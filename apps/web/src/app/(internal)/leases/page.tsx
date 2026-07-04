@@ -208,36 +208,36 @@ function ModifyLease({ lease, onDone }: { lease: Lease; onDone: () => void }) {
     <Card className="max-w-3xl gap-4 border-primary/30">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Pencil className="size-4" /> ปรับปรุงสัญญา (Remeasurement) — {lease.lease_no}
+          <Pencil className="size-4" /> {t('fnx.lease.modify_title', { no: lease.lease_no })}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
-          กรอกเฉพาะค่าที่ต้องการเปลี่ยน — ระบบจะคำนวณมูลค่าปัจจุบันใหม่และปรับ ROU/หนี้สิน (หากลดต่ำกว่ามูลค่า ROU จะรับรู้กำไรเข้า P&L)
+          {t('fnx.lease.modify_desc')}
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="grid gap-2">
-            <Label htmlFor="mo-pay">ค่าเช่า/เดือนใหม่ (฿)</Label>
+            <Label htmlFor="mo-pay">{t('fnx.lease.f_new_payment')}</Label>
             <Input id="mo-pay" type="number" min="0" value={payment} onChange={(e) => setPayment(e.target.value)} placeholder={String(lease.monthly_payment)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="mo-rem">งวดคงเหลือใหม่ (เดือน)</Label>
+            <Label htmlFor="mo-rem">{t('fnx.lease.f_new_remaining')}</Label>
             <Input id="mo-rem" type="number" min="1" value={remaining} onChange={(e) => setRemaining(e.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="mo-rate">อัตราคิดลดใหม่ (%)</Label>
+            <Label htmlFor="mo-rate">{t('fnx.lease.f_new_rate')}</Label>
             <Input id="mo-rate" type="number" min="0" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} placeholder={String(lease.annual_rate_pct)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="mo-eff">วันที่มีผล</Label>
+            <Label htmlFor="mo-eff">{t('fnx.lease.f_effective')}</Label>
             <Input id="mo-eff" type="date" value={effective} onChange={(e) => setEffective(e.target.value)} />
           </div>
         </div>
         <div className="flex gap-2">
           <Button disabled={modify.isPending || (!payment && !remaining && !rate)} onClick={() => modify.mutate()}>
-            {modify.isPending ? 'กำลังปรับปรุง…' : 'ปรับปรุงสัญญา'}
+            {modify.isPending ? t('fnx.lease.modifying') : t('fnx.lease.modify_btn')}
           </Button>
-          <Button variant="ghost" onClick={onDone}>ยกเลิก</Button>
+          <Button variant="ghost" onClick={onDone}>{t('fin.cancel')}</Button>
         </div>
       </CardContent>
     </Card>

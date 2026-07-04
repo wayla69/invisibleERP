@@ -6,8 +6,9 @@ import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Split
 import { api } from '@/lib/api';
 import { useRealtime } from '@/hooks/use-realtime';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
-import { FloorPlan, STATUS_TH, tone, type TableRow, type ZoneRow } from '@/components/floor-plan';
+import { FloorPlan, statusTh, tone, type TableRow, type ZoneRow } from '@/components/floor-plan';
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -29,6 +30,7 @@ import {
 // the floor-plan editor and this page share the same status palette and row shape.
 
 export default function TablesPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   // Live via SSE: a table freed/occupied/fired on another terminal updates this board at once; polling
   // drops to a 20s fallback while the stream is connected.
@@ -48,19 +50,19 @@ export default function TablesPage() {
   return (
     <div>
       <PageHeader
-        title="โต๊ะ (Floor plan)"
-        description="สถานะโต๊ะแบบเรียลไทม์และผังร้าน"
+        title={t('px.tbl_page_title')}
+        description={t('px.tbl_page_desc')}
         actions={
           <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
-            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? 'เรียลไทม์' : 'กำลังเชื่อมต่อ…'}
+            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? t('px.tbl_realtime') : t('px.tbl_connecting')}
           </Badge>
         }
       />
       <Tabs
         tabs={[
-          { key: 'board', label: 'สถานะโต๊ะ', content: <Board tables={tables} zones={zones} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
-          { key: 'plan', label: 'ผังร้าน', content: <FloorPlan tables={tables} zones={zones} onSelect={setSel} sel={sel} onChange={refresh} onZonesChange={refreshZones} /> },
-          { key: 'revenue', label: 'รายได้ต่อห้อง', content: <RoomRevenue /> },
+          { key: 'board', label: t('px.tbl_tab_board'), content: <Board tables={tables} zones={zones} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
+          { key: 'plan', label: t('px.tbl_tab_plan'), content: <FloorPlan tables={tables} zones={zones} onSelect={setSel} sel={sel} onChange={refresh} onZonesChange={refreshZones} /> },
+          { key: 'revenue', label: t('px.tbl_tab_revenue'), content: <RoomRevenue /> },
         ]}
       />
       {selected && <TablePanel t={selected} onChange={refresh} onClose={() => setSel(null)} onOrder={() => setOrderTable(selected.id)} />}
@@ -78,26 +80,27 @@ export default function TablesPage() {
 }
 
 function Board({ tables, zones, q, onSelect, sel, onOrder }: { tables: TableRow[]; zones: ZoneRow[]; q: any; onSelect: (id: number) => void; sel: number | null; onOrder: (id: number) => void }) {
+  const { t } = useLang();
   const [room, setRoom] = useState<number | 'all' | 'none'>('all');
-  const busy = (ts: TableRow[]) => ts.filter((t) => ['occupied', 'bill_requested', 'paying'].includes(t.status)).length;
+  const busy = (ts: TableRow[]) => ts.filter((row) => ['occupied', 'bill_requested', 'paying'].includes(row.status)).length;
   const chip = (active: boolean) => cn('inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors', active ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-accent');
 
-  const card = (t: TableRow) => (
+  const card = (row: TableRow) => (
     <div
-      key={t.id}
-      className={cn('rounded-lg border border-l-[6px] bg-card transition-colors', tone(t.status).border, sel === t.id && 'ring-2 ring-primary')}
+      key={row.id}
+      className={cn('rounded-lg border border-l-[6px] bg-card transition-colors', tone(row.status).border, sel === row.id && 'ring-2 ring-primary')}
     >
-      <button onClick={() => onSelect(t.id)} className="w-full rounded-t-lg p-2.5 text-left hover:bg-accent">
+      <button onClick={() => onSelect(row.id)} className="w-full rounded-t-lg p-2.5 text-left hover:bg-accent">
         <div className="flex items-center justify-between">
-          <strong>โต๊ะ {t.table_no}</strong>
-          <span className="text-sm text-muted-foreground">{t.seats} ที่</span>
+          <strong>{t('px.tbl_table_label', { no: row.table_no })}</strong>
+          <span className="text-sm text-muted-foreground">{t('px.tbl_seats', { n: row.seats })}</span>
         </div>
-        <div className={cn('text-sm font-semibold', tone(t.status).text)}>{STATUS_TH[t.status]}</div>
-        {t.order && <div className="text-xs text-muted-foreground tabular">{baht(t.order.total)} · รอ {t.order.waited_min}′</div>}
+        <div className={cn('text-sm font-semibold', tone(row.status).text)}>{statusTh(t, row.status)}</div>
+        {row.order && <div className="text-xs text-muted-foreground tabular">{baht(row.order.total)} · {t('px.tbl_waited', { min: row.order.waited_min })}</div>}
       </button>
       <div className="px-2.5 pb-2.5">
-        <Button variant="outline" size="sm" className="w-full" onClick={() => onOrder(t.id)}>
-          <Utensils className="size-4" /> สั่งอาหาร
+        <Button variant="outline" size="sm" className="w-full" onClick={() => onOrder(row.id)}>
+          <Utensils className="size-4" /> {t('px.tbl_order_food')}
         </Button>
       </div>
     </div>
@@ -108,7 +111,7 @@ function Board({ tables, zones, q, onSelect, sel, onOrder }: { tables: TableRow[
     return (
       <StateView q={q}>
         <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
-          {tables.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีโต๊ะ — เพิ่มในแท็บ “ผังร้าน”</p>}
+          {tables.length === 0 && <p className="text-sm text-muted-foreground">{t('px.tbl_no_tables_hint')}</p>}
           {tables.map(card)}
         </div>
       </StateView>
@@ -118,14 +121,14 @@ function Board({ tables, zones, q, onSelect, sel, onOrder }: { tables: TableRow[
   // Rooms exist → group tables by room, with a filter + per-room occupancy.
   const sections: { key: number | 'none'; name: string; color: string | null; tables: TableRow[] }[] = [
     ...zones.map((z) => ({ key: z.id as number | 'none', name: z.name, color: z.color, tables: tables.filter((t) => t.zone_id === z.id) })),
-    { key: 'none' as const, name: 'ไม่มีห้อง', color: null as string | null, tables: tables.filter((t) => t.zone_id == null) },
+    { key: 'none' as const, name: t('px.tbl_no_room'), color: null as string | null, tables: tables.filter((row) => row.zone_id == null) },
   ].filter((s) => s.tables.length > 0);
   const shown = room === 'all' ? sections : sections.filter((s) => s.key === room);
 
   return (
     <StateView q={q}>
       <div className="mb-3 flex flex-wrap gap-2">
-        <button onClick={() => setRoom('all')} className={chip(room === 'all')}>ทั้งหมด ({tables.length})</button>
+        <button onClick={() => setRoom('all')} className={chip(room === 'all')}>{t('px.tbl_all')} ({tables.length})</button>
         {sections.map((s) => (
           <button key={String(s.key)} onClick={() => setRoom(s.key)} className={chip(room === s.key)}>
             {s.color && <span className="size-2 rounded-full" style={{ background: s.color }} />}
@@ -133,14 +136,14 @@ function Board({ tables, zones, q, onSelect, sel, onOrder }: { tables: TableRow[
           </button>
         ))}
       </div>
-      {tables.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีโต๊ะ — เพิ่มในแท็บ “ผังร้าน”</p>}
+      {tables.length === 0 && <p className="text-sm text-muted-foreground">{t('px.tbl_no_tables_hint')}</p>}
       <div className="space-y-4">
         {shown.map((s) => (
           <section key={String(s.key)}>
             <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
               {s.color && <span className="size-2.5 rounded-full" style={{ background: s.color }} />}
               {s.name}
-              <span className="font-normal text-muted-foreground">· {busy(s.tables)}/{s.tables.length} โต๊ะมีลูกค้า</span>
+              <span className="font-normal text-muted-foreground">· {busy(s.tables)}/{s.tables.length} {t('px.tbl_tables_occupied')}</span>
             </h3>
             <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
               {s.tables.map(card)}
@@ -155,6 +158,7 @@ function Board({ tables, zones, q, onSelect, sel, onOrder }: { tables: TableRow[
 type RevRoom = { zone_id: number; name: string; color: string | null; active?: boolean; revenue: number; sales: number; avg_sale: number };
 
 function RoomRevenue() {
+  const { t } = useLang();
   const today = (() => { const d = new Date(); const p = (x: number) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; })();
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
@@ -167,29 +171,29 @@ function RoomRevenue() {
   const max = Math.max(1, ...rooms.map((r) => r.revenue), unzoned.revenue);
   const rows: RevRoom[] = [
     ...rooms,
-    { zone_id: 0, name: 'ไม่มีห้อง', color: null, active: true, revenue: unzoned.revenue, sales: unzoned.sales, avg_sale: unzoned.sales ? unzoned.revenue / unzoned.sales : 0 },
+    { zone_id: 0, name: t('px.tbl_no_room'), color: null, active: true, revenue: unzoned.revenue, sales: unzoned.sales, avg_sale: unzoned.sales ? unzoned.revenue / unzoned.sales : 0 },
   ].filter((r) => r.zone_id !== 0 || r.sales > 0);
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
-        <label className="text-sm">ตั้งแต่ <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="mt-1 w-[170px]" /></label>
-        <label className="text-sm">ถึง <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="mt-1 w-[170px]" /></label>
+        <label className="text-sm">{t('px.tbl_from')} <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="mt-1 w-[170px]" /></label>
+        <label className="text-sm">{t('px.tbl_to')} <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="mt-1 w-[170px]" /></label>
       </div>
       <StateView q={q}>
         {q.data && (
           <>
             <div className="flex flex-wrap gap-3">
-              <div className="rounded-lg border bg-card p-3"><div className="text-xs text-muted-foreground">รายได้รวม</div><div className="text-2xl font-semibold tabular">{baht(q.data.total.revenue)}</div></div>
-              <div className="rounded-lg border bg-card p-3"><div className="text-xs text-muted-foreground">จำนวนบิล</div><div className="text-2xl font-semibold tabular">{q.data.total.sales}</div></div>
+              <div className="rounded-lg border bg-card p-3"><div className="text-xs text-muted-foreground">{t('px.tbl_total_revenue')}</div><div className="text-2xl font-semibold tabular">{baht(q.data.total.revenue)}</div></div>
+              <div className="rounded-lg border bg-card p-3"><div className="text-xs text-muted-foreground">{t('px.tbl_bill_count')}</div><div className="text-2xl font-semibold tabular">{q.data.total.sales}</div></div>
             </div>
             <div className="space-y-2">
-              {q.data.total.sales === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีรายได้ในช่วงนี้</p>}
+              {q.data.total.sales === 0 && <p className="text-sm text-muted-foreground">{t('px.tbl_no_revenue')}</p>}
               {rows.map((r) => (
                 <div key={r.zone_id} className="rounded-lg border bg-card p-3">
                   <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-sm">
-                    <span className="flex items-center gap-2 font-medium">{r.color && <span className="size-2.5 rounded-full" style={{ background: r.color }} />}{r.name}{r.active === false && <span className="text-xs font-normal text-muted-foreground">(ลบแล้ว)</span>}</span>
-                    <span className="text-muted-foreground tabular">{baht(r.revenue)} · {r.sales} บิล · เฉลี่ย {baht(r.avg_sale)}</span>
+                    <span className="flex items-center gap-2 font-medium">{r.color && <span className="size-2.5 rounded-full" style={{ background: r.color }} />}{r.name}{r.active === false && <span className="text-xs font-normal text-muted-foreground">{t('px.tbl_deleted')}</span>}</span>
+                    <span className="text-muted-foreground tabular">{baht(r.revenue)} · {t('px.tbl_bills', { n: r.sales })} · {t('px.tbl_avg')} {baht(r.avg_sale)}</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(r.revenue / max) * 100}%` }} /></div>
                 </div>
@@ -202,7 +206,8 @@ function RoomRevenue() {
   );
 }
 
-function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: () => void; onClose: () => void; onOrder: () => void }) {
+function TablePanel({ t: tbl, onChange, onClose, onOrder }: { t: TableRow; onChange: () => void; onClose: () => void; onOrder: () => void }) {
+  const { t } = useLang();
   const [msg, setMsg] = useState('');
   const [qr, setQr] = useState('');
   const [sticker, setSticker] = useState<{ url: string; qr_image: string } | null>(null);
@@ -213,9 +218,9 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
   const [bPax, setBPax] = useState('2');
 
   const onErr = (e: any) => setMsg(`❌ ${e.message}`);
-  const printQr = useMutation({ mutationFn: () => api<{ url: string; qr_image: string }>(`/api/restaurant/tables/${t.id}/qr?base=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin : '')}`), onSuccess: setSticker, onError: onErr });
+  const printQr = useMutation({ mutationFn: () => api<{ url: string; qr_image: string }>(`/api/restaurant/tables/${tbl.id}/qr?base=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin : '')}`), onSuccess: setSticker, onError: onErr });
   const tiers = useQuery<{ packages: { id: number; name: string; price_per_pax: number }[] }>({ queryKey: ['buffet-packages'], queryFn: () => api('/api/restaurant/buffet/packages'), enabled: buffetOpen });
-  const startBuffet = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/buffet`, { method: 'POST', body: JSON.stringify({ package_id: Number(bPkg), pax: Number(bPax) || 1 }) }), onSuccess: () => { setMsg('เริ่มบุฟเฟต์แล้ว'); setBuffetOpen(false); onChange(); }, onError: onErr });
+  const startBuffet = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${tbl.id}/buffet`, { method: 'POST', body: JSON.stringify({ package_id: Number(bPkg), pax: Number(bPax) || 1 }) }), onSuccess: () => { setMsg(t('px.tbl_buffet_started')); setBuffetOpen(false); onChange(); }, onError: onErr });
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveTo, setMoveTo] = useState('');
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -224,12 +229,12 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
   const [tItems, setTItems] = useState<number[]>([]);
   const [tTo, setTTo] = useState('');
   const allTables = useQuery<{ tables: { id: number; table_no: string; status: string }[] }>({ queryKey: ['tables-list'], queryFn: () => api('/api/restaurant/tables'), enabled: moveOpen || mergeOpen || transferOpen });
-  const orderDetail = useQuery<{ items: { item_id: number; name: string; qty: number; amount: number; charge: boolean }[] }>({ queryKey: ['order-detail', t.order?.order_no], queryFn: () => api(`/api/restaurant/orders/${t.order!.order_no}`), enabled: transferOpen && !!t.order });
-  const move = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/move`, { method: 'POST', body: JSON.stringify({ to_table_id: Number(moveTo) }) }), onSuccess: () => { setMsg('ย้ายโต๊ะแล้ว'); setMoveOpen(false); onClose(); onChange(); }, onError: onErr });
-  const merge = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/merge`, { method: 'POST', body: JSON.stringify({ from_table_id: Number(mergeFrom) }) }), onSuccess: () => { setMsg('รวมโต๊ะแล้ว'); setMergeOpen(false); onChange(); }, onError: onErr });
-  const transfer = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/transfer-items`, { method: 'POST', body: JSON.stringify({ item_ids: tItems, to_table_id: Number(tTo) }) }), onSuccess: () => { setMsg('ย้ายรายการแล้ว'); setTransferOpen(false); setTItems([]); setTTo(''); onChange(); }, onError: onErr });
+  const orderDetail = useQuery<{ items: { item_id: number; name: string; qty: number; amount: number; charge: boolean }[] }>({ queryKey: ['order-detail', tbl.order?.order_no], queryFn: () => api(`/api/restaurant/orders/${tbl.order!.order_no}`), enabled: transferOpen && !!tbl.order });
+  const move = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${tbl.id}/move`, { method: 'POST', body: JSON.stringify({ to_table_id: Number(moveTo) }) }), onSuccess: () => { setMsg(t('px.tbl_table_moved')); setMoveOpen(false); onClose(); onChange(); }, onError: onErr });
+  const merge = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${tbl.id}/merge`, { method: 'POST', body: JSON.stringify({ from_table_id: Number(mergeFrom) }) }), onSuccess: () => { setMsg(t('px.tbl_tables_merged')); setMergeOpen(false); onChange(); }, onError: onErr });
+  const transfer = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${tbl.order!.order_no}/transfer-items`, { method: 'POST', body: JSON.stringify({ item_ids: tItems, to_table_id: Number(tTo) }) }), onSuccess: () => { setMsg(t('px.tbl_items_transferred')); setTransferOpen(false); setTItems([]); setTTo(''); onChange(); }, onError: onErr });
   const toggleItem = (id: number) => setTItems((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  const open = useMutation({ mutationFn: () => api<{ session_id: number; public_token: string }>(`/api/restaurant/tables/${t.id}/open`, { method: 'POST', body: '{}' }), onSuccess: (r) => { setSessionId(r.session_id); setQr(`/qr/${r.public_token}`); setMsg('เปิดโต๊ะแล้ว'); onChange(); }, onError: onErr });
+  const open = useMutation({ mutationFn: () => api<{ session_id: number; public_token: string }>(`/api/restaurant/tables/${tbl.id}/open`, { method: 'POST', body: '{}' }), onSuccess: (r) => { setSessionId(r.session_id); setQr(`/qr/${r.public_token}`); setMsg(t('px.tbl_table_opened')); onChange(); }, onError: onErr });
   const addItem = useMutation({
     mutationFn: async () => {
       const items = [{ name: item.name, qty: Number(item.qty) || 1, unit_price: Number(item.price) || 0, station_code: item.station }];

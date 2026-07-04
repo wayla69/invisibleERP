@@ -238,36 +238,36 @@ export default function CreditHoldPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {holdDialog?.action === 'hold' ? `ระงับเครดิต — ${holdDialog.customer}` : `ปลดระงับเครดิต — ${holdDialog?.customer}`}
+              {holdDialog?.action === 'hold' ? t('fnx.credhold.dlg_hold_title', { customer: holdDialog.customer }) : t('fnx.credhold.dlg_release_title', { customer: holdDialog?.customer ?? '' })}
             </DialogTitle>
           </DialogHeader>
           {holdDialog?.action === 'release' && (
-            <p className="text-sm text-muted-foreground">SoD: ผู้ปลดระงับต้องต่างจากผู้ที่ระงับ (maker-checker)</p>
+            <p className="text-sm text-muted-foreground">{t('fnx.credhold.sod_note')}</p>
           )}
           <div className="grid gap-2">
-            <Label>เหตุผล {holdDialog?.action === 'hold' ? '(ไม่บังคับ)' : '(ไม่บังคับ)'}</Label>
+            <Label>{t('fnx.credhold.reason')} {holdDialog?.action === 'hold' ? t('fnx.credhold.optional') : t('fnx.credhold.optional')}</Label>
             <Input
               value={holdReason}
               onChange={(e) => setHoldReason(e.target.value)}
-              placeholder={holdDialog?.action === 'hold' ? 'เช่น ค้างชำระเกิน 3 งวด' : 'เช่น ชำระหนี้ครบแล้ว'}
+              placeholder={holdDialog?.action === 'hold' ? t('fnx.credhold.hold_reason_ph') : t('fnx.credhold.release_reason_ph')}
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setHoldDialog(null); setHoldReason(''); }}>ยกเลิก</Button>
+            <Button variant="outline" onClick={() => { setHoldDialog(null); setHoldReason(''); }}>{t('fin.cancel')}</Button>
             {holdDialog?.action === 'hold' ? (
               <Button
                 variant="destructive"
                 disabled={actionPending}
                 onClick={() => placeHold.mutate({ tenant_id: holdDialog.tenantId, reason: holdReason || undefined })}
               >
-                ยืนยันระงับ
+                {t('fnx.credhold.confirm_hold')}
               </Button>
             ) : (
               <Button
                 disabled={actionPending}
                 onClick={() => holdDialog && releaseHold.mutate({ tenant_id: holdDialog.tenantId, reason: holdReason || undefined })}
               >
-                ยืนยันปลดระงับ
+                {t('fnx.credhold.confirm_release')}
               </Button>
             )}
           </DialogFooter>
@@ -281,40 +281,40 @@ export default function CreditHoldPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>เปลี่ยนวงเงินเครดิต — {limitDialog?.customer}</DialogTitle>
+            <DialogTitle>{t('fnx.credhold.dlg_limit_title', { customer: limitDialog?.customer ?? '' })}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label>วงเงินปัจจุบัน</Label>
-              <p className="text-sm text-muted-foreground">{limitDialog ? (limitDialog.currentLimit > 0 ? baht(limitDialog.currentLimit) : 'ไม่จำกัด') : '—'}</p>
+              <Label>{t('fnx.credhold.current_limit')}</Label>
+              <p className="text-sm text-muted-foreground">{limitDialog ? (limitDialog.currentLimit > 0 ? baht(limitDialog.currentLimit) : t('fnx.credhold.unlimited')) : '—'}</p>
             </div>
             <div className="grid gap-2">
-              <Label>วงเงินใหม่ (บาท, 0 = ไม่จำกัด)</Label>
+              <Label>{t('fnx.credhold.new_limit')}</Label>
               <Input
                 type="number"
                 min="0"
                 step="1000"
                 value={newLimit}
                 onChange={(e) => setNewLimit(e.target.value)}
-                placeholder="เช่น 100000"
+                placeholder={t('fnx.credhold.new_limit_ph')}
               />
             </div>
             <div className="grid gap-2">
-              <Label>เหตุผล</Label>
+              <Label>{t('fnx.credhold.reason')}</Label>
               <Input
                 value={limitReason}
                 onChange={(e) => setLimitReason(e.target.value)}
-                placeholder="เช่น ทบทวนรอบปี / ขยายวงเงินตามผลงาน"
+                placeholder={t('fnx.credhold.limit_reason_ph')}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setLimitDialog(null)}>ยกเลิก</Button>
+            <Button variant="outline" onClick={() => setLimitDialog(null)}>{t('fin.cancel')}</Button>
             <Button
               disabled={changeLimit.isPending || newLimit === '' || Number(newLimit) < 0}
               onClick={() => limitDialog && changeLimit.mutate({ tenant_id: limitDialog.tenantId, new_limit: Number(newLimit), reason: limitReason || undefined })}
             >
-              บันทึก
+              {t('fin.save')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -327,30 +327,30 @@ export default function CreditHoldPage() {
       >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>ประวัติเครดิต</DialogTitle>
+            <DialogTitle>{t('fnx.credhold.history_title')}</DialogTitle>
           </DialogHeader>
           <StateView q={events}>
             <DataTable
               rows={events.data?.events ?? []}
               rowKey={(_, i) => String(i)}
-              emptyState={{ icon: ShieldOff, title: 'ยังไม่มีประวัติ', description: 'ยังไม่มีการระงับ / ปลดระงับ / เปลี่ยนวงเงิน' }}
+              emptyState={{ icon: ShieldOff, title: t('fnx.credhold.history_empty_title'), description: t('fnx.credhold.history_empty_desc') }}
               columns={[
                 {
-                  key: 'event_type', label: 'ประเภท',
+                  key: 'event_type', label: t('fnx.credhold.col_event_type'),
                   render: (r) => (
                     <Badge variant={r.event_type === 'hold' ? 'destructive' : r.event_type === 'release' ? 'success' : 'default'}>
-                      {r.event_type === 'hold' ? 'ระงับ' : r.event_type === 'release' ? 'ปลดระงับ' : 'เปลี่ยนวงเงิน'}
+                      {r.event_type === 'hold' ? t('fnx.credhold.evt_hold') : r.event_type === 'release' ? t('fnx.credhold.evt_release') : t('fnx.credhold.evt_limit')}
                     </Badge>
                   ),
                 },
-                { key: 'reason', label: 'เหตุผล', render: (r) => r.reason ?? '—' },
-                { key: 'actioned_by', label: 'ผู้ดำเนินการ' },
-                { key: 'created_at', label: 'เวลา', render: (r) => thaiDate(r.created_at) },
+                { key: 'reason', label: t('fnx.credhold.reason'), render: (r) => r.reason ?? '—' },
+                { key: 'actioned_by', label: t('fnx.credhold.col_actioned_by') },
+                { key: 'created_at', label: t('fnx.credhold.col_time'), render: (r) => thaiDate(r.created_at) },
               ]}
             />
           </StateView>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEventsTenantId(null)}>ปิด</Button>
+            <Button variant="outline" onClick={() => setEventsTenantId(null)}>{t('fnx.credhold.close')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -107,14 +107,14 @@ function Rules() {
           rows={q.data?.rules ?? []}
           rowKey={(r) => r.id}
           columns={[
-            { key: 'name', label: 'ชื่อกฎ' },
-            { key: 'metric', label: 'เงื่อนไข', render: (r) => <code className="text-xs">{r.metric} {OP_LABEL[r.operator] ?? r.operator} {r.threshold}</code> },
-            { key: 'channel', label: 'ช่องทาง', render: (r) => <Badge variant="muted">{r.channel}{r.target_role ? ` · ${r.target_role}` : ''}</Badge> },
-            { key: 'severity', label: 'ระดับ', render: (r) => <Badge variant={r.severity === 'critical' ? 'destructive' : r.severity === 'warning' ? 'warning' : 'info'}>{r.severity}</Badge> },
-            { key: 'active', label: 'สถานะ', render: (r) => <Button size="sm" variant="ghost" disabled={toggle.isPending} onClick={() => toggle.mutate({ id: r.id, active: !r.active })}><Badge variant={r.active ? 'success' : 'muted'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge></Button> },
+            { key: 'name', label: t('st.alert.rule_name') },
+            { key: 'metric', label: t('st.alert.condition'), render: (r) => <code className="text-xs">{r.metric} {OP_LABEL[r.operator] ?? r.operator} {r.threshold}</code> },
+            { key: 'channel', label: t('st.alert.channel'), render: (r) => <Badge variant="muted">{r.channel}{r.target_role ? ` · ${r.target_role}` : ''}</Badge> },
+            { key: 'severity', label: t('st.alert.severity'), render: (r) => <Badge variant={r.severity === 'critical' ? 'destructive' : r.severity === 'warning' ? 'warning' : 'info'}>{r.severity}</Badge> },
+            { key: 'active', label: t('fin.col_status'), render: (r) => <Button size="sm" variant="ghost" disabled={toggle.isPending} onClick={() => toggle.mutate({ id: r.id, active: !r.active })}><Badge variant={r.active ? 'success' : 'muted'}>{r.active ? t('st.alert.on') : t('st.alert.off')}</Badge></Button> },
             { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
-          emptyState={{ icon: BellRing, title: 'ยังไม่มีกฎแจ้งเตือน', description: 'สร้างกฎจากแบบฟอร์มด้านบนเพื่อเริ่มเฝ้าดูตัวชี้วัดและส่งแจ้งเตือนเมื่อถึงเกณฑ์' }}
+          emptyState={{ icon: BellRing, title: t('st.alert.empty_title'), description: t('st.alert.empty_desc') }}
         />
       </StateView>
     </div>
@@ -122,6 +122,7 @@ function Rules() {
 }
 
 function Events() {
+  const { t } = useLang();
   const q = useQuery<{ events: AlertEvent[] }>({ queryKey: ['alert-events'], queryFn: () => api('/api/alerts/events'), refetchInterval: 15_000 });
   return (
     <StateView q={q}>
@@ -129,14 +130,14 @@ function Events() {
         rows={q.data?.events ?? []}
         rowKey={(r) => r.id}
         columns={[
-          { key: 'fired_at', label: 'เวลา', render: (r) => r.fired_at ? new Date(r.fired_at).toLocaleString('th-TH') : '—' },
-          { key: 'name', label: 'กฎ' },
-          { key: 'metric', label: 'ตัวชี้วัด', render: (r) => <code className="text-xs">{r.metric}</code> },
-          { key: 'value', label: 'ค่า', align: 'right', render: (r) => <span className="tabular">{num(r.value)} / {num(r.threshold)}</span> },
-          { key: 'severity', label: 'ระดับ', render: (r) => <Badge variant={r.severity === 'critical' ? 'destructive' : r.severity === 'warning' ? 'warning' : 'info'}>{r.severity}</Badge> },
-          { key: 'channel', label: 'ช่องทาง', render: (r) => r.channel },
+          { key: 'fired_at', label: t('st.alert.col_time'), render: (r) => r.fired_at ? new Date(r.fired_at).toLocaleString('th-TH') : '—' },
+          { key: 'name', label: t('st.alert.col_rule') },
+          { key: 'metric', label: t('st.alert.metric'), render: (r) => <code className="text-xs">{r.metric}</code> },
+          { key: 'value', label: t('st.alert.col_value'), align: 'right', render: (r) => <span className="tabular">{num(r.value)} / {num(r.threshold)}</span> },
+          { key: 'severity', label: t('st.alert.severity'), render: (r) => <Badge variant={r.severity === 'critical' ? 'destructive' : r.severity === 'warning' ? 'warning' : 'info'}>{r.severity}</Badge> },
+          { key: 'channel', label: t('st.alert.channel'), render: (r) => r.channel },
         ]}
-        emptyState={{ icon: History, title: 'ยังไม่มีการแจ้งเตือน', description: 'เมื่อกฎเข้าเกณฑ์ ประวัติการแจ้งเตือนจะปรากฏที่นี่' }}
+        emptyState={{ icon: History, title: t('st.alert.events_empty_title'), description: t('st.alert.events_empty_desc') }}
       />
     </StateView>
   );

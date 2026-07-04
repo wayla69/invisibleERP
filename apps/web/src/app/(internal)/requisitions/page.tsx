@@ -53,6 +53,7 @@ type LowStockItem = { item_id: string; item_description: string | null; uom: str
 // carries a suggested top-up qty (editable); ticking items and pressing "เปิด PR เติมของ" raises ONE PR for
 // the selection through the ordinary createPr path. Mirrors the LINE chat `low`/`reorder` commands.
 function LowStockCard() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ items: LowStockItem[]; count: number }>({
     queryKey: ['low-stock'], queryFn: () => api('/api/procurement/low-stock?limit=100'), refetchInterval: 30_000,
@@ -73,11 +74,11 @@ function LowStockCard() {
       }),
     }),
     onSuccess: (r: any) => {
-      notifySuccess(`เปิดคำขอซื้อเติมสต็อกแล้ว ${r?.pr_no ?? ''} (${chosen.length} รายการ)`);
+      notifySuccess(t('iv.req_toast_low_raised', { pr: r?.pr_no ?? '', count: chosen.length }));
       qc.invalidateQueries({ queryKey: ['prs'] });
       qc.invalidateQueries({ queryKey: ['low-stock'] });
     },
-    onError: (e: any) => notifyError(e?.message ?? 'เปิด PR ไม่สำเร็จ'),
+    onError: (e: any) => notifyError(e?.message ?? t('iv.req_toast_pr_failed')),
   });
 
   if (!q.isLoading && rows.length === 0) return null; // nothing low → hide the card entirely
@@ -85,25 +86,25 @@ function LowStockCard() {
   return (
     <Card className="mt-6 gap-4 border-amber-300/60">
       <CardHeader className="flex-row items-center justify-between gap-2">
-        <CardTitle className="text-base">สินค้าใกล้หมด{q.data ? ` (${q.data.count})` : ''}</CardTitle>
+        <CardTitle className="text-base">{t('iv.req_low_stock')}{q.data ? ` (${q.data.count})` : ''}</CardTitle>
         <Button size="sm" disabled={raise.isPending || chosen.length === 0} onClick={() => raise.mutate()}>
-          {raise.isPending ? 'กำลังเปิด…' : `เปิด PR เติมของ (${chosen.length})`}
+          {raise.isPending ? t('iv.req_opening') : t('iv.req_open_pr_topup', { count: chosen.length })}
         </Button>
       </CardHeader>
       <CardContent>
         {q.isLoading ? (
-          <p className="text-sm text-muted-foreground">กำลังโหลด…</p>
+          <p className="text-sm text-muted-foreground">{t('dash.loading')}</p>
         ) : (
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">รายการที่ยอดคงเหลือถึง/ต่ำกว่าจุดสั่งซื้อ — ปรับจำนวนได้ก่อนเปิดคำขอซื้อ (จะเปิดเป็น PR ใบเดียว)</p>
+            <p className="text-xs text-muted-foreground">{t('iv.req_low_note')}</p>
             {rows.map((it) => (
               <div key={it.item_id} className="flex flex-wrap items-center gap-2 rounded-md border p-2 text-sm">
-                <input type="checkbox" checked={isPicked(it)} onChange={(e) => setPicked((p) => ({ ...p, [it.item_id]: e.target.checked }))} aria-label={`เลือก ${it.item_id}`} />
+                <input type="checkbox" checked={isPicked(it)} onChange={(e) => setPicked((p) => ({ ...p, [it.item_id]: e.target.checked }))} aria-label={t('iv.req_select_aria', { id: it.item_id })} />
                 <span className="min-w-40 flex-1 font-medium">{it.item_id}{it.item_description ? <span className="ml-1 font-normal text-muted-foreground">— {it.item_description}</span> : null}</span>
-                <Badge variant="destructive">เหลือ {it.on_hand}{it.uom ? ` ${it.uom}` : ''}</Badge>
-                <span className="text-xs text-muted-foreground">จุดสั่งซื้อ {it.min_stock}</span>
+                <Badge variant="destructive">{t('iv.req_remaining_label')} {it.on_hand}{it.uom ? ` ${it.uom}` : ''}</Badge>
+                <span className="text-xs text-muted-foreground">{t('iv.req_reorder_point')} {it.min_stock}</span>
                 <div className="flex items-center gap-1">
-                  <Label htmlFor={`q-${it.item_id}`} className="text-xs">สั่ง</Label>
+                  <Label htmlFor={`q-${it.item_id}`} className="text-xs">{t('iv.req_order')}</Label>
                   <Input id={`q-${it.item_id}`} type="number" min={1} className="w-24" value={qtyOf(it)} onChange={(e) => setQty((s) => ({ ...s, [it.item_id]: Math.max(1, Number(e.target.value) || 1) }))} />
                 </div>
               </div>
@@ -118,16 +119,17 @@ function LowStockCard() {
 // The requisition register — every PR (raised on this page OR from LINE chat) with its status and lines.
 // Procurement/planner/exec see all PRs and can approve/reject a Pending one (maker-checker: the engine
 // still blocks self-approval); a plain requester sees their own and can cancel a still-Pending PR.
-const STATUS_BADGE: Record<string, { th: string; variant: 'success' | 'info' | 'muted' | 'destructive' }> = {
-  Approved: { th: 'อนุมัติแล้ว', variant: 'success' },
-  Converted: { th: 'ออก PO แล้ว', variant: 'success' },
-  Pending: { th: 'รออนุมัติ', variant: 'info' },
-  Rejected: { th: 'ไม่อนุมัติ', variant: 'destructive' },
-  Cancelled: { th: 'ยกเลิกแล้ว', variant: 'muted' },
-  Draft: { th: 'ฉบับร่าง', variant: 'muted' },
+const STATUS_BADGE: Record<string, { key: string; variant: 'success' | 'info' | 'muted' | 'destructive' }> = {
+  Approved: { key: 'iv.req_status_approved', variant: 'success' },
+  Converted: { key: 'iv.req_status_converted', variant: 'success' },
+  Pending: { key: 'iv.req_status_pending', variant: 'info' },
+  Rejected: { key: 'iv.req_status_rejected', variant: 'destructive' },
+  Cancelled: { key: 'iv.req_status_cancelled', variant: 'muted' },
+  Draft: { key: 'iv.req_status_draft', variant: 'muted' },
 };
 
 function PrListCard() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [converting, setConverting] = useState<Pr | null>(null);
   const q = useQuery<{ prs: Pr[]; can_approve: boolean }>({
@@ -136,12 +138,12 @@ function PrListCard() {
   const refresh = () => qc.invalidateQueries({ queryKey: ['prs'] });
   const decide = useMutation({
     mutationFn: ({ prNo, approve }: { prNo: string; approve: boolean }) => api(`/api/procurement/prs/${prNo}/approve`, { method: 'PATCH', body: JSON.stringify({ approve }) }),
-    onSuccess: (_r, v) => { notifySuccess(v.approve ? 'อนุมัติแล้ว' : 'ปฏิเสธแล้ว'); refresh(); },
+    onSuccess: (_r, v) => { notifySuccess(v.approve ? t('iv.req_toast_approved') : t('iv.req_toast_rejected')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const cancel = useMutation({
     mutationFn: (prNo: string) => api(`/api/procurement/prs/${prNo}/cancel`, { method: 'PATCH' }),
-    onSuccess: () => { notifySuccess('ยกเลิกแล้ว'); refresh(); },
+    onSuccess: () => { notifySuccess(t('iv.req_toast_cancelled')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -149,31 +151,31 @@ function PrListCard() {
   return (
     <Card className="mt-4 gap-4">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base">คำขอซื้อล่าสุด</CardTitle>
+        <CardTitle className="text-base">{t('iv.req_recent')}</CardTitle>
         <Button variant="ghost" size="sm" className="gap-1" onClick={refresh} disabled={q.isFetching}>
-          <RefreshCw className={`size-4 ${q.isFetching ? 'animate-spin' : ''}`} /> รีเฟรช
+          <RefreshCw className={`size-4 ${q.isFetching ? 'animate-spin' : ''}`} /> {t('iv.req_refresh')}
         </Button>
       </CardHeader>
       <CardContent>
         {q.isLoading ? (
-          <p className="text-sm text-muted-foreground">กำลังโหลด…</p>
+          <p className="text-sm text-muted-foreground">{t('dash.loading')}</p>
         ) : prs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">ยังไม่มีคำขอซื้อ — สร้างจากฟอร์มด้านบน หรือพิมพ์ <code className="rounded bg-muted px-1">pr &lt;ชื่อสินค้า&gt; &lt;จำนวน&gt;</code> ในแชท LINE</p>
+          <p className="text-sm text-muted-foreground">{t('iv.req_empty_before')} <code className="rounded bg-muted px-1">pr &lt;{t('iv.req_ph_item')}&gt; &lt;{t('iv.req_ph_qty')}&gt;</code> {t('iv.req_empty_after')}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs text-muted-foreground">
-                  <th className="py-2 pr-3">เลขที่ / วันที่</th>
-                  <th className="py-2 pr-3">รายการ</th>
-                  <th className="py-2 pr-3">ผู้ขอ</th>
-                  <th className="py-2 pr-3">สถานะ</th>
-                  <th className="py-2 pr-3 text-right">จัดการ</th>
+                  <th className="py-2 pr-3">{t('iv.req_col_no_date')}</th>
+                  <th className="py-2 pr-3">{t('iv.req_col_items')}</th>
+                  <th className="py-2 pr-3">{t('iv.req_col_requester')}</th>
+                  <th className="py-2 pr-3">{t('fin.col_status')}</th>
+                  <th className="py-2 pr-3 text-right">{t('iv.req_col_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {prs.map((pr) => {
-                  const badge = STATUS_BADGE[pr.status] ?? { th: pr.status, variant: 'muted' as const };
+                  const badge = STATUS_BADGE[pr.status];
                   const isPending = pr.status === 'Pending';
                   return (
                     <tr key={pr.pr_no} className="border-b align-top">
@@ -186,20 +188,20 @@ function PrListCard() {
                         </ul>
                       </td>
                       <td className="py-2 pr-3 whitespace-nowrap">{pr.requested_by ?? '-'}</td>
-                      <td className="py-2 pr-3"><Badge variant={badge.variant} className="text-[10px]">{badge.th}</Badge>{pr.approved_by ? <div className="text-xs text-muted-foreground">โดย {pr.approved_by}</div> : null}</td>
+                      <td className="py-2 pr-3"><Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>{pr.approved_by ? <div className="text-xs text-muted-foreground">{t('iv.req_by')} {pr.approved_by}</div> : null}</td>
                       <td className="py-2 pr-3">
                         <div className="flex justify-end gap-2">
                           {q.data?.can_approve && isPending && (
                             <>
-                              <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: true })}>อนุมัติ</Button>
-                              <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>ปฏิเสธ</Button>
+                              <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: true })}>{t('fin.approve')}</Button>
+                              <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>{t('iv.req_reject')}</Button>
                             </>
                           )}
                           {q.data?.can_approve && pr.status === 'Approved' && (
-                            <Button size="sm" onClick={() => setConverting(pr)}>➡️ สร้าง PO</Button>
+                            <Button size="sm" onClick={() => setConverting(pr)}>{t('iv.req_create_po')}</Button>
                           )}
                           {!q.data?.can_approve && isPending && (
-                            <Button size="sm" variant="outline" disabled={cancel.isPending} onClick={() => cancel.mutate(pr.pr_no)}>ยกเลิก</Button>
+                            <Button size="sm" variant="outline" disabled={cancel.isPending} onClick={() => cancel.mutate(pr.pr_no)}>{t('fin.cancel')}</Button>
                           )}
                         </div>
                       </td>
@@ -222,6 +224,7 @@ function PrListCard() {
 type ConvLine = { name: string; item_id: string; item_description: string; create_item: boolean; order_qty: number; unit_price: number; uom: string; matches: ItemMatch[]; searching: boolean; searched: boolean };
 
 function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCancel: () => void }) {
+  const { t } = useLang();
   const [vendor, setVendor] = useState('');
   const [vendorId, setVendorId] = useState<number | null>(null);
   const [vendorMatches, setVendorMatches] = useState<VendorMatch[]>([]);
@@ -253,7 +256,7 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
         lines: lines.map((l) => ({ item_id: l.item_id.trim(), item_description: l.item_description.trim() || undefined, create_item: l.create_item, order_qty: Number(l.order_qty), unit_price: Number(l.unit_price) || 0, uom: l.uom.trim() || undefined })),
       }),
     }),
-    onSuccess: (r) => { notifySuccess(`สร้าง PO ${r.po_no} แล้ว${r.created_items?.length ? ` · เปิดรหัสใหม่ ${r.created_items.length} รายการ` : ''}`); onDone(); },
+    onSuccess: (r) => { notifySuccess(`${t('iv.req_toast_po_created', { po: r.po_no })}${r.created_items?.length ? t('iv.req_toast_new_codes', { count: r.created_items.length }) : ''}`); onDone(); },
     onError: (e: any) => notifyError(e.message),
   });
   const canSubmit = lines.every((l) => l.item_id.trim() && Number(l.order_qty) > 0);
@@ -261,73 +264,73 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
   return (
     <div className="mt-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <div className="font-semibold">สร้าง PO จาก {pr.pr_no}</div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>ปิด</Button>
+        <div className="font-semibold">{t('iv.req_create_po_from', { pr: pr.pr_no })}</div>
+        <Button variant="ghost" size="sm" onClick={onCancel}>{t('iv.req_close')}</Button>
       </div>
       <div className="mb-3 max-w-lg space-y-1">
-        <Label className="text-xs">ผู้ขาย (Vendor){vendorId ? ' ✓ เลือกจากทะเบียนแล้ว' : ''}</Label>
+        <Label className="text-xs">{t('iv.req_vendor')}{vendorId ? t('iv.req_vendor_selected') : ''}</Label>
         <div className="flex gap-2">
-          <Input value={vendor} onChange={(e) => { setVendor(e.target.value); setVendorId(null); setVendorMatches([]); }} placeholder="ชื่อผู้ขาย / ซัพพลายเออร์" />
-          <Button type="button" variant="outline" size="sm" disabled={vendorSearching || !vendor.trim()} onClick={searchVendor}>{vendorSearching ? '…' : 'ค้นหาผู้ขาย'}</Button>
+          <Input value={vendor} onChange={(e) => { setVendor(e.target.value); setVendorId(null); setVendorMatches([]); }} placeholder={t('iv.req_vendor_ph')} />
+          <Button type="button" variant="outline" size="sm" disabled={vendorSearching || !vendor.trim()} onClick={searchVendor}>{vendorSearching ? '…' : t('iv.req_search_vendor')}</Button>
         </div>
         {vendorMatches.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
-            <span className="text-xs text-muted-foreground">เลือก:</span>
+            <span className="text-xs text-muted-foreground">{t('iv.req_choose')}</span>
             {vendorMatches.map((v) => (
               <button key={v.id} type="button" onClick={() => { setVendor(v.name); setVendorId(v.id); setVendorMatches([]); }}
                 className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">{v.name}{v.vendor_code ? ` (${v.vendor_code})` : ''}</button>
             ))}
           </div>
         )}
-        <p className="text-xs text-muted-foreground">เลือกจากทะเบียนเพื่อผูกการคัดกรอง/สกอร์การ์ด หรือพิมพ์ชื่อใหม่ก็ได้</p>
+        <p className="text-xs text-muted-foreground">{t('iv.req_vendor_note')}</p>
       </div>
       <div className="space-y-3">
         {lines.map((l, i) => (
           <div key={i} className="rounded-md border bg-card p-3">
-            <div className="mb-2 text-xs text-muted-foreground">จากคำขอ: <span className="font-medium text-foreground">{l.name}</span></div>
+            <div className="mb-2 text-xs text-muted-foreground">{t('iv.req_from_request')} <span className="font-medium text-foreground">{l.name}</span></div>
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <div className="space-y-1">
-                <Label className="text-xs">รหัสสินค้า {l.create_item ? '(เปิดใหม่)' : '(เทียบทะเบียน)'}</Label>
+                <Label className="text-xs">{t('iv.req_item_code')} {l.create_item ? t('iv.req_item_new') : t('iv.req_item_match')}</Label>
                 <div className="flex gap-2">
-                  <Input value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value, searched: false, matches: [] })} placeholder="รหัสสินค้า" />
-                  <Button type="button" variant="outline" size="sm" disabled={l.searching} onClick={() => search(i)}>{l.searching ? '…' : 'ค้นหา/เทียบ'}</Button>
+                  <Input value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value, searched: false, matches: [] })} placeholder={t('iv.req_item_code')} />
+                  <Button type="button" variant="outline" size="sm" disabled={l.searching} onClick={() => search(i)}>{l.searching ? '…' : t('iv.req_search_match')}</Button>
                 </div>
                 {l.matches.length > 0 && !l.create_item && (
                   <div className="flex flex-wrap gap-1 pt-1">
-                    <span className="text-xs text-muted-foreground">เลือกรหัสที่ตรง:</span>
+                    <span className="text-xs text-muted-foreground">{t('iv.req_choose_code')}</span>
                     {l.matches.map((m) => (
                       <button key={m.item_id} type="button" onClick={() => setLine(i, { item_id: m.item_id, uom: m.uom ?? l.uom, unit_price: (m.last_price ?? m.unit_price) || l.unit_price, matches: [], searched: false })}
                         className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">
-                        {m.item_id}{m.item_description ? ` — ${m.item_description}` : ''}{m.last_price ? ` · ล่าสุด ฿${m.last_price}` : ''}
+                        {m.item_id}{m.item_description ? ` — ${m.item_description}` : ''}{m.last_price ? ` · ${t('iv.req_latest')} ฿${m.last_price}` : ''}
                       </button>
                     ))}
                   </div>
                 )}
                 {l.searched && l.matches.length === 0 && !l.create_item && (
                   <p className="pt-1 text-xs text-warning">
-                    ไม่พบ &quot;{l.item_id}&quot; ในทะเบียนสินค้า — ติ๊ก &quot;เปิดเป็นสินค้าใหม่&quot; ด้านล่างเพื่อเปิดรหัสนี้เป็นสินค้าใหม่ หรือแก้ชื่อแล้วค้นหาอีกครั้ง
+                    {t('iv.req_not_found', { id: l.item_id })}
                   </p>
                 )}
                 <label className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
                   <input type="checkbox" checked={l.create_item} onChange={(e) => setLine(i, { create_item: e.target.checked })} />
-                  เปิดเป็นสินค้าใหม่ (ไม่มีในทะเบียน)
+                  {t('iv.req_open_new_item')}
                 </label>
                 {l.create_item && (
-                  <Input className="mt-1" value={l.item_description} onChange={(e) => setLine(i, { item_description: e.target.value })} placeholder="ชื่อ/รายละเอียดสินค้าใหม่" />
+                  <Input className="mt-1" value={l.item_description} onChange={(e) => setLine(i, { item_description: e.target.value })} placeholder={t('iv.req_new_item_ph')} />
                 )}
               </div>
               <div className="flex items-end gap-2">
-                <div className="w-20 space-y-1"><Label className="text-xs">จำนวน</Label><Input type="number" value={l.order_qty} onChange={(e) => setLine(i, { order_qty: Number(e.target.value) })} /></div>
-                <div className="w-20 space-y-1"><Label className="text-xs">หน่วย</Label><Input value={l.uom} onChange={(e) => setLine(i, { uom: e.target.value })} /></div>
-                <div className="w-24 space-y-1"><Label className="text-xs">ราคา/หน่วย</Label><Input type="number" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: Number(e.target.value) })} /></div>
+                <div className="w-20 space-y-1"><Label className="text-xs">{t('inv.col_qty')}</Label><Input type="number" value={l.order_qty} onChange={(e) => setLine(i, { order_qty: Number(e.target.value) })} /></div>
+                <div className="w-20 space-y-1"><Label className="text-xs">{t('inv.col_uom')}</Label><Input value={l.uom} onChange={(e) => setLine(i, { uom: e.target.value })} /></div>
+                <div className="w-24 space-y-1"><Label className="text-xs">{t('iv.req_unit_price')}</Label><Input type="number" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: Number(e.target.value) })} /></div>
               </div>
             </div>
           </div>
         ))}
       </div>
       <div className="mt-3 flex items-center gap-2">
-        <Button size="sm" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>{submit.isPending ? 'กำลังสร้าง…' : 'สร้างใบสั่งซื้อ (PO)'}</Button>
-        <span className="text-xs text-muted-foreground">ระบบจะเปิดรหัสใหม่ (ถ้าติ๊ก) · สร้าง PO · เชื่อมกลับ PR ให้อัตโนมัติ</span>
+        <Button size="sm" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>{submit.isPending ? t('iv.req_creating') : t('iv.req_create_po_btn')}</Button>
+        <span className="text-xs text-muted-foreground">{t('iv.req_submit_note')}</span>
       </div>
     </div>
   );
@@ -337,6 +340,7 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
 // (typed into the shop's LINE OA chat as `link <code>`). Once linked, `pr <item> <qty>` in the OA chat
 // raises a PR under the linked identity — it enters the same approval workflow as a PR raised here.
 function LineLinkCard() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ['line-link'], queryFn: () => api<{ linked: boolean }>('/api/line/link') });
   const issue = useMutation({
@@ -351,38 +355,38 @@ function LineLinkCard() {
     <Card className="mt-4 gap-4">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <MessageCircle className="size-4" /> สร้างคำขอซื้อผ่านแชท LINE
+          <MessageCircle className="size-4" /> {t('iv.req_line_title')}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {status.data?.linked ? (
           <>
             <p className="text-sm">
-              บัญชี LINE ของคุณเชื่อมต่อแล้ว ✔ — พิมพ์ <code className="rounded bg-muted px-1">pr &lt;รหัสสินค้า&gt; &lt;จำนวน&gt;</code>{' '}
-              ในแชท LINE OA ของร้านเพื่อสร้างคำขอซื้อ และ <code className="rounded bg-muted px-1">status &lt;เลขที่ PR&gt;</code> เพื่อเช็คสถานะ
+              {t('iv.req_line_linked_1')} <code className="rounded bg-muted px-1">pr &lt;{t('iv.req_ph_item_code')}&gt; &lt;{t('iv.req_ph_qty')}&gt;</code>{' '}
+              {t('iv.req_line_linked_2')} <code className="rounded bg-muted px-1">status &lt;{t('iv.req_ph_pr_no')}&gt;</code> {t('iv.req_line_linked_3')}
             </p>
             <Button variant="outline" size="sm" onClick={() => unlink.mutate()} disabled={unlink.isPending}>
-              ยกเลิกการเชื่อมต่อ LINE
+              {t('iv.req_line_unlink')}
             </Button>
           </>
         ) : (
           <>
             <p className="text-sm text-muted-foreground">
-              เชื่อมบัญชี LINE เพื่อสร้างคำขอซื้อจากแชทของ LINE OA ร้าน: กดสร้างรหัส แล้วพิมพ์{' '}
-              <code className="rounded bg-muted px-1">link &lt;รหัส&gt;</code> ในแชท (รหัสมีอายุ 10 นาที)
+              {t('iv.req_line_link_1')}{' '}
+              <code className="rounded bg-muted px-1">link &lt;{t('iv.req_ph_code')}&gt;</code> {t('iv.req_line_link_2')}
             </p>
             {issue.data && (
               <p className="text-sm">
-                รหัสเชื่อมของคุณ: <code className="rounded bg-muted px-2 py-1 text-base font-semibold tracking-widest">{issue.data.code}</code>{' '}
+                {t('iv.req_your_code')} <code className="rounded bg-muted px-2 py-1 text-base font-semibold tracking-widest">{issue.data.code}</code>{' '}
                 <span className="text-xs text-muted-foreground">
-                  — พิมพ์ <code>link {issue.data.code}</code> ในแชท LINE OA ภายใน 10 นาที
+                  {t('iv.req_type_within_1')} <code>link {issue.data.code}</code> {t('iv.req_type_within_2')}
                 </span>
               </p>
             )}
             <Button size="sm" onClick={() => issue.mutate()} disabled={issue.isPending}>
-              {issue.data ? 'สร้างรหัสใหม่' : 'สร้างรหัสเชื่อม LINE'}
+              {issue.data ? t('iv.req_gen_new_code') : t('iv.req_gen_link_code')}
             </Button>
-            {issue.isError && <p className="text-sm text-destructive">{(issue.error as Error)?.message ?? 'สร้างรหัสไม่สำเร็จ'}</p>}
+            {issue.isError && <p className="text-sm text-destructive">{(issue.error as Error)?.message ?? t('iv.req_code_failed')}</p>}
           </>
         )}
       </CardContent>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { LayoutTemplate, Plus, Trash2, Save, Star, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -21,12 +22,13 @@ type Resolved = { sections: { title: string; columns: number; fields: FieldDef[]
 const HIDDEN = -1;
 
 export default function ObjectLayoutsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [selKey, setSelKey] = useState('');
   const [editId, setEditId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
-  const [sections, setSections] = useState<Section[]>([{ title: 'ข้อมูล', columns: 1 }]);
+  const [sections, setSections] = useState<Section[]>([{ title: t('st.ol.default_section'), columns: 1 }]);
   const [assign, setAssign] = useState<Record<string, number>>({}); // field_key → section index | HIDDEN
   const [preview, setPreview] = useState<Resolved | null>(null);
   const [msg, setMsg] = useState('');
@@ -38,7 +40,7 @@ export default function ObjectLayoutsPage() {
 
   const resetEditor = (flds: FieldDef[] = fields) => {
     setEditId(null); setName(''); setRole('');
-    setSections([{ title: 'ข้อมูล', columns: 1 }]);
+    setSections([{ title: t('st.ol.default_section'), columns: 1 }]);
     setAssign(Object.fromEntries(flds.map((f) => [f.field_key, 0])));
     setMsg('');
   };
@@ -52,7 +54,7 @@ export default function ObjectLayoutsPage() {
     (l.config?.sections ?? []).forEach((s: any, i: number) => (s.fields ?? []).forEach((k: string) => { a[k] = i; }));
     (l.config?.hidden ?? []).forEach((k: string) => { a[k] = HIDDEN; });
     fields.forEach((f) => { if (a[f.field_key] === undefined) a[f.field_key] = 0; }); // unplaced → first section
-    setSections(secs.length ? secs : [{ title: 'ข้อมูล', columns: 1 }]);
+    setSections(secs.length ? secs : [{ title: t('st.ol.default_section'), columns: 1 }]);
     setAssign(a); setMsg('');
   };
 
@@ -71,40 +73,40 @@ export default function ObjectLayoutsPage() {
     mutationFn: () => editId
       ? api(`/api/object-layouts/${editId}`, { method: 'PUT', body: JSON.stringify({ name, config: buildConfig() }) })
       : api('/api/object-layouts', { method: 'POST', body: JSON.stringify({ object_key: selKey, name, role: role || undefined, config: buildConfig() }) }),
-    onSuccess: (r: any) => { setMsg('✅ บันทึกเลย์เอาต์แล้ว'); if (!editId && r?.id) setEditId(Number(r.id)); qc.invalidateQueries({ queryKey: ['olayouts', selKey] }); },
+    onSuccess: (r: any) => { setMsg(`✅ ${t('st.ol.saved')}`); if (!editId && r?.id) setEditId(Number(r.id)); qc.invalidateQueries({ queryKey: ['olayouts', selKey] }); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
-  const setDefault = useMutation({ mutationFn: (id: number) => api(`/api/object-layouts/${id}/default`, { method: 'POST' }), onSuccess: () => { setMsg('✅ ตั้งเป็นค่าเริ่มต้นแล้ว'); qc.invalidateQueries({ queryKey: ['olayouts', selKey] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const remove = useMutation({ mutationFn: (id: number) => api(`/api/object-layouts/${id}`, { method: 'DELETE' }), onSuccess: () => { setMsg('🗑️ ลบแล้ว'); resetEditor(); qc.invalidateQueries({ queryKey: ['olayouts', selKey] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const setDefault = useMutation({ mutationFn: (id: number) => api(`/api/object-layouts/${id}/default`, { method: 'POST' }), onSuccess: () => { setMsg(`✅ ${t('st.ol.set_default')}`); qc.invalidateQueries({ queryKey: ['olayouts', selKey] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const remove = useMutation({ mutationFn: (id: number) => api(`/api/object-layouts/${id}`, { method: 'DELETE' }), onSuccess: () => { setMsg(`🗑️ ${t('st.ol.deleted')}`); resetEditor(); qc.invalidateQueries({ queryKey: ['olayouts', selKey] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
 
   return (
     <div>
-      <PageHeader title="เลย์เอาต์ฟอร์ม (Form layouts)" description="จัดวางฟอร์มของออบเจ็กต์กำหนดเอง — แบ่งส่วน เรียงฟิลด์ ตั้งคอลัมน์ ซ่อนฟิลด์ ได้ตามบทบาท (ไม่กระทบข้อมูล/บัญชี)" />
+      <PageHeader title={t('st.ol.title')} description={t('st.ol.desc')} />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Label htmlFor="obj" className="text-sm">ออบเจ็กต์</Label>
+        <Label htmlFor="obj" className="text-sm">{t('st.ol.object')}</Label>
         <select id="obj" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={selKey} onChange={(e) => setSelKey(e.target.value)}>
-          <option value="">— เลือก —</option>
+          <option value="">{t('st.ol.select_ph')}</option>
           {(objects.data?.objects ?? []).map((o) => <option key={o.object_key} value={o.object_key}>{o.label} (/{o.object_key})</option>)}
         </select>
-        {selKey && <Button size="sm" variant="outline" onClick={() => resetEditor()}><Plus className="size-4" /> เลย์เอาต์ใหม่</Button>}
+        {selKey && <Button size="sm" variant="outline" onClick={() => resetEditor()}><Plus className="size-4" /> {t('st.ol.new_layout')}</Button>}
         {msg && <Msg ok={msg.startsWith('✅') || msg.startsWith('🗑️')}>{msg}</Msg>}
       </div>
 
       {!selKey ? (
-        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">เลือกออบเจ็กต์เพื่อออกแบบฟอร์ม</CardContent></Card>
+        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">{t('st.ol.pick_object')}</CardContent></Card>
       ) : fields.length === 0 ? (
-        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">ออบเจ็กต์นี้ยังไม่มีฟิลด์ — เพิ่มฟิลด์ที่หน้า “ออบเจ็กต์กำหนดเอง” ก่อน</CardContent></Card>
+        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">{t('st.ol.no_fields')}</CardContent></Card>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1fr_minmax(300px,380px)]">
           <div className="grid gap-6">
             {(layouts.data?.layouts ?? []).length > 0 && (
               <Card>
-                <CardHeader><CardTitle className="text-base">เลย์เอาต์ที่บันทึกไว้</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base">{t('st.ol.saved_layouts')}</CardTitle></CardHeader>
                 <CardContent className="grid gap-2">
                   {(layouts.data?.layouts ?? []).map((l) => (
                     <div key={l.id} className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm ${editId === l.id ? 'border-primary bg-primary/5' : ''}`}>
-                      <button className="flex-1 text-left" onClick={() => loadLayout(l)}>{l.name} {l.role && <span className="text-xs text-muted-foreground">· {l.role}</span>} {l.is_default && <Badge variant="success" className="ml-2"><Star className="size-3" /> เริ่มต้น</Badge>}</button>
+                      <button className="flex-1 text-left" onClick={() => loadLayout(l)}>{l.name} {l.role && <span className="text-xs text-muted-foreground">· {l.role}</span>} {l.is_default && <Badge variant="success" className="ml-2"><Star className="size-3" /> {t('st.ol.default_badge')}</Badge>}</button>
                       <div className="flex gap-2">
                         {!l.is_default && <Button size="sm" variant="ghost" disabled={setDefault.isPending} onClick={() => setDefault.mutate(l.id)}><Star className="size-4" /></Button>}
                         <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(l.id)}><Trash2 className="size-4 text-destructive" /></Button>
@@ -116,23 +118,23 @@ export default function ObjectLayoutsPage() {
             )}
 
             <Card>
-              <CardHeader><CardTitle className="text-base">{editId ? 'แก้ไขเลย์เอาต์' : 'เลย์เอาต์ใหม่'}</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-base">{editId ? t('st.ol.edit_layout') : t('st.ol.new_layout')}</CardTitle></CardHeader>
               <CardContent className="grid gap-4">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="grid gap-1"><Label>ชื่อเลย์เอาต์</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น ฟอร์มหลัก" /></div>
-                  <div className="grid gap-1"><Label>บทบาท (ไม่บังคับ — ว่าง = ทุกบทบาท)</Label><Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="เช่น Warehouse" /></div>
+                  <div className="grid gap-1"><Label>{t('st.ol.name_label')}</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('st.ol.name_ph')} /></div>
+                  <div className="grid gap-1"><Label>{t('st.ol.role_label')}</Label><Input value={role} onChange={(e) => setRole(e.target.value)} placeholder={t('st.ol.role_ph')} /></div>
                 </div>
 
                 <div className="grid gap-2">
                   <div className="flex items-center justify-between">
-                    <Label>ส่วน (Sections)</Label>
-                    <Button size="sm" variant="outline" onClick={() => setSections((s) => [...s, { title: `ส่วนที่ ${s.length + 1}`, columns: 1 }])}><Plus className="size-4" /> เพิ่มส่วน</Button>
+                    <Label>{t('st.ol.sections')}</Label>
+                    <Button size="sm" variant="outline" onClick={() => setSections((s) => [...s, { title: t('st.ol.section_n', { n: s.length + 1 }), columns: 1 }])}><Plus className="size-4" /> {t('st.ol.add_section')}</Button>
                   </div>
                   {sections.map((s, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <Input value={s.title} onChange={(e) => setSections((arr) => arr.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} placeholder={`ส่วนที่ ${i + 1}`} />
+                      <Input value={s.title} onChange={(e) => setSections((arr) => arr.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} placeholder={t('st.ol.section_n', { n: i + 1 })} />
                       <select className="h-9 rounded-md border bg-transparent px-2 text-sm" value={s.columns} onChange={(e) => setSections((arr) => arr.map((x, j) => j === i ? { ...x, columns: Number(e.target.value) === 2 ? 2 : 1 } : x))}>
-                        <option value={1}>1 คอลัมน์</option><option value={2}>2 คอลัมน์</option>
+                        <option value={1}>{t('st.ol.one_col')}</option><option value={2}>{t('st.ol.two_col')}</option>
                       </select>
                       {sections.length > 1 && <Button size="sm" variant="ghost" onClick={() => { setSections((arr) => arr.filter((_, j) => j !== i)); setAssign((a) => Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v === i ? 0 : v > i ? v - 1 : v]))); }}><Trash2 className="size-4 text-destructive" /></Button>}
                     </div>

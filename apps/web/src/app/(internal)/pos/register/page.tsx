@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { CloudOff, ListChecks, RefreshCw, Store, Utensils, Wifi, WifiOff, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useTerminal } from '@/lib/terminal';
 import { useOnline } from '@/lib/offline';
@@ -30,6 +31,7 @@ interface HeldCart { lines: CartLine[]; mode: Mode; tableId: number | null; tabl
 interface UserPrefs { favorites: string[]; navFold: Record<string, boolean>; pos_fav: number[]; saved: boolean }
 
 export default function RegisterPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const tm = useTerminal();
   const online = useOnline();
@@ -68,7 +70,7 @@ export default function RegisterPage() {
   const [tablePicker, setTablePicker] = useState(false);
   const [heldOpen, setHeldOpen] = useState(false);
 
-  const t = useMemo(() => cartTotals(lines), [lines]);
+  const tot = useMemo(() => cartTotals(lines), [lines]);
 
   // ── cart ops ──
   const pick = useCallback((it: MenuItem) => {
@@ -95,15 +97,15 @@ export default function RegisterPage() {
   // ── customer-facing display: mirror the cart (debounced) ──
   useEffect(() => {
     const id = setTimeout(() => {
-      if (lines.length === 0) { tm.pushDisplay({ message: 'ยินดีต้อนรับ / Welcome' }); return; }
+      if (lines.length === 0) { tm.pushDisplay({ message: t('px.reg_welcome') }); return; }
       tm.pushDisplay({
-        message: tableNo ? `โต๊ะ ${tableNo}` : 'กำลังคิดเงิน',
+        message: tableNo ? t('px.reg_table_label', { tableNo }) : t('px.reg_disp_settling'),
         lines: lines.map((l) => ({ name: l.name, qty: l.qty, amount: lineAmount(l) })),
-        subtotal: t.net, total: t.total,
+        subtotal: tot.net, total: tot.total,
       });
     }, 500);
     return () => clearTimeout(id);
-  }, [lines, t.net, t.total, tableNo, tm]);
+  }, [lines, tot.net, tot.total, tableNo, tm, t]);
 
   // ── settle: create the order (re-priced + 86-checked server-side), fire kitchen for dine-in, checkout,
   //    then drive the hardware (customer display → print → drawer). Returns the authoritative sale. ──
@@ -113,14 +115,14 @@ export default function RegisterPage() {
     // ── offline path: queue a QUICK (no-table) cash-ish sale and replay it on reconnect. Dine-in needs
     //    the kitchen/online path (fire + table state), so it is blocked offline with a clear message. ──
     if (!online) {
-      if (mode === 'dinein') throw new Error('ออฟไลน์: โหมดโต๊ะ/ครัวต้องออนไลน์ — ปลดโต๊ะแล้วใช้โหมดขายเร็ว');
+      if (mode === 'dinein') throw new Error(t('px.reg_err_offline_dinein'));
       const offlineTotal = cartTotals(lines, discountPct).total;
       const change = cashReceived != null ? Math.round((cashReceived - offlineTotal) * 100) / 100 : undefined;
       await enqueueRegisterSale({ lines: items, method, discount_pct: discountPct || undefined, captured_at: new Date().toISOString(), device_id: tm.terminalCode, total: offlineTotal });
       outbox.refresh();
-      tm.pushDisplay({ message: 'บันทึกออฟไลน์', total: offlineTotal, amount_due: cashReceived ?? undefined, change });
+      tm.pushDisplay({ message: t('px.reg_disp_offline_saved'), total: offlineTotal, amount_due: cashReceived ?? undefined, change });
       if (method === 'Cash') void tm.kickDrawer({ saleNo: 'OFFLINE', amount: offlineTotal, reason: 'sale' });
-      return { sale_no: 'ออฟไลน์ (รอซิงค์)', total: offlineTotal, change, offline: true };
+      return { sale_no: t('px.reg_offline_pending'), total: offlineTotal, change, offline: true };
     }
 
     const created = await api<{ order_no: string }>('/api/restaurant/orders', {
@@ -138,21 +140,21 @@ export default function RegisterPage() {
       method: 'POST',
       body: JSON.stringify({ method, discount_pct: discountPct || undefined, ...sc }),
     });
-    const total = Number(sale.total ?? sale.total_with_tip ?? t.total);
+    const total = Number(sale.total ?? sale.total_with_tip ?? tot.total);
     const change = cashReceived != null ? Math.round((cashReceived - total) * 100) / 100 : undefined;
 
-    tm.pushDisplay({ message: 'ขอบคุณค่ะ/ครับ', total, amount_due: cashReceived ?? undefined, change });
+    tm.pushDisplay({ message: t('px.reg_disp_thanks'), total, amount_due: cashReceived ?? undefined, change });
     // Auto-print only when a printer is paired — otherwise the cashier prints on demand from the success
     // screen (avoids a surprise print dialog when no printer is set up yet).
-    if (tm.printerConnected) tm.printReceipt(sale.sale_no).catch((e) => notifyError('พิมพ์ใบเสร็จไม่สำเร็จ — ' + (e as Error).message));
+    if (tm.printerConnected) tm.printReceipt(sale.sale_no).catch((e) => notifyError(t('px.reg_err_print', { msg: (e as Error).message })));
     if (method === 'Cash') void tm.kickDrawer({ saleNo: sale.sale_no, amount: total, reason: 'sale' });
 
     qc.invalidateQueries({ queryKey: ['orders'] });
     qc.invalidateQueries({ queryKey: ['pos-summary'] });
     return { sale_no: sale.sale_no, total, change };
-  }, [lines, tableId, mode, orderType, pax, serviceChargePct, t.total, tm, qc, online, outbox]);
+  }, [lines, tableId, mode, orderType, pax, serviceChargePct, tot.total, tm, qc, online, outbox, t]);
 
-  const finishSale = () => { setCheckout(false); resetSale(); tm.pushDisplay({ message: 'ยินดีต้อนรับ / Welcome' }); };
+  const finishSale = () => { setCheckout(false); resetSale(); tm.pushDisplay({ message: t('px.reg_welcome') }); };
 
   // ── hold / recall ──
   const hold = async () => {

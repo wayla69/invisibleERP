@@ -177,16 +177,16 @@ export default function DocumentTemplatesPage() {
 
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={() => { setMsg(''); save.mutate(); }} disabled={save.isPending || !name.trim()}>
-              {save.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} บันทึก
+              {save.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} {t('fin.save')}
             </Button>
-            <Button variant="outline" onClick={() => runPreview()}><RefreshCw className="size-4" /> รีเฟรชตัวอย่าง</Button>
+            <Button variant="outline" onClick={() => runPreview()}><RefreshCw className="size-4" /> {t('st.dt.refresh_preview')}</Button>
             {msg && <Msg ok={msg.startsWith('✅') || msg.startsWith('🗑️')}>{msg}</Msg>}
           </div>
         </div>
 
         {/* ── live preview ── */}
         <Card className="lg:sticky lg:top-4 h-fit">
-          <CardHeader><CardTitle className="text-base">ตัวอย่าง (Live preview)</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('st.dt.live_preview')}</CardTitle></CardHeader>
           <CardContent>
             <iframe title="preview" srcDoc={previewHtml} className="h-[560px] w-full rounded border bg-white" />
           </CardContent>

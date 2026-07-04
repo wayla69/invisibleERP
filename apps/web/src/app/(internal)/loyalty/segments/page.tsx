@@ -10,6 +10,7 @@ import { Filter, Plus, Trash2, Pencil, Users, Eye, Megaphone, X } from 'lucide-r
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -21,14 +22,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
-// Cosmetic Thai labels — keys not in this map render as-is, so a new server field never breaks the page.
-const FIELD_TH: Record<string, string> = {
-  balance: 'แต้มคงเหลือ', lifetime: 'แต้มสะสมตลอดชีพ', tier: 'ระดับสมาชิก', marketing_opt_in: 'รับข่าวสาร',
-  segment: 'กลุ่ม RFM', total_orders: 'จำนวนออเดอร์', total_spend: 'ยอดซื้อรวม', recency: 'ห่างหาย (วัน)',
-  frequency: 'ความถี่ (ครั้ง)', monetary: 'ยอดซื้อ (RFM)', preferred_channel: 'ช่องทางที่ชอบ',
-  visit_count: 'จำนวนครั้งที่มา', avg_order_value: 'ยอดเฉลี่ย/ออเดอร์',
+// Cosmetic labels — keys not in these maps render as-is, so a new server field never breaks the page.
+const FIELD_LABEL_KEYS: Record<string, string> = {
+  balance: 'ly.seg_f_balance', lifetime: 'ly.seg_f_lifetime', tier: 'ly.seg_f_tier', marketing_opt_in: 'ly.seg_f_optin',
+  segment: 'ly.seg_f_segment', total_orders: 'ly.seg_f_orders', total_spend: 'ly.seg_f_spend', recency: 'ly.seg_f_recency',
+  frequency: 'ly.seg_f_frequency', monetary: 'ly.seg_f_monetary', preferred_channel: 'ly.seg_f_channel',
+  visit_count: 'ly.seg_f_visits', avg_order_value: 'ly.seg_f_aov',
 };
-const OP_TH: Record<string, string> = { eq: '=', ne: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤', contains: 'มีคำว่า' };
+const OP_SYMBOL: Record<string, string> = { eq: '=', ne: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' };
 const OPS_BY_KIND: Record<string, string[]> = { num: ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'], text: ['eq', 'ne', 'contains'], bool: ['eq', 'ne'] };
 
 interface Rule { field: string; op: string; value: any }
@@ -36,6 +37,9 @@ interface Segment { id: number; name: string; match_mode: string; rules: Rule[];
 interface Catalog { fields: { key: string; kind: string }[]; operators: string[]; match_modes: string[] }
 
 export default function SavedSegmentsPage() {
+  const { t } = useLang();
+  const fieldLabel = (k: string) => (FIELD_LABEL_KEYS[k] ? t(FIELD_LABEL_KEYS[k]) : k);
+  const opLabel = (op: string) => (op === 'contains' ? t('ly.seg_op_contains') : OP_SYMBOL[op] ?? op);
   const qc = useQueryClient();
   const catalog = useQuery<Catalog>({ queryKey: ['seg-catalog'], queryFn: () => api('/api/loyalty/saved-segments/catalog'), staleTime: 300_000 });
   const list = useQuery<{ segments: Segment[] }>({ queryKey: ['saved-segments'], queryFn: () => api('/api/loyalty/saved-segments') });
@@ -65,12 +69,12 @@ export default function SavedSegmentsPage() {
     mutationFn: () => api(editId ? `/api/loyalty/saved-segments/${editId}` : '/api/loyalty/saved-segments', {
       method: editId ? 'PUT' : 'POST', body: JSON.stringify({ name, match_mode: matchMode, rules: coerced() }),
     }),
-    onSuccess: () => { notifySuccess(editId ? 'แก้ไขเซกเมนต์แล้ว' : 'สร้างเซกเมนต์แล้ว'); reset(); qc.invalidateQueries({ queryKey: ['saved-segments'] }); },
+    onSuccess: () => { notifySuccess(editId ? t('ly.seg_updated') : t('ly.seg_created')); reset(); qc.invalidateQueries({ queryKey: ['saved-segments'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
   const remove = useMutation({
     mutationFn: (s: Segment) => api(`/api/loyalty/saved-segments/${s.id}`, { method: 'DELETE' }),
-    onSuccess: () => { notifySuccess('ลบเซกเมนต์แล้ว'); qc.invalidateQueries({ queryKey: ['saved-segments'] }); },
+    onSuccess: () => { notifySuccess(t('ly.seg_deleted')); qc.invalidateQueries({ queryKey: ['saved-segments'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
 

@@ -88,27 +88,28 @@ function Devices() {
 }
 
 function Drawer() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [terminal, setTerminal] = useState('T01');
   const evts = useQuery<{ events: DrawerEvt[] }>({ queryKey: ['drawer-events'], queryFn: () => api('/api/peripherals/drawer/events'), refetchInterval: 15_000 });
   const recon = useQuery<{ total_opens: number; no_sale_opens: number; by_reason: Record<string, number> }>({ queryKey: ['drawer-recon'], queryFn: () => api('/api/peripherals/drawer/reconciliation') });
   const noSale = useMutation({
     mutationFn: () => api('/api/peripherals/drawer/kick', { method: 'POST', body: JSON.stringify({ terminal, reason: 'no_sale' }) }),
-    onSuccess: () => { notifySuccess('เปิดลิ้นชัก (ไม่มีการขาย) — บันทึกแล้ว'); qc.invalidateQueries({ queryKey: ['drawer-events'] }); qc.invalidateQueries({ queryKey: ['drawer-recon'] }); },
+    onSuccess: () => { notifySuccess(t('px.periph_kick_saved')); qc.invalidateQueries({ queryKey: ['drawer-events'] }); qc.invalidateQueries({ queryKey: ['drawer-recon'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="เปิดลิ้นชักรวม (24 ชม.)" value={num(recon.data?.total_opens ?? 0)} icon={DollarSign} tone="info" />
-        <StatCard label="เปิดแบบไม่มีการขาย (No-sale)" value={num(recon.data?.no_sale_opens ?? 0)} icon={DollarSign} tone={(recon.data?.no_sale_opens ?? 0) > 0 ? 'warning' : 'success'} hint="กระทบยอดกับ Z-report" />
-        <StatCard label="เปิดจากการขาย (Sale)" value={num(recon.data?.by_reason?.sale ?? 0)} icon={DollarSign} tone="default" />
+        <StatCard label={t('px.periph_stat_total_opens')} value={num(recon.data?.total_opens ?? 0)} icon={DollarSign} tone="info" />
+        <StatCard label={t('px.periph_stat_no_sale')} value={num(recon.data?.no_sale_opens ?? 0)} icon={DollarSign} tone={(recon.data?.no_sale_opens ?? 0) > 0 ? 'warning' : 'success'} hint={t('px.periph_stat_no_sale_hint')} />
+        <StatCard label={t('px.periph_stat_sale')} value={num(recon.data?.by_reason?.sale ?? 0)} icon={DollarSign} tone="default" />
       </div>
       <Card>
-        <CardHeader><CardTitle className="text-sm">เปิดลิ้นชักแบบไม่มีการขาย (No-sale)</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-sm">{t('px.periph_no_sale_title')}</CardTitle></CardHeader>
         <CardContent className="flex items-end gap-3">
-          <div><Label>เครื่อง POS</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.trim())} className="w-32" /></div>
-          <Button variant="outline" disabled={noSale.isPending} onClick={() => noSale.mutate()}>เปิดลิ้นชัก</Button>
+          <div><Label>{t('px.periph_terminal_short')}</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.trim())} className="w-32" /></div>
+          <Button variant="outline" disabled={noSale.isPending} onClick={() => noSale.mutate()}>{t('px.periph_open_drawer')}</Button>
         </CardContent>
       </Card>
       <StateView q={evts}>
@@ -116,17 +117,17 @@ function Drawer() {
           rows={evts.data?.events ?? []}
           rowKey={(r) => r.id}
           columns={[
-            { key: 'created_at', label: 'เวลา', render: (r) => r.created_at ? new Date(r.created_at).toLocaleString('th-TH') : '—' },
-            { key: 'reason', label: 'เหตุผล', render: (r) => <Badge variant={r.reason === 'no_sale' ? 'warning' : 'muted'}>{r.reason}</Badge> },
-            { key: 'terminal', label: 'เครื่อง', render: (r) => r.terminal ?? '—' },
-            { key: 'sale_no', label: 'การขาย', render: (r) => r.sale_no ?? '—' },
-            { key: 'amount', label: 'จำนวน', align: 'right', render: (r) => r.amount != null ? baht(r.amount) : '—' },
-            { key: 'opened_by', label: 'โดย', render: (r) => r.opened_by ?? '—' },
+            { key: 'created_at', label: t('px.periph_col_time'), render: (r) => r.created_at ? new Date(r.created_at).toLocaleString('th-TH') : '—' },
+            { key: 'reason', label: t('px.periph_col_reason'), render: (r) => <Badge variant={r.reason === 'no_sale' ? 'warning' : 'muted'}>{r.reason}</Badge> },
+            { key: 'terminal', label: t('px.periph_col_terminal'), render: (r) => r.terminal ?? '—' },
+            { key: 'sale_no', label: t('px.periph_col_sale'), render: (r) => r.sale_no ?? '—' },
+            { key: 'amount', label: t('inv.col_qty'), align: 'right', render: (r) => r.amount != null ? baht(r.amount) : '—' },
+            { key: 'opened_by', label: t('px.periph_col_by'), render: (r) => r.opened_by ?? '—' },
           ]}
           emptyState={{
             icon: DollarSign,
-            title: 'ยังไม่มีการเปิดลิ้นชัก',
-            description: 'เมื่อมีการเปิดลิ้นชักจากการขายหรือแบบไม่มีการขาย รายการจะปรากฏที่นี่เพื่อกระทบยอดกับ Z-report',
+            title: t('px.periph_drawer_empty_title'),
+            description: t('px.periph_drawer_empty_desc'),
           }}
         />
       </StateView>
@@ -135,6 +136,7 @@ function Drawer() {
 }
 
 function ScaleTab() {
+  const { t } = useLang();
   const [sku, setSku] = useState(''); const [gross, setGross] = useState(''); const [tare, setTare] = useState(''); const [res, setRes] = useState<any>(null);
   const read = useMutation({
     mutationFn: () => api<any>('/api/peripherals/scale/read', { method: 'POST', body: JSON.stringify({ sku, gross_weight: Number(gross), tare_weight: tare ? Number(tare) : undefined }) }),
@@ -143,18 +145,18 @@ function ScaleTab() {
   });
   return (
     <Card>
-      <CardHeader><CardTitle className="text-sm flex items-center gap-2"><Scale className="h-4 w-4" />ชั่งน้ำหนักสินค้า</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-sm flex items-center gap-2"><Scale className="h-4 w-4" />{t('px.periph_scale_title')}</CardTitle></CardHeader>
       <CardContent className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-3">
-          <div><Label>SKU (สินค้าชั่งน้ำหนัก)</Label><Input value={sku} onChange={(e) => setSku(e.target.value.trim())} placeholder="WGH1" /></div>
-          <div><Label>น้ำหนักรวม (gross)</Label><Input value={gross} onChange={(e) => setGross(e.target.value)} placeholder="1.25" /></div>
-          <div><Label>น้ำหนักภาชนะ (tare)</Label><Input value={tare} onChange={(e) => setTare(e.target.value)} placeholder="0.05" /></div>
+          <div><Label>{t('px.periph_scale_sku')}</Label><Input value={sku} onChange={(e) => setSku(e.target.value.trim())} placeholder="WGH1" /></div>
+          <div><Label>{t('px.periph_gross')}</Label><Input value={gross} onChange={(e) => setGross(e.target.value)} placeholder="1.25" /></div>
+          <div><Label>{t('px.periph_tare')}</Label><Input value={tare} onChange={(e) => setTare(e.target.value)} placeholder="0.05" /></div>
         </div>
-        <Button disabled={!sku || !gross || read.isPending} onClick={() => read.mutate()}>คำนวณราคา</Button>
+        <Button disabled={!sku || !gross || read.isPending} onClick={() => read.mutate()}>{t('px.periph_calc_price')}</Button>
         {res && (
           <div className="rounded-md border p-3 text-sm">
             <div className="font-medium">{res.name}</div>
-            <div className="text-muted-foreground">น้ำหนักสุทธิ {res.net_weight} {res.weight_unit} × {baht(res.unit_price)}/{res.weight_unit}</div>
+            <div className="text-muted-foreground">{t('px.periph_net_weight_line', { net: res.net_weight, unit: res.weight_unit, price: baht(res.unit_price) })}</div>
             <div className="mt-1 text-lg font-semibold tabular">{baht(res.amount)}</div>
           </div>
         )}
@@ -164,16 +166,17 @@ function ScaleTab() {
 }
 
 function Display() {
+  const { t } = useLang();
   const [terminal, setTerminal] = useState('T01');
   return (
     <Card>
-      <CardHeader><CardTitle className="text-sm flex items-center gap-2"><MonitorSmartphone className="h-4 w-4" />จอแสดงผลลูกค้า</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-sm flex items-center gap-2"><MonitorSmartphone className="h-4 w-4" />{t('px.periph_display_title')}</CardTitle></CardHeader>
       <CardContent className="space-y-3 text-sm text-muted-foreground">
-        <p>จอแสดงผลลูกค้า (pole display / จอที่สอง) จะดึงสถานะของเครื่อง POS แบบเรียลไทม์ — รายการสินค้า ยอดรวม ยอดที่ต้องชำระ และเงินทอน เปิดหน้าจอนี้บนจอที่หันไปทางลูกค้า</p>
+        <p>{t('px.periph_display_desc')}</p>
         <div className="flex items-end gap-3">
           {/* terminal is a device code — restrict to a safe charset so it can never carry markup into the href */}
-          <div><Label>เครื่อง POS</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} className="w-32" /></div>
-          <a href={`/display/${encodeURIComponent(terminal)}`} target="_blank" rel="noreferrer"><Button variant="outline" disabled={!terminal}>เปิดจอลูกค้า ↗</Button></a>
+          <div><Label>{t('px.periph_terminal_short')}</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} className="w-32" /></div>
+          <a href={`/display/${encodeURIComponent(terminal)}`} target="_blank" rel="noreferrer"><Button variant="outline" disabled={!terminal}>{t('px.periph_open_display')}</Button></a>
         </div>
       </CardContent>
     </Card>

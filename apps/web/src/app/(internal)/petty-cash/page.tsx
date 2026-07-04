@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { HandCoins, Wallet, ReceiptText } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -20,17 +21,18 @@ import { Label } from '@/components/ui/label';
 
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const reqStatusVariant = (s: string) => (s === 'Approved' ? 'success' : s === 'Rejected' ? 'destructive' : s === 'Settled' ? 'secondary' : 'warning');
-const reqStatusTh = (s: string) => ({ PendingApproval: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ปฏิเสธ', Settled: 'เคลียร์แล้ว' } as Record<string, string>)[s] ?? s;
+const REQ_STATUS_KEY: Record<string, string> = { PendingApproval: 'fin.pending', Approved: 'fin.approved', Rejected: 'fnx.petty.status_rejected', Settled: 'fnx.petty.status_settled' };
 
 export default function PettyCashPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="กองทุนเงินสดย่อย & ค่าใช้จ่าย (Petty cash)" description="วงเงินกองทุน · เปิดค่าใช้จ่ายตรง/เงินเบิกล่วงหน้า · อนุมัติแบบแยกหน้าที่ · ติดตามเอกสาร (EXP-08)" />
+      <PageHeader title={t('fnx.petty.title')} description={t('fnx.petty.subtitle')} />
       <Tabs
         tabs={[
-          { key: 'funds', label: 'กองทุน (Funds)', content: <FundsTab /> },
-          { key: 'requests', label: 'เปิดค่าใช้จ่าย / เบิกล่วงหน้า', content: <RequestsTab /> },
-          { key: 'approvals', label: 'อนุมัติ (Maker-checker)', content: <ApprovalsTab /> },
+          { key: 'funds', label: t('fnx.petty.tab_funds'), content: <FundsTab /> },
+          { key: 'requests', label: t('fnx.petty.tab_requests'), content: <RequestsTab /> },
+          { key: 'approvals', label: t('fnx.petty.tab_approvals'), content: <ApprovalsTab /> },
         ]}
       />
     </div>
@@ -38,6 +40,7 @@ export default function PettyCashPage() {
 }
 
 function FundsTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['pc-funds'], queryFn: () => api('/api/finance/petty-cash/funds') });
   const [code, setCode] = useState(''); const [name, setName] = useState(''); const [floatLimit, setFloatLimit] = useState(''); const [initial, setInitial] = useState('');
@@ -45,27 +48,27 @@ function FundsTab() {
 
   const create = useMutation({
     mutationFn: () => api<any>('/api/finance/petty-cash/funds', { method: 'POST', body: JSON.stringify({ fund_code: code, name: name || undefined, float_limit: Number(floatLimit), initial_amount: initial ? Number(initial) : undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(`เปิดกองทุน ${r.fund_code} (วงเงิน ${baht(r.float_limit)})`); setCode(''); setName(''); setFloatLimit(''); setInitial(''); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_fund_opened', { code: r.fund_code, limit: baht(r.float_limit) })); setCode(''); setName(''); setFloatLimit(''); setInitial(''); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const replenish = useMutation({
-    mutationFn: (fundCode: string) => { const amt = window.prompt('จำนวนเงินเติมกองทุน'); if (!amt) throw new Error('ยกเลิก'); return api<any>(`/api/finance/petty-cash/funds/${fundCode}/replenish`, { method: 'POST', body: JSON.stringify({ amount: Number(amt) }) }); },
-    onSuccess: (r: any) => { notifySuccess(`เติมกองทุน ${r.fund_code} → คงเหลือ ${baht(r.balance)}`); refresh(); },
-    onError: (e: any) => { if (e.message !== 'ยกเลิก') notifyError(e.message); },
+    mutationFn: (fundCode: string) => { const amt = window.prompt(t('fnx.petty.prompt_replenish')); if (!amt) throw new Error(t('fin.cancel')); return api<any>(`/api/finance/petty-cash/funds/${fundCode}/replenish`, { method: 'POST', body: JSON.stringify({ amount: Number(amt) }) }); },
+    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_replenished', { code: r.fund_code, balance: baht(r.balance) })); refresh(); },
+    onError: (e: any) => { if (e.message !== t('fin.cancel')) notifyError(e.message); },
   });
 
   const funds: any[] = q.data?.funds ?? [];
   return (
     <div className="space-y-5">
       <Card className="max-w-3xl gap-4 p-5">
-        <h3 className="text-base font-semibold">เปิดกองทุนเงินสดย่อย (กำหนดวงเงิน)</h3>
+        <h3 className="text-base font-semibold">{t('fnx.petty.open_fund_title')}</h3>
         <div className="grid gap-4 sm:grid-cols-4">
-          <div className="grid gap-1.5"><Label>รหัสกองทุน</Label><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="PCF-1" /></div>
-          <div className="grid gap-1.5"><Label>ชื่อ/แผนก</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="สำนักงานใหญ่" /></div>
-          <div className="grid gap-1.5"><Label>วงเงิน (Float)</Label><Input type="number" min="0" value={floatLimit} onChange={(e) => setFloatLimit(e.target.value)} placeholder="5000" /></div>
-          <div className="grid gap-1.5"><Label>เงินตั้งต้น</Label><Input type="number" min="0" value={initial} onChange={(e) => setInitial(e.target.value)} placeholder="5000" /></div>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_fund_code')}</Label><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="PCF-1" /></div>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_name_dept')}</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('fnx.petty.f_name_dept_ph')} /></div>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_float')}</Label><Input type="number" min="0" value={floatLimit} onChange={(e) => setFloatLimit(e.target.value)} placeholder="5000" /></div>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_initial')}</Label><Input type="number" min="0" value={initial} onChange={(e) => setInitial(e.target.value)} placeholder="5000" /></div>
         </div>
-        <div><Button disabled={!code || !floatLimit || create.isPending} onClick={() => create.mutate()}><Wallet className="size-4" /> เปิดกองทุน</Button></div>
+        <div><Button disabled={!code || !floatLimit || create.isPending} onClick={() => create.mutate()}><Wallet className="size-4" /> {t('fnx.petty.open_fund_btn')}</Button></div>
       </Card>
 
       <StateView q={q}>
@@ -73,15 +76,15 @@ function FundsTab() {
           <DataTable
             rows={funds}
             columns={[
-              { key: 'fund_code', label: 'รหัส' },
-              { key: 'name', label: 'ชื่อ', render: (r: any) => r.name ?? '—' },
-              { key: 'float_limit', label: 'วงเงิน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.float_limit)}</span> },
-              { key: 'balance', label: 'คงเหลือ', align: 'right', render: (r: any) => <span className="tabular">{baht(r.balance)}</span> },
-              { key: 'available', label: 'เติมได้อีก', align: 'right', render: (r: any) => <span className="tabular text-muted-foreground">{baht(r.available)}</span> },
-              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={r.status === 'active' ? 'success' : 'muted'}>{r.status}</Badge> },
-              { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" disabled={replenish.isPending} onClick={() => replenish.mutate(r.fund_code)}>เติมเงิน</Button> },
+              { key: 'fund_code', label: t('fnx.petty.col_code') },
+              { key: 'name', label: t('fnx.petty.col_name'), render: (r: any) => r.name ?? '—' },
+              { key: 'float_limit', label: t('fnx.petty.col_float'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.float_limit)}</span> },
+              { key: 'balance', label: t('fnx.petty.col_balance'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.balance)}</span> },
+              { key: 'available', label: t('fnx.petty.col_available'), align: 'right', render: (r: any) => <span className="tabular text-muted-foreground">{baht(r.available)}</span> },
+              { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.status === 'active' ? 'success' : 'muted'}>{r.status}</Badge> },
+              { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" disabled={replenish.isPending} onClick={() => replenish.mutate(r.fund_code)}>{t('fnx.petty.replenish_btn')}</Button> },
             ]}
-            emptyState={{ icon: Wallet, title: 'ยังไม่มีกองทุน', description: 'เปิดกองทุนเงินสดย่อยพร้อมกำหนดวงเงินด้านบน' }}
+            emptyState={{ icon: Wallet, title: t('fnx.petty.funds_empty_title'), description: t('fnx.petty.funds_empty_desc') }}
           />
         )}
       </StateView>
@@ -90,6 +93,7 @@ function FundsTab() {
 }
 
 function RequestsTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const funds = useQuery<any>({ queryKey: ['pc-funds'], queryFn: () => api('/api/finance/petty-cash/funds') });
   const q = useQuery<any>({ queryKey: ['pc-requests'], queryFn: () => api('/api/finance/petty-cash/requests') });
@@ -98,40 +102,40 @@ function RequestsTab() {
 
   const create = useMutation({
     mutationFn: () => api<any>('/api/finance/petty-cash/requests', { method: 'POST', body: JSON.stringify({ fund_code: fundCode, kind, payee: payee || undefined, amount: Number(amount), doc_ref: docRef || undefined, purpose: purpose || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอ ${r.req_no} (${baht(r.amount)}) — รอผู้อื่นอนุมัติ`); setPayee(''); setAmount(''); setDocRef(''); setPurpose(''); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_request_sent', { no: r.req_no, amount: baht(r.amount) })); setPayee(''); setAmount(''); setDocRef(''); setPurpose(''); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const settle = useMutation({
-    mutationFn: (reqNo: string) => { const sp = window.prompt('ยอดใช้จ่ายจริง (settled expense)'); if (sp == null) throw new Error('ยกเลิก'); const rc = window.prompt('เงินคืนกองทุน (returned cash)', '0') ?? '0'; return api<any>(`/api/finance/petty-cash/requests/${reqNo}/settle`, { method: 'POST', body: JSON.stringify({ settled_expense: Number(sp), returned_cash: Number(rc) }) }); },
-    onSuccess: () => { notifySuccess('เคลียร์เงินเบิกล่วงหน้าแล้ว'); refresh(); },
-    onError: (e: any) => { if (e.message !== 'ยกเลิก') notifyError(e.message); },
+    mutationFn: (reqNo: string) => { const sp = window.prompt(t('fnx.petty.prompt_settled')); if (sp == null) throw new Error(t('fin.cancel')); const rc = window.prompt(t('fnx.petty.prompt_returned'), '0') ?? '0'; return api<any>(`/api/finance/petty-cash/requests/${reqNo}/settle`, { method: 'POST', body: JSON.stringify({ settled_expense: Number(sp), returned_cash: Number(rc) }) }); },
+    onSuccess: () => { notifySuccess(t('fnx.petty.toast_settled')); refresh(); },
+    onError: (e: any) => { if (e.message !== t('fin.cancel')) notifyError(e.message); },
   });
 
   const fundList: any[] = funds.data?.funds ?? [];
   return (
     <div className="space-y-5">
       <Card className="max-w-4xl gap-4 p-5">
-        <h3 className="text-base font-semibold">เปิดค่าใช้จ่ายโดยตรง / เงินเบิกล่วงหน้า</h3>
+        <h3 className="text-base font-semibold">{t('fnx.petty.request_title')}</h3>
         <div className="grid gap-4 sm:grid-cols-3">
-          <div className="grid gap-1.5"><Label>กองทุน</Label>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_fund')}</Label>
             <select className={selectCls} value={fundCode} onChange={(e) => setFundCode(e.target.value)}>
-              <option value="">— เลือกกองทุน —</option>
-              {fundList.map((f: any) => <option key={f.fund_code} value={f.fund_code}>{f.fund_code} (คงเหลือ {baht(f.balance)})</option>)}
+              <option value="">{t('fnx.petty.f_fund_select')}</option>
+              {fundList.map((f: any) => <option key={f.fund_code} value={f.fund_code}>{t('fnx.petty.fund_option', { code: f.fund_code, balance: baht(f.balance) })}</option>)}
             </select>
           </div>
-          <div className="grid gap-1.5"><Label>ประเภท</Label>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_kind')}</Label>
             <select className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
-              <option value="expense">ค่าใช้จ่ายโดยตรง (Expense)</option>
-              <option value="advance">เงินเบิกล่วงหน้า (Advance)</option>
+              <option value="expense">{t('fnx.petty.kind_expense_opt')}</option>
+              <option value="advance">{t('fnx.petty.kind_advance_opt')}</option>
             </select>
           </div>
-          <div className="grid gap-1.5"><Label>จำนวนเงิน</Label><Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
-          <div className="grid gap-1.5"><Label>ผู้รับ / ผู้เบิก</Label><Input value={payee} onChange={(e) => setPayee(e.target.value)} placeholder="ชื่อ" /></div>
-          <div className="grid gap-1.5"><Label>เลขที่เอกสาร/ใบเสร็จ</Label><Input value={docRef} onChange={(e) => setDocRef(e.target.value)} placeholder="RCPT-001" /></div>
-          <div className="grid gap-1.5"><Label>รายละเอียด</Label><Input value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="ค่าเดินทาง" /></div>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_amount')}</Label><Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_payee')}</Label><Input value={payee} onChange={(e) => setPayee(e.target.value)} placeholder={t('fnx.petty.f_payee_ph')} /></div>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_docref')}</Label><Input value={docRef} onChange={(e) => setDocRef(e.target.value)} placeholder="RCPT-001" /></div>
+          <div className="grid gap-1.5"><Label>{t('fnx.petty.f_purpose')}</Label><Input value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder={t('fnx.petty.f_purpose_ph')} /></div>
         </div>
-        <div><Button disabled={!fundCode || !amount || create.isPending} onClick={() => create.mutate()}><ReceiptText className="size-4" /> ส่งคำขอ</Button></div>
-        <p className="text-xs text-muted-foreground">คำขอจะยังไม่ลงบัญชี จนกว่าจะมี “คนอื่น” อนุมัติ (แบ่งแยกหน้าที่) และต้องไม่เกินยอดคงเหลือในกองทุน</p>
+        <div><Button disabled={!fundCode || !amount || create.isPending} onClick={() => create.mutate()}><ReceiptText className="size-4" /> {t('fnx.petty.submit_btn')}</Button></div>
+        <p className="text-xs text-muted-foreground">{t('fnx.petty.request_note')}</p>
       </Card>
 
       <StateView q={q}>

@@ -476,8 +476,8 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
 
       <p className="text-xs text-muted-foreground">
         {edit
-          ? <span className="inline-flex items-center gap-1"><Move className="size-3" /> ลากเพื่อย้าย · จับมุมเพื่อปรับขนาด · แตะโต๊ะเพื่อตั้งรูปทรง/หมุน/ที่นั่ง/ห้อง · กด “เสร็จสิ้น” เมื่อจัดเสร็จ</span>
-          : 'แตะโต๊ะเพื่อจัดการ · กด “แก้ไขผัง” เพื่อจัดผัง/สร้างห้อง VIP · สีบอกสถานะ'}
+          ? <span className="inline-flex items-center gap-1"><Move className="size-3" /> {t('px.floor_edit_help')}</span>
+          : t('px.floor_view_help')}
       </p>
 
       {/* confirm (delete) + rename dialogs — design-system, replaces window.confirm/prompt */}
@@ -488,15 +488,15 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
             <DialogDescription>{confirm?.body}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirm(null)}>ยกเลิก</Button>
-            <Button variant="destructive" onClick={() => { confirm?.onYes(); setConfirm(null); }}>ลบ</Button>
+            <Button variant="outline" onClick={() => setConfirm(null)}>{t('fin.cancel')}</Button>
+            <Button variant="destructive" onClick={() => { confirm?.onYes(); setConfirm(null); }}>{t('px.floor_delete')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!rename} onOpenChange={(o) => { if (!o) setRename(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>เปลี่ยนชื่อห้อง</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('px.floor_rename_room_title')}</DialogTitle></DialogHeader>
           <Input
             autoFocus
             value={rename?.value ?? ''}
@@ -504,8 +504,8 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
             onKeyDown={(e) => { if (e.key === 'Enter') submitRename(); }}
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRename(null)}>ยกเลิก</Button>
-            <Button disabled={!rename?.value.trim()} onClick={submitRename}>บันทึก</Button>
+            <Button variant="outline" onClick={() => setRename(null)}>{t('fin.cancel')}</Button>
+            <Button disabled={!rename?.value.trim()} onClick={submitRename}>{t('fin.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

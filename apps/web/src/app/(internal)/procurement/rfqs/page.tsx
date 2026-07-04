@@ -6,6 +6,7 @@ import { ClipboardList, Plus, X, Award, FileSearch, Inbox, FileText, Quote } fro
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -20,16 +21,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { statusVariant } from '@/components/ui';
 
 export default function RfqsPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="ขอใบเสนอราคา (RFQ)"
-        description="ออก RFQ → รับใบเสนอราคาจากผู้ขาย → เลือกผู้ชนะ (award) ระบบสร้าง PO อัตโนมัติจากใบที่ชนะ"
+        title={t('iv.rfq_title')}
+        description={t('iv.rfq_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'list', label: 'รายการ RFQ', content: <RfqList /> },
-          { key: 'create', label: 'สร้าง RFQ', content: <RfqCreate /> },
+          { key: 'list', label: t('iv.rfq_tab_list'), content: <RfqList /> },
+          { key: 'create', label: t('iv.rfq_tab_create'), content: <RfqCreate /> },
         ]}
       />
     </div>
@@ -38,6 +40,7 @@ export default function RfqsPage() {
 
 // ───────────────────────── List + detail ─────────────────────────
 function RfqList() {
+  const { t } = useLang();
   const q = useQuery<any>({ queryKey: ['rfqs'], queryFn: () => api('/api/procurement/rfqs') });
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -50,23 +53,23 @@ function RfqList() {
       {q.data && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <StatCard label="RFQ ทั้งหมด" value={num(rfqs.length)} icon={ClipboardList} tone="primary" />
-            <StatCard label="เปิดอยู่" value={num(open)} icon={FileSearch} tone="info" />
-            <StatCard label="เลือกผู้ชนะแล้ว" value={num(awarded)} icon={Award} tone="success" />
+            <StatCard label={t('iv.rfq_stat_total')} value={num(rfqs.length)} icon={ClipboardList} tone="primary" />
+            <StatCard label={t('iv.rfq_stat_open')} value={num(open)} icon={FileSearch} tone="info" />
+            <StatCard label={t('iv.rfq_stat_awarded')} value={num(awarded)} icon={Award} tone="success" />
           </div>
           <DataTable
             rows={rfqs}
             onRowClick={(r: any) => setSelected(r.rfq_no)}
             columns={[
-              { key: 'rfq_no', label: 'เลขที่ RFQ' },
-              { key: 'rfq_date', label: 'วันที่', render: (r: any) => thaiDate(r.rfq_date) },
-              { key: 'required_date', label: 'ต้องการภายใน', render: (r: any) => (r.required_date ? thaiDate(r.required_date) : '—') },
-              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'rfq_no', label: t('iv.rfq_col_no') },
+              { key: 'rfq_date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.rfq_date) },
+              { key: 'required_date', label: t('iv.rfq_col_required'), render: (r: any) => (r.required_date ? thaiDate(r.required_date) : '—') },
+              { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
             ]}
             emptyState={{
               icon: Inbox,
-              title: 'ยังไม่มี RFQ',
-              description: 'สร้าง RFQ ใบแรกในแท็บ “สร้าง RFQ” เพื่อขอใบเสนอราคาจากผู้ขาย',
+              title: t('iv.rfq_empty_title'),
+              description: t('iv.rfq_empty_desc'),
             }}
           />
           <RfqDetailDialog rfqNo={selected} onClose={() => setSelected(null)} />
@@ -77,6 +80,7 @@ function RfqList() {
 }
 
 function RfqDetailDialog({ rfqNo, onClose }: { rfqNo: string | null; onClose: () => void }) {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['rfq', rfqNo], queryFn: () => api(`/api/procurement/rfqs/${encodeURIComponent(rfqNo!)}`), enabled: !!rfqNo });
 
@@ -87,7 +91,7 @@ function RfqDetailDialog({ rfqNo, onClose }: { rfqNo: string | null; onClose: ()
         body: JSON.stringify({ quote_no: quoteNo }),
       }),
     onSuccess: (r) => {
-      notifySuccess(`เลือกผู้ชนะแล้ว · สร้าง ${r.po_no}`);
+      notifySuccess(t('iv.rfq_awarded_toast', { po: r.po_no }));
       qc.invalidateQueries({ queryKey: ['rfq', rfqNo] });
       qc.invalidateQueries({ queryKey: ['rfqs'] });
     },
@@ -109,26 +113,26 @@ function RfqDetailDialog({ rfqNo, onClose }: { rfqNo: string | null; onClose: ()
           {data && (
             <div className="space-y-5">
               <div>
-                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">รายการที่ขอ</h3>
+                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{t('iv.rfq_items_requested')}</h3>
                 <DataTable
                   rows={data.items}
                   columns={[
-                    { key: 'item_id', label: 'รหัสสินค้า' },
-                    { key: 'qty', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
+                    { key: 'item_id', label: t('iv.rfq_col_item') },
+                    { key: 'qty', label: t('inv.col_qty'), align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
                   ]}
-                  emptyState={{ icon: FileText, title: 'ไม่มีรายการ' }}
+                  emptyState={{ icon: FileText, title: t('iv.rfq_no_items') }}
                   dense
                 />
               </div>
               <div>
-                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">ใบเสนอราคา</h3>
+                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{t('iv.rfq_quotes')}</h3>
                 <DataTable
                   rows={data.quotes}
                   columns={[
-                    { key: 'quote_no', label: 'เลขที่' },
-                    { key: 'vendor_name', label: 'ผู้ขาย', render: (r: any) => r.vendor_name ?? '—' },
-                    { key: 'total_amount', label: 'ยอดรวม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.total_amount)}</span> },
-                    { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                    { key: 'quote_no', label: t('dash.col_no') },
+                    { key: 'vendor_name', label: t('inv.col_supplier'), render: (r: any) => r.vendor_name ?? '—' },
+                    { key: 'total_amount', label: t('iv.rfq_col_total'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.total_amount)}</span> },
+                    { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                     {
                       key: '_award',
                       label: '',
@@ -136,12 +140,12 @@ function RfqDetailDialog({ rfqNo, onClose }: { rfqNo: string | null; onClose: ()
                       render: (r: any) =>
                         isOpen ? (
                           <Button size="sm" variant="outline" disabled={award.isPending} onClick={() => award.mutate(r.quote_no)}>
-                            <Award className="size-4" /> เลือก
+                            <Award className="size-4" /> {t('iv.rfq_select')}
                           </Button>
                         ) : null,
                     },
                   ]}
-                  emptyState={{ icon: Quote, title: 'ยังไม่มีใบเสนอราคา' }}
+                  emptyState={{ icon: Quote, title: t('iv.rfq_no_quotes') }}
                   dense
                 />
               </div>
@@ -157,6 +161,7 @@ function RfqDetailDialog({ rfqNo, onClose }: { rfqNo: string | null; onClose: ()
 interface Line { item_id: string; qty: number }
 
 function RfqCreate() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [requiredDate, setRequiredDate] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -174,7 +179,7 @@ function RfqCreate() {
         }),
       }),
     onSuccess: (r) => {
-      notifySuccess(`${r.rfq_no} · ${num(r.lines)} รายการ`);
+      notifySuccess(t('iv.rfq_created_toast', { no: r.rfq_no, n: num(r.lines) }));
       setRequiredDate(''); setRemarks(''); setLines([{ item_id: '', qty: 1 }]);
       qc.invalidateQueries({ queryKey: ['rfqs'] });
     },
@@ -184,21 +189,21 @@ function RfqCreate() {
   return (
     <Card className="max-w-2xl gap-4">
       <CardHeader>
-        <CardTitle className="text-base">สร้าง RFQ ใหม่</CardTitle>
+        <CardTitle className="text-base">{t('iv.rfq_create_title')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="rfq-req">ต้องการภายในวันที่</Label>
+            <Label htmlFor="rfq-req">{t('iv.rfq_required_date')}</Label>
             <Input id="rfq-req" type="date" value={requiredDate} onChange={(e) => setRequiredDate(e.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="rfq-remarks">หมายเหตุ</Label>
-            <Input id="rfq-remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="ไม่บังคับ" />
+            <Label htmlFor="rfq-remarks">{t('proc.remarks')}</Label>
+            <Input id="rfq-remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder={t('iv.rfq_optional')} />
           </div>
         </div>
         <div className="space-y-2">
-          <Label>รายการสินค้า</Label>
+          <Label>{t('proc.items')}</Label>
           {lines.map((l, i) => (
             <div key={i} className="grid grid-cols-[2fr_1fr_auto] gap-2">
               <Input placeholder="Item ID" value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} />
@@ -211,10 +216,10 @@ function RfqCreate() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" onClick={() => setLines((ls) => [...ls, { item_id: '', qty: 1 }])}>
-            <Plus className="size-4" /> รายการ
+            <Plus className="size-4" /> {t('iv.rfq_add_line')}
           </Button>
           <Button disabled={create.isPending || !lines.some((l) => l.item_id)} onClick={() => create.mutate()}>
-            {create.isPending ? 'กำลังสร้าง…' : 'สร้าง RFQ'}
+            {create.isPending ? t('iv.rfq_creating') : t('iv.rfq_tab_create')}
           </Button>
         </div>
       </CardContent>
