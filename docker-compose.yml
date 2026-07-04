@@ -31,10 +31,11 @@ services:
       CORS_ORIGINS: http://localhost:3000
       PORT: "8000"
       # Multi-tenancy / onboarding (ITGC-AC-18 — see docs/ops/tenancy-model.md). This local prod-like stack
-      # mirrors a SaaS deploy: org-scoped Admins + a single break-glass "god" (the seeded `admin`, who is a
-      # PLATFORM_ADMIN_USERNAMES member and so sees ALL companies). Public signup stays fail-closed.
+      # mirrors a SaaS deploy: org-scoped Admins + a single break-glass "god" (`godmimi`, a
+      # PLATFORM_ADMIN_USERNAMES member who therefore sees ALL companies). Public signup stays fail-closed.
+      # Create the god account once: `GOD_PASSWORD='<temp>' pnpm --filter @ierp/api db:create-god`.
       TENANCY_MODE: multi-company
-      PLATFORM_ADMIN_USERNAMES: admin
+      PLATFORM_ADMIN_USERNAMES: godmimi
       PUBLIC_SIGNUP_ENABLED: "false"
       RUN_MIGRATIONS: "1" # entrypoint applies drizzle migrations before boot (single-node local only)
     ports:

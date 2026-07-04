@@ -51,6 +51,13 @@ the web origin via `CORS_ORIGINS`.
    > Admin sees every company's data) — the boot validator warns loudly on this combo. Prefer the
    > platform-admin `POST /api/admin/tenants`, an invite, or the approval queue over opening public signup.
 
+   **Provision the god account (if it isn't an existing user).** `PLATFORM_ADMIN_USERNAMES` only *grants* the
+   bypass to a username that already exists — it does not create the account. To mint a dedicated one, run once
+   (e.g. via `railway run` / SSH against this environment):
+   `ALLOW_PROD_GOD=1 GOD_PASSWORD='<temp>' pnpm --filter @ierp/api db:create-god` (username defaults to
+   `godmimi`). It creates a role-`Admin` user with `must_change_password` — rotate on first login + enrol MFA —
+   then add that username to `PLATFORM_ADMIN_USERNAMES` and redeploy. See `docs/ops/tenancy-model.md` §2bis.
+
    Recommended (external APM — Sentry errors + OTel tracing): `SENTRY_DSN`, `OTEL_EXPORTER_OTLP_ENDPOINT`.
    These are **not required to boot** — the API always emits built-in signals (structured logs, `audit_log`,
    `/healthz`+`/readyz`, `ops-metrics`); their absence is a silent default. To **mandate** them as a
