@@ -40,6 +40,9 @@ export const projects = pgTable(
     estimatedCost: numeric('estimated_cost', { precision: 16, scale: 2 }).default('0'), // total estimated cost (EAC) for POC
     recognizedRevenue: numeric('recognized_revenue', { precision: 16, scale: 2 }).default('0'), // revenue recognised to date (POC)
     budgetAmount: numeric('budget_amount', { precision: 16, scale: 2 }).default('0'),
+    // FU1 (docs/32) — over-budget tolerance: a material draw may exceed a BoQ line by up to this % of the line
+    // budget before it needs the over-budget approval (0 = strict, every overage needs sign-off).
+    budgetTolerancePct: numeric('budget_tolerance_pct', { precision: 6, scale: 3 }).notNull().default('0'),
     contractAmount: numeric('contract_amount', { precision: 16, scale: 2 }).default('0'),
     status: text('status').notNull().default('Open'),         // Open | Active | Closed
     costToDate: numeric('cost_to_date', { precision: 16, scale: 2 }).default('0'),

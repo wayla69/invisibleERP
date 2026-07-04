@@ -288,6 +288,46 @@ async function main() {
   const advBad = await inj('POST', '/api/finance/advances', admin, { payee: 'x', amount: 100, project_code: 'PRJ-NOPE' });
   ok('Advance with unknown project_code → 404 PROJECT_NOT_FOUND', advBad.status === 404 && advBad.json.error?.code === 'PROJECT_NOT_FOUND', `${advBad.status} ${advBad.json.error?.code}`);
 
+  // ── 9h. FU1 — over-budget TOLERANCE + site cash CONSUMES BoQ budget ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-TOL', name: 'งานเผื่องบ', billing_type: 'TM', budget_tolerance_pct: 10 });
+  const tboq = await inj('POST', '/api/projects/PRJ-TOL/boq', admin, { lines: [
+    { category: 'material', item_no: 'SAND', description: 'ทราย', budget_qty: 100, rate: 100 }, // 10000
+    { category: 'labor', description: 'ค่าแรง', budget_qty: 50, rate: 100 },                    // 5000
+  ] });
+  const tBoqId = tboq.json.boq?.id;
+  const tLineId = (tboq.json.lines ?? []).find((l: any) => l.item_no === 'SAND')?.id;
+  const laborLineId = (tboq.json.lines ?? []).find((l: any) => l.category === 'labor')?.id;
+  await inj('POST', `/api/projects/boq/${tBoqId}/approve`, mgr); // author admin → approve by mgr (SoD)
+  // tolerance 10% on a 10000 line → ceiling 11000. A PO for 10500 (5% over budget) is WITHIN tolerance.
+  const poTol = await inj('POST', '/api/procurement/pos', admin, { project_code: 'PRJ-TOL', vendor_name: 'ACME', items: [{ item_id: 'SAND', order_qty: 105, unit_price: 100, boq_line_id: tLineId }] }); // 10500
+  ok('PO within tolerance (10500 ≤ 11000 ceiling on a 10000 line) → created', poTol.status < 300 && !!poTol.json.po_no, JSON.stringify({ s: poTol.status }));
+  const poTolOver = await inj('POST', '/api/procurement/pos', admin, { project_code: 'PRJ-TOL', vendor_name: 'ACME', items: [{ item_id: 'SAND', order_qty: 10, unit_price: 100, boq_line_id: tLineId }] }); // +1000 → 11500 > 11000
+  ok('PO beyond the tolerance ceiling → 400 BUDGET_EXCEEDED', poTolOver.status === 400 && poTolOver.json.error?.code === 'BUDGET_EXCEEDED', `${poTolOver.status} ${poTolOver.json.error?.code}`);
+  const pmrTol = await inj('POST', '/api/pmr', admin, { project_code: 'PRJ-TOL', items: [{ boq_line_id: tLineId, item_no: 'SAND', qty: 4, unit_cost: 100 }] }); // 400 ≤ headroom 500
+  ok('PMR within tolerance → routed, not pending', pmrTol.json.status === 'routed' && pmrTol.json.over_budget === false, JSON.stringify({ st: pmrTol.json.status }));
+
+  // site cash consumes BoQ budget: a project-tagged advance on the (fresh) labor line reduces its remaining on settle.
+  const advSC = await inj('POST', '/api/finance/advances', admin, { payee: 'สมชาย', amount: 1000, project_code: 'PRJ-TOL', boq_line_id: laborLineId });
+  await inj('POST', `/api/finance/advances/${advSC.json.advance_no}/settle`, admin, { settled_expense: 1000 });
+  const scBoq = await inj('GET', '/api/projects/PRJ-TOL/boq', admin);
+  const laborLine = (scBoq.json.lines ?? []).find((l: any) => l.id === laborLineId);
+  ok('Site cash consumes BoQ budget: settled advance 1000 → labor line committed 1000 / remaining 4000', near(laborLine?.committed, 1000) && near(laborLine?.remaining, 4000), JSON.stringify({ c: laborLine?.committed, r: laborLine?.remaining }));
+
+  // ── 9i. FU2 — a within-budget PMR prefers ON-HAND STOCK (reserve+issue to project) over raising a PR ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-STK', name: 'งานมีสต๊อก', billing_type: 'TM' });
+  const stkBoq = await inj('POST', '/api/projects/PRJ-STK/boq', admin, { lines: [{ category: 'material', item_no: 'STEEL', description: 'เหล็ก', budget_qty: 100, rate: 50 }] }); // 5000
+  const stkBoqId = stkBoq.json.boq?.id;
+  const stkLineId = (stkBoq.json.lines ?? []).find((l: any) => l.item_no === 'STEEL')?.id;
+  await inj('POST', `/api/projects/boq/${stkBoqId}/approve`, mgr);
+  const stkAvailBefore = await inj('GET', '/api/reservations/available?item_id=STEEL', admin); // STEEL has on-hand stock (M3 block)
+  const pmrStk = await inj('POST', '/api/pmr', admin, { project_code: 'PRJ-STK', items: [{ boq_line_id: stkLineId, item_no: 'STEEL', qty: 10, unit_cost: 50 }] });
+  ok('Within-budget PMR with stock on hand → route issue (not a PR)', pmrStk.json.status === 'routed' && pmrStk.json.route === 'issue' && !/^PR-/.test(pmrStk.json.linked_doc_no ?? ''), JSON.stringify({ st: pmrStk.json.status, route: pmrStk.json.route, doc: pmrStk.json.linked_doc_no }));
+  const stkAvailAfter = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('PMR stock fulfil consumed 10 STEEL from on-hand', near(Number(stkAvailBefore.json.on_hand) - Number(stkAvailAfter.json.on_hand), 10), JSON.stringify({ b: stkAvailBefore.json.on_hand, a: stkAvailAfter.json.on_hand }));
+  const stkBoqAfter = await inj('GET', '/api/projects/PRJ-STK/boq', admin);
+  const stkLine = (stkBoqAfter.json.lines ?? []).find((l: any) => l.id === stkLineId);
+  ok('PMR stock fulfil booked the issued value against the BoQ line (committed 500)', near(stkLine?.committed, 500), JSON.stringify({ c: stkLine?.committed }));
+
   // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
   const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
   const oppNo = opp.json.opp_no;

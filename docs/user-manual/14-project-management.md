@@ -122,7 +122,18 @@ deck assembled for you. (It can also be scheduled portfolio-wide via the `projec
   and optionally linked to an item and a WBS task. A BoQ is authored as a **draft**, then **approved by a
   *different* person** (maker-checker) — approval **syncs the project budget** to the BoQ total (the limit that
   requisitions draw against). An approved BoQ can be **locked** (frozen); before locking you can **re-measure**
-  a line (record the actual measured quantity vs the budgeted one). See the BoQ section below.
+  a line (record the actual measured quantity vs the budgeted one). Each line shows its **งบ / ผูกพัน / คงเหลือ**
+  (budget / committed / remaining) so you see the draw against every line at a glance. See the BoQ section below.
+- **ขอเบิกวัสดุ (Material requisitions, PROJ-13)** — raise a **PMR** against a BoQ line (*ขอเบิกวัสดุ*): within
+  budget it auto-routes to a project-tagged **PR** (or an on-hand **stock issue**), over budget it parks pending
+  and pushes a one-tap **LINE** approval to the authoriser; a *different* person approves/rejects the pending
+  ones here (maker-checker). The KPI band shows open/consumed commitments and the pending count.
+- **จองสต๊อก (Stock reservations, INV-13)** — reserve on-hand stock to the project (the dialog shows
+  **available-to-issue** = on-hand − held for the item/warehouse), then **issue-to-project** (moves value into
+  project WIP) or **release** a held reservation.
+- **เงินสดหน้างาน (Site cash, PROJ-14)** — a read-only rollup of the **advances**, **expense reimbursements**
+  and **petty cash** raised against this project, with the site-cash total — so project cash is managed on the
+  project.
 - **ต้นทุน & บิล (Costs & bill)** — the cost-entry ledger with the posting JE, plus *ลงต้นทุน* / *วางบิล* dialogs.
   For a project set to **over-time (POC) revenue recognition**, this tab also shows the % complete (cost-to-cost),
   recognised revenue, and the contract-asset / billings-in-excess position, with a **รับรู้รายได้ (Recognise)**
@@ -198,8 +209,9 @@ an unknown project code is rejected (`PROJECT_NOT_FOUND`). A goods receipt inher
 **Material requisition (PMR) — the draw-and-approve flow (docs/32, M2).** Staff request material against BoQ
 lines via `POST /api/pmr` (project + line + qty + unit cost). The system checks each line's **remaining
 budget**:
-- **Within budget** → the requisition is *routed* and a **project-tagged purchase requisition (PR)** is raised
-  for procurement to buy.
+- **Within budget** → the requisition is *routed*. If the material is **already on hand** it is **reserved and
+  issued straight to the project** from stock (no purchase needed); otherwise a **project-tagged purchase
+  requisition (PR)** is raised for procurement to buy (docs/32 FU2).
 - **Over budget** → the requisition is **held for approval** and a **LINE approval card** (อนุมัติ / ปฏิเสธ) is
   pushed to the authoriser(s). The authoriser (≠ the requester) approves — from the app or **one-tap in LINE** —
   and an **over-budget project PO is auto-drafted** (status *Draft*) for procurement to complete the purchase.
@@ -212,6 +224,12 @@ the line allows, and two orders raised at the same time can't jointly overrun (t
 tab shows each line's **budget / committed / remaining**; **cancelling** a PO frees its reservation, and
 **receiving** it in full turns the reservation into actual spend. The full ledger is at
 `GET /api/projects/{code}/commitments` (open / consumed / released).
+
+**Tolerance & site cash (docs/32, FU1).** A project can set an **over-budget tolerance %**
+(`budget_tolerance_pct` on *สร้างโครงการ*): a draw may exceed a BoQ line by up to that % of the line budget
+before it's blocked or routed to the over-budget approval (0 = strict). And **site cash counts against the
+budget**: an advance or petty-cash raised against a **BoQ line** (`boq_line_id`) **consumes** that line's
+remaining — so material + site cash share one ceiling.
 
 ## Reserving stock for a project (docs/32, M3)
 When the material is **already in the warehouse**, staff reserve it for the project instead of buying:
@@ -254,6 +272,9 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 | 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |
 | 2.1 | 2026-06-30 | **Program (cross-project) critical path** (PMO-4) — group projects into a *program* (`program_code`) with cross-project finish-to-start dependencies; the new `/projects/program/{code}` view runs a CPM over the program (each row a whole project) and highlights the program critical chain + per-project slack. A *โปรแกรม (Programs)* card on the Portfolio command center lists them. |
 | 2.2 | 2026-06-30 | **Pipeline → FTE forecast** (PMO-5) — the Portfolio billings forecast now also projects **กำลังคน (FTE)** demand per month: committed allocation + the pipeline's projected staffing draw (weighted value ÷ a configurable revenue-per-FTE-month rate), with a peak-FTE badge — "if we win the pipeline, how many people would each month need?". |
+| 2.11 | 2026-07-04 | **Material-control web screens** (docs/32, FU3) — the project workspace gains four tabs: **BoQ & งบวัสดุ** (create/append/approve/lock/re-measure + per-line budget/committed/remaining), **ขอเบิกวัสดุ** (raise a PMR against a BoQ line; maker-checker decide the pending over-budget ones), **จองสต๊อก** (available-to-issue check → reserve → issue-to-project/release) and **เงินสดหน้างาน** (advances/reimbursements/petty-cash rollup). No new endpoints — screens over the existing docs/32 M0–M4 spine. |
+| 2.10 | 2026-07-03 | **Requisition prefers stock** (docs/32, FU2) — a within-budget requisition now issues the material straight to the project **from on-hand stock** when available, and only raises a PR to buy when it isn't. |
+| 2.9 | 2026-07-03 | **Budget policy** (docs/32, FU1) — a per-project **over-budget tolerance %** (small overages auto-proceed before approval; 0 = strict), and **site cash consumes budget** (an advance/petty-cash tagged to a BoQ line reduces its remaining). |
 | 2.8 | 2026-07-03 | **Project-linked advances & reimbursements** (docs/32, M4, PROJ-14) — advances, expense-reimbursement claims and petty-cash can be raised **against a project** (`project_code`; unknown → `PROJECT_NOT_FOUND`); the spend posts tagged to the project, and `GET /api/projects/{code}/site-cash` rolls up all site cash (advances + reimbursements + petty-cash + totals) on the project. |
 | 2.7 | 2026-07-03 | **Stock reservation → issue-to-project** (docs/32, M3, INV-13) — reserve on-hand stock for a project (`POST /api/reservations`; available = on hand − held, no double-allocation → `INSUFFICIENT_STOCK`), then **issue it to the project** (`…/{id}/issue`) which moves the value from inventory (1200) into project WIP (1260); **release** frees an unused hold. |
 | 2.6 | 2026-07-03 | **Material requisition + over-budget LINE approval** (docs/32, M2, PROJ-13) — staff raise a **PMR** against BoQ lines (`POST /api/pmr`): within budget it routes to a project-tagged PR; over budget it holds for an authoriser who approves from the app **or one-tap in LINE** (maker-checker, ≠ requester), which **auto-drafts an over-budget project PO** (Draft) for procurement. Pending over-budget requisitions show on the Action Center (`pmr_over_budget`). |

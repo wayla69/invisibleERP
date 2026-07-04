@@ -7,6 +7,7 @@ import { CommitmentsService } from '../commitments/commitments.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { WorkflowService } from '../workflow/workflow.service';
 import { LineNotifyService, buildApproveCard } from '../messaging/line-notify.service';
+import { ReservationsService } from '../reservations/reservations.service';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
@@ -31,7 +32,39 @@ export class PmrService {
     private readonly procurement: ProcurementService,
     @Optional() private readonly workflow?: WorkflowService,       // optional so partial harnesses still build
     @Optional() private readonly lineNotify?: LineNotifyService,   // best-effort LINE approval card
+    @Optional() private readonly reservations?: ReservationsService, // FU2 — within-budget: prefer on-hand stock
   ) {}
+
+  // FU2 (docs/32) — try to fulfil a within-budget requisition from ON-HAND STOCK before buying: if EVERY line's
+  // item has enough available stock (on_hand − held) at the default location, reserve all lines then issue them
+  // to the project (→ project WIP). All-or-nothing: on any shortfall/failure it releases holds and returns false
+  // so the caller falls back to raising a PR. Never throws.
+  private async tryStockFulfil(projectCode: string, items: PmrLineDto[], user: JwtUser): Promise<{ ok: boolean; moves: string[] }> {
+    if (!this.reservations) return { ok: false, moves: [] };
+    const loc = 'WH-MAIN';
+    const need = new Map<string, number>();
+    for (const it of items) {
+      if (!it.item_no) return { ok: false, moves: [] };   // a line with no item can't come from stock
+      need.set(it.item_no, r2((need.get(it.item_no) ?? 0) + n(it.qty)));
+    }
+    for (const [itemNo, qty] of need) {
+      const av = await this.reservations.available(user, itemNo, loc).catch(() => null);
+      if (!av || av.available + EPS < qty) return { ok: false, moves: [] };
+    }
+    const holds: number[] = [];
+    try {
+      for (const it of items) {
+        const r = await this.reservations.reserve({ project_code: projectCode, item_id: it.item_no!, location_id: loc, qty: n(it.qty), boq_line_id: it.boq_line_id }, user);
+        holds.push(r.reservation_id);
+      }
+      const moves: string[] = [];
+      for (const id of holds) { const m = await this.reservations.issueToProject(id, user); moves.push(m.move_no); }
+      return { ok: true, moves };
+    } catch {
+      for (const id of holds) { try { await this.reservations.release(id, user); } catch { /* best-effort */ } }
+      return { ok: false, moves: [] };
+    }
+  }
 
   private async projectRow(code: string) {
     const [p] = await this.db.select().from(projects).where(eq(projects.projectCode, code)).limit(1);
@@ -60,19 +93,24 @@ export class PmrService {
       if (!l || Number(l.projectId) !== projectId) throw new BadRequestException({ code: 'BOQ_LINE_NOT_IN_PROJECT', message: `BoQ line ${id} is not on project ${dto.project_code}`, messageTh: 'รายการ BoQ ไม่ได้อยู่ในโครงการนี้' });
     }
     const committedByLine = await this.commitments.committedByLine(lineIds);
-    const remainingByLine = new Map<number, number>();
-    for (const id of lineIds) remainingByLine.set(id, r2(n(boqById.get(id).budgetAmount) - (committedByLine.get(id) ?? 0)));
+    const committedRun = new Map<number, number>(lineIds.map((id) => [id, committedByLine.get(id) ?? 0]));
+    // FU1 (docs/32) — a draw is "over budget" (needs approval) only if it exceeds the BoQ line's TOLERANCE
+    // ceiling (budget × (1 + project tolerance %)); a small overage within tolerance auto-proceeds.
+    const tolPct = Math.max(0, n(p.budgetTolerancePct));
 
-    // Evaluate each requested line against the remaining budget of its BoQ line.
+    // Evaluate each requested line against the remaining budget (+ tolerance headroom) of its BoQ line.
     let estTotal = 0, overAmount = 0, anyOver = false;
     const evaluated = dto.items.map((it) => {
       const est = r2(n(it.qty) * n(it.unit_cost));
-      const remaining = remainingByLine.get(Number(it.boq_line_id)) ?? 0;
-      const over = est > remaining + EPS;
-      const lineOver = over ? r2(est - Math.max(0, remaining)) : 0;
+      const id = Number(it.boq_line_id);
+      const budget = r2(n(boqById.get(id).budgetAmount));
+      const committed = committedRun.get(id) ?? 0;
+      const remaining = r2(budget - committed);                 // vs budget (reported on the line)
+      const headroom = r2(budget * (1 + tolPct / 100) - committed); // vs the tolerance ceiling
+      const over = est > headroom + EPS;
+      const lineOver = over ? r2(est - Math.max(0, headroom)) : 0;
       estTotal = r2(estTotal + est); overAmount = r2(overAmount + lineOver); anyOver = anyOver || over;
-      // reduce the running remaining so two lines against the SAME BoQ line are evaluated cumulatively
-      remainingByLine.set(Number(it.boq_line_id), r2(remaining - est));
+      committedRun.set(id, r2(committed + est));                // cumulative for repeated lines
       return { it, est, remaining, over };
     });
 
@@ -89,12 +127,18 @@ export class PmrService {
     }
 
     if (!anyOver) {
-      // Within budget → raise a project-tagged PR for procurement to buy (the ordinary requisition path).
-      const pr = await this.procurement.createPr({
-        project_code: dto.project_code, remarks: `PMR ${pmrNo}`, amount: estTotal,
-        items: dto.items.map((it) => ({ item_id: it.item_no ?? 'MATERIAL', request_qty: n(it.qty), boq_line_id: Number(it.boq_line_id), reason: `PMR ${pmrNo}` })),
-      }, user);
-      await this.db.update(projectMaterialRequisitions).set({ linkedDocNo: pr.pr_no }).where(eq(projectMaterialRequisitions.id, Number(h!.id)));
+      // FU2 — within budget: prefer fulfilling from ON-HAND STOCK (reserve → issue to project WIP). Only if the
+      // stock isn't there do we raise a project-tagged PR for procurement to buy (the ordinary path).
+      const stock = await this.tryStockFulfil(dto.project_code, dto.items, user);
+      if (stock.ok) {
+        await this.db.update(projectMaterialRequisitions).set({ route: 'issue', linkedDocNo: stock.moves.filter(Boolean).join(',') || null }).where(eq(projectMaterialRequisitions.id, Number(h!.id)));
+      } else {
+        const pr = await this.procurement.createPr({
+          project_code: dto.project_code, remarks: `PMR ${pmrNo}`, amount: estTotal,
+          items: dto.items.map((it) => ({ item_id: it.item_no ?? 'MATERIAL', request_qty: n(it.qty), boq_line_id: Number(it.boq_line_id), reason: `PMR ${pmrNo}` })),
+        }, user);
+        await this.db.update(projectMaterialRequisitions).set({ linkedDocNo: pr.pr_no }).where(eq(projectMaterialRequisitions.id, Number(h!.id)));
+      }
     } else {
       // Over budget → route to an authoriser: open a workflow instance (if a PMR definition is configured) and
       // push the one-tap LINE approval card to permission holders (best-effort; the maker is excluded, SoD).

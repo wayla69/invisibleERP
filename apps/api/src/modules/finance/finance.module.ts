@@ -9,9 +9,10 @@ import { LedgerModule } from '../ledger/ledger.module';
 import { TaxModule } from '../tax/tax.module';
 import { MatchModule } from '../match/match.module';
 import { MessagingModule } from '../messaging/messaging.module';
+import { CommitmentsModule } from '../commitments/commitments.module';
 
 @Module({
-  imports: [LedgerModule, TaxModule, MatchModule, MessagingModule],
+  imports: [LedgerModule, TaxModule, MatchModule, MessagingModule, CommitmentsModule],
   controllers: [FinanceController, CollectionsController],
   providers: [FinanceService, FinancialHealthService, ArAllowanceService, CollectionsService],
   exports: [FinanceService, FinancialHealthService, ArAllowanceService, CollectionsService],

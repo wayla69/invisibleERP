@@ -23,7 +23,7 @@ const peopleCsv = (xs?: string[]) => {
 };
 const csvToList = (s: unknown) => (s ? String(s).split(',').map((x) => x.trim()).filter(Boolean) : []);
 
-export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string; rev_method?: 'billing' | 'poc'; estimated_cost?: number }
+export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string; rev_method?: 'billing' | 'poc'; estimated_cost?: number; budget_tolerance_pct?: number }
 export interface RecognizeDto { as_of?: string; estimated_cost?: number }
 export interface ChangeOrderDto { description?: string; contract_delta?: number; budget_delta?: number; estimated_cost_delta?: number; reason?: string }
 export interface CostDto { entry_type?: 'time' | 'expense'; description?: string; qty?: number; rate?: number; amount?: number; billable?: boolean; entry_date?: string }
@@ -84,7 +84,7 @@ export class ProjectsService {
     await db.insert(projects).values({
       tenantId: user.tenantId ?? null, projectCode: code, name: dto.name, customerName: dto.customer_name ?? null, customerNo: dto.customer_no ?? null,
       billingType: dto.billing_type ?? 'TM', budgetAmount: fx(dto.budget_amount ?? 0, 2), contractAmount: fx(dto.contract_amount ?? 0, 2),
-      revMethod, estimatedCost: fx(dto.estimated_cost ?? 0, 2),
+      revMethod, estimatedCost: fx(dto.estimated_cost ?? 0, 2), budgetTolerancePct: fx(Math.max(0, dto.budget_tolerance_pct ?? 0), 3),
       status: 'Open', startDate: dto.start_date ?? null, endDate: dto.end_date ?? null, createdBy: user.username,
     });
     return this.get(code);
@@ -1507,7 +1507,7 @@ export class ProjectsService {
     return {
       project_code: p.projectCode, name: p.name, customer_name: p.customerName, customer_no: p.customerNo, crm_opp_no: p.crmOppNo, billing_type: p.billingType, status: p.status,
       rev_method: p.revMethod, estimated_cost: n(p.estimatedCost),
-      budget_amount: budget, contract_amount: n(p.contractAmount),
+      budget_amount: budget, budget_tolerance_pct: n(p.budgetTolerancePct), contract_amount: n(p.contractAmount),
       cost_to_date: cost, recognized_cost: recognized, recognized_revenue: recognizedRevenue, billed_to_date: billed,
       non_billable_cost: nb,                       // expensed straight to 5800 (unrecoverable)
       total_cost: totalCost,                       // all costs incurred (recoverable WIP + non-billable)
