@@ -124,6 +124,25 @@ async function main() {
   ok('GET /api/admin/tenants lists all companies enriched (status/plan/users) incl. the just-provisioned one',
     dir.status === 200 && dirRows.length >= 2 && !!createdRow && typeof createdRow.users === 'number' && 'status' in createdRow && 'plan_code' in createdRow,
     `n=${dirRows.length} created={status:${createdRow?.status},plan:${createdRow?.plan_code},users:${createdRow?.users}}`);
+  // Company detail drawer (Platform Console) — full profile + subscription + counts + recent activity.
+  const detail = await inj('GET', `/api/admin/tenants/${created.json.tenant_id}`, owner);
+  ok('GET /api/admin/tenants/:id returns company detail (subscription + counts + activity)',
+    detail.status === 200 && detail.json.id === Number(created.json.tenant_id) && !!detail.json.subscription && typeof detail.json.counts?.users === 'number' && Array.isArray(detail.json.recent_activity),
+    `st=${detail.status} plan=${detail.json.subscription?.plan_code} users=${detail.json.counts?.users}`);
+  // Platform subscription control — extend trial (pushes trial_ends_at out, status Trialing).
+  const ext = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/extend-trial`, owner, { days: 14 });
+  ok('POST /api/admin/tenants/:id/extend-trial extends the trial (status Trialing, future end)',
+    ext.status === 200 && ext.json.status === 'Trialing' && new Date(ext.json.trial_ends_at).getTime() > Date.now(),
+    `st=${ext.status} ends=${ext.json.trial_ends_at}`);
+  // Platform subscription control — change plan (no impersonation).
+  const chg = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/plan`, owner, { plan_code: 'pro' });
+  ok('POST /api/admin/tenants/:id/plan changes the plan cross-tenant (status Active)',
+    chg.status === 200 && chg.json.plan === 'pro' && chg.json.status === 'Active', `st=${chg.status} plan=${chg.json.plan}`);
+  // Detail + subscription control are platform-owner-gated too.
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // temporarily drop owner's platform status
+  const detailDenied = await inj('GET', `/api/admin/tenants/${created.json.tenant_id}`, owner);
+  ok('GET /api/admin/tenants/:id blocked for a non-platform-admin (403)', detailDenied.status === 403, `${detailDenied.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3c. Invite-link onboarding (ITGC-AC-18 #2): a platform owner issues a SINGLE-USE, expiring invite;

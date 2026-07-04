@@ -26,6 +26,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 
 interface Company {
   id: number;
@@ -68,6 +75,116 @@ function statusBadge(s: string | null) {
   return <Badge variant={variant as 'default' | 'secondary' | 'destructive' | 'outline'}>{th}</Badge>;
 }
 
+// Slide-over with the full picture of one company (drill-down without fully switching into it) + the
+// platform subscription controls (change plan / extend trial). Lives in this already-'use client' island.
+function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose: () => void; onChanged: () => void }) {
+  const detail = useQuery<any>({
+    queryKey: ['tenant-detail', id],
+    queryFn: () => api(`/api/admin/tenants/${id}`),
+    enabled: id != null,
+  });
+  const plans = useQuery<{ plans: { code: string; name: string }[] }>({
+    queryKey: ['plans'],
+    queryFn: () => api('/api/billing/plans'),
+    enabled: id != null,
+  });
+  const [plan, setPlan] = useState('');
+  const [days, setDays] = useState('14');
+
+  const changePlan = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan_code: plan }) }),
+    onSuccess: () => { notifySuccess('เปลี่ยนแพ็กเกจแล้ว'); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const extendTrial = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: Number(days) || 14 }) }),
+    onSuccess: () => { notifySuccess('ต่อระยะทดลองแล้ว'); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const d = detail.data;
+  return (
+    <Sheet open={id != null} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle>{d?.name ?? 'รายละเอียดบริษัท'}</SheetTitle>
+          <SheetDescription>{d ? `${d.code}${d.legal_name ? ` · ${d.legal_name}` : ''}` : 'กำลังโหลด…'}</SheetDescription>
+        </SheetHeader>
+        <StateView q={detail}>
+          {d && (
+            <div className="space-y-5 px-4 pb-6 text-sm">
+              {/* Snapshot */}
+              <div className="grid grid-cols-2 gap-3">
+                <div><div className="text-xs text-muted-foreground">สถานะ</div>{statusBadge(d.suspended ? 'Suspended' : d.subscription?.status ?? null)}</div>
+                <div><div className="text-xs text-muted-foreground">แพ็กเกจ</div>{d.subscription?.plan_code ?? '—'}</div>
+                <div><div className="text-xs text-muted-foreground">ผู้ใช้ · สาขา</div>{d.counts.users} · {d.counts.branches}</div>
+                <div><div className="text-xs text-muted-foreground">ทดลองถึง</div>{d.subscription?.trial_ends_at ? thaiDate(d.subscription.trial_ends_at) : '—'}</div>
+                <div><div className="text-xs text-muted-foreground">เลขภาษี</div>{d.tax_id ?? '—'}</div>
+                <div><div className="text-xs text-muted-foreground">เปิดเมื่อ</div>{d.created_at ? thaiDate(d.created_at) : '—'}</div>
+              </div>
+              {d.suspended && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs">
+                  ถูกระงับ{d.suspended_by ? ` โดย ${d.suspended_by}` : ''}{d.suspend_reason ? ` — ${d.suspend_reason}` : ''}
+                </div>
+              )}
+
+              {/* AI usage */}
+              <div>
+                <div className="mb-1 text-xs font-medium text-muted-foreground">การใช้ AI (สะสม)</div>
+                <div className="text-sm">in {num(d.ai_usage.input_tokens)} · out {num(d.ai_usage.output_tokens)} · overage {num(d.ai_usage.overage_tokens)} โทเคน</div>
+              </div>
+
+              {/* Subscription controls (platform-level, no impersonation) */}
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="text-xs font-medium">จัดการ subscription</div>
+                <div className="flex items-end gap-2">
+                  <div className="grid flex-1 gap-1">
+                    <Label className="text-xs">เปลี่ยนแพ็กเกจ</Label>
+                    <select className="h-9 rounded-md border border-input bg-transparent px-2 text-sm" value={plan} onChange={(e) => setPlan(e.target.value)}>
+                      <option value="">— เลือก —</option>
+                      {(plans.data?.plans ?? []).map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <Button size="sm" onClick={() => changePlan.mutate()} disabled={!plan || changePlan.isPending}>เปลี่ยน</Button>
+                </div>
+                <div className="flex items-end gap-2">
+                  <div className="grid w-24 gap-1">
+                    <Label className="text-xs">ต่อ trial (วัน)</Label>
+                    <Input value={days} onChange={(e) => setDays(e.target.value)} />
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => extendTrial.mutate()} disabled={extendTrial.isPending}>ต่อระยะทดลอง</Button>
+                </div>
+              </div>
+
+              {/* Quick actions */}
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => { setActingTenant({ id: d.id, name: d.name, code: d.code }); window.location.assign('/dashboard'); }}>
+                  <Eye className="size-3.5" /> เข้าดูบริษัทนี้
+                </Button>
+              </div>
+
+              {/* Recent activity */}
+              <div>
+                <div className="mb-1 text-xs font-medium text-muted-foreground">กิจกรรมล่าสุด</div>
+                <div className="space-y-1">
+                  {(d.recent_activity ?? []).length === 0 && <div className="text-xs text-muted-foreground">ยังไม่มีกิจกรรม</div>}
+                  {(d.recent_activity ?? []).map((a: any, i: number) => (
+                    <div key={i} className="flex items-center gap-2 text-xs">
+                      <span className={a.status === 'fail' ? 'text-destructive' : 'text-muted-foreground'}>{a.status === 'fail' ? '✕' : '✓'}</span>
+                      <span className="w-28 shrink-0 text-muted-foreground">{a.ts ? thaiDate(a.ts) : ''}</span>
+                      <span className="truncate">{a.actor ?? '—'} · {a.action ?? ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </StateView>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 export default function PlatformConsole({
   initialCompanies,
   initialRequests,
@@ -100,6 +217,8 @@ export default function PlatformConsole({
     qc.invalidateQueries({ queryKey: ['signup-requests', 'pending'] });
     qc.invalidateQueries({ queryKey: ['signup-invites'] });
   };
+
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   // Jump into a company: set the god act-as scope, then reload so every screen refetches under it.
   const view = (c: Company) => {
@@ -156,10 +275,10 @@ export default function PlatformConsole({
 
   const companyCols: Column<Company>[] = [
     { key: 'name', label: 'บริษัท', sortable: true, render: (c) => (
-      <div className="grid leading-tight">
+      <button type="button" className="grid text-left leading-tight hover:underline" onClick={() => setDetailId(c.id)}>
         <span className="font-medium">{c.name}</span>
         <span className="text-xs text-muted-foreground">{c.code}</span>
-      </div>
+      </button>
     ) },
     { key: 'status', label: 'สถานะ', render: (c) => statusBadge(c.status) },
     { key: 'plan_code', label: 'แพ็กเกจ', render: (c) => c.plan_code ?? '—' },
@@ -376,6 +495,7 @@ export default function PlatformConsole({
           { key: 'onboarding', label: pending ? `Onboarding (${pending})` : 'Onboarding', content: onboardingTab },
         ]}
       />
+      <CompanyDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={refresh} />
     </div>
   );
 }

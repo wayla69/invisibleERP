@@ -520,6 +520,9 @@ the sidebar (visible only to platform owners) — one place to run the whole fle
 - **ภาพรวม** — business KPIs across all companies (MRR/ARR, จำนวนบริษัทที่จ่ายเงิน, ผู้ใช้ active, churn, สัดส่วน
   แพ็กเกจ) and a **ต้องดูแล** panel that surfaces what needs action now: คำขอรออนุมัติ, บริษัททดลองใกล้หมดอายุ (7
   วัน), ค้างชำระ, และถูกระงับ.
+- **รายละเอียดบริษัท** — คลิกชื่อบริษัทในตารางเพื่อเปิดแผงด้านข้างที่รวมข้อมูลบริษัทนั้นครบ (subscription, จำนวน
+  ผู้ใช้/สาขา, การใช้ AI, กิจกรรมล่าสุด) พร้อม **เปลี่ยนแพ็กเกจ** และ **ต่อระยะทดลอง** ได้จากตรงนั้นเลย (ไม่ต้อง
+  สลับเข้าไปในบริษัท) และปุ่ม **เข้าดูบริษัทนี้**.
 
 Everything here is restricted to platform owners by the server, so the menu simply won't appear for a normal
 company Admin.
