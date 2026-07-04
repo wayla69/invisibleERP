@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Activity, AlertTriangle, Building2, CircleDollarSign, Clock, Download, Eye, PauseCircle, Pause, Play, Plus, ShieldCheck, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
 
 import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
-import { notifySuccess, notifyError } from '@/lib/notify';
+import { notifySuccess, notifyError, notifyInfo } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable, type Column } from '@/components/data-table';
@@ -156,10 +156,13 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                 </div>
               </div>
 
-              {/* Quick actions */}
-              <div className="flex gap-2">
+              {/* Quick actions — jump into the company (act-as) for the full workspace or its user admin. */}
+              <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => { setActingTenant({ id: d.id, name: d.name, code: d.code }); window.location.assign('/dashboard'); }}>
                   <Eye className="size-3.5" /> เข้าดูบริษัทนี้
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => { setActingTenant({ id: d.id, name: d.name, code: d.code }); window.location.assign('/admin/users'); }}>
+                  <Users className="size-3.5" /> จัดการผู้ใช้ (รีเซ็ตรหัส/เตะ session)
                 </Button>
               </div>
 
@@ -193,15 +196,19 @@ export default function PlatformConsole({
   initialRequests?: SignupRequest[];
 }) {
   const qc = useQueryClient();
+  // Auto-refresh so the fleet view stays current without a manual reload — new signup requests, trials
+  // slipping past due, etc. surface on their own (near-real-time; platform events aren't sub-second).
   const companies = useQuery<Company[]>({
     queryKey: ['admin-tenants'],
     queryFn: () => api<Company[]>('/api/admin/tenants'),
     initialData: initialCompanies,
+    refetchInterval: 60_000,
   });
   const requests = useQuery<SignupRequest[]>({
     queryKey: ['signup-requests', 'pending'],
     queryFn: () => api<{ requests: SignupRequest[] }>('/api/admin/signup-requests?status=pending').then((r) => r.requests),
     initialData: initialRequests,
+    refetchInterval: 45_000,
   });
   const invites = useQuery<any[]>({
     queryKey: ['signup-invites'],
@@ -220,6 +227,17 @@ export default function PlatformConsole({
   };
 
   const [detailId, setDetailId] = useState<number | null>(null);
+
+  // Live alert — when the auto-refresh brings in more pending requests than last time, toast the god so a
+  // new company waiting for approval doesn't sit unseen. Seeded on first load so it never fires spuriously.
+  const prevPending = useRef<number | null>(null);
+  useEffect(() => {
+    const n = requests.data?.length ?? 0;
+    if (prevPending.current != null && n > prevPending.current) {
+      notifyInfo(`มีคำขอเปิดบริษัทใหม่ ${n - prevPending.current} รายการ — ดูที่แท็บ Onboarding`);
+    }
+    prevPending.current = n;
+  }, [requests.data]);
 
   // Cross-company activity feed (audit_log; god RLS bypass returns every tenant's rows). Company + status
   // filter server-side (so a company filter spans all pages); the free-text box filters the fetched page.

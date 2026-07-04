@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.5** · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+**Status: DRAFT v0.6** · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -524,7 +524,11 @@ the sidebar (visible only to platform owners) — one place to run the whole fle
   วัน), ค้างชำระ, และถูกระงับ.
 - **รายละเอียดบริษัท** — คลิกชื่อบริษัทในตารางเพื่อเปิดแผงด้านข้างที่รวมข้อมูลบริษัทนั้นครบ (subscription, จำนวน
   ผู้ใช้/สาขา, การใช้ AI, กิจกรรมล่าสุด) พร้อม **เปลี่ยนแพ็กเกจ** และ **ต่อระยะทดลอง** ได้จากตรงนั้นเลย (ไม่ต้อง
-  สลับเข้าไปในบริษัท) และปุ่ม **เข้าดูบริษัทนี้**.
+  สลับเข้าไปในบริษัท), ปุ่ม **เข้าดูบริษัทนี้**, และ **จัดการผู้ใช้** (พาเข้าไปที่หน้าจัดการผู้ใช้ของบริษัทนั้นเพื่อ
+  รีเซ็ตรหัส/เตะ session/ปิดบัญชี).
+
+> **อัปเดตอัตโนมัติ.** ศูนย์ควบคุมจะรีเฟรชรายชื่อบริษัท/คิวคำขอให้เองเป็นระยะ และเด้งแจ้งเตือนเมื่อมี **คำขอเปิด
+> บริษัทใหม่เข้ามา** — ไม่ต้องคอยกดรีโหลดเอง.
 
 Everything here is restricted to platform owners by the server, so the menu simply won't appear for a normal
 company Admin.
