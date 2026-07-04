@@ -243,6 +243,7 @@ export class BillingService {
         id: tenants.id, code: tenants.code, name: tenants.name,
         suspendedAt: tenants.suspendedAt, createdAt: tenants.createdAt,
         legalName: tenants.legalName, taxId: tenants.taxId, addressLine1: tenants.addressLine1, province: tenants.province,
+        tags: tenants.tags,
         planCode: subscriptions.planCode, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt,
       })
       .from(tenants)
@@ -272,9 +273,19 @@ export class BillingService {
         created_at: t.createdAt ?? null,
         // Setup essentials for issuing tax invoices — mirrors TenantController.fmt's setup_complete.
         setup_complete: !!(t.legalName && t.taxId && t.addressLine1 && t.province),
+        tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
       });
     }
     return out;
+  }
+
+  // Set a company's tags/segments (Platform Console). Normalises to a de-duplicated, trimmed, capped list.
+  async setTenantTags(id: number, tags: string[]) {
+    const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    const clean = Array.from(new Set((tags ?? []).map((s) => String(s).trim()).filter(Boolean))).slice(0, 20);
+    await this.db.update(tenants).set({ tags: clean }).where(eq(tenants.id, id));
+    return { tenant_id: id, tags: clean };
   }
 
   // Cross-company AI-token usage aggregate (Platform Console) — total in/out/overage per company, ordered by
@@ -326,6 +337,7 @@ export class BillingService {
       id: Number(t.id), code: t.code, name: t.name, legal_name: t.legalName ?? null, tax_id: t.taxId ?? null,
       created_at: t.createdAt ?? null,
       suspended: !!t.suspendedAt, suspended_at: t.suspendedAt ?? null, suspend_reason: t.suspendReason ?? null, suspended_by: t.suspendedBy ?? null,
+      tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
       subscription: sub ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null } : null,
       counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },
       ai_usage: { input_tokens: Number(ai?.input ?? 0), output_tokens: Number(ai?.output ?? 0), overage_tokens: Number(ai?.overage ?? 0) },

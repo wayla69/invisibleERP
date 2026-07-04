@@ -141,6 +141,12 @@ async function main() {
   // Directory carries setup_complete (drives the "ตั้งค่ายังไม่เสร็จ" needs-attention card).
   const dir2 = await inj('GET', '/api/admin/tenants', owner);
   ok('GET /api/admin/tenants rows carry setup_complete', Array.isArray(dir2.json) && dir2.json.every((r: any) => typeof r.setup_complete === 'boolean'), `sample=${dir2.json?.[0]?.setup_complete}`);
+  // Company tags/segments (migration 0246) — set + reflected in the directory.
+  const setTags = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/tags`, owner, { tags: ['enterprise', 'enterprise', ' vip '] });
+  const dirTags = ((await inj('GET', '/api/admin/tenants', owner)).json as any[]).find((r) => Number(r.id) === Number(created.json.tenant_id));
+  ok('POST /api/admin/tenants/:id/tags sets deduped/trimmed tags reflected in the directory',
+    setTags.status === 200 && Array.isArray(setTags.json.tags) && setTags.json.tags.length === 2 && JSON.stringify(dirTags?.tags) === JSON.stringify(['enterprise', 'vip']),
+    `set=${JSON.stringify(setTags.json.tags)} dir=${JSON.stringify(dirTags?.tags)}`);
   // Cross-company AI usage aggregate (Platform Console AI-spend panel).
   const aiu = await inj('GET', '/api/admin/ai-usage', owner);
   ok('GET /api/admin/ai-usage returns a per-company token aggregate (array, sorted by spend)',

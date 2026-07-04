@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.7** · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+**Status: DRAFT v0.8** · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -534,6 +534,10 @@ the sidebar (visible only to platform owners) — one place to run the whole fle
 > **สุขภาพระบบ** (DB pool/คิวงาน/งานล้มเหลว/แคช) และตาราง **การใช้ AI ข้ามบริษัท** (ผู้ใช้มากสุด + overage);
 > การ์ด **ตั้งค่ายังไม่เสร็จ** ชี้บริษัทที่ข้อมูลภาษี/ที่อยู่ยังไม่ครบ; และแท็บ **กิจกรรม** มีตัวกรอง **เฉพาะการข้าม
 > บริษัท (god)** สำหรับสอบทานการสวมรอย.
+
+> **จัดการหลายบริษัทพร้อมกัน & แท็ก.** ในตารางบริษัทเลือกหลายรายการเพื่อ **ระงับ/คืนสถานะ/ต่อ trial/เปลี่ยน
+> แพ็กเกจ** พร้อมกันได้ และติด **แท็ก/กลุ่ม** (เช่น enterprise, trial-risk) จากแผงรายละเอียดบริษัท แล้วกรองตาราง
+> ตามแท็กได้.
 
 Everything here is restricted to platform owners by the server, so the menu simply won't appear for a normal
 company Admin.

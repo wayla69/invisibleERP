@@ -34,6 +34,7 @@ type RejectDto = z.infer<typeof RejectBody>;
 const CheckoutBody = z.object({ plan_code: z.string().min(1) });
 const ChangePlanBody = z.object({ plan_code: z.string().min(1) });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
+const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
 
 @Controller('api')
 export class BillingController {
@@ -125,6 +126,11 @@ export class BillingController {
   @Post('admin/tenants/:id/extend-trial') @PlatformAdmin() @HttpCode(200)
   extendTrial(@Param('id') id: string, @Body(new ZodValidationPipe(ExtendTrialBody)) b: { days: number }) {
     return this.svc.extendTrial(Number(id), b.days);
+  }
+
+  @Post('admin/tenants/:id/tags') @PlatformAdmin() @HttpCode(200)
+  setTenantTags(@Param('id') id: string, @Body(new ZodValidationPipe(TagsBody)) b: { tags: string[] }) {
+    return this.svc.setTenantTags(Number(id), b.tags);
   }
 
   // Tenant lifecycle (#5) — a platform owner suspends a company (its users are then blocked,

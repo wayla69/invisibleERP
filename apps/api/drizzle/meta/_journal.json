@@ -1723,6 +1723,13 @@
       "when": 2023820000072,
       "tag": "0245_capture_email",
       "breakpoints": true
+    },
+    {
+      "idx": 246,
+      "version": "7",
+      "when": 2023820000073,
+      "tag": "0246_tenant_tags",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import { Activity, AlertTriangle, Building2, CircleDollarSign, Clock, Database, 
 
 import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { notifySuccess, notifyError, notifyInfo } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -45,6 +46,7 @@ interface Company {
   users: number;
   created_at: string | null;
   setup_complete?: boolean;
+  tags?: string[];
 }
 
 interface SignupRequest {
@@ -91,6 +93,14 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   });
   const [plan, setPlan] = useState('');
   const [days, setDays] = useState('14');
+  const [tagsInput, setTagsInput] = useState('');
+  useEffect(() => { setTagsInput((detail.data?.tags ?? []).join(', ')); }, [detail.data]);
+
+  const saveTags = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean) }) }),
+    onSuccess: () => { notifySuccess('บันทึกแท็กแล้ว'); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
 
   const changePlan = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan_code: plan }) }),
@@ -154,6 +164,15 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                     <Input value={days} onChange={(e) => setDays(e.target.value)} />
                   </div>
                   <Button size="sm" variant="outline" onClick={() => extendTrial.mutate()} disabled={extendTrial.isPending}>ต่อระยะทดลอง</Button>
+                </div>
+              </div>
+
+              {/* Tags/segments */}
+              <div className="space-y-1">
+                <Label className="text-xs">แท็ก/กลุ่ม (คั่นด้วย ,)</Label>
+                <div className="flex items-end gap-2">
+                  <Input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} placeholder="enterprise, trial-risk" />
+                  <Button size="sm" variant="outline" onClick={() => saveTags.mutate()} disabled={saveTags.isPending}>บันทึก</Button>
                 </div>
               </div>
 
@@ -234,6 +253,28 @@ export default function PlatformConsole({
   };
 
   const [detailId, setDetailId] = useState<number | null>(null);
+
+  // Bulk actions (item 7) — select companies in the table, then act on all at once (loops the per-company
+  // endpoints; there's no batch endpoint, but a handful of parallel calls is fine at fleet size).
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const toggleSel = (id: number) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const clearSel = () => setSelected(new Set());
+  const [bulkPlan, setBulkPlan] = useState('');
+  const runBulk = async (fn: (c: Company) => Promise<unknown>, label: string) => {
+    const targets = comps.filter((c) => selected.has(c.id));
+    if (!targets.length) return;
+    const res = await Promise.allSettled(targets.map(fn));
+    const okN = res.filter((r) => r.status === 'fulfilled').length;
+    const failN = res.length - okN;
+    failN ? notifyError(`${label}: สำเร็จ ${okN}, ล้มเหลว ${failN}`) : notifySuccess(`${label} ${okN} บริษัทสำเร็จ`);
+    clearSel();
+    refresh();
+  };
+  const bulkPlans = useQuery<{ plans: { code: string; name: string }[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
+
+  // Tags/segments (item 8) — filter the company table by a tag chip.
+  const [tagFilter, setTagFilter] = useState('');
+  const allTags = Array.from(new Set(comps.flatMap((c) => c.tags ?? []))).sort();
 
   // Live alert — when the auto-refresh brings in more pending requests than last time, toast the god so a
   // new company waiting for approval doesn't sit unseen. Seeded on first load so it never fires spuriously.
@@ -321,11 +362,21 @@ export default function PlatformConsole({
   });
 
   const companyCols: Column<Company>[] = [
+    { key: 'sel', label: '', render: (c) => (
+      <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSel(c.id)} onClick={(e) => e.stopPropagation()} aria-label={`เลือก ${c.name}`} />
+    ) },
     { key: 'name', label: 'บริษัท', sortable: true, render: (c) => (
-      <button type="button" className="grid text-left leading-tight hover:underline" onClick={() => setDetailId(c.id)}>
-        <span className="font-medium">{c.name}</span>
-        <span className="text-xs text-muted-foreground">{c.code}</span>
-      </button>
+      <div className="grid gap-0.5">
+        <button type="button" className="grid text-left leading-tight hover:underline" onClick={() => setDetailId(c.id)}>
+          <span className="font-medium">{c.name}</span>
+          <span className="text-xs text-muted-foreground">{c.code}</span>
+        </button>
+        {(c.tags ?? []).length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {(c.tags ?? []).map((tg) => <Badge key={tg} variant="outline" className="px-1 py-0 text-[10px]">{tg}</Badge>)}
+          </div>
+        )}
+      </div>
     ) },
     { key: 'status', label: 'สถานะ', render: (c) => statusBadge(c.status) },
     { key: 'plan_code', label: 'แพ็กเกจ', render: (c) => c.plan_code ?? '—' },
@@ -424,13 +475,39 @@ export default function PlatformConsole({
     </Dialog>
   );
 
+  const companyRows = tagFilter ? comps.filter((c) => (c.tags ?? []).includes(tagFilter)) : comps;
   const companiesTab = (
     <StateView q={companies}>
+      {allTags.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground">แท็ก:</span>
+          <button type="button" onClick={() => setTagFilter('')} className={cn('rounded-full border px-2 py-0.5', !tagFilter && 'border-primary bg-primary/10 text-primary')}>ทั้งหมด</button>
+          {allTags.map((tg) => (
+            <button key={tg} type="button" onClick={() => setTagFilter(tg)} className={cn('rounded-full border px-2 py-0.5', tagFilter === tg && 'border-primary bg-primary/10 text-primary')}>{tg}</button>
+          ))}
+        </div>
+      )}
+      {selected.size > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-xs">
+          <span className="font-medium">เลือก {selected.size} บริษัท</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/suspend`, { method: 'POST', body: JSON.stringify({}) }), 'ระงับ')}><Pause className="size-3.5" /> ระงับ</Button>
+            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/reactivate`, { method: 'POST', body: JSON.stringify({}) }), 'คืนสถานะ')}><Play className="size-3.5" /> คืนสถานะ</Button>
+            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: 14 }) }), 'ต่อ trial')}><Clock className="size-3.5" /> ต่อ trial 14 วัน</Button>
+            <select className="h-8 rounded-md border border-input bg-transparent px-2" value={bulkPlan} onChange={(e) => setBulkPlan(e.target.value)}>
+              <option value="">เปลี่ยนแพ็กเกจ…</option>
+              {(bulkPlans.data?.plans ?? []).map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+            </select>
+            <Button size="sm" variant="ghost" disabled={!bulkPlan} onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/plan`, { method: 'POST', body: JSON.stringify({ plan_code: bulkPlan }) }), 'เปลี่ยนแพ็กเกจ')}>ใช้</Button>
+          </div>
+          <button type="button" className="ml-auto text-muted-foreground hover:underline" onClick={clearSel}>ล้าง</button>
+        </div>
+      )}
       <DataTable
-        rows={companies.data ?? []}
+        rows={companyRows}
         columns={companyCols}
         rowKey={(c) => c.id}
-        emptyState={{ icon: Building2, title: 'ยังไม่มีบริษัท', description: 'เปิดบริษัทแรกด้วยปุ่ม “เปิดบริษัทใหม่”' }}
+        emptyState={{ icon: Building2, title: tagFilter ? 'ไม่มีบริษัทในแท็กนี้' : 'ยังไม่มีบริษัท', description: tagFilter ? 'ลองเลือกแท็กอื่น' : 'เปิดบริษัทแรกด้วยปุ่ม “เปิดบริษัทใหม่”' }}
       />
     </StateView>
   );

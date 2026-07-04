@@ -48,6 +48,8 @@ export const tenants = pgTable('tenants', {
   suspendedAt: timestamp('suspended_at', { withTimezone: true }),
   suspendedBy: text('suspended_by'),
   suspendReason: text('suspend_reason'),
+  // Platform Console tags/segments (migration 0246) — free-form labels for fleet organisation/filtering.
+  tags: jsonb('tags').notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
