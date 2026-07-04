@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Banknote, PackageCheck, Plus, Receipt, RotateCcw, SearchX, Undo2, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { useMe, hasPerm } from '@/lib/auth';
 import { num, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -37,6 +38,7 @@ interface SaleItem { id: number; itemId: string; itemDescription: string | null;
 interface SaleDetail { order: { saleNo: string; total: string; saleDate: string | null }; items: SaleItem[] }
 
 export default function ReturnsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const me = useMe();
   const canRefund = hasPerm(me.data, 'pos_refund', 'pos', 'ar'); // SoD R12: authorize refunds = pos_refund duty
@@ -46,7 +48,7 @@ export default function ReturnsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
-  useEffect(() => { const t = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(t); }, [search]);
+  useEffect(() => { const timer = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(timer); }, [search]);
 
   const q = useQuery<RegResp>({
     queryKey: ['returns-register', debounced, method],
@@ -58,37 +60,37 @@ export default function ReturnsPage() {
 
   return (
     <ModulePage
-      title="คืนสินค้า & คืนเงิน (Returns Register)"
-      description="ทะเบียนการคืนสินค้า/คืนเงินทั้งหมด — วิธีคืนเงิน, ยอดคืน, การคืนเข้าสต๊อก, ลิงก์บัญชี (REV-07)"
+      title={t('hx.ret.title')}
+      description={t('hx.ret.desc')}
       query={q}
       actions={
         // SoD R12: creating/authorizing a return requires pos_refund (POS Supervisor) — a Cashier
         // (pos_sell only) can view the register but cannot issue refunds from this page.
         canRefund ? (
           <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-1.5 size-4" />บันทึกคืนสินค้า
+            <Plus className="mr-1.5 size-4" />{t('hx.ret.record_btn')}
           </Button>
         ) : undefined
       }
       toolbar={
         <>
-          <SearchInput value={search} onChange={setSearch} placeholder="ค้นหา เลขที่คืน / เลขที่ขาย…" ariaLabel="ค้นหารายการคืน" count={d ? `${num(d.count)} รายการ` : undefined} />
-          <select className={selectCls} value={method} onChange={(e) => setMethod(e.target.value)} aria-label="กรองตามวิธีคืนเงิน">
-            <option value="">ทุกวิธีคืนเงิน</option>
-            <option value="Cash">เงินสด (Cash)</option>
-            <option value="Transfer">โอน (Transfer)</option>
-            <option value="Card">บัตร (Card)</option>
-            <option value="StoreCredit">เครดิตร้าน (Store credit)</option>
+          <SearchInput value={search} onChange={setSearch} placeholder={t('hx.ret.search_ph')} ariaLabel={t('hx.ret.search_aria')} count={d ? t('hx.common.count_items', { n: num(d.count) }) : undefined} />
+          <select className={selectCls} value={method} onChange={(e) => setMethod(e.target.value)} aria-label={t('hx.ret.filter_method')}>
+            <option value="">{t('hx.ret.all_methods')}</option>
+            <option value="Cash">{t('hx.ret.m_cash')}</option>
+            <option value="Transfer">{t('hx.ret.m_transfer')}</option>
+            <option value="Card">{t('hx.ret.m_card')}</option>
+            <option value="StoreCredit">{t('hx.ret.m_store_credit')}</option>
           </select>
-          {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">กำลังอัปเดต…</span>}
+          {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">{t('hx.common.updating')}</span>}
         </>
       }
       stats={
         d && (
           <>
-            <StatCard label="จำนวนรายการคืน" value={num(d.total_count)} icon={Undo2} tone="primary" />
-            <StatCard label="ยอดคืนเงินรวม" value={`฿${num(d.total_refunded)}`} icon={Banknote} hint="รวมภาษี" />
-            <StatCard label="คืนเข้าสต๊อก" value={`${num(d.restocked_count)} / ${num(d.total_count)}`} icon={PackageCheck} tone={d.restocked_count > 0 ? 'success' : 'default'} hint="รายการที่คืนของเข้าคลัง" />
+            <StatCard label={t('hx.ret.stat_count')} value={num(d.total_count)} icon={Undo2} tone="primary" />
+            <StatCard label={t('hx.ret.stat_refunded')} value={`฿${num(d.total_refunded)}`} icon={Banknote} hint={t('hx.ret.incl_tax')} />
+            <StatCard label={t('hx.ret.stat_restocked')} value={`${num(d.restocked_count)} / ${num(d.total_count)}`} icon={PackageCheck} tone={d.restocked_count > 0 ? 'success' : 'default'} hint={t('hx.ret.restocked_hint')} />
           </>
         )
       }
@@ -101,17 +103,17 @@ export default function ReturnsPage() {
             rowKey={(r) => r.return_no}
             emptyState={
               filtering
-                ? { icon: SearchX, title: 'ไม่พบรายการคืนที่ตรงกับตัวกรอง', description: 'ลองปรับคำค้นหา หรือล้างตัวกรอง', action: <Button variant="outline" size="sm" onClick={() => { setSearch(''); setMethod(''); }}>ล้างตัวกรอง</Button> }
-                : { icon: RotateCcw, title: 'ยังไม่มีรายการคืนสินค้า', description: 'การคืน/คืนเงินจะถูกบันทึกจากหน้า POS แล้วแสดงที่นี่ หรือคลิก "บันทึกคืนสินค้า"' }
+                ? { icon: SearchX, title: t('hx.ret.no_match_title'), description: t('hx.ret.no_match_desc'), action: <Button variant="outline" size="sm" onClick={() => { setSearch(''); setMethod(''); }}>{t('inv.clear_filter')}</Button> }
+                : { icon: RotateCcw, title: t('hx.ret.empty_title'), description: t('hx.ret.empty_desc') }
             }
             columns={[
-              { key: 'return_no', label: 'เลขที่คืน', render: (r) => <button onClick={() => setSelected(r.return_no)} className={cn('font-medium text-primary hover:underline', selected === r.return_no && 'underline')}>{r.return_no}</button> },
-              { key: 'return_date', label: 'วันที่', render: (r) => (r.return_date ? thaiDate(r.return_date) : '—') },
-              { key: 'sale_no', label: 'เลขที่ขาย' },
-              { key: 'refund_method', label: 'วิธีคืนเงิน', render: (r) => <Badge variant="outline">{r.refund_method ?? '—'}</Badge> },
-              { key: 'total_returned', label: 'ยอดคืน', align: 'right', render: (r) => <span className="tabular font-medium">฿{num(r.total_returned)}</span> },
-              { key: 'restocked', label: 'คืนสต๊อก', render: (r) => (r.restocked ? <Badge variant="secondary">คืนแล้ว</Badge> : <span className="text-muted-foreground">—</span>) },
-              { key: 'journal_no', label: 'บัญชี (JE)', render: (r) => r.journal_no ?? '—' },
+              { key: 'return_no', label: t('hx.ret.col_return_no'), render: (r) => <button onClick={() => setSelected(r.return_no)} className={cn('font-medium text-primary hover:underline', selected === r.return_no && 'underline')}>{r.return_no}</button> },
+              { key: 'return_date', label: t('dash.col_date'), render: (r) => (r.return_date ? thaiDate(r.return_date) : '—') },
+              { key: 'sale_no', label: t('hx.ret.col_sale_no') },
+              { key: 'refund_method', label: t('hx.ret.col_method'), render: (r) => <Badge variant="outline">{r.refund_method ?? '—'}</Badge> },
+              { key: 'total_returned', label: t('hx.ret.col_total'), align: 'right', render: (r) => <span className="tabular font-medium">฿{num(r.total_returned)}</span> },
+              { key: 'restocked', label: t('hx.ret.col_restocked'), render: (r) => (r.restocked ? <Badge variant="secondary">{t('hx.ret.restocked_yes')}</Badge> : <span className="text-muted-foreground">—</span>) },
+              { key: 'journal_no', label: t('hx.ret.col_je'), render: (r) => r.journal_no ?? '—' },
             ]}
           />
           {selected && <ReturnDetail returnNo={selected} onClose={() => setSelected(null)} />}
@@ -130,36 +132,37 @@ export default function ReturnsPage() {
 
 // ── Return detail panel ──
 function ReturnDetail({ returnNo, onClose }: { returnNo: string; onClose: () => void }) {
+  const { t } = useLang();
   const q = useQuery<RetDetail>({ queryKey: ['return-detail', returnNo], queryFn: () => api(`/api/pos/returns/${encodeURIComponent(returnNo)}`) });
   const r = q.data;
   return (
     <Card className="mt-5 gap-3 p-5">
       <div className="flex items-center justify-between">
-        <h3 className="flex items-center gap-2 font-semibold"><Receipt className="size-4" /> รายละเอียดการคืน {returnNo}</h3>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="ปิด"><X className="size-4" /></Button>
+        <h3 className="flex items-center gap-2 font-semibold"><Receipt className="size-4" /> {t('hx.ret.detail_title', { no: returnNo })}</h3>
+        <Button variant="ghost" size="icon" onClick={onClose} aria-label={t('hx.common.close')}><X className="size-4" /></Button>
       </div>
       <StateView q={q}>
         {r && (
           <div className="space-y-4">
             <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-              <Info label="เลขที่ขายเดิม" value={r.sale_no} />
-              <Info label="ใบคืนเงิน" value={r.refund_no ?? '—'} />
-              <Info label="วิธีคืนเงิน" value={r.refund_method ?? '—'} />
-              <Info label="วันที่" value={r.return_date ? thaiDate(r.return_date) : '—'} />
-              <Info label="มูลค่าก่อนภาษี" value={`฿${num(r.subtotal_returned)}`} />
-              <Info label="ภาษี (VAT)" value={`฿${num(r.vat_returned)}`} />
-              <Info label="ยอดคืนรวม" value={`฿${num(r.total_returned)}`} />
-              <Info label="ใบลดหนี้ / JE" value={`${r.credit_note_no ?? '—'} · ${r.journal_no ?? '—'}`} />
+              <Info label={t('hx.ret.orig_sale')} value={r.sale_no} />
+              <Info label={t('hx.ret.refund_doc')} value={r.refund_no ?? '—'} />
+              <Info label={t('hx.ret.col_method')} value={r.refund_method ?? '—'} />
+              <Info label={t('dash.col_date')} value={r.return_date ? thaiDate(r.return_date) : '—'} />
+              <Info label={t('hx.ret.subtotal')} value={`฿${num(r.subtotal_returned)}`} />
+              <Info label={t('hx.ret.vat')} value={`฿${num(r.vat_returned)}`} />
+              <Info label={t('hx.ret.total_refund')} value={`฿${num(r.total_returned)}`} />
+              <Info label={t('hx.ret.cn_je')} value={`${r.credit_note_no ?? '—'} · ${r.journal_no ?? '—'}`} />
             </div>
             <DataTable
               rows={r.items}
               rowKey={(it) => it.item_id}
               columns={[
-                { key: 'item_id', label: 'รหัส' },
-                { key: 'name', label: 'สินค้า' },
-                { key: 'qty', label: 'จำนวนคืน', align: 'right', render: (it) => <span className="tabular">{num(it.qty)}</span> },
-                { key: 'amount', label: 'มูลค่า', align: 'right', render: (it) => <span className="tabular">฿{num(it.amount)}</span> },
-                { key: 'restocked', label: 'คืนสต๊อก', render: (it) => (it.restocked ? <Badge variant="secondary">คืนแล้ว</Badge> : <span className="text-muted-foreground">—</span>) },
+                { key: 'item_id', label: t('hx.ret.col_code') },
+                { key: 'name', label: t('hx.ret.col_item') },
+                { key: 'qty', label: t('hx.ret.col_return_qty'), align: 'right', render: (it) => <span className="tabular">{num(it.qty)}</span> },
+                { key: 'amount', label: t('hx.ret.col_value'), align: 'right', render: (it) => <span className="tabular">฿{num(it.amount)}</span> },
+                { key: 'restocked', label: t('hx.ret.col_restocked'), render: (it) => (it.restocked ? <Badge variant="secondary">{t('hx.ret.restocked_yes')}</Badge> : <span className="text-muted-foreground">—</span>) },
               ]}
             />
           </div>
@@ -170,18 +173,20 @@ function ReturnDetail({ returnNo, onClose }: { returnNo: string; onClose: () => 
 }
 
 // ── Create return dialog ──
+// value = submitted enum; label = i18n key, rendered via t().
 const REFUND_METHODS = [
-  { value: 'Cash', label: 'เงินสด (Cash)' },
-  { value: 'Card', label: 'บัตรเครดิต (Card)' },
-  { value: 'PromptPay', label: 'พร้อมเพย์ (PromptPay)' },
-  { value: 'QR', label: 'QR Code' },
-  { value: 'StoreCredit', label: 'เครดิตร้าน (Store Credit)' },
-  { value: 'None', label: 'ไม่คืนเงิน (None)' },
+  { value: 'Cash', label: 'hx.ret.rm_cash' },
+  { value: 'Card', label: 'hx.ret.rm_card' },
+  { value: 'PromptPay', label: 'hx.ret.rm_promptpay' },
+  { value: 'QR', label: 'hx.ret.rm_qr' },
+  { value: 'StoreCredit', label: 'hx.ret.rm_store_credit' },
+  { value: 'None', label: 'hx.ret.rm_none' },
 ] as const;
 
 type ReturnItem = { sale_item_id: number; item_id: string; name: string; sold_qty: number; return_qty: number; unit_price: number };
 
 function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const { t } = useLang();
   const [saleNo, setSaleNo] = useState('');
   const [searched, setSearched] = useState('');
   const [items, setItems] = useState<ReturnItem[]>([]);
@@ -214,7 +219,7 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
   const mut = useMutation({
     mutationFn: (body: object) => api('/api/pos/returns', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: (res: any) => setResult({ return_no: res.return_no, total_returned: res.total_returned, refund_method: res.refund_method }),
-    onError: (e: any) => setErr(e?.message ?? 'เกิดข้อผิดพลาด'),
+    onError: (e: any) => setErr(e?.message ?? t('hx.common.error')),
   });
 
   const doSearch = () => {
@@ -230,7 +235,7 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
 
   const handleSubmit = () => {
     const lines = items.filter((it) => it.return_qty > 0);
-    if (!lines.length) { setErr('กรุณาระบุจำนวนสินค้าที่ต้องการคืน'); return; }
+    if (!lines.length) { setErr(t('hx.ret.need_qty')); return; }
     mut.mutate({
       sale_no: searched,
       items: lines.map((it) => ({ sale_item_id: it.sale_item_id, qty: it.return_qty })),
@@ -244,25 +249,25 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-xl">
-        <DialogHeader><DialogTitle>บันทึกคืนสินค้า</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('hx.ret.record_btn')}</DialogTitle></DialogHeader>
 
         {result ? (
           <div className="space-y-3 py-2">
-            <p className="font-medium text-success">คืนสินค้าสำเร็จ</p>
+            <p className="font-medium text-success">{t('hx.ret.success')}</p>
             <div className="rounded-lg border p-4 text-sm space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">เลขที่คืน</span><span className="font-medium">{result.return_no}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">ยอดคืน</span><span className="font-medium">฿{num(result.total_returned)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">วิธีคืนเงิน</span><span>{result.refund_method}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">{t('hx.ret.col_return_no')}</span><span className="font-medium">{result.return_no}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">{t('hx.ret.col_total')}</span><span className="font-medium">฿{num(result.total_returned)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">{t('hx.ret.col_method')}</span><span>{result.refund_method}</span></div>
             </div>
             <DialogFooter>
-              <Button onClick={onDone}>ปิด</Button>
+              <Button onClick={onDone}>{t('hx.common.close')}</Button>
             </DialogFooter>
           </div>
         ) : (
           <div className="space-y-4 py-2">
             {/* Step 1: search sale */}
             <div className="space-y-1.5">
-              <Label>เลขที่ขาย (Sale No.) *</Label>
+              <Label>{t('hx.ret.sale_no_label')}</Label>
               <div className="flex gap-2">
                 <Input
                   placeholder="SALE-0001-xxxxxx"
@@ -271,22 +276,22 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
                   onKeyDown={(e) => { if (e.key === 'Enter') doSearch(); }}
                 />
                 <Button variant="outline" onClick={doSearch} disabled={saleQ.isFetching}>
-                  {saleQ.isFetching ? 'ค้นหา…' : 'ค้นหา'}
+                  {saleQ.isFetching ? t('hx.ret.searching') : t('hx.ret.search_btn')}
                 </Button>
               </div>
-              {saleQ.isError && <p className="text-xs text-destructive">ไม่พบรายการขาย</p>}
+              {saleQ.isError && <p className="text-xs text-destructive">{t('hx.ret.sale_not_found')}</p>}
             </div>
 
             {/* Step 2: pick items */}
             {items.length > 0 && (
               <div className="space-y-2">
-                <p className="text-sm font-medium">เลือกสินค้าที่ต้องการคืน</p>
+                <p className="text-sm font-medium">{t('hx.ret.pick_items')}</p>
                 <div className="divide-y rounded-lg border">
                   {items.map((it, idx) => (
                     <div key={it.sale_item_id} className="flex items-center gap-3 px-3 py-2">
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{it.name}</p>
-                        <p className="text-xs text-muted-foreground">฿{num(it.unit_price)} × {num(it.sold_qty)} ชิ้น</p>
+                        <p className="text-xs text-muted-foreground">฿{num(it.unit_price)} × {num(it.sold_qty)} {t('hx.ret.pcs')}</p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button type="button" className="flex size-7 items-center justify-center rounded border hover:bg-accent" onClick={() => setReturnQty(idx, it.return_qty - 1)}>−</button>

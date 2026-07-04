@@ -547,60 +547,60 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
       {/* Assign resource */}
       <Dialog open={resDlg} onOpenChange={setResDlg}>
         <DialogContent>
-          <DialogHeader><DialogTitle>จัดสรรทรัพยากร</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.btn_alloc_resource')}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5"><Label>ชื่อ</Label><Input value={rf.resource_name} onChange={(ev) => setRf({ ...rf, resource_name: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.f_generic_name')}</Label><Input value={rf.resource_name} onChange={(ev) => setRf({ ...rf, resource_name: ev.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>บทบาท (→ rate card)</Label><Input value={rf.role} onChange={(ev) => setRf({ ...rf, role: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>จัดสรร %</Label><Input type="number" min="1" max="100" value={rf.alloc_pct} onChange={(ev) => setRf({ ...rf, alloc_pct: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.f_role_rate')}</Label><Input value={rf.role} onChange={(ev) => setRf({ ...rf, role: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.f_alloc_pct')}</Label><Input type="number" min="1" max="100" value={rf.alloc_pct} onChange={(ev) => setRf({ ...rf, alloc_pct: ev.target.value })} /></div>
             </div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setResDlg(false)}>ปิด</Button><Button onClick={() => addRes.mutate()} disabled={!rf.resource_name || addRes.isPending}>จัดสรร</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setResDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => addRes.mutate()} disabled={!rf.resource_name || addRes.isPending}>{t('pj.btn_allocate')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Add risk / issue */}
       <Dialog open={riskDlg} onOpenChange={setRiskDlg}>
         <DialogContent>
-          <DialogHeader><DialogTitle>เพิ่มความเสี่ยง / ปัญหา</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.dlg_add_risk')}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>ประเภท</Label>
+              <div className="grid gap-1.5"><Label>{t('pj.col_type')}</Label>
                 <select className={selectCls} value={kf.kind} onChange={(ev) => setKf({ ...kf, kind: ev.target.value })}>
-                  <option value="risk">ความเสี่ยง (risk)</option><option value="issue">ปัญหา (issue)</option>
+                  <option value="risk">{t('pj.opt_risk')}</option><option value="issue">{t('pj.opt_issue')}</option>
                 </select>
               </div>
-              <div className="grid gap-1.5"><Label>ผู้รับผิดชอบ</Label><Input value={kf.owner} onChange={(ev) => setKf({ ...kf, owner: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.col_owner')}</Label><Input value={kf.owner} onChange={(ev) => setKf({ ...kf, owner: ev.target.value })} /></div>
             </div>
-            <div className="grid gap-1.5"><Label>หัวข้อ</Label><Input value={kf.title} onChange={(ev) => setKf({ ...kf, title: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.col_title')}</Label><Input value={kf.title} onChange={(ev) => setKf({ ...kf, title: ev.target.value })} /></div>
             <div className="grid grid-cols-3 gap-3">
-              {kf.kind === 'risk' && <div className="grid gap-1.5"><Label>โอกาส (1-5)</Label><Input type="number" min="1" max="5" value={kf.probability} onChange={(ev) => setKf({ ...kf, probability: ev.target.value })} /></div>}
-              <div className="grid gap-1.5"><Label>ผลกระทบ (1-5)</Label><Input type="number" min="1" max="5" value={kf.impact} onChange={(ev) => setKf({ ...kf, impact: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>กำหนด</Label><Input type="date" value={kf.due_date} onChange={(ev) => setKf({ ...kf, due_date: ev.target.value })} /></div>
+              {kf.kind === 'risk' && <div className="grid gap-1.5"><Label>{t('pj.f_probability')}</Label><Input type="number" min="1" max="5" value={kf.probability} onChange={(ev) => setKf({ ...kf, probability: ev.target.value })} /></div>}
+              <div className="grid gap-1.5"><Label>{t('pj.f_impact')}</Label><Input type="number" min="1" max="5" value={kf.impact} onChange={(ev) => setKf({ ...kf, impact: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.col_due')}</Label><Input type="date" value={kf.due_date} onChange={(ev) => setKf({ ...kf, due_date: ev.target.value })} /></div>
             </div>
-            <div className="grid gap-1.5"><Label>แผนรับมือ / แก้ไข</Label><Input value={kf.mitigation} onChange={(ev) => setKf({ ...kf, mitigation: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.f_mitigation')}</Label><Input value={kf.mitigation} onChange={(ev) => setKf({ ...kf, mitigation: ev.target.value })} /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setRiskDlg(false)}>ปิด</Button><Button onClick={() => addRisk.mutate()} disabled={!kf.title || addRisk.isPending}>เพิ่ม</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setRiskDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => addRisk.mutate()} disabled={!kf.title || addRisk.isPending}>{t('pj.btn_add')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Cost / bill */}
       <Dialog open={!!costDlg} onOpenChange={(o) => !o && setCostDlg(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{costDlg === 'cost' ? 'ลงต้นทุนโครงการ' : 'วางบิลลูกค้า'} — {code}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{costDlg === 'cost' ? t('pj.dlg_log_cost') : t('pj.dlg_bill_customer')} — {code}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             {costDlg === 'cost' && (
-              <div className="grid gap-1.5"><Label>ประเภท</Label>
+              <div className="grid gap-1.5"><Label>{t('pj.f_type')}</Label>
                 <select className={selectCls} value={ctype} onChange={(ev) => setCtype(ev.target.value as 'time' | 'expense')}>
-                  <option value="time">ค่าแรง (time)</option><option value="expense">ค่าใช้จ่าย (expense)</option>
+                  <option value="time">{t('pj.type_time')}</option><option value="expense">{t('pj.type_expense')}</option>
                 </select>
               </div>
             )}
-            <div className="grid gap-1.5"><Label>{costDlg === 'bill' && byPct ? 'เปอร์เซ็นต์ของสัญญา (%)' : 'จำนวนเงิน'}</Label><Input type="number" min="0" value={amount} onChange={(ev) => setAmount(ev.target.value)} /></div>
-            {costDlg === 'cost' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={billable} onChange={(ev) => setBillable(ev.target.checked)} /> เบิกลูกค้าได้ (billable)</label>}
-            {costDlg === 'bill' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={byPct} onChange={(ev) => setByPct(ev.target.checked)} /> วางบิลตาม % ของสัญญา</label>}
+            <div className="grid gap-1.5"><Label>{costDlg === 'bill' && byPct ? t('pj.f_percent_of_contract') : t('pj.f_amount')}</Label><Input type="number" min="0" value={amount} onChange={(ev) => setAmount(ev.target.value)} /></div>
+            {costDlg === 'cost' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={billable} onChange={(ev) => setBillable(ev.target.checked)} /> {t('pj.billable_label')}</label>}
+            {costDlg === 'bill' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={byPct} onChange={(ev) => setByPct(ev.target.checked)} /> {t('pj.bill_by_pct_short')}</label>}
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setCostDlg(null)}>ปิด</Button><Button onClick={() => submitCost.mutate()} disabled={!(Number(amount) > 0) || submitCost.isPending}>ยืนยัน</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setCostDlg(null)}>{t('pj.btn_close')}</Button><Button onClick={() => submitCost.mutate()} disabled={!(Number(amount) > 0) || submitCost.isPending}>{t('pj.btn_confirm')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

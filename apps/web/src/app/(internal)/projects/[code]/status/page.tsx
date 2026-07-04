@@ -6,6 +6,7 @@ import { ResponsiveContainer, ComposedChart, Line, CartesianGrid, XAxis, YAxis, 
 import { ArrowLeft, Printer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { StateView } from '@/components/state-view';
@@ -15,10 +16,11 @@ import { Button } from '@/components/ui/button';
 import { Activity } from 'lucide-react';
 
 const ragBadge: Record<string, 'success' | 'warning' | 'destructive' | 'muted'> = { green: 'success', amber: 'warning', red: 'destructive', no_data: 'muted' };
-const ragLabel: Record<string, string> = { green: 'ปกติ (Green)', amber: 'เฝ้าระวัง (Amber)', red: 'วิกฤต (Red)', no_data: 'ไม่มีข้อมูล' };
+const RAG_LABEL_KEY: Record<string, string> = { green: 'pj.rag_green', amber: 'pj.rag_amber', red: 'pj.rag_red', no_data: 'pj.rag_no_data' };
 
 // Period governance / status pack (PMO-3) — the auto-assembled, print-friendly project status report.
 export default function ProjectStatusPage() {
+  const { t } = useLang();
   const router = useRouter();
   const code = decodeURIComponent(String(useParams().code ?? ''));
   const q = useQuery<any>({ queryKey: ['proj', code, 'governance-pack'], queryFn: () => api(`/api/projects/${code}/governance-pack`) });
@@ -28,12 +30,12 @@ export default function ProjectStatusPage() {
   return (
     <div>
       <PageHeader
-        title={<span className="flex items-center gap-2">รายงานสถานะโครงการ {pk && <Badge variant={ragBadge[pk.rag]}>{ragLabel[pk.rag]}</Badge>}</span>}
-        description={<span>{code}{pk?.name ? ` · ${pk.name}` : ''}{pk?.customer_name ? ` · ${pk.customer_name}` : ''}{q.data?.period ? ` · งวด ${q.data.period}` : ''}</span>}
+        title={<span className="flex items-center gap-2">{t('pj.status_report_title')} {pk && <Badge variant={ragBadge[pk.rag]}>{t(RAG_LABEL_KEY[pk.rag] ?? pk.rag)}</Badge>}</span>}
+        description={<span>{code}{pk?.name ? ` · ${pk.name}` : ''}{pk?.customer_name ? ` · ${pk.customer_name}` : ''}{q.data?.period ? ` · ${t('pj.period_label', { period: q.data.period })}` : ''}</span>}
         actions={
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => router.push(`/projects/${encodeURIComponent(code)}`)}><ArrowLeft className="size-4" /> กลับ</Button>
-            <Button variant="outline" onClick={() => window.print()}><Printer className="size-4" /> พิมพ์</Button>
+            <Button variant="outline" onClick={() => router.push(`/projects/${encodeURIComponent(code)}`)}><ArrowLeft className="size-4" /> {t('pj.btn_back')}</Button>
+            <Button variant="outline" onClick={() => window.print()}><Printer className="size-4" /> {t('pj.btn_print')}</Button>
           </div>
         }
       />
@@ -42,38 +44,38 @@ export default function ProjectStatusPage() {
         <div className="space-y-4">
           {/* headline */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="ความคืบหน้า" value={`${pk?.pct_complete ?? 0}%`} icon={Activity} tone="primary" />
+            <StatCard label={t('pj.stat_progress')} value={`${pk?.pct_complete ?? 0}%`} icon={Activity} tone="primary" />
             <StatCard label="CPI / SPI" value={`${pk?.evm?.cpi ?? '—'} / ${pk?.evm?.spi ?? '—'}`} icon={Activity} tone={pk?.rag === 'red' ? 'danger' : pk?.rag === 'amber' ? 'warning' : 'success'} />
-            <StatCard label="กำไรสะสม" value={baht(pk?.margin ?? 0)} icon={Activity} tone={(pk?.margin ?? 0) < 0 ? 'danger' : 'success'} hint={`WIP ${baht(pk?.wip ?? 0)}`} />
-            <StatCard label="วางบิลแล้ว / สัญญา" value={baht(pk?.billed_to_date ?? 0)} icon={Activity} hint={`สัญญา ${baht(pk?.contract_amount ?? 0)}`} />
+            <StatCard label={t('pj.stat_margin')} value={baht(pk?.margin ?? 0)} icon={Activity} tone={(pk?.margin ?? 0) < 0 ? 'danger' : 'success'} hint={t('pj.wip_hint', { amount: baht(pk?.wip ?? 0) })} />
+            <StatCard label={t('pj.stat_billed_contract')} value={baht(pk?.billed_to_date ?? 0)} icon={Activity} hint={t('pj.contract_amount_label', { amount: baht(pk?.contract_amount ?? 0) })} />
           </div>
 
           {/* EVM + baseline variance */}
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="gap-3 p-5">
-              <h3 className="text-sm font-semibold">มูลค่าที่ได้รับ (EVM)</h3>
+              <h3 className="text-sm font-semibold">{t('pj.evm_title')}</h3>
               <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-                {[['BAC', pk?.evm?.bac], ['PV', pk?.evm?.ev], ['EV', pk?.evm?.ev], ['AC', pk?.evm?.ac], ['EAC', pk?.evm?.eac], ['ส่วนต่างต้นทุน (CV)', pk?.evm?.cost_variance], ['ส่วนต่างเวลา (SV)', pk?.evm?.schedule_variance]].map(([k, v]) => (
+                {[['BAC', pk?.evm?.bac], ['PV', pk?.evm?.ev], ['EV', pk?.evm?.ev], ['AC', pk?.evm?.ac], ['EAC', pk?.evm?.eac], [t('pj.ev_cv'), pk?.evm?.cost_variance], [t('pj.ev_sv'), pk?.evm?.schedule_variance]].map(([k, v]) => (
                   <div key={String(k)} className="flex justify-between border-b border-border/40 py-0.5"><dt className="text-muted-foreground">{k}</dt><dd className="tabular font-medium">{baht(Number(v ?? 0))}</dd></div>
                 ))}
               </dl>
             </Card>
             <Card className="gap-3 p-5">
-              <h3 className="text-sm font-semibold">เส้นฐาน & ส่วนต่าง (Baseline variance)</h3>
+              <h3 className="text-sm font-semibold">{t('pj.baseline_variance_title')}</h3>
               {pk?.baseline?.active ? (
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-                  <div className="flex justify-between border-b border-border/40 py-0.5"><dt className="text-muted-foreground">BAC เส้นฐาน</dt><dd className="tabular font-medium">{baht(pk.baseline.active.baseline_bac)}</dd></div>
-                  <div className="flex justify-between border-b border-border/40 py-0.5"><dt className="text-muted-foreground">ส่วนต่าง BAC</dt><dd className={`tabular font-medium ${(pk.baseline.variance?.bac_delta ?? 0) > 0 ? 'text-destructive' : ''}`}>{baht(pk.baseline.variance?.bac_delta ?? 0)}{pk.baseline.variance?.bac_pct != null ? ` (${pk.baseline.variance.bac_pct}%)` : ''}</dd></div>
-                  <div className="flex justify-between border-b border-border/40 py-0.5"><dt className="text-muted-foreground">ส่วนต่างระยะเวลา</dt><dd className="tabular font-medium">{pk.baseline.variance?.duration_delta ?? 0} วัน</dd></div>
+                  <div className="flex justify-between border-b border-border/40 py-0.5"><dt className="text-muted-foreground">{t('pj.baseline_bac_label')}</dt><dd className="tabular font-medium">{baht(pk.baseline.active.baseline_bac)}</dd></div>
+                  <div className="flex justify-between border-b border-border/40 py-0.5"><dt className="text-muted-foreground">{t('pj.bac_variance')}</dt><dd className={`tabular font-medium ${(pk.baseline.variance?.bac_delta ?? 0) > 0 ? 'text-destructive' : ''}`}>{baht(pk.baseline.variance?.bac_delta ?? 0)}{pk.baseline.variance?.bac_pct != null ? ` (${pk.baseline.variance.bac_pct}%)` : ''}</dd></div>
+                  <div className="flex justify-between border-b border-border/40 py-0.5"><dt className="text-muted-foreground">{t('pj.baseline_duration_delta')}</dt><dd className="tabular font-medium">{t('pj.days', { n: pk.baseline.variance?.duration_delta ?? 0 })}</dd></div>
                 </dl>
-              ) : <p className="text-sm text-muted-foreground">ยังไม่มีเส้นฐาน</p>}
+              ) : <p className="text-sm text-muted-foreground">{t('pj.no_baseline_short')}</p>}
             </Card>
           </div>
 
           {/* health trend */}
           {trend.length > 0 && (
             <Card className="gap-3 p-5">
-              <h3 className="text-sm font-semibold">แนวโน้มสุขภาพโครงการ (CPI/SPI)</h3>
+              <h3 className="text-sm font-semibold">{t('pj.health_trend_cpispi')}</h3>
               <ResponsiveContainer width="100%" height={200}>
                 <ComposedChart data={trend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -91,28 +93,28 @@ export default function ProjectStatusPage() {
           {/* open high risks + milestones */}
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="gap-3 p-5">
-              <h3 className="text-sm font-semibold">ความเสี่ยงสูงที่เปิดอยู่ ({pk?.risks?.summary?.high_open ?? 0}) · ยังไม่มีแผนรับมือ {pk?.risks?.summary?.unmitigated_high ?? 0}</h3>
-              {(pk?.risks?.open_high?.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">ไม่มีความเสี่ยงสูงที่เปิดอยู่</p> : (
+              <h3 className="text-sm font-semibold">{t('pj.open_high_risks', { open: pk?.risks?.summary?.high_open ?? 0, unmit: pk?.risks?.summary?.unmitigated_high ?? 0 })}</h3>
+              {(pk?.risks?.open_high?.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">{t('pj.no_open_high_risks')}</p> : (
                 <ul className="space-y-1.5 text-sm">
                   {pk.risks.open_high.map((r: any) => (
                     <li key={r.id} className="flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate">{r.title}{r.owner ? <span className="text-muted-foreground"> · {r.owner}</span> : ''}</span>
-                      <span className="flex shrink-0 gap-1"><Badge variant="destructive">{r.score}</Badge>{!r.mitigation && <Badge variant="warning">ไม่มีแผน</Badge>}</span>
+                      <span className="flex shrink-0 gap-1"><Badge variant="destructive">{r.score}</Badge>{!r.mitigation && <Badge variant="warning">{t('pj.no_plan')}</Badge>}</span>
                     </li>
                   ))}
                 </ul>
               )}
             </Card>
             <Card className="gap-3 p-5">
-              <h3 className="text-sm font-semibold">หมุดหมาย — บรรลุ {pk?.milestones?.reached ?? 0} · เลยกำหนด {pk?.milestones?.overdue?.length ?? 0}</h3>
-              {(pk?.milestones?.list?.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">ยังไม่มีหมุดหมาย</p> : (
+              <h3 className="text-sm font-semibold">{t('pj.ms_summary', { reached: pk?.milestones?.reached ?? 0, overdue: pk?.milestones?.overdue?.length ?? 0 })}</h3>
+              {(pk?.milestones?.list?.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">{t('pj.empty_ms_title')}</p> : (
                 <ul className="space-y-1.5 text-sm">
                   {pk.milestones.list.slice(0, 8).map((m: any) => {
                     const overdue = m.status === 'pending' && m.due_date && String(m.due_date) < (q.data?.as_of ?? '');
                     return (
                       <li key={m.id} className="flex items-center justify-between gap-2">
                         <span className="min-w-0 truncate">{m.name}{m.due_date ? <span className="text-muted-foreground"> · {m.due_date}</span> : ''}</span>
-                        <Badge variant={m.status === 'reached' ? 'success' : overdue ? 'destructive' : 'muted'}>{m.status === 'reached' ? 'บรรลุ' : overdue ? 'เลยกำหนด' : m.status}</Badge>
+                        <Badge variant={m.status === 'reached' ? 'success' : overdue ? 'destructive' : 'muted'}>{m.status === 'reached' ? t('pj.status_reached') : overdue ? t('pj.status_overdue') : m.status}</Badge>
                       </li>
                     );
                   })}
@@ -123,8 +125,8 @@ export default function ProjectStatusPage() {
 
           {/* change-order log */}
           <Card className="gap-3 p-5">
-            <h3 className="text-sm font-semibold">บันทึกใบสั่งเปลี่ยนแปลง — รออนุมัติ {pk?.change_orders?.summary?.pending ?? 0} · อนุมัติแล้ว {pk?.change_orders?.summary?.approved ?? 0}</h3>
-            {(pk?.change_orders?.list?.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">ไม่มีใบสั่งเปลี่ยนแปลง</p> : (
+            <h3 className="text-sm font-semibold">{t('pj.co_log_summary', { pending: pk?.change_orders?.summary?.pending ?? 0, approved: pk?.change_orders?.summary?.approved ?? 0 })}</h3>
+            {(pk?.change_orders?.list?.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">{t('pj.no_change_orders')}</p> : (
               <ul className="space-y-1.5 text-sm">
                 {pk.change_orders.list.map((c: any) => (
                   <li key={c.id} className="flex items-center justify-between gap-2">

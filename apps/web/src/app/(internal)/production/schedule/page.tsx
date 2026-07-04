@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useLang } from '@/lib/i18n';
 
 type WorkCenter = { id: number; code: string; name: string | null; minutes_per_day: number; active: boolean };
 type Schedule = {
@@ -24,6 +25,7 @@ type Schedule = {
 };
 
 export default function ProductionSchedulePage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const wc = useQuery<{ work_centers: WorkCenter[]; count: number }>({ queryKey: ['work-centers'], queryFn: () => api('/api/work-centers') });
   const [f, setF] = useState({ code: '', name: '', minutes_per_day: '480' });
@@ -32,39 +34,39 @@ export default function ProductionSchedulePage() {
 
   const addWc = useMutation({
     mutationFn: () => api('/api/work-centers', { method: 'POST', body: JSON.stringify({ code: f.code, name: f.name || undefined, minutes_per_day: Number(f.minutes_per_day) || 480 }) }),
-    onSuccess: () => { notifySuccess(`บันทึกศูนย์งาน ${f.code}`); setF({ code: '', name: '', minutes_per_day: '480' }); qc.invalidateQueries({ queryKey: ['work-centers'] }); },
+    onSuccess: () => { notifySuccess(t('mf.aps_wc_saved', { code: f.code })); setF({ code: '', name: '', minutes_per_day: '480' }); qc.invalidateQueries({ queryKey: ['work-centers'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const run = useMutation({
     mutationFn: () => api<Schedule>('/api/aps/schedule', { method: 'POST', body: JSON.stringify({ horizon_start: horizon || undefined }) }),
-    onSuccess: (r) => { setSchedule(r); notifySuccess(r.summary.scheduled ? `จัดตาราง ${r.summary.scheduled} งาน · ใช้เวลา ${r.makespan_days} วัน` : 'ไม่มีใบสั่งผลิตที่จะจัดตาราง'); },
+    onSuccess: (r) => { setSchedule(r); notifySuccess(r.summary.scheduled ? t('mf.aps_scheduled', { n: r.summary.scheduled, days: r.makespan_days }) : t('mf.aps_none')); },
     onError: (e: any) => notifyError(e.message),
   });
 
-  const fmtMin = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}ชม ${Math.round(m % 60)}น` : `${Math.round(m)}น`);
+  const fmtMin = (m: number) => (m >= 60 ? t('mf.aps_hm', { h: Math.floor(m / 60), m: Math.round(m % 60) }) : t('mf.aps_m', { m: Math.round(m) }));
 
   return (
     <div>
       <PageHeader
-        title={<span className="flex items-center gap-2"><CalendarRange className="size-5 text-primary" /> จัดตารางการผลิต (APS)</span>}
-        description="จัดลำดับขั้นตอนการผลิตลงศูนย์งานแบบจำกัดกำลังการผลิต — คิวงาน (dispatch), การใช้กำลังการผลิต, และงานที่เกินกำหนด"
+        title={<span className="flex items-center gap-2"><CalendarRange className="size-5 text-primary" /> {t('mf.aps_title')}</span>}
+        description={t('mf.aps_desc')}
       />
 
       <Card className="mb-5 gap-3 p-5">
-        <h3 className="text-base font-semibold">ศูนย์งาน (Work centres)</h3>
+        <h3 className="text-base font-semibold">{t('mf.aps_wc_title')}</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="grid gap-1.5"><Label>รหัส</Label><Input value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} placeholder="เช่น MIXER" /></div>
-          <div className="grid gap-1.5"><Label>ชื่อ</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>เวลาทำงาน/วัน (นาที)</Label><Input type="number" min="1" value={f.minutes_per_day} onChange={(e) => setF({ ...f, minutes_per_day: e.target.value })} /></div>
-          <div className="flex items-end"><Button onClick={() => addWc.mutate()} disabled={!f.code || addWc.isPending}><Plus className="size-4" /> บันทึก</Button></div>
+          <div className="grid gap-1.5"><Label>{t('mf.col_code')}</Label><Input value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} placeholder={t('mf.aps_wc_code_ph')} /></div>
+          <div className="grid gap-1.5"><Label>{t('mf.col_name')}</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('mf.aps_minutes_per_day')}</Label><Input type="number" min="1" value={f.minutes_per_day} onChange={(e) => setF({ ...f, minutes_per_day: e.target.value })} /></div>
+          <div className="flex items-end"><Button onClick={() => addWc.mutate()} disabled={!f.code || addWc.isPending}><Plus className="size-4" /> {t('fin.save')}</Button></div>
         </div>
         <StateView q={wc}>
           {wc.data && (
             <div className="flex flex-wrap gap-2">
               {(wc.data.work_centers ?? []).map((w) => (
-                <Badge key={w.id} variant={w.active ? 'secondary' : 'muted'} className="gap-1"><Factory className="size-3" /> {w.code} · {w.minutes_per_day}น/วัน</Badge>
+                <Badge key={w.id} variant={w.active ? 'secondary' : 'muted'} className="gap-1"><Factory className="size-3" /> {t('mf.aps_wc_badge', { code: w.code, min: w.minutes_per_day })}</Badge>
               ))}
-              {!wc.data.count && <span className="text-sm text-muted-foreground">ยังไม่มีศูนย์งาน — เพิ่มเพื่อจัดตาราง</span>}
+              {!wc.data.count && <span className="text-sm text-muted-foreground">{t('mf.aps_wc_empty')}</span>}
             </div>
           )}
         </StateView>
@@ -72,8 +74,8 @@ export default function ProductionSchedulePage() {
 
       <Card className="mb-5 gap-3 p-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="grid gap-1.5"><Label>เริ่มจัดตารางจากวันที่</Label><Input type="date" value={horizon} onChange={(e) => setHorizon(e.target.value)} className="w-48" /></div>
-          <Button onClick={() => run.mutate()} disabled={run.isPending}><Play className="size-4" /> จัดตาราง (ใบสั่งผลิตที่เปิดอยู่)</Button>
+          <div className="grid gap-1.5"><Label>{t('mf.aps_horizon_label')}</Label><Input type="date" value={horizon} onChange={(e) => setHorizon(e.target.value)} className="w-48" /></div>
+          <Button onClick={() => run.mutate()} disabled={run.isPending}><Play className="size-4" /> {t('mf.aps_schedule_btn')}</Button>
         </div>
       </Card>
 

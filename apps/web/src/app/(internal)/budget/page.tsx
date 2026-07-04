@@ -259,23 +259,23 @@ function SetBudgetTab() {
       </Card>
 
       <div>
-        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">งบประมาณปี {fy} {listQ.data && `· รวม ${baht(listQ.data.total)}`}</h3>
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('pb.bud_year_budget', { fy })} {listQ.data && t('pb.bud_total_suffix', { total: baht(listQ.data.total) })}</h3>
         <StateView q={listQ}>
           {listQ.data && (
             <DataTable
               rows={rows}
               rowKey={(r, i) => `${r.account_code}-${r.period}-${i}`}
-              emptyState={{ icon: Goal, title: 'ยังไม่มีงบประมาณในปีนี้', description: 'เพิ่มงบประมาณรายบัญชีจากแบบฟอร์มด้านบน' }}
+              emptyState={{ icon: Goal, title: t('pb.bud_empty_year_title'), description: t('pb.bud_empty_year_desc') }}
               columns={[
-                { key: 'account_code', label: 'รหัสบัญชี', render: (r) => <span className="font-medium">{r.account_code}</span> },
-                { key: 'cost_center_code', label: 'ศูนย์ต้นทุน', render: (r) => r.cost_center_code ?? '—' },
-                { key: 'period', label: 'งวด' },
-                { key: 'amount', label: 'จำนวนเงิน', align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
-                { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'PendingApproval' ? 'warning' : r.status === 'Rejected' ? 'destructive' : 'secondary'}>{r.status === 'Approved' ? 'อนุมัติแล้ว' : r.status === 'PendingApproval' ? 'รออนุมัติ' : r.status === 'Rejected' ? 'ปฏิเสธ' : (r.status ?? '—')}</Badge> },
+                { key: 'account_code', label: t('pb.col_account_code'), render: (r) => <span className="font-medium">{r.account_code}</span> },
+                { key: 'cost_center_code', label: t('pb.col_cost_center'), render: (r) => r.cost_center_code ?? '—' },
+                { key: 'period', label: t('pb.col_period') },
+                { key: 'amount', label: t('pb.col_amount_money'), align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'PendingApproval' ? 'warning' : r.status === 'Rejected' ? 'destructive' : 'secondary'}>{r.status === 'Approved' ? t('pb.status_approved') : r.status === 'PendingApproval' ? t('pb.status_pending') : r.status === 'Rejected' ? t('pb.reject') : (r.status ?? '—')}</Badge> },
                 { key: 'act', label: '', align: 'right', render: (r) => r.status === 'PendingApproval' ? (
                   <div className="flex justify-end gap-1">
-                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'approve' })}>อนุมัติ</Button>
-                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'reject' })}>ปฏิเสธ</Button>
+                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'approve' })}>{t('pb.approve')}</Button>
+                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'reject' })}>{t('pb.reject')}</Button>
                   </div>
                 ) : null },
               ]}

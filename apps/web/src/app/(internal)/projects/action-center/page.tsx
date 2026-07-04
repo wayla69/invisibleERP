@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, BellRing, CircleAlert, Inbox, Wifi, WifiOff } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { useRealtime } from '@/hooks/use-realtime';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -15,7 +16,7 @@ import { Button } from '@/components/ui/button';
 // Severity → tone for the badge + the left accent rail. high = act now, medium = approvals/schedule, low = hygiene.
 const sevBadge: Record<string, 'destructive' | 'warning' | 'muted'> = { high: 'destructive', medium: 'warning', low: 'muted' };
 const sevRail: Record<string, string> = { high: 'border-l-destructive', medium: 'border-l-warning', low: 'border-l-muted-foreground/40' };
-const sevLabel: Record<string, string> = { high: 'ด่วน (High)', medium: 'ปานกลาง (Medium)', low: 'ทั่วไป (Low)' };
+const SEV_LABEL_KEY: Record<string, string> = { high: 'pj.sev_high', medium: 'pj.sev_medium', low: 'pj.sev_low' };
 
 interface ActionItem {
   kind: string; severity: 'high' | 'medium' | 'low';
@@ -23,6 +24,7 @@ interface ActionItem {
 }
 
 export default function ActionCenterPage() {
+  const { t } = useLang();
   const router = useRouter();
   const q = useQuery<any>({ queryKey: ['projects', 'action-center'], queryFn: () => api('/api/projects/action-center') });
   // Proactive: a project_action event (project went red / unmitigated-high risk logged) re-pulls the worklist
@@ -38,12 +40,12 @@ export default function ActionCenterPage() {
   return (
     <div>
       <PageHeader
-        title="ศูนย์งานที่ต้องทำ (Action Center)"
-        description="รายการเดียวจบ — สิ่งที่ต้องอนุมัติ ตัดสินใจ หรือแก้ไขทั่วทั้งพอร์ตโครงการ จัดเรียงตามความเร่งด่วน"
+        title={t('pj.action_center_title')}
+        description={t('pj.action_center_desc')}
         actions={
           <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
             {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />}
-            {connected ? 'เรียลไทม์' : 'ออฟไลน์'}
+            {connected ? t('pj.realtime') : t('pj.offline')}
           </Badge>
         }
       />
