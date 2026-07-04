@@ -721,6 +721,33 @@ async function main() {
   const recF = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
   ok('FEFO: layer sub-ledger still ties to the GL inventory control account (reconciled)', recF.reconciled === true && near(recF.sub_ledger_value, recF.gl_inventory), `sub=${recF.sub_ledger_value} gl=${recF.gl_inventory} rec=${recF.reconciled}`);
 
+  // ───────────────────── Item-posting account determination (GL-21, docs/33) ─────────────────────
+  // Opt-in per tenant (posting_determination). When ON, an item's account override routes its posting; when
+  // OFF (default) — as in every test above — the hardcoded control accounts apply (parity). A distinct
+  // postable COGS account proves the routing actually moved.
+  await db.insert(s.accounts).values({ code: '5001', name: 'COGS — Beverage (determination test)', type: 'Expense', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  await db.insert(s.items).values({ itemId: 'DETITEM', itemDescription: 'Determination item', cogsAccount: '5001' }).onConflictDoNothing();
+  await db.insert(s.items).values({ itemId: 'BADACC', itemDescription: 'Bad override item', cogsAccount: '9999' }).onConflictDoNothing();
+  // Determination OFF by default: DETITEM's issue routes COGS to the standard 5000, not its 5001 override.
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'DETITEM', uom: 'EA', qty: 10, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-D0' });
+  await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'DETITEM', qty: 2, ref_type: 'MI', ref_id: 'MI-D0' });
+  const acc5001Off = (await inj('GET', '/api/ledger/account-ledger?account=5001', invmgr)).json;
+  ok('Determination OFF (default): item COGS override is ignored → 5001 untouched (parity)', near(acc5001Off.closing_balance ?? 0, 0), `closing=${acc5001Off.closing_balance}`);
+  // Turn determination ON for this tenant.
+  const flagOn = await inj('PUT', '/api/feature-flags/posting_determination', invmgr, { enabled: true });
+  ok('Determination: posting_determination flag can be enabled per tenant', flagOn.status === 200 && (flagOn.json?.flags ?? []).find((f: any) => f.key === 'posting_determination')?.enabled === true, `st=${flagOn.status}`);
+  // Now DETITEM's issue routes COGS to the 5001 override; inventory still on 1200 (no inventory override).
+  const detIss = await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'DETITEM', qty: 4, ref_type: 'MI', ref_id: 'MI-D1' });
+  ok('Determination ON: goods issue posts at moving-average (4 @ 10 = 40)', detIss.status === 201 && near(detIss.json?.value, 40), JSON.stringify(detIss.json).slice(0, 80));
+  const acc5001 = (await inj('GET', '/api/ledger/account-ledger?account=5001', invmgr)).json;
+  ok('Determination ON: COGS routed to the item override account 5001 (Dr 40)', near(acc5001.closing_balance, 40), `closing=${acc5001.closing_balance}`);
+  // The inventory sub-ledger still reconciles to the GL inventory account set even with COGS routed away.
+  const recDet = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
+  ok('Determination ON: inventory sub-ledger still ties to GL inventory account set (reconciled)', recDet.reconciled === true && near(recDet.sub_ledger_value, recDet.gl_inventory), `sub=${recDet.sub_ledger_value} gl=${recDet.gl_inventory} rec=${recDet.reconciled}`);
+  // GL-21 fail-closed: an override pointing at a non-existent account is rejected, not silently posted.
+  const badAcc = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'BADACC', uom: 'EA', qty: 1, unit_cost: 5, ref_type: 'GRN', ref_id: 'GRN-BAD' });
+  ok('Determination: invalid override account rejected fail-closed (GL-21 INVALID_POSTING_ACCOUNT)', badAcc.status === 400 && badAcc.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `st=${badAcc.status} code=${badAcc.json?.error?.code}`);
+
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).
   await db.insert(s.itemCosting).values({ tenantId: invTid, itemId: 'COSTITEM', method: 'AVG' }).onConflictDoNothing();

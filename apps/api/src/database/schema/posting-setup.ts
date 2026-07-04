@@ -1,7 +1,7 @@
 import { pgTable, bigserial, bigint, text, numeric, boolean, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
-// Item-posting setup master data (docs/33, GL-115). These tables give item posting an explicit,
+// Item-posting setup master data (docs/33, GL-21). These tables give item posting an explicit,
 // tenant-configurable account/tax profile so a transaction's GL/VAT/WHT accounts are DERIVED from the item
 // (via item → category → warehouse → global posting-rule default) rather than hardcoded. PR1 adds the tables +
 // item columns only; PR2 wires PostingService to resolve against them. Nullable columns fall through the

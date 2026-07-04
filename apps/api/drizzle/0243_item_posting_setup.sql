@@ -1,4 +1,4 @@
--- 0243_item_posting_setup — Item-posting setup foundation (docs/33, GL-115). Adds a tenant-configurable
+-- 0243_item_posting_setup — Item-posting setup foundation (docs/33, GL-21). Adds a tenant-configurable
 -- account/tax profile so item posting can be DERIVED (item → category → warehouse → global posting-rule
 -- default) instead of hardcoded. PR1 = schema only; PostingService wiring is PR2. All item columns are
 -- nullable and both new tables start empty, so an unconfigured tenant behaves exactly as today.

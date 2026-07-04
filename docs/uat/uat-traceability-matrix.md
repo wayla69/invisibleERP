@@ -510,6 +510,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-108 | API certify blocked for recon_prep-only token | R06, REC-03 | 04 §9 |
 | UAT-GL-113 | Snapshot reconciliation blocks a drifted close | GL-20 | 04 §9 |
 | UAT-GL-114 | Trial balance reads the maintained snapshot | GL-01, GL-20 | 04 §7 |
+| UAT-GL-115 | Item-posting determination off by default (parity) | GL-21 | 04 §9 |
+| UAT-GL-116 | Determination on → COGS routes to item override; sub-ledger ties | GL-21 | 04 §9 |
+| UAT-GL-117 | Determination fail-closed (INVALID_POSTING_ACCOUNT) | GL-21 | 04 §9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
