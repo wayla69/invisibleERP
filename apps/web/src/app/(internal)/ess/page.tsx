@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, CalendarOff, Receipt, Clock, IdCard, Wallet } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -32,15 +33,16 @@ const selectCls =
   'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function EssPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="พื้นที่พนักงาน (ESS)" description="ข้อมูลส่วนตัว สิทธิวันลา สลิปเงินเดือน การขอลา และการเบิกค่าใช้จ่ายของฉัน" />
+      <PageHeader title={t('hr.ess_title')} description={t('hr.ess_subtitle')} />
       <Tabs
         tabs={[
-          { key: 'me', label: 'ข้อมูลของฉัน', content: <MeTab /> },
-          { key: 'leave', label: 'ขอลางาน', content: <LeaveTab /> },
-          { key: 'expense', label: 'เบิกค่าใช้จ่าย', content: <ExpenseTab /> },
-          { key: 'time', label: 'ลงเวลา', content: <TimesheetTab /> },
+          { key: 'me', label: t('hr.tab_me'), content: <MeTab /> },
+          { key: 'leave', label: t('hr.tab_leave_req'), content: <LeaveTab /> },
+          { key: 'expense', label: t('hr.tab_expense'), content: <ExpenseTab /> },
+          { key: 'time', label: t('hr.tab_time'), content: <TimesheetTab /> },
         ]}
       />
     </div>
@@ -48,6 +50,7 @@ export default function EssPage() {
 }
 
 function MeTab() {
+  const { t } = useLang();
   const me = useQuery<MeResp>({ queryKey: ['ess-me'], queryFn: () => api('/api/ess/me') });
   const slips = useQuery<{ payslips: Payslip[]; count: number }>({ queryKey: ['ess-slips'], queryFn: () => api('/api/ess/payslips') });
 
@@ -61,23 +64,23 @@ function MeTab() {
                 <CardTitle className="flex items-center gap-2 text-base"><IdCard className="size-4" /> {me.data.employee.name}</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-3">
-                <div>รหัสพนักงาน: <span className="text-foreground">{me.data.employee.emp_code}</span></div>
-                <div>ตำแหน่ง: <span className="text-foreground">{me.data.employee.position ?? '—'}</span></div>
-                <div>แผนก: <span className="text-foreground">{me.data.employee.department ?? '—'}</span></div>
+                <div>{t('hr.emp_code_colon')} <span className="text-foreground">{me.data.employee.emp_code}</span></div>
+                <div>{t('hr.position_colon')} <span className="text-foreground">{me.data.employee.position ?? '—'}</span></div>
+                <div>{t('hr.department_colon')} <span className="text-foreground">{me.data.employee.department ?? '—'}</span></div>
               </CardContent>
             </Card>
 
             <div>
-              <h3 className="mb-3 text-sm font-semibold text-muted-foreground">สิทธิวันลา (ปีปัจจุบัน)</h3>
+              <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('hr.leave_balance_title')}</h3>
               <DataTable
                 rows={me.data.leave_balances}
                 rowKey={(r) => `${r.leave_type}-${r.year}`}
-                emptyText="ยังไม่มีข้อมูลสิทธิวันลา"
+                emptyText={t('hr.leave_balance_empty')}
                 columns={[
-                  { key: 'leave_type', label: 'ประเภทการลา' },
-                  { key: 'entitled', label: 'สิทธิทั้งหมด', align: 'right', render: (r) => <span className="tabular">{num(r.entitled)}</span> },
-                  { key: 'used', label: 'ใช้ไป', align: 'right', render: (r) => <span className="tabular">{num(r.used)}</span> },
-                  { key: 'remaining', label: 'คงเหลือ', align: 'right', render: (r) => <span className="tabular font-medium">{num(r.remaining)}</span> },
+                  { key: 'leave_type', label: t('hr.leave_type_col') },
+                  { key: 'entitled', label: t('hr.entitled'), align: 'right', render: (r) => <span className="tabular">{num(r.entitled)}</span> },
+                  { key: 'used', label: t('hr.used'), align: 'right', render: (r) => <span className="tabular">{num(r.used)}</span> },
+                  { key: 'remaining', label: t('hr.remaining'), align: 'right', render: (r) => <span className="tabular font-medium">{num(r.remaining)}</span> },
                 ]}
               />
             </div>
@@ -86,21 +89,21 @@ function MeTab() {
       </StateView>
 
       <div>
-        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">สลิปเงินเดือน</h3>
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('hr.payslips_title')}</h3>
         <StateView q={slips}>
           {slips.data && (
             <DataTable
               rows={slips.data.payslips}
               rowKey={(r) => r.id}
-              emptyState={{ icon: Wallet, title: 'ยังไม่มีสลิปเงินเดือน', description: 'สลิปจะปรากฏที่นี่หลังจากมีการประมวลผลเงินเดือน' }}
+              emptyState={{ icon: Wallet, title: t('hr.payslips_empty_title'), description: t('hr.payslips_empty_desc') }}
               columns={[
-                { key: 'id', label: 'รอบที่', render: (r) => <span className="font-medium">#{r.id}</span> },
-                { key: 'gross', label: 'รายได้รวม', align: 'right', render: (r) => <span className="tabular">{baht(r.gross)}</span> },
-                { key: 'ot_pay', label: 'ค่า OT', align: 'right', render: (r) => <span className="tabular">{baht(r.ot_pay)}</span> },
-                { key: 'sso_employee', label: 'ประกันสังคม', align: 'right', render: (r) => <span className="tabular">{baht(r.sso_employee)}</span> },
-                { key: 'pf_employee', label: 'กองทุนสำรองฯ', align: 'right', render: (r) => <span className="tabular">{baht(r.pf_employee)}</span> },
-                { key: 'wht', label: 'หัก ณ ที่จ่าย', align: 'right', render: (r) => <span className="tabular">{baht(r.wht)}</span> },
-                { key: 'net', label: 'รับสุทธิ', align: 'right', render: (r) => <span className="tabular font-semibold text-success">{baht(r.net)}</span> },
+                { key: 'id', label: t('hr.slip_no'), render: (r) => <span className="font-medium">#{r.id}</span> },
+                { key: 'gross', label: t('hr.gross_income'), align: 'right', render: (r) => <span className="tabular">{baht(r.gross)}</span> },
+                { key: 'ot_pay', label: t('hr.ot_pay'), align: 'right', render: (r) => <span className="tabular">{baht(r.ot_pay)}</span> },
+                { key: 'sso_employee', label: t('hr.sso'), align: 'right', render: (r) => <span className="tabular">{baht(r.sso_employee)}</span> },
+                { key: 'pf_employee', label: t('hr.pf'), align: 'right', render: (r) => <span className="tabular">{baht(r.pf_employee)}</span> },
+                { key: 'wht', label: t('hr.wht_short'), align: 'right', render: (r) => <span className="tabular">{baht(r.wht)}</span> },
+                { key: 'net', label: t('hr.net_received'), align: 'right', render: (r) => <span className="tabular font-semibold text-success">{baht(r.net)}</span> },
               ]}
             />
           )}
@@ -111,6 +114,7 @@ function MeTab() {
 }
 
 function LeaveTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ leave_requests: LeaveReq[]; count: number }>({ queryKey: ['ess-leave'], queryFn: () => api('/api/ess/leave') });
 
@@ -135,7 +139,7 @@ function LeaveTab() {
         }),
       }),
     onSuccess: (r: any) => {
-      notifySuccess(`ส่งคำขอลาแล้ว (${num(r.days)} วัน) — รออนุมัติ`);
+      notifySuccess(t('hr.leave_submitted_days', { days: num(r.days) }));
       setReason('');
       qc.invalidateQueries({ queryKey: ['ess-leave'] });
     },
@@ -147,44 +151,44 @@ function LeaveTab() {
   return (
     <div className="space-y-5">
       <Card className="max-w-4xl gap-4">
-        <CardHeader><CardTitle className="text-base">ขอลางาน</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('hr.tab_leave_req')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="lv-type">ประเภทการลา</Label>
+              <Label htmlFor="lv-type">{t('hr.leave_type_col')}</Label>
               <select id="lv-type" className={selectCls} value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
-                <option value="annual">ลาพักร้อน</option>
-                <option value="sick">ลาป่วย</option>
-                <option value="personal">ลากิจ</option>
-                <option value="unpaid">ลาไม่รับค่าจ้าง</option>
+                <option value="annual">{t('hr.leave_annual')}</option>
+                <option value="sick">{t('hr.leave_sick')}</option>
+                <option value="personal">{t('hr.leave_personal')}</option>
+                <option value="unpaid">{t('hr.leave_unpaid')}</option>
               </select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="lv-from">ตั้งแต่วันที่</Label>
+              <Label htmlFor="lv-from">{t('hr.from_date')}</Label>
               <Input id="lv-from" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="lv-to">ถึงวันที่</Label>
+              <Label htmlFor="lv-to">{t('hr.to_date')}</Label>
               <Input id="lv-to" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="lv-days">จำนวนวัน</Label>
+              <Label htmlFor="lv-days">{t('hr.days_count')}</Label>
               <Input id="lv-days" type="number" min="0" step="0.5" value={days} onChange={(e) => setDays(e.target.value)} className="max-w-[120px]" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="lv-paid">รับค่าจ้าง</Label>
+              <Label htmlFor="lv-paid">{t('hr.paid')}</Label>
               <select id="lv-paid" className={selectCls} value={paid} onChange={(e) => setPaid(e.target.value)}>
-                <option value="true">ได้รับค่าจ้าง</option>
-                <option value="false">ไม่รับค่าจ้าง</option>
+                <option value="true">{t('hr.paid_yes_long')}</option>
+                <option value="false">{t('hr.unpaid')}</option>
               </select>
             </div>
             <div className="grid gap-2 sm:col-span-2">
-              <Label htmlFor="lv-reason">เหตุผล</Label>
-              <Input id="lv-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="เหตุผลการลา" />
+              <Label htmlFor="lv-reason">{t('hr.reason')}</Label>
+              <Input id="lv-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t('hr.leave_reason_ph')} />
             </div>
           </div>
           <Button disabled={submit.isPending || !fromDate || !toDate || !days} onClick={() => submit.mutate()}>
-            <Plus className="size-4" /> {submit.isPending ? 'กำลังส่ง…' : 'ส่งคำขอลา'}
+            <Plus className="size-4" /> {submit.isPending ? t('hr.submitting') : t('hr.leave_submit_req')}
           </Button>
         </CardContent>
       </Card>
@@ -194,15 +198,15 @@ function LeaveTab() {
           <DataTable
             rows={rows}
             rowKey={(r) => r.id}
-            emptyState={{ icon: CalendarOff, title: 'ยังไม่มีคำขอลา', description: 'ส่งคำขอลาแรกจากแบบฟอร์มด้านบน' }}
+            emptyState={{ icon: CalendarOff, title: t('hr.leave_req_empty_title'), description: t('hr.leave_req_empty_desc') }}
             columns={[
-              { key: 'leave_type', label: 'ประเภท' },
-              { key: 'from_date', label: 'ตั้งแต่', render: (r) => thaiDate(r.from_date) },
-              { key: 'to_date', label: 'ถึง', render: (r) => thaiDate(r.to_date) },
-              { key: 'days', label: 'วัน', align: 'right', render: (r) => <span className="tabular">{num(r.days)}</span> },
-              { key: 'paid', label: 'ค่าจ้าง', render: (r) => <Badge variant={r.paid ? 'success' : 'secondary'}>{r.paid ? 'รับ' : 'ไม่รับ'}</Badge> },
-              { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-              { key: 'reason', label: 'เหตุผล', render: (r) => r.reason ?? '—' },
+              { key: 'leave_type', label: t('hr.type') },
+              { key: 'from_date', label: t('hr.from'), render: (r) => thaiDate(r.from_date) },
+              { key: 'to_date', label: t('hr.to'), render: (r) => thaiDate(r.to_date) },
+              { key: 'days', label: t('hr.day_unit'), align: 'right', render: (r) => <span className="tabular">{num(r.days)}</span> },
+              { key: 'paid', label: t('hr.col_paid'), render: (r) => <Badge variant={r.paid ? 'success' : 'secondary'}>{r.paid ? t('hr.paid_short_yes') : t('hr.paid_short_no')}</Badge> },
+              { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'reason', label: t('hr.reason'), render: (r) => r.reason ?? '—' },
             ]}
           />
         )}
@@ -212,6 +216,7 @@ function LeaveTab() {
 }
 
 function ExpenseTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ expense_claims: ExpenseClaim[]; count: number }>({ queryKey: ['ess-exp'], queryFn: () => api('/api/ess/expenses') });
 
@@ -232,7 +237,7 @@ function ExpenseTab() {
         }),
       }),
     onSuccess: () => {
-      notifySuccess('ส่งคำขอเบิกแล้ว — รออนุมัติ');
+      notifySuccess(t('hr.expense_submitted'));
       setAmount(''); setDescription('');
       qc.invalidateQueries({ queryKey: ['ess-exp'] });
     },
@@ -247,41 +252,41 @@ function ExpenseTab() {
       <StateView q={q}>
         {q.data && (
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="คำขอทั้งหมด" value={num(rows.length)} icon={Receipt} tone="primary" />
-            <StatCard label="รออนุมัติ (มูลค่า)" value={baht(pending)} tone="warning" />
-            <StatCard label="อนุมัติแล้ว" value={num(rows.filter((r) => r.status === 'Approved').length)} tone="success" />
+            <StatCard label={t('hr.total_claims')} value={num(rows.length)} icon={Receipt} tone="primary" />
+            <StatCard label={t('hr.pending_value')} value={baht(pending)} tone="warning" />
+            <StatCard label={t('fin.approved')} value={num(rows.filter((r) => r.status === 'Approved').length)} tone="success" />
           </div>
         )}
       </StateView>
 
       <Card className="max-w-4xl gap-4">
-        <CardHeader><CardTitle className="text-base">เบิกค่าใช้จ่าย</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('hr.tab_expense')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="grid gap-2">
-              <Label htmlFor="ex-date">วันที่</Label>
+              <Label htmlFor="ex-date">{t('dash.col_date')}</Label>
               <Input id="ex-date" type="date" value={claimDate} onChange={(e) => setClaimDate(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="ex-cat">หมวด</Label>
+              <Label htmlFor="ex-cat">{t('hr.category')}</Label>
               <select id="ex-cat" className={selectCls} value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option value="travel">เดินทาง</option>
-                <option value="meals">ค่าอาหาร</option>
-                <option value="supplies">วัสดุอุปกรณ์</option>
-                <option value="other">อื่น ๆ</option>
+                <option value="travel">{t('hr.cat_travel')}</option>
+                <option value="meals">{t('hr.cat_meals')}</option>
+                <option value="supplies">{t('hr.cat_supplies')}</option>
+                <option value="other">{t('hr.cat_other')}</option>
               </select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="ex-amt">จำนวนเงิน (฿)</Label>
+              <Label htmlFor="ex-amt">{t('hr.amount_baht')}</Label>
               <Input id="ex-amt" type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="ex-desc">รายละเอียด</Label>
-              <Input id="ex-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="รายละเอียด" />
+              <Label htmlFor="ex-desc">{t('hr.description')}</Label>
+              <Input id="ex-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('hr.description')} />
             </div>
           </div>
           <Button disabled={submit.isPending || !amount} onClick={() => submit.mutate()}>
-            <Plus className="size-4" /> {submit.isPending ? 'กำลังส่ง…' : 'ส่งคำขอเบิก'}
+            <Plus className="size-4" /> {submit.isPending ? t('hr.submitting') : t('hr.expense_submit_btn')}
           </Button>
         </CardContent>
       </Card>
@@ -291,13 +296,13 @@ function ExpenseTab() {
           <DataTable
             rows={rows}
             rowKey={(r) => r.id}
-            emptyState={{ icon: Receipt, title: 'ยังไม่มีคำขอเบิก', description: 'ส่งคำขอเบิกค่าใช้จ่ายแรกจากแบบฟอร์มด้านบน' }}
+            emptyState={{ icon: Receipt, title: t('hr.expense_empty_title'), description: t('hr.expense_empty_desc') }}
             columns={[
-              { key: 'claim_date', label: 'วันที่', render: (r) => thaiDate(r.claim_date) },
-              { key: 'category', label: 'หมวด', render: (r) => r.category ?? '—' },
-              { key: 'description', label: 'รายละเอียด', render: (r) => r.description ?? '—' },
-              { key: 'amount', label: 'จำนวนเงิน', align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
-              { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'claim_date', label: t('dash.col_date'), render: (r) => thaiDate(r.claim_date) },
+              { key: 'category', label: t('hr.category'), render: (r) => r.category ?? '—' },
+              { key: 'description', label: t('hr.description'), render: (r) => r.description ?? '—' },
+              { key: 'amount', label: t('hr.amount'), align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
+              { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
             ]}
           />
         )}
@@ -307,6 +312,7 @@ function ExpenseTab() {
 }
 
 function TimesheetTab() {
+  const { t } = useLang();
   const q = useQuery<{ timesheets: Timesheet[]; count: number }>({ queryKey: ['ess-time'], queryFn: () => api('/api/ess/timesheets') });
   const rows = q.data?.timesheets ?? [];
   const reg = rows.reduce((s, r) => s + (r.regular_hours || 0), 0);
@@ -317,9 +323,9 @@ function TimesheetTab() {
       <StateView q={q}>
         {q.data && (
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="จำนวนวันที่ลงเวลา" value={num(rows.length)} icon={Clock} tone="primary" />
-            <StatCard label="ชั่วโมงปกติรวม" value={num(reg)} tone="info" />
-            <StatCard label="ชั่วโมง OT รวม" value={num(ot)} tone="warning" />
+            <StatCard label={t('hr.days_logged')} value={num(rows.length)} icon={Clock} tone="primary" />
+            <StatCard label={t('hr.total_regular_hours')} value={num(reg)} tone="info" />
+            <StatCard label={t('hr.total_ot_hours')} value={num(ot)} tone="warning" />
           </div>
         )}
       </StateView>
@@ -328,12 +334,12 @@ function TimesheetTab() {
           <DataTable
             rows={rows}
             rowKey={(_r, i) => i}
-            emptyState={{ icon: Clock, title: 'ยังไม่มีบันทึกการลงเวลา', description: 'ข้อมูลการลงเวลาทำงานของคุณจะปรากฏที่นี่' }}
+            emptyState={{ icon: Clock, title: t('hr.ts_log_empty_title'), description: t('hr.ts_log_empty_desc') }}
             columns={[
-              { key: 'work_date', label: 'วันที่', render: (r) => thaiDate(r.work_date) },
-              { key: 'regular_hours', label: 'ชั่วโมงปกติ', align: 'right', render: (r) => <span className="tabular">{num(r.regular_hours)}</span> },
+              { key: 'work_date', label: t('dash.col_date'), render: (r) => thaiDate(r.work_date) },
+              { key: 'regular_hours', label: t('hr.regular_hours'), align: 'right', render: (r) => <span className="tabular">{num(r.regular_hours)}</span> },
               { key: 'ot_hours', label: 'OT', align: 'right', render: (r) => <span className="tabular">{num(r.ot_hours)}</span> },
-              { key: 'note', label: 'หมายเหตุ', render: (r) => r.note ?? '—' },
+              { key: 'note', label: t('hr.note'), render: (r) => r.note ?? '—' },
             ]}
           />
         )}
