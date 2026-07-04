@@ -535,6 +535,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-017 | Deferred tax run → DTA from AR allowance (×CIT) | TAX-06 | 06 §9a, 04 §3.2 |
 | UAT-TAX-018 | Deferred tax post maker-checker + idempotent (Dr 1700/Cr 5950) | TAX-06, R05 | 06 §9a, 04 §3.2 |
 | UAT-TAX-018a | Deferred tax web screen — run → maker-checker post (`/deferred-tax`) | TAX-06, R05 | 06 §9a, 04 §3.2 |
+| UAT-TAX-028 | Scheduled WHT-cert batch auto-issues the 50-ทวิ from AP-payment WHT | TAX-03 | 06 §14 (rev 0.9) |
+| UAT-TAX-029 | WHT-cert batch idempotent (no duplicate on re-run) | TAX-03 | 06 §14 (rev 0.9) |
+| UAT-TAX-030 | Scheduled PP30 filing-draft job registers the period return | TAX-05 | 06 §14 (rev 0.9) |
 
 ## 07 — Payroll → `05-payroll.md`
 

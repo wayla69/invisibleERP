@@ -8,5 +8,6 @@ import { TaxReportsController } from './tax-reports.controller';
 @Module({
   controllers: [TaxReportsController],
   providers: [TaxReportsService, TaxReportsPdfService],
+  exports: [TaxReportsService],
 })
 export class TaxReportsModule {}
