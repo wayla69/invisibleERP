@@ -178,6 +178,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.procurement': { th: 'จัดซื้อจัดจ้าง (PO)', en: 'Procurement (PO)' },
   'nav.rfqs': { th: 'ขอใบเสนอราคา (RFQ)', en: 'Request for Quotation (RFQ)' },
   'nav.po_match': { th: 'จับคู่เอกสาร 3 ทาง', en: '3-Way Match' },
+  'nav.ap_capture': { th: 'เก็บบิลเร็ว (ถ่ายรูป)', en: 'Quick Capture (Snap a Bill)' },
   'nav.ap_intake': { th: 'สแกนใบแจ้งหนี้จับคู่ PO', en: 'Invoice Scan → PO Match' },
   'nav.supplier_scorecards': { th: 'คะแนนซัพพลายเออร์', en: 'Supplier Scorecards' },
   'nav.supplier_prices': { th: 'ราคาซัพพลายเออร์', en: 'Supplier Prices' },

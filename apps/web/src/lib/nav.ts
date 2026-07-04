@@ -289,6 +289,9 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'nav.group.procurement',
     workspace: ['erp'],
     items: [
+      // Quick Capture (docs/34): any staffer holding a bill snaps/uploads it → AI extracts → NeedsReview
+      // draft for Accounting. Low-risk `pr_raise` duty (never books/GL), cross-listed to BOTH surfaces.
+      { label: 'nav.ap_capture', href: '/capture', icon: Camera, perms: ['pr_raise', 'procurement', 'creditors'], workspace: BOTH },
       // PR is company-wide (anyone can request) → cross-listed to BOTH surfaces so POS staff can raise one
       // without switching workspaces; buying (PO) + receiving (GR) stay role-segregated (SoD R03/R04).
       { label: 'nav.requisitions', href: '/requisitions', icon: FileText, perms: ['pr_raise', 'procurement', 'planner'], workspace: BOTH },

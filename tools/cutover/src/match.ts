@@ -47,6 +47,7 @@ async function main() {
     { username: 'procT1', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },
     { username: 'procT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },
     { username: 'apprv', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: hq }, // AP-PAY checker (≠ admin requester)
+    { username: 'capT1', passwordHash: await pw.hash('pw'), role: 'StockCounter', tenantId: t1 }, // pr_raise-only (no procurement/creditors) — Quick Capture lane (docs/34)
   ]).onConflictDoNothing();
   // The Procurement role default is now SoD-clean (procurement/pr_raise only). These fixtures need the
   // legacy bundle (md_vendor for supplier screening, etc.) → grant it via an explicit per-user override
@@ -82,6 +83,7 @@ async function main() {
   const procT1 = await login('procT1', 'pw'); // RLS-scoped to t1
   const procT2 = await login('procT2', 'pw'); // RLS-scoped to t2
   const apprv = await login('apprv', 'pw');   // AP-PAY approver (≠ admin)
+  const capT1 = await login('capT1', 'pw');   // pr_raise-only capturer (Quick Capture lane)
   const apTxn = async (amount: number) => (await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: V1, txn_type: 'Goods', amount })).json.txn_no as string;
   // AP-PAY maker-checker: requesting a payment (admin) is gated on the 3-way match; a successful request
   // is PendingApproval until a DIFFERENT authorized user approves it. payAttempt = the request (used for the
@@ -381,6 +383,21 @@ async function main() {
   ok('Upload gates: text/plain → 400 UNSUPPORTED_FILE_TYPE; oversized image → 400 FILE_TOO_LARGE',
     upBadType.status === 400 && upBadType.json.error?.code === 'UNSUPPORTED_FILE_TYPE' && upTooBig.status === 400 && upTooBig.json.error?.code === 'FILE_TOO_LARGE',
     JSON.stringify({ type: upBadType.json.error?.code, size: upTooBig.json.error?.code }));
+
+  // (e) Quick Capture lane (docs/34): a pr_raise-only staffer captures a bill (draft only), sees their own
+  // submissions via /mine, but CANNOT book it or read the full AP worklist — booking + the queue stay a
+  // creditors/procurement duty (SoD/EXP-06: capturer ≠ poster).
+  const capUp = await inj('POST', '/api/procurement/ap-intake/capture', capT1, { file_name: 'my-bill.png', data_url: png1x1 });
+  const capMine = await inj('GET', '/api/procurement/ap-intake/mine', capT1);
+  const capPost = await inj('POST', `/api/procurement/ap-intake/${capUp.json.intake_no}/post`, capT1, {});
+  const capFull = await inj('GET', '/api/procurement/ap-intake', capT1);
+  ok('Quick Capture: pr_raise staffer files a NeedsReview draft (file stored) + sees it in /mine',
+    (capUp.status === 200 || capUp.status === 201) && capUp.json.status === 'NeedsReview' && capUp.json.has_file === true && capUp.json.extract_source === 'none'
+      && Array.isArray(capMine.json.intakes) && capMine.json.intakes.some((i: any) => i.intake_no === capUp.json.intake_no),
+    JSON.stringify({ st: capUp.json.status, mine: capMine.json.count }));
+  ok('Quick Capture SoD: capturer cannot post the bill (403) nor read the full AP worklist (403)',
+    capPost.status === 403 && capFull.status === 403,
+    JSON.stringify({ post: capPost.status, full: capFull.status }));
 
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

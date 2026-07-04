@@ -33,6 +33,17 @@ export class ApIntakeController {
   @Post('upload/auto') @Permissions('creditors')
   uploadAuto(@Body(new ZodValidationPipe(UploadBody)) b: { file_name?: string; data_url: string }, @CurrentUser() u: JwtUser) { return this.svc.createFileAuto(b, u); }
 
+  // Quick Capture lane (docs/34): any internal staffer (company-wide `pr_raise`) captures a bill they are
+  // holding — draft only, never books or touches the GL. Booking stays a `creditors` action (SoD, EXP-06).
+  @Post('capture') @Permissions('pr_raise', 'procurement', 'creditors')
+  capture(@Body(new ZodValidationPipe(UploadBody)) b: { file_name?: string; data_url: string }, @CurrentUser() u: JwtUser) { return this.svc.capture(b, u); }
+
+  // The capturer's own submissions (declared before the `:intakeNo` routes so this static path wins).
+  @Get('mine') @Permissions('pr_raise', 'procurement', 'creditors')
+  mine(@CurrentUser() u: JwtUser, @Query('status') status?: string, @Query('limit') limit?: string) {
+    return this.svc.listMine({ status, limit: qint('limit', limit, 100) }, u);
+  }
+
   @Get(':intakeNo/file') @Permissions('procurement', 'creditors')
   file(@Param('intakeNo') intakeNo: string) { return this.svc.getFile(intakeNo); }
 
