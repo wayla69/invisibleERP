@@ -73,7 +73,7 @@ HTTP: 400 validation, 401 no/expired token, 403 RBAC/tenant, 404 not found, 409 
 ### Global search (⌘K spotlight)
 | Method | Path | Query | คืน |
 |---|---|---|---|
-| GET | `/api/search` | `q` (≥2 chars) | `{results:[{type:'customer'\|'vendor'\|'item', id, label, sublabel?, href}], count}` — read-only omni-search over customer/vendor/item master. RLS tenant-scoped; **each result type is gated in-service by the caller's expanded permissions** (customer→`crm\|exec\|ar`, vendor→`procurement\|warehouse\|creditors\|exec`, item→`warehouse\|dashboard\|planner`), so it never widens access. ≤6 per type. `q<2` ⇒ empty. |
+| GET | `/api/search` | `q` (≥2 chars) | `{results:[{type, id, label, sublabel?, href}], count}` — read-only omni-search over 7 record types: `customer`/`vendor`/`item` masters + `sale`/`ar_invoice`/`tax_invoice`/`purchase_order` documents. RLS tenant-scoped; **each result type is gated in-service by the caller's expanded permissions** (customer→`crm\|exec\|ar`, vendor→`procurement\|warehouse\|creditors\|exec`, item→`warehouse\|dashboard\|planner`, sale→`pos\|order_mgt\|dashboard`, ar_invoice→`ar\|exec`, tax_invoice→`ar\|pos\|cust_pos`, purchase_order→`procurement\|warehouse\|dashboard`), so it never widens access. Deep-links: item→`/inventory/{id}` detail; documents→their list carrying `?q={id}` so the list pre-filters to the record. ≤6 per type. `q<2` ⇒ empty. |
 
 ### AI Chat
 | POST | `/api/chat` | `{message, history?, agent_type?}` | `{reply, history}` หรือ **SSE stream** — V2 ต่อ tools จริง (เดิมต่อไม่ได้) |

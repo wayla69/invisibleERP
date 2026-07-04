@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Package, Truck, Users, type LucideIcon } from 'lucide-react';
+import { FileSpreadsheet, FileText, Package, ReceiptText, ShoppingCart, Truck, Users, type LucideIcon } from 'lucide-react';
 
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
@@ -17,10 +17,27 @@ import {
   CommandList,
 } from '@/components/ui/command';
 
-type SearchType = 'customer' | 'vendor' | 'item';
+type SearchType = 'customer' | 'vendor' | 'item' | 'sale' | 'ar_invoice' | 'tax_invoice' | 'purchase_order';
 interface SearchResult { type: SearchType; id: string; label: string; sublabel?: string; href: string }
 
-const TYPE_ICON: Record<SearchType, LucideIcon> = { customer: Users, vendor: Truck, item: Package };
+const TYPE_ICON: Record<SearchType, LucideIcon> = {
+  customer: Users,
+  vendor: Truck,
+  item: Package,
+  sale: ReceiptText,
+  ar_invoice: FileText,
+  tax_invoice: FileSpreadsheet,
+  purchase_order: ShoppingCart,
+};
+const TYPE_LABEL_KEY: Record<SearchType, string> = {
+  customer: 'search.type.customer',
+  vendor: 'search.type.vendor',
+  item: 'search.type.item',
+  sale: 'search.type.sale',
+  ar_invoice: 'search.type.ar_invoice',
+  tax_invoice: 'search.type.tax_invoice',
+  purchase_order: 'search.type.purchase_order',
+};
 
 /** Debounce a fast-changing value so the omni-search fires ~4×/s while typing, not on every keystroke. */
 function useDebounced<T>(value: T, ms: number): T {
@@ -108,7 +125,10 @@ export function CommandPalette({
                   onSelect={() => go(r.href)}
                 >
                   <Icon className="text-muted-foreground" />
-                  <span>{r.label}</span>
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    {t(TYPE_LABEL_KEY[r.type])}
+                  </span>
+                  <span className="truncate">{r.label}</span>
                   {r.sublabel && <span className="ml-auto truncate text-xs text-muted-foreground">{r.sublabel}</span>}
                 </CommandItem>
               );

@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ClipboardList, Coins, Hourglass, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { readQueryParam } from '@/lib/url';
 import { ModulePage } from '@/components/module-page';
 import { SearchInput } from '@/components/search-input';
 import { StatCard } from '@/components/stat-card';
@@ -19,7 +20,7 @@ export default function PurchaseOrdersPage() {
   const q = useQuery<{ purchase_orders: PO[] }>({ queryKey: ['pos'], queryFn: () => api('/api/inventory/purchase-orders?limit=50') });
   const rows = q.data?.purchase_orders ?? [];
 
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => readQueryParam('q')); // seed from a ⌘K spotlight deep-link
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   const statuses = useMemo(() => Array.from(new Set(rows.map((r) => r.Status).filter(Boolean))), [rows]);

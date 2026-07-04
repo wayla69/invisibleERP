@@ -32,7 +32,14 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'palette.description': { th: 'ไปยังหน้าใดก็ได้ หรือค้นหาลูกค้า ผู้ขาย สินค้า', en: 'Go to any page, or find a customer, vendor or product' },
   'palette.placeholder': { th: 'พิมพ์เพื่อค้นหาเมนู หรือ ลูกค้า/ผู้ขาย/สินค้า…', en: 'Search menu, or a customer / vendor / product…' },
   'palette.empty': { th: 'ไม่พบรายการ', en: 'No results' },
-  'palette.records': { th: 'ข้อมูล (ลูกค้า · ผู้ขาย · สินค้า)', en: 'Records (customers · vendors · products)' },
+  'palette.records': { th: 'ข้อมูล', en: 'Records' },
+  'search.type.customer': { th: 'ลูกค้า', en: 'Customer' },
+  'search.type.vendor': { th: 'ผู้ขาย', en: 'Vendor' },
+  'search.type.item': { th: 'สินค้า', en: 'Product' },
+  'search.type.sale': { th: 'การขาย', en: 'Sale' },
+  'search.type.ar_invoice': { th: 'ใบแจ้งหนี้', en: 'AR invoice' },
+  'search.type.tax_invoice': { th: 'ใบกำกับภาษี', en: 'Tax invoice' },
+  'search.type.purchase_order': { th: 'ใบสั่งซื้อ', en: 'Purchase order' },
 
   // ── Nav group titles ──────────────────────────────────────────────────────
   'nav.group.overview': { th: 'ภาพรวม', en: 'Overview' },

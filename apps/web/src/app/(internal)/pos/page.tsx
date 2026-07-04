@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Banknote, Hourglass, Plus, Receipt, SearchX, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { readQueryParam } from '@/lib/url';
 import { PageHeader } from '@/components/page-header';
 import { SearchInput } from '@/components/search-input';
 import { StatCard } from '@/components/stat-card';
@@ -28,7 +29,7 @@ export default function PosPage() {
   const q = useQuery<{ orders: Order[] }>({ queryKey: ['orders'], queryFn: () => api('/api/pos/orders?limit=50') });
   const orders = q.data?.orders ?? [];
 
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => readQueryParam('q')); // seed from a ⌘K spotlight deep-link
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   // Distinct statuses present in the loaded window — drives the quick-filter chips.
