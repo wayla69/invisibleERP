@@ -82,17 +82,17 @@ export default function ProductionSchedulePage() {
       {schedule && (
         <>
           <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="ใบสั่งผลิต" value={String(schedule.summary.work_orders)} icon={Factory} />
-            <StatCard label="ระยะเวลารวม (makespan)" value={`${schedule.makespan_days} วัน`} icon={Clock} />
-            <StatCard label="งานที่จัดได้" value={`${schedule.summary.scheduled}${schedule.summary.unscheduled_no_routing ? ` (ข้าม ${schedule.summary.unscheduled_no_routing})` : ''}`} icon={CalendarRange} />
-            <StatCard label="เกินกำหนด" value={String(schedule.summary.late)} icon={AlertTriangle} tone={schedule.summary.late > 0 ? 'danger' : 'success'} />
+            <StatCard label={t('mf.wo_label')} value={String(schedule.summary.work_orders)} icon={Factory} />
+            <StatCard label={t('mf.aps_makespan')} value={t('mf.days', { n: schedule.makespan_days })} icon={Clock} />
+            <StatCard label={t('mf.aps_scheduled_count')} value={`${schedule.summary.scheduled}${schedule.summary.unscheduled_no_routing ? t('mf.aps_skipped', { n: schedule.summary.unscheduled_no_routing }) : ''}`} icon={CalendarRange} />
+            <StatCard label={t('mf.aps_late')} value={String(schedule.summary.late)} icon={AlertTriangle} tone={schedule.summary.late > 0 ? 'danger' : 'success'} />
           </div>
 
           {schedule.late.length > 0 && (
             <Card className="mb-5 gap-2 border-destructive/40 p-4">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-destructive"><AlertTriangle className="size-4" /> งานที่เสร็จเกินกำหนด</h3>
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-destructive"><AlertTriangle className="size-4" /> {t('mf.aps_late_title')}</h3>
               <div className="flex flex-wrap gap-2">
-                {schedule.late.map((l) => <Badge key={l.wo_no} variant="destructive">{l.wo_no} — เสร็จ {l.finish_date} (กำหนด {l.due_by})</Badge>)}
+                {schedule.late.map((l) => <Badge key={l.wo_no} variant="destructive">{t('mf.aps_late_badge', { wo: l.wo_no, finish: l.finish_date, due: String(l.due_by) })}</Badge>)}
               </div>
             </Card>
           )}
@@ -102,7 +102,7 @@ export default function ProductionSchedulePage() {
               <Card key={w.work_center} className="gap-3 p-5">
                 <div className="flex items-center justify-between">
                   <h3 className="flex items-center gap-2 text-base font-semibold"><Factory className="size-4 text-muted-foreground" /> {w.work_center}</h3>
-                  <Badge variant={w.overloaded ? 'destructive' : 'secondary'}>ใช้กำลัง {w.utilization_pct ?? 0}%{w.overloaded ? ' ⚠' : ''}</Badge>
+                  <Badge variant={w.overloaded ? 'destructive' : 'secondary'}>{t('mf.aps_util', { pct: w.utilization_pct ?? 0 })}{w.overloaded ? ' ⚠' : ''}</Badge>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div className={`h-full rounded-full ${w.overloaded ? 'bg-destructive' : 'bg-primary'}`} style={{ width: `${Math.min(100, w.utilization_pct ?? 0)}%` }} />

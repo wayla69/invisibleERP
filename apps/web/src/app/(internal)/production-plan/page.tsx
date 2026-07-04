@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { useLang } from '@/lib/i18n';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -26,6 +27,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function ProductionPlanPage() {
+  const { t } = useLang();
   const [days, setDays] = useState(1);
   const [lookback, setLookback] = useState(28);
   const q = useQuery<any>({
@@ -37,23 +39,23 @@ export default function ProductionPlanPage() {
     mutationFn: () => api<{ po_no: string }>('/api/procurement/pos', {
       method: 'POST',
       body: JSON.stringify({
-        remarks: 'จากแผนการผลิต (production plan)',
+        remarks: t('mf.plan_po_remark'),
         items: (q.data?.purchase_orders ?? []).map((i: any) => ({ item_id: i.item_id, item_description: i.description, order_qty: i.order_qty, unit_price: i.unit_price, ...(i.uom ? { uom: i.uom } : {}) })),
       }),
     }),
-    onSuccess: (r) => notifySuccess(`สร้างใบสั่งซื้อแล้ว: ${r.po_no} — รออนุมัติ`),
+    onSuccess: (r) => notifySuccess(t('mf.plan_po_created', { po: r.po_no })),
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div>
       <PageHeader
-        title="แผนการผลิต (Production plan)"
-        description="พยากรณ์ยอดขาย → ตัดวัตถุดิบตามสูตร → รายการเตรียมครัว + รายการสั่งซื้อ"
+        title={t('mf.plan_title')}
+        description={t('mf.plan_desc')}
         actions={
           <div className="flex items-end gap-2">
-            <div className="grid gap-1"><Label htmlFor="days" className="text-xs">วางแผนล่วงหน้า (วัน)</Label><Input id="days" type="number" min={1} max={14} value={days} onChange={(e) => setDays(Math.max(1, +e.target.value))} className="h-9 w-36" /></div>
-            <div className="grid gap-1"><Label htmlFor="lookback" className="text-xs">ย้อนหลัง (วัน)</Label><Input id="lookback" type="number" min={7} max={90} value={lookback} onChange={(e) => setLookback(Math.max(7, +e.target.value))} className="h-9 w-36" /></div>
+            <div className="grid gap-1"><Label htmlFor="days" className="text-xs">{t('mf.plan_ahead_days')}</Label><Input id="days" type="number" min={1} max={14} value={days} onChange={(e) => setDays(Math.max(1, +e.target.value))} className="h-9 w-36" /></div>
+            <div className="grid gap-1"><Label htmlFor="lookback" className="text-xs">{t('mf.plan_lookback_days')}</Label><Input id="lookback" type="number" min={7} max={90} value={lookback} onChange={(e) => setLookback(Math.max(7, +e.target.value))} className="h-9 w-36" /></div>
           </div>
         }
       />

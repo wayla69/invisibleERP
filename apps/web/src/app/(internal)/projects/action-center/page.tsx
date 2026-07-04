@@ -53,24 +53,24 @@ export default function ActionCenterPage() {
       <StateView q={q}>
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="ทั้งหมด (Total)" value={d?.summary?.total ?? 0} icon={Inbox} tone="default" />
-            <StatCard label="ด่วน (High)" value={d?.summary?.high ?? 0} icon={AlertTriangle} tone={(d?.summary?.high ?? 0) > 0 ? 'danger' : 'success'} hint="ต้องลงมือทันที" />
-            <StatCard label="ปานกลาง (Medium)" value={d?.summary?.medium ?? 0} icon={CircleAlert} tone={(d?.summary?.medium ?? 0) > 0 ? 'warning' : 'default'} hint="รออนุมัติ / กำหนดการ" />
-            <StatCard label="ทั่วไป (Low)" value={d?.summary?.low ?? 0} icon={BellRing} tone="default" hint="สุขภาพ / ธรรมาภิบาล" />
+            <StatCard label={t('pj.stat_total')} value={d?.summary?.total ?? 0} icon={Inbox} tone="default" />
+            <StatCard label={t('pj.stat_high')} value={d?.summary?.high ?? 0} icon={AlertTriangle} tone={(d?.summary?.high ?? 0) > 0 ? 'danger' : 'success'} hint={t('pj.hint_act_now')} />
+            <StatCard label={t('pj.stat_medium')} value={d?.summary?.medium ?? 0} icon={CircleAlert} tone={(d?.summary?.medium ?? 0) > 0 ? 'warning' : 'default'} hint={t('pj.hint_approvals_schedule')} />
+            <StatCard label={t('pj.stat_low')} value={d?.summary?.low ?? 0} icon={BellRing} tone="default" hint={t('pj.hint_health_gov')} />
           </div>
 
           {items.length === 0 ? (
             <Card className="flex flex-col items-center gap-2 p-10 text-center">
               <Inbox className="size-8 text-muted-foreground" />
-              <p className="text-base font-medium">ไม่มีงานค้าง</p>
-              <p className="text-sm text-muted-foreground">ทุกโครงการอยู่ในเกณฑ์ — ไม่มีรายการที่ต้องดำเนินการ</p>
+              <p className="text-base font-medium">{t('pj.no_pending')}</p>
+              <p className="text-sm text-muted-foreground">{t('pj.no_pending_desc')}</p>
             </Card>
           ) : (
             groups.map(([sev, xs]) => (
               <div key={sev} className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Badge variant={sevBadge[sev]}>{sevLabel[sev]}</Badge>
-                  <span className="text-sm text-muted-foreground">{xs.length} รายการ</span>
+                  <Badge variant={sevBadge[sev]}>{t(SEV_LABEL_KEY[sev] ?? sev)}</Badge>
+                  <span className="text-sm text-muted-foreground">{t('pj.n_items', { n: xs.length })}</span>
                 </div>
                 <div className="space-y-2">
                   {xs.map((it, i) => (
@@ -85,7 +85,7 @@ export default function ActionCenterPage() {
                         </p>
                       </div>
                       <Button variant="ghost" size="sm" className="shrink-0" onClick={() => router.push(it.href)}>
-                        เปิด <ArrowRight className="size-4" />
+                        {t('pj.btn_open')} <ArrowRight className="size-4" />
                       </Button>
                     </Card>
                   ))}

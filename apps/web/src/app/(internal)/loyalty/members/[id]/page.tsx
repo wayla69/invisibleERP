@@ -182,23 +182,23 @@ function MissionsPanel({ id }: { id: string }) {
   const claim = useMutation({ mutationFn: (mid: number) => api(`/api/loyalty/missions/${mid}/claim`, { method: 'POST', body: JSON.stringify({ member_id: Number(id) }) }), onSuccess: inval });
   return (
     <Card className="gap-4">
-      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Target className="size-4" /> ภารกิจ & แสตมป์ (Missions)</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Target className="size-4" /> {t('ly.ms_title')}</CardTitle></CardHeader>
       <CardContent>
         <StateView q={q}>
-          {(q.data?.missions.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">ยังไม่มีภารกิจที่เปิดอยู่</p> : (
+          {(q.data?.missions.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">{t('ly.mm_no_missions')}</p> : (
             <div className="space-y-3">
               {q.data?.missions.map((m) => (
                 <div key={m.id} className="rounded-lg border p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="text-sm font-medium">{m.name}</span>
-                    <span className="text-xs text-muted-foreground">{m.reward_kind === 'points' ? `+${num(m.reward_points)} แต้ม` : `คูปอง ${baht(m.reward_coupon_value)}`}</span>
+                    <span className="text-xs text-muted-foreground">{m.reward_kind === 'points' ? t('ly.ms_points_plus', { n: num(m.reward_points) }) : t('ly.wh_coupon_val', { n: baht(m.reward_coupon_value) })}</span>
                   </div>
                   <div className="mb-2 flex items-center gap-2">
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, Math.round((m.progress / m.goal) * 100))}%` }} /></div>
                     <span className="tabular text-xs text-muted-foreground">{num(m.progress)}/{num(m.goal)}</span>
                   </div>
                   <div className="flex gap-2">
-                    {m.claimed ? <Badge variant="muted">รับรางวัลแล้ว</Badge> : m.completed ? <Button onClick={() => claim.mutate(m.id)} disabled={claim.isPending}>รับรางวัล</Button> : <Button variant="outline" onClick={() => stamp.mutate(m.id)} disabled={stamp.isPending}>+ แสตมป์</Button>}
+                    {m.claimed ? <Badge variant="muted">{t('ly.mm_claimed')}</Badge> : m.completed ? <Button onClick={() => claim.mutate(m.id)} disabled={claim.isPending}>{t('ly.mm_claim')}</Button> : <Button variant="outline" onClick={() => stamp.mutate(m.id)} disabled={stamp.isPending}>{t('ly.mm_stamp')}</Button>}
                   </div>
                 </div>
               ))}
@@ -213,40 +213,41 @@ function MissionsPanel({ id }: { id: string }) {
 interface Wallet { redemptions: { redemption_code: string; reward: string | null; reward_type: string | null; point_cost: number; value: number; status: string; used_ref: string | null }[]; coupons: { code: string; kind: string; value: number; source: string | null; status: string }[] }
 
 function WalletPanel({ id }: { id: string }) {
+  const { t } = useLang();
   const q = useQuery<Wallet>({ queryKey: ['loy-member-wallet', id], queryFn: () => api(`/api/loyalty/members/${id}/wallet`) });
   const statusBadge = (s: string) => s === 'used' ? 'muted' : s === 'issued' || s === 'active' ? 'success' : 'destructive';
   return (
     <Card className="gap-4">
-      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Gift className="size-4" /> ของรางวัล & คูปอง (Wallet)</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Gift className="size-4" /> {t('ly.wp_title')}</CardTitle></CardHeader>
       <CardContent className="space-y-5">
         <StateView q={q}>
           <div>
-            <h3 className="mb-2 text-sm font-semibold text-muted-foreground">ของรางวัลที่แลก (Redemptions)</h3>
+            <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{t('ly.wp_redemptions')}</h3>
             <DataTable
               rows={q.data?.redemptions ?? []}
               rowKey={(r) => r.redemption_code}
-              emptyState={{ icon: Award, title: 'ยังไม่มีการแลกของรางวัล', description: 'ของรางวัลที่สมาชิกแลกด้วยแต้มจะแสดงที่นี่' }}
+              emptyState={{ icon: Award, title: t('ly.wp_empty'), description: t('ly.wp_empty_desc') }}
               columns={[
-                { key: 'redemption_code', label: 'รหัส', render: (r) => <span className="font-mono text-xs">{r.redemption_code}</span> },
-                { key: 'reward', label: 'รางวัล', render: (r) => r.reward ?? '—' },
-                { key: 'point_cost', label: 'แต้ม', align: 'right', render: (r) => <span className="tabular">{num(r.point_cost)}</span> },
-                { key: 'value', label: 'มูลค่า', align: 'right', render: (r) => baht(r.value) },
-                { key: 'status', label: 'สถานะ', align: 'center', render: (r) => <Badge variant={statusBadge(r.status)}>{r.status}</Badge> },
+                { key: 'redemption_code', label: t('ly.col_code'), render: (r) => <span className="font-mono text-xs">{r.redemption_code}</span> },
+                { key: 'reward', label: t('ly.ms_reward'), render: (r) => r.reward ?? '—' },
+                { key: 'point_cost', label: t('ly.an_pts'), align: 'right', render: (r) => <span className="tabular">{num(r.point_cost)}</span> },
+                { key: 'value', label: t('ly.wh_col_value'), align: 'right', render: (r) => baht(r.value) },
+                { key: 'status', label: t('fin.col_status'), align: 'center', render: (r) => <Badge variant={statusBadge(r.status)}>{r.status}</Badge> },
               ]}
             />
           </div>
           {(q.data?.coupons?.length ?? 0) > 0 && (
             <div>
-              <h3 className="mb-2 text-sm font-semibold text-muted-foreground">คูปอง (Coupons)</h3>
+              <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{t('ly.wp_coupons')}</h3>
               <DataTable
                 rows={q.data?.coupons ?? []}
                 rowKey={(r) => r.code}
                 columns={[
-                  { key: 'code', label: 'รหัส', render: (r) => <span className="font-mono text-xs">{r.code}</span> },
-                  { key: 'kind', label: 'ชนิด', render: (r) => <Badge variant="info">{r.kind}</Badge> },
-                  { key: 'value', label: 'มูลค่า', align: 'right', render: (r) => baht(r.value) },
-                  { key: 'source', label: 'ที่มา', render: (r) => r.source ?? '—' },
-                  { key: 'status', label: 'สถานะ', align: 'center', render: (r) => <Badge variant={statusBadge(r.status)}>{r.status}</Badge> },
+                  { key: 'code', label: t('ly.col_code'), render: (r) => <span className="font-mono text-xs">{r.code}</span> },
+                  { key: 'kind', label: t('ly.pt_kind'), render: (r) => <Badge variant="info">{r.kind}</Badge> },
+                  { key: 'value', label: t('ly.wh_col_value'), align: 'right', render: (r) => baht(r.value) },
+                  { key: 'source', label: t('ly.wp_source'), render: (r) => r.source ?? '—' },
+                  { key: 'status', label: t('fin.col_status'), align: 'center', render: (r) => <Badge variant={statusBadge(r.status)}>{r.status}</Badge> },
                 ]}
               />
             </div>
@@ -258,6 +259,8 @@ function WalletPanel({ id }: { id: string }) {
 }
 
 function ConsentPanel({ id }: { id: string }) {
+  const { t } = useLang();
+  const purposeLabel = (k: string) => (PURPOSE_LABEL_KEYS[k] ? t(PURPOSE_LABEL_KEYS[k]) : k);
   const qc = useQueryClient();
   const q = useQuery<Consents>({ queryKey: ['loy-member-consents', id], queryFn: () => api(`/api/loyalty/members/${id}/consents`) });
   const set = useMutation({
@@ -268,26 +271,26 @@ function ConsentPanel({ id }: { id: string }) {
 
   return (
     <Card className="gap-4">
-      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="size-4" /> ความยินยอม (PDPA)</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="size-4" /> {t('ly.cp_title')}</CardTitle></CardHeader>
       <CardContent>
         <StateView q={q}>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {PURPOSES.map((p) => {
-              const on = granted(p.key);
+            {PURPOSE_KEYS.map((p) => {
+              const on = granted(p);
               return (
-                <label key={p.key} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                  <span className="text-sm">{p.label}</span>
+                <label key={p} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                  <span className="text-sm">{purposeLabel(p)}</span>
                   <input
                     type="checkbox"
                     checked={!!on}
                     disabled={set.isPending}
-                    onChange={(e) => set.mutate({ purpose: p.key, granted: e.target.checked })}
+                    onChange={(e) => set.mutate({ purpose: p, granted: e.target.checked })}
                   />
                 </label>
               );
             })}
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">การปิด “การตลาดทั่วไป” จะหยุดการส่งข้อความการตลาดถึงสมาชิกรายนี้ทันที (ใช้ร่วมกับระบบส่งข้อความ)</p>
+          <p className="mt-3 text-xs text-muted-foreground">{t('ly.md_pdpa_note')}</p>
         </StateView>
       </CardContent>
     </Card>

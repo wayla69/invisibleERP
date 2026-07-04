@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Lock, ShieldCheck, ShieldAlert, Clock, FolderKanban, CheckCircle2, XCircle, ClipboardCheck, LayoutDashboard } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -24,6 +25,7 @@ const ragBadge = (rag: string) => <Badge variant={rag === 'red' ? 'destructive' 
 // PROJ-03 — period-end WIP/clearing close review + maker-checker sign-off, alongside the PMO-3 portfolio
 // governance roll-up for the same period. Exec-only.
 export default function ProjectClosePage() {
+  const { t } = useLang();
   const router = useRouter();
   const qc = useQueryClient();
   const [period, setPeriod] = useState(thisPeriod());
@@ -35,15 +37,15 @@ export default function ProjectClosePage() {
 
   const prepare = useMutation({
     mutationFn: () => api(`/api/projects/close-review?period=${period}`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess(`จัดทำการสอบทานปิดงวด ${period}`); refresh(); }, onError: (e: any) => notifyError(e.message),
+    onSuccess: () => { notifySuccess(t('pj.toast_close_prepared', { period })); refresh(); }, onError: (e: any) => notifyError(e.message),
   });
   const approve = useMutation({
     mutationFn: (p: string) => api(`/api/projects/close-review/${p}/approve`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess('อนุมัติปิดงวดแล้ว'); refresh(); }, onError: (e: any) => notifyError(e.message),
+    onSuccess: () => { notifySuccess(t('pj.toast_close_approved')); refresh(); }, onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
-    mutationFn: (p: string) => api(`/api/projects/close-review/${p}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'ปฏิเสธจากผู้สอบทาน' }) }),
-    onSuccess: () => { notifySuccess('ปฏิเสธการปิดงวด'); refresh(); }, onError: (e: any) => notifyError(e.message),
+    mutationFn: (p: string) => api(`/api/projects/close-review/${p}/reject`, { method: 'POST', body: JSON.stringify({ reason: t('pj.reject_reason_default') }) }),
+    onSuccess: () => { notifySuccess(t('pj.toast_close_rejected')); refresh(); }, onError: (e: any) => notifyError(e.message),
   });
 
   const r = reviewQ.data;

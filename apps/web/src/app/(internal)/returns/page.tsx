@@ -308,7 +308,7 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
                     </div>
                   ))}
                 </div>
-                {totalReturn > 0 && <p className="text-right text-sm font-medium">ยอดโดยประมาณ ฿{num(totalReturn)}</p>}
+                {totalReturn > 0 && <p className="text-right text-sm font-medium">{t('hx.ret.est_total')} ฿{num(totalReturn)}</p>}
               </div>
             )}
 
@@ -316,14 +316,14 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
             {items.length > 0 && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label>วิธีคืนเงิน</Label>
+                  <Label>{t('hx.ret.col_method')}</Label>
                   <select className={selectCls + ' w-full'} value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)}>
-                    {REFUND_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    {REFUND_METHODS.map((m) => <option key={m.value} value={m.value}>{t(m.label)}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <Label>เหตุผล (ไม่บังคับ)</Label>
-                  <Input placeholder="สินค้าชำรุด, ลูกค้าเปลี่ยนใจ…" value={reason} onChange={(e) => setReason(e.target.value)} />
+                  <Label>{t('hx.ret.reason_opt')}</Label>
+                  <Input placeholder={t('hx.ret.reason_ph')} value={reason} onChange={(e) => setReason(e.target.value)} />
                 </div>
               </div>
             )}
@@ -331,9 +331,9 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
             {err && <p className="text-sm text-destructive">{err}</p>}
 
             <DialogFooter>
-              <Button variant="outline" onClick={onClose}>ยกเลิก</Button>
+              <Button variant="outline" onClick={onClose}>{t('fin.cancel')}</Button>
               <Button onClick={handleSubmit} disabled={mut.isPending || items.length === 0}>
-                {mut.isPending ? 'กำลังบันทึก…' : 'บันทึกคืนสินค้า'}
+                {mut.isPending ? t('hx.common.saving') : t('hx.ret.record_btn')}
               </Button>
             </DialogFooter>
           </div>
