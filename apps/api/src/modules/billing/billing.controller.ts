@@ -104,6 +104,12 @@ export class BillingController {
     return this.svc.listTenants();
   }
 
+  // Cross-company AI-token usage aggregate (Platform Console AI-spend panel).
+  @Get('admin/ai-usage') @PlatformAdmin()
+  adminAiUsage() {
+    return this.svc.aiUsageByTenant();
+  }
+
   // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.
   @Get('admin/tenants/:id') @PlatformAdmin()
   tenantDetail(@Param('id') id: string) {

@@ -138,6 +138,14 @@ async function main() {
   const chg = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/plan`, owner, { plan_code: 'pro' });
   ok('POST /api/admin/tenants/:id/plan changes the plan cross-tenant (status Active)',
     chg.status === 200 && chg.json.plan === 'pro' && chg.json.status === 'Active', `st=${chg.status} plan=${chg.json.plan}`);
+  // Directory carries setup_complete (drives the "ตั้งค่ายังไม่เสร็จ" needs-attention card).
+  const dir2 = await inj('GET', '/api/admin/tenants', owner);
+  ok('GET /api/admin/tenants rows carry setup_complete', Array.isArray(dir2.json) && dir2.json.every((r: any) => typeof r.setup_complete === 'boolean'), `sample=${dir2.json?.[0]?.setup_complete}`);
+  // Cross-company AI usage aggregate (Platform Console AI-spend panel).
+  const aiu = await inj('GET', '/api/admin/ai-usage', owner);
+  ok('GET /api/admin/ai-usage returns a per-company token aggregate (array, sorted by spend)',
+    aiu.status === 200 && Array.isArray(aiu.json) && aiu.json.every((r: any) => typeof r.tenant_id === 'number' && typeof r.total_tokens === 'number'),
+    `st=${aiu.status} n=${Array.isArray(aiu.json) ? aiu.json.length : 'x'}`);
   // Detail + subscription control are platform-owner-gated too.
   // Cross-company activity feed (Platform Console) — owner (Admin, single-company bypass) sees audit rows
   // across tenants; the new tenant_id filter narrows to exactly one company.

@@ -155,6 +155,16 @@ interface SwitcherCompany { id: number; code: string; name: string; suspended: b
  * Rendered ONLY for a god (`me.is_platform_owner`). Kept inside this already-'use client' shell (rather than
  * its own file) so it stays a client island without adding to the 'use client' ratchet.
  */
+const RECENT_COMPANIES_KEY = 'ie-god-recent-companies'; // most-recent-first, capped
+function readRecentCompanies(): ActingTenant[] {
+  return readJson<ActingTenant[]>(RECENT_COMPANIES_KEY, []).filter((c) => c && typeof c.id === 'number').slice(0, 5);
+}
+function pushRecentCompany(c: ActingTenant) {
+  if (typeof window === 'undefined') return;
+  const next = [c, ...readRecentCompanies().filter((r) => r.id !== c.id)].slice(0, 5);
+  localStorage.setItem(RECENT_COMPANIES_KEY, JSON.stringify(next));
+}
+
 function CompanySwitcher() {
   const { data: companies } = useQuery<SwitcherCompany[]>({
     queryKey: ['admin-tenants'],
@@ -162,9 +172,12 @@ function CompanySwitcher() {
     staleTime: 5 * 60_000,
   });
   const [acting, setActing] = React.useState<ActingTenant | null>(null);
-  React.useEffect(() => setActing(getActingTenant()), []);
+  const [recents, setRecents] = React.useState<ActingTenant[]>([]);
+  const [query, setQuery] = React.useState('');
+  React.useEffect(() => { setActing(getActingTenant()); setRecents(readRecentCompanies()); }, []);
 
   const pick = (tnt: ActingTenant | null) => {
+    if (tnt) pushRecentCompany(tnt);
     setActingTenant(tnt);
     // Reload so every cached query refetches under the new scope (see setActingTenant).
     window.location.reload();
@@ -172,10 +185,28 @@ function CompanySwitcher() {
 
   const currentName = acting?.name ?? 'ทุกบริษัท';
   const isGlobal = acting == null;
+  const q = query.trim().toLowerCase();
+  const list = (companies ?? []).filter((c) => !q || `${c.name} ${c.code}`.toLowerCase().includes(q));
+  // Recents only when not searching, and only companies still in the directory (name may have changed).
+  const recentItems = q ? [] : recents
+    .map((r) => (companies ?? []).find((c) => c.id === r.id))
+    .filter((c): c is SwitcherCompany => !!c && c.id !== acting?.id)
+    .slice(0, 4);
+
+  const row = (c: SwitcherCompany) => (
+    <DropdownMenuItem key={c.id} onSelect={(e) => { e.preventDefault(); pick({ id: c.id, name: c.name, code: c.code }); }} className="gap-2">
+      <Building2 className="size-4" />
+      <span className="grid flex-1 leading-tight">
+        <span className={cn('truncate', c.suspended && 'text-muted-foreground line-through')}>{c.name}</span>
+        <span className="truncate text-[10px] text-muted-foreground">{c.code}{c.suspended ? ' · ระงับ' : ''}</span>
+      </span>
+      {acting?.id === c.id && <Check className="size-4 text-primary" />}
+    </DropdownMenuItem>
+  );
 
   return (
     <div className="px-1 pb-1 group-data-[collapsible=icon]:hidden">
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(o) => !o && setQuery('')}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
@@ -193,28 +224,35 @@ function CompanySwitcher() {
             <ChevronsUpDown className="size-3.5 shrink-0 opacity-60" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-h-[60vh] w-64 overflow-y-auto">
+        <DropdownMenuContent align="start" className="max-h-[70vh] w-64 overflow-y-auto">
           <DropdownMenuLabel className="text-xs">มุมมองผู้ดูแลแพลตฟอร์ม (god)</DropdownMenuLabel>
+          {/* Search — stop keydown propagation so the menu's typeahead doesn't steal keystrokes. */}
+          <div className="px-1 py-1">
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder="ค้นหาบริษัท…"
+              className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+          </div>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => pick(null)} className="gap-2">
+          <DropdownMenuItem onSelect={(e) => { e.preventDefault(); pick(null); }} className="gap-2">
             <Globe className="size-4" />
             <span className="flex-1">ทุกบริษัท (รวม)</span>
             {isGlobal && <Check className="size-4 text-primary" />}
           </DropdownMenuItem>
+          {recentItems.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">เพิ่งดู</DropdownMenuLabel>
+              {recentItems.map(row)}
+            </>
+          )}
           <DropdownMenuSeparator />
-          {(companies ?? []).map((c) => (
-            <DropdownMenuItem key={c.id} onClick={() => pick({ id: c.id, name: c.name, code: c.code })} className="gap-2">
-              <Building2 className="size-4" />
-              <span className="grid flex-1 leading-tight">
-                <span className={cn('truncate', c.suspended && 'text-muted-foreground line-through')}>{c.name}</span>
-                <span className="truncate text-[10px] text-muted-foreground">
-                  {c.code}
-                  {c.suspended ? ' · ระงับ' : ''}
-                </span>
-              </span>
-              {acting?.id === c.id && <Check className="size-4 text-primary" />}
-            </DropdownMenuItem>
-          ))}
+          {q && <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">ผลค้นหา ({list.length})</DropdownMenuLabel>}
+          {list.length === 0 ? <div className="px-3 py-2 text-xs text-muted-foreground">ไม่พบบริษัท</div> : list.map(row)}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

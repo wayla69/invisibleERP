@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, AlertTriangle, Building2, CircleDollarSign, Clock, Download, Eye, PauseCircle, Pause, Play, Plus, ShieldCheck, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Building2, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
 
 import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
@@ -44,6 +44,7 @@ interface Company {
   trial_ends_at: string | null;
   users: number;
   created_at: string | null;
+  setup_complete?: boolean;
 }
 
 interface SignupRequest {
@@ -218,6 +219,12 @@ export default function PlatformConsole({
     queryKey: ['saas-metrics'],
     queryFn: () => api('/api/billing/saas-metrics'),
   });
+  const aiUsage = useQuery<any[]>({
+    queryKey: ['admin-ai-usage'],
+    queryFn: () => api<any[]>('/api/admin/ai-usage'),
+  });
+  const ops = useQuery<any>({ queryKey: ['ops-metrics'], queryFn: () => api('/api/ops/metrics') });
+  const jobs = useQuery<any>({ queryKey: ['jobs-ops-metrics'], queryFn: () => api('/api/jobs/ops-metrics') });
   const comps = companies.data ?? [];
 
   const refresh = () => {
@@ -244,6 +251,7 @@ export default function PlatformConsole({
   const [auditCompany, setAuditCompany] = useState('');
   const [auditStatus, setAuditStatus] = useState('');
   const [auditText, setAuditText] = useState('');
+  const [auditGodOnly, setAuditGodOnly] = useState(false);
   const auditQs = `limit=100${auditCompany ? `&tenant_id=${auditCompany}` : ''}${auditStatus ? `&status=${auditStatus}` : ''}`;
   const audit = useQuery<{ rows: any[]; total: number }>({
     queryKey: ['platform-audit', auditCompany, auditStatus],
@@ -461,6 +469,8 @@ export default function PlatformConsole({
 
   const pending = requests.data?.length ?? 0;
   const auditRows = (audit.data?.rows ?? []).filter((r: any) => {
+    // Impersonation/god-action lens (item 4) — rows where a god ran cross-tenant (act-as or full bypass).
+    if (auditGodOnly && !(r.meta?.god_act_as_tenant != null || r.meta?.rls_bypass)) return false;
     if (!auditText.trim()) return true;
     const q = auditText.toLowerCase();
     return `${r.actor ?? ''} ${r.action ?? ''}`.toLowerCase().includes(q);
@@ -489,6 +499,10 @@ export default function PlatformConsole({
           <Label className="text-xs">ค้นหา (ผู้ทำ/การกระทำ)</Label>
           <Input value={auditText} onChange={(e) => setAuditText(e.target.value)} placeholder="เช่น POST /api/ledger…" />
         </div>
+        <label className="flex items-center gap-1.5 text-xs">
+          <input type="checkbox" checked={auditGodOnly} onChange={(e) => setAuditGodOnly(e.target.checked)} />
+          เฉพาะการข้ามบริษัท (god)
+        </label>
         <Button size="sm" variant="outline" onClick={() => verifyChain.mutate()} disabled={verifyChain.isPending}>
           <ShieldCheck className="size-3.5" /> ตรวจ hash-chain
         </Button>
@@ -525,6 +539,7 @@ export default function PlatformConsole({
     const dt = new Date(c.trial_ends_at).getTime() - now;
     return dt > 0 && dt < 7 * 864e5;
   }).length;
+  const setupIncompleteN = comps.filter((c) => c.setup_complete === false && !c.suspended).length;
 
   const overviewTab = (
     <StateView q={metrics}>
@@ -546,7 +561,36 @@ export default function PlatformConsole({
               <StatCard label="ทดลองใกล้หมด (7 วัน)" value={num(trialSoonN)} icon={Clock} tone={trialSoonN ? 'warning' : 'default'} />
               <StatCard label="ค้างชำระ" value={num(pastDueN)} icon={CircleDollarSign} tone={pastDueN ? 'danger' : 'default'} />
               <StatCard label="ถูกระงับ" value={num(suspendedN)} icon={PauseCircle} tone={suspendedN ? 'danger' : 'default'} />
+              <StatCard label="ตั้งค่ายังไม่เสร็จ" value={num(setupIncompleteN)} icon={AlertTriangle} tone={setupIncompleteN ? 'warning' : 'default'} hint="ข้อมูลภาษี/ที่อยู่ไม่ครบ" />
             </div>
+          </div>
+
+          {/* Platform health (item 10) — DB pool, cache, queue backlog + dead-letters. */}
+          <div>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Server className="size-4 text-primary" /> สุขภาพระบบ</h3>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard label="DB pool" value={`${ops.data ? '' : '—'}${jobs.data?.pool?.saturation_pct ?? 0}%`} icon={Database} tone={(jobs.data?.pool?.saturation_pct ?? 0) > 80 ? 'danger' : 'default'} hint={`in-flight ${num(jobs.data?.pool?.in_flight_tx ?? 0)}/${num(jobs.data?.pool?.max ?? 0)}`} />
+              <StatCard label="งานในคิว" value={num(jobs.data?.jobs?.queued ?? 0)} icon={Activity} hint={`ทำงาน ${num(jobs.data?.jobs?.running ?? 0)}`} />
+              <StatCard label="งานล้มเหลว (dead-letter)" value={num(jobs.data?.jobs?.failed ?? 0)} icon={AlertTriangle} tone={(jobs.data?.jobs?.failed ?? 0) > 0 ? 'danger' : 'default'} hint={`ค้าง ${num(jobs.data?.jobs?.stuck ?? 0)}`} />
+              <StatCard label="Cache" value={ops.data?.cache?.provider ?? '—'} icon={Database} hint={ops.data ? `hits ${num(ops.data.cache?.hits ?? 0)} · queue ${ops.data.scale?.queue_provider ?? '—'}` : ''} />
+            </div>
+          </div>
+
+          {/* AI spend oversight (item 5) — top token spenders across companies. */}
+          <div>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4 text-primary" /> การใช้ AI ข้ามบริษัท</h3>
+            <Card className="p-0">
+              <DataTable
+                rows={(aiUsage.data ?? []).slice(0, 10)}
+                columns={[
+                  { key: 'name', label: 'บริษัท', render: (r: any) => <button type="button" className="text-left hover:underline" onClick={() => setDetailId(r.tenant_id)}>{r.name}</button> },
+                  { key: 'total_tokens', label: 'โทเคนรวม', align: 'right', render: (r: any) => num(r.total_tokens) },
+                  { key: 'overage_tokens', label: 'overage', align: 'right', render: (r: any) => <span className={r.overage_tokens > 0 ? 'text-destructive' : ''}>{num(r.overage_tokens)}</span> },
+                ]}
+                rowKey={(r: any) => r.tenant_id}
+                emptyText="ยังไม่มีการใช้ AI"
+              />
+            </Card>
           </div>
 
           {/* Plan mix — active subscriptions + MRR contribution per plan. */}

@@ -242,6 +242,7 @@ export class BillingService {
       .select({
         id: tenants.id, code: tenants.code, name: tenants.name,
         suspendedAt: tenants.suspendedAt, createdAt: tenants.createdAt,
+        legalName: tenants.legalName, taxId: tenants.taxId, addressLine1: tenants.addressLine1, province: tenants.province,
         planCode: subscriptions.planCode, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt,
       })
       .from(tenants)
@@ -269,9 +270,38 @@ export class BillingService {
         trial_ends_at: t.trialEndsAt ?? null,
         users: countByTenant.get(id) ?? 0,
         created_at: t.createdAt ?? null,
+        // Setup essentials for issuing tax invoices — mirrors TenantController.fmt's setup_complete.
+        setup_complete: !!(t.legalName && t.taxId && t.addressLine1 && t.province),
       });
     }
     return out;
+  }
+
+  // Cross-company AI-token usage aggregate (Platform Console) — total in/out/overage per company, ordered by
+  // spend. Cross-tenant read under the @PlatformAdmin bypass. Powers the AI-spend oversight panel.
+  async aiUsageByTenant() {
+    const rows = await this.db
+      .select({
+        tenantId: aiTokenUsage.tenantId,
+        input: sql<number>`coalesce(sum(${aiTokenUsage.inputTokens}),0)`,
+        output: sql<number>`coalesce(sum(${aiTokenUsage.outputTokens}),0)`,
+        overage: sql<number>`coalesce(sum(${aiTokenUsage.overageTokens}),0)`,
+      })
+      .from(aiTokenUsage)
+      .groupBy(aiTokenUsage.tenantId);
+    const names = await this.db.select({ id: tenants.id, code: tenants.code, name: tenants.name }).from(tenants);
+    const nameById = new Map(names.map((t) => [Number(t.id), { code: t.code, name: t.name }]));
+    return rows
+      .map((r) => {
+        const id = Number(r.tenantId);
+        const meta = nameById.get(id);
+        return {
+          tenant_id: id, code: meta?.code ?? null, name: meta?.name ?? `#${id}`,
+          input_tokens: Number(r.input), output_tokens: Number(r.output), overage_tokens: Number(r.overage),
+          total_tokens: Number(r.input) + Number(r.output),
+        };
+      })
+      .sort((a, b) => b.total_tokens - a.total_tokens);
   }
 
   // Full detail for one company — backs the Platform Console company drawer. Cross-tenant read under the
