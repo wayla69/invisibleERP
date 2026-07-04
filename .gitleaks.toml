@@ -1,0 +1,24 @@
+# gitleaks configuration (secret scanning — CI `security` job, ITGC).
+#
+# We keep ALL of gitleaks' default rules and add a single, tightly-scoped allowlist for a known
+# false-positive class: i18n message keys. The web app stores translation keys in object fields
+# named `key`/`labelKey` (e.g. `labelKey: 'fin.bucket_31_60'`, `key: 'tax.income_40_2'`), and the
+# default `generic-api-key` rule flags the high-entropy key STRING as if it were an API secret.
+#
+# The allowlist below exempts ONLY values that have the i18n-key shape — an all-lowercase namespace
+# followed by a dotted/underscored key (e.g. `fin.bucket_31_60`, `fnx.cc.type_branch`,
+# `pos.quick_register`, `mx.ast_qp_sales_today`). Real credentials do not match: they carry mixed
+# case / high-entropy random segments, so this does not weaken detection of actual secrets.
+title = "Invisible ERP gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "i18n message keys (namespace.dotted_key) are not secrets — generic-api-key false-positive on key/labelKey fields"
+# All-lowercase identifier with dot/underscore separators (e.g. fin.bucket_31_60, tax.income_40_2,
+# fnx.cc.type_branch, mx.ast_qp_sales_today). Real credentials carry mixed case / random entropy and
+# never match an all-lowercase [a-z0-9._] shape, so default detection of actual secrets is unaffected.
+regexes = [
+  '''^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$''',
+]
