@@ -21,6 +21,15 @@ export class MasterDataService {
     };
   }
 
+  // Resolve the header-keyed import rows from whichever body shape the client sent: pre-parsed `rows`, raw
+  // `csv` text, or a base64-encoded `.xlsx` workbook (so a user can round-trip the exact template/export
+  // file without a Save-As-CSV step). All three converge on the same validate/import pipeline below.
+  async rowsFromInput(input: { format?: 'rows' | 'csv' | 'xlsx'; csv?: string; xlsx?: string; rows?: Record<string, any>[] }): Promise<Record<string, any>[]> {
+    if (input.format === 'xlsx') return parseXlsx(Buffer.from(input.xlsx ?? '', 'base64'));
+    if (input.format === 'csv') return parseCsv(input.csv ?? '');
+    return input.rows ?? [];
+  }
+
   private entOrThrow(key: string): MdEntity {
     const e = findEntity(key);
     if (!e) throw new BadRequestException({ code: 'BAD_ENTITY', message: `Unknown entity: ${key}`, messageTh: 'ไม่รู้จักประเภทข้อมูลนี้' });
@@ -247,6 +256,50 @@ function coerceCell(c: MdCol, cell: unknown): CoerceOk | CoerceErr {
   }
   if (c.type === 'bool') return { ok: true, value: ['1', 'true', 'yes', 'y', 't'].includes(s.toLowerCase()) };
   return { ok: true, value: s };
+}
+
+// Flatten one ExcelJS cell value to a trimmed string, mirroring how `parseCsv` yields plain strings (the
+// import coercer re-types from there). Handles the shapes ExcelJS emits: primitives, Date, formula
+// ({ result }), hyperlink ({ text }), and rich text ({ richText:[…] }).
+function xlsxCellText(v: unknown): string {
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    const o = v as Record<string, any>;
+    if ('text' in o) return String(o.text ?? '');
+    if ('result' in o) return String(o.result ?? '');
+    if (Array.isArray(o.richText)) return o.richText.map((t: any) => t.text).join('');
+    return '';
+  }
+  return String(v);
+}
+
+// Parse a `.xlsx` workbook (first worksheet) into header-keyed rows, matching `parseCsv`'s output so both
+// import formats share the downstream pipeline. Row 1 is the header; blank rows are dropped. Columns are read
+// by position (not eachCell) so an empty middle cell doesn't shift later values onto the wrong header.
+export async function parseXlsx(buf: Buffer): Promise<Record<string, string>[]> {
+  const wb = new ExcelJS.Workbook();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- exceljs types want the legacy Buffer shape
+  await wb.xlsx.load(buf as any);
+  const ws = wb.worksheets[0];
+  if (!ws) return [];
+  const headers: string[] = []; // 1-based to align with ExcelJS column numbers
+  ws.getRow(1).eachCell({ includeEmpty: true }, (cell, col) => { headers[col] = xlsxCellText(cell.value).trim(); });
+  const out: Record<string, string>[] = [];
+  for (let r = 2; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const o: Record<string, string> = {};
+    let any = false;
+    for (let c = 1; c < headers.length; c++) {
+      const h = headers[c];
+      if (!h) continue;
+      const val = xlsxCellText(row.getCell(c).value).trim();
+      o[h] = val;
+      if (val !== '') any = true;
+    }
+    if (any) out.push(o);
+  }
+  return out;
 }
 
 // Minimal RFC4180-ish CSV parser (handles quotes, commas, CRLF). Returns header-keyed rows.

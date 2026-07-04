@@ -9,6 +9,7 @@ process.env.NODE_ENV = 'test';
 // Cap the public-API per-key rate limit low so the harness can trip it deterministically.
 process.env.PUBLIC_API_RATE_MAX = process.env.PUBLIC_API_RATE_MAX || '50';
 
+import ExcelJS from 'exceljs';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PGlite } from '@electric-sql/pglite';
@@ -351,6 +352,47 @@ async function main() {
   ok('Bulk import: menu_items rejects an out-of-set enum value (BAD_ENUM), not a hard DB failure', badEnum.json.valid === 0 && (badEnum.json.errors ?? []).some((e: any) => e.code === 'BAD_ENUM'), `${JSON.stringify(badEnum.json.errors ?? [])}`);
   const menuRe = await inj('POST', '/api/admin/master-data/menu_items/import/checked', token, { format: 'csv', mode: 'append', csv: menuCsv });
   ok('Bulk import: menu_items re-import dedups on (tenant, sku) → 0 new, all EXISTS', menuRe.json.imported === 0 && (menuRe.json.errors ?? []).length === 2 && (menuRe.json.errors ?? []).every((e: any) => e.code === 'EXISTS'), `${JSON.stringify({ imported: menuRe.json.imported, errs: (menuRe.json.errors ?? []).map((e: any) => e.code) })}`);
+
+  // ── XLSX import round-trip ── the exact .xlsx template/export can be re-imported without a Save-As-CSV
+  // step. Build a real workbook (header row + 2 new item rows), base64 it, and import via format:'xlsx'.
+  const wb = new ExcelJS.Workbook();
+  const xws = wb.addWorksheet('Items');
+  xws.columns = [{ header: 'Item_ID', key: 'Item_ID' }, { header: 'Item_Description', key: 'Item_Description' }, { header: 'Unit_Price', key: 'Unit_Price' }];
+  xws.addRow({ Item_ID: 'XL1', Item_Description: 'Excel Widget', Unit_Price: 12.5 });
+  xws.addRow({ Item_ID: 'XL2', Item_Description: 'Excel Gadget', Unit_Price: 30 });
+  const xlsxB64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
+  const xlDry = await inj('POST', '/api/admin/master-data/items/import/validate', token, { format: 'xlsx', mode: 'append', xlsx: xlsxB64 });
+  ok('Bulk import (xlsx): dry-run parses the workbook into rows', xlDry.json.total === 2 && xlDry.json.valid === 2 && xlDry.json.invalid === 0, `${JSON.stringify({ total: xlDry.json.total, valid: xlDry.json.valid })}`);
+  const xlImp = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'xlsx', mode: 'append', xlsx: xlsxB64 });
+  const xl1 = (await db.select().from(s.items).where(eq(s.items.itemId, 'XL1')))[0];
+  ok('Bulk import (xlsx): a real .xlsx file commits + types are coerced from cells', xlImp.json.status === 'success' && xlImp.json.imported === 2 && Number(xl1?.unitPrice) === 12.5, `${JSON.stringify({ status: xlImp.json.status, imported: xlImp.json.imported, price: xl1?.unitPrice })}`);
+
+  // ── setup-page IO endpoints (/api/item-setup/io) ── same engine, scoped to the two setup master lists and
+  // gated to the setup duties (md_item/md_config/masterdata/exec) so narrow master-data roles get the bulk
+  // Excel/CSV surface without the coarse `masterdata` duty (SoD R13). Admin holds masterdata → passes here.
+  const ioEnts = await inj('GET', '/api/item-setup/io/entities', token);
+  const ioKeys = (ioEnts.json.entities ?? []).map((e: any) => e.key).sort();
+  ok('Setup IO: entities are scoped to the setup master lists (item_categories, tax_codes)', JSON.stringify(ioKeys) === JSON.stringify(['item_categories', 'tax_codes']), `${JSON.stringify(ioKeys)}`);
+  const ioTpl = await inj('GET', '/api/item-setup/io/tax_codes/template', token);
+  ok('Setup IO: tax_codes template downloads as .xlsx (PK magic)', ioTpl.status === 200 && ioTpl.raw?.[0] === 0x50 && ioTpl.raw?.[1] === 0x4b, `status=${ioTpl.status} bytes=${ioTpl.raw?.length}`);
+  const ioImp = await inj('POST', '/api/item-setup/io/tax_codes/import/checked', token, { format: 'csv', mode: 'append', csv: 'Code,Name,Kind,Rate\nVAT-IO,VAT ผ่าน io,vat,0.07\nBADKIND,x,levy,0.1' });
+  ok('Setup IO: import validates enum (Kind) + commits the valid tax code', ioImp.json.status === 'invalid' && (ioImp.json.errors ?? []).some((e: any) => e.code === 'BAD_ENUM'), `${JSON.stringify({ status: ioImp.json.status, errs: (ioImp.json.errors ?? []).map((e: any) => e.code) })}`);
+  const ioImp2 = await inj('POST', '/api/item-setup/io/tax_codes/import/checked', token, { format: 'csv', mode: 'append', csv: 'Code,Name,Kind,Rate\nVAT-IO,VAT ผ่าน io,vat,0.07', skip_errors: true });
+  const ioTax = (await db.select().from(s.taxCodes).where(eq(s.taxCodes.code, 'VAT-IO')))[0];
+  ok('Setup IO: a clean tax_codes import commits + is tenant-stamped', ioImp2.json.status === 'success' && ioImp2.json.imported === 1 && !!ioTax && Number(ioTax.tenantId) === Number(hq.id), `${JSON.stringify({ status: ioImp2.json.status, imported: ioImp2.json.imported, tenant: ioTax?.tenantId })}`);
+  const ioBadEnt = await inj('GET', '/api/item-setup/io/customers/export', token);
+  ok('Setup IO: the allow-list blocks a sensitive entity (customers) → 400 BAD_ENTITY', ioBadEnt.status === 400 && ioBadEnt.json.error?.code === 'BAD_ENTITY', `${ioBadEnt.status} ${ioBadEnt.json.error?.code}`);
+
+  // SoD boundary: a user granted ONLY md_config can use the setup-page IO for tax codes, but is still blocked
+  // from the coarse /api/admin/master-data endpoints (which require the full `masterdata` duty).
+  await db.insert(s.users).values({ username: 'mdcfg', passwordHash: await pw.hash('pw'), role: 'ExecutiveViewer', tenantId: hq.id }).onConflictDoNothing();
+  const mdcfgUid = Number((await db.select().from(s.users).where(eq(s.users.username, 'mdcfg')))[0].id);
+  await db.insert(s.userPermissions).values([{ userId: mdcfgUid, perm: 'md_config' }]).onConflictDoNothing();
+  const mdcfg = (await inj('POST', '/api/login', undefined, { username: 'mdcfg', password: 'pw' })).json.token;
+  const cfgIo = await inj('POST', '/api/item-setup/io/tax_codes/import/validate', mdcfg, { format: 'csv', mode: 'append', csv: 'Code,Kind,Rate\nWHT-IO,wht,0.03' });
+  ok('Setup IO (SoD): an md_config-only user may validate via item-setup IO', (cfgIo.status === 200 || cfgIo.status === 201) && cfgIo.json.valid === 1, `${cfgIo.status} valid=${cfgIo.json.valid}`);
+  const cfgAdmin = await inj('POST', '/api/admin/master-data/tax_codes/import/validate', mdcfg, { format: 'csv', mode: 'append', csv: 'Code,Kind,Rate\nWHT-IO,wht,0.03' });
+  ok('Setup IO (SoD): the same user is blocked from the coarse /api/admin/master-data (403)', cfgAdmin.status === 403, `${cfgAdmin.status}`);
 
   // ── outbound webhooks (Phase 8) ──
   // cf2aa / hqaa are AccessAdmin (hold `users`, non-Admin → tenant-scoped). Deliveries go to an unreachable

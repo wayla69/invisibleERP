@@ -1,8 +1,16 @@
-import { Controller, Get, Post, Patch, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body, Res, BadRequestException } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ItemSetupService, type CategoryDto, type TaxCodeDto, type ItemProfileDto, type WarehouseAccountsDto } from './item-setup.service';
+import { MasterDataService } from '../masterdata/masterdata.service';
+import { ImportBody, type ImportBodyT, XLSX_MIME } from '../masterdata/masterdata.controller';
+
+// Registry keys this controller may bulk import/export — the two master lists these setup pages own. Kept as
+// an allow-list so a narrow md_item/md_config/exec holder can't reach sensitive entities (customers, vendors,
+// assets) through here; those stay behind the coarse `masterdata` duty on /api/admin/master-data (SoD R13).
+const IO_ENTITIES = new Set(['item_categories', 'tax_codes']);
 
 const acct = z.string().trim().max(20).nullish();
 const CategoryBody = z.object({
@@ -31,7 +39,55 @@ const WarehouseBody = z.object({ inventory_account: acct, adjustment_account: ac
 @Controller('api/item-setup')
 @Permissions('md_item', 'md_config', 'masterdata', 'exec')
 export class ItemSetupController {
-  constructor(private readonly svc: ItemSetupService) {}
+  constructor(private readonly svc: ItemSetupService, private readonly md: MasterDataService) {}
+
+  // ── Bulk Excel/CSV import-export for the setup master lists (item categories, tax codes) ──────────────
+  // Same registry-driven engine as /api/admin/master-data, but scoped to IO_ENTITIES and gated to the setup
+  // duties above so a user who can maintain these lists one-by-one can also load/download them in bulk.
+  private ioEntityOrThrow(entity: string): string {
+    if (!IO_ENTITIES.has(entity)) {
+      throw new BadRequestException({ code: 'BAD_ENTITY', message: `Import/export not available for '${entity}' here`, messageTh: 'ไม่รองรับการนำเข้า/ส่งออกสำหรับข้อมูลนี้ที่หน้านี้' });
+    }
+    return entity;
+  }
+
+  @Get('io/entities')
+  ioEntities() {
+    return { entities: this.md.entities().entities.filter((e) => IO_ENTITIES.has(e.key)) };
+  }
+
+  @Get('io/:entity/export')
+  async ioExport(@Param('entity') entity: string, @Query('format') format: string | undefined, @Res() reply: FastifyReply) {
+    this.ioEntityOrThrow(entity);
+    if (format === 'csv') {
+      const csv = await this.md.exportCsv(entity);
+      reply.header('Content-Type', 'text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="${entity}.csv"`).send(csv);
+      return;
+    }
+    const buf = await this.md.exportXlsx(entity);
+    reply.header('Content-Type', XLSX_MIME).header('Content-Disposition', `attachment; filename="${entity}.xlsx"`).header('Content-Length', buf.length).send(buf);
+  }
+
+  @Get('io/:entity/template')
+  async ioTemplate(@Param('entity') entity: string, @Res() reply: FastifyReply) {
+    this.ioEntityOrThrow(entity);
+    const buf = await this.md.templateXlsx(entity);
+    reply.header('Content-Type', XLSX_MIME).header('Content-Disposition', `attachment; filename="${entity}_template.xlsx"`).header('Content-Length', buf.length).send(buf);
+  }
+
+  @Post('io/:entity/import/validate')
+  async ioValidate(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
+    this.ioEntityOrThrow(entity);
+    const rows = await this.md.rowsFromInput(b);
+    return this.md.validateReport(entity, b.mode, rows, u);
+  }
+
+  @Post('io/:entity/import/checked')
+  async ioImportChecked(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
+    this.ioEntityOrThrow(entity);
+    const rows = await this.md.rowsFromInput(b);
+    return this.md.importChecked(entity, b.mode, rows, u, b.skip_errors ?? false);
+  }
 
   @Get('categories') listCategories(@CurrentUser() u: JwtUser) { return this.svc.listCategories(u); }
   @Post('categories') createCategory(@Body(new ZodValidationPipe(CategoryBody)) b: CategoryDto, @CurrentUser() u: JwtUser) { return this.svc.createCategory(b, u); }
