@@ -2,13 +2,14 @@
 
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, Upload, Loader2, CheckCircle2, Receipt, FileText, Sparkles } from 'lucide-react';
+import { Camera, Upload, Loader2, CheckCircle2, Receipt, FileText, Sparkles, Mail } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 type Intake = {
@@ -119,6 +120,8 @@ export default function CapturePage() {
         </Card>
       </div>
 
+      <EmailCaptureCard />
+
       <Card className="mt-6">
         <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Receipt className="size-4 text-primary" /> บิลที่คุณเพิ่งเก็บ</CardTitle></CardHeader>
         <CardContent>
@@ -148,5 +151,78 @@ export default function CapturePage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+type EmailStatus = { email: string | null; verified: boolean; inbox_address: string };
+
+// Email-to-Capture (docs/34 Phase 4). Verify the address you forward bills FROM (a code is mailed to it),
+// then forward any bill to the tenant inbox and it's filed for Accounting — attributed to you.
+function EmailCaptureCard() {
+  const qc = useQueryClient();
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const status = useQuery({ queryKey: ['capture-email-status'], queryFn: () => api<EmailStatus>('/api/capture-email/status') });
+
+  const register = useMutation({
+    mutationFn: () => api<{ pending: boolean; email: string; sent: boolean }>('/api/capture-email/register', { method: 'POST', body: JSON.stringify({ email }) }),
+    onSuccess: (r) => { notifySuccess(r.sent ? `ส่งรหัสยืนยันไปที่ ${r.email} แล้ว` : `บันทึกอีเมล ${r.email} แล้ว (ส่งรหัสไม่สำเร็จ ลองขอใหม่ได้)`); qc.invalidateQueries({ queryKey: ['capture-email-status'] }); },
+    onError: (e) => notifyError((e as Error).message),
+  });
+  const verify = useMutation({
+    mutationFn: () => api<{ verified: boolean; email: string }>('/api/capture-email/verify', { method: 'POST', body: JSON.stringify({ code }) }),
+    onSuccess: (r) => { notifySuccess(`ยืนยันอีเมล ${r.email} แล้ว`); setCode(''); qc.invalidateQueries({ queryKey: ['capture-email-status'] }); },
+    onError: (e) => notifyError((e as Error).message),
+  });
+
+  const s = status.data;
+  const pending = !!(s?.email && !s.verified);
+
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base"><Mail className="size-4 text-primary" /> รับบิลทางอีเมล (ส่งต่อบิลเข้าอีเมล)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {s?.inbox_address && (
+          <p className="text-sm">
+            ส่งต่อ (forward) บิล/ใบแจ้งหนี้ไปที่:{' '}
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{s.inbox_address}</span>{' '}
+            แล้วระบบจะอ่านไฟล์แนบและส่งให้ฝ่ายบัญชีให้อัตโนมัติ
+          </p>
+        )}
+        {s?.verified ? (
+          <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="size-4" /> อีเมลของคุณ <span className="font-mono">{s.email}</span> ยืนยันแล้ว — ส่งบิลจากอีเมลนี้ได้เลย
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              ยืนยันอีเมลที่คุณจะใช้ "ส่งบิล" ก่อน เพื่อให้ระบบรู้ว่าบิลที่ส่งมาเป็นของคุณ (จะมีรหัสยืนยันส่งไปที่อีเมลนั้น)
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="grow">
+                <label className="mb-1 block text-xs text-muted-foreground">อีเมลของคุณ</label>
+                <Input type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </div>
+              <Button variant="outline" disabled={register.isPending || !email.trim()} onClick={() => register.mutate()}>
+                {register.isPending ? <Loader2 className="size-4 animate-spin" /> : null} ขอรหัสยืนยัน
+              </Button>
+            </div>
+            {pending && (
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="grow">
+                  <label className="mb-1 block text-xs text-muted-foreground">รหัสยืนยัน (ส่งไปที่ {s?.email})</label>
+                  <Input inputMode="numeric" placeholder="รหัส 6 หลัก" value={code} onChange={(e) => setCode(e.target.value)} />
+                </div>
+                <Button disabled={verify.isPending || !code.trim()} onClick={() => verify.mutate()}>
+                  {verify.isPending ? <Loader2 className="size-4 animate-spin" /> : null} ยืนยัน
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

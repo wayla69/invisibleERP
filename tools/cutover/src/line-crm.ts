@@ -736,6 +736,39 @@ async function main() {
     capNoPerm.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีสิทธิ์'),
     JSON.stringify({ reply: (lineReplies.at(-1)?.text ?? '').slice(0, 40) }));
 
+  // ── 18mail. Email-to-Capture (docs/34 Phase 4): a staffer verifies a send-from address (code mailed —
+  //           read here from the DB), then an inbound email with a bill attachment files a NeedsReview draft
+  //           attributed to the verified sender + gated on pr_raise (draft-only; SoD/EXP-06). ──
+  const emPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const reg = await inj('POST', '/api/capture-email/register', somchaiTok, { email: 'Somchai@Shop.Test' });
+  const [somRow] = await db.select().from(s.users).where(eq(s.users.username, 'somchai'));
+  const ver = await inj('POST', '/api/capture-email/verify', somchaiTok, { code: somRow.captureEmailCode });
+  const stat = await inj('GET', '/api/capture-email/status', somchaiTok);
+  ok('email-capture: register (normalized, pending) → verify (mailed code) → status verified + tenant inbox address',
+    (reg.status === 200 || reg.status === 201) && reg.json.pending === true && reg.json.email === 'somchai@shop.test'
+      && ver.json.verified === true && stat.json.verified === true && String(stat.json.inbox_address ?? '').startsWith('capture-t1@'),
+    JSON.stringify({ reg: reg.json.email, ver: ver.json.verified, inbox: stat.json.inbox_address }));
+
+  const inbound = await inj('POST', '/api/email/inbound/T1', undefined, { from: 'somchai@shop.test', subject: 'ค่าไฟ', message_id: 'em-1', attachments: [{ filename: 'bill.png', content_type: 'image/png', data_base64: emPng }] });
+  const emMine = await inj('GET', '/api/procurement/ap-intake/mine', somchaiTok);
+  ok('email-capture: inbound bill from a verified sender → NeedsReview draft attributed to that staffer',
+    (inbound.status === 200 || inbound.status === 201) && inbound.json.captured === 1 && Array.isArray(inbound.json.intakes)
+      && emMine.json.intakes?.some((i: any) => i.intake_no === inbound.json.intakes[0]),
+    JSON.stringify({ cap: inbound.json.captured, skip: inbound.json.skipped }));
+
+  const inboundDup = await inj('POST', '/api/email/inbound/T1', undefined, { from: 'somchai@shop.test', message_id: 'em-1', attachments: [{ content_type: 'image/png', data_base64: emPng }] });
+  const inboundUnknown = await inj('POST', '/api/email/inbound/T1', undefined, { from: 'stranger@nowhere.test', message_id: 'em-2', attachments: [{ content_type: 'image/png', data_base64: emPng }] });
+  ok('email-capture: redelivery deduped (message_id) + unknown sender ignored — no draft either way',
+    inboundDup.json.captured === 0 && inboundDup.json.skipped === 'duplicate' && inboundUnknown.json.captured === 0 && inboundUnknown.json.skipped === 'unknown_sender',
+    JSON.stringify({ dup: inboundDup.json.skipped, unk: inboundUnknown.json.skipped }));
+
+  // SoD: a verified sender WITHOUT pr_raise (AccessAdmin, set directly in the DB) → inbound files no draft.
+  await db.update(s.users).set({ captureEmail: 'auditor@shop.test', captureEmailCode: null }).where(eq(s.users.username, 'auditor'));
+  const inboundNoPerm = await inj('POST', '/api/email/inbound/T1', undefined, { from: 'auditor@shop.test', message_id: 'em-3', attachments: [{ content_type: 'image/png', data_base64: emPng }] });
+  ok('email-capture SoD: verified sender without pr_raise → no draft (no_permission)',
+    inboundNoPerm.json.captured === 0 && inboundNoPerm.json.skipped === 'no_permission',
+    JSON.stringify({ skip: inboundNoPerm.json.skipped }));
+
   // 18e. web API round-trip + evidence-integrity delete rules (uploader-or-Admin only).
   const prayutTok = (await inj('POST', '/api/login', undefined, { username: 'prayut', password: 'pw' })).json.token as string;
   await db.insert(s.users).values([{ username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 }]).onConflictDoNothing();
