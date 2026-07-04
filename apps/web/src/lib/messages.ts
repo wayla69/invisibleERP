@@ -3,7 +3,21 @@
 // only — additional locales fall back to th. Pure data (no imports); extend per screen as translations land.
 export type Lang = 'th' | 'en' | 'ms' | 'vi' | 'id';
 
-export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
+// Per-domain catalog fragments (i18n-catalog/*) are merged into MESSAGES at the bottom of this file so many
+// screens can be translated in parallel without all editing this one object. Base chrome + core screens stay
+// inline here; extend a fragment for a new domain screen.
+import { CATALOG as CAT_POS } from './i18n-catalog/pos';
+import { CATALOG as CAT_LOYALTY } from './i18n-catalog/loyalty';
+import { CATALOG as CAT_PROJECTS } from './i18n-catalog/projects';
+import { CATALOG as CAT_FINANCEX } from './i18n-catalog/financex';
+import { CATALOG as CAT_INVOPS } from './i18n-catalog/invops';
+import { CATALOG as CAT_MFG } from './i18n-catalog/mfg';
+import { CATALOG as CAT_PLANBI } from './i18n-catalog/planbi';
+import { CATALOG as CAT_SETTINGS } from './i18n-catalog/settings';
+import { CATALOG as CAT_HRX } from './i18n-catalog/hrx';
+import { CATALOG as CAT_MISC } from './i18n-catalog/misc';
+
+const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
   'common.search': { th: 'ค้นหา…', en: 'Search…', ms: 'Cari…', vi: 'Tìm…', id: 'Cari…' },
   'common.save': { th: 'บันทึก', en: 'Save', ms: 'Simpan', vi: 'Lưu', id: 'Simpan' },
@@ -1339,3 +1353,12 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.portal_my': { th: 'ธุรกิจของฉัน', en: 'My Business' },
   'nav.portal_my_users': { th: 'พนักงานของฉัน', en: 'My Team' },
 };
+
+// Base + all domain fragments. Later spreads win on key collision, but keys are namespaced per domain so
+// collisions shouldn't occur; the base keeps chrome/core screens.
+export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.assign(
+  {},
+  BASE_MESSAGES,
+  CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC,
+);
