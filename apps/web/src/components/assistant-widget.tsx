@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Bot, Maximize2, Send, Sparkles, Square, X } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAssistantChat } from '@/hooks/use-assistant-chat';
@@ -13,9 +14,10 @@ import { useAssistantChat } from '@/hooks/use-assistant-chat';
 // users get contextual help without navigating to the full `/assistant` page. Shares the exact chat logic
 // (useAssistantChat) with that page; mounted (and permission-gated) by the app shell.
 
-const QUICK_PROMPTS = ['สรุปยอดขายวันนี้', 'สินค้าสต๊อกต่ำ', 'KPI การเงินตอนนี้'];
+const QUICK_PROMPT_KEYS = ['mx.awid_qp_sales', 'mx.awid_qp_lowstock', 'mx.awid_qp_finance'];
 
 export function AssistantWidget() {
+  const { t } = useLang();
   const [open, setOpen] = React.useState(false);
   const { messages, streaming, error, send, stop } = useAssistantChat();
   const [input, setInput] = React.useState('');
@@ -31,7 +33,7 @@ export function AssistantWidget() {
       <Button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={open ? 'ปิดผู้ช่วย AI' : 'เปิดผู้ช่วย AI'}
+        aria-label={open ? t('mx.awid_close') : t('mx.awid_open')}
         aria-expanded={open}
         className="fixed bottom-5 right-5 z-50 size-12 rounded-full p-0 shadow-lg print:hidden"
       >
@@ -41,7 +43,7 @@ export function AssistantWidget() {
       {open && (
         <div
           role="dialog"
-          aria-label="ผู้ช่วย AI"
+          aria-label={t('mx.awid_title')}
           className="fixed bottom-20 right-5 z-50 flex h-[520px] w-[min(24rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl print:hidden"
         >
           {/* header */}
@@ -50,14 +52,14 @@ export function AssistantWidget() {
               <Bot className="size-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-tight">ผู้ช่วย AI</p>
-              <p className="truncate text-xs text-muted-foreground">ถามยอดขาย สต๊อก การเงิน — ข้อมูลจริง</p>
+              <p className="text-sm font-semibold leading-tight">{t('mx.awid_title')}</p>
+              <p className="truncate text-xs text-muted-foreground">{t('mx.awid_subtitle')}</p>
             </div>
             <Link
               href="/assistant"
               onClick={() => setOpen(false)}
-              aria-label="เปิดแบบเต็มหน้า"
-              title="เปิดแบบเต็มหน้า"
+              aria-label={t('mx.awid_fullscreen')}
+              title={t('mx.awid_fullscreen')}
               className="rounded p-1.5 text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Maximize2 className="size-4" />
@@ -69,13 +71,16 @@ export function AssistantWidget() {
             {messages.length === 0 && (
               <div className="m-auto flex flex-col items-center gap-3 px-4 text-center text-muted-foreground">
                 <Sparkles className="size-7 opacity-40" />
-                <p className="text-xs">ถามอะไรก็ได้ หรือเลือกปุ่มลัดด้านล่าง</p>
+                <p className="text-xs">{t('mx.awid_empty')}</p>
                 <div className="flex flex-wrap justify-center gap-1.5">
-                  {QUICK_PROMPTS.map((p) => (
-                    <Button key={p} variant="outline" size="sm" className="h-7 text-xs" disabled={streaming} onClick={() => send(p)}>
-                      {p}
-                    </Button>
-                  ))}
+                  {QUICK_PROMPT_KEYS.map((k) => {
+                    const p = t(k);
+                    return (
+                      <Button key={k} variant="outline" size="sm" className="h-7 text-xs" disabled={streaming} onClick={() => send(p)}>
+                        {p}
+                      </Button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -87,7 +92,7 @@ export function AssistantWidget() {
                     m.role === 'user' ? 'rounded-br-sm bg-primary text-primary-foreground' : 'rounded-bl-sm bg-muted text-foreground',
                   )}
                 >
-                  {m.content || (streaming && m.role === 'assistant' ? <span className="text-muted-foreground">กำลังคิด…</span> : '')}
+                  {m.content || (streaming && m.role === 'assistant' ? <span className="text-muted-foreground">{t('mx.awid_thinking')}</span> : '')}
                 </div>
               </div>
             ))}
@@ -106,17 +111,17 @@ export function AssistantWidget() {
           >
             <Input
               className="flex-1"
-              placeholder="พิมพ์คำถาม…"
+              placeholder={t('mx.awid_input_placeholder')}
               value={input}
               disabled={streaming}
               onChange={(e) => setInput(e.target.value)}
             />
             {streaming ? (
-              <Button type="button" size="icon" variant="destructive" onClick={stop} aria-label="หยุด">
+              <Button type="button" size="icon" variant="destructive" onClick={stop} aria-label={t('mx.awid_stop')}>
                 <Square className="size-4" />
               </Button>
             ) : (
-              <Button type="submit" size="icon" disabled={!input.trim()} aria-label="ส่ง">
+              <Button type="submit" size="icon" disabled={!input.trim()} aria-label={t('mx.awid_send')}>
                 <Send className="size-4" />
               </Button>
             )}

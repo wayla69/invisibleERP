@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, Inbox } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 import {
   Table,
   TableBody,
@@ -61,7 +62,7 @@ export function DataTable<T extends Record<string, any>>({
   rows,
   columns,
   loading,
-  emptyText = 'ไม่มีข้อมูล',
+  emptyText,
   emptyState,
   dense,
   className,
@@ -69,6 +70,7 @@ export function DataTable<T extends Record<string, any>>({
   onRowClick,
   pageSize = 50,
 }: DataTableProps<T>) {
+  const { t } = useLang();
   const [sort, setSort] = React.useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [page, setPage] = React.useState(0);
 
@@ -166,7 +168,7 @@ export function DataTable<T extends Record<string, any>>({
                 ) : (
                   <div className="flex flex-col items-center gap-2 text-muted-foreground">
                     <Inbox className="size-8 opacity-40" />
-                    <span className="text-sm">{emptyText}</span>
+                    <span className="text-sm">{emptyText ?? t('mx.dtbl_empty')}</span>
                   </div>
                 )}
               </TableCell>
@@ -207,7 +209,7 @@ export function DataTable<T extends Record<string, any>>({
       {paginate && !loading && (
         <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-sm text-muted-foreground">
           <span className="tabular">
-            {pageClamped * pageSize + 1}–{Math.min((pageClamped + 1) * pageSize, sorted.length)} จาก {sorted.length}
+            {t('mx.dtbl_range', { from: pageClamped * pageSize + 1, to: Math.min((pageClamped + 1) * pageSize, sorted.length), total: sorted.length })}
           </span>
           <div className="flex items-center gap-1">
             <button
@@ -216,7 +218,7 @@ export function DataTable<T extends Record<string, any>>({
               disabled={pageClamped <= 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
             >
-              ก่อนหน้า
+              {t('mx.dtbl_prev')}
             </button>
             <span className="tabular px-1 text-xs">{pageClamped + 1}/{pageCount}</span>
             <button
@@ -225,7 +227,7 @@ export function DataTable<T extends Record<string, any>>({
               disabled={pageClamped >= pageCount - 1}
               onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
             >
-              ถัดไป
+              {t('mx.dtbl_next')}
             </button>
           </div>
         </div>

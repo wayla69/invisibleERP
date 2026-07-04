@@ -6,6 +6,7 @@
 import { Download } from 'lucide-react';
 
 import { baht, thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { StateView } from '@/components/state-view';
 import { StatCard } from '@/components/stat-card';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +15,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-const TYPE_TH: Record<string, string> = { invoice: 'ใบแจ้งหนี้', receipt: 'รับชำระ', bill: 'ตั้งหนี้ (ใบวางบิล)', payment: 'จ่ายชำระ' };
+const TYPE_KEY: Record<string, string> = { invoice: 'mx.acstmt_type_invoice', receipt: 'mx.acstmt_type_receipt', bill: 'mx.acstmt_type_bill', payment: 'mx.acstmt_type_payment' };
 
 export interface StatementData {
   party?: string;
@@ -49,9 +50,11 @@ export function AccountStatement({
   /** Shown when no party is selected yet (query disabled). */
   empty?: boolean;
 }) {
+  const { t } = useLang();
   const d = query.data;
-  const chargeLabel = side === 'ar' ? 'เดบิต (ใบแจ้งหนี้)' : 'ตั้งหนี้';
-  const payLabel = side === 'ar' ? 'รับชำระ' : 'จ่ายชำระ';
+  const typeLabel = (ty: string) => (TYPE_KEY[ty] ? t(TYPE_KEY[ty]) : ty);
+  const chargeLabel = side === 'ar' ? t('mx.acstmt_charge_ar') : t('mx.acstmt_charge_ap');
+  const payLabel = side === 'ar' ? t('mx.acstmt_pay_ar') : t('mx.acstmt_pay_ap');
 
   const exportCsv = () => {
     if (!d) return;
@@ -59,7 +62,7 @@ export function AccountStatement({
     const header = ['date', 'type', 'ref', 'currency', 'charge', 'payment', 'balance'];
     const rows = [
       header.join(','),
-      ...d.lines.map((l) => [l.date, TYPE_TH[l.type] ?? l.type, l.ref, l.doc_currency ?? '', l.charge, l.payment, l.balance].map(esc).join(',')),
+      ...d.lines.map((l) => [l.date, typeLabel(l.type), l.ref, l.doc_currency ?? '', l.charge, l.payment, l.balance].map(esc).join(',')),
     ];
     const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -73,7 +76,7 @@ export function AccountStatement({
   if (empty) {
     return (
       <Card className="grid min-h-[300px] place-items-center p-8 text-center text-sm text-muted-foreground">
-        เลือก{side === 'ar' ? 'ลูกหนี้' : 'เจ้าหนี้'}จากรายการเพื่อดูการ์ดบัญชี (statement)
+        {t('mx.acstmt_empty', { party: side === 'ar' ? t('mx.acstmt_party_ar') : t('mx.acstmt_party_ap') })}
       </Card>
     );
   }
@@ -83,15 +86,15 @@ export function AccountStatement({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
-          <p className="text-xs text-muted-foreground">การ์ดบัญชี — ยอดยกมา + รายการเคลื่อนไหว + ยอดคงเหลือสะสม</p>
+          <p className="text-xs text-muted-foreground">{t('mx.acstmt_subtitle')}</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div className="grid gap-1.5">
-            <Label htmlFor="st-from">ตั้งแต่</Label>
+            <Label htmlFor="st-from">{t('mx.acstmt_from')}</Label>
             <Input id="st-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-[150px]" />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="st-to">ถึง</Label>
+            <Label htmlFor="st-to">{t('mx.acstmt_to')}</Label>
             <Input id="st-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-[150px]" />
           </div>
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={!d}>
@@ -104,38 +107,38 @@ export function AccountStatement({
         {d && (
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="ยอดยกมา" value={baht(d.opening_balance)} />
+              <StatCard label={t('mx.acstmt_opening')} value={baht(d.opening_balance)} />
               <StatCard label={chargeLabel} value={baht(d.total_charges)} tone="primary" />
               <StatCard label={payLabel} value={baht(d.total_payments)} tone="success" />
-              <StatCard label="ยอดคงเหลือ" value={baht(d.closing_balance)} tone={d.closing_balance > 0.005 ? 'danger' : 'default'} />
+              <StatCard label={t('mx.acstmt_closing_card')} value={baht(d.closing_balance)} tone={d.closing_balance > 0.005 ? 'danger' : 'default'} />
             </div>
             <Card className="gap-2 p-5">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-muted-foreground">รายการเคลื่อนไหว</h3>
+                <h3 className="text-sm font-semibold text-muted-foreground">{t('mx.acstmt_movements')}</h3>
                 {d.reporting_currency && d.reporting_currency !== 'THB' && <Badge variant="secondary">{d.reporting_currency}</Badge>}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[560px] text-sm">
                   <thead>
                     <tr className="text-left text-muted-foreground">
-                      <th className="pb-2 font-medium">วันที่</th>
-                      <th className="pb-2 font-medium">ประเภท</th>
-                      <th className="pb-2 font-medium">เอกสาร</th>
+                      <th className="pb-2 font-medium">{t('mx.acstmt_col_date')}</th>
+                      <th className="pb-2 font-medium">{t('mx.acstmt_col_type')}</th>
+                      <th className="pb-2 font-medium">{t('mx.acstmt_col_doc')}</th>
                       <th className="pb-2 text-right font-medium">{chargeLabel}</th>
                       <th className="pb-2 text-right font-medium">{payLabel}</th>
-                      <th className="pb-2 text-right font-medium">คงเหลือ</th>
+                      <th className="pb-2 text-right font-medium">{t('mx.acstmt_col_balance')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr className="border-t text-muted-foreground">
-                      <td className="py-1.5" colSpan={5}>ยอดยกมา (opening)</td>
+                      <td className="py-1.5" colSpan={5}>{t('mx.acstmt_opening_row')}</td>
                       <td className="py-1.5 text-right tabular">{baht(d.opening_balance)}</td>
                     </tr>
                     {d.lines.map((l, i) => (
                       <tr key={`${l.ref}-${i}`} className="border-t">
                         <td className="py-1.5 tabular">{thaiDate(l.date)}</td>
                         <td className="py-1.5">
-                          <Badge variant={l.payment > 0 ? 'success' : 'secondary'}>{TYPE_TH[l.type] ?? l.type}</Badge>
+                          <Badge variant={l.payment > 0 ? 'success' : 'secondary'}>{typeLabel(l.type)}</Badge>
                         </td>
                         <td className="py-1.5 tabular">{l.ref}</td>
                         <td className="py-1.5 text-right tabular">{l.charge ? baht(l.charge) : '—'}</td>
@@ -145,11 +148,11 @@ export function AccountStatement({
                     ))}
                     {d.lines.length === 0 && (
                       <tr className="border-t">
-                        <td colSpan={6} className="py-4 text-center text-muted-foreground">ไม่มีรายการในช่วงเวลานี้</td>
+                        <td colSpan={6} className="py-4 text-center text-muted-foreground">{t('mx.acstmt_no_lines')}</td>
                       </tr>
                     )}
                     <tr className="border-t-2 font-semibold">
-                      <td className="py-1.5" colSpan={3}>ยอดคงเหลือปลายงวด (closing)</td>
+                      <td className="py-1.5" colSpan={3}>{t('mx.acstmt_closing_row')}</td>
                       <td className="py-1.5 text-right tabular">{baht(d.total_charges)}</td>
                       <td className="py-1.5 text-right tabular">{baht(d.total_payments)}</td>
                       <td className="py-1.5 text-right tabular">{baht(d.closing_balance)}</td>

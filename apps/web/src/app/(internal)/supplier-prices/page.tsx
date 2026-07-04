@@ -171,7 +171,7 @@ export default function SupplierPricesPage() {
       <Sheet open={historyRow != null} onOpenChange={(o) => { if (!o) setHistoryRow(null); }}>
         <SheetContent className="w-[560px] sm:max-w-[560px]">
           <SheetHeader>
-            <SheetTitle>{t('iv.spr_history_title', { item: historyRow?.item_description ?? historyRow?.item_id, vendor: historyRow?.vendor_name ?? `Vendor #${historyRow?.vendor_id}` })}</SheetTitle>
+            <SheetTitle>{t('iv.spr_history_title', { item: historyRow?.item_description ?? historyRow?.item_id ?? '', vendor: historyRow?.vendor_name ?? `Vendor #${historyRow?.vendor_id}` })}</SheetTitle>
           </SheetHeader>
           <div className="mt-4">
             {hq.isLoading && <p className="text-sm text-muted-foreground">{t('dash.loading')}</p>}

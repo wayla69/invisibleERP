@@ -83,7 +83,7 @@ function ScanTab() {
   });
   const auto = useMutation({
     mutationFn: () => { const b = body(); return api<Intake>(`${b.url}/auto`, { method: 'POST', body: JSON.stringify(b.payload) }); },
-    onSuccess: (r) => done(r, r.auto_posted ? t('iv.ap_bill_posted_matched', { txn: r.txn_no }) : t('iv.ap_not_posted_review')),
+    onSuccess: (r) => done(r, r.auto_posted ? t('iv.ap_bill_posted_matched', { txn: r.txn_no ?? '' }) : t('iv.ap_not_posted_review')),
     onError: (e) => notifyError((e as Error).message),
   });
   const pickFile = (f: File | undefined) => {
@@ -139,12 +139,12 @@ function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r:
 
   const mapPo = useMutation({
     mutationFn: (po: string) => api<Intake>(`/api/procurement/ap-intake/${encodeURIComponent(r.intake_no)}/map`, { method: 'PUT', body: JSON.stringify({ po_no: po }) }),
-    onSuccess: (x) => { refresh(x); notifySuccess(t('iv.ap_matched_po', { po: x.po_no })); },
+    onSuccess: (x) => { refresh(x); notifySuccess(t('iv.ap_matched_po', { po: x.po_no ?? '' })); },
     onError: (e) => notifyError((e as Error).message),
   });
   const post = useMutation({
     mutationFn: () => api<Intake>(`/api/procurement/ap-intake/${encodeURIComponent(r.intake_no)}/post`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (x) => { refresh(x); notifySuccess(t('iv.ap_bill_posted', { txn: x.txn_no })); },
+    onSuccess: (x) => { refresh(x); notifySuccess(t('iv.ap_bill_posted', { txn: x.txn_no ?? '' })); },
     onError: (e) => notifyError((e as Error).message),
   });
 

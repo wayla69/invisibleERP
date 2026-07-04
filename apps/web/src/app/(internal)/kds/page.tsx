@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChefHat, Smartphone, Utensils, Wifi, WifiOff } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { useRealtime } from '@/hooks/use-realtime';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
@@ -15,9 +16,9 @@ type KdsItem = { item_id: number; order_no: string; table_label: string | null; 
 type Station = { station_id: number; station_code: string; station_name: string; items: KdsItem[] };
 
 const NEXT: Record<string, { action: string; label: string }> = {
-  queued: { action: 'start', label: 'เริ่มทำ' },
-  preparing: { action: 'ready', label: 'เสร็จแล้ว' },
-  ready: { action: 'serve', label: 'เสิร์ฟแล้ว' },
+  queued: { action: 'start', label: 'mx.kds_start' },
+  preparing: { action: 'ready', label: 'mx.kds_ready' },
+  ready: { action: 'serve', label: 'mx.kds_serve' },
 };
 
 // Urgency by elapsed vs prep time → semantic token classes (high contrast for kitchen).
@@ -29,6 +30,7 @@ const URGENCY = {
 } satisfies Record<string, Urgency>;
 
 export default function KdsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   // Live via SSE: another terminal advancing an item refreshes this screen instantly. Polling stays as a
   // 15s fallback for when the stream is down (vs 3s before — the realtime push carries the load now).
@@ -44,18 +46,18 @@ export default function KdsPage() {
   return (
     <div>
       <PageHeader
-        title="จอครัว (KDS)"
-        description="อัปเดตสดทุกเครื่องพร้อมกัน · แตะการ์ดเพื่อเปลี่ยนสถานะ"
+        title={t('mx.kds_title')}
+        description={t('mx.kds_desc')}
         actions={
           <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
-            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? 'เรียลไทม์' : 'กำลังเชื่อมต่อ…'}
+            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? t('mx.kds_realtime') : t('mx.kds_connecting')}
           </Badge>
         }
       />
       <StateView q={feed}>
         {feed.data && (
           <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-            {feed.data.stations.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีออเดอร์เข้าครัว</p>}
+            {feed.data.stations.length === 0 && <p className="text-sm text-muted-foreground">{t('mx.kds_no_orders')}</p>}
             {feed.data.stations.map((st) => (
               <Card key={st.station_id} className="gap-3 p-3">
                 <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
@@ -74,11 +76,11 @@ export default function KdsPage() {
                           <span className={cn('text-base font-bold tabular', u.text)}>{it.elapsed_min}′</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
-                          <div className="text-xs text-muted-foreground">{it.table_label ? `โต๊ะ ${it.table_label}` : 'กลับบ้าน'} · {it.order_no}</div>
+                          <div className="text-xs text-muted-foreground">{it.table_label ? t('mx.kds_table', { label: it.table_label }) : t('mx.kds_takeaway')} · {it.order_no}</div>
                           <div className="flex gap-1">
-                            {(it.course ?? 1) > 1 && <Badge variant="outline" className="px-1.5 text-[10px]">คอร์ส {it.course}</Badge>}
-                            {it.is_buffet && <Badge variant="secondary" className="gap-0.5 px-1.5 text-[10px]"><Utensils className="size-2.5" /> บุฟเฟต์</Badge>}
-                            {it.from_diner && <Badge variant="outline" className="gap-0.5 px-1.5 text-[10px]"><Smartphone className="size-2.5" /> ลูกค้าสั่ง</Badge>}
+                            {(it.course ?? 1) > 1 && <Badge variant="outline" className="px-1.5 text-[10px]">{t('mx.kds_course', { course: it.course ?? 1 })}</Badge>}
+                            {it.is_buffet && <Badge variant="secondary" className="gap-0.5 px-1.5 text-[10px]"><Utensils className="size-2.5" /> {t('mx.kds_buffet')}</Badge>}
+                            {it.from_diner && <Badge variant="outline" className="gap-0.5 px-1.5 text-[10px]"><Smartphone className="size-2.5" /> {t('mx.kds_diner_order')}</Badge>}
                           </div>
                         </div>
                         {(it.modifiers?.length > 0 || it.notes) && (
@@ -88,13 +90,13 @@ export default function KdsPage() {
                         )}
                         {nxt && (
                           <Button className="mt-1.5 w-full" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: nxt.action })}>
-                            {nxt.label}
+                            {t(nxt.label)}
                           </Button>
                         )}
                       </div>
                     );
                   })}
-                  {st.items.length === 0 && <span className="text-sm text-muted-foreground">— ว่าง —</span>}
+                  {st.items.length === 0 && <span className="text-sm text-muted-foreground">{t('mx.kds_empty_station')}</span>}
                 </div>
               </Card>
             ))}
