@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 
 const ROLES = [
@@ -91,7 +92,7 @@ export default function AdminUsersPage() {
         <h3 className="text-base font-semibold">{t('st.usr.create_account')}</h3>
         <div className="grid gap-2 sm:grid-cols-4">
           <div className="grid gap-1.5"><Label>Username</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>Password</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>Password</Label><PasswordInput value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>Role</Label><select className={selectCls} value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
           <div className="grid gap-1.5"><Label>{t('st.usr.company_optional')}</Label><Input value={f.customer_name} onChange={(e) => setF({ ...f, customer_name: e.target.value })} placeholder="tenant code" /></div>
         </div>

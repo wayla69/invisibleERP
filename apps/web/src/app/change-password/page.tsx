@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { api, hasSession, logout } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -58,15 +58,15 @@ export default function ChangePasswordPage() {
         <form onSubmit={onSubmit} className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="current">รหัสผ่านปัจจุบัน</Label>
-            <Input id="current" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
+            <PasswordInput id="current" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="next">รหัสผ่านใหม่</Label>
-            <Input id="next" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" minLength={8} required />
+            <PasswordInput id="next" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" minLength={8} required />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="confirm">ยืนยันรหัสผ่านใหม่</Label>
-            <Input id="confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} required />
+            <PasswordInput id="confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} required />
           </div>
           {error && (
             <Alert variant="destructive">

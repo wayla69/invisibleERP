@@ -11,6 +11,7 @@ import { Msg } from '@/components/tabs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 
 export default function MyUsersPage() {
@@ -37,7 +38,7 @@ export default function MyUsersPage() {
         <h3 className="text-base font-semibold">เพิ่มพนักงาน</h3>
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="grid gap-1.5"><Label>Username</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>Password</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>Password</Label><PasswordInput value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
           <div className="flex items-end"><Button disabled={!f.username || f.password.length < 6 || create.isPending} onClick={() => create.mutate()}><UserPlus className="size-4" /> สร้างบัญชี</Button></div>
         </div>
         <Msg ok={msg.startsWith('✅')}>{msg}</Msg>

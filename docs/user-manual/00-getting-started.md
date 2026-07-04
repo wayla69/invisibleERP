@@ -15,7 +15,10 @@ finding your way around, and logging out.
 1. Open your web browser and go to your organisation's Invisible ERP address.
    You will land on the **Sign in** (**เข้าสู่ระบบ**) page.
 2. In **Username** (**ชื่อผู้ใช้**), type the username your administrator gave you.
-3. In **Password** (**รหัสผ่าน**), type your password.
+3. In **Password** (**รหัสผ่าน**), type your password. To check what you typed, click
+   the **eye icon** (👁) at the right of the field to reveal it (**แสดงรหัสผ่าน**); click
+   again to hide it. The same show/hide toggle appears on every password field (sign-up,
+   change-password, and when an administrator sets a user's password).
 4. Click **Sign in** (**เข้าสู่ระบบ**).
 
 **Expected result:** You are taken to your home dashboard. Staff go to
