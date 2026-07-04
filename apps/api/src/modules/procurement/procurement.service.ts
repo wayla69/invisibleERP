@@ -1,20 +1,28 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, invBalances } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, invBalances, projects } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
 import { CostingService } from '../costing/costing.service';
 import { WebhookService } from '../platform/webhook.service';
 import { LineNotifyService } from '../messaging/line-notify.service';
+import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const n = (v: unknown) => Number(v ?? 0);
 
-export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string }[]; remarks?: string; priority?: string; amount?: number }
-export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean }[] }
+// project_code / boq_line_id (M0, docs/32) — optionally raise a requisition/PO against a project's BoQ so
+// material spend is dimensioned to the project. Nullable throughout → non-project buys are unaffected.
+export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string; boq_line_id?: number }[]; remarks?: string; priority?: string; amount?: number; project_code?: string }
+export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; project_code?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean; boq_line_id?: number }[];
+  // M2 (docs/32) — internal flags set by the PMR auto-draft path (not exposed on the public PO create form):
+  // `draft` opens the PO as Draft (not Pending) and skips the approval workflow so procurement reviews it
+  // before committing; `authorized_over_budget` lets the BoQ-line reservation exceed the budget (the PMR
+  // approval IS the authorisation to overrun). project_id is passed through directly when known.
+  draft?: boolean; authorized_over_budget?: boolean; project_id?: number }
 export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
 export interface UpsertSupplierPriceDto { vendor_id: number; item_id: string; item_description?: string; uom?: string; currency?: string; unit_price: number; min_qty?: number; effective_from: string; effective_to?: string; notes?: string }
 
@@ -29,6 +37,7 @@ export class ProcurementService {
     @Optional() private readonly costing?: CostingService, // Phase 17A — inventory costing (opt-in per item)
     @Optional() private readonly webhooks?: WebhookService, // Phase 8 — outbound webhook fan-out (best-effort)
     @Optional() private readonly lineNotify?: LineNotifyService, // D2 — close-the-loop LINE pushes to the PR requester
+    @Optional() private readonly commitments?: CommitmentsService, // M1 (PROJ-12) — BoQ-line budget encumbrance
   ) {}
 
   // D2 — best-effort LINE push to the requester(s) of every PR linked to a PO (pr_items.po_no), closing
@@ -49,19 +58,30 @@ export class ProcurementService {
     } catch { /* best-effort — a push failure never blocks buying/receiving */ }
   }
 
+  // Resolve a project_code to its id (M0, docs/32). Unknown code → 404 so a typo can't silently drop the
+  // project dimension. Returns null when no code is supplied (a non-project buy).
+  private async resolveProjectId(code?: string): Promise<number | null> {
+    const c = code?.trim();
+    if (!c) return null;
+    const [p] = await this.db.select({ id: projects.id }).from(projects).where(eq(projects.projectCode, c)).limit(1);
+    if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${c} not found`, messageTh: 'ไม่พบโครงการ' });
+    return Number(p.id);
+  }
+
   // ── PR ──────────────────────────────────────────────────────────────
   async createPr(dto: CreatePrDto, user: JwtUser) {
     const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการ' });
+    const projectId = await this.resolveProjectId(dto.project_code); // M0 — project dimension (nullable)
     const prNo = await this.docNo.nextDaily('PR');
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(purchaseRequests).values({
-        prNo, prDate: ymd(), requestedBy: user.username, status: 'Pending', remarks: dto.remarks ?? null, priority: dto.priority ?? 'Normal',
+        prNo, prDate: ymd(), requestedBy: user.username, status: 'Pending', remarks: dto.remarks ?? null, priority: dto.priority ?? 'Normal', projectId,
       }).returning({ id: purchaseRequests.id });
       await tx.insert(prItems).values(dto.items.map((it) => ({
         prId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null,
         requestQty: String(n(it.request_qty)), uom: it.uom ?? null, requiredDate: it.required_date ?? null,
-        reason: it.reason ?? null, status: 'Open',
+        reason: it.reason ?? null, status: 'Open', boqLineId: it.boq_line_id ?? null,
       })));
     });
     await this.statusLog.log('PR', prNo, '', 'Pending', user.username);
@@ -468,25 +488,42 @@ export class ProcurementService {
       vendorName = v?.name ?? null;
     }
     await this.assertSupplierAllowed(vendorId, vendorName); // Phase 16 — blocklisted/unapproved vendor → 422
+    // M0/M2 — project dimension (nullable). project_id may be passed directly (PMR auto-draft) or resolved from a code.
+    const projectId = dto.project_id ?? await this.resolveProjectId(dto.project_code);
+    const isDraft = dto.draft === true; // M2 — PMR auto-draft opens as Draft (skips the approval workflow)
     const total = dto.items.reduce((a, it) => a + n(it.order_qty) * n(it.unit_price), 0);
     const poNo = await this.docNo.nextDaily('PO');
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(purchaseOrders).values({
-        poNo, poDate: ymd(), vendorId, vendorName, status: 'Pending', totalAmount: String(total),
+        poNo, poDate: ymd(), vendorId, vendorName, status: isDraft ? 'Draft' : 'Pending', totalAmount: String(total),
         createdBy: user.username, expectedDate: dto.expected_date ?? null, remarks: dto.remarks ?? null,
-        currency: dto.currency ?? 'THB', fxRate: String(dto.fx_rate ?? 1),
+        currency: dto.currency ?? 'THB', fxRate: String(dto.fx_rate ?? 1), projectId,
       }).returning({ id: purchaseOrders.id });
       await tx.insert(poItems).values(dto.items.map((it) => ({
         poId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null,
         orderQty: String(n(it.order_qty)), unitPrice: String(n(it.unit_price)), uom: it.uom ?? null,
         amount: String(n(it.order_qty) * n(it.unit_price)), receivedQty: '0', isCapital: it.is_capital === true, status: 'Open',
+        projectId, boqLineId: it.boq_line_id ?? null,
       })));
+      // M1 (PROJ-12) — a project PO line tagged to a BoQ line ENCUMBERS that line's budget. reserve() locks the
+      // BoQ line (FOR UPDATE) and throws BUDGET_EXCEEDED if the line's open+consumed commitments would exceed
+      // its budget — inside this tx, so an over-budget line rolls the whole PO back (nothing is created).
+      if (this.commitments && projectId != null) {
+        for (const it of dto.items) {
+          if (it.boq_line_id == null) continue;
+          await this.commitments.reserve(tx, {
+            projectId, boqLineId: it.boq_line_id, amount: n(it.order_qty) * n(it.unit_price), qty: n(it.order_qty),
+            sourceDocType: 'PO', sourceDocNo: poNo, createdBy: user.username, tenantId: user.tenantId ?? null,
+            allowOver: dto.authorized_over_budget === true, // M2 — an approved over-budget PMR authorises the overage
+          });
+        }
+      }
     });
-    await this.statusLog.log('PO', poNo, '', 'Pending', user.username);
-    // route into the approval engine (no active PO definition → autoApproved, legacy passthrough). The vendor
-    // is supplied as dimension context so a workflow can route e.g. a specific vendor to a special approver.
-    await this.workflow?.start({ docType: 'PO', docNo: poNo, amount: total, createdBy: user.username, tenantId: user.tenantId ?? null, context: { vendor: vendorName ?? '' } });
-    return { po_no: poNo, status: 'Pending', total_amount: total };
+    // A Draft PO (PMR auto-draft) is not yet committed — it does NOT enter the approval workflow; procurement
+    // reviews and submits it. A normal PO opens Pending and routes into the approval engine.
+    await this.statusLog.log('PO', poNo, '', isDraft ? 'Draft' : 'Pending', user.username);
+    if (!isDraft) await this.workflow?.start({ docType: 'PO', docNo: poNo, amount: total, createdBy: user.username, tenantId: user.tenantId ?? null, context: { vendor: vendorName ?? '' } });
+    return { po_no: poNo, status: isDraft ? 'Draft' : 'Pending', total_amount: total };
   }
 
   async approvePo(poNo: string, approve: boolean, reason: string | undefined, user: JwtUser) {
@@ -536,6 +573,8 @@ export class ProcurementService {
     if (!reason) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Cancel reason required', messageTh: 'ต้องระบุเหตุผล' });
     await db.update(purchaseOrders).set({ status: 'Cancelled', remarks: reason }).where(eq(purchaseOrders.id, po.id));
     await this.statusLog.log('PO', poNo, po.status ?? '', 'Cancelled', user.username, reason);
+    // M1 (PROJ-12) — a cancelled PO releases the BoQ-line budget it encumbered (frees it for other draws).
+    if (this.commitments) await this.commitments.release(db, 'PO', poNo);
     return { po_no: poNo, status: 'Cancelled' };
   }
 
@@ -562,7 +601,7 @@ export class ProcurementService {
     await db.transaction(async (tx: any) => {
       const [gh] = await tx.insert(goodsReceipts).values({
         grNo, grDate: today, poNo: dto.po_no, vendorId: po.vendorId, vendorName: po.vendorName, receivedBy: user.username, remarks: dto.remarks ?? null,
-        currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000',
+        currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000', projectId: po.projectId ?? null, // M0 — inherit the PO's project dimension
       }).returning({ id: goodsReceipts.id });
 
       for (const it of lines) {
@@ -610,6 +649,9 @@ export class ProcurementService {
     const fullyReceived = allItems.every((i: any) => n(i.receivedQty) >= n(i.orderQty));
     const newStatus = fullyReceived ? 'Closed' : 'Received';
     await db.update(purchaseOrders).set({ status: newStatus }).where(eq(purchaseOrders.id, po.id));
+    // M1 (PROJ-12) — once a project PO is fully received, its BoQ-line commitments become consumed (open →
+    // consumed; still counts against the budget — the spend is now actual, no longer just an open encumbrance).
+    if (this.commitments && fullyReceived) await this.commitments.consume(db, 'PO', dto.po_no);
     await this.statusLog.log('GR', grNo, '', 'Open', user.username);
     await this.statusLog.log('PO', dto.po_no, po.status ?? '', newStatus, user.username, `GR ${grNo}`);
 

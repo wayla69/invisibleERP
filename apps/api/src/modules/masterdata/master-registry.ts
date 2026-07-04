@@ -2,6 +2,7 @@ import { items, locations, bomMaster, vendors, priceList, promotions } from '../
 import { tenants } from '../../database/schema';
 import { fixedAssets } from '../../database/schema';
 import { menuItems } from '../../database/schema';
+import { itemCategories, taxCodes } from '../../database/schema';
 
 export type MdType = 'str' | 'num' | 'int' | 'bool' | 'date';
 export interface MdCol {
@@ -41,6 +42,38 @@ export const MASTER_REGISTRY: MdEntity[] = [
       C('Unit_Price', 'unitPrice', 'num'), C('Category', 'category'),
       C('Min_Stock', 'minStock', 'num'), C('Max_Stock', 'maxStock', 'num'),
       C('Lead_Time_Days', 'leadTimeDays', 'int'),
+      // Item-posting setup (docs/33) — optional account/tax profile overrides at the item level.
+      C('Category_ID', 'categoryId', 'int'), C('Revenue_Account', 'revenueAccount'),
+      C('COGS_Account', 'cogsAccount'), C('Inventory_Account', 'inventoryAccount'),
+      C('Valuation_Account', 'valuationAccount'), C('VAT_Code', 'vatCode'),
+      C('WHT_Income_Type', 'whtIncomeType'), C('Default_Location_ID', 'defaultLocationId'),
+    ],
+  },
+  {
+    // Item / product category master (docs/33) — default account-set + tax profile per item family.
+    key: 'item_categories', labelEn: 'Item Categories', labelTh: 'หมวดสินค้า',
+    table: itemCategories, tenantScoped: true, allowReplace: true,
+    required: ['Code'],
+    cols: [
+      C('Code', 'code'), C('Name', 'name'), C('Name_Th', 'nameTh'),
+      C('Revenue_Account', 'revenueAccount'), C('COGS_Account', 'cogsAccount'),
+      C('Inventory_Account', 'inventoryAccount'), C('Valuation_Account', 'valuationAccount'),
+      C('VAT_Code', 'vatCode'), C('WHT_Income_Type', 'whtIncomeType'),
+      C('Default_Location_ID', 'defaultLocationId'), C('Active', 'active', 'bool', { def: true }),
+    ],
+  },
+  {
+    // Tax-code master (docs/33) — VAT + WHT codes with rate + GL accounts.
+    key: 'tax_codes', labelEn: 'Tax Codes (VAT / WHT)', labelTh: 'รหัสภาษี (VAT / หัก ณ ที่จ่าย)',
+    table: taxCodes, tenantScoped: true, allowReplace: true,
+    required: ['Code'],
+    cols: [
+      C('Code', 'code'), C('Name', 'name'), C('Name_Th', 'nameTh'),
+      C('Kind', 'kind', 'str', { def: 'vat', enumVals: ['vat', 'wht'] }),
+      C('Rate', 'rate', 'num', { def: 0 }),
+      C('Output_Account', 'outputAccount'), C('Input_Account', 'inputAccount'),
+      C('WHT_Account', 'whtAccount'), C('WHT_Income_Type', 'whtIncomeType'),
+      C('Inclusive', 'inclusive', 'bool', { def: false }), C('Active', 'active', 'bool', { def: true }),
     ],
   },
   {
@@ -73,6 +106,8 @@ export const MASTER_REGISTRY: MdEntity[] = [
       C('Location_ID', 'locationId'), C('Location_Name', 'locationName'), C('Zone', 'zone'),
       C('Type', 'type'), C('Capacity', 'capacity', 'num'), C('Temperature', 'temperature'),
       C('Active', 'active', 'bool'), C('Notes', 'notes'),
+      // Warehouse posting-account defaults (docs/33 PR5).
+      C('Inventory_Account', 'inventoryAccount'), C('Adjustment_Account', 'adjustmentAccount'),
     ],
   },
   {

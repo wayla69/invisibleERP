@@ -40,6 +40,9 @@ export const projects = pgTable(
     estimatedCost: numeric('estimated_cost', { precision: 16, scale: 2 }).default('0'), // total estimated cost (EAC) for POC
     recognizedRevenue: numeric('recognized_revenue', { precision: 16, scale: 2 }).default('0'), // revenue recognised to date (POC)
     budgetAmount: numeric('budget_amount', { precision: 16, scale: 2 }).default('0'),
+    // FU1 (docs/32) — over-budget tolerance: a material draw may exceed a BoQ line by up to this % of the line
+    // budget before it needs the over-budget approval (0 = strict, every overage needs sign-off).
+    budgetTolerancePct: numeric('budget_tolerance_pct', { precision: 6, scale: 3 }).notNull().default('0'),
     contractAmount: numeric('contract_amount', { precision: 16, scale: 2 }).default('0'),
     status: text('status').notNull().default('Open'),         // Open | Active | Closed
     costToDate: numeric('cost_to_date', { precision: 16, scale: 2 }).default('0'),
@@ -311,6 +314,133 @@ export const projectHealthSnapshots = pgTable(
   },
   (t) => ({ byProject: index('idx_phs_project').on(t.projectId) }),
 );
+
+// Bill of Quantities (BoQ) — M0, docs/32. The project's measured-works requirement & budget baseline for
+// construction/contractor work. A BoQ header owns a set of rate-built lines (qty × rate = line budget); the
+// sum of line budgets is the project's material/works budget. Maker-checker: a draft is authored, an
+// independent approver (SoD: approver ≠ author) approves it — on approval the project's budget_amount is
+// synced to the sum of lines (the enforceable baseline that M1's commitment ledger draws against). A locked
+// BoQ is frozen (no further line edits); re-measurement records the actual measured qty vs the budget qty.
+export const projectBoq = pgTable(
+  'project_boq',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    boqNo: text('boq_no').notNull(),                          // business key (BOQ-YYYYMMDD-NNN)
+    version: integer('version').notNull().default(1),
+    title: text('title'),
+    status: text('status').notNull().default('draft'),        // draft | approved | locked
+    budgetTotal: numeric('budget_total', { precision: 16, scale: 2 }).notNull().default('0'), // Σ line budgets (snapshot on approve)
+    approvedBy: text('approved_by'),                          // checker — must differ from created_by (SoD)
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_boq_project').on(t.projectId), byTenant: index('idx_boq_tenant').on(t.tenantId, t.projectId) }),
+);
+
+// A single BoQ line — a measured requirement (material/labor/subcon/other). budget_amount = budget_qty × rate.
+// A material line optionally references the item master (item_no) so a requisition/PO can draw against it, and
+// a WBS task (task_id/wbs_code) so schedule and cost reconcile. remeasured_qty is the actual measured qty (vs
+// the budgeted qty) captured after works are done — the basis for re-measurement variance.
+export const projectBoqLines = pgTable(
+  'project_boq_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    boqId: bigint('boq_id', { mode: 'number' }).notNull().references(() => projectBoq.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id), // denormalized for line-scoped queries
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    lineNo: integer('line_no').notNull().default(0),
+    category: text('category').notNull().default('material'), // material | labor | subcon | other
+    itemNo: text('item_no'),                                   // → items.item_id (material lines; nullable)
+    taskId: bigint('task_id', { mode: 'number' }),            // → project_tasks.id (nullable)
+    wbsCode: text('wbs_code'),
+    description: text('description'),
+    uom: text('uom'),
+    budgetQty: numeric('budget_qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    rate: numeric('rate', { precision: 16, scale: 2 }).notNull().default('0'),
+    budgetAmount: numeric('budget_amount', { precision: 16, scale: 2 }).notNull().default('0'), // = budget_qty × rate
+    remeasuredQty: numeric('remeasured_qty', { precision: 18, scale: 4 }),                       // actual measured qty (nullable)
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byBoq: index('idx_boq_line_boq').on(t.boqId), byProject: index('idx_boq_line_project').on(t.projectId), byTenant: index('idx_boq_line_tenant').on(t.tenantId, t.boqId) }),
+);
+export type ProjectBoq = typeof projectBoq.$inferSelect;
+export type ProjectBoqLine = typeof projectBoqLines.$inferSelect;
+
+// Commitment / encumbrance ledger (M1, docs/32, PROJ-12). Each row reserves part of a BoQ line's budget for a
+// source document (a project PO today; a PMR/advance/reimbursement in later phases). `open` + `consumed`
+// commitments both count against the line budget; `released` (e.g. a cancelled PO) frees it. The remaining a
+// new draw may take is `line.budget_amount − Σ(open+consumed)` — checked atomically under a row-lock on the
+// BoQ line so two concurrent draws cannot jointly overrun. This is what makes the material budget *enforced*
+// rather than merely observed.
+export const projectCommitments = pgTable(
+  'project_commitments',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    boqLineId: bigint('boq_line_id', { mode: 'number' }).notNull().references(() => projectBoqLines.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    sourceDocType: text('source_doc_type').notNull(),        // PO | PMR | PR | ADV | REIMB
+    sourceDocNo: text('source_doc_no').notNull(),
+    qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    amount: numeric('amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    status: text('status').notNull().default('open'),        // open | consumed | released
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byBoqLine: index('idx_commit_boq_line').on(t.boqLineId), byProject: index('idx_commit_project').on(t.projectId), bySource: index('idx_commit_source').on(t.sourceDocType, t.sourceDocNo), byTenant: index('idx_commit_tenant').on(t.tenantId, t.boqLineId) }),
+);
+export type ProjectCommitment = typeof projectCommitments.$inferSelect;
+
+// Project Material Requisition (PMR) — M2, docs/32, PROJ-13. The single request document by which site staff
+// draw material against a project's BoQ. On submit the system checks each line against its BoQ-line remaining
+// budget: WITHIN budget → routed to procurement (a project-tagged PR is raised); OVER budget → parked
+// `pending` and sent to an authoriser (maker-checker + a one-tap LINE approval card). On approval the
+// over-budget draw is authorised and a project-tagged PO is auto-drafted (status Draft) for procurement to buy.
+export const projectMaterialRequisitions = pgTable(
+  'project_material_requisitions',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    pmrNo: text('pmr_no').notNull(),                          // PMR-YYYYMMDD-NNN
+    status: text('status').notNull().default('pending'),      // routed | pending | approved | rejected
+    route: text('route'),                                     // pr (within budget) | po (over budget → draft PO)
+    overBudget: boolean('over_budget').notNull().default(false),
+    estCost: numeric('est_cost', { precision: 16, scale: 2 }).notNull().default('0'), // total estimated cost
+    overAmount: numeric('over_amount', { precision: 16, scale: 2 }).notNull().default('0'), // Σ per-line overage
+    linkedDocNo: text('linked_doc_no'),                       // the raised PR / drafted PO number
+    requestedBy: text('requested_by'),
+    approvedBy: text('approved_by'),                          // checker — must differ from requested_by (SoD)
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectionReason: text('rejection_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_pmr_project').on(t.projectId), byTenant: index('idx_pmr_tenant').on(t.tenantId, t.status) }),
+);
+
+export const pmrLines = pgTable(
+  'pmr_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    pmrId: bigint('pmr_id', { mode: 'number' }).notNull().references(() => projectMaterialRequisitions.id),
+    boqLineId: bigint('boq_line_id', { mode: 'number' }).notNull().references(() => projectBoqLines.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    itemNo: text('item_no'),
+    qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    unitCost: numeric('unit_cost', { precision: 16, scale: 2 }).notNull().default('0'),
+    estCost: numeric('est_cost', { precision: 16, scale: 2 }).notNull().default('0'), // qty × unit_cost
+    remaining: numeric('remaining', { precision: 16, scale: 2 }).notNull().default('0'), // BoQ-line remaining at submit
+    overBudget: boolean('over_budget').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byPmr: index('idx_pmr_line_pmr').on(t.pmrId), byTenant: index('idx_pmr_line_tenant').on(t.tenantId, t.pmrId) }),
+);
+export type ProjectMaterialRequisition = typeof projectMaterialRequisitions.$inferSelect;
+export type PmrLine = typeof pmrLines.$inferSelect;
 
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;

@@ -1653,6 +1653,69 @@
       "when": 2023820000062,
       "tag": "0235_tenant_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 236,
+      "version": "7",
+      "when": 2023820000063,
+      "tag": "0236_project_boq",
+      "breakpoints": true
+    },
+    {
+      "idx": 237,
+      "version": "7",
+      "when": 2023820000064,
+      "tag": "0237_project_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 238,
+      "version": "7",
+      "when": 2023820000065,
+      "tag": "0238_tenant_idx_boq_commit",
+      "breakpoints": true
+    },
+    {
+      "idx": 239,
+      "version": "7",
+      "when": 2023820000066,
+      "tag": "0239_project_material_requisitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 240,
+      "version": "7",
+      "when": 2023820000067,
+      "tag": "0240_stock_reservations",
+      "breakpoints": true
+    },
+    {
+      "idx": 241,
+      "version": "7",
+      "when": 2023820000068,
+      "tag": "0241_project_site_cash",
+      "breakpoints": true
+    },
+    {
+      "idx": 242,
+      "version": "7",
+      "when": 2023820000069,
+      "tag": "0242_budget_tolerance_sitecash_boq",
+      "breakpoints": true
+    },
+    {
+      "idx": 243,
+      "version": "7",
+      "when": 2023820000070,
+      "tag": "0243_item_posting_setup",
+      "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "7",
+      "when": 2023820000071,
+      "tag": "0244_location_posting_accounts",
+      "breakpoints": true
     }
   ]
 }

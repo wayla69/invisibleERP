@@ -120,6 +120,214 @@ async function main() {
   ok('Budget overrun: total 6000 vs budget 5000 → over_budget, variance −1000, used 120%',
     bg.json.over_budget === true && near(bg.json.budget_variance, -1000) && near(bg.json.budget_used_pct, 120), JSON.stringify({ ob: bg.json.over_budget, v: bg.json.budget_variance, u: bg.json.budget_used_pct }));
 
+  // ── 9b. Bill of Quantities (BoQ) — M0 (docs/32): rate-built lines → maker-checker approve → budget baseline ──
+  const boqCreate = await inj('POST', '/api/projects/PRJ-A/boq', admin, {
+    title: 'BoQ งานติดตั้ง', lines: [
+      { category: 'material', item_no: 'CEMENT', description: 'ปูนซีเมนต์', uom: 'ถุง', budget_qty: 100, rate: 150 }, // 15000
+      { category: 'labor', description: 'ค่าแรงติดตั้ง', budget_qty: 20, rate: 500 },                                 // 10000
+    ],
+  });
+  ok('BoQ create → draft, 2 lines, budget_total 25000',
+    boqCreate.status < 300 && boqCreate.json.boq?.status === 'draft' && boqCreate.json.count === 2 && near(boqCreate.json.budget_total, 25000),
+    JSON.stringify({ s: boqCreate.status, st: boqCreate.json.boq?.status, t: boqCreate.json.budget_total }));
+  const boqId = boqCreate.json.boq?.id;
+  const matLineId = (boqCreate.json.lines ?? []).find((l: any) => l.item_no === 'CEMENT')?.id;
+
+  const boqAdd = await inj('POST', `/api/projects/boq/${boqId}/lines`, admin, { category: 'subcon', description: 'งานรับเหมาช่วง', budget_amount: 5000 });
+  ok('BoQ add line to draft → 3 lines, budget_total 30000', boqAdd.json.count === 3 && near(boqAdd.json.budget_total, 30000), JSON.stringify({ c: boqAdd.json.count, t: boqAdd.json.budget_total }));
+
+  const boqSelf = await inj('POST', `/api/projects/boq/${boqId}/approve`, admin); // author = admin
+  ok('BoQ self-approve by author → 400 SOD_SELF_APPROVAL', boqSelf.status === 400 && boqSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${boqSelf.status} ${boqSelf.json.error?.code}`);
+
+  const boqAppr = await inj('POST', `/api/projects/boq/${boqId}/approve`, mgr); // independent checker
+  ok('BoQ approve by independent checker → approved, project budget synced 30000',
+    boqAppr.status < 300 && boqAppr.json.boq?.status === 'approved' && near(boqAppr.json.budget_synced, 30000),
+    JSON.stringify({ s: boqAppr.status, st: boqAppr.json.boq?.status, sync: boqAppr.json.budget_synced }));
+  const boqProjGet = await inj('GET', '/api/projects/PRJ-A', admin);
+  ok('Project budget_amount reflects approved BoQ total (30000) + boq summary present',
+    near(boqProjGet.json.budget_amount, 30000) && boqProjGet.json.boq?.status === 'approved' && near(boqProjGet.json.boq?.budget_total, 30000),
+    JSON.stringify({ b: boqProjGet.json.budget_amount, boq: boqProjGet.json.boq?.budget_total }));
+
+  const boqAddLocked = await inj('POST', `/api/projects/boq/${boqId}/lines`, admin, { description: 'x', budget_amount: 1 });
+  ok('Add line to an approved BoQ → 400 BOQ_NOT_DRAFT', boqAddLocked.status === 400 && boqAddLocked.json.error?.code === 'BOQ_NOT_DRAFT', `${boqAddLocked.status} ${boqAddLocked.json.error?.code}`);
+
+  const boqRe = await inj('POST', `/api/projects/boq/lines/${matLineId}/remeasure`, admin, { remeasured_qty: 110 });
+  const reLine = (boqRe.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('Re-measure material line 100→110 → variance +10', boqRe.status < 300 && near(reLine?.remeasured_qty, 110) && near(reLine?.remeasure_variance_qty, 10), JSON.stringify({ rq: reLine?.remeasured_qty, v: reLine?.remeasure_variance_qty }));
+
+  const boqLock = await inj('POST', `/api/projects/boq/${boqId}/lock`, mgr);
+  ok('BoQ lock (approved→locked)', boqLock.status < 300 && boqLock.json.boq?.status === 'locked', JSON.stringify({ st: boqLock.json.boq?.status }));
+  const boqReLocked = await inj('POST', `/api/projects/boq/lines/${matLineId}/remeasure`, admin, { remeasured_qty: 120 });
+  ok('Re-measure a locked BoQ → 400 BOQ_LOCKED', boqReLocked.status === 400 && boqReLocked.json.error?.code === 'BOQ_LOCKED', `${boqReLocked.status} ${boqReLocked.json.error?.code}`);
+
+  // ── 9c. project-dimensioned procurement (M0): a PR tagged to a project + BoQ line persists the dimension ──
+  const prTagged = await inj('POST', '/api/procurement/prs', admin, {
+    project_code: 'PRJ-A', remarks: 'ขอวัสดุเข้าโครงการ',
+    items: [{ item_id: 'CEMENT', request_qty: 50, uom: 'ถุง', boq_line_id: matLineId }],
+  });
+  ok('PR raised against project + BoQ line → 2xx', prTagged.status < 300 && !!prTagged.json.pr_no, JSON.stringify({ s: prTagged.status, pr: prTagged.json.pr_no }));
+  const prRow = (await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prTagged.json.pr_no)))[0];
+  const prjRow = (await db.select().from(s.projects).where(eq(s.projects.projectCode, 'PRJ-A')))[0];
+  const prLineRow = prRow ? (await db.select().from(s.prItems).where(eq(s.prItems.prId, prRow.id)))[0] : null;
+  ok('PR carries project_id (PRJ-A) + line carries boq_line_id',
+    !!prRow && Number(prRow.projectId) === Number(prjRow?.id) && Number(prLineRow?.boqLineId) === Number(matLineId),
+    JSON.stringify({ prj: prRow?.projectId, boq: prLineRow?.boqLineId }));
+  const prBadProj = await inj('POST', '/api/procurement/prs', admin, { project_code: 'PRJ-NOPE', items: [{ item_id: 'X', request_qty: 1 }] });
+  ok('PR with unknown project_code → 404 PROJECT_NOT_FOUND', prBadProj.status === 404 && prBadProj.json.error?.code === 'PROJECT_NOT_FOUND', `${prBadProj.status} ${prBadProj.json.error?.code}`);
+
+  // ── 9d. Commitment ledger + budget enforcement (M1, PROJ-12): a project PO encumbers its BoQ line budget ──
+  // matLineId (CEMENT) budget = 100×150 = 15000; no commitments yet (the M0 PR does not reserve).
+  const po1 = await inj('POST', '/api/procurement/pos', admin, {
+    project_code: 'PRJ-A', vendor_name: 'ACME Supply',
+    items: [{ item_id: 'CEMENT', order_qty: 50, unit_price: 150, boq_line_id: matLineId }], // 7500
+  });
+  ok('Project PO within BoQ line budget → created (7500 of 15000)', po1.status < 300 && !!po1.json.po_no, JSON.stringify({ s: po1.status, po: po1.json.po_no }));
+  const boqAfterPo1 = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const ml1 = (boqAfterPo1.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('BoQ line shows committed 7500 / remaining 7500 after the PO', near(ml1?.committed, 7500) && near(ml1?.remaining, 7500), JSON.stringify({ c: ml1?.committed, r: ml1?.remaining }));
+
+  // a second PO that would push the line past its budget → BUDGET_EXCEEDED, and the PO is NOT created (atomic).
+  const poCountBefore = (await db.select().from(s.purchaseOrders)).length;
+  const po2 = await inj('POST', '/api/procurement/pos', admin, {
+    project_code: 'PRJ-A', vendor_name: 'ACME Supply',
+    items: [{ item_id: 'CEMENT', order_qty: 60, unit_price: 150, boq_line_id: matLineId }], // 9000 > 7500 remaining
+  });
+  ok('Over-budget project PO → 400 BUDGET_EXCEEDED', po2.status === 400 && po2.json.error?.code === 'BUDGET_EXCEEDED', `${po2.status} ${po2.json.error?.code}`);
+  const poCountAfter = (await db.select().from(s.purchaseOrders)).length;
+  ok('Rejected over-budget PO rolled back atomically (no PO row created)', poCountAfter === poCountBefore, JSON.stringify({ b: poCountBefore, a: poCountAfter }));
+
+  // a PO that exactly fills the remaining budget → created; line now fully committed.
+  const po3 = await inj('POST', '/api/procurement/pos', admin, {
+    project_code: 'PRJ-A', vendor_name: 'ACME Supply',
+    items: [{ item_id: 'CEMENT', order_qty: 50, unit_price: 150, boq_line_id: matLineId }], // 7500
+  });
+  ok('PO filling the remaining budget → created (line fully committed)', po3.status < 300 && !!po3.json.po_no, JSON.stringify({ s: po3.status }));
+  const boqFull = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const mlFull = (boqFull.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('BoQ line committed 15000 / remaining 0', near(mlFull?.committed, 15000) && near(mlFull?.remaining, 0), JSON.stringify({ c: mlFull?.committed, r: mlFull?.remaining }));
+
+  // cancelling PO1 releases its encumbrance → the line's remaining is restored.
+  const cancel1 = await inj('PATCH', `/api/procurement/pos/${po1.json.po_no}/cancel`, admin, { reason: 'ทดสอบคืนงบ' });
+  ok('Cancel PO1 → 2xx', cancel1.status < 300, JSON.stringify({ s: cancel1.status }));
+  const boqRel = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const mlRel = (boqRel.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('Cancelled PO releases budget → committed 7500 / remaining 7500 restored', near(mlRel?.committed, 7500) && near(mlRel?.remaining, 7500), JSON.stringify({ c: mlRel?.committed, r: mlRel?.remaining }));
+
+  const commits = await inj('GET', '/api/projects/PRJ-A/commitments', admin);
+  ok('Commitments ledger: open 7500 (PO3) + released 7500 (PO1) → committed 7500',
+    near(commits.json.summary?.open, 7500) && near(commits.json.summary?.released, 7500) && near(commits.json.summary?.committed, 7500),
+    JSON.stringify(commits.json.summary));
+
+  // ── 9e. Project Material Requisition (PMR) — M2 (PROJ-13): within-budget → PR; over-budget → LINE approval → Draft PO ──
+  // matLineId (CEMENT) budget 15000, committed 7500 (PO3), remaining 7500.
+  const pmrIn = await inj('POST', '/api/pmr', admin, { project_code: 'PRJ-A', items: [{ boq_line_id: matLineId, item_no: 'CEMENT', qty: 10, unit_cost: 100 }] }); // 1000 ≤ 7500
+  ok('PMR within budget → routed, project-tagged PR raised', pmrIn.status < 300 && pmrIn.json.status === 'routed' && pmrIn.json.over_budget === false && /^PR-/.test(pmrIn.json.linked_doc_no ?? ''), JSON.stringify({ s: pmrIn.status, st: pmrIn.json.status, doc: pmrIn.json.linked_doc_no }));
+
+  const pmrOver = await inj('POST', '/api/pmr', admin, { project_code: 'PRJ-A', items: [{ boq_line_id: matLineId, item_no: 'CEMENT', qty: 100, unit_cost: 100 }] }); // 10000 > 7500 remaining → over by 2500
+  const pmrNo = pmrOver.json.pmr_no;
+  ok('PMR over budget → pending, over_amount 2500, no PO yet', pmrOver.json.status === 'pending' && pmrOver.json.over_budget === true && near(pmrOver.json.over_amount, 2500) && !pmrOver.json.linked_doc_no, JSON.stringify({ st: pmrOver.json.status, over: pmrOver.json.over_amount }));
+
+  const acPmr = await inj('GET', '/api/projects/action-center', admin);
+  const pmrItem = (acPmr.json.items ?? []).find((i: any) => i.kind === 'pmr_over_budget' && i.ref === pmrNo);
+  ok('Action center surfaces pmr_over_budget (high) for the pending PMR', !!pmrItem && pmrItem.severity === 'high', JSON.stringify({ found: !!pmrItem, sev: pmrItem?.severity }));
+
+  const pmrSelf = await inj('POST', `/api/pmr/${pmrNo}/approve`, admin); // requester = admin
+  ok('PMR self-approve by requester → 400 SOD_SELF_APPROVAL', pmrSelf.status === 400 && pmrSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${pmrSelf.status} ${pmrSelf.json.error?.code}`);
+
+  const pmrAppr = await inj('POST', `/api/pmr/${pmrNo}/approve`, mgr); // independent authoriser
+  ok('PMR approve by authoriser → approved + Draft PO auto-drafted', pmrAppr.status < 300 && pmrAppr.json.status === 'approved' && /^PO-/.test(pmrAppr.json.linked_doc_no ?? ''), JSON.stringify({ s: pmrAppr.status, st: pmrAppr.json.status, doc: pmrAppr.json.linked_doc_no }));
+  const draftPo = (await db.select().from(s.purchaseOrders).where(eq(s.purchaseOrders.poNo, pmrAppr.json.linked_doc_no)))[0];
+  ok('Auto-drafted PO is Draft + project-tagged', draftPo?.status === 'Draft' && Number(draftPo?.projectId) === Number(prjRow?.id), JSON.stringify({ st: draftPo?.status, prj: draftPo?.projectId }));
+  const boqOver = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const mlOver = (boqOver.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('Authorised overage booked: BoQ line committed 17500 / remaining −2500', near(mlOver?.committed, 17500) && near(mlOver?.remaining, -2500), JSON.stringify({ c: mlOver?.committed, r: mlOver?.remaining }));
+  const acAfter = await inj('GET', '/api/projects/action-center', admin);
+  ok('Action center clears pmr_over_budget after approval', !(acAfter.json.items ?? []).some((i: any) => i.kind === 'pmr_over_budget' && i.ref === pmrNo), 'cleared');
+
+  // ── 9f. Stock reservation → issue-to-project (M3, INV-13): reserve on-hand stock, issue into project WIP ──
+  await db.insert(s.invBalances).values({ tenantId: hq, itemId: 'STEEL', itemDescription: 'เหล็ก', locationId: 'WH-MAIN', onHandQty: '100', avgCost: '50', totalValue: '5000', costingMethod: 'moving_avg' });
+  const avail0 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('Reservation available = on_hand 100, held 0, available 100', near(avail0.json.on_hand, 100) && near(avail0.json.available, 100), JSON.stringify(avail0.json));
+  const res1 = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 30, boq_line_id: matLineId });
+  ok('Reserve 30 to project → held, available_after 70', res1.status < 300 && res1.json.status === 'held' && near(res1.json.available_after, 70), JSON.stringify({ s: res1.status, aa: res1.json.available_after }));
+  const availHeld = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('Available reflects the hold: on_hand 100, held 30, available 70', near(availHeld.json.held, 30) && near(availHeld.json.available, 70), JSON.stringify(availHeld.json));
+  const resOver = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 80 }); // > 70 available
+  ok('Reserve beyond available → 400 INSUFFICIENT_STOCK', resOver.status === 400 && resOver.json.error?.code === 'INSUFFICIENT_STOCK', `${resOver.status} ${resOver.json.error?.code}`);
+
+  const bal = (tb: any, c: string) => (tb.json.rows ?? []).find((x: any) => x.account_code === c);
+  const tbBefore = await inj('GET', '/api/ledger/trial-balance', admin);
+  const wipBefore = Number(bal(tbBefore, '1260')?.balance ?? 0), invBefore = Number(bal(tbBefore, '1200')?.balance ?? 0);
+  const issue1 = await inj('POST', `/api/reservations/${res1.json.reservation_id}/issue`, admin);
+  ok('Issue reservation to project → consumed + WIP posting (value 1500)', issue1.status < 300 && issue1.json.status === 'consumed' && near(issue1.json.value, 1500), JSON.stringify({ s: issue1.status, v: issue1.json.value }));
+  const tbAfter = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('Issue-to-project GL: 1260 WIP +1500, 1200 Inventory −1500, TB balanced',
+    tbAfter.json.totals?.balanced === true && near(Number(bal(tbAfter, '1260')?.balance ?? 0) - wipBefore, 1500) && near(invBefore - Number(bal(tbAfter, '1200')?.balance ?? 0), 1500),
+    JSON.stringify({ bal: tbAfter.json.totals?.balanced, dWip: Number(bal(tbAfter, '1260')?.balance ?? 0) - wipBefore }));
+  const availPost = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('After issue: on_hand 70, available 70', near(availPost.json.on_hand, 70) && near(availPost.json.available, 70), JSON.stringify(availPost.json));
+  const res2 = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 20 });
+  const relRes = await inj('POST', `/api/reservations/${res2.json.reservation_id}/release`, admin);
+  ok('Release a held reservation → freed', relRes.status < 300 && relRes.json.status === 'released', JSON.stringify({ s: relRes.status }));
+  const availRel = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('Released reservation restores availability → available 70', near(availRel.json.available, 70), JSON.stringify(availRel.json));
+
+  // ── 9g. Project-linked advances & reimbursements (M4, PROJ-14): site cash managed on the project ──
+  const adv = await inj('POST', '/api/finance/advances', admin, { payee: 'ช่างสมชาย', amount: 2000, purpose: 'ค่าเดินทางหน้างาน', project_code: 'PRJ-A' });
+  ok('Issue project-tagged advance → 2xx + project_id set', adv.status < 300 && !!adv.json.advance_no && Number(adv.json.project_id) === Number(prjRow?.id), JSON.stringify({ s: adv.status, prj: adv.json.project_id }));
+  const projLines1 = await db.select().from(s.journalLines).where(eq(s.journalLines.projectId, Number(prjRow?.id)));
+  const advLine = projLines1.find((l: any) => l.accountCode === '1180');
+  ok('Advance GL: Dr 1180 line carries the project dimension', !!advLine && near(advLine.debit, 2000), JSON.stringify({ acct: '1180', dr: advLine?.debit }));
+  const stl = await inj('POST', `/api/finance/advances/${adv.json.advance_no}/settle`, admin, { settled_expense: 2000 });
+  ok('Settle advance → settled', stl.status < 300 && stl.json.status === 'settled', JSON.stringify({ s: stl.status }));
+  const projLines2 = await db.select().from(s.journalLines).where(eq(s.journalLines.projectId, Number(prjRow?.id)));
+  const expLine = projLines2.find((l: any) => l.accountCode === '5100');
+  ok('Settled spend GL: Dr 5100 expense line carries the project dimension', !!expLine && near(expLine.debit, 2000), JSON.stringify({ dr: expLine?.debit }));
+  const sc = await inj('GET', '/api/projects/PRJ-A/site-cash', admin);
+  ok('Project site-cash rollup: advance listed, advances total 2000', (sc.json.advances ?? []).some((a: any) => a.advance_no === adv.json.advance_no) && near(sc.json.totals?.advances, 2000), JSON.stringify({ n: sc.json.advances?.length, t: sc.json.totals?.advances }));
+  const advBad = await inj('POST', '/api/finance/advances', admin, { payee: 'x', amount: 100, project_code: 'PRJ-NOPE' });
+  ok('Advance with unknown project_code → 404 PROJECT_NOT_FOUND', advBad.status === 404 && advBad.json.error?.code === 'PROJECT_NOT_FOUND', `${advBad.status} ${advBad.json.error?.code}`);
+
+  // ── 9h. FU1 — over-budget TOLERANCE + site cash CONSUMES BoQ budget ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-TOL', name: 'งานเผื่องบ', billing_type: 'TM', budget_tolerance_pct: 10 });
+  const tboq = await inj('POST', '/api/projects/PRJ-TOL/boq', admin, { lines: [
+    { category: 'material', item_no: 'SAND', description: 'ทราย', budget_qty: 100, rate: 100 }, // 10000
+    { category: 'labor', description: 'ค่าแรง', budget_qty: 50, rate: 100 },                    // 5000
+  ] });
+  const tBoqId = tboq.json.boq?.id;
+  const tLineId = (tboq.json.lines ?? []).find((l: any) => l.item_no === 'SAND')?.id;
+  const laborLineId = (tboq.json.lines ?? []).find((l: any) => l.category === 'labor')?.id;
+  await inj('POST', `/api/projects/boq/${tBoqId}/approve`, mgr); // author admin → approve by mgr (SoD)
+  // tolerance 10% on a 10000 line → ceiling 11000. A PO for 10500 (5% over budget) is WITHIN tolerance.
+  const poTol = await inj('POST', '/api/procurement/pos', admin, { project_code: 'PRJ-TOL', vendor_name: 'ACME', items: [{ item_id: 'SAND', order_qty: 105, unit_price: 100, boq_line_id: tLineId }] }); // 10500
+  ok('PO within tolerance (10500 ≤ 11000 ceiling on a 10000 line) → created', poTol.status < 300 && !!poTol.json.po_no, JSON.stringify({ s: poTol.status }));
+  const poTolOver = await inj('POST', '/api/procurement/pos', admin, { project_code: 'PRJ-TOL', vendor_name: 'ACME', items: [{ item_id: 'SAND', order_qty: 10, unit_price: 100, boq_line_id: tLineId }] }); // +1000 → 11500 > 11000
+  ok('PO beyond the tolerance ceiling → 400 BUDGET_EXCEEDED', poTolOver.status === 400 && poTolOver.json.error?.code === 'BUDGET_EXCEEDED', `${poTolOver.status} ${poTolOver.json.error?.code}`);
+  const pmrTol = await inj('POST', '/api/pmr', admin, { project_code: 'PRJ-TOL', items: [{ boq_line_id: tLineId, item_no: 'SAND', qty: 4, unit_cost: 100 }] }); // 400 ≤ headroom 500
+  ok('PMR within tolerance → routed, not pending', pmrTol.json.status === 'routed' && pmrTol.json.over_budget === false, JSON.stringify({ st: pmrTol.json.status }));
+
+  // site cash consumes BoQ budget: a project-tagged advance on the (fresh) labor line reduces its remaining on settle.
+  const advSC = await inj('POST', '/api/finance/advances', admin, { payee: 'สมชาย', amount: 1000, project_code: 'PRJ-TOL', boq_line_id: laborLineId });
+  await inj('POST', `/api/finance/advances/${advSC.json.advance_no}/settle`, admin, { settled_expense: 1000 });
+  const scBoq = await inj('GET', '/api/projects/PRJ-TOL/boq', admin);
+  const laborLine = (scBoq.json.lines ?? []).find((l: any) => l.id === laborLineId);
+  ok('Site cash consumes BoQ budget: settled advance 1000 → labor line committed 1000 / remaining 4000', near(laborLine?.committed, 1000) && near(laborLine?.remaining, 4000), JSON.stringify({ c: laborLine?.committed, r: laborLine?.remaining }));
+
+  // ── 9i. FU2 — a within-budget PMR prefers ON-HAND STOCK (reserve+issue to project) over raising a PR ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-STK', name: 'งานมีสต๊อก', billing_type: 'TM' });
+  const stkBoq = await inj('POST', '/api/projects/PRJ-STK/boq', admin, { lines: [{ category: 'material', item_no: 'STEEL', description: 'เหล็ก', budget_qty: 100, rate: 50 }] }); // 5000
+  const stkBoqId = stkBoq.json.boq?.id;
+  const stkLineId = (stkBoq.json.lines ?? []).find((l: any) => l.item_no === 'STEEL')?.id;
+  await inj('POST', `/api/projects/boq/${stkBoqId}/approve`, mgr);
+  const stkAvailBefore = await inj('GET', '/api/reservations/available?item_id=STEEL', admin); // STEEL has on-hand stock (M3 block)
+  const pmrStk = await inj('POST', '/api/pmr', admin, { project_code: 'PRJ-STK', items: [{ boq_line_id: stkLineId, item_no: 'STEEL', qty: 10, unit_cost: 50 }] });
+  ok('Within-budget PMR with stock on hand → route issue (not a PR)', pmrStk.json.status === 'routed' && pmrStk.json.route === 'issue' && !/^PR-/.test(pmrStk.json.linked_doc_no ?? ''), JSON.stringify({ st: pmrStk.json.status, route: pmrStk.json.route, doc: pmrStk.json.linked_doc_no }));
+  const stkAvailAfter = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('PMR stock fulfil consumed 10 STEEL from on-hand', near(Number(stkAvailBefore.json.on_hand) - Number(stkAvailAfter.json.on_hand), 10), JSON.stringify({ b: stkAvailBefore.json.on_hand, a: stkAvailAfter.json.on_hand }));
+  const stkBoqAfter = await inj('GET', '/api/projects/PRJ-STK/boq', admin);
+  const stkLine = (stkBoqAfter.json.lines ?? []).find((l: any) => l.id === stkLineId);
+  ok('PMR stock fulfil booked the issued value against the BoQ line (committed 500)', near(stkLine?.committed, 500), JSON.stringify({ c: stkLine?.committed }));
+
   // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
   const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
   const oppNo = opp.json.opp_no;

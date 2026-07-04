@@ -721,6 +721,71 @@ async function main() {
   const recF = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
   ok('FEFO: layer sub-ledger still ties to the GL inventory control account (reconciled)', recF.reconciled === true && near(recF.sub_ledger_value, recF.gl_inventory), `sub=${recF.sub_ledger_value} gl=${recF.gl_inventory} rec=${recF.reconciled}`);
 
+  // ───────────────────── Item-posting account determination (GL-21, docs/33) ─────────────────────
+  // Opt-in per tenant (posting_determination). When ON, an item's account override routes its posting; when
+  // OFF (default) — as in every test above — the hardcoded control accounts apply (parity). A distinct
+  // postable COGS account proves the routing actually moved.
+  await db.insert(s.accounts).values({ code: '5001', name: 'COGS — Beverage (determination test)', type: 'Expense', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  await db.insert(s.items).values({ itemId: 'DETITEM', itemDescription: 'Determination item', cogsAccount: '5001' }).onConflictDoNothing();
+  await db.insert(s.items).values({ itemId: 'BADACC', itemDescription: 'Bad override item', cogsAccount: '9999' }).onConflictDoNothing();
+  // Determination OFF by default: DETITEM's issue routes COGS to the standard 5000, not its 5001 override.
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'DETITEM', uom: 'EA', qty: 10, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-D0' });
+  await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'DETITEM', qty: 2, ref_type: 'MI', ref_id: 'MI-D0' });
+  const acc5001Off = (await inj('GET', '/api/ledger/account-ledger?account=5001', invmgr)).json;
+  ok('Determination OFF (default): item COGS override is ignored → 5001 untouched (parity)', near(acc5001Off.closing_balance ?? 0, 0), `closing=${acc5001Off.closing_balance}`);
+  // Turn determination ON for this tenant.
+  const flagOn = await inj('PUT', '/api/feature-flags/posting_determination', invmgr, { enabled: true });
+  ok('Determination: posting_determination flag can be enabled per tenant', flagOn.status === 200 && (flagOn.json?.flags ?? []).find((f: any) => f.key === 'posting_determination')?.enabled === true, `st=${flagOn.status}`);
+  // Now DETITEM's issue routes COGS to the 5001 override; inventory still on 1200 (no inventory override).
+  const detIss = await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'DETITEM', qty: 4, ref_type: 'MI', ref_id: 'MI-D1' });
+  ok('Determination ON: goods issue posts at moving-average (4 @ 10 = 40)', detIss.status === 201 && near(detIss.json?.value, 40), JSON.stringify(detIss.json).slice(0, 80));
+  const acc5001 = (await inj('GET', '/api/ledger/account-ledger?account=5001', invmgr)).json;
+  ok('Determination ON: COGS routed to the item override account 5001 (Dr 40)', near(acc5001.closing_balance, 40), `closing=${acc5001.closing_balance}`);
+  // The inventory sub-ledger still reconciles to the GL inventory account set even with COGS routed away.
+  const recDet = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
+  ok('Determination ON: inventory sub-ledger still ties to GL inventory account set (reconciled)', recDet.reconciled === true && near(recDet.sub_ledger_value, recDet.gl_inventory), `sub=${recDet.sub_ledger_value} gl=${recDet.gl_inventory} rec=${recDet.reconciled}`);
+  // GL-21 fail-closed: an override pointing at a non-existent account is rejected, not silently posted.
+  const badAcc = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'BADACC', uom: 'EA', qty: 1, unit_cost: 5, ref_type: 'GRN', ref_id: 'GRN-BAD' });
+  ok('Determination: invalid override account rejected fail-closed (GL-21 INVALID_POSTING_ACCOUNT)', badAcc.status === 400 && badAcc.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `st=${badAcc.status} code=${badAcc.json?.error?.code}`);
+
+  // ── Item-posting SETUP master via the /api/item-setup screens' endpoints (docs/33 PR3, GL-21) ──
+  const catBad = await inj('POST', '/api/item-setup/categories', invmgr, { code: 'BADCAT', cogs_account: '9998' });
+  ok('Setup: item category with a non-postable account rejected at save (INVALID_POSTING_ACCOUNT)', catBad.status === 400 && catBad.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `st=${catBad.status} code=${catBad.json?.error?.code}`);
+  const catOk = await inj('POST', '/api/item-setup/categories', invmgr, { code: 'BEV', name_th: 'เครื่องดื่ม', cogs_account: '5001' });
+  ok('Setup: create item category with a default COGS account → 201', catOk.status === 201 && catOk.json?.code === 'BEV' && catOk.json?.cogs_account === '5001', JSON.stringify(catOk.json).slice(0, 80));
+  const catId = catOk.json.id;
+  await db.insert(s.items).values({ itemId: 'CATITEM', itemDescription: 'Category-driven item' }).onConflictDoNothing();
+  const linkOk = await inj('PATCH', '/api/item-setup/items/CATITEM', invmgr, { category_id: catId });
+  ok('Setup: link an item to a category (per-item posting profile)', linkOk.status === 200 && linkOk.json?.category_id === catId, `cat=${linkOk.json?.category_id}`);
+  // Determination (still ON): CATITEM has no item-level override, so COGS resolves via its CATEGORY's 5001
+  // (item → category → literal). 5001 already carries 40 (DETITEM); +30 here ⇒ 70.
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'CATITEM', uom: 'EA', qty: 10, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-C1' });
+  await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'CATITEM', qty: 3, ref_type: 'MI', ref_id: 'MI-C1' });
+  const acc5001b = (await inj('GET', '/api/ledger/account-ledger?account=5001', invmgr)).json;
+  ok('Setup: category-level COGS default drives posting (item→category→account: 5001 = 40+30 = 70)', near(acc5001b.closing_balance, 70), `closing=${acc5001b.closing_balance}`);
+  const catList = (await inj('GET', '/api/item-setup/categories', invmgr)).json;
+  ok('Setup: item-category list returns the created category', (catList.categories ?? []).some((c: any) => c.code === 'BEV'), `n=${catList.count}`);
+  const taxOk = await inj('POST', '/api/item-setup/tax-codes', invmgr, { code: 'VAT7', kind: 'vat', rate: 0.07, output_account: '2100', input_account: '2100', name_th: 'VAT 7%' });
+  ok('Setup: create VAT tax code (7% → 2100)', taxOk.status === 201 && taxOk.json?.code === 'VAT7' && near(taxOk.json?.rate, 0.07), JSON.stringify(taxOk.json).slice(0, 80));
+  const taxBadRate = await inj('POST', '/api/item-setup/tax-codes', invmgr, { code: 'BADRATE', rate: 1.5 });
+  ok('Setup: tax code with an out-of-range rate rejected (rate must be 0..1)', taxBadRate.status === 400 && ['BAD_RATE', 'VALIDATION_ERROR'].includes(taxBadRate.json?.error?.code), `st=${taxBadRate.status} code=${taxBadRate.json?.error?.code}`);
+
+  // ── Warehouse account defaults — the lowest determination tier (item → category → WAREHOUSE → literal) ──
+  await db.insert(s.accounts).values({ code: '1201', name: 'Inventory — Cold store (determination test)', type: 'Asset', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  await db.insert(s.locations).values({ locationId: 'WH-DET', locationName: 'Cold store' }).onConflictDoNothing();
+  const whBad = await inj('PATCH', '/api/item-setup/warehouses/WH-DET', invmgr, { inventory_account: '9997' });
+  ok('Setup: warehouse with a non-postable inventory account rejected (INVALID_POSTING_ACCOUNT)', whBad.status === 400 && whBad.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `st=${whBad.status} code=${whBad.json?.error?.code}`);
+  const whOk = await inj('PATCH', '/api/item-setup/warehouses/WH-DET', invmgr, { inventory_account: '1201' });
+  ok('Setup: set a warehouse default inventory account → 1201', whOk.status === 200 && whOk.json?.inventory_account === '1201', JSON.stringify(whOk.json ?? {}).slice(0, 90));
+  await db.insert(s.items).values({ itemId: 'WHITEM', itemDescription: 'Warehouse-driven item' }).onConflictDoNothing(); // no item/category override
+  // Determination ON: WHITEM has no item/category inventory account, so it falls through to the WAREHOUSE 1201.
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'WHITEM', location_id: 'WH-DET', uom: 'EA', qty: 10, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-W1' });
+  await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'WHITEM', location_id: 'WH-DET', qty: 3, ref_type: 'MI', ref_id: 'MI-W1' });
+  const acc1201 = (await inj('GET', '/api/ledger/account-ledger?account=1201', invmgr)).json;
+  ok('Determination: inventory routes to the WAREHOUSE default account (1201 = 100 receipt − 30 issue = 70)', near(acc1201.closing_balance, 70), `closing=${acc1201.closing_balance}`);
+  const recWh = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
+  ok('Determination: sub-ledger still ties with a warehouse-routed inventory account in the set', recWh.reconciled === true && near(recWh.sub_ledger_value, recWh.gl_inventory), `sub=${recWh.sub_ledger_value} gl=${recWh.gl_inventory} rec=${recWh.reconciled}`);
+
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).
   await db.insert(s.itemCosting).values({ tenantId: invTid, itemId: 'COSTITEM', method: 'AVG' }).onConflictDoNothing();

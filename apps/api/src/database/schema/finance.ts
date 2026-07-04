@@ -79,6 +79,8 @@ export const employeeAdvances = pgTable('employee_advances', {
   purpose: text('purpose'),
   amount: numeric('amount', { precision: 14, scale: 2 }).notNull(), // amount advanced
   status: text('status').notNull().default('open'), // open | settled
+  projectId: bigint('project_id', { mode: 'number' }), // M4 (docs/32) — site-cash advance against a project (nullable)
+  boqLineId: bigint('boq_line_id', { mode: 'number' }), // FU1 (docs/32) — consume this BoQ line's budget on settle
   expenseAccount: text('expense_account').default('5100'), // where settled spend lands
   settledExpense: numeric('settled_expense', { precision: 14, scale: 2 }).default('0'),
   returnedCash: numeric('returned_cash', { precision: 14, scale: 2 }).default('0'),

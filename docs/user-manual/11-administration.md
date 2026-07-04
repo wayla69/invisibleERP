@@ -230,7 +230,13 @@ configuration and bills of materials.
 **Screen:** `/master-data` · **Required permission:** `masterdata`.
 
 You can load many records at once from a spreadsheet — items, customers, vendors,
-locations, prices, promotions, BoMs, **menu items (POS)** and assets. Loading your
+locations, prices, promotions, BoMs, **menu items (POS)**, assets, and the item-posting
+setup records **หมวดสินค้า (Item Categories)** and **รหัสภาษี (Tax Codes — VAT / WHT)**.
+The last two let you pre-load each item family's default GL accounts (revenue / COGS /
+inventory / valuation) plus its VAT code and, for service/labour categories, a
+withholding-tax income type — the foundation for linking item posting to accounts and
+tax (see *docs/33*; the posting behavior that consumes them ships in a later phase).
+Loading your
 whole **menu** this way is the fastest way to set up a new restaurant: export the
 template for **เมนูอาหาร (Menu Items)**, fill in **SKU**, **Name** and **Price** (the
 only required columns), and import. Optional columns — **Type** (food / drink / retail

@@ -79,7 +79,7 @@ export class LineNotifyService {
   // per-user override else role default, expanded; same precedence as login). Used where the approver
   // population is defined by permission rather than a single role (e.g. petty-cash EXP-08:
   // creditors/exec). The maker is excluded so a requester is never "notified" of their own request.
-  async notifyPermissionHolders(required: string[], tenantId: number | null | undefined, text: string, excludeUsername?: string | null, cap = 20): Promise<void> {
+  async notifyPermissionHolders(required: string[], tenantId: number | null | undefined, text: string, excludeUsername?: string | null, cap = 20, flex?: any): Promise<void> {
     try {
       const conds = [eq(users.isActive, true), isNotNull(users.lineUserId)];
       if (tenantId != null) conds.push(or(eq(users.tenantId, tenantId), isNull(users.tenantId))!);
@@ -91,7 +91,7 @@ export class LineNotifyService {
         const ov = await this.db.select({ perm: userPermissions.perm }).from(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
         const eff = resolvePermissions(u.role as Role, ov.length ? ov.map((r: any) => r.perm as Permission) : null);
         if (!required.some((p) => eff.includes(p as Permission))) continue;
-        await this.push(tenantId ?? (u.tenantId != null ? Number(u.tenantId) : null), String(u.lineUserId), text);
+        await this.push(tenantId ?? (u.tenantId != null ? Number(u.tenantId) : null), String(u.lineUserId), text, flex);
         sent++;
       }
     } catch (e: any) {

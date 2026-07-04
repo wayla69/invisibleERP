@@ -1,20 +1,22 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxService } from '../tax/tax.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
+import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd, monthStart, n, fx } from '../../database/queries';
 import { roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
 export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
-export interface AdvanceDto { payee: string; amount: number; purpose?: string; expense_account?: string; tenant_id?: number | null }
+export interface AdvanceDto { payee: string; amount: number; purpose?: string; expense_account?: string; tenant_id?: number | null; project_code?: string; boq_line_id?: number }
 export interface SettleAdvanceDto { settled_expense: number; returned_cash?: number; expense_account?: string }
+// project_code (M4, docs/32) — an advance can be raised against a project so site cash is managed on it.
 
 @Injectable()
 export class FinanceService {
@@ -27,6 +29,7 @@ export class FinanceService {
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly tax?: TaxService,
     @Optional() private readonly matchSvc?: ThreeWayMatchService, // Phase 16 — gates AP pay on 3-way match
+    @Optional() private readonly commitments?: CommitmentsService, // FU1 (docs/32) — site cash consumes BoQ budget
   ) {}
 
   // VAT back-out (7/107) — prefer TaxService.calcInclusive when injected
@@ -181,19 +184,30 @@ export class FinanceService {
   // ───────────────────── Petty cash / employee cash advances (EXP-07) ─────────────────────
   // Issue an advance: cash out to the employee, Dr 1180 Employee Advances / Cr 1000 Cash. The 1180 balance
   // is the outstanding float; it clears on settlement.
+  // M4 (docs/32) — resolve an optional project_code to its id (nullable). Unknown code → 404 so a typo can't
+  // silently drop the project dimension on site cash.
+  private async resolveProjectId(code?: string): Promise<number | null> {
+    const c = code?.trim();
+    if (!c) return null;
+    const [p] = await this.db.select({ id: projects.id }).from(projects).where(eq(projects.projectCode, c)).limit(1);
+    if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${c} not found`, messageTh: 'ไม่พบโครงการ' });
+    return Number(p.id);
+  }
+
   async issueAdvance(dto: AdvanceDto, user: JwtUser) {
     const amount = round2(dto.amount);
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     const db = this.db;
     const tenantId = dto.tenant_id ?? user.tenantId ?? null;
+    const projectId = await this.resolveProjectId(dto.project_code); // M4 — project dimension (nullable)
     const advanceNo = await this.docNo.nextDaily('ADV');
     const today = ymd();
     await db.insert(employeeAdvances).values({
       advanceNo, tenantId, payee: dto.payee, purpose: dto.purpose ?? null, amount: String(amount), status: 'open',
-      expenseAccount: dto.expense_account ?? '5100', issuedBy: user.username, issuedDate: today,
+      projectId, boqLineId: dto.boq_line_id ?? null, expenseAccount: dto.expense_account ?? '5100', issuedBy: user.username, issuedDate: today,
     });
-    if (this.ledger) await this.ledger.postEntry({ date: today, source: 'ADV', sourceRef: advanceNo, tenantId, memo: `Cash advance ${advanceNo} — ${dto.payee}`, createdBy: user.username, lines: [{ account_code: '1180', debit: amount }, { account_code: '1000', credit: amount }] });
-    return { advance_no: advanceNo, payee: dto.payee, amount, status: 'open' };
+    if (this.ledger) await this.ledger.postEntry({ date: today, source: 'ADV', sourceRef: advanceNo, tenantId, memo: `Cash advance ${advanceNo} — ${dto.payee}`, createdBy: user.username, lines: [{ account_code: '1180', debit: amount, project_id: projectId }, { account_code: '1000', credit: amount }] });
+    return { advance_no: advanceNo, payee: dto.payee, amount, status: 'open', project_id: projectId };
   }
 
   // Settle an advance: the employee's actual spend posts to the expense account, any unused cash is returned.
@@ -207,12 +221,24 @@ export class FinanceService {
     const returned = round2(dto.returned_cash ?? 0);
     if (round2(spent + returned) !== round2(n(a.amount))) throw new BadRequestException({ code: 'SETTLE_MISMATCH', message: `settled_expense + returned_cash (${round2(spent + returned)}) must equal the advance (${n(a.amount)})`, messageTh: 'ยอดใช้จ่ายรวมเงินคืนต้องเท่ากับเงินทดรองจ่าย' });
     const expAcct = dto.expense_account ?? a.expenseAccount ?? '5100';
+    const projectId = a.projectId ?? null; // M4 — settled site-cash spend carries the project dimension
     const lines: any[] = [];
-    if (spent > 0) lines.push({ account_code: expAcct, debit: spent });
+    if (spent > 0) lines.push({ account_code: expAcct, debit: spent, project_id: projectId });
     if (returned > 0) lines.push({ account_code: '1000', debit: returned });
-    lines.push({ account_code: '1180', credit: round2(n(a.amount)) });
+    lines.push({ account_code: '1180', credit: round2(n(a.amount)), project_id: projectId });
     if (this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'ADV-STL', sourceRef: advanceNo, tenantId: a.tenantId ?? null, memo: `Settle advance ${advanceNo}`, createdBy: user.username, lines });
     await db.update(employeeAdvances).set({ status: 'settled', settledExpense: String(spent), returnedCash: String(returned), settledBy: user.username, settledDate: ymd() }).where(eq(employeeAdvances.id, a.id));
+    // FU1 (docs/32) — when the advance is tagged to a project + BoQ line, the settled spend CONSUMES that
+    // line's budget (a consumed commitment, allowOver so site cash never blocks — it records against remaining).
+    if (this.commitments && projectId != null && a.boqLineId != null && spent > 0) {
+      try {
+        await db.transaction(async (tx: any) => {
+          const c = await this.commitments!.reserve(tx, { projectId, boqLineId: Number(a.boqLineId), amount: spent, qty: 0, sourceDocType: 'ADV', sourceDocNo: advanceNo, createdBy: user.username, tenantId: a.tenantId ?? null, allowOver: true });
+          await this.commitments!.consume(tx, 'ADV', advanceNo);
+          void c;
+        });
+      } catch { /* best-effort — the settlement already posted */ }
+    }
     return { advance_no: advanceNo, status: 'settled', settled_expense: spent, returned_cash: returned };
   }
 

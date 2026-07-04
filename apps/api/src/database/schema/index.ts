@@ -102,6 +102,7 @@ export * from './localization';
 export * from './einvoice';
 export * from './eam';
 export * from './posting-rules';
+export * from './posting-setup';
 
 export * from './departments';
 export * from './subledger-tieout';

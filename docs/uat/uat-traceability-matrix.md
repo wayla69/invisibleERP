@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v2.6 · 2026-07-03** · *v2.6: added UAT-P2P-100 (partial receive + short/damaged claim from chat).* · *v2.5: added UAT-P2P-099 (purchase spend insights — chat `spend` + `/spend-summary` + `purchase_spend` report).* · *v2.4: added UAT-P2P-098 (close-the-loop LINE notifications to the PR requester).* · *v2.3: added UAT-P2P-097 (proactive morning low-stock alert → one-tap reorder).* · *v2.2: added UAT-P2P-096 (reorder low stock → one-tap PR — web card + LINE `low`/`reorder`).* · *v2.1: reconciled the UAT-P2P-093 collision after merging main — 093 = vendor AP card (merged separately), PR→PO conversion renumbered to 094, one-tap goods receipt (web รับครบ + LINE `receive`) to 095.* · *v2.0: added the one-tap goods-receipt case (now 095).* · *v1.9: added the PR→PO conversion case (now 094).* · *v1.8: added UAT-RPT-049 (LP-3 — digest 2.0).* · *v1.7: added UAT-P2P-092, UAT-PAY-039, UAT-RPT-048 (LP-2 — copilot uplift).* · *v1.6: added UAT-SEC-049/050 (LP-1 — LINE OA production go-live pack).* · *v1.5: added UAT-P2P-086..091 (EXP-10 — AP invoice intake: scan → PO auto-map → matched-at-posting, duplicate refusal, cumulative guard, scheduled auto re-match release, direct image/PDF upload).* · *v1.5: added UAT-P2P-085 + UAT-RPT-047 (LC-5 copilot + ask).* · *v1.4: added UAT-RPT-046 (LC-4 LINE delivery + digest).* · *v1.3: added UAT-SEC-048 + UAT-PAY-038 (LC-3 leave via chat + channel governance).* · *v1.2: added UAT-P2P-084 (LC-2 petty-cash chat raise + EXP-08 notifications).* · *v1.1: added UAT-P2P-083 (LC-1 one-tap chat approvals).* · *v1.0: added UAT-P2P-081..082 (PO attachment evidence — web + LINE chat photo attach).* · *v0.9: added UAT-P2P-076..080 (LINE chat phase 2 — workflow notifications, chat approve/reject with engine SoD, self-service commands).* · *v0.8: added UAT-P2P-070..075 (LINE chat → PR — link-code identity binding, chat-raised PR into the same approval workflow, entry-integrity negatives).* · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
+**Status: DRAFT v2.7 · 2026-07-04** · *v2.7: added UAT-O2C-234 (docs/32 FU4 — raise site cash from the project workspace; team walkthrough doc added).* · *v2.6: added UAT-P2P-100 (partial receive + short/damaged claim from chat).* · *v2.5: added UAT-P2P-099 (purchase spend insights — chat `spend` + `/spend-summary` + `purchase_spend` report).* · *v2.4: added UAT-P2P-098 (close-the-loop LINE notifications to the PR requester).* · *v2.3: added UAT-P2P-097 (proactive morning low-stock alert → one-tap reorder).* · *v2.2: added UAT-P2P-096 (reorder low stock → one-tap PR — web card + LINE `low`/`reorder`).* · *v2.1: reconciled the UAT-P2P-093 collision after merging main — 093 = vendor AP card (merged separately), PR→PO conversion renumbered to 094, one-tap goods receipt (web รับครบ + LINE `receive`) to 095.* · *v2.0: added the one-tap goods-receipt case (now 095).* · *v1.9: added the PR→PO conversion case (now 094).* · *v1.8: added UAT-RPT-049 (LP-3 — digest 2.0).* · *v1.7: added UAT-P2P-092, UAT-PAY-039, UAT-RPT-048 (LP-2 — copilot uplift).* · *v1.6: added UAT-SEC-049/050 (LP-1 — LINE OA production go-live pack).* · *v1.5: added UAT-P2P-086..091 (EXP-10 — AP invoice intake: scan → PO auto-map → matched-at-posting, duplicate refusal, cumulative guard, scheduled auto re-match release, direct image/PDF upload).* · *v1.5: added UAT-P2P-085 + UAT-RPT-047 (LC-5 copilot + ask).* · *v1.4: added UAT-RPT-046 (LC-4 LINE delivery + digest).* · *v1.3: added UAT-SEC-048 + UAT-PAY-038 (LC-3 leave via chat + channel governance).* · *v1.2: added UAT-P2P-084 (LC-2 petty-cash chat raise + EXP-08 notifications).* · *v1.1: added UAT-P2P-083 (LC-1 one-tap chat approvals).* · *v1.0: added UAT-P2P-081..082 (PO attachment evidence — web + LINE chat photo attach).* · *v0.9: added UAT-P2P-076..080 (LINE chat phase 2 — workflow notifications, chat approve/reject with engine SoD, self-service commands).* · *v0.8: added UAT-P2P-070..075 (LINE chat → PR — link-code identity binding, chat-raised PR into the same approval workflow, entry-integrity negatives).* · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -250,6 +250,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-225 | Pipeline → FTE resourcing forecast | PROJ-05/PROJ-06 (operational) | 16 §7 (20) |
 | UAT-O2C-226 | Project period-end close review — maker-checker (`/projects/close`) | PROJ-03 | 16 §7, §9 |
 | UAT-O2C-227 | Timesheet project allocation + approval surfaced in list (`/hcm`) | PROJ-04 | 16 §7 (10), §9 |
+| UAT-O2C-229 | Bill of Quantities (BoQ) + project-dimensioned procurement (M0) | maker-checker (BoQ approve); PROJ-12 (M1) | 16 §7 (23–24) |
+| UAT-O2C-230 | Material-budget commitment enforcement (M1) | PROJ-12 | 16 §7 (25) |
+| UAT-O2C-231 | Material requisition + over-budget LINE approval (M2) | PROJ-13 | 16 §7 (26) |
+| UAT-O2C-232 | Stock reservation → issue-to-project (M3) | INV-13 | 16 §7 (27) |
+| UAT-O2C-233 | Project-linked advances & reimbursements — site cash (M4) | PROJ-14 | 16 §7 (28) |
+| UAT-O2C-234 | Raise site cash from the project workspace — web (FU4) | PROJ-14 | 16 §7 (28) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |
@@ -504,6 +510,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-108 | API certify blocked for recon_prep-only token | R06, REC-03 | 04 §9 |
 | UAT-GL-113 | Snapshot reconciliation blocks a drifted close | GL-20 | 04 §9 |
 | UAT-GL-114 | Trial balance reads the maintained snapshot | GL-01, GL-20 | 04 §7 |
+| UAT-GL-115 | Item-posting determination off by default (parity) | GL-21 | 04 §9 |
+| UAT-GL-116 | Determination on → COGS routes to item override; sub-ledger ties | GL-21 | 04 §9 |
+| UAT-GL-117 | Determination fail-closed (INVALID_POSTING_ACCOUNT) | GL-21 | 04 §9 |
+| UAT-GL-118 | Item-setup screens: category-level account drives posting | GL-21 | 04 §14 (rev 2.8) |
+| UAT-GL-119 | Warehouse account default drives inventory posting (lowest tier) | GL-21 | 04 §14 (rev 2.9) |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -525,6 +536,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-017 | Deferred tax run → DTA from AR allowance (×CIT) | TAX-06 | 06 §9a, 04 §3.2 |
 | UAT-TAX-018 | Deferred tax post maker-checker + idempotent (Dr 1700/Cr 5950) | TAX-06, R05 | 06 §9a, 04 §3.2 |
 | UAT-TAX-018a | Deferred tax web screen — run → maker-checker post (`/deferred-tax`) | TAX-06, R05 | 06 §9a, 04 §3.2 |
+| UAT-TAX-028 | Scheduled WHT-cert batch auto-issues the 50-ทวิ from AP-payment WHT | TAX-03 | 06 §14 (rev 0.9) |
+| UAT-TAX-029 | WHT-cert batch idempotent (no duplicate on re-run) | TAX-03 | 06 §14 (rev 0.9) |
+| UAT-TAX-030 | Scheduled PP30 filing-draft job registers the period return | TAX-05 | 06 §14 (rev 0.9) |
 
 ## 07 — Payroll → `05-payroll.md`
 

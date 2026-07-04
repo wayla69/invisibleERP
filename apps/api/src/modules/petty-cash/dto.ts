@@ -23,6 +23,8 @@ export const ExpenseRequestBody = z.object({
   expense_account: z.string().optional(),
   doc_ref: z.string().optional(),
   receipt_key: z.string().optional(),
+  project_code: z.string().optional(), // M4 (docs/32) — petty-cash spend against a project
+  boq_line_id: z.number().int().positive().optional(), // FU1 (docs/32) — consume this BoQ line's budget
 });
 export type ExpenseRequestDto = z.infer<typeof ExpenseRequestBody>;
 

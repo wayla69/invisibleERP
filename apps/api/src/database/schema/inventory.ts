@@ -29,6 +29,18 @@ export const items = pgTable('items', {
   // depreciation category when the GR line is registered.
   isFixedAsset: boolean('is_fixed_asset').notNull().default(false),
   defaultAssetCategoryId: bigint('default_asset_category_id', { mode: 'number' }),
+  // Item-posting setup (docs/33, GL-21). Global-default account/tax profile — accounts are a global
+  // canonical universe so an item-level default is tenant-neutral; a tenant overrides per-category
+  // (item_categories) or via posting_rules. All nullable → fall through to category → warehouse → global
+  // posting-rule default (resolution wired in PR2). categoryId supersedes the free-text `category` above.
+  categoryId: bigint('category_id', { mode: 'number' }),
+  revenueAccount: text('revenue_account'),
+  cogsAccount: text('cogs_account'),
+  inventoryAccount: text('inventory_account'),
+  valuationAccount: text('valuation_account'),
+  vatCode: text('vat_code'),
+  whtIncomeType: text('wht_income_type'),
+  defaultLocationId: text('default_location_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
@@ -61,6 +73,11 @@ export const locations = pgTable('locations', {
   temperature: text('temperature').default('Ambient'),
   active: boolean('active').default(true),
   notes: text('notes'),
+  // Warehouse account defaults (docs/33 PR5, GL-21). The lowest tier of item-posting determination:
+  // an item's inventory/adjustment account falls through item → its category → THIS warehouse → the control
+  // literal (1200/5810). Nullable ⇒ no effect unless set + the tenant opts into posting_determination.
+  inventoryAccount: text('inventory_account'),
+  adjustmentAccount: text('adjustment_account'),
 });
 
 export const locationStock = pgTable('location_stock', {
@@ -220,6 +237,31 @@ export const invCostLayers = pgTable('inv_cost_layers', {
   byConsume: index('idx_inv_layers_consume').on(t.tenantId, t.itemId, t.locationId, t.remainingQty),
   byFefo: index('idx_inv_layers_fefo').on(t.tenantId, t.itemId, t.locationId, t.expiryDate),
 }));
+
+// Stock reservation (M3, docs/32, INV-13) — a soft allocation of on-hand stock to a project. Reserving holds
+// qty against an item+location so available-to-issue = on_hand − Σ(held). A reservation is `held`, then either
+// `released` (freed) or `consumed` (issued to the project → the value moves from inventory 1200 to project WIP
+// 1260). Prevents double-allocation of the same stock to two projects.
+export const stockReservations = pgTable('stock_reservations', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }),
+  itemId: text('item_id').notNull(),
+  locationId: text('location_id').notNull().default('WH-MAIN'),
+  projectId: bigint('project_id', { mode: 'number' }).notNull(),
+  boqLineId: bigint('boq_line_id', { mode: 'number' }),
+  sourceDocType: text('source_doc_type').notNull().default('RES'), // RES | PMR
+  sourceDocNo: text('source_doc_no'),
+  qtyReserved: numeric('qty_reserved', { precision: 18, scale: 4 }).notNull().default('0'),
+  status: text('status').notNull().default('held'),                 // held | released | consumed
+  issueNo: text('issue_no'),                                        // the INV move / JE that consumed it
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byItemLoc: index('idx_stock_res_item').on(t.tenantId, t.itemId, t.locationId),
+  byProject: index('idx_stock_res_project').on(t.projectId),
+}));
+export type StockReservation = typeof stockReservations.$inferSelect;
 
 export const scanSessions = pgTable('scan_sessions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

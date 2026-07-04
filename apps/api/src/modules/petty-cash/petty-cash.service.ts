@@ -1,11 +1,12 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { pettyCashFunds, expenseRequests } from '../../database/schema';
+import { pettyCashFunds, expenseRequests, projects } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LineNotifyService } from '../messaging/line-notify.service';
+import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { EstablishFundDto, ReplenishDto, ExpenseRequestDto, SettleExpenseDto } from './dto';
@@ -26,6 +27,7 @@ export class PettyCashService {
     // LC-2 (docs/30) — LINE notifications on the EXP-08 maker-checker: approvers (creditors/exec holders,
     // maker excluded) hear about a new request; the requester hears the decision. Best-effort by design.
     @Optional() private readonly lineNotify?: LineNotifyService,
+    @Optional() private readonly commitments?: CommitmentsService, // FU1 (docs/32) — site cash consumes BoQ budget
   ) {}
 
   // ── Fund: establish (fund it Dr 1015 / Cr 1000 up to the float) + replenish (top up to the float) ──
@@ -85,9 +87,15 @@ export class PettyCashService {
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     if (amount > n(fund.balance) + 1e-9) throw new UnprocessableEntityException({ code: 'INSUFFICIENT_FLOAT', message: `Amount ${amount} exceeds the fund balance ${n(fund.balance)}`, messageTh: `จำนวนเงินเกินยอดคงเหลือในกองทุน (${n(fund.balance)})` });
     const reqNo = await this.docNo.nextDaily('PEX');
+    let projectId: number | null = null; // M4 — resolve the optional project (404 on a bad code)
+    if (dto.project_code?.trim()) {
+      const [p] = await db.select({ id: projects.id }).from(projects).where(eq(projects.projectCode, dto.project_code.trim())).limit(1);
+      if (!p) throw new BadRequestException({ code: 'PROJECT_NOT_FOUND', message: `Project ${dto.project_code} not found`, messageTh: 'ไม่พบโครงการ' });
+      projectId = Number(p.id);
+    }
     await db.insert(expenseRequests).values({
       tenantId: user.tenantId ?? null, reqNo, fundId: Number(fund.id), kind: dto.kind, payee: dto.payee ?? null, purpose: dto.purpose ?? null,
-      amount: String(amount), expenseAccount: dto.expense_account ?? '5100', docRef: dto.doc_ref ?? null, receiptKey: dto.receipt_key ?? null,
+      amount: String(amount), projectId, boqLineId: dto.boq_line_id ?? null, expenseAccount: dto.expense_account ?? '5100', docRef: dto.doc_ref ?? null, receiptKey: dto.receipt_key ?? null,
       status: 'PendingApproval', requestedBy: user.username,
     });
     await this.statusLog?.log('PEX', reqNo, '', 'PendingApproval', user.username);
@@ -109,13 +117,24 @@ export class PettyCashService {
     const amount = round2(n(req.amount));
     if (amount > n(fund.balance) + 1e-9) throw new UnprocessableEntityException({ code: 'INSUFFICIENT_FLOAT', message: `Fund balance ${n(fund.balance)} is now below the request ${amount}`, messageTh: 'ยอดคงเหลือในกองทุนไม่พอ' });
     const tenantId = req.tenantId ?? user.tenantId ?? null;
+    const projectId = req.projectId ?? null; // M4 — the debit (advance/expense) carries the project dimension
     const lines = req.kind === 'advance'
-      ? [{ account_code: '1180', debit: amount }, { account_code: fund.glAccount, credit: amount }]
-      : [{ account_code: req.expenseAccount ?? '5100', debit: amount }, { account_code: fund.glAccount, credit: amount }];
+      ? [{ account_code: '1180', debit: amount, project_id: projectId }, { account_code: fund.glAccount, credit: amount }]
+      : [{ account_code: req.expenseAccount ?? '5100', debit: amount, project_id: projectId }, { account_code: fund.glAccount, credit: amount }];
     let glRef: string | null = null;
     if (this.ledger) { const je: any = await this.ledger.postEntry({ date: ymd(), source: 'PEX', sourceRef: reqNo, tenantId, memo: `${req.kind === 'advance' ? 'Advance' : 'Expense'} ${reqNo} — ${req.payee ?? ''}`, createdBy: user.username, lines }); glRef = je?.entry_no ?? null; }
     await db.update(pettyCashFunds).set({ balance: String(round2(n(fund.balance) - amount)) }).where(eq(pettyCashFunds.id, Number(fund.id)));
     await db.update(expenseRequests).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date(), glRef }).where(eq(expenseRequests.id, Number(req.id)));
+    // FU1 (docs/32) — a project-tagged petty-cash spend CONSUMES its BoQ line's budget (consumed commitment,
+    // allowOver so site cash never blocks). Best-effort: the GL/fund decrement already applied.
+    if (this.commitments && req.projectId != null && req.boqLineId != null) {
+      try {
+        await db.transaction(async (tx: any) => {
+          await this.commitments!.reserve(tx, { projectId: Number(req.projectId), boqLineId: Number(req.boqLineId), amount, qty: 0, sourceDocType: 'PEX', sourceDocNo: reqNo, createdBy: user.username, tenantId, allowOver: true });
+          await this.commitments!.consume(tx, 'PEX', reqNo);
+        });
+      } catch { /* best-effort */ }
+    }
     await this.statusLog?.log('PEX', reqNo, 'PendingApproval', 'Approved', user.username);
     if (req.requestedBy) await this.lineNotify?.notifyUser(req.requestedBy, tenantId, `✅ ${reqNo} อนุมัติแล้ว (โดย ${user.username}) — ${amount} บาท`);
     return { req_no: reqNo, kind: req.kind, status: 'Approved', amount, journal_no: glRef, approved_by: user.username, prepared_by: req.requestedBy, fund_balance: round2(n(fund.balance) - amount) };

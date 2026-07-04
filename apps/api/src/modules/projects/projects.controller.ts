@@ -2,7 +2,22 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
+
+// BoQ (M0, docs/32) — line: amount is budget_qty × rate unless an explicit budget_amount is given.
+const BoqLineBody = z.object({
+  category: z.enum(['material', 'labor', 'subcon', 'other']).optional(),
+  item_no: z.string().optional(),
+  task_id: z.number().int().positive().optional(),
+  wbs_code: z.string().optional(),
+  description: z.string().optional(),
+  uom: z.string().optional(),
+  budget_qty: z.number().nonnegative().optional(),
+  rate: z.number().nonnegative().optional(),
+  budget_amount: z.number().nonnegative().optional(),
+});
+const BoqBody = z.object({ title: z.string().optional(), boq_no: z.string().optional(), lines: z.array(BoqLineBody).optional() });
+const RemeasureBody = z.object({ remeasured_qty: z.number().nonnegative() });
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -11,6 +26,7 @@ const CreateBody = z.object({
   customer_no: z.string().optional(),
   billing_type: z.enum(['TM', 'Fixed']).optional(),
   budget_amount: z.number().nonnegative().optional(),
+  budget_tolerance_pct: z.number().nonnegative().max(100).optional(),
   contract_amount: z.number().nonnegative().optional(),
   rev_method: z.enum(['billing', 'poc']).optional(),
   estimated_cost: z.number().nonnegative().optional(),
@@ -236,9 +252,55 @@ export class ProjectsController {
     return this.svc.patchRisk(Number(riskId), b, u);
   }
 
+  // ── Bill of Quantities (BoQ) — M0, docs/32 ── static 'boq' segments (≥2 path parts) never collide with :code.
+  @Post('boq/:boqId/lines')
+  addBoqLine(@Param('boqId') boqId: string, @Body(new ZodValidationPipe(BoqLineBody)) b: BoqLineDto, @CurrentUser() u: JwtUser) {
+    return this.svc.addBoqLine(Number(boqId), b, u);
+  }
+
+  // Approve a BoQ (maker-checker: approver ≠ author). Syncs the project budget to the approved BoQ total.
+  @Post('boq/:boqId/approve')
+  approveBoq(@Param('boqId') boqId: string, @CurrentUser() u: JwtUser) {
+    return this.svc.approveBoq(Number(boqId), u);
+  }
+
+  @Post('boq/:boqId/lock')
+  lockBoq(@Param('boqId') boqId: string, @CurrentUser() u: JwtUser) {
+    return this.svc.lockBoq(Number(boqId), u);
+  }
+
+  // Re-measurement — record the actual measured qty on a line. Static 'boq/lines' segment, before :code.
+  @Post('boq/lines/:lineId/remeasure')
+  remeasureBoqLine(@Param('lineId') lineId: string, @Body(new ZodValidationPipe(RemeasureBody)) b: RemeasureDto, @CurrentUser() u: JwtUser) {
+    return this.svc.remeasureBoqLine(Number(lineId), b, u);
+  }
+
   @Get(':code')
   get(@Param('code') code: string) {
     return this.svc.get(code);
+  }
+
+  // Create / read a project's BoQ (M0, docs/32).
+  @Post(':code/boq')
+  createBoq(@Param('code') code: string, @Body(new ZodValidationPipe(BoqBody)) b: BoqDto, @CurrentUser() u: JwtUser) {
+    return this.svc.createBoq(code, b, u);
+  }
+
+  @Get(':code/boq')
+  getBoq(@Param('code') code: string) {
+    return this.svc.getBoq(code);
+  }
+
+  // Commitment / encumbrance ledger for a project (M1, PROJ-12): open/consumed/released draws vs the BoQ budget.
+  @Get(':code/commitments')
+  commitments(@Param('code') code: string) {
+    return this.svc.listCommitments(code);
+  }
+
+  // Site cash (M4, PROJ-14): advances + expense reimbursements + petty-cash raised against this project.
+  @Get(':code/site-cash')
+  siteCash(@Param('code') code: string) {
+    return this.svc.siteCash(code);
   }
 
   // RACI accountability matrix (B3): per-task A/R/C/I + per-person rollup + accountability gaps.

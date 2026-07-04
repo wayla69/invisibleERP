@@ -22,7 +22,13 @@ export default defineConfig({
         'src/database/encrypted-column.ts',
         'src/observability/runtime-metrics.ts',
       ],
-      exclude: ['**/*.module.ts'], // Nest module decorators carry no testable logic
+      exclude: [
+        '**/*.module.ts', // Nest module decorators carry no testable logic
+        // tax-jobs.service.ts (docs/33 PR4) sits at src/modules/tax/*.ts so the include glob catches it, but
+        // it is HARNESS-tested (taxdocs), not unit-tested — same convention as documents/ + reports/. Add it
+        // to the coverage set WITH unit tests, not before.
+        '**/tax-jobs.service.ts',
+      ],
       // Floor locked just below the measured baseline (stmts 63 / branch 80 / funcs 66 / lines 63 as of
       // 2026-06-30). A change that drops coverage on these modules FAILS the gate. Ratchet UP over time.
       thresholds: { statements: 60, branches: 75, functions: 62, lines: 60 },

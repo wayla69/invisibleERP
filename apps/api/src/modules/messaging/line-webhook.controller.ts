@@ -17,6 +17,7 @@ import { ClaimsService } from '../claims/claims.service';
 import { AttachmentsService } from '../procurement/attachments.service';
 import { PettyCashService } from '../petty-cash/petty-cash.service';
 import { EssService } from '../ess/ess.service';
+import { PmrService } from '../pmr/pmr.service';
 import { NlAnalyticsService } from '../nl-analytics/nl-analytics.service';
 import { llmClient } from '../../common/llm-client';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
@@ -63,6 +64,11 @@ export class LineWebhookService {
   }
   private pettyCashSvc(): PettyCashService | null {
     try { return this.moduleRef.get(PettyCashService, { strict: false }); } catch { return null; }
+  }
+  // M2 (docs/32) — PmrService resolved lazily (same reason: avoid a circular module graph) so the over-budget
+  // PMR approval card's [อนุมัติ]/[ปฏิเสธ] buttons route through the same replay-safe confirm flow as PRs.
+  private pmrSvc(): PmrService | null {
+    try { return this.moduleRef.get(PmrService, { strict: false }); } catch { return null; }
   }
   private essSvc(): EssService | null {
     try { return this.moduleRef.get(EssService, { strict: false }); } catch { return null; }
@@ -269,8 +275,12 @@ export class LineWebhookService {
   // (`procurement`), and the decision routes through ProcurementService.approvePr → the workflow engine,
   // so maker-checker/SoD and multi-level chains bind exactly as on the web.
   private async chatDecision(u: any, docNo: string, approve: boolean): Promise<string> {
-    const prNo = docNo.toUpperCase();
-    if (!prNo.startsWith('PR-')) return 'อนุมัติผ่านแชทได้เฉพาะคำขอซื้อ (เลขที่ขึ้นต้น PR-)';
+    const doc = docNo.toUpperCase();
+    // M2 (docs/32) — an over-budget Project Material Requisition (PMR-...) approval routes to PmrService, which
+    // enforces the same maker-checker (approver ≠ requester) and, on approval, auto-drafts the project PO.
+    if (doc.startsWith('PMR-')) return this.chatDecidePmr(u, doc, approve);
+    const prNo = doc;
+    if (!prNo.startsWith('PR-')) return 'อนุมัติผ่านแชทได้เฉพาะคำขอซื้อ (PR-) หรือใบขอเบิกวัสดุ (PMR-)';
     const perms = await this.effectivePerms(u);
     if (!perms.includes('procurement')) return 'บัญชีของคุณไม่มีสิทธิ์อนุมัติคำขอซื้อ (procurement)';
     const procurement = this.procurementSvc();
@@ -284,6 +294,25 @@ export class LineWebhookService {
       if (e?.response?.code === 'SOD_VIOLATION') return `${prNo}: อนุมัติไม่ได้ — ผู้สร้างเอกสารอนุมัติเองไม่ได้ (SOD_VIOLATION)`;
       const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
       return `${prNo}: ดำเนินการไม่สำเร็จ — ${String(msg).slice(0, 200)}`;
+    }
+  }
+
+  // M2 (docs/32) — approve/reject an over-budget PMR from chat. Requires procurement/exec; PmrService enforces
+  // maker-checker (approver ≠ requester) and, on approval, auto-drafts the project-tagged PO.
+  private async chatDecidePmr(u: any, pmrNo: string, approve: boolean): Promise<string> {
+    const perms = await this.effectivePerms(u);
+    if (!perms.some((p) => ['procurement', 'exec'].includes(p))) return 'บัญชีของคุณไม่มีสิทธิ์อนุมัติใบขอเบิกวัสดุ (procurement/exec)';
+    const pmr = this.pmrSvc();
+    if (!pmr) return 'ระบบใบขอเบิกวัสดุยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    try {
+      const res = approve ? await pmr.approve(pmrNo, jwtUser) : await pmr.reject(pmrNo, 'ปฏิเสธผ่านแชท', jwtUser);
+      if (approve) return `${pmrNo}: อนุมัติแล้ว ✅ — ร่างใบสั่งซื้อ ${res.linked_doc_no ?? '-'} ให้ฝ่ายจัดซื้อ`;
+      return `${pmrNo}: ปฏิเสธแล้ว ❌`;
+    } catch (e: any) {
+      if (e?.response?.code === 'SOD_SELF_APPROVAL') return `${pmrNo}: อนุมัติไม่ได้ — ผู้ขอเบิกอนุมัติเองไม่ได้ (SOD)`;
+      const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+      return `${pmrNo}: ดำเนินการไม่สำเร็จ — ${String(msg).slice(0, 200)}`;
     }
   }
 

@@ -41,8 +41,18 @@ export class PostingService {
     return ctx.tenantId ?? currentTenantStore()?.tenantId ?? null;
   }
 
-  /** Resolve posting rules for an event, falling back global → tenant-specific. */
-  private async resolveRules(eventType: string, tenantId: number | null) {
+  // A rule's optional `condition` jsonb (e.g. {"category":"exempt"}) selects it only when EVERY key equals the
+  // matching value in the event's condition context (ctx.meta). A null/empty condition is unconditional. This
+  // is what lets an item's category/tax profile pick a different account for the same event.
+  private matchesCondition(condition: unknown, conditionCtx: Record<string, unknown>): boolean {
+    if (condition == null || typeof condition !== 'object') return true;
+    const entries = Object.entries(condition as Record<string, unknown>);
+    if (!entries.length) return true;
+    return entries.every(([k, v]) => conditionCtx[k] === v);
+  }
+
+  /** Resolve posting rules for an event, falling back global → tenant-specific, filtered by `condition`. */
+  private async resolveRules(eventType: string, tenantId: number | null, conditionCtx: Record<string, unknown> = {}) {
     const rows = await this.db
       .select()
       .from(postingRules)
@@ -58,7 +68,9 @@ export class PostingService {
       )
       .orderBy(postingRules.tenantId, postingRules.legOrder);
 
-    if (!rows.length) {
+    // Only rules whose condition matches the event context apply (unconditional rules always match).
+    const applicable = rows.filter(r => this.matchesCondition(r.condition, conditionCtx));
+    if (!applicable.length) {
       throw new BadRequestException({
         code: 'NO_POSTING_RULE',
         message: `No posting rules found for event '${eventType}'`,
@@ -66,14 +78,14 @@ export class PostingService {
       });
     }
     // Prefer tenant-specific rules over global (tenant rules shadow global ones for same leg_order)
-    const tenantRules = rows.filter(r => r.tenantId != null);
-    return tenantRules.length ? tenantRules : rows;
+    const tenantRules = applicable.filter(r => r.tenantId != null);
+    return tenantRules.length ? tenantRules : applicable;
   }
 
   /** Preview: return the journal lines PostingService would produce (dry-run). */
   async preview(eventType: string, ctx: PostingContext): Promise<PreviewLine[]> {
     const tenantId = this.tenantId(ctx);
-    const rules = await this.resolveRules(eventType, tenantId);
+    const rules = await this.resolveRules(eventType, tenantId, ctx.meta ?? {});
     return rules.map(r => ({
       role: r.role,
       side: r.side as 'DR' | 'CR',
@@ -85,7 +97,7 @@ export class PostingService {
   /** Post an event to the GL via the posting-rules engine. */
   async post(eventType: string, ctx: PostingContext): Promise<Record<string, unknown>> {
     const tenantId = this.tenantId(ctx);
-    const rules = await this.resolveRules(eventType, tenantId);
+    const rules = await this.resolveRules(eventType, tenantId, ctx.meta ?? {});
 
     const lines = rules.map(r => {
       const amount = ctx.amounts[r.role] ?? 0;

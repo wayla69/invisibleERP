@@ -156,6 +156,7 @@ flowchart TD
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.2 | 2026-07-03 | Platform | **Project-linked site cash cross-reference (docs/32 M4, PROJ-14).** Employee advances (and petty-cash) can carry an optional `project_code` → `project_id` (migration 0241 adds the column; `PROJECT_NOT_FOUND` on a bad code); the advance/expense GL lines are tagged with `project_id` so the spend is traceable to the project and rolled up on `GET /api/projects/:code/site-cash`. Additive/nullable — no change to the advance issue/settle flow or its maker-checker. Full control **PROJ-14** owned by `16-project-accounting.md` §7 step 28. |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | Security review W2 (REC-02 / ITGC-AC-03): bank auto-match + reconciliation now scope GL cash movements to the bank account's tenant (shared 1010 GL no longer leaks across tenants under an Admin/bypass caller). Verified by the `bankrec` harness cross-tenant case. |
 | 0.3 | 2026-06-23 | Platform | Documented the `/api/recon` reconciliation-period API (7 endpoints) and the period-certify maker-checker control (certifier ≠ preparer, `SOD_VIOLATION`) in §7. |
