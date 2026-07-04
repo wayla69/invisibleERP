@@ -387,6 +387,7 @@ function SidebarMenuButton({
   size = 'default',
   tooltip,
   className,
+  onClick,
   ...props
 }: React.ComponentProps<'button'> & {
   asChild?: boolean;
@@ -394,7 +395,15 @@ function SidebarMenuButton({
   tooltip?: string | React.ComponentProps<typeof TooltipContent>;
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const Comp = asChild ? Slot : 'button';
-  const { isMobile, state } = useSidebar();
+  const { isMobile, state, setOpenMobile } = useSidebar();
+
+  // On mobile the sidebar is an overlay drawer (Sheet). Picking a menu item should dismiss it so the
+  // destination is visible without a manual close — the native app-drawer behaviour. Desktop keeps its
+  // persistent rail unchanged. Runs alongside any onClick the caller passed.
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    onClick?.(e);
+    if (isMobile) setOpenMobile(false);
+  };
 
   const button = (
     <Comp
@@ -403,6 +412,7 @@ function SidebarMenuButton({
       data-size={size}
       data-active={isActive}
       className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
+      onClick={handleClick}
       {...props}
     />
   );
