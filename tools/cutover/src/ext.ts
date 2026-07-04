@@ -710,6 +710,12 @@ async function main() {
   // ── B2 document-AI intake (Platform Phase 16) ──
   const docEx = await inj('POST', '/api/doc-ai/extract', token, { text: 'ACME Supplies Co.\nInvoice INV-9001\nDate 2026-06-15\nSubtotal 1,401.87\nVAT 98.13\nGrand Total 1,500.00' });
   ok('Doc-AI: extracts invoice no / amount / date (regex fallback)', (docEx.status === 200 || docEx.status === 201) && docEx.json.fields?.invoice_no === 'INV-9001' && Number(docEx.json.fields?.amount) === 1500 && docEx.json.fields?.invoice_date === '2026-06-15', `${JSON.stringify(docEx.json.fields ?? {})}`);
+  // image/PDF extraction endpoint (Quick Capture preview + LINE channel, docs/34) — extract-only, no GL.
+  const docPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const docImg = await inj('POST', '/api/doc-ai/extract-document', token, { file_name: 'bill.png', data_url: docPng });
+  ok('Doc-AI: extract-document accepts an image (no key → honest empty draft, source none)', (docImg.status === 200 || docImg.status === 201) && docImg.json.source === 'none' && docImg.json.fields && 'invoice_no' in docImg.json.fields, JSON.stringify({ st: docImg.status, src: docImg.json.source }));
+  const docBad = await inj('POST', '/api/doc-ai/extract-document', token, { data_url: `data:text/plain;base64,${Buffer.from('x').toString('base64')}` });
+  ok('Doc-AI: extract-document rejects non-image/PDF (400 UNSUPPORTED_FILE_TYPE)', docBad.status === 400 && docBad.json.error?.code === 'UNSUPPORTED_FILE_TYPE', JSON.stringify({ st: docBad.status, code: docBad.json.error?.code }));
 
   // ── B3 NL analytics (Platform Phase 17) — over the A5 semantic layer (HQ has seeded sales) ──
   const nlPay = await inj('POST', '/api/nl-analytics/ask', hqwhT, { question: 'sales by payment method' });

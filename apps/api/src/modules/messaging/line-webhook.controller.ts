@@ -15,6 +15,7 @@ import { replyLine, replyLineFlex, fetchLineContent, type SendResult } from './g
 import { ProcurementService } from '../procurement/procurement.service';
 import { ClaimsService } from '../claims/claims.service';
 import { AttachmentsService } from '../procurement/attachments.service';
+import { ApIntakeService } from '../ap-intake/ap-intake.service';
 import { PettyCashService } from '../petty-cash/petty-cash.service';
 import { EssService } from '../ess/ess.service';
 import { PmrService } from '../pmr/pmr.service';
@@ -57,6 +58,11 @@ export class LineWebhookService {
   }
   private attachmentsSvc(): AttachmentsService | null {
     try { return this.moduleRef.get(AttachmentsService, { strict: false }); } catch { return null; }
+  }
+  // Quick Capture over LINE (docs/34) — ApIntakeService resolved lazily (same reason as the others: avoid a
+  // circular module graph). A bill photo → a NeedsReview draft via the same EXP-10 engine as the web lane.
+  private apIntakeSvc(): ApIntakeService | null {
+    try { return this.moduleRef.get(ApIntakeService, { strict: false }); } catch { return null; }
   }
   // D4 — ClaimsService resolved lazily (same reason as ProcurementService: avoid a circular module graph).
   private claimsSvc(): ClaimsService | null {
@@ -163,7 +169,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> [<รหัสสินค้า> <จำนวน>] — รับครบ/รับบางส่วน · claim <PO/GR> <จำนวน> [เหตุผล] — แจ้งของขาด/เสีย\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้) · subscribe lowstock — แจ้งเตือนของใกล้หมดทุกเช้า\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ) · spend [YYYY-MM] — สรุปยอดซื้อ\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• บิล — เก็บบิล/ใบเสร็จส่งให้บัญชี (พิมพ์ บิล แล้วส่งรูปตามมา) · attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> [<รหัสสินค้า> <จำนวน>] — รับครบ/รับบางส่วน · claim <PO/GR> <จำนวน> [เหตุผล] — แจ้งของขาด/เสีย\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้) · subscribe lowstock — แจ้งเตือนของใกล้หมดทุกเช้า\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ) · spend [YYYY-MM] — สรุปยอดซื้อ\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -191,6 +197,7 @@ export class LineWebhookService {
     const isCancel = (cmd === 'cancel' || cmd === 'ยกเลิก') && !!arg1;
     const isStock = (cmd === 'stock' || cmd === 'สต็อก') && !!arg1;
     const isAttach = (cmd === 'attach' || cmd === 'แนบ') && !!arg1;
+    const isCapture = cmd === 'capture' || cmd === 'บิล' || cmd === 'เก็บบิล' || cmd === 'บันทึกบิล';
     const isReceive = (cmd === 'receive' || cmd === 'รับของ' || cmd === 'รับ') && !!arg1;
     const isClaim = (cmd === 'claim' || cmd === 'เคลม' || cmd === 'แจ้งของเสีย') && parts.length >= 3;
     const isLow = cmd === 'low' || cmd === 'ใกล้หมด' || cmd === 'สต็อกต่ำ';
@@ -208,7 +215,7 @@ export class LineWebhookService {
     const isDigestKpis = cmd === 'digest' && arg1.toLowerCase() === 'kpis';
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
     const isHelp = cmd === 'help' || cmd === 'เมนู' || cmd === 'ช่วยเหลือ' || cmd === 'คำสั่ง';
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isReceive && !isClaim && !isLow && !isReorder && !isSpend && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isSubLow && !isUnsubLow && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isCapture && !isReceive && !isClaim && !isLow && !isReorder && !isSpend && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isSubLow && !isUnsubLow && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
 
     // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
     // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
@@ -249,6 +256,7 @@ export class LineWebhookService {
       else if (isCancel) { reply = await this.chatCancel(staff, arg1); campaign = 'chat_cancel'; }
       else if (isStock) { reply = await this.chatStock(staff, arg1); campaign = 'chat_stock'; }
       else if (isAttach) { reply = await this.chatAttachStart(tenantId, lineUserId, staff, arg1, (parts[2] ?? '').toLowerCase()); campaign = 'chat_attach'; }
+      else if (isCapture) { reply = await this.chatCaptureStart(tenantId, lineUserId, staff); campaign = 'chat_capture'; }
       else if (isReceive) { reply = await this.chatReceive(staff, arg1, parts.slice(2)); campaign = 'chat_receive'; }
       else if (isClaim) { reply = await this.chatClaim(staff, arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_claim'; }
       else if (isLow) { reply = await this.chatLowStock(staff); campaign = 'chat_lowstock'; }
@@ -565,6 +573,8 @@ export class LineWebhookService {
 
   private static readonly ATTACH_PERMS = ['procurement', 'creditors', 'wh_receive'];
   private static readonly ATTACH_TTL_MS = 10 * 60_000;
+  // Quick Capture is the low-risk, company-wide maker duty (mirrors the /capture web gate) — draft only.
+  private static readonly CAPTURE_PERMS = ['pr_raise', 'procurement', 'creditors'];
 
   private async chatAttachStart(tenantId: number, lineUserId: string, u: any, docNo: string, kindArg: string): Promise<string> {
     const no = docNo.toUpperCase();
@@ -584,15 +594,31 @@ export class LineWebhookService {
     return `พร้อมรับรูปสำหรับ ${no} (${kind === 'receipt' ? 'ใบเสร็จ' : kind === 'other' ? 'อื่น ๆ' : 'ใบแจ้งหนี้/ใบกำกับ'}) — ส่งรูปมาในแชทนี้ภายใน 10 นาที`;
   }
 
-  // A photo from a linked staff member with a live pending-attach state → fetch the bytes from the LINE
-  // content API and pin them to the document. Any other image (customers, no pending state) is ignored.
+  // ── capture (บิล) → next photo is filed as an AP-intake draft for Accounting (docs/34) ────────────
+  // The command validates the low-risk pr_raise duty NOW and parks a pending state; the photo that follows
+  // (onChatImage) is fetched from the LINE content API and captured as a NeedsReview draft — never books a
+  // bill or touches the GL (booking stays creditors, SoD/EXP-06).
+  private async chatCaptureStart(tenantId: number, lineUserId: string, u: any): Promise<string> {
+    const perms = await this.effectivePerms(u);
+    if (!LineWebhookService.CAPTURE_PERMS.some((p) => perms.includes(p))) return 'บัญชีของคุณไม่มีสิทธิ์เก็บบิล (ต้องมี pr_raise)';
+    if (!this.apIntakeSvc()) return 'ระบบเก็บบิลยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const expiresAt = new Date(Date.now() + LineWebhookService.ATTACH_TTL_MS);
+    await this.db.insert(lineChatStates)
+      .values({ tenantId, lineUserId, kind: 'capture', payload: {}, expiresAt })
+      .onConflictDoUpdate({ target: [lineChatStates.tenantId, lineChatStates.lineUserId], set: { kind: 'capture', payload: {}, expiresAt, createdAt: new Date() } });
+    return 'ส่งรูปบิล/ใบเสร็จมาในแชทนี้ได้เลย (ภายใน 10 นาที) — ระบบจะอ่านข้อมูลและส่งให้ฝ่ายบัญชีตรวจสอบ';
+  }
+
+  // A photo from a linked staff member with a live pending state → fetch the bytes from the LINE content
+  // API and route by the pending kind: `attach` pins it to a PO/PR document; `capture` files it as an AP
+  // intake draft. Any other image (customers, no/other pending state) is ignored.
   private async onChatImage(tenantId: number, token: string | undefined, ev: any): Promise<boolean> {
     const lineUserId = String(ev?.source?.userId ?? '');
     const msgId = String(ev?.message?.id ?? '');
     if (!lineUserId || !msgId) return false;
     const [state] = await this.db.select().from(lineChatStates)
-      .where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId), eq(lineChatStates.kind, 'attach'))).limit(1);
-    if (!state || new Date(state.expiresAt).getTime() < Date.now()) return false; // no live flow → not ours
+      .where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId), or(eq(lineChatStates.kind, 'attach'), eq(lineChatStates.kind, 'capture')))).limit(1);
+    if (!state || new Date(state.expiresAt).getTime() < Date.now()) return false; // no live attach/capture flow → not ours
     const staff = await this.staffByLine(tenantId, lineUserId);
     if (!staff) return false;
 
@@ -600,6 +626,8 @@ export class LineWebhookService {
     const [dup] = await this.db.select({ id: messageLog.id }).from(messageLog)
       .where(and(eq(messageLog.tenantId, tenantId), eq(messageLog.providerRef, `line:msg:${msgId}`))).limit(1);
     if (dup) return true;
+
+    if (state.kind === 'capture') return this.onCaptureImage(tenantId, token, ev, staff, lineUserId, msgId);
 
     const p = (state.payload ?? {}) as { docType?: string; docNo?: string; kind?: string };
     let reply: string;
@@ -626,6 +654,39 @@ export class LineWebhookService {
       }
     }
     await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, 'chat_attach');
+    return true;
+  }
+
+  // The `capture` pending flow: fetch the photo and file it as an AP-intake draft via the same EXP-10
+  // engine the /capture web lane uses (draft only — never books or posts to the GL).
+  private async onCaptureImage(tenantId: number, token: string | undefined, ev: any, staff: any, lineUserId: string, msgId: string): Promise<boolean> {
+    let reply: string;
+    const apIntake = this.apIntakeSvc();
+    if (!apIntake) {
+      reply = 'ระบบเก็บบิลยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    } else if (!token) {
+      reply = 'ดึงรูปจาก LINE ไม่ได้ (ยังไม่ได้ตั้งค่า channel token ของร้าน)';
+    } else {
+      const content = await fetchLineContent(token, msgId);
+      if ('error' in content) {
+        reply = content.error === 'too-large' ? 'รูปใหญ่เกินไป (สูงสุด ~2MB) — ลองถ่ายใหม่หรือลดขนาด' : 'ดึงรูปจาก LINE ไม่สำเร็จ กรุณาส่งใหม่อีกครั้ง';
+      } else {
+        const perms = await this.effectivePerms(staff);
+        const jwtUser: JwtUser = { username: staff.username, role: staff.role, customerName: null, tenantId: staff.tenantId != null ? Number(staff.tenantId) : null, permissions: perms };
+        try {
+          const r: any = await apIntake.capture({ file_name: `line-${msgId}.jpg`, data_url: content.dataUrl }, jwtUser);
+          await this.db.delete(lineChatStates).where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId)));
+          const detail = r.extract_source === 'none'
+            ? 'ยังอ่านอัตโนมัติไม่ได้ — แนบรูปให้ฝ่ายบัญชีตรวจสอบแล้ว'
+            : `${r.vendor_name ?? 'ไม่ทราบผู้ขาย'}${r.amount != null ? ` · ${Number(r.amount).toLocaleString('th-TH')} ${r.currency ?? 'THB'}` : ''}`;
+          reply = `เก็บบิลแล้ว ✔ ${r.intake_no}\n${detail}\nฝ่ายบัญชีจะตรวจสอบและบันทึกบิลต่อ`;
+        } catch (e: any) {
+          const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+          reply = `เก็บบิลไม่สำเร็จ: ${String(msg).slice(0, 200)}`;
+        }
+      }
+    }
+    await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, 'chat_capture');
     return true;
   }
 
@@ -1002,6 +1063,7 @@ export class LineWebhookService {
     ] },
     { icon: '💸', title: 'การเงิน & เอกสาร', color: '#059669', items: [
       ['expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล]', 'เบิกเงินสดย่อย'],
+      ['บิล → ส่งรูป', 'เก็บบิล/ใบเสร็จส่งให้บัญชีตรวจสอบ'],
       ['attach <เลขที่ PO>', 'แนบรูปใบแจ้งหนี้/ใบเสร็จ'],
       ['receive <เลขที่ PO>', 'รับของครบตาม PO'],
       ['receive <PO> <รหัสสินค้า> <จำนวน>', 'รับบางส่วน (เฉพาะรายการ/จำนวนที่ระบุ)'],

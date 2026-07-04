@@ -10,6 +10,7 @@ import { DocAiService } from '../doc-ai/doc-ai.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { FinanceService } from '../finance/finance.service';
 import { putObject, objectUrl, isObjectRef } from '../../common/object-storage';
+import { parseInvoiceDataUrl } from '../../common/invoice-doc';
 
 // AP invoice intake (EXP-10): scanned/pasted vendor invoice → doc-ai extraction → PO auto-map →
 // post AP bill → automated 3-way match. Automates the path TO payment-ready only — the disbursement
@@ -18,11 +19,8 @@ import { putObject, objectUrl, isObjectRef } from '../../common/object-storage';
 const AUTO_MAP_MIN = 85;   // vendor + amount must both agree before we map without a human
 const RUNNER_UP_GAP = 15;  // and no near-tie with the second-best PO
 
-// Upload channel: accepted document types + data-URL size caps (chars ≈ bytes × 4/3). The image cap
-// stays under Claude's 5 MB per-image limit; the PDF cap keeps an inline-in-DB fallback row sane.
-const UPLOAD_MIME: readonly string[] = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
-const MAX_DATAURL: Record<string, number> = { 'application/pdf': 12_000_000 }; // default (images) below
-const MAX_DATAURL_DEFAULT = 6_500_000;
+// Upload/capture document validation (accepted types + size caps) lives in common/invoice-doc.ts so the
+// AP-intake, doc-ai and Quick Capture surfaces share one allow-list (parseInvoiceDataUrl).
 
 type PoCandidate = { po_no: string; vendor_name: string | null; total_amount: number; score: number };
 
@@ -52,20 +50,32 @@ export class ApIntakeService {
   // A digital PDF extracts via its text layer (deterministic); a scan/image extracts via Claude vision
   // when a key is set, else it queues as NeedsReview with the document stored for a human. ──
   async createFromFile(dto: { file_name?: string; data_url: string }, user: JwtUser) {
-    const m = /^data:([^;,]+);base64,(.*)$/s.exec(dto.data_url ?? '');
-    if (!m) throw new BadRequestException({ code: 'BAD_DATA_URL', message: 'data_url must be a base64 data: URL', messageTh: 'รูปแบบไฟล์ไม่ถูกต้อง' });
-    const mime = m[1]!.toLowerCase();
-    if (!UPLOAD_MIME.includes(mime)) {
-      throw new BadRequestException({ code: 'UNSUPPORTED_FILE_TYPE', message: `Unsupported type ${mime} — use PNG/JPEG/WebP or PDF`, messageTh: 'รองรับเฉพาะรูปภาพ (PNG/JPEG/WebP) และ PDF' });
-    }
-    if (dto.data_url.length > (MAX_DATAURL[mime] ?? MAX_DATAURL_DEFAULT)) {
-      throw new BadRequestException({ code: 'FILE_TOO_LARGE', message: 'File too large', messageTh: 'ไฟล์ใหญ่เกินไป' });
-    }
-    const ext = await this.docAi.extractInvoiceDocument({ media_type: mime, data: m[2]! }, user);
+    const doc = parseInvoiceDataUrl(dto.data_url);
+    const ext = await this.docAi.extractInvoiceDocument({ media_type: doc.mime, data: doc.base64 }, user);
     return this.receive({
       fields: ext.fields, source: ext.source, rawText: ext.text || null,
-      file: { name: (dto.file_name ?? 'document').slice(0, 200), mime, dataUrl: dto.data_url },
+      file: { name: (dto.file_name ?? 'document').slice(0, 200), mime: doc.mime, dataUrl: doc.dataUrl },
     }, user);
+  }
+
+  // ── Quick Capture lane (docs/34, paypers-style). Any internal staffer holding a bill (the low-risk,
+  // company-wide `pr_raise` duty) snaps/uploads it and it lands as a NeedsReview/Mapped DRAFT with the
+  // source document stored — never a bill, never a GL posting. A creditor then maps + posts it through
+  // the normal EXP-10 pipeline, so the segregation of duties (capturer ≠ poster, EXP-06) is preserved.
+  // Functionally identical to the upload channel; the distinct method + permission gate is the control
+  // boundary and the narrative anchor. ──
+  capture(dto: { file_name?: string; data_url: string }, user: JwtUser) {
+    return this.createFromFile(dto, user);
+  }
+
+  // The capturer's own submissions. `pr_raise`-only staff cannot see the full AP worklist (that stays
+  // procurement/creditors) — only what they themselves captured, scoped to their tenant.
+  async listMine(q: { status?: string; limit?: number }, user: JwtUser) {
+    const conds: any[] = [eq(apInvoiceIntakes.createdBy, user.username)];
+    if (user.tenantId != null) conds.push(eq(apInvoiceIntakes.tenantId, user.tenantId));
+    if (q.status) conds.push(eq(apInvoiceIntakes.status, q.status));
+    const rows = await this.db.select().from(apInvoiceIntakes).where(and(...conds)).orderBy(desc(apInvoiceIntakes.id)).limit(q.limit ?? 100);
+    return { intakes: rows.map((r: any) => this.toDto(r)), count: rows.length };
   }
 
   private async receive(inp: { fields: any; source: string; rawText: string | null; file?: { name: string; mime: string; dataUrl: string } }, user: JwtUser) {
