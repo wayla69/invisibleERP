@@ -44,7 +44,9 @@ export function GettingStarted() {
   });
 
   const data = status.data;
-  if (!data || data.percent >= 100) return null; // no access / loading / already done
+  // Guard against a missing/partial payload (loading, 403, or an unexpected shape) — never crash the
+  // dashboard: only render once we have a real steps array and we're not already complete.
+  if (!data || !Array.isArray(data.steps) || data.percent >= 100) return null; // no access / loading / already done
   const pending = data.steps.filter((s) => !s.done);
   if (pending.length === 0) return null;
   const stepLabel = (s: Step) => (lang === 'th' ? s.label : s.label_en || s.label);

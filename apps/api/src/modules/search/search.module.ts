@@ -46,7 +46,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(customerMaster.name, term), ilike(customerMaster.customerNo, term), ilike(customerMaster.email, term), ilike(customerMaster.phone, term)) as SQL)
         .orderBy(desc(customerMaster.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'customer' as const, id: r.no, label: r.name, sublabel: sub(r.no, r.phone), href: '/finance/customers' }));
+      return rows.map((r) => ({ type: 'customer' as const, id: r.no, label: r.name, sublabel: sub(r.no, r.phone), href: '/finance/customers' }));
     },
   },
   {
@@ -59,7 +59,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(vendors.name, term), ilike(vendors.vendorCode, term), ilike(vendors.contact, term), ilike(vendors.email, term)) as SQL)
         .orderBy(asc(vendors.name))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'vendor' as const, id: r.code ?? r.name, label: r.name, sublabel: sub(r.code, r.contact), href: '/inventory/suppliers' }));
+      return rows.map((r) => ({ type: 'vendor' as const, id: r.code ?? r.name, label: r.name, sublabel: sub(r.code, r.contact), href: '/inventory/suppliers' }));
     },
   },
   {
@@ -72,7 +72,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(items.itemId, term), ilike(items.itemDescription, term), ilike(items.category, term)) as SQL)
         .orderBy(asc(items.itemId))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'item' as const, id: r.itemId, label: r.description || r.itemId, sublabel: sub(r.itemId, r.category), href: `/inventory/${encodeURIComponent(r.itemId)}` }));
+      return rows.map((r) => ({ type: 'item' as const, id: r.itemId, label: r.description || r.itemId, sublabel: sub(r.itemId, r.category), href: `/inventory/${encodeURIComponent(r.itemId)}` }));
     },
   },
   {
@@ -85,7 +85,7 @@ const ENTITIES: EntitySpec[] = [
         .where(ilike(custPosSales.saleNo, term))
         .orderBy(desc(custPosSales.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'sale' as const, id: r.no, label: r.no, sublabel: sub(r.date, r.status), href: `/pos?q=${encodeURIComponent(r.no)}` }));
+      return rows.map((r) => ({ type: 'sale' as const, id: r.no, label: r.no, sublabel: sub(r.date, r.status), href: `/pos?q=${encodeURIComponent(r.no)}` }));
     },
   },
   {
@@ -98,7 +98,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(arInvoices.invoiceNo, term), ilike(arInvoices.orderNo, term)) as SQL)
         .orderBy(desc(arInvoices.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'ar_invoice' as const, id: r.no, label: r.no, sublabel: sub(r.orderNo, r.status), href: '/finance?tab=receivables' }));
+      return rows.map((r) => ({ type: 'ar_invoice' as const, id: r.no, label: r.no, sublabel: sub(r.orderNo, r.status), href: '/finance?tab=receivables' }));
     },
   },
   {
@@ -111,7 +111,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(taxInvoices.docNo, term), ilike(taxInvoices.buyerName, term), ilike(taxInvoices.sourceRef, term)) as SQL)
         .orderBy(desc(taxInvoices.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'tax_invoice' as const, id: r.no, label: r.no, sublabel: sub(r.buyer, r.ref), href: '/tax/invoices' }));
+      return rows.map((r) => ({ type: 'tax_invoice' as const, id: r.no, label: r.no, sublabel: sub(r.buyer, r.ref), href: '/tax/invoices' }));
     },
   },
   {
@@ -124,7 +124,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(purchaseOrders.poNo, term), ilike(purchaseOrders.vendorName, term)) as SQL)
         .orderBy(desc(purchaseOrders.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'purchase_order' as const, id: r.no, label: r.no, sublabel: sub(r.vendor, r.status), href: `/inventory/purchase-orders?q=${encodeURIComponent(r.no)}` }));
+      return rows.map((r) => ({ type: 'purchase_order' as const, id: r.no, label: r.no, sublabel: sub(r.vendor, r.status), href: `/inventory/purchase-orders?q=${encodeURIComponent(r.no)}` }));
     },
   },
   {
@@ -138,7 +138,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(posMembers.memberCode, term), ilike(posMembers.name, term), ilike(posMembers.phone, term)) as SQL)
         .orderBy(desc(posMembers.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'member' as const, id: String(r.id), label: r.name || r.code, sublabel: sub(r.code, r.phone), href: `/loyalty/members/${r.id}` }));
+      return rows.map((r) => ({ type: 'member' as const, id: String(r.id), label: r.name || r.code, sublabel: sub(r.code, r.phone), href: `/loyalty/members/${r.id}` }));
     },
   },
   {
@@ -152,7 +152,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(projects.projectCode, term), ilike(projects.name, term), ilike(projects.customerName, term)) as SQL)
         .orderBy(desc(projects.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'project' as const, id: r.code, label: r.name || r.code, sublabel: sub(r.code, r.customer), href: `/projects/${encodeURIComponent(r.code)}` }));
+      return rows.map((r) => ({ type: 'project' as const, id: r.code, label: r.name || r.code, sublabel: sub(r.code, r.customer), href: `/projects/${encodeURIComponent(r.code)}` }));
     },
   },
   {
@@ -165,7 +165,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(purchaseRequests.prNo, term), ilike(purchaseRequests.requestedBy, term)) as SQL)
         .orderBy(desc(purchaseRequests.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'requisition' as const, id: r.no, label: r.no, sublabel: sub(r.by, r.status), href: '/requisitions' }));
+      return rows.map((r) => ({ type: 'requisition' as const, id: r.no, label: r.no, sublabel: sub(r.by, r.status), href: '/requisitions' }));
     },
   },
   {
@@ -178,7 +178,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(apTransactions.txnNo, term), ilike(apTransactions.invoiceNo, term), ilike(apTransactions.vendorName, term)) as SQL)
         .orderBy(desc(apTransactions.id))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'ap_invoice' as const, id: r.no, label: r.no, sublabel: sub(r.vendor, r.invoiceNo), href: '/finance?tab=payables' }));
+      return rows.map((r) => ({ type: 'ap_invoice' as const, id: r.no, label: r.no, sublabel: sub(r.vendor, r.invoiceNo), href: '/finance?tab=payables' }));
     },
   },
   {
@@ -191,7 +191,7 @@ const ENTITIES: EntitySpec[] = [
         .where(or(ilike(employees.empCode, term), ilike(employees.name, term)) as SQL)
         .orderBy(asc(employees.empCode))
         .limit(limit);
-      return (rows as any[]).map((r) => ({ type: 'employee' as const, id: r.code ?? r.name, label: r.name || r.code, sublabel: r.code || undefined, href: '/hcm' }));
+      return rows.map((r) => ({ type: 'employee' as const, id: r.code ?? r.name, label: r.name || r.code, sublabel: r.code || undefined, href: '/hcm' }));
     },
   },
 ];
