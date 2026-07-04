@@ -80,7 +80,7 @@ today.
 - **PR2 — Wire the engine.** `PostingService.resolveRules()` evaluates `condition` and adds item/category/
   warehouse/tax-code keys; inventory + costing + sales posting paths call `PostingService.post()` behind a
   per-tenant `posting_determination` flag (defaults off → literals preserved). New detective control
-  **GL-20 "Item account determination"** (sub-ledger ↔ resolved-rule reconciliation) → RCM regen
+  **GL-115 "Item account determination"** (sub-ledger ↔ resolved-rule reconciliation) → RCM regen
   (`build_rcm.py`), `tools/cutover/src/compliance.ts`, PN GL narrative. Extend `basics`.
 - **PR3 — Setup screens.** Web: `/setup/items` (item posting setup), `/setup/item-categories`,
   `/setup/tax-codes`, `/setup/warehouses` (location account defaults), `/setup/posting-rules` (account
@@ -102,7 +102,7 @@ setup duties stay segregated from transacting.
 ## 5. Doc-sync obligations (per CLAUDE.md)
 
 Each PR updates, proportionately: the affected process narrative + Mermaid workflow + control matrix (new
-control **GL-20**; TAX-03 extension) and `compliance/` (RCM regen — currently 169 controls — readiness plan,
+control **GL-115**; TAX-03 extension) and `compliance/` (RCM regen — currently 169 controls — readiness plan,
 `tools/cutover/src/compliance.ts`); the user manual (item-setup / tax-code / posting-rules module guides +
 new error codes); UAT (positive + control cases + traceability matrix); and the `basics` cutover harness
 (primary AR/AP/GL gate) for the determination path.

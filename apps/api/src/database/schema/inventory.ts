@@ -29,6 +29,18 @@ export const items = pgTable('items', {
   // depreciation category when the GR line is registered.
   isFixedAsset: boolean('is_fixed_asset').notNull().default(false),
   defaultAssetCategoryId: bigint('default_asset_category_id', { mode: 'number' }),
+  // Item-posting setup (docs/33, GL-115). Global-default account/tax profile — accounts are a global
+  // canonical universe so an item-level default is tenant-neutral; a tenant overrides per-category
+  // (item_categories) or via posting_rules. All nullable → fall through to category → warehouse → global
+  // posting-rule default (resolution wired in PR2). categoryId supersedes the free-text `category` above.
+  categoryId: bigint('category_id', { mode: 'number' }),
+  revenueAccount: text('revenue_account'),
+  cogsAccount: text('cogs_account'),
+  inventoryAccount: text('inventory_account'),
+  valuationAccount: text('valuation_account'),
+  vatCode: text('vat_code'),
+  whtIncomeType: text('wht_income_type'),
+  defaultLocationId: text('default_location_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
