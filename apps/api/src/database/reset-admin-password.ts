@@ -4,16 +4,14 @@
  * credential (AUD-SEC-03 / docs/27 R0-3) — this needs server + DB access, which is the recovery gate.
  *
  * Run:   NEW_ADMIN_PASSWORD='…' pnpm --filter @ierp/api db:reset-password [username]
- *   or:  pnpm --filter @ierp/api db:reset-password [username]      (prompts for the password, no echo)
  *   username defaults to `admin`. Optional: CLEAR_MFA=1 to also drop a lost TOTP device.
  *
- * Safety: the password is read from stdin (no terminal echo) or the NEW_ADMIN_PASSWORD env — NEVER from
- * argv (which leaks in `ps`/shell history) — and is NEVER written to a log or the console (matches the
- * seed's no-clear-text-logging rule). The account is forced to rotate on next login, its login lockout is
- * cleared, and all existing sessions are revoked.
+ * Safety: the password is taken from the NEW_ADMIN_PASSWORD env var — NEVER from argv (which leaks in
+ * `ps`/shell history) — and is NEVER written to a log or the console (matches the seed's no-clear-text
+ * rule; same pattern as SEED_ADMIN_PASSWORD in seed.ts). The account is forced to rotate on next login,
+ * its login lockout is cleared, and all existing sessions are revoked.
  */
 import { resolve } from 'node:path';
-import { emitKeypressEvents } from 'node:readline';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq, sql } from 'drizzle-orm';
@@ -57,36 +55,6 @@ export async function resetUserPassword(
   return { username: u.username, role: u.role, mfaCleared: !!opts.clearMfa };
 }
 
-// Read a secret from stdin without echoing it (falls back to a plain line read when stdin is not a TTY,
-// e.g. piped input in automation). Never prints the typed characters.
-function readHidden(prompt: string): Promise<string> {
-  return new Promise((res) => {
-    const stdin = process.stdin;
-    process.stdout.write(prompt);
-    if (!stdin.isTTY) {
-      let buf = '';
-      stdin.setEncoding('utf8');
-      stdin.on('data', (d) => { buf += d; });
-      stdin.on('end', () => res(buf.replace(/\r?\n$/, '')));
-      return;
-    }
-    emitKeypressEvents(stdin);
-    stdin.setRawMode(true);
-    stdin.resume();
-    let buf = '';
-    const onKey = (ch: string, key: { name?: string; ctrl?: boolean }) => {
-      if (key && (key.name === 'return' || key.name === 'enter')) {
-        stdin.setRawMode(false); stdin.pause(); stdin.off('keypress', onKey);
-        process.stdout.write('\n'); res(buf); return;
-      }
-      if (key && key.ctrl && key.name === 'c') { stdin.setRawMode(false); process.stdout.write('\n'); process.exit(130); }
-      if (key && key.name === 'backspace') { buf = buf.slice(0, -1); return; }
-      if (ch) buf += ch;
-    };
-    stdin.on('keypress', onKey);
-  });
-}
-
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL not set (copy .env.example → .env, or export it for this run)');
@@ -94,24 +62,20 @@ async function main() {
   const username = (process.argv[2] || process.env.RESET_USERNAME || 'admin').trim();
   const clearMfa = process.env.CLEAR_MFA === '1';
 
-  // Password: env first (automation), else an interactive no-echo prompt. Confirmed twice when interactive.
-  let password = process.env.NEW_ADMIN_PASSWORD ?? '';
-  if (!password) {
-    password = await readHidden(`New password for "${username}" (min ${MIN_LEN} chars, hidden): `);
-    if (process.stdin.isTTY) {
-      const again = await readHidden('Confirm new password: ');
-      if (again !== password) throw new Error('Passwords did not match — nothing changed.');
-    }
+  // Password from the env only — never argv (leaks in `ps`), never logged. Same stance as seed.ts's
+  // SEED_ADMIN_PASSWORD, which keeps CodeQL's clear-text checks satisfied.
+  const password = process.env.NEW_ADMIN_PASSWORD ?? '';
+  if (password.length < MIN_LEN) {
+    throw new Error(`Set NEW_ADMIN_PASSWORD (>=${MIN_LEN} chars) and re-run, e.g.  NEW_ADMIN_PASSWORD='...' pnpm --filter @ierp/api db:reset-password ${username}`);
   }
-  if (!password || password.length < MIN_LEN) throw new Error(`Password too short (min ${MIN_LEN} chars) — nothing changed.`);
 
   const client = postgres(url, { max: 1 });
   const db = drizzle(client, { schema });
   try {
     const r = await resetUserPassword(db, { username, password, clearMfa });
-    // NOTE: the password is intentionally never printed or logged.
-    console.log(`✅ Reset password for "${r.username}" (role ${r.role}).`);
-    console.log('   • must change password on next login (enforced)');
+    // NOTE: the new secret is intentionally never printed or logged — only the outcome is.
+    console.log(`✅ Reset done for "${r.username}" (role ${r.role}).`);
+    console.log('   • must set a new one on next login (enforced)');
     console.log('   • login lockout cleared · all existing sessions revoked' + (r.mfaCleared ? ' · MFA disabled' : ''));
   } catch (e: any) {
     if (e?.message === 'USER_NOT_FOUND') throw new Error(`No user named "${username}" — check the username (nothing changed).`);

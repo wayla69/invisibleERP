@@ -223,8 +223,8 @@ another admin or an Access Admin can still sign in, they reset it from
 **Admin → Users** (the user is forced to set a new password on next login). If
 **nobody** can log in, an operator with server/database access runs the recovery
 tool: `NEW_ADMIN_PASSWORD='…' pnpm --filter @ierp/api db:reset-password <username>`
-(defaults to `admin`; prompts for the password with no echo if the env var is
-omitted; `CLEAR_MFA=1` also drops a lost TOTP device). It sets a new password
+(defaults to `admin`; the password comes from the env var, never argv or a log;
+`CLEAR_MFA=1` also drops a lost TOTP device). It sets a new password
 (never logged), forces a change on next login, clears any login lockout, and
 revokes existing sessions.
 
