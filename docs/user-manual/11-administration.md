@@ -475,6 +475,24 @@ A platform owner can **suspend** a company — `POST /api/admin/tenants/:id/susp
 (`POST /api/admin/tenants/:id/reactivate`). Platform owners themselves are never blocked (so you can always
 reactivate). Both actions are recorded in the [Audit trail](#11-audit-trail-who-changed-what-and-when).
 
+### 14.3 Who can see across all companies (the platform-owner super-user)
+
+In `multi-company` mode a company's **Admin sees only its own organization** — that's the isolation that keeps
+customers apart. So no ordinary Admin sees everything. The one operator who **can** see and act across **all**
+companies is the **platform owner** — any username you list in **`PLATFORM_ADMIN_USERNAMES`**. That user gets a
+cross-company view **everywhere in the app** (not just the company-management screens above), while every
+per-company Admin stays confined to its own org.
+
+- Make the platform owner a normal **Admin** user (so it has every permission), then add its username to
+  `PLATFORM_ADMIN_USERNAMES`. The env membership grants the cross-company *visibility*; the Admin role grants
+  the *permissions*.
+- This is intentionally an **operator/deployment setting, not a role you assign in the app** — so a company
+  Admin can never promote someone (or themselves) to see other companies' data.
+- Treat it like a **break-glass account:** keep the list to a few named people, require MFA on that login,
+  and remove the username when they no longer need cross-company access. Everything a platform owner does
+  across companies is recorded in the [Audit trail](#11-audit-trail-who-changed-what-and-when). See
+  `docs/ops/tenancy-model.md` §2bis.
+
 ### 14.1 First-run setup checklist & starter
 
 A brand-new company can see exactly what's left to set up: **`GET /api/tenant/onboarding-status`** returns a

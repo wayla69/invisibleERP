@@ -122,6 +122,9 @@ async function main() {
       { username: 'org1admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: mA1, orgId: 1 },
       { username: 'org2admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: mB, orgId: 2 },
       { username: 'newcoadmin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: mC, orgId: null },
+      // "god" — an org-scoped Admin by role, but a PLATFORM_ADMIN_USERNAMES member (set below) so the
+      // interceptor grants a GLOBAL bypass on every route: it must see ALL companies, not just its org.
+      { username: 'godadmin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: mA1, orgId: 1 },
     ]).onConflictDoNothing();
     await db.insert(s.backgroundJobs).values([
       { tenantId: mA1, jobType: 'mc_seed', status: 'done', payload: {} },
@@ -158,6 +161,15 @@ async function main() {
   // data tables and 0232 re-applies — so it now holds on BOTH PGlite and real Postgres. (Was org1=1 before
   // the 0232 fix: the mode over-isolated to the Admin's own tenant — fail-closed, no leak.)
   ok('multi-company: org-scoped Admin sees BOTH its org tenants and NO other company — cross-account SHARING active (org1===2)', org1 === 2, `org1=${org1}`);
+
+  // "god" = platform owner (PLATFORM_ADMIN_USERNAMES). Same role (Admin) + same org (org_id=1) as org1admin,
+  // but named a platform owner ⇒ the interceptor grants a GLOBAL bypass on EVERY route, so it must see ALL 4
+  // mc_seed companies (both org-1 tenants + org-2 + the org-null signup), NOT just its own org's 2. This is
+  // the "Admin stays org-scoped, god sees everything" guarantee. Env is read per-request, so we set it live.
+  process.env.PLATFORM_ADMIN_USERNAMES = 'godadmin';
+  const godSees = await mcCnt(await mcTok('godadmin'));
+  ok('multi-company: platform-owner "god" sees ALL companies across every org (4) while Admin stays org-scoped', godSees === 4, `god=${godSees}`);
+  delete process.env.PLATFORM_ADMIN_USERNAMES;
   delete process.env.TENANCY_MODE; // restore harness default
 
   await app.close();

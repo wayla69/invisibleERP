@@ -324,6 +324,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-048 | LINE chat governance: link registry, force-unlink, rate limit | ITGC-AC (chat channel) | 08 §7 |
 | UAT-SEC-049 | LINE OA go-live: required Channel secret + webhook receipt health (fail-closed verify) | ITGC-AC (chat channel) | 08 rev 1.8 |
 | UAT-SEC-050 | LINE OA go-live: test-push to the admin's own linked LINE (NOT_LINKED explained) | ITGC-AC (chat channel) | 08 rev 1.8 |
+| UAT-SEC-051 | Platform-owner "god" sees all companies cross-org; per-tenant Admin stays org-scoped (env-gated, not a role) | ITGC-AC-18 | 01 §7 |
 | UAT-PAY-038 | ESS leave raised from LINE chat + pushes (decision stays on web) | PAY (ESS leave) | 25 §7 |
 | UAT-PAY-039 | LINE copilot AI-drafted leave — confirm-first, same ESS path | PAY (ESS leave; AI drafts) | 25 rev 1.0 |
 | UAT-RPT-046 | LINE report delivery + daily digest + alert user-target (permission-at-subscribe) | Feature (LINE delivery) | 26 §7 |

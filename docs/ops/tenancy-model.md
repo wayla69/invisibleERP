@@ -16,7 +16,9 @@ bypass_rls='on'  OR  tenant_id = app.tenant_id  OR  (app.org_id set AND tenant_i
 
 - **Non-Admin staff** (Sales/Warehouse/Customer/…) are always scoped to their own `tenant_id`. Unchanged by
   `TENANCY_MODE`.
-- **Admin** scope is what `TENANCY_MODE` selects.
+- **Admin** scope is what `TENANCY_MODE` selects (global in `single-company`; org-scoped in `multi-company`).
+- **Platform owner = "god"** (a username in `PLATFORM_ADMIN_USERNAMES`) gets a **global `bypass_rls='on'` on
+  every route**, regardless of `TENANCY_MODE` — the cross-org super-user. See §2bis.
 - **Pre-auth** (login/signup) gets a temporary bypass to read `users` / create the tenant.
 
 ## 2. `TENANCY_MODE`
@@ -67,8 +69,52 @@ bypass_rls='on'  OR  tenant_id = app.tenant_id  OR  (app.org_id set AND tenant_i
 ### Set it
 Set `TENANCY_MODE=multi-company` on **every API service that connects to the same database** (e.g. both
 `invisibleERP` and `invisiblePOSERP` on Railway) — a service left on the default keeps the isolation hole
-open through that instance. Env-var change ⇒ redeploy. Verify in the boot log: `EnvValidation` warns
-`TENANCY_MODE=multi-company — Admin RLS bypass is org-scoped …`.
+open through that instance. Env-var change ⇒ redeploy. Reference config: `.env.example` (the tenancy/onboarding
+block), `docker-compose.yml` (the local prod-like `api` service), and `docs/ops/railway-setup.md` §2.2.
+
+Verify in the boot log (`EnvValidation`, prod only):
+- `TENANCY_MODE=multi-company — Admin RLS bypass is org-scoped …` confirms the mode took.
+- `PLATFORM_ADMIN_USERNAMES configures N platform owner(s) with a cross-tenant "god" bypass (…)` lists the
+  break-glass accounts so they are a visible, conscious choice.
+- `PUBLIC_SIGNUP_ENABLED is on but TENANCY_MODE is not multi-company …` is the **footgun guard** — if you see
+  it, an open signup would hand a new Admin the global bypass; switch the mode (or turn signup off).
+
+## 2bis. Platform owner = "god" (the cross-org super-user)
+
+`multi-company` deliberately **removes the Admin's global bypass** — each per-tenant `Admin` is confined to its
+own org (`org_id`). That is the point: a customer's Admin must not see other customers. So there is no longer a
+role you can log in as that sees *everything*. When you still need one operator who can see and act across
+**all** companies, that operator is the **platform owner**, not a role:
+
+- A username listed in **`PLATFORM_ADMIN_USERNAMES`** (comma-separated, case-insensitive) is granted a
+  **global `bypass_rls='on'` on every route** by `common/tenant-tx.interceptor.ts` — not just the
+  `@PlatformAdmin` management endpoints. It therefore sees and operates on **every tenant's data** everywhere
+  in the app, while ordinary `Admin`s stay org-scoped.
+- Give the god user **role `Admin`** so it also holds every functional permission (the `Admin` role maps to
+  all permissions); the env membership is what grants the cross-tenant *visibility*, the role is what grants
+  the *permissions*.
+- **Why an env list and not a DB role:** in `multi-company` a per-tenant Admin manages its own users. If
+  "god" were an assignable role, that Admin could set someone's role to god and **escalate to cross-org
+  visibility** (fail-open). Gating god on an **ops-controlled env var** the in-app user-management cannot
+  touch closes that escalation path. It also means god membership is changed by a deploy/redeploy, and is
+  the same knob (`PLATFORM_ADMIN_USERNAMES`) that authorises company provisioning/suspension.
+- Every cross-tenant read/write a god makes still runs with `req.__rlsBypass=true`, which the audit
+  interceptor records — so god actions are attributable in `audit_log`.
+
+**Provision one (two steps — account, then bypass):**
+1. Create the account: `GOD_PASSWORD='<temp>' pnpm --filter @ierp/api db:create-god` (`GOD_USERNAME` defaults
+   to `godmimi`; in production add `ALLOW_PROD_GOD=1`). It inserts a role=`Admin` user with
+   `must_change_password=true` in the HQ tenant — the temp password is rotated on first login and is never the
+   standing credential. Idempotent: an existing username is left untouched unless `GOD_RESET_PASSWORD=1`.
+2. Grant the bypass: add that username to `PLATFORM_ADMIN_USERNAMES` on every API service, then redeploy.
+
+The account alone is just an ordinary Admin; **step 2 is what makes it god.** (You can also skip step 1 and
+point `PLATFORM_ADMIN_USERNAMES` at an existing user — e.g. the seeded `admin` — no new account needed.)
+
+> **Operational note:** treat god credentials like a break-glass account — few named humans, strong auth
+> (MFA on that `Admin`), and remove the username from `PLATFORM_ADMIN_USERNAMES` when the person no longer
+> needs cross-org access. ToE: `cutover/pg-core.ts` asserts a god (`PLATFORM_ADMIN_USERNAMES` member) sees
+> ALL companies across every org while a same-org non-god Admin sees only its org.
 
 ## 3. `org_id` — grouping tenants (only needed for cross-account SHARING)
 
@@ -127,4 +173,5 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 | 1.3 | 2026-07-03 | Platform / Security | **Cross-account org SHARING fixed** (closes the §6 tracked limitation). Root cause: `0218_tenant_indexes_backfill`'s generic RLS re-loop recreated `tenant_isolation` with the plain body, silently dropping 0196's org clause on data tables. Fix: `0232_reapply_org_rls` re-applies the org-clause policy to every `tenant_id` table. `pg-core` now hard-asserts `org1===2` (org sharing active + isolated) on both backends. Corrected the mistaken "PGlite doesn't run the DO-loop" note — it does. |
 | 1.4 | 2026-07-03 | Platform / Security | **Invite-link onboarding** (ITGC-AC-18, onboarding-flow #2): platform owners issue single-use, expiring invites (`POST`/`GET /api/admin/signup-invites`, `@PlatformAdmin`); the invitee signs up with `invite_token` even when public signup is disabled (`400 INVALID_INVITE` if invalid/used/expired; single-use). Platform-level `signup_invites` table (migration 0233, hash-only, no tenant_id/RLS). ToE: `cutover/onboarding.ts` (issue-auth 403, bogus/valid/reuse, used-list). |
 | 1.5 | 2026-07-03 | Platform / Security | **Approval-queue onboarding** (ITGC-AC-18, onboarding-flow #3): public `POST /api/auth/signup-requests` creates a PENDING request (no tenant); a platform owner reviews (`GET /api/admin/signup-requests`) and approves (`…/:id/approve` → provisions with the requester's hashed password) or rejects (`…/:id/reject`). Dup pending → 409 REQUEST_PENDING; handled → 409 REQUEST_NOT_PENDING. Table `signup_requests` (migration 0234, platform-level; `created_tenant_id` not `tenant_id`). ToE: `cutover/onboarding.ts` (request→pending→approve→login, dup, reject, non-owner 403, re-approve 409). |
+| 1.7 | 2026-07-04 | Platform / Security | **Platform owner = "god" (cross-org super-user).** `common/tenant-tx.interceptor.ts` now grants a **global RLS bypass on EVERY route** to any `PLATFORM_ADMIN_USERNAMES` member (previously only on `@PlatformAdmin` management endpoints), so an ops-designated owner sees/operates across ALL tenants while a per-tenant Admin stays org-scoped under `multi-company`. Gated by env (not an assignable DB role) to prevent in-app privilege escalation; god actions still flagged to the audit interceptor. New §1 bullet + §2bis. ToE: `cutover/pg-core.ts` (god sees all 4 companies; same-org non-god Admin sees only its org — `god===4`, `org1===2`). Deploy config: documented the tenancy/onboarding vars (`TENANCY_MODE`/`PLATFORM_ADMIN_USERNAMES`/`PUBLIC_SIGNUP_ENABLED`) in `.env.example`, `docker-compose.yml`, and `railway-setup.md` §2.2; `env.validation.ts` now emits boot warnings listing configured god accounts and flagging the `PUBLIC_SIGNUP_ENABLED`-on-without-`multi-company` footgun. Added a `db:create-god` bootstrap script (`apps/api/src/database/create-god-user.ts`) to provision a god candidate account (default username `godmimi`, role Admin, must-change-password; prod-gated by `ALLOW_PROD_GOD=1`) — §2bis "Provision one". |
 | 1.6 | 2026-07-03 | Platform / Security | **Setup checklist + starter (onboarding #4, setup UX):** `GET /api/tenant/onboarding-status` (steps + percent + next) and `POST /api/tenant/starter-pack` (idempotent HQ branch). **Company lifecycle (onboarding #5, ITGC-AC-18):** platform owner `POST /api/admin/tenants/:id/suspend`/`reactivate` — a suspended company's users are blocked at the guard (`403 TENANT_SUSPENDED`); platform owners are exempt; audit-logged. Column `tenants.suspended_at` (migration 0235). ToE: `cutover/onboarding.ts` (checklist advance + idempotent starter; suspend→blocked→reactivate→restored, non-owner 403). |
