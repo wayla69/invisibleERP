@@ -36,6 +36,7 @@ import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
 import { BiLiveService } from './bi-live.service';
 import { BillingService } from '../billing/billing.service';
 import { GovernanceService } from '../governance/governance.service';
+import { TaxJobsService } from '../tax/tax-jobs.service';
 import { captureOpsAlert } from '../../observability/instrumentation';
 
 // Job type for offloading a due report/action subscription to the background worker.
@@ -107,6 +108,14 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   // Action job (daily/weekly): each run pushes the tenant's member snapshot (identity + RFM + consent) to an
   // external CDP webhook in batches — idempotent (a full snapshot keyed by member_code) and consent-aware.
   cdp_export_sync: { label: 'ซิงก์ข้อมูลลูกค้าไป CDP', labelEn: 'Sync customer data to CDP' },
+  // Tax automation (docs/33 PR4, TAX-03/TAX-05). Each run is idempotent per period.
+  // Issue the 50-ทวิ certificate for every un-certificated AP-payment WHT (labour/service withholding).
+  tax_wht_cert_batch: { label: 'ออกหนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) อัตโนมัติ', labelEn: 'Issue due WHT certificates (50-tawi)' },
+  // Register the period's PP30 / PND filing as a DRAFT (a human submits to the RD).
+  tax_pp30_draft: { label: 'จัดทำแบบ ภ.พ.30 (ฉบับร่าง)', labelEn: 'Draft PP30 VAT filing' },
+  tax_pnd_draft: { label: 'จัดทำแบบ ภ.ง.ด.3/53 (ฉบับร่าง)', labelEn: 'Draft PND3/53 WHT filing' },
+  // Remittance reminder: the period's amounts due + statutory deadlines (7th PND / 15th PP30).
+  tax_remittance_reminder: { label: 'แจ้งเตือนกำหนดนำส่งภาษี', labelEn: 'Tax remittance reminder' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -148,6 +157,9 @@ export class BiService implements OnModuleInit {
     @Optional() private readonly billing?: BillingService,
     // full app provides GovernanceModule, enabling the scheduled governance_readiness reminder job.
     @Optional() private readonly governance?: GovernanceService,
+    // Scheduled tax automation (docs/33 PR4). Optional so a partial harness still constructs; the full app
+    // provides TaxJobsModule, enabling the tax_wht_cert_batch / tax_*_draft / tax_remittance_reminder jobs.
+    @Optional() private readonly taxJobs?: TaxJobsService,
   ) {}
 
   // Register the background handler that runs one due subscription (report or heavy action job) off the
@@ -695,6 +707,22 @@ export class BiService implements OnModuleInit {
       if (!this.membership) throw new BadRequestException({ code: 'MEMBERSHIP_UNAVAILABLE', message: 'Membership service not available', messageTh: 'ระบบสมาชิก VIP ไม่พร้อมใช้งาน' });
       const r = await this.membership.recognizeDue(user); // idempotent per (membership, month) via the JE dedup
       return { data: r, summary: `VIP recognition: posted ${r.posted} month(s), ฿${r.amount} across ${r.scanned} membership(s)`, summaryTh: `รับรู้รายได้ VIP: ${r.posted} งวด ฿${r.amount}` };
+    }
+    if (reportType === 'tax_wht_cert_batch') {
+      if (!this.taxJobs) throw new BadRequestException({ code: 'TAX_JOBS_UNAVAILABLE', message: 'Tax jobs service not available', messageTh: 'ระบบงานภาษีไม่พร้อมใช้งาน' });
+      const r = await this.taxJobs.runWhtCertBatch(user, f.month ? Number(f.month) : undefined, f.year ? Number(f.year) : undefined); // idempotent: skips already-certificated payments
+      return { data: r, summary: `WHT certificates ${r.period}: issued ${r.issued} of ${r.scanned} (${r.skipped} skipped)`, summaryTh: `หนังสือรับรองหัก ณ ที่จ่าย ${r.period}: ออก ${r.issued} จาก ${r.scanned} รายการ (ข้าม ${r.skipped})` };
+    }
+    if (reportType === 'tax_pp30_draft' || reportType === 'tax_pnd_draft') {
+      if (!this.taxJobs) throw new BadRequestException({ code: 'TAX_JOBS_UNAVAILABLE', message: 'Tax jobs service not available', messageTh: 'ระบบงานภาษีไม่พร้อมใช้งาน' });
+      const type = reportType === 'tax_pp30_draft' ? 'PP30' : (f.pnd_type || 'PND53');
+      const r = await this.taxJobs.runFilingDraft(user, type, f.month ? Number(f.month) : undefined, f.year ? Number(f.year) : undefined); // idempotent per (tenant,type,period)
+      return { data: r, summary: `Draft filing ${type} ${r.period}: status ${r.status}${r.already_filed ? ' (already filed)' : ''}`, summaryTh: `จัดทำแบบ ${type} ${r.period}: สถานะ ${r.status}` };
+    }
+    if (reportType === 'tax_remittance_reminder') {
+      if (!this.taxJobs) throw new BadRequestException({ code: 'TAX_JOBS_UNAVAILABLE', message: 'Tax jobs service not available', messageTh: 'ระบบงานภาษีไม่พร้อมใช้งาน' });
+      const r = await this.taxJobs.remittanceReminder(user, f.month ? Number(f.month) : undefined, f.year ? Number(f.year) : undefined);
+      return { data: r, summary: `Remittance ${r.period}: PP30 net VAT ฿${r.pp30.net_vat_payable} (due ${r.pp30.deadline}); WHT ฿${r.pnd.wht_withheld} (due ${r.pnd.deadline}), un-certificated ฿${r.pnd.uncertificated_wht}`, summaryTh: `นำส่งภาษี ${r.period}: VAT สุทธิ ฿${r.pp30.net_vat_payable} (ครบกำหนด ${r.pp30.deadline}); หัก ณ ที่จ่าย ฿${r.pnd.wht_withheld} (ครบกำหนด ${r.pnd.deadline})` };
     }
     if (reportType === 'governance_readiness') {
       if (!this.governance) throw new BadRequestException({ code: 'GOVERNANCE_UNAVAILABLE', message: 'Governance service not available', messageTh: 'ระบบธรรมาภิบาลไม่พร้อมใช้งาน' });

@@ -107,6 +107,22 @@ When you pay certain suppliers or staff, you withhold tax and issue a certificat
 
 > **Note:** Void a certificate with a reason if it was issued incorrectly.
 
+### Auto-issue certificates for withheld payments (scheduled)
+
+When you pay a vendor for **labour or a service** and withhold tax at payment
+(ค่าจ้างทำของ / ค่าบริการ), the system can **issue the 50-ทวิ certificate for you**
+instead of keying each one by hand. Schedule the job **ออกหนังสือรับรองหัก ณ ที่จ่าย
+(50 ทวิ) อัตโนมัติ** (`tax_wht_cert_batch`) from *Reports → scheduled reports* (or run it
+on demand). Each run finds every withheld AP payment in the period that doesn't yet have a
+certificate and issues one, linked to the payment. It is safe to re-run — a payment that
+already has a certificate is skipped (no duplicates). A vendor without a valid 13-digit tax
+ID is skipped and reported, so you can fix the vendor record and re-run.
+
+Two companion jobs help you file on time: **จัดทำแบบ ภ.พ.30 / ภ.ง.ด.3/53 (ฉบับร่าง)**
+(`tax_pp30_draft` / `tax_pnd_draft`) prepare the period's return as a **draft** (you still
+review and submit), and **แจ้งเตือนกำหนดนำส่งภาษี** (`tax_remittance_reminder`) sends the
+amounts due and the deadlines (ภ.พ.30 by the 15th, ภ.ง.ด. by the 7th).
+
 ---
 
 ## 5. Tax reports

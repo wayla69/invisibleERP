@@ -510,6 +510,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-108 | API certify blocked for recon_prep-only token | R06, REC-03 | 04 §9 |
 | UAT-GL-113 | Snapshot reconciliation blocks a drifted close | GL-20 | 04 §9 |
 | UAT-GL-114 | Trial balance reads the maintained snapshot | GL-01, GL-20 | 04 §7 |
+| UAT-GL-115 | Item-posting determination off by default (parity) | GL-21 | 04 §9 |
+| UAT-GL-116 | Determination on → COGS routes to item override; sub-ledger ties | GL-21 | 04 §9 |
+| UAT-GL-117 | Determination fail-closed (INVALID_POSTING_ACCOUNT) | GL-21 | 04 §9 |
+| UAT-GL-118 | Item-setup screens: category-level account drives posting | GL-21 | 04 §14 (rev 2.8) |
+| UAT-GL-119 | Warehouse account default drives inventory posting (lowest tier) | GL-21 | 04 §14 (rev 2.9) |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -531,6 +536,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-017 | Deferred tax run → DTA from AR allowance (×CIT) | TAX-06 | 06 §9a, 04 §3.2 |
 | UAT-TAX-018 | Deferred tax post maker-checker + idempotent (Dr 1700/Cr 5950) | TAX-06, R05 | 06 §9a, 04 §3.2 |
 | UAT-TAX-018a | Deferred tax web screen — run → maker-checker post (`/deferred-tax`) | TAX-06, R05 | 06 §9a, 04 §3.2 |
+| UAT-TAX-028 | Scheduled WHT-cert batch auto-issues the 50-ทวิ from AP-payment WHT | TAX-03 | 06 §14 (rev 0.9) |
+| UAT-TAX-029 | WHT-cert batch idempotent (no duplicate on re-run) | TAX-03 | 06 §14 (rev 0.9) |
+| UAT-TAX-030 | Scheduled PP30 filing-draft job registers the period return | TAX-05 | 06 §14 (rev 0.9) |
 
 ## 07 — Payroll → `05-payroll.md`
 

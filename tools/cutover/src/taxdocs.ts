@@ -67,7 +67,11 @@ async function main() {
     { username: 'cust2', passwordHash: await pw.hash('pw2'), role: 'Customer', tenantId: t2 },
     { username: 'sales1', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 },
     { username: 'proc2', passwordHash: await pw.hash('pw4'), role: 'Procurement', tenantId: t2 }, // T2 creditors (AP per shop)
+    { username: 't2mgr', passwordHash: await pw.hash('pw5'), role: 'Admin', tenantId: t2 }, // T2 exec — runs the scheduled tax jobs (docs/33 PR4)
   ]).onConflictDoNothing();
+  // A T2 vendor WITH a tax ID → the WHT-cert batch can resolve the payee snapshot (docs/33 PR4).
+  await db.insert(s.vendors).values({ tenantId: t2, name: 'บริษัท ผู้รับเหมา ทู จำกัด', taxId: taxId('010555700007'), address: '789 ถนนสาทร กรุงเทพฯ', isCreditor: true }).onConflictDoNothing();
+  const t2VendorId = Number((await db.select().from(s.vendors).where(eq(s.vendors.name, 'บริษัท ผู้รับเหมา ทู จำกัด')))[0].id);
   // The Procurement role default is now SoD-clean (procurement/pr_raise only); proc2 books T2 AP bills
   // and reads input-VAT (creditors/ar) → grant the legacy bundle via an explicit per-user override.
   {
@@ -231,7 +235,7 @@ async function main() {
   // ── TAX-03: WHT withheld at AP payment → posted to GL 2361 → PND→GL tie-out ──
   // proc2 (creditors) books a T2 service bill ฿1070 (1000 + 70 VAT) and requests payment WITH 3% WHT; admin
   // (≠ requester, SoD) approves → the vendor is paid net ฿1040 and ฿30 is held in GL 2361 to remit to the RD.
-  const whtBill = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้รับเหมา T2', txn_type: 'Service', invoice_no: 'PV-WHT-1', invoice_date: periodDate('22'), amount: 1070 });
+  const whtBill = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_id: t2VendorId, vendor_name: 'บริษัท ผู้รับเหมา ทู จำกัด', txn_type: 'Service', invoice_no: 'PV-WHT-1', invoice_date: periodDate('22'), amount: 1070 });
   const whtReq = await inj('PATCH', `/api/finance/ap/transactions/${whtBill.json.txn_no}/pay`, proc2, { amount: 1070, wht_income_type: '3tre-service', wht_rate: 0.03 });
   ok('TAX-03: AP payment request captures a WHT rate (3%)', whtReq.status === 200 && near(whtReq.json.wht_rate, 0.03), `${whtReq.status} ${JSON.stringify(whtReq.json).slice(0, 90)}`);
   const whtAppr = await inj('POST', `/api/finance/ap/payments/${whtReq.json.payment_no}/approve`, admin, {});
@@ -243,6 +247,26 @@ async function main() {
   // PND→GL tie-out for the business month the WHT posted in: GL 2361 net (฿30) ties to the WHT withheld (฿30).
   const tie = await inj('GET', `/api/tax-reports/pnd-tieout?month=${curMonth}&year=${curYear}`, admin);
   ok('TAX-03: PND→GL tie-out — GL 2361 net (฿30) ties to AP-payment WHT withheld (฿30)', tie.status === 200 && near(tie.json.gl_net_movement, 30) && near(tie.json.ap_wht_withheld, 30) && tie.json.tied_gl_ap === true, `${tie.status} ${JSON.stringify(tie.json).slice(0, 170)}`);
+
+  // ── docs/33 PR4: scheduled tax automation — auto-issue the 50-ทวิ from the AP-payment WHT (labour/service) ──
+  // The batch keys on the AP payment_no (not a period total), so it issues exactly one linked certificate for
+  // the withheld payment and skips it on re-run.
+  const t2mgr = await login('t2mgr', 'pw5');
+  const subW = await inj('POST', '/api/bi/subscriptions', t2mgr, { name: 'WHT cert batch', report_type: 'tax_wht_cert_batch', frequency: 'monthly', filters: { month: curMonth, year: curYear } });
+  ok('PR4: tax_wht_cert_batch is a schedulable report type', subW.status === 201 && subW.json.id > 0, `${subW.status} ${JSON.stringify(subW.json).slice(0, 90)}`);
+  const runW = await inj('POST', `/api/bi/subscriptions/${subW.json.id}/run`, t2mgr, {});
+  ok('PR4: running the batch issues the 50-ทวิ for the un-certificated WHT payment (issued 1)', runW.status === 200 && runW.json.status === 'success' && /issued 1 of 1/.test(runW.json.summary ?? ''), `${runW.status} ${runW.json.summary ?? JSON.stringify(runW.json).slice(0, 120)}`);
+  const certs = await inj('GET', '/api/wht/certificates', t2mgr);
+  const autoCert = (certs.json.certificates ?? []).find((c: any) => c.ap_txn_no === whtBill.json.txn_no || c.payment_no === whtReq.json.payment_no);
+  ok('PR4: the auto-issued certificate is linked to the AP payment + withholds ฿30', !!autoCert && near(autoCert.total_wht, 30) && autoCert.pnd_type === 'PND53', JSON.stringify(autoCert ?? {}).slice(0, 130));
+  const runW2 = await inj('POST', `/api/bi/subscriptions/${subW.json.id}/run`, t2mgr, {});
+  ok('PR4: re-running the batch is idempotent — the certificated payment is skipped (issued 0)', runW2.status === 200 && /issued 0 of 1/.test(runW2.json.summary ?? ''), runW2.json.summary ?? '');
+  const certs2 = await inj('GET', '/api/wht/certificates', t2mgr);
+  ok('PR4: no duplicate certificate on re-run (exactly one for the payment)', (certs2.json.certificates ?? []).filter((c: any) => c.ap_txn_no === whtBill.json.txn_no).length === 1, `n=${(certs2.json.certificates ?? []).filter((c: any) => c.ap_txn_no === whtBill.json.txn_no).length}`);
+  // tax_pp30_draft: register the period PP30 as a DRAFT filing (idempotent per period).
+  const subP = await inj('POST', '/api/bi/subscriptions', t2mgr, { name: 'PP30 draft', report_type: 'tax_pp30_draft', frequency: 'monthly', filters: { month: curMonth, year: curYear } });
+  const runP = await inj('POST', `/api/bi/subscriptions/${subP.json.id}/run`, t2mgr, {});
+  ok('PR4: tax_pp30_draft runs and registers/refreshes the period PP30 filing', runP.status === 200 && runP.json.status === 'success' && /Draft filing PP30/.test(runP.json.summary ?? ''), runP.json.summary ?? JSON.stringify(runP.json).slice(0, 120));
 
   await app.close();
   await pg.close();

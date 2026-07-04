@@ -1,5 +1,3 @@
-'use client';
-
 /**
  * Compatibility layer — preserves the original ui.tsx API (Card, Kpi, Badge,
  * StateView, DataTable) so existing pages keep working, but renders the new

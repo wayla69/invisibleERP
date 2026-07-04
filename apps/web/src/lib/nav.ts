@@ -352,6 +352,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'nav.leases', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
           { label: 'nav.deferred_tax', href: '/deferred-tax', icon: Calculator, perms: ['gl_close', 'gl_post', 'exec'] },
           { label: 'nav.cost_centers', href: '/cost-centers', icon: PieChart, perms: ['exec', 'masterdata'] },
+          { label: 'nav.posting_rules', href: '/setup/posting-rules', icon: Route, perms: ['gl_posting_rules', 'exec'] },
           { label: 'nav.gl_schedules', href: '/gl-schedules', icon: CalendarClock, perms: ['gl_post', 'gl_close', 'exec'] },
           { label: 'nav.period_close', href: '/finance/period-close', icon: CalendarClock, perms: ['gl_close', 'exec'] },
         ],
@@ -471,6 +472,10 @@ export const INTERNAL_NAV: NavGroup[] = [
         title: 'nav.sub.master_data',
         items: [
           { label: 'nav.master_data', href: '/master-data', icon: Database, perms: ['masterdata'] },
+          { label: 'nav.item_categories', href: '/setup/item-categories', icon: Layers, perms: ['md_item', 'masterdata', 'exec'] },
+          { label: 'nav.tax_codes', href: '/setup/tax-codes', icon: Coins, perms: ['md_config', 'masterdata', 'exec'] },
+          { label: 'nav.item_posting', href: '/setup/items', icon: Boxes, perms: ['md_item', 'masterdata', 'exec'] },
+          { label: 'nav.warehouse_accounts', href: '/setup/warehouses', icon: Warehouse, perms: ['md_item', 'masterdata', 'exec'] },
           { label: 'nav.custom_fields', href: '/custom-fields', icon: SlidersHorizontal, perms: ['masterdata', 'users', 'exec'] },
           { label: 'nav.custom_objects', href: '/custom-objects', icon: Boxes, perms: ['masterdata', 'users', 'exec'] },
           { label: 'nav.object_layouts', href: '/object-layouts', icon: LayoutTemplate, perms: ['masterdata', 'users', 'exec'] },

@@ -135,6 +135,33 @@ changing its postability, or retiring it is a **head-office (Admin/HQ)** action:
 | `ACCOUNT_NOT_FOUND` | You curated a code that isn't in the master chart | Use an existing code (a new code is an Admin/HQ add) |
 | `TENANT_REQUIRED` | Curation attempted without a company context | Sign in to the company whose chart you're curating |
 
+### Item posting accounts (GL-21)
+
+By default, inventory and cost-of-goods-sold postings use the standard control accounts
+(inventory **1200**, COGS **5000**). If you want a particular product — or a whole product
+family — to post to **different** GL accounts, you can attach an **account profile** to the
+item or its **item category**. Set these up under *Settings → Master data* on the
+**หมวดสินค้า (Item Categories)** (`/setup/item-categories`), **รหัสภาษี (Tax Codes)**
+(`/setup/tax-codes`) and **ตั้งค่าบัญชีสินค้า (Item Posting Setup)** (`/setup/items`) screens
+— or bulk-import them from a spreadsheet (*Administration → Bulk import*). Account determination
+across every business event is viewable/overridable on **กฎการลงบัญชี (Posting Rules)**
+(`/setup/posting-rules`). Each item/category can carry its
+own revenue, COGS, inventory and valuation account plus a VAT code and — for service/labour
+categories — a withholding-tax income type.
+
+This is **opt-in per company**: turn on **กำหนดบัญชีตามสินค้า (Item posting)** under
+*Settings → Labs / feature flags* (`posting_determination`). While it's **off** (the default),
+every posting behaves exactly as before. While it's **on**, each posting picks its account by
+precedence — **the item's own setting → its category's setting → its warehouse's default →
+the standard control account** — so anything you leave blank simply falls back to today's
+behaviour. Warehouse-level defaults (a per-store inventory / adjustment account) are set on
+**บัญชีตามคลังสินค้า (Warehouse Accounts)** (`/setup/warehouses`). The inventory sub-ledger
+still reconciles to the GL either way.
+
+| Message | Meaning | What to do |
+|---------|---------|-----------|
+| `INVALID_POSTING_ACCOUNT` | An item/category account profile points at a code that doesn't exist in the chart, or at a header/control account you can't post to | Fix the account on the item or category to a real, postable code (see the chart above) |
+
 ---
 
 ## 2. Manual journal entries with maker-checker approval

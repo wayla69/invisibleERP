@@ -1702,6 +1702,20 @@
       "when": 2023820000069,
       "tag": "0242_budget_tolerance_sitecash_boq",
       "breakpoints": true
+    },
+    {
+      "idx": 243,
+      "version": "7",
+      "when": 2023820000070,
+      "tag": "0243_item_posting_setup",
+      "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "7",
+      "when": 2023820000071,
+      "tag": "0244_location_posting_accounts",
+      "breakpoints": true
     }
   ]
 }

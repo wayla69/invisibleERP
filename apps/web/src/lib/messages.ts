@@ -245,6 +245,11 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
 
   // ── Settings / Master Data ────────────────────────────────────────────────
   'nav.master_data': { th: 'ข้อมูลหลัก (Master Data)', en: 'Master Data' },
+  'nav.item_categories': { th: 'หมวดสินค้า (Item Categories)', en: 'Item Categories' },
+  'nav.tax_codes': { th: 'รหัสภาษี (VAT / WHT)', en: 'Tax Codes' },
+  'nav.item_posting': { th: 'ตั้งค่าบัญชีสินค้า (Item Posting)', en: 'Item Posting Setup' },
+  'nav.warehouse_accounts': { th: 'บัญชีตามคลังสินค้า (Warehouse Accounts)', en: 'Warehouse Accounts' },
+  'nav.posting_rules': { th: 'กฎการลงบัญชี (Posting Rules)', en: 'Posting Rules' },
   'nav.custom_fields': { th: 'ฟิลด์กำหนดเอง (Custom fields)', en: 'Custom Fields' },
   'nav.custom_objects': { th: 'ออบเจ็กต์กำหนดเอง (Custom objects)', en: 'Custom Objects' },
   'nav.object_layouts': { th: 'เลย์เอาต์ฟอร์ม (Form layouts)', en: 'Form Layouts' },

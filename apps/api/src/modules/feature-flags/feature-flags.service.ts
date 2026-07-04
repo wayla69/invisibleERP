@@ -12,6 +12,7 @@ export interface FlagDef { key: string; label: string; description: string; tier
 
 const DEFAULT_FLAGS: FlagDef[] = [
   { key: 'labs_visible', label: 'แสดงส่วน Labs', description: 'เปิดให้เห็นโมดูลทดลอง (Labs) ในเมนู', tier: 'CORE', enabled: false },
+  { key: 'posting_determination', label: 'กำหนดบัญชีตามสินค้า (Item posting)', description: 'ให้บัญชี GL/VAT/WHT ของรายการอิงตามสินค้า → หมวด → ค่าปริยาย (docs/33, GL-21)', tier: 'CORE', enabled: false },
   { key: 'consolidation', label: 'การรวมงบ (Consolidation)', description: 'งบการเงินรวมหลายบริษัท', tier: 'LABS', enabled: false },
   { key: 'intercompany', label: 'ระหว่างบริษัท (Intercompany)', description: 'รายการและตัดยอดระหว่างบริษัทในเครือ', tier: 'LABS', enabled: false },
   { key: 'manufacturing_mrp', label: 'การผลิต / MRP', description: 'วางแผนความต้องการวัตถุดิบเชิงผลิต', tier: 'LABS', enabled: false },
