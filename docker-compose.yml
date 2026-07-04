@@ -30,6 +30,12 @@ services:
       PSP_WEBHOOK_SECRET: local-compose-psp-secret
       CORS_ORIGINS: http://localhost:3000
       PORT: "8000"
+      # Multi-tenancy / onboarding (ITGC-AC-18 — see docs/ops/tenancy-model.md). This local prod-like stack
+      # mirrors a SaaS deploy: org-scoped Admins + a single break-glass "god" (the seeded `admin`, who is a
+      # PLATFORM_ADMIN_USERNAMES member and so sees ALL companies). Public signup stays fail-closed.
+      TENANCY_MODE: multi-company
+      PLATFORM_ADMIN_USERNAMES: admin
+      PUBLIC_SIGNUP_ENABLED: "false"
       RUN_MIGRATIONS: "1" # entrypoint applies drizzle migrations before boot (single-node local only)
     ports:
       - "8000:8000"

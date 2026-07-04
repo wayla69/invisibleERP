@@ -38,6 +38,19 @@ the web origin via `CORS_ORIGINS`.
    | `CORS_ORIGINS` | the **web** public URL (fill in after §4) |
    | `PORT` | `8000` |
 
+   **Multi-tenancy & onboarding (ITGC-AC-18 — set on _every_ API service sharing this DB).** Full model:
+   `docs/ops/tenancy-model.md`.
+
+   | Variable | Value |
+   |---|---|
+   | `TENANCY_MODE` | `single-company` (default — one company, many branches; every Admin sees all tenants) **or** `multi-company` (each Admin confined to its own org — **required if outsiders can sign up**). |
+   | `PLATFORM_ADMIN_USERNAMES` | comma-separated username(s) of the platform owner / "**god**". Provisions/suspends companies **and** gets a global RLS bypass on every route (sees ALL tenants) while ordinary Admins stay org-scoped. Empty ⇒ nobody (secure default). Break-glass: few named humans, MFA on that login. |
+   | `PUBLIC_SIGNUP_ENABLED` | `false` (default; `POST /api/auth/signup` → `403 SIGNUP_DISABLED`). Set `true` only for open self-service — and only with `TENANCY_MODE=multi-company`. |
+
+   > ⚠️ `PUBLIC_SIGNUP_ENABLED=true` **with** `TENANCY_MODE=single-company` is the isolation footgun (any signup
+   > Admin sees every company's data) — the boot validator warns loudly on this combo. Prefer the
+   > platform-admin `POST /api/admin/tenants`, an invite, or the approval queue over opening public signup.
+
    Recommended (external APM — Sentry errors + OTel tracing): `SENTRY_DSN`, `OTEL_EXPORTER_OTLP_ENDPOINT`.
    These are **not required to boot** — the API always emits built-in signals (structured logs, `audit_log`,
    `/healthz`+`/readyz`, `ops-metrics`); their absence is a silent default. To **mandate** them as a

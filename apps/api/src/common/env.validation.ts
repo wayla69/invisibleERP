@@ -60,6 +60,20 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   } else if (tmode === 'multi-company') {
     logger.warn('TENANCY_MODE=multi-company — Admin RLS bypass is org-scoped. Ensure tenants.org_id and Admin users.org_id are backfilled, or HQ Admins will see no cross-branch data.');
   }
+  // ITGC-AC-18 onboarding/tenancy footguns. Public self-serve signup mints a tenant + an Admin; under the
+  // single-company global-bypass model that new Admin would see EVERY company's data — so enabling public
+  // signup without multi-company is the isolation hole. Warn loudly (the signup path still works; this is
+  // the deploy-time nudge).
+  const signupOn = ['1', 'true', 'yes', 'on'].includes(String(config.PUBLIC_SIGNUP_ENABLED ?? '').trim().toLowerCase());
+  if (signupOn && tmode !== 'multi-company') {
+    logger.warn('PUBLIC_SIGNUP_ENABLED is on but TENANCY_MODE is not multi-company — a self-service signup Admin would get the GLOBAL RLS bypass and see EVERY company\'s data. Set TENANCY_MODE=multi-company on every API service sharing this DB. See docs/ops/tenancy-model.md.');
+  }
+  // Platform owner = "god": a global RLS bypass on every route. Surface how many are configured so a
+  // break-glass account is a conscious, visible choice at boot (empty ⇒ nobody, the secure default).
+  const gods = String(config.PLATFORM_ADMIN_USERNAMES ?? '').split(',').map((u) => u.trim().toLowerCase()).filter(Boolean);
+  if (gods.length) {
+    logger.warn(`PLATFORM_ADMIN_USERNAMES configures ${gods.length} platform owner(s) with a cross-tenant "god" bypass (${gods.join(', ')}). Treat as break-glass: MFA those Admin logins and prune unused entries. See docs/ops/tenancy-model.md §2bis.`);
+  }
   // AI legal gate (panel #2) — in prod the AI assistant must not transmit tenant data to Anthropic until
   // the DPA is executed. Warn loudly when a key is present but the DPA has not been acknowledged.
   if (has(config.ANTHROPIC_API_KEY) && !has(config.AI_DPA_ACKNOWLEDGED)) {
