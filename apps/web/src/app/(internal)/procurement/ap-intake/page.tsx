@@ -6,6 +6,7 @@ import { CheckCheck, FileScan, FileText, ListChecks, Loader2, Paperclip, ScanLin
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -44,16 +45,17 @@ const matchVariant = (s: string | null) => (s === 'matched' ? 'success' : s == n
 // AP invoice intake (EXP-10): scan/paste a vendor invoice → auto-extract → auto-map to the PO →
 // post the bill + run the 3-way match in one step. Payment stays behind the AP-PAY maker-checker.
 export default function ApIntakePage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="สแกนใบแจ้งหนี้จับคู่ PO (AP Intake)"
-        description="วางข้อความใบแจ้งหนี้ผู้ขาย ระบบดึงข้อมูล จับคู่ PO อัตโนมัติ บันทึกบิล และรันจับคู่ 3 ทางให้พร้อมจ่าย — การจ่ายเงินยังต้องขอ/อนุมัติแยกตามปกติ (EXP-06)"
+        title={t('iv.ap_title')}
+        description={t('iv.ap_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'scan', label: 'สแกน / รับเข้า', content: <ScanTab /> },
-          { key: 'worklist', label: 'รายการรอตรวจ / ประวัติ', content: <WorklistTab /> },
+          { key: 'scan', label: t('iv.ap_tab_scan'), content: <ScanTab /> },
+          { key: 'worklist', label: t('iv.ap_tab_worklist'), content: <WorklistTab /> },
         ]}
       />
     </div>
@@ -61,6 +63,7 @@ export default function ApIntakePage() {
 }
 
 function ScanTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [text, setText] = useState('');
   const [file, setFile] = useState<{ name: string; dataUrl: string } | null>(null);
@@ -75,12 +78,12 @@ function ScanTab() {
   const body = () => (file ? { url: '/api/procurement/ap-intake/upload', payload: { file_name: file.name, data_url: file.dataUrl } } : { url: '/api/procurement/ap-intake', payload: { text } });
   const scan = useMutation({
     mutationFn: () => { const b = body(); return api<Intake>(b.url, { method: 'POST', body: JSON.stringify(b.payload) }); },
-    onSuccess: (r) => done(r, r.po_no ? `จับคู่ ${r.po_no} แล้ว` : 'รอตรวจสอบ'),
+    onSuccess: (r) => done(r, r.po_no ? t('iv.ap_matched_po', { po: r.po_no }) : t('iv.ap_needs_review')),
     onError: (e) => notifyError((e as Error).message),
   });
   const auto = useMutation({
     mutationFn: () => { const b = body(); return api<Intake>(`${b.url}/auto`, { method: 'POST', body: JSON.stringify(b.payload) }); },
-    onSuccess: (r) => done(r, r.auto_posted ? `บันทึกบิล ${r.txn_no} + จับคู่แล้ว` : 'ยังไม่บันทึก — รอตรวจสอบ'),
+    onSuccess: (r) => done(r, r.auto_posted ? t('iv.ap_bill_posted_matched', { txn: r.txn_no ?? '' }) : t('iv.ap_not_posted_review')),
     onError: (e) => notifyError((e as Error).message),
   });
   const pickFile = (f: File | undefined) => {
@@ -94,79 +97,80 @@ function ScanTab() {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card className="gap-4">
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ScanLine className="size-4 text-primary" /> เอกสารใบแจ้งหนี้ (ไฟล์ หรือข้อความ)</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ScanLine className="size-4 text-primary" /> {t('iv.ap_doc_title')}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent">
-              <Paperclip className="size-4" /> แนบรูป / PDF
+              <Paperclip className="size-4" /> {t('iv.ap_attach')}
               <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp,application/pdf" onChange={(e) => pickFile(e.target.files?.[0])} />
             </label>
             {file && (
               <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs">
                 <FileText className="size-3" /> {file.name}
-                <button aria-label="เอาไฟล์ออก" onClick={() => setFile(null)}><X className="size-3" /></button>
+                <button aria-label={t('iv.ap_remove_file')} onClick={() => setFile(null)}><X className="size-3" /></button>
               </span>
             )}
           </div>
-          <textarea className="min-h-44 w-full rounded-md border bg-transparent p-3 text-sm disabled:opacity-50" placeholder="…หรือวางข้อความใบแจ้งหนี้ที่นี่" value={text} onChange={(e) => setText(e.target.value)} disabled={file != null} />
+          <textarea className="min-h-44 w-full rounded-md border bg-transparent p-3 text-sm disabled:opacity-50" placeholder={t('iv.ap_paste_placeholder')} value={text} onChange={(e) => setText(e.target.value)} disabled={file != null} />
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" disabled={scan.isPending || !ready} onClick={() => scan.mutate()}>
-              {scan.isPending ? <Loader2 className="size-4 animate-spin" /> : <FileScan className="size-4" />} ดึงข้อมูล + จับคู่ PO
+              {scan.isPending ? <Loader2 className="size-4 animate-spin" /> : <FileScan className="size-4" />} {t('iv.ap_extract_match')}
             </Button>
             <Button disabled={auto.isPending || !ready} onClick={() => auto.mutate()}>
-              {auto.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} อัตโนมัติทั้งหมด (บันทึกบิล + จับคู่ 3 ทาง)
+              {auto.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} {t('iv.ap_full_auto')}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">"อัตโนมัติทั้งหมด" ต้องมีสิทธิ์เจ้าหนี้ (creditors) และจะบันทึกเฉพาะเอกสารที่จับคู่ได้ชัดเจนและไม่ซ้ำเท่านั้น · PDF ที่มีชั้นข้อความอ่านได้ทันที ส่วนรูปถ่าย/สแกนใช้ AI (ถ้าไม่ได้ตั้งค่า AI จะเข้าคิวตรวจสอบพร้อมไฟล์แนบ)</p>
+          <p className="text-xs text-muted-foreground">{t('iv.ap_auto_hint')}</p>
         </CardContent>
       </Card>
       {res ? <IntakeDetail intake={res} onChanged={setRes} /> : (
-        <Card><CardHeader><CardTitle className="text-base">ผลการรับเข้า</CardTitle></CardHeader>
-          <CardContent><p className="text-sm text-muted-foreground">สแกนเอกสารแล้วผลจะแสดงที่นี่</p></CardContent></Card>
+        <Card><CardHeader><CardTitle className="text-base">{t('iv.ap_intake_result')}</CardTitle></CardHeader>
+          <CardContent><p className="text-sm text-muted-foreground">{t('iv.ap_scan_hint')}</p></CardContent></Card>
       )}
     </div>
   );
 }
 
 function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r: Intake) => void }) {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [manualPo, setManualPo] = useState('');
   const refresh = (x: Intake) => { onChanged(x); qc.invalidateQueries({ queryKey: ['ap-intake-list'] }); };
 
   const mapPo = useMutation({
     mutationFn: (po: string) => api<Intake>(`/api/procurement/ap-intake/${encodeURIComponent(r.intake_no)}/map`, { method: 'PUT', body: JSON.stringify({ po_no: po }) }),
-    onSuccess: (x) => { refresh(x); notifySuccess(`จับคู่ ${x.po_no} แล้ว`); },
+    onSuccess: (x) => { refresh(x); notifySuccess(t('iv.ap_matched_po', { po: x.po_no ?? '' })); },
     onError: (e) => notifyError((e as Error).message),
   });
   const post = useMutation({
     mutationFn: () => api<Intake>(`/api/procurement/ap-intake/${encodeURIComponent(r.intake_no)}/post`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (x) => { refresh(x); notifySuccess(`บันทึกบิล ${x.txn_no} แล้ว`); },
+    onSuccess: (x) => { refresh(x); notifySuccess(t('iv.ap_bill_posted', { txn: x.txn_no ?? '' })); },
     onError: (e) => notifyError((e as Error).message),
   });
 
   const rows: [string, any][] = [
-    ['สถานะ', <Badge key="s" variant={statusVariant(r.status)}>{r.status}</Badge>],
-    ['เอกสารต้นฉบับ', r.has_file ? (
+    [t('fin.col_status'), <Badge key="s" variant={statusVariant(r.status)}>{r.status}</Badge>],
+    [t('iv.ap_row_source_doc'), r.has_file ? (
       <button key="f" className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline" onClick={() => openIntakeFile(r.intake_no)}>
-        <FileText className="size-3.5" /> {r.file_name ?? 'เปิดไฟล์'}
+        <FileText className="size-3.5" /> {r.file_name ?? t('iv.ap_open_file')}
       </button>
     ) : null],
-    ['ผู้ขาย', r.vendor_name], ['เลขผู้เสียภาษี', r.vendor_tax_id],
-    ['เลขที่ใบแจ้งหนี้', r.invoice_no], ['วันที่', r.invoice_date],
-    ['จำนวนเงิน', r.amount != null ? num(r.amount) : null],
-    ['PO ที่จับคู่', r.po_no ? `${r.po_no} (${r.map_method}, ${num(r.map_confidence)}%)` : null],
-    ['บิล (AP)', r.txn_no],
-    ['ผลจับคู่ 3 ทาง', r.match_status ? <Badge key="m" variant={matchVariant(r.match_status)}>{r.match_status}</Badge> : null],
-    ['พร้อมจ่าย', r.payable == null ? null : <Badge key="p" variant={r.payable ? 'success' : 'destructive'}>{r.payable ? 'พร้อมจ่าย' : 'ระงับ'}</Badge>],
+    [t('inv.col_supplier'), r.vendor_name], [t('iv.ap_tax_id'), r.vendor_tax_id],
+    [t('iv.ap_invoice_no'), r.invoice_no], [t('dash.col_date'), r.invoice_date],
+    [t('iv.ap_amount'), r.amount != null ? num(r.amount) : null],
+    [t('iv.ap_matched_po_label'), r.po_no ? `${r.po_no} (${r.map_method}, ${num(r.map_confidence)}%)` : null],
+    [t('iv.ap_bill'), r.txn_no],
+    [t('iv.ap_match_result_3way'), r.match_status ? <Badge key="m" variant={matchVariant(r.match_status)}>{r.match_status}</Badge> : null],
+    [t('iv.ap_payable'), r.payable == null ? null : <Badge key="p" variant={r.payable ? 'success' : 'destructive'}>{r.payable ? t('iv.ap_payable') : t('iv.ap_on_hold')}</Badge>],
   ];
 
   return (
     <Card className="gap-4">
-      <CardHeader><CardTitle className="text-base">ผลการรับเข้า {r.intake_no} <span className="ml-1 text-xs text-muted-foreground">({r.extract_source})</span></CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-base">{t('iv.ap_intake_result')} {r.intake_no} <span className="ml-1 text-xs text-muted-foreground">({r.extract_source})</span></CardTitle></CardHeader>
       <CardContent className="space-y-4">
         {r.dup_of && (
           <p className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive">
-            <ShieldAlert className="size-4 shrink-0" /> อาจซ้ำกับ {r.dup_of} — ระบบไม่บันทึกอัตโนมัติ
+            <ShieldAlert className="size-4 shrink-0" /> {t('iv.ap_dup_warn', { dup: r.dup_of })}
           </p>
         )}
         <table className="w-full text-sm"><tbody>
@@ -175,11 +179,11 @@ function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r:
 
         {r.status !== 'Posted' && r.candidates.length > 0 && (
           <div className="space-y-2">
-            <p className="text-sm font-medium">PO ที่ใกล้เคียง — เลือกเพื่อจับคู่</p>
+            <p className="text-sm font-medium">{t('iv.ap_near_po')}</p>
             {r.candidates.map((c) => (
               <button key={c.po_no} className="flex w-full items-center justify-between rounded-md border p-2 text-sm hover:bg-accent" onClick={() => mapPo.mutate(c.po_no)} disabled={mapPo.isPending}>
                 <span className="flex items-center gap-2"><Link2 className="size-4 text-primary" /> {c.po_no} · {c.vendor_name ?? '—'}</span>
-                <span className="text-muted-foreground">{num(c.total_amount)} · คะแนน {c.score}</span>
+                <span className="text-muted-foreground">{num(c.total_amount)} · {t('iv.ap_score', { score: c.score })}</span>
               </button>
             ))}
           </div>
@@ -188,12 +192,12 @@ function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r:
         {r.status !== 'Posted' && (
           <div className="flex flex-wrap items-end gap-2">
             <div className="grid gap-1">
-              <Label htmlFor="ai-po">ระบุเลข PO เอง</Label>
+              <Label htmlFor="ai-po">{t('iv.ap_manual_po')}</Label>
               <Input id="ai-po" className="w-44" value={manualPo} onChange={(e) => setManualPo(e.target.value)} placeholder="PO-20260701-001" />
             </div>
-            <Button variant="outline" disabled={mapPo.isPending || !manualPo.trim()} onClick={() => mapPo.mutate(manualPo.trim())}><Link2 className="size-4" /> จับคู่</Button>
+            <Button variant="outline" disabled={mapPo.isPending || !manualPo.trim()} onClick={() => mapPo.mutate(manualPo.trim())}><Link2 className="size-4" /> {t('iv.ap_match')}</Button>
             <Button disabled={post.isPending} onClick={() => post.mutate()}>
-              <CheckCheck className="size-4" /> {post.isPending ? 'กำลังบันทึก…' : r.po_no ? 'บันทึกบิล + จับคู่ 3 ทาง' : 'บันทึกบิล (ไม่มี PO)'}
+              <CheckCheck className="size-4" /> {post.isPending ? t('iv.ap_saving') : r.po_no ? t('iv.ap_post_bill_match') : t('iv.ap_post_bill_no_po')}
             </Button>
           </div>
         )}
@@ -203,6 +207,7 @@ function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r:
 }
 
 function WorklistTab() {
+  const { t } = useLang();
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<Intake | null>(null);
   const q = useQuery<{ intakes: Intake[]; count: number }>({
@@ -217,31 +222,31 @@ function WorklistTab() {
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">
         {['', 'NeedsReview', 'Mapped', 'Posted'].map((s) => (
-          <Button key={s || 'all'} variant={status === s ? 'default' : 'outline'} onClick={() => setStatus(s)}>{s === '' ? 'ทั้งหมด' : s}</Button>
+          <Button key={s || 'all'} variant={status === s ? 'default' : 'outline'} onClick={() => setStatus(s)}>{s === '' ? t('iv.ap_all') : s}</Button>
         ))}
       </div>
       <StateView q={q}>
         {d && (
           <>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              <StatCard label="รอตรวจสอบ" value={num(counts('NeedsReview'))} icon={ShieldAlert} tone={counts('NeedsReview') > 0 ? 'warning' : 'success'} />
-              <StatCard label="จับคู่แล้วรอบันทึก" value={num(counts('Mapped'))} icon={Link2} tone="info" />
-              <StatCard label="บันทึกบิลแล้ว" value={num(counts('Posted'))} icon={ShieldCheck} tone="primary" />
+              <StatCard label={t('iv.ap_needs_review')} value={num(counts('NeedsReview'))} icon={ShieldAlert} tone={counts('NeedsReview') > 0 ? 'warning' : 'success'} />
+              <StatCard label={t('iv.ap_stat_mapped')} value={num(counts('Mapped'))} icon={Link2} tone="info" />
+              <StatCard label={t('iv.ap_stat_posted')} value={num(counts('Posted'))} icon={ShieldCheck} tone="primary" />
             </div>
             <DataTable
               rows={d.intakes}
               rowKey={(r: Intake) => r.intake_no}
               onRowClick={(r: Intake) => setSelected(r)}
-              emptyState={{ icon: ListChecks, title: 'ยังไม่มีเอกสารรับเข้า', description: 'สแกนใบแจ้งหนี้ที่แท็บ "สแกน / รับเข้า"' }}
+              emptyState={{ icon: ListChecks, title: t('iv.ap_empty_title'), description: t('iv.ap_empty_desc') }}
               columns={[
-                { key: 'intake_no', label: 'เลขรับเข้า', render: (r: Intake) => <span className="font-medium">{r.intake_no}</span> },
-                { key: 'vendor_name', label: 'ผู้ขาย', render: (r: Intake) => r.vendor_name ?? '—' },
-                { key: 'invoice_no', label: 'ใบแจ้งหนี้', render: (r: Intake) => r.invoice_no ?? '—' },
-                { key: 'amount', label: 'จำนวนเงิน', align: 'right', render: (r: Intake) => <span className="tabular">{r.amount != null ? num(r.amount) : '—'}</span> },
+                { key: 'intake_no', label: t('iv.ap_col_intake_no'), render: (r: Intake) => <span className="font-medium">{r.intake_no}</span> },
+                { key: 'vendor_name', label: t('inv.col_supplier'), render: (r: Intake) => r.vendor_name ?? '—' },
+                { key: 'invoice_no', label: t('iv.ap_col_invoice'), render: (r: Intake) => r.invoice_no ?? '—' },
+                { key: 'amount', label: t('iv.ap_amount'), align: 'right', render: (r: Intake) => <span className="tabular">{r.amount != null ? num(r.amount) : '—'}</span> },
                 { key: 'po_no', label: 'PO', render: (r: Intake) => r.po_no ?? '—' },
-                { key: 'status', label: 'สถานะ', render: (r: Intake) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-                { key: 'match_status', label: 'ผลจับคู่', render: (r: Intake) => r.match_status ? <Badge variant={matchVariant(r.match_status)}>{r.match_status}</Badge> : '—' },
-                { key: 'txn_no', label: 'บิล (AP)', render: (r: Intake) => r.txn_no ?? '—' },
+                { key: 'status', label: t('fin.col_status'), render: (r: Intake) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                { key: 'match_status', label: t('iv.ap_col_match_result'), render: (r: Intake) => r.match_status ? <Badge variant={matchVariant(r.match_status)}>{r.match_status}</Badge> : '—' },
+                { key: 'txn_no', label: t('iv.ap_bill'), render: (r: Intake) => r.txn_no ?? '—' },
               ]}
             />
           </>

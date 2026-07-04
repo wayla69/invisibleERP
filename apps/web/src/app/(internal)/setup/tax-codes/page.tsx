@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Coins, Plus, Save, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -26,6 +27,7 @@ const BLANK: Tax = { code: '', kind: 'vat', rate: 0, active: true };
 // รหัสภาษี — VAT + WHT tax-code master (rate + GL accounts). The configurable tax surface behind item posting
 // determination (docs/33, GL-21) replacing the single tenant vat_rate column.
 export default function TaxCodesPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['tax-codes'], queryFn: () => api('/api/item-setup/tax-codes') });
   const [form, setForm] = useState<Tax>(BLANK);
@@ -43,68 +45,68 @@ export default function TaxCodesPage() {
     mutationFn: () => editing
       ? api(`/api/item-setup/tax-codes/${encodeURIComponent(form.code.trim())}`, { method: 'PATCH', body: JSON.stringify(payload()) })
       : api('/api/item-setup/tax-codes', { method: 'POST', body: JSON.stringify(payload()) }),
-    onSuccess: (r: any) => { notifySuccess(`บันทึกรหัสภาษี ${r.code}`); reset(); qc.invalidateQueries({ queryKey: ['tax-codes'] }); },
+    onSuccess: (r: any) => { notifySuccess(t('st.stax_saved', { code: r.code })); reset(); qc.invalidateQueries({ queryKey: ['tax-codes'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const edit = (t: Tax) => { setForm({ ...BLANK, ...t }); setRatePct(String(((t.rate ?? 0) * 100).toFixed(2)).replace(/\.00$/, '')); setEditing(true); };
 
   return (
     <div>
-      <PageHeader title="รหัสภาษี (VAT / หัก ณ ที่จ่าย)" description="กำหนดรหัสภาษีมูลค่าเพิ่มและภาษีหัก ณ ที่จ่าย พร้อมอัตราและบัญชี GL — ใช้ผูกกับสินค้า/หมวดเพื่อคำนวณและลงบัญชีภาษีอัตโนมัติ" />
+      <PageHeader title={t('st.stax_title')} description={t('st.stax_desc')} />
       <div className="space-y-5">
         <Card className="max-w-4xl gap-4 p-5">
-          <h3 className="text-base font-semibold">{editing ? `แก้ไขรหัสภาษี ${form.code}` : 'เพิ่มรหัสภาษี'}</h3>
+          <h3 className="text-base font-semibold">{editing ? t('st.stax_edit_heading', { code: form.code }) : t('st.stax_add_heading')}</h3>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="รหัส"><Input value={form.code} onChange={set('code')} disabled={editing} placeholder="เช่น VAT7 / WHT3" /></Field>
-            <Field label="ชนิด">
+            <Field label={t('st.stax_code')}><Input value={form.code} onChange={set('code')} disabled={editing} placeholder={t('st.stax_ph_code')} /></Field>
+            <Field label={t('st.stax_kind')}>
               <Select value={form.kind} onValueChange={(v) => setForm((f) => ({ ...f, kind: v as 'vat' | 'wht' }))}>
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="vat">ภาษีมูลค่าเพิ่ม (VAT)</SelectItem>
-                  <SelectItem value="wht">หัก ณ ที่จ่าย (WHT)</SelectItem>
+                  <SelectItem value="vat">{t('st.stax_kind_vat')}</SelectItem>
+                  <SelectItem value="wht">{t('st.stax_kind_wht')}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="อัตรา (%)"><Input type="number" value={ratePct} onChange={(e) => setRatePct(e.target.value)} placeholder="7" /></Field>
-            <Field label="ชื่อ (EN)"><Input value={form.name ?? ''} onChange={set('name')} placeholder="VAT 7%" /></Field>
-            <Field label="ชื่อ (TH)"><Input value={form.name_th ?? ''} onChange={set('name_th')} placeholder="ภาษีมูลค่าเพิ่ม 7%" /></Field>
+            <Field label={t('st.stax_rate')}><Input type="number" value={ratePct} onChange={(e) => setRatePct(e.target.value)} placeholder="7" /></Field>
+            <Field label={t('st.stax_name_en')}><Input value={form.name ?? ''} onChange={set('name')} placeholder="VAT 7%" /></Field>
+            <Field label={t('st.stax_name_th')}><Input value={form.name_th ?? ''} onChange={set('name_th')} placeholder={t('st.stax_ph_name_th')} /></Field>
             {form.kind === 'vat' ? (
               <>
-                <Field label="บัญชี VAT ขาย (Output)"><Input value={form.output_account ?? ''} onChange={set('output_account')} placeholder="2100" /></Field>
-                <Field label="บัญชี VAT ซื้อ (Input)"><Input value={form.input_account ?? ''} onChange={set('input_account')} placeholder="2100" /></Field>
+                <Field label={t('st.stax_output')}><Input value={form.output_account ?? ''} onChange={set('output_account')} placeholder="2100" /></Field>
+                <Field label={t('st.stax_input')}><Input value={form.input_account ?? ''} onChange={set('input_account')} placeholder="2100" /></Field>
               </>
             ) : (
               <>
-                <Field label="บัญชีภาษีหัก ณ ที่จ่าย"><Input value={form.wht_account ?? ''} onChange={set('wht_account')} placeholder="2361" /></Field>
-                <Field label="ประเภทเงินได้"><Input value={form.wht_income_type ?? ''} onChange={set('wht_income_type')} placeholder="เช่น 40(7-8)" /></Field>
+                <Field label={t('st.stax_wht_account')}><Input value={form.wht_account ?? ''} onChange={set('wht_account')} placeholder="2361" /></Field>
+                <Field label={t('st.stax_income_type')}><Input value={form.wht_income_type ?? ''} onChange={set('wht_income_type')} placeholder={t('st.stax_ph_wht')} /></Field>
               </>
             )}
           </div>
           <div className="flex gap-2">
             <Button disabled={save.isPending || !form.code.trim()} onClick={() => save.mutate()}>
-              {editing ? <Save className="size-4" /> : <Plus className="size-4" />} {save.isPending ? 'กำลังบันทึก…' : editing ? 'บันทึกการแก้ไข' : 'เพิ่มรหัสภาษี'}
+              {editing ? <Save className="size-4" /> : <Plus className="size-4" />} {save.isPending ? t('st.stax_saving') : editing ? t('st.stax_save_edit') : t('st.stax_add')}
             </Button>
-            {editing && <Button variant="outline" onClick={reset}><X className="size-4" /> ยกเลิก</Button>}
+            {editing && <Button variant="outline" onClick={reset}><X className="size-4" /> {t('st.stax_cancel')}</Button>}
           </div>
         </Card>
 
         <StateView q={q}>
           {q.data && (
             <div className="space-y-5">
-              <StatCard label="จำนวนรหัสภาษี" value={q.data.count ?? 0} icon={Coins} tone="primary" className="max-w-xs" />
+              <StatCard label={t('st.stax_stat_count')} value={q.data.count ?? 0} icon={Coins} tone="primary" className="max-w-xs" />
               <DataTable
                 rows={q.data.tax_codes ?? []}
                 rowKey={(r: Tax) => r.code}
                 onRowClick={(r: Tax) => edit(r)}
                 columns={[
-                  { key: 'code', label: 'รหัส' },
-                  { key: 'kind', label: 'ชนิด', render: (r: Tax) => <Badge variant={r.kind === 'wht' ? 'warning' : 'success'}>{r.kind === 'wht' ? 'หัก ณ ที่จ่าย' : 'VAT'}</Badge> },
-                  { key: 'rate', label: 'อัตรา', align: 'right', render: (r: Tax) => `${((r.rate ?? 0) * 100).toFixed(2).replace(/\.00$/, '')}%` },
-                  { key: 'name', label: 'ชื่อ', render: (r: Tax) => r.name_th || r.name || '—' },
-                  { key: 'acct', label: 'บัญชี', sortable: false, render: (r: Tax) => r.kind === 'wht' ? (r.wht_account ?? '—') : `${r.output_account ?? '—'} / ${r.input_account ?? '—'}` },
-                  { key: 'active', label: 'สถานะ', render: (r: Tax) => <Badge variant={r.active === false ? 'destructive' : 'success'}>{r.active === false ? 'ปิด' : 'ใช้งาน'}</Badge> },
+                  { key: 'code', label: t('st.stax_code') },
+                  { key: 'kind', label: t('st.stax_col_kind'), render: (r: Tax) => <Badge variant={r.kind === 'wht' ? 'warning' : 'success'}>{r.kind === 'wht' ? t('st.stax_wht_short') : 'VAT'}</Badge> },
+                  { key: 'rate', label: t('st.stax_col_rate'), align: 'right', render: (r: Tax) => `${((r.rate ?? 0) * 100).toFixed(2).replace(/\.00$/, '')}%` },
+                  { key: 'name', label: t('st.stax_col_name'), render: (r: Tax) => r.name_th || r.name || '—' },
+                  { key: 'acct', label: t('st.stax_col_account'), sortable: false, render: (r: Tax) => r.kind === 'wht' ? (r.wht_account ?? '—') : `${r.output_account ?? '—'} / ${r.input_account ?? '—'}` },
+                  { key: 'active', label: t('st.stax_col_status'), render: (r: Tax) => <Badge variant={r.active === false ? 'destructive' : 'success'}>{r.active === false ? t('st.stax_off') : t('st.stax_active')}</Badge> },
                 ]}
-                emptyState={{ icon: Coins, title: 'ยังไม่มีรหัสภาษี', description: 'เพิ่มรหัส VAT7 (7%) หรือรหัสหัก ณ ที่จ่ายด้านบน' }}
+                emptyState={{ icon: Coins, title: t('st.stax_empty_title'), description: t('st.stax_empty_desc') }}
               />
             </div>
           )}

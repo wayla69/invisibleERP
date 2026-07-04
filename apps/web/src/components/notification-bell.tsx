@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bell, CheckCheck } from 'lucide-react';
 
 import { api, hasSession } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,7 @@ interface Inbox { items: InboxItem[]; total: number; unread_count: number }
 // Header bell: polls the unread count, and on open shows the most recent notifications with
 // a one-click "mark read". Everything is scoped server-side to the caller's tenant + role.
 export function NotificationBell() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [open, setOpen] = React.useState(false);
   const enabled = typeof window !== 'undefined' && !!hasSession();
@@ -65,7 +67,7 @@ export function NotificationBell() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative" aria-label={`การแจ้งเตือน${unread ? ` (${unread} ยังไม่อ่าน)` : ''}`}>
+        <Button variant="ghost" size="icon" className="relative" aria-label={unread ? t('mx.notif_aria_unread', { count: unread }) : t('mx.notif_title')}>
           <Bell className="size-4" />
           {unread > 0 && (
             <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground">
@@ -76,7 +78,7 @@ export function NotificationBell() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-sm font-medium">การแจ้งเตือน</span>
+          <span className="text-sm font-medium">{t('mx.notif_title')}</span>
           {unread > 0 && (
             <Button
               variant="ghost"
@@ -86,16 +88,16 @@ export function NotificationBell() {
               disabled={markAll.isPending}
             >
               <CheckCheck className="size-3.5" />
-              อ่านทั้งหมด
+              {t('mx.notif_mark_all')}
             </Button>
           )}
         </div>
 
         <div className="max-h-80 overflow-y-auto">
           {inbox.isLoading ? (
-            <p className="px-3 py-6 text-center text-sm text-muted-foreground">กำลังโหลด…</p>
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">{t('mx.notif_loading')}</p>
           ) : items.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm text-muted-foreground">ไม่มีการแจ้งเตือน</p>
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">{t('mx.notif_empty')}</p>
           ) : (
             items.map((it) => (
               <button
@@ -122,7 +124,7 @@ export function NotificationBell() {
           onClick={() => setOpen(false)}
           className="block border-t px-3 py-2 text-center text-sm font-medium text-primary hover:bg-accent"
         >
-          ดูทั้งหมด
+          {t('mx.notif_view_all')}
         </Link>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { SearchX, Truck } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { ModulePage } from '@/components/module-page';
 import { SearchInput } from '@/components/search-input';
 import { DataTable } from '@/components/data-table';
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button';
 interface Supplier { Supplier_ID: string; Supplier_Name?: string; Contact_Person?: string; Phone?: string; Payment_Terms?: string }
 
 export default function SuppliersPage() {
+  const { t } = useLang();
   const q = useQuery<{ suppliers: Supplier[] }>({ queryKey: ['suppliers'], queryFn: () => api('/api/inventory/suppliers') });
   const rows = q.data?.suppliers ?? [];
   const [search, setSearch] = useState('');
@@ -25,18 +27,20 @@ export default function SuppliersPage() {
 
   return (
     <ModulePage
-      title="ผู้ขาย (Suppliers)"
-      description="รายชื่อผู้ขายและเงื่อนไขการชำระเงิน"
+      title={t('inv.suppliers_title')}
+      description={t('inv.suppliers_subtitle')}
       query={q}
       toolbar={
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="ค้นหาชื่อ / รหัส / ผู้ติดต่อ…"
-          ariaLabel="ค้นหาผู้ขาย"
+          placeholder={t('inv.suppliers_search_ph')}
+          ariaLabel={t('inv.suppliers_search_aria')}
           count={
             q.data
-              ? `${num(filtered.length)}${search && filtered.length !== rows.length ? ` จาก ${num(rows.length)}` : ''} ราย`
+              ? (search && filtered.length !== rows.length
+                  ? t('inv.suppliers_count_of', { n: num(filtered.length), total: num(rows.length) })
+                  : t('inv.suppliers_count', { n: num(filtered.length) }))
               : undefined
           }
         />
@@ -50,22 +54,22 @@ export default function SuppliersPage() {
             search
               ? {
                   icon: SearchX,
-                  title: 'ไม่พบผู้ขายที่ตรงกับการค้นหา',
-                  description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                  title: t('inv.no_match_suppliers'),
+                  description: t('inv.no_match_desc'),
                   action: (
                     <Button variant="outline" size="sm" onClick={() => setSearch('')}>
-                      ล้างตัวกรอง
+                      {t('inv.clear_filter')}
                     </Button>
                   ),
                 }
-              : { icon: Truck, title: 'ยังไม่มีผู้ขาย', description: 'เพิ่มผู้ขายในข้อมูลหลักเพื่อเริ่มต้น' }
+              : { icon: Truck, title: t('inv.suppliers_empty_title'), description: t('inv.suppliers_empty_desc') }
           }
           columns={[
-            { key: 'Supplier_ID', label: 'รหัส' },
-            { key: 'Supplier_Name', label: 'ชื่อ', render: (r) => r.Supplier_Name || '—' },
-            { key: 'Contact_Person', label: 'ผู้ติดต่อ', render: (r) => r.Contact_Person || '—' },
-            { key: 'Phone', label: 'โทร', render: (r) => r.Phone || '—' },
-            { key: 'Payment_Terms', label: 'เครดิต', render: (r) => r.Payment_Terms || '—' },
+            { key: 'Supplier_ID', label: t('inv.col_code') },
+            { key: 'Supplier_Name', label: t('inv.col_name2'), render: (r) => r.Supplier_Name || '—' },
+            { key: 'Contact_Person', label: t('inv.col_contact'), render: (r) => r.Contact_Person || '—' },
+            { key: 'Phone', label: t('inv.col_phone'), render: (r) => r.Phone || '—' },
+            { key: 'Payment_Terms', label: t('inv.col_terms'), render: (r) => r.Payment_Terms || '—' },
           ]}
         />
       )}

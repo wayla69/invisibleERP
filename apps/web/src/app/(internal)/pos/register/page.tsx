@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { CloudOff, ListChecks, RefreshCw, Store, Utensils, Wifi, WifiOff, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useTerminal } from '@/lib/terminal';
 import { useOnline } from '@/lib/offline';
@@ -30,6 +31,7 @@ interface HeldCart { lines: CartLine[]; mode: Mode; tableId: number | null; tabl
 interface UserPrefs { favorites: string[]; navFold: Record<string, boolean>; pos_fav: number[]; saved: boolean }
 
 export default function RegisterPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const tm = useTerminal();
   const online = useOnline();
@@ -68,7 +70,7 @@ export default function RegisterPage() {
   const [tablePicker, setTablePicker] = useState(false);
   const [heldOpen, setHeldOpen] = useState(false);
 
-  const t = useMemo(() => cartTotals(lines), [lines]);
+  const tot = useMemo(() => cartTotals(lines), [lines]);
 
   // ── cart ops ──
   const pick = useCallback((it: MenuItem) => {
@@ -95,15 +97,15 @@ export default function RegisterPage() {
   // ── customer-facing display: mirror the cart (debounced) ──
   useEffect(() => {
     const id = setTimeout(() => {
-      if (lines.length === 0) { tm.pushDisplay({ message: 'ยินดีต้อนรับ / Welcome' }); return; }
+      if (lines.length === 0) { tm.pushDisplay({ message: t('px.reg_welcome') }); return; }
       tm.pushDisplay({
-        message: tableNo ? `โต๊ะ ${tableNo}` : 'กำลังคิดเงิน',
+        message: tableNo ? t('px.reg_table_label', { tableNo }) : t('px.reg_disp_settling'),
         lines: lines.map((l) => ({ name: l.name, qty: l.qty, amount: lineAmount(l) })),
-        subtotal: t.net, total: t.total,
+        subtotal: tot.net, total: tot.total,
       });
     }, 500);
     return () => clearTimeout(id);
-  }, [lines, t.net, t.total, tableNo, tm]);
+  }, [lines, tot.net, tot.total, tableNo, tm, t]);
 
   // ── settle: create the order (re-priced + 86-checked server-side), fire kitchen for dine-in, checkout,
   //    then drive the hardware (customer display → print → drawer). Returns the authoritative sale. ──
@@ -113,14 +115,14 @@ export default function RegisterPage() {
     // ── offline path: queue a QUICK (no-table) cash-ish sale and replay it on reconnect. Dine-in needs
     //    the kitchen/online path (fire + table state), so it is blocked offline with a clear message. ──
     if (!online) {
-      if (mode === 'dinein') throw new Error('ออฟไลน์: โหมดโต๊ะ/ครัวต้องออนไลน์ — ปลดโต๊ะแล้วใช้โหมดขายเร็ว');
+      if (mode === 'dinein') throw new Error(t('px.reg_err_offline_dinein'));
       const offlineTotal = cartTotals(lines, discountPct).total;
       const change = cashReceived != null ? Math.round((cashReceived - offlineTotal) * 100) / 100 : undefined;
       await enqueueRegisterSale({ lines: items, method, discount_pct: discountPct || undefined, captured_at: new Date().toISOString(), device_id: tm.terminalCode, total: offlineTotal });
       outbox.refresh();
-      tm.pushDisplay({ message: 'บันทึกออฟไลน์', total: offlineTotal, amount_due: cashReceived ?? undefined, change });
+      tm.pushDisplay({ message: t('px.reg_disp_offline_saved'), total: offlineTotal, amount_due: cashReceived ?? undefined, change });
       if (method === 'Cash') void tm.kickDrawer({ saleNo: 'OFFLINE', amount: offlineTotal, reason: 'sale' });
-      return { sale_no: 'ออฟไลน์ (รอซิงค์)', total: offlineTotal, change, offline: true };
+      return { sale_no: t('px.reg_offline_pending'), total: offlineTotal, change, offline: true };
     }
 
     const created = await api<{ order_no: string }>('/api/restaurant/orders', {
@@ -138,21 +140,21 @@ export default function RegisterPage() {
       method: 'POST',
       body: JSON.stringify({ method, discount_pct: discountPct || undefined, ...sc }),
     });
-    const total = Number(sale.total ?? sale.total_with_tip ?? t.total);
+    const total = Number(sale.total ?? sale.total_with_tip ?? tot.total);
     const change = cashReceived != null ? Math.round((cashReceived - total) * 100) / 100 : undefined;
 
-    tm.pushDisplay({ message: 'ขอบคุณค่ะ/ครับ', total, amount_due: cashReceived ?? undefined, change });
+    tm.pushDisplay({ message: t('px.reg_disp_thanks'), total, amount_due: cashReceived ?? undefined, change });
     // Auto-print only when a printer is paired — otherwise the cashier prints on demand from the success
     // screen (avoids a surprise print dialog when no printer is set up yet).
-    if (tm.printerConnected) tm.printReceipt(sale.sale_no).catch((e) => notifyError('พิมพ์ใบเสร็จไม่สำเร็จ — ' + (e as Error).message));
+    if (tm.printerConnected) tm.printReceipt(sale.sale_no).catch((e) => notifyError(t('px.reg_err_print', { msg: (e as Error).message })));
     if (method === 'Cash') void tm.kickDrawer({ saleNo: sale.sale_no, amount: total, reason: 'sale' });
 
     qc.invalidateQueries({ queryKey: ['orders'] });
     qc.invalidateQueries({ queryKey: ['pos-summary'] });
     return { sale_no: sale.sale_no, total, change };
-  }, [lines, tableId, mode, orderType, pax, serviceChargePct, t.total, tm, qc, online, outbox]);
+  }, [lines, tableId, mode, orderType, pax, serviceChargePct, tot.total, tm, qc, online, outbox, t]);
 
-  const finishSale = () => { setCheckout(false); resetSale(); tm.pushDisplay({ message: 'ยินดีต้อนรับ / Welcome' }); };
+  const finishSale = () => { setCheckout(false); resetSale(); tm.pushDisplay({ message: t('px.reg_welcome') }); };
 
   // ── hold / recall ──
   const hold = async () => {
@@ -161,9 +163,9 @@ export default function RegisterPage() {
       const cart: HeldCart = { lines, mode, tableId, tableNo, customerName };
       const r = await api<{ hold_no: string }>('/api/pos/hold', {
         method: 'POST',
-        body: JSON.stringify({ label: tableNo ? `โต๊ะ ${tableNo}` : undefined, customer_name: customerName || undefined, cart }),
+        body: JSON.stringify({ label: tableNo ? t('px.reg_table_label', { tableNo }) : undefined, customer_name: customerName || undefined, cart }),
       });
-      notifySuccess(`พักบิลแล้ว · ${r.hold_no}`);
+      notifySuccess(t('px.reg_held_ok', { hold_no: r.hold_no }));
       resetSale();
     } catch (e) { notifyError((e as Error).message); }
   };
@@ -182,29 +184,29 @@ export default function RegisterPage() {
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <Store className="size-5 text-primary" /> ขายหน้าร้าน
+          <Store className="size-5 text-primary" /> {t('px.reg_title')}
         </h1>
         <div className="flex flex-wrap items-center gap-1.5">
           {/* offline status + pending-sync badge */}
           <Badge variant={online ? 'success' : 'warning'} className="gap-1">
             {online ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
-            {online ? 'ออนไลน์' : 'ออฟไลน์ — บันทึกในเครื่อง'}
+            {online ? t('px.reg_online') : t('px.reg_offline_local')}
           </Badge>
           {outbox.count > 0 && (
             <Button variant="outline" size="sm" disabled={!online} onClick={() => outbox.flush().then(() => qc.invalidateQueries({ queryKey: ['orders'] })).catch((e) => notifyError((e as Error).message))}>
-              {online ? <RefreshCw className="size-4" /> : <CloudOff className="size-4" />} รอซิงค์ {outbox.count}
+              {online ? <RefreshCw className="size-4" /> : <CloudOff className="size-4" />} {t('px.reg_pending_sync', { count: outbox.count })}
             </Button>
           )}
           {mode === 'dinein' && tableNo ? (
             <Badge variant="info" className="gap-1">
-              <Utensils className="size-3" /> โต๊ะ {tableNo}
-              <button aria-label="ยกเลิกโต๊ะ" onClick={() => { setMode('quick'); setTableId(null); setTableNo(null); }} className="ml-1 hover:text-foreground"><X className="size-3" /></button>
+              <Utensils className="size-3" /> {t('px.reg_table_label', { tableNo })}
+              <button aria-label={t('px.reg_aria_clear_table')} onClick={() => { setMode('quick'); setTableId(null); setTableNo(null); }} className="ml-1 hover:text-foreground"><X className="size-3" /></button>
             </Badge>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => setTablePicker(true)}><Utensils className="size-4" /> แนบโต๊ะ</Button>
+            <Button variant="outline" size="sm" onClick={() => setTablePicker(true)}><Utensils className="size-4" /> {t('px.reg_attach_table')}</Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => setHeldOpen(true)}><ListChecks className="size-4" /> บิลที่พักไว้</Button>
-          <Button asChild variant="ghost" size="sm"><Link href="/tables">บริการโต๊ะ/บุฟเฟต์ →</Link></Button>
+          <Button variant="outline" size="sm" onClick={() => setHeldOpen(true)}><ListChecks className="size-4" /> {t('px.reg_held_bills')}</Button>
+          <Button asChild variant="ghost" size="sm"><Link href="/tables">{t('px.reg_tables_link')}</Link></Button>
         </div>
       </div>
 
@@ -268,16 +270,17 @@ export default function RegisterPage() {
 // ── attach-table picker ──
 interface TableRow { id: number; table_no: string; status: string; seats: number }
 function TableDialog({ onClose, onPick }: { onClose: () => void; onPick: (id: number, no: string) => void }) {
+  const { t } = useLang();
   const q = useQuery<{ tables: TableRow[] }>({ queryKey: ['tables-list'], queryFn: () => api('/api/restaurant/tables') });
   const tone = (s: string) => (['occupied', 'bill_requested', 'paying'].includes(s) ? 'warning' : s === 'available' ? 'success' : 'muted');
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>แนบโต๊ะ (ส่งครัว + แยกรายได้ตามโต๊ะ)</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('px.reg_tabledlg_title')}</DialogTitle></DialogHeader>
         <StateView q={q}>
           {q.data && (
             q.data.tables.length === 0
-              ? <p className="py-6 text-center text-sm text-muted-foreground">ยังไม่มีโต๊ะ — เพิ่มได้ที่หน้า “บริการโต๊ะ”</p>
+              ? <p className="py-6 text-center text-sm text-muted-foreground">{t('px.reg_no_tables')}</p>
               : (
                 <div className="grid max-h-[55vh] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
                   {q.data.tables.map((tb) => (
@@ -288,7 +291,7 @@ function TableDialog({ onClose, onPick }: { onClose: () => void; onPick: (id: nu
                       className="flex flex-col items-center gap-1 rounded-lg border p-3 text-center transition-colors hover:border-primary hover:bg-accent"
                     >
                       <span className="font-semibold">{tb.table_no}</span>
-                      <Badge variant={tone(tb.status)} className="text-[10px]">{tb.seats} ที่</Badge>
+                      <Badge variant={tone(tb.status)} className="text-[10px]">{t('px.reg_seats', { seats: tb.seats })}</Badge>
                     </button>
                   ))}
                 </div>
@@ -303,6 +306,7 @@ function TableDialog({ onClose, onPick }: { onClose: () => void; onPick: (id: nu
 // ── held-bills list ──
 interface HeldRow { hold_no: string; label: string | null; customer_name: string | null; created_at: string }
 function HeldDialog({ onClose, onRecall }: { onClose: () => void; onRecall: (cart: HeldCart) => void }) {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ held: HeldRow[] }>({ queryKey: ['pos-held'], queryFn: () => api('/api/pos/held') });
   const doRecall = async (holdNo: string) => {
@@ -318,11 +322,11 @@ function HeldDialog({ onClose, onRecall }: { onClose: () => void; onRecall: (car
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>บิลที่พักไว้</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('px.reg_held_bills')}</DialogTitle></DialogHeader>
         <StateView q={q}>
           {q.data && (
             q.data.held.length === 0
-              ? <p className="py-6 text-center text-sm text-muted-foreground">ไม่มีบิลที่พักไว้</p>
+              ? <p className="py-6 text-center text-sm text-muted-foreground">{t('px.reg_no_held')}</p>
               : (
                 <ul className="divide-y">
                   {q.data.held.map((h) => (
@@ -332,8 +336,8 @@ function HeldDialog({ onClose, onRecall }: { onClose: () => void; onRecall: (car
                         <div className="text-xs text-muted-foreground">{h.hold_no} · {thaiDate(h.created_at)}</div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
-                        <Button size="sm" variant="outline" onClick={() => doRecall(h.hold_no)}>เรียกคืน</Button>
-                        <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => discard(h.hold_no)}>ทิ้ง</Button>
+                        <Button size="sm" variant="outline" onClick={() => doRecall(h.hold_no)}>{t('px.reg_recall')}</Button>
+                        <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => discard(h.hold_no)}>{t('px.reg_discard')}</Button>
                       </div>
                     </li>
                   ))}

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Check, FileText, PackageCheck, ClipboardList } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -25,16 +26,17 @@ interface PoDetail { po_no: string; status: string; total_amount: number; acknow
 interface Invoice { txn_no: string; invoice_no: string; ref_doc: string | null; amount: number; vat_amount: number; status: string; created_at: string | null }
 
 export default function SupplierPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="พอร์ทัลซัพพลายเออร์"
-        description="สำหรับคู่ค้า/ผู้ขาย — ดูใบสั่งซื้อที่ได้รับ ยืนยันรับทราบ PO และส่งใบแจ้งหนี้เข้าระบบเพื่อให้ฝ่ายจัดซื้อจับคู่และชำระเงิน (เห็นเฉพาะข้อมูลของตนเอง)"
+        title={t('iv.sup_title')}
+        description={t('iv.sup_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'po', label: 'ใบสั่งซื้อ (PO)', content: <PoTab /> },
-          { key: 'inv', label: 'ใบแจ้งหนี้', content: <InvoiceTab /> },
+          { key: 'po', label: t('iv.sup_tab_po'), content: <PoTab /> },
+          { key: 'inv', label: t('iv.sup_tab_inv'), content: <InvoiceTab /> },
         ]}
       />
     </div>
@@ -42,6 +44,7 @@ export default function SupplierPage() {
 }
 
 function PoTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ vendor: string; purchase_orders: Po[]; count: number }>({
     queryKey: ['sup-pos'],
@@ -58,9 +61,9 @@ function PoTab() {
       <StateView q={q}>
         {q.data && (
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="ใบสั่งซื้อทั้งหมด" value={num(rows.length)} icon={ClipboardList} tone="primary" hint={q.data.vendor ? `ผู้ขาย: ${q.data.vendor}` : undefined} />
-            <StatCard label="ยังไม่ได้ยืนยันรับทราบ" value={num(unack)} tone="warning" />
-            <StatCard label="มูลค่ารวม" value={baht(totalOpen)} tone="info" />
+            <StatCard label={t('iv.sup_stat_total_po')} value={num(rows.length)} icon={ClipboardList} tone="primary" hint={q.data.vendor ? t('iv.sup_vendor_hint', { vendor: q.data.vendor }) : undefined} />
+            <StatCard label={t('iv.sup_stat_unack')} value={num(unack)} tone="warning" />
+            <StatCard label={t('iv.sup_stat_total_value')} value={baht(totalOpen)} tone="info" />
           </div>
         )}
       </StateView>
@@ -71,14 +74,14 @@ function PoTab() {
             rows={rows}
             rowKey={(r) => r.po_no}
             onRowClick={(r) => setSelected((id) => (id === r.po_no ? null : r.po_no))}
-            emptyState={{ icon: ClipboardList, title: 'ยังไม่มีใบสั่งซื้อ', description: 'ใบสั่งซื้อที่ผู้ซื้อออกให้คุณจะปรากฏที่นี่ — คลิกเพื่อดูรายการและยืนยันรับทราบ' }}
+            emptyState={{ icon: ClipboardList, title: t('iv.sup_empty_po_title'), description: t('iv.sup_empty_po_desc') }}
             columns={[
-              { key: 'po_no', label: 'เลขที่ PO', render: (r) => <span className="font-medium">{r.po_no}</span> },
-              { key: 'po_date', label: 'วันที่', render: (r) => thaiDate(r.po_date) },
-              { key: 'expected_date', label: 'กำหนดส่ง', render: (r) => thaiDate(r.expected_date) },
-              { key: 'total_amount', label: 'มูลค่า', align: 'right', render: (r) => <span className="tabular">{baht(r.total_amount)}</span> },
-              { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-              { key: 'acknowledged_at', label: 'รับทราบ', render: (r) => (r.acknowledged_at ? <Badge variant="success">รับทราบแล้ว</Badge> : <Badge variant="secondary">ยังไม่ยืนยัน</Badge>) },
+              { key: 'po_no', label: t('iv.sup_col_po_no'), render: (r) => <span className="font-medium">{r.po_no}</span> },
+              { key: 'po_date', label: t('dash.col_date'), render: (r) => thaiDate(r.po_date) },
+              { key: 'expected_date', label: t('iv.sup_col_expected'), render: (r) => thaiDate(r.expected_date) },
+              { key: 'total_amount', label: t('iv.sup_col_value'), align: 'right', render: (r) => <span className="tabular">{baht(r.total_amount)}</span> },
+              { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'acknowledged_at', label: t('iv.sup_col_ack'), render: (r) => (r.acknowledged_at ? <Badge variant="success">{t('iv.sup_ack_yes')}</Badge> : <Badge variant="secondary">{t('iv.sup_ack_no')}</Badge>) },
             ]}
           />
         )}
@@ -90,13 +93,14 @@ function PoTab() {
 }
 
 function PoDetailCard({ poNo, onAck }: { poNo: string; onAck: () => void }) {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<PoDetail>({ queryKey: ['sup-po', poNo], queryFn: () => api(`/api/supplier/purchase-orders/${poNo}`) });
 
   const ack = useMutation({
     mutationFn: () => api(`/api/supplier/purchase-orders/${poNo}/acknowledge`, { method: 'POST' }),
     onSuccess: (r: any) => {
-      notifySuccess(r.already ? 'PO นี้ยืนยันรับทราบไปแล้ว' : `ยืนยันรับทราบ ${poNo} แล้ว`);
+      notifySuccess(r.already ? t('iv.sup_ack_already') : t('iv.sup_ack_done', { poNo }));
       qc.invalidateQueries({ queryKey: ['sup-po', poNo] });
       onAck();
     },
@@ -107,10 +111,10 @@ function PoDetailCard({ poNo, onAck }: { poNo: string; onAck: () => void }) {
     <Card className="gap-4 border-primary/30">
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
-          <span className="flex items-center gap-2"><PackageCheck className="size-4" /> รายละเอียด {poNo}</span>
+          <span className="flex items-center gap-2"><PackageCheck className="size-4" /> {t('iv.sup_detail', { poNo })}</span>
           {q.data && !q.data.acknowledged_at && (
             <Button size="sm" disabled={ack.isPending} onClick={() => ack.mutate()}>
-              <Check className="size-4" /> {ack.isPending ? 'กำลังยืนยัน…' : 'ยืนยันรับทราบ PO'}
+              <Check className="size-4" /> {ack.isPending ? t('iv.sup_acking') : t('iv.sup_ack_btn')}
             </Button>
           )}
         </CardTitle>
@@ -121,14 +125,14 @@ function PoDetailCard({ poNo, onAck }: { poNo: string; onAck: () => void }) {
             <DataTable
               rows={q.data.items}
               rowKey={(_r, i) => i}
-              emptyText="ไม่มีรายการ"
+              emptyText={t('iv.sup_no_items')}
               columns={[
-                { key: 'item_id', label: 'รหัสสินค้า', render: (r) => <span className="font-medium">{r.item_id}</span> },
-                { key: 'description', label: 'รายละเอียด', render: (r) => r.description ?? '—' },
-                { key: 'order_qty', label: 'สั่ง', align: 'right', render: (r) => <span className="tabular">{num(r.order_qty)}</span> },
-                { key: 'received_qty', label: 'รับแล้ว', align: 'right', render: (r) => <span className="tabular">{num(r.received_qty)}</span> },
-                { key: 'unit_price', label: 'ราคา/หน่วย', align: 'right', render: (r) => <span className="tabular">{baht(r.unit_price)}</span> },
-                { key: 'amount', label: 'รวม', align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'item_id', label: t('iv.sup_col_item_code'), render: (r) => <span className="font-medium">{r.item_id}</span> },
+                { key: 'description', label: t('iv.sup_col_desc'), render: (r) => r.description ?? '—' },
+                { key: 'order_qty', label: t('iv.sup_col_ordered'), align: 'right', render: (r) => <span className="tabular">{num(r.order_qty)}</span> },
+                { key: 'received_qty', label: t('iv.sup_col_received'), align: 'right', render: (r) => <span className="tabular">{num(r.received_qty)}</span> },
+                { key: 'unit_price', label: t('iv.sup_col_unit_price'), align: 'right', render: (r) => <span className="tabular">{baht(r.unit_price)}</span> },
+                { key: 'amount', label: t('iv.sup_col_amount'), align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
               ]}
             />
           )}
@@ -139,6 +143,7 @@ function PoDetailCard({ poNo, onAck }: { poNo: string; onAck: () => void }) {
 }
 
 function InvoiceTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ invoices: Invoice[]; count: number }>({ queryKey: ['sup-inv'], queryFn: () => api('/api/supplier/invoices') });
 
@@ -161,7 +166,7 @@ function InvoiceTab() {
         }),
       }),
     onSuccess: (r: any) => {
-      notifySuccess(`ส่งใบแจ้งหนี้แล้ว: ${r.invoice_no}`, `เลขรายการ ${r.txn_no} · สถานะ ${r.status}`);
+      notifySuccess(t('iv.sup_inv_sent', { invoiceNo: r.invoice_no }), t('iv.sup_inv_sent_desc', { txnNo: r.txn_no, status: r.status }));
       setInvoiceNo(''); setAmount(''); setVatAmount(''); setPoNo('');
       qc.invalidateQueries({ queryKey: ['sup-inv'] });
     },
@@ -176,31 +181,31 @@ function InvoiceTab() {
       <StateView q={q}>
         {q.data && (
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="ใบแจ้งหนี้ทั้งหมด" value={num(rows.length)} icon={FileText} tone="primary" />
-            <StatCard label="ค้างชำระ (มูลค่า)" value={baht(unpaid)} tone="warning" />
-            <StatCard label="ชำระแล้ว" value={num(rows.filter((r) => r.status !== 'Unpaid').length)} tone="success" />
+            <StatCard label={t('iv.sup_stat_total_inv')} value={num(rows.length)} icon={FileText} tone="primary" />
+            <StatCard label={t('iv.sup_stat_unpaid')} value={baht(unpaid)} tone="warning" />
+            <StatCard label={t('iv.sup_stat_paid')} value={num(rows.filter((r) => r.status !== 'Unpaid').length)} tone="success" />
           </div>
         )}
       </StateView>
 
       <Card className="max-w-4xl gap-4">
-        <CardHeader><CardTitle className="text-base">ส่งใบแจ้งหนี้</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('iv.sup_submit_inv')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="iv-po">อ้างอิง PO (ถ้ามี)</Label>
-              <Input id="iv-po" value={poNo} onChange={(e) => setPoNo(e.target.value)} placeholder="เลขที่ PO" />
+              <Label htmlFor="iv-po">{t('iv.sup_po_ref')}</Label>
+              <Input id="iv-po" value={poNo} onChange={(e) => setPoNo(e.target.value)} placeholder={t('iv.sup_po_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="iv-no">เลขใบแจ้งหนี้</Label>
+              <Label htmlFor="iv-no">{t('iv.sup_inv_no')}</Label>
               <Input id="iv-no" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="INV-xxxx" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="iv-date">วันที่ใบแจ้งหนี้</Label>
+              <Label htmlFor="iv-date">{t('iv.sup_inv_date')}</Label>
               <Input id="iv-date" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="iv-amt">มูลค่าก่อน VAT (฿)</Label>
+              <Label htmlFor="iv-amt">{t('iv.sup_amt_label')}</Label>
               <Input id="iv-amt" type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
             </div>
             <div className="grid gap-2">
@@ -209,7 +214,7 @@ function InvoiceTab() {
             </div>
           </div>
           <Button disabled={submit.isPending || !invoiceNo.trim() || !amount} onClick={() => submit.mutate()}>
-            <Plus className="size-4" /> {submit.isPending ? 'กำลังส่ง…' : 'ส่งใบแจ้งหนี้'}
+            <Plus className="size-4" /> {submit.isPending ? t('iv.sup_submitting') : t('iv.sup_submit_inv')}
           </Button>
         </CardContent>
       </Card>
@@ -219,14 +224,14 @@ function InvoiceTab() {
           <DataTable
             rows={rows}
             rowKey={(r) => r.txn_no}
-            emptyState={{ icon: FileText, title: 'ยังไม่มีใบแจ้งหนี้', description: 'ส่งใบแจ้งหนี้แรกจากแบบฟอร์มด้านบนเพื่อเข้าสู่กระบวนการจ่ายของผู้ซื้อ' }}
+            emptyState={{ icon: FileText, title: t('iv.sup_empty_inv_title'), description: t('iv.sup_empty_inv_desc') }}
             columns={[
-              { key: 'invoice_no', label: 'เลขใบแจ้งหนี้', render: (r) => <span className="font-medium">{r.invoice_no}</span> },
-              { key: 'ref_doc', label: 'อ้างอิง', render: (r) => r.ref_doc ?? '—' },
-              { key: 'created_at', label: 'ส่งเมื่อ', render: (r) => thaiDate(r.created_at) },
-              { key: 'amount', label: 'มูลค่า', align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
+              { key: 'invoice_no', label: t('iv.sup_inv_no'), render: (r) => <span className="font-medium">{r.invoice_no}</span> },
+              { key: 'ref_doc', label: t('iv.sup_col_ref'), render: (r) => r.ref_doc ?? '—' },
+              { key: 'created_at', label: t('iv.sup_col_sent_at'), render: (r) => thaiDate(r.created_at) },
+              { key: 'amount', label: t('iv.sup_col_value'), align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
               { key: 'vat_amount', label: 'VAT', align: 'right', render: (r) => <span className="tabular">{baht(r.vat_amount)}</span> },
-              { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
             ]}
           />
         )}

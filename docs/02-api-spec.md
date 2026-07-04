@@ -70,6 +70,11 @@ HTTP: 400 validation, 401 no/expired token, 403 RBAC/tenant, 404 not found, 409 
 | POST | `/api/analytics/insight` | `{type, data}` | `{insight}` |
 | GET | `/api/analytics/dashboard-summary` | — | `{replenishment, anomalies, insight}` |
 
+### Global search (⌘K spotlight)
+| Method | Path | Query | คืน |
+|---|---|---|---|
+| GET | `/api/search` | `q` (≥2 chars) | `{results:[{type, id, label, sublabel?, href}], count}` — read-only omni-search over **12 record types**: masters `customer`/`vendor`/`item`; documents `sale`/`ar_invoice`/`tax_invoice`/`purchase_order`/`requisition`/`ap_invoice`; and `member`/`project`/`employee`. RLS tenant-scoped; **each type is gated in-service by the caller's expanded permissions** (member→`loyalty\|marketing\|crm`, project→`exec\|planner\|ar`, requisition→`pr_raise\|procurement\|planner\|exec`, ap_invoice→`creditors\|exec`, employee→`exec\|users\|creditors`, plus the earlier seven), so it never widens access. Deep-links: `item`→`/inventory/{id}`, `member`→`/loyalty/members/{numeric id}`, `project`→`/projects/{code}` are real **detail pages**; other documents open their list (carrying `?q={id}` where the list pre-filters). ≤6 per type. `q<2` ⇒ empty. |
+
 ### AI Chat
 | POST | `/api/chat` | `{message, history?, agent_type?}` | `{reply, history}` หรือ **SSE stream** — V2 ต่อ tools จริง (เดิมต่อไม่ได้) |
 

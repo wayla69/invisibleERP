@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Banknote, CheckCircle2, Keyboard, Plus, ShoppingCart, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 interface Line { item_id: string; order_qty: number; unit_price: number }
 
 export default function NewOrderPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [customer, setCustomer] = useState('');
   const [lines, setLines] = useState<Line[]>([{ item_id: '', order_qty: 1, unit_price: 0 }]);
@@ -57,26 +59,26 @@ export default function NewOrderPage() {
     <div>
       <Button asChild variant="ghost" size="sm" className="mb-3 -ml-2 text-muted-foreground">
         <Link href="/pos">
-          <ArrowLeft className="size-4" /> กลับ
+          <ArrowLeft className="size-4" /> {t('px.new_back')}
         </Link>
       </Button>
 
-      <PageHeader title="สร้างออเดอร์" description="เลือกสินค้าและสร้างรายการขายใหม่" />
+      <PageHeader title={t('px.new_title')} description={t('px.new_desc')} />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
         {/* Items list */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">รายการสินค้า</CardTitle>
+            <CardTitle className="text-base">{t('px.new_items')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-2">
-              <Label htmlFor="customer">ลูกค้า (Customer code)</Label>
+              <Label htmlFor="customer">{t('px.new_customer_label')}</Label>
               <Input
                 id="customer"
                 value={customer}
                 onChange={(e) => setCustomer(e.target.value)}
-                placeholder="เช่น T1 (เว้นว่าง = ไม่ระบุ)"
+                placeholder={t('px.new_customer_ph')}
               />
             </div>
 
@@ -84,8 +86,8 @@ export default function NewOrderPage() {
 
             <div className="hidden grid-cols-[2fr_1fr_1fr_auto] gap-3 px-1 text-xs font-medium text-muted-foreground sm:grid">
               <span>Item ID</span>
-              <span className="text-right">จำนวน</span>
-              <span className="text-right">ราคา</span>
+              <span className="text-right">{t('inv.col_qty')}</span>
+              <span className="text-right">{t('px.new_price')}</span>
               <span className="w-9" />
             </div>
 
@@ -95,7 +97,7 @@ export default function NewOrderPage() {
                   <Input
                     className="col-span-2 sm:col-span-1"
                     placeholder="Item ID"
-                    aria-label={`รหัสสินค้า รายการที่ ${i + 1}`}
+                    aria-label={t('px.new_item_aria', { n: i + 1 })}
                     value={l.item_id}
                     onChange={(e) => setLine(i, { item_id: e.target.value })}
                   />
@@ -105,8 +107,8 @@ export default function NewOrderPage() {
                     step={1}
                     inputMode="numeric"
                     className="tabular text-right"
-                    placeholder="จำนวน"
-                    aria-label={`จำนวน รายการที่ ${i + 1}`}
+                    placeholder={t('inv.col_qty')}
+                    aria-label={t('px.new_qty_aria', { n: i + 1 })}
                     value={l.order_qty}
                     onChange={(e) => setLine(i, { order_qty: +e.target.value })}
                   />
@@ -116,8 +118,8 @@ export default function NewOrderPage() {
                     step="0.01"
                     inputMode="decimal"
                     className="tabular text-right"
-                    placeholder="ราคา"
-                    aria-label={`ราคาต่อหน่วย รายการที่ ${i + 1}`}
+                    placeholder={t('px.new_price')}
+                    aria-label={t('px.new_unitprice_aria', { n: i + 1 })}
                     value={l.unit_price}
                     onChange={(e) => setLine(i, { unit_price: +e.target.value })}
                   />
@@ -125,7 +127,7 @@ export default function NewOrderPage() {
                     variant="ghost"
                     size="icon"
                     className="text-muted-foreground hover:text-destructive"
-                    aria-label="ลบรายการ"
+                    aria-label={t('px.new_remove')}
                     onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}
                   >
                     <Trash2 className="size-4" />
@@ -135,7 +137,7 @@ export default function NewOrderPage() {
             </div>
 
             <Button variant="outline" size="sm" onClick={addLine}>
-              <Plus className="size-4" /> เพิ่มรายการ <kbd className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">F2</kbd>
+              <Plus className="size-4" /> {t('px.new_add_line')} <kbd className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">F2</kbd>
             </Button>
           </CardContent>
         </Card>
@@ -144,40 +146,40 @@ export default function NewOrderPage() {
         <Card className="lg:sticky lg:top-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <ShoppingCart className="size-4" /> สรุปออเดอร์
+              <ShoppingCart className="size-4" /> {t('px.new_summary')}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">จำนวนรายการ</span>
+              <span className="text-muted-foreground">{t('px.new_line_count')}</span>
               <span className="tabular font-medium">{lines.filter((l) => l.item_id).length}</span>
             </div>
             <Separator />
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">รวมทั้งสิ้น</span>
+              <span className="text-sm text-muted-foreground">{t('px.new_total')}</span>
               <span className="tabular text-2xl font-semibold tracking-tight">{baht(total)}</span>
             </div>
 
             {/* Quick-tender: exact + round-cash buttons fill the cash-received field for fast change calc */}
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <Banknote className="size-3.5" /> รับเงินสด
+                <Banknote className="size-3.5" /> {t('px.new_cash_received')}
               </div>
               <div className="grid grid-cols-4 gap-1.5">
-                <Button type="button" variant="secondary" size="sm" onClick={() => setCashReceived(Math.round(total * 100) / 100)}>พอดี</Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setCashReceived(Math.round(total * 100) / 100)}>{t('px.new_exact')}</Button>
                 {[100, 500, 1000].map((d) => (
                   <Button key={d} type="button" variant="secondary" size="sm" onClick={() => setCashReceived(d)}>฿{d}</Button>
                 ))}
               </div>
               <Input
                 type="number" min={0} step="0.01" inputMode="decimal"
-                className="tabular text-right" placeholder="เงินที่รับ"
+                className="tabular text-right" placeholder={t('px.new_cash_ph')}
                 value={cashReceived}
                 onChange={(e) => setCashReceived(e.target.value === '' ? '' : +e.target.value)}
               />
               {change !== null && (
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">เงินทอน</span>
+                  <span className="text-muted-foreground">{t('px.new_change')}</span>
                   <span className={`tabular font-semibold ${change < 0 ? 'text-destructive' : 'text-success'}`}>{baht(change)}</span>
                 </div>
               )}
@@ -188,11 +190,11 @@ export default function NewOrderPage() {
               disabled={mut.isPending || !canConfirm}
               onClick={confirm}
             >
-              {mut.isPending ? 'กำลังบันทึก…' : 'ยืนยันออเดอร์'}
+              {mut.isPending ? t('px.new_saving') : t('px.new_confirm')}
               <kbd className="ml-1 rounded bg-primary-foreground/20 px-1 text-[10px]">F9</kbd>
             </Button>
             <p className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
-              <Keyboard className="size-3" /> F2 เพิ่มรายการ · F9 ยืนยัน
+              <Keyboard className="size-3" /> {t('px.new_hotkeys')}
             </p>
 
             {mut.error && (
@@ -204,7 +206,7 @@ export default function NewOrderPage() {
               <Alert className="border-success/30 text-success">
                 <CheckCircle2 className="size-4" />
                 <AlertDescription className="text-success/90">
-                  สร้างสำเร็จ: <strong>{mut.data.order_no}</strong> · ยอด <span className="tabular">{baht(mut.data.total)}</span> · แต้ม +
+                  {t('px.new_created')} <strong>{mut.data.order_no}</strong> · {t('fin.col_amount')} <span className="tabular">{baht(mut.data.total)}</span> · {t('px.new_points')} +
                   <span className="tabular">{mut.data.points_earned}</span>
                 </AlertDescription>
               </Alert>

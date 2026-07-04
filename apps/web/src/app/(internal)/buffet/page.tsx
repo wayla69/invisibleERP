@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useLang } from '@/lib/i18n';
 
 interface Pkg {
   id: number;
@@ -30,16 +31,17 @@ interface Pkg {
 }
 
 export default function BuffetPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="บุฟเฟต์ (Buffet packages)"
-        description="จัดการแพ็กเกจบุฟเฟต์แบบต่อหัว + เวลาทานต่อโต๊ะ — ลูกค้าเลือกได้จากหน้าสั่งอาหารผ่าน QR"
+        title={t('mf.buf_title')}
+        description={t('mf.buf_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'pkgs', label: 'แพ็กเกจบุฟเฟต์', content: <Packages /> },
-          { key: 'behaviour', label: 'พฤติกรรมตามแพ็กเกจ', content: <Behaviour /> },
+          { key: 'pkgs', label: t('mf.buf_tab_pkgs'), content: <Packages /> },
+          { key: 'behaviour', label: t('mf.buf_tab_behaviour'), content: <Behaviour /> },
         ]}
       />
     </div>
@@ -55,42 +57,43 @@ interface TierStat {
 
 // ───────────────────────── พฤติกรรมตามแพ็กเกจ (behaviour by tier) ─────────────────────────
 function Behaviour() {
+  const { t: tr } = useLang();
   const q = useQuery<{ tiers: TierStat[] }>({ queryKey: ['buffet-analytics'], queryFn: () => api('/api/restaurant/buffet/analytics') });
   const tiers = q.data?.tiers ?? [];
 
   return (
     <StateView q={q}>
       {tiers.length === 0 ? (
-        <p className="text-sm text-muted-foreground">ยังไม่มีข้อมูลบุฟเฟต์</p>
+        <p className="text-sm text-muted-foreground">{tr('mf.buf_no_data')}</p>
       ) : (
         <div className="space-y-6">
           {tiers.map((t) => (
             <Card key={t.tier.id} className="gap-4">
               <CardHeader>
                 <CardTitle className="flex items-center justify-between text-base">
-                  <span>{t.tier.name} <span className="text-sm font-normal text-muted-foreground">· {baht(t.tier.price_per_pax)}/ท่าน</span></span>
-                  <Badge variant="secondary" className="gap-1"><Users className="size-3" /> {num(t.covers)} ท่าน</Badge>
+                  <span>{t.tier.name} <span className="text-sm font-normal text-muted-foreground">· {tr('mf.buf_price_per_pax', { price: baht(t.tier.price_per_pax) })}</span></span>
+                  <Badge variant="secondary" className="gap-1"><Users className="size-3" /> {tr('mf.buf_pax', { n: num(t.covers) })}</Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
-                  <StatCard label="เซสชัน" value={num(t.sessions)} icon={Timer} tone="primary" />
-                  <StatCard label="ลูกค้า (ท่าน)" value={num(t.covers)} icon={Users} tone="info" />
-                  <StatCard label="จาน/ท่าน" value={t.items_per_head.toFixed(2)} icon={Utensils} tone="default" hint={`รวม ${num(t.food_qty)} จาน`} />
-                  <StatCard label="บิลเฉลี่ย/เซสชัน" value={baht(t.avg_bill_per_session)} icon={BarChart3} tone="success" hint={`รายได้รวม ${baht(t.revenue)}`} />
-                  <StatCard label="เกินเวลา" value={`${t.overtime_rate_pct.toFixed(0)}%`} icon={Timer} tone={t.overtime_rate_pct > 0 ? 'warning' : 'default'} hint={`${num(t.overtime_sessions)} เซสชัน`} />
+                  <StatCard label={tr('mf.buf_sessions')} value={num(t.sessions)} icon={Timer} tone="primary" />
+                  <StatCard label={tr('mf.buf_covers')} value={num(t.covers)} icon={Users} tone="info" />
+                  <StatCard label={tr('mf.buf_dishes_per_pax')} value={t.items_per_head.toFixed(2)} icon={Utensils} tone="default" hint={tr('mf.buf_total_dishes', { n: num(t.food_qty) })} />
+                  <StatCard label={tr('mf.buf_avg_bill')} value={baht(t.avg_bill_per_session)} icon={BarChart3} tone="success" hint={tr('mf.buf_total_revenue', { amt: baht(t.revenue) })} />
+                  <StatCard label={tr('mf.buf_overtime')} value={`${t.overtime_rate_pct.toFixed(0)}%`} icon={Timer} tone={t.overtime_rate_pct > 0 ? 'warning' : 'default'} hint={tr('mf.buf_sessions_n', { n: num(t.overtime_sessions) })} />
                 </div>
                 <div>
-                  <h4 className="mb-2 text-sm font-semibold text-muted-foreground">เมนูยอดนิยมในแพ็กเกจนี้</h4>
+                  <h4 className="mb-2 text-sm font-semibold text-muted-foreground">{tr('mf.buf_top_menu')}</h4>
                   <DataTable
                     rows={t.top_items}
                     rowKey={(r) => r.name}
                     columns={[
-                      { key: 'name', label: 'เมนู' },
-                      { key: 'qty', label: 'จำนวนที่สั่ง', align: 'right', render: (r) => num(r.qty) },
-                      { key: 'orders', label: 'ครั้งที่สั่ง', align: 'right', render: (r) => num(r.orders) },
+                      { key: 'name', label: tr('mf.col_dish') },
+                      { key: 'qty', label: tr('mf.buf_col_qty_ordered'), align: 'right', render: (r) => num(r.qty) },
+                      { key: 'orders', label: tr('mf.buf_col_orders'), align: 'right', render: (r) => num(r.orders) },
                     ]}
-                    emptyState={{ icon: Utensils, title: 'ยังไม่มีการสั่งอาหารในแพ็กเกจนี้' }}
+                    emptyState={{ icon: Utensils, title: tr('mf.buf_no_orders') }}
                   />
                 </div>
               </CardContent>
@@ -103,6 +106,7 @@ function Behaviour() {
 }
 
 function Packages() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ packages: Pkg[] }>({ queryKey: ['buffet-packages'], queryFn: () => api('/api/restaurant/buffet/packages') });
   const packages = q.data?.packages ?? [];
@@ -128,7 +132,7 @@ function Packages() {
         }),
       }),
     onSuccess: (p) => {
-      notifySuccess(`เพิ่มแพ็กเกจ ${p.code} · ${p.name}`);
+      notifySuccess(t('mf.buf_added', { code: p.code, name: p.name }));
       setCode(''); setName(''); setPrice(''); setSkus('');
       qc.invalidateQueries({ queryKey: ['buffet-packages'] });
     },
@@ -140,64 +144,64 @@ function Packages() {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard label="แพ็กเกจทั้งหมด" value={num(packages.length)} icon={Utensils} tone="primary" />
-        <StatCard label="ราคาเฉลี่ย/ท่าน" value={baht(avgPrice)} icon={Utensils} tone="default" />
-        <StatCard label="ใช้งานอยู่" value={num(packages.filter((p) => p.active).length)} icon={Timer} tone="success" />
+        <StatCard label={t('mf.buf_total_pkgs')} value={num(packages.length)} icon={Utensils} tone="primary" />
+        <StatCard label={t('mf.buf_avg_price_pax')} value={baht(avgPrice)} icon={Utensils} tone="default" />
+        <StatCard label={t('mf.active')} value={num(packages.filter((p) => p.active).length)} icon={Timer} tone="success" />
       </div>
 
       <Card className="max-w-2xl gap-4">
         <CardHeader>
-          <CardTitle className="text-base">เพิ่มแพ็กเกจบุฟเฟต์</CardTitle>
+          <CardTitle className="text-base">{t('mf.buf_add_title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label htmlFor="bf-code">รหัส</Label>
-              <Input id="bf-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="เช่น STD" />
+              <Label htmlFor="bf-code">{t('mf.col_code')}</Label>
+              <Input id="bf-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder={t('mf.buf_code_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bf-name">ชื่อแพ็กเกจ</Label>
-              <Input id="bf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น บุฟเฟต์มาตรฐาน" />
+              <Label htmlFor="bf-name">{t('mf.buf_name_label')}</Label>
+              <Input id="bf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('mf.buf_name_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bf-price">ราคา/ท่าน (บาท)</Label>
+              <Label htmlFor="bf-price">{t('mf.buf_price_label')}</Label>
               <Input id="bf-price" type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="299" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bf-time">เวลาทาน (นาที)</Label>
+              <Label htmlFor="bf-time">{t('mf.buf_time_label')}</Label>
               <Input id="bf-time" type="number" min="1" value={timeLimit} onChange={(e) => setTimeLimit(e.target.value)} placeholder="90" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bf-ot">ค่าปรับเกินเวลา/ท่าน (บาท)</Label>
+              <Label htmlFor="bf-ot">{t('mf.buf_ot_label')}</Label>
               <Input id="bf-ot" type="number" min="0" value={overtime} onChange={(e) => setOvertime(e.target.value)} placeholder="0" />
             </div>
             <div className="grid gap-2 sm:col-span-2">
-              <Label htmlFor="bf-skus">เมนูที่รวมในบุฟเฟต์ (SKU คั่นด้วย ,)</Label>
-              <Input id="bf-skus" value={skus} onChange={(e) => setSkus(e.target.value)} placeholder="เช่น BF01, BF02, BF03" />
+              <Label htmlFor="bf-skus">{t('mf.buf_skus_label')}</Label>
+              <Input id="bf-skus" value={skus} onChange={(e) => setSkus(e.target.value)} placeholder={t('mf.buf_skus_ph')} />
             </div>
           </div>
           <Button disabled={!code || !name || price === '' || create.isPending} onClick={() => create.mutate()}>
-            <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'เพิ่มแพ็กเกจ'}
+            <Plus className="size-4" /> {create.isPending ? t('mf.saving') : t('mf.buf_add_btn')}
           </Button>
         </CardContent>
       </Card>
 
       <div>
-        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">แพ็กเกจบุฟเฟต์</h3>
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('mf.buf_tab_pkgs')}</h3>
         <StateView q={q}>
           <DataTable
             rows={packages}
             rowKey={(r) => r.id}
             columns={[
-              { key: 'code', label: 'รหัส' },
-              { key: 'name', label: 'ชื่อแพ็กเกจ' },
-              { key: 'price_per_pax', label: 'ราคา/ท่าน', align: 'right', render: (r) => <span className="tabular">{baht(r.price_per_pax)}</span> },
-              { key: 'time_limit_min', label: 'เวลา (นาที)', align: 'right', render: (r) => num(r.time_limit_min) },
-              { key: 'overtime_fee_per_pax', label: 'เกินเวลา/ท่าน', align: 'right', render: (r) => <span className="tabular">{r.overtime_fee_per_pax > 0 ? baht(r.overtime_fee_per_pax) : '—'}</span> },
-              { key: 'item_skus', label: 'จำนวนเมนู', align: 'right', render: (r) => num(r.item_skus.length) },
-              { key: 'active', label: 'สถานะ', render: (r) => <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge> },
+              { key: 'code', label: t('mf.col_code') },
+              { key: 'name', label: t('mf.buf_name_label') },
+              { key: 'price_per_pax', label: t('mf.buf_col_price_pax'), align: 'right', render: (r) => <span className="tabular">{baht(r.price_per_pax)}</span> },
+              { key: 'time_limit_min', label: t('mf.buf_col_time'), align: 'right', render: (r) => num(r.time_limit_min) },
+              { key: 'overtime_fee_per_pax', label: t('mf.buf_col_ot'), align: 'right', render: (r) => <span className="tabular">{r.overtime_fee_per_pax > 0 ? baht(r.overtime_fee_per_pax) : '—'}</span> },
+              { key: 'item_skus', label: t('mf.buf_col_menu_count'), align: 'right', render: (r) => num(r.item_skus.length) },
+              { key: 'active', label: t('fin.col_status'), render: (r) => <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? t('mf.status_active') : t('mf.status_off')}</Badge> },
             ]}
-            emptyState={{ icon: Utensils, title: 'ยังไม่มีแพ็กเกจบุฟเฟต์', description: 'เพิ่มแพ็กเกจบุฟเฟต์รายการแรกจากฟอร์มด้านบนเพื่อให้ลูกค้าเลือกได้' }}
+            emptyState={{ icon: Utensils, title: t('mf.buf_empty_title'), description: t('mf.buf_empty_desc') }}
           />
         </StateView>
       </div>

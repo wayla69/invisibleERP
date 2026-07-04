@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { useLang } from '@/lib/i18n';
 
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
@@ -32,22 +33,24 @@ function Field({ label, htmlFor, hint, className, children }: { label: ReactNode
 }
 
 export default function TerminalsPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="เครื่องรับบัตร & สรุปยอด (Terminals)" description="รับชำระผ่านบัตร (sale/pre-auth/capture/void/refund) และสรุปยอด (settlement)" />
-      <Tabs tabs={[{ key: 'terminals', label: 'เครื่อง & ชำระ', content: <Terminals /> }, { key: 'settle', label: 'สรุปยอด', content: <Settlements /> }]} />
+      <PageHeader title={t('px.payterm_page_title')} description={t('px.payterm_page_desc')} />
+      <Tabs tabs={[{ key: 'terminals', label: t('px.payterm_tab_terminals'), content: <Terminals /> }, { key: 'settle', label: t('px.payterm_tab_settle'), content: <Settlements /> }]} />
     </div>
   );
 }
 
 function Terminals() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const terms = useQuery<any>({ queryKey: ['terminals'], queryFn: () => api('/api/payments/terminal/terminals') });
   const intents = useQuery<any>({ queryKey: ['intents'], queryFn: () => api('/api/payments/terminal/intents') });
-  const [t, setT] = useState({ terminal_code: '', name: '' });
+  const [frm, setFrm] = useState({ terminal_code: '', name: '' });
   const [c, setC] = useState({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false });
   const refresh = () => { qc.invalidateQueries({ queryKey: ['terminals'] }); qc.invalidateQueries({ queryKey: ['intents'] }); };
-  const reg = useMutation({ mutationFn: () => api('/api/payments/terminal/register', { method: 'POST', body: JSON.stringify({ terminal_code: t.terminal_code, name: t.name || undefined }) }), onSuccess: () => { notifySuccess('เพิ่มเครื่องแล้ว'); setT({ terminal_code: '', name: '' }); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const reg = useMutation({ mutationFn: () => api('/api/payments/terminal/register', { method: 'POST', body: JSON.stringify({ terminal_code: frm.terminal_code, name: frm.name || undefined }) }), onSuccess: () => { notifySuccess(t('px.payterm_terminal_added')); setFrm({ terminal_code: '', name: '' }); refresh(); }, onError: (e: any) => notifyError(e.message) });
   const charge = useMutation({ mutationFn: () => api('/api/payments/terminal/charge', { method: 'POST', body: JSON.stringify({ terminal_code: c.terminal_code || undefined, amount: Number(c.amount), type: c.type, sale_no: c.sale_no || undefined, record_tender: c.record_tender }) }), onSuccess: (r: any) => { notifySuccess(`${r.intent_no} → ${r.status}${r.payment_no ? ` · tender ${r.payment_no}` : ''}`); setC({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false }); refresh(); }, onError: (e: any) => notifyError(e.message) });
   const act = useMutation({ mutationFn: (v: { no: string; op: string; body?: any }) => api(`/api/payments/terminal/intents/${v.no}/${v.op}`, { method: 'POST', body: JSON.stringify(v.body ?? {}) }), onSuccess: () => refresh(), onError: (e: any) => notifyError(e.message) });
 
@@ -55,61 +58,61 @@ function Terminals() {
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle className="text-base">เพิ่มเครื่องรับบัตร</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('px.payterm_add_terminal')}</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <Field label="รหัสเครื่อง" htmlFor="t-code"><Input id="t-code" placeholder="เช่น TERM1" value={t.terminal_code} onChange={(e) => setT({ ...t, terminal_code: e.target.value })} /></Field>
-            <Field label="ชื่อ (ไม่บังคับ)" htmlFor="t-name"><Input id="t-name" placeholder="เช่น เคาน์เตอร์หน้า" value={t.name} onChange={(e) => setT({ ...t, name: e.target.value })} /></Field>
-            <Button className="w-fit" disabled={!t.terminal_code || reg.isPending} onClick={() => reg.mutate()}><CreditCard className="size-4" /> {reg.isPending ? 'กำลังเพิ่ม…' : 'เพิ่มเครื่อง'}</Button>
+            <Field label={t('px.payterm_terminal_code')} htmlFor="t-code"><Input id="t-code" placeholder={t('px.payterm_eg_term1')} value={frm.terminal_code} onChange={(e) => setFrm({ ...frm, terminal_code: e.target.value })} /></Field>
+            <Field label={t('px.payterm_name_optional')} htmlFor="t-name"><Input id="t-name" placeholder={t('px.payterm_eg_front_counter')} value={frm.name} onChange={(e) => setFrm({ ...frm, name: e.target.value })} /></Field>
+            <Button className="w-fit" disabled={!frm.terminal_code || reg.isPending} onClick={() => reg.mutate()}><CreditCard className="size-4" /> {reg.isPending ? t('px.payterm_adding') : t('px.payterm_add_terminal_btn')}</Button>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle className="text-base">รับชำระ (ทดสอบ)</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('px.payterm_charge_test')}</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="รหัสเครื่อง" htmlFor="c-term"><Input id="c-term" placeholder="เช่น TERM1" value={c.terminal_code} onChange={(e) => setC({ ...c, terminal_code: e.target.value })} /></Field>
-              <Field label="จำนวน (บาท)" htmlFor="c-amt"><Input id="c-amt" type="number" inputMode="decimal" placeholder="0" value={c.amount} onChange={(e) => setC({ ...c, amount: e.target.value })} /></Field>
-              <Field label="ประเภท" htmlFor="c-type">
+              <Field label={t('px.payterm_terminal_code')} htmlFor="c-term"><Input id="c-term" placeholder={t('px.payterm_eg_term1')} value={c.terminal_code} onChange={(e) => setC({ ...c, terminal_code: e.target.value })} /></Field>
+              <Field label={t('px.payterm_amount_baht')} htmlFor="c-amt"><Input id="c-amt" type="number" inputMode="decimal" placeholder="0" value={c.amount} onChange={(e) => setC({ ...c, amount: e.target.value })} /></Field>
+              <Field label={t('px.payterm_type')} htmlFor="c-type">
                 <select id="c-type" className={selectCls} value={c.type} onChange={(e) => setC({ ...c, type: e.target.value })}>
-                  <option value="sale">ขาย (capture)</option><option value="preauth">กันวงเงิน (pre-auth)</option>
+                  <option value="sale">{t('px.payterm_opt_sale')}</option><option value="preauth">{t('px.payterm_opt_preauth')}</option>
                 </select>
               </Field>
-              <Field label="เลขที่บิล (ไม่บังคับ)" htmlFor="c-sale"><Input id="c-sale" placeholder="SALE-…" value={c.sale_no} onChange={(e) => setC({ ...c, sale_no: e.target.value })} /></Field>
+              <Field label={t('px.payterm_sale_no_optional')} htmlFor="c-sale"><Input id="c-sale" placeholder="SALE-…" value={c.sale_no} onChange={(e) => setC({ ...c, sale_no: e.target.value })} /></Field>
             </div>
-            <label className="flex items-center gap-2 text-sm" title="บันทึกเป็นการชำระของบิล (ให้ปิดลิ้นชัก/รายงานเห็น)">
-              <input type="checkbox" className="size-4 accent-primary" checked={c.record_tender} onChange={(e) => setC({ ...c, record_tender: e.target.checked })} /> ลงรายการชำระ (ผูกกับบิล)
+            <label className="flex items-center gap-2 text-sm" title={t('px.payterm_record_tender_title')}>
+              <input type="checkbox" className="size-4 accent-primary" checked={c.record_tender} onChange={(e) => setC({ ...c, record_tender: e.target.checked })} /> {t('px.payterm_record_tender')}
             </label>
-            <Button disabled={!c.amount || charge.isPending} onClick={() => charge.mutate()}><Banknote className="size-4" /> {charge.isPending ? 'กำลังรับชำระ…' : 'รับชำระ'}</Button>
+            <Button disabled={!c.amount || charge.isPending} onClick={() => charge.mutate()}><Banknote className="size-4" /> {charge.isPending ? t('px.payterm_charging') : t('px.payterm_charge_btn')}</Button>
           </CardContent>
         </Card>
       </div>
-      <StateView q={terms}>{terms.data && <DataTable rows={terms.data.terminals} rowKey={(r: any) => r.terminal_code} columns={[{ key: 'terminal_code', label: 'รหัส' }, { key: 'name', label: 'ชื่อ', render: (r: any) => r.name || '—' }, { key: 'provider', label: 'ผู้ให้บริการ' }, { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'active' ? 'active' : 'cancelled')}>{r.status}</Badge> }]} emptyState={{ icon: CreditCard, title: 'ยังไม่มีเครื่องรับบัตร', description: 'เพิ่มเครื่องรับบัตรเครื่องแรกด้วยฟอร์ม “เพิ่มเครื่องรับบัตร” ด้านบน' }} />}</StateView>
+      <StateView q={terms}>{terms.data && <DataTable rows={terms.data.terminals} rowKey={(r: any) => r.terminal_code} columns={[{ key: 'terminal_code', label: t('px.payterm_col_code') }, { key: 'name', label: t('px.payterm_col_name'), render: (r: any) => r.name || '—' }, { key: 'provider', label: t('px.payterm_col_provider') }, { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status === 'active' ? 'active' : 'cancelled')}>{r.status}</Badge> }]} emptyState={{ icon: CreditCard, title: t('px.payterm_empty_terminals_title'), description: t('px.payterm_empty_terminals_desc') }} />}</StateView>
       <div>
-        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">รายการชำระ (Intents)</h3>
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('px.payterm_intents_heading')}</h3>
         <StateView q={intents}>
           {intents.data && (
             <DataTable
               rows={intents.data.intents}
               rowKey={(r: any) => r.intent_no}
               columns={[
-                { key: 'intent_no', label: 'เลขที่' },
-                { key: 'type', label: 'ประเภท' },
-                { key: 'amount', label: 'ยอด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-                { key: 'captured_amount', label: 'จับยอด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.captured_amount)}</span> },
-                { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                { key: 'intent_no', label: t('dash.col_no') },
+                { key: 'type', label: t('px.payterm_type') },
+                { key: 'amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'captured_amount', label: t('px.payterm_col_captured'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.captured_amount)}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                 { key: 'act', label: '', sortable: false, render: (r: any) => {
                   // Disable this row's actions while a mutation against it is in flight — a double-click
                   // must not fire a duplicate capture / void / refund (real money movement).
                   const busy = act.isPending && act.variables?.no === r.intent_no;
                   return (
                   <div className="flex gap-1">
-                    {r.status === 'Authorized' && <Button size="sm" disabled={busy} onClick={() => act.mutate({ no: r.intent_no, op: 'capture' })}>จับยอด</Button>}
-                    {r.status === 'Authorized' && <Button size="sm" variant="outline" disabled={busy} onClick={() => act.mutate({ no: r.intent_no, op: 'void' })}>ยกเลิก</Button>}
-                    {r.status === 'Captured' && <Button size="sm" variant="destructive" disabled={busy} onClick={() => { const a = prompt('จำนวนคืนเงิน'); if (a) act.mutate({ no: r.intent_no, op: 'refund', body: { amount: Number(a) } }); }}>คืนเงิน</Button>}
+                    {r.status === 'Authorized' && <Button size="sm" disabled={busy} onClick={() => act.mutate({ no: r.intent_no, op: 'capture' })}>{t('px.payterm_capture')}</Button>}
+                    {r.status === 'Authorized' && <Button size="sm" variant="outline" disabled={busy} onClick={() => act.mutate({ no: r.intent_no, op: 'void' })}>{t('fin.cancel')}</Button>}
+                    {r.status === 'Captured' && <Button size="sm" variant="destructive" disabled={busy} onClick={() => { const a = prompt(t('px.payterm_refund_amount_prompt')); if (a) act.mutate({ no: r.intent_no, op: 'refund', body: { amount: Number(a) } }); }}>{t('px.payterm_refund')}</Button>}
                   </div>
                   );
                 } },
               ]}
-              emptyState={{ icon: ListChecks, title: 'ยังไม่มีรายการชำระ', description: 'รับชำระผ่านการ์ดด้วยฟอร์ม “รับชำระ (ทดสอบ)” เพื่อสร้างรายการแรก' }}
+              emptyState={{ icon: ListChecks, title: t('px.payterm_empty_intents_title'), description: t('px.payterm_empty_intents_desc') }}
             />
           )}
         </StateView>
@@ -119,19 +122,20 @@ function Terminals() {
 }
 
 function Settlements() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['settlements'], queryFn: () => api('/api/payments/terminal/settlements') });
   const [fee, setFee] = useState('2');
-  const settle = useMutation({ mutationFn: () => api('/api/payments/terminal/settle', { method: 'POST', body: JSON.stringify({ fee_pct: Number(fee) }) }), onSuccess: (r: any) => { notifySuccess(`สรุปยอด ${r.batch_no}: ${r.txn_count} รายการ`); qc.invalidateQueries({ queryKey: ['settlements'] }); }, onError: (e: any) => notifyError(e.message) });
+  const settle = useMutation({ mutationFn: () => api('/api/payments/terminal/settle', { method: 'POST', body: JSON.stringify({ fee_pct: Number(fee) }) }), onSuccess: (r: any) => { notifySuccess(t('px.payterm_settle_done', { batch_no: r.batch_no, count: r.txn_count })); qc.invalidateQueries({ queryKey: ['settlements'] }); }, onError: (e: any) => notifyError(e.message) });
   const reconcile = useMutation({ mutationFn: (no: string) => api(`/api/payments/terminal/settlements/${no}/reconcile`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['settlements'] }) });
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader><CardTitle className="text-base">สรุปยอดประจำรอบ (Settlement)</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('px.payterm_settle_card')}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-end gap-2">
-            <Field label="ค่าธรรมเนียม %" htmlFor="s-fee" className="max-w-[140px]"><Input id="s-fee" type="number" inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} /></Field>
-            <Button disabled={settle.isPending} onClick={() => settle.mutate()}>{settle.isPending ? 'กำลังสรุป…' : 'สรุปยอดที่จับแล้ว'}</Button>
+            <Field label={t('px.payterm_fee_pct')} htmlFor="s-fee" className="max-w-[140px]"><Input id="s-fee" type="number" inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} /></Field>
+            <Button disabled={settle.isPending} onClick={() => settle.mutate()}>{settle.isPending ? t('px.payterm_settling') : t('px.payterm_settle_captured')}</Button>
           </div>
         </CardContent>
       </Card>
@@ -141,16 +145,16 @@ function Settlements() {
             rows={q.data.batches}
             rowKey={(r: any) => r.batch_no}
             columns={[
-              { key: 'batch_no', label: 'เลขที่รอบ' },
-              { key: 'batch_date', label: 'วันที่' },
-              { key: 'gross', label: 'ยอดรวม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.gross)}</span> },
-              { key: 'fees', label: 'ค่าธรรมเนียม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.fees)}</span> },
-              { key: 'net', label: 'สุทธิ', align: 'right', render: (r: any) => <span className="tabular">{baht(r.net)}</span> },
-              { key: 'txn_count', label: 'จำนวน', align: 'right' },
-              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'Reconciled' ? 'paid' : 'open')}>{r.status}</Badge> },
-              { key: 'act', label: '', sortable: false, render: (r: any) => r.status !== 'Reconciled' ? <Button size="sm" variant="outline" disabled={reconcile.isPending && reconcile.variables === r.batch_no} onClick={() => reconcile.mutate(r.batch_no)}>กระทบยอด</Button> : null },
+              { key: 'batch_no', label: t('px.payterm_col_batch_no') },
+              { key: 'batch_date', label: t('dash.col_date') },
+              { key: 'gross', label: t('px.payterm_col_gross'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.gross)}</span> },
+              { key: 'fees', label: t('px.payterm_col_fees'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.fees)}</span> },
+              { key: 'net', label: t('px.payterm_col_net'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.net)}</span> },
+              { key: 'txn_count', label: t('inv.col_qty'), align: 'right' },
+              { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status === 'Reconciled' ? 'paid' : 'open')}>{r.status}</Badge> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => r.status !== 'Reconciled' ? <Button size="sm" variant="outline" disabled={reconcile.isPending && reconcile.variables === r.batch_no} onClick={() => reconcile.mutate(r.batch_no)}>{t('px.payterm_reconcile')}</Button> : null },
             ]}
-            emptyState={{ icon: Layers, title: 'ยังไม่มีรอบสรุปยอด', description: 'กด “สรุปยอดที่จับแล้ว” เพื่อปิดรอบและสร้าง batch สรุปยอดแรก' }}
+            emptyState={{ icon: Layers, title: t('px.payterm_empty_settle_title'), description: t('px.payterm_empty_settle_desc') }}
           />
         )}
       </StateView>

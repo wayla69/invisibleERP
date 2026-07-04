@@ -6,6 +6,7 @@ import { CheckCheck, ListChecks, ShieldAlert, ShieldCheck, Save, Search, Unlock 
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -29,17 +30,18 @@ const lineStatusVariant = (s: string) =>
 const pct = (v: unknown) => `${Number(v ?? 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}%`;
 
 export default function MatchPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="จับคู่เอกสาร 3 ทาง (3-Way Match)"
-        description="กระทบใบแจ้งหนี้ (AP) กับ PO (ราคา) และใบรับ (จำนวน) ภายในเกณฑ์ที่กำหนด เพื่อปลดล็อกการจ่ายเงิน"
+        title={t('iv.match_title')}
+        description={t('iv.match_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'run', label: 'รันการจับคู่ + ผลลัพธ์', content: <RunMatchTab /> },
-          { key: 'worklist', label: 'รายการ / ใบที่ถูกระงับ', content: <WorklistTab /> },
-          { key: 'tolerance', label: 'เกณฑ์ความคลาดเคลื่อน', content: <ToleranceTab /> },
+          { key: 'run', label: t('iv.match_tab_run'), content: <RunMatchTab /> },
+          { key: 'worklist', label: t('iv.match_tab_worklist'), content: <WorklistTab /> },
+          { key: 'tolerance', label: t('iv.match_tab_tolerance'), content: <ToleranceTab /> },
         ]}
       />
     </div>
@@ -48,10 +50,11 @@ export default function MatchPage() {
 
 // ───────────────────────── Worklist / blocked-invoice register ─────────────────────────
 function WorklistTab() {
+  const { t } = useLang();
   const [blockedOnly, setBlockedOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
-  useEffect(() => { const t = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(t); }, [search]);
+  useEffect(() => { const tx = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(tx); }, [search]);
 
   const q = useQuery<any>({
     queryKey: ['match-worklist', blockedOnly, debounced],
@@ -65,35 +68,35 @@ function WorklistTab() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input className="pl-8 sm:w-72" placeholder="ค้นหา เลขที่บิล / PO…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="ค้นหาผลการจับคู่" />
+          <Input className="pl-8 sm:w-72" placeholder={t('iv.match_search_placeholder')} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={t('iv.match_search_aria')} />
         </div>
         <Button variant={blockedOnly ? 'default' : 'outline'} aria-pressed={blockedOnly} onClick={() => setBlockedOnly((v) => !v)}>
-          <ShieldAlert className="size-4" /> เฉพาะใบที่ถูกระงับ
+          <ShieldAlert className="size-4" /> {t('iv.match_blocked_only')}
         </Button>
-        {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">กำลังอัปเดต…</span>}
+        {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">{t('iv.match_updating')}</span>}
       </div>
       <StateView q={q}>
         {d && (
           <>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              <StatCard label="ผลการจับคู่ทั้งหมด" value={num(d.total)} icon={ListChecks} tone="primary" />
-              <StatCard label="ถูกระงับการจ่าย" value={num(d.blocked)} icon={ShieldAlert} tone={d.blocked > 0 ? 'danger' : 'success'} hint="ไม่ผ่าน + ยังไม่ override" />
-              <StatCard label="ใช้สิทธิ์ทับ (override)" value={num(d.overridden)} icon={Unlock} tone={d.overridden > 0 ? 'warning' : 'default'} />
+              <StatCard label={t('iv.match_stat_total')} value={num(d.total)} icon={ListChecks} tone="primary" />
+              <StatCard label={t('iv.match_stat_blocked')} value={num(d.blocked)} icon={ShieldAlert} tone={d.blocked > 0 ? 'danger' : 'success'} hint={t('iv.match_stat_blocked_hint')} />
+              <StatCard label={t('iv.match_stat_overridden')} value={num(d.overridden)} icon={Unlock} tone={d.overridden > 0 ? 'warning' : 'default'} />
             </div>
             <DataTable
               rows={d.results}
               rowKey={(r: any) => r.txn_no}
               emptyState={{
                 icon: ListChecks,
-                title: blockedOnly ? 'ไม่มีใบที่ถูกระงับ' : 'ยังไม่มีผลการจับคู่',
-                description: blockedOnly ? 'ทุกใบแจ้งหนี้ที่จับคู่ผ่านหรือถูก override แล้ว' : 'รันการจับคู่ที่แท็บ "รันการจับคู่" แล้วผลจะแสดงที่นี่',
+                title: blockedOnly ? t('iv.match_empty_blocked_title') : t('iv.match_empty_title'),
+                description: blockedOnly ? t('iv.match_empty_blocked_desc') : t('iv.match_empty_desc'),
               }}
               columns={[
-                { key: 'txn_no', label: 'เลขที่บิล (AP)', render: (r: any) => <span className="font-medium">{r.txn_no}</span> },
+                { key: 'txn_no', label: t('iv.match_col_bill'), render: (r: any) => <span className="font-medium">{r.txn_no}</span> },
                 { key: 'po_no', label: 'PO', render: (r: any) => r.po_no ?? '—' },
-                { key: 'match_status', label: 'ผลจับคู่', render: (r: any) => <Badge variant={lineStatusVariant(r.match_status)}>{r.match_status}</Badge> },
-                { key: 'state', label: 'สถานะจ่าย', render: (r: any) => (r.override ? <Badge variant="warning">ใช้สิทธิ์ทับ</Badge> : r.payable ? <Badge variant="success">จ่ายได้</Badge> : <Badge variant="destructive">ระงับ</Badge>) },
-                { key: 'matched_by', label: 'จับคู่โดย', render: (r: any) => r.matched_by ?? '—' },
+                { key: 'match_status', label: t('iv.match_col_result'), render: (r: any) => <Badge variant={lineStatusVariant(r.match_status)}>{r.match_status}</Badge> },
+                { key: 'state', label: t('iv.match_col_pay_state'), render: (r: any) => (r.override ? <Badge variant="warning">{t('iv.match_overridden')}</Badge> : r.payable ? <Badge variant="success">{t('iv.match_payable')}</Badge> : <Badge variant="destructive">{t('iv.match_on_hold')}</Badge>) },
+                { key: 'matched_by', label: t('iv.match_col_matched_by'), render: (r: any) => r.matched_by ?? '—' },
               ]}
             />
           </>
@@ -105,6 +108,7 @@ function WorklistTab() {
 
 // ───────────────────────── Run + result ─────────────────────────
 function RunMatchTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [txnNo, setTxnNo] = useState('');
   const [poNo, setPoNo] = useState('');
@@ -139,7 +143,7 @@ function RunMatchTab() {
         body: JSON.stringify({ reason: overrideReason }),
       }),
     onSuccess: () => {
-      notifySuccess('อนุมัติทับแล้ว — จ่ายเงินได้');
+      notifySuccess(t('iv.match_override_ok'));
       setOverrideReason('');
       qc.invalidateQueries({ queryKey: ['match', lookup] });
     },
@@ -154,32 +158,32 @@ function RunMatchTab() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="gap-4">
           <CardHeader>
-            <CardTitle className="text-base">รันการจับคู่</CardTitle>
+            <CardTitle className="text-base">{t('iv.match_run')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="m-txn">เลขใบแจ้งหนี้ (AP txn)</Label>
+                <Label htmlFor="m-txn">{t('iv.match_lbl_ap_txn')}</Label>
                 <Input id="m-txn" value={txnNo} onChange={(e) => setTxnNo(e.target.value)} placeholder="AP-0001" />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="m-po">เลข PO</Label>
+                <Label htmlFor="m-po">{t('iv.match_lbl_po')}</Label>
                 <Input id="m-po" value={poNo} onChange={(e) => setPoNo(e.target.value)} placeholder="PO-0001" />
               </div>
             </div>
             <Button disabled={run.isPending || !txnNo} onClick={() => run.mutate()}>
-              <CheckCheck className="size-4" /> {run.isPending ? 'กำลังจับคู่…' : 'รันการจับคู่'}
+              <CheckCheck className="size-4" /> {run.isPending ? t('iv.match_matching') : t('iv.match_run')}
             </Button>
           </CardContent>
         </Card>
 
         <Card className="gap-4">
           <CardHeader>
-            <CardTitle className="text-base">ค้นหาผลการจับคู่</CardTitle>
+            <CardTitle className="text-base">{t('iv.match_find_title')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-2">
-              <Label htmlFor="m-lookup">เลขใบแจ้งหนี้</Label>
+              <Label htmlFor="m-lookup">{t('iv.match_lbl_invoice_no')}</Label>
               <div className="flex gap-2">
                 <Input
                   id="m-lookup"
@@ -189,7 +193,7 @@ function RunMatchTab() {
                   onKeyDown={(e) => e.key === 'Enter' && result.refetch()}
                 />
                 <Button variant="outline" onClick={() => result.refetch()} disabled={!lookup}>
-                  <Search className="size-4" /> ค้นหา
+                  <Search className="size-4" /> {t('iv.match_search')}
                 </Button>
               </div>
             </div>
@@ -203,21 +207,21 @@ function RunMatchTab() {
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard
-                  label="สถานะการจับคู่"
+                  label={t('iv.match_stat_status')}
                   value={<Badge variant={lineStatusVariant(m.match_status)}>{m.match_status}</Badge>}
                   icon={m.match_status === 'matched' ? ShieldCheck : ShieldAlert}
                   tone={m.match_status === 'matched' ? 'success' : 'warning'}
                 />
                 <StatCard
-                  label="จ่ายได้"
-                  value={<Badge variant={m.payable ? 'success' : 'destructive'}>{m.payable ? 'ปลดล็อก' : 'ระงับ'}</Badge>}
+                  label={t('iv.match_payable')}
+                  value={<Badge variant={m.payable ? 'success' : 'destructive'}>{m.payable ? t('iv.match_unlocked') : t('iv.match_on_hold')}</Badge>}
                   icon={m.payable ? ShieldCheck : ShieldAlert}
                   tone={m.payable ? 'success' : 'danger'}
                 />
                 <StatCard label="PO" value={m.po_no ?? '—'} tone="default" />
                 <StatCard
                   label="Override"
-                  value={<Badge variant={m.override ? 'warning' : 'muted'}>{m.override ? 'ใช้สิทธิ์ทับ' : 'ไม่มี'}</Badge>}
+                  value={<Badge variant={m.override ? 'warning' : 'muted'}>{m.override ? t('iv.match_overridden') : t('iv.match_none')}</Badge>}
                   icon={Unlock}
                   tone={m.override ? 'warning' : 'default'}
                 />
@@ -227,28 +231,28 @@ function RunMatchTab() {
                 rows={lines}
                 rowKey={(_r, i) => i}
                 columns={[
-                  { key: 'item_id', label: 'รหัสสินค้า' },
-                  { key: 'inv_qty', label: 'จำนวน(บิล)', align: 'right', render: (r: any) => <span className="tabular">{num(r.inv_qty)}</span> },
-                  { key: 'gr_qty', label: 'รับจริง', align: 'right', render: (r: any) => <span className="tabular">{num(r.gr_qty)}</span> },
-                  { key: 'inv_price', label: 'ราคา(บิล)', align: 'right', render: (r: any) => <span className="tabular">{num(r.inv_price)}</span> },
-                  { key: 'po_price', label: 'ราคา PO', align: 'right', render: (r: any) => <span className="tabular">{num(r.po_price)}</span> },
-                  { key: 'qty_var_pct', label: '%ต่างจำนวน', align: 'right', render: (r: any) => <span className="tabular">{pct(r.qty_var_pct)}</span> },
-                  { key: 'price_var_pct', label: '%ต่างราคา', align: 'right', render: (r: any) => <span className="tabular">{pct(r.price_var_pct)}</span> },
-                  { key: 'line_status', label: 'ผลลัพธ์', render: (r: any) => <Badge variant={lineStatusVariant(r.line_status)}>{r.line_status}</Badge> },
+                  { key: 'item_id', label: t('iv.match_col_item') },
+                  { key: 'inv_qty', label: t('iv.match_col_inv_qty'), align: 'right', render: (r: any) => <span className="tabular">{num(r.inv_qty)}</span> },
+                  { key: 'gr_qty', label: t('iv.match_col_gr_qty'), align: 'right', render: (r: any) => <span className="tabular">{num(r.gr_qty)}</span> },
+                  { key: 'inv_price', label: t('iv.match_col_inv_price'), align: 'right', render: (r: any) => <span className="tabular">{num(r.inv_price)}</span> },
+                  { key: 'po_price', label: t('iv.match_col_po_price'), align: 'right', render: (r: any) => <span className="tabular">{num(r.po_price)}</span> },
+                  { key: 'qty_var_pct', label: t('iv.match_col_qty_var'), align: 'right', render: (r: any) => <span className="tabular">{pct(r.qty_var_pct)}</span> },
+                  { key: 'price_var_pct', label: t('iv.match_col_price_var'), align: 'right', render: (r: any) => <span className="tabular">{pct(r.price_var_pct)}</span> },
+                  { key: 'line_status', label: t('iv.match_col_line_result'), render: (r: any) => <Badge variant={lineStatusVariant(r.line_status)}>{r.line_status}</Badge> },
                 ]}
-                emptyState={{ icon: ListChecks, title: 'ไม่มีบรรทัดสำหรับจับคู่' }}
+                emptyState={{ icon: ListChecks, title: t('iv.match_no_lines') }}
               />
 
               {!m.payable && !m.override && (
                 <Card className="max-w-xl gap-4">
                   <CardHeader>
-                    <CardTitle className="text-base">ใช้สิทธิ์อนุมัติทับ (Override)</CardTitle>
+                    <CardTitle className="text-base">{t('iv.match_override_title')}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <p className="text-sm text-muted-foreground">อนุมัติให้จ่ายได้ทั้งที่จับคู่ไม่ผ่าน — ต้องระบุเหตุผล</p>
-                    <Input value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder="เหตุผลในการอนุมัติทับ" />
+                    <p className="text-sm text-muted-foreground">{t('iv.match_override_hint')}</p>
+                    <Input value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder={t('iv.match_override_reason_ph')} />
                     <Button variant="destructive" disabled={override.isPending || !overrideReason} onClick={() => override.mutate()}>
-                      <Unlock className="size-4" /> {override.isPending ? 'กำลังบันทึก…' : 'อนุมัติทับ'}
+                      <Unlock className="size-4" /> {override.isPending ? t('iv.match_saving') : t('iv.match_override_btn')}
                     </Button>
                   </CardContent>
                 </Card>
@@ -263,6 +267,7 @@ function RunMatchTab() {
 
 // ───────────────────────── Tolerance ─────────────────────────
 function ToleranceTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['match-tolerance'], queryFn: () => api('/api/procurement/match/tolerance') });
 
@@ -283,54 +288,54 @@ function ToleranceTab() {
         }),
       }),
     onSuccess: () => {
-      notifySuccess('บันทึกเกณฑ์แล้ว');
+      notifySuccess(t('iv.match_tol_saved'));
       setQtyPct(''); setPricePct(''); setAmountPct(''); setAmountAbs('');
       qc.invalidateQueries({ queryKey: ['match-tolerance'] });
     },
     onError: (e) => notifyError((e as Error).message),
   });
 
-  const t = q.data;
+  const tx = q.data;
 
   return (
     <div className="space-y-5">
       <StateView q={q}>
-        {t && (
+        {tx && (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="เกณฑ์จำนวน (%)" value={pct(t.qtyPct)} tone="info" />
-            <StatCard label="เกณฑ์ราคา (%)" value={pct(t.pricePct)} tone="info" />
-            <StatCard label="เกณฑ์ยอดรวม (%)" value={pct(t.amountPct)} tone="info" />
-            <StatCard label="เกณฑ์ยอดรวม (บาท)" value={num(t.amountAbs)} tone="info" />
+            <StatCard label={t('iv.match_tol_qty')} value={pct(tx.qtyPct)} tone="info" />
+            <StatCard label={t('iv.match_tol_price')} value={pct(tx.pricePct)} tone="info" />
+            <StatCard label={t('iv.match_tol_amt')} value={pct(tx.amountPct)} tone="info" />
+            <StatCard label={t('iv.match_tol_abs')} value={num(tx.amountAbs)} tone="info" />
           </div>
         )}
       </StateView>
 
       <Card className="max-w-2xl gap-4">
         <CardHeader>
-          <CardTitle className="text-base">ปรับเกณฑ์ความคลาดเคลื่อน</CardTitle>
+          <CardTitle className="text-base">{t('iv.match_tol_title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">เว้นว่างเพื่อคงค่าเดิม</p>
+          <p className="text-sm text-muted-foreground">{t('iv.match_tol_blank_hint')}</p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label htmlFor="t-qty">เกณฑ์จำนวน (%)</Label>
-              <Input id="t-qty" type="number" min="0" step="0.1" value={qtyPct} onChange={(e) => setQtyPct(e.target.value)} placeholder={String(t?.qtyPct ?? '')} />
+              <Label htmlFor="t-qty">{t('iv.match_tol_qty')}</Label>
+              <Input id="t-qty" type="number" min="0" step="0.1" value={qtyPct} onChange={(e) => setQtyPct(e.target.value)} placeholder={String(tx?.qtyPct ?? '')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="t-price">เกณฑ์ราคา (%)</Label>
-              <Input id="t-price" type="number" min="0" step="0.1" value={pricePct} onChange={(e) => setPricePct(e.target.value)} placeholder={String(t?.pricePct ?? '')} />
+              <Label htmlFor="t-price">{t('iv.match_tol_price')}</Label>
+              <Input id="t-price" type="number" min="0" step="0.1" value={pricePct} onChange={(e) => setPricePct(e.target.value)} placeholder={String(tx?.pricePct ?? '')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="t-amt">เกณฑ์ยอดรวม (%)</Label>
-              <Input id="t-amt" type="number" min="0" step="0.1" value={amountPct} onChange={(e) => setAmountPct(e.target.value)} placeholder={String(t?.amountPct ?? '')} />
+              <Label htmlFor="t-amt">{t('iv.match_tol_amt')}</Label>
+              <Input id="t-amt" type="number" min="0" step="0.1" value={amountPct} onChange={(e) => setAmountPct(e.target.value)} placeholder={String(tx?.amountPct ?? '')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="t-abs">เกณฑ์ยอดรวม (บาท)</Label>
-              <Input id="t-abs" type="number" min="0" step="0.01" value={amountAbs} onChange={(e) => setAmountAbs(e.target.value)} placeholder={String(t?.amountAbs ?? '')} />
+              <Label htmlFor="t-abs">{t('iv.match_tol_abs')}</Label>
+              <Input id="t-abs" type="number" min="0" step="0.01" value={amountAbs} onChange={(e) => setAmountAbs(e.target.value)} placeholder={String(tx?.amountAbs ?? '')} />
             </div>
           </div>
           <Button disabled={save.isPending} onClick={() => save.mutate()}>
-            <Save className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึกเกณฑ์'}
+            <Save className="size-4" /> {save.isPending ? t('iv.match_saving') : t('iv.match_tol_save')}
           </Button>
         </CardContent>
       </Card>

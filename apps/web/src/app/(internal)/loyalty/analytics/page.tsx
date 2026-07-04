@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { BarChart3, Users, AlertTriangle, Coins, Ticket, TrendingDown } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +40,7 @@ function Stat({ icon, label, value, sub, tone }: { icon: React.ReactNode; label:
 }
 
 export default function LoyaltyAnalyticsPage() {
+  const { t } = useLang();
   const ov = useQuery<Overview>({ queryKey: ['loy-analytics'], queryFn: () => api('/api/loyalty/analytics') });
   const churn = useQuery<Churn>({ queryKey: ['loy-churn'], queryFn: () => api('/api/loyalty/analytics/churn?limit=20') });
   const seg = useQuery<Segments>({ queryKey: ['loy-segments'], queryFn: () => api('/api/loyalty/analytics/segments') });
@@ -48,41 +50,41 @@ export default function LoyaltyAnalyticsPage() {
 
   return (
     <div>
-      <PageHeader title="วิเคราะห์ลอยัลตี้ (Loyalty Analytics)" description="หนี้สินแต้ม · กรวยการแลก · อัตราการหมดอายุ (breakage) · สัดส่วนระดับสมาชิก · ความเสี่ยงลูกค้าหาย (churn)"
-        actions={<Link href="/loyalty/members"><Button variant="outline"><Users className="size-4" /> สมาชิก</Button></Link>} />
+      <PageHeader title={t('ly.an_title')} description={t('ly.an_desc')}
+        actions={<Link href="/loyalty/members"><Button variant="outline"><Users className="size-4" /> {t('ly.members')}</Button></Link>} />
       <StateView q={ov}>
         {ov.data && (
           <div className="space-y-6">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Stat icon={<Users className="size-4" />} label="สมาชิกทั้งหมด" value={num(ov.data.members.total)} sub={`ใช้งาน ${num(ov.data.members.active)} · รับข่าวสาร ${num(ov.data.members.opted_in)}`} />
-              <Stat icon={<Coins className="size-4" />} label="หนี้สินแต้ม (มูลค่ายุติธรรม)" value={baht(ov.data.liability.fair_value)} sub={`${num(ov.data.liability.open_points)} แต้ม × ฿${ov.data.liability.baht_per_point} · ลง GL 2250 ฿${num(ov.data.liability.posted_2250)}`} tone="text-primary" />
-              <Stat icon={<Ticket className="size-4" />} label="อัตราการแลก" value={`${ov.data.redemption.redemption_rate_pct}%`} sub={`ใช้ ${num(ov.data.redemption.rewards_used + ov.data.redemption.coupons_used)} / ออก ${num(ov.data.redemption.rewards_issued + ov.data.redemption.coupons_issued)}`} tone="text-success" />
-              <Stat icon={<TrendingDown className="size-4" />} label="อัตราหมดอายุ (breakage)" value={`${ov.data.breakage_rate_pct}%`} sub={`หมดอายุ ${num(ov.data.points.expired)} แต้ม`} tone="text-warning" />
-              <Stat icon={<AlertTriangle className="size-4" />} label="เสี่ยงหาย (churn)" value={`${ov.data.churn_rate_pct}%`} sub={`${num(ov.data.members.at_risk)} คนเงียบ ≥90 วัน (ยังมีแต้ม)`} tone="text-destructive" />
-              <Stat icon={<BarChart3 className="size-4" />} label="อัตราสมาชิกใช้งาน" value={`${ov.data.active_rate_pct}%`} />
-              <Stat icon={<Coins className="size-4" />} label="แต้มสะสมรวม" value={num(ov.data.points.open_balance)} sub={`ได้ ${num(ov.data.points.earned)} · แลก ${num(ov.data.points.redeemed)} · ปรับ ${num(ov.data.points.adjusted)}`} />
+              <Stat icon={<Users className="size-4" />} label={t('ly.an_total_members')} value={num(ov.data.members.total)} sub={t('ly.an_members_sub', { active: num(ov.data.members.active), optin: num(ov.data.members.opted_in) })} />
+              <Stat icon={<Coins className="size-4" />} label={t('ly.an_liability')} value={baht(ov.data.liability.fair_value)} sub={t('ly.an_liability_sub', { points: num(ov.data.liability.open_points), rate: ov.data.liability.baht_per_point, posted: num(ov.data.liability.posted_2250) })} tone="text-primary" />
+              <Stat icon={<Ticket className="size-4" />} label={t('ly.an_redemption_rate')} value={`${ov.data.redemption.redemption_rate_pct}%`} sub={t('ly.an_redemption_sub', { used: num(ov.data.redemption.rewards_used + ov.data.redemption.coupons_used), issued: num(ov.data.redemption.rewards_issued + ov.data.redemption.coupons_issued) })} tone="text-success" />
+              <Stat icon={<TrendingDown className="size-4" />} label={t('ly.an_breakage')} value={`${ov.data.breakage_rate_pct}%`} sub={t('ly.an_breakage_sub', { n: num(ov.data.points.expired) })} tone="text-warning" />
+              <Stat icon={<AlertTriangle className="size-4" />} label={t('ly.an_churn')} value={`${ov.data.churn_rate_pct}%`} sub={t('ly.an_churn_sub', { n: num(ov.data.members.at_risk) })} tone="text-destructive" />
+              <Stat icon={<BarChart3 className="size-4" />} label={t('ly.an_active_rate')} value={`${ov.data.active_rate_pct}%`} />
+              <Stat icon={<Coins className="size-4" />} label={t('ly.an_open_balance')} value={num(ov.data.points.open_balance)} sub={t('ly.an_points_sub', { earned: num(ov.data.points.earned), redeemed: num(ov.data.points.redeemed), adjusted: num(ov.data.points.adjusted) })} />
             </div>
 
             <Card className="gap-3">
               <CardHeader className="pb-0">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <span className={`inline-block size-2 rounded-full ${live.data?.available ? 'bg-success animate-pulse' : 'bg-muted-foreground/40'}`} />
-                  แต้มสด (Live) — earn / redeem แบบเรียลไทม์
+                  {t('ly.an_live_title')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {(live.data?.events?.length ?? 0) === 0
-                  ? <p className="py-2 text-center text-sm text-muted-foreground">ยังไม่มีกิจกรรมแต้มล่าสุด — จะแสดงทันทีที่มีการสะสม/แลก</p>
+                  ? <p className="py-2 text-center text-sm text-muted-foreground">{t('ly.an_live_empty')}</p>
                   : (
                     <div className="space-y-1">
                       {live.data!.events.map((e, i) => (
                         <div key={`${e.ref_doc}-${i}`} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-1.5 text-sm">
                           <span className="flex items-center gap-2">
-                            <Badge variant="muted" className={e.kind === 'earn' ? 'text-success' : 'text-primary'}>{e.kind === 'earn' ? 'สะสม' : 'แลก'}</Badge>
-                            <span className="text-muted-foreground">สมาชิก #{e.member_id}</span>
+                            <Badge variant="muted" className={e.kind === 'earn' ? 'text-success' : 'text-primary'}>{e.kind === 'earn' ? t('ly.an_earn') : t('ly.an_redeem')}</Badge>
+                            <span className="text-muted-foreground">{t('ly.col_member')} #{e.member_id}</span>
                             <span className="text-xs text-muted-foreground">{e.ref_doc}</span>
                           </span>
-                          <span className="tabular-nums">{e.kind === 'earn' ? '+' : '−'}{num(e.points)} แต้ม <span className="text-xs text-muted-foreground">(คงเหลือ {num(e.balance_after)})</span></span>
+                          <span className="tabular-nums">{e.kind === 'earn' ? '+' : '−'}{num(e.points)} {t('ly.an_pts')} <span className="text-xs text-muted-foreground">({t('ly.an_balance_after', { n: num(e.balance_after) })})</span></span>
                         </div>
                       ))}
                     </div>
@@ -91,7 +93,7 @@ export default function LoyaltyAnalyticsPage() {
             </Card>
 
             <Card className="gap-3">
-              <CardHeader className="pb-0"><CardTitle className="text-base">สัดส่วนระดับสมาชิก (Tier mix)</CardTitle></CardHeader>
+              <CardHeader className="pb-0"><CardTitle className="text-base">{t('ly.an_tier_mix')}</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {Object.entries(ov.data.tier_mix).sort((a, b) => b[1] - a[1]).map(([tier, c]) => (
                   <div key={tier} className="flex items-center gap-3">
@@ -105,17 +107,17 @@ export default function LoyaltyAnalyticsPage() {
 
             <Card className="gap-3">
               <CardHeader className="pb-0">
-                <CardTitle className="flex items-center gap-2 text-base"><BarChart3 className="size-4 text-primary" /> กลุ่มลูกค้า RFM (Customer segments)</CardTitle>
-                {seg.data && <p className="text-xs text-muted-foreground">จัดกลุ่มแล้ว {num(seg.data.profiled_members)} คน · ยอดซื้อรวม {baht(seg.data.total_spend)}{seg.data.at_risk_value && seg.data.at_risk_value.members > 0 ? ` · ⚠ มูลค่าเสี่ยงหาย ~${baht(seg.data.at_risk_value.predicted_ltv)} (${num(seg.data.at_risk_value.members)} คน churn ≥ ${seg.data.at_risk_value.threshold} — ค่าประมาณ)` : ''}</p>}
+                <CardTitle className="flex items-center gap-2 text-base"><BarChart3 className="size-4 text-primary" /> {t('ly.an_rfm_title')}</CardTitle>
+                {seg.data && <p className="text-xs text-muted-foreground">{t('ly.an_rfm_summary', { n: num(seg.data.profiled_members), spend: baht(seg.data.total_spend) })}{seg.data.at_risk_value && seg.data.at_risk_value.members > 0 ? t('ly.an_rfm_atrisk', { ltv: baht(seg.data.at_risk_value.predicted_ltv), n: num(seg.data.at_risk_value.members), threshold: seg.data.at_risk_value.threshold }) : ''}</p>}
               </CardHeader>
               <CardContent className="space-y-2">
                 <StateView q={seg}>
                   {seg.data && seg.data.segments.map((s) => (
-                    <Link key={s.segment} href={`/crm?segment=${encodeURIComponent(s.segment)}`} className="flex items-center gap-3 rounded-md px-1 py-0.5 hover:bg-muted/50" title="เปิดใน CRM 360 เพื่อยิงแคมเปญกลุ่มนี้">
+                    <Link key={s.segment} href={`/crm?segment=${encodeURIComponent(s.segment)}`} className="flex items-center gap-3 rounded-md px-1 py-0.5 hover:bg-muted/50" title={t('ly.an_seg_link_title')}>
                       <span className="w-20 shrink-0 text-sm">{s.segment}</span>
                       <div className="h-3 flex-1 rounded-full bg-muted"><div className={`h-3 rounded-full ${SEG_TONE[s.segment] ?? 'bg-primary'}`} style={{ width: `${(s.members / maxSeg) * 100}%` }} /></div>
                       <span className="w-10 shrink-0 text-right text-sm tabular-nums">{num(s.members)}</span>
-                      <span className="hidden w-28 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:inline">฿เฉลี่ย {num(s.avg_spend)}</span>
+                      <span className="hidden w-28 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:inline">{t('ly.an_avg', { n: num(s.avg_spend) })}</span>
                     </Link>
                   ))}
                 </StateView>
@@ -123,15 +125,15 @@ export default function LoyaltyAnalyticsPage() {
             </Card>
 
             <Card className="gap-3">
-              <CardHeader className="pb-0"><CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="size-4 text-destructive" /> ลูกค้าเสี่ยงหาย — เป้าหมาย win-back</CardTitle></CardHeader>
+              <CardHeader className="pb-0"><CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="size-4 text-destructive" /> {t('ly.an_winback_title')}</CardTitle></CardHeader>
               <CardContent>
                 <StateView q={churn}>
-                  {churn.data && (churn.data.at_risk.length === 0 ? <p className="py-2 text-center text-sm text-muted-foreground">ไม่มีสมาชิกเสี่ยงหาย 🎉</p> : (
+                  {churn.data && (churn.data.at_risk.length === 0 ? <p className="py-2 text-center text-sm text-muted-foreground">{t('ly.an_no_churn')}</p> : (
                     <div className="space-y-1">
                       {churn.data.at_risk.map((m) => (
                         <Link key={m.id} href={`/loyalty/members/${m.id}`} className="flex items-center justify-between rounded-lg border border-border/60 p-2 hover:bg-muted/50">
                           <span className="text-sm"><span className="font-medium">{m.name ?? m.member_code}</span> <Badge variant="muted" className="ml-1">{m.tier}</Badge></span>
-                          <span className="text-sm tabular-nums">{num(m.balance)} แต้ม</span>
+                          <span className="text-sm tabular-nums">{num(m.balance)} {t('ly.an_pts')}</span>
                         </Link>
                       ))}
                     </div>

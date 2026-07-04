@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, FileWarning, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -25,12 +26,13 @@ function FilterBar({
   statusFilter: string | null; onStatus: (v: string | null) => void; placeholder: string;
   count?: string;
 }) {
+  const { t } = useLang();
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <SearchInput value={search} onChange={onSearch} placeholder={placeholder} ariaLabel="ค้นหาเคลม" count={count} />
+      <SearchInput value={search} onChange={onSearch} placeholder={placeholder} ariaLabel={t('hx.cl.search_aria')} count={count} />
       {statuses.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
-          <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => onStatus(null)}>ทั้งหมด</Button>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t('hx.common.filter_status')}>
+          <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => onStatus(null)}>{t('hx.common.all')}</Button>
           {statuses.map((s) => (
             <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" aria-pressed={statusFilter === s} onClick={() => onStatus(statusFilter === s ? null : s)}>{s}</Button>
           ))}
@@ -41,15 +43,17 @@ function FilterBar({
 }
 
 export default function ClaimsPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="จัดการเคลม (Claims)" description="เคลมจากลูกค้า (ขาย) และเคลมผู้ขาย (รับเข้า)" />
-      <Tabs tabs={[{ key: 'sales', label: 'เคลมการขาย', content: <SalesClaims /> }, { key: 'gr', label: 'เคลมผู้ขาย (GR)', content: <GrClaims /> }]} />
+      <PageHeader title={t('hx.cl.title')} description={t('hx.cl.desc')} />
+      <Tabs tabs={[{ key: 'sales', label: t('hx.cl.tab_sales'), content: <SalesClaims /> }, { key: 'gr', label: t('hx.cl.tab_gr'), content: <GrClaims /> }]} />
     </div>
   );
 }
 
 function SalesClaims() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['sales-claims'], queryFn: () => api('/api/claims/sales') });
   const [reason, setReason] = useState<Record<number, string>>({});
@@ -57,7 +61,7 @@ function SalesClaims() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const decide = useMutation({
     mutationFn: (v: { id: number; decision: 'approve' | 'reject' }) => api(`/api/claims/sales/${v.id}`, { method: 'PATCH', body: JSON.stringify({ decision: v.decision, reject_reason: reason[v.id] }) }),
-    onSuccess: () => { notifySuccess('บันทึกแล้ว'); qc.invalidateQueries({ queryKey: ['sales-claims'] }); },
+    onSuccess: () => { notifySuccess(t('hx.cl.saved')); qc.invalidateQueries({ queryKey: ['sales-claims'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -77,22 +81,22 @@ function SalesClaims() {
       <StateView q={q}>
         {q.data && (
           <div className="space-y-3">
-            <FilterBar search={search} onSearch={setSearch} statuses={statuses} statusFilter={statusFilter} onStatus={setStatusFilter} placeholder="ค้นหาออเดอร์ / สินค้า / เหตุผล…" count={`${num(filtered.length)} รายการ`} />
+            <FilterBar search={search} onSearch={setSearch} statuses={statuses} statusFilter={statusFilter} onStatus={setStatusFilter} placeholder={t('hx.cl.search_sales_ph')} count={t('hx.common.count_items', { n: num(filtered.length) })} />
             <DataTable
               rows={filtered}
               rowKey={(r: any) => r.id}
               columns={[
-                { key: 'order_no', label: 'ออเดอร์' },
-                { key: 'item_description', label: 'สินค้า' },
-                { key: 'claimed_qty', label: 'จำนวน', align: 'right', render: (r: any) => num(r.claimed_qty) },
-                { key: 'reason', label: 'เหตุผล' },
-                { key: 'admin_status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.admin_status)}>{r.admin_status}</Badge> },
+                { key: 'order_no', label: t('hx.cl.col_order') },
+                { key: 'item_description', label: t('hx.cl.col_item') },
+                { key: 'claimed_qty', label: t('hx.common.qty'), align: 'right', render: (r: any) => num(r.claimed_qty) },
+                { key: 'reason', label: t('hx.cl.col_reason') },
+                { key: 'admin_status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.admin_status)}>{r.admin_status}</Badge> },
                 {
-                  key: 'act', label: 'ดำเนินการ', sortable: false, render: (r: any) => r.admin_status === 'Waiting' ? (
+                  key: 'act', label: t('hx.common.actions'), sortable: false, render: (r: any) => r.admin_status === 'Waiting' ? (
                     <div className="flex items-center gap-1">
-                      <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, decision: 'approve' })}>อนุมัติ</Button>
-                      <Input className="h-8 w-32" placeholder="เหตุผลปฏิเสธ" aria-label="เหตุผลปฏิเสธ" value={reason[r.id] ?? ''} onChange={(e) => setReason((s) => ({ ...s, [r.id]: e.target.value }))} />
-                      <Button size="sm" variant="destructive" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, decision: 'reject' })}>ปฏิเสธ</Button>
+                      <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, decision: 'approve' })}>{t('fin.approve')}</Button>
+                      <Input className="h-8 w-32" placeholder={t('hx.cl.reject_reason')} aria-label={t('hx.cl.reject_reason')} value={reason[r.id] ?? ''} onChange={(e) => setReason((s) => ({ ...s, [r.id]: e.target.value }))} />
+                      <Button size="sm" variant="destructive" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, decision: 'reject' })}>{t('fin.rejected')}</Button>
                     </div>
                   ) : '—',
                 },
@@ -101,15 +105,15 @@ function SalesClaims() {
                 search || statusFilter
                   ? {
                       icon: SearchX,
-                      title: 'ไม่พบเคลมที่ตรงกับตัวกรอง',
-                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      title: t('hx.cl.no_match_title'),
+                      description: t('hx.common.filter_no_match_desc'),
                       action: (
                         <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter(null); }}>
-                          ล้างตัวกรอง
+                          {t('inv.clear_filter')}
                         </Button>
                       ),
                     }
-                  : { icon: FileWarning, title: 'ไม่มีรายการเคลม', description: 'เคลมจากลูกค้าที่รอพิจารณาจะแสดงที่นี่' }
+                  : { icon: FileWarning, title: t('hx.cl.sales_empty_title'), description: t('hx.cl.sales_empty_desc') }
               }
             />
           </div>
@@ -120,6 +124,7 @@ function SalesClaims() {
 }
 
 function GrClaims() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['gr-claims'], queryFn: () => api('/api/claims/gr') });
   const [f, setF] = useState({ gr_no: '', item_id: '', claim_qty: '', reason: '' });
@@ -127,7 +132,7 @@ function GrClaims() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: () => api('/api/claims/gr', { method: 'POST', body: JSON.stringify({ gr_no: f.gr_no || undefined, item_id: f.item_id || undefined, claim_qty: f.claim_qty ? Number(f.claim_qty) : undefined, reason: f.reason || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(`สร้างเคลม ${r.claim_no}`); setF({ gr_no: '', item_id: '', claim_qty: '', reason: '' }); qc.invalidateQueries({ queryKey: ['gr-claims'] }); },
+    onSuccess: (r: any) => { notifySuccess(t('hx.cl.created', { no: r.claim_no })); setF({ gr_no: '', item_id: '', claim_qty: '', reason: '' }); qc.invalidateQueries({ queryKey: ['gr-claims'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const resolve = useMutation({
@@ -149,44 +154,44 @@ function GrClaims() {
   return (
     <div className="space-y-4">
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">แจ้งเคลมผู้ขาย</h3>
+        <h3 className="text-base font-semibold">{t('hx.cl.gr_form_title')}</h3>
         <div className="grid gap-2 sm:grid-cols-4">
-          <Input placeholder="GR No." aria-label="เลขที่ GR" value={f.gr_no} onChange={(e) => setF({ ...f, gr_no: e.target.value })} />
-          <Input placeholder="รหัสสินค้า" aria-label="รหัสสินค้า" value={f.item_id} onChange={(e) => setF({ ...f, item_id: e.target.value })} />
-          <Input type="number" inputMode="numeric" placeholder="จำนวนเคลม" aria-label="จำนวนเคลม" value={f.claim_qty} onChange={(e) => setF({ ...f, claim_qty: e.target.value })} />
-          <Input placeholder="เหตุผล" aria-label="เหตุผล" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
+          <Input placeholder="GR No." aria-label={t('hx.cl.gr_no_aria')} value={f.gr_no} onChange={(e) => setF({ ...f, gr_no: e.target.value })} />
+          <Input placeholder={t('hx.cl.item_id')} aria-label={t('hx.cl.item_id')} value={f.item_id} onChange={(e) => setF({ ...f, item_id: e.target.value })} />
+          <Input type="number" inputMode="numeric" placeholder={t('hx.cl.claim_qty')} aria-label={t('hx.cl.claim_qty')} value={f.claim_qty} onChange={(e) => setF({ ...f, claim_qty: e.target.value })} />
+          <Input placeholder={t('hx.cl.reason')} aria-label={t('hx.cl.reason')} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
         </div>
-        <Button className="w-fit" disabled={create.isPending} onClick={() => create.mutate()}>สร้างเคลม</Button>
+        <Button className="w-fit" disabled={create.isPending} onClick={() => create.mutate()}>{t('hx.cl.create_btn')}</Button>
       </Card>
       <StateView q={q}>
         {q.data && (
           <div className="space-y-3">
-            <FilterBar search={search} onSearch={setSearch} statuses={statuses} statusFilter={statusFilter} onStatus={setStatusFilter} placeholder="ค้นหาเลขที่ / GR / สินค้า…" count={`${num(filtered.length)} รายการ`} />
+            <FilterBar search={search} onSearch={setSearch} statuses={statuses} statusFilter={statusFilter} onStatus={setStatusFilter} placeholder={t('hx.cl.search_gr_ph')} count={t('hx.common.count_items', { n: num(filtered.length) })} />
             <DataTable
               rows={filtered}
               rowKey={(r: any) => r.claim_no}
               columns={[
-                { key: 'claim_no', label: 'เลขที่' },
+                { key: 'claim_no', label: t('dash.col_no') },
                 { key: 'gr_no', label: 'GR' },
-                { key: 'item_id', label: 'สินค้า' },
-                { key: 'claim_qty', label: 'จำนวน', align: 'right', render: (r: any) => num(r.claim_qty) },
-                { key: 'reason', label: 'เหตุผล' },
-                { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-                { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'Open' ? <div className="flex gap-1"><Button size="sm" disabled={resolve.isPending} onClick={() => resolve.mutate({ no: r.claim_no, status: 'Resolved' })}>ปิดเคลม</Button><Button size="sm" variant="destructive" disabled={resolve.isPending} onClick={() => resolve.mutate({ no: r.claim_no, status: 'Rejected' })}>ปฏิเสธ</Button></div> : '—' },
+                { key: 'item_id', label: t('hx.cl.col_item') },
+                { key: 'claim_qty', label: t('hx.common.qty'), align: 'right', render: (r: any) => num(r.claim_qty) },
+                { key: 'reason', label: t('hx.cl.col_reason') },
+                { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'Open' ? <div className="flex gap-1"><Button size="sm" disabled={resolve.isPending} onClick={() => resolve.mutate({ no: r.claim_no, status: 'Resolved' })}>{t('hx.cl.close_claim')}</Button><Button size="sm" variant="destructive" disabled={resolve.isPending} onClick={() => resolve.mutate({ no: r.claim_no, status: 'Rejected' })}>{t('fin.rejected')}</Button></div> : '—' },
               ]}
               emptyState={
                 search || statusFilter
                   ? {
                       icon: SearchX,
-                      title: 'ไม่พบเคลมที่ตรงกับตัวกรอง',
-                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      title: t('hx.cl.no_match_title'),
+                      description: t('hx.common.filter_no_match_desc'),
                       action: (
                         <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter(null); }}>
-                          ล้างตัวกรอง
+                          {t('inv.clear_filter')}
                         </Button>
                       ),
                     }
-                  : { icon: ClipboardList, title: 'ไม่มีเคลมผู้ขาย', description: 'แจ้งเคลมผู้ขายด้วยฟอร์มด้านบนเพื่อเริ่มต้น' }
+                  : { icon: ClipboardList, title: t('hx.cl.gr_empty_title'), description: t('hx.cl.gr_empty_desc') }
               }
             />
           </div>

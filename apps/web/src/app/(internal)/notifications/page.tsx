@@ -6,6 +6,7 @@ import { Bell, CheckCheck, Check } from 'lucide-react';
 
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -17,6 +18,7 @@ import type { InboxItem } from '@/components/notification-bell';
 interface Inbox { items: InboxItem[]; total: number; unread_count: number }
 
 export default function NotificationsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [unreadOnly, setUnreadOnly] = useState(false);
 
@@ -38,16 +40,16 @@ export default function NotificationsPage() {
   return (
     <div>
       <PageHeader
-        title="การแจ้งเตือน (Notifications)"
-        description="กล่องข้อความแจ้งเตือนของคุณ — แจ้งเตือนจากกฎ Alert, รายงานตามกำหนดการ และงานอนุมัติที่เกินกำหนด (เฉพาะองค์กรและบทบาทของคุณ)"
+        title={t('pb.notif_title')}
+        description={t('pb.notif_subtitle')}
         actions={
           <div className="flex items-center gap-2">
             <Button variant={unreadOnly ? 'default' : 'outline'} size="sm" onClick={() => setUnreadOnly((v) => !v)}>
-              เฉพาะที่ยังไม่อ่าน{unread ? ` (${unread})` : ''}
+              {t('pb.notif_unread_only')}{unread ? ` (${unread})` : ''}
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => markAll.mutate()} disabled={!unread || markAll.isPending}>
               <CheckCheck className="size-4" />
-              อ่านทั้งหมด
+              {t('pb.notif_mark_all')}
             </Button>
           </div>
         }
@@ -59,7 +61,7 @@ export default function NotificationsPage() {
             {items.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-4 py-12 text-center text-muted-foreground">
                 <Bell className="size-8" />
-                <p className="text-sm">{unreadOnly ? 'ไม่มีการแจ้งเตือนที่ยังไม่อ่าน' : 'ยังไม่มีการแจ้งเตือน'}</p>
+                <p className="text-sm">{unreadOnly ? t('pb.notif_no_unread') : t('pb.notif_none')}</p>
               </div>
             ) : (
               <ul className="divide-y">
@@ -69,7 +71,7 @@ export default function NotificationsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium text-foreground">{it.message ?? it.message_en ?? '—'}</p>
-                        {!it.target_role && <Badge variant="secondary" className="text-[10px]">ประกาศทั้งระบบ</Badge>}
+                        {!it.target_role && <Badge variant="secondary" className="text-[10px]">{t('pb.notif_broadcast')}</Badge>}
                       </div>
                       {it.message_en && it.message_en !== it.message && (
                         <p className="text-sm text-muted-foreground">{it.message_en}</p>
@@ -79,7 +81,7 @@ export default function NotificationsPage() {
                     {!it.is_read && (
                       <Button variant="ghost" size="sm" className="gap-1 text-xs text-muted-foreground" disabled={markRead.isPending} onClick={() => markRead.mutate(it.id)}>
                         <Check className="size-3.5" />
-                        อ่านแล้ว
+                        {t('pb.notif_mark_read')}
                       </Button>
                     )}
                   </li>

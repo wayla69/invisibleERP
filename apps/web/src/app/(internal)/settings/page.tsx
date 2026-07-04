@@ -28,15 +28,16 @@ import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 
 export default function SettingsPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="ตั้งค่า" description="API Keys และความปลอดภัย" />
+      <PageHeader title={t('st.set.title')} description={t('st.set.subtitle')} />
       <Tabs
         tabs={[
-          { key: 'modules', label: 'โมดูล (เปิด/ปิด)', content: <Modules /> },
+          { key: 'modules', label: t('st.set.tab_modules'), content: <Modules /> },
           { key: 'keys', label: 'API Keys', content: <ApiKeys /> },
           { key: 'identity', label: 'SSO / SCIM', content: <Identity /> },
-          { key: 'mfa', label: 'ความปลอดภัย (MFA)', content: <Mfa /> },
+          { key: 'mfa', label: t('st.set.tab_mfa'), content: <Mfa /> },
         ]}
       />
     </div>
@@ -67,7 +68,9 @@ function Modules() {
     mutationFn: (v: { keys: string[]; enabled: boolean }) =>
       Promise.all(v.keys.map((key) => api('/api/admin/modules', { method: 'POST', body: JSON.stringify({ key, enabled: v.enabled }) }))),
     onSuccess: (_r, v) => {
-      notifySuccess(v.keys.length === 1 ? `${moduleLabel(v.keys[0], lang)} → ${v.enabled ? 'เปิด' : 'ปิด'}` : `${v.keys.length} โมดูล → ${v.enabled ? 'เปิด' : 'ปิด'}`);
+      notifySuccess(v.keys.length === 1
+        ? t('st.set.module_toggled', { name: moduleLabel(v.keys[0], lang), state: v.enabled ? t('st.set.on') : t('st.set.off') })
+        : t('st.set.modules_toggled', { count: v.keys.length, state: v.enabled ? t('st.set.on') : t('st.set.off') }));
       invalidate();
     },
     onError: (e: any) => notifyError(e.message),
@@ -76,7 +79,9 @@ function Modules() {
   const toggleNav = useMutation({
     mutationFn: (v: { hrefs: string[]; enabled: boolean }) => api('/api/admin/modules/nav', { method: 'POST', body: JSON.stringify(v) }),
     onSuccess: (_r, v) => {
-      notifySuccess(v.hrefs.length === 1 ? `เมนู → ${v.enabled ? 'แสดง' : 'ซ่อน'}` : `${v.hrefs.length} เมนู → ${v.enabled ? 'แสดง' : 'ซ่อน'}`);
+      notifySuccess(v.hrefs.length === 1
+        ? t('st.set.menu_toggled', { state: v.enabled ? t('st.set.show') : t('st.set.hide') })
+        : t('st.set.menus_toggled', { count: v.hrefs.length, state: v.enabled ? t('st.set.show') : t('st.set.hide') }));
       invalidate();
     },
     onError: (e: any) => notifyError(e.message),
@@ -84,19 +89,19 @@ function Modules() {
 
   const reorder = useMutation({
     mutationFn: (order: string[]) => api('/api/admin/modules/nav-order', { method: 'POST', body: JSON.stringify({ order }) }),
-    onSuccess: () => { notifySuccess('อัปเดตลำดับหมวดเมนูแล้ว'); invalidate(); },
+    onSuccess: () => { notifySuccess(t('st.set.group_order_updated')); invalidate(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const reorderItems = useMutation({
     mutationFn: (v: { scope: string; order: string[] }) => api('/api/admin/modules/nav-item-order', { method: 'POST', body: JSON.stringify(v) }),
-    onSuccess: () => { notifySuccess('อัปเดตลำดับเมนูแล้ว'); invalidate(); },
+    onSuccess: () => { notifySuccess(t('st.set.item_order_updated')); invalidate(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const resetNav = useMutation({
     mutationFn: () => api('/api/admin/modules/nav-reset', { method: 'POST' }),
-    onSuccess: () => { notifySuccess('รีเซ็ตการจัดเมนูเป็นค่าเริ่มต้นแล้ว'); invalidate(); },
+    onSuccess: () => { notifySuccess(t('st.set.nav_reset_done')); invalidate(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -109,18 +114,17 @@ function Modules() {
   return (
     <div className="space-y-4">
       <Card className="gap-2 p-5">
-        <h3 className="text-base font-semibold">จัดการเมนู & โมดูล (ทั้งระบบ)</h3>
+        <h3 className="text-base font-semibold">{t('st.set.menu_modules_heading')}</h3>
         <p className="text-sm text-muted-foreground">
-          <b>ซ่อนเมนู</b> = เอาออกจากแถบเมนูของทุกคน (สิทธิ์ยังเหมือนเดิม) · <b>ปิดโมดูล</b> = ปิดความสามารถทั้งชุดและปิดกั้นที่ API ด้วย —
-          โมดูล “ผู้ใช้ & สิทธิ์” และเมนูตั้งค่า/ผู้ใช้ ปิดไม่ได้เพื่อไม่ให้ผู้ดูแลถูกล็อกออก
+          <b>{t('st.set.hide_menu_label')}</b>{t('st.set.hide_menu_desc')}<b>{t('st.set.disable_module_label')}</b>{t('st.set.disable_module_desc')}
         </p>
         <div className="flex flex-wrap items-center gap-1.5">
-          {navDisabled.size > 0 && <Badge variant={statusVariant('Cancelled')}>ซ่อน {navDisabled.size} เมนู</Badge>}
-          {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>ปิด {disabledCount} โมดูล</Badge>}
+          {navDisabled.size > 0 && <Badge variant={statusVariant('Cancelled')}>{t('st.set.hidden_menus_badge', { count: navDisabled.size })}</Badge>}
+          {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>{t('st.set.disabled_modules_badge', { count: disabledCount })}</Badge>}
           {(navDisabled.size > 0 || (groupOrder?.length ?? 0) > 0) && (
             <Button variant="outline" size="sm" className="ml-auto" disabled={resetNav.isPending}
-              onClick={() => { if (confirm('คืนค่าการจัดเมนูเป็นค่าเริ่มต้น? จะแสดงทุกเมนูและใช้ลำดับหมวดเดิม (ไม่กระทบการเปิด/ปิดโมดูล) — มีผลกับทุกคน')) resetNav.mutate(); }}>
-              <RotateCcw className="size-4" /> รีเซ็ตการจัดเมนู
+              onClick={() => { if (confirm(t('st.set.reset_nav_confirm'))) resetNav.mutate(); }}>
+              <RotateCcw className="size-4" /> {t('st.set.reset_nav_btn')}
             </Button>
           )}
         </div>
@@ -141,10 +145,11 @@ function Modules() {
 
 // ── shared bits ────────────────────────────────────────────────────────────────
 function VisBtn({ hidden, onClick, disabled, size = 'sm' }: { hidden: boolean; onClick: () => void; disabled?: boolean; size?: 'sm' | 'xs' }) {
+  const { t } = useLang();
   return (
     <Button variant={hidden ? 'default' : 'outline'} size="sm" disabled={disabled} onClick={onClick}
       className={cn('shrink-0', size === 'xs' && 'h-7 px-2 text-xs')}>
-      {hidden ? <><Eye className="size-3.5" /> แสดง</> : <><EyeOff className="size-3.5" /> ซ่อน</>}
+      {hidden ? <><Eye className="size-3.5" /> {t('st.set.show')}</> : <><EyeOff className="size-3.5" /> {t('st.set.hide')}</>}
     </Button>
   );
 }
@@ -169,7 +174,7 @@ function MenuVisibility({
   onReorder: (order: string[]) => void;
   onReorderItems: (scope: string, order: string[]) => void;
   pending: boolean;
-  t: (k: string) => string;
+  t: (k: string, vars?: Record<string, string | number>) => string;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   // Mirror the sidebar's ERP/POS split so the tree lines up with what staff actually see. "All" merges both
@@ -180,7 +185,7 @@ function MenuVisibility({
   const query = q.trim().toLowerCase();
   const searching = query.length > 0;
   const canReorder = !searching; // reordering is disabled while filtering (order would be relative to matches)
-  const wsChip = (g: NavGroup) => (!g.workspace || g.workspace.length === 2 ? 'ทั้งสอง' : g.workspace[0] === 'pos' ? 'POS' : 'ERP');
+  const wsChip = (g: NavGroup) => (!g.workspace || g.workspace.length === 2 ? t('st.set.both') : g.workspace[0] === 'pos' ? 'POS' : 'ERP');
 
   const wsGroups = orderGroups(ws === 'all' ? INTERNAL_NAV : navForWorkspace(INTERNAL_NAV, ws), groupOrder);
   const itemsOf = (items: NavItem[], scope: string) => orderItems(items, itemOrder?.[scope]);
@@ -238,7 +243,7 @@ function MenuVisibility({
         className={cn('flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/50', hidden && 'opacity-60', drag?.kind === 'item' && drag.key === it.href && 'opacity-40')}>
         {canReorder && (
           <span draggable={!pending} onDragStart={!pending ? () => setDrag({ kind: 'item', key: it.href, scope }) : undefined} onDragEnd={() => setDrag(null)}
-            title="ลากเพื่อจัดลำดับ" className="shrink-0 cursor-grab text-muted-foreground/40 hover:text-muted-foreground"><GripVertical className="size-3.5" /></span>
+            title={t('st.set.drag_to_reorder')} className="shrink-0 cursor-grab text-muted-foreground/40 hover:text-muted-foreground"><GripVertical className="size-3.5" /></span>
         )}
         <it.icon className="size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
@@ -253,13 +258,13 @@ function MenuVisibility({
         {canReorder && (
           <div className="flex shrink-0 items-center">
             <button type="button" disabled={pending || idx === 0} onClick={() => moveItem(scope, list, it.href, -1)}
-              aria-label={`เลื่อน ${t(it.label)} ขึ้น`} title="เลื่อนขึ้น" className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-25"><ArrowUp className="size-3" /></button>
+              aria-label={t('st.set.move_up_label', { name: t(it.label) })} title={t('st.set.move_up')} className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-25"><ArrowUp className="size-3" /></button>
             <button type="button" disabled={pending || idx === count - 1} onClick={() => moveItem(scope, list, it.href, 1)}
-              aria-label={`เลื่อน ${t(it.label)} ลง`} title="เลื่อนลง" className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-25"><ArrowDown className="size-3" /></button>
+              aria-label={t('st.set.move_down_label', { name: t(it.label) })} title={t('st.set.move_down')} className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-25"><ArrowDown className="size-3" /></button>
           </div>
         )}
         {protectedItem ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><Lock className="size-3.5" /> ล็อก</span>
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><Lock className="size-3.5" /> {t('st.set.locked')}</span>
         ) : (
           <VisBtn hidden={hidden} disabled={pending} size="xs" onClick={() => onToggle([it.href], hidden)} />
         )}
@@ -281,20 +286,20 @@ function MenuVisibility({
       <div className="flex flex-wrap items-center gap-2 border-b p-4">
         <ListTree className="size-4 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <h3 className="text-base font-semibold">จัดการเมนู (แสดง/ซ่อน · จัดลำดับ)</h3>
-          <p className="text-sm text-muted-foreground">ซ่อน/แสดง และ<b>จัดลำดับ</b>ได้ทั้งหมวดและเมนู — ลากที่จับ <GripVertical className="inline size-3 align-text-bottom" /> หรือใช้ปุ่ม ▲▼ (มีผลกับทุกคน)</p>
+          <h3 className="text-base font-semibold">{t('st.set.menu_manage_heading')}</h3>
+          <p className="text-sm text-muted-foreground">{t('st.set.menu_manage_desc1')}<b>{t('st.set.reorder_word')}</b>{t('st.set.menu_manage_desc2')}<GripVertical className="inline size-3 align-text-bottom" />{t('st.set.menu_manage_desc3')}</p>
         </div>
         <div className="flex shrink-0 gap-0.5 rounded-md bg-muted p-0.5 text-xs">
-          {([['all', 'ทั้งหมด'], ['erp', 'ERP'], ['pos', 'POS']] as const).map(([id, label]) => (
+          {([['all', 'st.set.all'], ['erp', 'ERP'], ['pos', 'POS']] as const).map(([id, label]) => (
             <button key={id} type="button" onClick={() => setWs(id)}
               className={cn('rounded px-2.5 py-1 font-medium transition-colors', ws === id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-              {label}
+              {id === 'all' ? t(label) : label}
             </button>
           ))}
         </div>
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาเมนู…" className="pl-8" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('st.set.search_placeholder')} className="pl-8" />
         </div>
       </div>
       <div className="divide-y">
@@ -311,7 +316,7 @@ function MenuVisibility({
               <div className="flex items-center gap-2 px-3 py-2">
                 {canReorder && (
                   <span draggable={!pending} onDragStart={!pending ? () => setDrag({ kind: 'group', key: g.title }) : undefined} onDragEnd={() => setDrag(null)}
-                    title="ลากเพื่อจัดลำดับหมวด" className="shrink-0 cursor-grab text-muted-foreground/40 hover:text-muted-foreground"><GripVertical className="size-4" /></span>
+                    title={t('st.set.drag_group')} className="shrink-0 cursor-grab text-muted-foreground/40 hover:text-muted-foreground"><GripVertical className="size-4" /></span>
                 )}
                 <button type="button" onClick={() => setOpen((o) => ({ ...o, [g.title]: !isOpen }))}
                   className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
@@ -321,16 +326,16 @@ function MenuVisibility({
                     <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{wsChip(g)}</span>
                   )}
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {st.off > 0 ? `ซ่อน ${st.off}/${st.total}` : `${st.total} เมนู`}
+                    {st.off > 0 ? t('st.set.hidden_ratio', { off: st.off, total: st.total }) : t('st.set.menu_count', { count: st.total })}
                   </span>
                 </button>
                 {canReorder && (
                   <div className="flex shrink-0 items-center">
                     <button type="button" disabled={pending || gi === 0} onClick={() => moveGroup(g.title, -1)}
-                      aria-label={`เลื่อน ${t(g.title)} ขึ้น`} title="เลื่อนหมวดขึ้น"
+                      aria-label={t('st.set.move_up_label', { name: t(g.title) })} title={t('st.set.move_group_up')}
                       className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-25"><ArrowUp className="size-3.5" /></button>
                     <button type="button" disabled={pending || gi === visibleGroups.length - 1} onClick={() => moveGroup(g.title, 1)}
-                      aria-label={`เลื่อน ${t(g.title)} ลง`} title="เลื่อนหมวดลง"
+                      aria-label={t('st.set.move_down_label', { name: t(g.title) })} title={t('st.set.move_group_down')}
                       className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-25"><ArrowDown className="size-3.5" /></button>
                   </div>
                 )}
@@ -350,7 +355,7 @@ function MenuVisibility({
                       <div key={sub.title} className="mt-1 rounded-md border border-dashed border-border/70 p-1.5">
                         <div className="flex items-center gap-2 px-1 pb-1">
                           <span className="min-w-0 flex-1 truncate text-xs font-semibold text-muted-foreground">{t(sub.title)}</span>
-                          <span className="shrink-0 text-[11px] text-muted-foreground">{subSt.off > 0 ? `ซ่อน ${subSt.off}/${subSt.total}` : `${subSt.total} เมนู`}</span>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">{subSt.off > 0 ? t('st.set.hidden_ratio', { off: subSt.off, total: subSt.total }) : t('st.set.menu_count', { count: subSt.total })}</span>
                           <VisBtn hidden={subSt.allOff} disabled={pending} size="xs"
                             onClick={() => onToggle(subHrefs.filter((h) => !NAV_ALWAYS_VISIBLE.includes(h)), subSt.allOff)} />
                         </div>
@@ -364,7 +369,7 @@ function MenuVisibility({
           );
         })}
         {searching && visibleGroups.length === 0 && (
-          <div className="px-4 py-6 text-center text-sm text-muted-foreground">ไม่พบเมนูที่ตรงกับ “{q}”</div>
+          <div className="px-4 py-6 text-center text-sm text-muted-foreground">{t('st.set.no_menu_found', { q })}</div>
         )}
       </div>
     </Card>
@@ -379,7 +384,7 @@ function SystemModules({
   onToggle: (keys: string[], enabled: boolean) => void;
   pending: boolean;
   lang: any;
-  t: (k: string) => string;
+  t: (k: string, vars?: Record<string, string | number>) => string;
 }) {
   const byCat = useMemo(() => {
     const m = new Map<string, ModuleFlag[]>();
@@ -395,8 +400,8 @@ function SystemModules({
       <div className="flex items-center gap-2 border-b p-4">
         <ToggleLeft className="size-4 text-primary" />
         <div>
-          <h3 className="text-base font-semibold">โมดูลระบบ (สิทธิ์การใช้งาน)</h3>
-          <p className="text-sm text-muted-foreground">ปิดโมดูลจะปิดกั้นการเข้าถึงที่ API ด้วย — คอลัมน์ “คุมเมนู” แสดงว่าโมดูลนี้ควบคุมเมนูใดบ้าง</p>
+          <h3 className="text-base font-semibold">{t('st.set.system_modules_heading')}</h3>
+          <p className="text-sm text-muted-foreground">{t('st.set.system_modules_desc')}</p>
         </div>
       </div>
       <div className="divide-y">
@@ -410,11 +415,11 @@ function SystemModules({
             <div key={cat.key} className="p-3">
               <div className="mb-1.5 flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold">{categoryLabel(cat.key, lang)}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{offCount > 0 ? `ปิด ${offCount}/${rows.length}` : `${rows.length} โมดูล`}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{offCount > 0 ? t('st.set.disabled_ratio', { off: offCount, total: rows.length }) : t('st.set.module_count', { count: rows.length })}</span>
                 {toggleable.length > 0 && (
                   <Button variant={anyOn ? 'destructive' : 'default'} size="sm" disabled={pending} className="h-7 px-2 text-xs"
                     onClick={() => onToggle(toggleable.map((r) => r.key), !anyOn)}>
-                    <Power className="size-3.5" /> {anyOn ? 'ปิดทั้งหมวด' : 'เปิดทั้งหมวด'}
+                    <Power className="size-3.5" /> {anyOn ? t('st.set.disable_category') : t('st.set.enable_category')}
                   </Button>
                 )}
               </div>
@@ -430,7 +435,7 @@ function SystemModules({
                         </div>
                         {menus.length > 0 && (
                           <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                            <span className="text-[11px] text-muted-foreground">คุมเมนู:</span>
+                            <span className="text-[11px] text-muted-foreground">{t('st.set.controls_menus')}</span>
                             {menus.slice(0, 5).map((mn) => (
                               <span key={mn.href} className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{t(mn.label)}</span>
                             ))}
@@ -438,13 +443,13 @@ function SystemModules({
                           </div>
                         )}
                       </div>
-                      <Badge variant={statusVariant(r.enabled ? 'Open' : 'Cancelled')} className="shrink-0">{r.enabled ? 'เปิดอยู่' : 'ปิดอยู่'}</Badge>
+                      <Badge variant={statusVariant(r.enabled ? 'Open' : 'Cancelled')} className="shrink-0">{r.enabled ? t('st.set.enabled_state') : t('st.set.disabled_state')}</Badge>
                       {r.always_on ? (
                         <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><Lock className="size-3.5" /> always-on</span>
                       ) : (
                         <Button variant={r.enabled ? 'destructive' : 'default'} size="sm" disabled={pending} className="h-7 shrink-0 px-2 text-xs"
                           onClick={() => onToggle([r.key], !r.enabled)}>
-                          <Power className="size-3.5" /> {r.enabled ? 'ปิด' : 'เปิด'}
+                          <Power className="size-3.5" /> {r.enabled ? t('st.set.off') : t('st.set.on')}
                         </Button>
                       )}
                     </div>
@@ -463,15 +468,16 @@ function SystemModules({
 // Public API (v1) scopes an integrator key can be granted. The aliases read/write/* are also
 // accepted by the server; here we expose the granular per-resource read scopes plus 'read'.
 const API_KEY_SCOPES: { key: string; label: string }[] = [
-  { key: 'read', label: 'อ่านทั้งหมด (read)' },
-  { key: 'catalog:read', label: 'แค็ตตาล็อกสินค้า (catalog:read)' },
-  { key: 'inventory:read', label: 'สต๊อก (inventory:read)' },
-  { key: 'orders:read', label: 'ออเดอร์ (orders:read)' },
-  { key: 'invoices:read', label: 'ใบแจ้งหนี้ (invoices:read)' },
+  { key: 'read', label: 'st.set.scope_read' },
+  { key: 'catalog:read', label: 'st.set.scope_catalog' },
+  { key: 'inventory:read', label: 'st.set.scope_inventory' },
+  { key: 'orders:read', label: 'st.set.scope_orders' },
+  { key: 'invoices:read', label: 'st.set.scope_invoices' },
 ];
 
 function ApiKeys() {
   const qc = useQueryClient();
+  const { t } = useLang();
   const list = useQuery<any>({ queryKey: ['api-keys'], queryFn: () => api('/api/platform/api-keys') });
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>(['read']);
@@ -494,20 +500,20 @@ function ApiKeys() {
     <div className="space-y-4">
       <Card className="gap-3 p-5">
         <div>
-          <h3 className="text-base font-semibold">สร้าง API Key ใหม่</h3>
+          <h3 className="text-base font-semibold">{t('st.set.create_key_heading')}</h3>
           <p className="text-sm text-muted-foreground">
-            สำหรับเชื่อมต่อระบบภายนอกกับ Public API (<code>/api/v1</code>) ของคุณ · เอกสาร:{' '}
+            {t('st.set.create_key_desc1')}<code>/api/v1</code>{t('st.set.create_key_desc2')}{' '}
             <a href="/api/v1/openapi.json" className="underline" target="_blank" rel="noreferrer">openapi.json</a>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Input className="min-w-[180px] flex-1" placeholder="ชื่อ key (เช่น Zapier)" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input className="min-w-[180px] flex-1" placeholder={t('st.set.key_name_placeholder')} value={name} onChange={(e) => setName(e.target.value)} />
           <Button disabled={!name || create.isPending} onClick={() => create.mutate()}>
-            <Plus className="size-4" /> {create.isPending ? 'กำลังสร้าง…' : 'สร้าง Key'}
+            <Plus className="size-4" /> {create.isPending ? t('st.set.creating') : t('st.set.create_key_btn')}
           </Button>
         </div>
         <div>
-          <p className="mb-1.5 text-sm font-medium">สิทธิ์ (scopes) ที่อนุญาต</p>
+          <p className="mb-1.5 text-sm font-medium">{t('st.set.allowed_scopes')}</p>
           <div className="flex flex-wrap gap-1.5">
             {API_KEY_SCOPES.map((s) => (
               <button
@@ -519,7 +525,7 @@ function ApiKeys() {
                   scopes.includes(s.key) ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent',
                 )}
               >
-                {s.label}
+                {t(s.label)}
               </button>
             ))}
           </div>
@@ -527,7 +533,7 @@ function ApiKeys() {
         {newKey && (
           <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
             <div className="flex items-center gap-1.5 text-sm font-semibold text-warning-foreground dark:text-warning">
-              <TriangleAlert className="size-4" /> คัดลอกเก็บไว้ตอนนี้ — จะแสดงเพียงครั้งเดียว
+              <TriangleAlert className="size-4" /> {t('st.set.copy_now_once')}
             </div>
             <code className="mt-1.5 block break-all text-sm">{newKey}</code>
           </div>
@@ -537,13 +543,13 @@ function ApiKeys() {
       <StateView q={list}>
         <DataTable
           rows={rows}
-          emptyState={{ icon: KeyRound, title: 'ยังไม่มี API Key', description: 'สร้าง API Key ด้านบนเพื่อเชื่อมต่อระบบภายนอกกับ Public API' }}
+          emptyState={{ icon: KeyRound, title: t('st.set.no_keys_title'), description: t('st.set.no_keys_desc') }}
           columns={[
-            { key: 'name', label: 'ชื่อ' },
+            { key: 'name', label: t('st.set.col_name') },
             { key: 'prefix', label: 'Prefix', render: (r: any) => <code>{r.prefix}…</code> },
-            { key: 'scopes', label: 'สิทธิ์', render: (r: any) => (Array.isArray(r.scopes) ? r.scopes.join(', ') : String(r.scopes ?? '')) },
-            { key: 'revoked', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.revoked ? 'Cancelled' : 'Open')}>{r.revoked ? 'Cancelled' : 'Open'}</Badge> },
-            { key: 'act', label: '', render: (r: any) => !r.revoked && <Button variant="destructive" size="sm" disabled={revoke.isPending} onClick={() => revoke.mutate(r.id)}>เพิกถอน</Button> },
+            { key: 'scopes', label: t('st.set.col_scopes'), render: (r: any) => (Array.isArray(r.scopes) ? r.scopes.join(', ') : String(r.scopes ?? '')) },
+            { key: 'revoked', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.revoked ? 'Cancelled' : 'Open')}>{r.revoked ? 'Cancelled' : 'Open'}</Badge> },
+            { key: 'act', label: '', render: (r: any) => !r.revoked && <Button variant="destructive" size="sm" disabled={revoke.isPending} onClick={() => revoke.mutate(r.id)}>{t('st.set.revoke')}</Button> },
           ]}
         />
       </StateView>
@@ -554,6 +560,7 @@ function ApiKeys() {
 // ───────────────────────── Identity (SSO / SCIM) ─────────────────────────
 function Identity() {
   const qc = useQueryClient();
+  const { t } = useLang();
   const cfg = useQuery<any>({ queryKey: ['identity-config'], queryFn: () => api('/api/platform/identity') });
   const [issuer, setIssuer] = useState('');
   const [clientId, setClientId] = useState('');
@@ -580,7 +587,7 @@ function Identity() {
       sso_enabled: ssoEnabled, oidc_issuer: issuer, oidc_client_id: clientId,
       ...(secret ? { oidc_client_secret: secret } : {}), oidc_redirect_uri: redirect, default_role: defaultRole,
     }) }),
-    onSuccess: () => { notifySuccess('บันทึกการตั้งค่า IdP แล้ว'); setSecret(''); qc.invalidateQueries({ queryKey: ['identity-config'] }); },
+    onSuccess: () => { notifySuccess(t('st.set.idp_saved')); setSecret(''); qc.invalidateQueries({ queryKey: ['identity-config'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const rotate = useMutation({
@@ -593,38 +600,38 @@ function Identity() {
     <div className="space-y-4">
       <Card className="gap-3 p-5">
         <div>
-          <h3 className="text-base font-semibold">เข้าสู่ระบบด้วย SSO (OIDC)</h3>
-          <p className="text-sm text-muted-foreground">เชื่อมต่อ Identity Provider ขององค์กร (Azure AD, Okta, Google) ให้พนักงานล็อกอินด้วยบัญชีองค์กร</p>
+          <h3 className="text-base font-semibold">{t('st.set.sso_heading')}</h3>
+          <p className="text-sm text-muted-foreground">{t('st.set.sso_desc')}</p>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={ssoEnabled} onChange={(e) => setSsoEnabled(e.target.checked)} />
-          เปิดใช้งาน SSO
+          {t('st.set.enable_sso')}
         </label>
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5"><Label>Issuer URL</Label><Input value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://login.example.com" /></div>
           <div className="grid gap-1.5"><Label>Client ID</Label><Input value={clientId} onChange={(e) => setClientId(e.target.value)} /></div>
-          <div className="grid gap-1.5"><Label>Client Secret {cfg.data?.has_client_secret && <span className="text-xs text-muted-foreground">(ตั้งไว้แล้ว — เว้นว่างเพื่อคงเดิม)</span>}</Label><Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="••••••" /></div>
+          <div className="grid gap-1.5"><Label>Client Secret {cfg.data?.has_client_secret && <span className="text-xs text-muted-foreground">{t('st.set.secret_set_hint')}</span>}</Label><Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="••••••" /></div>
           <div className="grid gap-1.5"><Label>Redirect URI</Label><Input value={redirect} onChange={(e) => setRedirect(e.target.value)} placeholder="https://app.example/sso/callback" /></div>
-          <div className="grid gap-1.5"><Label>บทบาทเริ่มต้นของผู้ใช้ใหม่</Label><Input value={defaultRole} onChange={(e) => setDefaultRole(e.target.value)} /></div>
+          <div className="grid gap-1.5"><Label>{t('st.set.default_role_label')}</Label><Input value={defaultRole} onChange={(e) => setDefaultRole(e.target.value)} /></div>
         </div>
-        <div><Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}</Button></div>
+        <div><Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? t('st.set.saving') : t('fin.save')}</Button></div>
       </Card>
 
       <Card className="gap-3 p-5">
         <div>
-          <h3 className="text-base font-semibold">SCIM 2.0 — จัดการผู้ใช้อัตโนมัติ</h3>
-          <p className="text-sm text-muted-foreground">ให้ IdP เพิ่ม/ปิดผู้ใช้อัตโนมัติผ่าน SCIM endpoint <code>/scim/v2</code> ด้วย bearer token นี้</p>
+          <h3 className="text-base font-semibold">{t('st.set.scim_heading')}</h3>
+          <p className="text-sm text-muted-foreground">{t('st.set.scim_desc1')}<code>/scim/v2</code>{t('st.set.scim_desc2')}</p>
         </div>
-        {cfg.data?.has_scim_token && !scimToken && <p className="text-sm text-muted-foreground">โทเค็นปัจจุบัน: <code>{cfg.data.scim_token_prefix}…</code></p>}
+        {cfg.data?.has_scim_token && !scimToken && <p className="text-sm text-muted-foreground">{t('st.set.current_token')}<code>{cfg.data.scim_token_prefix}…</code></p>}
         {scimToken && (
           <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
             <div className="flex items-center gap-1.5 text-sm font-semibold text-warning-foreground dark:text-warning">
-              <TriangleAlert className="size-4" /> คัดลอกเก็บไว้ตอนนี้ — จะแสดงเพียงครั้งเดียว
+              <TriangleAlert className="size-4" /> {t('st.set.copy_now_once')}
             </div>
             <code className="mt-1.5 block break-all text-sm">{scimToken}</code>
           </div>
         )}
-        <div><Button variant="outline" disabled={rotate.isPending} onClick={() => rotate.mutate()}>{rotate.isPending ? 'กำลังสร้าง…' : (cfg.data?.has_scim_token ? 'สร้างโทเค็นใหม่ (เพิกถอนของเดิม)' : 'สร้าง SCIM token')}</Button></div>
+        <div><Button variant="outline" disabled={rotate.isPending} onClick={() => rotate.mutate()}>{rotate.isPending ? t('st.set.creating') : (cfg.data?.has_scim_token ? t('st.set.rotate_token') : t('st.set.create_scim_token'))}</Button></div>
       </Card>
     </div>
   );
@@ -632,6 +639,7 @@ function Identity() {
 
 // ───────────────────────── MFA (TOTP) ─────────────────────────
 function Mfa() {
+  const { t } = useLang();
   const [setup, setSetup] = useState<{ secret: string; otpauth_url: string } | null>(null);
   const [token, setToken] = useState('');
 
@@ -642,32 +650,32 @@ function Mfa() {
   });
   const verify = useMutation({
     mutationFn: () => api('/api/platform/mfa/verify', { method: 'POST', body: JSON.stringify({ token }) }),
-    onSuccess: () => notifySuccess('เปิดใช้งาน MFA สำเร็จ — ครั้งต่อไปต้องใส่รหัส 6 หลัก'),
-    onError: (e: any) => notifyError(`รหัสไม่ถูกต้อง (${e.message})`),
+    onSuccess: () => notifySuccess(t('st.set.mfa_enabled')),
+    onError: (e: any) => notifyError(t('st.set.invalid_code', { msg: e.message })),
   });
 
   return (
     <Card className="max-w-[480px] gap-4 p-5">
       <div>
-        <h3 className="text-base font-semibold">ยืนยันตัวตนสองชั้น (Two-Factor / TOTP)</h3>
-        <p className="text-sm text-muted-foreground">เพิ่มความปลอดภัยด้วยแอป Google Authenticator / Authy</p>
+        <h3 className="text-base font-semibold">{t('st.set.mfa_heading')}</h3>
+        <p className="text-sm text-muted-foreground">{t('st.set.mfa_desc')}</p>
       </div>
       {!setup ? (
         <Button disabled={begin.isPending} onClick={() => begin.mutate()}>
-          <ShieldCheck className="size-4" /> {begin.isPending ? 'กำลังเริ่ม…' : 'เริ่มตั้งค่า MFA'}
+          <ShieldCheck className="size-4" /> {begin.isPending ? t('st.set.starting') : t('st.set.start_mfa')}
         </Button>
       ) : (
         <div className="grid gap-3">
           <div className="grid gap-1.5">
-            <span className="text-sm text-muted-foreground">1) เพิ่มลงในแอป Authenticator ด้วยรหัสลับนี้:</span>
+            <span className="text-sm text-muted-foreground">{t('st.set.mfa_step1')}</span>
             <code className="block break-all rounded-md bg-muted p-2 text-sm">{setup.secret}</code>
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="mfa-token">2) ใส่รหัส 6 หลักจากแอปเพื่อยืนยัน</Label>
+            <Label htmlFor="mfa-token">{t('st.set.mfa_step2')}</Label>
             <Input id="mfa-token" inputMode="numeric" maxLength={6} placeholder="000000" value={token} onChange={(e) => setToken(e.target.value)} />
           </div>
           <Button disabled={token.length < 6 || verify.isPending} onClick={() => verify.mutate()}>
-            {verify.isPending ? 'กำลังยืนยัน…' : 'ยืนยันเปิดใช้งาน'}
+            {verify.isPending ? t('st.set.verifying') : t('st.set.verify_enable')}
           </Button>
         </div>
       )}

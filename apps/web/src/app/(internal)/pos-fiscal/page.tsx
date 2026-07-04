@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ShieldCheck, Send, BookText, FileCheck2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -17,35 +18,37 @@ import { Input } from '@/components/ui/input';
 import { statusVariant } from '@/components/ui';
 
 export default function PosFiscalPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="ภาษีอิเล็กทรอนิกส์ (Fiscal)" description="สมุดบันทึกอิเล็กทรอนิกส์แบบ hash-chain (ตรวจสอบการแก้ไข) และการนำส่ง e-Tax Invoice กับกรมสรรพากร" />
-      <Tabs tabs={[{ key: 'journal', label: 'สมุดบันทึก (Journal)', content: <Journal /> }, { key: 'etax', label: 'นำส่ง e-Tax', content: <Etax /> }]} />
+      <PageHeader title={t('px.fiscal_title')} description={t('px.fiscal_desc')} />
+      <Tabs tabs={[{ key: 'journal', label: t('px.fiscal_tab_journal'), content: <Journal /> }, { key: 'etax', label: t('px.fiscal_tab_etax'), content: <Etax /> }]} />
     </div>
   );
 }
 
 function Journal() {
+  const { t } = useLang();
   const q = useQuery<any>({ queryKey: ['pos-journal'], queryFn: () => api('/api/pos/journal?limit=100') });
   const [verify, setVerify] = useState<any>(null);
   const run = useMutation({ mutationFn: () => api('/api/pos/journal/verify'), onSuccess: (r: any) => setVerify(r) });
   return (
     <div className="space-y-4">
       <Card className="flex-row items-center gap-3 p-5">
-        <Button disabled={run.isPending} onClick={() => run.mutate()}><ShieldCheck className="size-4" /> ตรวจสอบความถูกต้องของสมุด</Button>
+        <Button disabled={run.isPending} onClick={() => run.mutate()}><ShieldCheck className="size-4" /> {t('px.fiscal_verify_btn')}</Button>
         {verify && (verify.ok
-          ? <Badge variant={statusVariant('paid')}>ถูกต้อง · {verify.length} รายการ</Badge>
-          : <Badge variant={statusVariant('cancelled')}>พบการแก้ไขที่ลำดับ {verify.broken_at} ({verify.reason})</Badge>)}
+          ? <Badge variant={statusVariant('paid')}>{t('px.fiscal_valid', { n: verify.length })}</Badge>
+          : <Badge variant={statusVariant('cancelled')}>{t('px.fiscal_broken', { seq: verify.broken_at, reason: verify.reason })}</Badge>)}
       </Card>
       <StateView q={q}>
         {q.data && (
           <DataTable rows={q.data.entries} columns={[
-            { key: 'seq', label: 'ลำดับ', align: 'right' },
-            { key: 'doc_type', label: 'ชนิด' },
-            { key: 'doc_no', label: 'เลขที่' },
-            { key: 'created_at', label: 'เวลา', render: (r: any) => thaiDate(r.created_at) },
+            { key: 'seq', label: t('px.fiscal_col_seq'), align: 'right' },
+            { key: 'doc_type', label: t('px.fiscal_col_type') },
+            { key: 'doc_no', label: t('dash.col_no') },
+            { key: 'created_at', label: t('px.fiscal_col_time'), render: (r: any) => thaiDate(r.created_at) },
             { key: 'hash', label: 'Hash', render: (r: any) => <span className="font-mono text-xs">{String(r.hash).slice(0, 16)}…</span> },
-          ]} emptyState={{ icon: BookText, title: 'ยังไม่มีรายการในสมุด', description: 'รายการขายและเอกสารจะถูกบันทึกแบบ hash-chain โดยอัตโนมัติเมื่อมีการทำรายการ' }} />
+          ]} emptyState={{ icon: BookText, title: t('px.fiscal_journal_empty_title'), description: t('px.fiscal_journal_empty_desc') }} />
         )}
       </StateView>
     </div>
@@ -53,32 +56,33 @@ function Journal() {
 }
 
 function Etax() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['etax'], queryFn: () => api('/api/tax/etax?limit=100') });
   const [docNo, setDocNo] = useState('');
   const submit = useMutation({
     mutationFn: () => api(`/api/tax/etax/submit/${docNo}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (r: any) => { notifySuccess(`${r.doc_no} → ${r.status}${r.idempotent ? ' (ส่งซ้ำ)' : ''}`); qc.invalidateQueries({ queryKey: ['etax'] }); },
+    onSuccess: (r: any) => { notifySuccess(`${r.doc_no} → ${r.status}${r.idempotent ? ` (${t('px.fiscal_resubmit')})` : ''}`); qc.invalidateQueries({ queryKey: ['etax'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   return (
     <div className="space-y-4">
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">นำส่งใบกำกับภาษีอิเล็กทรอนิกส์</h3>
+        <h3 className="text-base font-semibold">{t('px.fiscal_etax_heading')}</h3>
         <div className="flex gap-2">
-          <Input className="max-w-[240px]" placeholder="เลขที่เอกสาร (เช่น TIV-202606-0001)" value={docNo} onChange={(e) => setDocNo(e.target.value)} />
-          <Button disabled={!docNo || submit.isPending} onClick={() => submit.mutate()}><Send className="size-4" /> นำส่ง</Button>
+          <Input className="max-w-[240px]" placeholder={t('px.fiscal_docno_ph')} value={docNo} onChange={(e) => setDocNo(e.target.value)} />
+          <Button disabled={!docNo || submit.isPending} onClick={() => submit.mutate()}><Send className="size-4" /> {t('px.fiscal_submit')}</Button>
         </div>
       </Card>
       <StateView q={q}>
         {q.data && (
           <DataTable rows={q.data.submissions} columns={[
-            { key: 'doc_no', label: 'เลขที่' },
-            { key: 'provider', label: 'ผู้ให้บริการ' },
-            { key: 'provider_ref', label: 'อ้างอิง' },
-            { key: 'submitted_at', label: 'นำส่งเมื่อ', render: (r: any) => thaiDate(r.submitted_at) },
-            { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'Accepted' ? 'paid' : r.status === 'Rejected' ? 'cancelled' : 'open')}>{r.status}</Badge> },
-          ]} emptyState={{ icon: FileCheck2, title: 'ยังไม่มีการนำส่ง', description: 'กรอกเลขที่เอกสารด้านบนแล้วกด นำส่ง เพื่อส่ง e-Tax Invoice ไปยังกรมสรรพากร' }} />
+            { key: 'doc_no', label: t('dash.col_no') },
+            { key: 'provider', label: t('px.fiscal_col_provider') },
+            { key: 'provider_ref', label: t('px.fiscal_col_ref') },
+            { key: 'submitted_at', label: t('px.fiscal_col_submitted'), render: (r: any) => thaiDate(r.submitted_at) },
+            { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status === 'Accepted' ? 'paid' : r.status === 'Rejected' ? 'cancelled' : 'open')}>{r.status}</Badge> },
+          ]} emptyState={{ icon: FileCheck2, title: t('px.fiscal_etax_empty_title'), description: t('px.fiscal_etax_empty_desc') }} />
         )}
       </StateView>
     </div>

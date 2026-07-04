@@ -6,6 +6,7 @@ import { Plus, Target, TrendingUp, Layers } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -27,6 +28,7 @@ interface ForecastRow { stage: string; probability: number; count: number; total
 interface Forecast { by_stage: ForecastRow[]; total_pipeline: number; weighted_pipeline: number }
 
 export default function PipelinePage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const stages = useQuery<Stage[]>({ queryKey: ['pipeline-stages'], queryFn: () => api('/api/pipeline/stages') });
   const opps = useQuery<{ opportunities: Opp[]; count: number }>({ queryKey: ['pipeline-opps'], queryFn: () => api('/api/pipeline/opportunities') });
@@ -50,7 +52,7 @@ export default function PipelinePage() {
         }),
       }),
     onSuccess: (r) => {
-      notifySuccess(`สร้างดีลสำเร็จ: ${(r as Opp).opp_no}`);
+      notifySuccess(t('crm.deal_created', { no: (r as Opp).opp_no }));
       setName(''); setExpectedValue(''); setStageName('');
       qc.invalidateQueries({ queryKey: ['pipeline-opps'] });
       qc.invalidateQueries({ queryKey: ['pipeline-forecast'] });
@@ -75,7 +77,7 @@ export default function PipelinePage() {
 
   return (
     <div>
-      <PageHeader title="โอกาสการขาย (Sales Pipeline)" description="ติดตามดีลตามขั้นตอน พยากรณ์ยอดขายแบบถ่วงน้ำหนัก" />
+      <PageHeader title={t('crm.pipeline_title')} description={t('crm.pipeline_subtitle')} />
 
       <div className="space-y-6">
         {/* Forecast KPIs + chart */}
@@ -83,19 +85,19 @@ export default function PipelinePage() {
           {forecast.data && (
             <>
               <div className="grid gap-4 sm:grid-cols-3">
-                <StatCard label="มูลค่า Pipeline รวม" value={baht(forecast.data.total_pipeline)} icon={Layers} tone="primary" />
-                <StatCard label="พยากรณ์ถ่วงน้ำหนัก" value={baht(forecast.data.weighted_pipeline)} icon={TrendingUp} tone="success" hint="ตามความน่าจะเป็นของแต่ละขั้น" />
-                <StatCard label="ดีลที่เปิดอยู่" value={num((forecast.data.by_stage ?? []).reduce((s, r) => s + r.count, 0))} icon={Target} tone="info" />
+                <StatCard label={t('crm.total_pipeline_value')} value={baht(forecast.data.total_pipeline)} icon={Layers} tone="primary" />
+                <StatCard label={t('crm.weighted_forecast')} value={baht(forecast.data.weighted_pipeline)} icon={TrendingUp} tone="success" hint={t('crm.weighted_forecast_hint')} />
+                <StatCard label={t('crm.open_deals')} value={num((forecast.data.by_stage ?? []).reduce((s, r) => s + r.count, 0))} icon={Target} tone="info" />
               </div>
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">พยากรณ์ถ่วงน้ำหนักตามขั้นตอน</CardTitle>
+                  <CardTitle className="text-base">{t('crm.weighted_forecast_by_stage')}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {chartData.length ? (
                     <SimpleBarChart data={chartData} xKey="name" yKey="weighted" color="var(--chart-2)" fmt={(v) => baht(v)} />
                   ) : (
-                    <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">ยังไม่มีดีลที่เปิดอยู่</div>
+                    <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">{t('crm.no_open_deals')}</div>
                   )}
                 </CardContent>
               </Card>
@@ -106,29 +108,29 @@ export default function PipelinePage() {
         {/* Create opportunity */}
         <Card className="max-w-2xl gap-4">
           <CardHeader>
-            <CardTitle className="text-base">สร้างโอกาสการขาย</CardTitle>
+            <CardTitle className="text-base">{t('crm.create_opportunity')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="opp-name">ชื่อดีล</Label>
-                <Input id="opp-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น ดีล ABC Corp" />
+                <Label htmlFor="opp-name">{t('crm.deal_name')}</Label>
+                <Input id="opp-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('crm.deal_name_placeholder')} />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="opp-value">มูลค่าคาดการณ์ (฿)</Label>
+                <Label htmlFor="opp-value">{t('crm.expected_value')}</Label>
                 <Input id="opp-value" type="number" min="0" value={expectedValue} onChange={(e) => setExpectedValue(e.target.value)} placeholder="0" />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="opp-stage">ขั้นตอน</Label>
+                <Label htmlFor="opp-stage">{t('crm.stage')}</Label>
                 <select id="opp-stage" className={selectCls} value={stageName} onChange={(e) => setStageName(e.target.value)}>
-                  <option value="">— ค่าเริ่มต้น (Prospect) —</option>
+                  <option value="">{t('crm.stage_default_option')}</option>
                   {(stages.data ?? []).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
                 </select>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button disabled={create.isPending || !name.trim()} onClick={() => create.mutate()}>
-                <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างดีล'}
+                <Plus className="size-4" /> {create.isPending ? t('crm.saving') : t('crm.create_deal')}
               </Button>
             </div>
           </CardContent>
@@ -136,31 +138,31 @@ export default function PipelinePage() {
 
         {/* Opportunities list */}
         <div>
-          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">โอกาสการขายทั้งหมด</h3>
+          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('crm.all_opportunities')}</h3>
           <StateView q={opps}>
             {opps.data && (
               <DataTable
                 rows={opps.data.opportunities}
-                emptyState={{ icon: Target, title: 'ยังไม่มีโอกาสการขาย', description: 'กรอกแบบฟอร์ม "สร้างโอกาสการขาย" ด้านบนเพื่อเพิ่มดีลแรกของคุณ' }}
+                emptyState={{ icon: Target, title: t('crm.no_opportunities_title'), description: t('crm.no_opportunities_desc') }}
                 columns={[
-                  { key: 'opp_no', label: 'เลขที่' },
-                  { key: 'name', label: 'ชื่อดีล' },
-                  { key: 'account_name', label: 'ลูกค้า', render: (r: Opp) => r.account_name ?? '—' },
+                  { key: 'opp_no', label: t('dash.col_no') },
+                  { key: 'name', label: t('crm.deal_name') },
+                  { key: 'account_name', label: t('fin.col_customer'), render: (r: Opp) => r.account_name ?? '—' },
                   {
                     key: 'stage_id',
-                    label: 'ขั้นตอน',
+                    label: t('crm.stage'),
                     render: (r: Opp) => {
                       const label = r.stage_name ?? (r.stage_id != null ? stageById.get(r.stage_id) : null) ?? '—';
                       return <Badge variant={statusVariant(label)}>{label}</Badge>;
                     },
                   },
-                  { key: 'probability', label: 'โอกาส (%)', align: 'right', render: (r: Opp) => <span className="tabular">{num(r.probability)}%</span> },
-                  { key: 'expected_value', label: 'มูลค่า', align: 'right', render: (r: Opp) => <span className="tabular">{baht(r.expected_value)}</span> },
-                  { key: 'status', label: 'สถานะ', render: (r: Opp) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-                  { key: 'created_at', label: 'สร้างเมื่อ', render: (r: Opp) => thaiDate(r.created_at) },
+                  { key: 'probability', label: t('crm.probability_pct'), align: 'right', render: (r: Opp) => <span className="tabular">{num(r.probability)}%</span> },
+                  { key: 'expected_value', label: t('crm.value'), align: 'right', render: (r: Opp) => <span className="tabular">{baht(r.expected_value)}</span> },
+                  { key: 'status', label: t('fin.col_status'), render: (r: Opp) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                  { key: 'created_at', label: t('crm.created_at'), render: (r: Opp) => thaiDate(r.created_at) },
                   {
                     key: 'move',
-                    label: 'ย้ายขั้น',
+                    label: t('crm.move_stage'),
                     sortable: false,
                     render: (r: Opp) => (
                       <select
@@ -169,7 +171,7 @@ export default function PipelinePage() {
                         disabled={move.isPending}
                         onChange={(e) => { if (e.target.value) move.mutate({ id: r.id, stage_name: e.target.value }); }}
                       >
-                        <option value="">ย้ายไปยัง…</option>
+                        <option value="">{t('crm.move_to')}</option>
                         {(stages.data ?? []).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
                       </select>
                     ),

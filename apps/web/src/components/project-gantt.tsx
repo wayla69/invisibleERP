@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 
 export type GanttTask = {
   id: number;
@@ -23,37 +24,38 @@ export type GanttTask = {
  * to the design tokens.
  */
 export function ProjectGantt({ tasks, totalDays }: { tasks: GanttTask[]; totalDays: number }) {
+  const { t } = useLang();
   const span = Math.max(1, totalDays);
   // Month-ish gridlines every ~ceil(span/8) days so a long plan stays readable.
   const step = Math.max(1, Math.ceil(span / 8));
   const ticks = Array.from({ length: Math.floor(span / step) + 1 }, (_, i) => i * step);
 
   if (!tasks.length) {
-    return <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">ยังไม่มีงานในโครงสร้าง WBS — เพิ่มงานเพื่อสร้างกำหนดการ</div>;
+    return <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">{t('mx.gantt_empty')}</div>;
   }
 
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
       <div className="grid grid-cols-[minmax(9rem,16rem)_1fr] border-b bg-muted/40 text-xs font-medium text-muted-foreground">
-        <div className="px-3 py-2">งาน (Task)</div>
+        <div className="px-3 py-2">{t('mx.gantt_task_col')}</div>
         <div className="relative px-3 py-2">
-          กำหนดการ · {span} วัน
+          {t('mx.gantt_schedule', { span })}
         </div>
       </div>
       <div className="divide-y">
-        {tasks.map((t) => {
-          const left = (t.es / span) * 100;
-          const width = Math.max(1.5, (t.duration_days / span) * 100);
-          const done = Math.max(0, Math.min(100, t.pct_complete));
+        {tasks.map((task) => {
+          const left = (task.es / span) * 100;
+          const width = Math.max(1.5, (task.duration_days / span) * 100);
+          const done = Math.max(0, Math.min(100, task.pct_complete));
           return (
-            <div key={t.id} className="grid grid-cols-[minmax(9rem,16rem)_1fr] items-center hover:bg-muted/30">
+            <div key={task.id} className="grid grid-cols-[minmax(9rem,16rem)_1fr] items-center hover:bg-muted/30">
               <div className="min-w-0 px-3 py-2">
                 <div className="flex items-center gap-1.5">
-                  {t.on_critical_path && <span className="inline-block size-1.5 shrink-0 rounded-full bg-primary" title="อยู่บนเส้นทางวิกฤต (critical path)" />}
-                  <span className="truncate text-sm font-medium text-foreground" title={t.name}>{t.name}</span>
+                  {task.on_critical_path && <span className="inline-block size-1.5 shrink-0 rounded-full bg-primary" title={t('mx.gantt_critical')} />}
+                  <span className="truncate text-sm font-medium text-foreground" title={task.name}>{task.name}</span>
                 </div>
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {t.duration_days} วัน · {done}%{t.assignee ? ` · ${t.assignee}` : ''}{t.slack > 0 ? ` · slack ${t.slack}d` : ''}
+                  {t('mx.gantt_days', { days: task.duration_days })} · {done}%{task.assignee ? ` · ${task.assignee}` : ''}{task.slack > 0 ? ` · slack ${task.slack}d` : ''}
                 </div>
               </div>
               <div className="relative h-9 px-3">
@@ -67,17 +69,17 @@ export function ProjectGantt({ tasks, totalDays }: { tasks: GanttTask[]; totalDa
                 <div
                   className={cn(
                     'absolute top-1/2 h-4 -translate-y-1/2 overflow-hidden rounded-md shadow-xs ring-1',
-                    t.status === 'cancelled'
+                    task.status === 'cancelled'
                       ? 'bg-muted ring-border opacity-60'
-                      : t.on_critical_path
+                      : task.on_critical_path
                         ? 'bg-primary/25 ring-primary/40'
                         : 'bg-[var(--chart-2)]/20 ring-[var(--chart-2)]/40',
                   )}
                   style={{ left: `${left}%`, width: `${width}%` }}
-                  title={`${t.name} · วันที่ ${t.es}–${t.ef} · ${done}%`}
+                  title={t('mx.gantt_bar_title', { name: task.name, es: task.es, ef: task.ef, done })}
                 >
                   <div
-                    className={cn('h-full', t.on_critical_path ? 'bg-primary' : 'bg-[var(--chart-2)]')}
+                    className={cn('h-full', task.on_critical_path ? 'bg-primary' : 'bg-[var(--chart-2)]')}
                     style={{ width: `${done}%` }}
                   />
                 </div>

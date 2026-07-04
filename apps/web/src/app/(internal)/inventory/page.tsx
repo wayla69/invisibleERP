@@ -7,6 +7,7 @@ import { CalendarClock, Hourglass, Package, SearchX, TriangleAlert } from 'lucid
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 import { ModulePage } from '@/components/module-page';
 import { SearchInput } from '@/components/search-input';
 import { StatCard } from '@/components/stat-card';
@@ -36,14 +37,15 @@ function expiryTone(v: string | null): 'destructive' | 'warning' | null {
 }
 
 export default function InventoryPage() {
+  const { t } = useLang();
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const [lowOnly, setLowOnly] = useState(false);
 
   // Debounce the free-text search so we don't fire a request per keystroke.
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(search), 300);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setDebounced(search), 300);
+    return () => clearTimeout(timer);
   }, [search]);
 
   const q = useQuery<StockResp>({
@@ -60,36 +62,36 @@ export default function InventoryPage() {
 
   return (
     <ModulePage
-      title="สินค้าคงคลัง"
-      description="ระดับสต๊อกและวันหมดอายุ"
+      title={t('inv.title')}
+      description={t('inv.subtitle')}
       query={q}
       toolbar={
         <>
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="ค้นหา Item ID / ชื่อสินค้า…"
-            ariaLabel="ค้นหาสินค้า"
-            count={d ? `${num(d.items.length)} รายการ` : undefined}
+            placeholder={t('inv.search_ph')}
+            ariaLabel={t('inv.search_aria')}
+            count={d ? t('inv.count_items', { n: num(d.items.length) }) : undefined}
           />
           <Button variant={lowOnly ? 'default' : 'outline'} aria-pressed={lowOnly} onClick={() => setLowOnly((v) => !v)}>
-            <TriangleAlert className="size-4" /> เฉพาะสต๊อกต่ำ
+            <TriangleAlert className="size-4" /> {t('inv.low_only')}
           </Button>
-          {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">กำลังอัปเดต…</span>}
+          {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">{t('inv.updating')}</span>}
         </>
       }
       stats={
         d && (
           <>
-            <StatCard label="Snapshot" value={d.snapshot_date ? thaiDate(d.snapshot_date) : '—'} icon={CalendarClock} hint="ข้อมูล ณ วันที่" />
-            <StatCard label="รายการทั้งหมด" value={num(d.total)} icon={Package} tone="primary" />
-            <StatCard label="สต๊อกต่ำ" value={num(d.low_stock_count)} icon={TriangleAlert} tone={d.low_stock_count > 0 ? 'warning' : 'success'} hint="ต้องเติมสินค้า" />
+            <StatCard label="Snapshot" value={d.snapshot_date ? thaiDate(d.snapshot_date) : '—'} icon={CalendarClock} hint={t('inv.snapshot_hint')} />
+            <StatCard label={t('inv.total_items')} value={num(d.total)} icon={Package} tone="primary" />
+            <StatCard label={t('inv.low_stock')} value={num(d.low_stock_count)} icon={TriangleAlert} tone={d.low_stock_count > 0 ? 'warning' : 'success'} hint={t('dash.need_restock')} />
             <StatCard
-              label="หมดอายุ / ใกล้หมด (≤30 วัน)"
+              label={t('inv.expiring')}
               value={num(expiringSoon)}
               icon={Hourglass}
               tone={expiringSoon > 0 ? 'danger' : 'success'}
-              hint="จากรายการที่แสดง"
+              hint={t('inv.from_shown')}
             />
           </>
         )
@@ -103,24 +105,24 @@ export default function InventoryPage() {
             filtering
               ? {
                   icon: SearchX,
-                  title: 'ไม่พบสินค้าที่ตรงกับตัวกรอง',
-                  description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                  title: t('inv.no_match_items'),
+                  description: t('inv.no_match_desc'),
                   action: (
                     <Button variant="outline" size="sm" onClick={() => { setSearch(''); setLowOnly(false); }}>
-                      ล้างตัวกรอง
+                      {t('inv.clear_filter')}
                     </Button>
                   ),
                 }
-              : { icon: Package, title: 'ยังไม่มีข้อมูลสินค้า', description: 'เพิ่มสินค้าในข้อมูลหลัก หรือซิงก์สต๊อกเพื่อเริ่มต้น' }
+              : { icon: Package, title: t('inv.empty_title'), description: t('inv.empty_desc') }
           }
           columns={[
             { key: 'Item_ID', label: 'Item ID', render: (r) => <Link className="font-medium text-primary hover:underline" href={`/inventory/${encodeURIComponent(r.Item_ID)}`}>{r.Item_ID}</Link> },
-            { key: 'Item_Description', label: 'ชื่อสินค้า' },
-            { key: 'UOM', label: 'หน่วย' },
-            { key: 'AV_QTY', label: 'คงเหลือ', align: 'right', render: (r) => <span className={cn('tabular', Number(r.AV_QTY) <= 0 && 'font-semibold text-destructive')}>{num(r.AV_QTY)}</span> },
+            { key: 'Item_Description', label: t('inv.col_name') },
+            { key: 'UOM', label: t('inv.col_uom') },
+            { key: 'AV_QTY', label: t('inv.col_onhand'), align: 'right', render: (r) => <span className={cn('tabular', Number(r.AV_QTY) <= 0 && 'font-semibold text-destructive')}>{num(r.AV_QTY)}</span> },
             {
               key: 'Expiry_Date',
-              label: 'หมดอายุ',
+              label: t('inv.col_expiry'),
               render: (r) => {
                 const tone = expiryTone(r.Expiry_Date);
                 return (

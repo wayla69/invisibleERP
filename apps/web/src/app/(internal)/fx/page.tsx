@@ -16,20 +16,22 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { useLang } from '@/lib/i18n';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function FxPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="อัตราแลกเปลี่ยน (FX)"
-        description="กำหนดอัตราสิ้นงวด รายงานผลต่างที่ยังไม่เกิดขึ้นจริง และตีราคา (revaluation JE 5400)"
+        title={t('fnx.fx.title')}
+        description={t('fnx.fx.subtitle')}
       />
       <Tabs
         tabs={[
-          { key: 'rates', label: 'อัตราแลกเปลี่ยน', content: <Rates /> },
-          { key: 'revalue', label: 'ตีราคา / ผลต่าง', content: <Revalue /> },
+          { key: 'rates', label: t('fnx.fx.tab_rates'), content: <Rates /> },
+          { key: 'revalue', label: t('fnx.fx.tab_revalue'), content: <Revalue /> },
         ]}
       />
     </div>
@@ -38,6 +40,7 @@ export default function FxPage() {
 
 // ───────────────────────── rate table + add/update form ─────────────────────────
 function Rates() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['fx-rates'], queryFn: () => api('/api/fx/rates') });
 
@@ -54,8 +57,8 @@ function Rates() {
       }),
     onSuccess: (r) => {
       notifySuccess(r.status === 'PendingApproval'
-        ? `ส่งคำขออัตรา ${r.currency} @ ${num(r.rate)} — รออนุมัติจากผู้มีสิทธิ์ (คนละคนกับผู้ขอ)`
-        : `บันทึกอัตรา ${r.currency} @ ${num(r.rate)} (${r.rate_date})`);
+        ? t('fnx.fx.rate_pending', { currency: r.currency, rate: num(r.rate) })
+        : t('fnx.fx.rate_saved', { currency: r.currency, rate: num(r.rate), date: r.rate_date }));
       setRate('');
       qc.invalidateQueries({ queryKey: ['fx-rates'] });
     },
@@ -66,35 +69,35 @@ function Rates() {
   const decide = useMutation({
     mutationFn: ({ r, action }: { r: any; action: 'approve' | 'reject' }) =>
       api<any>(`/api/fx/rates/${action}`, { method: 'POST', body: JSON.stringify({ currency: r.currency, rate_date: r.rate_date, shared: r.tenant_id == null }) }),
-    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? 'อนุมัติอัตราแล้ว — พร้อมใช้งาน' : 'ปฏิเสธอัตราแล้ว'); qc.invalidateQueries({ queryKey: ['fx-rates'] }); },
+    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? t('fnx.fx.rate_approved') : t('fnx.fx.rate_rejected')); qc.invalidateQueries({ queryKey: ['fx-rates'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-5">
       <Card className="max-w-3xl gap-4 p-5">
-        <h3 className="text-base font-semibold">เพิ่ม / อัปเดตอัตรา</h3>
+        <h3 className="text-base font-semibold">{t('fnx.fx.add_card_title')}</h3>
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="grid gap-2">
-            <Label htmlFor="fx-ccy">สกุลเงิน</Label>
+            <Label htmlFor="fx-ccy">{t('fnx.fx.field_currency')}</Label>
             <Input id="fx-ccy" maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} placeholder="USD" />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="fx-date">วันที่</Label>
+            <Label htmlFor="fx-date">{t('dash.col_date')}</Label>
             <Input id="fx-date" type="date" value={rateDate} onChange={(e) => setRateDate(e.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="fx-rate">อัตรา (ต่อ THB)</Label>
+            <Label htmlFor="fx-rate">{t('fnx.fx.field_rate')}</Label>
             <Input id="fx-rate" type="number" step="0.0001" min="0" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="35.5" />
           </div>
         </div>
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="size-4 rounded border-input" />
-          ใช้ร่วมทุกร้าน (shared)
+          {t('fnx.fx.shared_all')}
         </label>
         <div>
           <Button disabled={setRateMut.isPending || currency.length !== 3 || !rate} onClick={() => setRateMut.mutate()}>
-            <Plus className="size-4" /> {setRateMut.isPending ? 'กำลังบันทึก…' : 'บันทึกอัตรา'}
+            <Plus className="size-4" /> {setRateMut.isPending ? t('fnx.fx.saving') : t('fnx.fx.save_rate')}
           </Button>
         </div>
       </Card>
@@ -102,26 +105,26 @@ function Rates() {
       <StateView q={q}>
         {q.data && (
           <div className="space-y-5">
-            <StatCard label="จำนวนอัตราที่บันทึก" value={num(q.data.count)} icon={Coins} tone="primary" className="max-w-xs" />
+            <StatCard label={t('fnx.fx.stat_rate_count')} value={num(q.data.count)} icon={Coins} tone="primary" className="max-w-xs" />
             <DataTable
               rows={q.data.rates}
               columns={[
-                { key: 'currency', label: 'สกุลเงิน' },
-                { key: 'rate_date', label: 'วันที่', render: (r: any) => thaiDate(r.rate_date) },
-                { key: 'rate', label: 'อัตรา (ต่อ THB)', align: 'right', render: (r: any) => <span className="tabular">{num(r.rate)}</span> },
-                { key: 'tenant_id', label: 'ขอบเขต', render: (r: any) => (r.tenant_id == null ? 'ใช้ร่วม' : `ร้าน #${r.tenant_id}`) },
-                { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'PendingApproval' ? 'warning' : 'destructive'}>{r.status === 'Approved' ? 'อนุมัติแล้ว' : r.status === 'PendingApproval' ? 'รออนุมัติ' : 'ปฏิเสธ'}</Badge> },
+                { key: 'currency', label: t('fnx.fx.field_currency') },
+                { key: 'rate_date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.rate_date) },
+                { key: 'rate', label: t('fnx.fx.field_rate'), align: 'right', render: (r: any) => <span className="tabular">{num(r.rate)}</span> },
+                { key: 'tenant_id', label: t('fnx.fx.col_scope'), render: (r: any) => (r.tenant_id == null ? t('fnx.fx.scope_shared') : t('fnx.fx.scope_store', { id: r.tenant_id })) },
+                { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'PendingApproval' ? 'warning' : 'destructive'}>{r.status === 'Approved' ? t('fin.approved') : r.status === 'PendingApproval' ? t('fin.pending') : t('fnx.fx.status_rejected')}</Badge> },
                 { key: 'act', label: '', align: 'right', render: (r: any) => r.status === 'PendingApproval' ? (
                   <div className="flex justify-end gap-1">
-                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'approve' })}>อนุมัติ</Button>
-                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'reject' })}>ปฏิเสธ</Button>
+                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'approve' })}>{t('fin.approve')}</Button>
+                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'reject' })}>{t('fnx.fx.reject')}</Button>
                   </div>
                 ) : null },
               ]}
               emptyState={{
                 icon: Coins,
-                title: 'ยังไม่มีอัตราแลกเปลี่ยน',
-                description: 'กรอกสกุลเงิน วันที่ และอัตราด้านบน เพื่อบันทึกอัตราสิ้นงวดรายการแรก',
+                title: t('fnx.fx.empty_title'),
+                description: t('fnx.fx.empty_desc'),
               }}
             />
           </div>
@@ -133,6 +136,7 @@ function Rates() {
 
 // ───────────────────────── unrealized report + revaluation action ─────────────────────────
 function Revalue() {
+  const { t } = useLang();
   const [asOf, setAsOf] = useState(today());
   const [currency, setCurrency] = useState('USD');
   const [autoReverse, setAutoReverse] = useState(true);
@@ -149,9 +153,9 @@ function Revalue() {
         body: JSON.stringify({ as_of: asOf, currency: currency.toUpperCase(), auto_reverse: autoReverse }),
       }),
     onSuccess: (r) => {
-      if (r.already) notifySuccess(`ตีราคา ${r.currency} ณ ${r.as_of} ลงบัญชีไปแล้ว`);
-      else if (!r.entry_no) notifySuccess(`${r.note ?? 'ไม่มียอดคงค้างสกุลต่างประเทศ'}`);
-      else notifySuccess(`ตีราคา ${r.currency} @ ${num(r.current_rate)} · JE ${r.entry_no}${r.reverse_entry_no ? ` (กลับ ${r.reverse_entry_no})` : ''}`);
+      if (r.already) notifySuccess(t('fnx.fx.reval_already', { currency: r.currency, as_of: r.as_of }));
+      else if (!r.entry_no) notifySuccess(r.note ?? t('fnx.fx.no_fx_balance'));
+      else notifySuccess(t('fnx.fx.reval_success', { currency: r.currency, rate: num(r.current_rate), entry_no: r.entry_no }) + (r.reverse_entry_no ? t('fnx.fx.reval_reverse_suffix', { reverse_entry_no: r.reverse_entry_no }) : ''));
       report.refetch();
     },
     onError: (e: any) => notifyError(e.message),
@@ -160,24 +164,24 @@ function Revalue() {
   return (
     <div className="space-y-5">
       <Card className="gap-4 p-5">
-        <h3 className="text-base font-semibold">ตีราคาอัตราแลกเปลี่ยน</h3>
+        <h3 className="text-base font-semibold">{t('fnx.fx.reval_card_title')}</h3>
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="grid gap-2">
-            <Label htmlFor="rev-asof">ณ วันที่</Label>
+            <Label htmlFor="rev-asof">{t('fnx.fx.field_asof')}</Label>
             <Input id="rev-asof" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="rev-ccy">สกุลเงิน</Label>
+            <Label htmlFor="rev-ccy">{t('fnx.fx.field_currency')}</Label>
             <Input id="rev-ccy" maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} placeholder="USD" />
           </div>
         </div>
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <input type="checkbox" checked={autoReverse} onChange={(e) => setAutoReverse(e.target.checked)} className="size-4 rounded border-input" />
-          กลับรายการต้นงวดถัดไป (auto-reverse)
+          {t('fnx.fx.auto_reverse')}
         </label>
         <div>
           <Button disabled={revalue.isPending || currency.length !== 3} onClick={() => revalue.mutate()}>
-            <RefreshCw className="size-4" /> {revalue.isPending ? 'กำลังตีราคา…' : 'ตีราคาและลงบัญชี'}
+            <RefreshCw className="size-4" /> {revalue.isPending ? t('fnx.fx.revaluing') : t('fnx.fx.reval_btn')}
           </Button>
         </div>
       </Card>
@@ -186,26 +190,26 @@ function Revalue() {
         {report.data && (
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-3">
-              <StatCard label="ผลต่าง AR" value={baht(report.data.totals?.ar_delta)} tone={Number(report.data.totals?.ar_delta) >= 0 ? 'success' : 'danger'} />
-              <StatCard label="ผลต่าง AP" value={baht(report.data.totals?.ap_delta)} tone={Number(report.data.totals?.ap_delta) >= 0 ? 'success' : 'danger'} />
-              <StatCard label="ผลต่างสุทธิ" value={baht(report.data.totals?.net_delta)} tone={Number(report.data.totals?.net_delta) >= 0 ? 'success' : 'danger'} />
+              <StatCard label={t('fnx.fx.stat_ar_delta')} value={baht(report.data.totals?.ar_delta)} tone={Number(report.data.totals?.ar_delta) >= 0 ? 'success' : 'danger'} />
+              <StatCard label={t('fnx.fx.stat_ap_delta')} value={baht(report.data.totals?.ap_delta)} tone={Number(report.data.totals?.ap_delta) >= 0 ? 'success' : 'danger'} />
+              <StatCard label={t('fnx.fx.stat_net_delta')} value={baht(report.data.totals?.net_delta)} tone={Number(report.data.totals?.net_delta) >= 0 ? 'success' : 'danger'} />
             </div>
 
             <div>
-              <h4 className="mb-3 text-sm font-semibold text-muted-foreground">ลูกหนี้ (AR) สกุลต่างประเทศคงค้าง</h4>
+              <h4 className="mb-3 text-sm font-semibold text-muted-foreground">{t('fnx.fx.ar_title')}</h4>
               <DataTable
                 rows={report.data.ar ?? []}
-                columns={fxRowColumns}
-                emptyState={{ title: 'ไม่มีลูกหนี้สกุลต่างประเทศคงค้าง' }}
+                columns={fxRowColumns(t)}
+                emptyState={{ title: t('fnx.fx.empty_ar') }}
                 dense
               />
             </div>
             <div>
-              <h4 className="mb-3 text-sm font-semibold text-muted-foreground">เจ้าหนี้ (AP) สกุลต่างประเทศคงค้าง</h4>
+              <h4 className="mb-3 text-sm font-semibold text-muted-foreground">{t('fnx.fx.ap_title')}</h4>
               <DataTable
                 rows={report.data.ap ?? []}
-                columns={fxRowColumns}
-                emptyState={{ title: 'ไม่มีเจ้าหนี้สกุลต่างประเทศคงค้าง' }}
+                columns={fxRowColumns(t)}
+                emptyState={{ title: t('fnx.fx.empty_ap') }}
                 dense
               />
             </div>
@@ -216,13 +220,13 @@ function Revalue() {
   );
 }
 
-const fxRowColumns = [
-  { key: 'doc_no', label: 'เลขที่เอกสาร' },
-  { key: 'currency', label: 'สกุล' },
-  { key: 'open_foreign', label: 'คงค้าง (ตปท.)', align: 'right' as const, render: (r: any) => <span className="tabular">{num(r.open_foreign)}</span> },
-  { key: 'booked_rate', label: 'อัตราเดิม', align: 'right' as const, render: (r: any) => <span className="tabular">{num(r.booked_rate)}</span> },
-  { key: 'current_rate', label: 'อัตราปัจจุบัน', align: 'right' as const, render: (r: any) => <span className="tabular">{num(r.current_rate)}</span> },
-  { key: 'booked_thb', label: 'มูลค่าเดิม (THB)', align: 'right' as const, render: (r: any) => <span className="tabular">{baht(r.booked_thb)}</span> },
-  { key: 'current_thb', label: 'มูลค่าปัจจุบัน (THB)', align: 'right' as const, render: (r: any) => <span className="tabular">{baht(r.current_thb)}</span> },
-  { key: 'delta', label: 'ผลต่าง', align: 'right' as const, render: (r: any) => <span className="tabular">{baht(r.delta)}</span> },
+const fxRowColumns = (t: (key: string) => string) => [
+  { key: 'doc_no', label: t('fnx.fx.col_doc_no') },
+  { key: 'currency', label: t('fnx.fx.col_ccy') },
+  { key: 'open_foreign', label: t('fnx.fx.col_open_foreign'), align: 'right' as const, render: (r: any) => <span className="tabular">{num(r.open_foreign)}</span> },
+  { key: 'booked_rate', label: t('fnx.fx.col_booked_rate'), align: 'right' as const, render: (r: any) => <span className="tabular">{num(r.booked_rate)}</span> },
+  { key: 'current_rate', label: t('fnx.fx.col_current_rate'), align: 'right' as const, render: (r: any) => <span className="tabular">{num(r.current_rate)}</span> },
+  { key: 'booked_thb', label: t('fnx.fx.col_booked_thb'), align: 'right' as const, render: (r: any) => <span className="tabular">{baht(r.booked_thb)}</span> },
+  { key: 'current_thb', label: t('fnx.fx.col_current_thb'), align: 'right' as const, render: (r: any) => <span className="tabular">{baht(r.current_thb)}</span> },
+  { key: 'delta', label: t('fnx.fx.col_delta'), align: 'right' as const, render: (r: any) => <span className="tabular">{baht(r.delta)}</span> },
 ];

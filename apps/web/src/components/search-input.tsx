@@ -4,6 +4,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { Search, X } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 
 /**
@@ -14,7 +15,7 @@ import { Input } from '@/components/ui/input';
 export function SearchInput({
   value,
   onChange,
-  placeholder = 'ค้นหา…',
+  placeholder,
   count,
   ariaLabel,
   className,
@@ -30,6 +31,8 @@ export function SearchInput({
   className?: string;
   inputClassName?: string;
 } & Omit<ComponentProps<typeof Input>, 'value' | 'onChange'>) {
+  const { t } = useLang();
+  const ph = placeholder ?? t('mx.srch_placeholder');
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <div className="relative w-full sm:max-w-xs">
@@ -38,8 +41,8 @@ export function SearchInput({
           className={cn('pl-9 pr-9', inputClassName)}
           inputMode="search"
           enterKeyHint="search"
-          aria-label={ariaLabel ?? placeholder}
-          placeholder={placeholder}
+          aria-label={ariaLabel ?? ph}
+          placeholder={ph}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           {...rest}
@@ -47,7 +50,7 @@ export function SearchInput({
         {value && (
           <button
             type="button"
-            aria-label="ล้างคำค้นหา"
+            aria-label={t('mx.srch_clear')}
             onClick={() => onChange('')}
             className="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           >

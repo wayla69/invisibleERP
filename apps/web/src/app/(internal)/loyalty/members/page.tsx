@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Search, SearchX, Users, Coins, Wallet, Settings } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -23,6 +24,7 @@ interface ListResp { limit: number; offset: number; count: number; members: Memb
 interface Liability { control_account: string; fair_value_per_point: number; outstanding_points: number; active_members: number; liability_value: number; posted_liability: number; unposted_value: number; movements: { earned_points: number; redeemed_points: number; redeemed_value: number; adjusted_points: number } }
 
 export default function MembersPage() {
+  const { t } = useLang();
   const [term, setTerm] = useState('');
   const [q, setQ] = useState('');
   const [segment, setSegment] = useState('');
@@ -36,19 +38,19 @@ export default function MembersPage() {
   return (
     <div>
       <PageHeader
-        title="สมาชิก & แต้ม"
-        description="ทะเบียนสมาชิก มุมมอง 360 องศา และหนี้สินแต้มสะสม"
-        actions={<Link href="/loyalty"><Button variant="outline"><Settings className="size-4" /> ตั้งค่าแต้ม</Button></Link>}
+        title={t('ly.mb_title')}
+        description={t('ly.mb_desc')}
+        actions={<Link href="/loyalty"><Button variant="outline"><Settings className="size-4" /> {t('ly.mb_settings_btn')}</Button></Link>}
       />
 
       <div className="space-y-6">
         <StateView q={liab}>
           {liab.data && (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="สมาชิกที่ใช้งาน" value={num(liab.data.active_members)} icon={Users} tone="primary" />
-              <StatCard label="แต้มคงค้าง" value={num(liab.data.outstanding_points)} icon={Coins} tone="info" hint={`มูลค่า ${liab.data.fair_value_per_point} บาท/แต้ม`} />
-              <StatCard label={`หนี้สินแต้ม (บัญชี ${liab.data.control_account})`} value={baht(liab.data.liability_value)} icon={Wallet} tone="warning" hint={`ลงบัญชีแล้ว ${baht(liab.data.posted_liability)}${liab.data.unposted_value ? ` · รอลง ${baht(liab.data.unposted_value)}` : ''}`} />
-              <StatCard label="แลกแล้ว (สะสม)" value={num(liab.data.movements.redeemed_points)} hint={`คิดเป็น ${baht(liab.data.movements.redeemed_value)}`} />
+              <StatCard label={t('ly.mb_active_members')} value={num(liab.data.active_members)} icon={Users} tone="primary" />
+              <StatCard label={t('ly.mb_outstanding')} value={num(liab.data.outstanding_points)} icon={Coins} tone="info" hint={t('ly.mb_value_per_point', { rate: liab.data.fair_value_per_point })} />
+              <StatCard label={t('ly.mb_liability', { acct: liab.data.control_account })} value={baht(liab.data.liability_value)} icon={Wallet} tone="warning" hint={`${t('ly.mb_posted', { posted: baht(liab.data.posted_liability) })}${liab.data.unposted_value ? t('ly.mb_unposted', { unposted: baht(liab.data.unposted_value) }) : ''}`} />
+              <StatCard label={t('ly.mb_redeemed')} value={num(liab.data.movements.redeemed_points)} hint={t('ly.mb_redeemed_value', { v: baht(liab.data.movements.redeemed_value) })} />
             </div>
           )}
         </StateView>
@@ -58,16 +60,16 @@ export default function MembersPage() {
           onSubmit={(e) => { e.preventDefault(); setQ(term.trim()); }}
         >
           <div className="grid gap-2">
-            <label className="text-sm font-medium" htmlFor="m-search">ค้นหา (ชื่อ / เบอร์ / บัตร / รหัส)</label>
-            <Input id="m-search" value={term} onChange={(e) => setTerm(e.target.value)} placeholder="เช่น 0812345678 หรือ M-000123" className="w-72" />
+            <label className="text-sm font-medium" htmlFor="m-search">{t('ly.mb_search_label')}</label>
+            <Input id="m-search" value={term} onChange={(e) => setTerm(e.target.value)} placeholder={t('ly.mb_search_ph')} className="w-72" />
           </div>
           <div className="grid gap-2">
-            <label className="text-sm font-medium" htmlFor="m-seg">กลุ่ม RFM</label>
+            <label className="text-sm font-medium" htmlFor="m-seg">{t('ly.seg_f_segment')}</label>
             <select id="m-seg" className={selectCls} value={segment} onChange={(e) => setSegment(e.target.value)}>
-              {SEGMENTS.map((s) => <option key={s} value={s}>{s || 'ทั้งหมด'}</option>)}
+              {SEGMENTS.map((s) => <option key={s} value={s}>{s || t('ly.all')}</option>)}
             </select>
           </div>
-          <Button type="submit"><Search className="size-4" /> ค้นหา</Button>
+          <Button type="submit"><Search className="size-4" /> {t('ly.search')}</Button>
         </form>
 
         <StateView q={list}>
@@ -79,24 +81,24 @@ export default function MembersPage() {
                 q || segment
                   ? {
                       icon: SearchX,
-                      title: 'ไม่พบสมาชิกที่ตรงกับเงื่อนไข',
-                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูสมาชิกทั้งหมด',
+                      title: t('ly.mb_no_match'),
+                      description: t('ly.mb_no_match_desc'),
                       action: (
                         <Button variant="outline" size="sm" onClick={() => { setTerm(''); setQ(''); setSegment(''); }}>
-                          ล้างตัวกรอง
+                          {t('inv.clear_filter')}
                         </Button>
                       ),
                     }
-                  : { icon: Users, title: 'ยังไม่มีสมาชิก', description: 'เพิ่มสมาชิกจากหน้าขายหรือบันทึกสมาชิกใหม่เพื่อเริ่มสะสมแต้ม' }
+                  : { icon: Users, title: t('ly.mb_empty'), description: t('ly.mb_empty_desc') }
               }
               columns={[
-                { key: 'member_code', label: 'รหัส', render: (r) => <Link className="text-primary underline-offset-2 hover:underline" href={`/loyalty/members/${r.id}`}>{r.member_code}</Link> },
-                { key: 'name', label: 'ชื่อ', render: (r) => r.name ?? '—' },
-                { key: 'phone', label: 'เบอร์', render: (r) => r.phone ?? '—' },
-                { key: 'segment', label: 'กลุ่ม', render: (r) => r.segment ? <Badge variant={statusVariant(r.segment)}>{r.segment}</Badge> : <span className="text-muted-foreground">—</span> },
-                { key: 'tier', label: 'ระดับ', render: (r) => r.tier ?? '—' },
-                { key: 'balance', label: 'แต้มคงเหลือ', align: 'right', render: (r) => <span className="tabular">{num(r.balance)}</span> },
-                { key: 'marketing_opt_in', label: 'รับข่าวสาร', align: 'center', render: (r) => r.marketing_opt_in ? <Badge variant="success">ยินยอม</Badge> : <Badge variant="muted">ปฏิเสธ</Badge> },
+                { key: 'member_code', label: t('ly.col_code'), render: (r) => <Link className="text-primary underline-offset-2 hover:underline" href={`/loyalty/members/${r.id}`}>{r.member_code}</Link> },
+                { key: 'name', label: t('ly.col_name'), render: (r) => r.name ?? '—' },
+                { key: 'phone', label: t('ly.mb_col_phone'), render: (r) => r.phone ?? '—' },
+                { key: 'segment', label: t('ly.col_group'), render: (r) => r.segment ? <Badge variant={statusVariant(r.segment)}>{r.segment}</Badge> : <span className="text-muted-foreground">—</span> },
+                { key: 'tier', label: t('ly.lc_tier'), render: (r) => r.tier ?? '—' },
+                { key: 'balance', label: t('ly.seg_f_balance'), align: 'right', render: (r) => <span className="tabular">{num(r.balance)}</span> },
+                { key: 'marketing_opt_in', label: t('ly.seg_f_optin'), align: 'center', render: (r) => r.marketing_opt_in ? <Badge variant="success">{t('ly.mb_opted_in')}</Badge> : <Badge variant="muted">{t('ly.mb_opted_out')}</Badge> },
               ]}
             />
           )}

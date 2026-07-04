@@ -1,4 +1,4 @@
 {
-  "useClient": 239,
-  "_note": "239 (was 238): +1 for the Quick Capture page /capture (docs/34) — inherently client-first (camera capture via <input capture>, FileReader→data URL, react-query mutation + live 'my captures' list); a server shell + island split cannot remove the client island. Justified exception to the down-only ratchet; keep converting other pages to RSC to bring this back down."
+  "useClient": 241,
+  "_note": "239 (was 238): +1 for the Quick Capture page /capture (docs/34) — inherently client-first (camera capture via <input capture>, FileReader→data URL, react-query mutation + live 'my captures' list); a server shell + island split cannot remove the client island. 241 (was 239): +2 for the i18n client-islands localizing the pipeline & financial-health RSC dashboards (PR #410) — both required to run the client-only t() hook on a server-prefetched page. Justified exceptions to the down-only ratchet; keep converting other pages to RSC to bring this back down."
 }

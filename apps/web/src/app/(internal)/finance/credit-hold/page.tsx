@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CircleDollarSign, RefreshCw, ShieldAlert, ShieldOff } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -44,6 +45,7 @@ interface CreditEvent {
 }
 
 export default function CreditHoldPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
 
   const positions = useQuery<{ positions: CreditPosition[]; count: number; on_hold_count: number; as_of: string }>({
@@ -73,24 +75,24 @@ export default function CreditHoldPage() {
 
   const placeHold = useMutation<{ customer: string }, Error, { tenant_id: number; reason?: string }>({
     mutationFn: (b) => api('/api/finance/ar/credit-hold', { method: 'POST', body: JSON.stringify(b) }) as Promise<{ customer: string }>,
-    onSuccess: (r) => { notifySuccess(`ระงับเครดิต ${r.customer} แล้ว`); setHoldDialog(null); setHoldReason(''); refresh(); },
-    onError: (e: any) => notifyError(e?.message ?? 'ระงับเครดิตไม่สำเร็จ'),
+    onSuccess: (r) => { notifySuccess(t('fnx.credhold.toast_held', { customer: r.customer })); setHoldDialog(null); setHoldReason(''); refresh(); },
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.credhold.err_hold')),
   });
 
   const releaseHold = useMutation<{ customer: string }, Error, { tenant_id: number; reason?: string }>({
     mutationFn: (b) => api('/api/finance/ar/credit-release', { method: 'POST', body: JSON.stringify(b) }) as Promise<{ customer: string }>,
-    onSuccess: (r) => { notifySuccess(`ปลดระงับเครดิต ${r.customer} แล้ว`); setHoldDialog(null); setHoldReason(''); refresh(); },
-    onError: (e: any) => notifyError(e?.message ?? 'ปลดระงับไม่สำเร็จ — ตรวจสอบ SoD (ผู้ปลดต้องต่างจากผู้ระงับ)'),
+    onSuccess: (r) => { notifySuccess(t('fnx.credhold.toast_released', { customer: r.customer })); setHoldDialog(null); setHoldReason(''); refresh(); },
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.credhold.err_release')),
   });
 
   const changeLimit = useMutation<{ customer: string; old_limit: number; new_limit: number }, Error, { tenant_id: number; new_limit: number; reason?: string }>({
     mutationFn: (b) => api('/api/finance/ar/credit-limit', { method: 'POST', body: JSON.stringify(b) }) as Promise<{ customer: string; old_limit: number; new_limit: number }>,
     onSuccess: (r) => {
-      notifySuccess(`เปลี่ยนวงเงิน ${r.customer}: ${baht(r.old_limit)} → ${baht(r.new_limit)}`);
+      notifySuccess(t('fnx.credhold.toast_limit', { customer: r.customer, oldLimit: baht(r.old_limit), newLimit: baht(r.new_limit) }));
       setLimitDialog(null); setNewLimit(''); setLimitReason('');
       refresh();
     },
-    onError: (e: any) => notifyError(e?.message ?? 'เปลี่ยนวงเงินไม่สำเร็จ'),
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.credhold.err_limit')),
   });
 
   const data = positions.data;
@@ -102,40 +104,40 @@ export default function CreditHoldPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="จัดการเครดิต & ระงับบัญชี"
-        description="REV-08 / REV-12 — สถานะเครดิตลูกค้าทุกราย, ระงับ/ปลดระงับ (maker-checker SoD), เปลี่ยนวงเงิน, ประวัติ"
+        title={t('fnx.credhold.title')}
+        description={t('fnx.credhold.desc')}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard
-          label="บัญชีถูกระงับ"
+          label={t('fnx.credhold.stat_on_hold')}
           value={data ? String(data.on_hold_count) : '—'}
           icon={ShieldAlert}
           tone="danger"
-          hint="ลูกค้าที่ถูกระงับเครดิตอยู่"
+          hint={t('fnx.credhold.stat_on_hold_hint')}
         />
         <StatCard
-          label="ลูกหนี้รวม (Exposure)"
+          label={t('fnx.credhold.stat_exposure')}
           value={data ? baht(totalExposure) : '—'}
           icon={CircleDollarSign}
           tone="warning"
-          hint="ยอดคงค้างรวมทุกราย"
+          hint={t('fnx.credhold.stat_exposure_hint')}
         />
         <StatCard
-          label="ยอดเกินกำหนด"
+          label={t('fnx.credhold.stat_overdue')}
           value={data ? baht(totalOverdue) : '—'}
           icon={AlertTriangle}
           tone="danger"
-          hint="ยอดที่เลยกำหนดชำระ"
+          hint={t('fnx.credhold.stat_overdue_hint')}
         />
       </div>
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-sm">สถานะเครดิตลูกค้า{data ? ` (${data.count} ราย ณ ${data.as_of})` : ''}</CardTitle>
+          <CardTitle className="text-sm">{data ? t('fnx.credhold.positions_title_count', { count: data.count, as_of: data.as_of }) : t('fnx.credhold.positions_title')}</CardTitle>
           <Button variant="outline" size="sm" onClick={refresh} disabled={positions.isFetching}>
             <RefreshCw className={`mr-1 size-4 ${positions.isFetching ? 'animate-spin' : ''}`} />
-            รีเฟรช
+            {t('fnx.credhold.refresh')}
           </Button>
         </CardHeader>
         <CardContent>
@@ -143,27 +145,27 @@ export default function CreditHoldPage() {
             <DataTable
               rows={data?.positions ?? []}
               rowKey={(r) => String(r.tenant_id)}
-              emptyState={{ icon: ShieldOff, title: 'ไม่มีลูกหนี้ค้างชำระ', description: 'ลูกค้าทุกรายชำระตามกำหนด' }}
+              emptyState={{ icon: ShieldOff, title: t('fnx.credhold.empty_title'), description: t('fnx.credhold.empty_desc') }}
               columns={[
-                { key: 'customer', label: 'ลูกค้า' },
+                { key: 'customer', label: t('fin.col_customer') },
                 {
-                  key: 'exposure', label: 'คงค้าง', align: 'right',
+                  key: 'exposure', label: t('fin.col_outstanding'), align: 'right',
                   render: (r) => <span className="tabular-nums">{baht(r.exposure)}</span>,
                 },
                 {
-                  key: 'overdue', label: 'เกินกำหนด', align: 'right',
+                  key: 'overdue', label: t('fnx.credhold.col_overdue'), align: 'right',
                   render: (r) => <span className={`tabular-nums ${r.overdue > 0 ? 'text-destructive' : ''}`}>{baht(r.overdue)}</span>,
                 },
                 {
-                  key: 'max_overdue_days', label: 'ค้างสูงสุด', align: 'right',
+                  key: 'max_overdue_days', label: t('fnx.credhold.col_max_overdue'), align: 'right',
                   render: (r) => <span className={`tabular-nums ${r.max_overdue_days > 90 ? 'text-destructive font-medium' : ''}`}>{r.max_overdue_days}d</span>,
                 },
                 {
-                  key: 'credit_limit', label: 'วงเงิน', align: 'right',
+                  key: 'credit_limit', label: t('fnx.credhold.col_limit'), align: 'right',
                   render: (r) => <span className="tabular-nums">{r.credit_limit > 0 ? baht(r.credit_limit) : '—'}</span>,
                 },
                 {
-                  key: 'available_credit', label: 'คงเหลือ', align: 'right',
+                  key: 'available_credit', label: t('fnx.credhold.col_available'), align: 'right',
                   render: (r) => (
                     <span className={`tabular-nums ${r.over_limit ? 'text-destructive font-medium' : ''}`}>
                       {r.available_credit != null ? baht(r.available_credit) : '—'}
@@ -171,13 +173,13 @@ export default function CreditHoldPage() {
                   ),
                 },
                 {
-                  key: 'status', label: 'สถานะ', sortable: false,
+                  key: 'status', label: t('fin.col_status'), sortable: false,
                   render: (r) => (
                     <div className="flex flex-wrap gap-1">
-                      {r.manual_hold && <Badge variant="destructive">ระงับ (ผู้จัดการ)</Badge>}
-                      {r.over_limit && <Badge variant="destructive">เกินวงเงิน</Badge>}
-                      {r.serious_overdue && <Badge variant="destructive">ค้าง 90+ วัน</Badge>}
-                      {!r.on_hold && <Badge variant="success">ปกติ</Badge>}
+                      {r.manual_hold && <Badge variant="destructive">{t('fnx.credhold.badge_manual_hold')}</Badge>}
+                      {r.over_limit && <Badge variant="destructive">{t('fnx.credhold.badge_over_limit')}</Badge>}
+                      {r.serious_overdue && <Badge variant="destructive">{t('fnx.credhold.badge_overdue_90')}</Badge>}
+                      {!r.on_hold && <Badge variant="success">{t('fnx.credhold.badge_normal')}</Badge>}
                     </div>
                   ),
                 },
@@ -193,7 +195,7 @@ export default function CreditHoldPage() {
                           onClick={() => { setHoldDialog({ tenantId: r.tenant_id, customer: r.customer, action: 'hold' }); setHoldReason(''); }}
                         >
                           <ShieldAlert className="mr-1 size-3.5" />
-                          ระงับ
+                          {t('fnx.credhold.action_hold')}
                         </Button>
                       ) : (
                         <Button
@@ -202,7 +204,7 @@ export default function CreditHoldPage() {
                           onClick={() => { setHoldDialog({ tenantId: r.tenant_id, customer: r.customer, action: 'release' }); setHoldReason(''); }}
                         >
                           <ShieldOff className="mr-1 size-3.5" />
-                          ปลดระงับ
+                          {t('fnx.credhold.action_release')}
                         </Button>
                       )}
                       <Button
@@ -210,14 +212,14 @@ export default function CreditHoldPage() {
                         size="sm"
                         onClick={() => { setLimitDialog({ tenantId: r.tenant_id, customer: r.customer, currentLimit: r.credit_limit }); setNewLimit(String(r.credit_limit > 0 ? r.credit_limit : '')); setLimitReason(''); }}
                       >
-                        วงเงิน
+                        {t('fnx.credhold.action_limit')}
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => setEventsTenantId(r.tenant_id)}
                       >
-                        ประวัติ
+                        {t('fnx.credhold.action_history')}
                       </Button>
                     </div>
                   ),
@@ -236,36 +238,36 @@ export default function CreditHoldPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {holdDialog?.action === 'hold' ? `ระงับเครดิต — ${holdDialog.customer}` : `ปลดระงับเครดิต — ${holdDialog?.customer}`}
+              {holdDialog?.action === 'hold' ? t('fnx.credhold.dlg_hold_title', { customer: holdDialog.customer }) : t('fnx.credhold.dlg_release_title', { customer: holdDialog?.customer ?? '' })}
             </DialogTitle>
           </DialogHeader>
           {holdDialog?.action === 'release' && (
-            <p className="text-sm text-muted-foreground">SoD: ผู้ปลดระงับต้องต่างจากผู้ที่ระงับ (maker-checker)</p>
+            <p className="text-sm text-muted-foreground">{t('fnx.credhold.sod_note')}</p>
           )}
           <div className="grid gap-2">
-            <Label>เหตุผล {holdDialog?.action === 'hold' ? '(ไม่บังคับ)' : '(ไม่บังคับ)'}</Label>
+            <Label>{t('fnx.credhold.reason')} {holdDialog?.action === 'hold' ? t('fnx.credhold.optional') : t('fnx.credhold.optional')}</Label>
             <Input
               value={holdReason}
               onChange={(e) => setHoldReason(e.target.value)}
-              placeholder={holdDialog?.action === 'hold' ? 'เช่น ค้างชำระเกิน 3 งวด' : 'เช่น ชำระหนี้ครบแล้ว'}
+              placeholder={holdDialog?.action === 'hold' ? t('fnx.credhold.hold_reason_ph') : t('fnx.credhold.release_reason_ph')}
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setHoldDialog(null); setHoldReason(''); }}>ยกเลิก</Button>
+            <Button variant="outline" onClick={() => { setHoldDialog(null); setHoldReason(''); }}>{t('fin.cancel')}</Button>
             {holdDialog?.action === 'hold' ? (
               <Button
                 variant="destructive"
                 disabled={actionPending}
                 onClick={() => placeHold.mutate({ tenant_id: holdDialog.tenantId, reason: holdReason || undefined })}
               >
-                ยืนยันระงับ
+                {t('fnx.credhold.confirm_hold')}
               </Button>
             ) : (
               <Button
                 disabled={actionPending}
                 onClick={() => holdDialog && releaseHold.mutate({ tenant_id: holdDialog.tenantId, reason: holdReason || undefined })}
               >
-                ยืนยันปลดระงับ
+                {t('fnx.credhold.confirm_release')}
               </Button>
             )}
           </DialogFooter>
@@ -279,40 +281,40 @@ export default function CreditHoldPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>เปลี่ยนวงเงินเครดิต — {limitDialog?.customer}</DialogTitle>
+            <DialogTitle>{t('fnx.credhold.dlg_limit_title', { customer: limitDialog?.customer ?? '' })}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label>วงเงินปัจจุบัน</Label>
-              <p className="text-sm text-muted-foreground">{limitDialog ? (limitDialog.currentLimit > 0 ? baht(limitDialog.currentLimit) : 'ไม่จำกัด') : '—'}</p>
+              <Label>{t('fnx.credhold.current_limit')}</Label>
+              <p className="text-sm text-muted-foreground">{limitDialog ? (limitDialog.currentLimit > 0 ? baht(limitDialog.currentLimit) : t('fnx.credhold.unlimited')) : '—'}</p>
             </div>
             <div className="grid gap-2">
-              <Label>วงเงินใหม่ (บาท, 0 = ไม่จำกัด)</Label>
+              <Label>{t('fnx.credhold.new_limit')}</Label>
               <Input
                 type="number"
                 min="0"
                 step="1000"
                 value={newLimit}
                 onChange={(e) => setNewLimit(e.target.value)}
-                placeholder="เช่น 100000"
+                placeholder={t('fnx.credhold.new_limit_ph')}
               />
             </div>
             <div className="grid gap-2">
-              <Label>เหตุผล</Label>
+              <Label>{t('fnx.credhold.reason')}</Label>
               <Input
                 value={limitReason}
                 onChange={(e) => setLimitReason(e.target.value)}
-                placeholder="เช่น ทบทวนรอบปี / ขยายวงเงินตามผลงาน"
+                placeholder={t('fnx.credhold.limit_reason_ph')}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setLimitDialog(null)}>ยกเลิก</Button>
+            <Button variant="outline" onClick={() => setLimitDialog(null)}>{t('fin.cancel')}</Button>
             <Button
               disabled={changeLimit.isPending || newLimit === '' || Number(newLimit) < 0}
               onClick={() => limitDialog && changeLimit.mutate({ tenant_id: limitDialog.tenantId, new_limit: Number(newLimit), reason: limitReason || undefined })}
             >
-              บันทึก
+              {t('fin.save')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -325,30 +327,30 @@ export default function CreditHoldPage() {
       >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>ประวัติเครดิต</DialogTitle>
+            <DialogTitle>{t('fnx.credhold.history_title')}</DialogTitle>
           </DialogHeader>
           <StateView q={events}>
             <DataTable
               rows={events.data?.events ?? []}
               rowKey={(_, i) => String(i)}
-              emptyState={{ icon: ShieldOff, title: 'ยังไม่มีประวัติ', description: 'ยังไม่มีการระงับ / ปลดระงับ / เปลี่ยนวงเงิน' }}
+              emptyState={{ icon: ShieldOff, title: t('fnx.credhold.history_empty_title'), description: t('fnx.credhold.history_empty_desc') }}
               columns={[
                 {
-                  key: 'event_type', label: 'ประเภท',
+                  key: 'event_type', label: t('fnx.credhold.col_event_type'),
                   render: (r) => (
                     <Badge variant={r.event_type === 'hold' ? 'destructive' : r.event_type === 'release' ? 'success' : 'default'}>
-                      {r.event_type === 'hold' ? 'ระงับ' : r.event_type === 'release' ? 'ปลดระงับ' : 'เปลี่ยนวงเงิน'}
+                      {r.event_type === 'hold' ? t('fnx.credhold.evt_hold') : r.event_type === 'release' ? t('fnx.credhold.evt_release') : t('fnx.credhold.evt_limit')}
                     </Badge>
                   ),
                 },
-                { key: 'reason', label: 'เหตุผล', render: (r) => r.reason ?? '—' },
-                { key: 'actioned_by', label: 'ผู้ดำเนินการ' },
-                { key: 'created_at', label: 'เวลา', render: (r) => thaiDate(r.created_at) },
+                { key: 'reason', label: t('fnx.credhold.reason'), render: (r) => r.reason ?? '—' },
+                { key: 'actioned_by', label: t('fnx.credhold.col_actioned_by') },
+                { key: 'created_at', label: t('fnx.credhold.col_time'), render: (r) => thaiDate(r.created_at) },
               ]}
             />
           </StateView>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEventsTenantId(null)}>ปิด</Button>
+            <Button variant="outline" onClick={() => setEventsTenantId(null)}>{t('fnx.credhold.close')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

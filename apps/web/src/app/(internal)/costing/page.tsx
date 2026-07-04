@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Calculator, Coins, ShieldCheck, Save, Boxes, SlidersHorizontal } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -21,16 +22,17 @@ const methodVariant = (m: string) =>
   m === 'FIFO' ? 'info' : m === 'AVG' ? 'secondary' : m === 'STD' ? 'warning' : 'muted';
 
 export default function CostingPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="ต้นทุนสินค้า (Inventory Costing)"
-        description="วิธีคิดต้นทุน FIFO / AVG / STD แบบ opt-in ต่อรายการ และมูลค่าสต็อกที่กระทบกับบัญชี 1200"
+        title={t('mx.costing_title')}
+        description={t('mx.costing_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'valuation', label: 'มูลค่าสต็อก (Valuation)', content: <ValuationTab /> },
-          { key: 'config', label: 'ตั้งค่าวิธีคิดต้นทุน', content: <ConfigTab /> },
+          { key: 'valuation', label: t('mx.costing_tab_valuation'), content: <ValuationTab /> },
+          { key: 'config', label: t('mx.costing_tab_config'), content: <ConfigTab /> },
         ]}
       />
     </div>
@@ -39,6 +41,7 @@ export default function CostingPage() {
 
 // ───────────────────────── Valuation ─────────────────────────
 function ValuationTab() {
+  const { t } = useLang();
   const q = useQuery<any>({ queryKey: ['costing-valuation'], queryFn: () => api('/api/costing/valuation') });
   const items: any[] = q.data?.items ?? [];
 
@@ -47,12 +50,12 @@ function ValuationTab() {
       {q.data && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="มูลค่าสต็อกรวม" value={baht(q.data.total_value)} icon={Coins} tone="primary" />
-            <StatCard label="ยอดบัญชี 1200 (GL)" value={baht(q.data.gl_1200)} icon={Calculator} tone="info" />
-            <StatCard label="จำนวนรายการ" value={num(items.length)} icon={Boxes} tone="default" />
+            <StatCard label={t('mx.costing_total_value')} value={baht(q.data.total_value)} icon={Coins} tone="primary" />
+            <StatCard label={t('mx.costing_gl_1200')} value={baht(q.data.gl_1200)} icon={Calculator} tone="info" />
+            <StatCard label={t('mx.costing_item_count')} value={num(items.length)} icon={Boxes} tone="default" />
             <StatCard
-              label="กระทบยอดกับ GL"
-              value={<Badge variant={q.data.ties ? 'success' : 'destructive'}>{q.data.ties ? 'ตรงกัน' : 'ไม่ตรง'}</Badge>}
+              label={t('mx.costing_ties_label')}
+              value={<Badge variant={q.data.ties ? 'success' : 'destructive'}>{q.data.ties ? t('mx.costing_ties_yes') : t('mx.costing_ties_no')}</Badge>}
               icon={ShieldCheck}
               tone={q.data.ties ? 'success' : 'danger'}
             />
@@ -60,16 +63,16 @@ function ValuationTab() {
           <DataTable
             rows={items}
             columns={[
-              { key: 'item_id', label: 'รหัสสินค้า' },
-              { key: 'method', label: 'วิธีคิดต้นทุน', render: (r: any) => <Badge variant={methodVariant(r.method)}>{r.method}</Badge> },
-              { key: 'qty', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
-              { key: 'unit_cost', label: 'ต้นทุน/หน่วย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.unit_cost)}</span> },
-              { key: 'value', label: 'มูลค่า', align: 'right', render: (r: any) => <span className="tabular">{baht(r.value)}</span> },
+              { key: 'item_id', label: t('mx.costing_col_item') },
+              { key: 'method', label: t('mx.costing_col_method'), render: (r: any) => <Badge variant={methodVariant(r.method)}>{r.method}</Badge> },
+              { key: 'qty', label: t('mx.costing_col_qty'), align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
+              { key: 'unit_cost', label: t('mx.costing_col_unit_cost'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.unit_cost)}</span> },
+              { key: 'value', label: t('mx.costing_col_value'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.value)}</span> },
             ]}
             emptyState={{
               icon: Boxes,
-              title: 'ยังไม่มีมูลค่าสต็อกให้แสดง',
-              description: 'เมื่อมีสินค้าคงเหลือและตั้งค่าวิธีคิดต้นทุนแล้ว มูลค่าสต็อกจะปรากฏที่นี่',
+              title: t('mx.costing_empty_val_title'),
+              description: t('mx.costing_empty_val_desc'),
             }}
           />
         </div>
@@ -80,6 +83,7 @@ function ValuationTab() {
 
 // ───────────────────────── Config ─────────────────────────
 function ConfigTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['costing-config'], queryFn: () => api('/api/costing/config') });
 
@@ -98,7 +102,7 @@ function ConfigTab() {
         }),
       }),
     onSuccess: (r) => {
-      notifySuccess(`บันทึก ${r.item_id ?? 'ค่าเริ่มต้น'} · ${r.method}`);
+      notifySuccess(t('mx.costing_saved', { item: r.item_id ?? t('mx.costing_default'), method: r.method }));
       qc.invalidateQueries({ queryKey: ['costing-config'] });
       qc.invalidateQueries({ queryKey: ['costing-valuation'] });
     },
@@ -111,17 +115,17 @@ function ConfigTab() {
     <div className="space-y-5">
       <Card className="max-w-2xl gap-4">
         <CardHeader>
-          <CardTitle className="text-base">ตั้งค่าวิธีคิดต้นทุน</CardTitle>
+          <CardTitle className="text-base">{t('mx.costing_tab_config')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">เว้นว่างรหัสสินค้าเพื่อกำหนดค่าเริ่มต้นของทั้งกิจการ (tenant default)</p>
+          <p className="text-sm text-muted-foreground">{t('mx.costing_config_hint')}</p>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="cfg-item">รหัสสินค้า</Label>
-              <Input id="cfg-item" value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder="(ค่าเริ่มต้น)" />
+              <Label htmlFor="cfg-item">{t('mx.costing_col_item')}</Label>
+              <Input id="cfg-item" value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder={t('mx.costing_default_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="cfg-method">วิธีคิดต้นทุน</Label>
+              <Label htmlFor="cfg-method">{t('mx.costing_col_method')}</Label>
               <select
                 id="cfg-method"
                 className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -129,12 +133,12 @@ function ConfigTab() {
                 onChange={(e) => setMethod(e.target.value as any)}
               >
                 <option value="FIFO">FIFO</option>
-                <option value="AVG">AVG (ถัวเฉลี่ย)</option>
-                <option value="STD">STD (มาตรฐาน)</option>
+                <option value="AVG">{t('mx.costing_avg_option')}</option>
+                <option value="STD">{t('mx.costing_std_option')}</option>
               </select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="cfg-std">ต้นทุนมาตรฐาน</Label>
+              <Label htmlFor="cfg-std">{t('mx.costing_std_cost')}</Label>
               <Input
                 id="cfg-std"
                 type="number"
@@ -147,7 +151,7 @@ function ConfigTab() {
             </div>
           </div>
           <Button disabled={save.isPending} onClick={() => save.mutate()}>
-            <Save className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึกการตั้งค่า'}
+            <Save className="size-4" /> {save.isPending ? t('mx.costing_saving') : t('mx.costing_save_config')}
           </Button>
         </CardContent>
       </Card>
@@ -157,16 +161,16 @@ function ConfigTab() {
           <DataTable
             rows={config}
             columns={[
-              { key: 'item_id', label: 'รหัสสินค้า', render: (r: any) => r.item_id ?? '(ค่าเริ่มต้น)' },
-              { key: 'method', label: 'วิธีคิดต้นทุน', render: (r: any) => <Badge variant={methodVariant(r.method)}>{r.method}</Badge> },
-              { key: 'standard_cost', label: 'ต้นทุนมาตรฐาน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.standard_cost)}</span> },
-              { key: 'avg_cost', label: 'ต้นทุนถัวเฉลี่ย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.avg_cost)}</span> },
-              { key: 'on_hand', label: 'คงเหลือ', align: 'right', render: (r: any) => <span className="tabular">{num(r.on_hand)}</span> },
+              { key: 'item_id', label: t('mx.costing_col_item'), render: (r: any) => r.item_id ?? t('mx.costing_default_ph') },
+              { key: 'method', label: t('mx.costing_col_method'), render: (r: any) => <Badge variant={methodVariant(r.method)}>{r.method}</Badge> },
+              { key: 'standard_cost', label: t('mx.costing_std_cost'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.standard_cost)}</span> },
+              { key: 'avg_cost', label: t('mx.costing_avg_cost'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.avg_cost)}</span> },
+              { key: 'on_hand', label: t('mx.costing_on_hand'), align: 'right', render: (r: any) => <span className="tabular">{num(r.on_hand)}</span> },
             ]}
             emptyState={{
               icon: SlidersHorizontal,
-              title: 'ยังไม่มีการตั้งค่าวิธีคิดต้นทุน',
-              description: 'ใช้ฟอร์มด้านบนเพื่อกำหนดวิธีคิดต้นทุน (FIFO / AVG / STD) ให้ทั้งกิจการหรือรายสินค้า',
+              title: t('mx.costing_empty_cfg_title'),
+              description: t('mx.costing_empty_cfg_desc'),
             }}
           />
         )}

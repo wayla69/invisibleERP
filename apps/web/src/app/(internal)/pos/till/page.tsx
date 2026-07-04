@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useLang } from '@/lib/i18n';
 
 // Till management screen (SoD: pos_till only — segregated from pos_sell cashier duty).
 // Covers: open/close sessions, cash movements (paid-in/out/drop), variance approval.
@@ -29,6 +30,7 @@ interface XzReport {
 interface XzListResp { reports: XzReport[]; count: number }
 
 export default function PosTillPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [openFloat, setOpenFloat] = useState('');
   const [openDialogOpen, setOpenDialogOpen] = useState(false);
@@ -45,26 +47,26 @@ export default function PosTillPage() {
     mutationFn: (openingFloat: number) =>
       api('/api/payments/till/open', { method: 'POST', body: JSON.stringify({ opening_float: openingFloat }) }),
     onSuccess: (r: any) => {
-      notifySuccess(`เปิดลิ้นชักเงินสด (${r?.session_no}) สำเร็จ`);
+      notifySuccess(t('px.till_open_success', { session_no: r?.session_no }));
       setOpenDialogOpen(false);
       setOpenFloat('');
       qc.invalidateQueries({ queryKey: ['xz-reports'] });
     },
-    onError: (e: any) => notifyError(e?.message ?? 'เปิดลิ้นชักไม่สำเร็จ'),
+    onError: (e: any) => notifyError(e?.message ?? t('px.till_open_failed')),
   });
 
   const approveVariance = useMutation({
     mutationFn: (sessionNo: string) =>
       api(`/api/payments/till/variance/${encodeURIComponent(sessionNo)}/approve`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess('อนุมัติผลต่างสำเร็จ'); setVarianceId(null); qc.invalidateQueries({ queryKey: ['xz-reports'] }); },
-    onError: (e: any) => notifyError(e?.message ?? 'อนุมัติไม่สำเร็จ'),
+    onSuccess: () => { notifySuccess(t('px.till_variance_approve_success')); setVarianceId(null); qc.invalidateQueries({ queryKey: ['xz-reports'] }); },
+    onError: (e: any) => notifyError(e?.message ?? t('px.till_approve_failed')),
   });
 
   const rejectVariance = useMutation({
     mutationFn: ({ sessionNo, reason }: { sessionNo: string; reason: string }) =>
       api(`/api/payments/till/variance/${encodeURIComponent(sessionNo)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
-    onSuccess: () => { notifySuccess('ปฏิเสธผลต่างสำเร็จ'); setVarianceId(null); setRejectReason(''); qc.invalidateQueries({ queryKey: ['xz-reports'] }); },
-    onError: (e: any) => notifyError(e?.message ?? 'ปฏิเสธไม่สำเร็จ'),
+    onSuccess: () => { notifySuccess(t('px.till_variance_reject_success')); setVarianceId(null); setRejectReason(''); qc.invalidateQueries({ queryKey: ['xz-reports'] }); },
+    onError: (e: any) => notifyError(e?.message ?? t('px.till_reject_failed')),
   });
 
   const openSessions = d?.reports.filter((r) => r.status === 'Open').length ?? 0;
@@ -73,37 +75,37 @@ export default function PosTillPage() {
 
   const statusBadge = (r: XzReport) =>
     r.status === 'Variance'
-      ? <Badge variant="destructive" className="gap-1"><AlertTriangle className="size-3" />ผลต่าง</Badge>
+      ? <Badge variant="destructive" className="gap-1"><AlertTriangle className="size-3" />{t('px.till_variance_badge')}</Badge>
       : r.variance !== 0 && r.status === 'Closed'
-        ? <Badge variant="outline" className="text-orange-700 border-orange-400">ปิด (มีผลต่าง)</Badge>
+        ? <Badge variant="outline" className="text-orange-700 border-orange-400">{t('px.till_closed_with_variance')}</Badge>
         : r.status === 'Open'
-          ? <Badge variant="secondary" className="bg-green-100 text-green-800">เปิดอยู่</Badge>
-          : <Badge variant="outline">ปิดแล้ว</Badge>;
+          ? <Badge variant="secondary" className="bg-green-100 text-green-800">{t('px.till_open_badge')}</Badge>
+          : <Badge variant="outline">{t('px.till_closed_badge')}</Badge>;
 
   const columns: Column<XzReport>[] = [
     { key: 'id', label: '#', render: (r) => `S-${r.till_session_id}` },
-    { key: 'generated_at', label: 'เวลาเปิด', render: (r) => new Date(r.generated_at).toLocaleString('th-TH') },
-    { key: 'gross_sales', label: 'ยอดขาย', align: 'right', render: (r) => baht(r.gross_sales) },
-    { key: 'total_cash', label: 'เงินสด', align: 'right', render: (r) => baht(r.total_cash) },
-    { key: 'cash_counted', label: 'นับจริง', align: 'right', render: (r) => baht(r.cash_counted) },
+    { key: 'generated_at', label: t('px.till_col_open_time'), render: (r) => new Date(r.generated_at).toLocaleString('th-TH') },
+    { key: 'gross_sales', label: t('px.till_col_sales'), align: 'right', render: (r) => baht(r.gross_sales) },
+    { key: 'total_cash', label: t('px.till_col_cash'), align: 'right', render: (r) => baht(r.total_cash) },
+    { key: 'cash_counted', label: t('px.till_col_counted'), align: 'right', render: (r) => baht(r.cash_counted) },
     {
-      key: 'variance', label: 'ผลต่าง', align: 'right',
+      key: 'variance', label: t('px.till_col_variance'), align: 'right',
       render: (r) => <span className={r.variance !== 0 ? 'font-medium text-destructive' : 'text-muted-foreground'}>{baht(r.variance)}</span>,
     },
-    { key: 'generated_by', label: 'เปิดโดย' },
-    { key: 'status', label: 'สถานะ', render: (r) => statusBadge(r) },
+    { key: 'generated_by', label: t('px.till_col_opened_by') },
+    { key: 'status', label: t('fin.col_status'), render: (r) => statusBadge(r) },
     {
-      key: 'id', label: 'การดำเนินการ',
+      key: 'id', label: t('px.till_col_actions'),
       render: (r) => r.status === 'Variance' ? (
         <div className="flex gap-1.5">
           <Button size="sm" variant="secondary" className="h-7 gap-1 text-green-700 hover:bg-green-50"
             disabled={approveVariance.isPending}
             onClick={() => setVarianceId({ sessionNo: String(r.till_session_id), variance: r.variance })}>
-            <CheckCircle2 className="size-3.5" />อนุมัติ
+            <CheckCircle2 className="size-3.5" />{t('fin.approve')}
           </Button>
           <Button size="sm" variant="ghost" className="h-7 gap-1 text-destructive hover:bg-destructive/10"
             onClick={() => { setVarianceId({ sessionNo: String(r.till_session_id), variance: r.variance }); setRejectReason(''); }}>
-            <XCircle className="size-3.5" />ปฏิเสธ
+            <XCircle className="size-3.5" />{t('px.till_reject')}
           </Button>
         </div>
       ) : null,
@@ -112,19 +114,19 @@ export default function PosTillPage() {
 
   return (
     <ModulePage
-      title="จัดการลิ้นชัก (Till Management)"
-      description="เปิด-ปิดลิ้นชักเงินสด, อนุมัติผลต่างตอนปิดกะ — ต้องมีสิทธิ์ pos_till เท่านั้น (แยกจากแคชเชียร์ pos_sell)"
+      title={t('px.till_title')}
+      description={t('px.till_desc')}
       query={q}
       actions={
         <Button size="sm" onClick={() => setOpenDialogOpen(true)}>
-          <CircleDollarSign className="mr-1.5 size-4" />เปิดลิ้นชักใหม่
+          <CircleDollarSign className="mr-1.5 size-4" />{t('px.till_new_till')}
         </Button>
       }
       stats={
         <>
-          <StatCard label="ลิ้นชักที่เปิดอยู่" value={num(openSessions)} icon={CircleDollarSign} tone={openSessions > 0 ? 'primary' : 'default'} />
-          <StatCard label="รออนุมัติผลต่าง" value={num(varianceSessions)} icon={AlertTriangle} tone={varianceSessions > 0 ? 'warning' : 'default'} />
-          <StatCard label="ยอดขายรวม" value={baht(totalSales)} icon={Banknote} hint="เซสชันปัจจุบัน" />
+          <StatCard label={t('px.till_stat_open')} value={num(openSessions)} icon={CircleDollarSign} tone={openSessions > 0 ? 'primary' : 'default'} />
+          <StatCard label={t('px.till_stat_pending_variance')} value={num(varianceSessions)} icon={AlertTriangle} tone={varianceSessions > 0 ? 'warning' : 'default'} />
+          <StatCard label={t('px.till_stat_total_sales')} value={baht(totalSales)} icon={Banknote} hint={t('px.till_hint_current_session')} />
         </>
       }
       statsClassName="xl:grid-cols-3"
@@ -132,29 +134,29 @@ export default function PosTillPage() {
       <DataTable
         rows={d?.reports ?? []}
         rowKey={(r) => r.id}
-        emptyState={{ icon: CircleDollarSign, title: 'ยังไม่มีเซสชันลิ้นชัก', description: 'คลิก "เปิดลิ้นชักใหม่" เพื่อเริ่มต้นกะ' }}
+        emptyState={{ icon: CircleDollarSign, title: t('px.till_empty_title'), description: t('px.till_empty_desc') }}
         columns={columns}
       />
 
       {/* Open till dialog */}
       <Dialog open={openDialogOpen} onOpenChange={setOpenDialogOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>เปิดลิ้นชักเงินสด</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('px.till_dialog_open_title')}</DialogTitle></DialogHeader>
           <Card className="border-0 shadow-none">
-            <CardHeader className="p-0 pb-3"><CardTitle className="text-sm text-muted-foreground">เงินทอนตั้งต้น (Opening float)</CardTitle></CardHeader>
+            <CardHeader className="p-0 pb-3"><CardTitle className="text-sm text-muted-foreground">{t('px.till_opening_float_title')}</CardTitle></CardHeader>
             <CardContent className="p-0">
               <div className="space-y-2">
-                <Label htmlFor="float">ยอดเงินทอน (฿)</Label>
+                <Label htmlFor="float">{t('px.till_float_label')}</Label>
                 <Input id="float" type="number" min="0" step="0.01" placeholder="0.00"
                   value={openFloat} onChange={(e) => setOpenFloat(e.target.value)} />
               </div>
             </CardContent>
           </Card>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpenDialogOpen(false)}>ยกเลิก</Button>
+            <Button variant="outline" onClick={() => setOpenDialogOpen(false)}>{t('fin.cancel')}</Button>
             <Button disabled={openTill.isPending}
               onClick={() => openTill.mutate(parseFloat(openFloat || '0'))}>
-              เปิดลิ้นชัก
+              {t('px.till_open_till_btn')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -167,25 +169,25 @@ export default function PosTillPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <AlertTriangle className="size-5 text-destructive" />
-                ผลต่างเงินสด: {baht(varianceId.variance)}
+                {t('px.till_cash_variance', { amount: baht(varianceId.variance) })}
               </DialogTitle>
             </DialogHeader>
-            <p className="text-sm text-muted-foreground">อนุมัติหรือปฏิเสธผลต่างเงินสดตอนปิดกะ (ต้องเป็นคนละคนกับผู้ปิดกะ)</p>
+            <p className="text-sm text-muted-foreground">{t('px.till_variance_dialog_desc')}</p>
             <div className="space-y-2">
-              <Label htmlFor="var-reason">เหตุผล (กรณีปฏิเสธ)</Label>
+              <Label htmlFor="var-reason">{t('px.till_reject_reason_label')}</Label>
               <textarea id="var-reason" className="min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
                 value={rejectReason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRejectReason(e.target.value)}
-                placeholder="ระบุเหตุผล…" rows={2} />
+                placeholder={t('px.till_reason_placeholder')} rows={2} />
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setVarianceId(null); setRejectReason(''); }}>ยกเลิก</Button>
+              <Button variant="outline" onClick={() => { setVarianceId(null); setRejectReason(''); }}>{t('fin.cancel')}</Button>
               <Button variant="destructive" disabled={rejectVariance.isPending}
                 onClick={() => rejectVariance.mutate({ sessionNo: varianceId.sessionNo, reason: rejectReason })}>
-                ปฏิเสธ
+                {t('px.till_reject')}
               </Button>
               <Button disabled={approveVariance.isPending}
                 onClick={() => approveVariance.mutate(varianceId.sessionNo)}>
-                <CheckCircle2 className="mr-1.5 size-4" />อนุมัติผลต่าง
+                <CheckCircle2 className="mr-1.5 size-4" />{t('px.till_approve_variance_btn')}
               </Button>
             </DialogFooter>
           </DialogContent>

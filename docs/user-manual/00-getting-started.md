@@ -131,9 +131,17 @@ main content area.
 - The **side menu** lists only the modules **you have permission for**. If you
   cannot see a menu item, you do not have access to it — this is normal.
 - The **command palette** (press the search/keyboard shortcut, or click the
-  search box) lets you jump straight to any screen by name.
+  search box) lets you jump straight to any screen by name — and now also **finds
+  records**: type a customer, vendor or product name/code and pick the matching
+  **ข้อมูล (Records)** result to open it directly. You only ever see record types
+  you already have permission for.
 - Each screen address in this manual (e.g. `/orders`) is what appears at the end
   of your browser address bar.
+- A **floating AI helper** (the round **🤖 button** in the bottom-right corner)
+  is available on every screen: click it to ask about sales, stock, finance or
+  purchasing and get answers from live data, without leaving the page. Use the
+  **⤢ expand** icon to open the full assistant at `/assistant`. The button only
+  appears if your account may use the assistant.
 
 Common starting points by role:
 
@@ -169,8 +177,8 @@ appear in **both** workspaces.
 - **Each workspace has its own home dashboard:** **ERP → `/dashboard`** (business/finance overview) and
   **POS → `/pos-home`** (store overview — today's sales, bill count, average ticket, top items, sales by
   payment method, open tills, and recent bills). Switching workspace takes you to its home.
-- **Search is global:** the command palette searches every screen you can access, regardless of the
-  active workspace.
+- **Search is global:** the command palette searches every screen you can access (regardless of the
+  active workspace) **and** your customer/vendor/product records — type a name or code and open the match.
 - **Menus are grouped by area:** within each workspace the side menu is organised into focused groups —
   e.g. POS shows *ขายหน้าร้าน*, *ร้าน & การจัดส่ง*, *อุปกรณ์ & การชำระเงิน*, *วิเคราะห์ร้านอาหาร*; ERP shows
   *ลูกค้า & CRM*, *ลอยัลตี้*, *สินค้าคงคลัง*, *จัดซื้อ*, *การผลิต*, *การเงิน*, *ภาษี*, *บุคลากร*, *วางแผน & BI*. Shared
@@ -181,6 +189,12 @@ appear in **both** workspaces.
   PEAK-style **cycle** sub-sections — *รายรับ–รายจ่าย*, *สมุดบัญชี & แยกประเภท*, *ธนาคาร & กระทบยอด*,
   *งบ & วิเคราะห์การเงิน*, *ระหว่างบริษัท & สกุลเงิน* (the last two start collapsed). Click a sub-section heading
   to fold/unfold it; your choice is remembered.
+- **"เริ่มต้นใช้งาน" (Getting started) on the dashboard:** while your company is still being set up, the ERP
+  home (*แดชบอร์ด*) shows a **first-run panel** at the top with your onboarding checklist and a completion
+  bar. Each unfinished step (*set up branding*, *pick a theme*, *choose your language*, *add your first
+  product*, *record your first sale*, *invite a teammate*) **deep-links to the screen where it gets done**,
+  and you can tick it off in place. The panel **disappears automatically** once every step is complete (or
+  for users without onboarding access) — the full checklist and industry packs stay at `/onboarding`.
 - **"สิ่งที่ต้องทำวันนี้" on the dashboard:** the ERP home (*แดชบอร์ด*) leads with an **action launcher** — live,
   clickable cards for *pending approvals*, *AP payment requests awaiting approval*, *overdue receivables*,
   and *low stock* — each opening the exact screen (and finance tab) where the work is done. Cards you have

@@ -46,6 +46,8 @@ async function seed(db: any) {
   const today = ymd(); // Bangkok-tz date to match the dashboard's ymd() (UTC slice flaked in the 00:00–07:00 BKK window)
   const [sale] = await db.insert(s.custPosSales).values({ saleNo: 'SALE-T1-1', saleDate: today, tenantId: t1.id, total: '107', subtotal: '100', taxAmount: '7', status: 'Completed', paymentMethod: 'Cash', createdBy: 'admin' }).returning({ id: s.custPosSales.id });
   await db.insert(s.custPosItems).values({ saleId: Number(sale.id), itemId: 'A', itemDescription: 'Apple', qty: '10', amount: '100' });
+  // a loyalty member (for the omni-search member type — its deep-link keys on the numeric id)
+  await db.insert(s.posMembers).values({ tenantId: t1.id, memberCode: 'M001', name: 'Alice Member', phone: '0812345678' });
 }
 
 async function main() {
@@ -95,6 +97,24 @@ async function main() {
   ok('notifications counts.low_stock = 2', (await inj('GET', '/api/notifications', token)).json.counts?.low_stock === 2);
   ok('analytics/replenishment 200', (await inj('GET', '/api/analytics/replenishment', token)).status === 200);
 
+  // global omni-search (⌘K records): the item master is reachable and deep-links to its detail page
+  const searchApp = await inj('GET', '/api/search?q=App', token);
+  ok('GET /api/search?q=App → item A deep-links /inventory/A',
+    searchApp.status === 200 && (searchApp.json.results ?? []).some((r: any) => r.type === 'item' && r.id === 'A' && r.href === '/inventory/A'),
+    `count=${searchApp.json.results?.length}`);
+  ok('GET /api/search min-length guard (1 char → empty)', (await inj('GET', '/api/search?q=A', token)).json.results?.length === 0);
+  ok('GET /api/search no-match → 200 empty', (await inj('GET', '/api/search?q=zzzznope', token)).json.results?.length === 0);
+  // member type: deep-links to the real detail page keyed on the NUMERIC id (/loyalty/members/{id})
+  const searchMem = await inj('GET', '/api/search?q=Alice', token);
+  ok('GET /api/search?q=Alice → member deep-links /loyalty/members/{id}',
+    (searchMem.json.results ?? []).some((r: any) => r.type === 'member' && /^\d+$/.test(r.id) && r.href === `/loyalty/members/${r.id}`),
+    `count=${searchMem.json.results?.length}`);
+  // document types: the seeded POS sale is found and deep-links to the filtered list
+  const searchSale = await inj('GET', '/api/search?q=SALE-T1', token);
+  ok('GET /api/search?q=SALE-T1 → sale deep-links /pos?q=',
+    (searchSale.json.results ?? []).some((r: any) => r.type === 'sale' && r.id === 'SALE-T1-1' && r.href === '/pos?q=SALE-T1-1'),
+    `count=${searchSale.json.results?.length}`);
+
   // write over HTTP (transaction + doc number + loyalty)
   const create = await inj('POST', '/api/pos/orders', token, { customer_name: 'T1', items: [{ item_id: 'A', order_qty: 2, unit_price: 10 }] });
   ok('POST /api/pos/orders 201 + SO-', (create.status === 200 || create.status === 201) && /^SO-\d{8}-\d{4}$/.test(create.json.order_no), `status=${create.status} no=${create.json.order_no}`);
@@ -104,6 +124,12 @@ async function main() {
   // procurement chain over HTTP
   const po = await inj('POST', '/api/procurement/pos', token, { vendor_name: 'V1', items: [{ item_id: 'A', order_qty: 5, unit_price: 4 }] });
   ok('POST /procurement/pos → PO- total 20', /^PO-\d{8}-\d{3}$/.test(po.json.po_no) && po.json.total_amount === 20, `${po.json.po_no} ${po.json.total_amount}`);
+  // omni-search now finds the just-created PO (by po_no and by vendor name) and deep-links to the filtered list
+  const searchPo = await inj('GET', `/api/search?q=${po.json.po_no}`, token);
+  ok('GET /api/search?q=<po_no> → purchase_order deep-links /inventory/purchase-orders?q=',
+    (searchPo.json.results ?? []).some((r: any) => r.type === 'purchase_order' && r.id === po.json.po_no && r.href === `/inventory/purchase-orders?q=${encodeURIComponent(po.json.po_no)}`),
+    `count=${searchPo.json.results?.length}`);
+  ok('GET /api/search?q=V1 → finds PO by vendor name', (await inj('GET', '/api/search?q=V1', token)).json.results?.some((r: any) => r.type === 'purchase_order'));
 
   // chat without key → 503 (route + auth ok)
   ok('POST /api/chat → 503 (no AI key)', (await inj('POST', '/api/chat', token, { message: 'hi' })).status === 503);

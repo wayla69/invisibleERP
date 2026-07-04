@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Msg } from '@/components/tabs';
+import { useLang } from '@/lib/i18n';
 
 type CObject = { object_key: string; label: string; label_en?: string | null; icon?: string | null };
 type FieldDef = { field_key: string; label: string; data_type: string; options?: string[] | null; required?: boolean };
@@ -22,8 +23,9 @@ const DATA_TYPES = ['text', 'number', 'date', 'boolean', 'select'] as const;
 
 // One input rendered per field type.
 function FieldInput({ f, value, onChange }: { f: FieldDef; value: any; onChange: (v: any) => void }) {
+  const { t } = useLang();
   const cls = 'h-9 rounded-md border bg-transparent px-3 text-sm';
-  if (f.data_type === 'boolean') return <select className={cls} value={value ? '1' : '0'} onChange={(e) => onChange(e.target.value === '1')}><option value="0">ไม่</option><option value="1">ใช่</option></select>;
+  if (f.data_type === 'boolean') return <select className={cls} value={value ? '1' : '0'} onChange={(e) => onChange(e.target.value === '1')}><option value="0">{t('mx.co_no')}</option><option value="1">{t('mx.co_yes')}</option></select>;
   if (f.data_type === 'select') return <select className={cls} value={value ?? ''} onChange={(e) => onChange(e.target.value)}><option value="">—</option>{(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}</select>;
   if (f.data_type === 'number') return <Input type="number" value={value ?? ''} onChange={(e) => onChange(e.target.value)} />;
   if (f.data_type === 'date') return <Input type="date" value={value ?? ''} onChange={(e) => onChange(e.target.value)} />;
@@ -31,6 +33,7 @@ function FieldInput({ f, value, onChange }: { f: FieldDef; value: any; onChange:
 }
 
 export default function CustomObjectsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [selKey, setSelKey] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
@@ -53,42 +56,42 @@ export default function CustomObjectsPage() {
 
   const createObj = useMutation({
     mutationFn: () => api('/api/custom-objects', { method: 'POST', body: JSON.stringify({ label: obj.label, label_en: obj.label_en || undefined, icon: obj.icon || undefined }) }),
-    onSuccess: (r: any) => { note('✅ สร้างออบเจ็กต์แล้ว'); setObj({ label: '', label_en: '', icon: '' }); qc.invalidateQueries({ queryKey: ['cobjects'] }); setSelKey(r.object_key); },
+    onSuccess: (r: any) => { note('✅ ' + t('mx.co_obj_created')); setObj({ label: '', label_en: '', icon: '' }); qc.invalidateQueries({ queryKey: ['cobjects'] }); setSelKey(r.object_key); },
     onError: (e: any) => note(`❌ ${e.message}`),
   });
   const delObj = useMutation({
     mutationFn: (key: string) => api(`/api/custom-objects/${key}`, { method: 'DELETE' }),
-    onSuccess: () => { note('🗑️ ลบออบเจ็กต์แล้ว'); setSelKey(null); qc.invalidateQueries({ queryKey: ['cobjects'] }); },
+    onSuccess: () => { note('🗑️ ' + t('mx.co_obj_deleted')); setSelKey(null); qc.invalidateQueries({ queryKey: ['cobjects'] }); },
     onError: (e: any) => note(`❌ ${e.message}`),
   });
   const addField = useMutation({
     mutationFn: () => api('/api/custom-fields/defs', { method: 'POST', body: JSON.stringify({ entity: selKey, label: fld.label, data_type: fld.data_type, required: fld.required, options: fld.data_type === 'select' ? fld.options.split(',').map((s) => s.trim()).filter(Boolean) : undefined }) }),
-    onSuccess: () => { note('✅ เพิ่มฟิลด์แล้ว'); setFld({ label: '', data_type: 'text', options: '', required: false }); qc.invalidateQueries({ queryKey: ['cobject', selKey] }); qc.invalidateQueries({ queryKey: ['crecords', selKey] }); qc.invalidateQueries({ queryKey: ['olayout', selKey] }); },
+    onSuccess: () => { note('✅ ' + t('mx.co_field_added')); setFld({ label: '', data_type: 'text', options: '', required: false }); qc.invalidateQueries({ queryKey: ['cobject', selKey] }); qc.invalidateQueries({ queryKey: ['crecords', selKey] }); qc.invalidateQueries({ queryKey: ['olayout', selKey] }); },
     onError: (e: any) => note(`❌ ${e.message}`),
   });
   const saveRec = useMutation({
     mutationFn: () => editId
       ? api(`/api/custom-objects/${selKey}/records/${editId}`, { method: 'PUT', body: JSON.stringify({ values: rec }) })
       : api(`/api/custom-objects/${selKey}/records`, { method: 'POST', body: JSON.stringify({ values: rec }) }),
-    onSuccess: () => { note('✅ บันทึกเรคคอร์ดแล้ว'); resetRec(); qc.invalidateQueries({ queryKey: ['crecords', selKey] }); },
+    onSuccess: () => { note('✅ ' + t('mx.co_record_saved')); resetRec(); qc.invalidateQueries({ queryKey: ['crecords', selKey] }); },
     onError: (e: any) => note(`❌ ${e.message}`),
   });
   const delRec = useMutation({
     mutationFn: (id: string) => api(`/api/custom-objects/${selKey}/records/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { note('🗑️ ลบเรคคอร์ดแล้ว'); qc.invalidateQueries({ queryKey: ['crecords', selKey] }); },
+    onSuccess: () => { note('🗑️ ' + t('mx.co_record_deleted')); qc.invalidateQueries({ queryKey: ['crecords', selKey] }); },
     onError: (e: any) => note(`❌ ${e.message}`),
   });
 
   return (
     <div>
-      <PageHeader title="ออบเจ็กต์กำหนดเอง (Custom objects)" description="สร้างประเภทข้อมูลของคุณเองโดยไม่ต้องเขียนโค้ด — กำหนดฟิลด์ บันทึกเรคคอร์ด (RLS แยกตามกิจการ ไม่ลงบัญชีแยกประเภท)" />
+      <PageHeader title={t('mx.co_title')} description={t('mx.co_desc')} />
 
       {msg && <div className="mb-3"><Msg ok={msg.startsWith('✅') || msg.startsWith('🗑️')}>{msg}</Msg></div>}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(260px,300px)_1fr]">
         {/* objects */}
         <Card className="h-fit">
-          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Boxes className="size-4 text-primary" /> ออบเจ็กต์</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Boxes className="size-4 text-primary" /> {t('mx.co_objects')}</CardTitle></CardHeader>
           <CardContent className="grid gap-3">
             <StateView q={objects}>
               <div className="grid gap-1">
@@ -97,49 +100,49 @@ export default function CustomObjectsPage() {
                     {o.label} <span className="text-xs text-muted-foreground">/{o.object_key}</span>
                   </button>
                 ))}
-                {(objects.data?.objects ?? []).length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีออบเจ็กต์</p>}
+                {(objects.data?.objects ?? []).length === 0 && <p className="text-sm text-muted-foreground">{t('mx.co_no_objects')}</p>}
               </div>
             </StateView>
             <div className="grid gap-2 border-t pt-3">
-              <Label htmlFor="olabel">ออบเจ็กต์ใหม่</Label>
-              <Input id="olabel" value={obj.label} onChange={(e) => setObj({ ...obj, label: e.target.value })} placeholder="เช่น เครื่องมือ (Equipment)" />
-              <Input value={obj.label_en} onChange={(e) => setObj({ ...obj, label_en: e.target.value })} placeholder="ชื่ออังกฤษ (ไม่บังคับ)" />
-              <Button size="sm" disabled={!obj.label.trim() || createObj.isPending} onClick={() => { setMsg(''); createObj.mutate(); }}><Plus className="size-4" /> สร้าง</Button>
+              <Label htmlFor="olabel">{t('mx.co_new_object')}</Label>
+              <Input id="olabel" value={obj.label} onChange={(e) => setObj({ ...obj, label: e.target.value })} placeholder={t('mx.co_new_object_ph')} />
+              <Input value={obj.label_en} onChange={(e) => setObj({ ...obj, label_en: e.target.value })} placeholder={t('mx.co_label_en_ph')} />
+              <Button size="sm" disabled={!obj.label.trim() || createObj.isPending} onClick={() => { setMsg(''); createObj.mutate(); }}><Plus className="size-4" /> {t('mx.co_create')}</Button>
             </div>
           </CardContent>
         </Card>
 
         {/* selected object */}
         {!selKey ? (
-          <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">เลือกออบเจ็กต์ทางซ้าย หรือสร้างใหม่</CardContent></Card>
+          <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">{t('mx.co_select_hint')}</CardContent></Card>
         ) : (
           <div className="grid gap-6">
             <Card>
               <CardHeader className="flex-row items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base"><Database className="size-4 text-primary" /> ฟิลด์ของ “{detail.data?.object.label ?? selKey}”</CardTitle>
-                <Button size="sm" variant="ghost" disabled={delObj.isPending} onClick={() => delObj.mutate(selKey)}><Trash2 className="size-4 text-destructive" /> ลบออบเจ็กต์</Button>
+                <CardTitle className="flex items-center gap-2 text-base"><Database className="size-4 text-primary" /> {t('mx.co_fields_of', { name: detail.data?.object.label ?? selKey })}</CardTitle>
+                <Button size="sm" variant="ghost" disabled={delObj.isPending} onClick={() => delObj.mutate(selKey)}><Trash2 className="size-4 text-destructive" /> {t('mx.co_delete_object')}</Button>
               </CardHeader>
               <CardContent className="grid gap-3">
                 <div className="flex flex-wrap gap-2">
                   {fields.map((f) => <Badge key={f.field_key} variant="secondary">{f.label} <span className="ml-1 opacity-70">· {f.data_type}{f.required ? ' *' : ''}</span></Badge>)}
-                  {fields.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีฟิลด์ — เพิ่มด้านล่าง</p>}
+                  {fields.length === 0 && <p className="text-sm text-muted-foreground">{t('mx.co_no_fields')}</p>}
                 </div>
                 <div className="grid items-end gap-2 border-t pt-3 sm:grid-cols-[1fr_auto_1fr_auto_auto]">
-                  <div className="grid gap-1"><Label>ชื่อฟิลด์</Label><Input value={fld.label} onChange={(e) => setFld({ ...fld, label: e.target.value })} placeholder="เช่น หมายเลขเครื่อง" /></div>
-                  <div className="grid gap-1"><Label>ชนิด</Label><select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={fld.data_type} onChange={(e) => setFld({ ...fld, data_type: e.target.value })}>{DATA_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
-                  <div className="grid gap-1"><Label>ตัวเลือก (select, คั่นด้วย ,)</Label><Input value={fld.options} disabled={fld.data_type !== 'select'} onChange={(e) => setFld({ ...fld, options: e.target.value })} placeholder="active, repair, retired" /></div>
-                  <div className="grid gap-1"><Label>บังคับ</Label><select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={fld.required ? '1' : '0'} onChange={(e) => setFld({ ...fld, required: e.target.value === '1' })}><option value="0">ไม่</option><option value="1">ใช่</option></select></div>
-                  <Button size="sm" disabled={!fld.label.trim() || addField.isPending} onClick={() => { setMsg(''); addField.mutate(); }}><Plus className="size-4" /> เพิ่มฟิลด์</Button>
+                  <div className="grid gap-1"><Label>{t('mx.co_field_name')}</Label><Input value={fld.label} onChange={(e) => setFld({ ...fld, label: e.target.value })} placeholder={t('mx.co_field_name_ph')} /></div>
+                  <div className="grid gap-1"><Label>{t('mx.co_type')}</Label><select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={fld.data_type} onChange={(e) => setFld({ ...fld, data_type: e.target.value })}>{DATA_TYPES.map((dt) => <option key={dt} value={dt}>{dt}</option>)}</select></div>
+                  <div className="grid gap-1"><Label>{t('mx.co_options_label')}</Label><Input value={fld.options} disabled={fld.data_type !== 'select'} onChange={(e) => setFld({ ...fld, options: e.target.value })} placeholder="active, repair, retired" /></div>
+                  <div className="grid gap-1"><Label>{t('mx.co_required')}</Label><select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={fld.required ? '1' : '0'} onChange={(e) => setFld({ ...fld, required: e.target.value === '1' })}><option value="0">{t('mx.co_no')}</option><option value="1">{t('mx.co_yes')}</option></select></div>
+                  <Button size="sm" disabled={!fld.label.trim() || addField.isPending} onClick={() => { setMsg(''); addField.mutate(); }}><Plus className="size-4" /> {t('mx.co_add_field')}</Button>
                 </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader><CardTitle className="text-base">เรคคอร์ด</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-base">{t('mx.co_records')}</CardTitle></CardHeader>
               <CardContent className="grid gap-4">
                 <StateView q={records}>
                   {(records.data?.records ?? []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">ยังไม่มีเรคคอร์ด</p>
+                    <p className="text-sm text-muted-foreground">{t('mx.co_no_records')}</p>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
@@ -149,7 +152,7 @@ export default function CustomObjectsPage() {
                             <tr key={r.record_id} className="border-b">
                               {fields.map((f) => <td key={f.field_key} className="px-2 py-1">{String(r.values?.[f.field_key] ?? '')}</td>)}
                               <td className="px-2 py-1 text-right">
-                                <Button size="sm" variant="ghost" onClick={() => { setEditId(r.record_id); setRec({ ...r.values }); }}>แก้ไข</Button>
+                                <Button size="sm" variant="ghost" onClick={() => { setEditId(r.record_id); setRec({ ...r.values }); }}>{t('mx.co_edit')}</Button>
                                 <Button size="sm" variant="ghost" disabled={delRec.isPending} onClick={() => delRec.mutate(r.record_id)}><Trash2 className="size-4 text-destructive" /></Button>
                               </td>
                             </tr>
@@ -161,7 +164,7 @@ export default function CustomObjectsPage() {
 
                   {fields.length > 0 && (
                     <div className="grid gap-3 border-t pt-3">
-                      <p className="text-sm font-medium">{editId ? `แก้ไขเรคคอร์ด #${editId}` : 'เพิ่มเรคคอร์ดใหม่'}</p>
+                      <p className="text-sm font-medium">{editId ? t('mx.co_edit_record', { editId }) : t('mx.co_add_record')}</p>
                       {formSections.map((sec, i) => (
                         <div key={i} className="grid gap-2">
                           {sec.title && <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{sec.title}</p>}
@@ -176,8 +179,8 @@ export default function CustomObjectsPage() {
                         </div>
                       ))}
                       <div className="flex items-center gap-3">
-                        <Button size="sm" disabled={saveRec.isPending} onClick={() => { setMsg(''); saveRec.mutate(); }}>{saveRec.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} {editId ? 'อัปเดต' : 'เพิ่ม'}</Button>
-                        {editId && <Button size="sm" variant="outline" onClick={resetRec}>ยกเลิก</Button>}
+                        <Button size="sm" disabled={saveRec.isPending} onClick={() => { setMsg(''); saveRec.mutate(); }}>{saveRec.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} {editId ? t('mx.co_update') : t('mx.co_add')}</Button>
+                        {editId && <Button size="sm" variant="outline" onClick={resetRec}>{t('fin.cancel')}</Button>}
                       </div>
                     </div>
                   )}

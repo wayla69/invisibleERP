@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Download, SearchX, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -25,13 +26,14 @@ const ROLES = [
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function AdminUsersPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const list = useQuery<any>({ queryKey: ['admin-users'], queryFn: () => api('/api/admin/users') });
   const [f, setF] = useState({ username: '', password: '', role: 'Sales', customer_name: '' });
 
   const create = useMutation({
     mutationFn: () => api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username: f.username, password: f.password, role: f.role, customer_name: f.customer_name || undefined }) }),
-    onSuccess: () => { notifySuccess(`สร้างผู้ใช้ ${f.username}`); setF({ username: '', password: '', role: 'Sales', customer_name: '' }); qc.invalidateQueries({ queryKey: ['admin-users'] }); },
+    onSuccess: () => { notifySuccess(t('st.usr.user_created', { username: f.username })); setF({ username: '', password: '', role: 'Sales', customer_name: '' }); qc.invalidateQueries({ queryKey: ['admin-users'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const setRole = useMutation({
@@ -39,15 +41,15 @@ export default function AdminUsersPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
   });
   const reset = useMutation({
-    mutationFn: (u: string) => { const pw = prompt(`รหัสผ่านใหม่สำหรับ ${u} (≥6 ตัว)`); return pw ? api(`/api/admin/users/${u}/reset-password`, { method: 'POST', body: JSON.stringify({ password: pw }) }) : Promise.resolve(null); },
-    onSuccess: (r) => { if (r) notifySuccess('รีเซ็ตรหัสผ่านแล้ว'); },
+    mutationFn: (u: string) => { const pw = prompt(t('st.usr.reset_prompt', { u })); return pw ? api(`/api/admin/users/${u}/reset-password`, { method: 'POST', body: JSON.stringify({ password: pw }) }) : Promise.resolve(null); },
+    onSuccess: (r) => { if (r) notifySuccess(t('st.usr.password_reset')); },
     onError: (e: any) => notifyError(e.message),
   });
   // ITGC-AC-17: set a staff member's POS quick-login PIN (front-of-house roles only — the API rejects
   // privileged accounts). Cancelling the prompt is a no-op.
   const setPin = useMutation({
-    mutationFn: (u: string) => { const pin = prompt(`ตั้ง PIN หน้าร้านสำหรับ ${u} (ตัวเลข 4–6 หลัก)`); if (pin == null) return Promise.resolve(null); if (!/^\d{4,6}$/.test(pin)) { notifyError('PIN ต้องเป็นตัวเลข 4–6 หลัก'); return Promise.resolve(null); } return api(`/api/auth/users/${u}/pin`, { method: 'POST', body: JSON.stringify({ pin }) }); },
-    onSuccess: (r) => { if (r) notifySuccess('ตั้ง PIN แล้ว'); },
+    mutationFn: (u: string) => { const pin = prompt(t('st.usr.pin_prompt', { u })); if (pin == null) return Promise.resolve(null); if (!/^\d{4,6}$/.test(pin)) { notifyError(t('st.usr.pin_invalid')); return Promise.resolve(null); } return api(`/api/auth/users/${u}/pin`, { method: 'POST', body: JSON.stringify({ pin }) }); },
+    onSuccess: (r) => { if (r) notifySuccess(t('st.usr.pin_set')); },
     onError: (e: any) => notifyError(e.message),
   });
   const del = useMutation({
@@ -60,8 +62,8 @@ export default function AdminUsersPage() {
   const certs = useQuery<any>({ queryKey: ['uar-certs'], queryFn: () => api('/api/admin/users/access-review/certifications') });
   const lastCert = certs.data?.reviews?.[0];
   const certify = useMutation({
-    mutationFn: () => { const period = prompt('ช่วงที่ทบทวน (เช่น 2026-Q2)'); if (!period) return Promise.resolve(null); const notes = prompt('หมายเหตุ (optional)') ?? undefined; return api('/api/admin/users/access-review/certify', { method: 'POST', body: JSON.stringify({ period, notes }) }); },
-    onSuccess: (r: any) => { if (r) { notifySuccess(`รับรองการทบทวนสิทธิ์ ${r.period} (${r.user_count} ผู้ใช้)`); qc.invalidateQueries({ queryKey: ['uar-certs'] }); } },
+    mutationFn: () => { const period = prompt(t('st.usr.review_period_prompt')); if (!period) return Promise.resolve(null); const notes = prompt(t('st.usr.notes_prompt')) ?? undefined; return api('/api/admin/users/access-review/certify', { method: 'POST', body: JSON.stringify({ period, notes }) }); },
+    onSuccess: (r: any) => { if (r) { notifySuccess(t('st.usr.cert_done', { period: r.period, count: r.user_count })); qc.invalidateQueries({ queryKey: ['uar-certs'] }); } },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -75,25 +77,25 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="จัดการผู้ใช้ (User Management)" description="สร้าง / แก้ไขสิทธิ์ / รีเซ็ตรหัสผ่าน / ลบบัญชีผู้ใช้" />
+      <PageHeader title={t('st.usr.title')} description={t('st.usr.subtitle')} />
       <Card className="gap-3 p-5">
-        <h3 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-4" /> การทบทวนสิทธิ์ผู้ใช้ (Access Review · ITGC-AC-08)</h3>
-        <p className="text-sm text-muted-foreground">ส่งออกสิทธิ์จริงของผู้ใช้ทุกคน (พร้อมความขัดแย้ง SoD) เพื่อทบทวน แล้วบันทึกการรับรองรายไตรมาส.</p>
+        <h3 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-4" /> {t('st.usr.access_review')}</h3>
+        <p className="text-sm text-muted-foreground">{t('st.usr.access_review_desc')}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => apiDownload('/api/admin/users/access-review/export', 'access-review.csv').catch((e) => notifyError(e.message))}><Download className="size-4" /> ส่งออก CSV</Button>
-          <Button size="sm" disabled={certify.isPending} onClick={() => certify.mutate()}><ShieldCheck className="size-4" /> รับรองการทบทวน</Button>
-          {lastCert && <span className="text-sm text-muted-foreground">ล่าสุด: {lastCert.period} · โดย {lastCert.reviewed_by} · {lastCert.user_count} ผู้ใช้ ({lastCert.conflict_user_count} ขัดแย้ง)</span>}
+          <Button variant="outline" size="sm" onClick={() => apiDownload('/api/admin/users/access-review/export', 'access-review.csv').catch((e) => notifyError(e.message))}><Download className="size-4" /> {t('st.usr.export_csv')}</Button>
+          <Button size="sm" disabled={certify.isPending} onClick={() => certify.mutate()}><ShieldCheck className="size-4" /> {t('st.usr.certify')}</Button>
+          {lastCert && <span className="text-sm text-muted-foreground">{t('st.usr.last_cert', { period: lastCert.period, by: lastCert.reviewed_by, count: lastCert.user_count, conflicts: lastCert.conflict_user_count })}</span>}
         </div>
       </Card>
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">สร้างบัญชีใหม่</h3>
+        <h3 className="text-base font-semibold">{t('st.usr.create_account')}</h3>
         <div className="grid gap-2 sm:grid-cols-4">
           <div className="grid gap-1.5"><Label>Username</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>Password</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>Role</Label><select className={selectCls} value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
-          <div className="grid gap-1.5"><Label>บริษัท (เลือก)</Label><Input value={f.customer_name} onChange={(e) => setF({ ...f, customer_name: e.target.value })} placeholder="tenant code" /></div>
+          <div className="grid gap-1.5"><Label>{t('st.usr.company_optional')}</Label><Input value={f.customer_name} onChange={(e) => setF({ ...f, customer_name: e.target.value })} placeholder="tenant code" /></div>
         </div>
-        <Button className="w-fit" disabled={!f.username || f.password.length < 6 || create.isPending} onClick={() => create.mutate()}><UserPlus className="size-4" /> สร้างผู้ใช้</Button>
+        <Button className="w-fit" disabled={!f.username || f.password.length < 6 || create.isPending} onClick={() => create.mutate()}><UserPlus className="size-4" /> {t('st.usr.create_user')}</Button>
       </Card>
       <StateView q={list}>
         {list.data && (
@@ -101,9 +103,9 @@ export default function AdminUsersPage() {
             <SearchInput
               value={search}
               onChange={setSearch}
-              placeholder="ค้นหา username / role / บริษัท…"
-              ariaLabel="ค้นหาผู้ใช้"
-              count={`ผู้ใช้ ${filtered.length}${search && filtered.length !== users.length ? ` จาก ${users.length}` : ''} คน`}
+              placeholder={t('st.usr.search_ph')}
+              ariaLabel={t('st.usr.search_aria')}
+              count={search && filtered.length !== users.length ? t('st.usr.count_filtered', { n: filtered.length, total: users.length }) : t('st.usr.count', { n: filtered.length })}
             />
           <DataTable
             rows={filtered}
@@ -112,24 +114,24 @@ export default function AdminUsersPage() {
               search
                 ? {
                     icon: SearchX,
-                    title: 'ไม่พบผู้ใช้ที่ตรงกับการค้นหา',
-                    description: 'ลองปรับคำค้นหา หรือล้างการค้นหาเพื่อดูผู้ใช้ทั้งหมด',
+                    title: t('st.usr.no_match_title'),
+                    description: t('st.usr.no_match_desc'),
                     action: (
                       <Button variant="outline" size="sm" onClick={() => setSearch('')}>
-                        ล้างตัวกรอง
+                        {t('inv.clear_filter')}
                       </Button>
                     ),
                   }
-                : { icon: Users, title: 'ยังไม่มีผู้ใช้', description: 'สร้างบัญชีใหม่ในการ์ดด้านบนเพื่อเพิ่มผู้ใช้รายแรก' }
+                : { icon: Users, title: t('st.usr.empty_title'), description: t('st.usr.empty_desc') }
             }
             columns={[
               { key: 'username', label: 'Username' },
               { key: 'role', label: 'Role', render: (r: any) => <select className={selectCls} value={r.role} onChange={(e) => setRole.mutate({ u: r.username, role: e.target.value })}>{ROLES.map((x) => <option key={x} value={x}>{x}</option>)}</select> },
-              { key: 'customer_name', label: 'บริษัท', render: (r: any) => r.customer_name ?? '—' },
-              { key: 'must_change_password', label: 'ต้องเปลี่ยนรหัส', render: (r: any) => r.must_change_password ? <Badge variant="warning">ใช่</Badge> : '—' },
-              { key: 'reset', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={reset.isPending} onClick={() => reset.mutate(r.username)}>รีเซ็ตรหัส</Button> },
-              { key: 'pin', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={setPin.isPending} onClick={() => setPin.mutate(r.username)}>ตั้ง PIN</Button> },
-              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.username)}>ลบ</Button> },
+              { key: 'customer_name', label: t('st.usr.company'), render: (r: any) => r.customer_name ?? '—' },
+              { key: 'must_change_password', label: t('st.usr.must_change'), render: (r: any) => r.must_change_password ? <Badge variant="warning">{t('st.usr.yes')}</Badge> : '—' },
+              { key: 'reset', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={reset.isPending} onClick={() => reset.mutate(r.username)}>{t('st.usr.reset_pw')}</Button> },
+              { key: 'pin', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={setPin.isPending} onClick={() => setPin.mutate(r.username)}>{t('st.usr.set_pin')}</Button> },
+              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.username)}>{t('st.usr.delete')}</Button> },
             ]}
           />
           </div>

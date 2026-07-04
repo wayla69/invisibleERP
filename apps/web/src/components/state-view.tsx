@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -17,6 +18,7 @@ export function StateView({
   skeleton?: ReactNode;
   className?: string;
 }) {
+  const { t } = useLang();
   if (q.isLoading) {
     return (
       <div className={className}>
@@ -33,7 +35,7 @@ export function StateView({
     return (
       <Alert variant="destructive" className={cn('max-w-2xl', className)}>
         <AlertCircle />
-        <AlertTitle>เกิดข้อผิดพลาด</AlertTitle>
+        <AlertTitle>{t('mx.stv_error')}</AlertTitle>
         <AlertDescription>{String((q.error as Error)?.message ?? q.error)}</AlertDescription>
       </Alert>
     );

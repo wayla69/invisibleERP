@@ -5,6 +5,13 @@
 This chapter covers the full buying cycle — purchase requisition (PR) → purchase
 order (PO) → goods receipt (GR) → 3-way match — plus managing vendors.
 
+> **The PR / PO / GR forms check your entries as you go.** When you press the
+> create button, any problem is flagged **in place** — a red hint under the exact
+> field or line: each line needs an **Item ID** and a **quantity greater than 0**,
+> a **PO** additionally needs a vendor (name or code) and a non-negative unit
+> price, and a **GR** needs the PO number. Fix the highlighted field and press
+> again; a green toast confirms success.
+
 **Each step is on its own screen, because each belongs to a different user group.**
 This is deliberate separation of duties (the person who *orders* must not also
 *receive* or *pay*):

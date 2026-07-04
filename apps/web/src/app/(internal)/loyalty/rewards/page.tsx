@@ -7,6 +7,7 @@ import { Gift, Plus, SearchX, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { SearchInput } from '@/components/search-input';
@@ -22,6 +23,7 @@ const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 t
 interface Reward { id: number; reward_code: string; name: string; type: string; point_cost: number; cash_value: number; coupon_kind: string | null; coupon_value: number; stock: number | null; per_member_limit: number | null; tier_min: number | null; active: boolean }
 
 export default function RewardsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const list = useQuery<{ rewards: Reward[]; count: number }>({ queryKey: ['loy-rewards'], queryFn: () => api('/api/loyalty/rewards') });
 
@@ -35,7 +37,7 @@ export default function RewardsPage() {
       ...(form.stock !== '' ? { stock: Number(form.stock) } : {}),
       ...(form.per_member_limit !== '' ? { per_member_limit: Number(form.per_member_limit) } : {}),
     }) }),
-    onSuccess: () => { notifySuccess('เพิ่มของรางวัลแล้ว'); setForm({ name: '', type: 'evoucher', point_cost: 100, cash_value: 0, coupon_kind: 'amount', coupon_value: 0, stock: '', per_member_limit: '' }); qc.invalidateQueries({ queryKey: ['loy-rewards'] }); },
+    onSuccess: () => { notifySuccess(t('ly.rw_added')); setForm({ name: '', type: 'evoucher', point_cost: 100, cash_value: 0, coupon_kind: 'amount', coupon_value: 0, stock: '', per_member_limit: '' }); qc.invalidateQueries({ queryKey: ['loy-rewards'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
   const toggle = useMutation({
@@ -59,33 +61,33 @@ export default function RewardsPage() {
   return (
     <div>
       <PageHeader
-        title="ของรางวัล (Rewards)"
-        description="แคตตาล็อกของรางวัล — สมาชิกใช้แต้มแลกเป็นรหัส (โค้ด) ใช้ครั้งเดียวที่จุดขาย"
-        actions={<Link href="/loyalty/members"><Button variant="outline"><Users className="size-4" /> สมาชิก</Button></Link>}
+        title={t('ly.rw_title')}
+        description={t('ly.rw_desc')}
+        actions={<Link href="/loyalty/members"><Button variant="outline"><Users className="size-4" /> {t('ly.members')}</Button></Link>}
       />
 
       <div className="space-y-6">
         <Card className="gap-4">
-          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Plus className="size-4" /> เพิ่มของรางวัล</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Plus className="size-4" /> {t('ly.rw_add')}</CardTitle></CardHeader>
           <CardContent>
             <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
-              <div className="grid gap-1.5 sm:col-span-2"><Label>ชื่อรางวัล</Label><Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="เช่น คูปองส่วนลด ฿50" required /></div>
-              <div className="grid gap-1.5"><Label>ประเภท</Label>
+              <div className="grid gap-1.5 sm:col-span-2"><Label>{t('ly.rw_name')}</Label><Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder={t('ly.rw_name_ph')} required /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.col_type')}</Label>
                 <select className={selectCls} value={form.type} onChange={(e) => set({ type: e.target.value })}>
-                  <option value="evoucher">e-Voucher</option><option value="discount">ส่วนลด</option><option value="product">สินค้า/ของแถม</option><option value="privilege">สิทธิพิเศษ</option>
+                  <option value="evoucher">e-Voucher</option><option value="discount">{t('ly.rw_t_discount')}</option><option value="product">{t('ly.rw_t_product')}</option><option value="privilege">{t('ly.rw_t_privilege')}</option>
                 </select>
               </div>
-              <div className="grid gap-1.5"><Label>ใช้กี่แต้ม</Label><Input type="number" min="1" value={form.point_cost} onChange={(e) => set({ point_cost: +e.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>มูลค่า (บาท)</Label><Input type="number" min="0" value={form.cash_value} onChange={(e) => set({ cash_value: +e.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>ชนิดคูปอง</Label>
+              <div className="grid gap-1.5"><Label>{t('ly.rw_point_cost')}</Label><Input type="number" min="1" value={form.point_cost} onChange={(e) => set({ point_cost: +e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.rw_cash_value')}</Label><Input type="number" min="0" value={form.cash_value} onChange={(e) => set({ cash_value: +e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.rw_coupon_kind')}</Label>
                 <select className={selectCls} value={form.coupon_kind} onChange={(e) => set({ coupon_kind: e.target.value })}>
-                  <option value="amount">ลดเป็นบาท</option><option value="percent">ลดเป็น %</option><option value="free_item">ของแถม</option>
+                  <option value="amount">{t('ly.rw_ck_amount')}</option><option value="percent">{t('ly.rw_ck_percent')}</option><option value="free_item">{t('ly.pt_k_freebie')}</option>
                 </select>
               </div>
-              <div className="grid gap-1.5"><Label>มูลค่าคูปอง</Label><Input type="number" min="0" value={form.coupon_value} onChange={(e) => set({ coupon_value: +e.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>สต๊อก (ว่าง=ไม่จำกัด)</Label><Input type="number" min="0" value={form.stock} onChange={(e) => set({ stock: e.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>จำกัด/คน (ว่าง=ไม่จำกัด)</Label><Input type="number" min="1" value={form.per_member_limit} onChange={(e) => set({ per_member_limit: e.target.value })} /></div>
-              <div className="flex items-end"><Button type="submit" disabled={!form.name.trim() || create.isPending}>{create.isPending ? 'กำลังบันทึก…' : 'เพิ่มรางวัล'}</Button></div>
+              <div className="grid gap-1.5"><Label>{t('ly.rw_coupon_value')}</Label><Input type="number" min="0" value={form.coupon_value} onChange={(e) => set({ coupon_value: +e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.rw_stock')}</Label><Input type="number" min="0" value={form.stock} onChange={(e) => set({ stock: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.rw_per_member')}</Label><Input type="number" min="1" value={form.per_member_limit} onChange={(e) => set({ per_member_limit: e.target.value })} /></div>
+              <div className="flex items-end"><Button type="submit" disabled={!form.name.trim() || create.isPending}>{create.isPending ? t('ly.saving') : t('ly.rw_add_short')}</Button></div>
             </form>
           </CardContent>
         </Card>
@@ -97,12 +99,12 @@ export default function RewardsPage() {
                 <SearchInput
                   value={search}
                   onChange={setSearch}
-                  placeholder="ค้นหาชื่อ / รหัส / ประเภท…"
-                  ariaLabel="ค้นหาของรางวัล"
-                  count={`${num(filtered.length)} รายการ`}
+                  placeholder={t('ly.ms_search_ph')}
+                  ariaLabel={t('ly.rw_search_aria')}
+                  count={t('ly.rw_count', { n: num(filtered.length) })}
                 />
-                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
-                  {([['all', 'ทั้งหมด'], ['on', 'เปิด'], ['off', 'ปิด']] as const).map(([v, l]) => (
+                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t('ly.filter_by_status')}>
+                  {([['all', t('ly.all')], ['on', t('ly.wh_on')], ['off', t('ly.wh_off')]] as const).map(([v, l]) => (
                     <Button key={v} variant={active === v ? 'secondary' : 'ghost'} size="sm" aria-pressed={active === v} onClick={() => setActive(v)}>{l}</Button>
                   ))}
                 </div>
@@ -114,29 +116,29 @@ export default function RewardsPage() {
                 search || active !== 'all'
                   ? {
                       icon: SearchX,
-                      title: 'ไม่พบของรางวัลที่ตรงกับตัวกรอง',
-                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      title: t('ly.rw_no_match'),
+                      description: t('ly.no_match_desc'),
                       action: (
                         <Button variant="outline" size="sm" onClick={() => { setSearch(''); setActive('all'); }}>
-                          ล้างตัวกรอง
+                          {t('inv.clear_filter')}
                         </Button>
                       ),
                     }
                   : {
                       icon: Gift,
-                      title: 'ยังไม่มีของรางวัล',
-                      description: 'เพิ่มของรางวัลรายการแรกจากฟอร์มด้านบน เพื่อให้สมาชิกใช้แต้มแลกได้',
+                      title: t('ly.rw_empty'),
+                      description: t('ly.rw_empty_desc'),
                     }
               }
               columns={[
-                { key: 'reward_code', label: 'รหัส', render: (r) => <span className="font-mono text-xs">{r.reward_code}</span> },
-                { key: 'name', label: 'ชื่อ', render: (r) => <span className="inline-flex items-center gap-1.5"><Gift className="size-3.5 text-muted-foreground" />{r.name}</span> },
-                { key: 'type', label: 'ประเภท', render: (r) => <Badge variant="info">{r.type}</Badge> },
-                { key: 'point_cost', label: 'แต้ม', align: 'right', render: (r) => <span className="tabular">{num(r.point_cost)}</span> },
-                { key: 'cash_value', label: 'มูลค่า', align: 'right', render: (r) => baht(r.cash_value) },
-                { key: 'stock', label: 'สต๊อก', align: 'right', render: (r) => r.stock == null ? '∞' : num(r.stock) },
-                { key: 'per_member_limit', label: 'จำกัด/คน', align: 'right', render: (r) => r.per_member_limit == null ? '∞' : num(r.per_member_limit) },
-                { key: 'active', label: 'สถานะ', align: 'center', render: (r) => <button onClick={() => toggle.mutate(r)} className="cursor-pointer">{r.active ? <Badge variant="success">เปิด</Badge> : <Badge variant="muted">ปิด</Badge>}</button> },
+                { key: 'reward_code', label: t('ly.col_code'), render: (r) => <span className="font-mono text-xs">{r.reward_code}</span> },
+                { key: 'name', label: t('ly.col_name'), render: (r) => <span className="inline-flex items-center gap-1.5"><Gift className="size-3.5 text-muted-foreground" />{r.name}</span> },
+                { key: 'type', label: t('ly.col_type'), render: (r) => <Badge variant="info">{r.type}</Badge> },
+                { key: 'point_cost', label: t('ly.an_pts'), align: 'right', render: (r) => <span className="tabular">{num(r.point_cost)}</span> },
+                { key: 'cash_value', label: t('ly.wh_col_value'), align: 'right', render: (r) => baht(r.cash_value) },
+                { key: 'stock', label: t('ly.wh_col_stock'), align: 'right', render: (r) => r.stock == null ? '∞' : num(r.stock) },
+                { key: 'per_member_limit', label: t('ly.rw_col_limit'), align: 'right', render: (r) => r.per_member_limit == null ? '∞' : num(r.per_member_limit) },
+                { key: 'active', label: t('fin.col_status'), align: 'center', render: (r) => <button onClick={() => toggle.mutate(r)} className="cursor-pointer">{r.active ? <Badge variant="success">{t('ly.wh_on')}</Badge> : <Badge variant="muted">{t('ly.wh_off')}</Badge>}</button> },
               ]}
             />
             </div>

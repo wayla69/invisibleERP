@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Users, Hourglass, BellRing } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -23,12 +24,14 @@ interface Resv {
 }
 interface Resp { reservations: Resv[]; count: number; waiting: number; booked: number; covers_pending: number }
 
-const STATUS: Record<string, { th: string; tone: 'success' | 'warning' | 'info' | 'muted' | 'destructive' }> = {
-  booked: { th: 'จองแล้ว', tone: 'info' }, waiting: { th: 'รอคิว', tone: 'warning' }, ready: { th: 'พร้อมแล้ว', tone: 'success' },
-  seated: { th: 'นั่งแล้ว', tone: 'muted' }, cancelled: { th: 'ยกเลิก', tone: 'muted' }, no_show: { th: 'ไม่มา', tone: 'destructive' },
+const STATUS: Record<string, { tone: 'success' | 'warning' | 'info' | 'muted' | 'destructive' }> = {
+  booked: { tone: 'info' }, waiting: { tone: 'warning' }, ready: { tone: 'success' },
+  seated: { tone: 'muted' }, cancelled: { tone: 'muted' }, no_show: { tone: 'destructive' },
 };
+const KNOWN_ACTIONS = ['notify', 'seat', 'cancel', 'no-show'];
 
 export default function ReservationsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<Resp>({ queryKey: ['reservations'], queryFn: () => api('/api/restaurant/reservations'), refetchInterval: 30_000 });
   const d = q.data;
@@ -48,12 +51,12 @@ export default function ReservationsPage() {
       table_id: form.table_id ? Number(form.table_id) : undefined,
       quoted_wait_min: kind === 'waitlist' && form.quoted_wait_min ? Number(form.quoted_wait_min) : undefined,
     }) }),
-    onSuccess: () => { notifySuccess(kind === 'waitlist' ? 'เพิ่มเข้าคิวแล้ว' : 'บันทึกการจองแล้ว'); setForm({ customer_name: '', customer_phone: '', party_size: '2', reserved_for: '', table_id: '', quoted_wait_min: '' }); refresh(); },
+    onSuccess: () => { notifySuccess(kind === 'waitlist' ? t('px.resv_added_queue') : t('px.resv_booked_ok')); setForm({ customer_name: '', customer_phone: '', party_size: '2', reserved_for: '', table_id: '', quoted_wait_min: '' }); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const act = useMutation({
     mutationFn: ({ id, action }: { id: number; action: string }) => api(`/api/restaurant/reservations/${id}/${action}`, { method: 'POST' }),
-    onSuccess: (_r, v) => { notifySuccess({ notify: 'แจ้งลูกค้าแล้ว', seat: 'รับเข้าโต๊ะแล้ว', cancel: 'ยกเลิกแล้ว', 'no-show': 'ทำเครื่องหมายไม่มาแล้ว' }[v.action] ?? 'อัปเดตแล้ว'); refresh(); },
+    onSuccess: (_r, v) => { notifySuccess(KNOWN_ACTIONS.includes(v.action) ? t(`px.resv_act_${v.action}`) : t('px.resv_updated')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -61,15 +64,15 @@ export default function ReservationsPage() {
 
   return (
     <ModulePage
-      title="จองโต๊ะ & รอคิว (Reservations & Waitlist)"
-      description="จองโต๊ะล่วงหน้าหรือรับลูกค้าเข้าคิว แจ้งเตือนเมื่อโต๊ะพร้อม (LINE/SMS) แล้วรับเข้านั่ง"
+      title={t('px.resv_title')}
+      description={t('px.resv_desc')}
       query={q}
       stats={d && (
         <>
-          <StatCard label="รอคิว (walk-in)" value={num(d.waiting)} icon={Hourglass} tone={d.waiting > 0 ? 'warning' : 'default'} />
-          <StatCard label="จองล่วงหน้า" value={num(d.booked)} icon={CalendarClock} tone="primary" />
-          <StatCard label="ที่นั่งค้างรับ" value={num(d.covers_pending)} icon={Users} tone="default" hint="รวมจอง + รอคิว + พร้อมแล้ว" />
-          <StatCard label="ทั้งหมด (วันนี้)" value={num(d.count)} icon={BellRing} tone="default" />
+          <StatCard label={t('px.resv_stat_waiting')} value={num(d.waiting)} icon={Hourglass} tone={d.waiting > 0 ? 'warning' : 'default'} />
+          <StatCard label={t('px.resv_stat_booked')} value={num(d.booked)} icon={CalendarClock} tone="primary" />
+          <StatCard label={t('px.resv_stat_covers')} value={num(d.covers_pending)} icon={Users} tone="default" hint={t('px.resv_stat_covers_hint')} />
+          <StatCard label={t('px.resv_stat_total')} value={num(d.count)} icon={BellRing} tone="default" />
         </>
       )}
       statsClassName="xl:grid-cols-4"
@@ -80,20 +83,20 @@ export default function ReservationsPage() {
           {(['waitlist', 'reservation'] as const).map((k) => (
             <button key={k} type="button" onClick={() => setKind(k)}
               className={`rounded-md px-3 py-1.5 font-medium transition-colors ${kind === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-              {k === 'waitlist' ? 'รับเข้าคิว (Walk-in)' : 'จองล่วงหน้า'}
+              {k === 'waitlist' ? t('px.resv_tab_waitlist') : t('px.resv_tab_reservation')}
             </button>
           ))}
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <FormField label="ชื่อลูกค้า"><Input value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)} placeholder="ชื่อ" /></FormField>
-          <FormField label="เบอร์โทร (แจ้งเตือน)"><Input value={form.customer_phone} onChange={(e) => set('customer_phone', e.target.value)} placeholder="08x-xxx-xxxx" /></FormField>
-          <FormField label="จำนวนคน"><Input type="number" min={1} value={form.party_size} onChange={(e) => set('party_size', e.target.value)} /></FormField>
-          <FormField label="โต๊ะ (ไม่บังคับ)"><Input type="number" value={form.table_id} onChange={(e) => set('table_id', e.target.value)} placeholder="เลขโต๊ะ (id)" /></FormField>
+          <FormField label={t('px.resv_name')}><Input value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)} placeholder={t('px.resv_name_ph')} /></FormField>
+          <FormField label={t('px.resv_phone')}><Input value={form.customer_phone} onChange={(e) => set('customer_phone', e.target.value)} placeholder="08x-xxx-xxxx" /></FormField>
+          <FormField label={t('px.resv_party')}><Input type="number" min={1} value={form.party_size} onChange={(e) => set('party_size', e.target.value)} /></FormField>
+          <FormField label={t('px.resv_table')}><Input type="number" value={form.table_id} onChange={(e) => set('table_id', e.target.value)} placeholder={t('px.resv_table_ph')} /></FormField>
           {kind === 'reservation'
-            ? <FormField label="เวลาที่จอง"><Input type="datetime-local" value={form.reserved_for} onChange={(e) => set('reserved_for', e.target.value)} /></FormField>
-            : <FormField label="เวลารอโดยประมาณ (นาที)"><Input type="number" min={0} value={form.quoted_wait_min} onChange={(e) => set('quoted_wait_min', e.target.value)} placeholder="20" /></FormField>}
+            ? <FormField label={t('px.resv_time')}><Input type="datetime-local" value={form.reserved_for} onChange={(e) => set('reserved_for', e.target.value)} /></FormField>
+            : <FormField label={t('px.resv_wait_est')}><Input type="number" min={0} value={form.quoted_wait_min} onChange={(e) => set('quoted_wait_min', e.target.value)} placeholder="20" /></FormField>}
           <div className="flex items-end">
-            <Button disabled={create.isPending} onClick={() => create.mutate()}>{kind === 'waitlist' ? 'เข้าคิว' : 'จองโต๊ะ'}</Button>
+            <Button disabled={create.isPending} onClick={() => create.mutate()}>{kind === 'waitlist' ? t('px.resv_queue_btn') : t('px.resv_book_btn')}</Button>
           </div>
         </div>
       </div>
@@ -102,19 +105,19 @@ export default function ReservationsPage() {
         <DataTable
           rows={d.reservations}
           rowKey={(r) => r.id}
-          emptyState={{ icon: CalendarClock, title: 'ยังไม่มีรายการจอง/คิว', description: 'เพิ่มการจองล่วงหน้าหรือรับลูกค้าเข้าคิวจากฟอร์มด้านบน' }}
+          emptyState={{ icon: CalendarClock, title: t('px.resv_empty_title'), description: t('px.resv_empty_desc') }}
           columns={[
-            { key: 'kind', label: 'ประเภท', render: (r) => <Badge variant="outline">{r.kind === 'waitlist' ? 'รอคิว' : 'จอง'}</Badge> },
-            { key: 'customer_name', label: 'ลูกค้า', render: (r) => <div><div className="font-medium">{r.customer_name || '—'}</div><div className="text-xs text-muted-foreground">{r.customer_phone || ''}</div></div> },
-            { key: 'party_size', label: 'คน', align: 'right', render: (r) => num(r.party_size) },
-            { key: 'reserved_for', label: 'เวลา', render: (r) => r.reserved_for ? thaiDate(r.reserved_for) : (r.quoted_wait_min != null ? `รอ ~${r.quoted_wait_min} นาที` : '—') },
-            { key: 'table_id', label: 'โต๊ะ', render: (r) => r.table_id ?? '—' },
-            { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={STATUS[r.status]?.tone ?? 'muted'}>{STATUS[r.status]?.th ?? r.status}</Badge> },
+            { key: 'kind', label: t('px.resv_col_kind'), render: (r) => <Badge variant="outline">{r.kind === 'waitlist' ? t('px.resv_kind_waitlist') : t('px.resv_kind_reservation')}</Badge> },
+            { key: 'customer_name', label: t('fin.col_customer'), render: (r) => <div><div className="font-medium">{r.customer_name || '—'}</div><div className="text-xs text-muted-foreground">{r.customer_phone || ''}</div></div> },
+            { key: 'party_size', label: t('px.resv_col_party'), align: 'right', render: (r) => num(r.party_size) },
+            { key: 'reserved_for', label: t('px.resv_col_time'), render: (r) => r.reserved_for ? thaiDate(r.reserved_for) : (r.quoted_wait_min != null ? t('px.resv_wait_min', { min: r.quoted_wait_min }) : '—') },
+            { key: 'table_id', label: t('px.resv_col_table'), render: (r) => r.table_id ?? '—' },
+            { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={STATUS[r.status]?.tone ?? 'muted'}>{STATUS[r.status] ? t(`px.resv_st_${r.status}`) : r.status}</Badge> },
             { key: 'actions', label: '', align: 'right', render: (r) => open(r) ? (
               <div className="flex justify-end gap-1.5">
-                {r.status !== 'ready' && <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'notify' })}>แจ้งโต๊ะพร้อม</Button>}
-                <Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'seat' })}>รับเข้านั่ง</Button>
-                <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: r.kind === 'reservation' ? 'no-show' : 'cancel' })}>{r.kind === 'reservation' ? 'ไม่มา' : 'ออกคิว'}</Button>
+                {r.status !== 'ready' && <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'notify' })}>{t('px.resv_notify_btn')}</Button>}
+                <Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'seat' })}>{t('px.resv_seat_btn')}</Button>
+                <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: r.kind === 'reservation' ? 'no-show' : 'cancel' })}>{r.kind === 'reservation' ? t('px.resv_noshow_btn') : t('px.resv_leave_btn')}</Button>
               </div>
             ) : null },
           ]}

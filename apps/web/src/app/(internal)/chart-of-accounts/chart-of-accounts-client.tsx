@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Ban, Download, Layers, ListTree, ShieldCheck } from 'lucide-react';
 
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -55,18 +56,22 @@ type Row = {
 type CoaResponse = { accounts: RawAccount[]; count?: number; source?: string; industry_scoped?: boolean };
 
 const TYPE_ORDER = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
-const TYPE_TH: Record<string, string> = {
-  Asset: 'สินทรัพย์',
-  Liability: 'หนี้สิน',
-  Equity: 'ส่วนของเจ้าของ',
-  Revenue: 'รายได้',
-  Expense: 'ค่าใช้จ่าย',
-  Other: 'อื่นๆ',
+const TYPE_KEY: Record<string, string> = {
+  Asset: 'fnx.coa.type_asset',
+  Liability: 'fnx.coa.type_liability',
+  Equity: 'fnx.coa.type_equity',
+  Revenue: 'fnx.coa.type_revenue',
+  Expense: 'fnx.coa.type_expense',
+  Other: 'fnx.coa.type_other',
 };
 
-const DIM_TH: Record<string, string> = { branch: 'สาขา', project: 'โปรเจกต์', department: 'แผนก', cost_center: 'ศูนย์ต้นทุน' };
+const DIM_KEY: Record<string, string> = { branch: 'fnx.coa.dim_branch', project: 'fnx.coa.dim_project', department: 'fnx.coa.dim_department', cost_center: 'fnx.coa.dim_cost_center' };
 
 export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initialCanon?: CoaResponse; initialOverlay?: CoaResponse }) {
+  const { t } = useLang();
+  // Localised type / dimension labels (guard known keys, raw fallback for unknown).
+  const typeLabel = (tp: string) => (TYPE_KEY[tp] ? t(TYPE_KEY[tp]) : tp);
+  const dimLabel = (d: string) => (DIM_KEY[d] ? t(DIM_KEY[d]) : d);
   const [showAll, setShowAll] = useState(false);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
@@ -131,13 +136,13 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
   };
 
   const nb = (v: string | null) =>
-    v === 'C' ? <Badge variant="info">เครดิต (Cr)</Badge> : v === 'D' ? <Badge variant="secondary">เดบิต (Dr)</Badge> : <span className="text-muted-foreground">—</span>;
+    v === 'C' ? <Badge variant="info">{t('fnx.coa.credit_cr')}</Badge> : v === 'D' ? <Badge variant="secondary">{t('fnx.coa.debit_dr')}</Badge> : <span className="text-muted-foreground">—</span>;
 
   const columns = [
-    { key: 'code', label: 'รหัส', className: 'font-medium tabular' },
+    { key: 'code', label: t('fnx.coa.col_code'), className: 'font-medium tabular' },
     {
       key: 'name',
-      label: 'ชื่อบัญชี',
+      label: t('fnx.coa.col_name'),
       render: (r: Row) => (
         <div className="min-w-0" style={r.parentCode ? { paddingLeft: 12 } : undefined}>
           <div className="truncate">{r.name}</div>
@@ -145,21 +150,21 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
         </div>
       ),
     },
-    { key: 'normalBalance', label: 'ดุลปกติ', align: 'center' as const, render: (r: Row) => nb(r.normalBalance) },
+    { key: 'normalBalance', label: t('fnx.coa.col_normal_balance'), align: 'center' as const, render: (r: Row) => nb(r.normalBalance) },
     {
       key: 'flags',
-      label: 'คุณสมบัติ',
+      label: t('fnx.coa.col_attributes'),
       sortable: false,
       render: (r: Row) => (
         <div className="flex flex-wrap items-center gap-1">
           {r.isControl && (
             <Badge variant="warning" className="gap-1">
-              <ShieldCheck className="size-3" /> ควบคุม{r.controlSubledger ? ` · ${r.controlSubledger}` : ''}
+              <ShieldCheck className="size-3" /> {t('fnx.coa.control')}{r.controlSubledger ? ` · ${r.controlSubledger}` : ''}
             </Badge>
           )}
           {!r.isPostable && (
             <Badge variant="muted" className="gap-1">
-              <Ban className="size-3" /> หัวข้อ (ห้ามลงรายการ)
+              <Ban className="size-3" /> {t('fnx.coa.header_no_posting')}
             </Badge>
           )}
           {r.requireDimension &&
@@ -167,49 +172,49 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
               .filter(([, on]) => on)
               .map(([d]) => (
                 <Badge key={d} variant="outline">
-                  ต้องระบุ{DIM_TH[d] ?? d}
+                  {t('fnx.coa.require_dim', { dim: dimLabel(d) })}
                 </Badge>
               ))}
-          {!r.active && <Badge variant="destructive">ปิดใช้งาน</Badge>}
+          {!r.active && <Badge variant="destructive">{t('fnx.coa.inactive')}</Badge>}
         </div>
       ),
     },
-    { key: 'parentCode', label: 'บัญชีแม่', align: 'right' as const, render: (r: Row) => r.parentCode ?? <span className="text-muted-foreground">—</span> },
+    { key: 'parentCode', label: t('fnx.coa.col_parent'), align: 'right' as const, render: (r: Row) => r.parentCode ?? <span className="text-muted-foreground">—</span> },
   ];
 
   // Group the filtered rows by account type, in financial-statement order.
   const groups = useMemo(() => {
     const seen = new Set(filtered.map((r) => r.type));
-    const order = [...TYPE_ORDER.filter((t) => seen.has(t)), ...[...seen].filter((t) => !TYPE_ORDER.includes(t as any))];
+    const order = [...TYPE_ORDER.filter((tp) => seen.has(tp)), ...[...seen].filter((tp) => !TYPE_ORDER.includes(tp as any))];
     return order.map((type) => ({ type, rows: filtered.filter((r) => r.type === type) }));
   }, [filtered]);
 
   return (
     <div>
       <PageHeader
-        title="ผังบัญชี"
-        description="โครงสร้างบัญชีทั้งหมด จัดกลุ่มตามประเภท พร้อมดุลปกติ บัญชีคุมยอด (control) และมิติที่ต้องระบุ"
+        title={t('fnx.coa.title')}
+        description={t('fnx.coa.description')}
         actions={
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={!filtered.length}>
-            <Download className="size-4" /> ส่งออก CSV
+            <Download className="size-4" /> {t('fnx.coa.export_csv')}
           </Button>
         }
       />
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหารหัส/ชื่อบัญชี…" count={`${filtered.length} บัญชี`} />
+        <SearchInput value={search} onChange={setSearch} placeholder={t('fnx.coa.search_placeholder')} count={t('fnx.coa.count_accounts', { count: filtered.length })} />
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant={typeFilter === null ? 'default' : 'outline'} onClick={() => setTypeFilter(null)}>
-            ทั้งหมด
+            {t('fnx.coa.all')}
           </Button>
-          {TYPE_ORDER.map((t) => (
-            <Button key={t} size="sm" variant={typeFilter === t ? 'default' : 'outline'} onClick={() => setTypeFilter((v) => (v === t ? null : t))}>
-              {TYPE_TH[t]}
+          {TYPE_ORDER.map((tp) => (
+            <Button key={tp} size="sm" variant={typeFilter === tp ? 'default' : 'outline'} onClick={() => setTypeFilter((v) => (v === tp ? null : tp))}>
+              {typeLabel(tp)}
             </Button>
           ))}
           {hasOverlay && (
             <Button size="sm" variant="ghost" onClick={() => setShowAll((v) => !v)}>
-              {showAll ? 'เฉพาะบัญชีของธุรกิจ' : 'แสดงบัญชีทั้งหมด'}
+              {showAll ? t('fnx.coa.view_industry_only') : t('fnx.coa.view_all')}
             </Button>
           )}
         </div>
@@ -218,24 +223,24 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
       <StateView q={gate}>
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="จำนวนบัญชี" value={rows.length} icon={ListTree} tone="primary" />
-            <StatCard label="บัญชีคุมยอด (control)" value={controlCount} icon={ShieldCheck} tone="warning" />
+            <StatCard label={t('fnx.coa.stat_accounts')} value={rows.length} icon={ListTree} tone="primary" />
+            <StatCard label={t('fnx.coa.stat_control')} value={controlCount} icon={ShieldCheck} tone="warning" />
             <StatCard
-              label="มุมมอง"
-              value={showAll || !hasOverlay ? 'ผังบัญชีเต็ม' : 'ตามประเภทธุรกิจ'}
+              label={t('fnx.coa.stat_view')}
+              value={showAll || !hasOverlay ? t('fnx.coa.view_full') : t('fnx.coa.view_by_industry')}
               icon={Layers}
-              hint={showAll || !hasOverlay ? 'ทุกบัญชีในระบบ' : 'บัญชีที่ใช้ในธุรกิจของคุณ'}
+              hint={showAll || !hasOverlay ? t('fnx.coa.view_full_hint') : t('fnx.coa.view_by_industry_hint')}
             />
-            <StatCard label="ประเภท" value={groups.length} hint="หมวดบัญชีที่แสดง" />
+            <StatCard label={t('fnx.coa.stat_types')} value={groups.length} hint={t('fnx.coa.stat_types_hint')} />
           </div>
 
           {groups.length === 0 ? (
-            <Card className="p-8 text-center text-sm text-muted-foreground">ไม่พบบัญชีที่ตรงกับเงื่อนไข</Card>
+            <Card className="p-8 text-center text-sm text-muted-foreground">{t('fnx.coa.no_match')}</Card>
           ) : (
             groups.map((g) => (
               <div key={g.type} className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-foreground">{TYPE_TH[g.type] ?? g.type}</h2>
+                  <h2 className="text-sm font-semibold text-foreground">{typeLabel(g.type)}</h2>
                   <Badge variant="secondary">{g.rows.length}</Badge>
                 </div>
                 <DataTable rows={g.rows} columns={columns} rowKey={(r) => r.code} pageSize={0} dense />

@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { useLang } from '@/lib/i18n';
 
 // Business-day (Asia/Bangkok) today, as YYYY-MM-DD.
 function bkkToday(): string {
@@ -43,6 +44,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function RestaurantAnalyticsPage() {
+  const { t } = useLang();
   const [from, setFrom] = useState(bkkToday());
   const [to, setTo] = useState(bkkToday());
   const win = `from=${from}&to=${to}`;
@@ -52,23 +54,23 @@ export default function RestaurantAnalyticsPage() {
   return (
     <div>
       <PageHeader
-        title="วิเคราะห์ร้านอาหาร (Restaurant analytics)"
-        description="Menu engineering · ช่วงเวลาขายดี · การยกเลิก/ส่วนลด · พนักงาน · แนวโน้ม · ความพร้อมเมนู"
+        title={t('mf.ra_title')}
+        description={t('mf.ra_desc')}
         actions={
           <div className="flex items-end gap-2">
-            <div className="grid gap-1"><Label htmlFor="from" className="text-xs">ตั้งแต่</Label><Input id="from" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></div>
-            <div className="grid gap-1"><Label htmlFor="to" className="text-xs">ถึง</Label><Input id="to" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></div>
+            <div className="grid gap-1"><Label htmlFor="from" className="text-xs">{t('mf.from')}</Label><Input id="from" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" /></div>
+            <div className="grid gap-1"><Label htmlFor="to" className="text-xs">{t('mf.to')}</Label><Input id="to" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" /></div>
           </div>
         }
       />
       <Tabs
         tabs={[
           { key: 'menu', label: 'Menu engineering', content: <MenuEngineering url={`/api/analytics/menu-engineering?${win}`} /> },
-          { key: 'daypart', label: 'ช่วงเวลาขายดี', content: <Daypart url={`/api/analytics/daypart?${win}`} /> },
-          { key: 'voids', label: 'ยกเลิก/ส่วนลด', content: <Voids url={`/api/analytics/voids-discounts?${win}`} /> },
-          { key: 'staff', label: 'พนักงาน', content: <Staff url={`/api/analytics/staff-performance?${win}`} /> },
-          { key: 'trend', label: 'แนวโน้ม', content: <Trend url={`/api/analytics/sales-trend?${win}`} /> },
-          { key: 'avail', label: 'ความพร้อมเมนู', content: <Availability /> },
+          { key: 'daypart', label: t('mf.ra_tab_daypart'), content: <Daypart url={`/api/analytics/daypart?${win}`} /> },
+          { key: 'voids', label: t('mf.ra_tab_voids'), content: <Voids url={`/api/analytics/voids-discounts?${win}`} /> },
+          { key: 'staff', label: t('mf.ra_tab_staff'), content: <Staff url={`/api/analytics/staff-performance?${win}`} /> },
+          { key: 'trend', label: t('mf.ra_tab_trend'), content: <Trend url={`/api/analytics/sales-trend?${win}`} /> },
+          { key: 'avail', label: t('mf.ra_tab_avail'), content: <Availability /> },
         ]}
       />
     </div>
@@ -82,26 +84,26 @@ export default function RestaurantAnalyticsPage() {
         {q.data && (
           <>
             <Grid>
-              <StatCard label="เมนูที่ขาย" value={num(q.data.summary.items)} icon={BarChart3} />
-              <StatCard label="จำนวนที่ขาย" value={num(q.data.summary.units_sold)} />
-              <StatCard label="กำไรส่วนเพิ่มรวม" value={baht(q.data.summary.total_contribution)} tone="success" />
+              <StatCard label={t('mf.ra_items_sold')} value={num(q.data.summary.items)} icon={BarChart3} />
+              <StatCard label={t('mf.ra_units_sold')} value={num(q.data.summary.units_sold)} />
+              <StatCard label={t('mf.ra_total_contribution')} value={baht(q.data.summary.total_contribution)} tone="success" />
               <StatCard label="⭐ Star" value={num(q.data.summary.stars)} tone="success" />
               <StatCard label="🐴 Plowhorse" value={num(q.data.summary.plowhorses)} tone="warning" />
               <StatCard label="❓ Puzzle / 🐶 Dog" value={`${num(q.data.summary.puzzles)} / ${num(q.data.summary.dogs)}`} tone="info" />
             </Grid>
-            <Section title="เมนูจัดกลุ่มตามความนิยม × กำไร (70% rule × contribution margin)">
+            <Section title={t('mf.ra_me_section')}>
               <DataTable
                 rows={q.data.items}
                 rowKey={(r: any) => r.item_id}
-                emptyState={{ icon: BarChart3, title: 'ไม่มีเมนูที่ขายในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบนให้ครอบคลุมวันที่มีการขาย แล้วดูใหม่' }}
+                emptyState={{ icon: BarChart3, title: t('mf.ra_me_empty_title'), description: t('mf.ra_adjust_dates') }}
                 columns={[
-                  { key: 'name', label: 'เมนู' },
-                  { key: 'quadrant', label: 'กลุ่ม', render: (r: any) => <Badge variant={QUADRANT[r.quadrant] ?? 'muted'}>{r.quadrant_th} ({r.quadrant})</Badge> },
-                  { key: 'qty', label: 'ขาย', align: 'right', render: (r: any) => num(r.qty) },
-                  { key: 'mix_share', label: 'สัดส่วน', align: 'right', render: (r: any) => pct(Number(r.mix_share) * 100) },
-                  { key: 'unit_margin', label: 'กำไร/จาน', align: 'right', render: (r: any) => baht(r.unit_margin) },
-                  { key: 'contribution', label: 'กำไรรวม', align: 'right', render: (r: any) => baht(r.contribution) },
-                  { key: 'action', label: 'คำแนะนำ', render: (r: any) => <span className="text-xs text-muted-foreground">{r.action_th}</span> },
+                  { key: 'name', label: t('mf.col_dish') },
+                  { key: 'quadrant', label: t('mf.ra_col_group'), render: (r: any) => <Badge variant={QUADRANT[r.quadrant] ?? 'muted'}>{r.quadrant_th} ({r.quadrant})</Badge> },
+                  { key: 'qty', label: t('mf.ra_col_sold'), align: 'right', render: (r: any) => num(r.qty) },
+                  { key: 'mix_share', label: t('mf.ra_col_share'), align: 'right', render: (r: any) => pct(Number(r.mix_share) * 100) },
+                  { key: 'unit_margin', label: t('mf.ra_col_margin_per_dish'), align: 'right', render: (r: any) => baht(r.unit_margin) },
+                  { key: 'contribution', label: t('mf.ra_col_total_margin'), align: 'right', render: (r: any) => baht(r.contribution) },
+                  { key: 'action', label: t('mf.ra_col_advice'), render: (r: any) => <span className="text-xs text-muted-foreground">{r.action_th}</span> },
                 ]}
               />
             </Section>
@@ -119,25 +121,25 @@ export default function RestaurantAnalyticsPage() {
         {q.data && (
           <>
             <Grid>
-              <StatCard label="ยอดขาย" value={baht(q.data.summary.revenue)} tone="success" icon={Clock} />
-              <StatCard label="จำนวนบิล" value={num(q.data.summary.txns)} />
-              <StatCard label="บิลเฉลี่ย" value={baht(q.data.summary.avg_ticket)} />
-              <StatCard label="ชั่วโมงพีก" value={q.data.summary.peak_hour != null ? `${q.data.summary.peak_hour}:00` : '—'} tone="info" />
-              <StatCard label="ช่วงพีก" value={q.data.by_daypart.find((d: any) => d.daypart === q.data.summary.peak_daypart)?.label_th ?? '—'} tone="info" />
+              <StatCard label={t('mf.ra_revenue')} value={baht(q.data.summary.revenue)} tone="success" icon={Clock} />
+              <StatCard label={t('mf.ra_txn_count')} value={num(q.data.summary.txns)} />
+              <StatCard label={t('mf.ra_avg_ticket')} value={baht(q.data.summary.avg_ticket)} />
+              <StatCard label={t('mf.ra_peak_hour')} value={q.data.summary.peak_hour != null ? `${q.data.summary.peak_hour}:00` : '—'} tone="info" />
+              <StatCard label={t('mf.ra_peak_daypart')} value={q.data.by_daypart.find((d: any) => d.daypart === q.data.summary.peak_daypart)?.label_th ?? '—'} tone="info" />
             </Grid>
-            <Section title="ยอดขายรายชั่วโมง (เวลาไทย)">
+            <Section title={t('mf.ra_hourly_sales')}>
               <SimpleBarChart data={q.data.by_hour.filter((h: any) => h.revenue > 0)} xKey="hour" yKey="revenue" fmt={(v) => baht(v)} />
             </Section>
-            <Section title="ตามช่วงเวลา">
+            <Section title={t('mf.ra_by_daypart')}>
               <DataTable
                 rows={q.data.by_daypart}
                 rowKey={(r: any) => r.daypart}
-                emptyState={{ icon: Clock, title: 'ไม่มียอดขายในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบนให้ครอบคลุมวันที่มีการขาย แล้วดูใหม่' }}
+                emptyState={{ icon: Clock, title: t('mf.ra_no_sales_title'), description: t('mf.ra_adjust_dates') }}
                 columns={[
-                  { key: 'label_th', label: 'ช่วง' },
-                  { key: 'revenue', label: 'ยอดขาย', align: 'right', render: (r: any) => baht(r.revenue) },
-                  { key: 'txns', label: 'บิล', align: 'right', render: (r: any) => num(r.txns) },
-                  { key: 'avg_ticket', label: 'บิลเฉลี่ย', align: 'right', render: (r: any) => baht(r.avg_ticket) },
+                  { key: 'label_th', label: t('mf.ra_col_period') },
+                  { key: 'revenue', label: t('mf.ra_revenue'), align: 'right', render: (r: any) => baht(r.revenue) },
+                  { key: 'txns', label: t('mf.ra_col_bills'), align: 'right', render: (r: any) => num(r.txns) },
+                  { key: 'avg_ticket', label: t('mf.ra_avg_ticket'), align: 'right', render: (r: any) => baht(r.avg_ticket) },
                 ]}
               />
             </Section>
@@ -155,23 +157,23 @@ export default function RestaurantAnalyticsPage() {
         {q.data && (
           <>
             <Grid>
-              <StatCard label="เหตุการณ์" value={num(q.data.summary.events)} icon={ShieldAlert} />
-              <StatCard label="ยกเลิก (ครั้ง)" value={num(q.data.summary.void_count)} tone="danger" />
-              <StatCard label="อัตรายกเลิก" value={pct(q.data.summary.void_rate_pct)} tone="warning" />
-              <StatCard label="ส่วนลดรวม" value={baht(q.data.summary.discount_amount)} />
+              <StatCard label={t('mf.ra_events')} value={num(q.data.summary.events)} icon={ShieldAlert} />
+              <StatCard label={t('mf.ra_void_count')} value={num(q.data.summary.void_count)} tone="danger" />
+              <StatCard label={t('mf.ra_void_rate')} value={pct(q.data.summary.void_rate_pct)} tone="warning" />
+              <StatCard label={t('mf.ra_total_discount')} value={baht(q.data.summary.discount_amount)} />
             </Grid>
-            <Section title="ตามเหตุผล">
-              <DataTable rows={q.data.by_reason} rowKey={(r: any, i) => r.reason_code + i} emptyState={{ icon: ShieldAlert, title: 'ไม่มีการยกเลิก/ส่วนลดในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบน หากต้องการดูข้อมูลช่วงอื่น' }} columns={[
-                { key: 'reason_code', label: 'เหตุผล' },
-                { key: 'count', label: 'ครั้ง', align: 'right', render: (r: any) => num(r.count) },
-                { key: 'amount', label: 'มูลค่า', align: 'right', render: (r: any) => baht(r.amount) },
+            <Section title={t('mf.ra_by_reason_title')}>
+              <DataTable rows={q.data.by_reason} rowKey={(r: any, i) => r.reason_code + i} emptyState={{ icon: ShieldAlert, title: t('mf.ra_no_voids_title'), description: t('mf.ra_adjust_dates2') }} columns={[
+                { key: 'reason_code', label: t('mf.ra_col_reason') },
+                { key: 'count', label: t('mf.ra_col_times'), align: 'right', render: (r: any) => num(r.count) },
+                { key: 'amount', label: t('mf.ra_col_value'), align: 'right', render: (r: any) => baht(r.amount) },
               ]} />
             </Section>
-            <Section title="ตามพนักงาน">
-              <DataTable rows={q.data.by_actor} rowKey={(r: any, i) => r.requested_by + i} emptyState={{ icon: ShieldAlert, title: 'ไม่มีการยกเลิก/ส่วนลดในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบน หากต้องการดูข้อมูลช่วงอื่น' }} columns={[
-                { key: 'requested_by', label: 'พนักงาน' },
-                { key: 'count', label: 'ครั้ง', align: 'right', render: (r: any) => num(r.count) },
-                { key: 'amount', label: 'มูลค่า', align: 'right', render: (r: any) => baht(r.amount) },
+            <Section title={t('mf.ra_by_staff_title')}>
+              <DataTable rows={q.data.by_actor} rowKey={(r: any, i) => r.requested_by + i} emptyState={{ icon: ShieldAlert, title: t('mf.ra_no_voids_title'), description: t('mf.ra_adjust_dates2') }} columns={[
+                { key: 'requested_by', label: t('mf.ra_tab_staff') },
+                { key: 'count', label: t('mf.ra_col_times'), align: 'right', render: (r: any) => num(r.count) },
+                { key: 'amount', label: t('mf.ra_col_value'), align: 'right', render: (r: any) => baht(r.amount) },
               ]} />
             </Section>
           </>
@@ -188,18 +190,18 @@ export default function RestaurantAnalyticsPage() {
         {q.data && (
           <>
             <Grid>
-              <StatCard label="พนักงาน" value={num(q.data.summary.staff)} icon={Users} />
-              <StatCard label="ยอดขายรวม" value={baht(q.data.summary.revenue)} tone="success" />
-              <StatCard label="จำนวนบิล" value={num(q.data.summary.sales)} />
+              <StatCard label={t('mf.ra_tab_staff')} value={num(q.data.summary.staff)} icon={Users} />
+              <StatCard label={t('mf.ra_total_revenue')} value={baht(q.data.summary.revenue)} tone="success" />
+              <StatCard label={t('mf.ra_txn_count')} value={num(q.data.summary.sales)} />
             </Grid>
-            <Section title="ผลงานพนักงาน (เรียงตามยอดขาย)">
-              <DataTable rows={q.data.staff} rowKey={(r: any) => r.staff} emptyState={{ icon: Users, title: 'ไม่มีข้อมูลพนักงานในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบนให้ครอบคลุมวันที่มีการขาย แล้วดูใหม่' }} columns={[
-                { key: 'staff', label: 'พนักงาน' },
-                { key: 'sales', label: 'บิล', align: 'right', render: (r: any) => num(r.sales) },
-                { key: 'revenue', label: 'ยอดขาย', align: 'right', render: (r: any) => baht(r.revenue) },
-                { key: 'avg_ticket', label: 'บิลเฉลี่ย', align: 'right', render: (r: any) => baht(r.avg_ticket) },
-                { key: 'voids', label: 'ยกเลิก', align: 'right', render: (r: any) => `${num(r.voids)} (${baht(r.void_amount)})` },
-                { key: 'discounts', label: 'ส่วนลด', align: 'right', render: (r: any) => `${num(r.discounts)} (${baht(r.discount_amount)})` },
+            <Section title={t('mf.ra_staff_perf')}>
+              <DataTable rows={q.data.staff} rowKey={(r: any) => r.staff} emptyState={{ icon: Users, title: t('mf.ra_no_staff_title'), description: t('mf.ra_adjust_dates') }} columns={[
+                { key: 'staff', label: t('mf.ra_tab_staff') },
+                { key: 'sales', label: t('mf.ra_col_bills'), align: 'right', render: (r: any) => num(r.sales) },
+                { key: 'revenue', label: t('mf.ra_revenue'), align: 'right', render: (r: any) => baht(r.revenue) },
+                { key: 'avg_ticket', label: t('mf.ra_avg_ticket'), align: 'right', render: (r: any) => baht(r.avg_ticket) },
+                { key: 'voids', label: t('mf.ra_col_voids'), align: 'right', render: (r: any) => `${num(r.voids)} (${baht(r.void_amount)})` },
+                { key: 'discounts', label: t('mf.ra_col_discounts'), align: 'right', render: (r: any) => `${num(r.discounts)} (${baht(r.discount_amount)})` },
               ]} />
             </Section>
           </>
@@ -216,16 +218,16 @@ export default function RestaurantAnalyticsPage() {
         {q.data && (
           <Grid>
             <StatCard
-              label="ยอดขาย (ช่วงนี้)"
+              label={t('mf.ra_revenue_current')}
               value={baht(q.data.current.revenue)}
               icon={TrendingUp}
               tone="success"
               trend={{ value: pct(q.data.revenue_delta_pct), direction: Number(q.data.revenue_delta) >= 0 ? 'up' : 'down' }}
-              hint={`ช่วงก่อน ${baht(q.data.previous.revenue)} (${q.data.previous.from} – ${q.data.previous.to})`}
+              hint={t('mf.ra_prev_window', { amt: baht(q.data.previous.revenue), from: q.data.previous.from, to: q.data.previous.to })}
             />
-            <StatCard label="จำนวนบิล" value={num(q.data.current.txns)} hint={`${q.data.txn_delta >= 0 ? '+' : ''}${num(q.data.txn_delta)} vs ช่วงก่อน`} />
-            <StatCard label="บิลเฉลี่ย" value={baht(q.data.current.avg_ticket)} hint={`${q.data.avg_ticket_delta >= 0 ? '+' : ''}${baht(q.data.avg_ticket_delta)} vs ช่วงก่อน`} />
-            <StatCard label="ช่วงเวลา" value={`${q.data.window_days} วัน`} />
+            <StatCard label={t('mf.ra_txn_count')} value={num(q.data.current.txns)} hint={t('mf.ra_vs_prev', { delta: `${q.data.txn_delta >= 0 ? '+' : ''}${num(q.data.txn_delta)}` })} />
+            <StatCard label={t('mf.ra_avg_ticket')} value={baht(q.data.current.avg_ticket)} hint={t('mf.ra_vs_prev', { delta: `${q.data.avg_ticket_delta >= 0 ? '+' : ''}${baht(q.data.avg_ticket_delta)}` })} />
+            <StatCard label={t('mf.ra_window')} value={t('mf.days', { n: q.data.window_days })} />
           </Grid>
         )}
       </StateView>
@@ -240,26 +242,26 @@ export default function RestaurantAnalyticsPage() {
         {q.data && (
           <>
             <Grid>
-              <StatCard label="เมนู (มีสูตร)" value={num(q.data.summary.dishes)} icon={Soup} />
-              <StatCard label="หมด (ควร 86)" value={num(q.data.summary.out)} tone="danger" />
-              <StatCard label="ใกล้หมด" value={num(q.data.summary.low)} tone="warning" />
-              <StatCard label="พร้อมขาย" value={num(q.data.summary.ok)} tone="success" />
-              <StatCard label="วัตถุดิบใกล้หมด" value={num(q.data.summary.low_ingredients)} tone="warning" />
+              <StatCard label={t('mf.ra_dishes_with_recipe')} value={num(q.data.summary.dishes)} icon={Soup} />
+              <StatCard label={t('mf.ra_out')} value={num(q.data.summary.out)} tone="danger" />
+              <StatCard label={t('mf.ra_low')} value={num(q.data.summary.low)} tone="warning" />
+              <StatCard label={t('mf.available')} value={num(q.data.summary.ok)} tone="success" />
+              <StatCard label={t('mf.ra_low_ingredients')} value={num(q.data.summary.low_ingredients)} tone="warning" />
             </Grid>
-            <Section title="ทำได้อีกกี่จาน (จากวัตถุดิบที่จำกัดที่สุด)">
-              <DataTable rows={q.data.items} rowKey={(r: any) => r.sku} emptyState={{ icon: Soup, title: 'ยังไม่มีเมนูที่มีสูตร', description: 'เพิ่มสูตร/BoM ให้เมนู เพื่อให้ระบบคำนวณจำนวนที่ทำได้จากวัตถุดิบคงเหลือ' }} columns={[
-                { key: 'name', label: 'เมนู' },
-                { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={AVAIL[r.status] ?? 'muted'}>{r.status}</Badge> },
-                { key: 'servings_left', label: 'ทำได้อีก', align: 'right', render: (r: any) => (r.servings_left == null ? '—' : num(r.servings_left)) },
-                { key: 'limiting', label: 'วัตถุดิบที่จำกัด', render: (r: any) => r.limiting_ingredient ? `${r.limiting_ingredient.description ?? r.limiting_ingredient.item_id} (${num(r.limiting_ingredient.stock)})` : '—' },
+            <Section title={t('mf.ra_servings_section')}>
+              <DataTable rows={q.data.items} rowKey={(r: any) => r.sku} emptyState={{ icon: Soup, title: t('mf.ra_no_recipe_title'), description: t('mf.ra_no_recipe_desc') }} columns={[
+                { key: 'name', label: t('mf.col_dish') },
+                { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={AVAIL[r.status] ?? 'muted'}>{r.status}</Badge> },
+                { key: 'servings_left', label: t('mf.ra_col_servings_left'), align: 'right', render: (r: any) => (r.servings_left == null ? '—' : num(r.servings_left)) },
+                { key: 'limiting', label: t('mf.ra_col_limiting'), render: (r: any) => r.limiting_ingredient ? `${r.limiting_ingredient.description ?? r.limiting_ingredient.item_id} (${num(r.limiting_ingredient.stock)})` : '—' },
               ]} />
             </Section>
             {q.data.low_ingredients.length > 0 && (
-              <Section title="วัตถุดิบใกล้/ถึงจุดสั่งซื้อ">
+              <Section title={t('mf.ra_low_ing_section')}>
                 <DataTable rows={q.data.low_ingredients} rowKey={(r: any) => r.item_id} columns={[
-                  { key: 'description', label: 'วัตถุดิบ', render: (r: any) => r.description ?? r.item_id },
-                  { key: 'stock', label: 'คงเหลือ', align: 'right', render: (r: any) => num(r.stock) },
-                  { key: 'reorder_point', label: 'จุดสั่งซื้อ', align: 'right', render: (r: any) => num(r.reorder_point) },
+                  { key: 'description', label: t('mf.col_material'), render: (r: any) => r.description ?? r.item_id },
+                  { key: 'stock', label: t('mf.col_stock'), align: 'right', render: (r: any) => num(r.stock) },
+                  { key: 'reorder_point', label: t('mf.ra_col_reorder'), align: 'right', render: (r: any) => num(r.reorder_point) },
                 ]} />
               </Section>
             )}

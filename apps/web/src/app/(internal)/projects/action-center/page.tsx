@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, BellRing, CircleAlert, Inbox, Wifi, WifiOff } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { useRealtime } from '@/hooks/use-realtime';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -15,7 +16,7 @@ import { Button } from '@/components/ui/button';
 // Severity → tone for the badge + the left accent rail. high = act now, medium = approvals/schedule, low = hygiene.
 const sevBadge: Record<string, 'destructive' | 'warning' | 'muted'> = { high: 'destructive', medium: 'warning', low: 'muted' };
 const sevRail: Record<string, string> = { high: 'border-l-destructive', medium: 'border-l-warning', low: 'border-l-muted-foreground/40' };
-const sevLabel: Record<string, string> = { high: 'ด่วน (High)', medium: 'ปานกลาง (Medium)', low: 'ทั่วไป (Low)' };
+const SEV_LABEL_KEY: Record<string, string> = { high: 'pj.sev_high', medium: 'pj.sev_medium', low: 'pj.sev_low' };
 
 interface ActionItem {
   kind: string; severity: 'high' | 'medium' | 'low';
@@ -23,6 +24,7 @@ interface ActionItem {
 }
 
 export default function ActionCenterPage() {
+  const { t } = useLang();
   const router = useRouter();
   const q = useQuery<any>({ queryKey: ['projects', 'action-center'], queryFn: () => api('/api/projects/action-center') });
   // Proactive: a project_action event (project went red / unmitigated-high risk logged) re-pulls the worklist
@@ -38,12 +40,12 @@ export default function ActionCenterPage() {
   return (
     <div>
       <PageHeader
-        title="ศูนย์งานที่ต้องทำ (Action Center)"
-        description="รายการเดียวจบ — สิ่งที่ต้องอนุมัติ ตัดสินใจ หรือแก้ไขทั่วทั้งพอร์ตโครงการ จัดเรียงตามความเร่งด่วน"
+        title={t('pj.action_center_title')}
+        description={t('pj.action_center_desc')}
         actions={
           <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
             {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />}
-            {connected ? 'เรียลไทม์' : 'ออฟไลน์'}
+            {connected ? t('pj.realtime') : t('pj.offline')}
           </Badge>
         }
       />
@@ -51,24 +53,24 @@ export default function ActionCenterPage() {
       <StateView q={q}>
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="ทั้งหมด (Total)" value={d?.summary?.total ?? 0} icon={Inbox} tone="default" />
-            <StatCard label="ด่วน (High)" value={d?.summary?.high ?? 0} icon={AlertTriangle} tone={(d?.summary?.high ?? 0) > 0 ? 'danger' : 'success'} hint="ต้องลงมือทันที" />
-            <StatCard label="ปานกลาง (Medium)" value={d?.summary?.medium ?? 0} icon={CircleAlert} tone={(d?.summary?.medium ?? 0) > 0 ? 'warning' : 'default'} hint="รออนุมัติ / กำหนดการ" />
-            <StatCard label="ทั่วไป (Low)" value={d?.summary?.low ?? 0} icon={BellRing} tone="default" hint="สุขภาพ / ธรรมาภิบาล" />
+            <StatCard label={t('pj.stat_total')} value={d?.summary?.total ?? 0} icon={Inbox} tone="default" />
+            <StatCard label={t('pj.stat_high')} value={d?.summary?.high ?? 0} icon={AlertTriangle} tone={(d?.summary?.high ?? 0) > 0 ? 'danger' : 'success'} hint={t('pj.hint_act_now')} />
+            <StatCard label={t('pj.stat_medium')} value={d?.summary?.medium ?? 0} icon={CircleAlert} tone={(d?.summary?.medium ?? 0) > 0 ? 'warning' : 'default'} hint={t('pj.hint_approvals_schedule')} />
+            <StatCard label={t('pj.stat_low')} value={d?.summary?.low ?? 0} icon={BellRing} tone="default" hint={t('pj.hint_health_gov')} />
           </div>
 
           {items.length === 0 ? (
             <Card className="flex flex-col items-center gap-2 p-10 text-center">
               <Inbox className="size-8 text-muted-foreground" />
-              <p className="text-base font-medium">ไม่มีงานค้าง</p>
-              <p className="text-sm text-muted-foreground">ทุกโครงการอยู่ในเกณฑ์ — ไม่มีรายการที่ต้องดำเนินการ</p>
+              <p className="text-base font-medium">{t('pj.no_pending')}</p>
+              <p className="text-sm text-muted-foreground">{t('pj.no_pending_desc')}</p>
             </Card>
           ) : (
             groups.map(([sev, xs]) => (
               <div key={sev} className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Badge variant={sevBadge[sev]}>{sevLabel[sev]}</Badge>
-                  <span className="text-sm text-muted-foreground">{xs.length} รายการ</span>
+                  <Badge variant={sevBadge[sev]}>{t(SEV_LABEL_KEY[sev] ?? sev)}</Badge>
+                  <span className="text-sm text-muted-foreground">{t('pj.n_items', { n: xs.length })}</span>
                 </div>
                 <div className="space-y-2">
                   {xs.map((it, i) => (
@@ -83,7 +85,7 @@ export default function ActionCenterPage() {
                         </p>
                       </div>
                       <Button variant="ghost" size="sm" className="shrink-0" onClick={() => router.push(it.href)}>
-                        เปิด <ArrowRight className="size-4" />
+                        {t('pj.btn_open')} <ArrowRight className="size-4" />
                       </Button>
                     </Card>
                   ))}

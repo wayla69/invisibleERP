@@ -6,6 +6,7 @@ import { baht } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { onBarcodeScan } from '@/lib/peripherals';
 import { notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { SearchInput } from '@/components/search-input';
 import type { MenuItem, MenuResp } from './types';
 import { sellable } from './types';
@@ -21,6 +22,7 @@ export function MenuGrid({ data, onPick, favIds, onToggleFav, className }: {
   onToggleFav?: (id: number) => void;
   className?: string;
 }) {
+  const { t } = useLang();
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState<CatKey>('all');
 
@@ -40,11 +42,11 @@ export function MenuGrid({ data, onPick, favIds, onToggleFav, className }: {
     return onBarcodeScan((code) => {
       const sku = code.trim();
       const it = allItems.find((i) => i.sku.toLowerCase() === sku.toLowerCase());
-      if (!it) { notifyError(`ไม่พบสินค้ารหัส ${sku}`); return; }
-      if (!sellable(it)) { notifyError(`${it.name} ปิดการขายอยู่`); return; }
+      if (!it) { notifyError(t('px.menu_not_found', { sku })); return; }
+      if (!sellable(it)) { notifyError(t('px.menu_item_disabled', { name: it.name })); return; }
       onPick(it);
     });
-  }, [allItems, onPick]);
+  }, [allItems, onPick, t]);
 
   const favSet = favIds ?? new Set<number>();
 
@@ -72,17 +74,17 @@ export function MenuGrid({ data, onPick, favIds, onToggleFav, className }: {
 
   return (
     <div className={cn('flex min-h-0 flex-col gap-3', className)}>
-      <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาเมนู / สแกนบาร์โค้ด…" ariaLabel="ค้นหาเมนู" />
+      <SearchInput value={search} onChange={setSearch} placeholder={t('px.menu_search_ph')} ariaLabel={t('px.menu_search_aria')} />
 
       {!search && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="หมวดหมู่เมนู">
+        <div className="flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label={t('px.menu_cats_aria')}>
           {onToggleFav && (
-            <button type="button" className={chip(cat === 'fav')} onClick={() => setCat('fav')} title="รายการโปรด">
+            <button type="button" className={chip(cat === 'fav')} onClick={() => setCat('fav')} title={t('px.menu_favorites')}>
               <Star className={cn('mr-1 inline size-3.5 align-middle', favSet.size > 0 && cat === 'fav' && 'fill-current')} />
-              รายการโปรด {favSet.size > 0 && `(${favSet.size})`}
+              {t('px.menu_favorites')} {favSet.size > 0 && `(${favSet.size})`}
             </button>
           )}
-          <button type="button" className={chip(cat === 'all')} onClick={() => setCat('all')}>ทั้งหมด</button>
+          <button type="button" className={chip(cat === 'all')} onClick={() => setCat('all')}>{t('px.menu_all')}</button>
           {data.categories.filter((c) => c.items.length > 0).map((c) => (
             <button key={c.id} type="button" className={chip(cat === c.id)} onClick={() => setCat(c.id)}>
               {c.color && <span className="mr-1.5 inline-block size-2 rounded-full align-middle" style={{ background: c.color }} />}
@@ -90,7 +92,7 @@ export function MenuGrid({ data, onPick, favIds, onToggleFav, className }: {
             </button>
           ))}
           {data.uncategorized.length > 0 && (
-            <button type="button" className={chip(cat === 'none')} onClick={() => setCat('none')}>อื่นๆ</button>
+            <button type="button" className={chip(cat === 'none')} onClick={() => setCat('none')}>{t('px.menu_other')}</button>
           )}
         </div>
       )}
@@ -100,7 +102,7 @@ export function MenuGrid({ data, onPick, favIds, onToggleFav, className }: {
           <div className="grid h-40 place-items-center text-center text-sm text-muted-foreground">
             <div>
               <UtensilsCrossed className="mx-auto mb-2 size-7 opacity-40" />
-              {search ? 'ไม่พบเมนูที่ค้นหา' : cat === 'fav' ? 'ยังไม่มีรายการโปรด — กด ★ บนการ์ดเมนูเพื่อเพิ่ม' : 'ยังไม่มีเมนูในหมวดนี้'}
+              {search ? t('px.menu_no_results') : cat === 'fav' ? t('px.menu_no_favorites') : t('px.menu_no_items')}
             </div>
           </div>
         ) : (
@@ -132,12 +134,12 @@ export function MenuGrid({ data, onPick, favIds, onToggleFav, className }: {
                     )}
                     {!ok && (
                       <span className="absolute right-1 top-1 rounded bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
-                        ปิดขาย
+                        {t('px.menu_closed')}
                       </span>
                     )}
                     {it.has_modifiers && ok && (
                       <span className="absolute right-1 top-1 rounded bg-primary/90 px-1 text-[10px] font-medium text-primary-foreground">
-                        ตัวเลือก
+                        {t('px.menu_options')}
                       </span>
                     )}
                   </div>
@@ -148,7 +150,7 @@ export function MenuGrid({ data, onPick, favIds, onToggleFav, className }: {
                   {onToggleFav && (
                     <button
                       type="button"
-                      aria-label={isFav ? 'ลบออกจากรายการโปรด' : 'เพิ่มในรายการโปรด'}
+                      aria-label={isFav ? t('px.menu_aria_unfav') : t('px.menu_aria_fav')}
                       onClick={(e) => { e.stopPropagation(); onToggleFav(it.id); }}
                       className={cn(
                         'absolute left-1 top-1 rounded p-0.5 transition-colors',

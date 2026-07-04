@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download, FileSpreadsheet, QrCode, Upload } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Msg } from '@/components/tabs';
@@ -20,6 +21,7 @@ interface ImpErr { row: number; column?: string; code: string; message: string; 
 interface ValidateReport { entity: string; mode: string; total: number; valid: number; invalid: number; errors: ImpErr[] }
 
 export default function MasterDataPage() {
+  const { t } = useLang();
   const list = useQuery<{ entities: Entity[] }>({ queryKey: ['md-entities'], queryFn: () => api('/api/admin/master-data/entities') });
   const [sel, setSel] = useState('');
   const [mode, setMode] = useState<'append' | 'replace'>('append');
@@ -56,7 +58,7 @@ export default function MasterDataPage() {
         method: 'POST', body: JSON.stringify({ format: 'csv', mode, csv }),
       });
       setReport(r);
-      setMsg(r.invalid ? `⚠️ ตรวจสอบแล้ว: ถูกต้อง ${r.valid}/${r.total} · ผิดพลาด ${r.invalid}` : `✅ ตรวจสอบแล้ว: ถูกต้องครบ ${r.valid}/${r.total}`);
+      setMsg(r.invalid ? `⚠️ ${t('st.md.validated_some', { valid: r.valid, total: r.total, invalid: r.invalid })}` : `✅ ${t('st.md.validated_all', { valid: r.valid, total: r.total })}`);
     } catch (e: any) {
       setMsg(`❌ ${e.message}`);
     } finally {
@@ -75,9 +77,9 @@ export default function MasterDataPage() {
         { method: 'POST', body: JSON.stringify({ format: 'csv', mode, csv: csvText, skip_errors: skipErrors }) },
       );
       if (r.status === 'invalid') {
-        setMsg(`❌ มีข้อผิดพลาด ${r.errors.length} รายการ — แก้ไขไฟล์ หรือเลือก "ข้ามแถวที่ผิด"`);
+        setMsg(`❌ ${t('st.md.commit_errors', { n: r.errors.length })}`);
       } else {
-        setMsg(`✅ นำเข้า ${r.imported} แถวเข้า ${ent.label_th}${r.skipped ? ` · ข้าม ${r.skipped}` : ''}`);
+        setMsg(`✅ ${t('st.md.imported', { n: r.imported, entity: ent.label_th })}${r.skipped ? ` · ${t('st.md.skipped_suffix', { n: r.skipped })}` : ''}`);
         setReport(null); setCsvText('');
       }
     } catch (e: any) {
@@ -89,40 +91,40 @@ export default function MasterDataPage() {
 
   return (
     <div>
-      <PageHeader title="ข้อมูลหลัก (Master Data)" description="นำเข้า / ส่งออก ข้อมูลหลักทุกประเภท (สินค้า ลูกค้า ผู้ขาย คลัง ราคา โปรโมชั่น BoM ทรัพย์สิน)" />
+      <PageHeader title={t('st.md.title')} description={t('st.md.desc')} />
       <StateView q={list}>
         <div className="space-y-4">
           <Card className="gap-3 p-5">
             <div className="grid gap-1.5 max-w-sm">
-              <Label htmlFor="md-ent">ประเภทข้อมูล</Label>
+              <Label htmlFor="md-ent">{t('st.md.data_type')}</Label>
               <select id="md-ent" className={selectCls} value={key ?? ''} onChange={(e) => setSel(e.target.value)}>
                 {entities.map((e) => <option key={e.key} value={e.key}>{e.label_th} ({e.label_en})</option>)}
               </select>
             </div>
             {ent && (
               <div className="text-sm text-muted-foreground">
-                คอลัมน์ที่จำเป็น: {ent.required.map((c) => <code key={c} className="mx-0.5 rounded bg-muted px-1 py-0.5 text-xs">{c}</code>)}
+                {t('st.md.required_cols')}: {ent.required.map((c) => <code key={c} className="mx-0.5 rounded bg-muted px-1 py-0.5 text-xs">{c}</code>)}
               </div>
             )}
             <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </Card>
 
           <Card className="gap-3 p-5">
-            <h3 className="text-base font-semibold">พิมพ์ป้าย QR สินค้า (Item QR Labels)</h3>
-            <p className="text-sm text-muted-foreground">สร้างแผ่นป้าย QR (A4) สำหรับสินค้าทั้งหมด เพื่อสแกนในงานคลัง</p>
+            <h3 className="text-base font-semibold">{t('st.md.qr_title')}</h3>
+            <p className="text-sm text-muted-foreground">{t('st.md.qr_desc')}</p>
             <Button
               variant="outline" className="w-fit" disabled={busy === 'qr'}
               onClick={() => dlPost('/api/inventory/qr/labels', 'item_qr_labels.pdf', { limit: 500 }, 'qr')}
             >
-              <QrCode className="size-4" /> {busy === 'qr' ? 'กำลังสร้าง…' : 'ดาวน์โหลดป้าย QR สินค้า'}
+              <QrCode className="size-4" /> {busy === 'qr' ? t('st.md.generating') : t('st.md.qr_download')}
             </Button>
           </Card>
 
           {ent && (
             <div className="grid gap-4 md:grid-cols-2">
               <Card className="gap-3 p-5">
-                <h3 className="text-base font-semibold">ส่งออก (Export)</h3>
-                <p className="text-sm text-muted-foreground">ดาวน์โหลดข้อมูลปัจจุบันเพื่อดูหรือแก้ไขแล้วนำเข้ากลับ</p>
+                <h3 className="text-base font-semibold">{t('st.md.export_title')}</h3>
+                <p className="text-sm text-muted-foreground">{t('st.md.export_desc')}</p>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" disabled={!!busy} onClick={() => dl(`/api/admin/master-data/${key}/export`, `${key}.xlsx`, 'xlsx')}>
                     <FileSpreadsheet className="size-4" /> Excel
@@ -131,46 +133,46 @@ export default function MasterDataPage() {
                     <Download className="size-4" /> CSV
                   </Button>
                   <Button variant="outline" disabled={!!busy} onClick={() => dl(`/api/admin/master-data/${key}/template`, `${key}_template.xlsx`, 'tpl')}>
-                    <Download className="size-4" /> แบบฟอร์ม (Template)
+                    <Download className="size-4" /> {t('st.md.template')}
                   </Button>
                 </div>
               </Card>
 
               <Card className="gap-3 p-5">
-                <h3 className="text-base font-semibold">นำเข้า (Import)</h3>
-                <p className="text-sm text-muted-foreground">อัปโหลดไฟล์ CSV — ระบบจะตรวจสอบทุกแถวก่อน แล้วให้ยืนยันนำเข้า</p>
+                <h3 className="text-base font-semibold">{t('st.md.import_title')}</h3>
+                <p className="text-sm text-muted-foreground">{t('st.md.import_desc')}</p>
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="grid gap-1.5">
-                    <Label htmlFor="md-mode">โหมด</Label>
+                    <Label htmlFor="md-mode">{t('st.md.mode')}</Label>
                     <select id="md-mode" className={`${selectCls} max-w-[200px]`} value={mode} onChange={(e) => setMode(e.target.value as any)}>
-                      <option value="append">เพิ่ม / ข้ามที่ซ้ำ (Append)</option>
-                      <option value="replace" disabled={!ent.allow_replace}>แทนที่ทั้งหมด (Replace){!ent.allow_replace ? ' — ไม่อนุญาต' : ''}</option>
+                      <option value="append">{t('st.md.mode_append')}</option>
+                      <option value="replace" disabled={!ent.allow_replace}>{t('st.md.mode_replace')}{!ent.allow_replace ? ` — ${t('st.md.not_allowed')}` : ''}</option>
                     </select>
                   </div>
                   <Button disabled={!!busy} onClick={() => fileRef.current?.click()}>
-                    <Upload className="size-4" /> {busy === 'validate' ? 'กำลังตรวจสอบ…' : 'เลือกไฟล์ CSV เพื่อตรวจสอบ'}
+                    <Upload className="size-4" /> {busy === 'validate' ? t('st.md.validating') : t('st.md.choose_csv')}
                   </Button>
                   <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
                 </div>
-                {mode === 'replace' && <Badge variant="destructive">โหมดแทนที่จะลบข้อมูลเดิมทั้งหมดก่อนนำเข้า</Badge>}
+                {mode === 'replace' && <Badge variant="destructive">{t('st.md.replace_warn')}</Badge>}
               </Card>
 
               {report && (
                 <Card className="gap-3 p-5 md:col-span-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-base font-semibold">ตรวจทานก่อนนำเข้า (Preview)</h3>
+                    <h3 className="text-base font-semibold">{t('st.md.preview_title')}</h3>
                     <div className="flex gap-2 text-sm">
-                      <Badge variant="success">ถูกต้อง {report.valid}</Badge>
-                      {report.invalid > 0 && <Badge variant="destructive">ผิดพลาด {report.invalid}</Badge>}
-                      <Badge variant="muted">รวม {report.total}</Badge>
+                      <Badge variant="success">{t('st.md.valid_badge')} {report.valid}</Badge>
+                      {report.invalid > 0 && <Badge variant="destructive">{t('st.md.invalid_badge')} {report.invalid}</Badge>}
+                      <Badge variant="muted">{t('st.md.total_badge')} {report.total}</Badge>
                     </div>
                   </div>
                   {report.errors.length > 0 && (
                     <div className="max-h-64 overflow-auto rounded border">
                       <table className="w-full text-sm">
                         <thead className="sticky top-0 bg-muted">
-                          <tr><th className="px-2 py-1 text-left">แถว</th><th className="px-2 py-1 text-left">คอลัมน์</th><th className="px-2 py-1 text-left">ปัญหา</th></tr>
+                          <tr><th className="px-2 py-1 text-left">{t('st.md.col_row')}</th><th className="px-2 py-1 text-left">{t('st.md.col_column')}</th><th className="px-2 py-1 text-left">{t('st.md.col_issue')}</th></tr>
                         </thead>
                         <tbody>
                           {report.errors.slice(0, 200).map((er, i) => (
@@ -188,13 +190,13 @@ export default function MasterDataPage() {
                     {report.invalid > 0 && (
                       <label className="flex items-center gap-2 text-sm">
                         <input type="checkbox" checked={skipErrors} onChange={(e) => setSkipErrors(e.target.checked)} />
-                        ข้ามแถวที่ผิด แล้วนำเข้าเฉพาะที่ถูกต้อง
+                        {t('st.md.skip_errors_label')}
                       </label>
                     )}
                     <Button disabled={busy === 'commit' || (report.invalid > 0 && !skipErrors)} onClick={commit}>
-                      {busy === 'commit' ? 'กำลังนำเข้า…' : `ยืนยันนำเข้า ${report.invalid > 0 && skipErrors ? report.valid : report.total} แถว`}
+                      {busy === 'commit' ? t('st.md.importing') : t('st.md.confirm_import', { n: report.invalid > 0 && skipErrors ? report.valid : report.total })}
                     </Button>
-                    <Button variant="outline" disabled={!!busy} onClick={() => { setReport(null); setCsvText(''); setMsg(''); }}>ยกเลิก</Button>
+                    <Button variant="outline" disabled={!!busy} onClick={() => { setReport(null); setCsvText(''); setMsg(''); }}>{t('fin.cancel')}</Button>
                   </div>
                 </Card>
               )}

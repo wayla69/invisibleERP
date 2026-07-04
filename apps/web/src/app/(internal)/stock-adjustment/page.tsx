@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ClipboardCheck, PackageMinus, SlidersHorizontal, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { ModulePage } from '@/components/module-page';
@@ -29,6 +30,7 @@ interface Writeoff { id: number; writeoff_no: string; item_id: string; item_desc
 interface WriteoffList { writeoffs: Writeoff[] }
 
 export default function StockAdjustmentPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [directOpen, setDirectOpen] = useState(false);
 
@@ -48,60 +50,60 @@ export default function StockAdjustmentPage() {
   const postCount = useMutation({
     mutationFn: (stNo: string) => api(`/api/stocktake/${encodeURIComponent(stNo)}/post`, { method: 'POST', body: '{}' }),
     onSuccess: (r: any, stNo) => {
-      notifySuccess(`ลงบัญชีใบนับ ${stNo} (${r?.variance_movements ?? 0} รายการปรับ)`);
+      notifySuccess(t('iv.adj_post_success', { stNo, n: r?.variance_movements ?? 0 }));
       qc.invalidateQueries({ queryKey: ['stocktakes'] });
     },
-    onError: (e: any) => notifyError(e?.message ?? 'ลงบัญชีไม่สำเร็จ'),
+    onError: (e: any) => notifyError(e?.message ?? t('iv.adj_post_error')),
   });
 
   const approveWo = useMutation({
     mutationFn: (id: number) => api(`/api/inventory/writeoffs/${id}/approve`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess('อนุมัติการตัดสต๊อกสำเร็จ'); qc.invalidateQueries({ queryKey: ['writeoffs'] }); },
-    onError: (e: any) => notifyError(e?.message ?? 'อนุมัติไม่สำเร็จ'),
+    onSuccess: () => { notifySuccess(t('iv.adj_wo_approve_success')); qc.invalidateQueries({ queryKey: ['writeoffs'] }); },
+    onError: (e: any) => notifyError(e?.message ?? t('iv.adj_approve_error')),
   });
 
   const rejectWo = useMutation({
     mutationFn: (id: number) => api(`/api/inventory/writeoffs/${id}/reject`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess('ปฏิเสธการตัดสต๊อกแล้ว'); qc.invalidateQueries({ queryKey: ['writeoffs'] }); },
-    onError: (e: any) => notifyError(e?.message ?? 'ปฏิเสธไม่สำเร็จ'),
+    onSuccess: () => { notifySuccess(t('iv.adj_wo_reject_success')); qc.invalidateQueries({ queryKey: ['writeoffs'] }); },
+    onError: (e: any) => notifyError(e?.message ?? t('iv.adj_reject_error')),
   });
 
   const countCols: Column<Stocktake>[] = [
-    { key: 'st_no', label: 'เลขที่', render: (r) => <span className="font-medium">{r.st_no}</span> },
-    { key: 'st_date', label: 'วันที่นับ', render: (r) => thaiDate(r.st_date) },
-    { key: 'counted_by', label: 'ผู้นับ' },
-    { key: 'lines', label: 'รายการ', align: 'right', render: (r) => num(r.lines) },
-    { key: 'variance_lines', label: 'มีผลต่าง', align: 'right', render: (r) => <span className={r.variance_lines > 0 ? 'font-medium text-destructive' : ''}>{num(r.variance_lines)}</span> },
-    { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+    { key: 'st_no', label: t('dash.col_no'), render: (r) => <span className="font-medium">{r.st_no}</span> },
+    { key: 'st_date', label: t('iv.adj_col_count_date'), render: (r) => thaiDate(r.st_date) },
+    { key: 'counted_by', label: t('iv.adj_col_counted_by') },
+    { key: 'lines', label: t('iv.adj_col_lines'), align: 'right', render: (r) => num(r.lines) },
+    { key: 'variance_lines', label: t('iv.adj_col_variance_lines'), align: 'right', render: (r) => <span className={r.variance_lines > 0 ? 'font-medium text-destructive' : ''}>{num(r.variance_lines)}</span> },
+    { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
     {
-      key: 'st_no', label: 'การดำเนินการ',
+      key: 'st_no', label: t('iv.adj_col_action'),
       render: (r) => (
         <Button size="sm" className="h-7 gap-1" disabled={postCount.isPending}
           onClick={() => postCount.mutate(r.st_no)}>
-          <ClipboardCheck className="size-3.5" />ลงบัญชีผลต่าง
+          <ClipboardCheck className="size-3.5" />{t('iv.adj_post_variance')}
         </Button>
       ),
     },
   ];
 
   const woCols: Column<Writeoff>[] = [
-    { key: 'writeoff_no', label: 'เลขที่ตัดสต๊อก', render: (r) => <span className="font-medium">{r.writeoff_no}</span> },
-    { key: 'item_id', label: 'รหัสสินค้า' },
-    { key: 'item_description', label: 'สินค้า', render: (r) => r.item_description ?? '—' },
-    { key: 'qty', label: 'จำนวน', align: 'right', render: (r) => <span className="tabular text-destructive">−{num(r.qty)} {r.uom ?? ''}</span> },
-    { key: 'reason', label: 'เหตุผล', render: (r) => r.reason ?? '—' },
-    { key: 'requested_by', label: 'ผู้ขอ' },
+    { key: 'writeoff_no', label: t('iv.adj_col_wo_no'), render: (r) => <span className="font-medium">{r.writeoff_no}</span> },
+    { key: 'item_id', label: t('iv.adj_col_item_code') },
+    { key: 'item_description', label: t('iv.adj_col_item'), render: (r) => r.item_description ?? '—' },
+    { key: 'qty', label: t('inv.col_qty'), align: 'right', render: (r) => <span className="tabular text-destructive">−{num(r.qty)} {r.uom ?? ''}</span> },
+    { key: 'reason', label: t('iv.adj_col_reason'), render: (r) => r.reason ?? '—' },
+    { key: 'requested_by', label: t('iv.adj_col_requested_by') },
     {
-      key: 'id', label: 'การดำเนินการ',
+      key: 'id', label: t('iv.adj_col_action'),
       render: (r) => (
         <div className="flex gap-1.5">
           <Button size="sm" variant="secondary" className="h-7 gap-1 text-green-700"
             disabled={approveWo.isPending} onClick={() => approveWo.mutate(r.id)}>
-            <CheckCircle2 className="size-3.5" />อนุมัติ
+            <CheckCircle2 className="size-3.5" />{t('fin.approve')}
           </Button>
           <Button size="sm" variant="ghost" className="h-7 gap-1 text-destructive"
             disabled={rejectWo.isPending} onClick={() => rejectWo.mutate(r.id)}>
-            <XCircle className="size-3.5" />ปฏิเสธ
+            <XCircle className="size-3.5" />{t('iv.adj_reject')}
           </Button>
         </div>
       ),
@@ -110,19 +112,19 @@ export default function StockAdjustmentPage() {
 
   return (
     <ModulePage
-      title="อนุมัติปรับสต๊อก (Stock Adjustment)"
-      description="Inventory Controller ลงบัญชีผลต่างจากใบนับสต๊อก และอนุมัติการตัดสต๊อก — ต้องมีสิทธิ์ wh_adjust เท่านั้น (SoD R11)"
+      title={t('iv.adj_title')}
+      description={t('iv.adj_desc')}
       query={pending}
       actions={
         <Button size="sm" variant="outline" onClick={() => setDirectOpen(true)}>
-          <SlidersHorizontal className="mr-1.5 size-4" />ปรับสต๊อกโดยตรง
+          <SlidersHorizontal className="mr-1.5 size-4" />{t('iv.adj_direct')}
         </Button>
       }
       stats={
         <>
-          <StatCard label="รออนุมัติ" value={num(totalPending)} icon={ClipboardCheck} tone={totalPending > 0 ? 'warning' : 'default'} />
-          <StatCard label="ใบนับรอลงบัญชี" value={num(counts.length)} icon={ClipboardCheck} tone={counts.length > 0 ? 'primary' : 'default'} />
-          <StatCard label="ตัดสต๊อกรออนุมัติ" value={num(writeoffs.data?.writeoffs.length ?? 0)} icon={PackageMinus} tone={(writeoffs.data?.writeoffs.length ?? 0) > 0 ? 'warning' : 'default'} />
+          <StatCard label={t('iv.adj_stat_pending')} value={num(totalPending)} icon={ClipboardCheck} tone={totalPending > 0 ? 'warning' : 'default'} />
+          <StatCard label={t('iv.adj_stat_counts')} value={num(counts.length)} icon={ClipboardCheck} tone={counts.length > 0 ? 'primary' : 'default'} />
+          <StatCard label={t('iv.adj_stat_wo')} value={num(writeoffs.data?.writeoffs.length ?? 0)} icon={PackageMinus} tone={(writeoffs.data?.writeoffs.length ?? 0) > 0 ? 'warning' : 'default'} />
         </>
       }
       statsClassName="xl:grid-cols-3"
@@ -131,25 +133,25 @@ export default function StockAdjustmentPage() {
         tabs={[
           {
             key: 'counts',
-            label: `ใบนับรอลงบัญชี (${counts.length})`,
+            label: t('iv.adj_tab_counts', { n: counts.length }),
             content: (
               <DataTable
                 rows={counts}
                 rowKey={(r) => r.st_no}
-                emptyState={{ icon: ClipboardCheck, title: 'ไม่มีใบนับที่รอลงบัญชี', description: 'ใบนับที่ Stock Counter บันทึกเสร็จจะปรากฏที่นี่' }}
+                emptyState={{ icon: ClipboardCheck, title: t('iv.adj_empty_counts_title'), description: t('iv.adj_empty_counts_desc') }}
                 columns={countCols}
               />
             ),
           },
           {
             key: 'writeoffs',
-            label: `ตัดสต๊อกรออนุมัติ (${writeoffs.data?.writeoffs.length ?? 0})`,
+            label: t('iv.adj_tab_wo', { n: writeoffs.data?.writeoffs.length ?? 0 }),
             content: (
               <StateView q={writeoffs}>
                 <DataTable
                   rows={writeoffs.data?.writeoffs ?? []}
                   rowKey={(r) => r.writeoff_no}
-                  emptyState={{ icon: PackageMinus, title: 'ไม่มีการตัดสต๊อกที่รออนุมัติ', description: 'คำขอตัดสต๊อกจากพนักงานคลังจะปรากฏที่นี่' }}
+                  emptyState={{ icon: PackageMinus, title: t('iv.adj_empty_wo_title'), description: t('iv.adj_empty_wo_desc') }}
                   columns={woCols}
                 />
               </StateView>
@@ -164,42 +166,43 @@ export default function StockAdjustmentPage() {
 }
 
 function DirectAdjustDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const { t } = useLang();
   const [itemId, setItemId] = useState('');
   const [delta, setDelta] = useState('');
   const [reason, setReason] = useState('');
 
   const adj = useMutation({
     mutationFn: () => api('/api/inventory/adjustments', { method: 'POST', body: JSON.stringify({ item_id: itemId, qty_delta: Number(delta), reason }) }),
-    onSuccess: () => { notifySuccess('ปรับสต๊อกสำเร็จ'); onDone(); },
-    onError: (e: any) => notifyError(e?.message ?? 'ปรับสต๊อกไม่สำเร็จ'),
+    onSuccess: () => { notifySuccess(t('iv.adj_direct_success')); onDone(); },
+    onError: (e: any) => notifyError(e?.message ?? t('iv.adj_direct_error')),
   });
 
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>ปรับสต๊อกโดยตรง (Direct Adjustment)</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('iv.adj_direct_title')}</DialogTitle></DialogHeader>
         <Card className="border-0 shadow-none p-0">
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="adj-item">รหัสสินค้า</Label>
-              <Input id="adj-item" value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder="เช่น P001" />
+              <Label htmlFor="adj-item">{t('iv.adj_col_item_code')}</Label>
+              <Input id="adj-item" value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder={t('iv.adj_item_ph')} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="adj-delta">ผลต่าง (+/-)</Label>
-              <Input id="adj-delta" type="number" value={delta} onChange={(e) => setDelta(e.target.value)} placeholder="เช่น -5 หรือ +10" />
+              <Label htmlFor="adj-delta">{t('iv.adj_delta_label')}</Label>
+              <Input id="adj-delta" type="number" value={delta} onChange={(e) => setDelta(e.target.value)} placeholder={t('iv.adj_delta_ph')} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="adj-reason">เหตุผล</Label>
+              <Label htmlFor="adj-reason">{t('iv.adj_col_reason')}</Label>
               <textarea id="adj-reason" className="min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
                 value={reason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReason(e.target.value)}
-                placeholder="เหตุผลในการปรับสต๊อก…" rows={2} />
+                placeholder={t('iv.adj_reason_ph')} rows={2} />
             </div>
           </div>
         </Card>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>ยกเลิก</Button>
+          <Button variant="outline" onClick={onClose}>{t('fin.cancel')}</Button>
           <Button disabled={!itemId || !delta || adj.isPending} onClick={() => adj.mutate()}>
-            <SlidersHorizontal className="mr-1.5 size-4" />ปรับสต๊อก
+            <SlidersHorizontal className="mr-1.5 size-4" />{t('iv.adj_submit')}
           </Button>
         </DialogFooter>
       </DialogContent>

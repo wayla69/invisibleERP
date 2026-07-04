@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -22,6 +23,7 @@ type AgingRow = { ref: string; party: string | null; due_date: string | null; ou
 type Vendor = { vendor: string; outstanding: number; max_days_overdue: number; open_bills: number };
 
 export function VendorCardsClient() {
+  const { t } = useLang();
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [from, setFrom] = useState(yearStart());
@@ -52,14 +54,14 @@ export function VendorCardsClient() {
 
   return (
     <div>
-      <PageHeader title="การ์ดเจ้าหนี้" description="ดูใบวางบิล การจ่ายชำระ และยอดคงเหลือสะสมของเจ้าหนี้แต่ละราย" />
+      <PageHeader title={t('fnx.vend.title')} description={t('fnx.vend.desc')} />
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="space-y-3">
-          <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาเจ้าหนี้…" count={`${vendors.length} ราย`} />
+          <SearchInput value={search} onChange={setSearch} placeholder={t('fnx.vend.search_ph')} count={t('fnx.vend.count', { n: vendors.length })} />
           <StateView q={agingQ}>
             <div className="space-y-2">
               {vendors.length === 0 && (
-                <Card className="p-6 text-center text-sm text-muted-foreground">ไม่มีเจ้าหนี้ที่มียอดค้าง</Card>
+                <Card className="p-6 text-center text-sm text-muted-foreground">{t('fnx.vend.empty')}</Card>
               )}
               {vendors.map((v) => (
                 <button
@@ -73,14 +75,14 @@ export function VendorCardsClient() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate font-medium">{v.vendor}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{v.open_bills} บิล</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{t('fnx.vend.bills', { n: v.open_bills })}</span>
                   </div>
                   <div className="mt-1 flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">ยอดค้างจ่าย</span>
+                    <span className="text-muted-foreground">{t('fnx.vend.outstanding')}</span>
                     <span className="tabular font-medium">{baht(v.outstanding)}</span>
                   </div>
                   {v.max_days_overdue > 0 && (
-                    <div className="mt-0.5 text-xs text-destructive">เกินกำหนดสูงสุด {v.max_days_overdue} วัน</div>
+                    <div className="mt-0.5 text-xs text-destructive">{t('fnx.vend.max_overdue_days', { days: v.max_days_overdue })}</div>
                   )}
                 </button>
               ))}

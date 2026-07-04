@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileMinus, Coins, Receipt, Plus, ExternalLink, Ban, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -29,14 +30,14 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const PND_TYPES = ['PND3', 'PND53', 'PND1K', 'PND1KS', 'PND2', 'PND2K', 'PND3K'];
 // common income types (see wht-rates.ts); rate falls back to the standard for the income type
-const INCOME_TYPES: { value: string; label: string }[] = [
-  { value: '40(2)', label: '40(2) ค่าจ้าง/ค่านายหน้า' },
-  { value: '40(3)', label: '40(3) ค่าสิทธิ' },
-  { value: '40(4)', label: '40(4) ดอกเบี้ย/เงินปันผล' },
-  { value: '40(5)', label: '40(5) ค่าเช่า' },
-  { value: '40(6)', label: '40(6) วิชาชีพอิสระ' },
-  { value: '40(7)', label: '40(7) ค่ารับเหมา' },
-  { value: '40(8)', label: '40(8) ค่าบริการ/อื่นๆ' },
+const INCOME_TYPES: { value: string; key: string }[] = [
+  { value: '40(2)', key: 'tax.income_40_2' },
+  { value: '40(3)', key: 'tax.income_40_3' },
+  { value: '40(4)', key: 'tax.income_40_4' },
+  { value: '40(5)', key: 'tax.income_40_5' },
+  { value: '40(6)', key: 'tax.income_40_6' },
+  { value: '40(7)', key: 'tax.income_40_7' },
+  { value: '40(8)', key: 'tax.income_40_8' },
 ];
 
 type Cert = {
@@ -50,6 +51,7 @@ type Cert = {
 };
 
 export default function WhtPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [filter, setFilter] = useState('');
   const q = useQuery<{ certificates: Cert[]; count: number }>({
@@ -87,7 +89,7 @@ export default function WhtPage() {
         }),
       }),
     onSuccess: (r) => {
-      notifySuccess(`ออกหนังสือรับรองสำเร็จ: ${r.doc_no}`);
+      notifySuccess(t('tax.cert_issued', { doc: r.doc_no }));
       setPayeeName(''); setPayeeTaxId(''); setAmount(''); setRate('');
       qc.invalidateQueries({ queryKey: ['wht-certs'] });
     },
@@ -99,13 +101,13 @@ export default function WhtPage() {
   return (
     <div>
       <PageHeader
-        title="ภาษีหัก ณ ที่จ่าย (50 ทวิ)"
-        description="หนังสือรับรองการหักภาษี ณ ที่จ่าย — อัตรามาตรฐานตามประเภทเงินได้ (กรอกเองได้)"
+        title={t('tax.wht_title')}
+        description={t('tax.wht_subtitle')}
       />
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <Button variant={filter === '' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('')}>
-          ทั้งหมด
+          {t('tax.all')}
         </Button>
         {PND_TYPES.map((p) => (
           <Button key={p} variant={filter === p ? 'default' : 'outline'} size="sm" onClick={() => setFilter(p)}>
@@ -117,57 +119,57 @@ export default function WhtPage() {
       <Card className="mb-6 max-w-2xl gap-4">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Plus className="size-4" /> ออกหนังสือรับรอง 50 ทวิ
+            <Plus className="size-4" /> {t('tax.wht_issue_card')}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label htmlFor="date-paid">วันที่จ่าย</Label>
+              <Label htmlFor="date-paid">{t('tax.date_paid')}</Label>
               <Input id="date-paid" type="date" value={datePaid} onChange={(e) => setDatePaid(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label>ประเภทผู้รับเงิน</Label>
+              <Label>{t('tax.payee_kind')}</Label>
               <Select value={payeeKind} onValueChange={(v) => setPayeeKind(v as 'person' | 'company')}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="company">นิติบุคคล (company)</SelectItem>
-                  <SelectItem value="person">บุคคลธรรมดา (person)</SelectItem>
+                  <SelectItem value="company">{t('tax.payee_company')}</SelectItem>
+                  <SelectItem value="person">{t('tax.payee_person')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="payee-name">ชื่อผู้ถูกหักภาษี</Label>
-            <Input id="payee-name" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} placeholder="ชื่อผู้รับเงิน" />
+            <Label htmlFor="payee-name">{t('tax.payee_name')}</Label>
+            <Input id="payee-name" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} placeholder={t('tax.payee_name_ph')} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="payee-taxid">เลขประจำตัวผู้เสียภาษี (13 หลัก)</Label>
-            <Input id="payee-taxid" value={payeeTaxId} onChange={(e) => setPayeeTaxId(e.target.value)} placeholder="เลข 13 หลัก" />
+            <Label htmlFor="payee-taxid">{t('tax.taxid_13')}</Label>
+            <Input id="payee-taxid" value={payeeTaxId} onChange={(e) => setPayeeTaxId(e.target.value)} placeholder={t('tax.taxid_13_ph')} />
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="grid gap-2">
-              <Label>ประเภทเงินได้</Label>
+              <Label>{t('tax.income_type')}</Label>
               <Select value={incomeType} onValueChange={setIncomeType}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {INCOME_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  {INCOME_TYPES.map((it) => (
+                    <SelectItem key={it.value} value={it.value}>{t(it.key)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="amount">ฐานภาษี (ไม่รวม VAT)</Label>
+              <Label htmlFor="amount">{t('tax.wht_base')}</Label>
               <Input id="amount" type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="rate">อัตรา (0–0.3)</Label>
-              <Input id="rate" type="number" min="0" max="0.3" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="อัตโนมัติ" />
+              <Label htmlFor="rate">{t('tax.rate')}</Label>
+              <Input id="rate" type="number" min="0" max="0.3" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} placeholder={t('tax.auto')} />
             </div>
           </div>
           <Button disabled={!canIssue} onClick={() => issue.mutate()}>
-            <Receipt className="size-4" /> {issue.isPending ? 'กำลังออก…' : 'ออกหนังสือรับรอง'}
+            <Receipt className="size-4" /> {issue.isPending ? t('tax.issuing') : t('tax.wht_issue_btn')}
           </Button>
         </CardContent>
       </Card>
@@ -176,21 +178,21 @@ export default function WhtPage() {
         {q.data && (
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-3">
-              <StatCard label="จำนวนหนังสือรับรอง" value={num(q.data.count)} icon={FileMinus} tone="primary" />
-              <StatCard label="ยอดจ่ายรวม" value={baht(totalPaid)} icon={Coins} />
-              <StatCard label="ภาษีหัก ณ ที่จ่ายรวม" value={baht(totalWht)} icon={Receipt} tone="info" />
+              <StatCard label={t('tax.cert_count')} value={num(q.data.count)} icon={FileMinus} tone="primary" />
+              <StatCard label={t('tax.total_paid')} value={baht(totalPaid)} icon={Coins} />
+              <StatCard label={t('tax.total_wht')} value={baht(totalWht)} icon={Receipt} tone="info" />
             </div>
             <DataTable
               rows={certs}
               columns={[
-                { key: 'doc_no', label: 'เลขที่เอกสาร' },
-                { key: 'date_paid', label: 'วันที่จ่าย', render: (r: Cert) => thaiDate(r.date_paid) },
-                { key: 'pnd_type', label: 'แบบ ภ.ง.ด.' },
-                { key: 'payee', label: 'ผู้ถูกหักภาษี', render: (r: Cert) => r.payee?.name ?? '—' },
-                { key: 'payee_tax_id', label: 'เลขผู้เสียภาษี', render: (r: Cert) => r.payee?.tax_id ?? '—' },
-                { key: 'total_paid', label: 'ยอดจ่าย', align: 'right', render: (r: Cert) => <span className="tabular">{baht(r.total_paid)}</span> },
-                { key: 'total_wht', label: 'ภาษีหัก', align: 'right', render: (r: Cert) => <span className="tabular">{baht(r.total_wht)}</span> },
-                { key: 'status', label: 'สถานะ', render: (r: Cert) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                { key: 'doc_no', label: t('tax.col_doc_no') },
+                { key: 'date_paid', label: t('tax.date_paid'), render: (r: Cert) => thaiDate(r.date_paid) },
+                { key: 'pnd_type', label: t('tax.col_pnd') },
+                { key: 'payee', label: t('tax.col_payee'), render: (r: Cert) => r.payee?.name ?? '—' },
+                { key: 'payee_tax_id', label: t('tax.col_tax_id'), render: (r: Cert) => r.payee?.tax_id ?? '—' },
+                { key: 'total_paid', label: t('tax.col_paid'), align: 'right', render: (r: Cert) => <span className="tabular">{baht(r.total_paid)}</span> },
+                { key: 'total_wht', label: t('tax.col_wht'), align: 'right', render: (r: Cert) => <span className="tabular">{baht(r.total_wht)}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r: Cert) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                 {
                   key: 'pdf',
                   label: 'PDF',
@@ -208,23 +210,23 @@ export default function WhtPage() {
                 filter
                   ? {
                       icon: SearchX,
-                      title: `ไม่พบหนังสือรับรองแบบ ${filter}`,
-                      description: 'ลองเลือกแบบ ภ.ง.ด. อื่น หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      title: t('tax.wht_empty_filter_title', { pnd: filter }),
+                      description: t('tax.wht_empty_filter_desc'),
                       action: (
                         <Button variant="outline" size="sm" onClick={() => setFilter('')}>
-                          ล้างตัวกรอง
+                          {t('inv.clear_filter')}
                         </Button>
                       ),
                     }
                   : {
                       icon: FileMinus,
-                      title: 'ยังไม่มีหนังสือรับรองการหักภาษี ณ ที่จ่าย',
-                      description: 'ออกหนังสือรับรอง 50 ทวิ จากแบบฟอร์มด้านบนเพื่อเริ่มต้น',
+                      title: t('tax.wht_empty_title'),
+                      description: t('tax.wht_empty_desc'),
                     }
               }
             />
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Ban className="size-3.5" /> การยกเลิก (void) จะเปลี่ยนสถานะเป็น Voided โดยไม่ลบเลขที่เอกสาร
+              <Ban className="size-3.5" /> {t('tax.wht_void_note')}
             </p>
           </div>
         )}

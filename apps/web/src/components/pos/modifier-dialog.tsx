@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { notifyError } from '@/lib/notify';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,7 @@ interface Resolved { item_id: number; sku: string; name: string; qty: number; un
 /** Modifier picker: pick options per group (radio when max=1, else multi), preview the live price, then
  *  resolve the priced line server-side (enforces 86 / hours / min-max) and hand it back to the cart. */
 export function ModifierDialog({ sku, onClose, onConfirm }: { sku: string; onClose: () => void; onConfirm: (line: CartLine) => void }) {
+  const { t } = useLang();
   const q = useQuery<ItemDetail>({ queryKey: ['menu-item', sku], queryFn: () => api(`/api/menu/items/${encodeURIComponent(sku)}`) });
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
@@ -34,7 +36,7 @@ export function ModifierDialog({ sku, onClose, onConfirm }: { sku: string; onClo
         next.delete(optId);
       } else {
         const count = inGroup.filter((id) => next.has(id)).length;
-        if (count >= g.max_select) { notifyError(`เลือก "${g.name}" ได้ไม่เกิน ${g.max_select}`); return prev; }
+        if (count >= g.max_select) { notifyError(t('px.mod_max_select', { name: g.name, max: g.max_select })); return prev; }
         next.add(optId);
       }
       return next;
@@ -80,17 +82,17 @@ export function ModifierDialog({ sku, onClose, onConfirm }: { sku: string; onClo
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{item?.name ?? 'เลือกตัวเลือก'}</DialogTitle>
+          <DialogTitle>{item?.name ?? t('px.mod_title')}</DialogTitle>
         </DialogHeader>
 
         <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
-          {q.isLoading && <p className="text-sm text-muted-foreground">กำลังโหลด…</p>}
+          {q.isLoading && <p className="text-sm text-muted-foreground">{t('dash.loading')}</p>}
           {item?.modifier_groups.map((g) => (
             <div key={g.group_id}>
               <div className="mb-1.5 flex items-center justify-between text-sm font-semibold">
                 <span>{g.name}</span>
                 <span className="text-xs font-normal text-muted-foreground">
-                  {g.required ? 'ต้องเลือก' : 'เลือกได้'} {g.max_select > 1 ? `สูงสุด ${g.max_select}` : ''}
+                  {g.required ? t('px.mod_required') : t('px.mod_optional')} {g.max_select > 1 ? t('px.mod_max', { max: g.max_select }) : ''}
                 </span>
               </div>
               <div className="grid gap-1.5">
@@ -122,9 +124,9 @@ export function ModifierDialog({ sku, onClose, onConfirm }: { sku: string; onClo
         </div>
 
         <DialogFooter className="sm:justify-between">
-          <Button variant="outline" onClick={onClose}>ยกเลิก</Button>
+          <Button variant="outline" onClick={onClose}>{t('fin.cancel')}</Button>
           <Button disabled={!item || missingRequired || resolve.isPending} onClick={() => resolve.mutate()}>
-            เพิ่มลงตะกร้า · {baht(livePrice)}
+            {t('px.mod_add')} · {baht(livePrice)}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Route, Save, Eye } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -17,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 // กฎการลงบัญชี — read + tenant-override editor over the account-determination engine (posting_rules).
 // Global defaults ship with the product; a tenant shadows a leg with its own account (docs/33 · GL-12/GL-21).
 export default function PostingRulesPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const events = useQuery<any[]>({ queryKey: ['posting-event-types'], queryFn: () => api('/api/ledger/posting-rules/event-types') });
   const [eventType, setEventType] = useState('');
@@ -28,26 +30,26 @@ export default function PostingRulesPage() {
   const [accountCode, setAccountCode] = useState('');
   const upsert = useMutation({
     mutationFn: () => api('/api/ledger/posting-rules', { method: 'POST', body: JSON.stringify({ eventType, legOrder: Number(legOrder), role: role.trim(), side, accountCode: accountCode.trim() }) }),
-    onSuccess: () => { notifySuccess('บันทึกกฎเฉพาะกิจการแล้ว'); setRole(''); setAccountCode(''); qc.invalidateQueries({ queryKey: ['posting-rules', eventType] }); },
+    onSuccess: () => { notifySuccess(t('st.spost_saved')); setRole(''); setAccountCode(''); qc.invalidateQueries({ queryKey: ['posting-rules', eventType] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const [amounts, setAmounts] = useState('{"inventory":1000}');
   const preview = useMutation<any[]>({
     mutationFn: () => api('/api/ledger/posting-rules/preview', { method: 'POST', body: JSON.stringify({ eventType, amounts: JSON.parse(amounts || '{}') }) }),
-    onError: (e: any) => notifyError(e.message?.includes('JSON') ? 'จำนวนเงิน (amounts) ต้องเป็น JSON ที่ถูกต้อง' : e.message),
+    onError: (e: any) => notifyError(e.message?.includes('JSON') ? t('st.spost_json_error') : e.message),
   });
 
   const eventList = events.data ?? [];
 
   return (
     <div>
-      <PageHeader title="กฎการลงบัญชี (Posting Rules / Account Determination)" description="ผังการกำหนดบัญชีต่อเหตุการณ์ทางบัญชี — ค่าปริยายมากับระบบ กิจการสามารถแทนที่บัญชีของแต่ละ leg ได้เอง และดูตัวอย่างรายการก่อนใช้งานจริง" />
+      <PageHeader title={t('st.spost_title')} description={t('st.spost_desc')} />
       <div className="space-y-5">
         <Card className="max-w-xl gap-4 p-5">
-          <Label>เหตุการณ์ทางบัญชี (Event type)</Label>
+          <Label>{t('st.spost_event_type')}</Label>
           <Select value={eventType} onValueChange={setEventType}>
-            <SelectTrigger className="w-full"><SelectValue placeholder="เลือกเหตุการณ์…" /></SelectTrigger>
+            <SelectTrigger className="w-full"><SelectValue placeholder={t('st.spost_event_ph')} /></SelectTrigger>
             <SelectContent>
               {eventList.map((e: any) => <SelectItem key={e.key} value={e.key}>{e.key} — {e.name}</SelectItem>)}
             </SelectContent>
@@ -57,59 +59,59 @@ export default function PostingRulesPage() {
         {eventType && (
           <>
             <Card className="gap-4 p-5">
-              <h3 className="text-base font-semibold">กฎที่ใช้อยู่</h3>
+              <h3 className="text-base font-semibold">{t('st.spost_active_rules')}</h3>
               <DataTable
                 rows={rules.data ?? []}
                 rowKey={(r: any, i: number) => `${r.legOrder}-${r.role}-${i}`}
                 columns={[
-                  { key: 'legOrder', label: 'ลำดับ' },
-                  { key: 'role', label: 'บทบาท (role)' },
-                  { key: 'side', label: 'ด้าน', render: (r: any) => <Badge variant={r.side === 'DR' ? 'success' : 'warning'}>{r.side}</Badge> },
-                  { key: 'accountCode', label: 'บัญชี' },
-                  { key: 'tenantId', label: 'ที่มา', render: (r: any) => <Badge variant={r.tenantId ? 'info' : 'muted'}>{r.tenantId ? 'กิจการ (override)' : 'ค่าปริยาย'}</Badge> },
+                  { key: 'legOrder', label: t('st.spost_col_order') },
+                  { key: 'role', label: t('st.spost_col_role') },
+                  { key: 'side', label: t('st.spost_col_side'), render: (r: any) => <Badge variant={r.side === 'DR' ? 'success' : 'warning'}>{r.side}</Badge> },
+                  { key: 'accountCode', label: t('st.spost_col_account') },
+                  { key: 'tenantId', label: t('st.spost_col_source'), render: (r: any) => <Badge variant={r.tenantId ? 'info' : 'muted'}>{r.tenantId ? t('st.spost_source_tenant') : t('st.spost_source_default')}</Badge> },
                 ]}
-                emptyState={{ icon: Route, title: 'ยังไม่มีกฎสำหรับเหตุการณ์นี้', description: 'เพิ่มกฎเฉพาะกิจการด้านล่าง' }}
+                emptyState={{ icon: Route, title: t('st.spost_empty_rules_title'), description: t('st.spost_empty_rules_desc') }}
               />
             </Card>
 
             <div className="grid gap-5 lg:grid-cols-2">
               <Card className="gap-4 p-5">
-                <h3 className="text-base font-semibold">แทนที่บัญชี (override เฉพาะกิจการ)</h3>
+                <h3 className="text-base font-semibold">{t('st.spost_override_heading')}</h3>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="grid gap-2"><Label>ลำดับ (leg)</Label><Input type="number" value={legOrder} onChange={(e) => setLegOrder(e.target.value)} /></div>
-                  <div className="grid gap-2"><Label>บทบาท (role)</Label><Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="เช่น inventory / cogs" /></div>
+                  <div className="grid gap-2"><Label>{t('st.spost_leg')}</Label><Input type="number" value={legOrder} onChange={(e) => setLegOrder(e.target.value)} /></div>
+                  <div className="grid gap-2"><Label>{t('st.spost_role')}</Label><Input value={role} onChange={(e) => setRole(e.target.value)} placeholder={t('st.spost_role_ph')} /></div>
                   <div className="grid gap-2">
-                    <Label>ด้าน</Label>
+                    <Label>{t('st.spost_side')}</Label>
                     <Select value={side} onValueChange={(v) => setSide(v as 'DR' | 'CR')}>
                       <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="DR">เดบิต (DR)</SelectItem><SelectItem value="CR">เครดิต (CR)</SelectItem></SelectContent>
+                      <SelectContent><SelectItem value="DR">{t('st.spost_debit')}</SelectItem><SelectItem value="CR">{t('st.spost_credit')}</SelectItem></SelectContent>
                     </Select>
                   </div>
-                  <div className="grid gap-2"><Label>บัญชี</Label><Input value={accountCode} onChange={(e) => setAccountCode(e.target.value)} placeholder="เช่น 5000" /></div>
+                  <div className="grid gap-2"><Label>{t('st.spost_account')}</Label><Input value={accountCode} onChange={(e) => setAccountCode(e.target.value)} placeholder={t('st.spost_account_ph')} /></div>
                 </div>
                 <div>
-                  <Button disabled={upsert.isPending || !role.trim() || !accountCode.trim()} onClick={() => upsert.mutate()}><Save className="size-4" /> {upsert.isPending ? 'กำลังบันทึก…' : 'บันทึก override'}</Button>
+                  <Button disabled={upsert.isPending || !role.trim() || !accountCode.trim()} onClick={() => upsert.mutate()}><Save className="size-4" /> {upsert.isPending ? t('st.spost_saving') : t('st.spost_save_override')}</Button>
                 </div>
               </Card>
 
               <Card className="gap-4 p-5">
-                <h3 className="text-base font-semibold">ดูตัวอย่างรายการ (Preview)</h3>
+                <h3 className="text-base font-semibold">{t('st.spost_preview_heading')}</h3>
                 <div className="grid gap-2">
-                  <Label>จำนวนเงินตามบทบาท (JSON)</Label>
+                  <Label>{t('st.spost_amounts_label')}</Label>
                   <Input value={amounts} onChange={(e) => setAmounts(e.target.value)} placeholder='{"inventory":1000}' />
                 </div>
-                <div><Button variant="outline" disabled={preview.isPending} onClick={() => preview.mutate()}><Eye className="size-4" /> แสดงตัวอย่าง</Button></div>
+                <div><Button variant="outline" disabled={preview.isPending} onClick={() => preview.mutate()}><Eye className="size-4" /> {t('st.spost_show_preview')}</Button></div>
                 {preview.data && (
                   <DataTable
                     rows={preview.data as any[]}
                     rowKey={(r: any, i: number) => i}
                     columns={[
-                      { key: 'role', label: 'บทบาท' },
-                      { key: 'side', label: 'ด้าน', render: (r: any) => <Badge variant={r.side === 'DR' ? 'success' : 'warning'}>{r.side}</Badge> },
-                      { key: 'accountCode', label: 'บัญชี' },
-                      { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => Number(r.amount).toLocaleString() },
+                      { key: 'role', label: t('st.spost_col_role2') },
+                      { key: 'side', label: t('st.spost_col_side'), render: (r: any) => <Badge variant={r.side === 'DR' ? 'success' : 'warning'}>{r.side}</Badge> },
+                      { key: 'accountCode', label: t('st.spost_col_account') },
+                      { key: 'amount', label: t('st.spost_col_amount'), align: 'right', render: (r: any) => Number(r.amount).toLocaleString() },
                     ]}
-                    emptyState={{ icon: Eye, title: 'ยังไม่มีตัวอย่าง', description: 'กดแสดงตัวอย่าง' }}
+                    emptyState={{ icon: Eye, title: t('st.spost_empty_preview_title'), description: t('st.spost_empty_preview_desc') }}
                   />
                 )}
               </Card>

@@ -9,6 +9,7 @@ import { Users } from 'lucide-react';
 
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -32,6 +33,7 @@ type Position = {
 };
 
 export function CustomerCardsClient() {
+  const { t } = useLang();
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Position | null>(null);
   const [from, setFrom] = useState(yearStart());
@@ -51,14 +53,14 @@ export function CustomerCardsClient() {
 
   return (
     <div>
-      <PageHeader title="การ์ดลูกหนี้" description="ดูใบแจ้งหนี้ การรับชำระ และยอดคงเหลือสะสมของลูกหนี้แต่ละราย" />
+      <PageHeader title={t('fnx.cust.title')} description={t('fnx.cust.desc')} />
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="space-y-3">
-          <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาลูกหนี้…" count={`${positions.length} ราย`} />
+          <SearchInput value={search} onChange={setSearch} placeholder={t('fnx.cust.search_ph')} count={t('fnx.cust.count', { n: positions.length })} />
           <StateView q={listQ}>
             <div className="space-y-2">
               {positions.length === 0 && (
-                <Card className="p-6 text-center text-sm text-muted-foreground">ไม่มีลูกหนี้ที่มียอดค้าง</Card>
+                <Card className="p-6 text-center text-sm text-muted-foreground">{t('fnx.cust.empty')}</Card>
               )}
               {positions.map((p) => (
                 <button
@@ -72,15 +74,15 @@ export function CustomerCardsClient() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate font-medium">{p.customer}</span>
-                    {p.on_hold && <Badge variant="destructive">ระงับเครดิต</Badge>}
+                    {p.on_hold && <Badge variant="destructive">{t('fnx.cust.badge_hold')}</Badge>}
                   </div>
                   <div className="mt-1 flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">ยอดค้าง</span>
+                    <span className="text-muted-foreground">{t('fnx.cust.outstanding')}</span>
                     <span className="tabular font-medium">{baht(p.exposure)}</span>
                   </div>
                   {p.overdue > 0.005 && (
                     <div className="mt-0.5 flex items-center justify-between text-xs text-destructive">
-                      <span>เกินกำหนด {p.max_overdue_days} วัน</span>
+                      <span>{t('fnx.cust.overdue_days', { days: p.max_overdue_days })}</span>
                       <span className="tabular">{baht(p.overdue)}</span>
                     </div>
                   )}

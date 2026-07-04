@@ -1,17 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BadgeCheck, Building2, Loader2, MapPin, Palette, ReceiptText, Save } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
+import { notifyError, notifySuccess } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
+import { FormField } from '@/components/form-field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Msg } from '@/components/tabs';
 
 interface Profile {
   code: string; name: string; legal_name: string | null; tax_id: string | null; branch_code: string | null;
@@ -24,24 +26,55 @@ interface Profile {
   setup_complete: boolean;
 }
 
-const FIELDS_IDENTITY = [
-  ['legal_name', 'ชื่อนิติบุคคล (ตามทะเบียน)'], ['tax_id', 'เลขประจำตัวผู้เสียภาษี (13 หลัก)'],
-  ['branch_code', 'รหัสสาขา (00000 = สำนักงานใหญ่)'], ['phone', 'โทรศัพท์'], ['email', 'อีเมล'],
-  ['promptpay_id', 'พร้อมเพย์ (เบอร์มือถือ/เลขบัตร 13 หลัก) — สำหรับ QR รับเงิน'],
-] as const;
-const FIELDS_ADDRESS = [
-  ['address_line1', 'ที่อยู่ (บรรทัด 1)'], ['address_line2', 'ที่อยู่ (บรรทัด 2)'],
-  ['sub_district', 'ตำบล/แขวง'], ['district', 'อำเภอ/เขต'], ['province', 'จังหวัด'], ['postal_code', 'รหัสไปรษณีย์'],
-] as const;
+// Field config: label + optional helper hint (both stored as i18n message keys, resolved at render).
+// Validated fields also appear in `validate()` below.
+type FieldDef = { key: string; label: string; hint?: string };
+const FIELDS_IDENTITY: FieldDef[] = [
+  { key: 'legal_name', label: 'mx.setup_f_legal_name', hint: 'mx.setup_h_legal_name' },
+  { key: 'tax_id', label: 'mx.setup_f_tax_id', hint: 'mx.setup_h_tax_id' },
+  { key: 'branch_code', label: 'mx.setup_f_branch_code', hint: 'mx.setup_h_branch_code' },
+  { key: 'phone', label: 'mx.setup_f_phone' },
+  { key: 'email', label: 'mx.setup_f_email' },
+  { key: 'promptpay_id', label: 'mx.setup_f_promptpay', hint: 'mx.setup_h_promptpay' },
+];
+const FIELDS_ADDRESS: FieldDef[] = [
+  { key: 'address_line1', label: 'mx.setup_f_address1' },
+  { key: 'address_line2', label: 'mx.setup_f_address2' },
+  { key: 'sub_district', label: 'mx.setup_f_subdistrict' },
+  { key: 'district', label: 'mx.setup_f_district' },
+  { key: 'province', label: 'mx.setup_f_province' },
+  { key: 'postal_code', label: 'mx.setup_f_postal', hint: 'mx.setup_h_postal' },
+];
+
+/** Client-side format checks — all optional fields, but if filled they must be well-formed. Returns a map of
+ *  field key → i18n error-message key (resolved at render); an empty map means the form is valid. Mirrors the
+ *  tax-doc format rules so a bad tax ID / PromptPay is caught before it ever reaches a printed invoice. */
+function validate(form: Record<string, any>): Record<string, string> {
+  const e: Record<string, string> = {};
+  const s = (k: string) => String(form[k] ?? '').trim();
+  if (s('tax_id') && !/^\d{13}$/.test(s('tax_id'))) e.tax_id = 'mx.setup_err_tax_id';
+  if (s('branch_code') && !/^\d{5}$/.test(s('branch_code'))) e.branch_code = 'mx.setup_err_branch_code';
+  if (s('email') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s('email'))) e.email = 'mx.setup_err_email';
+  if (s('postal_code') && !/^\d{5}$/.test(s('postal_code'))) e.postal_code = 'mx.setup_err_postal';
+  if (s('promptpay_id') && !/^(\d{10}|\d{13})$/.test(s('promptpay_id'))) e.promptpay_id = 'mx.setup_err_promptpay';
+  const rate = Number(form.vat_rate);
+  if (form.vat_registered && (!Number.isFinite(rate) || rate <= 0 || rate >= 1)) e.vat_rate = 'mx.setup_err_vat';
+  return e;
+}
 
 export default function SetupPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<Profile>({ queryKey: ['tenant-profile'], queryFn: () => api('/api/tenant/profile') });
   const [form, setForm] = useState<Record<string, any>>({});
-  const [msg, setMsg] = useState('');
+  const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => { if (q.data) setForm(q.data as any); }, [q.data]);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const errors = useMemo(() => validate(form), [form]);
+  const errFor = (k: string) => (showErrors ? errors[k] : undefined);
+  const errMsg = (k: string) => { const ek = errFor(k); return ek ? t(ek) : undefined; };
 
   const save = useMutation({
     mutationFn: () => api<Profile>('/api/tenant/profile', {
@@ -57,95 +90,94 @@ export default function SetupPage() {
         branding_prefs: form.branding_prefs ?? {},
       }),
     }),
-    onSuccess: (p) => { setMsg('✅ บันทึกข้อมูลกิจการเรียบร้อย'); qc.setQueryData(['tenant-profile'], p); setForm(p as any); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (p) => { notifySuccess(t('mx.setup_saved')); qc.setQueryData(['tenant-profile'], p); setForm(p as any); setShowErrors(false); },
+    onError: (e: any) => notifyError(e?.message ?? t('mx.setup_save_failed')),
   });
+
+  const onSave = () => {
+    setShowErrors(true);
+    if (Object.keys(validate(form)).length > 0) { notifyError(t('mx.setup_fix_before_save')); return; }
+    save.mutate();
+  };
 
   return (
     <div>
       <PageHeader
-        title="ตั้งค่ากิจการ"
-        description="ข้อมูลนี้ใช้ออกใบกำกับภาษีและเอกสารทางการ — กรอกให้ครบก่อนเปิดใช้งานเต็มรูปแบบ"
+        title={t('mx.setup_title')}
+        description={t('mx.setup_desc')}
         actions={q.data ? (
           q.data.setup_complete
-            ? <Badge variant="success"><BadgeCheck className="size-3" /> ตั้งค่าครบแล้ว</Badge>
-            : <Badge variant="warning">ยังตั้งค่าไม่ครบ</Badge>
+            ? <Badge variant="success"><BadgeCheck className="size-3" /> {t('mx.setup_complete_badge')}</Badge>
+            : <Badge variant="warning">{t('mx.setup_incomplete_badge')}</Badge>
         ) : null}
       />
       <StateView q={q}>
         <div className="grid max-w-3xl gap-6">
           <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Building2 className="size-4 text-primary" /> ข้อมูลนิติบุคคล</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Building2 className="size-4 text-primary" /> {t('mx.setup_section_identity')}</CardTitle></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              {FIELDS_IDENTITY.map(([k, label]) => (
-                <div key={k} className="grid gap-2">
-                  <Label htmlFor={k}>{label}</Label>
-                  <Input id={k} value={form[k] ?? ''} onChange={set(k)} />
-                </div>
+              {FIELDS_IDENTITY.map(({ key, label, hint }) => (
+                <FormField key={key} htmlFor={key} label={t(label)} hint={hint ? t(hint) : undefined} error={errMsg(key)}>
+                  <Input id={key} value={form[key] ?? ''} onChange={set(key)} aria-invalid={!!errFor(key)} />
+                </FormField>
               ))}
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ReceiptText className="size-4 text-primary" /> ภาษีมูลค่าเพิ่ม (VAT)</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ReceiptText className="size-4 text-primary" /> {t('mx.setup_section_vat')}</CardTitle></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="vat_registered">จดทะเบียน VAT</Label>
+              <FormField htmlFor="vat_registered" label={t('mx.setup_vat_registered')}>
                 <select
                   id="vat_registered"
                   className="h-9 rounded-md border bg-transparent px-3 text-sm"
                   value={form.vat_registered ? '1' : '0'}
                   onChange={(e) => setForm((f) => ({ ...f, vat_registered: e.target.value === '1' }))}
                 >
-                  <option value="0">ไม่ได้จด VAT</option>
-                  <option value="1">จดทะเบียน VAT แล้ว</option>
+                  <option value="0">{t('mx.setup_vat_no')}</option>
+                  <option value="1">{t('mx.setup_vat_yes')}</option>
                 </select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="vat_rate">อัตรา VAT (เช่น 0.07 = 7%)</Label>
-                <Input id="vat_rate" type="number" step="0.0001" value={form.vat_rate ?? 0.07} onChange={set('vat_rate')} className="tabular" />
-              </div>
+              </FormField>
+              <FormField htmlFor="vat_rate" label={t('mx.setup_vat_rate')} hint={t('mx.setup_vat_rate_hint')} error={errMsg('vat_rate')}>
+                <Input id="vat_rate" type="number" step="0.0001" value={form.vat_rate ?? 0.07} onChange={set('vat_rate')} className="tabular" aria-invalid={!!errFor('vat_rate')} />
+              </FormField>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><MapPin className="size-4 text-primary" /> ที่อยู่</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><MapPin className="size-4 text-primary" /> {t('mx.setup_section_address')}</CardTitle></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              {FIELDS_ADDRESS.map(([k, label]) => (
-                <div key={k} className="grid gap-2">
-                  <Label htmlFor={k}>{label}</Label>
-                  <Input id={k} value={form[k] ?? ''} onChange={set(k)} />
-                </div>
+              {FIELDS_ADDRESS.map(({ key, label, hint }) => (
+                <FormField key={key} htmlFor={key} label={t(label)} hint={hint ? t(hint) : undefined} error={errMsg(key)}>
+                  <Input id={key} value={form[key] ?? ''} onChange={set(key)} aria-invalid={!!errFor(key)} />
+                </FormField>
               ))}
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Palette className="size-4 text-primary" /> ตราสินค้า (Branding) — แสดงบนใบเสร็จ/เอกสาร</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Palette className="size-4 text-primary" /> {t('mx.setup_section_branding')}</CardTitle></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <div className="grid gap-2 sm:col-span-2">
-                <Label htmlFor="logo_url">โลโก้ (วาง URL รูปภาพ https:// หรือ data URI)</Label>
+              <FormField htmlFor="logo_url" label={t('mx.setup_logo_label')} className="sm:col-span-2">
                 <Input id="logo_url" value={form.logo_url ?? ''} onChange={set('logo_url')} placeholder="https://…/logo.png" />
-              </div>
-              <div className="grid gap-2 sm:col-span-2">
-                <Label htmlFor="tagline">สโลแกน / คำโปรย (แสดงใต้ชื่อกิจการ)</Label>
-                <Input id="tagline" value={form.tagline ?? ''} onChange={set('tagline')} placeholder="เช่น พันธมิตรที่ไว้ใจได้" />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="show_logo">แสดงโลโก้บนใบเสร็จ</Label>
+              </FormField>
+              <FormField htmlFor="tagline" label={t('mx.setup_tagline_label')} className="sm:col-span-2">
+                <Input id="tagline" value={form.tagline ?? ''} onChange={set('tagline')} placeholder={t('mx.setup_tagline_ph')} />
+              </FormField>
+              <FormField htmlFor="show_logo" label={t('mx.setup_show_logo')}>
                 <select
                   id="show_logo"
                   className="h-9 rounded-md border bg-transparent px-3 text-sm"
                   value={(form.branding_prefs?.show_logo_on_receipt === false) ? '0' : '1'}
                   onChange={(e) => setForm((f) => ({ ...f, branding_prefs: { ...(f.branding_prefs ?? {}), show_logo_on_receipt: e.target.value === '1' } }))}
                 >
-                  <option value="1">แสดง</option>
-                  <option value="0">ไม่แสดง</option>
+                  <option value="1">{t('mx.setup_show')}</option>
+                  <option value="0">{t('mx.setup_hide')}</option>
                 </select>
-              </div>
+              </FormField>
               {form.logo_url ? (
                 <div className="grid gap-2">
-                  <Label>ตัวอย่าง</Label>
+                  <Label>{t('mx.setup_preview')}</Label>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={form.logo_url} alt="logo preview" className="max-h-12 w-fit rounded border bg-white p-1" />
                 </div>
@@ -154,11 +186,13 @@ export default function SetupPage() {
           </Card>
 
           <div className="flex items-center gap-3">
-            <Button onClick={() => { setMsg(''); save.mutate(); }} disabled={save.isPending}>
+            <Button onClick={onSave} disabled={save.isPending}>
               {save.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              บันทึก
+              {t('mx.setup_save')}
             </Button>
-            {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+            {showErrors && Object.keys(errors).length > 0 && (
+              <span className="text-sm text-destructive" role="alert">{t('mx.setup_errors_count', { count: Object.keys(errors).length })}</span>
+            )}
           </div>
         </div>
       </StateView>

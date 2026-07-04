@@ -5,6 +5,7 @@ import { PackagePlus, RefreshCw, AlertTriangle, FileText, PackageSearch, ArrowLe
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -18,31 +19,32 @@ const statusVariant = (s: string) =>
   s === 'Suggested' ? 'info' : s === 'PR_Created' || s === 'Transfer_Done' ? 'success' : 'muted';
 
 export default function ReplenishmentPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['replenishment'], queryFn: () => api('/api/replenishment/suggestions') });
 
   const recompute = useMutation({
     mutationFn: () => api<{ count: number }>('/api/replenishment/suggest', { method: 'POST' }),
-    onSuccess: (r) => { notifySuccess(`คำนวณใหม่แล้ว · พบ ${num(r.count)} รายการ`); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
+    onSuccess: (r) => { notifySuccess(t('iv.repl_toast_recomputed', { count: num(r.count) })); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const autoTransfer = useMutation({
     mutationFn: () => api<{ doc_no: string | null; transfers: number }>('/api/replenishment/auto-transfer', { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (r) => { notifySuccess(r.doc_no ? `โอนสต๊อกแล้ว · ${r.doc_no} · ${num(r.transfers)} รายการ` : 'ไม่มีรายการที่ต้องโอน'); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
+    onSuccess: (r) => { notifySuccess(r.doc_no ? t('iv.repl_toast_transferred', { doc: r.doc_no, count: num(r.transfers) }) : t('iv.repl_toast_no_transfer')); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const autoPr = useMutation({
     mutationFn: () => api<{ pr_no: string | null; lines: number }>('/api/replenishment/auto-pr', { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (r) => { notifySuccess(r.pr_no ? `สร้าง ${r.pr_no} · ${num(r.lines)} บรรทัด` : 'ไม่มีรายการที่ต้องสั่งซื้อ'); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
+    onSuccess: (r) => { notifySuccess(r.pr_no ? t('iv.repl_toast_pr_created', { pr: r.pr_no, lines: num(r.lines) }) : t('iv.repl_toast_no_buy')); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const par = useQuery<any>({ queryKey: ['par-recommendations'], queryFn: () => api('/api/replenishment/par-recommendations') });
   const applyPar = useMutation({
     mutationFn: (v: { branch_id: number; item_id: string }) => api('/api/replenishment/par-recommendations/apply', { method: 'POST', body: JSON.stringify(v) }),
-    onSuccess: (r: any) => { notifySuccess(r?.applied ? `ปรับจุดสั่งซื้อเป็น ${num(r.reorder_point)} แล้ว` : 'ไม่มีคำแนะนำ'); qc.invalidateQueries({ queryKey: ['par-recommendations'] }); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
+    onSuccess: (r: any) => { notifySuccess(r?.applied ? t('iv.repl_toast_par_applied', { point: num(r.reorder_point) }) : t('iv.repl_toast_no_rec')); qc.invalidateQueries({ queryKey: ['par-recommendations'] }); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const parRecs: any[] = (par.data?.recommendations ?? []).filter((r: any) => r.under_buffered);
@@ -59,18 +61,18 @@ export default function ReplenishmentPage() {
   return (
     <div>
       <PageHeader
-        title="เติมสต๊อกอัตโนมัติ (Replenishment)"
-        description="Min-Max แยกตามสาขา — เมื่อสาขาใดคงเหลือ ≤ จุดสั่งซื้อ ระบบจะ “โอนจากสาขาที่มีของเหลือก่อน” แล้วจึง “สั่งซื้อ” ส่วนที่ขาด"
+        title={t('iv.repl_title')}
+        description={t('iv.repl_desc')}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" disabled={recompute.isPending} onClick={() => recompute.mutate()}>
-              <RefreshCw className="size-4" /> {recompute.isPending ? 'กำลังคำนวณ…' : 'คำนวณใหม่'}
+              <RefreshCw className="size-4" /> {recompute.isPending ? t('iv.repl_recomputing') : t('iv.repl_recompute')}
             </Button>
             <Button variant="outline" disabled={autoTransfer.isPending || openTransfers.length === 0} onClick={() => autoTransfer.mutate()}>
-              <ArrowLeftRight className="size-4" /> {autoTransfer.isPending ? 'กำลังโอน…' : 'โอนสต๊อก'}
+              <ArrowLeftRight className="size-4" /> {autoTransfer.isPending ? t('iv.repl_transferring') : t('iv.repl_transfer')}
             </Button>
             <Button disabled={autoPr.isPending || openBuys.length === 0} onClick={() => autoPr.mutate()}>
-              <FileText className="size-4" /> {autoPr.isPending ? 'กำลังสร้าง PR…' : 'สร้างใบขอซื้อ (PR)'}
+              <FileText className="size-4" /> {autoPr.isPending ? t('iv.repl_creating_pr') : t('iv.repl_create_pr')}
             </Button>
           </div>
         }
@@ -81,77 +83,77 @@ export default function ReplenishmentPage() {
           {q.data && (
             <div className="space-y-6">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <StatCard label="รายการโอน (รอดำเนินการ)" value={num(openTransfers.length)} icon={ArrowLeftRight} tone="primary" />
-                <StatCard label="รายการสั่งซื้อ (รอดำเนินการ)" value={num(openBuys.length)} icon={PackagePlus} tone="info" />
-                <StatCard label="วิกฤต (Critical)" value={num(critical)} icon={AlertTriangle} tone={critical > 0 ? 'danger' : 'default'} />
-                <StatCard label="จำนวนโอน · ซื้อ รวม" value={`${num(transferQty)} · ${num(buyQty)}`} icon={Truck} tone="default" />
+                <StatCard label={t('iv.repl_stat_transfers')} value={num(openTransfers.length)} icon={ArrowLeftRight} tone="primary" />
+                <StatCard label={t('iv.repl_stat_purchases')} value={num(openBuys.length)} icon={PackagePlus} tone="info" />
+                <StatCard label={t('iv.repl_stat_critical')} value={num(critical)} icon={AlertTriangle} tone={critical > 0 ? 'danger' : 'default'} />
+                <StatCard label={t('iv.repl_stat_qty_total')} value={`${num(transferQty)} · ${num(buyQty)}`} icon={Truck} tone="default" />
               </div>
 
               {/* ── โอนระหว่างสาขา (transfer-first) ── */}
               <section className="space-y-2">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><ArrowLeftRight className="size-4 text-primary" /> โอนระหว่างสาขา (Transfers)</h2>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><ArrowLeftRight className="size-4 text-primary" /> {t('iv.repl_sec_transfers')}</h2>
                 <DataTable
                   rows={transfers}
                   columns={[
-                    { key: 'suggestion_no', label: 'เลขที่' },
-                    { key: 'branch_name', label: 'สาขาที่ขาด', render: (r: any) => r.branch_name ?? `#${r.branch_id ?? '—'}` },
-                    { key: 'from_branch_name', label: 'โอนจากสาขา', render: (r: any) => r.from_branch_name ?? `#${r.from_branch_id ?? '—'}` },
-                    { key: 'item_id', label: 'รหัสสินค้า' },
-                    { key: 'transfer_qty', label: 'จำนวนโอน', align: 'right', render: (r: any) => <span className="tabular font-medium">{num(r.transfer_qty || r.suggested_qty)}</span> },
-                    { key: 'urgency', label: 'ความเร่งด่วน', render: (r: any) => <Badge variant={urgencyVariant(r.urgency)}>{r.urgency}</Badge> },
-                    { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                    { key: 'suggestion_no', label: t('dash.col_no') },
+                    { key: 'branch_name', label: t('iv.repl_col_branch_short'), render: (r: any) => r.branch_name ?? `#${r.branch_id ?? '—'}` },
+                    { key: 'from_branch_name', label: t('iv.repl_col_from_branch'), render: (r: any) => r.from_branch_name ?? `#${r.from_branch_id ?? '—'}` },
+                    { key: 'item_id', label: t('iv.repl_col_item') },
+                    { key: 'transfer_qty', label: t('iv.repl_col_transfer_qty'), align: 'right', render: (r: any) => <span className="tabular font-medium">{num(r.transfer_qty || r.suggested_qty)}</span> },
+                    { key: 'urgency', label: t('iv.repl_col_urgency'), render: (r: any) => <Badge variant={urgencyVariant(r.urgency)}>{r.urgency}</Badge> },
+                    { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                   ]}
                   emptyState={{
                     icon: ArrowLeftRight,
-                    title: 'ยังไม่มีรายการโอนระหว่างสาขา',
-                    description: 'เมื่อมีสาขาที่ขาดสต๊อกและสาขาอื่นมีของเหลือ ระบบจะเสนอให้โอนก่อนสั่งซื้อ',
+                    title: t('iv.repl_transfers_empty_title'),
+                    description: t('iv.repl_transfers_empty_desc'),
                   }}
                 />
               </section>
 
               {/* ── สั่งซื้อจากซัพพลายเออร์ (buy residual) ── */}
               <section className="space-y-2">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><PackagePlus className="size-4 text-primary" /> สั่งซื้อจากซัพพลายเออร์ (Purchases)</h2>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><PackagePlus className="size-4 text-primary" /> {t('iv.repl_sec_purchases')}</h2>
                 <DataTable
                   rows={purchases}
                   columns={[
-                    { key: 'suggestion_no', label: 'เลขที่' },
-                    { key: 'branch_name', label: 'สาขา', render: (r: any) => r.branch_name ?? (r.branch_id != null ? `#${r.branch_id}` : '— (รวม)') },
-                    { key: 'item_id', label: 'รหัสสินค้า' },
-                    { key: 'on_hand', label: 'คงเหลือ', align: 'right', render: (r: any) => <span className="tabular">{num(r.on_hand)}</span> },
-                    { key: 'buy_qty', label: 'จำนวนสั่งซื้อ', align: 'right', render: (r: any) => <span className="tabular font-medium">{num(r.buy_qty || r.suggested_qty)}</span> },
-                    { key: 'vendor', label: 'ซัพพลายเออร์', render: (r: any) => r.vendor ?? '—' },
-                    { key: 'urgency', label: 'ความเร่งด่วน', render: (r: any) => <Badge variant={urgencyVariant(r.urgency)}>{r.urgency}</Badge> },
-                    { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                    { key: 'suggestion_no', label: t('dash.col_no') },
+                    { key: 'branch_name', label: t('iv.repl_col_branch'), render: (r: any) => r.branch_name ?? (r.branch_id != null ? `#${r.branch_id}` : t('iv.repl_branch_all')) },
+                    { key: 'item_id', label: t('iv.repl_col_item') },
+                    { key: 'on_hand', label: t('iv.repl_col_on_hand'), align: 'right', render: (r: any) => <span className="tabular">{num(r.on_hand)}</span> },
+                    { key: 'buy_qty', label: t('iv.repl_col_buy_qty'), align: 'right', render: (r: any) => <span className="tabular font-medium">{num(r.buy_qty || r.suggested_qty)}</span> },
+                    { key: 'vendor', label: t('iv.repl_col_vendor'), render: (r: any) => r.vendor ?? '—' },
+                    { key: 'urgency', label: t('iv.repl_col_urgency'), render: (r: any) => <Badge variant={urgencyVariant(r.urgency)}>{r.urgency}</Badge> },
+                    { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                     { key: 'pr_no', label: 'PR', render: (r: any) => r.pr_no ?? '—' },
                   ]}
                   emptyState={{
                     icon: PackageSearch,
-                    title: 'ยังไม่มีรายการสั่งซื้อ',
-                    description: 'กด “คำนวณใหม่” เพื่อให้ระบบวิเคราะห์สต๊อกแต่ละสาขาและเสนอจำนวนที่ควรสั่งซื้อ',
+                    title: t('iv.repl_purchases_empty_title'),
+                    description: t('iv.repl_purchases_empty_desc'),
                   }}
                 />
               </section>
 
               {/* ── จุดสั่งซื้อตามดีมานด์ (demand-driven par recommendations, INV-12) ── */}
               <section className="space-y-2">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><AlertTriangle className="size-4 text-warning" /> จุดสั่งซื้อต่ำกว่าดีมานด์ (Par recommendations)</h2>
-                <p className="text-xs text-muted-foreground">จุดสั่งซื้อปัจจุบันต่ำกว่าอัตราการใช้จริง × lead time — แนะนำให้ปรับขึ้นเพื่อกันของขาด</p>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><AlertTriangle className="size-4 text-warning" /> {t('iv.repl_sec_par')}</h2>
+                <p className="text-xs text-muted-foreground">{t('iv.repl_par_note')}</p>
                 <DataTable
                   rows={parRecs}
                   columns={[
-                    { key: 'branch_id', label: 'สาขา', render: (r: any) => r.branch_id != null ? `#${r.branch_id}` : '—' },
-                    { key: 'item_id', label: 'รหัสสินค้า' },
-                    { key: 'avg_daily_usage', label: 'ใช้/วัน', align: 'right', render: (r: any) => <span className="tabular">{num(r.avg_daily_usage)}</span> },
-                    { key: 'lead_time_days', label: 'lead (วัน)', align: 'right', render: (r: any) => <span className="tabular">{num(r.lead_time_days)}</span> },
-                    { key: 'current_reorder_point', label: 'จุดสั่งซื้อปัจจุบัน', align: 'right', render: (r: any) => <span className="tabular">{num(r.current_reorder_point)}</span> },
-                    { key: 'recommended_reorder_point', label: 'แนะนำ', align: 'right', render: (r: any) => <span className="tabular font-medium text-warning">{num(r.recommended_reorder_point)}</span> },
-                    { key: 'apply', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" disabled={applyPar.isPending} onClick={() => applyPar.mutate({ branch_id: r.branch_id, item_id: r.item_id })}>ปรับ</Button> },
+                    { key: 'branch_id', label: t('iv.repl_col_branch'), render: (r: any) => r.branch_id != null ? `#${r.branch_id}` : '—' },
+                    { key: 'item_id', label: t('iv.repl_col_item') },
+                    { key: 'avg_daily_usage', label: t('iv.repl_col_daily_usage'), align: 'right', render: (r: any) => <span className="tabular">{num(r.avg_daily_usage)}</span> },
+                    { key: 'lead_time_days', label: t('iv.repl_col_lead'), align: 'right', render: (r: any) => <span className="tabular">{num(r.lead_time_days)}</span> },
+                    { key: 'current_reorder_point', label: t('iv.repl_col_current_rop'), align: 'right', render: (r: any) => <span className="tabular">{num(r.current_reorder_point)}</span> },
+                    { key: 'recommended_reorder_point', label: t('iv.repl_col_recommended'), align: 'right', render: (r: any) => <span className="tabular font-medium text-warning">{num(r.recommended_reorder_point)}</span> },
+                    { key: 'apply', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" disabled={applyPar.isPending} onClick={() => applyPar.mutate({ branch_id: r.branch_id, item_id: r.item_id })}>{t('iv.repl_apply')}</Button> },
                   ]}
                   emptyState={{
                     icon: PackageSearch,
-                    title: 'จุดสั่งซื้อเหมาะสมกับดีมานด์แล้ว',
-                    description: 'ทุกสาขามีจุดสั่งซื้อสูงพอเทียบกับอัตราการใช้จริง × lead time',
+                    title: t('iv.repl_par_empty_title'),
+                    description: t('iv.repl_par_empty_desc'),
                   }}
                 />
               </section>

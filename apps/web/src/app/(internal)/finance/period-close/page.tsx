@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Lock, LockOpen, CheckCircle2, Circle, AlertTriangle, CalendarClock } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -25,10 +26,10 @@ interface CloseRun {
   note: string | null; created_at: string | null; steps: CloseStep[];
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  InProgress: 'กำลังดำเนินการ',
-  ReadyToLock: 'พร้อมล็อก',
-  Locked: 'ล็อกแล้ว',
+const STATUS_LABEL_KEY: Record<string, string> = {
+  InProgress: 'fnx.close.status_inprogress',
+  ReadyToLock: 'fnx.close.status_readytolock',
+  Locked: 'fnx.close.status_locked',
 };
 const STATUS_VARIANT: Record<string, 'default' | 'warning' | 'success' | 'destructive'> = {
   InProgress: 'warning',
@@ -42,6 +43,8 @@ function todayPeriod() {
 }
 
 export default function PeriodClosePage() {
+  const { t } = useLang();
+  const closeStatusLabel = (s: string) => (STATUS_LABEL_KEY[s] ? t(STATUS_LABEL_KEY[s]) : s);
   const qc = useQueryClient();
   const [period, setPeriod] = useState(todayPeriod);
   const [selectedRun, setSelectedRun] = useState<CloseRun | null>(null);
@@ -69,11 +72,11 @@ export default function PeriodClosePage() {
   const startClose = useMutation<CloseRun, Error, void>({
     mutationFn: () => api('/api/ledger/close/start', { method: 'POST', body: JSON.stringify({ period }) }) as Promise<CloseRun>,
     onSuccess: (r) => {
-      notifySuccess(`เริ่มปิดงวด ${r.period} แล้ว`);
+      notifySuccess(t('fnx.close.toast_started', { period: r.period }));
       setSelectedRun(r);
       refresh();
     },
-    onError: (e: any) => notifyError(e?.message ?? 'ไม่สามารถเริ่มปิดงวดได้'),
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_start')),
   });
 
   const completeStep = useMutation<CloseRun, Error, string>({
@@ -82,11 +85,11 @@ export default function PeriodClosePage() {
       body: JSON.stringify({ close_run_id: run!.id, step_key: stepKey }),
     }) as Promise<CloseRun>,
     onSuccess: (r) => {
-      notifySuccess('บันทึกขั้นตอนแล้ว');
+      notifySuccess(t('fnx.close.toast_step_done'));
       setSelectedRun(r);
       refresh();
     },
-    onError: (e: any) => notifyError(e?.message ?? 'บันทึกไม่สำเร็จ'),
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_step')),
   });
 
   const lockPeriod = useMutation<CloseRun, Error, void>({
@@ -95,11 +98,11 @@ export default function PeriodClosePage() {
       body: JSON.stringify({ close_run_id: run!.id }),
     }) as Promise<CloseRun>,
     onSuccess: (r) => {
-      notifySuccess(`ล็อกงวด ${r.period} สำเร็จ`);
+      notifySuccess(t('fnx.close.toast_locked', { period: r.period }));
       setSelectedRun(r);
       refresh();
     },
-    onError: (e: any) => notifyError(e?.message ?? 'ล็อกไม่สำเร็จ — ตรวจสอบ SoD (ผู้ล็อกต้องต่างจากผู้เริ่ม)'),
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_lock')),
   });
 
   const reopenPeriod = useMutation<CloseRun, Error, void>({
@@ -108,20 +111,20 @@ export default function PeriodClosePage() {
       body: JSON.stringify({ close_run_id: run!.id, reason: reopenReason }),
     }) as Promise<CloseRun>,
     onSuccess: (r) => {
-      notifySuccess(`เปิดงวด ${r.period} อีกครั้งแล้ว`);
+      notifySuccess(t('fnx.close.toast_reopened', { period: r.period }));
       setReopenReason('');
       setSelectedRun(r);
       refresh();
     },
-    onError: (e: any) => notifyError(e?.message ?? 'เปิดอีกครั้งไม่สำเร็จ — ตรวจสอบ SoD และเหตุผล'),
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_reopen')),
   });
 
   // GL-19: programmatic pre-lock validation (read-only) — advisory readiness blockers before the lock.
   const [validation, setValidation] = useState<any>(null);
   const validate = useMutation<any, Error, void>({
     mutationFn: () => api(`/api/ledger/close/validate?period=${run!.period}`),
-    onSuccess: (r) => { setValidation(r); r.ready ? notifySuccess('ตรวจสอบแล้ว: พร้อมล็อก') : notifyError(`ยังไม่พร้อม: ${(r.blockers ?? []).join(', ')}`); },
-    onError: (e: any) => notifyError(e?.message ?? 'ตรวจสอบความพร้อมไม่สำเร็จ'),
+    onSuccess: (r) => { setValidation(r); r.ready ? notifySuccess(t('fnx.close.toast_validate_ready')) : notifyError(t('fnx.close.toast_validate_notready', { blockers: (r.blockers ?? []).join(', ') })); },
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_validate')),
   });
 
   const requiredDone = run?.steps?.filter((s) => s.required).every((s) => s.status === 'Done') ?? false;
@@ -129,17 +132,17 @@ export default function PeriodClosePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="ปิดงวดบัญชี (Period-close)"
-        description="GL-15/GL-16 — ปิดงวดพร้อม checklist แบบ maker-checker; ล็อกแล้วห้ามลงรายการย้อนหลัง"
+        title={t('fnx.close.title')}
+        description={t('fnx.close.subtitle')}
       />
 
       {/* Start a new close run */}
       <Card>
-        <CardHeader><CardTitle className="text-sm">เริ่มปิดงวด</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-sm">{t('fnx.close.start')}</CardTitle></CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-end gap-3">
             <div>
-              <Label>งวดบัญชี (YYYY-MM)</Label>
+              <Label>{t('fnx.close.period_label')}</Label>
               <Input
                 className="w-36"
                 placeholder="2025-12"
@@ -153,7 +156,7 @@ export default function PeriodClosePage() {
               onClick={() => startClose.mutate()}
             >
               <CalendarClock className="mr-2 h-4 w-4" />
-              เริ่มปิดงวด
+              {t('fnx.close.start')}
             </Button>
           </div>
         </CardContent>
@@ -162,7 +165,7 @@ export default function PeriodClosePage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Run list */}
         <Card className="lg:col-span-1">
-          <CardHeader><CardTitle className="text-sm">รายการปิดงวด</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">{t('fnx.close.runs_title')}</CardTitle></CardHeader>
           <CardContent className="p-0">
             <StateView q={runs}>
               <div className="divide-y">
@@ -174,13 +177,13 @@ export default function PeriodClosePage() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium">{r.period}</span>
-                      <Badge variant={STATUS_VARIANT[r.status] ?? 'default'}>{STATUS_LABEL[r.status] ?? r.status}</Badge>
+                      <Badge variant={STATUS_VARIANT[r.status] ?? 'default'}>{closeStatusLabel(r.status)}</Badge>
                     </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">เริ่มโดย {r.started_by}</div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">{t('fnx.close.started_by_label')} {r.started_by}</div>
                   </button>
                 ))}
                 {(runs.data?.count ?? 0) === 0 && (
-                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">ยังไม่มีรายการปิดงวด</p>
+                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t('fnx.close.runs_empty')}</p>
                 )}
               </div>
             </StateView>
@@ -190,21 +193,21 @@ export default function PeriodClosePage() {
         {/* Checklist + actions */}
         <div className="lg:col-span-2 space-y-4">
           {!run ? (
-            <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">เลือกงวดจากรายการทางซ้าย หรือเริ่มงวดใหม่</CardContent></Card>
+            <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">{t('fnx.close.select_prompt')}</CardContent></Card>
           ) : (
             <>
               {/* Run header */}
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm">งวด {run.period}</CardTitle>
-                    <Badge variant={STATUS_VARIANT[run.status] ?? 'default'}>{STATUS_LABEL[run.status] ?? run.status}</Badge>
+                    <CardTitle className="text-sm">{t('fnx.close.period_heading', { period: run.period })}</CardTitle>
+                    <Badge variant={STATUS_VARIANT[run.status] ?? 'default'}>{closeStatusLabel(run.status)}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-1 text-sm">
-                  <p className="text-muted-foreground">เริ่มโดย <span className="text-foreground font-medium">{run.started_by}</span></p>
+                  <p className="text-muted-foreground">{t('fnx.close.started_by_label')} <span className="text-foreground font-medium">{run.started_by}</span></p>
                   {run.locked_by && (
-                    <p className="text-muted-foreground">ล็อกโดย <span className="text-foreground font-medium">{run.locked_by}</span>
+                    <p className="text-muted-foreground">{t('fnx.close.locked_by_label')} <span className="text-foreground font-medium">{run.locked_by}</span>
                       {run.locked_at && <> · {thaiDate(run.locked_at)}</>}
                     </p>
                   )}
@@ -214,7 +217,7 @@ export default function PeriodClosePage() {
 
               {/* Checklist */}
               <Card>
-                <CardHeader><CardTitle className="text-sm">Checklist การปิดงวด</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-sm">{t('fnx.close.checklist_title')}</CardTitle></CardHeader>
                 <CardContent className="space-y-2">
                   {(run.steps ?? []).map((step) => (
                     <div
@@ -233,7 +236,7 @@ export default function PeriodClosePage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 ml-2 shrink-0">
-                        {!step.required && <Badge variant="muted" className="text-[10px]">ไม่บังคับ</Badge>}
+                        {!step.required && <Badge variant="muted" className="text-[10px]">{t('fnx.close.optional')}</Badge>}
                         {step.status === 'Pending' && run.status !== 'Locked' && (
                           <Button
                             size="sm"
@@ -241,7 +244,7 @@ export default function PeriodClosePage() {
                             disabled={completeStep.isPending}
                             onClick={() => completeStep.mutate(step.step_key)}
                           >
-                            เสร็จแล้ว
+                            {t('fnx.close.mark_done')}
                           </Button>
                         )}
                       </div>
@@ -253,19 +256,19 @@ export default function PeriodClosePage() {
               {/* Pre-lock validation (GL-19) — advisory readiness checks */}
               {run.status !== 'Locked' && (
                 <Card>
-                  <CardHeader><CardTitle className="text-sm">ตรวจสอบความพร้อมก่อนล็อก (GL-19)</CardTitle></CardHeader>
+                  <CardHeader><CardTitle className="text-sm">{t('fnx.close.prelock_title')}</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm text-muted-foreground">ตรวจว่าไม่มีร่างรายการค้าง รายการสมดุล และบัญชีพักเป็นศูนย์</p>
-                      <Button size="sm" variant="outline" disabled={validate.isPending} onClick={() => validate.mutate()}>ตรวจสอบ</Button>
+                      <p className="text-sm text-muted-foreground">{t('fnx.close.prelock_desc')}</p>
+                      <Button size="sm" variant="outline" disabled={validate.isPending} onClick={() => validate.mutate()}>{t('fnx.close.validate')}</Button>
                     </div>
                     {validation && validation.period === run.period && (
                       <div className="space-y-2 text-sm">
                         <div className="flex items-center gap-2">
                           {validation.ready
-                            ? <Badge variant="success">พร้อมล็อก</Badge>
-                            : <Badge variant="destructive">ยังไม่พร้อม — {(validation.blockers ?? []).length} รายการต้องแก้</Badge>}
-                          {(validation.warnings ?? []).length > 0 && <Badge variant="muted">คำเตือน {(validation.warnings).length}</Badge>}
+                            ? <Badge variant="success">{t('fnx.close.ready')}</Badge>
+                            : <Badge variant="destructive">{t('fnx.close.notready_count', { count: (validation.blockers ?? []).length })}</Badge>}
+                          {(validation.warnings ?? []).length > 0 && <Badge variant="muted">{t('fnx.close.warnings_count', { count: (validation.warnings).length })}</Badge>}
                         </div>
                         {(validation.checks ?? []).map((c: any) => (
                           <div key={c.key} className="flex items-center gap-2 text-xs">
@@ -284,21 +287,21 @@ export default function PeriodClosePage() {
               {/* Lock / Reopen actions */}
               {run.status !== 'Locked' && (
                 <Card>
-                  <CardHeader><CardTitle className="text-sm">ล็อกงวด (GL-16)</CardTitle></CardHeader>
+                  <CardHeader><CardTitle className="text-sm">{t('fnx.close.lock_title')}</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
                     {!requiredDone && (
                       <div className="flex items-center gap-2 text-sm text-orange-600 dark:text-orange-400">
                         <AlertTriangle className="h-4 w-4 shrink-0" />
-                        <span>ขั้นตอนบังคับยังไม่ครบ — ทำครบก่อนล็อกงวด</span>
+                        <span>{t('fnx.close.required_incomplete')}</span>
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground">SoD: ผู้ล็อกต้องต่างจากผู้เริ่ม ({run.started_by})</p>
+                    <p className="text-xs text-muted-foreground">{t('fnx.close.sod_lock', { by: run.started_by })}</p>
                     <Button
                       disabled={lockPeriod.isPending || !requiredDone}
                       onClick={() => lockPeriod.mutate()}
                     >
                       <Lock className="mr-2 h-4 w-4" />
-                      ล็อกงวด {run.period}
+                      {t('fnx.close.lock_period', { period: run.period })}
                     </Button>
                   </CardContent>
                 </Card>
@@ -306,13 +309,13 @@ export default function PeriodClosePage() {
 
               {run.status === 'Locked' && (
                 <Card className="border-orange-300 dark:border-orange-700">
-                  <CardHeader><CardTitle className="text-sm text-orange-700 dark:text-orange-300">เปิดงวดฉุกเฉิน (GL-16b)</CardTitle></CardHeader>
+                  <CardHeader><CardTitle className="text-sm text-orange-700 dark:text-orange-300">{t('fnx.close.reopen_title')}</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
-                    <p className="text-xs text-muted-foreground">SoD: ผู้เปิดต้องต่างจากผู้ล็อก ({run.locked_by}) · ต้องระบุเหตุผล · บันทึก audit trail</p>
+                    <p className="text-xs text-muted-foreground">{t('fnx.close.sod_reopen', { by: run.locked_by ?? '' })}</p>
                     <div>
-                      <Label>เหตุผลที่เปิดงวด *</Label>
+                      <Label>{t('fnx.close.reopen_reason_label')}</Label>
                       <Input
-                        placeholder="เช่น แก้ไขรายการ depreciation ที่ลืม"
+                        placeholder={t('fnx.close.reopen_reason_ph')}
                         value={reopenReason}
                         onChange={(e) => setReopenReason(e.target.value)}
                       />
@@ -323,7 +326,7 @@ export default function PeriodClosePage() {
                       onClick={() => reopenPeriod.mutate()}
                     >
                       <LockOpen className="mr-2 h-4 w-4" />
-                      เปิดงวดอีกครั้ง
+                      {t('fnx.close.reopen_btn')}
                     </Button>
                   </CardContent>
                 </Card>
