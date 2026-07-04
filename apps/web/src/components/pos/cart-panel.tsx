@@ -2,6 +2,7 @@
 
 import { Bike, Flame, Minus, Pause, Plus, ShoppingBag, ShoppingCart, Trash2, Utensils, User, Wallet } from 'lucide-react';
 import { baht } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';

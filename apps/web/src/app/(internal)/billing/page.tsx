@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CircleDollarSign, Package, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
@@ -18,6 +19,7 @@ import { statusVariant } from '@/components/ui';
 type Plan = { code: string; name: string; price_monthly: number; features?: any };
 
 export default function BillingPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const sub = useQuery<any>({ queryKey: ['subscription'], queryFn: () => api('/api/billing/subscription') });
   const plans = useQuery<{ plans: Plan[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
@@ -26,7 +28,7 @@ export default function BillingPage() {
 
   const change = useMutation({
     mutationFn: (plan_code: string) => api('/api/billing/change-plan', { method: 'POST', body: JSON.stringify({ plan_code }) }),
-    onSuccess: (_d, plan_code) => { setMsg(`✅ เปลี่ยนเป็นแพ็กเกจ ${plan_code} แล้ว`); qc.invalidateQueries({ queryKey: ['subscription'] }); },
+    onSuccess: (_d, plan_code) => { setMsg(t('st.bill.plan_changed', { plan: plan_code })); qc.invalidateQueries({ queryKey: ['subscription'] }); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 
@@ -40,11 +42,11 @@ export default function BillingPage() {
     const labels: string[] = [];
     for (const [k, v] of Object.entries(f)) {
       if (HIDDEN.has(k)) continue;
-      if (k === 'users') labels.push(Number(v) < 0 ? 'ผู้ใช้ไม่จำกัด' : `ผู้ใช้สูงสุด ${v} คน`);
-      else if (k === 'locations') labels.push(Number(v) < 0 ? 'สาขาไม่จำกัด' : `${v} สาขา`);
-      else if (k === 'ai_chat') labels.push(v ? 'ผู้ช่วย AI ในตัว' : 'ไม่รวมผู้ช่วย AI');
-      else if (k === 'ai_tokens_daily') { if (Number(v) > 0) labels.push(`AI ${(Number(v) / 1000).toLocaleString()}k โทเคน/วัน`); }
-      else if (k === 'reports') labels.push(`รายงาน: ${v}`);
+      if (k === 'users') labels.push(Number(v) < 0 ? t('st.bill.users_unlimited') : t('st.bill.users_max', { count: String(v) }));
+      else if (k === 'locations') labels.push(Number(v) < 0 ? t('st.bill.locations_unlimited') : t('st.bill.locations_count', { count: String(v) }));
+      else if (k === 'ai_chat') labels.push(v ? t('st.bill.ai_included') : t('st.bill.ai_excluded'));
+      else if (k === 'ai_tokens_daily') { if (Number(v) > 0) labels.push(t('st.bill.ai_tokens_daily', { count: (Number(v) / 1000).toLocaleString() })); }
+      else if (k === 'reports') labels.push(t('st.bill.reports', { value: String(v) }));
       else labels.push(String(v));
     }
     return labels;
@@ -54,15 +56,15 @@ export default function BillingPage() {
 
   return (
     <div>
-      <PageHeader title="แพ็กเกจการใช้งาน" description="จัดการการสมัครสมาชิกและแพ็กเกจ" />
+      <PageHeader title={t('st.bill.title')} description={t('st.bill.subtitle')} />
       <div className="space-y-6">
         <StateView q={sub}>
           {sub.data && (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="แพ็กเกจปัจจุบัน" value={(currentCode ?? '—').toUpperCase()} icon={Package} tone="primary" />
-              <StatCard label="สถานะ" value={<Badge variant={statusVariant(sub.data.status ?? 'Active')}>{sub.data.status ?? 'Active'}</Badge>} icon={ShieldCheck} />
-              {sub.data.price_monthly != null && <StatCard label="ราคา/เดือน" value={baht(sub.data.price_monthly)} icon={CircleDollarSign} />}
-              {sub.data.trial_ends_at && <StatCard label="ทดลองถึง" value={thaiDate(sub.data.trial_ends_at)} icon={CalendarClock} tone="warning" />}
+              <StatCard label={t('st.bill.current_plan')} value={(currentCode ?? '—').toUpperCase()} icon={Package} tone="primary" />
+              <StatCard label={t('fin.col_status')} value={<Badge variant={statusVariant(sub.data.status ?? 'Active')}>{sub.data.status ?? 'Active'}</Badge>} icon={ShieldCheck} />
+              {sub.data.price_monthly != null && <StatCard label={t('st.bill.price_monthly')} value={baht(sub.data.price_monthly)} icon={CircleDollarSign} />}
+              {sub.data.trial_ends_at && <StatCard label={t('st.bill.trial_until')} value={thaiDate(sub.data.trial_ends_at)} icon={CalendarClock} tone="warning" />}
             </div>
           )}
         </StateView>
@@ -73,15 +75,15 @@ export default function BillingPage() {
           <Card className="gap-4 p-5">
             <div className="flex items-center gap-2">
               <Sparkles className="size-4 text-primary" />
-              <strong className="text-sm">การใช้งาน AI วันนี้</strong>
-              <span className="ml-auto text-xs text-muted-foreground">รีเซ็ตเที่ยงคืน (เวลาไทย)</span>
+              <strong className="text-sm">{t('st.bill.ai_today')}</strong>
+              <span className="ml-auto text-xs text-muted-foreground">{t('st.bill.reset_midnight')}</span>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="ใช้ไปวันนี้" value={`${Number(ai.today?.total_tokens ?? 0).toLocaleString()} โทเคน`} icon={Gauge} tone={ai.today?.over_budget ? 'warning' : 'primary'} />
-              <StatCard label="รวมในแพ็กเกจ" value={`${Number(ai.daily_limit).toLocaleString()} /วัน`} icon={Package} />
-              <StatCard label="เพดานสูงสุด" value={`${Number(ai.daily_max).toLocaleString()} /วัน`} icon={ShieldCheck} />
+              <StatCard label={t('st.bill.used_today')} value={t('st.bill.tokens_value', { count: Number(ai.today?.total_tokens ?? 0).toLocaleString() })} icon={Gauge} tone={ai.today?.over_budget ? 'warning' : 'primary'} />
+              <StatCard label={t('st.bill.plan_included')} value={t('st.bill.per_day_value', { count: Number(ai.daily_limit).toLocaleString() })} icon={Package} />
+              <StatCard label={t('st.bill.hard_ceiling')} value={t('st.bill.per_day_value', { count: Number(ai.daily_max).toLocaleString() })} icon={ShieldCheck} />
               <StatCard
-                label={`ค่าใช้เกิน (${Number(ai.overage_rate_thb_per_1k)} ฿/1k)`}
+                label={t('st.bill.overage_label', { rate: Number(ai.overage_rate_thb_per_1k) })}
                 value={baht(overageCharge)}
                 icon={CircleDollarSign}
                 tone={overageCharge > 0 ? 'warning' : undefined}
@@ -89,14 +91,14 @@ export default function BillingPage() {
             </div>
             {Number(ai.today?.overage_tokens ?? 0) > 0 && (
               <p className="text-xs text-muted-foreground">
-                ใช้เกินโควต้าในแพ็กเกจ {Number(ai.today.overage_tokens).toLocaleString()} โทเคน — คิดค่าบริการส่วนเกินตามอัตรา {Number(ai.overage_rate_thb_per_1k)} ฿ ต่อ 1,000 โทเคน
+                {t('st.bill.overage_detail', { tokens: Number(ai.today.overage_tokens).toLocaleString(), rate: Number(ai.overage_rate_thb_per_1k) })}
               </p>
             )}
           </Card>
         )}
 
         <div>
-          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">เลือกแพ็กเกจ</h3>
+          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('st.bill.choose_plan')}</h3>
           <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           <StateView q={plans}>
             {plans.data && (
@@ -107,11 +109,11 @@ export default function BillingPage() {
                     <Card key={p.code} className={cn('gap-3 p-5', current && 'border-2 border-primary')}>
                       <div className="flex items-center justify-between">
                         <strong className="text-lg">{p.name}</strong>
-                        {current && <Badge variant="success">ปัจจุบัน</Badge>}
+                        {current && <Badge variant="success">{t('st.bill.current')}</Badge>}
                       </div>
                       <div className="text-2xl font-bold text-primary">
-                        {p.price_monthly > 0 ? baht(p.price_monthly) : 'ฟรี'}
-                        {p.price_monthly > 0 && <span className="text-sm font-normal text-muted-foreground"> /เดือน</span>}
+                        {p.price_monthly > 0 ? baht(p.price_monthly) : t('st.bill.free')}
+                        {p.price_monthly > 0 && <span className="text-sm font-normal text-muted-foreground"> {t('st.bill.per_month')}</span>}
                       </div>
                       <ul className="min-h-[60px] list-disc pl-5 text-sm text-muted-foreground">
                         {featureList(p.features).map((f, i) => <li key={i}>{f}</li>)}
@@ -122,7 +124,7 @@ export default function BillingPage() {
                         disabled={current || change.isPending}
                         onClick={() => change.mutate(p.code)}
                       >
-                        {current ? 'กำลังใช้งาน' : 'เลือกแพ็กเกจนี้'}
+                        {current ? t('st.bill.in_use') : t('st.bill.choose_this')}
                       </Button>
                     </Card>
                   );

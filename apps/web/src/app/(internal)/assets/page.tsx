@@ -17,24 +17,26 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { useLang } from '@/lib/i18n';
 
 const selectCls =
   'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function AssetsPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="สินทรัพย์ถาวร (Fixed Assets)"
-        description="ทะเบียนสินทรัพย์ ค่าเสื่อมราคาแบบเส้นตรง และการลงบัญชีอัตโนมัติ (Dr 5200 / Cr 1590)"
+        title={t('mx.as_title')}
+        description={t('mx.as_subtitle')}
       />
       <Tabs
         tabs={[
-          { key: 'register', label: 'ทะเบียนสินทรัพย์', content: <Register /> },
-          { key: 'capitalize', label: 'ตั้งทรัพย์สินจาก GR', content: <Capitalize /> },
-          { key: 'qr', label: 'QR ป้ายทรัพย์สิน', content: <QrTags /> },
-          { key: 'categories', label: 'หมวดหมู่', content: <Categories /> },
-          { key: 'runs', label: 'รอบค่าเสื่อมราคา', content: <DepreciationRuns /> },
+          { key: 'register', label: t('mx.as_tab_register'), content: <Register /> },
+          { key: 'capitalize', label: t('mx.as_tab_capitalize'), content: <Capitalize /> },
+          { key: 'qr', label: t('mx.as_tab_qr'), content: <QrTags /> },
+          { key: 'categories', label: t('mx.as_tab_categories'), content: <Categories /> },
+          { key: 'runs', label: t('mx.as_tab_runs'), content: <DepreciationRuns /> },
         ]}
       />
     </div>
@@ -43,6 +45,7 @@ export default function AssetsPage() {
 
 // ───────────────────────── Register + per-asset schedule drill-in ─────────────────────────
 function Register() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -55,10 +58,10 @@ function Register() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
         {[
-          { v: '', label: 'ทั้งหมด' },
-          { v: 'active', label: 'ใช้งาน' },
-          { v: 'fully_depreciated', label: 'หมดค่าเสื่อม' },
-          { v: 'disposed', label: 'จำหน่ายแล้ว' },
+          { v: '', label: t('mx.as_filter_all') },
+          { v: 'active', label: t('mx.as_filter_active') },
+          { v: 'fully_depreciated', label: t('mx.as_filter_fully_depreciated') },
+          { v: 'disposed', label: t('mx.as_filter_disposed') },
         ].map((f) => (
           <Button key={f.v} variant={status === f.v ? 'default' : 'outline'} size="sm" onClick={() => setStatus(f.v)}>
             {f.label}
@@ -70,37 +73,37 @@ function Register() {
         {q.data && (
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="จำนวนสินทรัพย์" value={num(q.data.count)} icon={Boxes} tone="primary" />
-              <StatCard label="ราคาทุนรวม" value={baht(q.data.total_cost)} icon={Coins} />
-              <StatCard label="ค่าเสื่อมสะสม" value={baht(q.data.total_accum_dep)} tone="warning" />
-              <StatCard label="มูลค่าตามบัญชี (NBV)" value={baht(q.data.total_nbv)} icon={Landmark} tone="success" />
+              <StatCard label={t('mx.as_stat_count')} value={num(q.data.count)} icon={Boxes} tone="primary" />
+              <StatCard label={t('mx.as_stat_total_cost')} value={baht(q.data.total_cost)} icon={Coins} />
+              <StatCard label={t('mx.as_stat_accum_dep')} value={baht(q.data.total_accum_dep)} tone="warning" />
+              <StatCard label={t('mx.as_stat_nbv')} value={baht(q.data.total_nbv)} icon={Landmark} tone="success" />
             </div>
 
             <DataTable
               rows={q.data.assets}
               onRowClick={(r: any) => setSelected(r.asset_no)}
               columns={[
-                { key: 'asset_no', label: 'รหัส' },
-                { key: 'name', label: 'ชื่อสินทรัพย์' },
-                { key: 'acquire_date', label: 'วันที่ได้มา', render: (r: any) => thaiDate(r.acquire_date) },
-                { key: 'acquire_cost', label: 'ราคาทุน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.acquire_cost)}</span> },
-                { key: 'accumulated_depreciation', label: 'ค่าเสื่อมสะสม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.accumulated_depreciation)}</span> },
-                { key: 'net_book_value', label: 'NBV', align: 'right', render: (r: any) => <span className="tabular">{baht(r.net_book_value)}</span> },
-                { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                { key: 'asset_no', label: t('mx.as_col_code') },
+                { key: 'name', label: t('mx.as_col_asset_name') },
+                { key: 'acquire_date', label: t('mx.as_col_acquire_date'), render: (r: any) => thaiDate(r.acquire_date) },
+                { key: 'acquire_cost', label: t('mx.as_col_acquire_cost'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.acquire_cost)}</span> },
+                { key: 'accumulated_depreciation', label: t('mx.as_col_accum_dep'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.accumulated_depreciation)}</span> },
+                { key: 'net_book_value', label: t('mx.as_col_nbv'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.net_book_value)}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               ]}
               emptyState={
                 status
                   ? {
                       icon: SearchX,
-                      title: 'ไม่พบสินทรัพย์ตามตัวกรอง',
-                      description: 'ไม่มีสินทรัพย์ในสถานะนี้ ลองล้างตัวกรองเพื่อดูทั้งหมด',
+                      title: t('mx.as_empty_filter_title'),
+                      description: t('mx.as_empty_filter_desc'),
                       action: (
                         <Button variant="outline" size="sm" onClick={() => setStatus('')}>
-                          ล้างตัวกรอง
+                          {t('inv.clear_filter')}
                         </Button>
                       ),
                     }
-                  : { icon: Boxes, title: 'ยังไม่มีสินทรัพย์', description: 'เพิ่มสินทรัพย์ในทะเบียน หรือบันทึกการได้มาเพื่อเริ่มต้น' }
+                  : { icon: Boxes, title: t('mx.as_empty_title'), description: t('mx.as_empty_desc') }
               }
             />
           </div>
@@ -117,50 +120,51 @@ function Register() {
 // Disposal with maker-checker (FA-09): a request posts a Draft JE + flags the asset disposal_pending; a
 // DIFFERENT user must approve before it is effective (status → disposed). Requester self-approval → SOD.
 function DisposalPanel({ asset, onChange }: { asset: any; onChange: () => void }) {
+  const { t } = useLang();
   const [proceeds, setProceeds] = useState('');
   const refresh = () => onChange();
   if (!asset) return null;
 
   const request = useMutation({
     mutationFn: () => api<any>(`/api/assets/${asset.asset_no}/dispose`, { method: 'PATCH', body: JSON.stringify({ proceeds: Number(proceeds) || 0 }) }),
-    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอจำหน่าย (${r.gain_loss >= 0 ? 'กำไร' : 'ขาดทุน'} ${baht(Math.abs(r.gain_loss))}) — รอผู้อื่นอนุมัติ`); setProceeds(''); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('mx.as_disp_requested', { result: r.gain_loss >= 0 ? t('mx.as_gain') : t('mx.as_loss'), amount: baht(Math.abs(r.gain_loss)) })); setProceeds(''); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const approve = useMutation({
     mutationFn: () => api<any>(`/api/assets/${asset.asset_no}/dispose/approve`, { method: 'POST' }),
-    onSuccess: () => { notifySuccess('อนุมัติการจำหน่าย — สินทรัพย์ถูกจำหน่ายและลงบัญชีแล้ว'); refresh(); },
+    onSuccess: () => { notifySuccess(t('mx.as_disp_approved')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
-    mutationFn: () => api<any>(`/api/assets/${asset.asset_no}/dispose/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
-    onSuccess: () => { notifySuccess('ปฏิเสธการจำหน่าย — สินทรัพย์ยังใช้งานอยู่'); refresh(); },
+    mutationFn: () => api<any>(`/api/assets/${asset.asset_no}/dispose/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt(t('mx.as_reject_reason_prompt')) || undefined }) }),
+    onSuccess: () => { notifySuccess(t('mx.as_disp_rejected')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const busy = approve.isPending || reject.isPending;
 
   return (
     <Card className="gap-4 p-5">
-      <h3 className="text-base font-semibold">จำหน่ายสินทรัพย์ · {asset.asset_no}</h3>
+      <h3 className="text-base font-semibold">{t('mx.as_disp_heading')} · {asset.asset_no}</h3>
       {asset.status === 'disposed' ? (
         <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
-          <Badge variant="secondary">จำหน่ายแล้ว</Badge> รับเงิน {baht(asset.disposal_proceeds)} · {asset.disposal_gain_loss >= 0 ? 'กำไร' : 'ขาดทุน'} {baht(Math.abs(asset.disposal_gain_loss))}
-          {asset.disposal_approved_by && <span className="text-muted-foreground"> · อนุมัติโดย {asset.disposal_approved_by}</span>}
+          <Badge variant="secondary">{t('mx.as_disposed_badge')}</Badge> {t('mx.as_proceeds_received')} {baht(asset.disposal_proceeds)} · {asset.disposal_gain_loss >= 0 ? t('mx.as_gain') : t('mx.as_loss')} {baht(Math.abs(asset.disposal_gain_loss))}
+          {asset.disposal_approved_by && <span className="text-muted-foreground"> · {t('mx.as_approved_by')} {asset.disposal_approved_by}</span>}
         </div>
       ) : asset.disposal_pending ? (
         <div className="flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
-          <Badge variant="warning">รออนุมัติจำหน่าย</Badge>
-          <span>รับเงิน {baht(asset.disposal_proceeds)} · {asset.disposal_gain_loss >= 0 ? 'กำไร' : 'ขาดทุน'} {baht(Math.abs(asset.disposal_gain_loss))} · ผู้ขอ {asset.disposal_requested_by}</span>
+          <Badge variant="warning">{t('mx.as_disp_pending_badge')}</Badge>
+          <span>{t('mx.as_proceeds_received')} {baht(asset.disposal_proceeds)} · {asset.disposal_gain_loss >= 0 ? t('mx.as_gain') : t('mx.as_loss')} {baht(Math.abs(asset.disposal_gain_loss))} · {t('mx.as_requested_by')} {asset.disposal_requested_by}</span>
           <div className="ml-auto flex gap-1.5">
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => approve.mutate()}>อนุมัติ</Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate()}>ปฏิเสธ</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => approve.mutate()}>{t('fin.approve')}</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate()}>{t('mx.as_reject')}</Button>
           </div>
-          <p className="w-full text-xs text-muted-foreground">ต้องเป็นคนละคนกับผู้ขอ (แบ่งแยกหน้าที่) — สินทรัพย์ถูกจำหน่ายและลงบัญชีเมื่ออนุมัติเท่านั้น</p>
+          <p className="w-full text-xs text-muted-foreground">{t('mx.as_disp_sod_note')}</p>
         </div>
       ) : (
         <div className="flex flex-wrap items-end gap-3">
-          <div className="grid gap-1.5"><Label>เงินที่ได้รับ (Proceeds)</Label><Input type="number" min="0" value={proceeds} onChange={(e) => setProceeds(e.target.value)} className="w-44" /></div>
-          <span className="text-xs text-muted-foreground">NBV ปัจจุบัน {baht(asset.net_book_value)}</span>
-          <Button disabled={!proceeds || request.isPending} onClick={() => request.mutate()}>ส่งคำขอจำหน่าย</Button>
+          <div className="grid gap-1.5"><Label>{t('mx.as_proceeds_label')}</Label><Input type="number" min="0" value={proceeds} onChange={(e) => setProceeds(e.target.value)} className="w-44" /></div>
+          <span className="text-xs text-muted-foreground">{t('mx.as_current_nbv')} {baht(asset.net_book_value)}</span>
+          <Button disabled={!proceeds || request.isPending} onClick={() => request.mutate()}>{t('mx.as_disp_submit')}</Button>
         </div>
       )}
     </Card>
@@ -170,6 +174,7 @@ function DisposalPanel({ asset, onChange }: { asset: any; onChange: () => void }
 // Revaluation / impairment with maker-checker (FA-08): request defers the carrying-value change as a
 // Draft; a DIFFERENT user approves before it is effective. Preparer self-approval → SOD_VIOLATION.
 function RevaluationPanel({ assetNo, onChange }: { assetNo: string; onChange: () => void }) {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [newValue, setNewValue] = useState('');
   const [reason, setReason] = useState('');
@@ -179,55 +184,55 @@ function RevaluationPanel({ assetNo, onChange }: { assetNo: string; onChange: ()
 
   const request = useMutation({
     mutationFn: () => api<any>(`/api/assets/${assetNo}/revalue`, { method: 'POST', body: JSON.stringify({ new_value: Number(newValue), reason: reason || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอตีมูลค่าใหม่ (${r.kind === 'impairment' ? 'ด้อยค่า' : 'เพิ่มมูลค่า'} ${baht(r.delta)}) — รอผู้อื่นอนุมัติ`); setNewValue(''); setReason(''); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('mx.as_reval_requested', { kind: r.kind === 'impairment' ? t('mx.as_impairment') : t('mx.as_uplift'), amount: baht(r.delta) })); setNewValue(''); setReason(''); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const approve = useMutation({
     mutationFn: () => api<any>(`/api/assets/${assetNo}/revalue/approve`, { method: 'POST' }),
-    onSuccess: () => { notifySuccess('อนุมัติการตีมูลค่าใหม่ — ลงบัญชีมีผล'); refresh(); },
+    onSuccess: () => { notifySuccess(t('mx.as_reval_approved')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
-    mutationFn: () => api<any>(`/api/assets/${assetNo}/revalue/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
-    onSuccess: () => { notifySuccess('ปฏิเสธการตีมูลค่าใหม่ — ยกเลิกรายการบัญชี'); refresh(); },
+    mutationFn: () => api<any>(`/api/assets/${assetNo}/revalue/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt(t('mx.as_reject_reason_prompt')) || undefined }) }),
+    onSuccess: () => { notifySuccess(t('mx.as_reval_rejected')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const busy = approve.isPending || reject.isPending;
 
   return (
     <Card className="gap-4 p-5">
-      <h3 className="text-base font-semibold">ตีมูลค่าใหม่ / ด้อยค่า · {assetNo}</h3>
+      <h3 className="text-base font-semibold">{t('mx.as_reval_heading')} · {assetNo}</h3>
       {pending ? (
         <div className="flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
-          <Badge variant="warning">รออนุมัติ</Badge>
-          <span>{pending.kind === 'impairment' ? 'ด้อยค่า' : 'เพิ่มมูลค่า'}: {baht(pending.old_value)} → {baht(pending.new_value)} · ผู้ขอ {pending.actioned_by}</span>
+          <Badge variant="warning">{t('mx.as_pending_badge')}</Badge>
+          <span>{pending.kind === 'impairment' ? t('mx.as_impairment') : t('mx.as_uplift')}: {baht(pending.old_value)} → {baht(pending.new_value)} · {t('mx.as_requested_by')} {pending.actioned_by}</span>
           <div className="ml-auto flex gap-1.5">
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => approve.mutate()}>อนุมัติ</Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate()}>ปฏิเสธ</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => approve.mutate()}>{t('fin.approve')}</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate()}>{t('mx.as_reject')}</Button>
           </div>
-          <p className="w-full text-xs text-muted-foreground">ต้องเป็นคนละคนกับผู้ขอ (แบ่งแยกหน้าที่) — มูลค่ามีผลต่อบัญชีเมื่ออนุมัติเท่านั้น</p>
+          <p className="w-full text-xs text-muted-foreground">{t('mx.as_reval_sod_note')}</p>
         </div>
       ) : (
         <div className="flex flex-wrap items-end gap-3">
-          <div className="grid gap-1.5"><Label>มูลค่าใหม่ (NBV)</Label><Input type="number" min="0" value={newValue} onChange={(e) => setNewValue(e.target.value)} className="w-40" /></div>
-          <div className="grid gap-1.5"><Label>เหตุผล</Label><Input value={reason} onChange={(e) => setReason(e.target.value)} className="w-56" placeholder="เช่น ประเมินราคาตลาด" /></div>
-          <Button disabled={!newValue || request.isPending} onClick={() => request.mutate()}>ส่งคำขอ</Button>
+          <div className="grid gap-1.5"><Label>{t('mx.as_new_value_label')}</Label><Input type="number" min="0" value={newValue} onChange={(e) => setNewValue(e.target.value)} className="w-40" /></div>
+          <div className="grid gap-1.5"><Label>{t('mx.as_reason_label')}</Label><Input value={reason} onChange={(e) => setReason(e.target.value)} className="w-56" placeholder={t('mx.as_reason_placeholder')} /></div>
+          <Button disabled={!newValue || request.isPending} onClick={() => request.mutate()}>{t('mx.as_submit_request')}</Button>
         </div>
       )}
       <StateView q={q}>
         {q.data && (
           <DataTable
             rows={q.data.revaluations}
-            emptyState={{ title: 'ยังไม่มีประวัติการตีมูลค่า' }}
+            emptyState={{ title: t('mx.as_reval_empty') }}
             dense
             columns={[
-              { key: 'reval_date', label: 'วันที่', render: (r: any) => (r.reval_date ? thaiDate(r.reval_date) : '—') },
-              { key: 'kind', label: 'ประเภท', render: (r: any) => <Badge variant={r.kind === 'impairment' ? 'destructive' : 'success'}>{r.kind === 'impairment' ? 'ด้อยค่า' : 'เพิ่มมูลค่า'}</Badge> },
-              { key: 'old_value', label: 'เดิม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.old_value)}</span> },
-              { key: 'new_value', label: 'ใหม่', align: 'right', render: (r: any) => <span className="tabular">{baht(r.new_value)}</span> },
-              { key: 'delta', label: 'ส่วนต่าง', align: 'right', render: (r: any) => <span className={`tabular ${r.delta < 0 ? 'text-destructive' : 'text-success'}`}>{baht(r.delta)}</span> },
-              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={r.status === 'Posted' ? 'success' : r.status === 'Rejected' ? 'destructive' : 'warning'}>{r.status === 'Posted' ? 'ผ่านแล้ว' : r.status === 'Rejected' ? 'ปฏิเสธ' : 'รออนุมัติ'}</Badge> },
-              { key: 'by', label: 'ผู้ขอ/อนุมัติ', render: (r: any) => <span className="text-xs text-muted-foreground">{r.actioned_by ?? '—'}{r.approved_by ? ` → ${r.approved_by}` : ''}</span> },
+              { key: 'reval_date', label: t('dash.col_date'), render: (r: any) => (r.reval_date ? thaiDate(r.reval_date) : '—') },
+              { key: 'kind', label: t('mx.as_col_kind'), render: (r: any) => <Badge variant={r.kind === 'impairment' ? 'destructive' : 'success'}>{r.kind === 'impairment' ? t('mx.as_impairment') : t('mx.as_uplift')}</Badge> },
+              { key: 'old_value', label: t('mx.as_col_old'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.old_value)}</span> },
+              { key: 'new_value', label: t('mx.as_col_new'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.new_value)}</span> },
+              { key: 'delta', label: t('mx.as_col_delta'), align: 'right', render: (r: any) => <span className={`tabular ${r.delta < 0 ? 'text-destructive' : 'text-success'}`}>{baht(r.delta)}</span> },
+              { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.status === 'Posted' ? 'success' : r.status === 'Rejected' ? 'destructive' : 'warning'}>{r.status === 'Posted' ? t('mx.as_status_posted') : r.status === 'Rejected' ? t('mx.as_status_rejected') : t('mx.as_status_pending')}</Badge> },
+              { key: 'by', label: t('mx.as_col_by'), render: (r: any) => <span className="text-xs text-muted-foreground">{r.actioned_by ?? '—'}{r.approved_by ? ` → ${r.approved_by}` : ''}</span> },
             ]}
           />
         )}
@@ -237,11 +242,12 @@ function RevaluationPanel({ assetNo, onChange }: { assetNo: string; onChange: ()
 }
 
 function ScheduleDrill({ assetNo, onClose }: { assetNo: string; onClose: () => void }) {
+  const { t } = useLang();
   const q = useQuery<any>({ queryKey: ['asset-schedule', assetNo], queryFn: () => api(`/api/assets/${assetNo}/schedule`) });
   return (
     <Card className="gap-4 p-5">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-base font-semibold">ตารางค่าเสื่อมราคา · {assetNo}</h3>
+        <h3 className="text-base font-semibold">{t('mx.as_schedule_heading')} · {assetNo}</h3>
         <Button variant="ghost" size="icon" onClick={onClose}>
           <X className="size-4" />
         </Button>
@@ -250,17 +256,17 @@ function ScheduleDrill({ assetNo, onClose }: { assetNo: string; onClose: () => v
         {q.data && (
           <div className="space-y-4">
             <div className="text-sm text-muted-foreground">
-              {q.data.asset?.name} · อายุการใช้งาน {num(q.data.asset?.useful_life_months)} เดือน · ราคาทุน {baht(q.data.asset?.acquire_cost)}
+              {q.data.asset?.name} · {t('mx.as_useful_life')} {num(q.data.asset?.useful_life_months)} {t('mx.as_months')} · {t('mx.as_cost')} {baht(q.data.asset?.acquire_cost)}
             </div>
             <DataTable
               rows={q.data.schedule}
               columns={[
-                { key: 'period', label: 'งวด' },
-                { key: 'amount', label: 'ค่าเสื่อม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-                { key: 'accumulated_after', label: 'สะสมหลังงวด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.accumulated_after)}</span> },
-                { key: 'nbv_after', label: 'NBV หลังงวด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.nbv_after)}</span> },
+                { key: 'period', label: t('mx.as_col_period') },
+                { key: 'amount', label: t('mx.as_col_depreciation'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'accumulated_after', label: t('mx.as_col_accum_after'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.accumulated_after)}</span> },
+                { key: 'nbv_after', label: t('mx.as_col_nbv_after'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.nbv_after)}</span> },
               ]}
-              emptyState={{ title: 'ยังไม่มีรายการค่าเสื่อม' }}
+              emptyState={{ title: t('mx.as_schedule_empty') }}
               dense
             />
           </div>
@@ -274,6 +280,7 @@ function ScheduleDrill({ assetNo, onClose }: { assetNo: string; onClose: () => v
 // A capital goods-receipt line is capitalised onto the asset register via a maker-checker request: a preparer
 // raises it (no GL), and a DIFFERENT user approves before the asset + acquisition JE are created.
 function Capitalize() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [grNo, setGrNo] = useState('');
   const [lookup, setLookup] = useState('');
@@ -285,28 +292,28 @@ function Capitalize() {
 
   const register = useMutation({
     mutationFn: (b: any) => api<any>('/api/assets/registrations', { method: 'POST', body: JSON.stringify(b) }),
-    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอตั้งทรัพย์สิน ${r.reg_no} (${baht(r.acquire_cost)}) — รอผู้อื่นอนุมัติ`); setForm(null); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('mx.as_cap_requested', { regNo: r.reg_no, amount: baht(r.acquire_cost) })); setForm(null); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const approve = useMutation({
     mutationFn: (regNo: string) => api<any>(`/api/assets/registrations/${regNo}/approve`, { method: 'POST' }),
-    onSuccess: (r: any) => { notifySuccess(`อนุมัติ — สร้างสินทรัพย์ ${r.asset_no} และลงบัญชีแล้ว`); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('mx.as_cap_approved', { assetNo: r.asset_no })); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
-    mutationFn: (regNo: string) => api<any>(`/api/assets/registrations/${regNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
-    onSuccess: () => { notifySuccess('ปฏิเสธคำขอตั้งทรัพย์สินแล้ว'); refresh(); },
+    mutationFn: (regNo: string) => api<any>(`/api/assets/registrations/${regNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt(t('mx.as_reject_reason_prompt')) || undefined }) }),
+    onSuccess: () => { notifySuccess(t('mx.as_cap_rejected')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-4">
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">ค้นหารายการทุน (Capital) จากใบรับสินค้า</h3>
-        <p className="text-sm text-muted-foreground">ระบุเลขที่ใบรับสินค้า (GR) เพื่อดูรายการที่ตั้งเป็นสินทรัพย์ถาวรได้ — รายการทุนจะไม่ถูกบันทึกเข้าสต๊อก แต่รอตั้งทะเบียนทรัพย์สิน</p>
+        <h3 className="text-base font-semibold">{t('mx.as_cap_search_heading')}</h3>
+        <p className="text-sm text-muted-foreground">{t('mx.as_cap_search_desc')}</p>
         <div className="flex flex-wrap items-end gap-2">
-          <div className="grid gap-1.5"><Label htmlFor="gr-no">เลขที่ GR</Label><Input id="gr-no" placeholder="GR-YYYYMMDD-NNN" value={grNo} onChange={(e) => setGrNo(e.target.value)} className="w-56" /></div>
-          <Button disabled={!grNo} onClick={() => setLookup(grNo.trim())}>ค้นหา</Button>
+          <div className="grid gap-1.5"><Label htmlFor="gr-no">{t('mx.as_gr_no_label')}</Label><Input id="gr-no" placeholder="GR-YYYYMMDD-NNN" value={grNo} onChange={(e) => setGrNo(e.target.value)} className="w-56" /></div>
+          <Button disabled={!grNo} onClick={() => setLookup(grNo.trim())}>{t('mx.as_search')}</Button>
         </div>
       </Card>
 
@@ -314,26 +321,26 @@ function Capitalize() {
         <StateView q={elig}>
           {elig.data && (
             <Card className="gap-3 p-5">
-              <h3 className="text-base font-semibold">รายการทุนที่รอตั้งทรัพย์สิน · {elig.data.gr_no} <span className="text-sm font-normal text-muted-foreground">(PO {elig.data.po_no})</span></h3>
+              <h3 className="text-base font-semibold">{t('mx.as_cap_eligible_heading')} · {elig.data.gr_no} <span className="text-sm font-normal text-muted-foreground">(PO {elig.data.po_no})</span></h3>
               <DataTable
                 rows={elig.data.eligible}
-                emptyState={{ icon: Boxes, title: 'ไม่มีรายการทุนที่รอตั้งทรัพย์สินใน GR นี้', description: 'รายการอาจถูกตั้งทรัพย์สินไปแล้ว หรือไม่ได้ถูกตั้งค่าเป็นสินทรัพย์ถาวร' }}
+                emptyState={{ icon: Boxes, title: t('mx.as_cap_eligible_empty_title'), description: t('mx.as_cap_eligible_empty_desc') }}
                 dense
                 columns={[
-                  { key: 'item_id', label: 'รหัสสินค้า' },
-                  { key: 'item_description', label: 'รายละเอียด' },
-                  { key: 'received_qty', label: 'รับ', align: 'right', render: (r: any) => <span className="tabular">{num(r.received_qty)}</span> },
-                  { key: 'unit_cost', label: 'ต้นทุน/หน่วย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.unit_cost)}</span> },
-                  { key: 'suggested_cost', label: 'มูลค่ารวม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.suggested_cost)}</span> },
-                  { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" onClick={() => setForm({ gr_item_id: r.gr_item_id, name: r.item_description || r.item_id, life: '60' })}>ตั้งทรัพย์สิน</Button> },
+                  { key: 'item_id', label: t('mx.as_col_item_id') },
+                  { key: 'item_description', label: t('mx.as_col_description') },
+                  { key: 'received_qty', label: t('mx.as_col_received'), align: 'right', render: (r: any) => <span className="tabular">{num(r.received_qty)}</span> },
+                  { key: 'unit_cost', label: t('mx.as_col_unit_cost'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.unit_cost)}</span> },
+                  { key: 'suggested_cost', label: t('mx.as_col_total_value'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.suggested_cost)}</span> },
+                  { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" onClick={() => setForm({ gr_item_id: r.gr_item_id, name: r.item_description || r.item_id, life: '60' })}>{t('mx.as_capitalize_action')}</Button> },
                 ]}
               />
               {form && (
                 <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted/40 p-3">
-                  <div className="grid gap-1.5"><Label>ชื่อสินทรัพย์</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-64" /></div>
-                  <div className="grid gap-1.5"><Label>อายุการใช้งาน (เดือน)</Label><Input type="number" min="1" value={form.life} onChange={(e) => setForm({ ...form, life: e.target.value })} className="w-36" /></div>
-                  <Button disabled={!form.name || !form.life || register.isPending} onClick={() => register.mutate({ gr_no: elig.data.gr_no, gr_item_id: form.gr_item_id, name: form.name, useful_life_months: Number(form.life) })}>ส่งคำขอ</Button>
-                  <Button variant="ghost" onClick={() => setForm(null)}>ยกเลิก</Button>
+                  <div className="grid gap-1.5"><Label>{t('mx.as_asset_name_label')}</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-64" /></div>
+                  <div className="grid gap-1.5"><Label>{t('mx.as_life_months_label')}</Label><Input type="number" min="1" value={form.life} onChange={(e) => setForm({ ...form, life: e.target.value })} className="w-36" /></div>
+                  <Button disabled={!form.name || !form.life || register.isPending} onClick={() => register.mutate({ gr_no: elig.data.gr_no, gr_item_id: form.gr_item_id, name: form.name, useful_life_months: Number(form.life) })}>{t('mx.as_submit_request')}</Button>
+                  <Button variant="ghost" onClick={() => setForm(null)}>{t('fin.cancel')}</Button>
                 </div>
               )}
             </Card>
@@ -342,25 +349,25 @@ function Capitalize() {
       )}
 
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">คำขอตั้งทรัพย์สินที่รออนุมัติ</h3>
-        <p className="text-xs text-muted-foreground">ผู้อนุมัติต้องเป็นคนละคนกับผู้ขอ (แบ่งแยกหน้าที่) — สินทรัพย์ถูกสร้างและลงบัญชี (Dr 1500 / Cr 2000) เมื่ออนุมัติเท่านั้น</p>
+        <h3 className="text-base font-semibold">{t('mx.as_cap_queue_heading')}</h3>
+        <p className="text-xs text-muted-foreground">{t('mx.as_cap_queue_sod_note')}</p>
         <StateView q={queue}>
           {queue.data && (
             <DataTable
               rows={queue.data.registrations}
-              emptyState={{ icon: Landmark, title: 'ไม่มีคำขอที่รออนุมัติ' }}
+              emptyState={{ icon: Landmark, title: t('mx.as_cap_queue_empty') }}
               dense
               columns={[
-                { key: 'reg_no', label: 'เลขที่คำขอ' },
-                { key: 'name', label: 'ชื่อสินทรัพย์' },
-                { key: 'gr_no', label: 'GR / PO', render: (r: any) => <span className="text-xs text-muted-foreground">{r.gr_no}{r.po_no ? ` · ${r.po_no}` : ''}</span> },
-                { key: 'acquire_cost', label: 'มูลค่า', align: 'right', render: (r: any) => <span className="tabular">{baht(r.acquire_cost)}</span> },
-                { key: 'useful_life_months', label: 'อายุ (ด.)', align: 'right', render: (r: any) => <span className="tabular">{num(r.useful_life_months)}</span> },
-                { key: 'requested_by', label: 'ผู้ขอ', render: (r: any) => <span className="text-xs text-muted-foreground">{r.requested_by ?? '—'}</span> },
+                { key: 'reg_no', label: t('mx.as_col_reg_no') },
+                { key: 'name', label: t('mx.as_col_asset_name') },
+                { key: 'gr_no', label: t('mx.as_col_gr_po'), render: (r: any) => <span className="text-xs text-muted-foreground">{r.gr_no}{r.po_no ? ` · ${r.po_no}` : ''}</span> },
+                { key: 'acquire_cost', label: t('mx.as_col_value'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.acquire_cost)}</span> },
+                { key: 'useful_life_months', label: t('mx.as_col_life_months'), align: 'right', render: (r: any) => <span className="tabular">{num(r.useful_life_months)}</span> },
+                { key: 'requested_by', label: t('mx.as_col_requested_by'), render: (r: any) => <span className="text-xs text-muted-foreground">{r.requested_by ?? '—'}</span> },
                 { key: 'act', label: '', align: 'right', render: (r: any) => (
                   <div className="flex justify-end gap-1.5">
-                    <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(r.reg_no)}>อนุมัติ</Button>
-                    <Button size="sm" variant="ghost" disabled={reject.isPending} onClick={() => reject.mutate(r.reg_no)}>ปฏิเสธ</Button>
+                    <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(r.reg_no)}>{t('fin.approve')}</Button>
+                    <Button size="sm" variant="ghost" disabled={reject.isPending} onClick={() => reject.mutate(r.reg_no)}>{t('mx.as_reject')}</Button>
                   </div>
                 ) },
               ]}
@@ -374,6 +381,7 @@ function Capitalize() {
 
 // ───────────────────────── QR asset tags + scan-to-update ─────────────────────────
 function QrTags() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['assets', ''], queryFn: () => api('/api/assets') });
   const [assetNo, setAssetNo] = useState('');
@@ -388,7 +396,7 @@ function QrTags() {
   const [scanLoc, setScanLoc] = useState('');
   const scan = useMutation({
     mutationFn: () => api('/api/assets/scan-update', { method: 'POST', body: JSON.stringify({ code: scanCode, location: scanLoc || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(`อัปเดต ${r.asset_no} → 📍 ${r.location ?? '—'}`); setScanCode(''); setScanLoc(''); qc.invalidateQueries({ queryKey: ['assets'] }); },
+    onSuccess: (r: any) => { notifySuccess(t('mx.as_scan_updated', { assetNo: r.asset_no, location: r.location ?? '—' })); setScanCode(''); setScanLoc(''); qc.invalidateQueries({ queryKey: ['assets'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -404,20 +412,20 @@ function QrTags() {
   return (
     <div className="space-y-4">
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">พิมพ์ป้าย QR ทรัพย์สิน</h3>
-        <p className="text-sm text-muted-foreground">ดาวน์โหลดแผ่นป้าย QR (A4) สำหรับติดบนทรัพย์สินทุกชิ้น</p>
+        <h3 className="text-base font-semibold">{t('mx.as_qr_print_heading')}</h3>
+        <p className="text-sm text-muted-foreground">{t('mx.as_qr_print_desc')}</p>
         <div>
-          <Button disabled={busy} onClick={downloadLabels}><QrCode className="size-4" /> {busy ? 'กำลังสร้าง…' : 'ดาวน์โหลดป้าย QR ทั้งหมด'}</Button>
+          <Button disabled={busy} onClick={downloadLabels}><QrCode className="size-4" /> {busy ? t('mx.as_generating') : t('mx.as_qr_download_all')}</Button>
         </div>
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="gap-3 p-5">
-          <h3 className="text-base font-semibold">ดู QR รายชิ้น</h3>
+          <h3 className="text-base font-semibold">{t('mx.as_qr_single_heading')}</h3>
           <div className="grid gap-1.5 max-w-sm">
-            <Label htmlFor="qr-asset">ทรัพย์สิน</Label>
+            <Label htmlFor="qr-asset">{t('mx.as_asset_label')}</Label>
             <select id="qr-asset" className={selectCls} value={assetNo} onChange={(e) => setAssetNo(e.target.value)}>
-              <option value="">— เลือก —</option>
+              <option value="">{t('mx.as_select_option')}</option>
               {assets.map((a: any) => <option key={a.asset_no} value={a.asset_no}>{a.asset_no} — {a.name}</option>)}
             </select>
           </div>
@@ -431,18 +439,18 @@ function QrTags() {
         </Card>
 
         <Card className="gap-3 p-5">
-          <h3 className="text-base font-semibold">สแกน & อัปเดตตำแหน่ง</h3>
-          <p className="text-sm text-muted-foreground">สแกน (หรือวาง) โค้ดจากป้าย QR แล้วระบุตำแหน่งใหม่</p>
+          <h3 className="text-base font-semibold">{t('mx.as_scan_heading')}</h3>
+          <p className="text-sm text-muted-foreground">{t('mx.as_scan_desc')}</p>
           <div className="grid gap-1.5">
-            <Label htmlFor="scan-code">โค้ดจาก QR</Label>
+            <Label htmlFor="scan-code">{t('mx.as_scan_code_label')}</Label>
             <Input id="scan-code" placeholder="ASSET_ID:FA-0001|…" value={scanCode} onChange={(e) => setScanCode(e.target.value)} />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="scan-loc">ตำแหน่งใหม่</Label>
-            <Input id="scan-loc" placeholder="เช่น ห้องครัวกลาง" value={scanLoc} onChange={(e) => setScanLoc(e.target.value)} />
+            <Label htmlFor="scan-loc">{t('mx.as_scan_loc_label')}</Label>
+            <Input id="scan-loc" placeholder={t('mx.as_scan_loc_placeholder')} value={scanLoc} onChange={(e) => setScanLoc(e.target.value)} />
           </div>
           <div>
-            <Button disabled={!scanCode || scan.isPending} onClick={() => scan.mutate()}><ScanLine className="size-4" /> {scan.isPending ? 'กำลังอัปเดต…' : 'อัปเดต'}</Button>
+            <Button disabled={!scanCode || scan.isPending} onClick={() => scan.mutate()}><ScanLine className="size-4" /> {scan.isPending ? t('mx.as_updating') : t('mx.as_update')}</Button>
           </div>
         </Card>
       </div>
@@ -452,23 +460,24 @@ function QrTags() {
 
 // ───────────────────────── Categories ─────────────────────────
 function Categories() {
+  const { t } = useLang();
   const q = useQuery<any>({ queryKey: ['asset-categories'], queryFn: () => api('/api/assets/categories') });
   return (
     <StateView q={q}>
       {q.data && (
         <div className="space-y-5">
-          <StatCard label="จำนวนหมวดหมู่" value={num(q.data.count)} icon={Boxes} tone="primary" className="max-w-xs" />
+          <StatCard label={t('mx.as_cat_count')} value={num(q.data.count)} icon={Boxes} tone="primary" className="max-w-xs" />
           <DataTable
             rows={q.data.categories}
             columns={[
-              { key: 'code', label: 'รหัส' },
-              { key: 'name', label: 'ชื่อหมวดหมู่' },
-              { key: 'default_useful_life_years', label: 'อายุ (ปี)', align: 'right', render: (r: any) => <span className="tabular">{num(r.default_useful_life_years)}</span> },
-              { key: 'asset_account', label: 'บัญชีสินทรัพย์' },
-              { key: 'accum_dep_account', label: 'บัญชีค่าเสื่อมสะสม' },
-              { key: 'dep_expense_account', label: 'บัญชีค่าใช้จ่าย' },
+              { key: 'code', label: t('mx.as_col_code') },
+              { key: 'name', label: t('mx.as_col_category_name') },
+              { key: 'default_useful_life_years', label: t('mx.as_col_life_years'), align: 'right', render: (r: any) => <span className="tabular">{num(r.default_useful_life_years)}</span> },
+              { key: 'asset_account', label: t('mx.as_col_asset_account') },
+              { key: 'accum_dep_account', label: t('mx.as_col_accum_dep_account') },
+              { key: 'dep_expense_account', label: t('mx.as_col_dep_expense_account') },
             ]}
-            emptyState={{ icon: FolderTree, title: 'ยังไม่มีหมวดหมู่สินทรัพย์', description: 'ตั้งค่าหมวดหมู่เพื่อกำหนดอายุการใช้งานและผังบัญชีเริ่มต้น' }}
+            emptyState={{ icon: FolderTree, title: t('mx.as_cat_empty_title'), description: t('mx.as_cat_empty_desc') }}
           />
         </div>
       )}
@@ -478,6 +487,7 @@ function Categories() {
 
 // ───────────────────────── Depreciation runs + run action ─────────────────────────
 function DepreciationRuns() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['dep-runs'], queryFn: () => api('/api/assets/depreciation/runs') });
   const [period, setPeriod] = useState('2026-06');
@@ -485,9 +495,9 @@ function DepreciationRuns() {
   const run = useMutation({
     mutationFn: () => api<any>('/api/assets/depreciation/run', { method: 'POST', body: JSON.stringify({ period }) }),
     onSuccess: (r) => {
-      if (r.already) notifySuccess(`งวด ${period} ลงบัญชีไปแล้ว`);
-      else if (!r.asset_count) notifySuccess(`ไม่มีสินทรัพย์ที่ต้องคิดค่าเสื่อมในงวด ${period}`);
-      else notifySuccess(`คิดค่าเสื่อม ${num(r.asset_count)} รายการ · ${baht(r.total_depreciation)} · ${r.runs?.length ?? 1} รอบ`);
+      if (r.already) notifySuccess(t('mx.as_run_already', { period }));
+      else if (!r.asset_count) notifySuccess(t('mx.as_run_none', { period }));
+      else notifySuccess(t('mx.as_run_done', { count: num(r.asset_count), total: baht(r.total_depreciation), runs: r.runs?.length ?? 1 }));
       qc.invalidateQueries({ queryKey: ['dep-runs'] });
       qc.invalidateQueries({ queryKey: ['assets'] });
     },
@@ -497,14 +507,14 @@ function DepreciationRuns() {
   return (
     <div className="space-y-5">
       <Card className="gap-4 p-5">
-        <h3 className="text-base font-semibold">คิดค่าเสื่อมราคาประจำงวด</h3>
+        <h3 className="text-base font-semibold">{t('mx.as_run_heading')}</h3>
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor="dep-period">งวด (YYYY-MM)</Label>
+            <Label htmlFor="dep-period">{t('mx.as_period_label')}</Label>
             <input id="dep-period" className={`${selectCls} max-w-[160px]`} value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="2026-06" />
           </div>
           <Button disabled={run.isPending || !/^\d{4}-\d{2}$/.test(period)} onClick={() => run.mutate()}>
-            <Play className="size-4" /> {run.isPending ? 'กำลังคิด…' : 'คิดค่าเสื่อม'}
+            <Play className="size-4" /> {run.isPending ? t('mx.as_computing') : t('mx.as_run_action')}
           </Button>
         </div>
       </Card>
@@ -514,14 +524,14 @@ function DepreciationRuns() {
           <DataTable
             rows={q.data.runs}
             columns={[
-              { key: 'run_no', label: 'เลขที่รอบ' },
-              { key: 'period', label: 'งวด' },
-              { key: 'asset_count', label: 'จำนวนสินทรัพย์', align: 'right', render: (r: any) => <span className="tabular">{num(r.asset_count)}</span> },
-              { key: 'total_depreciation', label: 'ค่าเสื่อมรวม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.total_depreciation)}</span> },
-              { key: 'journal_no', label: 'เลขที่บัญชี', render: (r: any) => r.journal_no ?? '—' },
-              { key: 'posted_at', label: 'ลงบัญชีเมื่อ', render: (r: any) => thaiDate(r.posted_at) },
+              { key: 'run_no', label: t('mx.as_col_run_no') },
+              { key: 'period', label: t('mx.as_col_period') },
+              { key: 'asset_count', label: t('mx.as_col_asset_count'), align: 'right', render: (r: any) => <span className="tabular">{num(r.asset_count)}</span> },
+              { key: 'total_depreciation', label: t('mx.as_col_total_dep'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.total_depreciation)}</span> },
+              { key: 'journal_no', label: t('mx.as_col_journal_no'), render: (r: any) => r.journal_no ?? '—' },
+              { key: 'posted_at', label: t('mx.as_col_posted_at'), render: (r: any) => thaiDate(r.posted_at) },
             ]}
-            emptyState={{ icon: CalendarRange, title: 'ยังไม่มีรอบค่าเสื่อมราคา', description: 'เลือกงวดด้านบนแล้วกด คิดค่าเสื่อม เพื่อสร้างรอบแรก' }}
+            emptyState={{ icon: CalendarRange, title: t('mx.as_run_empty_title'), description: t('mx.as_run_empty_desc') }}
           />
         )}
       </StateView>

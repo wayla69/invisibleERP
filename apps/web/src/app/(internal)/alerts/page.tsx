@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BellRing, Plus, Trash2, Play, History } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -24,18 +25,20 @@ interface AlertEvent { id: number; name: string; metric: string; value: number; 
 const OP_LABEL: Record<string, string> = { gt: '>', gte: '≥', lt: '<', lte: '≤', eq: '=' };
 
 export default function AlertsPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="การแจ้งเตือน (Alert rules)" description="ตั้งกฎแจ้งเตือนจากตัวชี้วัดสด (สต๊อกต่ำ, งานอนุมัติเกินกำหนด, …) → ส่งแจ้งเตือนในระบบ หรือ LINE/SMS/อีเมล เมื่อถึงเกณฑ์" />
+      <PageHeader title={t('st.alert.title')} description={t('st.alert.subtitle')} />
       <Tabs tabs={[
-        { key: 'rules', label: 'กฎแจ้งเตือน', content: <Rules /> },
-        { key: 'events', label: 'ประวัติการแจ้งเตือน', content: <Events /> },
+        { key: 'rules', label: t('st.alert.tab_rules'), content: <Rules /> },
+        { key: 'events', label: t('st.alert.tab_events'), content: <Events /> },
       ]} />
     </div>
   );
 }
 
 function Rules() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const cat = useQuery<Catalog>({ queryKey: ['alert-metrics'], queryFn: () => api('/api/alerts/metrics') });
   const prev = useQuery<{ values: Record<string, number> }>({ queryKey: ['alert-preview'], queryFn: () => api('/api/alerts/preview') });
@@ -45,12 +48,12 @@ function Rules() {
   const metrics = cat.data?.metrics ?? [];
   const create = useMutation({
     mutationFn: () => api('/api/alerts/rules', { method: 'POST', body: JSON.stringify({ name, metric: metric || metrics[0]?.key, operator, threshold: Number(threshold) || 0, channel, target_role: targetRole || undefined, target_to: targetTo || undefined, severity, cooldown_hours: Number(cooldown) || 0 }) }),
-    onSuccess: () => { notifySuccess(`เพิ่มกฎ ${name}`); setName(''); setThreshold(''); qc.invalidateQueries({ queryKey: ['alert-rules'] }); },
+    onSuccess: () => { notifySuccess(t('st.alert.rule_added', { name })); setName(''); setThreshold(''); qc.invalidateQueries({ queryKey: ['alert-rules'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
   const run = useMutation({
     mutationFn: () => api('/api/alerts/run', { method: 'POST' }),
-    onSuccess: (r: any) => { notifySuccess(`ตรวจสอบแล้ว: แจ้งเตือน ${r.fired_count} · ระงับ (cooldown) ${r.suppressed}`); qc.invalidateQueries({ queryKey: ['alert-rules'] }); },
+    onSuccess: (r: any) => { notifySuccess(t('st.alert.checked', { fired: r.fired_count, suppressed: r.suppressed })); qc.invalidateQueries({ queryKey: ['alert-rules'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
   const toggle = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => api(`/api/alerts/rules/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }) });
@@ -59,43 +62,43 @@ function Rules() {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader><CardTitle className="text-sm flex items-center gap-2"><BellRing className="h-4 w-4" />สร้างกฎแจ้งเตือน</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-sm flex items-center gap-2"><BellRing className="h-4 w-4" />{t('st.alert.create_rule')}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-4">
-            <div className="sm:col-span-2"><Label>ชื่อกฎ</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น สต๊อกต่ำ" /></div>
-            <div><Label>ตัวชี้วัด</Label>
+            <div className="sm:col-span-2"><Label>{t('st.alert.rule_name')}</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('st.alert.rule_name_ph')} /></div>
+            <div><Label>{t('st.alert.metric')}</Label>
               <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={metric} onChange={(e) => setMetric(e.target.value)}>
                 {metrics.map((m) => <option key={m.key} value={m.key}>{m.label} ({prev.data?.values?.[m.key] ?? 0})</option>)}
               </select>
             </div>
             <div className="grid grid-cols-2 gap-1">
-              <div><Label>เงื่อนไข</Label>
+              <div><Label>{t('st.alert.condition')}</Label>
                 <select className="h-9 w-full rounded-md border bg-background px-1 text-sm" value={operator} onChange={(e) => setOperator(e.target.value)}>
                   {(cat.data?.operators ?? []).map((o) => <option key={o} value={o}>{OP_LABEL[o] ?? o}</option>)}
                 </select>
               </div>
-              <div><Label>ค่าเกณฑ์</Label><Input value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder="1" /></div>
+              <div><Label>{t('st.alert.threshold')}</Label><Input value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder="1" /></div>
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-4">
-            <div><Label>ช่องทาง</Label>
+            <div><Label>{t('st.alert.channel')}</Label>
               <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={channel} onChange={(e) => setChannel(e.target.value)}>
                 {(cat.data?.channels ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             {channel === 'notification'
-              ? <div><Label>แจ้งบทบาท</Label><Input value={targetRole} onChange={(e) => setTargetRole(e.target.value)} placeholder="Warehouse" /></div>
-              : <div><Label>ผู้รับ ({channel})</Label><Input value={targetTo} onChange={(e) => setTargetTo(e.target.value)} placeholder="email/เบอร์/LINE id" /></div>}
-            <div><Label>ระดับ</Label>
+              ? <div><Label>{t('st.alert.notify_role')}</Label><Input value={targetRole} onChange={(e) => setTargetRole(e.target.value)} placeholder="Warehouse" /></div>
+              : <div><Label>{t('st.alert.recipient', { channel })}</Label><Input value={targetTo} onChange={(e) => setTargetTo(e.target.value)} placeholder={t('st.alert.recipient_ph')} /></div>}
+            <div><Label>{t('st.alert.severity')}</Label>
               <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={severity} onChange={(e) => setSeverity(e.target.value)}>
                 {['info', 'warning', 'critical'].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-            <div><Label>หน่วงเวลา (ชม.)</Label><Input value={cooldown} onChange={(e) => setCooldown(e.target.value)} /></div>
+            <div><Label>{t('st.alert.cooldown')}</Label><Input value={cooldown} onChange={(e) => setCooldown(e.target.value)} /></div>
           </div>
           <div className="flex items-center gap-3">
-            <Button disabled={!name || (!metric && !metrics.length) || create.isPending} onClick={() => create.mutate()}><Plus className="mr-1 h-4 w-4" />เพิ่มกฎ</Button>
-            <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate()}><Play className="mr-1 h-4 w-4" />ตรวจสอบเดี๋ยวนี้</Button>
+            <Button disabled={!name || (!metric && !metrics.length) || create.isPending} onClick={() => create.mutate()}><Plus className="mr-1 h-4 w-4" />{t('st.alert.add_rule')}</Button>
+            <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate()}><Play className="mr-1 h-4 w-4" />{t('st.alert.check_now')}</Button>
           </div>
         </CardContent>
       </Card>

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Code, ExternalLink } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,11 +14,12 @@ type Portal = { scopes: { key: string; desc: string }[]; endpoints: { method: st
 
 // D1 (Phase 23) — developer portal over the shipped public API v1: keys + rate tiers, scopes, endpoints, OpenAPI.
 export default function DeveloperPage() {
+  const { t } = useLang();
   const q = useQuery<Portal>({ queryKey: ['developer-portal'], queryFn: () => api('/api/developer/portal') });
   const [msg, setMsg] = useState('');
   const setTier = useMutation({
     mutationFn: ({ id, tier }: { id: number; tier: string }) => api(`/api/developer/keys/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) }),
-    onSuccess: () => { setMsg('อัปเดตระดับแล้ว ✓'); q.refetch(); },
+    onSuccess: () => { setMsg(t('st.dev.tier_updated')); q.refetch(); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
   const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';

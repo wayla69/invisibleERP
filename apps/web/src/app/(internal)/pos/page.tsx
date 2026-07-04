@@ -15,6 +15,7 @@ import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { statusVariant } from '@/components/ui';
+import { useLang } from '@/lib/i18n';
 
 interface Order {
   Sale_No: string;
@@ -26,6 +27,7 @@ interface Order {
 }
 
 export default function PosPage() {
+  const { t } = useLang();
   const q = useQuery<{ orders: Order[] }>({ queryKey: ['orders'], queryFn: () => api('/api/pos/orders?limit=50') });
   const orders = q.data?.orders ?? [];
 
@@ -57,12 +59,12 @@ export default function PosPage() {
   return (
     <div>
       <PageHeader
-        title="ออเดอร์"
-        description="รายการขายและสถานะการชำระเงิน"
+        title={t('px.poshome_title')}
+        description={t('px.poshome_desc')}
         actions={
           <Button asChild>
             <Link href="/pos/register">
-              <Plus className="size-4" /> เปิดหน้าขาย
+              <Plus className="size-4" /> {t('px.poshome_open_register')}
             </Link>
           </Button>
         }
@@ -72,15 +74,15 @@ export default function PosPage() {
           <div className="space-y-6">
             {/* Summary band — derived from the recent orders shown on this page */}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="ออเดอร์ที่แสดง" value={num(summary.count)} icon={Receipt} tone="primary" hint="50 รายการล่าสุด" />
-              <StatCard label="ยอดขายรวม" value={baht(summary.total)} icon={Banknote} tone="default" hint="จากออเดอร์ที่แสดง" />
-              <StatCard label="ยอดเฉลี่ย/ออเดอร์" value={baht(summary.avg)} icon={TrendingUp} tone="info" />
+              <StatCard label={t('px.poshome_stat_shown')} value={num(summary.count)} icon={Receipt} tone="primary" hint={t('px.poshome_stat_shown_hint')} />
+              <StatCard label={t('px.poshome_stat_total')} value={baht(summary.total)} icon={Banknote} tone="default" hint={t('px.poshome_stat_total_hint')} />
+              <StatCard label={t('px.poshome_stat_avg')} value={baht(summary.avg)} icon={TrendingUp} tone="info" />
               <StatCard
-                label="รอดำเนินการ/ค้างชำระ"
+                label={t('px.poshome_stat_open')}
                 value={num(summary.open)}
                 icon={Hourglass}
                 tone={summary.open > 0 ? 'warning' : 'success'}
-                hint="ยังไม่เสร็จสมบูรณ์"
+                hint={t('px.poshome_stat_open_hint')}
               />
             </div>
 
@@ -89,13 +91,13 @@ export default function PosPage() {
               <SearchInput
                 value={search}
                 onChange={setSearch}
-                placeholder="ค้นหาเลขที่ออเดอร์ หรือลูกค้า…"
-                ariaLabel="ค้นหาออเดอร์"
+                placeholder={t('px.poshome_search_placeholder')}
+                ariaLabel={t('px.poshome_search_aria')}
               />
               {statuses.length > 1 && (
-                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
+                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t('px.poshome_filter_status_aria')}>
                   <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(null)}>
-                    ทั้งหมด
+                    {t('px.poshome_all')}
                   </Button>
                   {statuses.map((s) => (
                     <Button
@@ -119,34 +121,34 @@ export default function PosPage() {
                 search || statusFilter
                   ? {
                       icon: SearchX,
-                      title: 'ไม่พบออเดอร์ที่ตรงกับตัวกรอง',
-                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      title: t('px.poshome_empty_filtered_title'),
+                      description: t('px.poshome_empty_filtered_desc'),
                       action: (
                         <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter(null); }}>
-                          ล้างตัวกรอง
+                          {t('inv.clear_filter')}
                         </Button>
                       ),
                     }
                   : {
                       icon: Receipt,
-                      title: 'ยังไม่มีออเดอร์',
-                      description: 'สร้างออเดอร์แรกเพื่อเริ่มบันทึกการขาย',
+                      title: t('px.poshome_empty_title'),
+                      description: t('px.poshome_empty_desc'),
                       action: (
                         <Button asChild size="sm">
                           <Link href="/pos/new">
-                            <Plus className="size-4" /> สร้างออเดอร์
+                            <Plus className="size-4" /> {t('px.poshome_create_order')}
                           </Link>
                         </Button>
                       ),
                     }
               }
               columns={[
-                { key: 'Sale_No', label: 'เลขที่' },
-                { key: 'Sale_Date', label: 'วันที่', render: (r) => thaiDate(r.Sale_Date) },
-                { key: 'Customer_Name', label: 'ลูกค้า', render: (r) => r.Customer_Name || '—' },
-                { key: 'Total', label: 'ยอด', align: 'right', render: (r) => <span className="tabular">{baht(r.Total)}</span> },
-                { key: 'Payment_Method', label: 'ชำระ', render: (r) => r.Payment_Method || '—' },
-                { key: 'Status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
+                { key: 'Sale_No', label: t('dash.col_no') },
+                { key: 'Sale_Date', label: t('dash.col_date'), render: (r) => thaiDate(r.Sale_Date) },
+                { key: 'Customer_Name', label: t('fin.col_customer'), render: (r) => r.Customer_Name || '—' },
+                { key: 'Total', label: t('fin.col_amount'), align: 'right', render: (r) => <span className="tabular">{baht(r.Total)}</span> },
+                { key: 'Payment_Method', label: t('px.poshome_col_payment'), render: (r) => r.Payment_Method || '—' },
+                { key: 'Status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
               ]}
             />
           </div>

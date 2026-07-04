@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CalendarCheck2, Layers, PackageSearch, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';

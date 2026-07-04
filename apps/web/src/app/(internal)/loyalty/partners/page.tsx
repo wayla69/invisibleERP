@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Handshake, Plus, Gift, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +20,7 @@ interface Priv { id: number; name: string; kind: string; value: number; tier_min
 interface Partner { id: number; partner_code: string; name: string; category: string | null; active: boolean; privileges: Priv[] }
 
 export default function PartnersPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const list = useQuery<{ partners: Partner[] }>({ queryKey: ['loy-partners'], queryFn: () => api('/api/loyalty/partners') });
   const [pName, setPName] = useState(''); const [pCat, setPCat] = useState('dining');
@@ -28,14 +30,14 @@ export default function PartnersPage() {
 
   const addPartner = useMutation({
     mutationFn: () => api('/api/loyalty/partners', { method: 'POST', body: JSON.stringify({ name: pName, category: pCat }) }),
-    onSuccess: () => { setMsg('✅ เพิ่มพันธมิตรแล้ว'); setPName(''); qc.invalidateQueries({ queryKey: ['loy-partners'] }); }, onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { setMsg('✅ ' + t('ly.pt_partner_added')); setPName(''); qc.invalidateQueries({ queryKey: ['loy-partners'] }); }, onError: (e: Error) => setMsg(`❌ ${e.message}`),
   });
   const addPriv = useMutation({
     mutationFn: () => api('/api/loyalty/privileges', { method: 'POST', body: JSON.stringify({
       partner_id: Number(pv.partner_id), name: pv.name, kind: pv.kind, value: Number(pv.value),
       ...(pv.tier_min !== '' ? { tier_min: Number(pv.tier_min) } : {}), ...(pv.stock !== '' ? { stock: Number(pv.stock) } : {}), ...(pv.per_member_limit !== '' ? { per_member_limit: Number(pv.per_member_limit) } : {}),
     }) }),
-    onSuccess: () => { setMsg('✅ เพิ่มสิทธิพิเศษแล้ว'); setPv({ ...pv, name: '' }); qc.invalidateQueries({ queryKey: ['loy-partners'] }); }, onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { setMsg('✅ ' + t('ly.pt_priv_added')); setPv({ ...pv, name: '' }); qc.invalidateQueries({ queryKey: ['loy-partners'] }); }, onError: (e: Error) => setMsg(`❌ ${e.message}`),
   });
   const toggleP = useMutation({ mutationFn: (p: Partner) => api('/api/loyalty/partners', { method: 'POST', body: JSON.stringify({ id: p.id, name: p.name, category: p.category, active: !p.active }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-partners'] }) });
   const togglePriv = useMutation({ mutationFn: (v: Priv) => api(`/api/loyalty/privileges/${v.id}`, { method: 'PATCH', body: JSON.stringify({ active: !v.active }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-partners'] }) });

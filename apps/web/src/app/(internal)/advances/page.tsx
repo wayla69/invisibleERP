@@ -6,6 +6,7 @@ import { CircleDollarSign, HandCoins, Send, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -30,16 +31,17 @@ interface Advance {
 interface AdvancesResp { advances: Advance[]; count: number; outstanding: number }
 
 export default function AdvancesPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="เงินทดรองจ่าย (Petty Cash / Advances)"
-        description="ทะเบียนเงินทดรองจ่าย — ยอดที่ยังไม่เคลียร์ (outstanding float), ผู้รับ, สถานะ พร้อมเบิก/เคลียร์ (EXP-07)"
+        title={t('fnx.adv.title')}
+        description={t('fnx.adv.desc')}
       />
       <Tabs
         tabs={[
-          { key: 'register', label: 'ทะเบียน', content: <Register /> },
-          { key: 'issue', label: 'เบิกเงินทดรอง', content: <IssueForm /> },
+          { key: 'register', label: t('fnx.adv.tab_register'), content: <Register /> },
+          { key: 'issue', label: t('fnx.adv.tab_issue'), content: <IssueForm /> },
         ]}
       />
     </div>
@@ -47,6 +49,7 @@ export default function AdvancesPage() {
 }
 
 function Register() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [status, setStatus] = useState('');
   const [settle, setSettle] = useState<Advance | null>(null);
@@ -60,34 +63,34 @@ function Register() {
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="กรองตามสถานะ">
-          <option value="">ทุกสถานะ</option>
-          <option value="open">ค้างเคลียร์ (open)</option>
-          <option value="settled">เคลียร์แล้ว (settled)</option>
+        <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t('fnx.adv.filter_status')}>
+          <option value="">{t('fnx.adv.status_all')}</option>
+          <option value="open">{t('fnx.adv.status_open')}</option>
+          <option value="settled">{t('fnx.adv.status_settled')}</option>
         </select>
-        {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">กำลังอัปเดต…</span>}
+        {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">{t('fnx.adv.updating')}</span>}
       </div>
       <StateView q={q}>
         {d && (
           <>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              <StatCard label="รายการทั้งหมด" value={num(d.count)} icon={HandCoins} tone="primary" />
-              <StatCard label="ยอดค้างเคลียร์ (Outstanding)" value={`฿${num(d.outstanding)}`} icon={Wallet} tone={d.outstanding > 0 ? 'warning' : 'success'} hint="เงินสดที่ยังไม่คืน/ยังไม่ล้างบัญชี" />
-              <StatCard label="ค้างเคลียร์ (รายการ)" value={num(d.advances.filter((a) => a.status === 'open').length)} icon={CircleDollarSign} />
+              <StatCard label={t('fnx.adv.stat_total')} value={num(d.count)} icon={HandCoins} tone="primary" />
+              <StatCard label={t('fnx.adv.stat_outstanding')} value={`฿${num(d.outstanding)}`} icon={Wallet} tone={d.outstanding > 0 ? 'warning' : 'success'} hint={t('fnx.adv.stat_outstanding_hint')} />
+              <StatCard label={t('fnx.adv.stat_open')} value={num(d.advances.filter((a) => a.status === 'open').length)} icon={CircleDollarSign} />
             </div>
             <DataTable
               rows={d.advances}
               rowKey={(r) => r.advance_no}
-              emptyState={{ icon: HandCoins, title: 'ยังไม่มีเงินทดรองจ่าย', description: 'เบิกเงินทดรองที่แท็บ "เบิกเงินทดรอง" แล้วรายการจะแสดงที่นี่' }}
+              emptyState={{ icon: HandCoins, title: t('fnx.adv.empty_title'), description: t('fnx.adv.empty_desc') }}
               columns={[
-                { key: 'advance_no', label: 'เลขที่', render: (r) => <span className="font-medium">{r.advance_no}</span> },
-                { key: 'payee', label: 'ผู้รับ' },
-                { key: 'purpose', label: 'วัตถุประสงค์', render: (r) => r.purpose ?? '—' },
-                { key: 'amount', label: 'จำนวน', align: 'right', render: (r) => <span className="tabular font-medium">฿{num(r.amount)}</span> },
-                { key: 'status', label: 'สถานะ', render: (r) => (r.status === 'open' ? <Badge variant="warning">ค้างเคลียร์</Badge> : <Badge variant="success">เคลียร์แล้ว</Badge>) },
-                { key: 'issued_by', label: 'เบิกโดย', render: (r) => r.issued_by ?? '—' },
-                { key: 'issued_date', label: 'วันที่เบิก', render: (r) => (r.issued_date ? thaiDate(r.issued_date) : '—') },
-                { key: 'act', label: '', render: (r) => (r.status === 'open' ? <Button size="sm" variant="outline" onClick={() => setSettle(r)}>เคลียร์</Button> : <span className="text-muted-foreground">—</span>) },
+                { key: 'advance_no', label: t('dash.col_no'), render: (r) => <span className="font-medium">{r.advance_no}</span> },
+                { key: 'payee', label: t('fnx.adv.col_payee') },
+                { key: 'purpose', label: t('fnx.adv.col_purpose'), render: (r) => r.purpose ?? '—' },
+                { key: 'amount', label: t('fnx.adv.col_amount'), align: 'right', render: (r) => <span className="tabular font-medium">฿{num(r.amount)}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r) => (r.status === 'open' ? <Badge variant="warning">{t('fnx.adv.badge_open')}</Badge> : <Badge variant="success">{t('fnx.adv.badge_settled')}</Badge>) },
+                { key: 'issued_by', label: t('fnx.adv.col_issued_by'), render: (r) => r.issued_by ?? '—' },
+                { key: 'issued_date', label: t('fnx.adv.col_issued_date'), render: (r) => (r.issued_date ? thaiDate(r.issued_date) : '—') },
+                { key: 'act', label: '', render: (r) => (r.status === 'open' ? <Button size="sm" variant="outline" onClick={() => setSettle(r)}>{t('fnx.adv.action_settle')}</Button> : <span className="text-muted-foreground">—</span>) },
               ]}
             />
             {settle && <SettleCard advance={settle} onDone={() => { setSettle(null); qc.invalidateQueries({ queryKey: ['advances'] }); }} onClose={() => setSettle(null)} />}
@@ -99,6 +102,7 @@ function Register() {
 }
 
 function SettleCard({ advance, onDone, onClose }: { advance: Advance; onDone: () => void; onClose: () => void }) {
+  const { t } = useLang();
   const [expense, setExpense] = useState('');
   const [returned, setReturned] = useState('');
   const sum = (Number(expense) || 0) + (Number(returned) || 0);
@@ -109,37 +113,38 @@ function SettleCard({ advance, onDone, onClose }: { advance: Advance; onDone: ()
       method: 'POST',
       body: JSON.stringify({ settled_expense: Number(expense), returned_cash: Number(returned) }),
     }),
-    onSuccess: () => { notifySuccess(`เคลียร์ ${advance.advance_no} แล้ว (ค่าใช้จ่าย ฿${num(expense)} · คืนเงิน ฿${num(returned)})`); onDone(); },
+    onSuccess: () => { notifySuccess(t('fnx.adv.toast_settled', { no: advance.advance_no, expense: num(expense), returned: num(returned) })); onDone(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <Card className="mt-2 gap-3 p-5">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold">เคลียร์เงินทดรอง {advance.advance_no} <span className="text-muted-foreground">(฿{num(advance.amount)})</span></h3>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="ปิด"><X className="size-4" /></Button>
+        <h3 className="font-semibold">{t('fnx.adv.settle_heading', { no: advance.advance_no })} <span className="text-muted-foreground">(฿{num(advance.amount)})</span></h3>
+        <Button variant="ghost" size="icon" onClick={onClose} aria-label={t('fnx.adv.close')}><X className="size-4" /></Button>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="ad-exp">ค่าใช้จ่ายจริง (฿)</Label>
+          <Label htmlFor="ad-exp">{t('fnx.adv.f_expense')}</Label>
           <Input id="ad-exp" type="number" min="0" step="any" value={expense} onChange={(e) => setExpense(e.target.value)} />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="ad-ret">เงินสดคืน (฿)</Label>
+          <Label htmlFor="ad-ret">{t('fnx.adv.f_returned')}</Label>
           <Input id="ad-ret" type="number" min="0" step="any" value={returned} onChange={(e) => setReturned(e.target.value)} />
         </div>
       </div>
       <p className={reconciles ? 'text-xs text-muted-foreground' : 'text-xs text-destructive'}>
-        ค่าใช้จ่าย + เงินคืน = ฿{num(sum)} {reconciles ? '✓ ตรงกับยอดเบิก' : `(ต้องเท่ากับ ฿${num(advance.amount)})`}
+        {t('fnx.adv.settle_sum', { sum: num(sum) })} {reconciles ? t('fnx.adv.settle_match') : t('fnx.adv.settle_need', { amount: num(advance.amount) })}
       </p>
       <Button className="w-fit" disabled={!reconciles || submit.isPending} onClick={() => submit.mutate()}>
-        <Send className="size-4" /> {submit.isPending ? 'กำลังเคลียร์…' : 'เคลียร์เงินทดรอง'}
+        <Send className="size-4" /> {submit.isPending ? t('fnx.adv.settling') : t('fnx.adv.settle_submit')}
       </Button>
     </Card>
   );
 }
 
 function IssueForm() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [form, setForm] = useState({ payee: '', amount: '', purpose: '' });
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -149,7 +154,7 @@ function IssueForm() {
       method: 'POST',
       body: JSON.stringify({ payee: form.payee.trim(), amount: Number(form.amount), purpose: form.purpose.trim() || undefined }),
     }),
-    onSuccess: (r) => { notifySuccess(`เบิกเงินทดรอง ${r.advance_no} — ${r.payee} ฿${num(r.amount)}`); setForm({ payee: '', amount: '', purpose: '' }); qc.invalidateQueries({ queryKey: ['advances'] }); },
+    onSuccess: (r) => { notifySuccess(t('fnx.adv.toast_issued', { no: r.advance_no, payee: r.payee, amount: num(r.amount) })); setForm({ payee: '', amount: '', purpose: '' }); qc.invalidateQueries({ queryKey: ['advances'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const canSubmit = !!form.payee.trim() && Number(form.amount) > 0;
@@ -158,21 +163,21 @@ function IssueForm() {
     <Card className="max-w-xl gap-3 p-5">
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="ad-payee">ผู้รับ (พนักงาน) <span className="text-destructive">*</span></Label>
-          <Input id="ad-payee" value={form.payee} onChange={set('payee')} placeholder="เช่น EMP1 / ชื่อพนักงาน" />
+          <Label htmlFor="ad-payee">{t('fnx.adv.f_payee')} <span className="text-destructive">*</span></Label>
+          <Input id="ad-payee" value={form.payee} onChange={set('payee')} placeholder={t('fnx.adv.f_payee_ph')} />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="ad-amt">จำนวนเงิน (฿) <span className="text-destructive">*</span></Label>
+          <Label htmlFor="ad-amt">{t('fnx.adv.f_amount')} <span className="text-destructive">*</span></Label>
           <Input id="ad-amt" type="number" min="0" step="any" value={form.amount} onChange={set('amount')} />
         </div>
         <div className="grid gap-1.5 sm:col-span-2">
-          <Label htmlFor="ad-purpose">วัตถุประสงค์</Label>
-          <Input id="ad-purpose" value={form.purpose} onChange={set('purpose')} placeholder="เช่น ค่าเดินทางไปไซต์งาน" />
+          <Label htmlFor="ad-purpose">{t('fnx.adv.f_purpose')}</Label>
+          <Input id="ad-purpose" value={form.purpose} onChange={set('purpose')} placeholder={t('fnx.adv.f_purpose_ph')} />
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">ลงบัญชี: เดบิต 1180 เงินทดรองจ่าย / เครดิต 1000 เงินสด</p>
+      <p className="text-xs text-muted-foreground">{t('fnx.adv.posting_note')}</p>
       <Button className="w-fit" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>
-        <HandCoins className="size-4" /> {submit.isPending ? 'กำลังเบิก…' : 'เบิกเงินทดรอง'}
+        <HandCoins className="size-4" /> {submit.isPending ? t('fnx.adv.issuing') : t('fnx.adv.issue_submit')}
       </Button>
     </Card>
   );

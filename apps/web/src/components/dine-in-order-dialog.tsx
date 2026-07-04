@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Msg } from '@/components/tabs';
+import { useLang } from '@/lib/i18n';
 
 type MenuItem = { sku: string; name: string; price: number };
 type MenuCategory = { name?: string; items: MenuItem[] };
@@ -34,6 +35,7 @@ export function DineInOrderDialog({
   onChange: () => void;
   onClose: () => void;
 }) {
+  const { t } = useLang();
   const [orderNo, setOrderNo] = useState<string | null>(initialOrderNo);
   const [lines, setLines] = useState<Line[]>([]);
   const [free, setFree] = useState({ name: '', unit_price: '' });
@@ -89,7 +91,7 @@ export function DineInOrderDialog({
     onSuccess: (r: any) => {
       if (r?.order_no) setOrderNo(r.order_no);
       setLines([]);
-      setMsg(`✅ บันทึกรายการแล้ว ${r?.order_no ?? orderNo ?? ''}`);
+      setMsg(`✅ ${t('px.dine_saved', { order: r?.order_no ?? orderNo ?? '' })}`);
       onChange();
     },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
@@ -97,7 +99,7 @@ export function DineInOrderDialog({
 
   const fire = useMutation({
     mutationFn: () => api(`/api/restaurant/orders/${orderNo}/fire`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { setMsg('✅ ส่งเข้าครัวแล้ว'); onChange(); },
+    onSuccess: () => { setMsg(`✅ ${t('px.dine_fired')}`); onChange(); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 
@@ -113,7 +115,7 @@ export function DineInOrderDialog({
         }),
       },
     ),
-    onSuccess: (r) => { setMsg(`✅ ชำระเงินสำเร็จ · ${r.sale_no} · ${baht(r.total)}`); onChange(); onClose(); },
+    onSuccess: (r) => { setMsg(`✅ ${t('px.dine_paid', { sale: r.sale_no, total: baht(r.total) })}`); onChange(); onClose(); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 
@@ -122,7 +124,7 @@ export function DineInOrderDialog({
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Utensils className="size-4" /> สั่งอาหาร · โต๊ะ {tableNo}
+            <Utensils className="size-4" /> {t('px.dine_title', { table: tableNo })}
             {orderNo && <Badge variant="info">{orderNo}</Badge>}
           </DialogTitle>
         </DialogHeader>
@@ -149,27 +151,27 @@ export function DineInOrderDialog({
                   </div>
                 </div>
               ))}
-              {menu.isLoading && <p className="text-sm text-muted-foreground">กำลังโหลดเมนู…</p>}
+              {menu.isLoading && <p className="text-sm text-muted-foreground">{t('px.dine_loading_menu')}</p>}
             </div>
 
             {/* Free-text line */}
             <div className="flex flex-wrap items-end gap-2 border-t pt-3">
               <div className="min-w-[140px] flex-[2] grid gap-1">
-                <Label htmlFor="free-name">รายการอื่น ๆ</Label>
-                <Input id="free-name" placeholder="ชื่ออาหาร" value={free.name} onChange={(e) => setFree({ ...free, name: e.target.value })} />
+                <Label htmlFor="free-name">{t('px.dine_other_item')}</Label>
+                <Input id="free-name" placeholder={t('px.dine_ph_food_name')} value={free.name} onChange={(e) => setFree({ ...free, name: e.target.value })} />
               </div>
               <div className="w-24 grid gap-1">
-                <Label htmlFor="free-price">ราคา</Label>
+                <Label htmlFor="free-price">{t('px.dine_price')}</Label>
                 <Input id="free-price" type="number" min={0} step="0.01" className="tabular text-right" value={free.unit_price} onChange={(e) => setFree({ ...free, unit_price: e.target.value })} />
               </div>
               <Button type="button" variant="outline" disabled={!free.name} onClick={addFree}>
-                <Plus className="size-4" /> เพิ่ม
+                <Plus className="size-4" /> {t('px.dine_add')}
               </Button>
             </div>
 
             {/* Course for items added next (apps → mains → dessert), fired course-by-course on the KDS */}
             <div className="flex items-center gap-2 pt-1">
-              <Label htmlFor="course" className="text-xs text-muted-foreground">คอร์สสำหรับรายการที่เพิ่ม</Label>
+              <Label htmlFor="course" className="text-xs text-muted-foreground">{t('px.dine_course_for_added')}</Label>
               <Input id="course" type="number" min={1} step={1} className="tabular w-16" value={course} onChange={(e) => setCourse(Math.max(1, Number(e.target.value) || 1))} />
             </div>
           </div>
@@ -178,30 +180,30 @@ export function DineInOrderDialog({
           <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
             {!orderNo && (
               <div className="grid gap-1">
-                <Label htmlFor="guests">จำนวนลูกค้า</Label>
-                <Input id="guests" type="number" min={1} step={1} className="tabular" value={guests} onChange={(e) => setGuests(e.target.value)} placeholder="เช่น 2" />
+                <Label htmlFor="guests">{t('px.dine_guest_count')}</Label>
+                <Input id="guests" type="number" min={1} step={1} className="tabular" value={guests} onChange={(e) => setGuests(e.target.value)} placeholder={t('px.dine_ph_eg2')} />
               </div>
             )}
 
             <div className="space-y-2">
-              {lines.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีรายการ — เลือกจากเมนู</p>}
+              {lines.length === 0 && <p className="text-sm text-muted-foreground">{t('px.dine_no_items')}</p>}
               {lines.map((l) => (
                 <div key={l.key} className="flex items-center gap-2 text-sm">
-                  <span className="flex-1 truncate">{l.name}{l.course > 1 && <span className="ml-1 text-xs text-muted-foreground">· คอร์ส {l.course}</span>}</span>
+                  <span className="flex-1 truncate">{l.name}{l.course > 1 && <span className="ml-1 text-xs text-muted-foreground">{t('px.dine_course_n', { n: l.course })}</span>}</span>
                   <div className="flex items-center gap-1">
-                    <Button type="button" variant="ghost" size="icon" className="size-6" aria-label="ลด" onClick={() => setQty(l.key, -1)}><Minus className="size-3" /></Button>
+                    <Button type="button" variant="ghost" size="icon" className="size-6" aria-label={t('px.dine_decrease')} onClick={() => setQty(l.key, -1)}><Minus className="size-3" /></Button>
                     <span className="tabular w-6 text-center">{l.qty}</span>
-                    <Button type="button" variant="ghost" size="icon" className="size-6" aria-label="เพิ่ม" onClick={() => setQty(l.key, 1)}><Plus className="size-3" /></Button>
+                    <Button type="button" variant="ghost" size="icon" className="size-6" aria-label={t('px.dine_add')} onClick={() => setQty(l.key, 1)}><Plus className="size-3" /></Button>
                   </div>
                   <span className="tabular w-16 text-right text-muted-foreground">{baht(l.qty * l.unit_price)}</span>
-                  <Button type="button" variant="ghost" size="icon" className="size-6 text-muted-foreground hover:text-destructive" aria-label="ลบ" onClick={() => removeLine(l.key)}><Trash2 className="size-3" /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="size-6 text-muted-foreground hover:text-destructive" aria-label={t('px.dine_delete')} onClick={() => removeLine(l.key)}><Trash2 className="size-3" /></Button>
                 </div>
               ))}
             </div>
 
             {lines.length > 0 && (
               <div className="flex items-center justify-between border-t pt-2 text-sm">
-                <span className="text-muted-foreground">รวมรายการใหม่</span>
+                <span className="text-muted-foreground">{t('px.dine_new_items_total')}</span>
                 <span className="tabular font-semibold">{baht(total)}</span>
               </div>
             )}
@@ -212,28 +214,28 @@ export function DineInOrderDialog({
               disabled={createOrAdd.isPending || lines.length === 0}
               onClick={() => { setMsg(''); createOrAdd.mutate(); }}
             >
-              {orderNo ? 'เพิ่มลงออเดอร์' : 'สร้างออเดอร์'}
+              {orderNo ? t('px.dine_add_to_order') : t('px.dine_create_order')}
             </Button>
 
             {orderNo && (
               <div className="space-y-2 border-t pt-3">
                 <Button type="button" variant="outline" className="w-full" disabled={fire.isPending} onClick={() => { setMsg(''); fire.mutate(); }}>
-                  <Flame className="size-4" /> ส่งเข้าครัว
+                  <Flame className="size-4" /> {t('px.dine_send_kitchen')}
                 </Button>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div className="grid gap-1">
-                    <Label htmlFor="discount">ส่วนลด %</Label>
+                    <Label htmlFor="discount">{t('px.dine_discount_pct')}</Label>
                     <Input id="discount" type="number" min={0} max={100} step="0.01" className="tabular" value={discount} onChange={(e) => setDiscount(e.target.value)} />
                   </div>
                   <div className="grid gap-1">
-                    <Label htmlFor="tip">ทิป</Label>
+                    <Label htmlFor="tip">{t('px.dine_tip')}</Label>
                     <Input id="tip" type="number" min={0} step="0.01" className="tabular" value={tip} onChange={(e) => setTip(e.target.value)} />
                   </div>
                 </div>
 
                 <Button type="button" className={cn('w-full')} disabled={checkout.isPending} onClick={() => { setMsg(''); checkout.mutate(); }}>
-                  <Wallet className="size-4" /> ชำระเงิน (เงินสด)
+                  <Wallet className="size-4" /> {t('px.dine_checkout_cash')}
                 </Button>
               </div>
             )}
@@ -243,7 +245,7 @@ export function DineInOrderDialog({
         {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>ปิด</Button>
+          <Button type="button" variant="outline" onClick={onClose}>{t('px.dine_close')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

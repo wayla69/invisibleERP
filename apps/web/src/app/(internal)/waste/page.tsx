@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, TriangleAlert, Coins } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -18,9 +19,12 @@ import { notifySuccess, notifyError } from '@/lib/notify';
 interface Waste { waste_no: string; item_id: string; item_description: string | null; qty: number; uom: string | null; reason_code: string; unit_cost: number; total_cost: number; journal_no: string | null; logged_by: string | null; created_at: string }
 interface Resp { waste: Waste[]; count: number; total_qty: number; total_cost: number; by_reason: { reason: string; qty: number; cost: number; count: number }[] }
 
-const REASON_TH: Record<string, string> = { damage: 'ชำรุด/เสียหาย', expiry: 'หมดอายุ', spoilage: 'เน่าเสีย', overproduction: 'ทำเกิน', prep_error: 'เตรียมผิด', other: 'อื่น ๆ' };
+// Reason codes → i18n key (labels resolve via t(); raw code is the guarded fallback).
+const REASON_KEY: Record<string, string> = { damage: 'iv.waste_reason_damage', expiry: 'iv.waste_reason_expiry', spoilage: 'iv.waste_reason_spoilage', overproduction: 'iv.waste_reason_overproduction', prep_error: 'iv.waste_reason_prep_error', other: 'iv.waste_reason_other' };
 
 export default function WastePage() {
+  const { t } = useLang();
+  const reasonLabel = (code: string) => (REASON_KEY[code] ? t(REASON_KEY[code]) : code);
   const qc = useQueryClient();
   const q = useQuery<Resp>({ queryKey: ['waste'], queryFn: () => api('/api/inventory/waste'), refetchInterval: 30_000 });
   const d = q.data;
@@ -33,37 +37,37 @@ export default function WastePage() {
       item_id: form.item_id, qty: Number(form.qty), reason_code: form.reason_code,
       unit_cost: form.unit_cost ? Number(form.unit_cost) : undefined, notes: form.notes || undefined,
     }) }),
-    onSuccess: (r: any) => { notifySuccess(`บันทึกของเสีย ${r.waste_no}${r.total_cost ? ` (${baht(r.total_cost)})` : ''}`); setForm({ item_id: '', qty: '', reason_code: 'spoilage', unit_cost: '', notes: '' }); qc.invalidateQueries({ queryKey: ['waste'] }); },
+    onSuccess: (r: any) => { notifySuccess(`${t('iv.waste_logged', { no: r.waste_no })}${r.total_cost ? ` (${baht(r.total_cost)})` : ''}`); setForm({ item_id: '', qty: '', reason_code: 'spoilage', unit_cost: '', notes: '' }); qc.invalidateQueries({ queryKey: ['waste'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <ModulePage
-      title="ของเสีย / ทิ้ง (Waste & spoilage)"
-      description="บันทึกของเสียพร้อมเหตุผล — ตัดสต๊อกวัตถุดิบ และถ้าระบุต้นทุนจะลงบัญชี Dr 5810 ของเสีย / Cr 1200 สินค้าคงคลัง; ใช้วิเคราะห์ต้นทุนอาหารที่สูญเสีย"
+      title={t('iv.waste_title')}
+      description={t('iv.waste_desc')}
       query={q}
       stats={d && (
         <>
-          <StatCard label="มูลค่าของเสีย (รวม)" value={baht(d.total_cost)} icon={Coins} tone={d.total_cost > 0 ? 'warning' : 'success'} />
-          <StatCard label="จำนวนรายการ" value={num(d.count)} icon={Trash2} tone="default" />
-          <StatCard label="เหตุผลที่เสียมากสุด" value={d.by_reason[0] ? (REASON_TH[d.by_reason[0].reason] ?? d.by_reason[0].reason) : '—'} icon={TriangleAlert} tone={d.by_reason.length ? 'danger' : 'default'} hint={d.by_reason[0] ? baht(d.by_reason[0].cost) : ''} />
-          <StatCard label="ปริมาณรวม" value={num(d.total_qty)} icon={Trash2} tone="default" />
+          <StatCard label={t('iv.waste_stat_value')} value={baht(d.total_cost)} icon={Coins} tone={d.total_cost > 0 ? 'warning' : 'success'} />
+          <StatCard label={t('iv.waste_stat_count')} value={num(d.count)} icon={Trash2} tone="default" />
+          <StatCard label={t('iv.waste_stat_top_reason')} value={d.by_reason[0] ? reasonLabel(d.by_reason[0].reason) : '—'} icon={TriangleAlert} tone={d.by_reason.length ? 'danger' : 'default'} hint={d.by_reason[0] ? baht(d.by_reason[0].cost) : ''} />
+          <StatCard label={t('iv.waste_stat_total_qty')} value={num(d.total_qty)} icon={Trash2} tone="default" />
         </>
       )}
       statsClassName="xl:grid-cols-4"
     >
       <div className="mb-4 rounded-xl border bg-card p-4">
-        <h3 className="mb-3 text-sm font-semibold">บันทึกของเสีย</h3>
+        <h3 className="mb-3 text-sm font-semibold">{t('iv.waste_form_title')}</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <FormField label="รหัสวัตถุดิบ"><Input value={form.item_id} onChange={(e) => set('item_id', e.target.value)} placeholder="เช่น PORK" /></FormField>
-          <FormField label="จำนวน"><Input type="number" min={0} step="any" value={form.qty} onChange={(e) => set('qty', e.target.value)} /></FormField>
-          <FormField label="เหตุผล">
+          <FormField label={t('iv.waste_field_item')}><Input value={form.item_id} onChange={(e) => set('item_id', e.target.value)} placeholder={t('iv.waste_item_ph')} /></FormField>
+          <FormField label={t('inv.col_qty')}><Input type="number" min={0} step="any" value={form.qty} onChange={(e) => set('qty', e.target.value)} /></FormField>
+          <FormField label={t('iv.waste_field_reason')}>
             <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={form.reason_code} onChange={(e) => set('reason_code', e.target.value)}>
-              {Object.entries(REASON_TH).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(REASON_KEY).map(([k, key]) => <option key={k} value={k}>{t(key)}</option>)}
             </select>
           </FormField>
-          <FormField label="ต้นทุน/หน่วย (ไม่บังคับ)"><Input type="number" min={0} step="any" value={form.unit_cost} onChange={(e) => set('unit_cost', e.target.value)} placeholder="ถ้าระบุ → ลงบัญชี" /></FormField>
-          <div className="flex items-end"><Button disabled={log.isPending || !form.item_id || !form.qty} onClick={() => log.mutate()}>บันทึก</Button></div>
+          <FormField label={t('iv.waste_field_unit_cost')}><Input type="number" min={0} step="any" value={form.unit_cost} onChange={(e) => set('unit_cost', e.target.value)} placeholder={t('iv.waste_unit_cost_ph')} /></FormField>
+          <div className="flex items-end"><Button disabled={log.isPending || !form.item_id || !form.qty} onClick={() => log.mutate()}>{t('fin.save')}</Button></div>
         </div>
       </div>
 
@@ -72,7 +76,7 @@ export default function WastePage() {
         <div className="mb-4 flex flex-wrap gap-2">
           {d.by_reason.map((r) => (
             <Badge key={r.reason} variant="outline" className="gap-1.5 py-1.5">
-              {REASON_TH[r.reason] ?? r.reason}: <strong>{baht(r.cost)}</strong> <span className="text-muted-foreground">({num(r.qty)} · {r.count})</span>
+              {reasonLabel(r.reason)}: <strong>{baht(r.cost)}</strong> <span className="text-muted-foreground">({num(r.qty)} · {r.count})</span>
             </Badge>
           ))}
         </div>
@@ -82,15 +86,15 @@ export default function WastePage() {
         <DataTable
           rows={d.waste}
           rowKey={(r) => r.waste_no}
-          emptyState={{ icon: Trash2, title: 'ยังไม่มีการบันทึกของเสีย', description: 'บันทึกของเสีย/ของหมดอายุจากฟอร์มด้านบนเพื่อตามต้นทุนอาหารที่สูญเสีย' }}
+          emptyState={{ icon: Trash2, title: t('iv.waste_empty_title'), description: t('iv.waste_empty_desc') }}
           columns={[
-            { key: 'waste_no', label: 'เลขที่', render: (r) => <span className="font-mono text-sm">{r.waste_no}</span> },
-            { key: 'item', label: 'วัตถุดิบ', render: (r) => r.item_description || r.item_id },
-            { key: 'qty', label: 'จำนวน', align: 'right', render: (r) => `${num(r.qty)}${r.uom ? ' ' + r.uom : ''}` },
-            { key: 'reason', label: 'เหตุผล', render: (r) => <Badge variant="muted">{REASON_TH[r.reason_code] ?? r.reason_code}</Badge> },
-            { key: 'total_cost', label: 'มูลค่า', align: 'right', render: (r) => r.total_cost > 0 ? baht(r.total_cost) : '—' },
-            { key: 'journal_no', label: 'บัญชี', render: (r) => r.journal_no ? <span className="font-mono text-xs">{r.journal_no}</span> : '—' },
-            { key: 'created_at', label: 'วันที่', render: (r) => thaiDate(r.created_at) },
+            { key: 'waste_no', label: t('dash.col_no'), render: (r) => <span className="font-mono text-sm">{r.waste_no}</span> },
+            { key: 'item', label: t('iv.waste_col_item'), render: (r) => r.item_description || r.item_id },
+            { key: 'qty', label: t('inv.col_qty'), align: 'right', render: (r) => `${num(r.qty)}${r.uom ? ' ' + r.uom : ''}` },
+            { key: 'reason', label: t('iv.waste_col_reason'), render: (r) => <Badge variant="muted">{reasonLabel(r.reason_code)}</Badge> },
+            { key: 'total_cost', label: t('iv.waste_col_value'), align: 'right', render: (r) => r.total_cost > 0 ? baht(r.total_cost) : '—' },
+            { key: 'journal_no', label: t('iv.waste_col_journal'), render: (r) => r.journal_no ? <span className="font-mono text-xs">{r.journal_no}</span> : '—' },
+            { key: 'created_at', label: t('dash.col_date'), render: (r) => thaiDate(r.created_at) },
           ]}
         />
       )}

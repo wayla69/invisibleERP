@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical } from 'lucide-react';
 import { api } from '@/lib/api';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
@@ -12,12 +13,13 @@ import { Button } from '@/components/ui/button';
 type Flag = { key: string; label: string; description: string; tier: 'CORE' | 'LABS'; enabled: boolean; source: string };
 
 export default function LabsSettingsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ flags: Flag[] }>({ queryKey: ['feature-flags'], queryFn: () => api('/api/feature-flags') });
 
   const toggle = useMutation({
     mutationFn: (v: { key: string; enabled: boolean }) => api(`/api/feature-flags/${encodeURIComponent(v.key)}`, { method: 'PUT', body: JSON.stringify({ enabled: v.enabled }) }),
-    onSuccess: () => { notifySuccess('บันทึกการตั้งค่าแล้ว'); qc.invalidateQueries({ queryKey: ['feature-flags'] }); },
+    onSuccess: () => { notifySuccess(t('st.labs.saved')); qc.invalidateQueries({ queryKey: ['feature-flags'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -27,8 +29,8 @@ export default function LabsSettingsPage() {
   return (
     <div>
       <PageHeader
-        title="โมดูลทดลอง (Labs)"
-        description="เปิด/ปิดโมดูลเสริมที่ยังไม่ใช่ส่วนหลักของระบบ — ซ่อนไว้เพื่อให้หน้าจอกระชับ และเปิดเมื่อต้องการใช้งานจริง"
+        title={t('st.labs.title')}
+        description={t('st.labs.desc')}
       />
       <StateView q={q}>
         {q.data && (
@@ -40,12 +42,12 @@ export default function LabsSettingsPage() {
                   <div className="text-sm text-muted-foreground">{master.description}</div>
                 </div>
                 <Button variant={master.enabled ? 'default' : 'outline'} disabled={toggle.isPending} onClick={() => toggle.mutate({ key: master.key, enabled: !master.enabled })}>
-                  {master.enabled ? 'เปิดอยู่' : 'ปิดอยู่'}
+                  {master.enabled ? t('st.labs.on') : t('st.labs.off')}
                 </Button>
               </div>
             )}
             <div className="rounded-xl border bg-card">
-              <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-semibold"><FlaskConical className="size-4 text-primary" /> โมดูล Labs</div>
+              <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-semibold"><FlaskConical className="size-4 text-primary" /> {t('st.labs.section')}</div>
               <ul className="divide-y">
                 {labs.map((f) => (
                   <li key={f.key} className="flex items-center justify-between px-4 py-3">
@@ -54,7 +56,7 @@ export default function LabsSettingsPage() {
                       <div className="text-sm text-muted-foreground">{f.description}</div>
                     </div>
                     <Button size="sm" variant={f.enabled ? 'default' : 'outline'} disabled={toggle.isPending} onClick={() => toggle.mutate({ key: f.key, enabled: !f.enabled })}>
-                      {f.enabled ? 'เปิด' : 'ปิด'}
+                      {f.enabled ? t('st.labs.enable') : t('st.labs.disable')}
                     </Button>
                   </li>
                 ))}

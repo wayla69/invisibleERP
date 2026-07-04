@@ -6,6 +6,7 @@ import { ScanLine, PackageCheck, ClipboardList, PackageSearch } from 'lucide-rea
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -20,6 +21,7 @@ const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3
 const TYPES = ['GR', 'Issue', 'Transfer', 'Count'];
 
 export default function MobileScanPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [sessionNo, setSessionNo] = useState('');
   const [type, setType] = useState('Count');
@@ -32,7 +34,7 @@ export default function MobileScanPage() {
 
   const open = useMutation({
     mutationFn: () => api<any>('/api/scan/sessions', { method: 'POST', body: JSON.stringify({ session_type: type, location_id: loc }) }),
-    onSuccess: (r) => { setSessionNo(r.session_no); notifySuccess(`เปิดเซสชัน ${r.session_no}`); },
+    onSuccess: (r) => { setSessionNo(r.session_no); notifySuccess(t('iv.scan_toast_opened', { no: r.session_no })); },
     onError: (e: any) => notifyError(e.message),
   });
   const addLine = useMutation({
@@ -42,38 +44,38 @@ export default function MobileScanPage() {
   });
   const close = useMutation({
     mutationFn: () => api<any>(`/api/scan/sessions/${sessionNo}/close`, { method: 'POST' }),
-    onSuccess: (r) => { notifySuccess(`ปิดเซสชัน — บันทึก ${r.committed} รายการ`); setSessionNo(''); },
+    onSuccess: (r) => { notifySuccess(t('iv.scan_toast_closed', { count: r.committed })); setSessionNo(''); },
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-4">
-      <PageHeader title="สแกนผ่านมือถือ (Mobile Scan)" description="เปิดเซสชัน → สแกนสินค้า → ปิดเพื่อบันทึกการเคลื่อนไหว" />
+      <PageHeader title={t('iv.scan_title')} description={t('iv.scan_desc')} />
       {!sessionNo ? (
         <div className="space-y-4">
           <Card className="max-w-md gap-3 p-5">
-            <h3 className="text-base font-semibold">เปิดเซสชันใหม่</h3>
-            <div className="grid gap-1.5"><Label>ประเภท</Label><select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
-            <div className="grid gap-1.5"><Label>คลัง</Label><Input value={loc} onChange={(e) => setLoc(e.target.value)} /></div>
-            <Button disabled={open.isPending} onClick={() => open.mutate()}><ScanLine className="size-4" /> เปิดเซสชัน</Button>
+            <h3 className="text-base font-semibold">{t('iv.scan_open_new')}</h3>
+            <div className="grid gap-1.5"><Label>{t('iv.scan_type')}</Label><select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((tx) => <option key={tx} value={tx}>{tx}</option>)}</select></div>
+            <div className="grid gap-1.5"><Label>{t('iv.scan_location')}</Label><Input value={loc} onChange={(e) => setLoc(e.target.value)} /></div>
+            <Button disabled={open.isPending} onClick={() => open.mutate()}><ScanLine className="size-4" /> {t('iv.scan_open_session')}</Button>
           </Card>
           <div>
-            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">เซสชันล่าสุด</h3>
+            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('iv.scan_recent')}</h3>
             <StateView q={recent}>
               {recent.data && (
                 <DataTable
                   rows={recent.data.sessions}
                   columns={[
-                    { key: 'session_no', label: 'เลขที่' },
-                    { key: 'session_type', label: 'ประเภท' },
-                    { key: 'location_id', label: 'คลัง' },
-                    { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-                    { key: 'act', label: '', render: (r: any) => r.status === 'Open' ? <Button size="sm" variant="outline" onClick={() => setSessionNo(r.session_no)}>เปิดต่อ</Button> : null },
+                    { key: 'session_no', label: t('dash.col_no') },
+                    { key: 'session_type', label: t('iv.scan_type') },
+                    { key: 'location_id', label: t('iv.scan_location') },
+                    { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                    { key: 'act', label: '', render: (r: any) => r.status === 'Open' ? <Button size="sm" variant="outline" onClick={() => setSessionNo(r.session_no)}>{t('iv.scan_resume')}</Button> : null },
                   ]}
                   emptyState={{
                     icon: ClipboardList,
-                    title: 'ยังไม่มีเซสชัน',
-                    description: 'เปิดเซสชันใหม่ด้านบนเพื่อเริ่มสแกนสินค้า',
+                    title: t('iv.scan_empty_title'),
+                    description: t('iv.scan_empty_desc'),
                   }}
                 />
               )}
@@ -84,24 +86,24 @@ export default function MobileScanPage() {
         <Card className="gap-3 p-5">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold">{sessionNo} · {session.data?.session_type}</h3>
-            <Button variant="default" disabled={close.isPending} onClick={() => close.mutate()}><PackageCheck className="size-4" /> ปิด & บันทึก</Button>
+            <Button variant="default" disabled={close.isPending} onClick={() => close.mutate()}><PackageCheck className="size-4" /> {t('iv.scan_close_commit')}</Button>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <div className="grid gap-1.5 flex-1 min-w-[220px]"><Label>สแกน / วาง QR</Label><Input value={scan} onChange={(e) => setScan(e.target.value)} placeholder="ITEM_ID:A|…" /></div>
-            <div className="grid gap-1.5"><Label>จำนวน</Label><Input type="number" className="max-w-[120px]" value={qty} onChange={(e) => setQty(e.target.value)} /></div>
-            <Button disabled={!scan || addLine.isPending} onClick={() => addLine.mutate()}>เพิ่ม</Button>
+            <div className="grid gap-1.5 flex-1 min-w-[220px]"><Label>{t('iv.scan_scan_qr')}</Label><Input value={scan} onChange={(e) => setScan(e.target.value)} placeholder="ITEM_ID:A|…" /></div>
+            <div className="grid gap-1.5"><Label>{t('inv.col_qty')}</Label><Input type="number" className="max-w-[120px]" value={qty} onChange={(e) => setQty(e.target.value)} /></div>
+            <Button disabled={!scan || addLine.isPending} onClick={() => addLine.mutate()}>{t('iv.scan_add')}</Button>
           </div>
           <DataTable
             rows={session.data?.lines ?? []}
             columns={[
-              { key: 'item_id', label: 'สินค้า' },
-              { key: 'qty', label: 'จำนวน', align: 'right', render: (r: any) => num(r.qty) },
-              { key: 'action', label: 'การทำงาน' },
+              { key: 'item_id', label: t('iv.scan_item') },
+              { key: 'qty', label: t('inv.col_qty'), align: 'right', render: (r: any) => num(r.qty) },
+              { key: 'action', label: t('iv.scan_action') },
             ]}
             emptyState={{
               icon: PackageSearch,
-              title: 'ยังไม่มีรายการสแกน',
-              description: 'สแกนหรือวางรหัส QR ด้านบนเพื่อเพิ่มรายการ',
+              title: t('iv.scan_lines_empty_title'),
+              description: t('iv.scan_lines_empty_desc'),
             }}
           />
         </Card>

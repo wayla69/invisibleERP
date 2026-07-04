@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CustomFields } from '@/components/custom-fields';
+import { useLang } from '@/lib/i18n';
 
 interface Def { id: number; entity: string; field_key: string; label: string; data_type: string; options: string[] | null; required: boolean; sort: number; active: boolean }
 
@@ -21,6 +22,7 @@ interface Def { id: number; entity: string; field_key: string; label: string; da
 const ENTITIES = ['customer', 'item', 'sales_order', 'purchase_order', 'journal', 'vendor', 'employee', 'project'];
 
 export default function CustomFieldsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [entity, setEntity] = useState('customer');
   const [label, setLabel] = useState(''); const [type, setType] = useState('text'); const [options, setOptions] = useState(''); const [required, setRequired] = useState(false);
@@ -29,7 +31,7 @@ export default function CustomFieldsPage() {
 
   const create = useMutation({
     mutationFn: () => api('/api/custom-fields/defs', { method: 'POST', body: JSON.stringify({ entity, label, data_type: type, required, options: type === 'select' ? options.split(',').map((s) => s.trim()).filter(Boolean) : undefined }) }),
-    onSuccess: () => { notifySuccess(`เพิ่มฟิลด์ ${label}`); setLabel(''); setOptions(''); setRequired(false); qc.invalidateQueries({ queryKey: ['cf-defs', entity] }); },
+    onSuccess: () => { notifySuccess(t('mx.cf_field_added', { label })); setLabel(''); setOptions(''); setRequired(false); qc.invalidateQueries({ queryKey: ['cf-defs', entity] }); },
     onError: (e: Error) => notifyError(e.message),
   });
   const remove = useMutation({
@@ -40,11 +42,11 @@ export default function CustomFieldsPage() {
 
   return (
     <div>
-      <PageHeader title="ฟิลด์กำหนดเอง (Custom fields)" description="เพิ่มฟิลด์ของคุณเองให้กับข้อมูลหลัก/เอกสารใด ๆ โดยไม่ต้องเขียนโค้ด — มีการตรวจสอบชนิดข้อมูลและแยกตามกิจการ" />
+      <PageHeader title={t('mx.cf_title')} description={t('mx.cf_desc')} />
 
       <div className="mb-6 flex items-end gap-3">
         <div>
-          <Label>ประเภทข้อมูล (entity)</Label>
+          <Label>{t('mx.cf_entity_label')}</Label>
           <select className="h-9 w-56 rounded-md border bg-background px-2 text-sm" value={entity} onChange={(e) => setEntity(e.target.value)}>
             {ENTITIES.map((e) => <option key={e} value={e}>{e}</option>)}
           </select>
@@ -53,31 +55,31 @@ export default function CustomFieldsPage() {
 
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle className="text-sm flex items-center gap-2"><SlidersHorizontal className="h-4 w-4" />เพิ่มฟิลด์ใหม่</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm flex items-center gap-2"><SlidersHorizontal className="h-4 w-4" />{t('mx.cf_add_field_new')}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              <div><Label>ชื่อฟิลด์</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="เช่น พนักงานขาย" /></div>
+              <div><Label>{t('mx.cf_field_name')}</Label><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('mx.cf_field_name_ph')} /></div>
               <div>
-                <Label>ชนิด</Label>
+                <Label>{t('mx.cf_type')}</Label>
                 <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={type} onChange={(e) => setType(e.target.value)}>
-                  <option value="text">ข้อความ (text)</option><option value="number">ตัวเลข (number)</option><option value="date">วันที่ (date)</option><option value="boolean">ใช่/ไม่ใช่ (boolean)</option><option value="select">ตัวเลือก (select)</option>
+                  <option value="text">{t('mx.cf_type_text')}</option><option value="number">{t('mx.cf_type_number')}</option><option value="date">{t('mx.cf_type_date')}</option><option value="boolean">{t('mx.cf_type_boolean')}</option><option value="select">{t('mx.cf_type_select')}</option>
                 </select>
               </div>
             </div>
-            {type === 'select' && <div><Label>ตัวเลือก (คั่นด้วย ,)</Label><Input value={options} onChange={(e) => setOptions(e.target.value)} placeholder="A, B, C" /></div>}
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} /> จำเป็นต้องกรอก (required)</label>
+            {type === 'select' && <div><Label>{t('mx.cf_options_label')}</Label><Input value={options} onChange={(e) => setOptions(e.target.value)} placeholder="A, B, C" /></div>}
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} /> {t('mx.cf_required_check')}</label>
             <div className="flex items-center gap-3">
-              <Button disabled={!label || (type === 'select' && !options.trim()) || create.isPending} onClick={() => create.mutate()}>เพิ่มฟิลด์</Button>
+              <Button disabled={!label || (type === 'select' && !options.trim()) || create.isPending} onClick={() => create.mutate()}>{t('mx.cf_add_field')}</Button>
             </div>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle className="text-sm">ทดลองกรอกค่า (ตามเรคคอร์ด)</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">{t('mx.cf_try_values')}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <div><Label>รหัสเรคคอร์ด (record id)</Label><Input value={recordId} onChange={(e) => setRecordId(e.target.value.trim())} placeholder={`${entity.toUpperCase()}-1`} /></div>
+            <div><Label>{t('mx.cf_record_id')}</Label><Input value={recordId} onChange={(e) => setRecordId(e.target.value.trim())} placeholder={`${entity.toUpperCase()}-1`} /></div>
             {recordId
-              ? <CustomFields entity={entity} recordId={recordId} title={`ค่า ${entity} · ${recordId}`} />
-              : <p className="text-sm text-muted-foreground">ใส่รหัสเรคคอร์ดเพื่อกรอกค่าฟิลด์กำหนดเองของเรคคอร์ดนั้น (หน้าจริงของแต่ละโมดูลจะฝังแผงนี้ไว้ให้อัตโนมัติ)</p>}
+              ? <CustomFields entity={entity} recordId={recordId} title={t('mx.cf_values_title', { entity, recordId })} />
+              : <p className="text-sm text-muted-foreground">{t('mx.cf_record_id_hint')}</p>}
           </CardContent>
         </Card>
       </div>
@@ -87,17 +89,17 @@ export default function CustomFieldsPage() {
           rows={q.data?.fields ?? []}
           rowKey={(r) => r.id}
           columns={[
-            { key: 'label', label: 'ชื่อฟิลด์' },
-            { key: 'field_key', label: 'คีย์', render: (r) => <code className="text-xs">{r.field_key}</code> },
-            { key: 'data_type', label: 'ชนิด', render: (r) => <Badge variant="muted">{r.data_type}</Badge> },
-            { key: 'options', label: 'ตัวเลือก', render: (r) => r.options?.join(', ') ?? '—' },
-            { key: 'required', label: 'จำเป็น', render: (r) => r.required ? <Badge variant="warning">required</Badge> : '—' },
+            { key: 'label', label: t('mx.cf_field_name') },
+            { key: 'field_key', label: t('mx.cf_col_key'), render: (r) => <code className="text-xs">{r.field_key}</code> },
+            { key: 'data_type', label: t('mx.cf_type'), render: (r) => <Badge variant="muted">{r.data_type}</Badge> },
+            { key: 'options', label: t('mx.cf_col_options'), render: (r) => r.options?.join(', ') ?? '—' },
+            { key: 'required', label: t('mx.cf_col_required'), render: (r) => r.required ? <Badge variant="warning">required</Badge> : '—' },
             { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
           emptyState={{
             icon: SlidersHorizontal,
-            title: 'ยังไม่มีฟิลด์กำหนดเองสำหรับประเภทนี้',
-            description: 'เพิ่มฟิลด์ใหม่จากแผง “เพิ่มฟิลด์ใหม่” ด้านบนเพื่อเริ่มต้น',
+            title: t('mx.cf_empty_title'),
+            description: t('mx.cf_empty_desc'),
           }}
         />
       </StateView>

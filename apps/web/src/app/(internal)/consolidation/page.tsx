@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { useLang } from '@/lib/i18n';
 
 const currentPeriod = () => new Date().toISOString().slice(0, 7);
 
@@ -45,16 +46,17 @@ interface RunLine {
 interface RunLinesResp { run_id: number; lines: RunLine[] }
 
 export default function ConsolidationPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="งบการเงินรวม (Consolidation)"
-        description="รวมงบของบริษัทในกลุ่ม แปลงสกุลเงิน ตัดรายการระหว่างกัน และคำนวณส่วนได้เสียที่ไม่มีอำนาจควบคุม (NCI)"
+        title={t('fnx.consol.title')}
+        description={t('fnx.consol.subtitle')}
       />
       <Tabs
         tabs={[
-          { key: 'groups', label: 'กลุ่มบริษัท', content: <GroupsTab /> },
-          { key: 'runs', label: 'การรวมงบ', content: <RunsTab /> },
+          { key: 'groups', label: t('fnx.consol.tab_groups'), content: <GroupsTab /> },
+          { key: 'runs', label: t('fnx.consol.tab_runs'), content: <RunsTab /> },
         ]}
       />
     </div>
@@ -63,6 +65,7 @@ export default function ConsolidationPage() {
 
 // ───────────────────────── กลุ่มบริษัท + entities ─────────────────────────
 function GroupsTab() {
+  const { t } = useLang();
   const q = useQuery<GroupsResp>({ queryKey: ['consol-groups'], queryFn: () => api('/api/consolidation/groups') });
   const [selected, setSelected] = useState<number | null>(null);
 
@@ -71,23 +74,23 @@ function GroupsTab() {
       {q.data && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <StatCard label="จำนวนกลุ่ม" value={q.data.count} icon={Layers} tone="primary" />
+            <StatCard label={t('fnx.consol.stat_group_count')} value={q.data.count} icon={Layers} tone="primary" />
           </div>
           <DataTable
             rows={q.data.groups}
             rowKey={(r) => r.id}
             onRowClick={(r) => setSelected(r.id)}
             columns={[
-              { key: 'name', label: 'ชื่อกลุ่ม', render: (r) => <span className="font-medium">{r.name}</span> },
-              { key: 'fiscal_year', label: 'ปีบัญชี', align: 'right', render: (r) => <span className="tabular">{r.fiscal_year}</span> },
-              { key: 'base_currency', label: 'สกุลเงินหลัก' },
-              { key: 'created_by', label: 'สร้างโดย' },
-              { key: 'created_at', label: 'วันที่สร้าง', render: (r) => (r.created_at ? thaiDate(r.created_at) : '—') },
+              { key: 'name', label: t('fnx.consol.col_group_name'), render: (r) => <span className="font-medium">{r.name}</span> },
+              { key: 'fiscal_year', label: t('fnx.consol.col_fiscal_year'), align: 'right', render: (r) => <span className="tabular">{r.fiscal_year}</span> },
+              { key: 'base_currency', label: t('fnx.consol.col_base_currency') },
+              { key: 'created_by', label: t('fnx.consol.col_created_by') },
+              { key: 'created_at', label: t('fnx.consol.col_created_at'), render: (r) => (r.created_at ? thaiDate(r.created_at) : '—') },
             ]}
             emptyState={{
               icon: Layers,
-              title: 'ยังไม่มีกลุ่มบริษัท',
-              description: 'สร้างกลุ่มบริษัทเพื่อกำหนดโครงสร้างการถือหุ้นและเริ่มรวมงบการเงิน',
+              title: t('fnx.consol.empty_groups_title'),
+              description: t('fnx.consol.empty_groups_desc'),
             }}
           />
           {selected != null && <GroupEntities groupId={selected} />}
@@ -98,11 +101,12 @@ function GroupsTab() {
 }
 
 function GroupEntities({ groupId }: { groupId: number }) {
+  const { t } = useLang();
   const q = useQuery<EntitiesResp>({ queryKey: ['consol-entities', groupId], queryFn: () => api(`/api/consolidation/groups/${groupId}/entities`) });
   return (
     <Card className="gap-4 p-5">
       <CardHeader className="p-0">
-        <CardTitle className="text-base">บริษัทในกลุ่ม #{groupId}</CardTitle>
+        <CardTitle className="text-base">{t('fnx.consol.entities_title', { id: groupId })}</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <StateView q={q}>
@@ -111,11 +115,11 @@ function GroupEntities({ groupId }: { groupId: number }) {
               rows={q.data.entities}
               rowKey={(r) => r.id}
               columns={[
-                { key: 'entity_tenant_id', label: 'บริษัท', render: (r) => <span className="font-medium">#{r.entity_tenant_id}</span> },
-                { key: 'ownership_pct', label: 'สัดส่วนถือหุ้น', align: 'right', render: (r) => <span className="tabular">{r.ownership_pct}%</span> },
-                { key: 'entity_currency', label: 'สกุลเงิน' },
+                { key: 'entity_tenant_id', label: t('fnx.consol.col_entity'), render: (r) => <span className="font-medium">#{r.entity_tenant_id}</span> },
+                { key: 'ownership_pct', label: t('fnx.consol.col_ownership'), align: 'right', render: (r) => <span className="tabular">{r.ownership_pct}%</span> },
+                { key: 'entity_currency', label: t('fnx.consol.col_currency') },
               ]}
-              emptyState={{ icon: Building2, title: 'ยังไม่มีบริษัทในกลุ่มนี้' }}
+              emptyState={{ icon: Building2, title: t('fnx.consol.empty_entities_title') }}
             />
           )}
         </StateView>
@@ -126,6 +130,7 @@ function GroupEntities({ groupId }: { groupId: number }) {
 
 // ───────────────────────── การรวมงบ (runs) ─────────────────────────
 function RunsTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const groups = useQuery<GroupsResp>({ queryKey: ['consol-groups'], queryFn: () => api('/api/consolidation/groups') });
   const [groupId, setGroupId] = useState<number | null>(null);
@@ -147,7 +152,7 @@ function RunsTab() {
         body: JSON.stringify({ period }),
       }),
     onSuccess: (r) => {
-      notifySuccess(`รวมงบสำเร็จ (run #${r.run_id}) · ${r.entity_count} บริษัท · ตัดรายการ ${r.ic_eliminations} · ${r.status}`);
+      notifySuccess(t('fnx.consol.run_success', { run_id: r.run_id, entity_count: r.entity_count, ic_eliminations: r.ic_eliminations, status: r.status }));
       qc.invalidateQueries({ queryKey: ['consol-runs', gid] });
     },
     onError: (e: Error) => notifyError(e.message),
@@ -160,12 +165,12 @@ function RunsTab() {
     <div className="space-y-5">
       <Card className="max-w-2xl gap-4">
         <CardHeader>
-          <CardTitle className="text-base">เดินการรวมงบ (Run Consolidation)</CardTitle>
+          <CardTitle className="text-base">{t('fnx.consol.run_card_title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-2">
-              <Label htmlFor="consol-group">กลุ่มบริษัท</Label>
+              <Label htmlFor="consol-group">{t('fnx.consol.field_group')}</Label>
               <select
                 id="consol-group"
                 className={selectCls}
@@ -177,16 +182,16 @@ function RunsTab() {
                     <option key={g.id} value={g.id}>{g.name} ({g.fiscal_year})</option>
                   ))
                 ) : (
-                  <option value="">— ยังไม่มีกลุ่ม —</option>
+                  <option value="">{t('fnx.consol.opt_no_group')}</option>
                 )}
               </select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="consol-period">งวด (YYYY-MM)</Label>
+              <Label htmlFor="consol-period">{t('fnx.consol.field_period')}</Label>
               <Input id="consol-period" className="max-w-[160px]" placeholder="2026-06" value={period} onChange={(e) => setPeriod(e.target.value)} />
             </div>
             <Button disabled={run.isPending || gid == null || !/^\d{4}-\d{2}$/.test(period)} onClick={() => run.mutate()}>
-              <PlayCircle className="size-4" /> {run.isPending ? 'กำลังรวมงบ…' : 'รวมงบ'}
+              <PlayCircle className="size-4" /> {run.isPending ? t('fnx.consol.running') : t('fnx.consol.run_btn')}
             </Button>
           </div>
         </CardContent>
@@ -197,7 +202,7 @@ function RunsTab() {
           {runs.data && (
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <StatCard label="จำนวนรอบการรวมงบ" value={runs.data.runs.length} icon={Building2} tone="primary" />
+                <StatCard label={t('fnx.consol.stat_run_count')} value={runs.data.runs.length} icon={Building2} tone="primary" />
               </div>
               <DataTable
                 rows={runs.data.runs}
@@ -205,15 +210,15 @@ function RunsTab() {
                 onRowClick={(r) => setOpenRun((cur) => (cur === r.id ? null : r.id))}
                 columns={[
                   { key: 'id', label: 'Run', render: (r) => <span className="font-medium">#{r.id}</span> },
-                  { key: 'period', label: 'งวด' },
-                  { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-                  { key: 'run_by', label: 'โดย' },
-                  { key: 'run_at', label: 'เวลา', render: (r) => (r.run_at ? thaiDate(r.run_at) : '—') },
+                  { key: 'period', label: t('fnx.consol.col_period') },
+                  { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                  { key: 'run_by', label: t('fnx.consol.col_by') },
+                  { key: 'run_at', label: t('fnx.consol.col_time'), render: (r) => (r.run_at ? thaiDate(r.run_at) : '—') },
                 ]}
                 emptyState={{
                   icon: Rows3,
-                  title: 'ยังไม่มีการรวมงบ',
-                  description: 'เลือกงวดแล้วกด รวมงบ เพื่อเดินการรวมงบครั้งแรกของกลุ่มนี้',
+                  title: t('fnx.consol.empty_runs_title'),
+                  description: t('fnx.consol.empty_runs_desc'),
                 }}
               />
               {openRun != null && <RunLines runId={openRun} />}
@@ -226,11 +231,12 @@ function RunsTab() {
 }
 
 function RunLines({ runId }: { runId: number }) {
+  const { t } = useLang();
   const q = useQuery<RunLinesResp>({ queryKey: ['consol-run-lines', runId], queryFn: () => api(`/api/consolidation/runs/${runId}/lines`) });
   return (
     <Card className="gap-4 p-5">
       <CardHeader className="p-0">
-        <CardTitle className="text-base">รายการรวมงบ — Run #{runId}</CardTitle>
+        <CardTitle className="text-base">{t('fnx.consol.run_lines_title', { id: runId })}</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <StateView q={q}>
@@ -239,13 +245,13 @@ function RunLines({ runId }: { runId: number }) {
               rows={q.data.lines}
               rowKey={(r) => r.id}
               columns={[
-                { key: 'line_type', label: 'ประเภท', render: (r) => <Badge variant={statusVariant(r.line_type)}>{r.line_type}</Badge> },
-                { key: 'account_code', label: 'รหัสบัญชี' },
-                { key: 'entity_tenant_id', label: 'บริษัท', render: (r) => (r.entity_tenant_id != null ? `#${r.entity_tenant_id}` : '—') },
-                { key: 'amount_thb', label: 'ยอด (THB)', align: 'right', render: (r) => <span className="tabular">{baht(r.amount_thb)}</span> },
-                { key: 'notes', label: 'หมายเหตุ', render: (r) => r.notes ?? '—' },
+                { key: 'line_type', label: t('fnx.consol.col_type'), render: (r) => <Badge variant={statusVariant(r.line_type)}>{r.line_type}</Badge> },
+                { key: 'account_code', label: t('fnx.consol.col_account') },
+                { key: 'entity_tenant_id', label: t('fnx.consol.col_entity'), render: (r) => (r.entity_tenant_id != null ? `#${r.entity_tenant_id}` : '—') },
+                { key: 'amount_thb', label: t('fnx.consol.col_amount_thb'), align: 'right', render: (r) => <span className="tabular">{baht(r.amount_thb)}</span> },
+                { key: 'notes', label: t('fnx.consol.col_notes'), render: (r) => r.notes ?? '—' },
               ]}
-              emptyState={{ icon: ListTree, title: 'ไม่มีรายการรวมงบ' }}
+              emptyState={{ icon: ListTree, title: t('fnx.consol.empty_run_lines') }}
             />
           )}
         </StateView>

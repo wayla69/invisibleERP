@@ -6,6 +6,7 @@ import { Award, Gauge, TrendingDown, Trophy } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -25,6 +26,7 @@ const scoreTone = (s: number): 'success' | 'warning' | 'destructive' =>
   s >= 85 ? 'success' : s >= 70 ? 'warning' : 'destructive';
 
 export default function SupplierScorecardsPage() {
+  const { t } = useLang();
   const [period, setPeriod] = useState('');
 
   const q = useQuery<Resp>({
@@ -36,23 +38,23 @@ export default function SupplierScorecardsPage() {
 
   return (
     <ModulePage
-      title="คะแนนซัพพลายเออร์ (Supplier Scorecards)"
-      description="จัดอันดับผลงานผู้ขายตาม scorecard — ตรงเวลา · คุณภาพ · ส่วนต่างราคา เพื่อบริหารจัดการผู้ขาย"
+      title={t('iv.ssc_title')}
+      description={t('iv.ssc_desc')}
       query={q}
       toolbar={
         <>
-          <label className="text-sm text-muted-foreground" htmlFor="sc-period">งวด</label>
-          <Input id="sc-period" className="w-40" placeholder="ทุกงวด (ล่าสุด/ราย)" value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="กรองตามงวด (YYYY-MM)" />
-          {period && <span className="text-xs text-muted-foreground">รูปแบบ YYYY-MM · เว้นว่าง = ล่าสุดต่อราย</span>}
-          {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">กำลังอัปเดต…</span>}
+          <label className="text-sm text-muted-foreground" htmlFor="sc-period">{t('iv.ssc_period')}</label>
+          <Input id="sc-period" className="w-40" placeholder={t('iv.ssc_period_ph')} value={period} onChange={(e) => setPeriod(e.target.value)} aria-label={t('iv.ssc_period_aria')} />
+          {period && <span className="text-xs text-muted-foreground">{t('iv.ssc_period_hint')}</span>}
+          {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">{t('iv.ssc_updating')}</span>}
         </>
       }
       stats={
         d && (
           <>
-            <StatCard label="ซัพพลายเออร์ (มี scorecard)" value={num(d.count)} icon={Award} tone="primary" />
-            <StatCard label="คะแนนเฉลี่ย" value={num(d.avg_score)} icon={Gauge} tone={d.avg_score >= 85 ? 'success' : d.avg_score >= 70 ? 'warning' : 'danger'} hint="เต็ม 100" />
-            <StatCard label="ต่ำกว่าเกณฑ์ (< 70)" value={num(d.underperformers)} icon={TrendingDown} tone={d.underperformers > 0 ? 'danger' : 'success'} hint="ควรทบทวน/ตรวจสอบ" />
+            <StatCard label={t('iv.ssc_stat_count')} value={num(d.count)} icon={Award} tone="primary" />
+            <StatCard label={t('iv.ssc_stat_avg')} value={num(d.avg_score)} icon={Gauge} tone={d.avg_score >= 85 ? 'success' : d.avg_score >= 70 ? 'warning' : 'danger'} hint={t('iv.ssc_stat_avg_hint')} />
+            <StatCard label={t('iv.ssc_stat_under')} value={num(d.underperformers)} icon={TrendingDown} tone={d.underperformers > 0 ? 'danger' : 'success'} hint={t('iv.ssc_stat_under_hint')} />
           </>
         )
       }
@@ -62,17 +64,17 @@ export default function SupplierScorecardsPage() {
         <DataTable
           rows={d.scorecards.map((s, i) => ({ ...s, rank: i + 1 }))}
           rowKey={(r) => `${r.vendor_id}-${r.period}`}
-          emptyState={{ icon: Award, title: 'ยังไม่มีคะแนนซัพพลายเออร์', description: 'คำนวณ scorecard จากหน้าจัดซื้อ (suppliers/:id/scorecard) แล้วผลจะแสดงและจัดอันดับที่นี่' }}
+          emptyState={{ icon: Award, title: t('iv.ssc_empty_title'), description: t('iv.ssc_empty_desc') }}
           columns={[
-            { key: 'rank', label: 'อันดับ', render: (r) => <span className="tabular text-muted-foreground">{r.rank === 1 ? <Trophy className="inline size-4 text-warning-foreground dark:text-warning" /> : `#${r.rank}`}</span> },
-            { key: 'vendor_name', label: 'ซัพพลายเออร์', render: (r) => <span className="font-medium">{r.vendor_name ?? `#${r.vendor_id}`}</span> },
-            { key: 'score', label: 'คะแนน', align: 'right', render: (r) => <Badge variant={scoreTone(r.score)}>{num(r.score)}</Badge> },
-            { key: 'on_time_pct', label: 'ตรงเวลา %', align: 'right', render: (r) => <span className="tabular">{num(r.on_time_pct)}%</span> },
-            { key: 'quality_pct', label: 'คุณภาพ %', align: 'right', render: (r) => <span className="tabular">{num(r.quality_pct)}%</span> },
-            { key: 'price_var_pct', label: 'ส่วนต่างราคา %', align: 'right', render: (r) => <span className={cn('tabular', r.price_var_pct > 0 && 'text-destructive')}>{num(r.price_var_pct)}%</span> },
-            { key: 'gr_count', label: 'รับของ', align: 'right', render: (r) => <span className="tabular">{num(r.gr_count)}</span> },
-            { key: 'claim_count', label: 'เคลม', align: 'right', render: (r) => <span className={cn('tabular', r.claim_count > 0 && 'font-medium text-destructive')}>{num(r.claim_count)}</span> },
-            { key: 'period', label: 'งวด', render: (r) => r.period ?? '—' },
+            { key: 'rank', label: t('iv.ssc_col_rank'), render: (r) => <span className="tabular text-muted-foreground">{r.rank === 1 ? <Trophy className="inline size-4 text-warning-foreground dark:text-warning" /> : `#${r.rank}`}</span> },
+            { key: 'vendor_name', label: t('iv.ssc_col_supplier'), render: (r) => <span className="font-medium">{r.vendor_name ?? `#${r.vendor_id}`}</span> },
+            { key: 'score', label: t('iv.ssc_col_score'), align: 'right', render: (r) => <Badge variant={scoreTone(r.score)}>{num(r.score)}</Badge> },
+            { key: 'on_time_pct', label: t('iv.ssc_col_on_time'), align: 'right', render: (r) => <span className="tabular">{num(r.on_time_pct)}%</span> },
+            { key: 'quality_pct', label: t('iv.ssc_col_quality'), align: 'right', render: (r) => <span className="tabular">{num(r.quality_pct)}%</span> },
+            { key: 'price_var_pct', label: t('iv.ssc_col_price_var'), align: 'right', render: (r) => <span className={cn('tabular', r.price_var_pct > 0 && 'text-destructive')}>{num(r.price_var_pct)}%</span> },
+            { key: 'gr_count', label: t('iv.ssc_col_gr'), align: 'right', render: (r) => <span className="tabular">{num(r.gr_count)}</span> },
+            { key: 'claim_count', label: t('iv.ssc_col_claim'), align: 'right', render: (r) => <span className={cn('tabular', r.claim_count > 0 && 'font-medium text-destructive')}>{num(r.claim_count)}</span> },
+            { key: 'period', label: t('iv.ssc_col_period'), render: (r) => r.period ?? '—' },
           ]}
         />
       )}

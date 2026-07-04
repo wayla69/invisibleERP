@@ -7,12 +7,14 @@ import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useLang } from '@/lib/i18n';
 
 type Citation = { title: string; ord: number; content: string; score: number };
 type Answer = { answer: string; grounded: boolean; citations: Citation[]; source: string };
 
 // Embedded copilot (Platform Phase 15 — B1). Context-aware Q&A grounded in the tenant's knowledge base.
 export default function CopilotPage() {
+  const { t } = useLang();
   const [q, setQ] = useState('');
   const [res, setRes] = useState<Answer | null>(null);
   const [err, setErr] = useState('');
@@ -24,13 +26,13 @@ export default function CopilotPage() {
 
   return (
     <div>
-      <PageHeader title="ผู้ช่วยอัจฉริยะ (Copilot)" description="ถามเป็นภาษาธรรมชาติ ระบบตอบโดยอ้างอิงจากฐานความรู้ของกิจการเท่านั้น (cite-or-refuse) — ไม่กุข้อมูล อ่านอย่างเดียว" />
+      <PageHeader title={t('mx.cp_title')} description={t('mx.cp_desc')} />
 
       <Card className="mb-6">
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Bot className="size-4 text-primary" /> ถามผู้ช่วย</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Bot className="size-4 text-primary" /> {t('mx.cp_ask')}</CardTitle></CardHeader>
         <CardContent>
           <div className="flex gap-2">
-            <textarea className="min-h-20 flex-1 rounded-md border bg-transparent p-3 text-sm" placeholder="เช่น นโยบายการคืนสินค้าเป็นอย่างไร" value={q} onChange={(e) => setQ(e.target.value)} />
+            <textarea className="min-h-20 flex-1 rounded-md border bg-transparent p-3 text-sm" placeholder={t('mx.cp_ask_ph')} value={q} onChange={(e) => setQ(e.target.value)} />
             <Button disabled={ask.isPending || !q.trim()} onClick={() => ask.mutate()}>{ask.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>
           </div>
           {err && <p className="mt-2 text-sm text-destructive">{err}</p>}
@@ -39,12 +41,12 @@ export default function CopilotPage() {
 
       {res && (
         <Card>
-          <CardHeader><CardTitle className="text-base">คำตอบ {res.grounded ? <span className="ml-2 rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">มีแหล่งอ้างอิง</span> : <span className="ml-2 rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">ไม่พบแหล่งอ้างอิง</span>}</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('mx.cp_answer')} {res.grounded ? <span className="ml-2 rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">{t('mx.cp_grounded')}</span> : <span className="ml-2 rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t('mx.cp_ungrounded')}</span>}</CardTitle></CardHeader>
           <CardContent>
             <p className="whitespace-pre-wrap text-sm">{res.answer}</p>
             {res.citations?.length > 0 && (
               <div className="mt-4">
-                <p className="mb-1 text-xs font-medium text-muted-foreground">แหล่งอ้างอิง</p>
+                <p className="mb-1 text-xs font-medium text-muted-foreground">{t('mx.cp_citations')}</p>
                 <ul className="space-y-2">
                   {res.citations.map((c, i) => (
                     <li key={i} className="rounded border p-2 text-xs">

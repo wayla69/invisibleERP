@@ -12,6 +12,7 @@ import { FormField } from '@/components/form-field';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 
 // W3 — cash banking. Batch till safe-drops into a bank deposit (Dr bank / Cr 1000), reconcile to statement.
 interface Dep { id: number; deposit_no: string; bank_account_id: number; amount: number; status: string; deposit_date: string | null; journal_no: string | null; created_at: string }
@@ -20,6 +21,7 @@ interface Drops { drops: { movement_no: string; amount: number; reason: string |
 interface Bank { id: number; bank_name: string; account_no: string }
 
 export default function CashBankingPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<Resp>({ queryKey: ['bank-deposits'], queryFn: () => api('/api/bank/deposits'), refetchInterval: 30_000 });
   const drops = useQuery<Drops>({ queryKey: ['undeposited-drops'], queryFn: () => api('/api/bank/deposits/undeposited-drops') });
@@ -29,26 +31,26 @@ export default function CashBankingPage() {
 
   const deposit = useMutation({
     mutationFn: () => api('/api/bank/deposits', { method: 'POST', body: JSON.stringify({ bank_account_id: Number(bankId), deposit_date: new Date().toISOString().slice(0, 10) }) }),
-    onSuccess: (r: any) => { notifySuccess(`นำฝาก ${r.deposit_no} · ${baht(r.amount)} (${r.drops_banked} รายการ)`); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('fnx.cashbank.toast_deposited', { no: r.deposit_no, amount: baht(r.amount), n: r.drops_banked })); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const reconcile = useMutation({
     mutationFn: (id: number) => api(`/api/bank/deposits/${id}/reconcile`, { method: 'POST' }),
-    onSuccess: () => { notifySuccess('กระทบยอดแล้ว'); refresh(); },
+    onSuccess: () => { notifySuccess(t('fnx.cashbank.toast_reconciled')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const d = q.data;
   return (
     <ModulePage
-      title="นำเงินสดฝากธนาคาร (Cash banking)"
-      description="รวมเงินสดที่ฝากเซฟจากลิ้นชัก แล้วนำฝากธนาคาร (Dr ธนาคาร / Cr เงินสด) และกระทบยอดกับ statement; เงินสดที่ยังไม่ได้นำฝากคือความเสี่ยงในเซฟ"
+      title={t('fnx.cashbank.title')}
+      description={t('fnx.cashbank.desc')}
       query={q}
       stats={d && (
         <>
-          <StatCard label="เงินสดในเซฟ (ยังไม่นำฝาก)" value={baht(d.cash_in_safe)} icon={Vault} tone={d.cash_in_safe > 0 ? 'warning' : 'success'} hint={`${num(d.undeposited_drops)} รายการ`} />
-          <StatCard label="รายการนำฝากทั้งหมด" value={num(d.count)} icon={Landmark} tone="primary" />
-          <StatCard label="ยังไม่กระทบยอด" value={num(d.unreconciled)} icon={Banknote} tone={d.unreconciled > 0 ? 'warning' : 'success'} />
+          <StatCard label={t('fnx.cashbank.stat_cash_in_safe')} value={baht(d.cash_in_safe)} icon={Vault} tone={d.cash_in_safe > 0 ? 'warning' : 'success'} hint={t('fnx.cashbank.n_items', { n: num(d.undeposited_drops) })} />
+          <StatCard label={t('fnx.cashbank.stat_total_deposits')} value={num(d.count)} icon={Landmark} tone="primary" />
+          <StatCard label={t('fnx.cashbank.stat_unreconciled')} value={num(d.unreconciled)} icon={Banknote} tone={d.unreconciled > 0 ? 'warning' : 'success'} />
         </>
       )}
       statsClassName="xl:grid-cols-3"
@@ -56,14 +58,14 @@ export default function CashBankingPage() {
       {/* deposit form */}
       <div className="mb-4 rounded-xl border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <FormField label="บัญชีธนาคารปลายทาง" className="min-w-[220px]">
+          <FormField label={t('fnx.cashbank.field_bank')} className="min-w-[220px]">
             <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={bankId} onChange={(e) => setBankId(e.target.value)}>
-              <option value="">— เลือกบัญชี —</option>
+              <option value="">{t('fnx.cashbank.select_account')}</option>
               {(banks.data?.accounts ?? []).map((b) => <option key={b.id} value={b.id}>{b.bank_name} {b.account_no}</option>)}
             </select>
           </FormField>
-          <div className="text-sm text-muted-foreground">เงินสดในเซฟพร้อมนำฝาก: <strong className="text-foreground">{baht(drops.data?.total ?? 0)}</strong> ({num(drops.data?.count ?? 0)} รายการ)</div>
-          <Button disabled={deposit.isPending || !bankId || (drops.data?.count ?? 0) === 0} onClick={() => deposit.mutate()}>นำฝากทั้งหมด</Button>
+          <div className="text-sm text-muted-foreground">{t('fnx.cashbank.ready_to_deposit')} <strong className="text-foreground">{baht(drops.data?.total ?? 0)}</strong> ({t('fnx.cashbank.n_items', { n: num(drops.data?.count ?? 0) })})</div>
+          <Button disabled={deposit.isPending || !bankId || (drops.data?.count ?? 0) === 0} onClick={() => deposit.mutate()}>{t('fnx.cashbank.deposit_all')}</Button>
         </div>
       </div>
 
@@ -71,15 +73,15 @@ export default function CashBankingPage() {
         <DataTable
           rows={d.deposits}
           rowKey={(r) => r.deposit_no}
-          emptyState={{ icon: Landmark, title: 'ยังไม่มีการนำฝาก', description: 'เมื่อมีเงินสดฝากเซฟจากลิ้นชัก เลือกบัญชีธนาคารแล้วกด “นำฝากทั้งหมด”' }}
+          emptyState={{ icon: Landmark, title: t('fnx.cashbank.empty_title'), description: t('fnx.cashbank.empty_desc') }}
           columns={[
-            { key: 'deposit_no', label: 'เลขที่', render: (r) => <span className="font-mono text-sm">{r.deposit_no}</span> },
-            { key: 'deposit_date', label: 'วันที่ฝาก', render: (r) => r.deposit_date ?? thaiDate(r.created_at) },
-            { key: 'amount', label: 'จำนวน', align: 'right', render: (r) => baht(r.amount) },
-            { key: 'journal_no', label: 'บัญชี', render: (r) => r.journal_no ? <span className="font-mono text-xs">{r.journal_no}</span> : '—' },
-            { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'Reconciled' ? 'success' : 'warning'}>{r.status === 'Reconciled' ? 'กระทบยอดแล้ว' : 'รอกระทบยอด'}</Badge> },
+            { key: 'deposit_no', label: t('dash.col_no'), render: (r) => <span className="font-mono text-sm">{r.deposit_no}</span> },
+            { key: 'deposit_date', label: t('fnx.cashbank.col_deposit_date'), render: (r) => r.deposit_date ?? thaiDate(r.created_at) },
+            { key: 'amount', label: t('fnx.cashbank.col_amount'), align: 'right', render: (r) => baht(r.amount) },
+            { key: 'journal_no', label: t('fnx.cashbank.col_journal'), render: (r) => r.journal_no ? <span className="font-mono text-xs">{r.journal_no}</span> : '—' },
+            { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={r.status === 'Reconciled' ? 'success' : 'warning'}>{r.status === 'Reconciled' ? t('fnx.cashbank.status_reconciled') : t('fnx.cashbank.status_pending')}</Badge> },
             { key: 'actions', label: '', align: 'right', render: (r) => r.status !== 'Reconciled' ? (
-              <Button size="sm" variant="outline" disabled={reconcile.isPending} onClick={() => reconcile.mutate(r.id)}><CheckCircle2 className="size-4" /> กระทบยอด</Button>
+              <Button size="sm" variant="outline" disabled={reconcile.isPending} onClick={() => reconcile.mutate(r.id)}><CheckCircle2 className="size-4" /> {t('fnx.cashbank.reconcile')}</Button>
             ) : null },
           ]}
         />

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAssistantChat } from '@/hooks/use-assistant-chat';
+import { useLang } from '@/lib/i18n';
 
 // ── SSE assistant ───────────────────────────────────────────────────────────
 // สถานะ + สตรีมมิ่งอยู่ใน useAssistantChat (แชร์กับ floating widget) — หน้านี้ให้เฉพาะ UI เต็มหน้า
@@ -20,6 +21,7 @@ const QUICK_PROMPTS = [
 ];
 
 export default function AssistantPage() {
+  const { t } = useLang();
   const { messages, streaming, error, send, stop } = useAssistantChat();
   const [input, setInput] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
@@ -39,7 +41,7 @@ export default function AssistantPage() {
         <div className="min-w-0">
           <h1 className="text-lg font-semibold tracking-tight">AI Assistant</h1>
           <p className="text-sm text-muted-foreground">
-            ถาม AI เกี่ยวกับยอดขาย สต๊อก การเงิน และการสั่งซื้อ — ดึงข้อมูลจริงจากระบบ
+            {t('mx.ast_subtitle')}
           </p>
         </div>
       </div>
@@ -61,7 +63,7 @@ export default function AssistantPage() {
         {messages.length === 0 && (
           <div className="m-auto flex flex-col items-center gap-3 text-center text-muted-foreground">
             <Sparkles className="size-8 opacity-40" />
-            <p className="text-sm">เริ่มสนทนาด้วยการพิมพ์คำถาม หรือเลือกปุ่มลัดด้านบน</p>
+            <p className="text-sm">{t('mx.ast_empty')}</p>
           </div>
         )}
         {messages.map((m, i) => (
@@ -83,7 +85,7 @@ export default function AssistantPage() {
               )}
             >
               {m.content || (streaming && m.role === 'assistant' ? (
-                <span className="text-muted-foreground">กำลังคิด…</span>
+                <span className="text-muted-foreground">{t('mx.ast_thinking')}</span>
               ) : '')}
             </div>
           </div>
@@ -105,18 +107,18 @@ export default function AssistantPage() {
       >
         <Input
           className="flex-1"
-          placeholder="พิมพ์คำถาม… (เช่น สรุปยอดขายเดือนนี้)"
+          placeholder={t('mx.ast_input_ph')}
           value={input}
           disabled={streaming}
           onChange={(e) => setInput(e.target.value)}
         />
         {streaming ? (
           <Button type="button" variant="destructive" onClick={stop}>
-            <Square className="size-4" /> หยุด
+            <Square className="size-4" /> {t('mx.ast_stop')}
           </Button>
         ) : (
           <Button type="submit" disabled={!input.trim()}>
-            <Send className="size-4" /> ส่ง
+            <Send className="size-4" /> {t('mx.ast_send')}
           </Button>
         )}
       </form>

@@ -11,11 +11,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { useLang } from '@/lib/i18n';
 
 interface Widget { key: string; label: string; label_en: string; unit: string; perms: string[] }
 interface Catalog { widgets: Widget[]; roles: string[] }
 
 export default function DashboardDesignerPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const cat = useQuery<Catalog>({ queryKey: ['dash-catalog'], queryFn: () => api('/api/dashboard/widgets/catalog') });
   const [role, setRole] = useState('');
@@ -34,7 +36,7 @@ export default function DashboardDesignerPage() {
 
   const save = useMutation({
     mutationFn: () => api(`/api/dashboard/layouts/${role}`, { method: 'PUT', body: JSON.stringify({ widgets: selected }) }),
-    onSuccess: () => { setMsg(`✅ บันทึกแดชบอร์ดของบทบาท ${role}`); qc.invalidateQueries({ queryKey: ['dash-layout', role] }); qc.invalidateQueries({ queryKey: ['dashboard-mine'] }); },
+    onSuccess: () => { setMsg(`✅ ${t('mx.dd_saved', { role })}`); qc.invalidateQueries({ queryKey: ['dash-layout', role] }); qc.invalidateQueries({ queryKey: ['dashboard-mine'] }); },
     onError: (e: Error) => setMsg(`❌ ${e.message}`),
   });
 
@@ -47,9 +49,9 @@ export default function DashboardDesignerPage() {
 
   return (
     <div>
-      <PageHeader title="ออกแบบแดชบอร์ดตามบทบาท (Role dashboards)" description="เลือกตัวชี้วัด (วิดเจ็ต) ที่จะแสดงบนหน้าแดชบอร์ดของแต่ละบทบาท — ผู้ใช้จะเห็นเฉพาะวิดเจ็ตที่สิทธิ์ของตนเข้าถึงได้" />
+      <PageHeader title={t('mx.dd_title')} description={t('mx.dd_desc')} />
       <div className="mb-4 max-w-xs">
-        <Label>บทบาท (Role)</Label>
+        <Label>{t('mx.dd_role')}</Label>
         <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={role} onChange={(e) => setRole(e.target.value)}>
           {roles.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
@@ -57,7 +59,7 @@ export default function DashboardDesignerPage() {
       <StateView q={cat}>
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle className="text-sm">วิดเจ็ตที่มีให้เลือก</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-sm">{t('mx.dd_available_widgets')}</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {widgets.map((w) => (
                 <div key={w.key} className="flex items-center justify-between rounded-md border px-3 py-2">
@@ -65,15 +67,15 @@ export default function DashboardDesignerPage() {
                     <div className="text-sm font-medium">{w.label} <span className="text-xs text-muted-foreground">/ {w.label_en}</span></div>
                     <div className="text-xs text-muted-foreground">{w.perms.join(', ')}</div>
                   </div>
-                  <Button size="sm" variant="outline" disabled={selected.includes(w.key)} onClick={() => add(w.key)}>เพิ่ม</Button>
+                  <Button size="sm" variant="outline" disabled={selected.includes(w.key)} onClick={() => add(w.key)}>{t('mx.dd_add')}</Button>
                 </div>
               ))}
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle className="text-sm flex items-center gap-2"><LayoutDashboard className="h-4 w-4" />แดชบอร์ดของบทบาท {role} {layout.data?.configured === false && <Badge variant="muted">ค่าเริ่มต้น</Badge>}</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-sm flex items-center gap-2"><LayoutDashboard className="h-4 w-4" />{t('mx.dd_role_dashboard', { role })} {layout.data?.configured === false && <Badge variant="muted">{t('mx.dd_default')}</Badge>}</CardTitle></CardHeader>
             <CardContent className="space-y-2">
-              {selected.length === 0 && <div className="text-sm text-muted-foreground">ยังไม่ได้เลือกวิดเจ็ต — เพิ่มจากด้านซ้าย</div>}
+              {selected.length === 0 && <div className="text-sm text-muted-foreground">{t('mx.dd_no_widgets')}</div>}
               {selected.map((k, i) => {
                 const w = byKey(k);
                 return (
@@ -88,7 +90,7 @@ export default function DashboardDesignerPage() {
                 );
               })}
               <div className="flex items-center gap-3 pt-2">
-                <Button disabled={!role || save.isPending} onClick={() => save.mutate()}><Save className="mr-1 h-4 w-4" />บันทึก</Button>
+                <Button disabled={!role || save.isPending} onClick={() => save.mutate()}><Save className="mr-1 h-4 w-4" />{t('fin.save')}</Button>
                 <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
               </div>
             </CardContent>

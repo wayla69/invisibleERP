@@ -16,20 +16,22 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { useLang } from '@/lib/i18n';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function FxPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="อัตราแลกเปลี่ยน (FX)"
-        description="กำหนดอัตราสิ้นงวด รายงานผลต่างที่ยังไม่เกิดขึ้นจริง และตีราคา (revaluation JE 5400)"
+        title={t('fnx.fx.title')}
+        description={t('fnx.fx.subtitle')}
       />
       <Tabs
         tabs={[
-          { key: 'rates', label: 'อัตราแลกเปลี่ยน', content: <Rates /> },
-          { key: 'revalue', label: 'ตีราคา / ผลต่าง', content: <Revalue /> },
+          { key: 'rates', label: t('fnx.fx.tab_rates'), content: <Rates /> },
+          { key: 'revalue', label: t('fnx.fx.tab_revalue'), content: <Revalue /> },
         ]}
       />
     </div>
@@ -38,6 +40,7 @@ export default function FxPage() {
 
 // ───────────────────────── rate table + add/update form ─────────────────────────
 function Rates() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['fx-rates'], queryFn: () => api('/api/fx/rates') });
 
@@ -54,8 +57,8 @@ function Rates() {
       }),
     onSuccess: (r) => {
       notifySuccess(r.status === 'PendingApproval'
-        ? `ส่งคำขออัตรา ${r.currency} @ ${num(r.rate)} — รออนุมัติจากผู้มีสิทธิ์ (คนละคนกับผู้ขอ)`
-        : `บันทึกอัตรา ${r.currency} @ ${num(r.rate)} (${r.rate_date})`);
+        ? t('fnx.fx.rate_pending', { currency: r.currency, rate: num(r.rate) })
+        : t('fnx.fx.rate_saved', { currency: r.currency, rate: num(r.rate), date: r.rate_date }));
       setRate('');
       qc.invalidateQueries({ queryKey: ['fx-rates'] });
     },
@@ -66,7 +69,7 @@ function Rates() {
   const decide = useMutation({
     mutationFn: ({ r, action }: { r: any; action: 'approve' | 'reject' }) =>
       api<any>(`/api/fx/rates/${action}`, { method: 'POST', body: JSON.stringify({ currency: r.currency, rate_date: r.rate_date, shared: r.tenant_id == null }) }),
-    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? 'อนุมัติอัตราแล้ว — พร้อมใช้งาน' : 'ปฏิเสธอัตราแล้ว'); qc.invalidateQueries({ queryKey: ['fx-rates'] }); },
+    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? t('fnx.fx.rate_approved') : t('fnx.fx.rate_rejected')); qc.invalidateQueries({ queryKey: ['fx-rates'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 

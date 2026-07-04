@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MessageSquare, CheckCircle2, XCircle, Copy, Send } from 'lucide-react';
 import { api, API_BASE } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -17,17 +18,18 @@ type Channel = { channel: 'line' | 'sms' | 'email'; configured: boolean; enabled
   webhook_secret_set?: boolean; webhook_path?: string | null; last_webhook_at?: string | null; last_webhook_status?: string | null };
 
 // The credential fields we collect per channel (write-only — never returned by the API).
+// `label` holds an i18n key (t() falls back to the raw string, so plain English labels pass through).
 const FIELDS: Record<string, { key: string; label: string; placeholder?: string; type?: string }[]> = {
   line: [
     { key: 'token', label: 'Channel access token (LINE OA)', type: 'password' },
-    { key: 'secret', label: 'Channel secret (จำเป็น — ใช้ยืนยัน webhook/แชท)', type: 'password' },
-    { key: 'callbackToken', label: 'Callback token (สำหรับ delivery-status callback) — ถ้ามี', type: 'password' },
+    { key: 'secret', label: 'st.msg.f_line_secret', type: 'password' },
+    { key: 'callbackToken', label: 'st.msg.f_callback_token', type: 'password' },
   ],
   sms: [
     { key: 'apiKey', label: 'API key', type: 'password' },
     { key: 'apiUrl', label: 'API endpoint (URL)', placeholder: 'https://…' },
-    { key: 'sender', label: 'ชื่อผู้ส่ง (Sender ID) — ถ้ามี' },
-    { key: 'callbackToken', label: 'Callback token (สำหรับ delivery-status callback) — ถ้ามี', type: 'password' },
+    { key: 'sender', label: 'st.msg.f_sender' },
+    { key: 'callbackToken', label: 'st.msg.f_callback_token', type: 'password' },
   ],
   email: [
     { key: 'host', label: 'SMTP host', placeholder: 'smtp.example.com' },
@@ -35,25 +37,28 @@ const FIELDS: Record<string, { key: string; label: string; placeholder?: string;
     { key: 'user', label: 'Username' },
     { key: 'pass', label: 'Password', type: 'password' },
     { key: 'from', label: 'From address', placeholder: 'no-reply@shop.co' },
-    { key: 'callbackToken', label: 'Callback token (สำหรับ delivery-status callback) — ถ้ามี', type: 'password' },
+    { key: 'callbackToken', label: 'st.msg.f_callback_token', type: 'password' },
   ],
 };
-const CHANNEL_LABEL: Record<string, string> = { line: 'LINE Official Account', sms: 'SMS', email: 'อีเมล (SMTP)' };
+// `t()` falls back to the raw string, so machine labels (LINE/SMS) pass through unchanged.
+const CHANNEL_LABEL: Record<string, string> = { line: 'LINE Official Account', sms: 'SMS', email: 'st.msg.ch_email' };
 
 // Go-live readiness (Phase F3) — mirrors the gateway's resolution order (tenant creds → platform env → mock).
+// `label` holds an i18n key resolved via t() at render.
 const READINESS: Record<Channel['resolved_provider'], { dot: string; label: string; variant: 'success' | 'info' | 'muted' }> = {
-  tenant: { dot: '🟢', label: 'พร้อมใช้งาน — ผู้ให้บริการของร้าน', variant: 'success' },
-  env: { dot: '🟡', label: 'ใช้ผู้ให้บริการกลางของแพลตฟอร์ม', variant: 'info' },
-  mock: { dot: '⚪', label: 'โหมดเดโม — ข้อความไม่ออกจริง', variant: 'muted' },
+  tenant: { dot: '🟢', label: 'st.msg.rd_tenant', variant: 'success' },
+  env: { dot: '🟡', label: 'st.msg.rd_env', variant: 'info' },
+  mock: { dot: '⚪', label: 'st.msg.rd_mock', variant: 'muted' },
 };
 
 // LP-1 (docs/31) — LINE OA go-live panel: the exact webhook URL to paste into the LINE Developers
 // console, webhook receipt health (has LINE actually reached us + verify outcome), and a one-tap test
 // push to the clicking admin's own linked LINE. See docs/ops/line-oa-golive.md for the full runbook.
+// values are i18n keys resolved via t() at render (the emoji is baked into the catalog value).
 const WEBHOOK_STATUS_TH: Record<string, string> = {
-  verified: '🟢 รับ webhook ล่าสุดสำเร็จ (ยืนยันลายเซ็นแล้ว)',
-  bad_signature: '🔴 webhook ล่าสุดลายเซ็นไม่ถูกต้อง — ตรวจ Channel secret ให้ตรงกับ LINE console',
-  unverified_dev: '🟡 รับ webhook แบบไม่ยืนยัน (โหมด dev/test เท่านั้น)',
+  verified: 'st.msg.wh_verified',
+  bad_signature: 'st.msg.wh_bad_signature',
+  unverified_dev: 'st.msg.wh_unverified_dev',
 };
 
 function LineGoLivePanel({ ch }: { ch: Channel }) {

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Cable, DollarSign, Scale, MonitorSmartphone } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -21,43 +22,45 @@ interface Device { id: number; device_code: string; kind: string; terminal: stri
 interface DrawerEvt { id: number; reason: string; terminal: string | null; sale_no: string | null; amount: number | null; opened_by: string | null; created_at: string | null }
 
 export default function PeripheralsPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="อุปกรณ์ฮาร์ดแวร์ (POS peripherals)" description="ลิ้นชักเก็บเงิน · จอแสดงผลลูกค้า · เครื่องชั่งน้ำหนัก — ทะเบียนอุปกรณ์และการตรวจสอบการเปิดลิ้นชัก · ต่อเครื่องพิมพ์/ลิ้นชัก/จอลูกค้าใช้งานจริงได้ที่ปุ่ม ⚙ “ตั้งค่าเครื่อง” บนหน้าขายหน้าร้าน (Register)" />
+      <PageHeader title={t('px.periph_page_title')} description={t('px.periph_page_desc')} />
       <Tabs tabs={[
-        { key: 'devices', label: 'ทะเบียนอุปกรณ์', content: <Devices /> },
-        { key: 'drawer', label: 'ลิ้นชักเก็บเงิน', content: <Drawer /> },
-        { key: 'scale', label: 'เครื่องชั่ง', content: <ScaleTab /> },
-        { key: 'display', label: 'จอลูกค้า', content: <Display /> },
+        { key: 'devices', label: t('px.periph_tab_devices'), content: <Devices /> },
+        { key: 'drawer', label: t('px.periph_tab_drawer'), content: <Drawer /> },
+        { key: 'scale', label: t('px.periph_tab_scale'), content: <ScaleTab /> },
+        { key: 'display', label: t('px.periph_tab_display'), content: <Display /> },
       ]} />
     </div>
   );
 }
 
 function Devices() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [code, setCode] = useState(''); const [kind, setKind] = useState('cash_drawer'); const [terminal, setTerminal] = useState(''); const [printerId, setPrinterId] = useState('');
   const q = useQuery<{ devices: Device[] }>({ queryKey: ['pos-devices'], queryFn: () => api('/api/peripherals/devices') });
   const create = useMutation({
     mutationFn: () => api('/api/peripherals/devices', { method: 'POST', body: JSON.stringify({ device_code: code, kind, terminal: terminal || undefined, printer_id: printerId || undefined }) }),
-    onSuccess: () => { notifySuccess(`ลงทะเบียนอุปกรณ์ ${code}`); setCode(''); qc.invalidateQueries({ queryKey: ['pos-devices'] }); },
+    onSuccess: () => { notifySuccess(t('px.periph_registered', { code })); setCode(''); qc.invalidateQueries({ queryKey: ['pos-devices'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader><CardTitle className="text-sm">ลงทะเบียนอุปกรณ์</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-sm">{t('px.periph_register')}</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-4">
-          <div><Label>รหัสอุปกรณ์</Label><Input value={code} onChange={(e) => setCode(e.target.value.trim())} placeholder="DRW1" /></div>
-          <div><Label>ชนิด</Label>
+          <div><Label>{t('px.periph_device_code')}</Label><Input value={code} onChange={(e) => setCode(e.target.value.trim())} placeholder="DRW1" /></div>
+          <div><Label>{t('px.periph_kind')}</Label>
             <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={kind} onChange={(e) => setKind(e.target.value)}>
-              <option value="cash_drawer">ลิ้นชักเก็บเงิน</option><option value="printer">เครื่องพิมพ์</option><option value="display">จอลูกค้า</option><option value="scale">เครื่องชั่ง</option>
+              <option value="cash_drawer">{t('px.periph_kind_cash_drawer')}</option><option value="printer">{t('px.periph_kind_printer')}</option><option value="display">{t('px.periph_kind_display')}</option><option value="scale">{t('px.periph_kind_scale')}</option>
             </select>
           </div>
-          <div><Label>เครื่อง POS (terminal)</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.trim())} placeholder="T01" /></div>
-          <div><Label>พิมพ์ผ่าน (printer_id)</Label><Input value={printerId} onChange={(e) => setPrinterId(e.target.value.trim())} placeholder="PRN1" /></div>
+          <div><Label>{t('px.periph_terminal')}</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.trim())} placeholder="T01" /></div>
+          <div><Label>{t('px.periph_printer_via')}</Label><Input value={printerId} onChange={(e) => setPrinterId(e.target.value.trim())} placeholder="PRN1" /></div>
           <div className="sm:col-span-4 flex items-center gap-3">
-            <Button disabled={!code || create.isPending} onClick={() => create.mutate()}>ลงทะเบียน</Button>
+            <Button disabled={!code || create.isPending} onClick={() => create.mutate()}>{t('px.periph_register_btn')}</Button>
           </div>
         </CardContent>
       </Card>
@@ -66,17 +69,17 @@ function Devices() {
           rows={q.data?.devices ?? []}
           rowKey={(r) => r.id}
           columns={[
-            { key: 'device_code', label: 'รหัส' },
-            { key: 'kind', label: 'ชนิด', render: (r) => <Badge variant="muted">{r.kind}</Badge> },
-            { key: 'terminal', label: 'เครื่อง', render: (r) => r.terminal ?? '—' },
-            { key: 'printer_id', label: 'พิมพ์ผ่าน', render: (r) => r.printer_id ?? '—' },
-            { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'active' ? 'success' : 'muted'}>{r.status}</Badge> },
-            { key: 'last_seen_at', label: 'พบล่าสุด', render: (r) => r.last_seen_at ? new Date(r.last_seen_at).toLocaleString('th-TH') : '—' },
+            { key: 'device_code', label: t('px.periph_col_code') },
+            { key: 'kind', label: t('px.periph_col_kind'), render: (r) => <Badge variant="muted">{r.kind}</Badge> },
+            { key: 'terminal', label: t('px.periph_col_terminal'), render: (r) => r.terminal ?? '—' },
+            { key: 'printer_id', label: t('px.periph_col_printer_via'), render: (r) => r.printer_id ?? '—' },
+            { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={r.status === 'active' ? 'success' : 'muted'}>{r.status}</Badge> },
+            { key: 'last_seen_at', label: t('px.periph_col_last_seen'), render: (r) => r.last_seen_at ? new Date(r.last_seen_at).toLocaleString('th-TH') : '—' },
           ]}
           emptyState={{
             icon: MonitorSmartphone,
-            title: 'ยังไม่มีอุปกรณ์',
-            description: 'ลงทะเบียนลิ้นชักเก็บเงิน เครื่องพิมพ์ จอลูกค้า หรือเครื่องชั่งจากแบบฟอร์มด้านบน',
+            title: t('px.periph_devices_empty_title'),
+            description: t('px.periph_devices_empty_desc'),
           }}
         />
       </StateView>

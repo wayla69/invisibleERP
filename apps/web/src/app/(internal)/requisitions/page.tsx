@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MessageCircle, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,18 +23,19 @@ type VendorMatch = { id: number; name: string; vendor_code: string | null };
 // requisition. A PR is only a request: it is routed to Procurement for approval and conversion to a PO.
 // Buying (PO) and receiving (GR) live on their own pages owned by Procurement / Warehouse (SoD R03/R04).
 export default function RequisitionsPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="คำขอซื้อ (Purchase Requisition)" description="แจ้งความต้องการซื้อสินค้า/บริการ — ทุกคนในองค์กรสร้างได้ ทีมจัดซื้อจะพิจารณาอนุมัติและออกใบสั่งซื้อ (PO) ต่อไป" />
+      <PageHeader title={t('iv.req_title')} description={t('iv.req_desc')} />
 
       <Card className="gap-4">
         <CardHeader>
-          <CardTitle className="text-base">สร้างคำขอซื้อ (PR)</CardTitle>
+          <CardTitle className="text-base">{t('iv.req_card_title')}</CardTitle>
         </CardHeader>
         <CardContent>
           <PrForm />
           <p className="mt-4 text-xs text-muted-foreground">
-            คำขอซื้อจะถูกส่งเข้าสู่ขั้นตอนอนุมัติของทีมจัดซื้อโดยอัตโนมัติ — ติดตามสถานะการอนุมัติได้ที่หน้า “รายการรออนุมัติ / อนุมัติงาน”
+            {t('iv.req_form_note')}
           </p>
         </CardContent>
       </Card>
