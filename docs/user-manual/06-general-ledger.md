@@ -166,6 +166,13 @@ approval. Drafts are excluded from balances.
 
 > **Note:** If debits and credits don't balance (or there are no lines) the entry
 > is rejected (`UNBALANCED`).
+>
+> **The form checks this for you before you save.** When you press save, any problem
+> is shown **in place**: a line that has no account, no amount, or both a debit and a
+> credit gets a red hint; and if the entry doesn't balance, a message says **which
+> side is over and by how much** (e.g. *เครดิตเกิน ฿50.00*) instead of just an
+> "unbalanced" badge. Fix the highlighted item and save again. The same checks apply
+> to **Recurring** and **Prepaid** schedules.
 
 ### To approve or reject a journal entry (approver)
 

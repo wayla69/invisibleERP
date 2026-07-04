@@ -5,17 +5,19 @@
 //   • ค่าใช้จ่ายจ่ายล่วงหน้า (Prepaid amortization, GL-09) → GET/POST /api/ledger/prepaid, /prepaid/run
 // A recurring run posts each due template as a DRAFT JE (maker-checker, GL-05); a prepaid run amortizes one
 // straight-line slice (Dr expense / Cr 1280). Both runs are idempotent.
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Play, Plus, Save, X } from 'lucide-react';
 
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { jeFormError, jeLineError } from '@/lib/journal-validation';
 import { useMe, hasPerm } from '@/lib/auth';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { StateView } from '@/components/state-view';
+import { FormField } from '@/components/form-field';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -61,11 +63,14 @@ function Recurring() {
   const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
   const [memo, setMemo] = useState('');
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
+  const [showErrors, setShowErrors] = useState(false);
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   const sumD = lines.reduce((a, l) => a + (Number(l.debit) || 0), 0);
   const sumC = lines.reduce((a, l) => a + (Number(l.credit) || 0), 0);
   const balanced = Math.abs(sumD - sumC) < 0.005 && sumD > 0;
+  const nameErr = !name.trim() ? 'ระบุชื่อรายการ' : null;
+  const formErr = jeFormError(lines);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['recurring'] });
   const create = useMutation({
@@ -76,9 +81,10 @@ function Recurring() {
         lines: lines.filter((l) => l.account_code && (Number(l.debit) || Number(l.credit))).map((l) => ({ account_code: l.account_code, debit: Number(l.debit) || undefined, credit: Number(l.credit) || undefined })),
       }),
     }),
-    onSuccess: () => { notifySuccess('สร้างรายการตั้งเวลาแล้ว'); setName(''); setMemo(''); setLines([emptyLine(), emptyLine()]); refresh(); },
+    onSuccess: () => { notifySuccess('สร้างรายการตั้งเวลาแล้ว'); setName(''); setMemo(''); setLines([emptyLine(), emptyLine()]); setShowErrors(false); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
+  const submit = () => { setShowErrors(true); if (nameErr || formErr || lines.some((l) => jeLineError(l))) { notifyError('กรุณาแก้ไขรายการให้ถูกต้องและสมดุลก่อนบันทึก'); return; } create.mutate(); };
   const toggle = useMutation({ mutationFn: (v: { id: number; active: boolean }) => api(`/api/ledger/recurring/${v.id}/active`, { method: 'POST', body: JSON.stringify({ active: v.active }) }), onSuccess: refresh, onError: (e: any) => notifyError(e.message) });
   const runDue = useMutation({
     mutationFn: () => api<{ posted: number; scanned: number }>('/api/ledger/recurring/run', { method: 'POST' }),
@@ -95,7 +101,7 @@ function Recurring() {
         <Card className="gap-3 p-5">
           <h3 className="text-base font-semibold">สร้างรายการตั้งเวลา</h3>
           <div className="flex flex-wrap items-end gap-3">
-            <div className="grid gap-1.5"><Label htmlFor="rc-name">ชื่อรายการ</Label><Input id="rc-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น ค่าเช่าสำนักงาน" /></div>
+            <FormField htmlFor="rc-name" label="ชื่อรายการ" required error={showErrors ? nameErr : undefined}><Input id="rc-name" value={name} aria-invalid={showErrors && !!nameErr} onChange={(e) => setName(e.target.value)} placeholder="เช่น ค่าเช่าสำนักงาน" /></FormField>
             <div className="grid gap-1.5">
               <Label htmlFor="rc-freq">ความถี่</Label>
               <select id="rc-freq" className={selectCls} value={frequency} onChange={(e) => setFrequency(e.target.value as 'daily' | 'weekly' | 'monthly')}>
@@ -116,19 +122,25 @@ function Recurring() {
               </tr>
             </thead>
             <tbody>
-              {lines.map((l, i) => (
-                <tr key={i}>
+              {lines.map((l, i) => {
+                const err = showErrors ? jeLineError(l) : null;
+                return (
+                <Fragment key={i}>
+                <tr>
                   <td className="py-1 pr-2">
-                    <select className={selectCls} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
+                    <select className={selectCls} aria-invalid={!!err} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
                       <option value="">— เลือกบัญชี —</option>
                       {accountsQ.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
                     </select>
                   </td>
-                  <td className="py-1 pr-2"><Input type="number" min="0" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
-                  <td className="py-1 pr-2"><Input type="number" min="0" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
+                  <td className="py-1 pr-2"><Input type="number" min="0" aria-invalid={!!err} value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
+                  <td className="py-1 pr-2"><Input type="number" min="0" aria-invalid={!!err} value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
                   <td className="py-1">{lines.length > 2 && <Button variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}><X className="size-4" /></Button>}</td>
                 </tr>
-              ))}
+                {err && <tr><td colSpan={4} className="pb-1 text-xs text-destructive" role="alert">{err}</td></tr>}
+                </Fragment>
+                );
+              })}
             </tbody>
           </table>
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -137,8 +149,9 @@ function Recurring() {
               เดบิต <strong className="tabular">{baht(sumD)}</strong> · เครดิต <strong className="tabular">{baht(sumC)}</strong>{' '}
               <Badge variant={balanced ? 'success' : 'warning'}>{balanced ? 'สมดุล' : 'ยังไม่สมดุล'}</Badge>
             </span>
-            <Button disabled={!name || !balanced || create.isPending} onClick={() => create.mutate()}><Save className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างรายการ'}</Button>
+            <Button disabled={create.isPending} onClick={submit}><Save className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างรายการ'}</Button>
           </div>
+          {showErrors && formErr && <p className="text-sm text-destructive" role="alert">{formErr}</p>}
         </Card>
       )}
 
@@ -190,6 +203,11 @@ function Prepaid() {
   const [months, setMonths] = useState('12');
   const [expenseAccount, setExpenseAccount] = useState('');
   const [capitalize, setCapitalize] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
+
+  const nameErr = !name.trim() ? 'ระบุชื่อรายการ' : null;
+  const totalErr = !(Number(total) > 0) ? 'ยอดรวมต้องมากกว่า 0' : null;
+  const monthsErr = !(Number.isInteger(Number(months)) && Number(months) >= 1) ? 'จำนวนงวดต้องเป็นจำนวนเต็มตั้งแต่ 1' : null;
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['prepaid'] });
   const create = useMutation({
@@ -197,9 +215,10 @@ function Prepaid() {
       method: 'POST',
       body: JSON.stringify({ name, total_amount: Number(total), months: Number(months), expense_account: expenseAccount || undefined, capitalize }),
     }),
-    onSuccess: () => { notifySuccess('สร้างตารางตัดจ่ายแล้ว'); setName(''); setTotal(''); setMonths('12'); setExpenseAccount(''); setCapitalize(false); refresh(); },
+    onSuccess: () => { notifySuccess('สร้างตารางตัดจ่ายแล้ว'); setName(''); setTotal(''); setMonths('12'); setExpenseAccount(''); setCapitalize(false); setShowErrors(false); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
+  const submit = () => { setShowErrors(true); if (nameErr || totalErr || monthsErr) { notifyError('กรุณาแก้ไขข้อมูลที่ไม่ถูกต้องก่อนบันทึก'); return; } create.mutate(); };
   const runDue = useMutation({
     mutationFn: () => api<{ posted?: number; scanned?: number }>('/api/ledger/prepaid/run', { method: 'POST' }),
     onSuccess: (r) => { notifySuccess(`ตัดจ่ายงวดที่ถึงกำหนด ${r.posted ?? 0} รายการ`); refresh(); qc.invalidateQueries({ queryKey: ['journal'] }); },
@@ -207,7 +226,6 @@ function Prepaid() {
   });
 
   const rows: any[] = q.data?.schedules ?? [];
-  const valid = name && Number(total) > 0 && Number.isInteger(Number(months)) && Number(months) >= 1;
 
   return (
     <div className="grid gap-5">
@@ -215,16 +233,16 @@ function Prepaid() {
         <Card className="gap-3 p-5">
           <h3 className="text-base font-semibold">สร้างตารางตัดจ่าย (Prepaid)</h3>
           <p className="text-sm text-muted-foreground">ตัดจ่ายแบบเส้นตรง งวดละ {Number(total) > 0 && Number(months) >= 1 ? baht(Number(total) / Number(months)) : '—'} (Dr ค่าใช้จ่าย / Cr 1280)</p>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="grid gap-1.5"><Label htmlFor="pp-name">ชื่อรายการ</Label><Input id="pp-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น ประกันภัยรายปี" /></div>
-            <div className="grid gap-1.5"><Label htmlFor="pp-total">ยอดรวม</Label><Input id="pp-total" type="number" min="0" value={total} onChange={(e) => setTotal(e.target.value)} className="w-[140px]" /></div>
-            <div className="grid gap-1.5"><Label htmlFor="pp-months">จำนวนงวด (เดือน)</Label><Input id="pp-months" type="number" min="1" value={months} onChange={(e) => setMonths(e.target.value)} className="w-[120px]" /></div>
-            <div className="grid gap-1.5"><Label htmlFor="pp-acct">บัญชีค่าใช้จ่าย</Label><Input id="pp-acct" value={expenseAccount} onChange={(e) => setExpenseAccount(e.target.value)} placeholder="5100" className="w-[120px]" /></div>
-            <label className="flex items-center gap-2 pb-2 text-sm">
+          <div className="flex flex-wrap items-start gap-3">
+            <FormField htmlFor="pp-name" label="ชื่อรายการ" required error={showErrors ? nameErr : undefined}><Input id="pp-name" value={name} aria-invalid={showErrors && !!nameErr} onChange={(e) => setName(e.target.value)} placeholder="เช่น ประกันภัยรายปี" /></FormField>
+            <FormField htmlFor="pp-total" label="ยอดรวม" required error={showErrors ? totalErr : undefined}><Input id="pp-total" type="number" min="0" value={total} aria-invalid={showErrors && !!totalErr} onChange={(e) => setTotal(e.target.value)} className="w-[140px]" /></FormField>
+            <FormField htmlFor="pp-months" label="จำนวนงวด (เดือน)" required error={showErrors ? monthsErr : undefined}><Input id="pp-months" type="number" min="1" value={months} aria-invalid={showErrors && !!monthsErr} onChange={(e) => setMonths(e.target.value)} className="w-[120px]" /></FormField>
+            <FormField htmlFor="pp-acct" label="บัญชีค่าใช้จ่าย" hint="เว้นว่างเพื่อใช้ค่าเริ่มต้น"><Input id="pp-acct" value={expenseAccount} onChange={(e) => setExpenseAccount(e.target.value)} placeholder="5100" className="w-[120px]" /></FormField>
+            <label className="flex items-center gap-2 pt-8 text-sm">
               <input type="checkbox" checked={capitalize} onChange={(e) => setCapitalize(e.target.checked)} className="size-4" />
               ตั้งยอดจ่ายล่วงหน้าตอนนี้ (Dr 1280 / Cr 1000)
             </label>
-            <Button disabled={!valid || create.isPending} onClick={() => create.mutate()}><Save className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างตาราง'}</Button>
+            <div className="pt-7"><Button disabled={create.isPending} onClick={submit}><Save className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างตาราง'}</Button></div>
           </div>
         </Card>
       )}

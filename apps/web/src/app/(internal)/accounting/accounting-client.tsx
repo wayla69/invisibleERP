@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, ChevronUp, ClipboardPaste, Info, Pencil, Plus, Power, Save, Scale, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { jeFormError, jeLineError } from '@/lib/journal-validation';
 import { useMe, hasPerm } from '@/lib/auth';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -286,10 +287,12 @@ function Journal() {
 
   const [memo, setMemo] = useState('');
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
+  const [showErrors, setShowErrors] = useState(false);
 
   const sumDebit = lines.reduce((a, l) => a + (Number(l.debit) || 0), 0);
   const sumCredit = lines.reduce((a, l) => a + (Number(l.credit) || 0), 0);
   const balanced = Math.abs(sumDebit - sumCredit) < 0.005 && sumDebit > 0;
+  const formErr = jeFormError(lines);
 
   const post = useMutation({
     mutationFn: () =>
@@ -305,7 +308,7 @@ function Journal() {
       }),
     onSuccess: (r) => {
       notifySuccess(`บันทึกเป็นฉบับร่าง — รออนุมัติจากผู้อื่น (maker-checker): ${r.entry_no}`);
-      setMemo(''); setLines([emptyLine(), emptyLine()]);
+      setMemo(''); setLines([emptyLine(), emptyLine()]); setShowErrors(false);
       qc.invalidateQueries({ queryKey: ['journal'] });
       qc.invalidateQueries({ queryKey: ['je-pending'] });
     },
@@ -313,6 +316,7 @@ function Journal() {
   });
 
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const submit = () => { setShowErrors(true); if (formErr || lines.some((l) => jeLineError(l))) { notifyError('กรุณาแก้ไขรายการให้ถูกต้องและสมดุลก่อนบันทึก'); return; } post.mutate(); };
 
   return (
     <div className="grid gap-5">
@@ -329,19 +333,25 @@ function Journal() {
             </tr>
           </thead>
           <tbody>
-            {lines.map((l, i) => (
-              <tr key={i}>
+            {lines.map((l, i) => {
+              const err = showErrors ? jeLineError(l) : null;
+              return (
+              <Fragment key={i}>
+              <tr>
                 <td className="py-1 pr-2">
-                  <select className={selectCls} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
+                  <select className={selectCls} aria-invalid={!!err} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
                     <option value="">— เลือกบัญชี —</option>
                     {accounts.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
                   </select>
                 </td>
-                <td className="py-1 pr-2"><Input type="number" min="0" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
-                <td className="py-1 pr-2"><Input type="number" min="0" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
+                <td className="py-1 pr-2"><Input type="number" min="0" aria-invalid={!!err} value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
+                <td className="py-1 pr-2"><Input type="number" min="0" aria-invalid={!!err} value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
                 <td className="py-1">{lines.length > 2 && <Button variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}><X className="size-4" /></Button>}</td>
               </tr>
-            ))}
+              {err && <tr><td colSpan={4} className="pb-1 text-xs text-destructive" role="alert">{err}</td></tr>}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -352,10 +362,11 @@ function Journal() {
             เดบิต <strong className="tabular">{baht(sumDebit)}</strong> · เครดิต <strong className="tabular">{baht(sumCredit)}</strong>{' '}
             <Badge variant={balanced ? 'success' : 'warning'}>{balanced ? 'สมดุล' : 'ยังไม่สมดุล'}</Badge>
           </span>
-          <Button disabled={!balanced || post.isPending} onClick={() => post.mutate()}>
+          <Button disabled={post.isPending} onClick={submit}>
             <Save className="size-4" /> {post.isPending ? 'กำลังบันทึก…' : 'บันทึกรายการ'}
           </Button>
         </div>
+        {showErrors && formErr && <p className="text-sm text-destructive" role="alert">{formErr}</p>}
       </Card>
 
       <div>
