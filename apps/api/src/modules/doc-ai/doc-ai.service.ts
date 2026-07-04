@@ -3,6 +3,7 @@ import { llmClient } from '../../common/llm-client';
 import type { JwtUser } from '../../common/decorators';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 import { pdfExtractText } from '../../common/pdf-text';
+import { parseInvoiceDataUrl } from '../../common/invoice-doc';
 
 const EXTRACT_SYSTEM = 'You extract vendor-invoice fields. Return ONLY JSON: {vendor_name, vendor_tax_id, invoice_no, invoice_date (YYYY-MM-DD), amount (number), currency, po_no (the referenced purchase-order number, null if absent)}. No prose.';
 
@@ -86,5 +87,15 @@ export class DocAiService {
     } catch {
       return { fields: this.emptyFields(), source: 'none', text: '' };
     }
+  }
+
+  // Public extract-only entry for an uploaded image/PDF (base64 `data:` URL). Parses + validates the data
+  // URL (shared allow-list) then runs the same text/vision extractor the AP-intake upload channel uses.
+  // Returns a draft for a human to review — never persists, never touches the GL. Reused by the Quick
+  // Capture preview and the LINE capture channel (docs/34).
+  async extractFromDataUrl(dataUrl: string, user: JwtUser) {
+    const doc = parseInvoiceDataUrl(dataUrl);
+    const r = await this.extractInvoiceDocument({ media_type: doc.mime, data: doc.base64 }, user);
+    return { fields: r.fields, source: r.source };
   }
 }

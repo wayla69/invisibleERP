@@ -15,6 +15,7 @@ This is deliberate separation of duties (the person who *orders* must not also
 | Create / approve a PO | `/procurement` | **Procurement** — `procurement` |
 | Receive goods (GR) | `/receiving` | **Warehouse** — `wh_receive` |
 | 3-way match | `/procurement/match` | **Procurement / Accounting** — `procurement` |
+| **Quick Capture a bill** (snap/upload → send to Accounting) | `/capture` | **Anyone in the company** — `pr_raise` |
 | Scan invoice → PO match (AP intake) | `/procurement/ap-intake` | scan/map: `procurement`/`creditors`; **book the bill**: `creditors` |
 
 > A PR only *requests* a purchase — it commits nothing, so anyone may raise one.
@@ -326,6 +327,33 @@ invoice / PO number. Use it to triage what needs investigation or an override be
 AP can pay. The list is **store-scoped** (you see only your own).
 
 [screenshot: 3-way match result with variances]
+
+### Quick Capture — snap a bill from anywhere
+
+Got a supplier bill in your hand and you're **not** in Accounting? You don't need
+to key anything or find the right menu. **Quick Capture** lets *anyone in the
+company* photograph or upload a bill and send it straight to Accounting's review
+queue — the system reads it for you.
+
+**Screen:** `/capture` · **Required permission:** `pr_raise` (every internal
+staff role has it — the same one that lets you raise a requisition). Works great
+on a phone.
+
+1. Go to **Procurement** → **เก็บบิลเร็ว (ถ่ายรูป)** (`/capture`).
+2. Press **ถ่ายรูปบิล** to snap it with your camera, or **เลือกไฟล์ / PDF** to
+   upload an existing image (PNG/JPEG/WebP) or PDF.
+3. That's it. The system reads the vendor, invoice number, date and amount and
+   shows you what it found, then files the bill for Accounting under a document
+   number. A digital PDF is read instantly; a photo is read by AI when it's
+   configured — if it can't read it automatically, the bill is still filed with
+   the photo attached so Accounting can key it by hand (it never guesses).
+4. Your captured bills appear under **บิลที่คุณเพิ่งเก็บ** with their status:
+   *รอตรวจสอบ* (waiting for Accounting), *จับคู่ PO แล้ว*, or *บันทึกบิลแล้ว*.
+
+> **Quick Capture only *files* the bill — it never records a payable or posts to
+> the ledger.** Booking the bill and paying it stay with Accounting/Finance
+> (that separation of duties is a control, **EXP-06**). You'll see only the bills
+> *you* captured, not the whole AP queue.
 
 ### Scan an invoice and let the system match it (AP intake)
 
