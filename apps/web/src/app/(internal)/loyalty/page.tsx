@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Msg } from '@/components/tabs';
@@ -18,6 +19,7 @@ interface Plan { id: number; code: string; name: string; tier: string; price: nu
 interface Resolved { coalition: string; member_id: number; member_code: string; name: string | null; tier: string | null; balance: number; home_tenant_code: string | null; home_tenant_name: string | null; is_home: boolean }
 
 export default function LoyaltyConfig() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<Cfg>({ queryKey: ['loy-cfg'], queryFn: () => api('/api/loyalty/config') });
   const tiersQ = useQuery<{ tiers: Tier[] }>({ queryKey: ['loy-tiers'], queryFn: () => api('/api/loyalty/tiers') });
@@ -40,7 +42,7 @@ export default function LoyaltyConfig() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-cfg'] }),
   });
   const saveTier = useMutation({
-    mutationFn: (t: Tier) => api('/api/loyalty/tiers', { method: 'POST', body: JSON.stringify(t) }),
+    mutationFn: (tr: Tier) => api('/api/loyalty/tiers', { method: 'POST', body: JSON.stringify(tr) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['loy-tiers'] }); setTierDraft({ tier: '', min_lifetime: 0, earn_mult: 1, redeem_mult: 1 }); },
   });
   const createCoal = useMutation({
@@ -57,7 +59,7 @@ export default function LoyaltyConfig() {
   });
   const sellVip = useMutation({
     mutationFn: () => api('/api/loyalty/memberships/sell', { method: 'POST', body: JSON.stringify(sellDraft) }),
-    onSuccess: (r: any) => setSellMsg(`✅ ขายแล้ว — ${r.plan} ให้สมาชิก #${r.member_id} ถึง ${r.end_date}`),
+    onSuccess: (r: any) => setSellMsg('✅ ' + t('ly.cf_sold', { plan: r.plan, member: r.member_id, end: r.end_date })),
     onError: (e) => setSellMsg((e as Error).message),
   });
   const doResolve = async () => {
@@ -69,39 +71,39 @@ export default function LoyaltyConfig() {
 
   return (
     <div>
-      <PageHeader title="ตั้งค่าระบบสะสมแต้ม" description="กำหนดอัตราการสะสม/แลกแต้ม เพดานโอนแต้ม และตัวคูณตามระดับสมาชิก" />
+      <PageHeader title={t('ly.cf_title')} description={t('ly.cf_desc')} />
       <div className="flex flex-wrap items-start gap-4">
         <StateView q={q}>
           {cfg && (
             <Card className="max-w-md gap-4 p-5">
               <Label className="gap-2">
                 <input type="checkbox" checked={cfg.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
-                <span className="font-semibold">เปิดใช้งานระบบสะสมแต้ม</span>
+                <span className="font-semibold">{t('ly.cf_enable')}</span>
               </Label>
               <div className="grid gap-2">
-                <Label>แต้มต่อบาท (earn)</Label>
+                <Label>{t('ly.cf_ppb')}</Label>
                 <Input type="number" value={cfg.points_per_baht} onChange={(e) => set({ points_per_baht: +e.target.value })} />
               </div>
               <div className="grid gap-2">
-                <Label>บาทต่อแต้ม (redeem)</Label>
+                <Label>{t('ly.cf_bpp')}</Label>
                 <Input type="number" value={cfg.baht_per_point} onChange={(e) => set({ baht_per_point: +e.target.value })} />
               </div>
               <div className="grid gap-2">
-                <Label>แต้มขั้นต่ำที่แลกได้</Label>
+                <Label>{t('ly.cf_min_redeem')}</Label>
                 <Input type="number" value={cfg.min_redeem} onChange={(e) => set({ min_redeem: +e.target.value })} />
               </div>
               <div className="grid gap-2">
-                <Label>อายุแต้ม (วัน, 0 = ไม่หมดอายุ)</Label>
+                <Label>{t('ly.cf_expiry')}</Label>
                 <Input type="number" value={cfg.expiry_days} onChange={(e) => set({ expiry_days: +e.target.value })} />
               </div>
               <div className="grid gap-2">
-                <Label>เพดานโอนแต้มต่อวัน (แต้ม, 0 = ปิดการโอน)</Label>
+                <Label>{t('ly.cf_transfer_cap')}</Label>
                 <Input type="number" value={cfg.transfer_day_cap} onChange={(e) => set({ transfer_day_cap: +e.target.value })} />
               </div>
               <div>
-                <Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}</Button>
+                <Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? t('ly.saving') : t('fin.save')}</Button>
               </div>
-              {save.isSuccess && <Msg ok>✅ บันทึกแล้ว</Msg>}
+              {save.isSuccess && <Msg ok>✅ {t('ly.cf_saved')}</Msg>}
               {save.error && <Msg>{(save.error as Error).message}</Msg>}
             </Card>
           )}
@@ -109,24 +111,24 @@ export default function LoyaltyConfig() {
 
         {/* W1 (docs/27) — tier ladder: earn multiplier now applies on the REAL earn path (earnInTx) */}
         <Card className="max-w-lg gap-3 p-5">
-          <div className="font-semibold">ระดับสมาชิก (ตัวคูณแต้ม)</div>
-          <p className="text-sm text-muted-foreground">สมาชิกระดับสูงสะสมแต้มเร็วขึ้น เช่น Gold ×2 — ตัวคูณมีผลกับการสะสมจริงที่จุดขาย</p>
+          <div className="font-semibold">{t('ly.cf_tiers_title')}</div>
+          <p className="text-sm text-muted-foreground">{t('ly.cf_tiers_desc')}</p>
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-muted-foreground"><th className="py-1">ระดับ</th><th>แต้มสะสมขั้นต่ำ</th><th>ตัวคูณ earn</th><th>ตัวคูณ redeem</th></tr></thead>
+            <thead><tr className="text-left text-muted-foreground"><th className="py-1">{t('ly.lc_tier')}</th><th>{t('ly.cf_min_lifetime')}</th><th>{t('ly.cf_mult_earn')}</th><th>{t('ly.cf_mult_redeem')}</th></tr></thead>
             <tbody>
-              {(tiersQ.data?.tiers ?? []).map((t) => (
-                <tr key={t.id} className="border-t">
-                  <td className="py-1 font-medium">{t.tier}</td><td>{t.min_lifetime}</td><td>×{t.earn_mult}</td><td>×{t.redeem_mult}</td>
+              {(tiersQ.data?.tiers ?? []).map((row) => (
+                <tr key={row.id} className="border-t">
+                  <td className="py-1 font-medium">{row.tier}</td><td>{row.min_lifetime}</td><td>×{row.earn_mult}</td><td>×{row.redeem_mult}</td>
                 </tr>
               ))}
-              {!tiersQ.data?.tiers?.length && <tr><td colSpan={4} className="py-2 text-muted-foreground">ยังไม่กำหนดระดับ — สมาชิกทุกคนสะสม ×1</td></tr>}
+              {!tiersQ.data?.tiers?.length && <tr><td colSpan={4} className="py-2 text-muted-foreground">{t('ly.cf_no_tiers')}</td></tr>}
             </tbody>
           </table>
           <div className="grid grid-cols-4 items-end gap-2">
-            <div className="grid gap-1"><Label className="text-xs">ระดับ</Label><Input value={tierDraft.tier} onChange={(e) => setTierDraft({ ...tierDraft, tier: e.target.value })} placeholder="Gold" /></div>
-            <div className="grid gap-1"><Label className="text-xs">ขั้นต่ำ</Label><Input type="number" value={tierDraft.min_lifetime} onChange={(e) => setTierDraft({ ...tierDraft, min_lifetime: +e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.lc_tier')}</Label><Input value={tierDraft.tier} onChange={(e) => setTierDraft({ ...tierDraft, tier: e.target.value })} placeholder="Gold" /></div>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.cf_min')}</Label><Input type="number" value={tierDraft.min_lifetime} onChange={(e) => setTierDraft({ ...tierDraft, min_lifetime: +e.target.value })} /></div>
             <div className="grid gap-1"><Label className="text-xs">×earn</Label><Input type="number" step="0.1" value={tierDraft.earn_mult} onChange={(e) => setTierDraft({ ...tierDraft, earn_mult: +e.target.value })} /></div>
-            <Button variant="outline" disabled={!tierDraft.tier || saveTier.isPending} onClick={() => saveTier.mutate(tierDraft)}>เพิ่ม/แก้ไข</Button>
+            <Button variant="outline" disabled={!tierDraft.tier || saveTier.isPending} onClick={() => saveTier.mutate(tierDraft)}>{t('ly.cf_add_edit')}</Button>
           </div>
           {saveTier.error && <Msg>{(saveTier.error as Error).message}</Msg>}
         </Card>

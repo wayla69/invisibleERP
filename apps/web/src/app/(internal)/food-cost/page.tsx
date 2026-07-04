@@ -13,6 +13,7 @@ import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useLang } from '@/lib/i18n';
 
 interface MarginItem { sku: string; name: string; price: number; cost: number; margin: number; margin_pct: number; food_cost_pct: number; has_recipe: boolean; costed: boolean }
 interface FoodCost { target_pct: number; summary: { items: number; costed: number; uncosted: number; avg_food_cost_pct: number; over_target: number }; items: MarginItem[] }
@@ -22,22 +23,24 @@ interface VarReason { reason_code: string; variance_cost: number; theoretical_co
 interface VarStation { station: string; variance_cost: number; theoretical_cost: number; lines: number; variance_pct: number }
 interface Variance { from: string; to: string; summary: { items: number; theoretical_cost: number; actual_cost: number; variance_cost: number; variance_pct: number; unfavorable_cost: number; favorable_cost: number; anomalies: number }; by_reason?: VarReason[]; by_station?: VarStation[]; items: VarItem[] }
 
-const REASON_TH: Record<string, string> = { WASTE: 'ของเสีย', OVERSTOCK: 'สต๊อกเกิน', SPOILAGE: 'เน่าเสีย', PORTIONING: 'การตัก/แบ่ง', THEFT: 'สูญหาย', OTHER: 'อื่นๆ' };
-
 export default function FoodCostPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="ต้นทุนอาหาร & กำไรต่อจาน (Food cost)" description="ต้นทุนตามสูตร เทียบราคาขาย — มาร์จิน % ต่อเมนู, วัตถุดิบที่ดันต้นทุน และส่วนต่างต้นทุนจริง" />
+      <PageHeader title={t('mf.fc_title')} description={t('mf.fc_desc')} />
       <Tabs tabs={[
-        { key: 'menu', label: 'กำไรต่อเมนู', content: <Margins /> },
-        { key: 'ingredients', label: 'ต้นทุนวัตถุดิบ', content: <Ingredients /> },
-        { key: 'variance', label: 'ส่วนต่าง (จริง vs ทฤษฎี)', content: <VarianceTab /> },
+        { key: 'menu', label: t('mf.fc_tab_margins'), content: <Margins /> },
+        { key: 'ingredients', label: t('mf.fc_tab_ingredients'), content: <Ingredients /> },
+        { key: 'variance', label: t('mf.fc_tab_variance'), content: <VarianceTab /> },
       ]} />
     </div>
   );
 }
 
 function VarianceTab() {
+  const { t } = useLang();
+  // Reason-code label (key-based, guarded — falls back to the raw code if the catalog lacks the key).
+  const reasonLabel = (code: string) => { const k = `mf.fc_reason_${code}`; const v = t(k); return v === k ? code : v; };
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() + 7 * 3600 * 1000 - 30 * 86400 * 1000).toISOString().slice(0, 10);
   const [from, setFrom] = useState(monthAgo);
@@ -47,44 +50,44 @@ function VarianceTab() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end gap-3">
-        <div><Label>ตั้งแต่</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" /></div>
-        <div><Label>ถึง</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" /></div>
+        <div><Label>{t('mf.from')}</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" /></div>
+        <div><Label>{t('mf.to')}</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" /></div>
       </div>
       <StateView q={q}>
         {q.data && (
           <div className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="ต้นทุนตามทฤษฎี" value={baht(s?.theoretical_cost ?? 0)} icon={Utensils} tone="primary" hint="ตามสูตร × ยอดขาย" />
-              <StatCard label="ส่วนต่างสุทธิ" value={baht(s?.variance_cost ?? 0)} icon={Scale} tone={(s?.variance_cost ?? 0) > 0 ? 'danger' : 'success'} hint={`${s?.variance_pct ?? 0}% ของทฤษฎี`} />
-              <StatCard label="ส่วนเกิน (ขาดทุน)" value={baht(s?.unfavorable_cost ?? 0)} icon={AlertTriangle} tone={(s?.unfavorable_cost ?? 0) > 0 ? 'warning' : 'default'} hint="ใช้เกินสูตร (ของเสีย/ตัก)" />
-              <StatCard label="รายการผิดปกติ" value={num(s?.anomalies ?? 0)} icon={TrendingUp} tone={(s?.anomalies ?? 0) > 0 ? 'danger' : 'default'} />
+              <StatCard label={t('mf.fc_theoretical_cost')} value={baht(s?.theoretical_cost ?? 0)} icon={Utensils} tone="primary" hint={t('mf.fc_theoretical_hint')} />
+              <StatCard label={t('mf.fc_net_variance')} value={baht(s?.variance_cost ?? 0)} icon={Scale} tone={(s?.variance_cost ?? 0) > 0 ? 'danger' : 'success'} hint={t('mf.fc_of_theoretical', { pct: s?.variance_pct ?? 0 })} />
+              <StatCard label={t('mf.fc_unfavorable')} value={baht(s?.unfavorable_cost ?? 0)} icon={AlertTriangle} tone={(s?.unfavorable_cost ?? 0) > 0 ? 'warning' : 'default'} hint={t('mf.fc_unfavorable_hint')} />
+              <StatCard label={t('mf.fc_anomalies')} value={num(s?.anomalies ?? 0)} icon={TrendingUp} tone={(s?.anomalies ?? 0) > 0 ? 'danger' : 'default'} />
             </div>
             {((q.data.by_reason?.length ?? 0) > 0 || (q.data.by_station?.length ?? 0) > 0) && (
               <div className="grid gap-4 lg:grid-cols-2">
                 <div>
-                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">ส่วนต่างตามสาเหตุ (why)</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{t('mf.fc_by_reason')}</h3>
                   <DataTable
                     rows={q.data.by_reason ?? []}
                     rowKey={(r) => r.reason_code}
                     columns={[
-                      { key: 'reason_code', label: 'สาเหตุ', render: (r) => REASON_TH[r.reason_code] ?? r.reason_code },
-                      { key: 'variance_cost', label: 'ส่วนต่าง (฿)', align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
+                      { key: 'reason_code', label: t('mf.fc_col_reason'), render: (r) => reasonLabel(r.reason_code) },
+                      { key: 'variance_cost', label: t('mf.fc_col_variance_baht'), align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
                       { key: 'variance_pct', label: '%', align: 'right', render: (r) => <span className="tabular">{r.variance_pct}%</span> },
                     ]}
-                    emptyState={{ icon: Scale, title: 'ไม่มีข้อมูลตามสาเหตุ' }}
+                    emptyState={{ icon: Scale, title: t('mf.fc_no_reason') }}
                   />
                 </div>
                 <div>
-                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">ส่วนต่างตามสถานี (where)</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{t('mf.fc_by_station')}</h3>
                   <DataTable
                     rows={q.data.by_station ?? []}
                     rowKey={(r) => r.station}
                     columns={[
-                      { key: 'station', label: 'สถานี', render: (r) => r.station },
-                      { key: 'variance_cost', label: 'ส่วนต่าง (฿)', align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
+                      { key: 'station', label: t('mf.fc_col_station'), render: (r) => r.station },
+                      { key: 'variance_cost', label: t('mf.fc_col_variance_baht'), align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
                       { key: 'variance_pct', label: '%', align: 'right', render: (r) => <span className="tabular">{r.variance_pct}%</span> },
                     ]}
-                    emptyState={{ icon: Scale, title: 'ยังไม่ได้ระบุสถานี' }}
+                    emptyState={{ icon: Scale, title: t('mf.fc_no_station') }}
                   />
                 </div>
               </div>
@@ -93,17 +96,17 @@ function VarianceTab() {
               rows={q.data.items}
               rowKey={(r) => r.item_id}
               columns={[
-                { key: 'item_id', label: 'วัตถุดิบ', render: (r) => <span>{r.description ?? r.item_id}</span> },
-                { key: 'theoretical_use', label: 'ใช้ตามสูตร', align: 'right', render: (r) => num(r.theoretical_use) },
-                { key: 'actual_use', label: 'ใช้จริง', align: 'right', render: (r) => num(r.actual_use) },
-                { key: 'variance_qty', label: 'ส่วนต่าง', align: 'right', render: (r) => <span className="tabular">{r.variance_qty}</span> },
-                { key: 'variance_cost', label: 'ส่วนต่าง (฿)', align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
+                { key: 'item_id', label: t('mf.col_material'), render: (r) => <span>{r.description ?? r.item_id}</span> },
+                { key: 'theoretical_use', label: t('mf.fc_col_theoretical_use'), align: 'right', render: (r) => num(r.theoretical_use) },
+                { key: 'actual_use', label: t('mf.fc_col_actual_use'), align: 'right', render: (r) => num(r.actual_use) },
+                { key: 'variance_qty', label: t('mf.fc_col_variance'), align: 'right', render: (r) => <span className="tabular">{r.variance_qty}</span> },
+                { key: 'variance_cost', label: t('mf.fc_col_variance_baht'), align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
                 { key: 'variance_pct', label: '% ', align: 'right', render: (r) => <Badge variant={r.anomaly === 'High' ? 'destructive' : r.anomaly === 'Medium' ? 'warning' : 'muted'}>{r.variance_pct}%</Badge> },
               ]}
               emptyState={{
                 icon: CalendarSearch,
-                title: 'ไม่มีข้อมูลส่วนต่างในช่วงที่เลือก',
-                description: 'ยังไม่มีการนับสต๊อก (EOD count) ในช่วงวันที่นี้ — ลองปรับช่วงวันที่แล้วดูใหม่',
+                title: t('mf.fc_variance_empty_title'),
+                description: t('mf.fc_variance_empty_desc'),
               }}
             />
           </div>
@@ -114,6 +117,7 @@ function VarianceTab() {
 }
 
 function Margins() {
+  const { t } = useLang();
   const q = useQuery<FoodCost>({ queryKey: ['food-cost'], queryFn: () => api('/api/menu/food-cost') });
   const s = q.data?.summary;
   return (
@@ -121,26 +125,26 @@ function Margins() {
       {q.data && (
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="เมนูทั้งหมด" value={num(s?.items ?? 0)} icon={Utensils} tone="primary" hint={`คิดต้นทุนแล้ว ${num(s?.costed ?? 0)} · ยังไม่คิด ${num(s?.uncosted ?? 0)}`} />
-            <StatCard label="ต้นทุนอาหารเฉลี่ย" value={`${s?.avg_food_cost_pct ?? 0}%`} icon={Percent} tone={(s?.avg_food_cost_pct ?? 0) > (q.data.target_pct) ? 'warning' : 'success'} hint={`เป้าหมาย ≤ ${q.data.target_pct}%`} />
-            <StatCard label="เกินเป้าต้นทุน" value={num(s?.over_target ?? 0)} icon={AlertTriangle} tone={(s?.over_target ?? 0) > 0 ? 'danger' : 'default'} hint={`> ${q.data.target_pct}% food cost`} />
-            <StatCard label="เมนูคิดต้นทุนแล้ว" value={num(s?.costed ?? 0)} icon={TrendingUp} tone="info" />
+            <StatCard label={t('mf.fc_total_dishes')} value={num(s?.items ?? 0)} icon={Utensils} tone="primary" hint={t('mf.fc_costed_hint', { costed: num(s?.costed ?? 0), uncosted: num(s?.uncosted ?? 0) })} />
+            <StatCard label={t('mf.fc_avg_foodcost')} value={`${s?.avg_food_cost_pct ?? 0}%`} icon={Percent} tone={(s?.avg_food_cost_pct ?? 0) > (q.data.target_pct) ? 'warning' : 'success'} hint={t('mf.fc_target_hint', { pct: q.data.target_pct })} />
+            <StatCard label={t('mf.fc_over_target')} value={num(s?.over_target ?? 0)} icon={AlertTriangle} tone={(s?.over_target ?? 0) > 0 ? 'danger' : 'default'} hint={t('mf.fc_over_hint', { pct: q.data.target_pct })} />
+            <StatCard label={t('mf.fc_costed_dishes')} value={num(s?.costed ?? 0)} icon={TrendingUp} tone="info" />
           </div>
           <DataTable
             rows={q.data.items}
             rowKey={(r) => r.sku}
             columns={[
-              { key: 'name', label: 'เมนู', render: (r) => <span>{r.name}{!r.costed && <Badge variant="muted" className="ml-2 text-[10px]">ยังไม่คิดต้นทุน</Badge>}</span> },
-              { key: 'price', label: 'ราคาขาย', align: 'right', render: (r) => <span className="tabular">{baht(r.price)}</span> },
-              { key: 'cost', label: 'ต้นทุน', align: 'right', render: (r) => <span className="tabular">{baht(r.cost)}</span> },
-              { key: 'margin', label: 'กำไร', align: 'right', render: (r) => <span className="tabular">{baht(r.margin)}</span> },
-              { key: 'food_cost_pct', label: 'ต้นทุน %', align: 'right', render: (r) => <Badge variant={r.food_cost_pct > q.data!.target_pct ? 'destructive' : r.costed ? 'success' : 'muted'}>{r.food_cost_pct}%</Badge> },
-              { key: 'margin_pct', label: 'มาร์จิน %', align: 'right', render: (r) => <span className="tabular">{r.margin_pct}%</span> },
+              { key: 'name', label: t('mf.col_dish'), render: (r) => <span>{r.name}{!r.costed && <Badge variant="muted" className="ml-2 text-[10px]">{t('mf.fc_uncosted_badge')}</Badge>}</span> },
+              { key: 'price', label: t('mf.col_sell_price'), align: 'right', render: (r) => <span className="tabular">{baht(r.price)}</span> },
+              { key: 'cost', label: t('mf.fc_col_cost'), align: 'right', render: (r) => <span className="tabular">{baht(r.cost)}</span> },
+              { key: 'margin', label: t('mf.fc_col_margin'), align: 'right', render: (r) => <span className="tabular">{baht(r.margin)}</span> },
+              { key: 'food_cost_pct', label: t('mf.fc_col_foodcost_pct'), align: 'right', render: (r) => <Badge variant={r.food_cost_pct > q.data!.target_pct ? 'destructive' : r.costed ? 'success' : 'muted'}>{r.food_cost_pct}%</Badge> },
+              { key: 'margin_pct', label: t('mf.fc_col_margin_pct'), align: 'right', render: (r) => <span className="tabular">{r.margin_pct}%</span> },
             ]}
             emptyState={{
               icon: UtensilsCrossed,
-              title: 'ยังไม่มีเมนู',
-              description: 'เพิ่มเมนูในข้อมูลหลัก แล้วผูกสูตร (recipe/BoM) เพื่อให้คำนวณต้นทุนต่อจานได้',
+              title: t('mf.menu_empty_title'),
+              description: t('mf.fc_dishes_empty_desc'),
             }}
           />
         </div>

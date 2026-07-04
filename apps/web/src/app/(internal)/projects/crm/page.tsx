@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Handshake, Plus, UserCheck, ArrowRightLeft, XCircle, Target, TrendingUp, FolderPlus, BarChart3 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -26,73 +27,75 @@ const leadBadge = (s: string) => <Badge variant={s === 'converted' ? 'success' :
 
 // CRM sales pipeline management (REV-17) — leads → opportunities → convert a won deal into a project (CRM-WL).
 export default function ProjectCrmPage() {
+  const { t } = useLang();
   const router = useRouter();
   return (
     <div>
       <PageHeader
-        title="ลีด & โอกาสการขาย (CRM Pipeline)"
-        description="จัดการลีด → คัดกรอง → แปลงเป็นโอกาสการขาย → เลื่อนขั้น → ชนะแล้วแปลงเป็นโครงการ (CRM-WL)"
+        title={t('pj.crm_title')}
+        description={t('pj.crm_desc')}
         actions={<Button variant="outline" onClick={() => router.push('/projects/pipeline')}><BarChart3 className="size-4" /> Win/Loss</Button>}
       />
       <Tabs tabs={[
-        { key: 'opps', label: 'โอกาสการขาย', content: <Opportunities /> },
-        { key: 'leads', label: 'ลีด (Leads)', content: <Leads /> },
+        { key: 'opps', label: t('pj.tab_opps'), content: <Opportunities /> },
+        { key: 'leads', label: t('pj.tab_leads'), content: <Leads /> },
       ]} />
     </div>
   );
 }
 
 function Leads() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['crm-leads'], queryFn: () => api('/api/crm/pipeline/leads') });
   const refresh = () => qc.invalidateQueries({ queryKey: ['crm-leads'] });
   const [f, setF] = useState({ name: '', company: '', email: '', phone: '', source: '' });
   const create = useMutation({
     mutationFn: () => api('/api/crm/pipeline/leads', { method: 'POST', body: JSON.stringify({ name: f.name, company: f.company || undefined, email: f.email || undefined, phone: f.phone || undefined, source: f.source || undefined }) }),
-    onSuccess: () => { notifySuccess('เพิ่มลีดแล้ว'); setF({ name: '', company: '', email: '', phone: '', source: '' }); refresh(); }, onError: (e: any) => notifyError(e.message),
+    onSuccess: () => { notifySuccess(t('pj.toast_lead_added')); setF({ name: '', company: '', email: '', phone: '', source: '' }); refresh(); }, onError: (e: any) => notifyError(e.message),
   });
-  const qualify = useMutation({ mutationFn: (no: string) => api(`/api/crm/pipeline/leads/${no}/qualify`, { method: 'POST', body: '{}' }), onSuccess: () => { notifySuccess('คัดกรองผ่าน'); refresh(); }, onError: (e: any) => notifyError(e.message) });
-  const lose = useMutation({ mutationFn: (no: string) => api(`/api/crm/pipeline/leads/${no}/lose`, { method: 'POST', body: JSON.stringify({ reason: 'ไม่สนใจ' }) }), onSuccess: () => { notifySuccess('ปิดลีด (เสีย)'); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const qualify = useMutation({ mutationFn: (no: string) => api(`/api/crm/pipeline/leads/${no}/qualify`, { method: 'POST', body: '{}' }), onSuccess: () => { notifySuccess(t('pj.toast_qualified')); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const lose = useMutation({ mutationFn: (no: string) => api(`/api/crm/pipeline/leads/${no}/lose`, { method: 'POST', body: JSON.stringify({ reason: t('pj.lead_lose_reason') }) }), onSuccess: () => { notifySuccess(t('pj.toast_lead_lost')); refresh(); }, onError: (e: any) => notifyError(e.message) });
 
   const [conv, setConv] = useState<null | { lead_no: string; name: string }>(null);
   const [cf, setCf] = useState({ opportunity_name: '', amount: '', expected_close_date: '' });
   const convert = useMutation({
     mutationFn: () => api<any>(`/api/crm/pipeline/leads/${conv!.lead_no}/convert`, { method: 'POST', body: JSON.stringify({ opportunity_name: cf.opportunity_name || undefined, amount: Number(cf.amount) || undefined, expected_close_date: cf.expected_close_date || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(`แปลงลีดเป็นโอกาสการขาย ${r.opp_no}`); setConv(null); setCf({ opportunity_name: '', amount: '', expected_close_date: '' }); refresh(); qc.invalidateQueries({ queryKey: ['crm-opps'] }); }, onError: (e: any) => notifyError(e.message),
+    onSuccess: (r: any) => { notifySuccess(t('pj.toast_lead_converted', { opp: r.opp_no })); setConv(null); setCf({ opportunity_name: '', amount: '', expected_close_date: '' }); refresh(); qc.invalidateQueries({ queryKey: ['crm-opps'] }); }, onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="grid gap-5">
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">เพิ่มลีด</h3>
+        <h3 className="text-base font-semibold">{t('pj.btn_add_lead')}</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="grid gap-1.5"><Label>ชื่อผู้ติดต่อ</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>บริษัท</Label><Input value={f.company} onChange={(e) => setF({ ...f, company: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>ที่มา</Label><Input value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} placeholder="เว็บไซต์ / งานแสดง / แนะนำ" /></div>
-          <div className="grid gap-1.5"><Label>อีเมล</Label><Input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>โทร</Label><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_contact_name')}</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_company')}</Label><Input value={f.company} onChange={(e) => setF({ ...f, company: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_source')}</Label><Input value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} placeholder={t('pj.ph_source')} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_email')}</Label><Input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_phone')}</Label><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></div>
         </div>
-        <div><Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> เพิ่มลีด</Button></div>
+        <div><Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> {t('pj.btn_add_lead')}</Button></div>
       </Card>
       <StateView q={q}>{q.data && (
         <DataTable
           rows={q.data.leads ?? []}
           rowKey={(r: any) => r.lead_no}
           columns={[
-            { key: 'lead_no', label: 'เลขที่' },
-            { key: 'name', label: 'ผู้ติดต่อ', render: (r: any) => `${r.name}${r.company ? ` · ${r.company}` : ''}` },
-            { key: 'source', label: 'ที่มา', render: (r: any) => r.source ?? '—' },
-            { key: 'owner', label: 'ผู้ดูแล', render: (r: any) => r.owner ?? '—' },
-            { key: 'status', label: 'สถานะ', render: (r: any) => leadBadge(r.status) },
+            { key: 'lead_no', label: t('dash.col_no') },
+            { key: 'name', label: t('pj.col_contact'), render: (r: any) => `${r.name}${r.company ? ` · ${r.company}` : ''}` },
+            { key: 'source', label: t('pj.f_source'), render: (r: any) => r.source ?? '—' },
+            { key: 'owner', label: t('pj.col_manager'), render: (r: any) => r.owner ?? '—' },
+            { key: 'status', label: t('fin.col_status'), render: (r: any) => leadBadge(r.status) },
             { key: 'act', label: '', sortable: false, render: (r: any) => (
               <div className="flex justify-end gap-1">
-                {r.status === 'new' && <Button size="sm" variant="ghost" title="คัดกรองผ่าน" onClick={() => qualify.mutate(r.lead_no)}><UserCheck className="size-4" /></Button>}
-                {(r.status === 'new' || r.status === 'qualified') && <Button size="sm" variant="ghost" title="แปลงเป็นโอกาสการขาย" onClick={() => { setConv({ lead_no: r.lead_no, name: r.company || r.name }); setCf({ opportunity_name: `${r.company || r.name} opportunity`, amount: '', expected_close_date: '' }); }}><ArrowRightLeft className="size-4" /></Button>}
-                {(r.status === 'new' || r.status === 'qualified') && <Button size="sm" variant="ghost" title="ปิด (เสีย)" onClick={() => lose.mutate(r.lead_no)}><XCircle className="size-4" /></Button>}
+                {r.status === 'new' && <Button size="sm" variant="ghost" title={t('pj.tip_qualify')} onClick={() => qualify.mutate(r.lead_no)}><UserCheck className="size-4" /></Button>}
+                {(r.status === 'new' || r.status === 'qualified') && <Button size="sm" variant="ghost" title={t('pj.tip_convert_opp')} onClick={() => { setConv({ lead_no: r.lead_no, name: r.company || r.name }); setCf({ opportunity_name: `${r.company || r.name} opportunity`, amount: '', expected_close_date: '' }); }}><ArrowRightLeft className="size-4" /></Button>}
+                {(r.status === 'new' || r.status === 'qualified') && <Button size="sm" variant="ghost" title={t('pj.tip_close_lost')} onClick={() => lose.mutate(r.lead_no)}><XCircle className="size-4" /></Button>}
               </div>
             ) },
           ]}
-          emptyState={{ icon: Handshake, title: 'ยังไม่มีลีด', description: 'เพิ่มลีดจากแบบฟอร์มด้านบนเพื่อเริ่มไปป์ไลน์การขาย' }}
+          emptyState={{ icon: Handshake, title: t('pj.empty_leads_title'), description: t('pj.empty_leads_desc') }}
         />
       )}</StateView>
 
