@@ -154,6 +154,7 @@ function Margins() {
 }
 
 function Ingredients() {
+  const { t } = useLang();
   const q = useQuery<{ ingredients: Ingredient[] }>({ queryKey: ['ingredient-cost'], queryFn: () => api('/api/menu/ingredient-cost') });
   return (
     <StateView q={q}>
@@ -161,15 +162,15 @@ function Ingredients() {
         rows={q.data?.ingredients ?? []}
         rowKey={(r) => r.ingredient_item_id}
         columns={[
-          { key: 'ingredient_item_id', label: 'วัตถุดิบ' },
-          { key: 'description', label: 'รายละเอียด', render: (r) => r.description ?? '—' },
-          { key: 'recipes_using', label: 'ใช้ในสูตร', align: 'right', render: (r) => num(r.recipes_using) },
-          { key: 'cost', label: 'ต้นทุนรวม/เสิร์ฟ', align: 'right', render: (r) => <span className="tabular">{baht(r.cost)}</span> },
+          { key: 'ingredient_item_id', label: t('mf.col_material') },
+          { key: 'description', label: t('mf.col_desc'), render: (r) => r.description ?? '—' },
+          { key: 'recipes_using', label: t('mf.fc_col_recipes_using'), align: 'right', render: (r) => num(r.recipes_using) },
+          { key: 'cost', label: t('mf.fc_col_cost_per_serve'), align: 'right', render: (r) => <span className="tabular">{baht(r.cost)}</span> },
         ]}
         emptyState={{
           icon: Soup,
-          title: 'ยังไม่มีสูตร/วัตถุดิบ',
-          description: 'ผูกสูตร (recipe/BoM) ให้เมนู เพื่อดูต้นทุนวัตถุดิบที่ดันต้นทุนอาหาร',
+          title: t('mf.fc_ing_empty_title'),
+          description: t('mf.fc_ing_empty_desc'),
         }}
       />
     </StateView>

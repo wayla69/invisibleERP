@@ -135,24 +135,24 @@ export default function LoyaltyConfig() {
 
         {/* V4 (docs/29) — paid VIP membership plans (LYL-21): fee deferred to 2410, recognized monthly */}
         <Card className="max-w-lg gap-3 p-5">
-          <div className="font-semibold">สมาชิก VIP แบบเสียเงิน (Paid membership)</div>
-          <p className="text-sm text-muted-foreground">ขายแพ็กเกจระดับสมาชิก — เก็บเงินวันนี้ รับรู้รายได้รายเดือนตามมาตรฐาน และระดับหมดสิทธิ์เองเมื่อไม่ต่อ</p>
+          <div className="font-semibold">{t('ly.cf_vip_title')}</div>
+          <p className="text-sm text-muted-foreground">{t('ly.cf_vip_desc')}</p>
           {(plansQ.data?.plans ?? []).map((pl) => (
             <div key={pl.id} className="rounded border p-2 text-sm">
-              <span className="font-medium">{pl.code}</span> — {pl.name} · ระดับ {pl.tier} · ฿{pl.price.toLocaleString()} / {pl.period_months} เดือน {!pl.active && '(ปิด)'}
+              <span className="font-medium">{pl.code}</span> — {pl.name} · {t('ly.lc_tier')} {pl.tier} · ฿{pl.price.toLocaleString()} / {pl.period_months} {t('ly.cf_months')} {!pl.active && t('ly.cf_closed')}
             </div>
           ))}
           <div className="grid grid-cols-5 items-end gap-2">
-            <div className="grid gap-1"><Label className="text-xs">รหัส</Label><Input value={planDraft.code} onChange={(e) => setPlanDraft({ ...planDraft, code: e.target.value })} placeholder="VIP12" /></div>
-            <div className="grid gap-1"><Label className="text-xs">ชื่อ</Label><Input value={planDraft.name} onChange={(e) => setPlanDraft({ ...planDraft, name: e.target.value })} /></div>
-            <div className="grid gap-1"><Label className="text-xs">ระดับ</Label><Input value={planDraft.tier} onChange={(e) => setPlanDraft({ ...planDraft, tier: e.target.value })} placeholder="Platinum" /></div>
-            <div className="grid gap-1"><Label className="text-xs">ราคา ฿</Label><Input type="number" value={planDraft.price || ''} onChange={(e) => setPlanDraft({ ...planDraft, price: +e.target.value })} /></div>
-            <Button variant="outline" disabled={!planDraft.code || !planDraft.tier || planDraft.price <= 0 || savePlan.isPending} onClick={() => savePlan.mutate()}>เพิ่มแผน</Button>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.col_code')}</Label><Input value={planDraft.code} onChange={(e) => setPlanDraft({ ...planDraft, code: e.target.value })} placeholder="VIP12" /></div>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.col_name')}</Label><Input value={planDraft.name} onChange={(e) => setPlanDraft({ ...planDraft, name: e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.lc_tier')}</Label><Input value={planDraft.tier} onChange={(e) => setPlanDraft({ ...planDraft, tier: e.target.value })} placeholder="Platinum" /></div>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.cf_price')}</Label><Input type="number" value={planDraft.price || ''} onChange={(e) => setPlanDraft({ ...planDraft, price: +e.target.value })} /></div>
+            <Button variant="outline" disabled={!planDraft.code || !planDraft.tier || planDraft.price <= 0 || savePlan.isPending} onClick={() => savePlan.mutate()}>{t('ly.cf_add_plan')}</Button>
           </div>
           <div className="grid grid-cols-3 items-end gap-2 border-t pt-3">
-            <div className="grid gap-1"><Label className="text-xs">สมาชิก (id)</Label><Input type="number" value={sellDraft.member_id || ''} onChange={(e) => setSellDraft({ ...sellDraft, member_id: +e.target.value })} /></div>
-            <div className="grid gap-1"><Label className="text-xs">แผน (id)</Label><Input type="number" value={sellDraft.plan_id || ''} onChange={(e) => setSellDraft({ ...sellDraft, plan_id: +e.target.value })} /></div>
-            <Button disabled={!sellDraft.member_id || !sellDraft.plan_id || sellVip.isPending} onClick={() => sellVip.mutate()}>ขายแพ็กเกจ</Button>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.cf_member_id')}</Label><Input type="number" value={sellDraft.member_id || ''} onChange={(e) => setSellDraft({ ...sellDraft, member_id: +e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.cf_plan_id')}</Label><Input type="number" value={sellDraft.plan_id || ''} onChange={(e) => setSellDraft({ ...sellDraft, plan_id: +e.target.value })} /></div>
+            <Button disabled={!sellDraft.member_id || !sellDraft.plan_id || sellVip.isPending} onClick={() => sellVip.mutate()}>{t('ly.cf_sell')}</Button>
           </div>
           {sellMsg && <Msg ok={sellMsg.startsWith('✅')}>{sellMsg}</Msg>}
           {(savePlan.error) && <Msg>{(savePlan.error as Error).message}</Msg>}

@@ -101,15 +101,15 @@ function Leads() {
 
       <Dialog open={!!conv} onOpenChange={(o) => !o && setConv(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>แปลงลีดเป็นโอกาสการขาย — {conv?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.dlg_convert_lead')} — {conv?.name}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5"><Label>ชื่อโอกาสการขาย</Label><Input value={cf.opportunity_name} onChange={(e) => setCf({ ...cf, opportunity_name: e.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.f_opp_name')}</Label><Input value={cf.opportunity_name} onChange={(e) => setCf({ ...cf, opportunity_name: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>มูลค่าโดยประมาณ</Label><Input type="number" min="0" value={cf.amount} onChange={(e) => setCf({ ...cf, amount: e.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>คาดปิดการขาย</Label><Input type="date" value={cf.expected_close_date} onChange={(e) => setCf({ ...cf, expected_close_date: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.f_est_amount')}</Label><Input type="number" min="0" value={cf.amount} onChange={(e) => setCf({ ...cf, amount: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.f_expected_close')}</Label><Input type="date" value={cf.expected_close_date} onChange={(e) => setCf({ ...cf, expected_close_date: e.target.value })} /></div>
             </div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setConv(null)}>ปิด</Button><Button onClick={() => convert.mutate()} disabled={convert.isPending}>แปลง</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setConv(null)}>{t('pj.btn_close')}</Button><Button onClick={() => convert.mutate()} disabled={convert.isPending}>{t('pj.btn_convert')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
