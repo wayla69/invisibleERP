@@ -1,6 +1,6 @@
 # 34 — Quick Capture lane (paypers-style bill capture) + doc-AI image extraction
 
-> **Date:** 2026-07-04 · **Status:** v1.0 — IMPLEMENTED (Phase 1) · **Owner:** Web / Product / Platform
+> **Date:** 2026-07-04 · **Status:** v1.1 — IMPLEMENTED (Phases 1–3) · **Owner:** Web / Product / Platform
 > **Scope:** Make capturing a supplier bill as frictionless as [paypers.ai](https://paypers.ai/) — *snap a
 > photo, done* — by opening the **existing** AP-intake engine (EXP-10) to **every staffer** through a
 > dead-simple `/capture` screen, and by exposing the doc-AI image/PDF extractor as a first-class endpoint.
@@ -25,9 +25,18 @@ without Accounting. The gap is **the front door**, not the engine.
 |---|---|---|
 | **2 — doc-AI accepts images** | Expose the existing vision extractor as `POST /api/doc-ai/extract-document` (base64 `data:` URL). Extract-only, no persistence, no GL. The reusable primitive behind capture + the future LINE channel. | ✅ this PR |
 | **3 — Quick Capture lane** | A `pr_raise`-gated `POST /api/procurement/ap-intake/capture` (draft-only) + `GET …/mine`, and a phone-friendly `/capture` screen: snap/upload → AI reads → filed for Accounting. | ✅ this PR |
-| **1 — LINE capture channel** | Send a bill photo to the shop LINE OA → webhook → `extractFromDataUrl` → capture draft. Reuses the LINE infra (docs/30) + both endpoints above. | ⏭ next |
+| **1 — LINE capture channel** | Type `บิล` in the shop LINE OA then send a bill photo → webhook parks a pending state → the photo routes to `ApIntakeService.capture`. Reuses the LINE infra (docs/30) + the capture engine. | ✅ shipped |
 
 *(The user asked to ship 2 + 3 first, then 1 — hence the ordering.)*
+
+### 2.4 LINE capture channel (Phase 1)
+A linked staffer types **`บิล`** (`capture`) in the shop LINE OA chat; `LineWebhookService.chatCaptureStart`
+checks the same `pr_raise` gate and parks a `line_chat_states` pending state (10-min TTL, one per user). The
+**next photo** (`onChatImage` → `onCaptureImage`) is fetched from the LINE content API and routed to
+`ApIntakeService.capture` — the **same draft-only** result as the web lane (NeedsReview, file stored, never
+books/GL). Webhook redelivery is deduped on the message id; a stray photo with no pending state is ignored
+(customers send images all day). `line_chat_states.kind` is a plain text column, so **no migration** — the
+existing `attach` flow and the new `capture` flow share the one pending-state row (routed by `kind`).
 
 ## 2. What shipped (Phases 2 + 3)
 
@@ -80,9 +89,12 @@ traceability matrix.
 - `ext` harness **268 ✓** — new: `extract-document` on an image → honest-empty draft (`source: none`);
   unsupported type → **400 `UNSUPPORTED_FILE_TYPE`**.
 - `basics` **234 ✓** (no AP/GL regression).
+- `line-crm` **132 ✓** — new: `บิล` + photo → a NeedsReview draft filed from the LINE content API
+  (`created_by` = the linked staff, file stored); a linked user without `pr_raise` is refused.
 
 ## Revision history
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-07-04 | v1.1 (IMPLEMENTED — Phase 1) | Platform | **LINE capture channel.** `บิล`/`capture` command in the shop LINE OA parks a `line_chat_states` pending state; the next photo (`onChatImage`→`onCaptureImage`) is fetched from the LINE content API and routed to `ApIntakeService.capture` (draft-only, same `pr_raise` gate + SoD as the web lane). Shares the pending-state row with the `attach` flow (routed by `kind`; no migration). ToE: `line-crm` 132 ✓. Docs synced (narrative 3.2, manual, UAT-P2P-103 + matrix). |
 | 2026-07-04 | v1.0 (IMPLEMENTED — Phases 2+3) | Web / Product / Platform | doc-AI `POST /api/doc-ai/extract-document` (image/PDF, extract-only); Quick Capture `/capture` + `POST /api/procurement/ap-intake/capture` (`pr_raise`, draft-only) + `GET …/mine`; shared `common/invoice-doc.ts`; nav `nav.ap_capture`. Entry extension of EXP-10, no new control / GL / schema. ToE: `match` 45 ✓, `ext` 268 ✓, `basics` 234 ✓. Docs synced (narrative 3.1, manual, UAT 101/102 + matrix). Phase 1 (LINE capture channel) to follow. |

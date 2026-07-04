@@ -718,6 +718,24 @@ async function main() {
   ok('attach: replayed photo cannot double-attach (state consumed → ignored); stateless photo ignored silently',
     replayPhoto.json.chat === 0 && strayPhoto.json.chat === 0 && attRows2.length === 1, JSON.stringify({ rows: attRows2.length, replay: replayPhoto.json.chat, stray: strayPhoto.json.chat }));
 
+  // ── 18cap. Quick Capture over LINE (docs/34): `บิล` parks a capture state; the next photo is filed as an
+  //          AP-intake DRAFT (NeedsReview, file stored, never a bill/GL) via the same EXP-10 engine. A linked
+  //          user without pr_raise is refused. somchai (Cashier) is linked to Usomchai with pr_raise. ──
+  const capStart = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-cap1', source: { userId: 'Usomchai' }, message: { id: 'mid-cap1', type: 'text', text: 'บิล' } }] });
+  const capStartOk = (lineReplies.at(-1)?.text ?? '').includes('ส่งรูปบิล');
+  const capPhoto = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-cap2', source: { userId: 'Usomchai' }, message: { id: 'mid-cap2', type: 'image' } }] });
+  const capRows = await db.select().from(s.apInvoiceIntakes).where(eq(s.apInvoiceIntakes.createdBy, 'somchai'));
+  ok('capture: บิล + photo → AP-intake draft filed from the LINE content API (NeedsReview, file stored, no GL)',
+    capStart.json.chat === 1 && capStartOk && capPhoto.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('เก็บบิลแล้ว')
+      && capRows.length === 1 && capRows[0].status === 'NeedsReview' && capRows[0].createdBy === 'somchai' && capRows[0].fileRef != null,
+    JSON.stringify({ rows: capRows.length, st: capRows[0]?.status, reply: (lineReplies.at(-1)?.text ?? '').slice(0, 24) }));
+
+  // capture permission: a linked user without pr_raise (AccessAdmin = Uauditor) cannot start a capture.
+  const capNoPerm = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-cap3', source: { userId: 'Uauditor' }, message: { id: 'mid-cap3', type: 'text', text: 'บิล' } }] });
+  ok('capture: linked user without pr_raise → refused (no draft)',
+    capNoPerm.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีสิทธิ์'),
+    JSON.stringify({ reply: (lineReplies.at(-1)?.text ?? '').slice(0, 40) }));
+
   // 18e. web API round-trip + evidence-integrity delete rules (uploader-or-Admin only).
   const prayutTok = (await inj('POST', '/api/login', undefined, { username: 'prayut', password: 'pw' })).json.token as string;
   await db.insert(s.users).values([{ username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 }]).onConflictDoNothing();

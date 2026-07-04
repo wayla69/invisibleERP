@@ -350,6 +350,11 @@ on a phone.
 4. Your captured bills appear under **บิลที่คุณเพิ่งเก็บ** with their status:
    *รอตรวจสอบ* (waiting for Accounting), *จับคู่ PO แล้ว*, or *บันทึกบิลแล้ว*.
 
+**Even faster — from LINE:** if your shop's LINE OA is linked to your account, just
+type **`บิล`** in the chat and send the bill photo. The system reads it and files it
+for Accounting exactly like the `/capture` screen — no app needed. (Same `pr_raise`
+permission; it never books the bill.)
+
 > **Quick Capture only *files* the bill — it never records a payable or posts to
 > the ledger.** Booking the bill and paying it stay with Accounting/Finance
 > (that separation of duties is a control, **EXP-06**). You'll see only the bills
