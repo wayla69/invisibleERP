@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Area, Line, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
-import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check } from 'lucide-react';
+import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -209,7 +209,6 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   });
 
   // Site cash — raise an advance or a petty-cash request against this project straight from the site-cash tab.
-  const funds = useQuery<any>({ queryKey: ['petty-funds'], queryFn: () => api(`/api/finance/petty-cash/funds`) });
   const [advDlg, setAdvDlg] = useState(false);
   const [af, setAf] = useState({ payee: '', amount: '', purpose: '', boq_line_id: '' });
   const raiseAdvance = useMutation({
@@ -218,9 +217,11 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   });
   const [pcDlg, setPcDlg] = useState(false);
   const [pcf, setPcf] = useState({ fund_code: '', kind: 'expense', payee: '', purpose: '', amount: '', boq_line_id: '' });
+  // Petty-cash funds — fetched lazily only when the request dialog is open (feeds the fund picker).
+  const funds = useQuery<any>({ queryKey: ['petty-funds'], queryFn: () => api(`/api/finance/petty-cash/funds`), enabled: pcDlg });
   const raisePetty = useMutation({
     mutationFn: () => api(`/api/finance/petty-cash/requests`, { method: 'POST', body: JSON.stringify({ fund_code: pcf.fund_code, kind: pcf.kind, payee: pcf.payee || undefined, purpose: pcf.purpose || undefined, amount: Number(pcf.amount) || 0, project_code: code, boq_line_id: pcf.boq_line_id ? Number(pcf.boq_line_id) : undefined }) }),
-    onSuccess: () => { notifySuccess('ส่งคำขอเงินสดย่อยแล้ว — รออนุมัติ'); setPcDlg(false); setPcf({ fund_code: '', kind: 'expense', payee: '', purpose: '', amount: '', boq_line_id: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess('ส่งคำขอเงินสดย่อยแล้ว — รออนุมัติ'); setPcDlg(false); setPcf({ fund_code: '', kind: 'expense', payee: '', purpose: '', amount: '', boq_line_id: '' }); qc.invalidateQueries({ queryKey: ['petty-funds'] }); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
   const boqStatusBadge = (s?: string) => <Badge variant={s === 'locked' ? 'secondary' : s === 'approved' ? 'success' : 'warning'}>{s === 'locked' ? 'ล็อก' : s === 'approved' ? 'อนุมัติแล้ว' : 'ร่าง'}</Badge>;
@@ -304,7 +305,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'pending' ? (
               <span className="flex gap-1">
                 <Button variant="ghost" size="sm" title="อนุมัติ (ผู้อนุมัติ ≠ ผู้ขอ)" onClick={() => decidePmr.mutate({ pmrNo: r.pmr_no, action: 'approve' })}><Check className="size-4" /></Button>
-                <Button variant="ghost" size="sm" title="ปฏิเสธ" onClick={() => decidePmr.mutate({ pmrNo: r.pmr_no, action: 'reject' })}><ArrowLeft className="size-4 rotate-45" /></Button>
+                <Button variant="ghost" size="sm" title="ปฏิเสธ" onClick={() => decidePmr.mutate({ pmrNo: r.pmr_no, action: 'reject' })}><X className="size-4" /></Button>
               </span>
             ) : null },
           ]}
