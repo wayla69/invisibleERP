@@ -131,9 +131,12 @@ deck assembled for you. (It can also be scheduled portfolio-wide via the `projec
 - **จองสต๊อก (Stock reservations, INV-13)** — reserve on-hand stock to the project (the dialog shows
   **available-to-issue** = on-hand − held for the item/warehouse), then **issue-to-project** (moves value into
   project WIP) or **release** a held reservation.
-- **เงินสดหน้างาน (Site cash, PROJ-14)** — a read-only rollup of the **advances**, **expense reimbursements**
-  and **petty cash** raised against this project, with the site-cash total — so project cash is managed on the
-  project.
+- **เงินสดหน้างาน (Site cash, PROJ-14)** — the **advances**, **expense reimbursements** and **petty cash**
+  raised against this project, with the site-cash total — so project cash is managed on the project. You can
+  **raise cash straight from this tab**: *ออกเงินทดรอง* issues a project-tagged **advance**, and *ขอเงินสดย่อย*
+  files a **petty-cash request** (pick the fund; it routes to maker-checker approval). Either can be **linked to
+  a BoQ line**, so when it settles/approves it **consumes that line's budget** (FU1) — material and site cash
+  sit under one ceiling.
 - **ต้นทุน & บิล (Costs & bill)** — the cost-entry ledger with the posting JE, plus *ลงต้นทุน* / *วางบิล* dialogs.
   For a project set to **over-time (POC) revenue recognition**, this tab also shows the % complete (cost-to-cost),
   recognised revenue, and the contract-asset / billings-in-excess position, with a **รับรู้รายได้ (Recognise)**
@@ -272,6 +275,7 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 | 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |
 | 2.1 | 2026-06-30 | **Program (cross-project) critical path** (PMO-4) — group projects into a *program* (`program_code`) with cross-project finish-to-start dependencies; the new `/projects/program/{code}` view runs a CPM over the program (each row a whole project) and highlights the program critical chain + per-project slack. A *โปรแกรม (Programs)* card on the Portfolio command center lists them. |
 | 2.2 | 2026-06-30 | **Pipeline → FTE forecast** (PMO-5) — the Portfolio billings forecast now also projects **กำลังคน (FTE)** demand per month: committed allocation + the pipeline's projected staffing draw (weighted value ÷ a configurable revenue-per-FTE-month rate), with a peak-FTE badge — "if we win the pipeline, how many people would each month need?". |
+| 2.12 | 2026-07-04 | **Raise site cash from the project** (docs/32, FU4) — the *เงินสดหน้างาน* tab gains *ออกเงินทดรอง* (raise a project-tagged advance → `POST /api/finance/advances`) and *ขอเงินสดย่อย* (file a petty-cash request against a fund → `POST /api/finance/petty-cash/requests`), each optionally linked to a BoQ line so settlement/approval consumes that line's budget. Existing endpoints; no API/schema change. |
 | 2.11 | 2026-07-04 | **Material-control web screens** (docs/32, FU3) — the project workspace gains four tabs: **BoQ & งบวัสดุ** (create/append/approve/lock/re-measure + per-line budget/committed/remaining), **ขอเบิกวัสดุ** (raise a PMR against a BoQ line; maker-checker decide the pending over-budget ones), **จองสต๊อก** (available-to-issue check → reserve → issue-to-project/release) and **เงินสดหน้างาน** (advances/reimbursements/petty-cash rollup). No new endpoints — screens over the existing docs/32 M0–M4 spine. |
 | 2.10 | 2026-07-03 | **Requisition prefers stock** (docs/32, FU2) — a within-budget requisition now issues the material straight to the project **from on-hand stock** when available, and only raises a PR to buy when it isn't. |
 | 2.9 | 2026-07-03 | **Budget policy** (docs/32, FU1) — a per-project **over-budget tolerance %** (small overages auto-proceed before approval; 0 = strict), and **site cash consumes budget** (an advance/petty-cash tagged to a BoQ line reduces its remaining). |

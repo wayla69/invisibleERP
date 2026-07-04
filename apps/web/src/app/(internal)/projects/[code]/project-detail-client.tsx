@@ -208,6 +208,21 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
     onSuccess: () => { notifySuccess('ปล่อยการจองแล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
+  // Site cash — raise an advance or a petty-cash request against this project straight from the site-cash tab.
+  const funds = useQuery<any>({ queryKey: ['petty-funds'], queryFn: () => api(`/api/finance/petty-cash/funds`) });
+  const [advDlg, setAdvDlg] = useState(false);
+  const [af, setAf] = useState({ payee: '', amount: '', purpose: '', boq_line_id: '' });
+  const raiseAdvance = useMutation({
+    mutationFn: () => api(`/api/finance/advances`, { method: 'POST', body: JSON.stringify({ payee: af.payee, amount: Number(af.amount) || 0, purpose: af.purpose || undefined, project_code: code, boq_line_id: af.boq_line_id ? Number(af.boq_line_id) : undefined }) }),
+    onSuccess: () => { notifySuccess('ออกเงินทดรองจ่ายแล้ว'); setAdvDlg(false); setAf({ payee: '', amount: '', purpose: '', boq_line_id: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  const [pcDlg, setPcDlg] = useState(false);
+  const [pcf, setPcf] = useState({ fund_code: '', kind: 'expense', payee: '', purpose: '', amount: '', boq_line_id: '' });
+  const raisePetty = useMutation({
+    mutationFn: () => api(`/api/finance/petty-cash/requests`, { method: 'POST', body: JSON.stringify({ fund_code: pcf.fund_code, kind: pcf.kind, payee: pcf.payee || undefined, purpose: pcf.purpose || undefined, amount: Number(pcf.amount) || 0, project_code: code, boq_line_id: pcf.boq_line_id ? Number(pcf.boq_line_id) : undefined }) }),
+    onSuccess: () => { notifySuccess('ส่งคำขอเงินสดย่อยแล้ว — รออนุมัติ'); setPcDlg(false); setPcf({ fund_code: '', kind: 'expense', payee: '', purpose: '', amount: '', boq_line_id: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+
   const boqStatusBadge = (s?: string) => <Badge variant={s === 'locked' ? 'secondary' : s === 'approved' ? 'success' : 'warning'}>{s === 'locked' ? 'ล็อก' : s === 'approved' ? 'อนุมัติแล้ว' : 'ร่าง'}</Badge>;
   const boqTab = (
     <div className="space-y-4">
@@ -342,6 +357,10 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
         <StatCard label="เบิกคืน (reimburse)" value={baht(sc?.totals?.reimbursements ?? 0)} icon={Receipt} />
         <StatCard label="เงินสดย่อย" value={baht(sc?.totals?.petty_cash ?? 0)} icon={Wallet} />
         <StatCard label="เงินสดหน้างานรวม" value={baht(sc?.totals?.total ?? 0)} icon={TrendingUp} tone="primary" />
+      </div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={() => setAdvDlg(true)}><Wallet className="size-4" /> ออกเงินทดรอง</Button>
+        <Button size="sm" onClick={() => setPcDlg(true)}><Plus className="size-4" /> ขอเงินสดย่อย</Button>
       </div>
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">เงินทดรองจ่าย (Advances)</h3>
@@ -936,6 +955,61 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             {availItem && <p className="text-xs text-muted-foreground">พร้อมจ่าย (available-to-issue): <span className="tabular font-medium text-foreground">{avail.isLoading ? '…' : num(avail.data?.available ?? 0)}</span></p>}
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setResvDlg(false)}>ปิด</Button><Button onClick={() => reserve.mutate()} disabled={!zf.item_id || !(Number(zf.qty) > 0) || reserve.isPending}>จอง</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Raise advance (site cash) */}
+      <Dialog open={advDlg} onOpenChange={setAdvDlg}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>ออกเงินทดรองจ่ายให้โครงการ — {code}</DialogTitle></DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5"><Label>ผู้รับเงิน</Label><Input value={af.payee} onChange={(ev) => setAf({ ...af, payee: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>จำนวนเงิน</Label><Input type="number" min="0" value={af.amount} onChange={(ev) => setAf({ ...af, amount: ev.target.value })} /></div>
+            </div>
+            <div className="grid gap-1.5"><Label>วัตถุประสงค์</Label><Input value={af.purpose} onChange={(ev) => setAf({ ...af, purpose: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>ผูกกับรายการ BoQ (ถ้ามี — จะกันงบรายการนั้น)</Label>
+              <select className={selectCls} value={af.boq_line_id} onChange={(ev) => setAf({ ...af, boq_line_id: ev.target.value })}>
+                <option value="">— ไม่ผูกงบ —</option>
+                {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · คงเหลือ {baht(l.remaining ?? 0)}</option>)}
+              </select>
+            </div>
+            <p className="text-xs text-muted-foreground">เงินทดรองจะผูกกับโครงการนี้ และแสดงในเงินสดหน้างาน เมื่อเคลียร์ค่าใช้จ่ายจะกันงบ BoQ ที่เลือก (PROJ-14)</p>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setAdvDlg(false)}>ปิด</Button><Button onClick={() => raiseAdvance.mutate()} disabled={!af.payee || !(Number(af.amount) > 0) || raiseAdvance.isPending}>ออกเงินทดรอง</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Raise petty-cash request (site cash) */}
+      <Dialog open={pcDlg} onOpenChange={setPcDlg}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>ขอเบิกเงินสดย่อยให้โครงการ — {code}</DialogTitle></DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5"><Label>กองทุนเงินสดย่อย</Label>
+                <select className={selectCls} value={pcf.fund_code} onChange={(ev) => setPcf({ ...pcf, fund_code: ev.target.value })}>
+                  <option value="">— เลือกกองทุน —</option>
+                  {(funds.data?.funds ?? []).map((f: any) => <option key={f.fund_code} value={f.fund_code}>{f.fund_code} · {f.name} (คงเหลือ {baht(f.balance)})</option>)}
+                </select>
+              </div>
+              <div className="grid gap-1.5"><Label>ประเภท</Label>
+                <select className={selectCls} value={pcf.kind} onChange={(ev) => setPcf({ ...pcf, kind: ev.target.value })}>
+                  <option value="expense">ค่าใช้จ่าย (expense)</option><option value="advance">ทดรอง (advance)</option>
+                </select>
+              </div>
+              <div className="grid gap-1.5"><Label>ผู้รับ/ผู้เบิก</Label><Input value={pcf.payee} onChange={(ev) => setPcf({ ...pcf, payee: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>จำนวนเงิน</Label><Input type="number" min="0" value={pcf.amount} onChange={(ev) => setPcf({ ...pcf, amount: ev.target.value })} /></div>
+            </div>
+            <div className="grid gap-1.5"><Label>วัตถุประสงค์</Label><Input value={pcf.purpose} onChange={(ev) => setPcf({ ...pcf, purpose: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>ผูกกับรายการ BoQ (ถ้ามี — จะกันงบรายการนั้น)</Label>
+              <select className={selectCls} value={pcf.boq_line_id} onChange={(ev) => setPcf({ ...pcf, boq_line_id: ev.target.value })}>
+                <option value="">— ไม่ผูกงบ —</option>
+                {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · คงเหลือ {baht(l.remaining ?? 0)}</option>)}
+              </select>
+            </div>
+            <p className="text-xs text-muted-foreground">คำขอจะรออนุมัติ (ผู้อนุมัติ ≠ ผู้ขอ) เมื่ออนุมัติจะกันงบ BoQ ที่เลือกและตัดกองทุนเงินสดย่อย (PROJ-14)</p>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setPcDlg(false)}>ปิด</Button><Button onClick={() => raisePetty.mutate()} disabled={!pcf.fund_code || !(Number(pcf.amount) > 0) || raisePetty.isPending}>ส่งคำขอ</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
