@@ -542,6 +542,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-028 | Scheduled WHT-cert batch auto-issues the 50-ทวิ from AP-payment WHT | TAX-03 | 06 §14 (rev 0.9) |
 | UAT-TAX-029 | WHT-cert batch idempotent (no duplicate on re-run) | TAX-03 | 06 §14 (rev 0.9) |
 | UAT-TAX-030 | Scheduled PP30 filing-draft job registers the period return | TAX-05 | 06 §14 (rev 0.9) |
+| UAT-TAX-031 | AP bill tax_code routes input VAT to the code's account | GL-21 | 06 §14 (rev 0.10) |
+| UAT-TAX-032 | AR output VAT routes to the item vat_code account | GL-21 | 06 §14 (rev 0.10) |
+| UAT-TAX-033 | PP30↔GL reconciliation spans the VAT-account set | TAX-04 | 06 §14 (rev 0.10) |
 
 ## 07 — Payroll → `05-payroll.md`
 

@@ -16,6 +16,14 @@ certificates, and the statutory tax reports.
   **zero-rated**.
 - **Output VAT** is the VAT you charge customers; **input VAT** is the VAT you pay
   suppliers. The difference is reported on the monthly VAT return.
+- **Tax codes (advanced).** If you set up **รหัสภาษี (Tax Codes)** at
+  *Settings → Master data* (`/setup/tax-codes`) with their own rate and GL
+  accounts, those drive posting: a purchase bill can carry a **tax code** so its
+  input VAT posts to that code's account, and a sale's output VAT follows the
+  **VAT code on the item** (or its category). The **ภ.พ.30 report reconciles
+  across all your VAT accounts**, so the tie to the ledger stays exact even when
+  you route VAT to your own accounts. Leave tax codes unset and everything uses
+  the standard 7% → single VAT-payable account, exactly as before.
 
 ---
 

@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, eq, gte, lt, asc, desc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
-import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings } from '../../../database/schema';
+import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import { PND_LABELS } from '../documents/wht-rates';
 import { currentTenantStore } from '../../../common/tenant-context';
@@ -55,14 +55,21 @@ export class TaxReportsService {
     const outputTax = out.totals.vat, inputTax = inp.totals.vat;
     const netVat = round2(outputTax - inputTax);
     const db = this.db;
+    // docs/33 PR6 — a tenant can route VAT to its own output/input accounts via a tax_code, so reconcile the
+    // WHOLE VAT-account set (control 2100 + any configured tax-code accounts), not just 2100. No tax codes ⇒
+    // set is {2100} ⇒ identical to before.
+    const vatAccounts = new Set<string>(['2100']);
+    for (const c of await db.select({ o: taxCodes.outputAccount, i: taxCodes.inputAccount }).from(taxCodes).where(eq(taxCodes.kind, 'vat'))) {
+      if (c.o) vatAccounts.add(c.o); if (c.i) vatAccounts.add(c.i);
+    }
     const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '2100'), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
+      .where(and(inArray(journalLines.accountCode, [...vatAccounts]), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
     const gl2100Net = round2(n(g?.v));
     return {
       report: 'pp30', month, year, period,
       form: { sales_taxable: out.totals.value, output_vat: outputTax, purchases: inp.totals.base, input_vat: inputTax, vat_payable: netVat > 0 ? netVat : 0, vat_credit_carry_forward: netVat < 0 ? -netVat : 0 },
-      reconciliation: { gl_account: '2100', gl_net_movement: gl2100Net, report_net_vat: netVat, tied: Math.abs(gl2100Net - netVat) < 0.01, scope_note: 'AR legs of 2100 are tenant-tagged; AP legs are tenant-null — tie is exact under HQ/bypass or single-seller scope.' },
+      reconciliation: { gl_account: [...vatAccounts].join('+'), gl_net_movement: gl2100Net, report_net_vat: netVat, tied: Math.abs(gl2100Net - netVat) < 0.01, scope_note: 'VAT-account set (2100 + configured tax-code accounts). AR legs tenant-tagged; AP legs tenant-null — tie exact under HQ/bypass or single-seller scope.' },
       deadline: nextMonthDay(month, year, 15),
       deadline_note: 'ยื่นแบบ ภ.พ.30 ภายในวันที่ 15 ของเดือนถัดไป',
     };

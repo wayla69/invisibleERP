@@ -268,6 +268,35 @@ async function main() {
   const runP = await inj('POST', `/api/bi/subscriptions/${subP.json.id}/run`, t2mgr, {});
   ok('PR4: tax_pp30_draft runs and registers/refreshes the period PP30 filing', runP.status === 200 && runP.json.status === 'success' && /Draft filing PP30/.test(runP.json.summary ?? ''), runP.json.summary ?? JSON.stringify(runP.json).slice(0, 120));
 
+  // ── docs/33 PR6: vat_code → VAT posting (makes the tax_codes table live) ──
+  // A VAT code with DISTINCT output/input accounts proves the routing moved off the shared 2100.
+  await db.insert(s.accounts).values([
+    { code: '2101', name: 'Output VAT — determination test', type: 'Liability', normalBalance: 'C', isPostable: true },
+    { code: '2102', name: 'Input VAT — determination test', type: 'Liability', normalBalance: 'C', isPostable: true },
+  ]).onConflictDoNothing();
+  await inj('PUT', '/api/feature-flags/posting_determination', t2mgr, { enabled: true }); // AR auto-resolution needs the flag
+  const taxc = await inj('POST', '/api/item-setup/tax-codes', t2mgr, { code: 'VAT7X', kind: 'vat', rate: 0.07, inclusive: true, output_account: '2101', input_account: '2102', name_th: 'VAT 7% (แยกบัญชี)' });
+  ok('PR6: create a VAT code with distinct output/input accounts', taxc.status === 201 && taxc.json.output_account === '2101' && taxc.json.input_account === '2102', JSON.stringify(taxc.json).slice(0, 90));
+  // AP bill carrying the tax_code → input VAT (70 on a 1,070 inclusive bill) routes to 2102, not 2100.
+  const apVat = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้ขาย VAT', txn_type: 'Service', invoice_no: 'PV-VAT', invoice_date: periodDate('23'), amount: 1070, tax_code: 'VAT7X' });
+  ok('PR6: AP bill accepts a tax_code', /^AP-/.test(apVat.json.txn_no ?? ''), JSON.stringify(apVat.json).slice(0, 80));
+  const acc2102 = (await inj('GET', '/api/ledger/account-ledger?account=2102', proc2)).json;
+  ok('PR6: input VAT routed to the tax_code input account 2102 (Dr 70)', near(acc2102.total_debit, 70), `dr=${acc2102.total_debit}`);
+  const apBadVat = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'x', txn_type: 'Service', invoice_no: 'PV-BADVAT', invoice_date: periodDate('23'), amount: 100, tax_code: 'NOPE' });
+  ok('PR6: AP bill with an unknown tax_code is rejected fail-closed (UNKNOWN_TAX_CODE)', apBadVat.status === 400 && apBadVat.json.error?.code === 'UNKNOWN_TAX_CODE', `st=${apBadVat.status} code=${apBadVat.json.error?.code}`);
+  // AR: an order whose item carries vat_code VAT7X → ar/sync routes OUTPUT VAT to 2101 (item→vat_code).
+  await db.insert(s.items).values({ itemId: 'VATITEM', itemDescription: 'VAT-coded item' }).onConflictDoNothing();
+  await inj('PATCH', '/api/item-setup/items/VATITEM', t2mgr, { vat_code: 'VAT7X' });
+  const [ord] = await db.insert(s.orders).values({ orderNo: 'SO-VAT-1', orderDate: periodDate('23'), status: 'Completed', tenantId: t2 }).returning({ id: s.orders.id });
+  await db.insert(s.orderLines).values({ orderId: Number(ord.id), itemId: 'VATITEM', totalPrice: '1070' });
+  const arSync = await inj('POST', '/api/finance/ar/sync', t2mgr, {});
+  ok('PR6: ar/sync creates the invoice from the order', (arSync.status === 200 || arSync.status === 201) && (arSync.json.created ?? 0) >= 1, JSON.stringify(arSync.json).slice(0, 60));
+  const acc2101 = (await inj('GET', '/api/ledger/account-ledger?account=2101', t2mgr)).json;
+  ok('PR6: output VAT routed to the item vat_code account 2101 (Cr 70)', near(acc2101.total_credit, 70), `cr=${acc2101.total_credit}`);
+  // TAX-04 stays correct under routing: the PP30 tie now spans the whole VAT-account set, not just 2100.
+  const ppSet = (await inj('GET', `/api/tax-reports/pp30?month=${curMonth}&year=${curYear}`, t2mgr)).json;
+  ok('PR6: PP30 reconciliation spans the VAT-account set (2100 + 2101 + 2102)', /2100/.test(ppSet.reconciliation.gl_account) && /2101/.test(ppSet.reconciliation.gl_account) && /2102/.test(ppSet.reconciliation.gl_account), ppSet.reconciliation.gl_account);
+
   await app.close();
   await pg.close();
 
