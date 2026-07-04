@@ -4,7 +4,7 @@ import { from, firstValueFrom, finalize } from 'rxjs';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { tenantALS } from './tenant-context';
-import { NO_TX_KEY } from './decorators';
+import { NO_TX_KEY, isPlatformAdmin } from './decorators';
 import { txStart, txEnd } from '../observability/runtime-metrics';
 import { logger as pino } from '../observability/logger';
 
@@ -17,7 +17,8 @@ const SLOW_TX_MS = Number(process.env.SLOW_TX_MS ?? 1000);
 // then runs the handler inside tenantALS so the DRIZZLE proxy routes all queries to this tx.
 //
 // Tenancy model (chosen): "HQ sees all, staff bound to their shop".
-//   - Admin (head office / HQ)  -> bypass: sees every tenant.
+//   - Platform owner (PLATFORM_ADMIN_USERNAMES) = "god" -> global bypass on EVERY route, regardless of mode.
+//   - Admin (head office / HQ)  -> bypass in single-company (sees every tenant); org-scoped in multi-company.
 //   - public / pre-auth (login, signup) -> bypass: no user yet, needed to read users / create tenants.
 //   - everyone else (Customer AND non-Admin staff: Sales/Warehouse/…) -> scoped to their own tenant_id.
 // RLS is enforced in the DB; this only decides the per-request scope GUCs.
@@ -54,13 +55,19 @@ export class TenantTxInterceptor implements NestInterceptor {
     // Platform-admin bypass — set server-side by PlatformAdminGuard (never from client input) on a verified
     // @PlatformAdmin route, so it can provision a brand-new tenant regardless of tenancy mode.
     const platformBypass = req.__platformBypass === true;
+    // Platform owner = "god": a user whose username is in PLATFORM_ADMIN_USERNAMES gets a GLOBAL RLS bypass on
+    // EVERY route (not only the @PlatformAdmin management endpoints) — so an ops-designated owner can see and
+    // operate across ALL tenants, while a per-tenant Admin stays org-scoped (multi-company). This is gated
+    // purely by env (never an assignable DB role), so a tenant Admin who manages users cannot escalate into
+    // it. Cross-tenant reads/writes it makes are still flagged to the audit interceptor via req.__rlsBypass.
+    const isGod = isPlatformAdmin(user?.username);
     let bypass: boolean;
     let orgScope: number | null = null;
     if (!multiCompany) {
-      bypass = preAuth || isAdmin || platformBypass; // legacy global HQ bypass
+      bypass = preAuth || isAdmin || platformBypass || isGod; // legacy global HQ bypass (god implied)
     } else {
-      bypass = preAuth || platformBypass; // login/signup + platform provisioning need it to read users / create tenants
-      if (isAdmin && !platformBypass) orgScope = user?.orgId != null ? Number(user.orgId) : null; // org-scoped Admin
+      bypass = preAuth || platformBypass || isGod; // god + login/signup + platform provisioning get the global bypass
+      if (isAdmin && !bypass) orgScope = user?.orgId != null ? Number(user.orgId) : null; // org-scoped Admin (non-god)
     }
     // Expose the effective scope to the audit interceptor (records cross-tenant access on mutations).
     req.__rlsBypass = bypass;
