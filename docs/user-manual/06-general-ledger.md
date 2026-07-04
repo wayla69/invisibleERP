@@ -158,6 +158,12 @@ behaviour. Warehouse-level defaults (a per-store inventory / adjustment account)
 **บัญชีตามคลังสินค้า (Warehouse Accounts)** (`/setup/warehouses`). The inventory sub-ledger
 still reconciles to the GL either way.
 
+The same item/category profile also drives a few non-account defaults when
+determination is on: an item's **default stock location** (a receipt or issue with no
+location goes there instead of the main warehouse), its **revenue account** (a sales
+invoice's revenue follows the item, when a whole order shares one), and its **VAT / WHT
+codes** (see [Tax](./07-tax.md)). Leave any of them blank to keep the standard behaviour.
+
 | Message | Meaning | What to do |
 |---------|---------|-----------|
 | `INVALID_POSTING_ACCOUNT` | An item/category account profile points at a code that doesn't exist in the chart, or at a header/control account you can't post to | Fix the account on the item or category to a real, postable code (see the chart above) |

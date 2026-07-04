@@ -284,15 +284,28 @@ async function main() {
   ok('PR6: input VAT routed to the tax_code input account 2102 (Dr 70)', near(acc2102.total_debit, 70), `dr=${acc2102.total_debit}`);
   const apBadVat = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'x', txn_type: 'Service', invoice_no: 'PV-BADVAT', invoice_date: periodDate('23'), amount: 100, tax_code: 'NOPE' });
   ok('PR6: AP bill with an unknown tax_code is rejected fail-closed (UNKNOWN_TAX_CODE)', apBadVat.status === 400 && apBadVat.json.error?.code === 'UNKNOWN_TAX_CODE', `st=${apBadVat.status} code=${apBadVat.json.error?.code}`);
-  // AR: an order whose item carries vat_code VAT7X → ar/sync routes OUTPUT VAT to 2101 (item→vat_code).
+  // AR: an order whose item carries vat_code VAT7X + revenue_account 4001 → ar/sync routes OUTPUT VAT to 2101
+  // (item→vat_code) AND revenue to 4001 (item→revenue_account, docs/33 PR7).
+  await db.insert(s.accounts).values({ code: '4001', name: 'Revenue — determination test', type: 'Revenue', normalBalance: 'C', isPostable: true }).onConflictDoNothing();
   await db.insert(s.items).values({ itemId: 'VATITEM', itemDescription: 'VAT-coded item' }).onConflictDoNothing();
-  await inj('PATCH', '/api/item-setup/items/VATITEM', t2mgr, { vat_code: 'VAT7X' });
+  await inj('PATCH', '/api/item-setup/items/VATITEM', t2mgr, { vat_code: 'VAT7X', revenue_account: '4001' });
   const [ord] = await db.insert(s.orders).values({ orderNo: 'SO-VAT-1', orderDate: periodDate('23'), status: 'Completed', tenantId: t2 }).returning({ id: s.orders.id });
   await db.insert(s.orderLines).values({ orderId: Number(ord.id), itemId: 'VATITEM', totalPrice: '1070' });
   const arSync = await inj('POST', '/api/finance/ar/sync', t2mgr, {});
   ok('PR6: ar/sync creates the invoice from the order', (arSync.status === 200 || arSync.status === 201) && (arSync.json.created ?? 0) >= 1, JSON.stringify(arSync.json).slice(0, 60));
   const acc2101 = (await inj('GET', '/api/ledger/account-ledger?account=2101', t2mgr)).json;
   ok('PR6: output VAT routed to the item vat_code account 2101 (Cr 70)', near(acc2101.total_credit, 70), `cr=${acc2101.total_credit}`);
+  const acc4001 = (await inj('GET', '/api/ledger/account-ledger?account=4001', t2mgr)).json;
+  ok('PR7: AR revenue routed to the item revenue_account 4001 (Cr 1000 net)', near(acc4001.total_credit, 1000), `cr=${acc4001.total_credit}`);
+  // PR7 (C): a WHT tax_code defaults the income type + rate on an AP payment request (WHT side of tax_codes).
+  const whtCode = await inj('POST', '/api/item-setup/tax-codes', t2mgr, { code: 'WHT3X', kind: 'wht', rate: 0.03, wht_income_type: '3tre-service', name_th: 'หัก ณ ที่จ่าย 3%' });
+  ok('PR7: create a WHT tax code (3%, 3tre-service)', whtCode.status === 201 && whtCode.json.kind === 'wht', JSON.stringify(whtCode.json).slice(0, 80));
+  const whtBillC = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้รับเหมา C', txn_type: 'Service', invoice_no: 'PV-WHTC', invoice_date: periodDate('24'), amount: 1070 });
+  const whtReqC = await inj('PATCH', `/api/finance/ap/transactions/${whtBillC.json.txn_no}/pay`, proc2, { amount: 1070, wht_tax_code: 'WHT3X' });
+  ok('PR7: WHT tax_code defaults the rate on the payment request (3% from the code)', whtReqC.status === 200 && near(whtReqC.json.wht_rate, 0.03), `${whtReqC.status} rate=${whtReqC.json.wht_rate}`);
+  const whtBadC = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'x', txn_type: 'Service', invoice_no: 'PV-WHTBAD', invoice_date: periodDate('24'), amount: 100 });
+  const whtReqBad = await inj('PATCH', `/api/finance/ap/transactions/${whtBadC.json.txn_no}/pay`, proc2, { amount: 100, wht_tax_code: 'VAT7X' });
+  ok('PR7: a VAT code used as wht_tax_code is rejected (INVALID_WHT_TAX_CODE)', whtReqBad.status === 400 && whtReqBad.json.error?.code === 'INVALID_WHT_TAX_CODE', `st=${whtReqBad.status} code=${whtReqBad.json.error?.code}`);
   // TAX-04 stays correct under routing: the PP30 tie now spans the whole VAT-account set, not just 2100.
   const ppSet = (await inj('GET', `/api/tax-reports/pp30?month=${curMonth}&year=${curYear}`, t2mgr)).json;
   ok('PR6: PP30 reconciliation spans the VAT-account set (2100 + 2101 + 2102)', /2100/.test(ppSet.reconciliation.gl_account) && /2101/.test(ppSet.reconciliation.gl_account) && /2102/.test(ppSet.reconciliation.gl_account), ppSet.reconciliation.gl_account);

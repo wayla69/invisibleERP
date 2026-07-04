@@ -61,6 +61,14 @@ export class InventoryLedgerService {
     return { inventory: r?.inventoryAccount ?? ACCT_INVENTORY, cogs: r?.cogsAccount ?? ACCT_COGS, adj: r?.adjustmentAccount ?? ACCT_ADJ };
   }
 
+  // docs/33 PR7 — the stock location for a move: the explicit one, else the item's default_location_id
+  // (item → category, when determination is on), else the WH-MAIN control default. Off/unset ⇒ WH-MAIN.
+  private async locFor(tenantId: number, itemId: string, explicit?: string | null): Promise<string> {
+    if (explicit) return explicit;
+    const d = this.determination ? await this.determination.resolveDefaultLocation(tenantId, itemId) : null;
+    return d ?? 'WH-MAIN';
+  }
+
   // The set of GL accounts that carry inventory value for this tenant's sub-ledger = the default control (1200)
   // plus any per-item / per-category / per-WAREHOUSE inventory_account overrides. reconcile() sums GL over this
   // whole set so it stays correct even when determination routes some items to a different inventory account.
@@ -169,7 +177,7 @@ export class InventoryLedgerService {
     const unitCost = round4(dto.unit_cost);
     if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
     if (unitCost < 0) throw bad('BAD_COST', 'unit_cost must be ≥ 0', 'ต้นทุนต้องไม่ติดลบ');
-    const loc = dto.location_id ?? 'WH-MAIN';
+    const loc = await this.locFor(tenantId, dto.item_id, dto.location_id);
     // Costing-engine boundary: an item EXPLICITLY managed by the costing module (item_costing per-item row —
     // FIFO/AVG/STD, capitalized on procurement GR to GL 1200) must NOT also be capitalized by this perpetual
     // sub-ledger, or inventory double-posts to 1200. The newer sub-ledger yields to the established engine.
@@ -210,7 +218,7 @@ export class InventoryLedgerService {
     const tenantId = this.tenant(user);
     const qty = round4(dto.qty);
     if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
-    const loc = dto.location_id ?? 'WH-MAIN';
+    const loc = await this.locFor(tenantId, dto.item_id, dto.location_id);
     if (dto.ref_type && dto.ref_id) {
       const dup = await this.findByRef(tenantId, dto.ref_type, dto.ref_id);
       if (dup) return { move_no: dup.moveNo, move_type: 'issue', deduped: true, balance_qty: n(dup.balanceQty), avg_cost: n(dup.avgCost) };
@@ -250,7 +258,7 @@ export class InventoryLedgerService {
     const tenantId = this.tenant(user);
     const qty = round4(dto.qty);
     if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
-    const loc = dto.location_id ?? 'WH-MAIN';
+    const loc = await this.locFor(tenantId, dto.item_id, dto.location_id);
     if (dto.ref_type && dto.ref_id) {
       const dup = await this.findByRef(tenantId, dto.ref_type, dto.ref_id);
       if (dup) return { move_no: dup.moveNo, move_type: 'issue', deduped: true, balance_qty: n(dup.balanceQty), avg_cost: n(dup.avgCost) };
@@ -297,7 +305,7 @@ export class InventoryLedgerService {
   private async requestWriteOff(dto: AdjustDto, delta: number, user: JwtUser) {
     const tenantId = this.tenant(user);
     const db = this.db;
-    const loc = dto.location_id ?? 'WH-MAIN';
+    const loc = await this.locFor(tenantId, dto.item_id, dto.location_id);
     const cur = await this.balanceRow(tenantId, dto.item_id, loc);
     const oldQty = n(cur?.onHandQty), avg = n(cur?.avgCost);
     if (round4(oldQty + delta) < -EPS) throw bad('NEG_STOCK', `Adjustment would drive ${dto.item_id} below zero (${round4(oldQty + delta)})`, 'การปรับทำให้สต๊อกติดลบ');
@@ -344,7 +352,7 @@ export class InventoryLedgerService {
     const delta = round4(dto.qty_delta);
     if (!delta) throw bad('NO_CHANGE', 'qty_delta must be non-zero', 'ต้องระบุส่วนต่างที่ไม่เป็นศูนย์');
     if (!dto.reason || !dto.reason.trim()) throw bad('REASON_REQUIRED', 'A reason is required for stock adjustments', 'ต้องระบุเหตุผลในการปรับสต๊อก');
-    const loc = dto.location_id ?? 'WH-MAIN';
+    const loc = await this.locFor(tenantId, dto.item_id, dto.location_id);
     const cur = await this.balanceRow(tenantId, dto.item_id, loc);
     const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue), avg = n(cur?.avgCost);
     const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? 'moving_avg';
@@ -445,7 +453,7 @@ export class InventoryLedgerService {
   // variance to GL (reuses adjust(): shortage Dr 5810 / Cr 1200, overage reversed). No-op if untracked.
   async postCountVariance(p: { item_id: string; location_id?: string; physical_qty: number; doc_no: string }, user: JwtUser) {
     const tenantId = this.tenant(user);
-    const loc = p.location_id ?? 'WH-MAIN';
+    const loc = await this.locFor(tenantId, p.item_id, p.location_id);
     const cur = await this.balanceRow(tenantId, p.item_id, loc);
     if (!cur) return { valued: false as const };
     const delta = round4(round4(p.physical_qty) - n(cur.onHandQty));
@@ -459,7 +467,7 @@ export class InventoryLedgerService {
   // Goods issue for a tracked item → relieve valued stock + COGS (reuses issue(), incl. NEG_STOCK guard).
   async issueIfTracked(p: { item_id: string; location_id?: string; qty: number }, user: JwtUser) {
     const tenantId = this.tenant(user);
-    const loc = p.location_id ?? 'WH-MAIN';
+    const loc = await this.locFor(tenantId, p.item_id, p.location_id);
     if (!(await this.balanceRow(tenantId, p.item_id, loc))) return { valued: false as const };
     const r = await this.issue({ item_id: p.item_id, location_id: loc, qty: p.qty }, user);
     return { valued: true as const, ...r };

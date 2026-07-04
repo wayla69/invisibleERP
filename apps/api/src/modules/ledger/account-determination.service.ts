@@ -102,4 +102,20 @@ export class AccountDeterminationService {
       .where(and(eq(taxCodes.tenantId, tenantId), eq(taxCodes.code, code), eq(taxCodes.active, true))).limit(1);
     return tc ?? null;
   }
+
+  /**
+   * The item's default stock location (item → its category), or null when determination is off or none is set
+   * — the caller then keeps its own default (WH-MAIN). docs/33 PR7.
+   */
+  async resolveDefaultLocation(tenantId: number | null | undefined, itemId: string): Promise<string | null> {
+    if (!(await this.enabled(tenantId))) return null;
+    const [it] = await this.db.select().from(items).where(eq(items.itemId, itemId)).limit(1);
+    if (it?.defaultLocationId) return it.defaultLocationId;
+    if (it?.categoryId != null && tenantId != null) {
+      const [cat] = await this.db.select().from(itemCategories)
+        .where(and(eq(itemCategories.id, it.categoryId), eq(itemCategories.tenantId, tenantId))).limit(1);
+      return cat?.defaultLocationId ?? null;
+    }
+    return null;
+  }
 }
