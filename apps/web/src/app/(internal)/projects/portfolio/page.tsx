@@ -152,15 +152,15 @@ export default function PortfolioPage() {
                 rowKey={(r: any) => r.id}
                 onRowClick={(r: any) => r.project_code && router.push(`/projects/${encodeURIComponent(r.project_code)}?tab=risks`)}
                 columns={[
-                  { key: 'rag', label: 'ระดับ', sortable: false, render: (r: any) => <Badge variant={r.rag === 'red' ? 'destructive' : r.rag === 'amber' ? 'warning' : 'success'}>{r.rag}</Badge> },
-                  { key: 'project_code', label: 'โครงการ', render: (r: any) => `${r.project_code ?? '—'}${r.project_name ? ` · ${r.project_name}` : ''}` },
-                  { key: 'kind', label: 'ประเภท', render: (r: any) => r.kind === 'issue' ? 'ปัญหา' : 'ความเสี่ยง' },
-                  { key: 'title', label: 'หัวข้อ' },
-                  { key: 'score', label: 'คะแนน', align: 'right', render: (r: any) => <span className="tabular">{r.score}</span> },
-                  { key: 'owner', label: 'ผู้รับผิดชอบ', render: (r: any) => r.owner ?? '—' },
-                  { key: 'mitigation', label: 'แผนรับมือ', render: (r: any) => r.mitigation ? <span className="text-xs">{r.mitigation}</span> : <span className="text-xs text-destructive">— ยังไม่มี</span> },
+                  { key: 'rag', label: t('pj.col_level'), sortable: false, render: (r: any) => <Badge variant={r.rag === 'red' ? 'destructive' : r.rag === 'amber' ? 'warning' : 'success'}>{r.rag}</Badge> },
+                  { key: 'project_code', label: t('pj.col_project'), render: (r: any) => `${r.project_code ?? '—'}${r.project_name ? ` · ${r.project_name}` : ''}` },
+                  { key: 'kind', label: t('pj.col_type'), render: (r: any) => r.kind === 'issue' ? t('pj.kind_issue') : t('pj.kind_risk') },
+                  { key: 'title', label: t('pj.col_title') },
+                  { key: 'score', label: t('pj.col_score'), align: 'right', render: (r: any) => <span className="tabular">{r.score}</span> },
+                  { key: 'owner', label: t('pj.col_owner'), render: (r: any) => r.owner ?? '—' },
+                  { key: 'mitigation', label: t('pj.col_mitigation'), render: (r: any) => r.mitigation ? <span className="text-xs">{r.mitigation}</span> : <span className="text-xs text-destructive">{t('pj.none_yet')}</span> },
                 ]}
-                emptyState={{ icon: ShieldCheck, title: 'ไม่มีความเสี่ยงเปิดอยู่', description: 'ทุกความเสี่ยง/ปัญหาถูกปิดแล้ว' }}
+                emptyState={{ icon: ShieldCheck, title: t('pj.no_open_risks_title'), description: t('pj.no_open_risks_desc') }}
               />
             </Card>
           )}
@@ -169,12 +169,12 @@ export default function PortfolioPage() {
           {!!capQ.data?.resources?.length && (
             <Card className="gap-3 p-5">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold">ปฏิทินกำลังคน (Capacity calendar) — ความต้องการ vs กำลัง 100%/เดือน</h3>
-                {capQ.data.over_allocated_count > 0 && <Badge variant="destructive">{capQ.data.over_allocated_count} คนเกินกำลัง</Badge>}
+                <h3 className="text-sm font-semibold">{t('pj.capacity_calendar_title')}</h3>
+                {capQ.data.over_allocated_count > 0 && <Badge variant="destructive">{t('pj.n_over_allocated', { n: capQ.data.over_allocated_count })}</Badge>}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full border-separate border-spacing-1 text-xs">
-                  <thead><tr><th className="text-left font-medium text-muted-foreground">ทรัพยากร</th>{(capQ.data.horizon ?? []).map((m: string) => <th key={m} className="px-1 text-center font-medium text-muted-foreground">{m.slice(2)}</th>)}</tr></thead>
+                  <thead><tr><th className="text-left font-medium text-muted-foreground">{t('pj.col_resource')}</th>{(capQ.data.horizon ?? []).map((m: string) => <th key={m} className="px-1 text-center font-medium text-muted-foreground">{m.slice(2)}</th>)}</tr></thead>
                   <tbody>
                     {capQ.data.resources.slice(0, 12).map((r: any) => (
                       <tr key={r.resource_name}>
@@ -193,16 +193,16 @@ export default function PortfolioPage() {
           {/* programs (cross-project critical path, PMO-4) */}
           {!!progQ.data?.programs?.length && (
             <Card className="gap-3 p-5">
-              <h3 className="text-sm font-semibold">โปรแกรม (Programs) — เส้นทางวิกฤตข้ามโครงการ</h3>
+              <h3 className="text-sm font-semibold">{t('pj.programs_title')}</h3>
               <ul className="divide-y divide-border/50">
                 {progQ.data.programs.map((pr: any) => (
                   <li key={pr.program_code}>
                     <button onClick={() => router.push(`/projects/program/${encodeURIComponent(pr.program_code)}`)} className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm hover:opacity-80">
                       <span className="font-medium">{pr.program_code}</span>
                       <span className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span>{pr.member_count} โครงการ</span>
-                        <span>{pr.program_duration_days} วัน</span>
-                        <Badge variant="destructive">{pr.critical_path?.length ?? 0} วิกฤต</Badge>
+                        <span>{t('pj.n_projects', { n: pr.member_count })}</span>
+                        <span>{t('pj.days', { n: pr.program_duration_days })}</span>
+                        <Badge variant="destructive">{t('pj.n_critical', { n: pr.critical_path?.length ?? 0 })}</Badge>
                       </span>
                     </button>
                   </li>
@@ -215,30 +215,30 @@ export default function PortfolioPage() {
           {!!fc?.billing?.monthly?.length && (
             <Card className="gap-3 p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">พยากรณ์การวางบิล/กระแสเงินสด (Billings forecast) — มั่นใจ + ไปป์ไลน์ถ่วงน้ำหนัก</h3>
+                <h3 className="text-sm font-semibold">{t('pj.forecast_title')}</h3>
                 <div className="flex flex-wrap gap-2 text-xs">
-                  <Badge variant="info">มั่นใจ {baht(fc.billing.committed_total)}</Badge>
-                  <Badge variant="muted">ไปป์ไลน์ (ถ่วง) {baht(fc.billing.weighted_pipeline_total)}</Badge>
-                  <Badge variant="success">รวมคาดการณ์ {baht(fc.billing.expected_total)}</Badge>
-                  {fc.resourcing?.peak_total_demand_fte != null && <Badge variant="warning">กำลังคนสูงสุด {fc.resourcing.peak_total_demand_fte} FTE</Badge>}
+                  <Badge variant="info">{t('pj.committed_amt', { amount: baht(fc.billing.committed_total) })}</Badge>
+                  <Badge variant="muted">{t('pj.weighted_pipeline_amt', { amount: baht(fc.billing.weighted_pipeline_total) })}</Badge>
+                  <Badge variant="success">{t('pj.total_forecast_amt', { amount: baht(fc.billing.expected_total) })}</Badge>
+                  {fc.resourcing?.peak_total_demand_fte != null && <Badge variant="warning">{t('pj.peak_fte', { n: fc.resourcing.peak_total_demand_fte })}</Badge>}
                 </div>
               </div>
               <div className="space-y-2">
                 {fc.billing.monthly.map((m: any) => (
                   <div key={m.month}>
                     <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">{m.month}{(() => { const r = (fc.resourcing?.monthly ?? []).find((x: any) => x.month === m.month); return r?.total_demand_fte ? <span className="ml-2 text-muted-foreground/70">· กำลังคน {r.total_demand_fte} FTE{r.pipeline_demand_fte > 0 ? ` (มั่นใจ ${r.committed_demand_fte} + ไปป์ไลน์ ${r.pipeline_demand_fte})` : ''}</span> : null; })()}</span>
+                      <span className="text-muted-foreground">{m.month}{(() => { const r = (fc.resourcing?.monthly ?? []).find((x: any) => x.month === m.month); return r?.total_demand_fte ? <span className="ml-2 text-muted-foreground/70">{t('pj.demand_fte', { fte: r.total_demand_fte })}{r.pipeline_demand_fte > 0 ? t('pj.demand_breakdown', { committed: r.committed_demand_fte, pipeline: r.pipeline_demand_fte }) : ''}</span> : null; })()}</span>
                       <span className="tabular font-medium">{baht(m.total_expected)}</span>
                     </div>
                     {/* committed (solid) + weighted pipeline (lighter) stacked bar */}
                     <div className="flex h-2.5 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full" style={{ width: `${(m.committed_billing / fcMax) * 100}%`, background: 'var(--info)' }} title={`มั่นใจ ${baht(m.committed_billing)}`} />
-                      <div className="h-full opacity-50" style={{ width: `${(m.weighted_pipeline / fcMax) * 100}%`, background: 'var(--chart-3)' }} title={`ไปป์ไลน์ถ่วงน้ำหนัก ${baht(m.weighted_pipeline)}`} />
+                      <div className="h-full" style={{ width: `${(m.committed_billing / fcMax) * 100}%`, background: 'var(--info)' }} title={t('pj.committed_amt', { amount: baht(m.committed_billing) })} />
+                      <div className="h-full opacity-50" style={{ width: `${(m.weighted_pipeline / fcMax) * 100}%`, background: 'var(--chart-3)' }} title={t('pj.weighted_pipeline_title', { amount: baht(m.weighted_pipeline) })} />
                     </div>
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">มั่นใจ = หมุดหมายวางบิล (Fixed) + สินทรัพย์ตามสัญญา POC ที่ยังไม่วางบิล · ไปป์ไลน์ = มูลค่าโอกาส × ความน่าจะเป็น ณ เดือนที่คาดปิด · กำลังคน (FTE) = ความต้องการปัจจุบัน + ไปป์ไลน์ถ่วงน้ำหนัก ÷ {baht(fc.rev_per_fte_month)}/คน/เดือน</p>
+              <p className="text-xs text-muted-foreground">{t('pj.forecast_footnote', { rev: baht(fc.rev_per_fte_month) })}</p>
             </Card>
           )}
         </div>
