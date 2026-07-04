@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, asc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { itemCategories, taxCodes, items, accounts } from '../../database/schema';
+import { itemCategories, taxCodes, items, accounts, locations } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 
 // Item-posting SETUP master data (docs/33 PR3, GL-21). Maintains the account/tax profile that the
@@ -26,6 +26,9 @@ export interface ItemProfileDto {
   revenue_account?: string | null; cogs_account?: string | null;
   inventory_account?: string | null; valuation_account?: string | null;
   vat_code?: string | null; wht_income_type?: string | null; default_location_id?: string | null;
+}
+export interface WarehouseAccountsDto {
+  inventory_account?: string | null; adjustment_account?: string | null;
 }
 
 @Injectable()
@@ -148,6 +151,25 @@ export class ItemSetupService {
     if (!row) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: `Item ${itemId} not found`, messageTh: 'ไม่พบสินค้า' });
     return shapeItem(row);
   }
+
+  // ── Warehouse (location) account defaults — the lowest determination tier (docs/33 PR5) ──
+  async listWarehouses(_user: JwtUser) {
+    const rows = await this.db.select().from(locations).orderBy(asc(locations.locationId));
+    return { warehouses: rows.map(shapeWarehouse), count: rows.length };
+  }
+
+  async updateWarehouseAccounts(locationId: string, dto: WarehouseAccountsDto, _user: JwtUser) {
+    await this.assertPostable([dto.inventory_account, dto.adjustment_account]);
+    const [row] = await this.db.update(locations).set({
+      inventoryAccount: dto.inventory_account, adjustmentAccount: dto.adjustment_account,
+    }).where(eq(locations.locationId, locationId)).returning();
+    if (!row) throw new NotFoundException({ code: 'LOCATION_NOT_FOUND', message: `Warehouse ${locationId} not found`, messageTh: 'ไม่พบคลังสินค้า' });
+    return shapeWarehouse(row);
+  }
+}
+
+function shapeWarehouse(l: any) {
+  return { location_id: l.locationId, location_name: l.locationName, zone: l.zone, type: l.type, active: l.active, inventory_account: l.inventoryAccount, adjustment_account: l.adjustmentAccount };
 }
 
 function shapeCategory(c: any) {

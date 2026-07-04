@@ -475,6 +475,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'nav.item_categories', href: '/setup/item-categories', icon: Layers, perms: ['md_item', 'masterdata', 'exec'] },
           { label: 'nav.tax_codes', href: '/setup/tax-codes', icon: Coins, perms: ['md_config', 'masterdata', 'exec'] },
           { label: 'nav.item_posting', href: '/setup/items', icon: Boxes, perms: ['md_item', 'masterdata', 'exec'] },
+          { label: 'nav.warehouse_accounts', href: '/setup/warehouses', icon: Warehouse, perms: ['md_item', 'masterdata', 'exec'] },
           { label: 'nav.custom_fields', href: '/custom-fields', icon: SlidersHorizontal, perms: ['masterdata', 'users', 'exec'] },
           { label: 'nav.custom_objects', href: '/custom-objects', icon: Boxes, perms: ['masterdata', 'users', 'exec'] },
           { label: 'nav.object_layouts', href: '/object-layouts', icon: LayoutTemplate, perms: ['masterdata', 'users', 'exec'] },

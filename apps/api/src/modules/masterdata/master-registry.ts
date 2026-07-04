@@ -106,6 +106,8 @@ export const MASTER_REGISTRY: MdEntity[] = [
       C('Location_ID', 'locationId'), C('Location_Name', 'locationName'), C('Zone', 'zone'),
       C('Type', 'type'), C('Capacity', 'capacity', 'num'), C('Temperature', 'temperature'),
       C('Active', 'active', 'bool'), C('Notes', 'notes'),
+      // Warehouse posting-account defaults (docs/33 PR5).
+      C('Inventory_Account', 'inventoryAccount'), C('Adjustment_Account', 'adjustmentAccount'),
     ],
   },
   {

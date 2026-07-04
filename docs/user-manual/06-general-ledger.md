@@ -152,8 +152,10 @@ categories — a withholding-tax income type.
 This is **opt-in per company**: turn on **กำหนดบัญชีตามสินค้า (Item posting)** under
 *Settings → Labs / feature flags* (`posting_determination`). While it's **off** (the default),
 every posting behaves exactly as before. While it's **on**, each posting picks its account by
-precedence — **the item's own setting → its category's setting → the standard control account** —
-so anything you leave blank simply falls back to today's behaviour. The inventory sub-ledger
+precedence — **the item's own setting → its category's setting → its warehouse's default →
+the standard control account** — so anything you leave blank simply falls back to today's
+behaviour. Warehouse-level defaults (a per-store inventory / adjustment account) are set on
+**บัญชีตามคลังสินค้า (Warehouse Accounts)** (`/setup/warehouses`). The inventory sub-ledger
 still reconciles to the GL either way.
 
 | Message | Meaning | What to do |

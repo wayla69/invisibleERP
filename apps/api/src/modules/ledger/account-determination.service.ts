@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { items, itemCategories, taxCodes, featureFlags, accounts } from '../../database/schema';
+import { items, itemCategories, taxCodes, featureFlags, accounts, locations } from '../../database/schema';
 
 // Item-posting account determination (docs/33, GL-21). Resolves the GL/VAT/WHT accounts a posting should use
 // FROM THE ITEM, applying precedence: item column → its category (item_categories) → null (the caller then
@@ -15,13 +15,14 @@ export interface ItemAccounts {
   cogsAccount: string | null;
   inventoryAccount: string | null;
   valuationAccount: string | null;
+  adjustmentAccount: string | null;
   vatCode: string | null;
   whtIncomeType: string | null;
 }
 
 const EMPTY: ItemAccounts = {
   revenueAccount: null, cogsAccount: null, inventoryAccount: null,
-  valuationAccount: null, vatCode: null, whtIncomeType: null,
+  valuationAccount: null, adjustmentAccount: null, vatCode: null, whtIncomeType: null,
 };
 
 @Injectable()
@@ -42,7 +43,7 @@ export class AccountDeterminationService {
    * account is validated to be a real postable account (GL-21) — a typo'd/unpostable override fails closed
    * rather than posting to a bad account.
    */
-  async resolveItemAccounts(tenantId: number | null | undefined, itemId: string): Promise<ItemAccounts> {
+  async resolveItemAccounts(tenantId: number | null | undefined, itemId: string, locationId?: string | null): Promise<ItemAccounts> {
     if (!(await this.enabled(tenantId))) return { ...EMPTY };
     const [it] = await this.db.select().from(items).where(eq(items.itemId, itemId)).limit(1);
     if (!it) return { ...EMPTY };
@@ -51,17 +52,21 @@ export class AccountDeterminationService {
       [cat] = await this.db.select().from(itemCategories)
         .where(and(eq(itemCategories.id, it.categoryId), eq(itemCategories.tenantId, tenantId))).limit(1);
     }
-    const pick = (a: string | null | undefined, b: string | null | undefined): string | null => a ?? b ?? null;
+    // Warehouse tier (lowest before the control literal): its default inventory/adjustment account.
+    let loc: typeof locations.$inferSelect | undefined;
+    if (locationId) [loc] = await this.db.select().from(locations).where(eq(locations.locationId, locationId)).limit(1);
+    const pick = (...xs: (string | null | undefined)[]): string | null => xs.find((x) => x != null) ?? null;
     const resolved: ItemAccounts = {
       revenueAccount: pick(it.revenueAccount, cat?.revenueAccount),
       cogsAccount: pick(it.cogsAccount, cat?.cogsAccount),
-      inventoryAccount: pick(it.inventoryAccount, cat?.inventoryAccount),
+      inventoryAccount: pick(it.inventoryAccount, cat?.inventoryAccount, loc?.inventoryAccount),
       valuationAccount: pick(it.valuationAccount, cat?.valuationAccount),
+      adjustmentAccount: pick(loc?.adjustmentAccount),
       vatCode: pick(it.vatCode, cat?.vatCode),
       whtIncomeType: pick(it.whtIncomeType, cat?.whtIncomeType),
     };
     await this.assertPostable(itemId, [
-      resolved.revenueAccount, resolved.cogsAccount, resolved.inventoryAccount, resolved.valuationAccount,
+      resolved.revenueAccount, resolved.cogsAccount, resolved.inventoryAccount, resolved.valuationAccount, resolved.adjustmentAccount,
     ]);
     return resolved;
   }

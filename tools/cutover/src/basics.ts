@@ -770,6 +770,22 @@ async function main() {
   const taxBadRate = await inj('POST', '/api/item-setup/tax-codes', invmgr, { code: 'BADRATE', rate: 1.5 });
   ok('Setup: tax code with an out-of-range rate rejected (rate must be 0..1)', taxBadRate.status === 400 && ['BAD_RATE', 'VALIDATION_ERROR'].includes(taxBadRate.json?.error?.code), `st=${taxBadRate.status} code=${taxBadRate.json?.error?.code}`);
 
+  // ── Warehouse account defaults — the lowest determination tier (item → category → WAREHOUSE → literal) ──
+  await db.insert(s.accounts).values({ code: '1201', name: 'Inventory — Cold store (determination test)', type: 'Asset', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  await db.insert(s.locations).values({ locationId: 'WH-DET', locationName: 'Cold store' }).onConflictDoNothing();
+  const whBad = await inj('PATCH', '/api/item-setup/warehouses/WH-DET', invmgr, { inventory_account: '9997' });
+  ok('Setup: warehouse with a non-postable inventory account rejected (INVALID_POSTING_ACCOUNT)', whBad.status === 400 && whBad.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `st=${whBad.status} code=${whBad.json?.error?.code}`);
+  const whOk = await inj('PATCH', '/api/item-setup/warehouses/WH-DET', invmgr, { inventory_account: '1201' });
+  ok('Setup: set a warehouse default inventory account → 1201', whOk.status === 200 && whOk.json?.inventory_account === '1201', JSON.stringify(whOk.json ?? {}).slice(0, 90));
+  await db.insert(s.items).values({ itemId: 'WHITEM', itemDescription: 'Warehouse-driven item' }).onConflictDoNothing(); // no item/category override
+  // Determination ON: WHITEM has no item/category inventory account, so it falls through to the WAREHOUSE 1201.
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'WHITEM', location_id: 'WH-DET', uom: 'EA', qty: 10, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-W1' });
+  await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'WHITEM', location_id: 'WH-DET', qty: 3, ref_type: 'MI', ref_id: 'MI-W1' });
+  const acc1201 = (await inj('GET', '/api/ledger/account-ledger?account=1201', invmgr)).json;
+  ok('Determination: inventory routes to the WAREHOUSE default account (1201 = 100 receipt − 30 issue = 70)', near(acc1201.closing_balance, 70), `closing=${acc1201.closing_balance}`);
+  const recWh = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
+  ok('Determination: sub-ledger still ties with a warehouse-routed inventory account in the set', recWh.reconciled === true && near(recWh.sub_ledger_value, recWh.gl_inventory), `sub=${recWh.sub_ledger_value} gl=${recWh.gl_inventory} rec=${recWh.reconciled}`);
+
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).
   await db.insert(s.itemCosting).values({ tenantId: invTid, itemId: 'COSTITEM', method: 'AVG' }).onConflictDoNothing();

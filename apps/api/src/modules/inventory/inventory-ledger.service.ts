@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { invMoves, invBalances, invCostLayers, invWriteoffRequests, itemCosting, items, itemCategories, journalEntries, journalLines } from '../../database/schema';
+import { invMoves, invBalances, invCostLayers, invWriteoffRequests, itemCosting, items, itemCategories, locations, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { n, ymd } from '../../database/queries';
@@ -53,23 +53,26 @@ export class InventoryLedgerService {
     return user.tenantId;
   }
 
-  // GL-21 — resolve the inventory & COGS accounts for an item: item/category override (when the tenant has
-  // opted into posting_determination) else the hardcoded control accounts. Off/unconfigured ⇒ 1200/5000.
-  private async invAccounts(tenantId: number, itemId: string): Promise<{ inventory: string; cogs: string }> {
-    const r = this.determination ? await this.determination.resolveItemAccounts(tenantId, itemId) : null;
-    return { inventory: r?.inventoryAccount ?? ACCT_INVENTORY, cogs: r?.cogsAccount ?? ACCT_COGS };
+  // GL-21 — resolve the inventory / COGS / adjustment accounts for an item at a location: item → category →
+  // warehouse override (when the tenant has opted into posting_determination) else the hardcoded control
+  // accounts. Off/unconfigured ⇒ 1200 / 5000 / 5810.
+  private async invAccounts(tenantId: number, itemId: string, loc: string): Promise<{ inventory: string; cogs: string; adj: string }> {
+    const r = this.determination ? await this.determination.resolveItemAccounts(tenantId, itemId, loc) : null;
+    return { inventory: r?.inventoryAccount ?? ACCT_INVENTORY, cogs: r?.cogsAccount ?? ACCT_COGS, adj: r?.adjustmentAccount ?? ACCT_ADJ };
   }
 
   // The set of GL accounts that carry inventory value for this tenant's sub-ledger = the default control (1200)
-  // plus any per-item / per-category inventory_account overrides. reconcile() sums GL over this whole set so it
-  // stays correct even when determination routes some items to a different inventory account.
+  // plus any per-item / per-category / per-WAREHOUSE inventory_account overrides. reconcile() sums GL over this
+  // whole set so it stays correct even when determination routes some items to a different inventory account.
   private async inventoryAccountSet(tenantId: number): Promise<string[]> {
     const set = new Set<string>([ACCT_INVENTORY]);
     const catRows = await this.db.selectDistinct({ a: itemCategories.inventoryAccount }).from(itemCategories)
       .where(and(eq(itemCategories.tenantId, tenantId), isNotNull(itemCategories.inventoryAccount)));
     const itemRows = await this.db.selectDistinct({ a: items.inventoryAccount }).from(items)
       .where(isNotNull(items.inventoryAccount));
-    for (const r of [...catRows, ...itemRows]) if (r.a) set.add(r.a);
+    const locRows = await this.db.selectDistinct({ a: locations.inventoryAccount }).from(locations)
+      .where(isNotNull(locations.inventoryAccount));
+    for (const r of [...catRows, ...itemRows, ...locRows]) if (r.a) set.add(r.a);
     return [...set];
   }
 
@@ -185,7 +188,7 @@ export class InventoryLedgerService {
     const newVal = round4(oldVal + value);
     const newAvg = newQty > EPS ? round4(newVal / newQty) : 0;
     const moveNo = this.mkNo('INV-RCV');
-    const acc = await this.invAccounts(tenantId, dto.item_id);
+    const acc = await this.invAccounts(tenantId, dto.item_id, loc);
     const je = value > EPS ? await this.ledger.postEntry({
       date: ymd(), source: 'INV-RCV', sourceRef: dto.ref_type && dto.ref_id ? `${dto.ref_type}:${dto.ref_id}` : moveNo,
       tenantId, memo: `Goods receipt ${moveNo} — ${dto.item_id}`, createdBy: user.username,
@@ -224,7 +227,7 @@ export class InventoryLedgerService {
     const newVal = round4(oldVal - value);
     const newAvg = newQty > EPS ? round4(newVal / newQty) : avg;
     const moveNo = this.mkNo('INV-ISS');
-    const acc = await this.invAccounts(tenantId, dto.item_id);
+    const acc = await this.invAccounts(tenantId, dto.item_id, loc);
     const je = value > EPS ? await this.ledger.postEntry({
       date: ymd(), source: 'INV-ISS', sourceRef: dto.ref_type && dto.ref_id ? `${dto.ref_type}:${dto.ref_id}` : moveNo,
       tenantId, memo: `Goods issue ${moveNo} — ${dto.item_id}`, createdBy: user.username,
@@ -262,7 +265,7 @@ export class InventoryLedgerService {
     const newVal = round4(oldVal - value);
     const newAvg = newQty > EPS ? round4(newVal / newQty) : avg;
     const moveNo = this.mkNo('INV-PRJ');
-    const acc = await this.invAccounts(tenantId, dto.item_id);
+    const acc = await this.invAccounts(tenantId, dto.item_id, loc);
     const je = value > EPS ? await this.ledger.postEntry({
       date: ymd(), source: 'INV-ISS', sourceRef: dto.ref_type && dto.ref_id ? `${dto.ref_type}:${dto.ref_id}` : moveNo,
       tenantId, memo: `Issue to project ${moveNo} — ${dto.item_id}`, createdBy: user.username,
@@ -363,10 +366,10 @@ export class InventoryLedgerService {
     }
     const newVal = round4(oldVal + (delta > 0 ? moveVal : -moveVal));
     const newAvg = newQty > EPS ? round4(newVal / newQty) : avg;
-    const acc = await this.invAccounts(tenantId, dto.item_id);
+    const acc = await this.invAccounts(tenantId, dto.item_id, loc);
     const lines = delta < 0
-      ? [{ account_code: ACCT_ADJ, debit: moveVal }, { account_code: acc.inventory, credit: moveVal }]
-      : [{ account_code: acc.inventory, debit: moveVal }, { account_code: ACCT_ADJ, credit: moveVal }];
+      ? [{ account_code: acc.adj, debit: moveVal }, { account_code: acc.inventory, credit: moveVal }]
+      : [{ account_code: acc.inventory, debit: moveVal }, { account_code: acc.adj, credit: moveVal }];
     const je = moveVal > EPS ? await this.ledger.postEntry({
       date: ymd(), source: 'INV-ADJ', sourceRef: moveNo,
       tenantId, memo: `Stock adjustment ${moveNo} — ${dto.reason}`, createdBy: user.username, lines,

@@ -73,6 +73,11 @@ export const locations = pgTable('locations', {
   temperature: text('temperature').default('Ambient'),
   active: boolean('active').default(true),
   notes: text('notes'),
+  // Warehouse account defaults (docs/33 PR5, GL-21). The lowest tier of item-posting determination:
+  // an item's inventory/adjustment account falls through item → its category → THIS warehouse → the control
+  // literal (1200/5810). Nullable ⇒ no effect unless set + the tenant opts into posting_determination.
+  inventoryAccount: text('inventory_account'),
+  adjustmentAccount: text('adjustment_account'),
 });
 
 export const locationStock = pgTable('location_stock', {

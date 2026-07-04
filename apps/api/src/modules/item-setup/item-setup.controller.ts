@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Param, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ItemSetupService, type CategoryDto, type TaxCodeDto, type ItemProfileDto } from './item-setup.service';
+import { ItemSetupService, type CategoryDto, type TaxCodeDto, type ItemProfileDto, type WarehouseAccountsDto } from './item-setup.service';
 
 const acct = z.string().trim().max(20).nullish();
 const CategoryBody = z.object({
@@ -24,6 +24,7 @@ const ItemProfileBody = z.object({
   revenue_account: acct, cogs_account: acct, inventory_account: acct, valuation_account: acct,
   vat_code: z.string().nullish(), wht_income_type: z.string().nullish(), default_location_id: z.string().nullish(),
 });
+const WarehouseBody = z.object({ inventory_account: acct, adjustment_account: acct });
 
 // Item-posting setup (docs/33 PR3). Item categories + tax codes maintenance and the per-item posting-profile
 // override. Gated to master-data setup duties — kept clear of transactional perms (SoD R13).
@@ -42,4 +43,7 @@ export class ItemSetupController {
 
   @Get('items/:itemId') getItem(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.getItem(itemId, u); }
   @Patch('items/:itemId') updateItem(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemProfileBody)) b: ItemProfileDto, @CurrentUser() u: JwtUser) { return this.svc.updateItemProfile(itemId, b, u); }
+
+  @Get('warehouses') listWarehouses(@CurrentUser() u: JwtUser) { return this.svc.listWarehouses(u); }
+  @Patch('warehouses/:locationId') updateWarehouse(@Param('locationId') locationId: string, @Body(new ZodValidationPipe(WarehouseBody)) b: WarehouseAccountsDto, @CurrentUser() u: JwtUser) { return this.svc.updateWarehouseAccounts(locationId, b, u); }
 }
