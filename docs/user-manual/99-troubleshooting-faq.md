@@ -217,10 +217,21 @@ No. Each organisation is a separate tenant; you only ever see your own data.
 **Where do I download Excel / PDF reports?**
 From each module's report area — see [Reports & Analytics](./09-reports-and-analytics.md).
 
+**I forgot the admin password and no one can log in.**
+There is no "forgot password" email and no default credential (by design). If
+another admin or an Access Admin can still sign in, they reset it from
+**Admin → Users** (the user is forced to set a new password on next login). If
+**nobody** can log in, an operator with server/database access runs the recovery
+tool: `NEW_ADMIN_PASSWORD='…' pnpm --filter @ierp/api db:reset-password <username>`
+(defaults to `admin`; prompts for the password with no echo if the env var is
+omitted; `CLEAR_MFA=1` also drops a lost TOTP device). It sets a new password
+(never logged), forces a change on next login, clears any login lockout, and
+revokes existing sessions.
+
 **Who do I contact for help?**
 Your organisation's administrator first (for access, passwords, MFA, module
 toggles). For issues they can't resolve, escalate to your support contact:
-`<<support email / phone>>`.
+`kittipot.c@oshinei.onmicrosoft.com`.
 
 ---
 
