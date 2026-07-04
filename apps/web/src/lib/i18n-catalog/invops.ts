@@ -2,6 +2,28 @@ import type { Lang } from '../messages';
 
 // i18n catalog fragment (invops domain). Merged into MESSAGES in messages.ts. Add `'key': { th, en }` entries.
 export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
+  // ── Quick Capture (iv.cap_*) — paypers-style bill capture (docs/34) ──
+  'iv.cap_read_fail': { th: 'อ่านไฟล์ไม่สำเร็จ', en: 'Failed to read the file' },
+  'iv.cap_status_needsreview': { th: 'รอตรวจสอบ', en: 'Needs review' },
+  'iv.cap_status_mapped': { th: 'จับคู่ PO แล้ว', en: 'Matched to PO' },
+  'iv.cap_status_posted': { th: 'บันทึกบิลแล้ว', en: 'Bill posted' },
+  'iv.cap_sent_toast': { th: 'ส่งให้ฝ่ายบัญชีแล้ว · {no}', en: 'Sent to Accounting · {no}' },
+  'iv.cap_title': { th: 'เก็บบิลเร็ว (Quick Capture)', en: 'Quick Capture' },
+  'iv.cap_desc': { th: 'ถ่ายรูปหรืออัปโหลดใบเสร็จ/ใบแจ้งหนี้ ระบบอ่านข้อมูลให้อัตโนมัติ แล้วส่งเข้าคิวให้ฝ่ายบัญชีตรวจสอบและบันทึกบิลต่อ — จากมือถือหรือหน้าจอไหนก็ได้', en: 'Snap or upload a receipt/invoice; the system auto-extracts the fields and queues it for Accounting to review and post — from your phone or any screen' },
+  'iv.cap_snap_upload': { th: 'ถ่าย / อัปโหลดบิล', en: 'Snap / upload a bill' },
+  'iv.cap_take_photo': { th: 'ถ่ายรูปบิล', en: 'Take a photo' },
+  'iv.cap_choose_file': { th: 'เลือกไฟล์ / PDF', en: 'Choose file / PDF' },
+  'iv.cap_formats_note': { th: 'รองรับรูปภาพ (PNG/JPEG/WebP) และ PDF · PDF ที่มีชั้นข้อความอ่านได้ทันที ส่วนรูปถ่าย/สแกนใช้ AI — ถ้าอ่านอัตโนมัติไม่ได้ ระบบจะแนบไฟล์เข้าคิวให้ฝ่ายบัญชีตรวจสอบเอง ไม่มีการเดา', en: 'Supports images (PNG/JPEG/WebP) and PDF · Text-layer PDFs are read instantly; photos/scans use AI — if auto-extraction fails, the file is queued with its attachment for Accounting to review manually, with no guessing' },
+  'iv.cap_latest_result': { th: 'ผลล่าสุด', en: 'Latest result' },
+  'iv.cap_captured': { th: 'เก็บเข้าระบบแล้ว · {no}', en: 'Captured · {no}' },
+  'iv.cap_vendor': { th: 'ผู้ขาย', en: 'Vendor' },
+  'iv.cap_extract_none': { th: 'ยังอ่านข้อมูลอัตโนมัติไม่ได้ — ฝ่ายบัญชีจะตรวจสอบจากไฟล์ที่แนบ', en: 'Auto-extraction not available yet — Accounting will review from the attached file' },
+  'iv.cap_extract_ai': { th: 'AI อ่านข้อมูลให้แล้ว — ฝ่ายบัญชีจะตรวจสอบและบันทึกบิลต่อ', en: 'AI extracted the data — Accounting will review and post the bill' },
+  'iv.cap_empty_last': { th: 'ถ่ายหรืออัปโหลดบิลแล้วผลจะแสดงที่นี่', en: 'Snap or upload a bill and the result appears here' },
+  'iv.cap_recent': { th: 'บิลที่คุณเพิ่งเก็บ', en: 'Bills you just captured' },
+  'iv.cap_empty_recent': { th: 'ยังไม่มีบิลที่เก็บไว้ — ถ่ายรูปบิลใบแรกได้เลย', en: 'No captured bills yet — snap your first one' },
+  'iv.cap_unknown_vendor': { th: 'ไม่ทราบผู้ขาย', en: 'Unknown vendor' },
+  'iv.cap_no_invoice_no': { th: 'ไม่มีเลขที่', en: 'No invoice no.' },
   'iv.adj_approve_error': { th: 'อนุมัติไม่สำเร็จ', en: 'Approval failed' },
   'iv.adj_col_action': { th: 'การดำเนินการ', en: 'Action' },
   'iv.adj_col_count_date': { th: 'วันที่นับ', en: 'Count date' },
