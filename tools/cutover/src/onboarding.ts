@@ -139,10 +139,19 @@ async function main() {
   ok('POST /api/admin/tenants/:id/plan changes the plan cross-tenant (status Active)',
     chg.status === 200 && chg.json.plan === 'pro' && chg.json.status === 'Active', `st=${chg.status} plan=${chg.json.plan}`);
   // Detail + subscription control are platform-owner-gated too.
+  // Cross-company activity feed (Platform Console) — owner (Admin, single-company bypass) sees audit rows
+  // across tenants; the new tenant_id filter narrows to exactly one company.
+  const auditAll = await inj('GET', '/api/admin/audit?limit=200', owner);
+  const allRows = (auditAll.json.rows ?? []) as any[];
+  const pickTid = allRows.map((r) => r.tenant_id).find((x) => x != null);
+  const auditOne = pickTid != null ? ((await inj('GET', `/api/admin/audit?limit=200&tenant_id=${pickTid}`, owner)).json.rows ?? []) as any[] : [];
+  ok('GET /api/admin/audit?tenant_id filters the fleet-wide feed to exactly one company',
+    auditAll.status === 200 && allRows.length > 0 && (pickTid == null || (auditOne.length > 0 && auditOne.every((r) => Number(r.tenant_id) === Number(pickTid)))),
+    `all=${allRows.length} pick=${pickTid} one=${auditOne.length}`);
+  // Detail + subscription control are platform-owner-gated too.
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // temporarily drop owner's platform status
   const detailDenied = await inj('GET', `/api/admin/tenants/${created.json.tenant_id}`, owner);
   ok('GET /api/admin/tenants/:id blocked for a non-platform-admin (403)', detailDenied.status === 403, `${detailDenied.status}`);
-  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3c. Invite-link onboarding (ITGC-AC-18 #2): a platform owner issues a SINGLE-USE, expiring invite;

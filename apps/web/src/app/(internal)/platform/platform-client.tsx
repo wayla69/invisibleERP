@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, AlertTriangle, Building2, CircleDollarSign, Clock, Eye, PauseCircle, Pause, Play, Plus, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Building2, CircleDollarSign, Clock, Download, Eye, PauseCircle, Pause, Play, Plus, ShieldCheck, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
 
-import { api, setActingTenant } from '@/lib/api';
+import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -211,6 +211,7 @@ export default function PlatformConsole({
     queryKey: ['saas-metrics'],
     queryFn: () => api('/api/billing/saas-metrics'),
   });
+  const comps = companies.data ?? [];
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['admin-tenants'] });
@@ -219,6 +220,26 @@ export default function PlatformConsole({
   };
 
   const [detailId, setDetailId] = useState<number | null>(null);
+
+  // Cross-company activity feed (audit_log; god RLS bypass returns every tenant's rows). Company + status
+  // filter server-side (so a company filter spans all pages); the free-text box filters the fetched page.
+  const [auditCompany, setAuditCompany] = useState('');
+  const [auditStatus, setAuditStatus] = useState('');
+  const [auditText, setAuditText] = useState('');
+  const auditQs = `limit=100${auditCompany ? `&tenant_id=${auditCompany}` : ''}${auditStatus ? `&status=${auditStatus}` : ''}`;
+  const audit = useQuery<{ rows: any[]; total: number }>({
+    queryKey: ['platform-audit', auditCompany, auditStatus],
+    queryFn: () => api(`/api/admin/audit?${auditQs}`),
+  });
+  const companyName = (tid: any) => {
+    const c = comps.find((x) => Number(x.id) === Number(tid));
+    return c ? c.name : (tid == null ? '— (ระบบ)' : `#${tid}`);
+  };
+  const verifyChain = useMutation({
+    mutationFn: () => api<{ ok: boolean; broken_at?: any }>('/api/admin/audit/verify'),
+    onSuccess: (r) => r.ok ? notifySuccess('ห่วงโซ่ audit ครบถ้วน (ไม่พบการแก้ไข)') : notifyError(`พบความผิดปกติของห่วงโซ่ audit${r.broken_at ? ` ที่ #${r.broken_at}` : ''}`),
+    onError: (e: any) => notifyError(e.message),
+  });
 
   // Jump into a company: set the god act-as scope, then reload so every screen refetches under it.
   const view = (c: Company) => {
@@ -421,10 +442,63 @@ export default function PlatformConsole({
   );
 
   const pending = requests.data?.length ?? 0;
+  const auditRows = (audit.data?.rows ?? []).filter((r: any) => {
+    if (!auditText.trim()) return true;
+    const q = auditText.toLowerCase();
+    return `${r.actor ?? ''} ${r.action ?? ''}`.toLowerCase().includes(q);
+  });
+  const selectCls = 'h-9 rounded-md border border-input bg-transparent px-2 text-sm';
+
+  const activityTab = (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="grid gap-1">
+          <Label className="text-xs">บริษัท</Label>
+          <select className={selectCls} value={auditCompany} onChange={(e) => setAuditCompany(e.target.value)}>
+            <option value="">ทุกบริษัท</option>
+            {comps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="grid gap-1">
+          <Label className="text-xs">ผล</Label>
+          <select className={selectCls} value={auditStatus} onChange={(e) => setAuditStatus(e.target.value)}>
+            <option value="">ทั้งหมด</option>
+            <option value="success">สำเร็จ</option>
+            <option value="fail">ล้มเหลว</option>
+          </select>
+        </div>
+        <div className="grid flex-1 gap-1">
+          <Label className="text-xs">ค้นหา (ผู้ทำ/การกระทำ)</Label>
+          <Input value={auditText} onChange={(e) => setAuditText(e.target.value)} placeholder="เช่น POST /api/ledger…" />
+        </div>
+        <Button size="sm" variant="outline" onClick={() => verifyChain.mutate()} disabled={verifyChain.isPending}>
+          <ShieldCheck className="size-3.5" /> ตรวจ hash-chain
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => apiDownload(`/api/admin/audit/export?${auditQs.replace('limit=100', '')}`, 'audit-log.csv')}>
+          <Download className="size-3.5" /> ส่งออก CSV
+        </Button>
+      </div>
+      <StateView q={audit}>
+        <DataTable
+          rows={auditRows}
+          columns={[
+            { key: 'ts', label: 'เวลา', render: (r: any) => (r.ts ? thaiDate(r.ts) : '—') },
+            { key: 'tenant_id', label: 'บริษัท', render: (r: any) => companyName(r.tenant_id) },
+            { key: 'actor', label: 'ผู้ทำ', render: (r: any) => r.actor ?? '—' },
+            { key: 'action', label: 'การกระทำ', render: (r: any) => <span className="font-mono text-xs">{r.action ?? ''}</span> },
+            { key: 'status', label: 'ผล', render: (r: any) => <Badge variant={r.status === 'fail' ? 'destructive' : 'secondary'}>{r.status === 'fail' ? 'ล้มเหลว' : 'สำเร็จ'}</Badge> },
+          ]}
+          rowKey={(r: any) => r.id}
+          emptyText="ไม่มีกิจกรรมตามเงื่อนไข"
+          pageSize={50}
+        />
+      </StateView>
+      <p className="text-xs text-muted-foreground">แสดงล่าสุด {num(audit.data?.rows?.length ?? 0)} รายการ (จากทั้งหมด {num(audit.data?.total ?? 0)}) — กรองบริษัท/ผลเพื่อเจาะจง แล้วส่งออก CSV ได้ทั้งชุด</p>
+    </div>
+  );
 
   // Needs-attention — derived from the company list + request queue (no extra endpoint). "Trial ending soon"
   // = a Trialing company whose trial_ends_at is within the next 7 days.
-  const comps = companies.data ?? [];
   const now = Date.now();
   const suspendedN = comps.filter((c) => c.suspended).length;
   const pastDueN = comps.filter((c) => c.status === 'PastDue').length;
@@ -493,6 +567,7 @@ export default function PlatformConsole({
           { key: 'overview', label: 'ภาพรวม', content: overviewTab },
           { key: 'companies', label: `บริษัท (${companies.data?.length ?? 0})`, content: companiesTab },
           { key: 'onboarding', label: pending ? `Onboarding (${pending})` : 'Onboarding', content: onboardingTab },
+          { key: 'activity', label: 'กิจกรรม', content: activityTab },
         ]}
       />
       <CompanyDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={refresh} />
