@@ -18,10 +18,12 @@ import { Label } from '@/components/ui/label';
 import { FormField } from '@/components/form-field';
 import { Tabs } from '@/components/tabs';
 import { statusVariant } from '@/components/ui';
+import { useLang } from '@/lib/i18n';
 
 const g = (r: any, ...keys: string[]) => { for (const k of keys) if (r[k] != null) return r[k]; return ''; };
 
 function Library() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['bom-master'], queryFn: () => api('/api/bom/master') });
   const [code, setCode] = useState(''); const [name, setName] = useState(''); const [sell, setSell] = useState(0); const [labor, setLabor] = useState(0);
@@ -33,14 +35,14 @@ function Library() {
   // Inline validation (shown after a save attempt). Numeric fields must be non-negative; a material line is
   // validated only once it has an Item ID, so the trailing empty row never nags.
   const nn = (v: unknown) => Number(v) >= 0;
-  const codeErr = !code.trim() ? 'ระบุรหัสสูตร' : null;
-  const nameErr = !name.trim() ? 'ระบุชื่อสินค้า' : null;
-  const sellErr = !nn(sell) ? 'ราคาขายต้องไม่ติดลบ' : null;
-  const laborErr = !nn(labor) ? 'ค่าแรงต้องไม่ติดลบ' : null;
+  const codeErr = !code.trim() ? t('mf.bom_err_code') : null;
+  const nameErr = !name.trim() ? t('mf.bom_err_name') : null;
+  const sellErr = !nn(sell) ? t('mf.bom_err_sell_neg') : null;
+  const laborErr = !nn(labor) ? t('mf.bom_err_labor_neg') : null;
   const lineErr = (l: { item_id: string; qty_use_uom: number; conv_factor: number }) => {
     if (!l.item_id.trim()) return null;
-    if (!(Number(l.qty_use_uom) > 0)) return 'จำนวนใช้ต้องมากกว่า 0';
-    if (!(Number(l.conv_factor) > 0)) return 'อัตราแปลงต้องมากกว่า 0';
+    if (!(Number(l.qty_use_uom) > 0)) return t('mf.bom_err_qty_gt0');
+    if (!(Number(l.conv_factor) > 0)) return t('mf.bom_err_conv_gt0');
     return null;
   };
   const invalid = !!codeErr || !!nameErr || !!sellErr || !!laborErr || lines.some((l) => lineErr(l));

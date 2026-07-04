@@ -81,7 +81,7 @@ export default function NotificationsPage() {
                     {!it.is_read && (
                       <Button variant="ghost" size="sm" className="gap-1 text-xs text-muted-foreground" disabled={markRead.isPending} onClick={() => markRead.mutate(it.id)}>
                         <Check className="size-3.5" />
-                        อ่านแล้ว
+                        {t('pb.notif_mark_read')}
                       </Button>
                     )}
                   </li>

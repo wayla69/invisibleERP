@@ -21,8 +21,8 @@ export default function OpsPage() {
         {q.data && (
           <div className="grid gap-4 md:grid-cols-3">
             <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Activity className="size-4 text-primary" /> {t('st.ops.process')}</CardTitle></CardHeader><CardContent className="text-sm"><p>Uptime: {q.data.uptime_s}s</p><p>Node: {q.data.node}</p></CardContent></Card>
-            <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Database className="size-4 text-primary" /> แคช (Cache)</CardTitle></CardHeader><CardContent className="text-sm"><p>Provider: {q.data.cache.provider}</p><p>Size {q.data.cache.size} · Hits {q.data.cache.hits} · Misses {q.data.cache.misses}</p></CardContent></Card>
-            <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Layers className="size-4 text-primary" /> การขยายขนาด</CardTitle></CardHeader><CardContent className="text-sm"><p>Cache: {q.data.scale.cache_provider}</p><p>Queue: {q.data.scale.queue_provider}</p><p className="mt-2 text-xs text-muted-foreground">{q.data.scale.note}</p></CardContent></Card>
+            <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Database className="size-4 text-primary" /> {t('st.ops.cache')}</CardTitle></CardHeader><CardContent className="text-sm"><p>Provider: {q.data.cache.provider}</p><p>Size {q.data.cache.size} · Hits {q.data.cache.hits} · Misses {q.data.cache.misses}</p></CardContent></Card>
+            <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Layers className="size-4 text-primary" /> {t('st.ops.scale')}</CardTitle></CardHeader><CardContent className="text-sm"><p>Cache: {q.data.scale.cache_provider}</p><p>Queue: {q.data.scale.queue_provider}</p><p className="mt-2 text-xs text-muted-foreground">{q.data.scale.note}</p></CardContent></Card>
           </div>
         )}
       </StateView>

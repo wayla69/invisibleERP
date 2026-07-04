@@ -238,45 +238,45 @@ function TablePanel({ t: tbl, onChange, onClose, onOrder }: { t: TableRow; onCha
   const addItem = useMutation({
     mutationFn: async () => {
       const items = [{ name: item.name, qty: Number(item.qty) || 1, unit_price: Number(item.price) || 0, station_code: item.station }];
-      if (t.order) return api(`/api/restaurant/orders/${t.order.order_no}/items`, { method: 'POST', body: JSON.stringify({ items }) });
-      return api('/api/restaurant/orders', { method: 'POST', body: JSON.stringify({ table_id: t.id, session_id: sessionId ?? undefined, items }) });
+      if (tbl.order) return api(`/api/restaurant/orders/${tbl.order.order_no}/items`, { method: 'POST', body: JSON.stringify({ items }) });
+      return api('/api/restaurant/orders', { method: 'POST', body: JSON.stringify({ table_id: tbl.id, session_id: sessionId ?? undefined, items }) });
     },
-    onSuccess: () => { setItem({ ...item, name: '', price: '' }); setMsg('เพิ่มรายการแล้ว'); onChange(); },
+    onSuccess: () => { setItem({ ...item, name: '', price: '' }); setMsg(t('px.tbl_item_added')); onChange(); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
-  const fire = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/fire`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('ส่งเข้าครัวแล้ว'); onChange(); }, onError: onErr });
+  const fire = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${tbl.order!.order_no}/fire`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg(t('px.tbl_sent_to_kitchen')); onChange(); }, onError: onErr });
   const [fireCourse, setFireCourse] = useState('');
-  const fireCourseM = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/fire?course=${Number(fireCourse)}`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg(`ส่งครัวคอร์ส ${fireCourse} แล้ว`); setFireCourse(''); onChange(); }, onError: onErr });
-  const bill = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/bill`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('เรียกเก็บเงินแล้ว'); onChange(); }, onError: onErr });
-  const checkout = useMutation({ mutationFn: () => api<{ tax_invoice_no: string }>(`/api/restaurant/orders/${t.order!.order_no}/checkout`, { method: 'POST', body: JSON.stringify({ method: 'Cash' }) }), onSuccess: (r) => { setMsg(`ชำระเงินสำเร็จ · ใบกำกับภาษี ${r.tax_invoice_no ?? '-'}`); onChange(); }, onError: onErr });
-  const clear = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }), onSuccess: () => { setMsg('เคลียร์โต๊ะแล้ว'); onClose(); onChange(); }, onError: onErr });
-  const del = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}`, { method: 'DELETE' }), onSuccess: () => { onClose(); onChange(); }, onError: onErr });
-  const removeTable = () => { if (typeof window !== 'undefined' && !window.confirm(`ลบโต๊ะ ${t.table_no}? ประวัติการขายยังอยู่ครบ`)) return; del.mutate(); };
+  const fireCourseM = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${tbl.order!.order_no}/fire?course=${Number(fireCourse)}`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg(t('px.tbl_course_fired', { course: fireCourse })); setFireCourse(''); onChange(); }, onError: onErr });
+  const bill = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${tbl.order!.order_no}/bill`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg(t('px.tbl_bill_requested_msg')); onChange(); }, onError: onErr });
+  const checkout = useMutation({ mutationFn: () => api<{ tax_invoice_no: string }>(`/api/restaurant/orders/${tbl.order!.order_no}/checkout`, { method: 'POST', body: JSON.stringify({ method: 'Cash' }) }), onSuccess: (r) => { setMsg(t('px.tbl_checkout_success', { no: r.tax_invoice_no ?? '-' })); onChange(); }, onError: onErr });
+  const clear = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${tbl.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }), onSuccess: () => { setMsg(t('px.tbl_table_cleared')); onClose(); onChange(); }, onError: onErr });
+  const del = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${tbl.id}`, { method: 'DELETE' }), onSuccess: () => { onClose(); onChange(); }, onError: onErr });
+  const removeTable = () => { if (typeof window !== 'undefined' && !window.confirm(t('px.tbl_remove_confirm', { no: tbl.table_no }))) return; del.mutate(); };
 
   return (
-    <Card className={cn('mt-4 gap-4 border-t-4 p-5', tone(t.status).bar)}>
+    <Card className={cn('mt-4 gap-4 border-t-4 p-5', tone(tbl.status).bar)}>
       <div className="flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-lg font-semibold">โต๊ะ {t.table_no} · <Badge variant={statusVariant(STATUS_TH[t.status])}>{STATUS_TH[t.status]}</Badge></h3>
+        <h3 className="flex items-center gap-2 text-lg font-semibold">{t('px.tbl_table_label', { no: tbl.table_no })} · <Badge variant={statusVariant(statusTh(t, tbl.status))}>{statusTh(t, tbl.status)}</Badge></h3>
         <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" onClick={onOrder}><Utensils className="size-4" /> สั่งอาหาร</Button>
+          <Button variant="outline" size="sm" onClick={onOrder}><Utensils className="size-4" /> {t('px.tbl_order_food')}</Button>
           <Button variant="ghost" size="icon" onClick={onClose}><X className="size-4" /></Button>
         </div>
       </div>
       <Msg ok={!msg.startsWith('❌')}>{msg}</Msg>
 
-      {t.status === 'available' && <Button onClick={() => open.mutate()} disabled={open.isPending}><Armchair className="size-4" /> เปิดโต๊ะ (รับลูกค้า)</Button>}
-      {qr && <div className="text-sm text-muted-foreground">QR ลูกค้า: <a href={qr} target="_blank" className="text-primary hover:underline">{qr}</a></div>}
+      {tbl.status === 'available' && <Button onClick={() => open.mutate()} disabled={open.isPending}><Armchair className="size-4" /> {t('px.tbl_open_table')}</Button>}
+      {qr && <div className="text-sm text-muted-foreground">{t('px.tbl_customer_qr')} <a href={qr} target="_blank" className="text-primary hover:underline">{qr}</a></div>}
 
       <div>
-        <Button variant="outline" size="sm" onClick={() => printQr.mutate()} disabled={printQr.isPending}><QrCode className="size-4" /> QR ติดโต๊ะ (สำหรับพิมพ์)</Button>
+        <Button variant="outline" size="sm" onClick={() => printQr.mutate()} disabled={printQr.isPending}><QrCode className="size-4" /> {t('px.tbl_table_qr_print')}</Button>
         {sticker && (
           <div className="mt-2 flex items-center gap-3 rounded-lg border p-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={sticker.qr_image} alt={`QR โต๊ะ ${t.table_no}`} className="size-28 rounded bg-white p-1" />
+            <img src={sticker.qr_image} alt={t('px.tbl_qr_alt', { no: tbl.table_no })} className="size-28 rounded bg-white p-1" />
             <div className="min-w-0 text-xs text-muted-foreground">
-              <p className="font-medium text-foreground">สแกนเพื่อสั่งอาหาร — โต๊ะ {t.table_no}</p>
+              <p className="font-medium text-foreground">{t('px.tbl_scan_to_order', { no: tbl.table_no })}</p>
               <p className="break-all">{sticker.url}</p>
-              <p className="mt-1">พิมพ์สติกเกอร์นี้ติดที่โต๊ะ — ลูกค้าสแกนเพื่อเปิดเซสชันและสั่งอาหารเอง</p>
+              <p className="mt-1">{t('px.tbl_sticker_hint')}</p>
             </div>
           </div>
         )}

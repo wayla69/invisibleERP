@@ -143,15 +143,15 @@ function RequestsTab() {
           <DataTable
             rows={q.data.requests}
             columns={[
-              { key: 'req_no', label: 'เลขที่' },
-              { key: 'kind', label: 'ประเภท', render: (r: any) => <Badge variant={r.kind === 'advance' ? 'secondary' : 'default'}>{r.kind === 'advance' ? 'เบิกล่วงหน้า' : 'ค่าใช้จ่าย'}</Badge> },
-              { key: 'payee', label: 'ผู้รับ', render: (r: any) => r.payee ?? '—' },
-              { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-              { key: 'doc_ref', label: 'เอกสาร', render: (r: any) => r.doc_ref ?? '—' },
-              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={reqStatusVariant(r.status)}>{reqStatusTh(r.status)}</Badge> },
-              { key: 'act', label: '', align: 'right', render: (r: any) => (r.kind === 'advance' && r.status === 'Approved' ? <Button size="sm" variant="outline" disabled={settle.isPending} onClick={() => settle.mutate(r.req_no)}>เคลียร์</Button> : null) },
+              { key: 'req_no', label: t('dash.col_no') },
+              { key: 'kind', label: t('fnx.petty.col_kind'), render: (r: any) => <Badge variant={r.kind === 'advance' ? 'secondary' : 'default'}>{r.kind === 'advance' ? t('fnx.petty.kind_advance') : t('fnx.petty.kind_expense')}</Badge> },
+              { key: 'payee', label: t('fnx.petty.col_payee'), render: (r: any) => r.payee ?? '—' },
+              { key: 'amount', label: t('fnx.petty.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+              { key: 'doc_ref', label: t('fnx.petty.col_doc'), render: (r: any) => r.doc_ref ?? '—' },
+              { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={reqStatusVariant(r.status)}>{REQ_STATUS_KEY[r.status] ? t(REQ_STATUS_KEY[r.status]) : r.status}</Badge> },
+              { key: 'act', label: '', align: 'right', render: (r: any) => (r.kind === 'advance' && r.status === 'Approved' ? <Button size="sm" variant="outline" disabled={settle.isPending} onClick={() => settle.mutate(r.req_no)}>{t('fnx.petty.settle_btn')}</Button> : null) },
             ]}
-            emptyState={{ icon: ReceiptText, title: 'ยังไม่มีรายการ' }}
+            emptyState={{ icon: ReceiptText, title: t('fnx.petty.requests_empty_title') }}
           />
         )}
       </StateView>
@@ -160,41 +160,42 @@ function RequestsTab() {
 }
 
 function ApprovalsTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['pc-pending'], queryFn: () => api('/api/finance/petty-cash/requests?status=PendingApproval') });
   const refresh = () => { qc.invalidateQueries({ queryKey: ['pc-pending'] }); qc.invalidateQueries({ queryKey: ['pc-requests'] }); qc.invalidateQueries({ queryKey: ['pc-funds'] }); };
   const approve = useMutation({
     mutationFn: (reqNo: string) => api<any>(`/api/finance/petty-cash/requests/${reqNo}/approve`, { method: 'POST' }),
-    onSuccess: (r: any) => { notifySuccess(`อนุมัติ ${r.req_no} — ลงบัญชีแล้ว (คงเหลือกองทุน ${baht(r.fund_balance)})`); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_approved', { no: r.req_no, balance: baht(r.fund_balance) })); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
-    mutationFn: (reqNo: string) => api<any>(`/api/finance/petty-cash/requests/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
-    onSuccess: () => { notifySuccess('ปฏิเสธคำขอแล้ว'); refresh(); },
+    mutationFn: (reqNo: string) => api<any>(`/api/finance/petty-cash/requests/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt(t('fnx.petty.prompt_reject')) || undefined }) }),
+    onSuccess: () => { notifySuccess(t('fnx.petty.toast_rejected')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const pending: any[] = q.data?.requests ?? [];
   return (
     <div className="space-y-4">
-      <StatCard label="คำขอรออนุมัติ" value={num(pending.length)} icon={HandCoins} tone={pending.length ? 'warning' : 'success'} className="max-w-xs" />
+      <StatCard label={t('fnx.petty.pending_stat')} value={num(pending.length)} icon={HandCoins} tone={pending.length ? 'warning' : 'success'} className="max-w-xs" />
       <Card className="gap-3 p-5">
-        <p className="text-xs text-muted-foreground">ผู้อนุมัติต้องเป็นคนละคนกับผู้ขอ (แบ่งแยกหน้าที่) — ลงบัญชีและตัดยอดกองทุนเมื่ออนุมัติเท่านั้น</p>
+        <p className="text-xs text-muted-foreground">{t('fnx.petty.approvals_note')}</p>
         <StateView q={q}>
           {q.data && (
             <DataTable
               rows={pending}
-              emptyState={{ icon: HandCoins, title: 'ไม่มีคำขอที่รออนุมัติ' }}
+              emptyState={{ icon: HandCoins, title: t('fnx.petty.pending_empty_title') }}
               columns={[
-                { key: 'req_no', label: 'เลขที่' },
-                { key: 'kind', label: 'ประเภท', render: (r: any) => (r.kind === 'advance' ? 'เบิกล่วงหน้า' : 'ค่าใช้จ่าย') },
-                { key: 'payee', label: 'ผู้รับ', render: (r: any) => r.payee ?? '—' },
-                { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-                { key: 'doc_ref', label: 'เอกสาร', render: (r: any) => r.doc_ref ?? '—' },
-                { key: 'requested_by', label: 'ผู้ขอ', render: (r: any) => <span className="text-xs text-muted-foreground">{r.requested_by ?? '—'}</span> },
+                { key: 'req_no', label: t('dash.col_no') },
+                { key: 'kind', label: t('fnx.petty.col_kind'), render: (r: any) => (r.kind === 'advance' ? t('fnx.petty.kind_advance') : t('fnx.petty.kind_expense')) },
+                { key: 'payee', label: t('fnx.petty.col_payee'), render: (r: any) => r.payee ?? '—' },
+                { key: 'amount', label: t('fnx.petty.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'doc_ref', label: t('fnx.petty.col_doc'), render: (r: any) => r.doc_ref ?? '—' },
+                { key: 'requested_by', label: t('fnx.petty.col_requester'), render: (r: any) => <span className="text-xs text-muted-foreground">{r.requested_by ?? '—'}</span> },
                 { key: 'act', label: '', align: 'right', render: (r: any) => (
                   <div className="flex justify-end gap-1.5">
-                    <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(r.req_no)}>อนุมัติ</Button>
-                    <Button size="sm" variant="ghost" disabled={reject.isPending} onClick={() => reject.mutate(r.req_no)}>ปฏิเสธ</Button>
+                    <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(r.req_no)}>{t('fin.approve')}</Button>
+                    <Button size="sm" variant="ghost" disabled={reject.isPending} onClick={() => reject.mutate(r.req_no)}>{t('fnx.petty.reject_btn')}</Button>
                   </div>
                 ) },
               ]}

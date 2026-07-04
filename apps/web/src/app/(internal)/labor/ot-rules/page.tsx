@@ -189,7 +189,7 @@ export default function OtRulesPage() {
 
       {/* Labor alerts */}
       <Card>
-        <CardHeader><CardTitle className="text-sm">การแจ้งเตือนแรงงาน % (ที่รอดำเนินการ)</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-sm">{t('hx.labor.alerts_title')}</CardTitle></CardHeader>
         <CardContent>
           <StateView q={alerts}>
             <DataTable
@@ -198,18 +198,18 @@ export default function OtRulesPage() {
               columns={[
                 {
                   key: 'alert_type',
-                  label: 'ประเภท',
+                  label: t('hx.labor.col_type'),
                   render: (r) => (
                     <div className="flex items-center gap-1.5">
                       <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
-                      <span className="text-xs">{r.alert_type === 'LABOR_PCT_EXCEEDED' ? 'แรงงาน % เกินเป้า' : r.alert_type}</span>
+                      <span className="text-xs">{r.alert_type === 'LABOR_PCT_EXCEEDED' ? t('hx.labor.type_exceeded') : r.alert_type}</span>
                     </div>
                   ),
                 },
-                { key: 'period_from', label: 'ช่วงเวลา', render: (r) => <span className="text-xs tabular">{r.period_from} – {r.period_to}</span> },
+                { key: 'period_from', label: t('hx.labor.col_period'), render: (r) => <span className="text-xs tabular">{r.period_from} – {r.period_to}</span> },
                 {
                   key: 'actual_pct',
-                  label: 'แรงงาน % จริง',
+                  label: t('hx.labor.col_actual_pct'),
                   align: 'right',
                   render: (r) => (
                     <span className="tabular text-destructive font-medium">{num(r.actual_pct)}%</span>
@@ -217,7 +217,7 @@ export default function OtRulesPage() {
                 },
                 {
                   key: 'threshold_pct',
-                  label: 'เป้าหมาย',
+                  label: t('hx.labor.col_target'),
                   align: 'right',
                   render: (r) => <span className="tabular text-muted-foreground">{num(r.threshold_pct)}%</span>,
                 },
@@ -232,15 +232,15 @@ export default function OtRulesPage() {
                       onClick={() => resolveAlert.mutate(r.id)}
                     >
                       <CheckCircle className="mr-1 h-3.5 w-3.5" />
-                      ปิด
+                      {t('hx.common.close')}
                     </Button>
                   ),
                 },
               ]}
               emptyState={{
                 icon: ShieldCheck,
-                title: 'ไม่มีการแจ้งเตือนที่รอดำเนินการ',
-                description: 'ตรวจแรงงาน % ได้จากหน้า จัดตารางเวร',
+                title: t('hx.labor.empty_title'),
+                description: t('hx.labor.empty_desc'),
               }}
             />
           </StateView>

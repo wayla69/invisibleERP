@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { MessageSquare, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,7 @@ type Res = { question: string; resolved: { dimension: string; date_from?: string
 
 // NL analytics (Platform Phase 17 — B3). Plain-language question → governed query over the semantic layer.
 export default function NlAnalyticsPage() {
+  const { t } = useLang();
   const [q, setQ] = useState('');
   const [res, setRes] = useState<Res | null>(null);
   const [err, setErr] = useState('');

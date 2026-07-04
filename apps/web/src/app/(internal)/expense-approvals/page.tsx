@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, X, Receipt, CircleDollarSign } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -19,6 +20,7 @@ interface PendingClaim {
 }
 
 export default function ExpenseApprovalsPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ pending: PendingClaim[]; count: number }>({
     queryKey: ['ess-pending-expenses'],
@@ -33,8 +35,8 @@ export default function ExpenseApprovalsPage() {
       }),
     onSuccess: (r) => {
       notifySuccess(
-        r.status === 'Approved' ? 'อนุมัติคำขอเบิกแล้ว' : 'ปฏิเสธคำขอเบิกแล้ว',
-        r.ap_txn_no ? `ตั้งเจ้าหนี้ค่าใช้จ่าย ${r.ap_txn_no} (เข้าคิวจ่าย AP)` : undefined,
+        r.status === 'Approved' ? t('hx.exp.approved_toast') : t('hx.exp.rejected_toast'),
+        r.ap_txn_no ? t('hx.exp.ap_detail', { no: r.ap_txn_no }) : undefined,
       );
       qc.invalidateQueries({ queryKey: ['ess-pending-expenses'] });
     },

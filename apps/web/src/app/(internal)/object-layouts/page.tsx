@@ -142,21 +142,21 @@ export default function ObjectLayoutsPage() {
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>การจัดวางฟิลด์</Label>
+                  <Label>{t('st.ol.field_layout')}</Label>
                   {fields.map((f) => (
                     <div key={f.field_key} className="flex items-center justify-between gap-2 rounded-md border px-3 py-1.5 text-sm">
                       <span>{f.label}{f.required ? ' *' : ''} <span className="text-xs text-muted-foreground">· {f.data_type}</span></span>
                       <select className="h-8 rounded-md border bg-transparent px-2 text-sm" value={assign[f.field_key] ?? 0} onChange={(e) => setAssign((a) => ({ ...a, [f.field_key]: Number(e.target.value) }))}>
-                        {sections.map((s, i) => <option key={i} value={i}>{s.title || `ส่วนที่ ${i + 1}`}</option>)}
-                        <option value={HIDDEN}>— ซ่อน —</option>
+                        {sections.map((s, i) => <option key={i} value={i}>{s.title || t('st.ol.section_n', { n: i + 1 })}</option>)}
+                        <option value={HIDDEN}>{t('st.ol.hide_option')}</option>
                       </select>
                     </div>
                   ))}
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <Button onClick={() => { setMsg(''); save.mutate(); }} disabled={save.isPending || !name.trim()}><Save className="size-4" /> บันทึก</Button>
-                  <Button variant="outline" onClick={runPreview}><RefreshCw className="size-4" /> รีเฟรชตัวอย่าง</Button>
+                  <Button onClick={() => { setMsg(''); save.mutate(); }} disabled={save.isPending || !name.trim()}><Save className="size-4" /> {t('fin.save')}</Button>
+                  <Button variant="outline" onClick={runPreview}><RefreshCw className="size-4" /> {t('st.ol.refresh_preview')}</Button>
                 </div>
               </CardContent>
             </Card>
@@ -164,7 +164,7 @@ export default function ObjectLayoutsPage() {
 
           {/* preview */}
           <Card className="lg:sticky lg:top-4 h-fit">
-            <CardHeader><CardTitle className="text-base">ตัวอย่างฟอร์ม</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base">{t('st.ol.form_preview')}</CardTitle></CardHeader>
             <CardContent className="grid gap-4">
               {(preview?.sections ?? []).map((sec, i) => (
                 <div key={i} className="grid gap-2">
@@ -179,7 +179,7 @@ export default function ObjectLayoutsPage() {
                   </div>
                 </div>
               ))}
-              {(preview?.hidden ?? []).length > 0 && <p className="text-xs text-muted-foreground">ซ่อน: {(preview?.hidden ?? []).map((f) => f.label).join(', ')}</p>}
+              {(preview?.hidden ?? []).length > 0 && <p className="text-xs text-muted-foreground">{t('st.ol.hidden_label')}: {(preview?.hidden ?? []).map((f) => f.label).join(', ')}</p>}
             </CardContent>
           </Card>
         </div>

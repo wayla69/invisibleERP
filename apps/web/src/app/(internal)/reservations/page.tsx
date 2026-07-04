@@ -105,19 +105,19 @@ export default function ReservationsPage() {
         <DataTable
           rows={d.reservations}
           rowKey={(r) => r.id}
-          emptyState={{ icon: CalendarClock, title: 'ยังไม่มีรายการจอง/คิว', description: 'เพิ่มการจองล่วงหน้าหรือรับลูกค้าเข้าคิวจากฟอร์มด้านบน' }}
+          emptyState={{ icon: CalendarClock, title: t('px.resv_empty_title'), description: t('px.resv_empty_desc') }}
           columns={[
-            { key: 'kind', label: 'ประเภท', render: (r) => <Badge variant="outline">{r.kind === 'waitlist' ? 'รอคิว' : 'จอง'}</Badge> },
-            { key: 'customer_name', label: 'ลูกค้า', render: (r) => <div><div className="font-medium">{r.customer_name || '—'}</div><div className="text-xs text-muted-foreground">{r.customer_phone || ''}</div></div> },
-            { key: 'party_size', label: 'คน', align: 'right', render: (r) => num(r.party_size) },
-            { key: 'reserved_for', label: 'เวลา', render: (r) => r.reserved_for ? thaiDate(r.reserved_for) : (r.quoted_wait_min != null ? `รอ ~${r.quoted_wait_min} นาที` : '—') },
-            { key: 'table_id', label: 'โต๊ะ', render: (r) => r.table_id ?? '—' },
-            { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={STATUS[r.status]?.tone ?? 'muted'}>{STATUS[r.status]?.th ?? r.status}</Badge> },
+            { key: 'kind', label: t('px.resv_col_kind'), render: (r) => <Badge variant="outline">{r.kind === 'waitlist' ? t('px.resv_kind_waitlist') : t('px.resv_kind_reservation')}</Badge> },
+            { key: 'customer_name', label: t('fin.col_customer'), render: (r) => <div><div className="font-medium">{r.customer_name || '—'}</div><div className="text-xs text-muted-foreground">{r.customer_phone || ''}</div></div> },
+            { key: 'party_size', label: t('px.resv_col_party'), align: 'right', render: (r) => num(r.party_size) },
+            { key: 'reserved_for', label: t('px.resv_col_time'), render: (r) => r.reserved_for ? thaiDate(r.reserved_for) : (r.quoted_wait_min != null ? t('px.resv_wait_min', { min: r.quoted_wait_min }) : '—') },
+            { key: 'table_id', label: t('px.resv_col_table'), render: (r) => r.table_id ?? '—' },
+            { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={STATUS[r.status]?.tone ?? 'muted'}>{STATUS[r.status] ? t(`px.resv_st_${r.status}`) : r.status}</Badge> },
             { key: 'actions', label: '', align: 'right', render: (r) => open(r) ? (
               <div className="flex justify-end gap-1.5">
-                {r.status !== 'ready' && <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'notify' })}>แจ้งโต๊ะพร้อม</Button>}
-                <Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'seat' })}>รับเข้านั่ง</Button>
-                <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: r.kind === 'reservation' ? 'no-show' : 'cancel' })}>{r.kind === 'reservation' ? 'ไม่มา' : 'ออกคิว'}</Button>
+                {r.status !== 'ready' && <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'notify' })}>{t('px.resv_notify_btn')}</Button>}
+                <Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'seat' })}>{t('px.resv_seat_btn')}</Button>
+                <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: r.kind === 'reservation' ? 'no-show' : 'cancel' })}>{r.kind === 'reservation' ? t('px.resv_noshow_btn') : t('px.resv_leave_btn')}</Button>
               </div>
             ) : null },
           ]}

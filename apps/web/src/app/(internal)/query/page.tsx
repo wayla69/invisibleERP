@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { BarChart3, Play, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,6 +21,7 @@ const money = (x: number) => (Number(x) || 0).toLocaleString('en-US', { minimumF
 const sel = 'h-9 rounded-md border bg-transparent px-3 text-sm';
 
 export default function QueryStudioPage() {
+  const { t } = useLang();
   const [dimension, setDimension] = useState('period_month');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -39,22 +41,22 @@ export default function QueryStudioPage() {
 
   return (
     <div>
-      <PageHeader title="เครื่องมือวิเคราะห์ (Analytics studio)" description="สร้างรายงานเองจากชั้นข้อมูลที่ควบคุมแล้ว (semantic layer) — เลือกมิติ + ช่วงวันที่ แล้วดูตัวเลขสรุป (อ่านอย่างเดียว แยกตามกิจการ)" />
+      <PageHeader title={t('pb.query_title')} description={t('pb.query_subtitle')} />
 
       <Card className="mb-6">
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><BarChart3 className="size-4 text-primary" /> สร้างรายงาน</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><BarChart3 className="size-4 text-primary" /> {t('pb.query_build_report')}</CardTitle></CardHeader>
         <CardContent>
           <StateView q={model}>
             <div className="flex flex-wrap items-end gap-3">
               <div className="grid gap-1">
-                <Label>จัดกลุ่มตาม (มิติ)</Label>
+                <Label>{t('pb.query_group_by')}</Label>
                 <select className={sel} value={dimension} onChange={(e) => setDimension(e.target.value)}>
                   {(model.data?.dimensions ?? []).map((d) => <option key={d.key} value={d.key}>{d.label} ({d.label_en})</option>)}
                 </select>
               </div>
-              <div className="grid gap-1"><Label>ตั้งแต่วันที่</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-              <div className="grid gap-1"><Label>ถึงวันที่</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
-              <Button disabled={run.isPending} onClick={() => run.mutate()}>{run.isPending ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />} รันรายงาน</Button>
+              <div className="grid gap-1"><Label>{t('pb.query_date_from')}</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+              <div className="grid gap-1"><Label>{t('pb.query_date_to')}</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+              <Button disabled={run.isPending} onClick={() => run.mutate()}>{run.isPending ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />} {t('pb.query_run')}</Button>
             </div>
             {msg && <p className="mt-2 text-sm text-destructive">{msg}</p>}
           </StateView>
@@ -63,9 +65,9 @@ export default function QueryStudioPage() {
 
       {result && (
         <Card>
-          <CardHeader><CardTitle className="text-base">ผลลัพธ์ — จัดกลุ่มตาม {model.data?.dimensions.find((d) => d.key === result.dimension)?.label ?? result.dimension}</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('pb.query_result_by', { label: model.data?.dimensions.find((d) => d.key === result.dimension)?.label ?? result.dimension })}</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto">
-            {result.rows.length === 0 ? <p className="text-sm text-muted-foreground">ไม่มีข้อมูลในช่วงที่เลือก</p> : (
+            {result.rows.length === 0 ? <p className="text-sm text-muted-foreground">{t('pb.query_no_data')}</p> : (
               <table className="w-full text-sm">
                 <thead><tr className="border-b text-left text-muted-foreground"><th className="px-2 py-1 font-medium">{model.data?.dimensions.find((d) => d.key === result.dimension)?.label}</th>{measures.map((m) => <th key={m.key} className="px-2 py-1 text-right font-medium">{m.label}</th>)}</tr></thead>
                 <tbody>
