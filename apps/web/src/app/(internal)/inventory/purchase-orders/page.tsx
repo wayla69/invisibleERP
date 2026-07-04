@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ClipboardList, Coins, Hourglass, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -20,8 +20,11 @@ export default function PurchaseOrdersPage() {
   const q = useQuery<{ purchase_orders: PO[] }>({ queryKey: ['pos'], queryFn: () => api('/api/inventory/purchase-orders?limit=50') });
   const rows = q.data?.purchase_orders ?? [];
 
-  const [search, setSearch] = useState(() => readQueryParam('q')); // seed from a ⌘K spotlight deep-link
+  const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  // Seed the search box from a ⌘K spotlight deep-link (?q=). Done in an effect (not a useState initializer)
+  // so the server-rendered markup stays '' and there's no hydration mismatch.
+  useEffect(() => { const q = readQueryParam('q'); if (q) setSearch(q); }, []);
 
   const statuses = useMemo(() => Array.from(new Set(rows.map((r) => r.Status).filter(Boolean))), [rows]);
   const filtered = useMemo(() => {

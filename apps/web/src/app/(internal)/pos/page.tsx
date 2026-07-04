@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { Banknote, Hourglass, Plus, Receipt, SearchX, TrendingUp } from 'lucide-react';
@@ -29,8 +29,10 @@ export default function PosPage() {
   const q = useQuery<{ orders: Order[] }>({ queryKey: ['orders'], queryFn: () => api('/api/pos/orders?limit=50') });
   const orders = q.data?.orders ?? [];
 
-  const [search, setSearch] = useState(() => readQueryParam('q')); // seed from a ⌘K spotlight deep-link
+  const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  // Seed the search box from a ⌘K spotlight deep-link (?q=) after mount, avoiding a hydration mismatch.
+  useEffect(() => { const q = readQueryParam('q'); if (q) setSearch(q); }, []);
 
   // Distinct statuses present in the loaded window — drives the quick-filter chips.
   const statuses = useMemo(() => Array.from(new Set(orders.map((o) => o.Status).filter(Boolean))), [orders]);
