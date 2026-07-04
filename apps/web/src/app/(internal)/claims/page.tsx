@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, FileWarning, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -25,12 +26,13 @@ function FilterBar({
   statusFilter: string | null; onStatus: (v: string | null) => void; placeholder: string;
   count?: string;
 }) {
+  const { t } = useLang();
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <SearchInput value={search} onChange={onSearch} placeholder={placeholder} ariaLabel="ค้นหาเคลม" count={count} />
+      <SearchInput value={search} onChange={onSearch} placeholder={placeholder} ariaLabel={t('hx.cl.search_aria')} count={count} />
       {statuses.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
-          <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => onStatus(null)}>ทั้งหมด</Button>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t('hx.common.filter_status')}>
+          <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => onStatus(null)}>{t('hx.common.all')}</Button>
           {statuses.map((s) => (
             <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" aria-pressed={statusFilter === s} onClick={() => onStatus(statusFilter === s ? null : s)}>{s}</Button>
           ))}
@@ -41,15 +43,17 @@ function FilterBar({
 }
 
 export default function ClaimsPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="จัดการเคลม (Claims)" description="เคลมจากลูกค้า (ขาย) และเคลมผู้ขาย (รับเข้า)" />
-      <Tabs tabs={[{ key: 'sales', label: 'เคลมการขาย', content: <SalesClaims /> }, { key: 'gr', label: 'เคลมผู้ขาย (GR)', content: <GrClaims /> }]} />
+      <PageHeader title={t('hx.cl.title')} description={t('hx.cl.desc')} />
+      <Tabs tabs={[{ key: 'sales', label: t('hx.cl.tab_sales'), content: <SalesClaims /> }, { key: 'gr', label: t('hx.cl.tab_gr'), content: <GrClaims /> }]} />
     </div>
   );
 }
 
 function SalesClaims() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['sales-claims'], queryFn: () => api('/api/claims/sales') });
   const [reason, setReason] = useState<Record<number, string>>({});
@@ -57,7 +61,7 @@ function SalesClaims() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const decide = useMutation({
     mutationFn: (v: { id: number; decision: 'approve' | 'reject' }) => api(`/api/claims/sales/${v.id}`, { method: 'PATCH', body: JSON.stringify({ decision: v.decision, reject_reason: reason[v.id] }) }),
-    onSuccess: () => { notifySuccess('บันทึกแล้ว'); qc.invalidateQueries({ queryKey: ['sales-claims'] }); },
+    onSuccess: () => { notifySuccess(t('hx.cl.saved')); qc.invalidateQueries({ queryKey: ['sales-claims'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 

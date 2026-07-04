@@ -208,6 +208,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'hx.br.add_title': { th: 'เพิ่มสาขาใหม่', en: 'Add a branch' },
   'hx.br.code': { th: 'รหัสสาขา', en: 'Branch code' },
   'hx.br.name': { th: 'ชื่อสาขา', en: 'Branch name' },
+  'hx.br.name_ph': { th: 'สาขาสีลม', en: 'Silom branch' },
   'hx.br.is_hq': { th: 'สำนักงานใหญ่ (HQ)', en: 'Head office (HQ)' },
   'hx.br.add_btn': { th: 'เพิ่มสาขา', en: 'Add branch' },
   'hx.br.stat_count': { th: 'จำนวนสาขา', en: 'Branch count' },

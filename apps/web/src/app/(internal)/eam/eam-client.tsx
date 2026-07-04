@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { useLang } from '@/lib/i18n';
 
 // ── API contract (apps/api/src/modules/eam) ───────────────────────────────────
 interface WorkOrder {
@@ -39,17 +40,18 @@ const selectCls =
   'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function EamWorkspace({ initialWo }: { initialWo?: unknown }) {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="ซ่อมบำรุงสินทรัพย์ (EAM)"
-        description="ใบสั่งงานซ่อม แผนบำรุงรักษาเชิงป้องกัน (PM) และดัชนีความน่าเชื่อถือของสินทรัพย์ — ปิดงานพร้อมผู้รับเหมาจะตั้งเจ้าหนี้ค่าซ่อม (5710 → 2000) อัตโนมัติ (FA-06)"
+        title={t('mf.eam_title')}
+        description={t('mf.eam_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'wo', label: 'ใบสั่งงานซ่อม', content: <WorkOrders initialData={initialWo} /> },
-          { key: 'pm', label: 'แผนบำรุงรักษา (PM)', content: <PmSchedules /> },
-          { key: 'rel', label: 'ความน่าเชื่อถือ', content: <ReliabilityTab /> },
+          { key: 'wo', label: t('mf.eam_tab_wo'), content: <WorkOrders initialData={initialWo} /> },
+          { key: 'pm', label: t('mf.eam_tab_pm'), content: <PmSchedules /> },
+          { key: 'rel', label: t('mf.eam_tab_rel'), content: <ReliabilityTab /> },
         ]}
       />
     </div>
@@ -58,6 +60,7 @@ export default function EamWorkspace({ initialWo }: { initialWo?: unknown }) {
 
 // ───────────────────────── ใบสั่งงานซ่อม ─────────────────────────
 function WorkOrders({ initialData }: { initialData?: unknown }) {
+  const { t } = useLang();
   const qc = useQueryClient();
   // Server-prefetched payload (see page.tsx) renders instantly; react-query still owns the cache and
   // refetches on invalidation exactly as before. A null/undefined prefetch = the old client-only path.
@@ -91,7 +94,7 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
         }),
       }),
     onSuccess: (r: any) => {
-      notifySuccess(`สร้างใบสั่งงานสำเร็จ: ${r.wo_no}`);
+      notifySuccess(t('mf.eam_wo_created', { wo: r.wo_no }));
       setAssetNo(''); setDescription(''); setVendorName(''); setCostEstimate(''); setScheduledDate('');
       qc.invalidateQueries({ queryKey: ['eam-wo'] });
     },
@@ -102,7 +105,7 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
     mutationFn: (v: { woNo: string; status: string }) =>
       api(`/api/eam/work-orders/${v.woNo}/status`, { method: 'PATCH', body: JSON.stringify({ status: v.status }) }),
     onSuccess: (r: any) => {
-      notifySuccess(`อัปเดตสถานะ ${r.wo_no} → ${r.status}${r.ap_txn_no ? ` · ตั้งเจ้าหนี้ ${r.ap_txn_no}` : ''}`);
+      notifySuccess(`${t('mf.eam_status_updated', { wo: r.wo_no, status: r.status })}${r.ap_txn_no ? t('mf.eam_ap_created', { ap: r.ap_txn_no }) : ''}`);
       qc.invalidateQueries({ queryKey: ['eam-wo'] });
     },
     onError: (e: any) => notifyError(e.message),
@@ -118,59 +121,59 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
       <StateView q={q}>
         {q.data && (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="ใบสั่งงานทั้งหมด" value={num(rows.length)} icon={Wrench} tone="primary" />
-            <StatCard label="ค้างดำเนินการ" value={num(open)} tone="warning" />
-            <StatCard label="เสร็จสิ้น" value={num(done)} tone="success" />
-            <StatCard label="ต้นทุนซ่อมจริง (รวม)" value={baht(cost)} icon={Activity} tone="info" />
+            <StatCard label={t('mf.eam_wo_total')} value={num(rows.length)} icon={Wrench} tone="primary" />
+            <StatCard label={t('mf.eam_pending')} value={num(open)} tone="warning" />
+            <StatCard label={t('mf.eam_done')} value={num(done)} tone="success" />
+            <StatCard label={t('mf.eam_actual_cost_total')} value={baht(cost)} icon={Activity} tone="info" />
           </div>
         )}
       </StateView>
 
       <Card className="max-w-4xl gap-4">
         <CardHeader>
-          <CardTitle className="text-base">สร้างใบสั่งงานซ่อม</CardTitle>
+          <CardTitle className="text-base">{t('mf.eam_create_wo')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="wo-asset">รหัสสินทรัพย์</Label>
-              <Input id="wo-asset" value={assetNo} onChange={(e) => setAssetNo(e.target.value)} placeholder="เช่น FA-0001" />
+              <Label htmlFor="wo-asset">{t('mf.eam_asset_label')}</Label>
+              <Input id="wo-asset" value={assetNo} onChange={(e) => setAssetNo(e.target.value)} placeholder={t('mf.eam_asset_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="wo-type">ประเภทงาน</Label>
+              <Label htmlFor="wo-type">{t('mf.eam_wotype_label')}</Label>
               <select id="wo-type" className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>
-                <option value="corrective">แก้ไข (Corrective)</option>
-                <option value="preventive">เชิงป้องกัน (Preventive)</option>
-                <option value="inspection">ตรวจสอบ (Inspection)</option>
+                <option value="corrective">{t('mf.eam_type_corrective')}</option>
+                <option value="preventive">{t('mf.eam_type_preventive')}</option>
+                <option value="inspection">{t('mf.eam_type_inspection')}</option>
               </select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="wo-pri">ความสำคัญ</Label>
+              <Label htmlFor="wo-pri">{t('mf.eam_priority_label')}</Label>
               <select id="wo-pri" className={selectCls} value={priority} onChange={(e) => setPriority(e.target.value)}>
-                <option value="low">ต่ำ</option>
-                <option value="medium">ปานกลาง</option>
-                <option value="high">สูง</option>
+                <option value="low">{t('mf.eam_pri_low')}</option>
+                <option value="medium">{t('mf.eam_pri_medium')}</option>
+                <option value="high">{t('mf.eam_pri_high')}</option>
               </select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="wo-sched">วันที่นัดซ่อม</Label>
+              <Label htmlFor="wo-sched">{t('mf.eam_sched_label')}</Label>
               <Input id="wo-sched" type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="wo-vendor">ผู้รับเหมา (ถ้ามี)</Label>
-              <Input id="wo-vendor" value={vendorName} onChange={(e) => setVendorName(e.target.value)} placeholder="ชื่อผู้รับเหมา" />
+              <Label htmlFor="wo-vendor">{t('mf.eam_vendor_label')}</Label>
+              <Input id="wo-vendor" value={vendorName} onChange={(e) => setVendorName(e.target.value)} placeholder={t('mf.eam_vendor_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="wo-cost">งบประมาณ (฿)</Label>
+              <Label htmlFor="wo-cost">{t('mf.eam_budget_label')}</Label>
               <Input id="wo-cost" type="number" min="0" value={costEstimate} onChange={(e) => setCostEstimate(e.target.value)} placeholder="0" />
             </div>
             <div className="grid gap-2 sm:col-span-2 lg:col-span-3">
-              <Label htmlFor="wo-desc">รายละเอียด</Label>
-              <Input id="wo-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="อาการ / งานที่ต้องทำ" />
+              <Label htmlFor="wo-desc">{t('mf.col_desc')}</Label>
+              <Input id="wo-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('mf.eam_desc_ph')} />
             </div>
           </div>
           <Button disabled={create.isPending || !assetNo.trim()} onClick={() => create.mutate()}>
-            <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างใบสั่งงาน'}
+            <Plus className="size-4" /> {create.isPending ? t('mf.saving') : t('mf.eam_create_wo_btn')}
           </Button>
         </CardContent>
       </Card>
@@ -181,18 +184,18 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
             rows={rows}
             rowKey={(r) => r.wo_no}
             onRowClick={(r) => setSelected((id) => (id === r.wo_no ? null : r.wo_no))}
-            emptyState={{ icon: Wrench, title: 'ยังไม่มีใบสั่งงานซ่อม', description: 'สร้างใบสั่งงานแรกจากแบบฟอร์มด้านบน หรือให้แผน PM สร้างให้อัตโนมัติ' }}
+            emptyState={{ icon: Wrench, title: t('mf.eam_wo_empty_title'), description: t('mf.eam_wo_empty_desc') }}
             columns={[
-              { key: 'wo_no', label: 'เลขที่', render: (r) => <span className="font-medium">{r.wo_no}</span> },
-              { key: 'asset_no', label: 'สินทรัพย์' },
-              { key: 'type', label: 'ประเภท', render: (r) => <Badge variant="info">{r.type}</Badge> },
-              { key: 'priority', label: 'ความสำคัญ', render: (r) => <Badge variant={statusVariant(r.priority)}>{r.priority}</Badge> },
-              { key: 'scheduled_date', label: 'นัดซ่อม', render: (r) => thaiDate(r.scheduled_date) },
-              { key: 'actual_cost', label: 'ต้นทุนจริง', align: 'right', render: (r) => <span className="tabular">{baht(r.actual_cost)}</span> },
-              { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'wo_no', label: t('dash.col_no'), render: (r) => <span className="font-medium">{r.wo_no}</span> },
+              { key: 'asset_no', label: t('mf.eam_col_asset') },
+              { key: 'type', label: t('mf.col_type'), render: (r) => <Badge variant="info">{r.type}</Badge> },
+              { key: 'priority', label: t('mf.eam_priority_label'), render: (r) => <Badge variant={statusVariant(r.priority)}>{r.priority}</Badge> },
+              { key: 'scheduled_date', label: t('mf.eam_col_sched'), render: (r) => thaiDate(r.scheduled_date) },
+              { key: 'actual_cost', label: t('mf.eam_col_actual_cost'), align: 'right', render: (r) => <span className="tabular">{baht(r.actual_cost)}</span> },
+              { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               {
                 key: '_act',
-                label: 'เปลี่ยนสถานะ',
+                label: t('mf.eam_col_change_status'),
                 sortable: false,
                 render: (r) =>
                   r.status === 'completed' || r.status === 'cancelled' ? (
@@ -206,10 +209,10 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
                         if (e.target.value) setStatus.mutate({ woNo: r.wo_no, status: e.target.value });
                       }}
                     >
-                      <option value="">เลือก…</option>
-                      <option value="in_progress">กำลังซ่อม</option>
-                      <option value="completed">เสร็จสิ้น</option>
-                      <option value="cancelled">ยกเลิก</option>
+                      <option value="">{t('mf.eam_select_ph')}</option>
+                      <option value="in_progress">{t('mf.eam_status_inprogress')}</option>
+                      <option value="completed">{t('mf.eam_done')}</option>
+                      <option value="cancelled">{t('fin.cancel')}</option>
                     </select>
                   ),
               },
@@ -224,6 +227,7 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
 }
 
 function WorkOrderLines({ woNo }: { woNo: string }) {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ wo_no: string; lines: WoLine[]; labor_total: number; parts_total: number; total: number }>({
     queryKey: ['eam-wo-lines', woNo],
@@ -249,7 +253,7 @@ function WorkOrderLines({ woNo }: { woNo: string }) {
         }),
       }),
     onSuccess: () => {
-      notifySuccess('เพิ่มรายการต้นทุนแล้ว');
+      notifySuccess(t('mf.eam_line_added'));
       setDesc(''); setHours(''); setUnitCost('');
       qc.invalidateQueries({ queryKey: ['eam-wo-lines', woNo] });
       qc.invalidateQueries({ queryKey: ['eam-wo'] });
@@ -261,10 +265,10 @@ function WorkOrderLines({ woNo }: { woNo: string }) {
     <Card className="gap-4">
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-          <ListTree className="size-4" /> ต้นทุนงานซ่อม — {woNo}
+          <ListTree className="size-4" /> {t('mf.eam_wo_cost_title', { wo: woNo })}
           {q.data && (
             <span className="text-sm font-normal text-muted-foreground">
-              ค่าแรง {baht(q.data.labor_total)} · อะไหล่ {baht(q.data.parts_total)} · รวม {baht(q.data.total)}
+              {t('mf.eam_labor_parts_total', { labor: baht(q.data.labor_total), parts: baht(q.data.parts_total), total: baht(q.data.total) })}
             </span>
           )}
         </CardTitle>
@@ -272,33 +276,33 @@ function WorkOrderLines({ woNo }: { woNo: string }) {
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid gap-2">
-            <Label htmlFor="ln-kind">ประเภท</Label>
+            <Label htmlFor="ln-kind">{t('mf.col_type')}</Label>
             <select id="ln-kind" className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
-              <option value="labor">ค่าแรง</option>
-              <option value="part">อะไหล่</option>
+              <option value="labor">{t('mf.eam_kind_labor')}</option>
+              <option value="part">{t('mf.eam_kind_part')}</option>
             </select>
           </div>
           <div className="grid grow gap-2">
-            <Label htmlFor="ln-desc">รายละเอียด</Label>
-            <Input id="ln-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="ช่าง / อะไหล่" />
+            <Label htmlFor="ln-desc">{t('mf.col_desc')}</Label>
+            <Input id="ln-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={t('mf.eam_line_desc_ph')} />
           </div>
           {kind === 'part' ? (
             <div className="grid gap-2">
-              <Label htmlFor="ln-qty">จำนวน</Label>
+              <Label htmlFor="ln-qty">{t('inv.col_qty')}</Label>
               <Input id="ln-qty" type="number" min="0" value={qty} onChange={(e) => setQty(e.target.value)} className="max-w-[100px]" />
             </div>
           ) : (
             <div className="grid gap-2">
-              <Label htmlFor="ln-hours">ชั่วโมง</Label>
+              <Label htmlFor="ln-hours">{t('mf.col_hours')}</Label>
               <Input id="ln-hours" type="number" min="0" value={hours} onChange={(e) => setHours(e.target.value)} className="max-w-[100px]" />
             </div>
           )}
           <div className="grid gap-2">
-            <Label htmlFor="ln-uc">ต้นทุน/หน่วย (฿)</Label>
+            <Label htmlFor="ln-uc">{t('mf.eam_unitcost_baht')}</Label>
             <Input id="ln-uc" type="number" min="0" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} className="max-w-[140px]" />
           </div>
           <Button disabled={add.isPending} onClick={() => add.mutate()}>
-            <Plus className="size-4" /> เพิ่ม
+            <Plus className="size-4" /> {t('mf.add')}
           </Button>
         </div>
 
@@ -307,14 +311,14 @@ function WorkOrderLines({ woNo }: { woNo: string }) {
             <DataTable
               rows={q.data.lines}
               rowKey={(_r, i) => i}
-              emptyText="ยังไม่มีรายการต้นทุน"
+              emptyText={t('mf.eam_no_lines')}
               columns={[
-                { key: 'kind', label: 'ประเภท', render: (r) => <Badge variant="info">{r.kind}</Badge> },
-                { key: 'description', label: 'รายละเอียด', render: (r) => r.description ?? '—' },
-                { key: 'quantity', label: 'จำนวน', align: 'right', render: (r) => <span className="tabular">{num(r.quantity)}</span> },
-                { key: 'hours', label: 'ชั่วโมง', align: 'right', render: (r) => <span className="tabular">{num(r.hours)}</span> },
-                { key: 'unit_cost', label: 'ต้นทุน/หน่วย', align: 'right', render: (r) => <span className="tabular">{baht(r.unit_cost)}</span> },
-                { key: 'amount', label: 'รวม', align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'kind', label: t('mf.col_type'), render: (r) => <Badge variant="info">{r.kind}</Badge> },
+                { key: 'description', label: t('mf.col_desc'), render: (r) => r.description ?? '—' },
+                { key: 'quantity', label: t('inv.col_qty'), align: 'right', render: (r) => <span className="tabular">{num(r.quantity)}</span> },
+                { key: 'hours', label: t('mf.col_hours'), align: 'right', render: (r) => <span className="tabular">{num(r.hours)}</span> },
+                { key: 'unit_cost', label: t('mf.col_unit_cost'), align: 'right', render: (r) => <span className="tabular">{baht(r.unit_cost)}</span> },
+                { key: 'amount', label: t('mf.col_total'), align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
               ]}
             />
           )}
@@ -326,6 +330,7 @@ function WorkOrderLines({ woNo }: { woNo: string }) {
 
 // ───────────────────────── แผนบำรุงรักษา (PM) ─────────────────────────
 function PmSchedules() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ schedules: PmSchedule[]; count: number }>({
     queryKey: ['eam-pm'],
@@ -351,7 +356,7 @@ function PmSchedules() {
         }),
       }),
     onSuccess: () => {
-      notifySuccess('สร้างแผน PM แล้ว');
+      notifySuccess(t('mf.eam_pm_created'));
       setAssetNo(''); setName(''); setIntervalDays(''); setMeterInterval(''); setNextDue('');
       qc.invalidateQueries({ queryKey: ['eam-pm'] });
     },
@@ -361,7 +366,7 @@ function PmSchedules() {
   const run = useMutation({
     mutationFn: () => api('/api/eam/pm/run', { method: 'POST' }),
     onSuccess: (r: any) => {
-      notifySuccess(`เดินแผน PM แล้ว — สแกน ${r.scanned} แผน สร้างใบสั่งงาน ${r.generated} รายการ`);
+      notifySuccess(t('mf.eam_pm_ran', { scanned: r.scanned, generated: r.generated }));
       qc.invalidateQueries({ queryKey: ['eam-pm'] });
       qc.invalidateQueries({ queryKey: ['eam-wo'] });
     },
@@ -376,10 +381,10 @@ function PmSchedules() {
         <StateView q={q}>
           {q.data && (
             <div className="grid w-full gap-4 sm:grid-cols-3">
-              <StatCard label="แผน PM ทั้งหมด" value={num(rows.length)} icon={CalendarClock} tone="primary" />
-              <StatCard label="ใช้งานอยู่" value={num(rows.filter((r) => r.active).length)} tone="success" />
+              <StatCard label={t('mf.eam_pm_total')} value={num(rows.length)} icon={CalendarClock} tone="primary" />
+              <StatCard label={t('mf.active')} value={num(rows.filter((r) => r.active).length)} tone="success" />
               <StatCard
-                label="ครบกำหนดแล้ว"
+                label={t('mf.eam_due')}
                 value={num(rows.filter((r) => r.next_due_date && r.next_due_date <= new Date().toISOString().slice(0, 10)).length)}
                 tone="warning"
               />
@@ -390,42 +395,42 @@ function PmSchedules() {
 
       <Card className="max-w-4xl gap-4">
         <CardHeader>
-          <CardTitle className="text-base">สร้างแผนบำรุงรักษาเชิงป้องกัน</CardTitle>
+          <CardTitle className="text-base">{t('mf.eam_pm_create_title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="pm-asset">รหัสสินทรัพย์</Label>
-              <Input id="pm-asset" value={assetNo} onChange={(e) => setAssetNo(e.target.value)} placeholder="เช่น FA-0001" />
+              <Label htmlFor="pm-asset">{t('mf.eam_asset_label')}</Label>
+              <Input id="pm-asset" value={assetNo} onChange={(e) => setAssetNo(e.target.value)} placeholder={t('mf.eam_asset_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="pm-name">ชื่อแผน</Label>
-              <Input id="pm-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น เปลี่ยนน้ำมันเครื่อง" />
+              <Label htmlFor="pm-name">{t('mf.eam_plan_name')}</Label>
+              <Input id="pm-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('mf.eam_plan_name_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="pm-next">ครบกำหนดครั้งแรก</Label>
+              <Label htmlFor="pm-next">{t('mf.eam_first_due')}</Label>
               <Input id="pm-next" type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="pm-days">รอบตามเวลา (วัน)</Label>
-              <Input id="pm-days" type="number" min="0" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} placeholder="เช่น 90" />
+              <Label htmlFor="pm-days">{t('mf.eam_interval_days')}</Label>
+              <Input id="pm-days" type="number" min="0" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} placeholder={t('mf.eam_ph_90')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="pm-meter">รอบตามมิเตอร์ (หน่วย)</Label>
-              <Input id="pm-meter" type="number" min="0" value={meterInterval} onChange={(e) => setMeterInterval(e.target.value)} placeholder="เช่น 5000" />
+              <Label htmlFor="pm-meter">{t('mf.eam_interval_meter')}</Label>
+              <Input id="pm-meter" type="number" min="0" value={meterInterval} onChange={(e) => setMeterInterval(e.target.value)} placeholder={t('mf.eam_ph_5000')} />
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">ระบุรอบตามเวลา หรือ รอบตามมิเตอร์ อย่างน้อยหนึ่งอย่าง</p>
+          <p className="text-xs text-muted-foreground">{t('mf.eam_interval_hint')}</p>
           <Button disabled={create.isPending || !assetNo.trim() || !name.trim() || (!intervalDays && !meterInterval)} onClick={() => create.mutate()}>
-            <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างแผน PM'}
+            <Plus className="size-4" /> {create.isPending ? t('mf.saving') : t('mf.eam_pm_create_btn')}
           </Button>
         </CardContent>
       </Card>
 
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-muted-foreground">แผนบำรุงรักษา</h3>
+        <h3 className="text-sm font-semibold text-muted-foreground">{t('mf.eam_pm_list')}</h3>
         <Button variant="outline" size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
-          <PlayCircle className="size-4" /> {run.isPending ? 'กำลังเดินแผน…' : 'เดินแผน PM ที่ครบกำหนดเดี๋ยวนี้'}
+          <PlayCircle className="size-4" /> {run.isPending ? t('mf.eam_pm_running') : t('mf.eam_pm_run_btn')}
         </Button>
       </div>
 
@@ -434,14 +439,14 @@ function PmSchedules() {
           <DataTable
             rows={rows}
             rowKey={(r) => r.id}
-            emptyState={{ icon: CalendarClock, title: 'ยังไม่มีแผน PM', description: 'สร้างแผนบำรุงรักษาเชิงป้องกันเพื่อให้ระบบออกใบสั่งงานอัตโนมัติเมื่อครบกำหนด' }}
+            emptyState={{ icon: CalendarClock, title: t('mf.eam_pm_empty_title'), description: t('mf.eam_pm_empty_desc') }}
             columns={[
-              { key: 'asset_no', label: 'สินทรัพย์', render: (r) => <span className="font-medium">{r.asset_no}</span> },
-              { key: 'name', label: 'ชื่อแผน' },
-              { key: 'interval_days', label: 'รอบ (วัน)', align: 'right', render: (r) => (r.interval_days ? <span className="tabular">{num(r.interval_days)}</span> : '—') },
-              { key: 'meter_interval', label: 'รอบ (มิเตอร์)', align: 'right', render: (r) => (r.meter_interval ? <span className="tabular">{num(r.meter_interval)}</span> : '—') },
-              { key: 'next_due_date', label: 'ครบกำหนดถัดไป', render: (r) => thaiDate(r.next_due_date) },
-              { key: 'active', label: 'สถานะ', render: (r) => <Badge variant={r.active ? 'success' : 'secondary'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge> },
+              { key: 'asset_no', label: t('mf.eam_col_asset'), render: (r) => <span className="font-medium">{r.asset_no}</span> },
+              { key: 'name', label: t('mf.eam_plan_name') },
+              { key: 'interval_days', label: t('mf.eam_col_interval_days'), align: 'right', render: (r) => (r.interval_days ? <span className="tabular">{num(r.interval_days)}</span> : '—') },
+              { key: 'meter_interval', label: t('mf.eam_col_interval_meter'), align: 'right', render: (r) => (r.meter_interval ? <span className="tabular">{num(r.meter_interval)}</span> : '—') },
+              { key: 'next_due_date', label: t('mf.eam_col_next_due'), render: (r) => thaiDate(r.next_due_date) },
+              { key: 'active', label: t('fin.col_status'), render: (r) => <Badge variant={r.active ? 'success' : 'secondary'}>{r.active ? t('mf.status_active') : t('mf.status_off')}</Badge> },
             ]}
           />
         )}
@@ -452,6 +457,7 @@ function PmSchedules() {
 
 // ───────────────────────── ความน่าเชื่อถือ + มิเตอร์ ─────────────────────────
 function ReliabilityTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [assetNo, setAssetNo] = useState('');
   const [query, setQuery] = useState('');
@@ -475,7 +481,7 @@ function ReliabilityTab() {
         body: JSON.stringify({ meter_value: Number(meterValue) || 0, reading_date: readingDate || undefined }),
       }),
     onSuccess: () => {
-      notifySuccess('บันทึกค่ามิเตอร์แล้ว');
+      notifySuccess(t('mf.eam_meter_saved'));
       setMeterValue('');
       qc.invalidateQueries({ queryKey: ['eam-meters', query] });
     },
@@ -486,16 +492,16 @@ function ReliabilityTab() {
     <div className="space-y-5">
       <Card className="max-w-xl gap-4">
         <CardHeader>
-          <CardTitle className="text-base">ดูดัชนีความน่าเชื่อถือของสินทรัพย์</CardTitle>
+          <CardTitle className="text-base">{t('mf.eam_rel_title')}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid grow gap-2">
-              <Label htmlFor="rel-asset">รหัสสินทรัพย์</Label>
-              <Input id="rel-asset" value={assetNo} onChange={(e) => setAssetNo(e.target.value)} placeholder="เช่น FA-0001" onKeyDown={(e) => e.key === 'Enter' && setQuery(assetNo.trim())} />
+              <Label htmlFor="rel-asset">{t('mf.eam_asset_label')}</Label>
+              <Input id="rel-asset" value={assetNo} onChange={(e) => setAssetNo(e.target.value)} placeholder={t('mf.eam_asset_ph')} onKeyDown={(e) => e.key === 'Enter' && setQuery(assetNo.trim())} />
             </div>
             <Button disabled={!assetNo.trim()} onClick={() => setQuery(assetNo.trim())}>
-              <Gauge className="size-4" /> ดูข้อมูล
+              <Gauge className="size-4" /> {t('mf.eam_view_data')}
             </Button>
           </div>
         </CardContent>
@@ -505,10 +511,10 @@ function ReliabilityTab() {
         <StateView q={q}>
           {q.data && (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="ใบสั่งงานทั้งหมด" value={num(q.data.work_orders)} icon={Wrench} tone="primary" />
-              <StatCard label="งานซ่อมจากการเสีย (CM)" value={num(q.data.corrective_failures)} tone="danger" />
-              <StatCard label="MTBF (วันเฉลี่ยระหว่างเสีย)" value={q.data.mtbf_days != null ? num(q.data.mtbf_days) : '—'} tone="info" />
-              <StatCard label="ต้นทุนซ่อมสะสม" value={baht(q.data.total_maintenance_cost)} tone="warning" hint={`ดาวน์ไทม์รวม ${num(q.data.total_downtime_hours)} ชม.`} />
+              <StatCard label={t('mf.eam_wo_total')} value={num(q.data.work_orders)} icon={Wrench} tone="primary" />
+              <StatCard label={t('mf.eam_cm_failures')} value={num(q.data.corrective_failures)} tone="danger" />
+              <StatCard label={t('mf.eam_mtbf')} value={q.data.mtbf_days != null ? num(q.data.mtbf_days) : '—'} tone="info" />
+              <StatCard label={t('mf.eam_cum_cost')} value={baht(q.data.total_maintenance_cost)} tone="warning" hint={t('mf.eam_downtime_total', { h: num(q.data.total_downtime_hours) })} />
             </div>
           )}
         </StateView>
@@ -517,20 +523,20 @@ function ReliabilityTab() {
       {query && (
         <Card className="gap-4">
           <CardHeader>
-            <CardTitle className="text-base">บันทึกค่ามิเตอร์ — {query}</CardTitle>
+            <CardTitle className="text-base">{t('mf.eam_meter_title', { asset: query })}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-end gap-3">
               <div className="grid gap-2">
-                <Label htmlFor="mt-val">ค่ามิเตอร์</Label>
+                <Label htmlFor="mt-val">{t('mf.eam_meter_value')}</Label>
                 <Input id="mt-val" type="number" min="0" value={meterValue} onChange={(e) => setMeterValue(e.target.value)} className="max-w-[180px]" />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="mt-date">วันที่อ่าน</Label>
+                <Label htmlFor="mt-date">{t('mf.eam_reading_date')}</Label>
                 <Input id="mt-date" type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} />
               </div>
               <Button disabled={recordMeter.isPending || !meterValue} onClick={() => recordMeter.mutate()}>
-                <Plus className="size-4" /> บันทึก
+                <Plus className="size-4" /> {t('fin.save')}
               </Button>
             </div>
             <StateView q={meters}>
@@ -538,11 +544,11 @@ function ReliabilityTab() {
                 <DataTable
                   rows={meters.data.readings}
                   rowKey={(_r, i) => i}
-                  emptyText="ยังไม่มีการอ่านค่ามิเตอร์"
+                  emptyText={t('mf.eam_no_meters')}
                   columns={[
-                    { key: 'reading_date', label: 'วันที่', render: (r) => thaiDate(r.reading_date) },
-                    { key: 'meter_value', label: 'ค่ามิเตอร์', align: 'right', render: (r) => <span className="tabular">{num(r.meter_value)}</span> },
-                    { key: 'note', label: 'หมายเหตุ', render: (r) => r.note ?? '—' },
+                    { key: 'reading_date', label: t('dash.col_date'), render: (r) => thaiDate(r.reading_date) },
+                    { key: 'meter_value', label: t('mf.eam_meter_value'), align: 'right', render: (r) => <span className="tabular">{num(r.meter_value)}</span> },
+                    { key: 'note', label: t('mf.col_note'), render: (r) => r.note ?? '—' },
                   ]}
                 />
               )}

@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useLang } from '@/lib/i18n';
 
 // ── API contract (apps/api/src/modules/demand-ml) ─────────────────────────────
 interface Metrics { algorithm: string; wape: number; mase: number; rmse: number; bias: number; n_test: number }
@@ -37,17 +38,18 @@ const pct = (v: number | null) => (v == null ? '—' : `${(v * 100).toFixed(1)}%
 const ALGOS = ['', 'naive', 'moving_average', 'ses', 'holt', 'croston'];
 
 export default function DemandPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="พยากรณ์ความต้องการ (Demand ML)"
-        description="พยากรณ์ยอดขายรายสินค้าด้วยหลายอัลกอริทึม เลือกโมเดลที่แม่นที่สุดอัตโนมัติ (WAPE ต่ำสุด) — ต้องมีประวัติการขายอย่างน้อย 14 วัน"
+        title={t('mf.dem_title')}
+        description={t('mf.dem_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'forecast', label: 'พยากรณ์', content: <ForecastTab /> },
-          { key: 'backtest', label: 'เทียบโมเดล', content: <BacktestTab /> },
-          { key: 'history', label: 'ประวัติ & ความแม่น', content: <HistoryTab /> },
+          { key: 'forecast', label: t('mf.dem_tab_forecast'), content: <ForecastTab /> },
+          { key: 'backtest', label: t('mf.dem_tab_backtest'), content: <BacktestTab /> },
+          { key: 'history', label: t('mf.dem_tab_history'), content: <HistoryTab /> },
         ]}
       />
     </div>
@@ -55,18 +57,19 @@ export default function DemandPage() {
 }
 
 function MetricsTable({ rows, best }: { rows: Metrics[]; best?: string }) {
+  const { t } = useLang();
   return (
     <DataTable
       rows={rows}
       rowKey={(r) => r.algorithm}
-      emptyText="ไม่มีผลการประเมิน"
+      emptyText={t('mf.dem_no_metrics')}
       columns={[
         {
           key: 'algorithm',
-          label: 'อัลกอริทึม',
+          label: t('mf.dem_col_algo'),
           render: (r) => (
             <span className="font-medium">
-              {r.algorithm} {best === r.algorithm && <Badge variant="success" className="ml-1">ดีสุด</Badge>}
+              {r.algorithm} {best === r.algorithm && <Badge variant="success" className="ml-1">{t('mf.dem_best')}</Badge>}
             </span>
           ),
         },
@@ -74,13 +77,14 @@ function MetricsTable({ rows, best }: { rows: Metrics[]; best?: string }) {
         { key: 'mase', label: 'MASE', align: 'right', render: (r) => <span className="tabular">{r.mase?.toFixed(2)}</span> },
         { key: 'rmse', label: 'RMSE', align: 'right', render: (r) => <span className="tabular">{num(Math.round(r.rmse))}</span> },
         { key: 'bias', label: 'Bias', align: 'right', render: (r) => <span className="tabular">{r.bias?.toFixed(2)}</span> },
-        { key: 'n_test', label: 'จุดทดสอบ', align: 'right', render: (r) => <span className="tabular">{num(r.n_test)}</span> },
+        { key: 'n_test', label: t('mf.dem_col_ntest'), align: 'right', render: (r) => <span className="tabular">{num(r.n_test)}</span> },
       ]}
     />
   );
 }
 
 function ForecastTab() {
+  const { t } = useLang();
   const [itemId, setItemId] = useState('');
   const [horizon, setHorizon] = useState('14');
   const [algorithm, setAlgorithm] = useState('');
@@ -99,26 +103,26 @@ function ForecastTab() {
   return (
     <div className="space-y-5">
       <Card className="max-w-3xl gap-4">
-        <CardHeader><CardTitle className="text-base">สร้างพยากรณ์</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('mf.dem_form_title')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="fc-item">รหัสสินค้า</Label>
-              <Input id="fc-item" value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder="เช่น ITEM-001" />
+              <Label htmlFor="fc-item">{t('mf.dem_item_label')}</Label>
+              <Input id="fc-item" value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder={t('mf.dem_item_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="fc-h">จำนวนวันที่พยากรณ์</Label>
+              <Label htmlFor="fc-h">{t('mf.dem_horizon_label')}</Label>
               <Input id="fc-h" type="number" min="1" max="90" value={horizon} onChange={(e) => setHorizon(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="fc-algo">อัลกอริทึม</Label>
+              <Label htmlFor="fc-algo">{t('mf.dem_col_algo')}</Label>
               <select id="fc-algo" className={selectCls} value={algorithm} onChange={(e) => setAlgorithm(e.target.value)}>
-                {ALGOS.map((a) => <option key={a} value={a}>{a === '' ? 'เลือกอัตโนมัติ (แม่นสุด)' : a}</option>)}
+                {ALGOS.map((a) => <option key={a} value={a}>{a === '' ? t('mf.dem_auto_select') : a}</option>)}
               </select>
             </div>
           </div>
           <Button disabled={run.isPending || !itemId.trim()} onClick={() => run.mutate()}>
-            <Sparkles className="size-4" /> {run.isPending ? 'กำลังพยากรณ์…' : 'พยากรณ์'}
+            <Sparkles className="size-4" /> {run.isPending ? t('mf.dem_forecasting') : t('mf.dem_tab_forecast')}
           </Button>
         </CardContent>
       </Card>
@@ -126,28 +130,28 @@ function ForecastTab() {
       {r && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="โมเดลที่เลือก" value={r.algorithm} icon={LineChart} tone="primary" hint={r.selected_by === 'lowest_wape' ? 'เลือกอัตโนมัติ' : 'กำหนดเอง'} />
-            <StatCard label="ความคลาดเคลื่อน (WAPE)" value={pct(r.metrics.wape)} tone="info" />
-            <StatCard label="ข้อมูลที่ใช้ (วัน)" value={num(r.data_days)} tone="default" />
-            <StatCard label="ยอดรวมที่พยากรณ์" value={num(Math.round(r.forecast.reduce((a, b) => a + b, 0)))} tone="success" hint={`${r.horizon} วัน`} />
+            <StatCard label={t('mf.dem_model_selected')} value={r.algorithm} icon={LineChart} tone="primary" hint={r.selected_by === 'lowest_wape' ? t('mf.dem_auto') : t('mf.dem_manual')} />
+            <StatCard label={t('mf.dem_wape_label')} value={pct(r.metrics.wape)} tone="info" />
+            <StatCard label={t('mf.dem_data_days')} value={num(r.data_days)} tone="default" />
+            <StatCard label={t('mf.dem_total_forecast')} value={num(Math.round(r.forecast.reduce((a, b) => a + b, 0)))} tone="success" hint={t('mf.days', { n: r.horizon })} />
           </div>
 
           <div>
-            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ค่าพยากรณ์รายวัน</h3>
+            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('mf.dem_daily_forecast')}</h3>
             <DataTable
               rows={r.forecast.map((v, i) => ({ day: i + 1, qty: v }))}
               rowKey={(x) => x.day}
               pageSize={0}
               dense
               columns={[
-                { key: 'day', label: 'วันที่ (จากวันนี้)', render: (x) => `วันที่ +${x.day}` },
-                { key: 'qty', label: 'จำนวนที่พยากรณ์', align: 'right', render: (x) => <span className="tabular">{num(Math.round(x.qty))}</span> },
+                { key: 'day', label: t('mf.dem_col_day'), render: (x) => t('mf.dem_day_plus', { n: x.day }) },
+                { key: 'qty', label: t('mf.dem_col_qty_forecast'), align: 'right', render: (x) => <span className="tabular">{num(Math.round(x.qty))}</span> },
               ]}
             />
           </div>
 
           <div>
-            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">เปรียบเทียบโมเดลที่ทดสอบ</h3>
+            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('mf.dem_compare_tested')}</h3>
             <MetricsTable rows={r.candidates} best={r.algorithm} />
           </div>
         </div>
@@ -157,6 +161,7 @@ function ForecastTab() {
 }
 
 function BacktestTab() {
+  const { t } = useLang();
   const [itemId, setItemId] = useState('');
   const [testSize, setTestSize] = useState('7');
 
@@ -175,21 +180,21 @@ function BacktestTab() {
     <div className="space-y-5">
       <Card className="max-w-2xl gap-4">
         <CardHeader>
-          <CardTitle className="text-base">ทดสอบย้อนหลัง (Backtest)</CardTitle>
+          <CardTitle className="text-base">{t('mf.dem_backtest_title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-xs text-muted-foreground">เปรียบเทียบความแม่นของทุกอัลกอริทึมบนข้อมูลจริงโดยไม่บันทึกผล — ใช้เลือกโมเดลที่เหมาะกับสินค้าแต่ละตัว</p>
+          <p className="text-xs text-muted-foreground">{t('mf.dem_backtest_hint')}</p>
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid grow gap-2">
-              <Label htmlFor="bt-item">รหัสสินค้า</Label>
-              <Input id="bt-item" value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder="เช่น ITEM-001" />
+              <Label htmlFor="bt-item">{t('mf.dem_item_label')}</Label>
+              <Input id="bt-item" value={itemId} onChange={(e) => setItemId(e.target.value)} placeholder={t('mf.dem_item_ph')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bt-size">ขนาดชุดทดสอบ (วัน)</Label>
+              <Label htmlFor="bt-size">{t('mf.dem_testsize_label')}</Label>
               <Input id="bt-size" type="number" min="1" value={testSize} onChange={(e) => setTestSize(e.target.value)} className="max-w-[160px]" />
             </div>
             <Button disabled={run.isPending || !itemId.trim()} onClick={() => run.mutate()}>
-              <FlaskConical className="size-4" /> {run.isPending ? 'กำลังทดสอบ…' : 'ทดสอบ'}
+              <FlaskConical className="size-4" /> {run.isPending ? t('mf.dem_testing') : t('mf.dem_test_btn')}
             </Button>
           </div>
         </CardContent>
@@ -198,12 +203,12 @@ function BacktestTab() {
       {r && (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="โมเดลแนะนำ" value={r.best.algorithm} icon={Target} tone="success" />
-            <StatCard label="WAPE (ดีสุด)" value={pct(r.best.wape)} tone="info" />
-            <StatCard label="ข้อมูลที่ใช้ (วัน)" value={num(r.data_days)} tone="default" />
+            <StatCard label={t('mf.dem_model_recommend')} value={r.best.algorithm} icon={Target} tone="success" />
+            <StatCard label={t('mf.dem_wape_best')} value={pct(r.best.wape)} tone="info" />
+            <StatCard label={t('mf.dem_data_days')} value={num(r.data_days)} tone="default" />
           </div>
           <div>
-            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ผลการทดสอบทุกโมเดล</h3>
+            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('mf.dem_all_results')}</h3>
             <MetricsTable rows={r.candidates} best={r.best.algorithm} />
           </div>
         </div>
@@ -213,6 +218,7 @@ function BacktestTab() {
 }
 
 function HistoryTab() {
+  const { t } = useLang();
   const q = useQuery<{ count: number; forecasts: ForecastRow[] }>({ queryKey: ['demand-history'], queryFn: () => api('/api/demand/forecasts?limit=100') });
   const acc = useQuery<AccuracyResp>({ queryKey: ['demand-accuracy'], queryFn: () => api('/api/demand/accuracy') });
 
@@ -221,43 +227,43 @@ function HistoryTab() {
       <StateView q={acc}>
         {acc.data && (
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="จำนวนการพยากรณ์" value={num(acc.data.runs)} icon={History} tone="primary" />
-            <StatCard label="WAPE เฉลี่ย" value={pct(acc.data.avg_wape)} tone="info" />
-            <StatCard label="MASE เฉลี่ย" value={acc.data.avg_mase != null ? acc.data.avg_mase.toFixed(2) : '—'} tone="default" />
+            <StatCard label={t('mf.dem_forecast_count')} value={num(acc.data.runs)} icon={History} tone="primary" />
+            <StatCard label={t('mf.dem_wape_avg')} value={pct(acc.data.avg_wape)} tone="info" />
+            <StatCard label={t('mf.dem_mase_avg')} value={acc.data.avg_mase != null ? acc.data.avg_mase.toFixed(2) : '—'} tone="default" />
           </div>
         )}
       </StateView>
 
       {acc.data && acc.data.by_algorithm.length > 0 && (
         <div>
-          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ความแม่นแยกตามอัลกอริทึม</h3>
+          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('mf.dem_acc_by_algo')}</h3>
           <DataTable
             rows={acc.data.by_algorithm}
             rowKey={(r) => r.algorithm}
             columns={[
-              { key: 'algorithm', label: 'อัลกอริทึม', render: (r) => <span className="font-medium">{r.algorithm}</span> },
-              { key: 'runs', label: 'จำนวนครั้ง', align: 'right', render: (r) => <span className="tabular">{num(r.runs)}</span> },
-              { key: 'avg_wape', label: 'WAPE เฉลี่ย', align: 'right', render: (r) => <span className="tabular">{pct(r.avg_wape)}</span> },
+              { key: 'algorithm', label: t('mf.dem_col_algo'), render: (r) => <span className="font-medium">{r.algorithm}</span> },
+              { key: 'runs', label: t('mf.dem_col_runs'), align: 'right', render: (r) => <span className="tabular">{num(r.runs)}</span> },
+              { key: 'avg_wape', label: t('mf.dem_wape_avg'), align: 'right', render: (r) => <span className="tabular">{pct(r.avg_wape)}</span> },
             ]}
           />
         </div>
       )}
 
       <div>
-        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ประวัติการพยากรณ์ล่าสุด</h3>
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('mf.dem_recent_history')}</h3>
         <StateView q={q}>
           {q.data && (
             <DataTable
               rows={q.data.forecasts}
               rowKey={(_r, i) => i}
-              emptyState={{ icon: History, title: 'ยังไม่มีประวัติการพยากรณ์', description: 'สร้างพยากรณ์จากแท็บ "พยากรณ์" แล้วผลจะถูกบันทึกไว้ที่นี่' }}
+              emptyState={{ icon: History, title: t('mf.dem_empty_title'), description: t('mf.dem_empty_desc') }}
               columns={[
-                { key: 'createdAt', label: 'เมื่อ', render: (r) => thaiDate(r.createdAt) },
-                { key: 'itemId', label: 'สินค้า', render: (r) => <span className="font-medium">{r.itemId}</span> },
-                { key: 'algorithm', label: 'โมเดล' },
-                { key: 'horizon', label: 'ช่วง (วัน)', align: 'right', render: (r) => <span className="tabular">{num(r.horizon)}</span> },
+                { key: 'createdAt', label: t('mf.dem_col_when'), render: (r) => thaiDate(r.createdAt) },
+                { key: 'itemId', label: t('mf.col_product'), render: (r) => <span className="font-medium">{r.itemId}</span> },
+                { key: 'algorithm', label: t('mf.col_model') },
+                { key: 'horizon', label: t('mf.dem_col_horizon'), align: 'right', render: (r) => <span className="tabular">{num(r.horizon)}</span> },
                 { key: 'wape', label: 'WAPE', align: 'right', render: (r) => <span className="tabular">{pct(r.wape)}</span> },
-                { key: 'dataDays', label: 'ข้อมูล (วัน)', align: 'right', render: (r) => <span className="tabular">{num(r.dataDays)}</span> },
+                { key: 'dataDays', label: t('mf.dem_col_datadays'), align: 'right', render: (r) => <span className="tabular">{num(r.dataDays)}</span> },
               ]}
             />
           )}

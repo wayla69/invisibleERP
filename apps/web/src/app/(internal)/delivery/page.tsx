@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SearchX, Truck } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -20,6 +21,7 @@ import { statusVariant } from '@/components/ui';
 const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function DeliveryPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['deliveries'], queryFn: () => api('/api/delivery') });
   const [f, setF] = useState({ order_no: '', driver: '', vehicle: '' });
@@ -27,7 +29,7 @@ export default function DeliveryPage() {
   const detail = useQuery<any>({ queryKey: ['delivery', sel], queryFn: () => api(`/api/delivery/${sel}`), enabled: !!sel });
   const create = useMutation({
     mutationFn: () => api('/api/delivery', { method: 'POST', body: JSON.stringify({ order_no: f.order_no || undefined, driver: f.driver || undefined, vehicle: f.vehicle || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(`สร้างใบส่ง ${r.do_no} (${r.lines} รายการ)`); setF({ order_no: '', driver: '', vehicle: '' }); qc.invalidateQueries({ queryKey: ['deliveries'] }); },
+    onSuccess: (r: any) => { notifySuccess(t('hx.del.created', { no: r.do_no, lines: r.lines })); setF({ order_no: '', driver: '', vehicle: '' }); qc.invalidateQueries({ queryKey: ['deliveries'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const setStatus = useMutation({
@@ -51,15 +53,15 @@ export default function DeliveryPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="ใบส่งสินค้า (Delivery Orders)" description="สร้างใบส่งจากออเดอร์ ติดตามสถานะ และยืนยันการส่ง" />
+      <PageHeader title={t('hx.del.title')} description={t('hx.del.desc')} />
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">สร้างใบส่งจากออเดอร์</h3>
+        <h3 className="text-base font-semibold">{t('hx.del.create_title')}</h3>
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="grid gap-1.5"><Label htmlFor="do-order">เลขที่ออเดอร์</Label><Input id="do-order" placeholder="SO-…" value={f.order_no} onChange={(e) => setF({ ...f, order_no: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label htmlFor="do-driver">คนขับ</Label><Input id="do-driver" placeholder="ชื่อคนขับ" value={f.driver} onChange={(e) => setF({ ...f, driver: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label htmlFor="do-vehicle">ทะเบียนรถ</Label><Input id="do-vehicle" placeholder="เช่น 1กก-1234" value={f.vehicle} onChange={(e) => setF({ ...f, vehicle: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="do-order">{t('hx.del.order_no')}</Label><Input id="do-order" placeholder="SO-…" value={f.order_no} onChange={(e) => setF({ ...f, order_no: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="do-driver">{t('hx.del.driver')}</Label><Input id="do-driver" placeholder={t('hx.del.driver_ph')} value={f.driver} onChange={(e) => setF({ ...f, driver: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="do-vehicle">{t('hx.del.vehicle')}</Label><Input id="do-vehicle" placeholder={t('hx.del.vehicle_ph')} value={f.vehicle} onChange={(e) => setF({ ...f, vehicle: e.target.value })} /></div>
         </div>
-        <Button className="w-fit" disabled={!f.order_no || create.isPending} onClick={() => create.mutate()}>สร้างใบส่ง</Button>
+        <Button className="w-fit" disabled={!f.order_no || create.isPending} onClick={() => create.mutate()}>{t('hx.del.create_btn')}</Button>
       </Card>
       <StateView q={q}>
         {q.data && (
@@ -68,14 +70,14 @@ export default function DeliveryPage() {
               <SearchInput
                 value={search}
                 onChange={setSearch}
-                placeholder="ค้นหาเลขที่ / คนขับ / ทะเบียน…"
-                ariaLabel="ค้นหาใบส่งสินค้า"
-                count={`${filtered.length} รายการ`}
+                placeholder={t('hx.del.search_ph')}
+                ariaLabel={t('hx.del.search_aria')}
+                count={t('hx.common.count_items', { n: filtered.length })}
               />
               {statuses.length > 1 && (
-                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
+                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t('hx.common.filter_status')}>
                   <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(null)}>
-                    ทั้งหมด
+                    {t('hx.common.all')}
                   </Button>
                   {statuses.map((s) => (
                     <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" aria-pressed={statusFilter === s} onClick={() => setStatusFilter((c) => (c === s ? null : s))}>
@@ -89,33 +91,33 @@ export default function DeliveryPage() {
               rows={filtered}
               rowKey={(r: any) => r.do_no}
               columns={[
-              { key: 'do_no', label: 'เลขที่' },
-              { key: 'do_date', label: 'วันที่', render: (r: any) => thaiDate(r.do_date) },
-              { key: 'driver', label: 'คนขับ', render: (r: any) => r.driver || '—' },
-              { key: 'vehicle', label: 'ทะเบียน', render: (r: any) => r.vehicle || '—' },
-              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'do_no', label: t('dash.col_no') },
+              { key: 'do_date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.do_date) },
+              { key: 'driver', label: t('hx.del.col_driver'), render: (r: any) => r.driver || '—' },
+              { key: 'vehicle', label: t('hx.del.col_vehicle'), render: (r: any) => r.vehicle || '—' },
+              { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               {
-                key: 'act', label: 'อัปเดตสถานะ', render: (r: any) => (
+                key: 'act', label: t('hx.common.update_status'), render: (r: any) => (
                   <select className={selectCls} value={r.status} onChange={(e) => setStatus.mutate({ no: r.do_no, status: e.target.value })}>
                     {['Pending', 'In Transit', 'Delivered', 'Cancelled'].map((st) => <option key={st} value={st}>{st}</option>)}
                   </select>
                 ),
               },
-              { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.do_no)}>ดูรายการ</Button> },
+              { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.do_no)}>{t('hx.del.view_items')}</Button> },
               ]}
               emptyState={
                 search || statusFilter
                   ? {
                       icon: SearchX,
-                      title: 'ไม่พบใบส่งที่ตรงกับตัวกรอง',
-                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      title: t('hx.del.no_match_title'),
+                      description: t('hx.common.filter_no_match_desc'),
                       action: (
                         <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter(null); }}>
-                          ล้างตัวกรอง
+                          {t('inv.clear_filter')}
                         </Button>
                       ),
                     }
-                  : { icon: Truck, title: 'ยังไม่มีใบส่งสินค้า', description: 'สร้างใบส่งจากออเดอร์ด้านบนเพื่อเริ่มต้น' }
+                  : { icon: Truck, title: t('hx.del.empty_title'), description: t('hx.del.empty_desc') }
               }
             />
           </div>
@@ -123,18 +125,18 @@ export default function DeliveryPage() {
       </StateView>
       {sel && (
         <Card className="gap-3 p-5">
-          <div className="flex items-center justify-between"><h3 className="text-base font-semibold">รายการใน {sel}</h3><Button variant="ghost" size="sm" onClick={() => setSel(null)}>ปิด</Button></div>
+          <div className="flex items-center justify-between"><h3 className="text-base font-semibold">{t('hx.del.items_in', { no: sel })}</h3><Button variant="ghost" size="sm" onClick={() => setSel(null)}>{t('hx.common.close')}</Button></div>
           <StateView q={detail}>
             {detail.data && (
               <DataTable
                 rows={detail.data.items}
                 columns={[
-                  { key: 'item_id', label: 'สินค้า' },
-                  { key: 'item_description', label: 'รายละเอียด' },
-                  { key: 'qty', label: 'จำนวน', align: 'right' },
-                  { key: 'uom', label: 'หน่วย' },
+                  { key: 'item_id', label: t('hx.del.col_item') },
+                  { key: 'item_description', label: t('hx.del.col_desc') },
+                  { key: 'qty', label: t('hx.common.qty'), align: 'right' },
+                  { key: 'uom', label: t('hx.del.col_uom') },
                 ]}
-                emptyText="ไม่มีรายการ"
+                emptyText={t('hx.common.no_items')}
               />
             )}
           </StateView>

@@ -1,55 +1,57 @@
-// Server component (docs/28 §4 / docs/27 R5-2 — RSC conversion). This is a read-only working-capital
-// dashboard: it fetches once and renders, with no client interactivity, so it prefetches on the server
-// (cookie-forwarded, see lib/server-api.ts) and renders directly — no client bundle, no fetch waterfall.
+'use client';
+
+// Read-only working-capital dashboard: fetches the health snapshot and renders it, with no mutations.
+// (Client component so it can localize via useLang(); the data comes from GET /api/finance/health.)
+import { useQuery } from '@tanstack/react-query';
 import { HeartPulse, Wallet, TrendingUp, AlertTriangle } from 'lucide-react';
-import { serverApi } from '@/lib/server-api';
+import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-// cookies() (via serverApi) already opts this route out of prerendering; explicit for clarity.
-export const dynamic = 'force-dynamic';
-
 const GRADE_TONE: Record<string, 'success' | 'info' | 'warning' | 'danger'> = { A: 'success', B: 'success', C: 'info', D: 'warning', E: 'danger' };
 
-export default async function FinancialHealthPage() {
-  const data = await serverApi<any>('/api/finance/health');
+export default function FinancialHealthPage() {
+  const { t } = useLang();
+  const q = useQuery<any>({ queryKey: ['finance-health'], queryFn: () => api('/api/finance/health') });
+  const data = q.data;
 
   return (
     <div>
       <PageHeader
-        title="สุขภาพการเงิน (Financial health)"
-        description="คะแนนเงินทุนหมุนเวียน 0–100 (เกรด A–E) จากเงินสด เทียบลูกหนี้/เจ้าหนี้ หนี้ค้างชำระ และยอดขาย — ดูพยากรณ์กระแสเงินสดรายสัปดาห์ได้ที่งบกระแสเงินสด"
+        title={t('fnx.finhealth.title')}
+        description={t('fnx.finhealth.subtitle')}
       />
       {!data ? (
         <Card className="p-8 text-center text-sm text-muted-foreground">
-          ไม่สามารถโหลดข้อมูลสุขภาพการเงินได้ในขณะนี้ — โปรดรีเฟรชหน้าอีกครั้ง
+          {t('fnx.finhealth.load_error')}
         </Card>
       ) : (
         <>
           <div className="mb-4 grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
             <StatCard
-              label="คะแนนสุขภาพการเงิน"
+              label={t('fnx.finhealth.score')}
               value={`${data.score}/100 · ${data.grade}`}
               icon={HeartPulse}
               tone={GRADE_TONE[data.grade] ?? 'info'}
-              hint={`เงินสดอยู่ได้ ~${data.days_cash_on_hand ?? '∞'} วัน · current ratio ${data.current_ratio ?? '—'}`}
+              hint={t('fnx.finhealth.score_hint', { days: data.days_cash_on_hand ?? '∞', ratio: data.current_ratio ?? '—' })}
             />
-            <StatCard label="เงินสดคงเหลือ" value={baht(data.cash_on_hand)} icon={Wallet} />
-            <StatCard label="ลูกหนี้คงค้าง" value={baht(data.ar_outstanding)} hint={`ค้างชำระ ${data.overdue_ar_pct}% (${baht(data.overdue_ar)})`} tone={data.overdue_ar_pct > 20 ? 'warning' : 'default'} />
-            <StatCard label="เจ้าหนี้คงค้าง" value={baht(data.ap_outstanding)} icon={AlertTriangle} />
-            <StatCard label="ยอดขาย/วัน (run-rate)" value={baht(data.pos_daily_run_rate)} icon={TrendingUp} tone="info" />
+            <StatCard label={t('fnx.finhealth.cash_on_hand')} value={baht(data.cash_on_hand)} icon={Wallet} />
+            <StatCard label={t('fnx.finhealth.ar_outstanding')} value={baht(data.ar_outstanding)} hint={t('fnx.finhealth.ar_hint', { pct: data.overdue_ar_pct, amount: baht(data.overdue_ar) })} tone={data.overdue_ar_pct > 20 ? 'warning' : 'default'} />
+            <StatCard label={t('fnx.finhealth.ap_outstanding')} value={baht(data.ap_outstanding)} icon={AlertTriangle} />
+            <StatCard label={t('fnx.finhealth.run_rate')} value={baht(data.pos_daily_run_rate)} icon={TrendingUp} tone="info" />
           </div>
 
           <Card className="gap-3 p-4">
-            <h3 className="text-sm font-semibold text-muted-foreground">ปัจจัยที่ใช้คำนวณคะแนน (drivers)</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground">{t('fnx.finhealth.drivers_title')}</h3>
             <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-              <Driver label="สภาพคล่อง (Liquidity)" score={data.drivers.liquidity} hint={`${data.days_cash_on_hand ?? '∞'} วันของเงินสด · เต็ม 100 ที่ ≥60 วัน`} />
-              <Driver label="ลูกหนี้ (Receivables)" score={data.drivers.receivables} hint={`หักตามสัดส่วนหนี้ค้างชำระ (${data.overdue_ar_pct}%)`} />
+              <Driver label={t('fnx.finhealth.driver_liquidity')} score={data.drivers.liquidity} hint={t('fnx.finhealth.driver_liquidity_hint', { days: data.days_cash_on_hand ?? '∞' })} />
+              <Driver label={t('fnx.finhealth.driver_receivables')} score={data.drivers.receivables} hint={t('fnx.finhealth.driver_receivables_hint', { pct: data.overdue_ar_pct })} />
             </div>
-            <p className="text-xs text-muted-foreground">คะแนนรวม = สภาพคล่อง×0.6 + ลูกหนี้×0.4 · อ่านอย่างเดียว ไม่กระทบบัญชี</p>
+            <p className="text-xs text-muted-foreground">{t('fnx.finhealth.formula_note')}</p>
           </Card>
         </>
       )}

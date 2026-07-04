@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Download, ShieldCheck } from 'lucide-react';
 
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -42,26 +43,27 @@ function downloadCsv(name: string, rows: (string | number)[][]) {
 }
 
 export function FinancialStatementsClient() {
+  const { t } = useLang();
   const [ledger, setLedger] = useState('');
   const ledgersQ = useQuery<any>({ queryKey: ['ledgers'], queryFn: () => api('/api/ledger/ledgers') });
   const ledgers: any[] = ledgersQ.data?.ledgers ?? [];
   const lp = ledger ? `&ledger=${encodeURIComponent(ledger)}` : '';
 
   const tabs = [
-    { key: 'bs', label: 'งบดุล', content: <BalanceSheet lp={lp} /> },
-    { key: 'pl', label: 'งบกำไรขาดทุน', content: <IncomeStatement lp={lp} ledger={ledger} /> },
-    { key: 'cf', label: 'งบกระแสเงินสด', content: <CashFlow lp={lp} /> },
+    { key: 'bs', label: t('fnx.fs.tab_bs'), content: <BalanceSheet lp={lp} /> },
+    { key: 'pl', label: t('fnx.fs.tab_pl'), content: <IncomeStatement lp={lp} ledger={ledger} /> },
+    { key: 'cf', label: t('fnx.fs.tab_cf'), content: <CashFlow lp={lp} /> },
   ];
 
   return (
     <div>
       <PageHeader
-        title="งบการเงิน"
-        description="งบดุล · งบกำไรขาดทุน · งบกระแสเงินสด — สร้างจากบัญชีแยกประเภทที่โพสต์แล้ว (TFRS)"
+        title={t('fnx.fs.title')}
+        description={t('fnx.fs.subtitle')}
         actions={
           ledgers.length > 1 ? (
             <label className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">บัญชีมาตรฐาน</span>
+              <span className="text-muted-foreground">{t('fnx.fs.ledger_std')}</span>
               <select className={selectCls} value={ledger} onChange={(e) => setLedger(e.target.value)}>
                 {ledgers.map((l) => (
                   <option key={l.code} value={l.is_leading ? '' : l.code}>
@@ -81,13 +83,14 @@ export function FinancialStatementsClient() {
 
 // ───────────────────────── งบดุล (Balance Sheet) ─────────────────────────
 function BalanceSheet({ lp }: { lp: string }) {
+  const { t } = useLang();
   const [asOf, setAsOf] = useState(today());
   const q = useQuery<any>({ queryKey: ['bs', asOf, lp], queryFn: () => api(`/api/ledger/balance-sheet?as_of=${asOf}${lp}`) });
   const d = q.data;
 
   const sections = useMemo(() => {
     const lines: any[] = d?.lines ?? [];
-    const pick = (t: string) => lines.filter((l) => l.account_type === t).sort((a, b) => String(a.account_code).localeCompare(String(b.account_code)));
+    const pick = (type: string) => lines.filter((l) => l.account_type === type).sort((a, b) => String(a.account_code).localeCompare(String(b.account_code)));
     return { assets: pick('Asset'), liabilities: pick('Liability'), equity: pick('Equity') };
   }, [d]);
 
@@ -112,12 +115,12 @@ function BalanceSheet({ lp }: { lp: string }) {
           )}
           {rows.length === 0 && !extra && (
             <tr>
-              <td colSpan={3} className="py-2 text-center text-muted-foreground">ไม่มีรายการ</td>
+              <td colSpan={3} className="py-2 text-center text-muted-foreground">{t('fnx.fs.no_rows')}</td>
             </tr>
           )}
           <tr className="border-t font-semibold">
             <td className="py-1" />
-            <td className="py-1">รวม{title}</td>
+            <td className="py-1">{t('fnx.fs.total', { name: title })}</td>
             <td className="py-1 text-right tabular">{baht(subtotal)}</td>
           </tr>
         </tbody>
@@ -131,7 +134,7 @@ function BalanceSheet({ lp }: { lp: string }) {
     sections.assets.forEach((l) => rows.push(['Asset', l.account_code, l.account_name, l.balance]));
     sections.liabilities.forEach((l) => rows.push(['Liability', l.account_code, l.account_name, l.balance]));
     sections.equity.forEach((l) => rows.push(['Equity', l.account_code, l.account_name, l.balance]));
-    rows.push(['Equity', '', 'กำไร(ขาดทุน)งวดปัจจุบัน', d.net_income]);
+    rows.push(['Equity', '', t('fnx.fs.current_pl'), d.net_income]);
     downloadCsv(`balance-sheet-${asOf}.csv`, rows);
   };
 
@@ -139,42 +142,42 @@ function BalanceSheet({ lp }: { lp: string }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="grid max-w-[200px] gap-1.5">
-          <Label htmlFor="bs-asof">ณ วันที่</Label>
+          <Label htmlFor="bs-asof">{t('fnx.fs.as_of')}</Label>
           <Input id="bs-asof" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
         </div>
         <Button variant="outline" size="sm" onClick={exportCsv} disabled={!d}>
-          <Download className="size-4" /> ส่งออก CSV
+          <Download className="size-4" /> {t('fnx.fs.export_csv')}
         </Button>
       </div>
       <StateView q={q}>
         {d && (
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="สินทรัพย์รวม" value={baht(d.assets)} tone="primary" />
-              <StatCard label="หนี้สินรวม" value={baht(d.liabilities)} tone="danger" />
-              <StatCard label="ส่วนของเจ้าของรวม" value={baht(d.equity + d.net_income)} />
+              <StatCard label={t('fnx.fs.bs_assets_total')} value={baht(d.assets)} tone="primary" />
+              <StatCard label={t('fnx.fs.bs_liab_total')} value={baht(d.liabilities)} tone="danger" />
+              <StatCard label={t('fnx.fs.bs_equity_total')} value={baht(d.equity + d.net_income)} />
               <StatCard
-                label="สถานะ"
-                value={<Badge variant={d.balanced ? 'success' : 'destructive'}>{d.balanced ? 'สมดุล' : 'ไม่สมดุล'}</Badge>}
+                label={t('fin.col_status')}
+                value={<Badge variant={d.balanced ? 'success' : 'destructive'}>{d.balanced ? t('fnx.fs.balanced') : t('fnx.fs.unbalanced')}</Badge>}
               />
             </div>
             <div className="grid gap-4 lg:grid-cols-2">
-              <Section title="สินทรัพย์" rows={sections.assets} subtotal={d.assets} />
+              <Section title={t('fnx.fs.sec_assets')} rows={sections.assets} subtotal={d.assets} />
               <div className="space-y-4">
-                <Section title="หนี้สิน" rows={sections.liabilities} subtotal={d.liabilities} />
+                <Section title={t('fnx.fs.sec_liab')} rows={sections.liabilities} subtotal={d.liabilities} />
                 <Section
-                  title="ส่วนของเจ้าของ"
+                  title={t('fnx.fs.sec_equity')}
                   rows={sections.equity}
-                  extra={{ label: 'กำไร(ขาดทุน)งวดปัจจุบัน', amount: d.net_income }}
+                  extra={{ label: t('fnx.fs.current_pl'), amount: d.net_income }}
                   subtotal={d.equity + d.net_income}
                 />
               </div>
             </div>
             <Card className="flex-row flex-wrap items-center gap-2 p-5 text-sm">
               <ShieldCheck className="size-4 text-muted-foreground" />
-              สินทรัพย์ <span className="tabular">{baht(d.assets)}</span> = หนี้สิน+ทุน{' '}
+              {t('fnx.fs.sec_assets')} <span className="tabular">{baht(d.assets)}</span> = {t('fnx.fs.liab_plus_equity')}{' '}
               <span className="tabular">{baht(d.liabilities_plus_equity)}</span>{' '}
-              <Badge variant={d.balanced ? 'success' : 'destructive'}>{d.balanced ? 'สมดุล' : 'ไม่สมดุล'}</Badge>
+              <Badge variant={d.balanced ? 'success' : 'destructive'}>{d.balanced ? t('fnx.fs.balanced') : t('fnx.fs.unbalanced')}</Badge>
             </Card>
           </div>
         )}
@@ -185,6 +188,7 @@ function BalanceSheet({ lp }: { lp: string }) {
 
 // ───────────────────────── งบกำไรขาดทุน (Income Statement) ─────────────────────────
 function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
+  const { t } = useLang();
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
   const [byBranch, setByBranch] = useState(false);
@@ -201,7 +205,7 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
     const rows: (string | number)[][] = [['section', 'code', 'account', 'amount']];
     rev.forEach((l: any) => rows.push(['Revenue', l.account_code, l.account_name, l.amount]));
     exp.forEach((l: any) => rows.push(['Expense', l.account_code, l.account_name, l.amount]));
-    rows.push(['', '', 'กำไรสุทธิ', d.net_income]);
+    rows.push(['', '', t('fnx.fs.net_profit'), d.net_income]);
     downloadCsv(`income-statement-${from}_${to}.csv`, rows);
   };
 
@@ -219,12 +223,12 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={3} className="py-2 text-center text-muted-foreground">ไม่มีรายการ</td>
+              <td colSpan={3} className="py-2 text-center text-muted-foreground">{t('fnx.fs.no_rows')}</td>
             </tr>
           )}
           <tr className={`border-t font-semibold ${tone ?? ''}`}>
             <td className="py-1" />
-            <td className="py-1">รวม{title}</td>
+            <td className="py-1">{t('fnx.fs.total', { name: title })}</td>
             <td className="py-1 text-right tabular">{baht(subtotal)}</td>
           </tr>
         </tbody>
@@ -237,21 +241,21 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor="pl-from">ตั้งแต่</Label>
+            <Label htmlFor="pl-from">{t('fnx.fs.from')}</Label>
             <Input id="pl-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="pl-to">ถึง</Label>
+            <Label htmlFor="pl-to">{t('fnx.fs.to')}</Label>
             <Input id="pl-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setFrom(yearStart())}>ตั้งแต่ต้นปี</Button>
+          <Button variant="ghost" size="sm" onClick={() => setFrom(yearStart())}>{t('fnx.fs.ytd')}</Button>
         </div>
         <div className="flex items-center gap-2">
           <Button variant={byBranch ? 'default' : 'outline'} size="sm" onClick={() => setByBranch((v) => !v)} disabled={!!ledger && byBranch}>
-            แยกตามสาขา
+            {t('fnx.fs.by_branch')}
           </Button>
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={byBranch || !d}>
-            <Download className="size-4" /> ส่งออก CSV
+            <Download className="size-4" /> {t('fnx.fs.export_csv')}
           </Button>
         </div>
       </div>
@@ -261,17 +265,17 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
           {branchQ.data && (
             <div className="grid gap-3">
               {Object.entries(branchQ.data.branches ?? {}).length === 0 && (
-                <Card className="p-6 text-center text-sm text-muted-foreground">ยังไม่มีรายการรายได้/ค่าใช้จ่ายในช่วงนี้</Card>
+                <Card className="p-6 text-center text-sm text-muted-foreground">{t('fnx.fs.branch_empty')}</Card>
               )}
               {Object.entries(branchQ.data.branches ?? {}).map(([key, b]: [string, any]) => (
                 <Card key={key} className="gap-2 p-5">
                   <div className="flex items-center justify-between">
-                    <strong>{key === 'unassigned' ? 'ไม่ระบุสาขา' : `สาขา #${key}`}</strong>
-                    <Badge variant={b.net >= 0 ? 'success' : 'destructive'}>กำไรสุทธิ {baht(b.net)}</Badge>
+                    <strong>{key === 'unassigned' ? t('fnx.fs.unassigned_branch') : t('fnx.fs.branch_hash', { key })}</strong>
+                    <Badge variant={b.net >= 0 ? 'success' : 'destructive'}>{t('fnx.fs.net_profit')} {baht(b.net)}</Badge>
                   </div>
                   <div className="flex gap-6 text-sm text-muted-foreground">
-                    <span>รายได้ <span className="tabular text-foreground">{baht(b.revenue)}</span></span>
-                    <span>ค่าใช้จ่าย <span className="tabular text-foreground">{baht(b.expense)}</span></span>
+                    <span>{t('fnx.fs.revenue')} <span className="tabular text-foreground">{baht(b.revenue)}</span></span>
+                    <span>{t('fnx.fs.expense')} <span className="tabular text-foreground">{baht(b.expense)}</span></span>
                   </div>
                 </Card>
               ))}
@@ -283,14 +287,14 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
           {d && (
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-3">
-                <StatCard label="รายได้รวม" value={baht(d.revenue)} tone="primary" />
-                <StatCard label="ค่าใช้จ่ายรวม" value={baht(d.expense)} tone="danger" />
-                <StatCard label="กำไรสุทธิ" value={baht(d.net_income)} tone={d.net_income >= 0 ? 'success' : 'danger'} />
+                <StatCard label={t('fnx.fs.rev_total')} value={baht(d.revenue)} tone="primary" />
+                <StatCard label={t('fnx.fs.exp_total')} value={baht(d.expense)} tone="danger" />
+                <StatCard label={t('fnx.fs.net_profit')} value={baht(d.net_income)} tone={d.net_income >= 0 ? 'success' : 'danger'} />
               </div>
-              <LineTable title="รายได้" rows={rev} subtotal={d.revenue} />
-              <LineTable title="ค่าใช้จ่าย" rows={exp} subtotal={d.expense} />
+              <LineTable title={t('fnx.fs.revenue')} rows={rev} subtotal={d.revenue} />
+              <LineTable title={t('fnx.fs.expense')} rows={exp} subtotal={d.expense} />
               <Card className="flex-row items-center justify-between p-5">
-                <span className="font-semibold">กำไร(ขาดทุน)สุทธิ</span>
+                <span className="font-semibold">{t('fnx.fs.net_pl')}</span>
                 <span className={`text-lg font-semibold tabular ${d.net_income >= 0 ? 'text-success' : 'text-destructive'}`}>{baht(d.net_income)}</span>
               </Card>
             </div>
@@ -303,6 +307,7 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
 
 // ───────────────────────── งบกระแสเงินสด (Statement of Cash Flows) ─────────────────────────
 function CashFlow({ lp }: { lp: string }) {
+  const { t } = useLang();
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
   const [method, setMethod] = useState<'indirect' | 'direct' | 'forecast'>('indirect');
@@ -329,18 +334,18 @@ function CashFlow({ lp }: { lp: string }) {
         <div className="flex flex-wrap items-center gap-1">
           {(['indirect', 'direct', 'forecast'] as const).map((m) => (
             <Button key={m} size="sm" variant={method === m ? 'default' : 'outline'} onClick={() => setMethod(m)}>
-              {m === 'indirect' ? 'ทางอ้อม' : m === 'direct' ? 'ทางตรง' : 'พยากรณ์'}
+              {m === 'indirect' ? t('fnx.fs.cf_indirect') : m === 'direct' ? t('fnx.fs.cf_direct') : t('fnx.fs.cf_forecast')}
             </Button>
           ))}
         </div>
         {method !== 'forecast' && (
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-1.5">
-              <Label htmlFor="cf-from">ตั้งแต่</Label>
+              <Label htmlFor="cf-from">{t('fnx.fs.from')}</Label>
               <Input id="cf-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="cf-to">ถึง</Label>
+              <Label htmlFor="cf-to">{t('fnx.fs.to')}</Label>
               <Input id="cf-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </div>
           </div>
@@ -351,32 +356,32 @@ function CashFlow({ lp }: { lp: string }) {
         {d && method === 'indirect' && (
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-3">
-              <StatCard label="เงินสดจากการดำเนินงาน" value={baht(d.operating?.net)} tone={d.operating?.net >= 0 ? 'success' : 'danger'} />
-              <StatCard label="เงินสดจากการลงทุน" value={baht(d.investing?.net)} />
-              <StatCard label="เงินสดจากการจัดหาเงิน" value={baht(d.financing?.net)} />
+              <StatCard label={t('fnx.fs.cf_operating')} value={baht(d.operating?.net)} tone={d.operating?.net >= 0 ? 'success' : 'danger'} />
+              <StatCard label={t('fnx.fs.cf_investing')} value={baht(d.investing?.net)} />
+              <StatCard label={t('fnx.fs.cf_financing')} value={baht(d.financing?.net)} />
             </div>
             <Card className="gap-2 p-5">
               <table className="w-full text-sm">
                 <tbody>
-                  <tr className="text-muted-foreground"><td className="pb-1 font-medium">กิจกรรมดำเนินงาน (Operating)</td><td /></tr>
-                  {flowRow('กำไรสุทธิ (Net income)', d.operating?.net_income ?? 0, 'ni')}
+                  <tr className="text-muted-foreground"><td className="pb-1 font-medium">{t('fnx.fs.op_activities')}</td><td /></tr>
+                  {flowRow(t('fnx.fs.net_income_row'), d.operating?.net_income ?? 0, 'ni')}
                   {(d.operating?.adjustments ?? []).map((a: any, i: number) => flowRow(`+ ${a.label ?? a.account_name}`, a.amount, `adj${i}`))}
                   {(d.operating?.working_capital ?? []).map((a: any, i: number) => flowRow(`Δ ${a.label ?? a.account_name}`, a.amount, `wc${i}`))}
-                  <tr className="border-t font-medium"><td className="py-1">เงินสดสุทธิจากการดำเนินงาน</td><td className="py-1 text-right tabular">{baht(d.operating?.net)}</td></tr>
-                  {(d.investing?.lines ?? []).length > 0 && <tr className="text-muted-foreground"><td className="pt-3 pb-1 font-medium">กิจกรรมลงทุน (Investing)</td><td /></tr>}
+                  <tr className="border-t font-medium"><td className="py-1">{t('fnx.fs.net_op_cash')}</td><td className="py-1 text-right tabular">{baht(d.operating?.net)}</td></tr>
+                  {(d.investing?.lines ?? []).length > 0 && <tr className="text-muted-foreground"><td className="pt-3 pb-1 font-medium">{t('fnx.fs.inv_activities')}</td><td /></tr>}
                   {(d.investing?.lines ?? []).map((a: any, i: number) => flowRow(a.label ?? a.account_name, a.amount, `inv${i}`))}
-                  {(d.financing?.lines ?? []).length > 0 && <tr className="text-muted-foreground"><td className="pt-3 pb-1 font-medium">กิจกรรมจัดหาเงิน (Financing)</td><td /></tr>}
+                  {(d.financing?.lines ?? []).length > 0 && <tr className="text-muted-foreground"><td className="pt-3 pb-1 font-medium">{t('fnx.fs.fin_activities')}</td><td /></tr>}
                   {(d.financing?.lines ?? []).map((a: any, i: number) => flowRow(a.label ?? a.account_name, a.amount, `fin${i}`))}
-                  <tr className="border-t font-semibold"><td className="py-1.5">เงินสดเปลี่ยนแปลงสุทธิ</td><td className="py-1.5 text-right tabular">{baht(d.net_change_in_cash)}</td></tr>
-                  <tr><td className="py-0.5 pr-3 text-muted-foreground">เงินสดต้นงวด</td><td className="py-0.5 text-right tabular">{baht(d.cash_beginning)}</td></tr>
-                  <tr><td className="py-0.5 pr-3 text-muted-foreground">เงินสดปลายงวด</td><td className="py-0.5 text-right tabular">{baht(d.cash_ending)}</td></tr>
+                  <tr className="border-t font-semibold"><td className="py-1.5">{t('fnx.fs.net_change_cash')}</td><td className="py-1.5 text-right tabular">{baht(d.net_change_in_cash)}</td></tr>
+                  <tr><td className="py-0.5 pr-3 text-muted-foreground">{t('fnx.fs.cash_begin')}</td><td className="py-0.5 text-right tabular">{baht(d.cash_beginning)}</td></tr>
+                  <tr><td className="py-0.5 pr-3 text-muted-foreground">{t('fnx.fs.cash_end')}</td><td className="py-0.5 text-right tabular">{baht(d.cash_ending)}</td></tr>
                 </tbody>
               </table>
             </Card>
             <Card className="flex-row flex-wrap items-center gap-2 p-5 text-sm">
               <ShieldCheck className="size-4 text-muted-foreground" />
-              งบกระแสเงินสด (วิธีทางอ้อม) — รายการปิดบัญชีสิ้นปีไม่นับรวม{' '}
-              <Badge variant={d.reconciled ? 'success' : 'destructive'}>{d.reconciled ? 'กระทบยอดเงินสดตรง' : 'ไม่ตรง'}</Badge>
+              {t('fnx.fs.cf_indirect_note')}{' '}
+              <Badge variant={d.reconciled ? 'success' : 'destructive'}>{d.reconciled ? t('fnx.fs.reconciled') : t('fnx.fs.not_reconciled')}</Badge>
             </Card>
           </div>
         )}
@@ -384,31 +389,31 @@ function CashFlow({ lp }: { lp: string }) {
         {d && method === 'direct' && (
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-3">
-              <StatCard label="เงินสดจากการดำเนินงาน" value={baht(d.operating?.net)} tone={d.operating?.net >= 0 ? 'success' : 'danger'} />
-              <StatCard label="เงินสดจากการลงทุน" value={baht(d.investing?.net)} />
-              <StatCard label="เงินสดจากการจัดหาเงิน" value={baht(d.financing?.net)} />
+              <StatCard label={t('fnx.fs.cf_operating')} value={baht(d.operating?.net)} tone={d.operating?.net >= 0 ? 'success' : 'danger'} />
+              <StatCard label={t('fnx.fs.cf_investing')} value={baht(d.investing?.net)} />
+              <StatCard label={t('fnx.fs.cf_financing')} value={baht(d.financing?.net)} />
             </div>
             <Card className="gap-2 p-5">
               <table className="w-full text-sm">
                 <tbody>
-                  <tr className="text-muted-foreground"><td className="pb-1 font-medium">กิจกรรมดำเนินงาน (Operating)</td><td /></tr>
-                  {flowRow('รับจากลูกค้า', d.operating?.receipts_from_customers ?? 0, 'r')}
-                  {flowRow('จ่ายผู้ขาย/ซัพพลายเออร์', d.operating?.payments_to_suppliers ?? 0, 'p')}
-                  {flowRow('ภาษี & เงินเดือน', d.operating?.tax_and_payroll ?? 0, 't')}
-                  {flowRow('ดำเนินงานอื่นๆ', d.operating?.other_operating ?? 0, 'o')}
-                  <tr className="border-t font-medium"><td className="py-1">เงินสดสุทธิจากการดำเนินงาน</td><td className="py-1 text-right tabular">{baht(d.operating?.net)}</td></tr>
-                  {flowRow('กิจกรรมลงทุน (Investing)', d.investing?.net ?? 0, 'i')}
-                  {flowRow('กิจกรรมจัดหาเงิน (Financing)', d.financing?.net ?? 0, 'f')}
-                  <tr className="border-t font-semibold"><td className="py-1.5">เงินสดเปลี่ยนแปลงสุทธิ</td><td className="py-1.5 text-right tabular">{baht(d.net_change_in_cash)}</td></tr>
-                  <tr><td className="py-0.5 pr-3 text-muted-foreground">เงินสดต้นงวด</td><td className="py-0.5 text-right tabular">{baht(d.cash_beginning)}</td></tr>
-                  <tr><td className="py-0.5 pr-3 text-muted-foreground">เงินสดปลายงวด</td><td className="py-0.5 text-right tabular">{baht(d.cash_ending)}</td></tr>
+                  <tr className="text-muted-foreground"><td className="pb-1 font-medium">{t('fnx.fs.op_activities')}</td><td /></tr>
+                  {flowRow(t('fnx.fs.receipts_customers'), d.operating?.receipts_from_customers ?? 0, 'r')}
+                  {flowRow(t('fnx.fs.payments_suppliers'), d.operating?.payments_to_suppliers ?? 0, 'p')}
+                  {flowRow(t('fnx.fs.tax_payroll'), d.operating?.tax_and_payroll ?? 0, 't')}
+                  {flowRow(t('fnx.fs.other_operating'), d.operating?.other_operating ?? 0, 'o')}
+                  <tr className="border-t font-medium"><td className="py-1">{t('fnx.fs.net_op_cash')}</td><td className="py-1 text-right tabular">{baht(d.operating?.net)}</td></tr>
+                  {flowRow(t('fnx.fs.inv_activities'), d.investing?.net ?? 0, 'i')}
+                  {flowRow(t('fnx.fs.fin_activities'), d.financing?.net ?? 0, 'f')}
+                  <tr className="border-t font-semibold"><td className="py-1.5">{t('fnx.fs.net_change_cash')}</td><td className="py-1.5 text-right tabular">{baht(d.net_change_in_cash)}</td></tr>
+                  <tr><td className="py-0.5 pr-3 text-muted-foreground">{t('fnx.fs.cash_begin')}</td><td className="py-0.5 text-right tabular">{baht(d.cash_beginning)}</td></tr>
+                  <tr><td className="py-0.5 pr-3 text-muted-foreground">{t('fnx.fs.cash_end')}</td><td className="py-0.5 text-right tabular">{baht(d.cash_ending)}</td></tr>
                 </tbody>
               </table>
             </Card>
             <Card className="flex-row flex-wrap items-center gap-2 p-5 text-sm">
               <ShieldCheck className="size-4 text-muted-foreground" />
-              งบกระแสเงินสด (วิธีทางตรง) — จำแนกตามลักษณะการรับ/จ่ายเงินสด{' '}
-              <Badge variant={d.reconciled ? 'success' : 'destructive'}>{d.reconciled ? 'กระทบยอดเงินสดตรง' : 'ไม่ตรง'}</Badge>
+              {t('fnx.fs.cf_direct_note')}{' '}
+              <Badge variant={d.reconciled ? 'success' : 'destructive'}>{d.reconciled ? t('fnx.fs.reconciled') : t('fnx.fs.not_reconciled')}</Badge>
             </Card>
           </div>
         )}
@@ -416,27 +421,27 @@ function CashFlow({ lp }: { lp: string }) {
         {d && method === 'forecast' && (
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="เงินสดปัจจุบัน" value={baht(d.opening_cash)} tone="primary" />
-              <StatCard label="คาดว่าจะรับ" value={baht(d.total_expected_inflow)} tone="success" />
-              <StatCard label="คาดว่าจะจ่าย" value={baht(d.total_expected_outflow)} tone="danger" />
-              <StatCard label="เงินสดปลายงวดคาดการณ์" value={baht(d.projected_closing_cash)} tone={d.projected_closing_cash >= 0 ? 'success' : 'danger'} />
+              <StatCard label={t('fnx.fs.current_cash')} value={baht(d.opening_cash)} tone="primary" />
+              <StatCard label={t('fnx.fs.expected_in')} value={baht(d.total_expected_inflow)} tone="success" />
+              <StatCard label={t('fnx.fs.expected_out')} value={baht(d.total_expected_outflow)} tone="danger" />
+              <StatCard label={t('fnx.fs.projected_closing')} value={baht(d.projected_closing_cash)} tone={d.projected_closing_cash >= 0 ? 'success' : 'danger'} />
             </div>
             <Card className="gap-2 p-5">
-              <h3 className="text-sm font-semibold text-muted-foreground">พยากรณ์กระแสเงินสด 8 สัปดาห์ (จาก AR/AP ที่ครบกำหนด)</h3>
+              <h3 className="text-sm font-semibold text-muted-foreground">{t('fnx.fs.forecast_title')}</h3>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-muted-foreground">
-                    <th className="pb-2 font-medium">สัปดาห์</th>
-                    <th className="pb-2 text-right font-medium">รับ</th>
-                    <th className="pb-2 text-right font-medium">จ่าย</th>
-                    <th className="pb-2 text-right font-medium">สุทธิ</th>
-                    <th className="pb-2 text-right font-medium">ยอดคงเหลือคาดการณ์</th>
+                    <th className="pb-2 font-medium">{t('fnx.fs.col_week')}</th>
+                    <th className="pb-2 text-right font-medium">{t('fnx.fs.col_in')}</th>
+                    <th className="pb-2 text-right font-medium">{t('fnx.fs.col_out')}</th>
+                    <th className="pb-2 text-right font-medium">{t('fnx.fs.col_net')}</th>
+                    <th className="pb-2 text-right font-medium">{t('fnx.fs.col_proj_balance')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(d.periods ?? []).map((p: any) => (
                     <tr key={p.week} className="border-t">
-                      <td className="py-1">{p.week === 0 ? 'ครบกำหนด/เกินกำหนด' : `สัปดาห์ +${p.week}`}</td>
+                      <td className="py-1">{p.week === 0 ? t('fnx.fs.week_due') : t('fnx.fs.week_plus', { week: p.week })}</td>
                       <td className="py-1 text-right tabular">{p.inflow ? baht(p.inflow) : '—'}</td>
                       <td className="py-1 text-right tabular">{p.outflow ? baht(p.outflow) : '—'}</td>
                       <td className={`py-1 text-right tabular ${p.net < 0 ? 'text-destructive' : ''}`}>{baht(p.net)}</td>

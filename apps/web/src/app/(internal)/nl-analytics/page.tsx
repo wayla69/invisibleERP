@@ -28,27 +28,27 @@ export default function NlAnalyticsPage() {
 
   return (
     <div>
-      <PageHeader title="ถามข้อมูลด้วยภาษาธรรมชาติ (NL Analytics)" description="พิมพ์คำถามเป็นภาษาคน ระบบแปลงเป็นรายงานบนชั้นข้อมูลที่ควบคุมแล้ว (ไม่สร้าง SQL อิสระ) แล้วแสดงผล แยกตามกิจการ" />
+      <PageHeader title={t('pb.nl_title')} description={t('pb.nl_subtitle')} />
 
       <Card className="mb-6">
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><MessageSquare className="size-4 text-primary" /> ถามข้อมูล</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><MessageSquare className="size-4 text-primary" /> {t('pb.nl_ask')}</CardTitle></CardHeader>
         <CardContent>
           <div className="flex gap-2">
-            <input className="h-9 flex-1 rounded-md border bg-transparent px-3 text-sm" placeholder="เช่น ยอดขายแยกตามวิธีชำระเงิน" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && q.trim() && ask.mutate()} />
-            <Button disabled={ask.isPending || !q.trim()} onClick={() => ask.mutate()}>{ask.isPending ? <Loader2 className="size-4 animate-spin" /> : 'ถาม'}</Button>
+            <input className="h-9 flex-1 rounded-md border bg-transparent px-3 text-sm" placeholder={t('pb.nl_ph')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && q.trim() && ask.mutate()} />
+            <Button disabled={ask.isPending || !q.trim()} onClick={() => ask.mutate()}>{ask.isPending ? <Loader2 className="size-4 animate-spin" /> : t('pb.nl_ask_btn')}</Button>
           </div>
           {err && <p className="mt-2 text-sm text-destructive">{err}</p>}
-          {res?.resolved && <p className="mt-2 text-xs text-muted-foreground">ตีความเป็น: จัดกลุ่มตาม <span className="font-medium">{res.resolved.dimension}</span>{res.resolved.date_from ? ` · ตั้งแต่ ${res.resolved.date_from}` : ''}{res.resolved.date_to ? ` · ถึง ${res.resolved.date_to}` : ''} ({res.source})</p>}
+          {res?.resolved && <p className="mt-2 text-xs text-muted-foreground">{t('pb.nl_interpreted')} <span className="font-medium">{res.resolved.dimension}</span>{res.resolved.date_from ? t('pb.nl_from', { d: res.resolved.date_from }) : ''}{res.resolved.date_to ? t('pb.nl_to', { d: res.resolved.date_to }) : ''} ({res.source})</p>}
         </CardContent>
       </Card>
 
       {res?.result && (
         <Card>
-          <CardHeader><CardTitle className="text-base">ผลลัพธ์</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('pb.result')}</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto">
-            {rows.length === 0 ? <p className="text-sm text-muted-foreground">ไม่มีข้อมูล</p> : (
+            {rows.length === 0 ? <p className="text-sm text-muted-foreground">{t('pb.no_data')}</p> : (
               <table className="w-full text-sm">
-                <thead><tr className="border-b text-left text-muted-foreground"><th className="px-2 py-1 font-medium">{res.result.dimension}</th><th className="px-2 py-1 text-right font-medium">ยอดขาย</th><th className="px-2 py-1 text-right font-medium">ออร์เดอร์</th></tr></thead>
+                <thead><tr className="border-b text-left text-muted-foreground"><th className="px-2 py-1 font-medium">{res.result.dimension}</th><th className="px-2 py-1 text-right font-medium">{t('pb.col_sales')}</th><th className="px-2 py-1 text-right font-medium">{t('pb.nl_col_orders')}</th></tr></thead>
                 <tbody>{rows.map((r, i) => (
                   <tr key={i} className="border-b">
                     <td className="px-2 py-1"><div>{String(r.dim)}</div><div className="mt-0.5 h-1.5 rounded bg-primary/20"><div className="h-1.5 rounded bg-primary" style={{ width: `${Math.round((Number(r.sales_total) / maxSales) * 100)}%` }} /></div></td>

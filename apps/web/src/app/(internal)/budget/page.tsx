@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Goal, Scale, TrendingUp, Search, ClipboardCheck } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -33,16 +34,17 @@ const selectCls =
 const thisYear = new Date().getFullYear();
 
 export default function BudgetPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="งบประมาณเทียบจริง (Budget vs Actual)"
-        description="ตั้งงบประมาณรายบัญชี/ศูนย์ต้นทุน แล้วเทียบกับยอดจริงจากบัญชีแยกประเภท (เฉพาะรายการที่ลงบัญชีแล้ว) พร้อมวิเคราะห์ผลต่างเชิงบวก/ลบ"
+        title={t('pb.bud_title')}
+        description={t('pb.bud_subtitle')}
       />
       <Tabs
         tabs={[
-          { key: 'bva', label: 'งบเทียบจริง', content: <BvaTab /> },
-          { key: 'set', label: 'ตั้งงบประมาณ', content: <SetBudgetTab /> },
+          { key: 'bva', label: t('pb.bud_tab_bva'), content: <BvaTab /> },
+          { key: 'set', label: t('pb.bud_tab_set'), content: <SetBudgetTab /> },
         ]}
       />
     </div>
@@ -50,6 +52,7 @@ export default function BudgetPage() {
 }
 
 function BvaTab() {
+  const { t } = useLang();
   const [fy, setFy] = useState(String(thisYear));
   const [period, setPeriod] = useState('');
   const [query, setQuery] = useState<{ fy: string; period: string } | null>({ fy: String(thisYear), period: '' });
@@ -64,7 +67,7 @@ function BvaTab() {
   // ELC-06 management review sign-off (records evidence + follow-up note for the selected period).
   const signOff = useMutation({
     mutationFn: (notes: string) => api('/api/ledger/budget-review/sign-off', { method: 'POST', body: JSON.stringify({ fiscal_year: Number(query!.fy), period: query!.period || undefined, notes }) }),
-    onSuccess: (r: any) => { notifySuccess(`บันทึกการสอบทานงบประมาณแล้ว (${r.material_count} รายการมีสาระสำคัญ)`); qc.invalidateQueries({ queryKey: ['bva'] }); },
+    onSuccess: (r: any) => { notifySuccess(t('pb.bud_review_saved', { n: r.material_count })); qc.invalidateQueries({ queryKey: ['bva'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -73,19 +76,19 @@ function BvaTab() {
   return (
     <div className="space-y-5">
       <Card className="max-w-2xl gap-4">
-        <CardHeader><CardTitle className="text-base">เลือกงวด</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('pb.bud_select_period')}</CardTitle></CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-2">
-              <Label htmlFor="bva-fy">ปีงบประมาณ</Label>
+              <Label htmlFor="bva-fy">{t('pb.fiscal_year')}</Label>
               <Input id="bva-fy" type="number" value={fy} onChange={(e) => setFy(e.target.value)} className="max-w-[120px]" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bva-period">งวด (YYYY-MM, ว่าง = ทั้งปี)</Label>
+              <Label htmlFor="bva-period">{t('pb.bud_period_label')}</Label>
               <Input id="bva-period" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="2026-06" className="max-w-[160px]" />
             </div>
             <Button onClick={() => setQuery({ fy, period: /^\d{4}-\d{2}$/.test(period) ? period : '' })}>
-              <Search className="size-4" /> ดูรายงาน
+              <Search className="size-4" /> {t('pb.bud_view_report')}
             </Button>
           </div>
         </CardContent>
@@ -96,24 +99,24 @@ function BvaTab() {
           <>
             <div className="grid gap-4 sm:grid-cols-3">
               <StatCard
-                label="รายได้ (จริง/งบ)"
+                label={t('pb.bud_revenue_actual_budget')}
                 value={baht(q.data.rollup.revenue.actual)}
                 icon={TrendingUp}
                 tone={q.data.rollup.revenue.favorable ? 'success' : 'warning'}
-                hint={`งบ ${baht(q.data.rollup.revenue.budget)} · ผลต่าง ${baht(q.data.rollup.revenue.variance)}`}
+                hint={t('pb.bud_budget_variance', { b: baht(q.data.rollup.revenue.budget), v: baht(q.data.rollup.revenue.variance) })}
               />
               <StatCard
-                label="ค่าใช้จ่าย (จริง/งบ)"
+                label={t('pb.bud_expense_actual_budget')}
                 value={baht(q.data.rollup.expense.actual)}
                 tone={q.data.rollup.expense.favorable ? 'success' : 'danger'}
-                hint={`งบ ${baht(q.data.rollup.expense.budget)} · ผลต่าง ${baht(q.data.rollup.expense.variance)}`}
+                hint={t('pb.bud_budget_variance', { b: baht(q.data.rollup.expense.budget), v: baht(q.data.rollup.expense.variance) })}
               />
               <StatCard
-                label="สุทธิ (จริง/งบ)"
+                label={t('pb.bud_net_actual_budget')}
                 value={baht(q.data.rollup.net.actual)}
                 icon={Scale}
                 tone={q.data.rollup.net.favorable ? 'success' : 'danger'}
-                hint={`งบ ${baht(q.data.rollup.net.budget)} · ผลต่าง ${baht(q.data.rollup.net.variance)}`}
+                hint={t('pb.bud_budget_variance', { b: baht(q.data.rollup.net.budget), v: baht(q.data.rollup.net.variance) })}
               />
             </div>
 
@@ -122,33 +125,33 @@ function BvaTab() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <Badge variant={q.data.review.material_count === 0 ? 'secondary' : q.data.review.last_signoff ? 'success' : 'warning'}>
-                    {q.data.review.material_count === 0 ? 'ไม่มีผลต่างที่มีสาระสำคัญ' : `${q.data.review.material_count} รายการมีสาระสำคัญ`}
+                    {q.data.review.material_count === 0 ? t('pb.bud_no_material') : t('pb.bud_n_material', { n: q.data.review.material_count })}
                   </Badge>
-                  {q.data.review.requires_review_count > 0 && <span className="text-muted-foreground">ต้องสอบทาน/ติดตาม <span className="font-medium text-foreground">{q.data.review.requires_review_count}</span> รายการ · ผลต่างไม่พึงประสงค์รวม <span className="tabular font-medium text-foreground">{baht(q.data.review.unfavorable_total)}</span></span>}
-                  <span className="text-xs text-muted-foreground">(เกณฑ์สาระสำคัญ ≥ {q.data.review.material_threshold_pct}% และ ≥ {baht(q.data.review.material_threshold_abs)})</span>
+                  {q.data.review.requires_review_count > 0 && <span className="text-muted-foreground">{t('pb.bud_needs_review_1')} <span className="font-medium text-foreground">{q.data.review.requires_review_count}</span> {t('pb.bud_needs_review_2')} <span className="tabular font-medium text-foreground">{baht(q.data.review.unfavorable_total)}</span></span>}
+                  <span className="text-xs text-muted-foreground">{t('pb.bud_material_threshold', { pct: q.data.review.material_threshold_pct, abs: baht(q.data.review.material_threshold_abs) })}</span>
                 </div>
-                <Button variant="outline" size="sm" disabled={signOff.isPending} onClick={() => { const note = window.prompt('บันทึกการสอบทาน + การติดตามผลต่าง (เป็นหลักฐานการสอบทานของผู้บริหาร)'); if (note && note.trim()) signOff.mutate(note.trim()); }}>
-                  <ClipboardCheck className="size-4" /> บันทึกการสอบทาน
+                <Button variant="outline" size="sm" disabled={signOff.isPending} onClick={() => { const note = window.prompt(t('pb.bud_review_prompt')); if (note && note.trim()) signOff.mutate(note.trim()); }}>
+                  <ClipboardCheck className="size-4" /> {t('pb.bud_record_review')}
                 </Button>
               </div>
               {q.data.review.last_signoff
-                ? <p className="text-xs text-muted-foreground">สอบทานล่าสุดโดย <span className="font-medium text-foreground">{q.data.review.last_signoff.reviewed_by}</span> — {q.data.review.last_signoff.notes}</p>
-                : q.data.review.material_count > 0 && <p className="text-xs text-warning-foreground dark:text-warning">ยังไม่มีการสอบทาน — ผู้บริหารควรสอบทานผลต่างที่มีสาระสำคัญและบันทึกการติดตาม</p>}
+                ? <p className="text-xs text-muted-foreground">{t('pb.bud_last_reviewed_by')} <span className="font-medium text-foreground">{q.data.review.last_signoff.reviewed_by}</span> — {q.data.review.last_signoff.notes}</p>
+                : q.data.review.material_count > 0 && <p className="text-xs text-warning-foreground dark:text-warning">{t('pb.bud_no_review_yet')}</p>}
             </Card>
 
             <DataTable
               rows={q.data.rows}
               rowKey={(r) => r.account_code}
-              emptyState={{ icon: Goal, title: 'ไม่มีข้อมูลงบ/ยอดจริงในงวดนี้', description: 'ตั้งงบประมาณในแท็บ "ตั้งงบประมาณ" หรือเลือกงวดที่มีการลงบัญชีแล้ว' }}
+              emptyState={{ icon: Goal, title: t('pb.bud_empty_title'), description: t('pb.bud_empty_desc') }}
               columns={[
-                { key: 'account_code', label: 'รหัสบัญชี', render: (r) => <span className="font-medium">{r.account_code}{r.material ? <span title="ผลต่างมีสาระสำคัญ — ต้องสอบทาน" className="ml-1 text-warning-foreground dark:text-warning">⚠</span> : null}</span> },
-                { key: 'account_name', label: 'ชื่อบัญชี', render: (r) => r.account_name ?? '—' },
-                { key: 'account_type', label: 'ประเภท', render: (r) => (r.account_type ? <Badge variant="info">{r.account_type}</Badge> : '—') },
-                { key: 'budget', label: 'งบประมาณ', align: 'right', render: (r) => <span className="tabular">{baht(r.budget)}</span> },
-                { key: 'actual', label: 'จริง', align: 'right', render: (r) => <span className="tabular">{baht(r.actual)}</span> },
-                { key: 'variance', label: 'ผลต่าง', align: 'right', render: (r) => <span className={`tabular ${r.material && !r.favorable ? 'font-medium text-destructive' : ''}`}>{baht(r.variance)}</span> },
+                { key: 'account_code', label: t('pb.col_account_code'), render: (r) => <span className="font-medium">{r.account_code}{r.material ? <span title={t('pb.bud_material_title')} className="ml-1 text-warning-foreground dark:text-warning">⚠</span> : null}</span> },
+                { key: 'account_name', label: t('pb.col_account_name'), render: (r) => r.account_name ?? '—' },
+                { key: 'account_type', label: t('pb.col_type'), render: (r) => (r.account_type ? <Badge variant="info">{r.account_type}</Badge> : '—') },
+                { key: 'budget', label: t('pb.col_budget'), align: 'right', render: (r) => <span className="tabular">{baht(r.budget)}</span> },
+                { key: 'actual', label: t('pb.col_actual'), align: 'right', render: (r) => <span className="tabular">{baht(r.actual)}</span> },
+                { key: 'variance', label: t('pb.col_variance'), align: 'right', render: (r) => <span className={`tabular ${r.material && !r.favorable ? 'font-medium text-destructive' : ''}`}>{baht(r.variance)}</span> },
                 { key: 'variance_pct', label: '%', align: 'right', render: (r) => <span className="tabular">{r.variance_pct == null ? '—' : `${r.variance_pct}%`}</span> },
-                { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={tone(r.favorable, r.variance)}>{r.status}</Badge> },
+                { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={tone(r.favorable, r.variance)}>{r.status}</Badge> },
               ]}
             />
           </>
@@ -159,6 +162,7 @@ function BvaTab() {
 }
 
 function SetBudgetTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [fy, setFy] = useState(String(thisYear));
   const listQ = useQuery<{ budgets: BudgetRow[]; count: number; total: number }>({
@@ -188,7 +192,7 @@ function SetBudgetTab() {
         }),
       }),
     onSuccess: (r: any) => {
-      notifySuccess(`ส่งคำขอตั้งงบประมาณบัญชี ${r.account_code}`, `${num(r.lines)} งวด · รวม ${baht(r.total)} — รออนุมัติจากผู้มีสิทธิ์ (คนละคนกับผู้ขอ)`);
+      notifySuccess(t('pb.bud_request_sent', { acc: r.account_code }), t('pb.bud_request_detail', { n: num(r.lines), total: baht(r.total) }));
       setAccountCode(''); setAmount(''); setNotes('');
       qc.invalidateQueries({ queryKey: ['budgets', fy] });
     },
@@ -199,7 +203,7 @@ function SetBudgetTab() {
   const decide = useMutation({
     mutationFn: ({ r, action }: { r: BudgetRow; action: 'approve' | 'reject' }) =>
       api(`/api/ledger/budgets/${action}`, { method: 'POST', body: JSON.stringify({ fiscal_year: r.fiscal_year, account_code: r.account_code, cost_center_code: r.cost_center_code ?? undefined }) }),
-    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? 'อนุมัติงบประมาณแล้ว' : 'ปฏิเสธงบประมาณแล้ว'); qc.invalidateQueries({ queryKey: ['budgets', fy] }); },
+    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? t('pb.bud_approved') : t('pb.bud_rejected')); qc.invalidateQueries({ queryKey: ['budgets', fy] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -208,48 +212,48 @@ function SetBudgetTab() {
   return (
     <div className="space-y-5">
       <Card className="max-w-4xl gap-4">
-        <CardHeader><CardTitle className="text-base">ตั้ง/แก้ไขงบประมาณ</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('pb.bud_set_edit')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">
-              <Label htmlFor="bg-fy">ปีงบประมาณ</Label>
+              <Label htmlFor="bg-fy">{t('pb.fiscal_year')}</Label>
               <Input id="bg-fy" type="number" value={fy} onChange={(e) => setFy(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bg-acc">รหัสบัญชี</Label>
-              <Input id="bg-acc" value={accountCode} onChange={(e) => setAccountCode(e.target.value)} placeholder="เช่น 5100" />
+              <Label htmlFor="bg-acc">{t('pb.col_account_code')}</Label>
+              <Input id="bg-acc" value={accountCode} onChange={(e) => setAccountCode(e.target.value)} placeholder={t('pb.bud_ph_account')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bg-cc">ศูนย์ต้นทุน (ถ้ามี)</Label>
-              <Input id="bg-cc" value={costCenter} onChange={(e) => setCostCenter(e.target.value)} placeholder="เช่น CC-01" />
+              <Label htmlFor="bg-cc">{t('pb.bud_cost_center_opt')}</Label>
+              <Input id="bg-cc" value={costCenter} onChange={(e) => setCostCenter(e.target.value)} placeholder={t('pb.bud_ph_cc')} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bg-mode">รูปแบบ</Label>
+              <Label htmlFor="bg-mode">{t('pb.bud_mode')}</Label>
               <select id="bg-mode" className={selectCls} value={mode} onChange={(e) => setMode(e.target.value)}>
-                <option value="annual">ทั้งปี (เฉลี่ย 12 งวด)</option>
-                <option value="monthly">รายเดือน (งวดเดียว)</option>
+                <option value="annual">{t('pb.bud_mode_annual')}</option>
+                <option value="monthly">{t('pb.bud_mode_monthly')}</option>
               </select>
             </div>
             {mode === 'monthly' && (
               <div className="grid gap-2">
-                <Label htmlFor="bg-period">งวด (YYYY-MM)</Label>
+                <Label htmlFor="bg-period">{t('pb.period_ym')}</Label>
                 <Input id="bg-period" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="2026-06" />
               </div>
             )}
             <div className="grid gap-2">
-              <Label htmlFor="bg-amt">จำนวนเงิน (฿)</Label>
+              <Label htmlFor="bg-amt">{t('pb.bud_amount_baht')}</Label>
               <Input id="bg-amt" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
             </div>
             <div className="grid gap-2 sm:col-span-2">
-              <Label htmlFor="bg-notes">หมายเหตุ</Label>
-              <Input id="bg-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="คำอธิบาย" />
+              <Label htmlFor="bg-notes">{t('pb.col_note')}</Label>
+              <Input id="bg-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('pb.bud_ph_desc')} />
             </div>
           </div>
           <Button
             disabled={upsert.isPending || !accountCode.trim() || !amount || (mode === 'monthly' && !/^\d{4}-\d{2}$/.test(period))}
             onClick={() => upsert.mutate()}
           >
-            <Plus className="size-4" /> {upsert.isPending ? 'กำลังบันทึก…' : 'บันทึกงบประมาณ'}
+            <Plus className="size-4" /> {upsert.isPending ? t('pb.saving') : t('pb.bud_save_budget')}
           </Button>
         </CardContent>
       </Card>

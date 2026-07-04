@@ -14,18 +14,20 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useLang } from '@/lib/i18n';
 
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function ProductionPage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="การผลิตขั้นสูง" description="เส้นทางการผลิต (Routings) · หน้างาน (Shop-floor) · ตรวจคุณภาพ (QA) · วางแผนความต้องการวัสดุ (MRP)" />
+      <PageHeader title={t('mf.prod_title')} description={t('mf.prod_desc')} />
       <Tabs tabs={[
-        { key: 'routings', label: 'เส้นทางการผลิต', content: <Routings /> },
-        { key: 'shopfloor', label: 'หน้างาน (Shop-floor)', content: <ShopFloor /> },
-        { key: 'qa', label: 'ตรวจคุณภาพ (QA)', content: <Quality /> },
-        { key: 'mrp', label: 'วางแผนวัสดุ (MRP)', content: <Mrp /> },
+        { key: 'routings', label: t('mf.prod_tab_routings'), content: <Routings /> },
+        { key: 'shopfloor', label: t('mf.prod_tab_shopfloor'), content: <ShopFloor /> },
+        { key: 'qa', label: t('mf.prod_tab_qa'), content: <Quality /> },
+        { key: 'mrp', label: t('mf.prod_tab_mrp'), content: <Mrp /> },
       ]} />
     </div>
   );
@@ -35,6 +37,7 @@ export default function ProductionPage() {
 type Op = { op_no: string; work_center: string; description: string; setup_min: string; run_min_per_unit: string; labor_rate: string };
 const emptyOp = (): Op => ({ op_no: '', work_center: '', description: '', setup_min: '', run_min_per_unit: '', labor_rate: '' });
 function Routings() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['routings'], queryFn: () => api('/api/routings') });
   const [code, setCode] = useState('');

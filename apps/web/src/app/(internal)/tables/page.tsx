@@ -282,54 +282,54 @@ function TablePanel({ t: tbl, onChange, onClose, onOrder }: { t: TableRow; onCha
         )}
       </div>
 
-      {!t.order && t.status !== 'cleaning' && (
+      {!tbl.order && tbl.status !== 'cleaning' && (
         <div>
-          <Button variant="outline" size="sm" onClick={() => setBuffetOpen((v) => !v)}><Utensils className="size-4" /> เริ่มบุฟเฟต์</Button>
+          <Button variant="outline" size="sm" onClick={() => setBuffetOpen((v) => !v)}><Utensils className="size-4" /> {t('px.tbl_start_buffet')}</Button>
           {buffetOpen && (
             <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border p-3">
               <Select value={bPkg} onValueChange={setBPkg}>
-                <SelectTrigger className="w-[200px]"><SelectValue placeholder="เลือกแพ็กเกจบุฟเฟต์" /></SelectTrigger>
+                <SelectTrigger className="w-[200px]"><SelectValue placeholder={t('px.tbl_select_buffet_pkg')} /></SelectTrigger>
                 <SelectContent>
-                  {(tiers.data?.packages ?? []).map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name} · {baht(p.price_per_pax)}/ท่าน</SelectItem>)}
+                  {(tiers.data?.packages ?? []).map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name} · {baht(p.price_per_pax)}{t('px.tbl_per_pax')}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Input className="w-[90px]" type="number" min={1} step={1} placeholder="จำนวนคน" value={bPax} onChange={(e) => setBPax(e.target.value)} />
-              <Button disabled={!bPkg || startBuffet.isPending} onClick={() => startBuffet.mutate()}>เริ่ม</Button>
+              <Input className="w-[90px]" type="number" min={1} step={1} placeholder={t('px.tbl_pax_count')} value={bPax} onChange={(e) => setBPax(e.target.value)} />
+              <Button disabled={!bPkg || startBuffet.isPending} onClick={() => startBuffet.mutate()}>{t('px.tbl_start')}</Button>
             </div>
           )}
         </div>
       )}
 
-      {(t.session || sessionId) && t.status !== 'cleaning' && (
+      {(tbl.session || sessionId) && tbl.status !== 'cleaning' && (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setMoveOpen((v) => !v); setMergeOpen(false); setTransferOpen(false); }}><ArrowLeftRight className="size-4" /> ย้ายโต๊ะ</Button>
-            <Button variant="outline" size="sm" onClick={() => { setMergeOpen((v) => !v); setMoveOpen(false); setTransferOpen(false); }}><Sparkles className="size-4" /> รวมโต๊ะ</Button>
-            {t.order && <Button variant="outline" size="sm" onClick={() => { setTransferOpen((v) => !v); setMoveOpen(false); setMergeOpen(false); }}><Split className="size-4" /> ย้ายรายการ</Button>}
+            <Button variant="outline" size="sm" onClick={() => { setMoveOpen((v) => !v); setMergeOpen(false); setTransferOpen(false); }}><ArrowLeftRight className="size-4" /> {t('px.tbl_move_table')}</Button>
+            <Button variant="outline" size="sm" onClick={() => { setMergeOpen((v) => !v); setMoveOpen(false); setTransferOpen(false); }}><Sparkles className="size-4" /> {t('px.tbl_merge_table')}</Button>
+            {tbl.order && <Button variant="outline" size="sm" onClick={() => { setTransferOpen((v) => !v); setMoveOpen(false); setMergeOpen(false); }}><Split className="size-4" /> {t('px.tbl_transfer_items')}</Button>}
           </div>
           {moveOpen && (
             <div className="flex flex-wrap items-end gap-2 rounded-lg border p-3">
               <Select value={moveTo} onValueChange={setMoveTo}>
-                <SelectTrigger className="w-[200px]"><SelectValue placeholder="ย้ายไปโต๊ะว่าง…" /></SelectTrigger>
+                <SelectTrigger className="w-[200px]"><SelectValue placeholder={t('px.tbl_move_to_empty')} /></SelectTrigger>
                 <SelectContent>
-                  {(allTables.data?.tables ?? []).filter((x) => x.id !== t.id && x.status === 'available').map((x) => <SelectItem key={x.id} value={String(x.id)}>โต๊ะ {x.table_no}</SelectItem>)}
+                  {(allTables.data?.tables ?? []).filter((x) => x.id !== tbl.id && x.status === 'available').map((x) => <SelectItem key={x.id} value={String(x.id)}>{t('px.tbl_table_label', { no: x.table_no })}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Button disabled={!moveTo || move.isPending} onClick={() => move.mutate()}>ย้าย</Button>
+              <Button disabled={!moveTo || move.isPending} onClick={() => move.mutate()}>{t('px.tbl_move')}</Button>
             </div>
           )}
           {mergeOpen && (
             <div className="flex flex-wrap items-end gap-2 rounded-lg border p-3">
               <Select value={mergeFrom} onValueChange={setMergeFrom}>
-                <SelectTrigger className="w-[220px]"><SelectValue placeholder="รวมโต๊ะอื่นเข้าโต๊ะนี้…" /></SelectTrigger>
+                <SelectTrigger className="w-[220px]"><SelectValue placeholder={t('px.tbl_merge_placeholder')} /></SelectTrigger>
                 <SelectContent>
-                  {(allTables.data?.tables ?? []).filter((x) => x.id !== t.id && ['occupied', 'bill_requested', 'paying'].includes(x.status)).map((x) => <SelectItem key={x.id} value={String(x.id)}>โต๊ะ {x.table_no}</SelectItem>)}
+                  {(allTables.data?.tables ?? []).filter((x) => x.id !== tbl.id && ['occupied', 'bill_requested', 'paying'].includes(x.status)).map((x) => <SelectItem key={x.id} value={String(x.id)}>{t('px.tbl_table_label', { no: x.table_no })}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Button disabled={!mergeFrom || merge.isPending} onClick={() => merge.mutate()}>รวม</Button>
+              <Button disabled={!mergeFrom || merge.isPending} onClick={() => merge.mutate()}>{t('px.tbl_merge')}</Button>
             </div>
           )}
-          {transferOpen && t.order && (
+          {transferOpen && tbl.order && (
             <div className="flex flex-col gap-2 rounded-lg border p-3">
               <div className="grid max-h-48 gap-1 overflow-y-auto">
                 {(orderDetail.data?.items ?? []).filter((i) => !i.charge).map((i) => (
@@ -341,57 +341,57 @@ function TablePanel({ t: tbl, onChange, onClose, onOrder }: { t: TableRow; onCha
                     <span className="text-xs text-muted-foreground tabular">{baht(i.amount)}</span>
                   </label>
                 ))}
-                {orderDetail.isLoading && <span className="text-xs text-muted-foreground">กำลังโหลด…</span>}
-                {orderDetail.data && (orderDetail.data.items ?? []).filter((i) => !i.charge).length === 0 && <span className="text-xs text-muted-foreground">ไม่มีรายการให้ย้าย</span>}
+                {orderDetail.isLoading && <span className="text-xs text-muted-foreground">{t('dash.loading')}</span>}
+                {orderDetail.data && (orderDetail.data.items ?? []).filter((i) => !i.charge).length === 0 && <span className="text-xs text-muted-foreground">{t('px.tbl_no_items_to_transfer')}</span>}
               </div>
               <div className="flex flex-wrap items-end gap-2">
                 <Select value={tTo} onValueChange={setTTo}>
-                  <SelectTrigger className="w-[200px]"><SelectValue placeholder="ย้ายไปโต๊ะที่มีลูกค้า…" /></SelectTrigger>
+                  <SelectTrigger className="w-[200px]"><SelectValue placeholder={t('px.tbl_transfer_to_occupied')} /></SelectTrigger>
                   <SelectContent>
-                    {(allTables.data?.tables ?? []).filter((x) => x.id !== t.id && ['occupied', 'bill_requested', 'paying'].includes(x.status)).map((x) => <SelectItem key={x.id} value={String(x.id)}>โต๊ะ {x.table_no}</SelectItem>)}
+                    {(allTables.data?.tables ?? []).filter((x) => x.id !== tbl.id && ['occupied', 'bill_requested', 'paying'].includes(x.status)).map((x) => <SelectItem key={x.id} value={String(x.id)}>{t('px.tbl_table_label', { no: x.table_no })}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Button disabled={!tItems.length || !tTo || transfer.isPending} onClick={() => transfer.mutate()}>ย้าย {tItems.length} รายการ</Button>
+                <Button disabled={!tItems.length || !tTo || transfer.isPending} onClick={() => transfer.mutate()}>{t('px.tbl_move_n_items', { n: tItems.length })}</Button>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {(t.session || sessionId) && t.status !== 'cleaning' && (
+      {(tbl.session || sessionId) && tbl.status !== 'cleaning' && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-2">
-            <Input className="min-w-[120px] flex-[2]" placeholder="ชื่ออาหาร" value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} />
-            <Input className="w-[70px]" type="number" min={1} step={1} placeholder="จำนวน" value={item.qty} onChange={(e) => setItem({ ...item, qty: e.target.value })} />
-            <Input className="w-20" type="number" min={0} step="0.01" placeholder="ราคา" value={item.price} onChange={(e) => setItem({ ...item, price: e.target.value })} />
+            <Input className="min-w-[120px] flex-[2]" placeholder={t('px.tbl_food_name')} value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} />
+            <Input className="w-[70px]" type="number" min={1} step={1} placeholder={t('inv.col_qty')} value={item.qty} onChange={(e) => setItem({ ...item, qty: e.target.value })} />
+            <Input className="w-20" type="number" min={0} step="0.01" placeholder={t('px.tbl_price')} value={item.price} onChange={(e) => setItem({ ...item, price: e.target.value })} />
             <Select value={item.station} onValueChange={(v) => setItem({ ...item, station: v })}>
               <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="hot">ครัวร้อน</SelectItem>
-                <SelectItem value="cold">ครัวเย็น</SelectItem>
-                <SelectItem value="drinks">เครื่องดื่ม</SelectItem>
+                <SelectItem value="hot">{t('px.tbl_station_hot')}</SelectItem>
+                <SelectItem value="cold">{t('px.tbl_station_cold')}</SelectItem>
+                <SelectItem value="drinks">{t('px.tbl_station_drinks')}</SelectItem>
               </SelectContent>
             </Select>
-            <Button disabled={!item.name || addItem.isPending} onClick={() => addItem.mutate()}><Plus className="size-4" /> เพิ่ม</Button>
+            <Button disabled={!item.name || addItem.isPending} onClick={() => addItem.mutate()}><Plus className="size-4" /> {t('px.tbl_add')}</Button>
           </div>
-          {t.order && (
+          {tbl.order && (
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" onClick={() => fire.mutate()} disabled={fire.isPending}><Flame className="size-4" /> ส่งเข้าครัว (ทั้งหมด)</Button>
+              <Button variant="outline" onClick={() => fire.mutate()} disabled={fire.isPending}><Flame className="size-4" /> {t('px.tbl_fire_all')}</Button>
               <span className="flex items-center gap-1">
-                <Input className="w-16" type="number" min={1} step={1} placeholder="คอร์ส" value={fireCourse} onChange={(e) => setFireCourse(e.target.value)} />
-                <Button variant="outline" disabled={!fireCourse || fireCourseM.isPending} onClick={() => fireCourseM.mutate()}><Flame className="size-4" /> ส่งคอร์ส</Button>
+                <Input className="w-16" type="number" min={1} step={1} placeholder={t('px.tbl_course')} value={fireCourse} onChange={(e) => setFireCourse(e.target.value)} />
+                <Button variant="outline" disabled={!fireCourse || fireCourseM.isPending} onClick={() => fireCourseM.mutate()}><Flame className="size-4" /> {t('px.tbl_fire_course')}</Button>
               </span>
-              <Button variant="outline" onClick={() => bill.mutate()} disabled={bill.isPending}><Receipt className="size-4" /> เรียกเก็บเงิน</Button>
-              <Button onClick={() => checkout.mutate()} disabled={checkout.isPending}><Wallet className="size-4" /> เช็คบิล (เงินสด) {baht(t.order.total)}</Button>
+              <Button variant="outline" onClick={() => bill.mutate()} disabled={bill.isPending}><Receipt className="size-4" /> {t('px.tbl_request_bill')}</Button>
+              <Button onClick={() => checkout.mutate()} disabled={checkout.isPending}><Wallet className="size-4" /> {t('px.tbl_checkout_cash')} {baht(tbl.order.total)}</Button>
             </div>
           )}
         </div>
       )}
-      {t.status === 'cleaning' && <Button onClick={() => clear.mutate()} disabled={clear.isPending}><Sparkles className="size-4" /> เคลียร์โต๊ะแล้ว (พร้อมรับลูกค้า)</Button>}
+      {tbl.status === 'cleaning' && <Button onClick={() => clear.mutate()} disabled={clear.isPending}><Sparkles className="size-4" /> {t('px.tbl_clear_table')}</Button>}
 
-      {!t.session && (
+      {!tbl.session && (
         <Button variant="ghost" size="sm" className="self-start text-destructive hover:bg-destructive/10" onClick={removeTable} disabled={del.isPending}>
-          <Trash2 className="size-4" /> ลบโต๊ะนี้
+          <Trash2 className="size-4" /> {t('px.tbl_delete_this_table')}
         </Button>
       )}
     </Card>
