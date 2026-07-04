@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, Paperclip, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -21,38 +22,39 @@ const PO_LIST_KEY = ['proc-pos'];
 // status. Raising a requisition lives at /requisitions (anyone) and goods receipt at /receiving
 // (warehouse) — kept on separate pages because each belongs to a different user group (SoD R03/R04).
 export default function ProcurementPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const pos = useQuery<any>({ queryKey: PO_LIST_KEY, queryFn: () => api('/api/inventory/purchase-orders?limit=50') });
 
   return (
     <div>
-      <PageHeader title="ใบสั่งซื้อ (Purchase Orders)" description="สร้าง / อนุมัติใบสั่งซื้อ (PO) สำหรับทีมจัดซื้อ และติดตามสถานะ" />
+      <PageHeader title={t('proc.page_title')} description={t('proc.page_subtitle')} />
 
       <Card className="mb-6 gap-4">
         <CardHeader>
-          <CardTitle className="text-base">สร้างใบสั่งซื้อ (PO)</CardTitle>
+          <CardTitle className="text-base">{t('proc.create_po_card')}</CardTitle>
         </CardHeader>
         <CardContent>
           <PoForm onDone={() => qc.invalidateQueries({ queryKey: PO_LIST_KEY })} />
         </CardContent>
       </Card>
 
-      <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ใบสั่งซื้อ</h3>
+      <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('proc.po_list')}</h3>
       <StateView q={pos}>
         {pos.data && (
           <DataTable
             rows={pos.data.purchase_orders}
             emptyState={{
               icon: ClipboardList,
-              title: 'ยังไม่มีใบสั่งซื้อ',
-              description: 'สร้าง PO ในแบบฟอร์มด้านบนเพื่อเริ่มต้นการจัดซื้อ',
+              title: t('inv.po_empty_title'),
+              description: t('proc.po_empty_desc'),
             }}
             columns={[
               { key: 'PO_No', label: 'PO' },
-              { key: 'PO_Date', label: 'วันที่', render: (r: any) => thaiDate(r.PO_Date) },
-              { key: 'Supplier_Name', label: 'ผู้ขาย' },
-              { key: 'Total_Amount', label: 'ยอด', align: 'right', render: (r: any) => baht(r.Total_Amount) },
-              { key: 'Status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
+              { key: 'PO_Date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.PO_Date) },
+              { key: 'Supplier_Name', label: t('inv.col_supplier') },
+              { key: 'Total_Amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => baht(r.Total_Amount) },
+              { key: 'Status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
             ]}
           />
         )}
@@ -66,6 +68,7 @@ export default function ProcurementPage() {
 // Invoice/receipt photos pinned to a PO (0228) — evidence backing the 3-way match. Upload here or from
 // the LINE OA chat (`attach <PO no>` then send the photo); both land in the same register.
 function PoAttachmentsCard() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [docNo, setDocNo] = useState('');
   const [loadedFor, setLoadedFor] = useState('');
@@ -106,28 +109,28 @@ function PoAttachmentsCard() {
   return (
     <Card className="mt-6 gap-4">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base"><Paperclip className="size-4" /> ไฟล์แนบใบสั่งซื้อ (ใบแจ้งหนี้ / ใบเสร็จ)</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base"><Paperclip className="size-4" /> {t('proc.attach_title')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Input className="w-56" placeholder="เลขที่ PO เช่น PO-20260702-001" value={docNo} onChange={(e) => setDocNo(e.target.value)} />
-          <Button size="sm" variant="outline" onClick={() => { setPreview(null); setLoadedFor(docNo.trim().toUpperCase()); }} disabled={!docNo.trim()}>ดูไฟล์แนบ</Button>
-          <Button size="sm" onClick={() => fileRef.current?.click()} disabled={!loadedFor || upload.isPending}>แนบรูป/ไฟล์</Button>
+          <Input className="w-56" placeholder={t('proc.attach_po_ph')} value={docNo} onChange={(e) => setDocNo(e.target.value)} />
+          <Button size="sm" variant="outline" onClick={() => { setPreview(null); setLoadedFor(docNo.trim().toUpperCase()); }} disabled={!docNo.trim()}>{t('proc.attach_view')}</Button>
+          <Button size="sm" onClick={() => fileRef.current?.click()} disabled={!loadedFor || upload.isPending}>{t('proc.attach_upload')}</Button>
           <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={onFile('invoice')} />
-          <span className="text-xs text-muted-foreground">หรือแนบจากแชท LINE: พิมพ์ <code className="rounded bg-muted px-1">attach &lt;เลขที่ PO&gt;</code> แล้วส่งรูป</span>
+          <span className="text-xs text-muted-foreground">{t('proc.attach_line_1')} <code className="rounded bg-muted px-1">attach &lt;PO&gt;</code> {t('proc.attach_line_2')}</span>
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
         {loadedFor && (
           <StateView q={list}>
             {list.data && (
-              list.data.count === 0 ? <p className="text-sm text-muted-foreground">ยังไม่มีไฟล์แนบสำหรับ {loadedFor}</p> : (
+              list.data.count === 0 ? <p className="text-sm text-muted-foreground">{t('proc.attach_none', { no: loadedFor })}</p> : (
                 <ul className="space-y-1">
                   {list.data.attachments.map((a: any) => (
                     <li key={a.id} className="flex items-center gap-2 text-sm">
-                      <Badge variant="outline">{a.kind === 'receipt' ? 'ใบเสร็จ' : a.kind === 'other' ? 'อื่น ๆ' : 'ใบแจ้งหนี้'}</Badge>
-                      <button className="underline-offset-2 hover:underline" onClick={() => view(a.id)}>{a.filename ?? `ไฟล์ #${a.id}`}</button>
-                      <span className="text-xs text-muted-foreground">โดย {a.created_by}{a.source === 'line' ? ' · จาก LINE' : ''}</span>
-                      <Button size="icon" variant="ghost" className="size-6" onClick={() => del.mutate(a.id)} title="ลบ (เฉพาะผู้แนบ/ผู้ดูแล)"><Trash2 className="size-3.5" /></Button>
+                      <Badge variant="outline">{a.kind === 'receipt' ? t('proc.kind_receipt') : a.kind === 'other' ? t('proc.kind_other') : t('proc.kind_invoice')}</Badge>
+                      <button className="underline-offset-2 hover:underline" onClick={() => view(a.id)}>{a.filename ?? t('proc.file_n', { id: a.id })}</button>
+                      <span className="text-xs text-muted-foreground">{t('proc.by', { by: a.created_by })}{a.source === 'line' ? t('proc.from_line') : ''}</span>
+                      <Button size="icon" variant="ghost" className="size-6" onClick={() => del.mutate(a.id)} title={t('proc.delete_title')}><Trash2 className="size-3.5" /></Button>
                     </li>
                   ))}
                 </ul>
@@ -138,7 +141,7 @@ function PoAttachmentsCard() {
         {preview && (
           preview.dataUrl.startsWith('data:image/')
             ? <img src={preview.dataUrl} alt="attachment preview" className="max-h-96 rounded border" />
-            : <a className="text-sm underline" href={preview.dataUrl} download={`attachment-${preview.id}.pdf`}>ดาวน์โหลด PDF</a>
+            : <a className="text-sm underline" href={preview.dataUrl} download={`attachment-${preview.id}.pdf`}>{t('proc.download_pdf')}</a>
         )}
       </CardContent>
     </Card>
