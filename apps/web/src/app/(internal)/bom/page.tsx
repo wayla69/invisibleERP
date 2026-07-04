@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { FormField } from '@/components/form-field';
 import { Tabs } from '@/components/tabs';
 import { statusVariant } from '@/components/ui';
 
@@ -26,7 +27,23 @@ function Library() {
   const [code, setCode] = useState(''); const [name, setName] = useState(''); const [sell, setSell] = useState(0); const [labor, setLabor] = useState(0);
   const [lines, setLines] = useState([{ item_id: '', qty_use_uom: 1, conv_factor: 1 }]);
   const [search, setSearch] = useState('');
+  const [showErrors, setShowErrors] = useState(false);
   const setLine = (i: number, p: any) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...p } : l)));
+
+  // Inline validation (shown after a save attempt). Numeric fields must be non-negative; a material line is
+  // validated only once it has an Item ID, so the trailing empty row never nags.
+  const nn = (v: unknown) => Number(v) >= 0;
+  const codeErr = !code.trim() ? 'ระบุรหัสสูตร' : null;
+  const nameErr = !name.trim() ? 'ระบุชื่อสินค้า' : null;
+  const sellErr = !nn(sell) ? 'ราคาขายต้องไม่ติดลบ' : null;
+  const laborErr = !nn(labor) ? 'ค่าแรงต้องไม่ติดลบ' : null;
+  const lineErr = (l: { item_id: string; qty_use_uom: number; conv_factor: number }) => {
+    if (!l.item_id.trim()) return null;
+    if (!(Number(l.qty_use_uom) > 0)) return 'จำนวนใช้ต้องมากกว่า 0';
+    if (!(Number(l.conv_factor) > 0)) return 'อัตราแปลงต้องมากกว่า 0';
+    return null;
+  };
+  const invalid = !!codeErr || !!nameErr || !!sellErr || !!laborErr || lines.some((l) => lineErr(l));
   const boms: any[] = q.data?.boms ?? [];
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -35,9 +52,10 @@ function Library() {
   }, [boms, search]);
   const add = useMutation({
     mutationFn: () => api<{ bom_code: string }>('/api/bom/master', { method: 'POST', body: JSON.stringify({ bom_code: code, product_name: name, selling_price: Number(sell), labor_cost: Number(labor), lines: lines.filter((l) => l.item_id).map((l) => ({ item_id: l.item_id, qty_use_uom: Number(l.qty_use_uom), conv_factor: Number(l.conv_factor) })) }) }),
-    onSuccess: (r) => { notifySuccess(`บันทึก ${r.bom_code}`); qc.invalidateQueries({ queryKey: ['bom-master'] }); setCode(''); setName(''); },
+    onSuccess: (r) => { notifySuccess(`บันทึก ${r.bom_code}`); qc.invalidateQueries({ queryKey: ['bom-master'] }); setCode(''); setName(''); setShowErrors(false); },
     onError: (e: any) => notifyError(e.message),
   });
+  const submit = () => { setShowErrors(true); if (invalid) { notifyError('กรุณาแก้ไขข้อมูลที่ไม่ถูกต้องก่อนบันทึก'); return; } add.mutate(); };
   return (
     <div className="space-y-4">
       <Card className="max-w-3xl gap-4">
@@ -46,10 +64,18 @@ function Library() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="grid gap-1.5"><Label htmlFor="bom-code">รหัสสูตร</Label><Input id="bom-code" placeholder="เช่น BOM001" value={code} onChange={(e) => setCode(e.target.value)} /></div>
-            <div className="grid gap-1.5"><Label htmlFor="bom-name">ชื่อสินค้า</Label><Input id="bom-name" placeholder="เช่น ก๋วยเตี๋ยวต้มยำ" value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div className="grid gap-1.5"><Label htmlFor="bom-sell">ราคาขาย (บาท)</Label><Input id="bom-sell" type="number" inputMode="decimal" value={sell} onChange={(e) => setSell(+e.target.value)} /></div>
-            <div className="grid gap-1.5"><Label htmlFor="bom-labor">ค่าแรง (บาท)</Label><Input id="bom-labor" type="number" inputMode="decimal" value={labor} onChange={(e) => setLabor(+e.target.value)} /></div>
+            <FormField htmlFor="bom-code" label="รหัสสูตร" required error={showErrors ? codeErr : undefined}>
+              <Input id="bom-code" placeholder="เช่น BOM001" value={code} aria-invalid={showErrors && !!codeErr} onChange={(e) => setCode(e.target.value)} />
+            </FormField>
+            <FormField htmlFor="bom-name" label="ชื่อสินค้า" required error={showErrors ? nameErr : undefined}>
+              <Input id="bom-name" placeholder="เช่น ก๋วยเตี๋ยวต้มยำ" value={name} aria-invalid={showErrors && !!nameErr} onChange={(e) => setName(e.target.value)} />
+            </FormField>
+            <FormField htmlFor="bom-sell" label="ราคาขาย (บาท)" error={showErrors ? sellErr : undefined}>
+              <Input id="bom-sell" type="number" inputMode="decimal" value={sell} aria-invalid={showErrors && !!sellErr} onChange={(e) => setSell(+e.target.value)} />
+            </FormField>
+            <FormField htmlFor="bom-labor" label="ค่าแรง (บาท)" error={showErrors ? laborErr : undefined}>
+              <Input id="bom-labor" type="number" inputMode="decimal" value={labor} aria-invalid={showErrors && !!laborErr} onChange={(e) => setLabor(+e.target.value)} />
+            </FormField>
           </div>
           <p className="text-sm font-medium">วัตถุดิบ</p>
           <div className="space-y-2">
@@ -58,12 +84,13 @@ function Library() {
             </div>
             {lines.map((l, i) => (
               <div key={i} className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2">
-                <Input placeholder="Item ID" aria-label={`รหัสวัตถุดิบ แถวที่ ${i + 1}`} value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} />
-                <Input type="number" inputMode="decimal" aria-label={`จำนวนใช้ แถวที่ ${i + 1}`} value={l.qty_use_uom} onChange={(e) => setLine(i, { qty_use_uom: +e.target.value })} />
-                <Input type="number" inputMode="decimal" aria-label={`อัตราแปลง แถวที่ ${i + 1}`} value={l.conv_factor} onChange={(e) => setLine(i, { conv_factor: +e.target.value })} />
+                <Input placeholder="Item ID" aria-label={`รหัสวัตถุดิบ แถวที่ ${i + 1}`} value={l.item_id} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { item_id: e.target.value })} />
+                <Input type="number" inputMode="decimal" aria-label={`จำนวนใช้ แถวที่ ${i + 1}`} value={l.qty_use_uom} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { qty_use_uom: +e.target.value })} />
+                <Input type="number" inputMode="decimal" aria-label={`อัตราแปลง แถวที่ ${i + 1}`} value={l.conv_factor} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { conv_factor: +e.target.value })} />
                 <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" aria-label={`ลบวัตถุดิบ แถวที่ ${i + 1}`} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
                   <X className="size-4" />
                 </Button>
+                {showErrors && lineErr(l) && <p className="col-span-full -mt-1 text-xs text-destructive" role="alert">{lineErr(l)}</p>}
               </div>
             ))}
           </div>
@@ -71,7 +98,7 @@ function Library() {
             <Button variant="secondary" onClick={() => setLines((ls) => [...ls, { item_id: '', qty_use_uom: 1, conv_factor: 1 }])}>
               <Plus className="size-4" /> วัตถุดิบ
             </Button>
-            <Button disabled={!code || add.isPending} onClick={() => add.mutate()}>บันทึกสูตร</Button>
+            <Button disabled={add.isPending} onClick={submit}>บันทึกสูตร</Button>
           </div>
         </CardContent>
       </Card>
