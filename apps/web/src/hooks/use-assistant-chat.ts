@@ -1,5 +1,5 @@
-'use client';
-
+// No 'use client' directive needed: this hook is imported only by client components
+// (assistant-widget, /assistant page), so it already lives in their client subgraph.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 // Shared AI-assistant chat state + SSE streaming, used by both the full `/assistant` page and the global

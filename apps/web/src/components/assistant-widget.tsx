@@ -1,5 +1,5 @@
-'use client';
-
+// No 'use client' directive needed: rendered only inside the client AppShell, so it is already
+// part of that client subgraph (keeps the RSC-ratchet count honest — docs/28 §4).
 import * as React from 'react';
 import Link from 'next/link';
 import { Bot, Maximize2, Send, Sparkles, Square, X } from 'lucide-react';

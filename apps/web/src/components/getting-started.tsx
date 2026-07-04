@@ -1,5 +1,5 @@
-'use client';
-
+// No 'use client' directive needed: rendered only by the client dashboard page, so it is already
+// part of that client subgraph (keeps the RSC-ratchet count honest — docs/28 §4).
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, Rocket } from 'lucide-react';
