@@ -95,6 +95,14 @@ export class BillingController {
     return this.svc.rejectSignupRequest(Number(id), u.username, b.reason);
   }
 
+  // Company directory for the platform owner ("god") — backs the web company-switcher so god can pick a
+  // single company to scope its view to (see the X-Act-As-Tenant header in TenantTxInterceptor). Lists ALL
+  // tenants (runs under the @PlatformAdmin RLS bypass); non-owners 403 at the guard.
+  @Get('admin/tenants') @PlatformAdmin()
+  listTenants() {
+    return this.svc.listTenants();
+  }
+
   // Tenant lifecycle (#5) — a platform owner suspends a company (its users are then blocked,
   // TENANT_SUSPENDED) or reactivates it. Audit-logged; platform owners are exempt from the block.
   @Post('admin/tenants/:id/suspend') @PlatformAdmin() @HttpCode(200)

@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2** · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -492,6 +492,21 @@ per-company Admin stays confined to its own org.
   and remove the username when they no longer need cross-company access. Everything a platform owner does
   across companies is recorded in the [Audit trail](#11-audit-trail-who-changed-what-and-when). See
   `docs/ops/tenancy-model.md` §2bis.
+
+**Knowing which company you're looking at (the company switcher).** Because a platform owner sees every
+company's data at once, the lists you open would otherwise mix rows from all companies with no cue to which
+is which. To handle that, the sidebar shows a **company switcher** — visible **only** to a platform owner —
+just under the workspace tabs. It doubles as a **current-company badge**:
+
+- It opens with **"ทุกบริษัท (รวม)"** selected — the combined cross-company view described above.
+- Pick a company from the list and the whole app **scopes to just that company** — every screen, list, and
+  export now shows only its data, exactly as that company's own Admin would see it. The badge shows the
+  company name so you always know whose data is on screen. Choose **"ทุกบริษัท (รวม)"** again to go back to the
+  combined view.
+- The choice is remembered on that device and the page reloads so everything refreshes under the new scope.
+  It only ever **narrows** what you see (you can always switch back); it never grants a normal Admin any
+  cross-company access. Actions you take while scoped to a company are still recorded in the audit trail with
+  the company you were acting as.
 
 ### 14.1 First-run setup checklist & starter
 

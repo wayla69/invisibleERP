@@ -55,6 +55,7 @@ import { LanguageToggle } from '@/components/language-toggle';
 import { CommandPalette } from '@/components/command-palette';
 import { AssistantWidget } from '@/components/assistant-widget';
 import { NotificationBell } from '@/components/notification-bell';
+import { CompanySwitcher } from '@/components/company-switcher';
 
 function initials(name?: string | null) {
   if (!name) return '?';
@@ -557,6 +558,7 @@ export function AppShell({
               </div>
             </div>
           )}
+          {me.data?.is_platform_owner && <CompanySwitcher />}
         </SidebarHeader>
 
         <SidebarContent>

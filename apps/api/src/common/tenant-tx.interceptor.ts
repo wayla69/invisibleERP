@@ -61,9 +61,29 @@ export class TenantTxInterceptor implements NestInterceptor {
     // purely by env (never an assignable DB role), so a tenant Admin who manages users cannot escalate into
     // it. Cross-tenant reads/writes it makes are still flagged to the audit interceptor via req.__rlsBypass.
     const isGod = isPlatformAdmin(user?.username);
+    // God "act-as-company": the web company-switcher lets a platform owner narrow its global view to ONE
+    // company. The client sends `X-Act-As-Tenant: <tenantId>`; we honour it ONLY for a god (never a normal
+    // Admin/staff) and ONLY on non-provisioning routes (a @PlatformAdmin route keeps its full bypass so the
+    // switcher's own directory still lists every company). It only ever REDUCES a god's visibility — god
+    // already sees everything — so trusting a client header here is safe (no privilege escalation). An
+    // invalid/absent value falls through to the normal global-god path.
+    const actAsRaw = req.headers?.['x-act-as-tenant'];
+    const actAsTenant = isGod && !platformBypass && actAsRaw != null && /^[0-9]+$/.test(String(actAsRaw))
+      ? Number(actAsRaw)
+      : null;
     let bypass: boolean;
     let orgScope: number | null = null;
-    if (!multiCompany) {
+    let effectiveTenantId: number | null = tenantId;
+    if (actAsTenant != null) {
+      // God scoped to a single chosen company: drop the bypass and pin app.tenant_id to that tenant so RLS
+      // returns only its rows — exactly the visibility a per-tenant Admin of that company would have. Also
+      // repoint the request's user.tenantId so services that derive the write tenant from the JWT (and the
+      // incidental writes some GETs perform — dashboard auto-reorder, lazy config seed) act as that company
+      // too, and don't trip the RLS WITH CHECK against the now-scoped app.tenant_id.
+      bypass = false;
+      effectiveTenantId = actAsTenant;
+      if (user) user.tenantId = actAsTenant;
+    } else if (!multiCompany) {
       bypass = preAuth || isAdmin || platformBypass || isGod; // legacy global HQ bypass (god implied)
     } else {
       bypass = preAuth || platformBypass || isGod; // god + login/signup + platform provisioning get the global bypass
@@ -72,6 +92,7 @@ export class TenantTxInterceptor implements NestInterceptor {
     // Expose the effective scope to the audit interceptor (records cross-tenant access on mutations).
     req.__rlsBypass = bypass;
     req.__rlsOrgScope = orgScope;
+    req.__actAsTenant = actAsTenant; // audit: which company a god narrowed its view to (null = global)
 
     // Bracket the request's DB transaction for ops metrics + slow-path logging (operational visibility).
     const started = Date.now();
@@ -99,14 +120,14 @@ export class TenantTxInterceptor implements NestInterceptor {
         // actor for the DB-level field change-log triggers (0116). All transaction-local (set_config …, true).
         await tx.execute(sql`select
           set_config('app.bypass_rls', ${bypass ? 'on' : 'off'}, true),
-          set_config('app.tenant_id', ${tenantId != null ? String(tenantId) : ''}, true),
+          set_config('app.tenant_id', ${effectiveTenantId != null ? String(effectiveTenantId) : ''}, true),
           set_config('app.org_id', ${orgScope != null ? String(orgScope) : ''}, true),
           set_config('app.actor', ${user?.username ?? ''}, true)`);
         // NB: we intentionally do NOT force the tx READ ONLY for GETs — several GET handlers perform
         // legitimate writes (dashboard auto-reorder, lazy loyalty-config seed), and Postgres rejects
         // changing access mode after the first query anyway (25001). @NoTx is the opt-out for non-tenant
         // handlers. defaultValue guards handlers that complete without emitting (would throw EmptyError).
-        return tenantALS.run({ tx, tenantId, bypass, req }, () => firstValueFrom(next.handle(), { defaultValue: undefined }));
+        return tenantALS.run({ tx, tenantId: effectiveTenantId, bypass, req }, () => firstValueFrom(next.handle(), { defaultValue: undefined }));
       }),
     ).pipe(
       finalize(() => {

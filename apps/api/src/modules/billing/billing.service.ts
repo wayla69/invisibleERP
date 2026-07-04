@@ -233,6 +233,16 @@ export class BillingService {
   // which the auth guard reads to block the tenant's users (403 TENANT_SUSPENDED); platform owners are exempt.
   // The mutation is audit-logged (AuditInterceptor). Runs under the platform-admin bypass (writes another
   // tenant's row). ──
+  // Company directory for the platform owner ("god") — backs the web company-switcher. Runs under the
+  // @PlatformAdmin RLS bypass, so it lists EVERY tenant. Ordered by code for a stable dropdown.
+  async listTenants() {
+    const rows = await this.db
+      .select({ id: tenants.id, code: tenants.code, name: tenants.name, suspendedAt: tenants.suspendedAt })
+      .from(tenants)
+      .orderBy(tenants.code);
+    return rows.map((t) => ({ id: Number(t.id), code: t.code, name: t.name, suspended: !!t.suspendedAt }));
+  }
+
   async suspendTenant(id: number, by: string, reason?: string) {
     const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });

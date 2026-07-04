@@ -51,8 +51,12 @@ export class AuditInterceptor implements NestInterceptor {
     // Hybrid tenancy (0196) — flag mutations that ran with cross-tenant visibility (HQ global bypass or
     // org-scoped Admin), set by TenantTxInterceptor. Only attach when present so ordinary tenant-scoped
     // rows stay lean. This is the audit trail behind "HQ sees all branches".
+    // A god that narrowed its view to one company via the switcher runs with bypass OFF but is still a
+    // cross-tenant operator acting on a company that isn't its own — record which company for traceability.
+    const actAs = (req as any).__actAsTenant;
     const xtenant: Record<string, unknown> | undefined =
-      (req as any).__rlsBypass ? { rls_bypass: true }
+      actAs != null ? { god_act_as_tenant: actAs }
+      : (req as any).__rlsBypass ? { rls_bypass: true }
       : (req as any).__rlsOrgScope != null ? { rls_org_scope: (req as any).__rlsOrgScope }
       : undefined;
 
