@@ -5,6 +5,7 @@ import { apPayments, apTransactions, vendors, whtCertificates } from '../../data
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { WhtService } from './documents/wht.service';
+import type { IssueWhtDto } from './documents/dto';
 import { TaxReportsService } from './reports/tax-reports.service';
 
 // Scheduled tax automation jobs (docs/33 PR4, TAX-03/TAX-05). Idempotent action jobs the BI scheduler runs:
@@ -67,13 +68,14 @@ export class TaxJobsService {
       if (!v?.taxId) { skipped++; continue; }
       const base = Math.round((n(r.whtAmount) / rate) * 100) / 100; // pre-VAT income base the WHT was taken on
       const datePaid = (r.approvedAt instanceof Date ? r.approvedAt.toISOString() : String(r.approvedAt)).slice(0, 10);
+      const dto: IssueWhtDto = {
+        date_paid: datePaid,
+        payee: { name: v.name ?? r.vendorName ?? '', tax_id: String(v.taxId), address: v.address ?? undefined, kind: 'company' },
+        lines: [{ income_type: r.whtIncomeType, amount_paid: base, rate, description: `หัก ณ ที่จ่าย ตามการจ่ายเงิน ${r.paymentNo} (${r.txnNo})` }],
+        ap_txn_no: r.txnNo, payment_no: r.paymentNo,
+      };
       try {
-        await this.wht.issue({
-          date_paid: datePaid,
-          payee: { name: v.name ?? r.vendorName ?? '', tax_id: String(v.taxId), address: v.address ?? undefined, kind: 'company' },
-          lines: [{ income_type: r.whtIncomeType, amount_paid: base, rate, description: `หัก ณ ที่จ่าย ตามการจ่ายเงิน ${r.paymentNo} (${r.txnNo})` }],
-          ap_txn_no: r.txnNo, payment_no: r.paymentNo,
-        } as any, user);
+        await this.wht.issue(dto, user);
         issued++;
       } catch {
         // Invalid payee/payer tax id, unknown income type, disallowed rate — skip this one, keep going.
