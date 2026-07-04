@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.3** · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+**Status: DRAFT v0.4** · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -517,9 +517,17 @@ the sidebar (visible only to platform owners) — one place to run the whole fle
   company (tenant + its Admin + industry chart of accounts) in one step.
 - **Onboarding** — the queue of pending **คำขอเปิดบริษัท** to **อนุมัติ/ปฏิเสธ**, and **ออกลิงก์เชิญ** to issue a
   single-use, expiring invite link (the token is shown once — copy it then).
+- **ภาพรวม** — business KPIs across all companies (MRR/ARR, จำนวนบริษัทที่จ่ายเงิน, ผู้ใช้ active, churn, สัดส่วน
+  แพ็กเกจ) and a **ต้องดูแล** panel that surfaces what needs action now: คำขอรออนุมัติ, บริษัททดลองใกล้หมดอายุ (7
+  วัน), ค้างชำระ, และถูกระงับ.
 
 Everything here is restricted to platform owners by the server, so the menu simply won't appear for a normal
 company Admin.
+
+**Knowing your scope at all times.** As a platform owner you'll see a thin **banner under the top bar**: in
+the combined view it reminds you that the figures on screen add up **all** companies; once you enter a company
+(via the switcher or **เข้าดู**) it names that company and gives you a one-click **ออกเป็นมุมมองรวม** to return —
+so a dashboard total is never mistaken for a single company's number.
 
 ### 14.1 First-run setup checklist & starter
 

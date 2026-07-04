@@ -119,6 +119,32 @@ const PLATFORM_GROUP: NavGroup = {
   items: [{ label: 'nav.platform', href: '/platform', icon: ShieldCheck, perms: [] }],
 };
 
+/**
+ * Persistent scope banner under the header — god only. In the combined view it warns that every figure sums
+ * ALL companies (so a dashboard number isn't misread as one company's); while acting-as it names the company
+ * in scope and offers a one-click return to the combined view. Complements the sidebar switcher/badge.
+ */
+function GodScopeBanner() {
+  const [acting, setActing] = React.useState<ActingTenant | null>(null);
+  React.useEffect(() => setActing(getActingTenant()), []);
+  const exit = () => { setActingTenant(null); window.location.reload(); };
+  if (acting) {
+    return (
+      <div className="flex items-center gap-2 border-b border-primary/30 bg-primary/10 px-4 py-1.5 text-xs">
+        <Building2 className="size-3.5 shrink-0 text-primary" />
+        <span className="flex-1 truncate">กำลังดูข้อมูลของ <b>{acting.name}</b>{acting.code ? ` (${acting.code})` : ''} — มุมมองผู้ดูแลแพลตฟอร์ม</span>
+        <button type="button" onClick={exit} className="shrink-0 rounded px-2 py-0.5 font-medium text-primary hover:bg-primary/15">ออกเป็นมุมมองรวม</button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 border-b border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground">
+      <Globe className="size-3.5 shrink-0" />
+      <span>โหมดผู้ดูแลแพลตฟอร์ม — กำลังดู <b>รวมทุกบริษัท</b> (ตัวเลขรวมทุกบริษัท) เลือกดูรายบริษัทได้จากแถบซ้ายบน</span>
+    </div>
+  );
+}
+
 interface SwitcherCompany { id: number; code: string; name: string; suspended: boolean }
 
 /**
@@ -761,6 +787,7 @@ export function AppShell({
           </div>
         </header>
 
+        {isGod && <GodScopeBanner />}
         <div className={cn('flex-1 pt-4 sm:pt-6 app-content-pad')}>{children}</div>
       </SidebarInset>
 

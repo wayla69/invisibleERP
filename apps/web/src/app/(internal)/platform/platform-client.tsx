@@ -2,14 +2,16 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, Eye, Pause, Play, Plus, Ticket, UserPlus } from 'lucide-react';
+import { Activity, AlertTriangle, Building2, CircleDollarSign, Clock, Eye, PauseCircle, Pause, Play, Plus, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
 
 import { api, setActingTenant } from '@/lib/api';
-import { thaiDate } from '@/lib/format';
+import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
+import { StatCard } from '@/components/stat-card';
 import { DataTable, type Column } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
+import { Card } from '@/components/ui/card';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -87,6 +89,10 @@ export default function PlatformConsole({
   const invites = useQuery<any[]>({
     queryKey: ['signup-invites'],
     queryFn: () => api<{ invites: any[] }>('/api/admin/signup-invites').then((r) => r.invites),
+  });
+  const metrics = useQuery<any>({
+    queryKey: ['saas-metrics'],
+    queryFn: () => api('/api/billing/saas-metrics'),
   });
 
   const refresh = () => {
@@ -297,6 +303,64 @@ export default function PlatformConsole({
 
   const pending = requests.data?.length ?? 0;
 
+  // Needs-attention — derived from the company list + request queue (no extra endpoint). "Trial ending soon"
+  // = a Trialing company whose trial_ends_at is within the next 7 days.
+  const comps = companies.data ?? [];
+  const now = Date.now();
+  const suspendedN = comps.filter((c) => c.suspended).length;
+  const pastDueN = comps.filter((c) => c.status === 'PastDue').length;
+  const trialSoonN = comps.filter((c) => {
+    if (c.status !== 'Trialing' || !c.trial_ends_at) return false;
+    const dt = new Date(c.trial_ends_at).getTime() - now;
+    return dt > 0 && dt < 7 * 864e5;
+  }).length;
+
+  const overviewTab = (
+    <StateView q={metrics}>
+      {metrics.data && (
+        <div className="space-y-6">
+          {/* Revenue + engagement KPIs (cross-company; god RLS bypass spans the whole book). */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label="MRR (รายเดือน)" value={baht(metrics.data.revenue.mrr)} icon={CircleDollarSign} tone="primary" hint={`ARR ${baht(metrics.data.revenue.arr)} · ARPU ${baht(metrics.data.revenue.arpu)}`} />
+            <StatCard label="บริษัทที่จ่ายเงิน" value={num(metrics.data.subscriptions.active)} icon={Building2} tone="success" hint={`ทดลอง ${num(metrics.data.subscriptions.trialing)} · ค้างชำระ ${num(metrics.data.subscriptions.past_due)}`} />
+            <StatCard label="ผู้ใช้ active (30 วัน)" value={num(metrics.data.engagement.mau)} icon={Users} tone="info" hint={`วันนี้ ${num(metrics.data.engagement.dau)} · stickiness ${metrics.data.engagement.stickiness_pct}%`} />
+            <StatCard label="Churn (30 วัน)" value={`${metrics.data.churn.churn_rate_30d_pct}%`} icon={TrendingUp} tone={metrics.data.churn.churn_rate_30d_pct > 5 ? 'danger' : 'default'} hint={`ยกเลิก ${num(metrics.data.churn.canceled_30d)} ราย`} />
+          </div>
+
+          {/* Needs-attention — what a god should act on. Open the Onboarding tab for the request queue. */}
+          <div>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><AlertTriangle className="size-4 text-warning-foreground dark:text-warning" /> ต้องดูแล</h3>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard label="คำขอรออนุมัติ" value={num(pending)} icon={UserPlus} tone={pending ? 'warning' : 'default'} hint="ดูที่แท็บ Onboarding" />
+              <StatCard label="ทดลองใกล้หมด (7 วัน)" value={num(trialSoonN)} icon={Clock} tone={trialSoonN ? 'warning' : 'default'} />
+              <StatCard label="ค้างชำระ" value={num(pastDueN)} icon={CircleDollarSign} tone={pastDueN ? 'danger' : 'default'} />
+              <StatCard label="ถูกระงับ" value={num(suspendedN)} icon={PauseCircle} tone={suspendedN ? 'danger' : 'default'} />
+            </div>
+          </div>
+
+          {/* Plan mix — active subscriptions + MRR contribution per plan. */}
+          <div>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Activity className="size-4 text-primary" /> สัดส่วนตามแพ็กเกจ</h3>
+            <Card className="p-0">
+              <DataTable
+                rows={metrics.data.by_plan ?? []}
+                columns={[
+                  { key: 'name', label: 'แพ็กเกจ', render: (p: any) => <span className="font-medium">{p.name}</span> },
+                  { key: 'price_monthly', label: 'ราคา/เดือน', align: 'right', render: (p: any) => baht(p.price_monthly) },
+                  { key: 'active_subscriptions', label: 'ใช้งาน', align: 'right', render: (p: any) => num(p.active_subscriptions) },
+                  { key: 'trialing', label: 'ทดลอง', align: 'right', render: (p: any) => num(p.trialing) },
+                  { key: 'mrr', label: 'MRR', align: 'right', render: (p: any) => baht(p.mrr) },
+                ]}
+                rowKey={(p: any) => p.plan}
+                emptyText="ยังไม่มีแพ็กเกจ"
+              />
+            </Card>
+          </div>
+        </div>
+      )}
+    </StateView>
+  );
+
   return (
     <div>
       <PageHeader
@@ -307,6 +371,7 @@ export default function PlatformConsole({
       <Tabs
         urlParam="tab"
         tabs={[
+          { key: 'overview', label: 'ภาพรวม', content: overviewTab },
           { key: 'companies', label: `บริษัท (${companies.data?.length ?? 0})`, content: companiesTab },
           { key: 'onboarding', label: pending ? `Onboarding (${pending})` : 'Onboarding', content: onboardingTab },
         ]}
