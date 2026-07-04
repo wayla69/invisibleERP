@@ -157,27 +157,27 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const [bf, setBf] = useState({ boq_no: '', title: '' });
   const createBoq = useMutation({
     mutationFn: () => api(`/api/projects/${code}/boq`, { method: 'POST', body: JSON.stringify({ boq_no: bf.boq_no || undefined, title: bf.title || undefined, lines: [] }) }),
-    onSuccess: () => { notifySuccess('สร้าง BoQ แล้ว'); setBoqDlg(false); setBf({ boq_no: '', title: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.boq_toast_created')); setBoqDlg(false); setBf({ boq_no: '', title: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   const [lineDlg, setLineDlg] = useState(false);
   const [lf, setLf] = useState({ category: 'material', item_no: '', description: '', uom: '', budget_qty: '', rate: '' });
   const addBoqLine = useMutation({
     mutationFn: () => api(`/api/projects/boq/${boqId}/lines`, { method: 'POST', body: JSON.stringify({ category: lf.category, item_no: lf.item_no || undefined, description: lf.description || undefined, uom: lf.uom || undefined, budget_qty: Number(lf.budget_qty) || 0, rate: Number(lf.rate) || 0 }) }),
-    onSuccess: () => { notifySuccess('เพิ่มรายการ BoQ แล้ว'); setLineDlg(false); setLf({ category: 'material', item_no: '', description: '', uom: '', budget_qty: '', rate: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.boq_toast_line_added')); setLineDlg(false); setLf({ category: 'material', item_no: '', description: '', uom: '', budget_qty: '', rate: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   const approveBoq = useMutation({
     mutationFn: () => api(`/api/projects/boq/${boqId}/approve`, { method: 'POST', body: '{}' }),
-    onSuccess: (r: any) => { notifySuccess(r?.budget_synced != null ? `อนุมัติ BoQ — งบวัสดุ ${baht(r.budget_synced)}` : 'อนุมัติ BoQ แล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: (r: any) => { notifySuccess(r?.budget_synced != null ? t('pj.boq_toast_approved_synced', { amount: baht(r.budget_synced) }) : t('pj.boq_toast_approved')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   const lockBoq = useMutation({
     mutationFn: () => api(`/api/projects/boq/${boqId}/lock`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess('ล็อก BoQ แล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.boq_toast_locked')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   const [remDlg, setRemDlg] = useState<null | any>(null);
   const [remQty, setRemQty] = useState('');
   const remeasure = useMutation({
     mutationFn: () => api(`/api/projects/boq/lines/${remDlg.id}/remeasure`, { method: 'POST', body: JSON.stringify({ remeasured_qty: Number(remQty) || 0 }) }),
-    onSuccess: () => { notifySuccess('บันทึกปริมาณวัดจริงแล้ว'); setRemDlg(null); setRemQty(''); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.boq_toast_remeasured')); setRemDlg(null); setRemQty(''); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
   // Requisition (PMR) — submit against a BoQ line, maker-checker decide over-budget ones.
@@ -185,11 +185,11 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const [pf, setPf] = useState({ boq_line_id: '', item_no: '', qty: '', unit_cost: '', vendor_name: '' });
   const submitPmr = useMutation({
     mutationFn: () => api(`/api/pmr`, { method: 'POST', body: JSON.stringify({ project_code: code, vendor_name: pf.vendor_name || undefined, items: [{ boq_line_id: Number(pf.boq_line_id), item_no: pf.item_no || undefined, qty: Number(pf.qty) || 0, unit_cost: Number(pf.unit_cost) || 0 }] }) }),
-    onSuccess: (r: any) => { notifySuccess(r?.over_budget ? `เกินงบ — ส่งอนุมัติผ่าน LINE (${r?.pmr_no ?? ''})` : r?.route === 'stock_issue' ? `เบิกจากสต๊อกแล้ว (${r?.pmr_no ?? ''})` : `ออกใบขอซื้อแล้ว (${r?.pmr_no ?? ''})`); setPmrDlg(false); setPf({ boq_line_id: '', item_no: '', qty: '', unit_cost: '', vendor_name: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: (r: any) => { notifySuccess(r?.over_budget ? t('pj.pmr_toast_over_budget', { no: r?.pmr_no ?? '' }) : r?.route === 'stock_issue' ? t('pj.pmr_toast_stock_issued', { no: r?.pmr_no ?? '' }) : t('pj.pmr_toast_pr_issued', { no: r?.pmr_no ?? '' })); setPmrDlg(false); setPf({ boq_line_id: '', item_no: '', qty: '', unit_cost: '', vendor_name: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   const decidePmr = useMutation({
     mutationFn: (v: { pmrNo: string; action: 'approve' | 'reject' }) => api(`/api/pmr/${v.pmrNo}/${v.action}`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess('อัปเดตใบขอเบิกแล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.pmr_toast_updated')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
   // Reservations — reserve on-hand stock to the project, issue-to-project (→ WIP) / release.
@@ -199,15 +199,15 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const avail = useQuery<any>({ queryKey: ['proj', code, 'resv-avail', availItem, zf.location_id], queryFn: () => api(`/api/reservations/available?item_id=${encodeURIComponent(availItem)}&location_id=${encodeURIComponent(zf.location_id || 'WH-MAIN')}`), enabled: resvDlg && !!availItem });
   const reserve = useMutation({
     mutationFn: () => api(`/api/reservations`, { method: 'POST', body: JSON.stringify({ project_code: code, item_id: zf.item_id, location_id: zf.location_id || undefined, qty: Number(zf.qty) || 0, boq_line_id: zf.boq_line_id ? Number(zf.boq_line_id) : undefined }) }),
-    onSuccess: () => { notifySuccess('จองสต๊อกแล้ว'); setResvDlg(false); setZf({ item_id: '', location_id: 'WH-MAIN', qty: '', boq_line_id: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.resv_toast_reserved')); setResvDlg(false); setZf({ item_id: '', location_id: 'WH-MAIN', qty: '', boq_line_id: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   const issueResv = useMutation({
     mutationFn: (id: number) => api(`/api/reservations/${id}/issue`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess('จ่ายวัสดุเข้าโครงการ (WIP) แล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.resv_toast_issued')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   const releaseResv = useMutation({
     mutationFn: (id: number) => api(`/api/reservations/${id}/release`, { method: 'POST', body: '{}' }),
-    onSuccess: () => { notifySuccess('ปล่อยการจองแล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.resv_toast_released')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
   // Site cash — raise an advance or a petty-cash request against this project straight from the site-cash tab.
@@ -215,7 +215,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const [af, setAf] = useState({ payee: '', amount: '', purpose: '', boq_line_id: '' });
   const raiseAdvance = useMutation({
     mutationFn: () => api(`/api/finance/advances`, { method: 'POST', body: JSON.stringify({ payee: af.payee, amount: Number(af.amount) || 0, purpose: af.purpose || undefined, project_code: code, boq_line_id: af.boq_line_id ? Number(af.boq_line_id) : undefined }) }),
-    onSuccess: () => { notifySuccess('ออกเงินทดรองจ่ายแล้ว'); setAdvDlg(false); setAf({ payee: '', amount: '', purpose: '', boq_line_id: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.sc_toast_advance_raised')); setAdvDlg(false); setAf({ payee: '', amount: '', purpose: '', boq_line_id: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   const [pcDlg, setPcDlg] = useState(false);
   const [pcf, setPcf] = useState({ fund_code: '', kind: 'expense', payee: '', purpose: '', amount: '', boq_line_id: '' });
@@ -223,37 +223,38 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const funds = useQuery<any>({ queryKey: ['petty-funds'], queryFn: () => api(`/api/finance/petty-cash/funds`), enabled: pcDlg });
   const raisePetty = useMutation({
     mutationFn: () => api(`/api/finance/petty-cash/requests`, { method: 'POST', body: JSON.stringify({ fund_code: pcf.fund_code, kind: pcf.kind, payee: pcf.payee || undefined, purpose: pcf.purpose || undefined, amount: Number(pcf.amount) || 0, project_code: code, boq_line_id: pcf.boq_line_id ? Number(pcf.boq_line_id) : undefined }) }),
-    onSuccess: () => { notifySuccess('ส่งคำขอเงินสดย่อยแล้ว — รออนุมัติ'); setPcDlg(false); setPcf({ fund_code: '', kind: 'expense', payee: '', purpose: '', amount: '', boq_line_id: '' }); qc.invalidateQueries({ queryKey: ['petty-funds'] }); refresh(); }, onError: (err: any) => notifyError(err.message),
+    onSuccess: () => { notifySuccess(t('pj.sc_toast_petty_submitted')); setPcDlg(false); setPcf({ fund_code: '', kind: 'expense', payee: '', purpose: '', amount: '', boq_line_id: '' }); qc.invalidateQueries({ queryKey: ['petty-funds'] }); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
-  const boqStatusBadge = (s?: string) => <Badge variant={s === 'locked' ? 'secondary' : s === 'approved' ? 'success' : 'warning'}>{s === 'locked' ? 'ล็อก' : s === 'approved' ? 'อนุมัติแล้ว' : 'ร่าง'}</Badge>;
+  const boqStatusLabel = (s?: string) => s === 'locked' ? t('pj.boq_status_locked') : s === 'approved' ? t('pj.boq_status_approved') : t('pj.boq_status_draft');
+  const boqStatusBadge = (s?: string) => <Badge variant={s === 'locked' ? 'secondary' : s === 'approved' ? 'success' : 'warning'}>{boqStatusLabel(s)}</Badge>;
   const boqTab = (
     <div className="space-y-4">
       {!bq?.boq ? (
         <Card className="gap-3 p-8 text-center">
           <ListTree className="mx-auto size-8 text-muted-foreground" />
-          <h3 className="text-base font-semibold">ยังไม่มีบัญชีปริมาณงาน (BoQ)</h3>
-          <p className="text-sm text-muted-foreground">สร้าง BoQ เพื่อกำหนดงบวัสดุ/งานต่อรายการ — เมื่ออนุมัติแล้วจะเป็นเพดานงบที่ระบบบังคับใช้ (PROJ-12)</p>
-          <div><Button onClick={() => setBoqDlg(true)}><Plus className="size-4" /> สร้าง BoQ</Button></div>
+          <h3 className="text-base font-semibold">{t('pj.boq_empty_title')}</h3>
+          <p className="text-sm text-muted-foreground">{t('pj.boq_empty_desc')}</p>
+          <div><Button onClick={() => setBoqDlg(true)}><Plus className="size-4" /> {t('pj.boq_btn_create')}</Button></div>
         </Card>
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-4">
-            <StatCard label="งบ BoQ รวม" value={baht(bq.budget_total)} icon={FileText} hint={`${bq.count} รายการ`} />
-            <StatCard label="ผูกพันแล้ว (committed)" value={baht(bq.committed_total ?? 0)} icon={ClipboardList} tone={(bq.committed_total ?? 0) > bq.budget_total ? 'danger' : 'default'} />
-            <StatCard label="คงเหลือ" value={baht(bq.remaining_total ?? 0)} icon={TrendingUp} tone={(bq.remaining_total ?? 0) < 0 ? 'danger' : 'success'} />
-            <StatCard label="สถานะ" value={boqStatus === 'locked' ? 'ล็อก' : boqStatus === 'approved' ? 'อนุมัติแล้ว' : 'ร่าง'} icon={boqStatus === 'locked' ? Lock : boqStatus === 'approved' ? CheckCircle2 : Clock} />
+            <StatCard label={t('pj.boq_stat_budget')} value={baht(bq.budget_total)} icon={FileText} hint={t('pj.n_items', { n: bq.count })} />
+            <StatCard label={t('pj.boq_stat_committed')} value={baht(bq.committed_total ?? 0)} icon={ClipboardList} tone={(bq.committed_total ?? 0) > bq.budget_total ? 'danger' : 'default'} />
+            <StatCard label={t('pj.boq_remaining')} value={baht(bq.remaining_total ?? 0)} icon={TrendingUp} tone={(bq.remaining_total ?? 0) < 0 ? 'danger' : 'success'} />
+            <StatCard label={t('pj.boq_stat_status')} value={boqStatusLabel(boqStatus)} icon={boqStatus === 'locked' ? Lock : boqStatus === 'approved' ? CheckCircle2 : Clock} />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm">
               <span className="font-medium">{bq.boq.boq_no}</span>{boqStatusBadge(boqStatus)}
               {bq.boq.title && <span className="text-muted-foreground">· {bq.boq.title}</span>}
-              {bq.boq.approved_by && <span className="text-xs text-muted-foreground">อนุมัติโดย {bq.boq.approved_by}</span>}
+              {bq.boq.approved_by && <span className="text-xs text-muted-foreground">{t('pj.boq_approved_by', { who: bq.boq.approved_by })}</span>}
             </div>
             <div className="flex flex-wrap gap-2">
-              {boqStatus === 'draft' && <Button size="sm" variant="outline" onClick={() => setLineDlg(true)}><Plus className="size-4" /> เพิ่มรายการ</Button>}
-              {boqStatus === 'draft' && <Button size="sm" onClick={() => approveBoq.mutate()} disabled={approveBoq.isPending || !bq.count} title="ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ"><Check className="size-4" /> อนุมัติ</Button>}
-              {boqStatus === 'approved' && <Button size="sm" variant="outline" onClick={() => lockBoq.mutate()} disabled={lockBoq.isPending}><Lock className="size-4" /> ล็อก</Button>}
+              {boqStatus === 'draft' && <Button size="sm" variant="outline" onClick={() => setLineDlg(true)}><Plus className="size-4" /> {t('pj.boq_btn_add_line')}</Button>}
+              {boqStatus === 'draft' && <Button size="sm" onClick={() => approveBoq.mutate()} disabled={approveBoq.isPending || !bq.count} title={t('pj.boq_approve_tip')}><Check className="size-4" /> {t('pj.boq_btn_approve')}</Button>}
+              {boqStatus === 'approved' && <Button size="sm" variant="outline" onClick={() => lockBoq.mutate()} disabled={lockBoq.isPending}><Lock className="size-4" /> {t('pj.boq_btn_lock')}</Button>}
             </div>
           </div>
           <DataTable
@@ -261,18 +262,18 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             rowKey={(r: any) => r.id}
             columns={[
               { key: 'line_no', label: '#', align: 'right', render: (r: any) => <span className="tabular text-xs text-muted-foreground">{r.line_no}</span> },
-              { key: 'category', label: 'หมวด', render: (r: any) => <Badge variant="muted">{r.category}</Badge> },
-              { key: 'description', label: 'รายละเอียด', render: (r: any) => r.description ?? r.item_no ?? '—' },
-              { key: 'budget_qty', label: 'ปริมาณ', align: 'right', render: (r: any) => <span className="tabular">{num(r.budget_qty)}{r.uom ? ` ${r.uom}` : ''}</span> },
-              { key: 'remeasured_qty', label: 'วัดจริง', align: 'right', render: (r: any) => r.remeasured_qty != null ? <span className="tabular">{num(r.remeasured_qty)}</span> : <span className="text-xs text-muted-foreground">—</span> },
-              { key: 'rate', label: 'ราคา/หน่วย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.rate)}</span> },
-              { key: 'budget_amount', label: 'งบ', align: 'right', render: (r: any) => <span className="tabular">{baht(r.budget_amount)}</span> },
-              { key: 'committed', label: 'ผูกพัน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.committed ?? 0)}</span> },
-              { key: 'remaining', label: 'คงเหลือ', align: 'right', render: (r: any) => <span className={`tabular ${(r.remaining ?? 0) < 0 ? 'text-destructive' : ''}`}>{baht(r.remaining ?? 0)}</span> },
+              { key: 'category', label: t('pj.boq_col_category'), render: (r: any) => <Badge variant="muted">{r.category}</Badge> },
+              { key: 'description', label: t('pj.col_description'), render: (r: any) => r.description ?? r.item_no ?? '—' },
+              { key: 'budget_qty', label: t('pj.boq_col_qty'), align: 'right', render: (r: any) => <span className="tabular">{num(r.budget_qty)}{r.uom ? ` ${r.uom}` : ''}</span> },
+              { key: 'remeasured_qty', label: t('pj.boq_col_remeasured'), align: 'right', render: (r: any) => r.remeasured_qty != null ? <span className="tabular">{num(r.remeasured_qty)}</span> : <span className="text-xs text-muted-foreground">—</span> },
+              { key: 'rate', label: t('pj.boq_col_rate'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.rate)}</span> },
+              { key: 'budget_amount', label: t('pj.col_budget'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.budget_amount)}</span> },
+              { key: 'committed', label: t('pj.boq_col_committed'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.committed ?? 0)}</span> },
+              { key: 'remaining', label: t('pj.boq_remaining'), align: 'right', render: (r: any) => <span className={`tabular ${(r.remaining ?? 0) < 0 ? 'text-destructive' : ''}`}>{baht(r.remaining ?? 0)}</span> },
               { key: 'act', label: '', sortable: false, render: (r: any) => boqStatus === 'approved'
-                ? <Button variant="ghost" size="sm" title="บันทึกปริมาณวัดจริง" onClick={() => { setRemDlg(r); setRemQty(String(r.remeasured_qty ?? r.budget_qty ?? '')); }}><ListTree className="size-4" /></Button> : null },
+                ? <Button variant="ghost" size="sm" title={t('pj.boq_remeasure_tip')} onClick={() => { setRemDlg(r); setRemQty(String(r.remeasured_qty ?? r.budget_qty ?? '')); }}><ListTree className="size-4" /></Button> : null },
             ]}
-            emptyState={{ icon: ListTree, title: 'ยังไม่มีรายการ BoQ', description: 'เพิ่มรายการวัสดุ/งานพร้อมปริมาณและราคาต่อหน่วย' }}
+            emptyState={{ icon: ListTree, title: t('pj.boq_empty_lines_title'), description: t('pj.boq_empty_lines_desc') }}
           />
         </>
       )}
@@ -280,38 +281,38 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   );
 
   const cs = commitments.data?.summary;
-  const pmrRoute = (r: any) => r.over_budget ? <Badge variant="destructive">เกินงบ</Badge> : r.route === 'stock_issue' ? <Badge variant="success">เบิกสต๊อก</Badge> : <Badge variant="secondary">ใบขอซื้อ</Badge>;
+  const pmrRoute = (r: any) => r.over_budget ? <Badge variant="destructive">{t('pj.over_budget')}</Badge> : r.route === 'stock_issue' ? <Badge variant="success">{t('pj.pmr_route_stock')}</Badge> : <Badge variant="secondary">{t('pj.pmr_route_pr')}</Badge>;
   const pmrTab = (
     <div className="space-y-4">
       {cs && (
         <div className="grid gap-3 sm:grid-cols-4">
-          <StatCard label="ผูกพันเปิดอยู่ (open)" value={baht(cs.open)} icon={ClipboardList} />
-          <StatCard label="ใช้จริงแล้ว (consumed)" value={baht(cs.consumed)} icon={Receipt} />
-          <StatCard label="ผูกพันรวม" value={baht(cs.committed)} icon={TrendingUp} />
-          <StatCard label="รออนุมัติ" value={String(pmrList.data?.pending ?? 0)} icon={Clock} tone={(pmrList.data?.pending ?? 0) > 0 ? 'warning' : 'default'} />
+          <StatCard label={t('pj.pmr_stat_open')} value={baht(cs.open)} icon={ClipboardList} />
+          <StatCard label={t('pj.pmr_stat_consumed')} value={baht(cs.consumed)} icon={Receipt} />
+          <StatCard label={t('pj.pmr_stat_committed')} value={baht(cs.committed)} icon={TrendingUp} />
+          <StatCard label={t('pj.status_pending')} value={String(pmrList.data?.pending ?? 0)} icon={Clock} tone={(pmrList.data?.pending ?? 0) > 0 ? 'warning' : 'default'} />
         </div>
       )}
-      <div className="flex justify-end"><Button size="sm" onClick={() => setPmrDlg(true)} disabled={!bq?.boq}><Plus className="size-4" /> ขอเบิกวัสดุ</Button></div>
+      <div className="flex justify-end"><Button size="sm" onClick={() => setPmrDlg(true)} disabled={!bq?.boq}><Plus className="size-4" /> {t('pj.pmr_btn_submit')}</Button></div>
       {pmrList.data && (
         <DataTable
           rows={pmrList.data.pmrs ?? []}
           rowKey={(r: any) => r.pmr_no}
           columns={[
-            { key: 'pmr_no', label: 'เลขที่' },
-            { key: 'route', label: 'เส้นทาง', sortable: false, render: (r: any) => pmrRoute(r) },
-            { key: 'est_cost', label: 'มูลค่า', align: 'right', render: (r: any) => <span className="tabular">{baht(r.est_cost)}</span> },
-            { key: 'over_amount', label: 'ส่วนเกินงบ', align: 'right', render: (r: any) => r.over_amount > 0 ? <span className="tabular text-destructive">{baht(r.over_amount)}</span> : '—' },
-            { key: 'linked_doc_no', label: 'เอกสารเชื่อม', render: (r: any) => r.linked_doc_no ?? '—' },
-            { key: 'requested_by', label: 'ผู้ขอ' },
-            { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+            { key: 'pmr_no', label: t('pj.col_doc_no') },
+            { key: 'route', label: t('pj.pmr_col_route'), sortable: false, render: (r: any) => pmrRoute(r) },
+            { key: 'est_cost', label: t('pj.amount_th'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.est_cost)}</span> },
+            { key: 'over_amount', label: t('pj.pmr_col_over'), align: 'right', render: (r: any) => r.over_amount > 0 ? <span className="tabular text-destructive">{baht(r.over_amount)}</span> : '—' },
+            { key: 'linked_doc_no', label: t('pj.pmr_col_linked_doc'), render: (r: any) => r.linked_doc_no ?? '—' },
+            { key: 'requested_by', label: t('pj.pmr_col_requested_by') },
+            { key: 'status', label: t('pj.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
             { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'pending' ? (
               <span className="flex gap-1">
-                <Button variant="ghost" size="sm" title="อนุมัติ (ผู้อนุมัติ ≠ ผู้ขอ)" onClick={() => decidePmr.mutate({ pmrNo: r.pmr_no, action: 'approve' })}><Check className="size-4" /></Button>
-                <Button variant="ghost" size="sm" title="ปฏิเสธ" onClick={() => decidePmr.mutate({ pmrNo: r.pmr_no, action: 'reject' })}><X className="size-4" /></Button>
+                <Button variant="ghost" size="sm" title={t('pj.pmr_approve_tip')} onClick={() => decidePmr.mutate({ pmrNo: r.pmr_no, action: 'approve' })}><Check className="size-4" /></Button>
+                <Button variant="ghost" size="sm" title={t('pj.btn_reject')} onClick={() => decidePmr.mutate({ pmrNo: r.pmr_no, action: 'reject' })}><X className="size-4" /></Button>
               </span>
             ) : null },
           ]}
-          emptyState={{ icon: ClipboardList, title: 'ยังไม่มีใบขอเบิกวัสดุ', description: 'เบิกวัสดุตาม BoQ — ภายในงบออกใบขอซื้อ/เบิกสต๊อก เกินงบส่งอนุมัติผ่าน LINE (PROJ-13)' }}
+          emptyState={{ icon: ClipboardList, title: t('pj.pmr_empty_title'), description: t('pj.pmr_empty_desc') }}
         />
       )}
     </div>
@@ -322,31 +323,31 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
     <div className="space-y-4">
       {zs && (
         <div className="grid gap-3 sm:grid-cols-3">
-          <StatCard label="จองอยู่ (held)" value={num(zs.held)} icon={Boxes} />
-          <StatCard label="จ่ายเข้าโครงการ (issued)" value={num(zs.consumed)} icon={CheckCircle2} tone="success" />
-          <StatCard label="ปล่อยแล้ว (released)" value={num(zs.released)} icon={ArrowLeft} />
+          <StatCard label={t('pj.resv_stat_held')} value={num(zs.held)} icon={Boxes} />
+          <StatCard label={t('pj.resv_stat_issued')} value={num(zs.consumed)} icon={CheckCircle2} tone="success" />
+          <StatCard label={t('pj.resv_stat_released')} value={num(zs.released)} icon={ArrowLeft} />
         </div>
       )}
-      <div className="flex justify-end"><Button size="sm" onClick={() => setResvDlg(true)}><Plus className="size-4" /> จองสต๊อก</Button></div>
+      <div className="flex justify-end"><Button size="sm" onClick={() => setResvDlg(true)}><Plus className="size-4" /> {t('pj.resv_btn_reserve')}</Button></div>
       {reservations.data && (
         <DataTable
           rows={reservations.data.reservations ?? []}
           rowKey={(r: any) => r.id}
           columns={[
-            { key: 'item_id', label: 'สินค้า' },
-            { key: 'location_id', label: 'คลัง' },
-            { key: 'qty', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
+            { key: 'item_id', label: t('pj.resv_col_item') },
+            { key: 'location_id', label: t('pj.resv_col_location') },
+            { key: 'qty', label: t('pj.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
             { key: 'boq_line_id', label: 'BoQ line', render: (r: any) => r.boq_line_id ?? '—' },
-            { key: 'issue_no', label: 'เลขที่จ่าย', render: (r: any) => r.issue_no ?? '—' },
-            { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+            { key: 'issue_no', label: t('pj.resv_col_issue_no'), render: (r: any) => r.issue_no ?? '—' },
+            { key: 'status', label: t('pj.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
             { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'held' ? (
               <span className="flex gap-1">
-                <Button variant="ghost" size="sm" title="จ่ายเข้าโครงการ (WIP)" onClick={() => issueResv.mutate(r.id)}><CheckCircle2 className="size-4" /></Button>
-                <Button variant="ghost" size="sm" title="ปล่อยการจอง" onClick={() => releaseResv.mutate(r.id)}><ArrowLeft className="size-4" /></Button>
+                <Button variant="ghost" size="sm" title={t('pj.resv_issue_tip')} onClick={() => issueResv.mutate(r.id)}><CheckCircle2 className="size-4" /></Button>
+                <Button variant="ghost" size="sm" title={t('pj.resv_release_tip')} onClick={() => releaseResv.mutate(r.id)}><ArrowLeft className="size-4" /></Button>
               </span>
             ) : null },
           ]}
-          emptyState={{ icon: Boxes, title: 'ยังไม่มีการจองสต๊อก', description: 'จองสต๊อกคงเหลือให้โครงการ แล้วจ่ายเข้างานระหว่างทำ (WIP) — INV-13' }}
+          emptyState={{ icon: Boxes, title: t('pj.resv_empty_title'), description: t('pj.resv_empty_desc') }}
         />
       )}
     </div>
@@ -356,43 +357,43 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const siteCashTab = (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-4">
-        <StatCard label="เงินทดรองจ่าย" value={baht(sc?.totals?.advances ?? 0)} icon={Wallet} />
-        <StatCard label="เบิกคืน (reimburse)" value={baht(sc?.totals?.reimbursements ?? 0)} icon={Receipt} />
-        <StatCard label="เงินสดย่อย" value={baht(sc?.totals?.petty_cash ?? 0)} icon={Wallet} />
-        <StatCard label="เงินสดหน้างานรวม" value={baht(sc?.totals?.total ?? 0)} icon={TrendingUp} tone="primary" />
+        <StatCard label={t('pj.sc_stat_advances')} value={baht(sc?.totals?.advances ?? 0)} icon={Wallet} />
+        <StatCard label={t('pj.sc_stat_reimburse')} value={baht(sc?.totals?.reimbursements ?? 0)} icon={Receipt} />
+        <StatCard label={t('pj.sc_petty_cash')} value={baht(sc?.totals?.petty_cash ?? 0)} icon={Wallet} />
+        <StatCard label={t('pj.sc_stat_total')} value={baht(sc?.totals?.total ?? 0)} icon={TrendingUp} tone="primary" />
       </div>
       <div className="flex flex-wrap justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={() => setAdvDlg(true)}><Wallet className="size-4" /> ออกเงินทดรอง</Button>
-        <Button size="sm" onClick={() => setPcDlg(true)}><Plus className="size-4" /> ขอเงินสดย่อย</Button>
+        <Button size="sm" variant="outline" onClick={() => setAdvDlg(true)}><Wallet className="size-4" /> {t('pj.sc_btn_advance')}</Button>
+        <Button size="sm" onClick={() => setPcDlg(true)}><Plus className="size-4" /> {t('pj.sc_btn_petty')}</Button>
       </div>
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">เงินทดรองจ่าย (Advances)</h3>
+        <h3 className="text-base font-semibold">{t('pj.sc_advances_heading')}</h3>
         <DataTable
           rows={sc?.advances ?? []}
           rowKey={(r: any) => r.advance_no}
           columns={[
-            { key: 'advance_no', label: 'เลขที่' },
-            { key: 'payee', label: 'ผู้รับ' },
-            { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-            { key: 'settled_expense', label: 'เคลียร์แล้ว', align: 'right', render: (r: any) => <span className="tabular">{baht(r.settled_expense)}</span> },
-            { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+            { key: 'advance_no', label: t('pj.col_doc_no') },
+            { key: 'payee', label: t('pj.sc_col_payee') },
+            { key: 'amount', label: t('pj.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+            { key: 'settled_expense', label: t('pj.sc_col_settled'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.settled_expense)}</span> },
+            { key: 'status', label: t('pj.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
           ]}
-          emptyState={{ icon: Wallet, title: 'ไม่มีเงินทดรอง', description: 'เงินทดรองจ่ายที่ผูกกับโครงการนี้' }}
+          emptyState={{ icon: Wallet, title: t('pj.sc_empty_adv_title'), description: t('pj.sc_empty_adv_desc') }}
         />
       </Card>
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">เบิกคืน & เงินสดย่อย (Reimbursements & petty cash)</h3>
+        <h3 className="text-base font-semibold">{t('pj.sc_reimburse_heading')}</h3>
         <DataTable
           rows={[...(sc?.reimbursements ?? []).map((r: any) => ({ ...r, _t: 'reimburse', _no: r.entry_no ?? r.ap_txn_no ?? `#${r.id}` })), ...(sc?.petty_cash ?? []).map((r: any) => ({ ...r, _t: 'petty', _no: r.req_no }))]}
           rowKey={(r: any) => `${r._t}-${r._no}`}
           columns={[
-            { key: '_t', label: 'ประเภท', render: (r: any) => r._t === 'petty' ? <Badge variant="muted">เงินสดย่อย</Badge> : <Badge variant="secondary">เบิกคืน</Badge> },
-            { key: '_no', label: 'เลขที่' },
-            { key: 'category', label: 'หมวด/ผู้รับ', render: (r: any) => r.category ?? r.payee ?? '—' },
-            { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-            { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+            { key: '_t', label: t('pj.col_type'), render: (r: any) => r._t === 'petty' ? <Badge variant="muted">{t('pj.sc_petty_cash')}</Badge> : <Badge variant="secondary">{t('pj.sc_reimburse_badge')}</Badge> },
+            { key: '_no', label: t('pj.col_doc_no') },
+            { key: 'category', label: t('pj.sc_col_cat_payee'), render: (r: any) => r.category ?? r.payee ?? '—' },
+            { key: 'amount', label: t('pj.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+            { key: 'status', label: t('pj.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
           ]}
-          emptyState={{ icon: Receipt, title: 'ไม่มีรายการ', description: 'เบิกคืนค่าใช้จ่ายและเงินสดย่อยที่ผูกกับโครงการ (PROJ-14)' }}
+          emptyState={{ icon: Receipt, title: t('pj.sc_empty_title'), description: t('pj.sc_empty_desc') }}
         />
       </Card>
     </div>
@@ -869,151 +870,151 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
       {/* Create BoQ */}
       <Dialog open={boqDlg} onOpenChange={setBoqDlg}>
         <DialogContent>
-          <DialogHeader><DialogTitle>สร้างบัญชีปริมาณงาน (BoQ) — {code}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.boq_dlg_create', { code })}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5"><Label>เลขที่ BoQ (เว้นว่างให้ระบบออกให้)</Label><Input value={bf.boq_no} onChange={(ev) => setBf({ ...bf, boq_no: ev.target.value })} placeholder="เช่น BOQ-001" /></div>
-            <div className="grid gap-1.5"><Label>ชื่อ/คำอธิบาย</Label><Input value={bf.title} onChange={(ev) => setBf({ ...bf, title: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.boq_f_no')}</Label><Input value={bf.boq_no} onChange={(ev) => setBf({ ...bf, boq_no: ev.target.value })} placeholder={t('pj.boq_ph_no')} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.boq_f_title')}</Label><Input value={bf.title} onChange={(ev) => setBf({ ...bf, title: ev.target.value })} /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setBoqDlg(false)}>ปิด</Button><Button onClick={() => createBoq.mutate()} disabled={createBoq.isPending}>สร้าง</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setBoqDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => createBoq.mutate()} disabled={createBoq.isPending}>{t('pj.btn_create')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Add BoQ line */}
       <Dialog open={lineDlg} onOpenChange={setLineDlg}>
         <DialogContent>
-          <DialogHeader><DialogTitle>เพิ่มรายการ BoQ</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.boq_dlg_add_line')}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>หมวด</Label>
+              <div className="grid gap-1.5"><Label>{t('pj.boq_col_category')}</Label>
                 <select className={selectCls} value={lf.category} onChange={(ev) => setLf({ ...lf, category: ev.target.value })}>
-                  <option value="material">วัสดุ (material)</option><option value="labor">ค่าแรง (labor)</option><option value="equipment">เครื่องจักร (equipment)</option><option value="subcontract">ผู้รับเหมาช่วง (subcontract)</option><option value="other">อื่นๆ (other)</option>
+                  <option value="material">{t('pj.boq_cat_material')}</option><option value="labor">{t('pj.boq_cat_labor')}</option><option value="equipment">{t('pj.boq_cat_equipment')}</option><option value="subcontract">{t('pj.boq_cat_subcontract')}</option><option value="other">{t('pj.boq_cat_other')}</option>
                 </select>
               </div>
-              <div className="grid gap-1.5"><Label>รหัสสินค้า (ถ้ามี)</Label><Input value={lf.item_no} onChange={(ev) => setLf({ ...lf, item_no: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.boq_f_item_no')}</Label><Input value={lf.item_no} onChange={(ev) => setLf({ ...lf, item_no: ev.target.value })} /></div>
             </div>
-            <div className="grid gap-1.5"><Label>รายละเอียด</Label><Input value={lf.description} onChange={(ev) => setLf({ ...lf, description: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.col_description')}</Label><Input value={lf.description} onChange={(ev) => setLf({ ...lf, description: ev.target.value })} /></div>
             <div className="grid grid-cols-3 gap-3">
-              <div className="grid gap-1.5"><Label>ปริมาณ</Label><Input type="number" min="0" value={lf.budget_qty} onChange={(ev) => setLf({ ...lf, budget_qty: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>หน่วย</Label><Input value={lf.uom} onChange={(ev) => setLf({ ...lf, uom: ev.target.value })} placeholder="เช่น ม³, ตัน" /></div>
-              <div className="grid gap-1.5"><Label>ราคา/หน่วย</Label><Input type="number" min="0" value={lf.rate} onChange={(ev) => setLf({ ...lf, rate: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.boq_col_qty')}</Label><Input type="number" min="0" value={lf.budget_qty} onChange={(ev) => setLf({ ...lf, budget_qty: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.boq_f_uom')}</Label><Input value={lf.uom} onChange={(ev) => setLf({ ...lf, uom: ev.target.value })} placeholder={t('pj.boq_ph_uom')} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.boq_col_rate')}</Label><Input type="number" min="0" value={lf.rate} onChange={(ev) => setLf({ ...lf, rate: ev.target.value })} /></div>
             </div>
-            <p className="text-xs text-muted-foreground">งบรายการ = ปริมาณ × ราคา/หน่วย = <span className="tabular font-medium text-foreground">{baht((Number(lf.budget_qty) || 0) * (Number(lf.rate) || 0))}</span></p>
+            <p className="text-xs text-muted-foreground">{t('pj.boq_line_amount_formula')} <span className="tabular font-medium text-foreground">{baht((Number(lf.budget_qty) || 0) * (Number(lf.rate) || 0))}</span></p>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setLineDlg(false)}>ปิด</Button><Button onClick={() => addBoqLine.mutate()} disabled={addBoqLine.isPending}>เพิ่ม</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setLineDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => addBoqLine.mutate()} disabled={addBoqLine.isPending}>{t('pj.btn_add')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Re-measure BoQ line */}
       <Dialog open={!!remDlg} onOpenChange={(o) => !o && setRemDlg(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>บันทึกปริมาณวัดจริง (Re-measure)</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.boq_dlg_remeasure')}</DialogTitle></DialogHeader>
           {remDlg && (
             <div className="grid gap-3">
-              <p className="text-sm text-muted-foreground">{remDlg.description ?? remDlg.item_no ?? `รายการ #${remDlg.line_no}`} · งบตั้งไว้ <span className="tabular font-medium text-foreground">{num(remDlg.budget_qty)}{remDlg.uom ? ` ${remDlg.uom}` : ''}</span></p>
-              <div className="grid gap-1.5"><Label>ปริมาณวัดจริง</Label><Input type="number" min="0" value={remQty} onChange={(ev) => setRemQty(ev.target.value)} /></div>
+              <p className="text-sm text-muted-foreground">{remDlg.description ?? remDlg.item_no ?? t('pj.boq_line_hash', { n: remDlg.line_no })} · {t('pj.boq_budgeted')} <span className="tabular font-medium text-foreground">{num(remDlg.budget_qty)}{remDlg.uom ? ` ${remDlg.uom}` : ''}</span></p>
+              <div className="grid gap-1.5"><Label>{t('pj.boq_f_remeasured_qty')}</Label><Input type="number" min="0" value={remQty} onChange={(ev) => setRemQty(ev.target.value)} /></div>
             </div>
           )}
-          <DialogFooter><Button variant="outline" onClick={() => setRemDlg(null)}>ปิด</Button><Button onClick={() => remeasure.mutate()} disabled={remeasure.isPending}>บันทึก</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setRemDlg(null)}>{t('pj.btn_close')}</Button><Button onClick={() => remeasure.mutate()} disabled={remeasure.isPending}>{t('pj.btn_save')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Submit requisition (PMR) */}
       <Dialog open={pmrDlg} onOpenChange={setPmrDlg}>
         <DialogContent>
-          <DialogHeader><DialogTitle>ขอเบิกวัสดุตาม BoQ — {code}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.pmr_dlg_submit', { code })}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5"><Label>รายการ BoQ (งบวัสดุ)</Label>
+            <div className="grid gap-1.5"><Label>{t('pj.pmr_f_boq_line')}</Label>
               <select className={selectCls} value={pf.boq_line_id} onChange={(ev) => setPf({ ...pf, boq_line_id: ev.target.value })}>
-                <option value="">— เลือกรายการ —</option>
-                {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · คงเหลือ {baht(l.remaining ?? 0)}</option>)}
+                <option value="">{t('pj.pmr_opt_select_line')}</option>
+                {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · {t('pj.boq_remaining')} {baht(l.remaining ?? 0)}</option>)}
               </select>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>รหัสสินค้า (ถ้ามี)</Label><Input value={pf.item_no} onChange={(ev) => setPf({ ...pf, item_no: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>ผู้ขาย (ถ้ามี)</Label><Input value={pf.vendor_name} onChange={(ev) => setPf({ ...pf, vendor_name: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>จำนวน</Label><Input type="number" min="0" value={pf.qty} onChange={(ev) => setPf({ ...pf, qty: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>ราคา/หน่วย</Label><Input type="number" min="0" value={pf.unit_cost} onChange={(ev) => setPf({ ...pf, unit_cost: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.boq_f_item_no')}</Label><Input value={pf.item_no} onChange={(ev) => setPf({ ...pf, item_no: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.pmr_f_vendor')}</Label><Input value={pf.vendor_name} onChange={(ev) => setPf({ ...pf, vendor_name: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.col_amount')}</Label><Input type="number" min="0" value={pf.qty} onChange={(ev) => setPf({ ...pf, qty: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.boq_col_rate')}</Label><Input type="number" min="0" value={pf.unit_cost} onChange={(ev) => setPf({ ...pf, unit_cost: ev.target.value })} /></div>
             </div>
-            <p className="text-xs text-muted-foreground">มูลค่า = <span className="tabular font-medium text-foreground">{baht((Number(pf.qty) || 0) * (Number(pf.unit_cost) || 0))}</span> — ภายในงบออกใบขอซื้อ/เบิกสต๊อกอัตโนมัติ เกินงบส่งอนุมัติผ่าน LINE</p>
+            <p className="text-xs text-muted-foreground">{t('pj.pmr_value_pre')} <span className="tabular font-medium text-foreground">{baht((Number(pf.qty) || 0) * (Number(pf.unit_cost) || 0))}</span> {t('pj.pmr_value_post')}</p>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setPmrDlg(false)}>ปิด</Button><Button onClick={() => submitPmr.mutate()} disabled={!pf.boq_line_id || !(Number(pf.qty) > 0) || submitPmr.isPending}>ส่งคำขอ</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setPmrDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => submitPmr.mutate()} disabled={!pf.boq_line_id || !(Number(pf.qty) > 0) || submitPmr.isPending}>{t('pj.btn_submit_request')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Reserve stock */}
       <Dialog open={resvDlg} onOpenChange={setResvDlg}>
         <DialogContent>
-          <DialogHeader><DialogTitle>จองสต๊อกให้โครงการ — {code}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.resv_dlg_reserve', { code })}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>รหัสสินค้า</Label><Input value={zf.item_id} onChange={(ev) => setZf({ ...zf, item_id: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>คลัง</Label><Input value={zf.location_id} onChange={(ev) => setZf({ ...zf, location_id: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>จำนวน</Label><Input type="number" min="0" value={zf.qty} onChange={(ev) => setZf({ ...zf, qty: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>BoQ line (ถ้ามี)</Label>
+              <div className="grid gap-1.5"><Label>{t('pj.resv_f_item')}</Label><Input value={zf.item_id} onChange={(ev) => setZf({ ...zf, item_id: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.resv_col_location')}</Label><Input value={zf.location_id} onChange={(ev) => setZf({ ...zf, location_id: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.col_amount')}</Label><Input type="number" min="0" value={zf.qty} onChange={(ev) => setZf({ ...zf, qty: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.resv_f_boq_line')}</Label>
                 <select className={selectCls} value={zf.boq_line_id} onChange={(ev) => setZf({ ...zf, boq_line_id: ev.target.value })}>
-                  <option value="">— ไม่ระบุ —</option>
+                  <option value="">{t('pj.resv_opt_none')}</option>
                   {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category}</option>)}
                 </select>
               </div>
             </div>
-            {availItem && <p className="text-xs text-muted-foreground">พร้อมจ่าย (available-to-issue): <span className="tabular font-medium text-foreground">{avail.isLoading ? '…' : num(avail.data?.available ?? 0)}</span></p>}
+            {availItem && <p className="text-xs text-muted-foreground">{t('pj.resv_available_label')} <span className="tabular font-medium text-foreground">{avail.isLoading ? '…' : num(avail.data?.available ?? 0)}</span></p>}
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setResvDlg(false)}>ปิด</Button><Button onClick={() => reserve.mutate()} disabled={!zf.item_id || !(Number(zf.qty) > 0) || reserve.isPending}>จอง</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setResvDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => reserve.mutate()} disabled={!zf.item_id || !(Number(zf.qty) > 0) || reserve.isPending}>{t('pj.resv_btn_confirm')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Raise advance (site cash) */}
       <Dialog open={advDlg} onOpenChange={setAdvDlg}>
         <DialogContent>
-          <DialogHeader><DialogTitle>ออกเงินทดรองจ่ายให้โครงการ — {code}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.sc_dlg_advance', { code })}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>ผู้รับเงิน</Label><Input value={af.payee} onChange={(ev) => setAf({ ...af, payee: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>จำนวนเงิน</Label><Input type="number" min="0" value={af.amount} onChange={(ev) => setAf({ ...af, amount: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.sc_f_payee')}</Label><Input value={af.payee} onChange={(ev) => setAf({ ...af, payee: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.sc_f_amount')}</Label><Input type="number" min="0" value={af.amount} onChange={(ev) => setAf({ ...af, amount: ev.target.value })} /></div>
             </div>
-            <div className="grid gap-1.5"><Label>วัตถุประสงค์</Label><Input value={af.purpose} onChange={(ev) => setAf({ ...af, purpose: ev.target.value })} /></div>
-            <div className="grid gap-1.5"><Label>ผูกกับรายการ BoQ (ถ้ามี — จะกันงบรายการนั้น)</Label>
+            <div className="grid gap-1.5"><Label>{t('pj.sc_f_purpose')}</Label><Input value={af.purpose} onChange={(ev) => setAf({ ...af, purpose: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.sc_f_boq_link')}</Label>
               <select className={selectCls} value={af.boq_line_id} onChange={(ev) => setAf({ ...af, boq_line_id: ev.target.value })}>
-                <option value="">— ไม่ผูกงบ —</option>
-                {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · คงเหลือ {baht(l.remaining ?? 0)}</option>)}
+                <option value="">{t('pj.sc_opt_no_link')}</option>
+                {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · {t('pj.boq_remaining')} {baht(l.remaining ?? 0)}</option>)}
               </select>
             </div>
-            <p className="text-xs text-muted-foreground">เงินทดรองจะผูกกับโครงการนี้ และแสดงในเงินสดหน้างาน เมื่อเคลียร์ค่าใช้จ่ายจะกันงบ BoQ ที่เลือก (PROJ-14)</p>
+            <p className="text-xs text-muted-foreground">{t('pj.sc_advance_note')}</p>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setAdvDlg(false)}>ปิด</Button><Button onClick={() => raiseAdvance.mutate()} disabled={!af.payee || !(Number(af.amount) > 0) || raiseAdvance.isPending}>ออกเงินทดรอง</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setAdvDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => raiseAdvance.mutate()} disabled={!af.payee || !(Number(af.amount) > 0) || raiseAdvance.isPending}>{t('pj.sc_btn_advance')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Raise petty-cash request (site cash) */}
       <Dialog open={pcDlg} onOpenChange={setPcDlg}>
         <DialogContent>
-          <DialogHeader><DialogTitle>ขอเบิกเงินสดย่อยให้โครงการ — {code}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.sc_dlg_petty', { code })}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>กองทุนเงินสดย่อย</Label>
+              <div className="grid gap-1.5"><Label>{t('pj.sc_f_fund')}</Label>
                 <select className={selectCls} value={pcf.fund_code} onChange={(ev) => setPcf({ ...pcf, fund_code: ev.target.value })}>
-                  <option value="">— เลือกกองทุน —</option>
-                  {(funds.data?.funds ?? []).map((f: any) => <option key={f.fund_code} value={f.fund_code}>{f.fund_code} · {f.name} (คงเหลือ {baht(f.balance)})</option>)}
+                  <option value="">{t('pj.sc_opt_select_fund')}</option>
+                  {(funds.data?.funds ?? []).map((f: any) => <option key={f.fund_code} value={f.fund_code}>{f.fund_code} · {f.name} ({t('pj.boq_remaining')} {baht(f.balance)})</option>)}
                 </select>
               </div>
-              <div className="grid gap-1.5"><Label>ประเภท</Label>
+              <div className="grid gap-1.5"><Label>{t('pj.col_type')}</Label>
                 <select className={selectCls} value={pcf.kind} onChange={(ev) => setPcf({ ...pcf, kind: ev.target.value })}>
-                  <option value="expense">ค่าใช้จ่าย (expense)</option><option value="advance">ทดรอง (advance)</option>
+                  <option value="expense">{t('pj.sc_kind_expense')}</option><option value="advance">{t('pj.sc_kind_advance')}</option>
                 </select>
               </div>
-              <div className="grid gap-1.5"><Label>ผู้รับ/ผู้เบิก</Label><Input value={pcf.payee} onChange={(ev) => setPcf({ ...pcf, payee: ev.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>จำนวนเงิน</Label><Input type="number" min="0" value={pcf.amount} onChange={(ev) => setPcf({ ...pcf, amount: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.sc_f_payee_petty')}</Label><Input value={pcf.payee} onChange={(ev) => setPcf({ ...pcf, payee: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.sc_f_amount')}</Label><Input type="number" min="0" value={pcf.amount} onChange={(ev) => setPcf({ ...pcf, amount: ev.target.value })} /></div>
             </div>
-            <div className="grid gap-1.5"><Label>วัตถุประสงค์</Label><Input value={pcf.purpose} onChange={(ev) => setPcf({ ...pcf, purpose: ev.target.value })} /></div>
-            <div className="grid gap-1.5"><Label>ผูกกับรายการ BoQ (ถ้ามี — จะกันงบรายการนั้น)</Label>
+            <div className="grid gap-1.5"><Label>{t('pj.sc_f_purpose')}</Label><Input value={pcf.purpose} onChange={(ev) => setPcf({ ...pcf, purpose: ev.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pj.sc_f_boq_link')}</Label>
               <select className={selectCls} value={pcf.boq_line_id} onChange={(ev) => setPcf({ ...pcf, boq_line_id: ev.target.value })}>
-                <option value="">— ไม่ผูกงบ —</option>
-                {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · คงเหลือ {baht(l.remaining ?? 0)}</option>)}
+                <option value="">{t('pj.sc_opt_no_link')}</option>
+                {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · {t('pj.boq_remaining')} {baht(l.remaining ?? 0)}</option>)}
               </select>
             </div>
-            <p className="text-xs text-muted-foreground">คำขอจะรออนุมัติ (ผู้อนุมัติ ≠ ผู้ขอ) เมื่ออนุมัติจะกันงบ BoQ ที่เลือกและตัดกองทุนเงินสดย่อย (PROJ-14)</p>
+            <p className="text-xs text-muted-foreground">{t('pj.sc_petty_note')}</p>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setPcDlg(false)}>ปิด</Button><Button onClick={() => raisePetty.mutate()} disabled={!pcf.fund_code || !(Number(pcf.amount) > 0) || raisePetty.isPending}>ส่งคำขอ</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setPcDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => raisePetty.mutate()} disabled={!pcf.fund_code || !(Number(pcf.amount) > 0) || raisePetty.isPending}>{t('pj.btn_submit_request')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Layers, Plus, Save, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -25,6 +26,7 @@ const BLANK: Cat = { code: '', active: true };
 // หมวดสินค้า — item category master carrying the default GL account-set + tax profile a family of items posts
 // to (docs/33, GL-21). The posting engine resolves item → this category → the standard control account.
 export default function ItemCategoriesPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['item-categories'], queryFn: () => api('/api/item-setup/categories') });
   const [form, setForm] = useState<Cat>(BLANK);
@@ -39,55 +41,55 @@ export default function ItemCategoriesPage() {
     mutationFn: () => editing
       ? api(`/api/item-setup/categories/${encodeURIComponent(form.code.trim())}`, { method: 'PATCH', body: JSON.stringify(payload()) })
       : api('/api/item-setup/categories', { method: 'POST', body: JSON.stringify(payload()) }),
-    onSuccess: (r: any) => { notifySuccess(`บันทึกหมวด ${r.code}`); reset(); qc.invalidateQueries({ queryKey: ['item-categories'] }); },
+    onSuccess: (r: any) => { notifySuccess(t('st.scat_saved', { code: r.code })); reset(); qc.invalidateQueries({ queryKey: ['item-categories'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const edit = (c: Cat) => { setForm({ ...BLANK, ...c }); setEditing(true); };
 
   return (
     <div>
-      <PageHeader title="หมวดสินค้า (Item Categories)" description="กำหนดผังบัญชีปริยาย (รายได้ / ต้นทุนขาย / สินค้าคงคลัง / มูลค่า) และรหัสภาษี VAT/หัก ณ ที่จ่าย ต่อกลุ่มสินค้า — เครื่องยนต์บัญชีจะเลือก สินค้า → หมวด → บัญชีคุมมาตรฐาน" />
+      <PageHeader title={t('st.scat_title')} description={t('st.scat_desc')} />
       <div className="space-y-5">
         <Card className="max-w-4xl gap-4 p-5">
-          <h3 className="text-base font-semibold">{editing ? `แก้ไขหมวด ${form.code}` : 'เพิ่มหมวดสินค้า'}</h3>
+          <h3 className="text-base font-semibold">{editing ? t('st.scat_edit_heading', { code: form.code }) : t('st.scat_add_heading')}</h3>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="รหัส"><Input value={form.code} onChange={set('code')} disabled={editing} placeholder="เช่น BEV" /></Field>
-            <Field label="ชื่อ (EN)"><Input value={form.name ?? ''} onChange={set('name')} placeholder="Beverages" /></Field>
-            <Field label="ชื่อ (TH)"><Input value={form.name_th ?? ''} onChange={set('name_th')} placeholder="เครื่องดื่ม" /></Field>
-            <Field label="บัญชีรายได้"><Input value={form.revenue_account ?? ''} onChange={set('revenue_account')} placeholder="4000" /></Field>
-            <Field label="บัญชีต้นทุนขาย (COGS)"><Input value={form.cogs_account ?? ''} onChange={set('cogs_account')} placeholder="5000" /></Field>
-            <Field label="บัญชีสินค้าคงคลัง"><Input value={form.inventory_account ?? ''} onChange={set('inventory_account')} placeholder="1200" /></Field>
-            <Field label="บัญชีมูลค่า"><Input value={form.valuation_account ?? ''} onChange={set('valuation_account')} placeholder="เว้นว่างได้" /></Field>
-            <Field label="รหัส VAT"><Input value={form.vat_code ?? ''} onChange={set('vat_code')} placeholder="VAT7" /></Field>
-            <Field label="ประเภทเงินได้ (หัก ณ ที่จ่าย)"><Input value={form.wht_income_type ?? ''} onChange={set('wht_income_type')} placeholder="เช่น 40(7-8)" /></Field>
-            <Field label="คลังปริยาย"><Input value={form.default_location_id ?? ''} onChange={set('default_location_id')} placeholder="WH-MAIN" /></Field>
+            <Field label={t('st.scat_code')}><Input value={form.code} onChange={set('code')} disabled={editing} placeholder={t('st.scat_ph_code')} /></Field>
+            <Field label={t('st.scat_name_en')}><Input value={form.name ?? ''} onChange={set('name')} placeholder="Beverages" /></Field>
+            <Field label={t('st.scat_name_th')}><Input value={form.name_th ?? ''} onChange={set('name_th')} placeholder={t('st.scat_ph_name_th')} /></Field>
+            <Field label={t('st.scat_revenue')}><Input value={form.revenue_account ?? ''} onChange={set('revenue_account')} placeholder="4000" /></Field>
+            <Field label={t('st.scat_cogs')}><Input value={form.cogs_account ?? ''} onChange={set('cogs_account')} placeholder="5000" /></Field>
+            <Field label={t('st.scat_inventory')}><Input value={form.inventory_account ?? ''} onChange={set('inventory_account')} placeholder="1200" /></Field>
+            <Field label={t('st.scat_valuation')}><Input value={form.valuation_account ?? ''} onChange={set('valuation_account')} placeholder={t('st.scat_ph_optional')} /></Field>
+            <Field label={t('st.scat_vat')}><Input value={form.vat_code ?? ''} onChange={set('vat_code')} placeholder="VAT7" /></Field>
+            <Field label={t('st.scat_wht')}><Input value={form.wht_income_type ?? ''} onChange={set('wht_income_type')} placeholder={t('st.scat_ph_wht')} /></Field>
+            <Field label={t('st.scat_location')}><Input value={form.default_location_id ?? ''} onChange={set('default_location_id')} placeholder="WH-MAIN" /></Field>
           </div>
           <div className="flex gap-2">
             <Button disabled={save.isPending || !form.code.trim()} onClick={() => save.mutate()}>
-              {editing ? <Save className="size-4" /> : <Plus className="size-4" />} {save.isPending ? 'กำลังบันทึก…' : editing ? 'บันทึกการแก้ไข' : 'เพิ่มหมวด'}
+              {editing ? <Save className="size-4" /> : <Plus className="size-4" />} {save.isPending ? t('st.scat_saving') : editing ? t('st.scat_save_edit') : t('st.scat_add')}
             </Button>
-            {editing && <Button variant="outline" onClick={reset}><X className="size-4" /> ยกเลิก</Button>}
+            {editing && <Button variant="outline" onClick={reset}><X className="size-4" /> {t('st.scat_cancel')}</Button>}
           </div>
         </Card>
 
         <StateView q={q}>
           {q.data && (
             <div className="space-y-5">
-              <StatCard label="จำนวนหมวด" value={q.data.count ?? 0} icon={Layers} tone="primary" className="max-w-xs" />
+              <StatCard label={t('st.scat_stat_count')} value={q.data.count ?? 0} icon={Layers} tone="primary" className="max-w-xs" />
               <DataTable
                 rows={q.data.categories ?? []}
                 rowKey={(r: Cat) => r.code}
                 onRowClick={(r: Cat) => edit(r)}
                 columns={[
-                  { key: 'code', label: 'รหัส' },
-                  { key: 'name', label: 'ชื่อ', render: (r: Cat) => r.name_th || r.name || '—' },
-                  { key: 'revenue_account', label: 'รายได้', render: (r: Cat) => r.revenue_account ?? '—' },
-                  { key: 'cogs_account', label: 'ต้นทุนขาย', render: (r: Cat) => r.cogs_account ?? '—' },
-                  { key: 'inventory_account', label: 'สินค้าคงคลัง', render: (r: Cat) => r.inventory_account ?? '—' },
+                  { key: 'code', label: t('st.scat_code') },
+                  { key: 'name', label: t('st.scat_col_name'), render: (r: Cat) => r.name_th || r.name || '—' },
+                  { key: 'revenue_account', label: t('st.scat_col_revenue'), render: (r: Cat) => r.revenue_account ?? '—' },
+                  { key: 'cogs_account', label: t('st.scat_col_cogs'), render: (r: Cat) => r.cogs_account ?? '—' },
+                  { key: 'inventory_account', label: t('st.scat_col_inventory'), render: (r: Cat) => r.inventory_account ?? '—' },
                   { key: 'vat_code', label: 'VAT', render: (r: Cat) => r.vat_code ?? '—' },
-                  { key: 'active', label: 'สถานะ', render: (r: Cat) => <Badge variant={r.active === false ? 'destructive' : 'success'}>{r.active === false ? 'ปิด' : 'ใช้งาน'}</Badge> },
+                  { key: 'active', label: t('st.scat_col_status'), render: (r: Cat) => <Badge variant={r.active === false ? 'destructive' : 'success'}>{r.active === false ? t('st.scat_off') : t('st.scat_active')}</Badge> },
                 ]}
-                emptyState={{ icon: Layers, title: 'ยังไม่มีหมวดสินค้า', description: 'เพิ่มหมวดแรกด้านบนเพื่อกำหนดผังบัญชี/ภาษีปริยายของกลุ่มสินค้า' }}
+                emptyState={{ icon: Layers, title: t('st.scat_empty_title'), description: t('st.scat_empty_desc') }}
               />
             </div>
           )}
