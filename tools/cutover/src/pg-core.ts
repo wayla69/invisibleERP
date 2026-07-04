@@ -184,6 +184,14 @@ async function main() {
   // anyone. org2admin is already scoped to its own single company, so it still sees exactly 1 (its own).
   const nonGodAct = (await inj('GET', '/api/jobs?type=mc_seed', await mcTok('org2admin'), undefined, { 'x-act-as-tenant': String(mA1) })).json.count;
   ok('multi-company: X-Act-As-Tenant from a NON-god is ignored (no cross-company widening)', nonGodAct === 1, `nonGodAct=${nonGodAct}`);
+
+  // God "read-only" act-as: a GET still returns the scoped rows, but any mutating request is blocked before
+  // the handler runs (safe inspection view). Uses a real POST route the god is otherwise authorised for.
+  const roRead = (await inj('GET', '/api/jobs?type=mc_seed', godTok, undefined, { 'x-act-as-tenant': String(mB), 'x-act-as-read-only': '1' })).json.count;
+  const roWrite = await inj('POST', '/api/tenant/starter-pack', godTok, {}, { 'x-act-as-tenant': String(mB), 'x-act-as-read-only': '1' });
+  ok('multi-company: god read-only act-as allows GET but blocks writes (403 READONLY_IMPERSONATION)',
+    roRead === 1 && roWrite.status === 403 && roWrite.json.error?.code === 'READONLY_IMPERSONATION',
+    `read=${roRead} write=${roWrite.status} ${roWrite.json.error?.code}`);
   delete process.env.PLATFORM_ADMIN_USERNAMES;
   delete process.env.TENANCY_MODE; // restore harness default
 

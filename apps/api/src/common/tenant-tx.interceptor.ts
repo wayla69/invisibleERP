@@ -1,4 +1,4 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Inject, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Inject, Logger, ServiceUnavailableException, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { from, firstValueFrom, finalize } from 'rxjs';
 import { sql } from 'drizzle-orm';
@@ -71,6 +71,15 @@ export class TenantTxInterceptor implements NestInterceptor {
     const actAsTenant = isGod && !platformBypass && actAsRaw != null && /^[0-9]+$/.test(String(actAsRaw))
       ? Number(actAsRaw)
       : null;
+    // Read-only inspection — a god can enter a company to look without any risk of writing. When set, we
+    // reject mutating requests (safe support view). GETs (incl. their incidental pref writes) still work.
+    const actAsReadOnly = actAsTenant != null && req.headers?.['x-act-as-read-only'] === '1';
+    if (actAsReadOnly) {
+      const method = String(req.method ?? '').toUpperCase();
+      if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
+        throw new ForbiddenException({ code: 'READONLY_IMPERSONATION', message: 'Read-only company view — writing is disabled', messageTh: 'กำลังดูบริษัทแบบอ่านอย่างเดียว — แก้ไขข้อมูลไม่ได้' });
+      }
+    }
     let bypass: boolean;
     let orgScope: number | null = null;
     let effectiveTenantId: number | null = tenantId;

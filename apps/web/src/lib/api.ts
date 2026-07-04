@@ -35,7 +35,7 @@ function csrfHeader(method?: string): Record<string, string> {
 // stores its {id,name} here; every request then carries `X-Act-As-Tenant`, and the server narrows the god's
 // RLS scope to that one company. Ignored by the server for non-god users, so it's safe to always attach.
 const ACTING_TENANT_KEY = 'ie-god-company';
-export interface ActingTenant { id: number; name: string; code?: string }
+export interface ActingTenant { id: number; name: string; code?: string; readOnly?: boolean }
 
 export function getActingTenant(): ActingTenant | null {
   if (typeof window === 'undefined') return null;
@@ -57,7 +57,9 @@ export function setActingTenant(t: ActingTenant | null): void {
 
 function actingTenantHeader(): Record<string, string> {
   const t = getActingTenant();
-  return t ? { 'X-Act-As-Tenant': String(t.id) } : {};
+  if (!t) return {};
+  // Read-only inspection: the server rejects mutating requests while this is set (safe support view).
+  return { 'X-Act-As-Tenant': String(t.id), ...(t.readOnly ? { 'X-Act-As-Read-Only': '1' } : {}) };
 }
 
 // Log out: clear the server cookies, then bounce to /login. Best-effort on the network call.

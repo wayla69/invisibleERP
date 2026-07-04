@@ -128,11 +128,17 @@ function GodScopeBanner() {
   const [acting, setActing] = React.useState<ActingTenant | null>(null);
   React.useEffect(() => setActing(getActingTenant()), []);
   const exit = () => { setActingTenant(null); window.location.reload(); };
+  const toggleReadOnly = () => { if (acting) { setActingTenant({ ...acting, readOnly: !acting.readOnly }); window.location.reload(); } };
   if (acting) {
     return (
-      <div className="flex items-center gap-2 border-b border-primary/30 bg-primary/10 px-4 py-1.5 text-xs">
-        <Building2 className="size-3.5 shrink-0 text-primary" />
-        <span className="flex-1 truncate">กำลังดูข้อมูลของ <b>{acting.name}</b>{acting.code ? ` (${acting.code})` : ''} — มุมมองผู้ดูแลแพลตฟอร์ม</span>
+      <div className={cn('flex items-center gap-2 border-b px-4 py-1.5 text-xs', acting.readOnly ? 'border-amber-500/40 bg-amber-500/10' : 'border-primary/30 bg-primary/10')}>
+        <Building2 className={cn('size-3.5 shrink-0', acting.readOnly ? 'text-amber-600 dark:text-amber-400' : 'text-primary')} />
+        <span className="flex-1 truncate">
+          กำลังดูข้อมูลของ <b>{acting.name}</b>{acting.code ? ` (${acting.code})` : ''} — {acting.readOnly ? <b>อ่านอย่างเดียว</b> : 'มุมมองผู้ดูแลแพลตฟอร์ม'}
+        </span>
+        <button type="button" onClick={toggleReadOnly} className="shrink-0 rounded px-2 py-0.5 font-medium hover:bg-black/5 dark:hover:bg-white/10" title="สลับโหมดอ่านอย่างเดียว / แก้ไขได้">
+          {acting.readOnly ? 'เปิดให้แก้ไข' : 'อ่านอย่างเดียว'}
+        </button>
         <button type="button" onClick={exit} className="shrink-0 rounded px-2 py-0.5 font-medium text-primary hover:bg-primary/15">ออกเป็นมุมมองรวม</button>
       </div>
     );
