@@ -28,6 +28,12 @@ export const users = pgTable('users', {
   lineUserId: text('line_user_id'),
   lineLinkCode: text('line_link_code'),
   lineLinkExpiresAt: timestamp('line_link_expires_at', { withTimezone: true }),
+  // ── Email-to-Capture (0245, docs/34 Phase 4) — staff verified "send-from" address for bill forwarding.
+  // A bill emailed to the tenant capture inbox from this address is attributed to this user + gated on
+  // pr_raise. captureEmail set + captureEmailCode NULL ⇒ verified; code present ⇒ pending a mailed code.
+  captureEmail: text('capture_email'),
+  captureEmailCode: text('capture_email_code'),
+  captureEmailExpiresAt: timestamp('capture_email_expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

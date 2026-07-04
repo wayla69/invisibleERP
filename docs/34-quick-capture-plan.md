@@ -1,6 +1,6 @@
 # 34 — Quick Capture lane (paypers-style bill capture) + doc-AI image extraction
 
-> **Date:** 2026-07-04 · **Status:** v1.1 — IMPLEMENTED (Phases 1–3) · **Owner:** Web / Product / Platform
+> **Date:** 2026-07-04 · **Status:** v1.2 — IMPLEMENTED (Phases 1–4) · **Owner:** Web / Product / Platform
 > **Scope:** Make capturing a supplier bill as frictionless as [paypers.ai](https://paypers.ai/) — *snap a
 > photo, done* — by opening the **existing** AP-intake engine (EXP-10) to **every staffer** through a
 > dead-simple `/capture` screen, and by exposing the doc-AI image/PDF extractor as a first-class endpoint.
@@ -26,8 +26,9 @@ without Accounting. The gap is **the front door**, not the engine.
 | **2 — doc-AI accepts images** | Expose the existing vision extractor as `POST /api/doc-ai/extract-document` (base64 `data:` URL). Extract-only, no persistence, no GL. The reusable primitive behind capture + the future LINE channel. | ✅ this PR |
 | **3 — Quick Capture lane** | A `pr_raise`-gated `POST /api/procurement/ap-intake/capture` (draft-only) + `GET …/mine`, and a phone-friendly `/capture` screen: snap/upload → AI reads → filed for Accounting. | ✅ this PR |
 | **1 — LINE capture channel** | Type `บิล` in the shop LINE OA then send a bill photo → webhook parks a pending state → the photo routes to `ApIntakeService.capture`. Reuses the LINE infra (docs/30) + the capture engine. | ✅ shipped |
+| **4 — Email-to-capture** | Forward a bill to the per-tenant capture inbox → inbound-email webhook resolves the verified sender and routes each attachment to `ApIntakeService.capture`. New `email-capture` module + a verified send-from identity on `users` (migration 0245). | ✅ shipped |
 
-*(The user asked to ship 2 + 3 first, then 1 — hence the ordering.)*
+*(The user asked to ship 2 + 3 first, then 1, then 4 — hence the ordering.)*
 
 ### 2.4 LINE capture channel (Phase 1)
 A linked staffer types **`บิล`** (`capture`) in the shop LINE OA chat; `LineWebhookService.chatCaptureStart`
@@ -37,6 +38,23 @@ checks the same `pr_raise` gate and parks a `line_chat_states` pending state (10
 books/GL). Webhook redelivery is deduped on the message id; a stray photo with no pending state is ignored
 (customers send images all day). `line_chat_states.kind` is a plain text column, so **no migration** — the
 existing `attach` flow and the new `capture` flow share the one pending-state row (routed by `kind`).
+
+### 2.5 Email-to-capture channel (Phase 4)
+New module `email-capture`. **Identity:** a staffer verifies the address they forward bills *from* — `POST
+/api/capture-email/register {email}` mails a 6-digit code (best-effort via a private Nodemailer transport;
+the code is stored so registration survives an SMTP outage, never returned in the API body), `POST
+/api/capture-email/verify {code}` confirms it. Stored on `users` (migration **`0245`** — `capture_email` /
+`capture_email_code` / `capture_email_expires_at`, an ALTER only → no RLS loop; verified ⇔ `capture_email`
+set + code NULL), mirroring the LINE link columns. **Inbound:** each tenant has a capture inbox
+(`capture-<shop>@$CAPTURE_EMAIL_DOMAIN`); the provider's inbound-parse (SendGrid / Mailgun / Postmark) posts
+the normalized mail to `POST /api/email/inbound/<shop>` (`@Public`/`@NoTx`, per-tenant shared secret via
+`TenantMessagingService.resolveCreds(_, 'email')` — same fail-closed-in-prod stance as the LINE webhook;
+redelivery-deduped on `message_id` through `message_log`). The webhook resolves the **verified sender** in
+that tenant, checks **`pr_raise`**, and routes each image/PDF attachment (shared `INVOICE_DOC_MIME`
+allow-list) to `ApIntakeService.capture` — **draft-only**, attributed to the sender. Unknown/unverified
+sender or missing `pr_raise` ⇒ **no draft** (`skipped: unknown_sender | no_permission`), preserving
+attribution + SoD. `/capture` gains a verify + inbox-address card. New env: `CAPTURE_EMAIL_DOMAIN`,
+`CAPTURE_EMAIL_FROM`.
 
 ## 2. What shipped (Phases 2 + 3)
 
@@ -89,12 +107,17 @@ traceability matrix.
 - `ext` harness **268 ✓** — new: `extract-document` on an image → honest-empty draft (`source: none`);
   unsupported type → **400 `UNSUPPORTED_FILE_TYPE`**.
 - `basics` **234 ✓** (no AP/GL regression).
-- `line-crm` **132 ✓** — new: `บิล` + photo → a NeedsReview draft filed from the LINE content API
-  (`created_by` = the linked staff, file stored); a linked user without `pr_raise` is refused.
+- `line-crm` **136 ✓** — LINE: `บิล` + photo → a NeedsReview draft filed from the LINE content API
+  (`created_by` = the linked staff, file stored); a linked user without `pr_raise` is refused. Email:
+  register→verify→inbound bill → a draft attributed to the verified sender; redelivery / unknown-sender /
+  no-`pr_raise` each file no draft.
+- `migration-parity` **✓** (246 migrations, filename-order == journal-order) + migrations-journaled gate green
+  for `0245`.
 
 ## Revision history
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-07-04 | v1.2 (IMPLEMENTED — Phase 4) | Platform | **Email-to-capture channel.** New `email-capture` module: verify a send-from address via a mailed 6-digit code (`/api/capture-email/register`+`/verify`+`/status`; `users.capture_email*`, migration `0245`), and an inbound webhook `POST /api/email/inbound/<shop>` (`@Public`/`@NoTx`, per-tenant secret, redelivery-deduped) that resolves the verified sender, gates on `pr_raise`, and routes each attachment to `ApIntakeService.capture` (draft-only, attributed to the sender). `/capture` web adds a verify + inbox card. Env `CAPTURE_EMAIL_DOMAIN`/`CAPTURE_EMAIL_FROM`. No new control (entry extension of EXP-10); RCM unchanged. ToE: `line-crm` 136 ✓, `migration-parity`/journaled ✓, `basics` 234 ✓. Docs synced (narrative 3.3, manual, UAT-P2P-104 + matrix). |
 | 2026-07-04 | v1.1 (IMPLEMENTED — Phase 1) | Platform | **LINE capture channel.** `บิล`/`capture` command in the shop LINE OA parks a `line_chat_states` pending state; the next photo (`onChatImage`→`onCaptureImage`) is fetched from the LINE content API and routed to `ApIntakeService.capture` (draft-only, same `pr_raise` gate + SoD as the web lane). Shares the pending-state row with the `attach` flow (routed by `kind`; no migration). ToE: `line-crm` 132 ✓. Docs synced (narrative 3.2, manual, UAT-P2P-103 + matrix). |
 | 2026-07-04 | v1.0 (IMPLEMENTED — Phases 2+3) | Web / Product / Platform | doc-AI `POST /api/doc-ai/extract-document` (image/PDF, extract-only); Quick Capture `/capture` + `POST /api/procurement/ap-intake/capture` (`pr_raise`, draft-only) + `GET …/mine`; shared `common/invoice-doc.ts`; nav `nav.ap_capture`. Entry extension of EXP-10, no new control / GL / schema. ToE: `match` 45 ✓, `ext` 268 ✓, `basics` 234 ✓. Docs synced (narrative 3.1, manual, UAT 101/102 + matrix). Phase 1 (LINE capture channel) to follow. |

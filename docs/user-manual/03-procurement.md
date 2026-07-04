@@ -362,6 +362,14 @@ type **`บิล`** in the chat and send the bill photo. The system reads it an
 for Accounting exactly like the `/capture` screen — no app needed. (Same `pr_raise`
 permission; it never books the bill.)
 
+**Or forward it by email.** On `/capture`, in **รับบิลทางอีเมล**, verify the email
+address you send bills *from* (press **ขอรหัสยืนยัน**, then type the 6-digit code we
+mail you). After that, just **forward any supplier bill** (PDF or photo attachment) to
+your shop's capture inbox — shown on the same card as `capture-<shop>@…`. The system
+reads each attachment and files it for Accounting, credited to you. Bills sent from an
+unverified address, or from someone without the `pr_raise` permission, are ignored —
+so only your team's bills get in, and it never books the bill itself.
+
 > **Quick Capture only *files* the bill — it never records a payable or posts to
 > the ledger.** Booking the bill and paying it stay with Accounting/Finance
 > (that separation of duties is a control, **EXP-06**). You'll see only the bills

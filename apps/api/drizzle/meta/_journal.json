@@ -1716,6 +1716,13 @@
       "when": 2023820000071,
       "tag": "0244_location_posting_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 245,
+      "version": "7",
+      "when": 2023820000072,
+      "tag": "0245_capture_email",
+      "breakpoints": true
     }
   ]
 }
