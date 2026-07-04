@@ -5,6 +5,7 @@ import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, order
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { TaxService } from '../tax/tax.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { CommitmentsService } from '../commitments/commitments.service';
@@ -13,7 +14,7 @@ import { roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
-export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
+export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; tax_code?: string; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
 export interface AdvanceDto { payee: string; amount: number; purpose?: string; expense_account?: string; tenant_id?: number | null; project_code?: string; boq_line_id?: number }
 export interface SettleAdvanceDto { settled_expense: number; returned_cash?: number; expense_account?: string }
 // project_code (M4, docs/32) — an advance can be raised against a project so site cash is managed on it.
@@ -30,6 +31,9 @@ export class FinanceService {
     @Optional() private readonly tax?: TaxService,
     @Optional() private readonly matchSvc?: ThreeWayMatchService, // Phase 16 — gates AP pay on 3-way match
     @Optional() private readonly commitments?: CommitmentsService, // FU1 (docs/32) — site cash consumes BoQ budget
+    // docs/33 PR6 — resolve the VAT leg (rate + output/input GL account) from a tax_code. Optional so the
+    // writeflow harness's hand-constructed FinanceService still builds; absent ⇒ the flat 7/107→2100 default.
+    @Optional() private readonly determination?: AccountDeterminationService,
   ) {}
 
   // VAT back-out (7/107) — prefer TaxService.calcInclusive when injected
@@ -37,6 +41,37 @@ export class FinanceService {
     if (this.tax) { const r = this.tax.calcInclusive({ gross }); return { net: r.net, vat: r.tax }; }
     const vat = Math.round((gross * 7 / 107) * 100) / 100;
     return { net: Math.round((gross - vat) * 100) / 100, vat };
+  }
+
+  // docs/33 PR6 — resolve a VAT leg (net/vat/gross + GL account) from a configured tax_code. `side` picks the
+  // sales (output) vs purchase (input) VAT account. Honors the code's `inclusive` flag: inclusive ⇒ `amount`
+  // is gross and VAT is backed out; exclusive ⇒ `amount` is net and gross = net + VAT. Returns null when no
+  // code is given (caller keeps its flat default). An explicitly-given code that doesn't resolve to an active
+  // VAT code fails closed (UNKNOWN_TAX_CODE / NOT_A_VAT_CODE) — the account itself is validated postable at
+  // setup time and again by LedgerService.postEntry, so a bad account can never reach the books.
+  private async vatLegFromCode(tenantId: number | null, code: string | null | undefined, amount: number, side: 'output' | 'input', opts?: { forceInclusive?: boolean }): Promise<{ net: number; vat: number; gross: number; account: string } | null> {
+    if (!code || !this.determination) return null;
+    const tc = await this.determination.resolveTaxCode(tenantId, code);
+    if (!tc) throw new BadRequestException({ code: 'UNKNOWN_TAX_CODE', message: `Tax code '${code}' not found or inactive`, messageTh: `ไม่พบรหัสภาษี '${code}' หรือถูกปิดใช้งาน` });
+    if (tc.kind !== 'vat') throw new BadRequestException({ code: 'NOT_A_VAT_CODE', message: `Tax code '${code}' is a ${tc.kind} code, not VAT`, messageTh: `รหัสภาษี '${code}' ไม่ใช่ภาษีมูลค่าเพิ่ม` });
+    const rate = n(tc.rate);
+    const account = (side === 'output' ? tc.outputAccount : tc.inputAccount) ?? '2100';
+    // AR (forceInclusive) always treats `amount` as the fixed gross receivable and backs VAT out; AP honors
+    // the code's inclusive/exclusive convention (exclusive ⇒ amount is net, gross = net + VAT).
+    const inclusive = opts?.forceInclusive || tc.inclusive;
+    const r2 = (x: number) => Math.round(x * 100) / 100;
+    const net = inclusive ? r2(amount - amount * rate / (1 + rate)) : r2(amount);
+    const vat = inclusive ? r2(amount * rate / (1 + rate)) : r2(amount * rate);
+    return { net, vat, gross: r2(net + vat), account };
+  }
+
+  // docs/33 PR6 — the single VAT code shared by ALL of an order's items (item → category resolution), or null
+  // when the tenant hasn't opted in, an item leaves it blank, or the order mixes codes (→ caller's default).
+  private async resolveUniformVatCode(tenantId: number, itemIds: string[]): Promise<string | null> {
+    if (!this.determination || !itemIds.length) return null;
+    const codes = new Set<string | null>();
+    for (const id of new Set(itemIds)) codes.add((await this.determination.resolveItemAccounts(tenantId, id)).vatCode ?? null);
+    return codes.size === 1 ? ([...codes][0] ?? null) : null;
   }
 
   // ───────────────────── READ (Phase 2) ─────────────────────
@@ -314,6 +349,16 @@ export class FinanceService {
     const tenantIds = [...new Set(todo.map((o: any) => o.tenantId).filter((v: any) => v != null))] as number[];
     const termRows = tenantIds.length ? await db.select({ id: tenants.id, ct: tenants.creditTerm }).from(tenants).where(inArray(tenants.id, tenantIds)) : [];
     const termMap = new Map<number, string>(termRows.map((t: any) => [Number(t.id), t.ct]));
+    // docs/33 PR6 — output-VAT determination: only tenants that opted into posting_determination get the
+    // per-item VAT account (else parity — flat 7/107 → 2100). Prefetch each order's item ids for the lookup.
+    const enabledTenants = new Set<number>();
+    if (this.determination) for (const t of tenantIds) if (await this.determination.enabled(t)) enabledTenants.add(t);
+    const itemsByOrder = new Map<number, string[]>();
+    if (enabledTenants.size) {
+      const lineRows = await db.select({ orderId: orderLines.orderId, itemId: orderLines.itemId })
+        .from(orderLines).where(inArray(orderLines.orderId, orderIds));
+      for (const r of lineRows) if (r.itemId) { const a = itemsByOrder.get(Number(r.orderId)) ?? []; a.push(r.itemId); itemsByOrder.set(Number(r.orderId), a); }
+    }
     let created = 0;
     for (const o of todo) {
       const amtA = sumMap.get(Number(o.id)) ?? '0';
@@ -324,14 +369,21 @@ export class FinanceService {
         invoiceNo, invoiceDate: o.orderDate, dueDate: addDays(o.orderDate, termDays),
         tenantId: o.tenantId, orderNo: o.orderNo, amount: amtA, paidAmount: '0', status: 'Unpaid', createdBy: 'system',
       }).onConflictDoNothing();
-      // GL: recognize receivable + revenue + output VAT (Dr 1100 / Cr 4000 net / Cr 2100 vat)
+      // GL: recognize receivable + revenue + output VAT (Dr 1100 / Cr 4000 net / Cr <output-vat> vat). The
+      // VAT account/rate come from the order's uniform item vat_code when the tenant opted in (docs/33 PR6);
+      // else the flat 7/107 → 2100 default. The receivable (grossAmt) is fixed, so VAT is always backed out.
       const grossAmt = n(amtA);
       if (this.ledger && grossAmt > 0 && !(await this.ledger.alreadyPosted('AR', invoiceNo))) {
-        const { net, vat } = this.vatSplit(grossAmt);
+        let net: number, vat: number, vatAccount = '2100';
+        const code = o.tenantId != null && enabledTenants.has(Number(o.tenantId))
+          ? await this.resolveUniformVatCode(Number(o.tenantId), itemsByOrder.get(Number(o.id)) ?? []) : null;
+        const leg = await this.vatLegFromCode(o.tenantId ?? null, code, grossAmt, 'output', { forceInclusive: true });
+        if (leg) { net = leg.net; vat = leg.vat; vatAccount = leg.account; }
+        else ({ net, vat } = this.vatSplit(grossAmt));
         await this.ledger.postEntry({
           date: o.orderDate ?? undefined, source: 'AR', sourceRef: invoiceNo, tenantId: o.tenantId ?? null,
           memo: `AR invoice ${invoiceNo}`, createdBy: 'system',
-          lines: [{ account_code: '1100', debit: grossAmt }, { account_code: '4000', credit: net }, { account_code: '2100', credit: vat }],
+          lines: [{ account_code: '1100', debit: grossAmt }, { account_code: '4000', credit: net }, { account_code: vatAccount, credit: vat }],
         });
       }
       created++;
@@ -396,24 +448,29 @@ export class FinanceService {
       if (ex) return { txn_no: ex.txnNo, status: ex.status, idempotent: true };
     }
     const txnNo = await this.docNo.nextDaily('AP');
-    const paid = n(dto.paid_amount);
-    const status = paid >= n(dto.amount) ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid';
-    const apGross = n(dto.amount);
-    // input VAT — exempt/zero-rated/non-VAT bills carry NO input VAT (else ภ.พ.30 overstates the credit).
+    // input VAT — a configured tax_code (docs/33 PR6) drives the rate + input-VAT GL account; else the flat
+    // 7/107 default (exempt/zero-rated/non-VAT bills carry NO input VAT, else ภ.พ.30 overstates the credit).
     const treatment = dto.vat_treatment ?? 'standard';
-    const { net, vat } = treatment === 'standard' ? this.vatSplit(apGross) : { net: apGross, vat: 0 };
+    const leg = await this.vatLegFromCode(tenantId, dto.tax_code, n(dto.amount), 'input');
+    const fallback = treatment === 'standard' ? this.vatSplit(n(dto.amount)) : { net: n(dto.amount), vat: 0 };
+    const net = leg ? leg.net : fallback.net;
+    const vat = leg ? leg.vat : fallback.vat;
+    const apGross = leg ? leg.gross : n(dto.amount);
+    const vatAccount = leg?.account ?? '2100';
+    const paid = n(dto.paid_amount);
+    const status = paid >= apGross ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid';
     await db.insert(apTransactions).values({
       txnNo, tenantId, vendorId: dto.vendor_id ?? null, vendorName: dto.vendor_name ?? null, txnType: dto.txn_type ?? 'Invoice',
       invoiceNo: dto.invoice_no ?? null, invoiceDate: dto.invoice_date ?? null, dueDate: dto.due_date ?? null,
       amount: String(apGross), vatAmount: fx(vat, 2), paidAmount: String(paid), status, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
     });
-    // GL: record expense + input VAT + payable (Dr 5100/1200/override net / Dr 2100 vat / Cr 2000 gross). Zero VAT leg auto-drops.
+    // GL: record expense + input VAT + payable (Dr 5100/1200/override net / Dr <input-vat> vat / Cr 2000 gross). Zero VAT leg auto-drops.
     if (this.ledger && apGross > 0) {
       const expenseAccount = dto.expense_account ?? ((dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100');
       await this.ledger.postEntry({
         date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId,
         memo: `AP bill ${txnNo}${dto.vendor_name ? ' ' + dto.vendor_name : ''}`, createdBy: user.username,
-        lines: [{ account_code: expenseAccount, debit: net }, { account_code: '2100', debit: vat }, { account_code: '2000', credit: apGross }],
+        lines: [{ account_code: expenseAccount, debit: net }, { account_code: vatAccount, debit: vat }, { account_code: '2000', credit: apGross }],
       });
     }
     await this.statusLog.log('AP', txnNo, '', status, user.username);
