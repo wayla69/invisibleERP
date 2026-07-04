@@ -9,7 +9,7 @@ import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
 const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional(), vat_treatment: z.enum(['standard', 'exempt', 'zero']).optional(), tax_code: z.string().optional(), idempotency_key: z.string().optional() });
-const PayBody = z.object({ amount: z.number().positive(), idempotency_key: z.string().optional(), wht_income_type: z.string().optional(), wht_rate: z.number().min(0).max(0.30).optional() });
+const PayBody = z.object({ amount: z.number().positive(), idempotency_key: z.string().optional(), wht_income_type: z.string().optional(), wht_rate: z.number().min(0).max(0.30).optional(), wht_tax_code: z.string().optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
 const AdvanceBody = z.object({ payee: z.string().min(1), amount: z.number().positive(), purpose: z.string().optional(), expense_account: z.string().optional(), tenant_id: z.number().optional(), project_code: z.string().optional(), boq_line_id: z.number().int().positive().optional() });
 const SettleBody = z.object({ settled_expense: z.number().nonnegative(), returned_cash: z.number().nonnegative().optional(), expense_account: z.string().optional() });
@@ -113,7 +113,7 @@ export class FinanceController {
   // AP disbursement maker-checker (AP-PAY). MAKER requests; a DIFFERENT user with approval authority approves.
   // Request a payment (maker). Records a PendingApproval row — no cash/GL effect until approved.
   @Patch('ap/transactions/:txnNo/pay') @Permissions('creditors')
-  requestApPayment(@Param('txnNo') txnNo: string, @Body(new ZodValidationPipe(PayBody)) b: { amount: number; idempotency_key?: string; wht_income_type?: string; wht_rate?: number }, @CurrentUser() u: JwtUser) { return this.svc.requestApPayment(txnNo, b.amount, u, b.idempotency_key, { income_type: b.wht_income_type, rate: b.wht_rate }); }
+  requestApPayment(@Param('txnNo') txnNo: string, @Body(new ZodValidationPipe(PayBody)) b: { amount: number; idempotency_key?: string; wht_income_type?: string; wht_rate?: number; wht_tax_code?: string }, @CurrentUser() u: JwtUser) { return this.svc.requestApPayment(txnNo, b.amount, u, b.idempotency_key, { income_type: b.wht_income_type, rate: b.wht_rate, tax_code: b.wht_tax_code }); }
 
   // Checker queue — payments awaiting approval.
   @Get('ap/payments/pending') @Permissions('approvals', 'gl_close', 'exec')

@@ -65,13 +65,18 @@ export class FinanceService {
     return { net, vat, gross: r2(net + vat), account };
   }
 
-  // docs/33 PR6 — the single VAT code shared by ALL of an order's items (item → category resolution), or null
-  // when the tenant hasn't opted in, an item leaves it blank, or the order mixes codes (→ caller's default).
-  private async resolveUniformVatCode(tenantId: number, itemIds: string[]): Promise<string | null> {
-    if (!this.determination || !itemIds.length) return null;
-    const codes = new Set<string | null>();
-    for (const id of new Set(itemIds)) codes.add((await this.determination.resolveItemAccounts(tenantId, id)).vatCode ?? null);
-    return codes.size === 1 ? ([...codes][0] ?? null) : null;
+  // docs/33 PR6/PR7 — the VAT code + revenue account shared by ALL of an order's items (item → category
+  // resolution). A field is null when the tenant hasn't opted in, an item leaves it blank, or the order MIXES
+  // values (→ caller keeps its default). Resolves each item once.
+  private async resolveOrderProfile(tenantId: number, itemIds: string[]): Promise<{ vatCode: string | null; revenueAccount: string | null }> {
+    if (!this.determination || !itemIds.length) return { vatCode: null, revenueAccount: null };
+    const vats = new Set<string | null>(), revs = new Set<string | null>();
+    for (const id of new Set(itemIds)) {
+      const r = await this.determination.resolveItemAccounts(tenantId, id);
+      vats.add(r.vatCode ?? null); revs.add(r.revenueAccount ?? null);
+    }
+    const uniform = (s: Set<string | null>) => (s.size === 1 ? ([...s][0] ?? null) : null);
+    return { vatCode: uniform(vats), revenueAccount: uniform(revs) };
   }
 
   // ───────────────────── READ (Phase 2) ─────────────────────
@@ -369,21 +374,23 @@ export class FinanceService {
         invoiceNo, invoiceDate: o.orderDate, dueDate: addDays(o.orderDate, termDays),
         tenantId: o.tenantId, orderNo: o.orderNo, amount: amtA, paidAmount: '0', status: 'Unpaid', createdBy: 'system',
       }).onConflictDoNothing();
-      // GL: recognize receivable + revenue + output VAT (Dr 1100 / Cr 4000 net / Cr <output-vat> vat). The
-      // VAT account/rate come from the order's uniform item vat_code when the tenant opted in (docs/33 PR6);
-      // else the flat 7/107 → 2100 default. The receivable (grossAmt) is fixed, so VAT is always backed out.
+      // GL: recognize receivable + revenue + output VAT (Dr 1100 / Cr <revenue> net / Cr <output-vat> vat).
+      // The VAT account/rate AND the revenue account come from the order's uniform item profile when the
+      // tenant opted in (docs/33 PR6/PR7); else the flat 7/107 → 2100 and revenue 4000 default. The receivable
+      // (grossAmt) is fixed, so VAT is always backed out.
       const grossAmt = n(amtA);
       if (this.ledger && grossAmt > 0 && !(await this.ledger.alreadyPosted('AR', invoiceNo))) {
         let net: number, vat: number, vatAccount = '2100';
-        const code = o.tenantId != null && enabledTenants.has(Number(o.tenantId))
-          ? await this.resolveUniformVatCode(Number(o.tenantId), itemsByOrder.get(Number(o.id)) ?? []) : null;
-        const leg = await this.vatLegFromCode(o.tenantId ?? null, code, grossAmt, 'output', { forceInclusive: true });
+        const prof = o.tenantId != null && enabledTenants.has(Number(o.tenantId))
+          ? await this.resolveOrderProfile(Number(o.tenantId), itemsByOrder.get(Number(o.id)) ?? []) : { vatCode: null, revenueAccount: null };
+        const leg = await this.vatLegFromCode(o.tenantId ?? null, prof.vatCode, grossAmt, 'output', { forceInclusive: true });
         if (leg) { net = leg.net; vat = leg.vat; vatAccount = leg.account; }
         else ({ net, vat } = this.vatSplit(grossAmt));
+        const revenueAccount = prof.revenueAccount ?? '4000';
         await this.ledger.postEntry({
           date: o.orderDate ?? undefined, source: 'AR', sourceRef: invoiceNo, tenantId: o.tenantId ?? null,
           memo: `AR invoice ${invoiceNo}`, createdBy: 'system',
-          lines: [{ account_code: '1100', debit: grossAmt }, { account_code: '4000', credit: net }, { account_code: vatAccount, credit: vat }],
+          lines: [{ account_code: '1100', debit: grossAmt }, { account_code: revenueAccount, credit: net }, { account_code: vatAccount, credit: vat }],
         });
       }
       created++;
@@ -480,7 +487,7 @@ export class FinanceService {
   // ───────────────────── AP disbursement maker-checker (AP-PAY) ─────────────────────
   // Step 1 (MAKER, `creditors`) — REQUEST a vendor payment. No cash moves and NO GL posts here: the bill's
   // paid_amount is untouched and a PendingApproval row is recorded. PATCH /api/finance/ap/transactions/{no}/pay
-  async requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string, wht?: { income_type?: string; rate?: number }) {
+  async requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string, wht?: { income_type?: string; rate?: number; tax_code?: string }) {
     const db = this.db;
     const [t] = await db.select().from(apTransactions).where(eq(apTransactions.txnNo, txnNo)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
@@ -503,18 +510,24 @@ export class FinanceService {
     }
     // TAX-03 — optional withholding tax (ภ.ง.ด.3/53). The rate is captured here; the amount is computed on the
     // pre-VAT base and posted to GL 2361 at approval (the actual cash/GL event). Bounded to a sane 0–30%.
-    let whtRate: number | null = null;
-    if (wht?.rate != null) {
-      whtRate = wht.rate;
-      if (!(whtRate > 0 && whtRate <= 0.30)) {
-        throw new BadRequestException({ code: 'INVALID_WHT_RATE', message: 'WHT rate must be between 0 and 0.30', messageTh: 'อัตราภาษีหัก ณ ที่จ่ายต้องอยู่ระหว่าง 0 ถึง 0.30' });
-      }
+    // docs/33 PR7: a WHT tax_code defaults the income type + rate when the caller omits them (makes the WHT
+    // side of tax_codes live — ค่าจ้างทำของ/ค่าบริการ). An explicit income_type/rate still wins.
+    let whtRate: number | null = wht?.rate ?? null;
+    let whtIncome: string | null = wht?.income_type ?? null;
+    if (wht?.tax_code && this.determination) {
+      const tc = await this.determination.resolveTaxCode(apTenant, wht.tax_code);
+      if (!tc || tc.kind !== 'wht') throw new BadRequestException({ code: 'INVALID_WHT_TAX_CODE', message: `Tax code '${wht.tax_code}' is not an active WHT code`, messageTh: `รหัสภาษี '${wht.tax_code}' ไม่ใช่รหัสหัก ณ ที่จ่ายที่ใช้งานอยู่` });
+      whtIncome = whtIncome ?? tc.whtIncomeType ?? null;
+      whtRate = whtRate ?? n(tc.rate);
+    }
+    if (whtRate != null && !(whtRate > 0 && whtRate <= 0.30)) {
+      throw new BadRequestException({ code: 'INVALID_WHT_RATE', message: 'WHT rate must be between 0 and 0.30', messageTh: 'อัตราภาษีหัก ณ ที่จ่ายต้องอยู่ระหว่าง 0 ถึง 0.30' });
     }
     const paymentNo = await this.docNo.nextDaily('APP');
     await db.insert(apPayments).values({
       paymentNo, txnNo, tenantId: apTenant, amount: String(n(amount)), status: 'PendingApproval',
       requestedBy: user.username, glRef: `${txnNo}:p:${paymentNo}`, idempotencyKey: idempotencyKey ?? null,
-      whtIncomeType: whtRate != null ? (wht?.income_type ?? null) : null, whtRate: whtRate != null ? String(whtRate) : null,
+      whtIncomeType: whtRate != null ? whtIncome : null, whtRate: whtRate != null ? String(whtRate) : null,
     });
     await this.statusLog.log('APP', paymentNo, '', 'PendingApproval', user.username, `Payment request ${n(amount)} for ${txnNo}${whtRate != null ? ` (WHT ${whtRate * 100}%)` : ''}`);
     return { payment_no: paymentNo, txn_no: txnNo, amount: n(amount), status: 'PendingApproval', wht_rate: whtRate };

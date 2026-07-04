@@ -518,6 +518,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-117 | Determination fail-closed (INVALID_POSTING_ACCOUNT) | GL-21 | 04 §9 |
 | UAT-GL-118 | Item-setup screens: category-level account drives posting | GL-21 | 04 §14 (rev 2.8) |
 | UAT-GL-119 | Warehouse account default drives inventory posting (lowest tier) | GL-21 | 04 §14 (rev 2.9) |
+| UAT-GL-120 | Item default_location_id + AR revenue account drive posting | GL-21 | 04 §14 (rev 2.10) |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -545,6 +546,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-031 | AP bill tax_code routes input VAT to the code's account | GL-21 | 06 §14 (rev 0.10) |
 | UAT-TAX-032 | AR output VAT routes to the item vat_code account | GL-21 | 06 §14 (rev 0.10) |
 | UAT-TAX-033 | PP30↔GL reconciliation spans the VAT-account set | TAX-04 | 06 §14 (rev 0.10) |
+| UAT-TAX-034 | WHT tax_code defaults the income type + rate on an AP payment | TAX-03 | 06 §14 (rev 0.11) |
 
 ## 07 — Payroll → `05-payroll.md`
 

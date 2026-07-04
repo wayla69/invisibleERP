@@ -786,6 +786,14 @@ async function main() {
   const recWh = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
   ok('Determination: sub-ledger still ties with a warehouse-routed inventory account in the set', recWh.reconciled === true && near(recWh.sub_ledger_value, recWh.gl_inventory), `sub=${recWh.sub_ledger_value} gl=${recWh.gl_inventory} rec=${recWh.reconciled}`);
 
+  // ── default_location_id (docs/33 PR7): a receipt with no explicit location goes to the item's default ──
+  await db.insert(s.items).values({ itemId: 'DETLOC', itemDescription: 'Default-location item' }).onConflictDoNothing();
+  await inj('PATCH', '/api/item-setup/items/DETLOC', invmgr, { default_location_id: 'WH-COLD' });
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'DETLOC', uom: 'EA', qty: 5, unit_cost: 4, ref_type: 'GRN', ref_id: 'GRN-LOC' });
+  const valLoc = (await inj('GET', '/api/inventory/valuation', invmgr)).json;
+  const detlocRow = (valLoc.items ?? []).find((i: any) => i.item_id === 'DETLOC');
+  ok('Determination: a receipt with no location defaults to the item default_location_id (WH-COLD, not WH-MAIN)', detlocRow?.location_id === 'WH-COLD', `loc=${detlocRow?.location_id}`);
+
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).
   await db.insert(s.itemCosting).values({ tenantId: invTid, itemId: 'COSTITEM', method: 'AVG' }).onConflictDoNothing();
