@@ -233,14 +233,45 @@ export class BillingService {
   // which the auth guard reads to block the tenant's users (403 TENANT_SUSPENDED); platform owners are exempt.
   // The mutation is audit-logged (AuditInterceptor). Runs under the platform-admin bypass (writes another
   // tenant's row). ──
-  // Company directory for the platform owner ("god") — backs the web company-switcher. Runs under the
-  // @PlatformAdmin RLS bypass, so it lists EVERY tenant. Ordered by code for a stable dropdown.
+  // Company directory for the platform owner ("god") — backs the web company-switcher AND the Platform
+  // Console table. Runs under the @PlatformAdmin RLS bypass, so it lists EVERY tenant. Enriched with the
+  // subscription (plan/status/trial) and a live user count so the console can show each company's posture
+  // at a glance. Ordered by code for a stable list.
   async listTenants() {
     const rows = await this.db
-      .select({ id: tenants.id, code: tenants.code, name: tenants.name, suspendedAt: tenants.suspendedAt })
+      .select({
+        id: tenants.id, code: tenants.code, name: tenants.name,
+        suspendedAt: tenants.suspendedAt, createdAt: tenants.createdAt,
+        planCode: subscriptions.planCode, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt,
+      })
       .from(tenants)
+      .leftJoin(subscriptions, eq(subscriptions.tenantId, tenants.id))
       .orderBy(tenants.code);
-    return rows.map((t) => ({ id: Number(t.id), code: t.code, name: t.name, suspended: !!t.suspendedAt }));
+    // One grouped query for all user counts (avoids an N+1 over the tenant list).
+    const counts = await this.db
+      .select({ tenantId: users.tenantId, n: sql<number>`count(*)` })
+      .from(users)
+      .groupBy(users.tenantId);
+    const countByTenant = new Map(counts.map((c) => [Number(c.tenantId), Number(c.n)]));
+    // A tenant with two subscription rows would duplicate in the left join — keep the first (ordered) per id.
+    const seen = new Set<number>();
+    const out = [];
+    for (const t of rows) {
+      const id = Number(t.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id, code: t.code, name: t.name,
+        suspended: !!t.suspendedAt,
+        // Suspended wins as the headline status; otherwise show the subscription status (or null if none).
+        status: t.suspendedAt ? 'Suspended' : (t.status ?? null),
+        plan_code: t.planCode ?? null,
+        trial_ends_at: t.trialEndsAt ?? null,
+        users: countByTenant.get(id) ?? 0,
+        created_at: t.createdAt ?? null,
+      });
+    }
+    return out;
   }
 
   async suspendTenant(id: number, by: string, reason?: string) {

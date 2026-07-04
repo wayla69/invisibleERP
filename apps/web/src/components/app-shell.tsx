@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, Star } from 'lucide-react';
+import { Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, ShieldCheck, Star } from 'lucide-react';
 
 import { useQuery } from '@tanstack/react-query';
 
@@ -111,6 +111,13 @@ function NavSubSection({
     </div>
   );
 }
+
+// God-only nav group (Platform Console). Appended AFTER the permission filter so it is gated solely on
+// is_platform_owner — a per-tenant Admin (who also passes every perm) never sees it.
+const PLATFORM_GROUP: NavGroup = {
+  title: 'nav.group.platform',
+  items: [{ label: 'nav.platform', href: '/platform', icon: ShieldCheck, perms: [] }],
+};
 
 interface SwitcherCompany { id: number; code: string; name: string; suspended: boolean }
 
@@ -432,16 +439,19 @@ export function AppShell({
   const wsNav = React.useMemo(() => (enableWorkspaces ? navForWorkspace(nav, workspace) : nav), [enableWorkspaces, nav, workspace]);
   const groupOrder = moduleFlags.data?.groupOrder;
   const itemOrder = moduleFlags.data?.itemOrder;
+  const isGod = me.data?.is_platform_owner ?? false;
   const groups = React.useMemo(() => {
     const filtered = filterByPerm(wsNav);
     const base = filtered.length ? filtered : wsNav; // fall back while loading
-    return orderGroups(base, groupOrder); // admin-curated system-wide category order
-  }, [filterByPerm, wsNav, groupOrder]);
+    const ordered = orderGroups(base, groupOrder); // admin-curated system-wide category order
+    return isGod ? [...ordered, PLATFORM_GROUP] : ordered; // platform console — god only
+  }, [filterByPerm, wsNav, groupOrder, isGod]);
   const paletteGroups = React.useMemo(() => {
     const filtered = filterByPerm(nav);
     const base = filtered.length ? filtered : nav;
-    return orderGroups(base, groupOrder); // keep the ⌘K palette in the same admin-curated order as the sidebar
-  }, [filterByPerm, nav, groupOrder]);
+    const ordered = orderGroups(base, groupOrder); // keep the ⌘K palette in the same admin-curated order as the sidebar
+    return isGod ? [...ordered, PLATFORM_GROUP] : ordered;
+  }, [filterByPerm, nav, groupOrder, isGod]);
 
   const isActive = (href: string) =>
     pathname === href || (href !== '/dashboard' && href !== '/portal/dashboard' && pathname.startsWith(href + '/'));

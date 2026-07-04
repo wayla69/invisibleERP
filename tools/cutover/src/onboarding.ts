@@ -114,6 +114,16 @@ async function main() {
   ok('Platform-created company is org-isolated + fully provisioned (org_id=tenant id, 12 periods)', Number(pcRows[0].t_org) === Number(created.json.tenant_id) && Number(pcRows[0].u_org) === Number(created.json.tenant_id) && pcRows[0].periods === 12, JSON.stringify(pcRows[0]));
   const platLogin = await login('platco_admin', 'platco12345');
   ok('The newly platform-created Admin can log in', !!platLogin.json.token, `st=${platLogin.status}`);
+  // Company directory (backs the Platform Console table + the switcher). Lists EVERY tenant enriched with
+  // status/plan/user-count; a non-platform-admin is blocked at the guard.
+  const dirDenied = await inj('GET', '/api/admin/tenants', platLogin.json.token); // platco_admin is NOT a platform owner
+  ok('GET /api/admin/tenants blocked for a non-platform-admin (403)', dirDenied.status === 403, `${dirDenied.status} ${dirDenied.json.error?.code}`);
+  const dir = await inj('GET', '/api/admin/tenants', owner); // owner1 IS the platform owner
+  const dirRows = Array.isArray(dir.json) ? dir.json : [];
+  const createdRow = dirRows.find((r: any) => Number(r.id) === Number(created.json.tenant_id));
+  ok('GET /api/admin/tenants lists all companies enriched (status/plan/users) incl. the just-provisioned one',
+    dir.status === 200 && dirRows.length >= 2 && !!createdRow && typeof createdRow.users === 'number' && 'status' in createdRow && 'plan_code' in createdRow,
+    `n=${dirRows.length} created={status:${createdRow?.status},plan:${createdRow?.plan_code},users:${createdRow?.users}}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3c. Invite-link onboarding (ITGC-AC-18 #2): a platform owner issues a SINGLE-USE, expiring invite;

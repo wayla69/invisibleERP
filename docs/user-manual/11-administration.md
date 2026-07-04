@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.2** · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+**Status: DRAFT v0.3** · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -507,6 +507,19 @@ just under the workspace tabs. It doubles as a **current-company badge**:
   It only ever **narrows** what you see (you can always switch back); it never grants a normal Admin any
   cross-company access. Actions you take while scoped to a company are still recorded in the audit trail with
   the company you were acting as.
+
+**The Platform Console (`/platform`).** A platform owner also gets a dedicated **ศูนย์ควบคุมแพลตฟอร์ม** entry in
+the sidebar (visible only to platform owners) — one place to run the whole fleet:
+
+- **บริษัท** — a table of every company with its status (ใช้งาน/ทดลอง/ระงับ/ค้างชำระ), plan, number of users, trial
+  end and creation date. Per row you can **เข้าดู** (jump into that company — this sets the switcher above and
+  reloads into its dashboard) or **ระงับ/คืนสถานะ** it. The **เปิดบริษัทใหม่** button provisions a brand-new
+  company (tenant + its Admin + industry chart of accounts) in one step.
+- **Onboarding** — the queue of pending **คำขอเปิดบริษัท** to **อนุมัติ/ปฏิเสธ**, and **ออกลิงก์เชิญ** to issue a
+  single-use, expiring invite link (the token is shown once — copy it then).
+
+Everything here is restricted to platform owners by the server, so the menu simply won't appear for a normal
+company Admin.
 
 ### 14.1 First-run setup checklist & starter
 
