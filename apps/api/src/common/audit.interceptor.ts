@@ -37,7 +37,15 @@ export class AuditInterceptor implements NestInterceptor {
   intercept(ctx: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (ctx.getType() !== 'http') return next.handle();
 
-    const req = ctx.switchToHttp().getRequest<FastifyRequest & { user?: JwtUser; __auditMeta?: Record<string, unknown> }>();
+    // Fields set upstream by TenantTxInterceptor (RLS scope of this request) are declared here so the audit
+    // trail can read them without an `as any` cast.
+    const req = ctx.switchToHttp().getRequest<FastifyRequest & {
+      user?: JwtUser;
+      __auditMeta?: Record<string, unknown>;
+      __rlsBypass?: boolean;
+      __rlsOrgScope?: number | null;
+      __actAsTenant?: number | null;
+    }>();
     const method = (req.method ?? '').toUpperCase();
     if (!MUTATING.has(method)) return next.handle();
 
@@ -53,11 +61,11 @@ export class AuditInterceptor implements NestInterceptor {
     // rows stay lean. This is the audit trail behind "HQ sees all branches".
     // A god that narrowed its view to one company via the switcher runs with bypass OFF but is still a
     // cross-tenant operator acting on a company that isn't its own — record which company for traceability.
-    const actAs = (req as any).__actAsTenant;
+    const actAs = req.__actAsTenant;
     const xtenant: Record<string, unknown> | undefined =
       actAs != null ? { god_act_as_tenant: actAs }
-      : (req as any).__rlsBypass ? { rls_bypass: true }
-      : (req as any).__rlsOrgScope != null ? { rls_org_scope: (req as any).__rlsOrgScope }
+      : req.__rlsBypass ? { rls_bypass: true }
+      : req.__rlsOrgScope != null ? { rls_org_scope: req.__rlsOrgScope }
       : undefined;
 
     // Service-attached audit metadata (appendAuditMeta) is read at tap-time — after the handler ran —
