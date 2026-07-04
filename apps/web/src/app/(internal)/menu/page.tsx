@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useLang } from '@/lib/i18n';
 
 interface Item {
   id: number;
@@ -52,16 +53,17 @@ const selectCls =
   'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function MenuPage() {
+  const { t } = useLang();
   return (
     <div>
       <PageHeader
-        title="เมนูอาหาร (Menu)"
-        description="จัดการรายการเมนู หมวดหมู่ และราคา — ใช้แสดงผลบนหน้า POS"
+        title={t('mf.menu_title')}
+        description={t('mf.menu_desc')}
       />
       <Tabs
         tabs={[
-          { key: 'items', label: 'รายการเมนู', content: <Items /> },
-          { key: 'categories', label: 'หมวดหมู่', content: <Categories /> },
+          { key: 'items', label: t('mf.menu_tab_items'), content: <Items /> },
+          { key: 'categories', label: t('mf.menu_tab_categories'), content: <Categories /> },
         ]}
       />
     </div>
@@ -70,6 +72,7 @@ export default function MenuPage() {
 
 // ───────────────────────── รายการเมนู + สร้างเมนู ─────────────────────────
 function Items() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const menu = useQuery<MenuResp>({ queryKey: ['menu'], queryFn: () => api('/api/menu') });
   const cats = useQuery<{ categories: Category[] }>({ queryKey: ['menu-categories'], queryFn: () => api('/api/menu/categories') });
@@ -111,7 +114,7 @@ function Items() {
         }),
       }),
     onSuccess: (it) => {
-      notifySuccess(`เพิ่มเมนู ${it.sku} · ${it.name}`);
+      notifySuccess(t('mf.menu_added', { sku: it.sku, name: it.name }));
       setSku(''); setName(''); setPrice(''); setCategoryId(''); setStartT(''); setEndT(''); setDays([true, true, true, true, true, true, true]);
       qc.invalidateQueries({ queryKey: ['menu'] });
     },

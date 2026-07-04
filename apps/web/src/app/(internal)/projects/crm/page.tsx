@@ -117,6 +117,7 @@ function Leads() {
 }
 
 function Opportunities() {
+  const { t } = useLang();
   const router = useRouter();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['crm-opps'], queryFn: () => api('/api/crm/pipeline/opportunities') });
@@ -125,11 +126,11 @@ function Opportunities() {
   const [f, setF] = useState({ name: '', amount: '', probability: '10', expected_close_date: '' });
   const create = useMutation({
     mutationFn: () => api('/api/crm/pipeline/opportunities', { method: 'POST', body: JSON.stringify({ name: f.name, amount: Number(f.amount) || undefined, probability: Number(f.probability) || undefined, expected_close_date: f.expected_close_date || undefined }) }),
-    onSuccess: () => { notifySuccess('เพิ่มโอกาสการขาย'); setF({ name: '', amount: '', probability: '10', expected_close_date: '' }); refresh(); }, onError: (e: any) => notifyError(e.message),
+    onSuccess: () => { notifySuccess(t('pj.add_opp')); setF({ name: '', amount: '', probability: '10', expected_close_date: '' }); refresh(); }, onError: (e: any) => notifyError(e.message),
   });
   const setStage = useMutation({
-    mutationFn: (v: { oppNo: string; stage: string }) => api(`/api/crm/pipeline/opportunities/${v.oppNo}/stage`, { method: 'PATCH', body: JSON.stringify({ stage: v.stage, lost_reason: v.stage === 'lost' ? 'แพ้คู่แข่ง' : undefined }) }),
-    onSuccess: () => { notifySuccess('อัปเดตขั้นตอนแล้ว'); refresh(); }, onError: (e: any) => notifyError(e.message),
+    mutationFn: (v: { oppNo: string; stage: string }) => api(`/api/crm/pipeline/opportunities/${v.oppNo}/stage`, { method: 'PATCH', body: JSON.stringify({ stage: v.stage, lost_reason: v.stage === 'lost' ? t('pj.lost_reason_default') : undefined }) }),
+    onSuccess: () => { notifySuccess(t('pj.toast_stage_updated')); refresh(); }, onError: (e: any) => notifyError(e.message),
   });
 
   // Convert a WON opportunity into a project (CRM-WL) via /api/projects/from-opportunity/:oppNo.
@@ -137,7 +138,7 @@ function Opportunities() {
   const [pf, setPf] = useState({ project_code: '', billing_type: 'Fixed', budget_amount: '', start_date: '', end_date: '' });
   const convert = useMutation({
     mutationFn: () => api<any>(`/api/projects/from-opportunity/${conv!.opp_no}`, { method: 'POST', body: JSON.stringify({ project_code: pf.project_code || undefined, billing_type: pf.billing_type, budget_amount: Number(pf.budget_amount) || undefined, start_date: pf.start_date || undefined, end_date: pf.end_date || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(r?.already ? `โอกาสนี้แปลงเป็นโครงการแล้ว (${r.project_code})` : `สร้างโครงการ ${r.project_code}`); setConv(null); router.push(`/projects/${encodeURIComponent(r.project_code)}`); }, onError: (e: any) => notifyError(e.message),
+    onSuccess: (r: any) => { notifySuccess(r?.already ? t('pj.toast_opp_already_converted', { code: r.project_code }) : t('pj.toast_created', { code: r.project_code })); setConv(null); router.push(`/projects/${encodeURIComponent(r.project_code)}`); }, onError: (e: any) => notifyError(e.message),
   });
 
   const s = sumQ.data;
@@ -145,64 +146,64 @@ function Opportunities() {
     <div className="grid gap-5">
       {s && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="มูลค่าเปิดอยู่ (Open)" value={baht(s.open_amount)} icon={Target} tone="primary" />
-          <StatCard label="พยากรณ์ถ่วงน้ำหนัก" value={baht(s.weighted_forecast)} icon={TrendingUp} tone="info" hint="Σ มูลค่า × ความน่าจะเป็น" />
-          <StatCard label="ชนะแล้ว" value={baht(s.won_amount)} icon={TrendingUp} tone="success" />
-          <StatCard label="อัตราชนะ" value={`${Math.round((s.win_rate ?? 0) * 100)}%`} icon={BarChart3} tone="default" />
+          <StatCard label={t('pj.stat_open_amount')} value={baht(s.open_amount)} icon={Target} tone="primary" />
+          <StatCard label={t('pj.stat_weighted_forecast')} value={baht(s.weighted_forecast)} icon={TrendingUp} tone="info" hint={t('pj.weighted_hint')} />
+          <StatCard label={t('pj.stat_won')} value={baht(s.won_amount)} icon={TrendingUp} tone="success" />
+          <StatCard label={t('pj.stat_win_rate')} value={`${Math.round((s.win_rate ?? 0) * 100)}%`} icon={BarChart3} tone="default" />
         </div>
       )}
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">เพิ่มโอกาสการขาย</h3>
+        <h3 className="text-base font-semibold">{t('pj.add_opp')}</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="grid gap-1.5"><Label>ชื่อดีล</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>มูลค่า</Label><Input type="number" min="0" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>ความน่าจะเป็น (%)</Label><Input type="number" min="0" max="100" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>คาดปิดการขาย</Label><Input type="date" value={f.expected_close_date} onChange={(e) => setF({ ...f, expected_close_date: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_deal_name')}</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.amount_th')}</Label><Input type="number" min="0" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_probability_pct')}</Label><Input type="number" min="0" max="100" value={f.probability} onChange={(e) => setF({ ...f, probability: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_expected_close')}</Label><Input type="date" value={f.expected_close_date} onChange={(e) => setF({ ...f, expected_close_date: e.target.value })} /></div>
         </div>
-        <div><Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> เพิ่ม</Button></div>
+        <div><Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> {t('pj.btn_add')}</Button></div>
       </Card>
       <StateView q={q}>{q.data && (
         <DataTable
           rows={q.data.opportunities ?? []}
           rowKey={(r: any) => r.opp_no}
           columns={[
-            { key: 'opp_no', label: 'เลขที่' },
-            { key: 'name', label: 'ดีล' },
-            { key: 'amount', label: 'มูลค่า', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-            { key: 'probability', label: 'โอกาส', align: 'right', render: (r: any) => `${r.probability}%` },
-            { key: 'weighted', label: 'ถ่วงน้ำหนัก', align: 'right', render: (r: any) => <span className="tabular">{baht(r.weighted)}</span> },
-            { key: 'expected_close_date', label: 'คาดปิด', render: (r: any) => r.expected_close_date ?? '—' },
-            { key: 'stage', label: 'ขั้นตอน', sortable: false, render: (r: any) => (r.stage === 'won' || r.stage === 'lost') ? stageBadge(r.stage) : (
+            { key: 'opp_no', label: t('dash.col_no') },
+            { key: 'name', label: t('pj.col_deal') },
+            { key: 'amount', label: t('pj.amount_th'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+            { key: 'probability', label: t('pj.col_prob'), align: 'right', render: (r: any) => `${r.probability}%` },
+            { key: 'weighted', label: t('pj.col_weighted'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.weighted)}</span> },
+            { key: 'expected_close_date', label: t('pj.col_expected_close'), render: (r: any) => r.expected_close_date ?? '—' },
+            { key: 'stage', label: t('pj.col_stage'), sortable: false, render: (r: any) => (r.stage === 'won' || r.stage === 'lost') ? stageBadge(r.stage) : (
               <select className={`${selectCls} w-36`} value={r.stage} onChange={(e) => setStage.mutate({ oppNo: r.opp_no, stage: e.target.value })}>
                 {STAGES.map((st) => <option key={st} value={st}>{st}</option>)}
               </select>
             ) },
             { key: 'act', label: '', sortable: false, render: (r: any) => r.stage === 'won'
-              ? <Button size="sm" variant="outline" title="แปลงเป็นโครงการ" onClick={() => { setConv({ opp_no: r.opp_no, name: r.name, amount: r.amount }); setPf({ project_code: '', billing_type: 'Fixed', budget_amount: '', start_date: '', end_date: '' }); }}><FolderPlus className="size-4" /> เป็นโครงการ</Button>
+              ? <Button size="sm" variant="outline" title={t('pj.tip_convert_project')} onClick={() => { setConv({ opp_no: r.opp_no, name: r.name, amount: r.amount }); setPf({ project_code: '', billing_type: 'Fixed', budget_amount: '', start_date: '', end_date: '' }); }}><FolderPlus className="size-4" /> {t('pj.btn_to_project')}</Button>
               : <span className="text-xs text-muted-foreground">—</span> },
           ]}
-          emptyState={{ icon: Target, title: 'ยังไม่มีโอกาสการขาย', description: 'เพิ่มโอกาสการขายหรือแปลงจากลีด — ชนะแล้วแปลงเป็นโครงการได้ทันที' }}
+          emptyState={{ icon: Target, title: t('pj.empty_opps_title'), description: t('pj.empty_opps_desc') }}
         />
       )}</StateView>
 
       <Dialog open={!!conv} onOpenChange={(o) => !o && setConv(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>แปลงโอกาสเป็นโครงการ — {conv?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('pj.dlg_convert_opp')} — {conv?.name}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
-            <p className="text-sm text-muted-foreground">มูลค่าสัญญาจะตั้งจากมูลค่าดีล {baht(conv?.amount ?? 0)} โดยอัตโนมัติ</p>
+            <p className="text-sm text-muted-foreground">{t('pj.contract_from_deal', { amount: baht(conv?.amount ?? 0) })}</p>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5"><Label>รหัสโครงการ (ถ้าเว้นว่างจะสร้างให้)</Label><Input value={pf.project_code} onChange={(e) => setPf({ ...pf, project_code: e.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>รูปแบบ</Label>
+              <div className="grid gap-1.5"><Label>{t('pj.f_project_code')}</Label><Input value={pf.project_code} onChange={(e) => setPf({ ...pf, project_code: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.billing_type')}</Label>
                 <select className={selectCls} value={pf.billing_type} onChange={(e) => setPf({ ...pf, billing_type: e.target.value })}>
-                  <option value="Fixed">เหมารวม (Fixed)</option><option value="TM">ตามเวลา/วัสดุ (T&M)</option>
+                  <option value="Fixed">{t('pj.bt_fixed')}</option><option value="TM">{t('pj.bt_tm')}</option>
                 </select>
               </div>
-              <div className="grid gap-1.5"><Label>งบประมาณ</Label><Input type="number" min="0" value={pf.budget_amount} onChange={(e) => setPf({ ...pf, budget_amount: e.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>เริ่ม</Label><Input type="date" value={pf.start_date} onChange={(e) => setPf({ ...pf, start_date: e.target.value })} /></div>
-              <div className="grid gap-1.5"><Label>เสร็จ</Label><Input type="date" value={pf.end_date} onChange={(e) => setPf({ ...pf, end_date: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.f_budget')}</Label><Input type="number" min="0" value={pf.budget_amount} onChange={(e) => setPf({ ...pf, budget_amount: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.f_start')}</Label><Input type="date" value={pf.start_date} onChange={(e) => setPf({ ...pf, start_date: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('pj.f_end')}</Label><Input type="date" value={pf.end_date} onChange={(e) => setPf({ ...pf, end_date: e.target.value })} /></div>
             </div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setConv(null)}>ปิด</Button><Button onClick={() => convert.mutate()} disabled={convert.isPending}>สร้างโครงการ</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setConv(null)}>{t('pj.btn_close')}</Button><Button onClick={() => convert.mutate()} disabled={convert.isPending}>{t('pj.create_project')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

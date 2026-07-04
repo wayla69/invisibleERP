@@ -160,36 +160,36 @@ export default function LoyaltyConfig() {
 
         {/* W2 (docs/27) — coalition network: earn/burn anywhere, settled through intercompany (LYL-19) */}
         <Card className="max-w-lg gap-3 p-5">
-          <div className="font-semibold">เครือข่ายพันธมิตรแต้ม (Coalition)</div>
-          <p className="text-sm text-muted-foreground">สมาชิกสะสม/แลกแต้มได้ทุกร้านในเครือข่าย — แต้มอยู่ที่ร้านบ้าน ทุกการเคลื่อนไหวข้ามร้านตั้งหนี้ระหว่างกิจการอัตโนมัติ (ตั้งค่าโดยสำนักงานใหญ่)</p>
+          <div className="font-semibold">{t('ly.cf_coal_title')}</div>
+          <p className="text-sm text-muted-foreground">{t('ly.cf_coal_desc')}</p>
           {(coalQ.data?.coalitions ?? []).map((c) => (
             <div key={c.id} className="rounded border p-2 text-sm">
-              <span className="font-medium">{c.code}</span> — {c.name} {!c.active && <span className="text-muted-foreground">(ปิด)</span>}
-              <span className="ml-2 text-muted-foreground">ร้านในเครือ: {c.members.filter((m) => m.active).map((m) => m.tenant_id).join(', ') || '—'}</span>
+              <span className="font-medium">{c.code}</span> — {c.name} {!c.active && <span className="text-muted-foreground">{t('ly.cf_closed')}</span>}
+              <span className="ml-2 text-muted-foreground">{t('ly.cf_shops_in')}: {c.members.filter((m) => m.active).map((m) => m.tenant_id).join(', ') || '—'}</span>
             </div>
           ))}
           <div className="grid grid-cols-3 items-end gap-2">
-            <div className="grid gap-1"><Label className="text-xs">รหัส</Label><Input value={coalDraft.code} onChange={(e) => setCoalDraft({ ...coalDraft, code: e.target.value })} placeholder="THAICOAL" /></div>
-            <div className="grid gap-1"><Label className="text-xs">ชื่อเครือข่าย</Label><Input value={coalDraft.name} onChange={(e) => setCoalDraft({ ...coalDraft, name: e.target.value })} /></div>
-            <Button variant="outline" disabled={!coalDraft.code || !coalDraft.name || createCoal.isPending} onClick={() => createCoal.mutate()}>สร้างเครือข่าย</Button>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.col_code')}</Label><Input value={coalDraft.code} onChange={(e) => setCoalDraft({ ...coalDraft, code: e.target.value })} placeholder="THAICOAL" /></div>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.cf_coal_name')}</Label><Input value={coalDraft.name} onChange={(e) => setCoalDraft({ ...coalDraft, name: e.target.value })} /></div>
+            <Button variant="outline" disabled={!coalDraft.code || !coalDraft.name || createCoal.isPending} onClick={() => createCoal.mutate()}>{t('ly.cf_create_coal')}</Button>
           </div>
           <div className="grid grid-cols-3 items-end gap-2">
-            <div className="grid gap-1"><Label className="text-xs">เครือข่าย (id)</Label><Input type="number" value={shopDraft.coalition_id || ''} onChange={(e) => setShopDraft({ ...shopDraft, coalition_id: +e.target.value })} /></div>
-            <div className="grid gap-1"><Label className="text-xs">ร้าน (tenant id)</Label><Input type="number" value={shopDraft.tenant_id || ''} onChange={(e) => setShopDraft({ ...shopDraft, tenant_id: +e.target.value })} /></div>
-            <Button variant="outline" disabled={!shopDraft.coalition_id || !shopDraft.tenant_id || addShop.isPending} onClick={() => addShop.mutate()}>เพิ่มร้านเข้าเครือ</Button>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.cf_coal_id')}</Label><Input type="number" value={shopDraft.coalition_id || ''} onChange={(e) => setShopDraft({ ...shopDraft, coalition_id: +e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-xs">{t('ly.cf_shop_id')}</Label><Input type="number" value={shopDraft.tenant_id || ''} onChange={(e) => setShopDraft({ ...shopDraft, tenant_id: +e.target.value })} /></div>
+            <Button variant="outline" disabled={!shopDraft.coalition_id || !shopDraft.tenant_id || addShop.isPending} onClick={() => addShop.mutate()}>{t('ly.cf_add_shop')}</Button>
           </div>
           {(createCoal.error || addShop.error) && <Msg>{((createCoal.error ?? addShop.error) as Error).message}</Msg>}
           <div className="border-t pt-3">
-            <Label className="text-xs">ค้นหาสมาชิกเครือข่ายจากเบอร์โทร (หน้าร้านพันธมิตร)</Label>
+            <Label className="text-xs">{t('ly.cf_resolve_label')}</Label>
             <div className="mt-1 flex gap-2">
               <Input value={resolvePhone} onChange={(e) => setResolvePhone(e.target.value)} placeholder="08x-xxx-xxxx" />
-              <Button variant="outline" disabled={!resolvePhone} onClick={doResolve}>ค้นหา</Button>
+              <Button variant="outline" disabled={!resolvePhone} onClick={doResolve}>{t('ly.search')}</Button>
             </div>
             {resolved && (
               <div className="mt-2 rounded border p-2 text-sm">
-                <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">เครือข่ายพันธมิตรแต้ม · {resolved.coalition}</span>
-                <div className="mt-1">{resolved.member_code} — {resolved.name ?? '—'} · {resolved.tier ?? '—'} · {resolved.balance} แต้ม</div>
-                <div className="text-muted-foreground">ร้านบ้าน: {resolved.home_tenant_name ?? resolved.home_tenant_code ?? resolved.member_id} {resolved.is_home ? '(ร้านนี้)' : ''}</div>
+                <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">{t('ly.cf_coal_badge')} · {resolved.coalition}</span>
+                <div className="mt-1">{resolved.member_code} — {resolved.name ?? '—'} · {resolved.tier ?? '—'} · {resolved.balance} {t('ly.an_pts')}</div>
+                <div className="text-muted-foreground">{t('ly.cf_home_shop')}: {resolved.home_tenant_name ?? resolved.home_tenant_code ?? resolved.member_id} {resolved.is_home ? t('ly.cf_this_shop') : ''}</div>
               </div>
             )}
             {resolveErr && <Msg>{resolveErr}</Msg>}

@@ -12,12 +12,13 @@ import { useLang } from '@/lib/i18n';
 // สถานะ + สตรีมมิ่งอยู่ใน useAssistantChat (แชร์กับ floating widget) — หน้านี้ให้เฉพาะ UI เต็มหน้า
 
 // quick prompts (ภาษาไทย) — ปุ่มลัดถามคำถามที่พบบ่อย
-const QUICK_PROMPTS = [
-  'สรุปยอดขายวันนี้',
-  'สินค้าที่สต๊อกต่ำกว่าจุดสั่งซื้อ',
-  'KPI การเงินตอนนี้เป็นอย่างไร',
-  'เจ้าหนี้ที่ค้างชำระมีอะไรบ้าง',
-  'รายการสินค้าที่ควรสั่งซื้อเพิ่ม',
+// label แสดงผ่าน t() แต่ prompt ที่ส่งเข้า assistant คงเป็นภาษาไทย (payload)
+const QUICK_PROMPTS: { key: string; prompt: string }[] = [
+  { key: 'mx.ast_qp_sales_today', prompt: 'สรุปยอดขายวันนี้' },
+  { key: 'mx.ast_qp_low_stock', prompt: 'สินค้าที่สต๊อกต่ำกว่าจุดสั่งซื้อ' },
+  { key: 'mx.ast_qp_fin_kpi', prompt: 'KPI การเงินตอนนี้เป็นอย่างไร' },
+  { key: 'mx.ast_qp_overdue_ap', prompt: 'เจ้าหนี้ที่ค้างชำระมีอะไรบ้าง' },
+  { key: 'mx.ast_qp_reorder', prompt: 'รายการสินค้าที่ควรสั่งซื้อเพิ่ม' },
 ];
 
 export default function AssistantPage() {
@@ -49,8 +50,8 @@ export default function AssistantPage() {
       {/* quick prompts */}
       <div className="mb-3 flex flex-wrap gap-2">
         {QUICK_PROMPTS.map((p) => (
-          <Button key={p} variant="outline" size="sm" disabled={streaming} onClick={() => send(p)}>
-            {p}
+          <Button key={p.key} variant="outline" size="sm" disabled={streaming} onClick={() => send(p.prompt)}>
+            {t(p.key)}
           </Button>
         ))}
       </div>
