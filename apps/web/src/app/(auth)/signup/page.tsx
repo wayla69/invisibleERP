@@ -7,6 +7,7 @@ import { Loader2, Rocket } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -87,7 +88,7 @@ export default function SignupPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="admin_password">รหัสผ่าน</Label>
-              <Input id="admin_password" type="password" value={f.admin_password} onChange={set('admin_password')} autoComplete="new-password" minLength={8} required />
+              <PasswordInput id="admin_password" value={f.admin_password} onChange={set('admin_password')} autoComplete="new-password" minLength={8} required />
             </div>
           </div>
           {error && (
