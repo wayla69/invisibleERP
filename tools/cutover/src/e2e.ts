@@ -46,6 +46,8 @@ async function seed(db: any) {
   const today = ymd(); // Bangkok-tz date to match the dashboard's ymd() (UTC slice flaked in the 00:00–07:00 BKK window)
   const [sale] = await db.insert(s.custPosSales).values({ saleNo: 'SALE-T1-1', saleDate: today, tenantId: t1.id, total: '107', subtotal: '100', taxAmount: '7', status: 'Completed', paymentMethod: 'Cash', createdBy: 'admin' }).returning({ id: s.custPosSales.id });
   await db.insert(s.custPosItems).values({ saleId: Number(sale.id), itemId: 'A', itemDescription: 'Apple', qty: '10', amount: '100' });
+  // a loyalty member (for the omni-search member type — its deep-link keys on the numeric id)
+  await db.insert(s.posMembers).values({ tenantId: t1.id, memberCode: 'M001', name: 'Alice Member', phone: '0812345678' });
 }
 
 async function main() {
@@ -102,6 +104,11 @@ async function main() {
     `count=${searchApp.json.results?.length}`);
   ok('GET /api/search min-length guard (1 char → empty)', (await inj('GET', '/api/search?q=A', token)).json.results?.length === 0);
   ok('GET /api/search no-match → 200 empty', (await inj('GET', '/api/search?q=zzzznope', token)).json.results?.length === 0);
+  // member type: deep-links to the real detail page keyed on the NUMERIC id (/loyalty/members/{id})
+  const searchMem = await inj('GET', '/api/search?q=Alice', token);
+  ok('GET /api/search?q=Alice → member deep-links /loyalty/members/{id}',
+    (searchMem.json.results ?? []).some((r: any) => r.type === 'member' && /^\d+$/.test(r.id) && r.href === `/loyalty/members/${r.id}`),
+    `count=${searchMem.json.results?.length}`);
   // document types: the seeded POS sale is found and deep-links to the filtered list
   const searchSale = await inj('GET', '/api/search?q=SALE-T1', token);
   ok('GET /api/search?q=SALE-T1 → sale deep-links /pos?q=',

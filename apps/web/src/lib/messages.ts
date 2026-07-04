@@ -40,6 +40,11 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'search.type.ar_invoice': { th: 'ใบแจ้งหนี้', en: 'AR invoice' },
   'search.type.tax_invoice': { th: 'ใบกำกับภาษี', en: 'Tax invoice' },
   'search.type.purchase_order': { th: 'ใบสั่งซื้อ', en: 'Purchase order' },
+  'search.type.member': { th: 'สมาชิก', en: 'Member' },
+  'search.type.project': { th: 'โปรเจกต์', en: 'Project' },
+  'search.type.requisition': { th: 'คำขอซื้อ', en: 'Requisition' },
+  'search.type.ap_invoice': { th: 'เจ้าหนี้/บิล', en: 'AP bill' },
+  'search.type.employee': { th: 'พนักงาน', en: 'Employee' },
 
   // ── Nav group titles ──────────────────────────────────────────────────────
   'nav.group.overview': { th: 'ภาพรวม', en: 'Overview' },

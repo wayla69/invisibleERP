@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { FileSpreadsheet, FileText, Package, ReceiptText, ShoppingCart, Truck, Users, type LucideIcon } from 'lucide-react';
+import { Banknote, ClipboardList, FileSpreadsheet, FileText, FolderKanban, IdCard, Package, ReceiptText, ShoppingCart, Star, Truck, Users, type LucideIcon } from 'lucide-react';
 
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
@@ -17,7 +17,10 @@ import {
   CommandList,
 } from '@/components/ui/command';
 
-type SearchType = 'customer' | 'vendor' | 'item' | 'sale' | 'ar_invoice' | 'tax_invoice' | 'purchase_order';
+type SearchType =
+  | 'customer' | 'vendor' | 'item'
+  | 'sale' | 'ar_invoice' | 'tax_invoice' | 'purchase_order'
+  | 'member' | 'project' | 'requisition' | 'ap_invoice' | 'employee';
 interface SearchResult { type: SearchType; id: string; label: string; sublabel?: string; href: string }
 
 const TYPE_ICON: Record<SearchType, LucideIcon> = {
@@ -28,6 +31,11 @@ const TYPE_ICON: Record<SearchType, LucideIcon> = {
   ar_invoice: FileText,
   tax_invoice: FileSpreadsheet,
   purchase_order: ShoppingCart,
+  member: Star,
+  project: FolderKanban,
+  requisition: ClipboardList,
+  ap_invoice: Banknote,
+  employee: IdCard,
 };
 const TYPE_LABEL_KEY: Record<SearchType, string> = {
   customer: 'search.type.customer',
@@ -37,6 +45,11 @@ const TYPE_LABEL_KEY: Record<SearchType, string> = {
   ar_invoice: 'search.type.ar_invoice',
   tax_invoice: 'search.type.tax_invoice',
   purchase_order: 'search.type.purchase_order',
+  member: 'search.type.member',
+  project: 'search.type.project',
+  requisition: 'search.type.requisition',
+  ap_invoice: 'search.type.ap_invoice',
+  employee: 'search.type.employee',
 };
 
 /** Debounce a fast-changing value so the omni-search fires ~4×/s while typing, not on every keystroke. */

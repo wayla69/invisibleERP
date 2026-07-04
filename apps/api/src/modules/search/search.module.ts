@@ -2,7 +2,7 @@ import { Inject, Injectable, Module, Controller, Get, Query } from '@nestjs/comm
 import { or, ilike, desc, asc, type SQL } from 'drizzle-orm';
 import { expandPermissions, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { customerMaster, vendors, items, custPosSales, arInvoices, taxInvoices, purchaseOrders } from '../../database/schema';
+import { customerMaster, vendors, items, custPosSales, arInvoices, taxInvoices, purchaseOrders, posMembers, projects, purchaseRequests, apTransactions, employees } from '../../database/schema';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 
 // ── Global "spotlight" search (GET /api/search?q=) ─────────────────────────────────────────────────
@@ -15,7 +15,10 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 // sees result types they could already open from the menu — the endpoint never widens anyone's data access.
 // Additive + read-only ⇒ no migration, no GL, no control change.
 
-export type SearchType = 'customer' | 'vendor' | 'item' | 'sale' | 'ar_invoice' | 'tax_invoice' | 'purchase_order';
+export type SearchType =
+  | 'customer' | 'vendor' | 'item'
+  | 'sale' | 'ar_invoice' | 'tax_invoice' | 'purchase_order'
+  | 'member' | 'project' | 'requisition' | 'ap_invoice' | 'employee';
 export interface SearchResult { type: SearchType; id: string; label: string; sublabel?: string; href: string }
 
 const PER_TYPE = 6; // cap per entity so the palette stays scannable
@@ -122,6 +125,73 @@ const ENTITIES: EntitySpec[] = [
         .orderBy(desc(purchaseOrders.id))
         .limit(limit);
       return (rows as any[]).map((r) => ({ type: 'purchase_order' as const, id: r.no, label: r.no, sublabel: sub(r.vendor, r.status), href: `/inventory/purchase-orders?q=${encodeURIComponent(r.no)}` }));
+    },
+  },
+  {
+    // real per-record detail page ("Member 360"), keyed on the NUMERIC id (not member_code)
+    type: 'member',
+    perms: ['loyalty', 'marketing', 'crm'],
+    run: async (db, term, limit) => {
+      const rows = await db
+        .select({ id: posMembers.id, code: posMembers.memberCode, name: posMembers.name, phone: posMembers.phone })
+        .from(posMembers)
+        .where(or(ilike(posMembers.memberCode, term), ilike(posMembers.name, term), ilike(posMembers.phone, term)) as SQL)
+        .orderBy(desc(posMembers.id))
+        .limit(limit);
+      return (rows as any[]).map((r) => ({ type: 'member' as const, id: String(r.id), label: r.name || r.code, sublabel: sub(r.code, r.phone), href: `/loyalty/members/${r.id}` }));
+    },
+  },
+  {
+    // real per-record detail page, keyed on the project_code
+    type: 'project',
+    perms: ['exec', 'planner', 'ar'],
+    run: async (db, term, limit) => {
+      const rows = await db
+        .select({ code: projects.projectCode, name: projects.name, customer: projects.customerName })
+        .from(projects)
+        .where(or(ilike(projects.projectCode, term), ilike(projects.name, term), ilike(projects.customerName, term)) as SQL)
+        .orderBy(desc(projects.id))
+        .limit(limit);
+      return (rows as any[]).map((r) => ({ type: 'project' as const, id: r.code, label: r.name || r.code, sublabel: sub(r.code, r.customer), href: `/projects/${encodeURIComponent(r.code)}` }));
+    },
+  },
+  {
+    type: 'requisition',
+    perms: ['pr_raise', 'procurement', 'planner', 'exec'],
+    run: async (db, term, limit) => {
+      const rows = await db
+        .select({ no: purchaseRequests.prNo, by: purchaseRequests.requestedBy, status: purchaseRequests.status })
+        .from(purchaseRequests)
+        .where(or(ilike(purchaseRequests.prNo, term), ilike(purchaseRequests.requestedBy, term)) as SQL)
+        .orderBy(desc(purchaseRequests.id))
+        .limit(limit);
+      return (rows as any[]).map((r) => ({ type: 'requisition' as const, id: r.no, label: r.no, sublabel: sub(r.by, r.status), href: '/requisitions' }));
+    },
+  },
+  {
+    type: 'ap_invoice',
+    perms: ['creditors', 'exec'],
+    run: async (db, term, limit) => {
+      const rows = await db
+        .select({ no: apTransactions.txnNo, invoiceNo: apTransactions.invoiceNo, vendor: apTransactions.vendorName })
+        .from(apTransactions)
+        .where(or(ilike(apTransactions.txnNo, term), ilike(apTransactions.invoiceNo, term), ilike(apTransactions.vendorName, term)) as SQL)
+        .orderBy(desc(apTransactions.id))
+        .limit(limit);
+      return (rows as any[]).map((r) => ({ type: 'ap_invoice' as const, id: r.no, label: r.no, sublabel: sub(r.vendor, r.invoiceNo), href: '/finance?tab=payables' }));
+    },
+  },
+  {
+    type: 'employee',
+    perms: ['exec', 'users', 'creditors'],
+    run: async (db, term, limit) => {
+      const rows = await db
+        .select({ code: employees.empCode, name: employees.name })
+        .from(employees)
+        .where(or(ilike(employees.empCode, term), ilike(employees.name, term)) as SQL)
+        .orderBy(asc(employees.empCode))
+        .limit(limit);
+      return (rows as any[]).map((r) => ({ type: 'employee' as const, id: r.code ?? r.name, label: r.name || r.code, sublabel: r.code || undefined, href: '/hcm' }));
     },
   },
 ];
