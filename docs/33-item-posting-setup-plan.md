@@ -1,6 +1,6 @@
 # 33 — Item Posting Setup: Account/Category/Warehouse/VAT/WHT Linking & Tax Automation — Design & Roadmap
 
-> **Date:** 2026-07-04 · **Status:** v1.1 — PR1 + PR2 DELIVERED (setup screens PR3 + tax automation PR4 pending) · **Owner:** ERP / Finance
+> **Date:** 2026-07-04 · **Status:** v1.2 — PR1 + PR2 + PR3 DELIVERED (tax automation PR4 pending) · **Owner:** ERP / Finance
 > **Scope:** Give item posting an explicit, configurable **account-determination** spine so a transaction's
 > GL/VAT/WHT accounts are *derived from the item* (via item → category → warehouse → global default) instead
 > of hardcoded literals; add a **setup menu** to maintain that mapping; and schedule the existing tax/WHT
@@ -113,3 +113,4 @@ new error codes); UAT (positive + control cases + traceability matrix); and the 
 |---|---|---|---|
 | 2026-07-04 | 1.0 | Initial plan; PR1 (config foundation) in progress. | ERP/Finance |
 | 2026-07-04 | 1.1 | PR1 delivered (schema/migration 0243/master-registry). PR2 delivered: `AccountDeterminationService` + `posting_determination` opt-in flag wired into the inventory sub-ledger; `condition` evaluation fixed; new control **GL-21**; RCM 181; `basics` 223 green. | ERP/Finance |
+| 2026-07-04 | 1.2 | PR3 delivered: `ItemSetupModule` (`/api/item-setup/*` — item categories + tax codes CRUD + per-item posting profile, save-time postable-account validation, gated `md_item`/`md_config`, SoD-clear); web screens `/setup/item-categories`, `/setup/tax-codes`, `/setup/items`, `/setup/posting-rules` under Settings/Ledger nav. `basics` 230 green; web build clean. Warehouse account defaults deferred (needs `locations` account columns + resolver precedence). | ERP/Finance |

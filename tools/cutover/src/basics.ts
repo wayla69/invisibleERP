@@ -748,6 +748,28 @@ async function main() {
   const badAcc = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'BADACC', uom: 'EA', qty: 1, unit_cost: 5, ref_type: 'GRN', ref_id: 'GRN-BAD' });
   ok('Determination: invalid override account rejected fail-closed (GL-21 INVALID_POSTING_ACCOUNT)', badAcc.status === 400 && badAcc.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `st=${badAcc.status} code=${badAcc.json?.error?.code}`);
 
+  // ── Item-posting SETUP master via the /api/item-setup screens' endpoints (docs/33 PR3, GL-21) ──
+  const catBad = await inj('POST', '/api/item-setup/categories', invmgr, { code: 'BADCAT', cogs_account: '9998' });
+  ok('Setup: item category with a non-postable account rejected at save (INVALID_POSTING_ACCOUNT)', catBad.status === 400 && catBad.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `st=${catBad.status} code=${catBad.json?.error?.code}`);
+  const catOk = await inj('POST', '/api/item-setup/categories', invmgr, { code: 'BEV', name_th: 'เครื่องดื่ม', cogs_account: '5001' });
+  ok('Setup: create item category with a default COGS account → 201', catOk.status === 201 && catOk.json?.code === 'BEV' && catOk.json?.cogs_account === '5001', JSON.stringify(catOk.json).slice(0, 80));
+  const catId = catOk.json.id;
+  await db.insert(s.items).values({ itemId: 'CATITEM', itemDescription: 'Category-driven item' }).onConflictDoNothing();
+  const linkOk = await inj('PATCH', '/api/item-setup/items/CATITEM', invmgr, { category_id: catId });
+  ok('Setup: link an item to a category (per-item posting profile)', linkOk.status === 200 && linkOk.json?.category_id === catId, `cat=${linkOk.json?.category_id}`);
+  // Determination (still ON): CATITEM has no item-level override, so COGS resolves via its CATEGORY's 5001
+  // (item → category → literal). 5001 already carries 40 (DETITEM); +30 here ⇒ 70.
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'CATITEM', uom: 'EA', qty: 10, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-C1' });
+  await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'CATITEM', qty: 3, ref_type: 'MI', ref_id: 'MI-C1' });
+  const acc5001b = (await inj('GET', '/api/ledger/account-ledger?account=5001', invmgr)).json;
+  ok('Setup: category-level COGS default drives posting (item→category→account: 5001 = 40+30 = 70)', near(acc5001b.closing_balance, 70), `closing=${acc5001b.closing_balance}`);
+  const catList = (await inj('GET', '/api/item-setup/categories', invmgr)).json;
+  ok('Setup: item-category list returns the created category', (catList.categories ?? []).some((c: any) => c.code === 'BEV'), `n=${catList.count}`);
+  const taxOk = await inj('POST', '/api/item-setup/tax-codes', invmgr, { code: 'VAT7', kind: 'vat', rate: 0.07, output_account: '2100', input_account: '2100', name_th: 'VAT 7%' });
+  ok('Setup: create VAT tax code (7% → 2100)', taxOk.status === 201 && taxOk.json?.code === 'VAT7' && near(taxOk.json?.rate, 0.07), JSON.stringify(taxOk.json).slice(0, 80));
+  const taxBadRate = await inj('POST', '/api/item-setup/tax-codes', invmgr, { code: 'BADRATE', rate: 1.5 });
+  ok('Setup: tax code with an out-of-range rate rejected (rate must be 0..1)', taxBadRate.status === 400 && ['BAD_RATE', 'VALIDATION_ERROR'].includes(taxBadRate.json?.error?.code), `st=${taxBadRate.status} code=${taxBadRate.json?.error?.code}`);
+
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).
   await db.insert(s.itemCosting).values({ tenantId: invTid, itemId: 'COSTITEM', method: 'AVG' }).onConflictDoNothing();

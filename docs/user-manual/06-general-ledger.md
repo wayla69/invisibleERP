@@ -140,8 +140,12 @@ changing its postability, or retiring it is a **head-office (Admin/HQ)** action:
 By default, inventory and cost-of-goods-sold postings use the standard control accounts
 (inventory **1200**, COGS **5000**). If you want a particular product — or a whole product
 family — to post to **different** GL accounts, you can attach an **account profile** to the
-item or its **item category** (set up under *Settings → Master data*, or bulk-imported as
-**หมวดสินค้า (Item Categories)** / **รหัสภาษี (Tax Codes)**). Each item/category can carry its
+item or its **item category**. Set these up under *Settings → Master data* on the
+**หมวดสินค้า (Item Categories)** (`/setup/item-categories`), **รหัสภาษี (Tax Codes)**
+(`/setup/tax-codes`) and **ตั้งค่าบัญชีสินค้า (Item Posting Setup)** (`/setup/items`) screens
+— or bulk-import them from a spreadsheet (*Administration → Bulk import*). Account determination
+across every business event is viewable/overridable on **กฎการลงบัญชี (Posting Rules)**
+(`/setup/posting-rules`). Each item/category can carry its
 own revenue, COGS, inventory and valuation account plus a VAT code and — for service/labour
 categories — a withholding-tax income type.
 

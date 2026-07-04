@@ -513,6 +513,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-115 | Item-posting determination off by default (parity) | GL-21 | 04 §9 |
 | UAT-GL-116 | Determination on → COGS routes to item override; sub-ledger ties | GL-21 | 04 §9 |
 | UAT-GL-117 | Determination fail-closed (INVALID_POSTING_ACCOUNT) | GL-21 | 04 §9 |
+| UAT-GL-118 | Item-setup screens: category-level account drives posting | GL-21 | 04 §14 (rev 2.8) |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
