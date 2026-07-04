@@ -6,6 +6,7 @@ import { Banknote, BellRing, CalendarClock, CheckCheck, Download, Eraser, HandCo
 import { api, apiDownload } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -25,32 +26,33 @@ import { TrendAreaChart } from '@/components/charts';
 // AR/AP aging buckets in escalating-severity order — shared by the overview composition bars and the
 // detail Aging sections. Colours ramp current → 90+ so an overdue-heavy book reads "red" at a glance.
 const AGING_BUCKETS = [
-  { k: 'current', l: 'ยังไม่ครบกำหนด', cls: 'bg-success' },
-  { k: 'd1_30', l: '1–30 วัน', cls: 'bg-info' },
-  { k: 'd31_60', l: '31–60 วัน', cls: 'bg-warning' },
-  { k: 'd61_90', l: '61–90 วัน', cls: 'bg-orange-500' },
-  { k: 'd90_plus', l: '90+ วัน', cls: 'bg-destructive' },
+  { k: 'current', labelKey: 'fin.bucket_current', cls: 'bg-success' },
+  { k: 'd1_30', labelKey: 'fin.bucket_1_30', cls: 'bg-info' },
+  { k: 'd31_60', labelKey: 'fin.bucket_31_60', cls: 'bg-warning' },
+  { k: 'd61_90', labelKey: 'fin.bucket_61_90', cls: 'bg-orange-500' },
+  { k: 'd90_plus', labelKey: 'fin.bucket_90plus', cls: 'bg-destructive' },
 ] as const;
 
 /** A single horizontal stacked bar showing how an outstanding balance splits across aging buckets. */
 function AgingStack({ label, total, buckets }: { label: string; total: number; buckets?: Record<string, number> }) {
-  const t = total || AGING_BUCKETS.reduce((a, b) => a + Number(buckets?.[b.k] ?? 0), 0);
+  const { t } = useLang();
+  const tot = total || AGING_BUCKETS.reduce((a, b) => a + Number(buckets?.[b.k] ?? 0), 0);
   return (
     <div>
       <div className="mb-1.5 flex items-baseline justify-between text-sm">
         <span className="font-medium">{label}</span>
-        <span className="tabular text-muted-foreground">{baht(t)}</span>
+        <span className="tabular text-muted-foreground">{baht(tot)}</span>
       </div>
       <div
         className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted"
         role="img"
-        aria-label={`${label} แยกตามอายุหนี้ รวม ${baht(t)}`}
+        aria-label={t('fin.aging_aria', { label, total: baht(tot) })}
       >
-        {t > 0 &&
+        {tot > 0 &&
           AGING_BUCKETS.map((b) => {
             const v = Number(buckets?.[b.k] ?? 0);
             if (v <= 0) return null;
-            return <div key={b.k} className={b.cls} style={{ width: `${(v / t) * 100}%` }} title={`${b.l}: ${baht(v)}`} />;
+            return <div key={b.k} className={b.cls} style={{ width: `${(v / tot) * 100}%` }} title={`${t(b.labelKey)}: ${baht(v)}`} />;
           })}
       </div>
     </div>
@@ -75,15 +77,16 @@ function Field({ label, name, form, set, ...props }: {
 // (e.g. /finance?tab=payables). /finance stays the single route — no new pages, URL-stable (cf. doc 15).
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 export default function FinancePage() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="การเงิน" description="รายได้ ลูกหนี้ และเจ้าหนี้ — แยกตามวงจรแบบ PEAK" />
+      <PageHeader title={t('fin.title')} description={t('fin.subtitle')} />
       <Tabs
         urlParam="tab"
         tabs={[
-          { key: 'overview', label: 'ภาพรวม', content: <OverviewTab /> },
-          { key: 'receivables', label: 'รายรับ (AR)', content: <ReceivablesTab /> },
-          { key: 'payables', label: 'รายจ่าย (AP)', content: <PayablesTab /> },
+          { key: 'overview', label: t('fin.tab_overview'), content: <OverviewTab /> },
+          { key: 'receivables', label: t('fin.tab_ar'), content: <ReceivablesTab /> },
+          { key: 'payables', label: t('fin.tab_ap'), content: <PayablesTab /> },
         ]}
       />
     </div>
@@ -92,6 +95,7 @@ export default function FinancePage() {
 
 // ── ภาพรวม: executive band — KPIs + revenue trend + AR/AP aging composition ──
 function OverviewTab() {
+  const { t } = useLang();
   const kpi = useQuery<any>({ queryKey: ['fin-kpi'], queryFn: () => api('/api/finance/kpi') });
   const trend = useQuery<any>({ queryKey: ['fin-revenue-trend'], queryFn: () => api('/api/dashboard/sales-trend?days=30') });
   // The aging queries reuse the exact keys the detail Aging sections use, so React Query dedupes them to a
@@ -105,10 +109,10 @@ function OverviewTab() {
       <StateView q={kpi}>
         {kpi.data && (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="รายได้ MTD" value={baht(kpi.data.mtd_revenue)} icon={Banknote} tone="primary" hint="รายได้เดือนนี้ (สะสม)" />
-            <StatCard label="รายได้ YTD" value={baht(kpi.data.ytd_revenue)} icon={TrendingUp} tone="default" hint="รายได้ปีนี้ (สะสม)" />
-            <StatCard label="ลูกหนี้คงค้าง (AR)" value={baht(kpi.data.ar_outstanding)} icon={ReceiptText} tone={kpi.data.ar_outstanding > 0 ? 'warning' : 'success'} hint="ยอดที่ต้องเรียกเก็บ" />
-            <StatCard label="เจ้าหนี้คงค้าง (AP)" value={baht(kpi.data.ap_outstanding)} icon={Wallet} tone={kpi.data.ap_outstanding > 0 ? 'danger' : 'success'} hint="ยอดที่ต้องชำระ" />
+            <StatCard label={t('fin.mtd_revenue')} value={baht(kpi.data.mtd_revenue)} icon={Banknote} tone="primary" hint={t('fin.mtd_hint')} />
+            <StatCard label={t('fin.ytd_revenue')} value={baht(kpi.data.ytd_revenue)} icon={TrendingUp} tone="default" hint={t('fin.ytd_hint')} />
+            <StatCard label={t('fin.ar_outstanding')} value={baht(kpi.data.ar_outstanding)} icon={ReceiptText} tone={kpi.data.ar_outstanding > 0 ? 'warning' : 'success'} hint={t('fin.ar_outstanding_hint')} />
+            <StatCard label={t('fin.ap_outstanding')} value={baht(kpi.data.ap_outstanding)} icon={Wallet} tone={kpi.data.ap_outstanding > 0 ? 'danger' : 'success'} hint={t('fin.ap_outstanding_hint')} />
           </div>
         )}
       </StateView>
@@ -116,33 +120,33 @@ function OverviewTab() {
       <div className="grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-3">
           <CardHeader>
-            <CardTitle className="text-base">แนวโน้มรายได้ (30 วัน)</CardTitle>
+            <CardTitle className="text-base">{t('fin.revenue_trend')}</CardTitle>
           </CardHeader>
           <CardContent>
             {trend.isLoading ? (
-              <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">กำลังโหลด…</div>
+              <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">{t('dash.loading')}</div>
             ) : trendData.length ? (
               <TrendAreaChart data={trendData} xKey="label" yKey="sales" fmt={(v) => baht(v)} />
             ) : (
-              <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">ยังไม่มีข้อมูลรายได้</div>
+              <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">{t('fin.no_revenue_data')}</div>
             )}
           </CardContent>
         </Card>
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">อายุหนี้คงค้าง (AR เทียบ AP)</CardTitle>
+            <CardTitle className="text-base">{t('fin.aging_compare')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {arAging.isLoading || apAging.isLoading ? (
-              <div className="grid h-[200px] place-items-center text-sm text-muted-foreground">กำลังโหลด…</div>
+              <div className="grid h-[200px] place-items-center text-sm text-muted-foreground">{t('dash.loading')}</div>
             ) : (
               <>
-                <AgingStack label="ลูกหนี้ (AR)" total={arAging.data?.total ?? 0} buckets={arAging.data?.buckets} />
-                <AgingStack label="เจ้าหนี้ (AP)" total={apAging.data?.total ?? 0} buckets={apAging.data?.buckets} />
+                <AgingStack label={t('fin.ar_label')} total={arAging.data?.total ?? 0} buckets={arAging.data?.buckets} />
+                <AgingStack label={t('fin.ap_label')} total={apAging.data?.total ?? 0} buckets={apAging.data?.buckets} />
                 <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1">
                   {AGING_BUCKETS.map((b) => (
                     <span key={b.k} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <span className={`size-2.5 rounded-sm ${b.cls}`} /> {b.l}
+                      <span className={`size-2.5 rounded-sm ${b.cls}`} /> {t(b.labelKey)}
                     </span>
                   ))}
                 </div>
@@ -157,6 +161,7 @@ function OverviewTab() {
 
 // ── รายรับ (AR): receivables list + รับชำระ receipt + collections/dunning worklist + AR aging ──
 function ReceivablesTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const ar = useQuery<any>({ queryKey: ['fin-ar'], queryFn: () => api('/api/finance/ar?limit=50') });
   const refresh = () => { for (const k of ['fin-ar', 'fin-kpi', 'fin-ar-aging']) qc.invalidateQueries({ queryKey: [k] }); };
@@ -166,35 +171,35 @@ function ReceivablesTab() {
   const [arForm, setArForm] = useState<any>({ invoice_no: '', amount: '', method: 'Transfer', ref_no: '' });
   const arReceipt = useMutation({
     mutationFn: () => api('/api/finance/ar/receipts', { method: 'POST', body: JSON.stringify({ ...arForm, amount: Number(arForm.amount) }) }),
-    onSuccess: (r: any) => { notifySuccess(`รับชำระ ${r.receipt_no} — สถานะ ${r.status}`); refresh(); setArForm({ invoice_no: '', amount: '', method: 'Transfer', ref_no: '' }); },
+    onSuccess: (r: any) => { notifySuccess(t('fin.ar_receipt_ok', { no: r.receipt_no, status: r.status })); refresh(); setArForm({ invoice_no: '', amount: '', method: 'Transfer', ref_no: '' }); },
     onError: (e: any) => notifyError(e.message),
   });
   const syncAr = useMutation({
     mutationFn: () => api('/api/finance/ar/sync', { method: 'POST' }),
-    onSuccess: () => { notifySuccess('ซิงก์ลูกหนี้ (AR) เรียบร้อย'); refresh(); },
+    onSuccess: () => { notifySuccess(t('fin.ar_synced')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">ลูกหนี้ (AR)</h2>
+        <h2 className="text-base font-semibold">{t('fin.ar_label')}</h2>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => syncAr.mutate()} disabled={syncAr.isPending}>
-            <RefreshCw className={`size-4 ${syncAr.isPending ? 'animate-spin' : ''}`} /> Sync AR
+            <RefreshCw className={`size-4 ${syncAr.isPending ? 'animate-spin' : ''}`} /> {t('fin.sync_ar')}
           </Button>
           <Dialog open={arOpen} onOpenChange={setArOpen}>
-            <DialogTrigger asChild><Button variant="outline" size="sm"><HandCoins className="size-4" /> รับชำระ (AR)</Button></DialogTrigger>
+            <DialogTrigger asChild><Button variant="outline" size="sm"><HandCoins className="size-4" /> {t('fin.receive_ar')}</Button></DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>รับชำระจากลูกหนี้</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>{t('fin.receive_ar_title')}</DialogTitle></DialogHeader>
               <div className="grid gap-4">
-                <Field label="เลขที่ใบแจ้งหนี้" name="invoice_no" placeholder="INV-…" form={arForm} set={setArForm} />
-                <Field label="จำนวนเงิน" name="amount" type="number" step="0.01" form={arForm} set={setArForm} />
-                <Field label="วิธีรับชำระ" name="method" form={arForm} set={setArForm} />
-                <Field label="อ้างอิง" name="ref_no" form={arForm} set={setArForm} />
+                <Field label={t('fin.f_invoice_no')} name="invoice_no" placeholder="INV-…" form={arForm} set={setArForm} />
+                <Field label={t('fin.f_amount')} name="amount" type="number" step="0.01" form={arForm} set={setArForm} />
+                <Field label={t('fin.f_method')} name="method" form={arForm} set={setArForm} />
+                <Field label={t('fin.f_ref')} name="ref_no" form={arForm} set={setArForm} />
               </div>
               <DialogFooter>
-                <Button onClick={() => arReceipt.mutate()} disabled={arReceipt.isPending || !arForm.invoice_no || !arForm.amount}>บันทึก</Button>
+                <Button onClick={() => arReceipt.mutate()} disabled={arReceipt.isPending || !arForm.invoice_no || !arForm.amount}>{t('fin.save')}</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -205,16 +210,16 @@ function ReceivablesTab() {
         {ar.data && (
           <DataTable
             rows={ar.data.invoices}
-            emptyState={{ icon: ReceiptText, title: 'ยังไม่มีใบแจ้งหนี้', description: 'กด Sync AR เพื่อดึงใบแจ้งหนี้ลูกหนี้เข้ามา' }}
+            emptyState={{ icon: ReceiptText, title: t('fin.ar_empty_title'), description: t('fin.ar_empty_desc') }}
             columns={[
-              { key: 'Invoice_No', label: 'เลขที่' },
-              { key: 'Customer_Name', label: 'ลูกค้า' },
-              { key: 'Due_Date', label: 'ครบกำหนด', render: (r: any) => thaiDate(r.Due_Date) },
-              { key: 'Amount', label: 'ยอด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.Amount)}</span> },
-              { key: 'Outstanding_Amount', label: 'คงค้าง', align: 'right', render: (r: any) => <span className="tabular">{baht(r.Outstanding_Amount)}</span> },
-              { key: 'Status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
+              { key: 'Invoice_No', label: t('fin.col_no') },
+              { key: 'Customer_Name', label: t('fin.col_customer') },
+              { key: 'Due_Date', label: t('fin.col_due'), render: (r: any) => thaiDate(r.Due_Date) },
+              { key: 'Amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.Amount)}</span> },
+              { key: 'Outstanding_Amount', label: t('fin.col_outstanding'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.Outstanding_Amount)}</span> },
+              { key: 'Status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
               { key: 'act', label: '', sortable: false, render: (r: any) => (
-                <Button variant="ghost" size="sm" onClick={() => { setArForm({ invoice_no: r.Invoice_No, amount: String(r.Outstanding_Amount), method: 'Transfer', ref_no: '' }); setArOpen(true); }}>รับชำระ</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setArForm({ invoice_no: r.Invoice_No, amount: String(r.Outstanding_Amount), method: 'Transfer', ref_no: '' }); setArOpen(true); }}>{t('fin.receive')}</Button>
               ) },
             ]}
           />
@@ -230,6 +235,7 @@ function ReceivablesTab() {
 
 // ── AR bad-debt write-off (REV-14): request (Draft) → independent approval (maker-checker) + register ──
 function WriteOffSection() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const wo = useQuery<any>({ queryKey: ['fin-ar-writeoffs'], queryFn: () => api('/api/finance/ar/write-offs'), retry: false });
   const refresh = () => { for (const k of ['fin-ar-writeoffs', 'fin-ar', 'fin-kpi']) qc.invalidateQueries({ queryKey: [k] }); };
@@ -237,30 +243,30 @@ function WriteOffSection() {
   const [form, setForm] = useState<any>({ customer_name: '', amount: '', reason: '' });
   const request = useMutation({
     mutationFn: () => api('/api/finance/ar/write-off', { method: 'POST', body: JSON.stringify({ customer_name: form.customer_name || undefined, amount: Number(form.amount), reason: form.reason }) }),
-    onSuccess: (r: any) => { notifySuccess(`ขอตัดหนี้สูญ ${baht(r.amount)} — รออนุมัติจากผู้อื่น (${r.entry_no})`); setForm({ customer_name: '', amount: '', reason: '' }); setOpen(false); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('fin.wo_requested', { amount: baht(r.amount), no: r.entry_no })); setForm({ customer_name: '', amount: '', reason: '' }); setOpen(false); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const approve = useMutation({
     mutationFn: (entryNo: string) => api(`/api/ledger/journal/${entryNo}/approve`, { method: 'POST' }),
-    onSuccess: () => { notifySuccess('อนุมัติตัดหนี้สูญแล้ว — ลงบัญชีมีผล'); refresh(); },
+    onSuccess: () => { notifySuccess(t('fin.wo_approved')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-muted-foreground">ตัดหนี้สูญ (Bad-debt write-off) — ต้องมีผู้อื่นอนุมัติ (แบ่งแยกหน้าที่)</h3>
+        <h3 className="text-sm font-semibold text-muted-foreground">{t('fin.wo_heading')}</h3>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button variant="outline" size="sm"><Eraser className="size-4" /> ขอตัดหนี้สูญ</Button></DialogTrigger>
+          <DialogTrigger asChild><Button variant="outline" size="sm"><Eraser className="size-4" /> {t('fin.wo_request')}</Button></DialogTrigger>
           <DialogContent>
-            <DialogHeader><DialogTitle>ขอตัดหนี้สูญ (หนี้ที่เก็บไม่ได้)</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>{t('fin.wo_title')}</DialogTitle></DialogHeader>
             <div className="grid gap-4">
-              <Field label="ชื่อลูกค้า (ไม่บังคับ)" name="customer_name" form={form} set={setForm} />
-              <Field label="จำนวนเงิน" name="amount" type="number" step="0.01" form={form} set={setForm} />
-              <Field label="เหตุผล" name="reason" placeholder="เช่น ลูกค้าปิดกิจการ / ติดตามแล้วเก็บไม่ได้" form={form} set={setForm} />
+              <Field label={t('fin.f_customer_opt')} name="customer_name" form={form} set={setForm} />
+              <Field label={t('fin.f_amount')} name="amount" type="number" step="0.01" form={form} set={setForm} />
+              <Field label={t('fin.f_reason')} name="reason" placeholder={t('fin.wo_reason_ph')} form={form} set={setForm} />
             </div>
             <DialogFooter>
-              <Button onClick={() => request.mutate()} disabled={request.isPending || !(Number(form.amount) > 0) || !form.reason.trim()}>ขออนุมัติ (Dr หนี้สูญ / Cr ลูกหนี้)</Button>
+              <Button onClick={() => request.mutate()} disabled={request.isPending || !(Number(form.amount) > 0) || !form.reason.trim()}>{t('fin.wo_submit')}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -270,15 +276,15 @@ function WriteOffSection() {
           <DataTable
             rows={wo.data.write_offs}
             rowKey={(r: any) => r.entry_no}
-            emptyState={{ icon: Eraser, title: 'ยังไม่มีรายการตัดหนี้สูญ', description: 'เมื่อมีหนี้ที่เก็บไม่ได้ ให้กด ขอตัดหนี้สูญ แล้วให้ผู้มีอำนาจอีกคนอนุมัติ' }}
+            emptyState={{ icon: Eraser, title: t('fin.wo_empty_title'), description: t('fin.wo_empty_desc') }}
             columns={[
-              { key: 'entry_no', label: 'เลขที่บัญชี' },
-              { key: 'memo', label: 'รายละเอียด' },
-              { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-              { key: 'created_by', label: 'ผู้ขอ' },
-              { key: 'state', label: 'สถานะ', render: (r: any) => <Badge variant={r.state === 'approved' ? 'success' : r.state === 'rejected' ? 'destructive' : 'warning'}>{r.state === 'approved' ? 'อนุมัติแล้ว' : r.state === 'rejected' ? 'ปฏิเสธ' : 'รออนุมัติ'}</Badge> },
+              { key: 'entry_no', label: t('fin.col_entry_no') },
+              { key: 'memo', label: t('fin.col_detail') },
+              { key: 'amount', label: t('fin.col_amount2'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+              { key: 'created_by', label: t('fin.col_requester') },
+              { key: 'state', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.state === 'approved' ? 'success' : r.state === 'rejected' ? 'destructive' : 'warning'}>{r.state === 'approved' ? t('fin.approved') : r.state === 'rejected' ? t('fin.rejected') : t('fin.pending')}</Badge> },
               { key: 'act', label: '', sortable: false, render: (r: any) => r.state === 'pending' ? (
-                <Button variant="outline" size="sm" disabled={approve.isPending} onClick={() => approve.mutate(r.entry_no)}>อนุมัติ</Button>
+                <Button variant="outline" size="sm" disabled={approve.isPending} onClick={() => approve.mutate(r.entry_no)}>{t('fin.approve')}</Button>
               ) : null },
             ]}
           />
@@ -290,6 +296,7 @@ function WriteOffSection() {
 
 // ── รายจ่าย (AP): payables list + บันทึกบิล + pay-request + maker-checker approval queue + AP aging ──
 function PayablesTab() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const ap = useQuery<any>({ queryKey: ['fin-ap'], queryFn: () => api('/api/finance/ap?status=Unpaid&limit=50') });
   const refresh = () => { for (const k of ['fin-ap', 'fin-kpi', 'fin-ap-aging']) qc.invalidateQueries({ queryKey: [k] }); };
@@ -299,7 +306,7 @@ function PayablesTab() {
   const [apForm, setApForm] = useState<any>({ vendor_name: '', invoice_no: '', invoice_date: '', due_date: '', amount: '', txn_type: 'Invoice', vat_treatment: 'standard' });
   const apCreate = useMutation({
     mutationFn: () => api('/api/finance/ap/transactions', { method: 'POST', body: JSON.stringify({ ...apForm, amount: Number(apForm.amount) }) }),
-    onSuccess: (r: any) => { notifySuccess(`บันทึกบิล ${r.txn_no}`); refresh(); setApForm({ vendor_name: '', invoice_no: '', invoice_date: '', due_date: '', amount: '', txn_type: 'Invoice', vat_treatment: 'standard' }); },
+    onSuccess: (r: any) => { notifySuccess(t('fin.ap_created', { no: r.txn_no })); refresh(); setApForm({ vendor_name: '', invoice_no: '', invoice_date: '', due_date: '', amount: '', txn_type: 'Invoice', vat_treatment: 'standard' }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -308,7 +315,7 @@ function PayablesTab() {
   const [payAmt, setPayAmt] = useState('');
   const payAp = useMutation({
     mutationFn: () => api(`/api/finance/ap/transactions/${payTxn}/pay`, { method: 'PATCH', body: JSON.stringify({ amount: Number(payAmt) }) }),
-    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอจ่าย ${r.payment_no ?? r.txn_no} — รออนุมัติ`); refresh(); setPayTxn(null); setPayAmt(''); },
+    onSuccess: (r: any) => { notifySuccess(t('fin.pay_requested', { no: r.payment_no ?? r.txn_no })); refresh(); setPayTxn(null); setPayAmt(''); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -318,28 +325,28 @@ function PayablesTab() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">เจ้าหนี้ (AP)</h2>
+        <h2 className="text-base font-semibold">{t('fin.ap_label')}</h2>
         <Dialog open={apOpen} onOpenChange={setApOpen}>
-          <DialogTrigger asChild><Button size="sm"><Plus className="size-4" /> บันทึกบิลเจ้าหนี้ (AP)</Button></DialogTrigger>
+          <DialogTrigger asChild><Button size="sm"><Plus className="size-4" /> {t('fin.ap_add')}</Button></DialogTrigger>
           <DialogContent>
-            <DialogHeader><DialogTitle>บันทึกบิลเจ้าหนี้</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>{t('fin.ap_add_title')}</DialogTitle></DialogHeader>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="ชื่อเจ้าหนี้/ผู้ขาย" name="vendor_name" form={apForm} set={setApForm} />
-              <Field label="เลขที่ใบแจ้งหนี้" name="invoice_no" form={apForm} set={setApForm} />
-              <Field label="วันที่บิล" name="invoice_date" type="date" form={apForm} set={setApForm} />
-              <Field label="ครบกำหนด" name="due_date" type="date" form={apForm} set={setApForm} />
-              <Field label="จำนวนเงิน (รวม VAT)" name="amount" type="number" step="0.01" form={apForm} set={setApForm} />
+              <Field label={t('fin.f_vendor')} name="vendor_name" form={apForm} set={setApForm} />
+              <Field label={t('fin.f_invoice_no')} name="invoice_no" form={apForm} set={setApForm} />
+              <Field label={t('fin.f_invoice_date')} name="invoice_date" type="date" form={apForm} set={setApForm} />
+              <Field label={t('fin.f_due_date')} name="due_date" type="date" form={apForm} set={setApForm} />
+              <Field label={t('fin.f_amount_vat')} name="amount" type="number" step="0.01" form={apForm} set={setApForm} />
               <div className="grid gap-2">
-                <Label htmlFor="vat_treatment">ภาษี</Label>
+                <Label htmlFor="vat_treatment">{t('fin.f_vat')}</Label>
                 <select id="vat_treatment" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={apForm.vat_treatment} onChange={(e) => setApForm((f: any) => ({ ...f, vat_treatment: e.target.value }))}>
-                  <option value="standard">VAT 7% (standard)</option>
-                  <option value="exempt">ยกเว้น VAT</option>
-                  <option value="zero">VAT 0%</option>
+                  <option value="standard">{t('fin.vat_standard')}</option>
+                  <option value="exempt">{t('fin.vat_exempt')}</option>
+                  <option value="zero">{t('fin.vat_zero')}</option>
                 </select>
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={() => apCreate.mutate()} disabled={apCreate.isPending || !apForm.amount}>บันทึก</Button>
+              <Button onClick={() => apCreate.mutate()} disabled={apCreate.isPending || !apForm.amount}>{t('fin.save')}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -349,16 +356,16 @@ function PayablesTab() {
         {ap.data && (
           <DataTable
             rows={ap.data.transactions}
-            emptyState={{ icon: Wallet, title: 'ยังไม่มีบิลเจ้าหนี้', description: 'กด บันทึกบิล เพื่อเพิ่มบิลเจ้าหนี้รายการแรก' }}
+            emptyState={{ icon: Wallet, title: t('fin.ap_empty_title'), description: t('fin.ap_empty_desc') }}
             columns={[
-              { key: 'Transaction_ID', label: 'เลขที่' },
-              { key: 'Creditor_Name', label: 'เจ้าหนี้' },
-              { key: 'Due_Date', label: 'ครบกำหนด', render: (r: any) => thaiDate(r.Due_Date) },
-              { key: 'Amount', label: 'ยอด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.Amount)}</span> },
-              { key: 'Outstanding_Amount', label: 'คงค้าง', align: 'right', render: (r: any) => <span className="tabular">{baht(r.Outstanding_Amount)}</span> },
-              { key: 'Status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
+              { key: 'Transaction_ID', label: t('fin.col_no') },
+              { key: 'Creditor_Name', label: t('fin.col_creditor') },
+              { key: 'Due_Date', label: t('fin.col_due'), render: (r: any) => thaiDate(r.Due_Date) },
+              { key: 'Amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.Amount)}</span> },
+              { key: 'Outstanding_Amount', label: t('fin.col_outstanding'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.Outstanding_Amount)}</span> },
+              { key: 'Status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
               { key: 'act', label: '', sortable: false, render: (r: any) => (
-                <Button variant="ghost" size="sm" onClick={() => { setPayTxn(r.Transaction_ID); setPayAmt(String(r.Outstanding_Amount)); }}>จ่าย</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setPayTxn(r.Transaction_ID); setPayAmt(String(r.Outstanding_Amount)); }}>{t('fin.pay')}</Button>
               ) },
             ]}
           />
@@ -367,9 +374,9 @@ function PayablesTab() {
 
       {/* The maker-checker approval queue moved to the finance-owned /disbursements page (SoD R07). */}
       <p className="text-xs text-muted-foreground">
-        คำขอจ่ายที่ส่งแล้วจะรอการอนุมัติจากฝ่ายการเงินที่หน้า{' '}
-        <a href="/disbursements" className="font-medium underline underline-offset-2">จ่ายเงินเจ้าหนี้ (Disbursements)</a>{' '}
-        — ผู้อนุมัติต้องไม่ใช่ผู้ขอจ่าย (แบ่งแยกหน้าที่)
+        {t('fin.ap_note_1')}{' '}
+        <a href="/disbursements" className="font-medium underline underline-offset-2">{t('fin.disbursements_link')}</a>{' '}
+        {t('fin.ap_note_2')}
       </p>
 
       <ApAgingSection />
@@ -377,15 +384,15 @@ function PayablesTab() {
       {/* AP pay-request dialog — submits a request that a different user must approve (maker-checker) */}
       <Dialog open={!!payTxn} onOpenChange={(o) => { if (!o) setPayTxn(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>ขอจ่ายเจ้าหนี้ {payTxn}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('fin.pay_title', { txn: payTxn ?? '' })}</DialogTitle></DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="payAmt">จำนวนเงิน</Label>
+            <Label htmlFor="payAmt">{t('fin.f_amount')}</Label>
             <Input id="payAmt" type="number" step="0.01" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} />
-            <p className="text-xs text-muted-foreground">คำขอจ่ายต้องได้รับการอนุมัติจากผู้มีสิทธิ์อีกคน (แบ่งแยกหน้าที่) ก่อนตัดจ่ายจริง</p>
+            <p className="text-xs text-muted-foreground">{t('fin.pay_note')}</p>
           </div>
           <DialogFooter>
-            <DialogClose asChild><Button variant="outline">ยกเลิก</Button></DialogClose>
-            <Button onClick={() => payAp.mutate()} disabled={payAp.isPending || !payAmt}>ส่งคำขอจ่าย</Button>
+            <DialogClose asChild><Button variant="outline">{t('fin.cancel')}</Button></DialogClose>
+            <Button onClick={() => payAp.mutate()} disabled={payAp.isPending || !payAmt}>{t('fin.pay_submit')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -395,28 +402,30 @@ function PayablesTab() {
 
 // ── AR aging buckets (Current / 1-30 / 31-60 / 61-90 / 90+) ──
 function ArAgingSection() {
+  const { t } = useLang();
   const arA = useQuery<any>({ queryKey: ['fin-ar-aging'], queryFn: () => api('/api/finance/ar/aging') });
   return (
     <StateView q={arA}>
-      <AgingRow title="อายุลูกหนี้ (AR)" data={arA.data} />
+      <AgingRow title={t('fin.ar_aging_title')} data={arA.data} />
     </StateView>
   );
 }
 
 // ── AP aging buckets + AP-aging Excel export ──
 function ApAgingSection() {
+  const { t } = useLang();
   const apA = useQuery<any>({ queryKey: ['fin-ap-aging'], queryFn: () => api('/api/finance/ap/aging') });
   const [busy, setBusy] = useState(false);
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">วิเคราะห์อายุเจ้าหนี้ (AP Aging)</h2>
+        <h2 className="text-base font-semibold">{t('fin.ap_aging_heading')}</h2>
         <Button variant="outline" size="sm" disabled={busy} onClick={async () => { setBusy(true); try { await apiDownload('/api/reports/ap-aging/export', 'ap-aging.xlsx'); } finally { setBusy(false); } }}>
-          <Download className="size-4" /> ส่งออก AP Aging (Excel)
+          <Download className="size-4" /> {t('fin.export_ap_aging')}
         </Button>
       </div>
       <StateView q={apA}>
-        <AgingRow title="อายุเจ้าหนี้ (AP)" data={apA.data} />
+        <AgingRow title={t('fin.ap_aging_title')} data={apA.data} />
       </StateView>
     </div>
   );
@@ -424,16 +433,17 @@ function ApAgingSection() {
 
 // Shared aging-bucket StatCard row (Current / 1-30 / 31-60 / 61-90 / 90+).
 function AgingRow({ title, data }: { title: string; data: any }) {
+  const { t } = useLang();
   const B = [
-    { k: 'current', l: 'ยังไม่ครบกำหนด' }, { k: 'd1_30', l: '1–30 วัน' }, { k: 'd31_60', l: '31–60 วัน' },
-    { k: 'd61_90', l: '61–90 วัน' }, { k: 'd90_plus', l: '90+ วัน' },
+    { k: 'current', labelKey: 'fin.bucket_current' }, { k: 'd1_30', labelKey: 'fin.bucket_1_30' }, { k: 'd31_60', labelKey: 'fin.bucket_31_60' },
+    { k: 'd61_90', labelKey: 'fin.bucket_61_90' }, { k: 'd90_plus', labelKey: 'fin.bucket_90plus' },
   ];
   if (!data) return null;
   return (
     <div>
-      <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{title} · รวมคงค้าง {baht(data.total)}</h3>
+      <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('fin.aging_total', { title, total: baht(data.total) })}</h3>
       <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
-        {B.map((b, i) => <StatCard key={b.k} label={b.l} value={baht(data.buckets?.[b.k])} icon={CalendarClock} tone={i >= 3 ? 'danger' : i === 2 ? 'warning' : 'default'} />)}
+        {B.map((b, i) => <StatCard key={b.k} label={t(b.labelKey)} value={baht(data.buckets?.[b.k])} icon={CalendarClock} tone={i >= 3 ? 'danger' : i === 2 ? 'warning' : 'default'} />)}
       </div>
     </div>
   );
@@ -441,14 +451,12 @@ function AgingRow({ title, data }: { title: string; data: any }) {
 
 // ── AR collections worklist: aging + dunning stage + record action + automated sweep ──
 const DUNNING_STAGES = ['reminder', 'first_notice', 'second_notice', 'final_notice', 'legal'] as const;
-const STAGE_LABEL: Record<string, string> = {
-  reminder: 'เตือนความจำ', first_notice: 'แจ้งเตือนครั้งที่ 1', second_notice: 'แจ้งเตือนครั้งที่ 2',
-  final_notice: 'แจ้งเตือนครั้งสุดท้าย', legal: 'ดำเนินคดี',
-};
 const stageBadge = (stage: string | null): 'secondary' | 'warning' | 'destructive' =>
   stage === 'legal' || stage === 'final_notice' ? 'destructive' : stage === 'second_notice' ? 'warning' : 'secondary';
 
 function CollectionsSection() {
+  const { t } = useLang();
+  const stageLabel = (s: string) => t(`fin.stage_${s}`);
   const qc = useQueryClient();
   const wl = useQuery<any>({ queryKey: ['ar-collections'], queryFn: () => api('/api/finance/ar/collections?overdue_only=1') });
   const refresh = () => qc.invalidateQueries({ queryKey: ['ar-collections'] });
@@ -461,43 +469,43 @@ function CollectionsSection() {
       body: JSON.stringify({ stage: form.stage, channel: form.channel, promise_to_pay_date: form.promise_to_pay_date || undefined, notes: form.notes || undefined }),
     }),
     onSuccess: (r: any) => {
-      const note = r.message_status === 'sent' ? ` — ส่งแจ้งเตือนแล้ว (${r.recipient ?? r.channel})`
-        : r.message_status === 'manual' ? ` — บันทึกการติดต่อ (${r.channel})`
-        : r.message_status === 'failed' ? ' — แต่ส่งแจ้งเตือนไม่สำเร็จ (ไม่มีช่องทางติดต่อ)' : '';
-      notifySuccess(`บันทึกการทวงถาม ${r.dunning_no}${note}`); refresh(); setDun(null);
+      const note = r.message_status === 'sent' ? t('fin.dun_sent', { r: r.recipient ?? r.channel })
+        : r.message_status === 'manual' ? t('fin.dun_manual', { r: r.channel })
+        : r.message_status === 'failed' ? t('fin.dun_failed') : '';
+      notifySuccess(t('fin.dun_recorded', { no: r.dunning_no, note })); refresh(); setDun(null);
     },
     onError: (e: any) => notifyError(e.message),
   });
 
   const sweep = useMutation({
     mutationFn: () => api('/api/finance/ar/collections/sweep', { method: 'POST' }),
-    onSuccess: (r: any) => { notifySuccess(`รันการทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการ`); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(t('fin.sweep_ok', { advanced: r.advanced, scanned: r.scanned })); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">ติดตามหนี้ค้างชำระ (Collections)</h2>
+        <h2 className="text-base font-semibold">{t('fin.collections_heading')}</h2>
         <Button variant="outline" size="sm" disabled={sweep.isPending} onClick={() => sweep.mutate()}>
-          <PlayCircle className={`size-4 ${sweep.isPending ? 'animate-spin' : ''}`} /> ทวงถามอัตโนมัติ
+          <PlayCircle className={`size-4 ${sweep.isPending ? 'animate-spin' : ''}`} /> {t('fin.auto_dunning')}
         </Button>
       </div>
       <StateView q={wl}>
         {wl.data && (
           <DataTable
             rows={wl.data.rows}
-            emptyState={{ icon: CheckCheck, title: 'ไม่มีหนี้ค้างชำระ', description: 'ไม่มีลูกหนี้เกินกำหนดที่ต้องติดตามในขณะนี้' }}
+            emptyState={{ icon: CheckCheck, title: t('fin.collections_empty_title'), description: t('fin.collections_empty_desc') }}
             columns={[
-              { key: 'invoice_no', label: 'ใบแจ้งหนี้' },
-              { key: 'party', label: 'ลูกค้า' },
-              { key: 'outstanding', label: 'คงค้าง', align: 'right', render: (r: any) => <span className="tabular">{baht(r.outstanding)}</span> },
-              { key: 'days_overdue', label: 'เกินกำหนด (วัน)', align: 'right', render: (r: any) => <span className={`tabular ${r.days_overdue > 90 ? 'text-red-600' : ''}`}>{r.days_overdue}</span> },
-              { key: 'current_stage', label: 'ขั้นปัจจุบัน', render: (r: any) => r.current_stage ? <Badge variant={stageBadge(r.current_stage)}>{STAGE_LABEL[r.current_stage]}</Badge> : <span className="text-muted-foreground">—</span> },
-              { key: 'recommended_stage', label: 'แนะนำ', render: (r: any) => r.recommended_stage ? <Badge variant={r.escalate ? 'destructive' : 'outline'}>{STAGE_LABEL[r.recommended_stage]}</Badge> : <span className="text-muted-foreground">—</span> },
+              { key: 'invoice_no', label: t('fin.col_invoice') },
+              { key: 'party', label: t('fin.col_customer') },
+              { key: 'outstanding', label: t('fin.col_outstanding'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.outstanding)}</span> },
+              { key: 'days_overdue', label: t('fin.col_days_overdue'), align: 'right', render: (r: any) => <span className={`tabular ${r.days_overdue > 90 ? 'text-red-600' : ''}`}>{r.days_overdue}</span> },
+              { key: 'current_stage', label: t('fin.col_current_stage'), render: (r: any) => r.current_stage ? <Badge variant={stageBadge(r.current_stage)}>{stageLabel(r.current_stage)}</Badge> : <span className="text-muted-foreground">—</span> },
+              { key: 'recommended_stage', label: t('fin.col_recommended'), render: (r: any) => r.recommended_stage ? <Badge variant={r.escalate ? 'destructive' : 'outline'}>{stageLabel(r.recommended_stage)}</Badge> : <span className="text-muted-foreground">—</span> },
               { key: 'act', label: '', sortable: false, render: (r: any) => (
                 <Button variant="ghost" size="sm" onClick={() => { setForm({ stage: r.recommended_stage ?? 'reminder', channel: 'email', promise_to_pay_date: '', notes: '' }); setDun(r); }}>
-                  <BellRing className="size-4" /> ทวงถาม
+                  <BellRing className="size-4" /> {t('fin.dun')}
                 </Button>
               ) },
             ]}
@@ -508,32 +516,32 @@ function CollectionsSection() {
       {/* Record-dunning dialog */}
       <Dialog open={!!dun} onOpenChange={(o) => { if (!o) setDun(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>บันทึกการทวงถาม {dun?.invoice_no}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('fin.dun_title', { invoice: dun?.invoice_no ?? '' })}</DialogTitle></DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="dun-stage">ขั้นการทวงถาม</Label>
+              <Label htmlFor="dun-stage">{t('fin.dun_stage')}</Label>
               <select id="dun-stage" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={form.stage} onChange={(e) => setForm((f: any) => ({ ...f, stage: e.target.value }))}>
-                {DUNNING_STAGES.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+                {DUNNING_STAGES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
               </select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="dun-channel">ช่องทาง</Label>
+              <Label htmlFor="dun-channel">{t('fin.dun_channel')}</Label>
               <select id="dun-channel" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={form.channel} onChange={(e) => setForm((f: any) => ({ ...f, channel: e.target.value }))}>
-                <option value="email">อีเมล</option><option value="phone">โทรศัพท์</option><option value="letter">จดหมาย</option><option value="sms">SMS</option>
+                <option value="email">{t('fin.ch_email')}</option><option value="phone">{t('fin.ch_phone')}</option><option value="letter">{t('fin.ch_letter')}</option><option value="sms">{t('fin.ch_sms')}</option>
               </select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="dun-ptp">นัดชำระ (ถ้ามี)</Label>
+              <Label htmlFor="dun-ptp">{t('fin.dun_ptp')}</Label>
               <Input id="dun-ptp" type="date" value={form.promise_to_pay_date} onChange={(e) => setForm((f: any) => ({ ...f, promise_to_pay_date: e.target.value }))} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="dun-notes">บันทึก</Label>
+              <Label htmlFor="dun-notes">{t('fin.dun_notes')}</Label>
               <Input id="dun-notes" value={form.notes} onChange={(e) => setForm((f: any) => ({ ...f, notes: e.target.value }))} />
             </div>
           </div>
           <DialogFooter>
-            <DialogClose asChild><Button variant="outline">ยกเลิก</Button></DialogClose>
-            <Button onClick={() => record.mutate()} disabled={record.isPending}>บันทึก</Button>
+            <DialogClose asChild><Button variant="outline">{t('fin.cancel')}</Button></DialogClose>
+            <Button onClick={() => record.mutate()} disabled={record.isPending}>{t('fin.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
