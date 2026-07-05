@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { scanSessions, scanLines, stockMovements } from '../../database/schema';
+import { scanSessions, scanLines, stockMovements, items, fixedAssets } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { parseQrPayload } from '@ierp/shared';
 import { n } from '../../database/queries';
@@ -33,6 +33,27 @@ export class ScanService {
       qty: String(dto.qty ?? 1), uom: p.UOM ?? null, action: dto.action ?? s.sessionType, locationId: s.locationId, confirmed: false,
     });
     return { session_no: sessionNo, item_id: itemId, qty: dto.qty ?? 1 };
+  }
+
+  // Resolve a scanned code (raw payload OR a /q?d=… deep link) to the underlying item or asset.
+  // Powers the public /q resolver page: identify what was scanned, then link into the app.
+  async resolve(code: string) {
+    const db = this.db;
+    const p = parseQrPayload(code);
+    const id = (p.ITEM_ID || p.ASSET_ID || String(code ?? '').trim()).trim();
+    if (!id) throw new BadRequestException({ code: 'NO_CODE', message: 'No code in QR', messageTh: 'ไม่พบรหัสใน QR' });
+    // Prefer the entity type the payload declares; fall back to the other so a bare code still resolves.
+    const preferAsset = !!p.ASSET_ID && !p.ITEM_ID;
+    const lookupItem = async () => {
+      const [it] = await db.select().from(items).where(eq(items.itemId, id)).limit(1);
+      return it ? { kind: 'item' as const, id: it.itemId, description: it.itemDescription ?? null, uom: it.uom ?? null, price: it.unitPrice ?? null, category: it.category ?? null } : null;
+    };
+    const lookupAsset = async () => {
+      const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, id)).limit(1);
+      return a ? { kind: 'asset' as const, id: a.assetNo, description: a.name ?? null, location: a.location ?? null, status: a.status ?? null } : null;
+    };
+    const found = preferAsset ? (await lookupAsset()) ?? (await lookupItem()) : (await lookupItem()) ?? (await lookupAsset());
+    return found ?? { kind: 'unknown' as const, id, parsed: p };
   }
 
   async getSession(sessionNo: string) {

@@ -20,7 +20,7 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
-import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS, MODULE_KEYS } from '@ierp/shared';
+import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS, MODULE_KEYS, parseQrPayload, scanCodeId } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const grpOf = (k: string) => Object.entries(PERM_GROUPS).find(([, ks]) => (ks as string[]).includes(k))?.[0] ?? null;
@@ -222,6 +222,27 @@ async function main() {
 
   const iLabels = await inj('POST', '/api/inventory/qr/labels', token, { item_ids: ['A'] });
   ok('inventory item labels respond', (iLabels.status === 200 || iLabels.status === 201) && (iLabels.ctype.includes('pdf') || iLabels.ctype.includes('html')), `status=${iLabels.status} ctype=${iLabels.ctype}`);
+
+  // ── 3b. DEEP-LINK PAYLOAD (URL carrier) — same code works raw or as a /q?d=… URL ──────────
+  const wrapped = `https://erp.example/q?d=${encodeURIComponent('ASSET_ID:FA-TEST|DESC:Test Fridge')}`;
+  ok('parseQrPayload unwraps a /q?d= deep-link URL', parseQrPayload(wrapped).ASSET_ID === 'FA-TEST', `got=${parseQrPayload(wrapped).ASSET_ID}`);
+  ok('parseQrPayload still handles a raw payload', parseQrPayload('ITEM_ID:A|DESC:Apple').ITEM_ID === 'A');
+  ok('scanCodeId falls back to ASSET_ID (was dropped before)', scanCodeId('ASSET_ID:FA-9|DESC:x') === 'FA-9', `got=${scanCodeId('ASSET_ID:FA-9|DESC:x')}`);
+  ok('scanCodeId reads a bare code', scanCodeId('P001') === 'P001');
+
+  // scan-update accepts the URL-wrapped code end-to-end (a pasted deep link resolves the asset).
+  const scanUrl = await inj('POST', '/api/assets/scan-update', token, { code: wrapped, location: 'Zone C' });
+  ok('asset scan-update accepts a URL-wrapped code', (scanUrl.status === 200 || scanUrl.status === 201) && scanUrl.json.location === 'Zone C', `status=${scanUrl.status} loc=${scanUrl.json.location}`);
+
+  // ── 3c. RESOLVE ENDPOINT (powers the /q resolver page) ───────────────────────────────────
+  const resA = await inj('GET', `/api/scan/sessions/resolve?code=${encodeURIComponent('ASSET_ID:FA-TEST')}`, token);
+  ok('resolve asset → kind=asset,id=FA-TEST', resA.status === 200 && resA.json.kind === 'asset' && resA.json.id === 'FA-TEST', `kind=${resA.json.kind} id=${resA.json.id}`);
+  const resI = await inj('GET', '/api/scan/sessions/resolve?code=A', token);
+  ok('resolve item → kind=item,id=A', resI.status === 200 && resI.json.kind === 'item' && resI.json.id === 'A', `kind=${resI.json.kind} id=${resI.json.id}`);
+  const resUrl = await inj('GET', `/api/scan/sessions/resolve?code=${encodeURIComponent(wrapped)}`, token);
+  ok('resolve accepts a URL-wrapped code', resUrl.status === 200 && resUrl.json.kind === 'asset' && resUrl.json.id === 'FA-TEST', `kind=${resUrl.json.kind} id=${resUrl.json.id}`);
+  const resNone = await inj('GET', '/api/scan/sessions/resolve?code=NOPE-404', token);
+  ok('resolve unknown code → kind=unknown', resNone.status === 200 && resNone.json.kind === 'unknown', `kind=${resNone.json.kind}`);
 
   await app.close();
   await pg.close();

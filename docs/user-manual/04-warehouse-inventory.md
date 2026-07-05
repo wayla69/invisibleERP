@@ -98,10 +98,26 @@ transferring and counting.
 1. Go to **Mobile Scan** (`/mobile-scan`).
 2. Start a **scan session** and choose its purpose: Goods Receipt, Issue,
    Transfer or Count.
-3. Scan each item / location; lines are added to the session.
+3. Scan each item / location; lines are added to the session. You can capture a
+   tag three ways off the same label:
+   - **Camera scan** — tap **สแกน QR / Scan QR** (the camera button next to the
+     scan box) and point your phone/tablet at the QR label. Supported on
+     Chromium-based browsers (Chrome, Edge, Android WebView, Samsung Internet);
+     on other browsers the button is hidden and you use one of the two below.
+   - **Hardware scanner** — a USB/Bluetooth wedge scanner types the code into the
+     scan box automatically.
+   - **Manual** — type or paste the code.
 4. **Close** the session to finalise it.
 
+The same camera-scan button is available on the **Stocktake** (`/stocktake`) and
+**Goods Issue / Transfer** (`/goods-issue`) scan boxes.
+
 **Expected result:** The scanned movements are recorded and stock is updated.
+
+> **Print QR labels** for items from **Master Data → QR labels** (an A4 label
+> sheet). If your deployment sets a public web address, a label also works with a
+> phone's **native camera** — scanning it opens a resolver page (`/q`) that shows
+> the item and links into the app. Otherwise use the in-app camera scanner above.
 
 ---
 

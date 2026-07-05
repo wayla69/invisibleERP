@@ -699,8 +699,15 @@ Only **one** revaluation can be pending per asset at a time.
 > 3100) automatically — it isn't recognised again in profit or loss. The disposal
 > response reports the amount recycled.
 
-> **Note:** Print **QR labels** from the QR Tags tab and use **scan-update** to
-> record an asset's location or assigned holder during a physical asset count.
+> **Note — QR asset tags & scanning:** Print **QR labels** from the **QR Tags** tab
+> (single tag or the full A4 sheet) and use **scan-update** to record an asset's
+> location or assigned holder during a physical asset count. On the QR Tags tab's
+> scan box you can capture a tag by **camera** (tap **สแกน QR / Scan QR** — Chromium
+> browsers), a **hardware wedge scanner**, or by typing/pasting the code. If your
+> deployment sets a public web address, the printed QR also opens from a phone's
+> **native camera**: it lands on a resolver page (`/q`) that identifies the asset
+> and links into the register. The scan box accepts either the raw `ASSET_ID:…`
+> code or the resolver URL.
 
 [screenshot: asset register with depreciation schedule]
 

@@ -17,6 +17,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { QrScanButton } from '@/components/qr-scanner';
 import { useLang } from '@/lib/i18n';
 
 const selectCls =
@@ -443,7 +444,10 @@ function QrTags() {
           <p className="text-sm text-muted-foreground">{t('mx.as_scan_desc')}</p>
           <div className="grid gap-1.5">
             <Label htmlFor="scan-code">{t('mx.as_scan_code_label')}</Label>
-            <Input id="scan-code" placeholder="ASSET_ID:FA-0001|…" value={scanCode} onChange={(e) => setScanCode(e.target.value)} />
+            <div className="flex items-center gap-2">
+              <Input id="scan-code" className="flex-1" placeholder="ASSET_ID:FA-0001|…" value={scanCode} onChange={(e) => setScanCode(e.target.value)} />
+              <QrScanButton onScan={setScanCode} />
+            </div>
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="scan-loc">{t('mx.as_scan_loc_label')}</Label>

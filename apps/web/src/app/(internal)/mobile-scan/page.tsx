@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { QrScanButton } from '@/components/qr-scanner';
 
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const TYPES = ['GR', 'Issue', 'Transfer', 'Count'];
@@ -89,7 +90,7 @@ export default function MobileScanPage() {
             <Button variant="default" disabled={close.isPending} onClick={() => close.mutate()}><PackageCheck className="size-4" /> {t('iv.scan_close_commit')}</Button>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <div className="grid gap-1.5 flex-1 min-w-[220px]"><Label>{t('iv.scan_scan_qr')}</Label><Input value={scan} onChange={(e) => setScan(e.target.value)} placeholder="ITEM_ID:A|…" /></div>
+            <div className="grid gap-1.5 flex-1 min-w-[220px]"><Label>{t('iv.scan_scan_qr')}</Label><div className="flex items-center gap-2"><Input className="flex-1" value={scan} onChange={(e) => setScan(e.target.value)} placeholder="ITEM_ID:A|…" /><QrScanButton onScan={setScan} /></div></div>
             <div className="grid gap-1.5"><Label>{t('inv.col_qty')}</Label><Input type="number" className="max-w-[120px]" value={qty} onChange={(e) => setQty(e.target.value)} /></div>
             <Button disabled={!scan || addLine.isPending} onClick={() => addLine.mutate()}>{t('iv.scan_add')}</Button>
           </div>
