@@ -2,6 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException } from '@nes
 import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { retentionLedger, retentionReleaseSchedule, projects } from '../../database/schema';
+import { LedgerService } from '../ledger/ledger.service';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const n = (x: unknown) => Number(x ?? 0);
@@ -11,6 +12,10 @@ export type RetentionParty = 'customer' | 'subcontractor';
 // The GL anchor for each side (docs/35 Phase 0): a customer withholds retention we will collect (asset);
 // we withhold retention from a subcontractor we will pay (liability).
 export const RETENTION_GL: Record<RetentionParty, string> = { customer: '1170', subcontractor: '2440' };
+// On RELEASE the withheld amount reclassifies from the retention account to the ordinary control account: a
+// customer's retention receivable (1170) becomes billable AR (1100); a subcontractor's retention payable (2440)
+// becomes payable AP (2000) — [debit, credit] of the release JE.
+const RELEASE_GL: Record<string, [string, string]> = { '1170': ['1100', '1170'], '2440': ['2440', '2000'] };
 
 export interface RetentionTrancheDto {
   tranche_no?: number;
@@ -46,7 +51,10 @@ export interface ReleaseDto {
 // the projects/AR and procurement/AP services can depend on it without a module cycle.
 @Injectable()
 export class RetentionService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly ledger: LedgerService,
+  ) {}
 
   private async projectRow(code: string) {
     const [p] = await this.db.select().from(projects).where(eq(projects.projectCode, code)).limit(1);
@@ -102,7 +110,7 @@ export class RetentionService {
 
   // Release retention (a partial amount, or a specific scheduled tranche). MUST run inside a transaction so the
   // FOR UPDATE lock on the ledger row serialises concurrent releases and the outstanding can't be over-released.
-  async release(dto: ReleaseDto, runner: any): Promise<{ id: number; released: number; released_amount: number; outstanding: number; status: string }> {
+  async release(dto: ReleaseDto, runner: any): Promise<{ id: number; released: number; released_amount: number; outstanding: number; status: string; entry_no: string | null }> {
     const [row] = await runner.select().from(retentionLedger).where(eq(retentionLedger.id, Number(dto.retentionId))).for('update').limit(1);
     if (!row) throw new NotFoundException({ code: 'RETENTION_NOT_FOUND', message: `Retention ${dto.retentionId} not found`, messageTh: 'ไม่พบรายการเงินประกันผลงาน' });
     const withheld = r2(n(row.withheldAmount));
@@ -129,7 +137,27 @@ export class RetentionService {
     const status = newReleased + EPS >= withheld ? 'released' : 'partially_released';
     await runner.update(retentionLedger).set({ releasedAmount: String(newReleased), status, updatedAt: new Date() }).where(eq(retentionLedger.id, Number(dto.retentionId)));
     if (tranche) await runner.update(retentionReleaseSchedule).set({ status: 'released', releasedAt: new Date() }).where(eq(retentionReleaseSchedule.id, Number(tranche.id)));
-    return { id: Number(dto.retentionId), released: amount, released_amount: newReleased, outstanding: r2(withheld - newReleased), status };
+
+    // Reclassify the released amount OUT of the retention account into the ordinary control account (customer
+    // retention receivable 1170 → AR 1100; subcontractor retention payable 2440 → AP 2000). Idempotent on the
+    // cumulative released amount so a retried release can't double-post.
+    const [dr, cr] = RELEASE_GL[String(row.glAccount)] ?? [];
+    let entryNo: string | null = null;
+    if (dr && cr) {
+      const ref = `RET${dto.retentionId}-${newReleased}`;
+      if (!(await this.ledger.alreadyPosted('RETENTION-REL', ref, row.tenantId ?? null, runner))) {
+        const projectId = row.projectId != null ? Number(row.projectId) : null;
+        const je: any = await this.ledger.postEntry({
+          source: 'RETENTION-REL', sourceRef: ref, tenantId: row.tenantId ?? null, memo: `Retention release ${row.sourceDocType} ${row.sourceDocNo}`, createdBy: dto.releasedBy ?? 'system',
+          lines: [
+            { account_code: dr, debit: amount, memo: `Retention release ${row.sourceDocNo}`, project_id: projectId },
+            { account_code: cr, credit: amount, memo: `Retention release ${row.sourceDocNo}`, project_id: projectId },
+          ],
+        }, runner);
+        entryNo = je.entry_no;
+      }
+    }
+    return { id: Number(dto.retentionId), released: amount, released_amount: newReleased, outstanding: r2(withheld - newReleased), status, entry_no: entryNo };
   }
 
   // Controller convenience: run a standalone release inside its own transaction (row-locked).

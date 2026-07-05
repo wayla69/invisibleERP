@@ -5,6 +5,7 @@ import { projects, projectEntries, projectTasks, projectMilestones, projectResou
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
 import { CommitmentsService } from '../commitments/commitments.service';
+import { RetentionService } from '../retention/retention.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -69,6 +70,9 @@ export class ProjectsService {
     // M1 (PROJ-12) — the BoQ-line encumbrance ledger; when present, getBoq shows budget/committed/remaining
     // per line and listCommitments exposes the project commitments. @Optional so partial harnesses still build.
     @Optional() private readonly commitments?: CommitmentsService,
+    // docs/35 Depth-1 — the shared retention sub-ledger; when present, the action center surfaces retention
+    // release tranches due for action (`retention_due`). @Optional so partial harnesses still build.
+    @Optional() private readonly retention?: RetentionService,
   ) {}
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
@@ -843,6 +847,20 @@ export class ProjectsService {
     for (const r of risks.top) {
       if (r.rag !== 'red' || r.mitigation) continue;
       push('risk_unmitigated_high', 'high', r.project_id ?? null, r.project_code ?? null, `ความเสี่ยงสูงยังไม่มีแผนรับมือ: ${r.title}`, `Unmitigated high risk: ${r.title}`, r.title, 'risks', { risk_id: r.id, score: r.score });
+    }
+
+    // Retention release tranches whose due date has passed (docs/35 Depth-1) — the withheld retention is now
+    // collectible (customer) / payable (subcontractor) and should be released. Bounded to the caller's projects.
+    if (this.retention) {
+      const due = await this.retention.due(today).catch(() => null);
+      for (const d of due?.due ?? []) {
+        const pid = d.project_id != null ? Number(d.project_id) : null;
+        if (pid == null || !ids.has(pid)) continue;
+        const code = codeById.get(pid) ?? null;
+        const th = d.party_type === 'subcontractor' ? 'เงินประกันผลงานผู้รับเหมาช่วงถึงกำหนดคืน' : 'เงินประกันผลงานลูกค้าถึงกำหนดคืน';
+        const en = d.party_type === 'subcontractor' ? 'Subcontractor retention due for release' : 'Customer retention due for release';
+        push('retention_due', 'medium', pid, code, `${th} (${d.source_doc_no}, ${n(d.amount)})`, `${en} (${d.source_doc_no}, ${n(d.amount)})`, d.source_doc_no, 'billing', { tranche_id: d.tranche_id, retention_id: d.retention_id, amount: n(d.amount), due_date: d.due_date, party_type: d.party_type });
+      }
     }
 
     items.sort((a, b) => (SEV_RANK[a.severity]! - SEV_RANK[b.severity]!) || String(a.project_code ?? '').localeCompare(String(b.project_code ?? '')) || a.kind.localeCompare(b.kind));

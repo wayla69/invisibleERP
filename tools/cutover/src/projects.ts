@@ -1054,9 +1054,9 @@ async function main() {
     JSON.stringify({ recv: rbal1.json.receivable?.outstanding, pay: rbal1.json.payable?.outstanding }));
 
   const rel1 = await inj('POST', `/api/retention/${custRetId}/release`, admin, { amount: 200 });
-  ok('Retention partial release 200 (customer) → partially_released, released 200, outstanding 300',
-    rel1.status < 300 && rel1.json.status === 'partially_released' && near(rel1.json.released_amount, 200) && near(rel1.json.outstanding, 300),
-    JSON.stringify({ st: rel1.json.status, rel: rel1.json.released_amount, out: rel1.json.outstanding }));
+  ok('Retention partial release 200 (customer) → partially_released, released 200, outstanding 300, JE posted (Depth-1: Dr 1100 / Cr 1170)',
+    rel1.status < 300 && rel1.json.status === 'partially_released' && near(rel1.json.released_amount, 200) && near(rel1.json.outstanding, 300) && /^JE-/.test(rel1.json.entry_no ?? ''),
+    JSON.stringify({ st: rel1.json.status, rel: rel1.json.released_amount, je: rel1.json.entry_no }));
 
   const relOver = await inj('POST', `/api/retention/${custRetId}/release`, admin, { amount: 5000 });
   ok('Over-release beyond outstanding → 400 RETENTION_OVER_RELEASE', relOver.status === 400 && relOver.json.error?.code === 'RETENTION_OVER_RELEASE', `${relOver.status} ${relOver.json.error?.code}`);
@@ -1071,11 +1071,17 @@ async function main() {
     JSON.stringify({ count: due.json.count, first: dueSub?.amount }));
 
   const relTranche = await inj('POST', `/api/retention/${subRetId}/release`, admin, { tranche_id: dueSub?.tranche_id });
-  ok('Release a scheduled tranche by id → subcontract retention released 500, outstanding 500',
-    relTranche.status < 300 && near(relTranche.json.released_amount, 500) && near(relTranche.json.outstanding, 500),
-    JSON.stringify({ rel: relTranche.json.released_amount, out: relTranche.json.outstanding }));
+  ok('Release a scheduled tranche by id → subcontract retention released 500, outstanding 500, JE posted (Depth-1: Dr 2440 / Cr 2000)',
+    relTranche.status < 300 && near(relTranche.json.released_amount, 500) && near(relTranche.json.outstanding, 500) && /^JE-/.test(relTranche.json.entry_no ?? ''),
+    JSON.stringify({ rel: relTranche.json.released_amount, je: relTranche.json.entry_no }));
   const dueAfter = await inj('GET', '/api/retention/due', admin);
   ok('After releasing the tranche it drops off the due worklist (0 due)', (dueAfter.json.due ?? []).length === 0, `count=${dueAfter.json.count}`);
+
+  // Depth-1: an overdue retention tranche surfaces on the PMO action center as `retention_due`.
+  await inj('POST', '/api/retention/withhold', admin, { party_type: 'customer', project_code: 'PRJ-A', source_doc_type: 'CLAIM', source_doc_no: 'CLAIM-DUE', amount: 800, schedule: [{ due_basis: 'date', due_date: '2019-06-01', pct: 100 }] });
+  const acRet = await inj('GET', '/api/projects/action-center', admin);
+  const retItem = (acRet.json.items ?? []).find((i: any) => i.kind === 'retention_due' && i.ref === 'CLAIM-DUE');
+  ok('Depth-1: an overdue retention tranche surfaces on the action center as retention_due', !!retItem && near(retItem.meta?.amount, 800), JSON.stringify({ found: !!retItem, kinds: acRet.json.summary?.by_kind?.retention_due }));
 
   // SCF classification: a posted JE touching 1170/2440 must bucket into OPERATING working capital (not unclassified).
   const rje = await inj('POST', '/api/ledger/journal', admin, { date: '2026-06-15', memo: 'retention SCF classify test', lines: [{ account_code: '1170', debit: 500 }, { account_code: '2440', credit: 500 }] });

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { LedgerModule } from '../ledger/ledger.module';
 import { RetentionService } from './retention.service';
 import { RetentionController } from './retention.controller';
 
@@ -6,6 +7,7 @@ import { RetentionController } from './retention.controller';
 // projects/AR side (Track A progress billing) and the procurement/AP side (Track B subcontract valuations)
 // can both depend on RetentionService without a module cycle. Exports the service for that reuse.
 @Module({
+  imports: [LedgerModule],
   controllers: [RetentionController],
   providers: [RetentionService],
   exports: [RetentionService],
