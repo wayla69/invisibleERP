@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, Plus, X, Award, FileSearch, Inbox, FileText, Quote } from 'lucide-react';
+import { ClipboardList, Plus, X, Award, FileSearch, Inbox, FileText, Quote, Printer, Mail } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -39,10 +39,19 @@ export default function RfqsPage() {
 }
 
 // ───────────────────────── List + detail ─────────────────────────
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
 function RfqList() {
   const { t } = useLang();
   const q = useQuery<any>({ queryKey: ['rfqs'], queryFn: () => api('/api/procurement/rfqs') });
   const [selected, setSelected] = useState<string | null>(null);
+  // Email the RFQ PDF to a supplier (prompts for the recipient address).
+  const email = useMutation({
+    mutationFn: (v: { no: string; to_email: string }) => api<{ to: string }>(`/api/procurement/rfqs/${encodeURIComponent(v.no)}/send-email`, { method: 'POST', body: JSON.stringify({ to_email: v.to_email }) }),
+    onSuccess: (r) => notifySuccess(t('doc.email_sent', { to: r.to })),
+    onError: (e: any) => notifyError(e.message),
+  });
+  const promptEmail = (no: string) => { const to = window.prompt(t('doc.email_prompt')); if (to) email.mutate({ no, to_email: to }); };
 
   const rfqs: any[] = q.data?.rfqs ?? [];
   const open = rfqs.filter((r) => r.status === 'Open').length;
@@ -65,6 +74,17 @@ function RfqList() {
               { key: 'rfq_date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.rfq_date) },
               { key: 'required_date', label: t('iv.rfq_col_required'), render: (r: any) => (r.required_date ? thaiDate(r.required_date) : '—') },
               { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              {
+                key: 'doc', label: t('doc.print_col'), sortable: false,
+                render: (r: any) => (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}>
+                      <a href={`${BASE}/api/procurement/rfqs/${encodeURIComponent(r.rfq_no)}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-4" /></a>
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={email.isPending} title={t('doc.email')} onClick={() => promptEmail(r.rfq_no)}><Mail className="size-4" /></Button>
+                  </div>
+                ),
+              },
             ]}
             emptyState={{
               icon: Inbox,

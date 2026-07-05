@@ -103,6 +103,8 @@ export function CustomerCardsClient() {
               setFrom={setFrom}
               setTo={setTo}
               filename={`ar-statement-${selected.customer}-${from}_${to}.csv`}
+              pdfPath="/api/finance/ar/statement"
+              partyParam={`tenant_id=${selected.tenant_id}`}
             />
           ) : (
             <AccountStatement title="" side="ar" query={stmtQ} from={from} to={to} setFrom={setFrom} setTo={setTo} filename="" empty />

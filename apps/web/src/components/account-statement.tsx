@@ -3,7 +3,10 @@
 // Shared running-balance statement panel for the AR (customer) and AP (vendor) cards. The parent owns the
 // fetch (customer keys by tenant_id, vendor by name) and the date-range state; this renders the summary
 // (opening / charges / payments / closing) + the dated line table with a running balance, and CSV export.
-import { Download } from 'lucide-react';
+import { useMutation } from '@tanstack/react-query';
+import { Download, Printer, Mail } from 'lucide-react';
+import { api } from '@/lib/api';
+import { notifySuccess, notifyError } from '@/lib/notify';
 
 import { baht, thaiDate } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -37,6 +40,8 @@ export function AccountStatement({
   setTo,
   filename,
   empty,
+  pdfPath,
+  partyParam,
 }: {
   title: string;
   /** 'ar' → charges are ใบแจ้งหนี้ (debit), payments are รับชำระ; 'ap' → charges are bills, payments are จ่าย. */
@@ -49,8 +54,20 @@ export function AccountStatement({
   filename: string;
   /** Shown when no party is selected yet (query disabled). */
   empty?: boolean;
+  /** Statement endpoint base (e.g. `/api/finance/ar/statement`) — enables the Print/Email actions. */
+  pdfPath?: string;
+  /** Party query param for the statement endpoint (e.g. `tenant_id=5` or `vendor=ACME`). */
+  partyParam?: string;
 }) {
   const { t } = useLang();
+  const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+  const qs = `${partyParam ?? ''}&from=${from}&to=${to}`;
+  const emailStmt = useMutation({
+    mutationFn: (to_email: string) => api<{ to: string }>(`${pdfPath}/send-email?${qs}`, { method: 'POST', body: JSON.stringify({ to_email }) }),
+    onSuccess: (r) => notifySuccess(t('doc.email_sent', { to: r.to })),
+    onError: (e: any) => notifyError(e.message),
+  });
+  const promptEmail = () => { const e = window.prompt(t('doc.email_prompt')); if (e) emailStmt.mutate(e); };
   const d = query.data;
   const typeLabel = (ty: string) => (TYPE_KEY[ty] ? t(TYPE_KEY[ty]) : ty);
   const chargeLabel = side === 'ar' ? t('mx.acstmt_charge_ar') : t('mx.acstmt_charge_ap');
@@ -100,6 +117,16 @@ export function AccountStatement({
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={!d}>
             <Download className="size-4" /> CSV
           </Button>
+          {pdfPath && (
+            <>
+              <Button variant="outline" size="sm" asChild disabled={!d} title={t('doc.print_pdf')}>
+                <a href={`${BASE}${pdfPath}/pdf?${qs}`} target="_blank" rel="noopener noreferrer"><Printer className="size-4" /> PDF</a>
+              </Button>
+              <Button variant="outline" size="sm" onClick={promptEmail} disabled={!d || emailStmt.isPending} title={t('doc.email')}>
+                <Mail className="size-4" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
 

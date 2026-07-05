@@ -85,6 +85,39 @@ export class FinanceController {
   @Get('ap/statement') @Permissions('creditors', 'exec')
   vendorStatement(@Query('vendor') vendor: string, @Query('from') from?: string, @Query('to') to?: string, @Query('currency') currency?: string) { return this.svc.vendorStatement(vendor, from || undefined, to || undefined, currency || undefined); }
 
+  // Printable ใบแจ้งยอดบัญชี (Statement of account) — customer (AR) / vendor (AP) — HTML→PDF, HTML fallback.
+  @Get('ar/statement/pdf') @Permissions('ar', 'exec')
+  async customerStatementPdf(@Query('tenant_id') tenantId: string, @Query('from') from: string | undefined, @Query('to') to: string | undefined, @Query('currency') currency: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const s = await this.svc.getCustomerStatementForPrint(Number(tenantId), from || undefined, to || undefined, currency || undefined, u);
+    const buf = await this.svc.renderStatementPdf(s);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="statement-${tenantId}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(this.svc.statementHtml(s));
+  }
+  @Post('ar/statement/send-email') @HttpCode(200) @Permissions('ar', 'exec')
+  async emailCustomerStatement(@Query('tenant_id') tenantId: string, @Query('from') from: string | undefined, @Query('to') to: string | undefined, @Query('currency') currency: string | undefined, @Body(new ZodValidationPipe(DocEmailBody)) b: z.infer<typeof DocEmailBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.emailStatement(await this.svc.getCustomerStatementForPrint(Number(tenantId), from || undefined, to || undefined, currency || undefined, u), b.to_email);
+  }
+  @Get('ap/statement/pdf') @Permissions('creditors', 'exec')
+  async vendorStatementPdf(@Query('vendor') vendor: string, @Query('from') from: string | undefined, @Query('to') to: string | undefined, @Query('currency') currency: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const s = await this.svc.getVendorStatementForPrint(vendor, from || undefined, to || undefined, currency || undefined, u);
+    const buf = await this.svc.renderStatementPdf(s);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="statement-vendor.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(this.svc.statementHtml(s));
+  }
+
+  // Printable ใบสำคัญรับเงิน (AR receipt voucher).
+  @Get('ar/receipts/:receiptNo/pdf') @Permissions('ar', 'exec')
+  async arReceiptPdf(@Param('receiptNo') receiptNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const r = await this.svc.getArReceiptForPrint(receiptNo, u);
+    const buf = await this.svc.renderArReceiptPdf(r);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${receiptNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(this.svc.arReceiptHtml(r));
+  }
+  @Post('ar/receipts/:receiptNo/send-email') @HttpCode(200) @Permissions('ar', 'exec')
+  emailArReceipt(@Param('receiptNo') receiptNo: string, @Body(new ZodValidationPipe(DocEmailBody)) b: z.infer<typeof DocEmailBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.emailArReceipt(receiptNo, b.to_email, u);
+  }
+
   // Printable ใบแจ้งหนี้/ใบวางบิล (AR billing invoice) — HTML→PDF via the shared renderer (HTML fallback
   // when Chromium absent). Distinct from the statutory ใบกำกับภาษี under /api/tax-invoices.
   @Get('ar/invoices/:invoiceNo/pdf') @Permissions('ar', 'exec')
