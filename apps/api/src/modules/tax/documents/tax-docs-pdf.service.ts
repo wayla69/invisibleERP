@@ -3,6 +3,7 @@ import { bahtText } from '../../../common/bahttext.util';
 import { formatTaxId } from './tax-docs.snapshot';
 import { PND_LABELS, WHT_CONDITION_LABELS, incomeType, type PndType } from './wht-rates';
 import { PdfRenderer } from '../../pdf/pdf-renderer.service';
+import { type A4TemplateConfig, DEFAULT_A4_TEMPLATE, a4LogoHtml, a4HeaderNoteHtml, a4FooterHtml } from '../../../common/a4-template';
 
 // HTML → PDF templates for the three Thai tax documents. Rendering is delegated to the shared PdfRenderer
 // (external-service offload or pooled Chromium); if unavailable it returns null → caller sends the HTML.
@@ -17,7 +18,11 @@ export class TaxDocsPdfService {
   }
 
   // ── ใบกำกับภาษีเต็มรูป (ม.86/4) — A4 ──
-  fullTaxInvoiceHtml(inv: any, copy = false): string {
+  // `cfg` is the tenant's active, presentation-only no-code template (common/a4-template.ts). It carries an
+  // accent colour, an optional logo + header note, custom footer terms/signature captions and an
+  // amount-in-words toggle. It is normalized with { fiscal: true } upstream, so the mandatory ม.86/4
+  // seller name/address/tax-id lines below are UNCONDITIONAL — a knob can never drop a legally-required field.
+  fullTaxInvoiceHtml(inv: any, copy = false, cfg: A4TemplateConfig = DEFAULT_A4_TEMPLATE): string {
     const rows = inv.lines.map((l: any, i: number) => `
       <tr><td class="c">${i + 1}</td><td>${esc(l.description)}</td>
       <td class="r">${l.qty != null ? fmtQty(l.qty) : ''}</td>
@@ -27,9 +32,11 @@ export class TaxDocsPdfService {
     return wrapA4(`
       <div class="hdr">
         <div>
+          ${a4LogoHtml(cfg, inv.seller.logo_url)}
           <div class="t1">${esc(inv.seller.name)}</div>
           <div>${esc(inv.seller.address)}</div>
           <div>เลขประจำตัวผู้เสียภาษีอากร ${esc(formatTaxId(inv.seller.tax_id))} &nbsp; (${esc(inv.seller.branch_label)})</div>
+          ${a4HeaderNoteHtml(cfg)}
         </div>
         <div class="ttl">ใบกำกับภาษี/ใบเสร็จรับเงิน<div class="copy">(${copy ? 'สำเนา' : 'ต้นฉบับ'})</div></div>
       </div>
@@ -47,9 +54,9 @@ export class TaxDocsPdfService {
         <tr><td class="tlbl">ภาษีมูลค่าเพิ่ม 7%</td><td class="tval">${fmtMoney(inv.vat_amount)}</td></tr>
         <tr class="grand"><td class="tlbl">จำนวนเงินรวมทั้งสิ้น</td><td class="tval">${fmtMoney(inv.grand_total)}</td></tr>
       </table>
-      <div class="words">( ${esc(bahtText(inv.grand_total))} )</div>
-      <div class="foot"><div class="sign">ผู้รับสินค้า / ผู้ซื้อ</div><div class="sign">ผู้รับเงิน / ผู้มีอำนาจลงนาม</div></div>
-    `, 'ใบกำกับภาษีเต็มรูป');
+      ${cfg.totals.show_amount_in_words ? `<div class="words">( ${esc(bahtText(inv.grand_total))} )</div>` : ''}
+      ${a4FooterHtml(cfg, { leftDefault: 'ผู้รับสินค้า / ผู้ซื้อ', rightDefault: 'ผู้รับเงิน / ผู้มีอำนาจลงนาม' })}
+    `, 'ใบกำกับภาษีเต็มรูป', { accentColor: cfg.header.accent_color });
   }
 
   // ── ใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) — A4 ──
@@ -181,27 +188,37 @@ export class TaxDocsPdfService {
 }
 
 // ── A4 shell ──
-function wrapA4(body: string, title: string): string {
-  return `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"/>
+// `opts.accentColor` overrides the brand accent (#1E3C72) for the header rules/headings + grid, driven by a
+// tenant's no-code document template (presentation only; see common/a4-template.ts). A non-#RRGGBB value
+// falls back to the brand default so a bad config can never break the shell. The `.brandlogo`/`.hnote` +
+// `.terms`/`.fline`/`.sign .who` classes back the shared a4LogoHtml/a4HeaderNoteHtml/a4FooterHtml helpers.
+const TAX_A4_BRAND = '#1E3C72';
+const TAX_A4_HEX = /^#[0-9a-fA-F]{6}$/;
+function wrapA4(body: string, title: string, opts: { accentColor?: string } = {}): string {
+  const A = opts.accentColor && TAX_A4_HEX.test(opts.accentColor) ? opts.accentColor : TAX_A4_BRAND;
+  return `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"/><title>${esc(title)}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet"/>
   <style>
     *{box-sizing:border-box} body{font-family:'Sarabun',sans-serif;color:#1a1a1a;font-size:12px;margin:0}
-    .hdr{display:flex;justify-content:space-between;border-bottom:2px solid #1E3C72;padding-bottom:6px;margin-bottom:8px}
-    .t1{font-size:16px;font-weight:700;color:#1E3C72} .ttl{font-size:15px;font-weight:700;color:#1E3C72;text-align:right}
+    .hdr{display:flex;justify-content:space-between;border-bottom:2px solid ${A};padding-bottom:6px;margin-bottom:8px}
+    .brandlogo{max-height:46px;max-width:180px;margin-bottom:4px;display:block} .hnote{font-size:11px;color:#555}
+    .t1{font-size:16px;font-weight:700;color:${A}} .ttl{font-size:15px;font-weight:700;color:${A};text-align:right}
     .copy{font-size:11px;font-weight:400;color:#b00} .copylbl{font-size:11px;color:#b00}
-    .ttl50{font-size:15px;font-weight:700;color:#1E3C72;text-align:center;margin:4px 0 8px}
+    .ttl50{font-size:15px;font-weight:700;color:${A};text-align:center;margin:4px 0 8px}
     .ct{text-align:center} .b{font-weight:700} .r{text-align:right} .c{text-align:center}
     table{width:100%;border-collapse:collapse} table.meta td{padding:2px 6px} td.lbl{color:#555;width:18%}
-    table.grid{margin:8px 0} table.grid th{background:#1E3C72;color:#fff;padding:5px;text-align:left;font-size:11px}
-    table.grid td{padding:4px 6px;border-bottom:1px solid #e0e0e0} table.grid tr.grand td{border-top:2px solid #1E3C72;font-weight:700}
+    table.grid{margin:8px 0} table.grid th{background:${A};color:#fff;padding:5px;text-align:left;font-size:11px}
+    table.grid td{padding:4px 6px;border-bottom:1px solid #e0e0e0} table.grid tr.grand td{border-top:2px solid ${A};font-weight:700}
     table.wht td{border:1px solid #999;font-size:11px;height:18px}
     table.totals{width:45%;margin-left:auto;margin-top:6px} table.totals td{padding:3px 6px} td.tval{text-align:right;font-weight:600}
-    table.totals tr.grand td{border-top:2px solid #1E3C72;color:#1E3C72;font-size:13px}
-    .words{margin-top:8px;font-weight:600;color:#1E3C72} .pnd{margin:8px 0} .bx{font-size:14px}
+    table.totals tr.grand td{border-top:2px solid ${A};color:${A};font-size:13px}
+    .words{margin-top:8px;font-weight:600;color:${A}} .pnd{margin:8px 0} .bx{font-size:14px}
+    .terms{margin-top:10px;font-size:11px;color:#333;white-space:pre-wrap} .fline{margin-top:2px;font-size:11px;color:#555}
     .cond{margin:8px 0} .certify{margin-top:10px;font-size:11px} .foot{margin-top:24px;display:flex;justify-content:space-between}
     .sign{width:45%;text-align:center;border-top:1px solid #999;padding-top:4px;color:#555}
-    .party{color:#1E3C72}
+    .sign .who{margin-top:18px;color:#1a1a1a;font-weight:600}
+    .party{color:${A}}
   </style></head><body>${body}</body></html>`;
 }
 

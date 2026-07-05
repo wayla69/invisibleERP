@@ -129,10 +129,16 @@ nothing to the GL. That discipline is itself part of "outclass."
   note, seller-line toggles, amount-in-words, signature captions, footer terms) applied by each per-module
   renderer at print time via the parameterized `common/doc-html.ts` shell; the designer previews a real A4
   sample per type + per-type web knob panels. See narrative `27-platform-customization.md` §7.13 / rev 1.7.
-- **Deferred (next increment of Phase 10):** template-driven LIVE rendering for the **abbreviated/full tax
-  invoices** (authorable + previewable now, with the ม.86/4 mandatory seller fields force-kept; the live
-  doc wiring is fiscal-sensitive and pending); logo file upload to object storage (today a pasted https URL
-  / data-URI, per Phase 9).
+- **Delivered (2026-07-05):** template-driven LIVE rendering for the **full tax invoice (ใบกำกับภาษีเต็มรูป,
+  ม.86/4)** — its own fiscal shell (`tax-docs-pdf.service.ts`) **parameterized in place** with the same accent
+  gate + the shared `a4LogoHtml`/`a4HeaderNoteHtml`/`a4FooterHtml` helpers; the tax-docs controller resolves
+  the active template fail-open and normalizes it with **`{ fiscal: true }`**, so the ม.86/4 mandatory seller
+  name/address/tax-id are force-kept regardless of the knobs. `tax_invoice_full` flips to `live`; seller logo
+  is read live from the tenant. See narrative `27-platform-customization.md` §7.13 / rev 1.8; `taxdocs` 87.
+- **Deferred (next increment of Phase 10):** template-driven LIVE rendering for the **abbreviated (80mm
+  thermal) tax invoice** (authorable + previewable now, with the ม.86/4 mandatory seller fields force-kept;
+  the live slip wiring is pending); logo file upload to object storage (today a pasted https URL / data-URI,
+  per Phase 9).
 
 ---
 
