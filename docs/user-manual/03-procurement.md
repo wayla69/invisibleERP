@@ -143,6 +143,10 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 > out). On a phone, a **floating cart button** (bottom-right) shows how many lines
 > you have and jumps straight to the basket.
 
+> **Track your requests without leaving the page.** A **คำขอซื้อล่าสุดของฉัน** card
+> (below the basket) lists your last few requisitions with their live approval
+> **status** — tap one (or **ดูทั้งหมด**) to open the full requisitions page.
+
 > **Where does the category grouping come from?** The cards are grouped by each
 > item's category in the **item register** — the real *หมวดสินค้า* (`item_categories`,
 > set per item via `category_id`), falling back to the free-text category, otherwise
