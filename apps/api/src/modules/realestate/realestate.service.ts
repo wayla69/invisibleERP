@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { reProjects, reUnits, reBookings, reContracts, reInstallments } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -194,6 +194,35 @@ export class RealEstateService {
       return je.entry_no;
     });
     return { installment_id: Number(installmentId), seq: inst.seq, amount, status: 'paid', entry_no: entryNo };
+  }
+
+  // ── Scheduled sweeps (docs/35 Depth) — ride the BI report scheduler ──
+  private ymd() { return new Date().toISOString().slice(0, 10); }
+
+  // Expire held bookings past their expiry date → free the unit back to available (inventory hygiene, RE-01).
+  // The deposit stays a customer-deposit liability (2210) for a separate refund/forfeit decision.
+  async expireDueBookings(asOf?: string): Promise<{ scanned: number; expired: number }> {
+    const cutoff = asOf ?? this.ymd();
+    const rows = await this.db.select().from(reBookings).where(and(eq(reBookings.status, 'held'), lt(reBookings.expiresOn, cutoff)));
+    let expired = 0;
+    for (const b of rows) {
+      if (!b.expiresOn) continue;
+      await this.db.update(reBookings).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(reBookings.id, Number(b.id)));
+      await this.db.update(reUnits).set({ status: 'available', updatedAt: new Date() }).where(and(eq(reUnits.id, Number(b.unitId)), eq(reUnits.status, 'reserved')));
+      expired += 1;
+    }
+    return { scanned: rows.length, expired };
+  }
+
+  // Overdue installments (detective sweep) — pending installments past their due date, for a dunning/worklist.
+  async overdueInstallments(asOf?: string): Promise<{ overdue: number; total: number; items: any[] }> {
+    const cutoff = asOf ?? this.ymd();
+    const rows = await this.db.select().from(reInstallments).where(and(eq(reInstallments.status, 'pending'), lt(reInstallments.dueDate, cutoff))).orderBy(asc(reInstallments.dueDate));
+    return {
+      overdue: rows.length,
+      total: r2(rows.reduce((a: number, i: any) => a + n(i.amount), 0)),
+      items: rows.map((i: any) => ({ installment_id: Number(i.id), contract_id: Number(i.contractId), seq: i.seq, due_date: i.dueDate, amount: n(i.amount) })),
+    };
   }
 
   async getContract(contractNo: string) {

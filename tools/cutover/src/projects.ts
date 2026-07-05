@@ -1124,6 +1124,23 @@ async function main() {
     wc.some((l: any) => l.account_code === '1170') && wc.some((l: any) => l.account_code === '2440'),
     JSON.stringify({ uncl: scf.json.unclassified_accounts, codes: wc.map((l: any) => l.account_code) }));
 
+  // ── Depth: scheduled sweeps (docs/35) — retention release due, booking expiry, installment overdue ──
+  await inj('POST', '/api/retention/withhold', admin, { party_type: 'customer', project_code: 'PRJ-A', source_doc_type: 'CLAIM', source_doc_no: 'CLAIM-SWEEP', amount: 1000, schedule: [{ due_basis: 'date', due_date: '2018-01-01', pct: 100 }] });
+  const rrSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Retention release', report_type: 'retention_release_due', frequency: 'monthly' });
+  const rrRun = await inj('POST', `/api/bi/subscriptions/${rrSub.json.id}/run`, admin, {});
+  ok('Sweep: retention_release_due auto-releases past-due tranches (posts GL)', rrRun.json.status === 'success' && /released\s+[1-9]/.test(rrRun.json.summary ?? ''), JSON.stringify({ s: rrRun.json.status, sum: (rrRun.json.summary ?? '').slice(0, 50) }));
+
+  await inj('POST', '/api/realestate/bookings', admin, { dev_code: 'RED-1', unit_no: 'U-103', deposit: 5000, expires_on: '2018-01-01' });
+  const beSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Booking expiry', report_type: 're_booking_expire', frequency: 'daily' });
+  const beRun = await inj('POST', `/api/bi/subscriptions/${beSub.json.id}/run`, admin, {});
+  ok('Sweep: re_booking_expire cancels lapsed bookings + frees the unit', beRun.json.status === 'success' && /expired\s+[1-9]/.test(beRun.json.summary ?? ''), JSON.stringify({ s: beRun.json.status, sum: (beRun.json.summary ?? '').slice(0, 50) }));
+  const u103 = await inj('GET', '/api/realestate/developments/RED-1/units', admin);
+  ok('Sweep: the expired booking freed U-103 back to available', (u103.json.units ?? []).find((x: any) => x.unit_no === 'U-103')?.status === 'available', JSON.stringify({ st: (u103.json.units ?? []).find((x: any) => x.unit_no === 'U-103')?.status }));
+
+  const ioSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Installment overdue', report_type: 're_installment_overdue', frequency: 'daily' });
+  const ioRun = await inj('POST', `/api/bi/subscriptions/${ioSub.json.id}/run`, admin, {});
+  ok('Sweep: re_installment_overdue runs (detective worklist)', ioRun.json.status === 'success' && /[Oo]verdue installments/.test(ioRun.json.summary ?? ''), JSON.stringify({ s: ioRun.json.status, sum: (ioRun.json.summary ?? '').slice(0, 40) }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

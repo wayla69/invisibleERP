@@ -199,6 +199,19 @@ export class RetentionService {
     return this.listForProject(Number(p.id));
   }
 
+  // Scheduled sweep (docs/35 Depth) — auto-release every retention tranche whose due date has passed, posting
+  // the release GL for each. Idempotent: a tranche already released is skipped (the release guard). Rides the
+  // BI report scheduler (retention_release_due).
+  async runDueReleases(asOf?: string): Promise<{ scanned: number; released: number; amount: number }> {
+    const due = await this.due(asOf);
+    let released = 0, amount = 0;
+    for (const t of due.due) {
+      try { await this.releaseStandalone({ retentionId: t.retention_id, trancheId: t.tranche_id, releasedBy: 'scheduler' }); released += 1; amount = r2(amount + n(t.amount)); }
+      catch { /* already released / raced — skip idempotently */ }
+    }
+    return { scanned: due.count, released, amount: r2(amount) };
+  }
+
   // Retention releases due for action — pending, date-based tranches whose due date has passed (as_of),
   // joined to the parent ledger row. The seed of the future action-center `retention_due` exception.
   async due(asOf?: string) {

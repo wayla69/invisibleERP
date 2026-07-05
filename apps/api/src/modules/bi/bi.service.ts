@@ -22,6 +22,8 @@ import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
 import { RevRecService } from '../revenue/revrec.service';
 import { ProjectsService } from '../projects/projects.service';
+import { RetentionService } from '../retention/retention.service';
+import { RealEstateService } from '../realestate/realestate.service';
 import { CrmPipelineService } from '../crm/pipeline/crm-pipeline.service';
 import { CrmService } from '../crm/crm.service';
 import { NpsService } from '../nps/nps.service';
@@ -84,6 +86,11 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
+  // Construction/real-estate sweeps (docs/35 Depth) — each idempotent: retention released on its schedule,
+  // bookings expired past their date, overdue property installments surfaced.
+  retention_release_due: { label: 'คืนเงินประกันผลงานที่ถึงกำหนด', labelEn: 'Release due retention' },
+  re_booking_expire: { label: 'ยกเลิกการจองที่หมดอายุ', labelEn: 'Expire lapsed unit bookings' },
+  re_installment_overdue: { label: 'งวดผ่อนอสังหาฯ ที่เกินกำหนด', labelEn: 'Overdue property installments' },
   nps_post_purchase: { label: 'ส่งแบบสอบถาม NPS หลังการขาย', labelEn: 'Send post-purchase NPS surveys' }, // W3 (docs/27)
   membership_revenue_recognize: { label: 'รับรู้รายได้ค่าสมาชิก VIP รายเดือน', labelEn: 'Recognize monthly VIP membership revenue' }, // V4 (docs/29)
   // Likewise: each run recognizes every due TFRS-15 revenue schedule through the current period (idempotent).
@@ -137,6 +144,9 @@ export class BiService implements OnModuleInit {
     // PPM analytics report types (project_evm portfolio EVM, crm_win_loss). Optional so a partial harness
     // still constructs BiService; the full app provides them (ProjectsModule / CrmPipelineModule).
     @Optional() private readonly projects?: ProjectsService,
+    // Construction/real-estate scheduled sweeps (docs/35 Depth). @Optional so partial harnesses still build.
+    @Optional() private readonly retention?: RetentionService,
+    @Optional() private readonly realestate?: RealEstateService,
     @Optional() private readonly crm?: CrmPipelineService,
     // Member CRM (cdp_export_sync action job) — Optional so a partial harness still constructs.
     @Optional() private readonly crmMembers?: CrmService,
@@ -697,6 +707,21 @@ export class BiService implements OnModuleInit {
       if (!this.leases) throw new BadRequestException({ code: 'LEASES_UNAVAILABLE', message: 'Lease service not available', messageTh: 'ระบบสัญญาเช่าไม่พร้อมใช้งาน' });
       const r = await this.leases.runDueLeases(user); // idempotent per (lease, period)
       return { data: r, summary: `Lease run: posted ${r.posted} of ${r.scanned} due leases`, summaryTh: `ลงรายการสัญญาเช่า: ${r.posted} จาก ${r.scanned} สัญญา` };
+    }
+    if (reportType === 'retention_release_due') {
+      if (!this.retention) throw new BadRequestException({ code: 'RETENTION_UNAVAILABLE', message: 'Retention service not available', messageTh: 'ระบบเงินประกันผลงานไม่พร้อมใช้งาน' });
+      const r = await this.retention.runDueReleases(); // idempotent per tranche
+      return { data: r, summary: `Retention release: released ${r.released} of ${r.scanned} due tranches (${r.amount})`, summaryTh: `คืนเงินประกันผลงาน: ${r.released} จาก ${r.scanned} งวด (${r.amount})` };
+    }
+    if (reportType === 're_booking_expire') {
+      if (!this.realestate) throw new BadRequestException({ code: 'REALESTATE_UNAVAILABLE', message: 'Real-estate service not available', messageTh: 'ระบบอสังหาฯ ไม่พร้อมใช้งาน' });
+      const r = await this.realestate.expireDueBookings(); // frees the unit back to available
+      return { data: r, summary: `Booking expiry: expired ${r.expired} of ${r.scanned} lapsed bookings`, summaryTh: `ยกเลิกการจองหมดอายุ: ${r.expired} จาก ${r.scanned} รายการ` };
+    }
+    if (reportType === 're_installment_overdue') {
+      if (!this.realestate) throw new BadRequestException({ code: 'REALESTATE_UNAVAILABLE', message: 'Real-estate service not available', messageTh: 'ระบบอสังหาฯ ไม่พร้อมใช้งาน' });
+      const r = await this.realestate.overdueInstallments(); // detective — surfaces the overdue worklist
+      return { data: r, summary: `Overdue installments: ${r.overdue} pending (${r.total})`, summaryTh: `งวดผ่อนเกินกำหนด: ${r.overdue} งวด (${r.total})` };
     }
     if (reportType === 'nps_post_purchase') {
       if (!this.nps) throw new BadRequestException({ code: 'NPS_UNAVAILABLE', message: 'NPS service not available', messageTh: 'ระบบ NPS ไม่พร้อมใช้งาน' });
