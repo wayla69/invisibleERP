@@ -2,7 +2,7 @@
 
 import { useState, type ComponentProps, type Dispatch, type SetStateAction } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Banknote, BellRing, CalendarClock, CheckCheck, Download, Eraser, HandCoins, PlayCircle, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
+import { Banknote, BellRing, CalendarClock, CheckCheck, Download, Eraser, HandCoins, Mail, PlayCircle, Plus, Printer, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/dialog';
 import { statusVariant } from '@/components/ui';
 import { TrendAreaChart } from '@/components/charts';
+
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // AR/AP aging buckets in escalating-severity order — shared by the overview composition bars and the
 // detail Aging sections. Colours ramp current → 90+ so an overdue-heavy book reads "red" at a glance.
@@ -174,6 +176,14 @@ function ReceivablesTab() {
     onSuccess: (r: any) => { notifySuccess(t('fin.ar_receipt_ok', { no: r.receipt_no, status: r.status })); refresh(); setArForm({ invoice_no: '', amount: '', method: 'Transfer', ref_no: '' }); },
     onError: (e: any) => notifyError(e.message),
   });
+
+  // Email the ใบแจ้งหนี้/ใบวางบิล PDF to the customer (prompts for the recipient address).
+  const emailInv = useMutation({
+    mutationFn: (v: { no: string; to_email: string }) => api<{ to: string }>(`/api/finance/ar/invoices/${encodeURIComponent(v.no)}/send-email`, { method: 'POST', body: JSON.stringify({ to_email: v.to_email }) }),
+    onSuccess: (r) => notifySuccess(t('doc.email_sent', { to: r.to })),
+    onError: (e: any) => notifyError(e.message),
+  });
+  const promptEmail = (no: string) => { const to = window.prompt(t('doc.email_prompt')); if (to) emailInv.mutate({ no, to_email: to }); };
   const syncAr = useMutation({
     mutationFn: () => api('/api/finance/ar/sync', { method: 'POST' }),
     onSuccess: () => { notifySuccess(t('fin.ar_synced')); refresh(); },
@@ -219,7 +229,13 @@ function ReceivablesTab() {
               { key: 'Outstanding_Amount', label: t('fin.col_outstanding'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.Outstanding_Amount)}</span> },
               { key: 'Status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
               { key: 'act', label: '', sortable: false, render: (r: any) => (
-                <Button variant="ghost" size="sm" onClick={() => { setArForm({ invoice_no: r.Invoice_No, amount: String(r.Outstanding_Amount), method: 'Transfer', ref_no: '' }); setArOpen(true); }}>{t('fin.receive')}</Button>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => { setArForm({ invoice_no: r.Invoice_No, amount: String(r.Outstanding_Amount), method: 'Transfer', ref_no: '' }); setArOpen(true); }}>{t('fin.receive')}</Button>
+                  <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}>
+                    <a href={`${BASE}/api/finance/ar/invoices/${encodeURIComponent(r.Invoice_No)}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-4" /></a>
+                  </Button>
+                  <Button variant="ghost" size="sm" disabled={emailInv.isPending} title={t('doc.email')} onClick={() => promptEmail(r.Invoice_No)}><Mail className="size-4" /></Button>
+                </div>
               ) },
             ]}
           />

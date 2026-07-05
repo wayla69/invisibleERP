@@ -124,6 +124,7 @@ import { PdpaModule } from './modules/pdpa/pdpa.module';
 import { GovernanceModule } from './modules/governance/governance.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { PdfModule } from './modules/pdf/pdf.module';
+import { MailModule } from './modules/mail/mail.module';
 
 @Module({
   imports: [
@@ -132,6 +133,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     CommonModule,
     JobsModule, // @Global async job queue + in-process worker (enqueue from any module)
     PdfModule, // @Global HTML→PDF renderer (external-service offload or pooled Chromium)
+    MailModule, // @Global DocEmailService — email a rendered document (PDF attach, HTML fallback) via SMTP
     AuthModule, // exports JwtModule → JwtAuthGuard can inject JwtService
     HealthModule,
     InventoryModule,

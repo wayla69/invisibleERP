@@ -3,8 +3,12 @@ import { eq, and, sql, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { productConfigs, configOptions, pricingRules, quotes, quoteLines } from '../../database/schema/cpq';
 import { docCountersTenant } from '../../database/schema/system';
+import { tenants } from '../../database/schema';
 import { n, fx } from '../../database/queries';
 import { LedgerService } from '../ledger/ledger.service';
+import { QuotePdfService, type QuotePrintData } from './quote-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
+import { sellerParty } from '../../common/doc-party';
 import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
@@ -16,6 +20,10 @@ export class CpqService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     @Optional() private readonly ledger?: LedgerService,
+    // @Optional so the standalone cpq harness (which constructs the service directly) still compiles; both
+    // are provided when the app boots via CpqModule.
+    @Optional() private readonly quotePdf?: QuotePdfService,
+    @Optional() private readonly docEmail?: DocEmailService,
   ) {}
 
   // ── Product Configs ──
@@ -186,6 +194,47 @@ export class CpqService {
     const db = this.db;
     const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, quoteId)).orderBy(quoteLines.lineNo);
     return { lines: lines.map((l: any) => ({ line_no: l.lineNo, description: l.description, qty: n(l.qty), unit_price: n(l.unitPrice), discount_pct: n(l.discountPct), line_total: n(l.lineTotal) })) };
+  }
+
+  // Assemble the printable ใบเสนอราคา (header + lines + our-company seller block) for the PDF/email path.
+  async getQuoteForPrint(quoteId: number): Promise<QuotePrintData> {
+    const db = this.db;
+    const q = await this.assertQuote(quoteId);
+    const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, quoteId)).orderBy(quoteLines.lineNo);
+    const [t] = q.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(q.tenantId))).limit(1) : [null];
+    return {
+      quote_no: q.quoteNo, status: q.status, issued_date: q.issuedDate ?? null, expires_date: q.expiresDate ?? null,
+      currency: q.currency ?? 'THB', customer_name: q.customerName, notes: q.notes ?? null, created_by: q.createdBy ?? null,
+      seller: sellerParty(t),
+      lines: lines.map((l: any) => ({ line_no: l.lineNo, item_code: l.itemCode ?? null, description: l.description, qty: n(l.qty), unit_price: n(l.unitPrice), discount_pct: n(l.discountPct), line_total: n(l.lineTotal) })),
+      subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total),
+    };
+  }
+
+  quotationHtml(q: QuotePrintData): string {
+    if (!this.quotePdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Quote renderer not wired' });
+    return this.quotePdf.quotationHtml(q);
+  }
+
+  async renderQuotePdf(q: QuotePrintData): Promise<Buffer | null> {
+    return this.quotePdf ? this.quotePdf.renderToPdf(this.quotePdf.quotationHtml(q)) : null;
+  }
+
+  // Email the ใบเสนอราคา to the customer as a PDF attachment (HTML fallback when Chromium is absent),
+  // and mark the quote Sent (Draft → Sent) so the pipeline reflects that it went out.
+  async emailQuote(quoteId: number, toEmail: string, user: JwtUser) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const q = await this.getQuoteForPrint(quoteId);
+    const html = this.quotationHtml(q);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: q.seller.email ?? undefined, filename: q.quote_no,
+      subject: `ใบเสนอราคา ${q.quote_no} จาก ${q.seller.name}`,
+      text: `เรียน ${q.customer_name},\n\nแนบใบเสนอราคาเลขที่ ${q.quote_no} ยอดรวม ${q.total.toLocaleString()} ${q.currency} (ยืนราคาถึง ${q.expires_date ?? '-'})\n\nขอบคุณครับ\n${q.seller.name}`,
+      html,
+    });
+    // Transition Draft → Sent (best-effort; a re-send of an already-Sent quote just re-emails).
+    if (q.status === 'Draft') { try { await this.sendQuote(quoteId, user); } catch { /* keep the email result */ } }
+    return { ...res, quote_no: q.quote_no };
   }
 
   // ── Helpers ──

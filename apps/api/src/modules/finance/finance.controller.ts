@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Patch, Param, Query, Body, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body, HttpCode, Res } from '@nestjs/common';
 import { z } from 'zod';
+import type { FastifyReply } from 'fastify';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto, type AdvanceDto, type SettleAdvanceDto } from './finance.service';
@@ -14,6 +15,7 @@ const RejectBody = z.object({ reason: z.string().optional() });
 const AdvanceBody = z.object({ payee: z.string().min(1), amount: z.number().positive(), purpose: z.string().optional(), expense_account: z.string().optional(), tenant_id: z.number().optional(), project_code: z.string().optional(), boq_line_id: z.number().int().positive().optional() });
 const SettleBody = z.object({ settled_expense: z.number().nonnegative(), returned_cash: z.number().nonnegative().optional(), expense_account: z.string().optional() });
 const WriteOffBody = z.object({ tenant_id: z.number().optional(), customer_name: z.string().optional(), amount: z.number().positive(), reason: z.string().min(1) });
+const DocEmailBody = z.object({ to_email: z.string().email() });
 const AllowanceComputeBody = z.object({
   as_of_date: z.string().optional(),
   method: z.enum(['aging', 'percentage']).optional(),
@@ -82,6 +84,23 @@ export class FinanceController {
 
   @Get('ap/statement') @Permissions('creditors', 'exec')
   vendorStatement(@Query('vendor') vendor: string, @Query('from') from?: string, @Query('to') to?: string, @Query('currency') currency?: string) { return this.svc.vendorStatement(vendor, from || undefined, to || undefined, currency || undefined); }
+
+  // Printable ใบแจ้งหนี้/ใบวางบิล (AR billing invoice) — HTML→PDF via the shared renderer (HTML fallback
+  // when Chromium absent). Distinct from the statutory ใบกำกับภาษี under /api/tax-invoices.
+  @Get('ar/invoices/:invoiceNo/pdf') @Permissions('ar', 'exec')
+  async arInvoicePdf(@Param('invoiceNo') invoiceNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const inv = await this.svc.getArInvoiceForPrint(invoiceNo, u);
+    const html = this.svc.arInvoiceHtml(inv);
+    const buf = await this.svc.renderArInvoicePdf(inv);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${invoiceNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  }
+
+  // Email the ใบแจ้งหนี้ to the customer as a PDF attachment.
+  @Post('ar/invoices/:invoiceNo/send-email') @HttpCode(200) @Permissions('ar', 'exec')
+  emailArInvoice(@Param('invoiceNo') invoiceNo: string, @Body(new ZodValidationPipe(DocEmailBody)) b: z.infer<typeof DocEmailBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.emailArInvoice(invoiceNo, b.to_email, u);
+  }
 
   // Petty cash / employee cash advances (EXP-07): issue a float, settle it against actual spend.
   @Post('advances') @Permissions('creditors', 'exec')

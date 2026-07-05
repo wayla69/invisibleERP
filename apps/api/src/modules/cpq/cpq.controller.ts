@@ -1,9 +1,12 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe, Query, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, ParseIntPipe, Query, HttpCode, Res } from '@nestjs/common';
 import { z } from 'zod';
+import type { FastifyReply } from 'fastify';
 import { CpqService } from './cpq.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+
+const EmailBody = z.object({ to_email: z.string().email() });
 
 const ConfigBody = z.object({ code: z.string().min(1), name: z.string().min(1), base_price: z.number().nonnegative().optional(), description: z.string().optional() });
 const OptionBody = z.object({ group_name: z.string().min(1), option_code: z.string().min(1), option_name: z.string().min(1), price_delta: z.number().optional(), is_default: z.boolean().optional() });
@@ -52,6 +55,25 @@ export class CpqController {
   @Permissions('exec')
   @HttpCode(200)
   send(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.sendQuote(id, user); }
+
+  // Printable ใบเสนอราคา (Quotation) — HTML→PDF via the shared renderer, HTML fallback when Chromium absent.
+  @Get('quotes/:id/pdf')
+  @Permissions('exec')
+  async pdf(@Param('id', ParseIntPipe) id: number, @Res() reply: FastifyReply) {
+    const q = await this.svc.getQuoteForPrint(id);
+    const html = this.svc.quotationHtml(q);
+    const buf = await this.svc.renderQuotePdf(q);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${q.quote_no}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  }
+
+  // Email the quotation to the customer as a PDF attachment (marks the quote Sent).
+  @Post('quotes/:id/send-email')
+  @Permissions('exec')
+  @HttpCode(200)
+  sendEmail(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(EmailBody)) b: z.infer<typeof EmailBody>, @CurrentUser() user: JwtUser) {
+    return this.svc.emailQuote(id, b.to_email, user);
+  }
 
   @Post('quotes/:id/accept')
   @Permissions('exec')
