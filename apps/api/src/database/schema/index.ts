@@ -74,6 +74,7 @@ export * from './pos-control';
 export * from './pos-terminal';
 export * from './projects';
 export * from './retention';
+export * from './realestate';
 export * from './mfg-depth';
 export * from './hcm';
 export * from './pricing';

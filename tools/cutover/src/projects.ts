@@ -822,6 +822,57 @@ async function main() {
   const ccList = await inj('GET', '/api/projects/close-reviews', admin);
   ok('PROJ-03: the close review is recorded in the register (Approved)', (ccList.json.reviews ?? []).some((r: any) => r.period === '2026-06' && r.status === 'Approved'), `n=${ccList.json.count}`);
 
+  // ── P4 (docs/35) — real-estate developer vertical: units → booking → contract → installments (RE-01/02/03) ──
+  await inj('POST', '/api/realestate/developments', admin, { dev_code: 'RED-1', name: 'เดอะ คอนโด', location: 'กรุงเทพฯ' });
+  await inj('POST', '/api/realestate/developments/RED-1/units', admin, { unit_no: 'U-101', unit_type: 'condo', area_sqm: 35, list_price: 1000000 });
+  await inj('POST', '/api/realestate/developments/RED-1/units', admin, { unit_no: 'U-102', unit_type: 'condo', area_sqm: 55, list_price: 2000000 });
+  await inj('POST', '/api/realestate/developments/RED-1/units', admin, { unit_no: 'U-103', unit_type: 'condo', area_sqm: 40, list_price: 1000000 });
+  const rlist0 = await inj('GET', '/api/realestate/developments/RED-1/units', admin);
+  ok('RE-01: development unit grid → 3 units, all available', rlist0.json.summary?.total === 3 && rlist0.json.summary?.available === 3, JSON.stringify(rlist0.json.summary));
+
+  const rbk1 = await inj('POST', '/api/realestate/bookings', admin, { dev_code: 'RED-1', unit_no: 'U-101', buyer_name: 'คุณสมชาย', deposit: 50000 });
+  ok('RE-01: book an available unit → held, deposit 50000 (unit → reserved)', rbk1.status < 300 && rbk1.json.status === 'held' && near(rbk1.json.deposit, 50000), JSON.stringify({ s: rbk1.status, st: rbk1.json.status }));
+  const rbkDup = await inj('POST', '/api/realestate/bookings', admin, { dev_code: 'RED-1', unit_no: 'U-101', deposit: 10000 });
+  ok('RE-01: re-book a reserved unit → 400 UNIT_NOT_AVAILABLE', rbkDup.status === 400 && rbkDup.json.error?.code === 'UNIT_NOT_AVAILABLE', `${rbkDup.status} ${rbkDup.json.error?.code}`);
+
+  const rc1 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-101', booking_no: rbk1.json.booking_no, buyer_name: 'คุณสมชาย', discount: 100000, down_payment: 200000, installment_count: 4 });
+  ok('RE-02: draft contract → price 900000 (1,000,000 − 100,000), balance 700000, draft (no GL)',
+    rc1.status < 300 && rc1.json.status === 'draft' && near(rc1.json.price, 900000) && near(rc1.json.balance, 700000), JSON.stringify({ st: rc1.json.status, p: rc1.json.price }));
+  const rc1No = rc1.json.contract_no;
+  const rc1Self = await inj('POST', `/api/realestate/contracts/${rc1No}/approve`, admin);
+  ok('RE-02: drafter self-approves the contract → 400 SOD_SELF_APPROVAL', rc1Self.status === 400 && rc1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${rc1Self.status} ${rc1Self.json.error?.code}`);
+  const rc1Appr = await inj('POST', `/api/realestate/contracts/${rc1No}/approve`, mgr);
+  ok('RE-02: independent approver → active; down_payment 200000, cash_collected 150000 (50000 deposit reclassed)',
+    rc1Appr.status < 300 && rc1Appr.json.status === 'active' && near(rc1Appr.json.down_payment, 200000) && near(rc1Appr.json.cash_collected, 150000), JSON.stringify({ st: rc1Appr.json.status, cc: rc1Appr.json.cash_collected }));
+  const rc1Get = await inj('GET', `/api/realestate/contracts/${rc1No}`, admin);
+  ok('RE-02/03: contract has 4 installments of 175000, outstanding 700000',
+    rc1Get.json.installments?.length === 4 && near(rc1Get.json.installments?.[0]?.amount, 175000) && near(rc1Get.json.outstanding, 700000), JSON.stringify({ n: rc1Get.json.installments?.length, out: rc1Get.json.outstanding }));
+
+  const inst1 = rc1Get.json.installments?.[0]?.id;
+  const pay1 = await inj('POST', `/api/realestate/installments/${inst1}/pay`, admin, { amount: 175000 });
+  ok('RE-03: pay installment 1 (exact 175000) → paid (Dr 1000 / Cr 2410)', pay1.status < 300 && pay1.json.status === 'paid' && /^JE-/.test(pay1.json.entry_no ?? ''), JSON.stringify({ st: pay1.json.status, je: pay1.json.entry_no }));
+  const payDup = await inj('POST', `/api/realestate/installments/${inst1}/pay`, admin, { amount: 175000 });
+  ok('RE-03: pay the same installment again → 400 INSTALLMENT_PAID', payDup.status === 400 && payDup.json.error?.code === 'INSTALLMENT_PAID', `${payDup.status} ${payDup.json.error?.code}`);
+  const inst2 = rc1Get.json.installments?.[1]?.id;
+  const payBad = await inj('POST', `/api/realestate/installments/${inst2}/pay`, admin, { amount: 100000 });
+  ok('RE-03: pay a wrong amount (≠ scheduled) → 400 BAD_AMOUNT', payBad.status === 400 && payBad.json.error?.code === 'BAD_AMOUNT', `${payBad.status} ${payBad.json.error?.code}`);
+  const rc1Get2 = await inj('GET', `/api/realestate/contracts/${rc1No}`, admin);
+  ok('RE-03: after one payment → installments_paid 175000, outstanding 525000', near(rc1Get2.json.installments_paid, 175000) && near(rc1Get2.json.outstanding, 525000), JSON.stringify({ paid: rc1Get2.json.installments_paid, out: rc1Get2.json.outstanding }));
+
+  // no-booking contract (down-payment straight to cash → contract liability, no deposit reclass)
+  const rc2 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-102', down_payment: 400000, installment_count: 2 });
+  const rc2Appr = await inj('POST', `/api/realestate/contracts/${rc2.json.contract_no}/approve`, mgr);
+  ok('RE-02: no-booking contract approved → active, cash_collected 400000 (full down-payment)', rc2Appr.status < 300 && rc2Appr.json.status === 'active' && near(rc2Appr.json.cash_collected, 400000), JSON.stringify({ cc: rc2Appr.json.cash_collected }));
+
+  const rBadDisc = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-103', discount: 2000000, down_payment: 0, installment_count: 1 });
+  ok('RE-02: discount beyond the list price → 400 BAD_DISCOUNT', rBadDisc.status === 400 && rBadDisc.json.error?.code === 'BAD_DISCOUNT', `${rBadDisc.status} ${rBadDisc.json.error?.code}`);
+  const rBadDown = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-103', discount: 0, down_payment: 5000000, installment_count: 0 });
+  ok('RE-02: down-payment beyond the price → 400 BAD_DOWN_PAYMENT', rBadDown.status === 400 && rBadDown.json.error?.code === 'BAD_DOWN_PAYMENT', `${rBadDown.status} ${rBadDown.json.error?.code}`);
+  const rReContract = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-101', down_payment: 0, installment_count: 1 });
+  ok('RE-01: contract an already-contracted unit → 400 UNIT_NOT_CONTRACTABLE', rReContract.status === 400 && rReContract.json.error?.code === 'UNIT_NOT_CONTRACTABLE', `${rReContract.status} ${rReContract.json.error?.code}`);
+  const rlist1 = await inj('GET', '/api/realestate/developments/RED-1/units', admin);
+  ok('RE-01: availability grid ties out → 2 contracted, 1 available', rlist1.json.summary?.contracted === 2 && rlist1.json.summary?.available === 1, JSON.stringify(rlist1.json.summary));
+
   // ── P3 (docs/35) — tender / estimating → award (Track C, PROJ-17) ──
   // Build a priced estimate, submit, record win/loss, and on a WIN award → seed a project + a DRAFT BoQ from
   // the tender lines (the seeded BoQ's own maker-checker approve sets the controlled budget baseline).

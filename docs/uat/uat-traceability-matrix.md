@@ -260,6 +260,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-244 | Progress billing / งวดงาน — BoQ-line valuation, maker-checker certify, retention receivable (P1) | PROJ-15, SoD R17 | 16 §7 (29) / §14 (rev 0.36), 35 P1 |
 | UAT-O2C-245 | Subcontractor management — subcontract vs BoQ budget, valuation certify, retention payable (P2) | PROJ-16, SoD R18 | 16 §7 (30) / §14 (rev 0.37), 35 P2 |
 | UAT-O2C-246 | Tender / estimating → award — seed a project + draft BoQ from the winning bid (P3) | PROJ-17 | 16 §7 (31) / §14 (rev 0.38), 35 P3 |
+| UAT-RE-01 | Real-estate unit inventory — no double allocation; availability grid ties out (P4) | RE-01 | 31 §3–4, 35 P4 (D1) |
+| UAT-RE-02 | Real-estate sale contract — price/discount authority (maker-checker) (P4) | RE-02, SoD R19 | 31 §3–4, 35 P4 (D2) |
+| UAT-RE-03 | Real-estate installment application — pay-once, exact amount (P4) | RE-03 | 31 §3–4, 35 P4 (D2) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

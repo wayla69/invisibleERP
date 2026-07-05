@@ -31,6 +31,10 @@ export const PERMISSIONS = [
   // ── Tender / estimating → award (docs/35 P3, PROJ-17) — build/submit estimates and award a won tender
   //    (which seeds a project + a DRAFT BoQ; the seeded BoQ's own maker-checker controls the budget baseline). ──
   'proj_tender',
+  // ── Real-estate developer vertical (docs/35 P4, RE-01..03) — a property developer's unit sales. re_sales
+  //    manages developments/units/bookings/contracts/installments; re_contract_approve certifies the sale
+  //    contract (maker-checker on the price/discount authority). Ungranted ⇒ the vertical is invisible. ──
+  're_sales', 're_contract_approve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -45,6 +49,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'proj_billing', 'proj_billing_certify',
   'proj_subcon', 'proj_subcon_certify',
   'proj_tender',
+  're_sales', 're_contract_approve',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -65,6 +70,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
+  'Real Estate (Developer)': ['re_sales', 're_contract_approve'],
 };
 
 // Canonical role → default permission seed (init_db DEFAULT_PERMS, verbatim).
@@ -197,6 +203,8 @@ export const SOD_RULES: SodRule[] = [
     a: ['proj_billing'], b: ['proj_billing_certify'], severity: 'High', risk: 'Raise and certify one’s own progress claim — bill work not done and withhold/release retention improperly.', mitigation: 'Separate claim preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-15).' },
   { id: 'R18', dutyA: 'Raise subcontractor valuation', dutyB: 'Certify subcontractor valuation',
     a: ['proj_subcon'], b: ['proj_subcon_certify'], severity: 'High', risk: 'Raise and certify one’s own subcontractor valuation — over-pay a subcontractor / mishandle retention and back-charges.', mitigation: 'Separate valuation preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-16).' },
+  { id: 'R19', dutyA: 'Draft real-estate sale contract', dutyB: 'Approve sale contract',
+    a: ['re_sales'], b: ['re_contract_approve'], severity: 'High', risk: 'Draft and approve one’s own unit sale contract — grant an unauthorised price/discount to a related buyer.', mitigation: 'Separate contract drafting from approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, RE-02).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }
