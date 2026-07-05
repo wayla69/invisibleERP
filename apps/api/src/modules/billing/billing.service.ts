@@ -11,6 +11,7 @@ import { normalizeUsername } from '../../common/username';
 import { isUniqueViolation } from '../../common/db-error';
 import { logger } from '../../observability/logger';
 import type { JwtUser } from '../../common/decorators';
+import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 
 // Public self-serve signup gate (ITGC-AC-18). Always allowed outside production (dev + harnesses run
 // NODE_ENV=test); in production it is FAIL-CLOSED — enabled only when an operator sets PUBLIC_SIGNUP_ENABLED
@@ -75,6 +76,7 @@ export class BillingService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly password: PasswordService,
     @Optional() private readonly ledger?: LedgerService, // optional so hand-constructed test instances still work
+    @Optional() private readonly platformNotifs?: PlatformNotificationsService, // god event feed; optional for partial harnesses
   ) {}
 
   // ───────────────────── Seed (idempotent — run at startup) ─────────────────────
@@ -183,6 +185,7 @@ export class BillingService {
         companyName: dto.company_name, tenantCode: code, adminUsername: username,
         passwordHash: await this.password.hash(dto.admin_password), email: dto.email, industry, status: 'pending',
       }).returning({ id: signupRequests.id });
+      await this.platformNotifs?.emit({ type: 'signup_request', title: `คำขอเปิดบริษัทใหม่: ${dto.company_name}`, body: `รหัส ${code} · ผู้ดูแล ${username}${dto.email ? ` · ${dto.email}` : ''}`, refType: 'signup_request', refId: String(row!.id) });
       return { request_id: Number(row!.id), status: 'pending' };
     } catch (e) {
       if (isUniqueViolation(e)) throw new ConflictException({ code: 'REQUEST_PENDING', message: 'A pending request already exists for this company/username', messageTh: 'มีคำขอเปิดบัญชีนี้รออนุมัติอยู่แล้ว' });
@@ -363,6 +366,7 @@ export class BillingService {
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
     await this.db.update(tenants).set({ suspendedAt: new Date(), suspendedBy: by, suspendReason: reason ?? null }).where(eq(tenants.id, id));
     logger.warn({ event: 'tenant_suspended', tenant_id: id, by, reason: reason ?? null }, 'company suspended');
+    await this.platformNotifs?.emit({ type: 'tenant_suspended', title: `ระงับบริษัท #${id}`, body: `โดย ${by}${reason ? ` — ${reason}` : ''}`, tenantId: id, refType: 'tenant', refId: String(id) });
     return { tenant_id: id, status: 'suspended' };
   }
 
@@ -371,6 +375,7 @@ export class BillingService {
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
     await this.db.update(tenants).set({ suspendedAt: null, suspendedBy: null, suspendReason: null }).where(eq(tenants.id, id));
     logger.info({ event: 'tenant_reactivated', tenant_id: id, by }, 'company reactivated');
+    await this.platformNotifs?.emit({ type: 'tenant_reactivated', title: `คืนสถานะบริษัท #${id}`, body: `โดย ${by}`, tenantId: id, refType: 'tenant', refId: String(id) });
     return { tenant_id: id, status: 'active' };
   }
 
@@ -440,6 +445,7 @@ export class BillingService {
     // actor; this is the ops "a new company was created" notification). A user-facing welcome email/LINE to
     // the new admin is a follow-on — it needs the admin's channel, which isn't set up yet at provision time.
     logger.info({ event: 'tenant_provisioned', tenant_id: Number(tenant.id), code: tenant.code, admin: username, industry }, 'company provisioned');
+    await this.platformNotifs?.emit({ type: 'company_provisioned', title: `เปิดบริษัทใหม่: ${tenant.name}`, body: `รหัส ${tenant.code} · แพ็กเกจ ${planCode} · ผู้ดูแล ${username}`, tenantId: Number(tenant.id), refType: 'tenant', refId: String(tenant.id) });
     return {
       tenant_id: Number(tenant.id),
       tenant_code: tenant.code,

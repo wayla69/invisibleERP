@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, AlertTriangle, Building2, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
 
 import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
@@ -244,6 +244,20 @@ export default function PlatformConsole({
   });
   const ops = useQuery<any>({ queryKey: ['ops-metrics'], queryFn: () => api('/api/ops/metrics') });
   const jobs = useQuery<any>({ queryKey: ['jobs-ops-metrics'], queryFn: () => api('/api/jobs/ops-metrics') });
+  // Platform notification inbox — the durable god event feed (signup requests, company lifecycle) with read state.
+  const notifs = useQuery<{ items: any[]; unread_count: number; total: number }>({
+    queryKey: ['platform-notifs'],
+    queryFn: () => api('/api/admin/notifications?limit=50'),
+    refetchInterval: 45_000,
+  });
+  const markNotif = useMutation({
+    mutationFn: (id: number) => api(`/api/admin/notifications/${id}/read`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => notifs.refetch(),
+  });
+  const markAllNotif = useMutation({
+    mutationFn: () => api('/api/admin/notifications/mark-all-read', { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => { notifs.refetch(); notifySuccess('ทำเครื่องหมายอ่านทั้งหมดแล้ว'); },
+  });
   const comps = companies.data ?? [];
 
   const refresh = () => {
@@ -606,6 +620,44 @@ export default function PlatformConsole({
     </div>
   );
 
+  const notifIcon = (type: string) =>
+    type === 'signup_request' ? <UserPlus className="size-4 text-primary" />
+    : type === 'tenant_suspended' ? <PauseCircle className="size-4 text-destructive" />
+    : type === 'company_provisioned' ? <Building2 className="size-4 text-success" />
+    : <Bell className="size-4 text-muted-foreground" />;
+
+  const notificationsTab = (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{num(notifs.data?.unread_count ?? 0)} ยังไม่อ่าน · ทั้งหมด {num(notifs.data?.total ?? 0)}</span>
+        <Button size="sm" variant="outline" disabled={!(notifs.data?.unread_count ?? 0) || markAllNotif.isPending} onClick={() => markAllNotif.mutate()}>
+          <CheckCheck className="size-3.5" /> อ่านทั้งหมด
+        </Button>
+      </div>
+      <StateView q={notifs}>
+        <div className="divide-y rounded-md border">
+          {(notifs.data?.items ?? []).length === 0 && <div className="p-4 text-center text-xs text-muted-foreground">ยังไม่มีการแจ้งเตือน</div>}
+          {(notifs.data?.items ?? []).map((nt: any) => (
+            <div key={nt.id} className={cn('flex items-start gap-2 p-3 text-sm', !nt.is_read && 'bg-primary/5')}>
+              <div className="mt-0.5 shrink-0">{notifIcon(nt.type)}</div>
+              <div className="grid flex-1 gap-0.5 leading-tight">
+                <span className={cn('truncate', !nt.is_read && 'font-medium')}>{nt.title}</span>
+                {nt.body && <span className="text-xs text-muted-foreground">{nt.body}</span>}
+                <span className="text-[10px] text-muted-foreground">{nt.created_at ? thaiDate(nt.created_at) : ''}</span>
+              </div>
+              {nt.tenant_id != null && (
+                <button type="button" className="shrink-0 text-xs text-primary hover:underline" onClick={() => setDetailId(nt.tenant_id)}>ดูบริษัท</button>
+              )}
+              {!nt.is_read && (
+                <button type="button" className="shrink-0 text-xs text-muted-foreground hover:underline" onClick={() => markNotif.mutate(nt.id)}>อ่านแล้ว</button>
+              )}
+            </div>
+          ))}
+        </div>
+      </StateView>
+    </div>
+  );
+
   // Needs-attention — derived from the company list + request queue (no extra endpoint). "Trial ending soon"
   // = a Trialing company whose trial_ends_at is within the next 7 days.
   const now = Date.now();
@@ -706,6 +758,7 @@ export default function PlatformConsole({
           { key: 'overview', label: 'ภาพรวม', content: overviewTab },
           { key: 'companies', label: `บริษัท (${companies.data?.length ?? 0})`, content: companiesTab },
           { key: 'onboarding', label: pending ? `Onboarding (${pending})` : 'Onboarding', content: onboardingTab },
+          { key: 'notifications', label: (notifs.data?.unread_count ?? 0) > 0 ? `แจ้งเตือน (${notifs.data?.unread_count})` : 'แจ้งเตือน', content: notificationsTab },
           { key: 'activity', label: 'กิจกรรม', content: activityTab },
         ]}
       />

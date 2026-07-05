@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.9** · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+**Status: DRAFT v0.10** · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -550,6 +550,10 @@ the sidebar (visible only to platform owners) — one place to run the whole fle
 
 > **เข้าดูแบบอ่านอย่างเดียว.** เมื่อสวมรอยเข้าดูบริษัท แถบด้านบนมีปุ่มสลับ **อ่านอย่างเดียว ⇄ เปิดให้แก้ไข** —
 > โหมดอ่านอย่างเดียวจะบล็อกการบันทึก/แก้ไขทุกอย่าง (ปลอดภัยสำหรับการตรวจสอบ/ซัพพอร์ต โดยไม่เผลอเปลี่ยนข้อมูลลูกค้า).
+
+> **กล่องแจ้งเตือนแพลตฟอร์ม.** แท็บ **แจ้งเตือน** ในศูนย์ควบคุมรวมเหตุการณ์ที่ต้องรู้ (คำขอเปิดบริษัทใหม่,
+> การเปิด/ระงับ/คืนสถานะบริษัท) เป็นรายการมีสถานะอ่าน/ยังไม่อ่าน — ตัวเลขยังไม่อ่านโชว์บนหัวแท็บ กด **อ่านทั้งหมด**
+> หรืออ่านทีละรายการได้ (ต่างจากการ์ด “ต้องดูแล” ที่โชว์สถานะปัจจุบัน — อันนี้เก็บประวัติเหตุการณ์ไว้).
 
 Everything here is restricted to platform owners by the server, so the menu simply won't appear for a normal
 company Admin.

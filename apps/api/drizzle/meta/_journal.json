@@ -1730,6 +1730,13 @@
       "when": 2023820000073,
       "tag": "0246_tenant_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "7",
+      "when": 2023820000074,
+      "tag": "0247_platform_notifications",
+      "breakpoints": true
     }
   ]
 }

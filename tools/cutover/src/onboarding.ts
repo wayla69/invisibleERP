@@ -203,6 +203,16 @@ async function main() {
   process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
   const rlist = await inj('GET', '/api/admin/signup-requests?status=pending', owner);
   ok('Platform-admin sees the pending request in the queue', rlist.status === 200 && (rlist.json.requests ?? []).some((r: any) => r.id === reqId), `${rlist.status}`);
+  // Platform notification inbox (item 2) — the signup request emitted a god notification; it's unread.
+  // Then mark-all-read clears the unread count.
+  const inbox = await inj('GET', '/api/admin/notifications', owner);
+  const unread0 = (await inj('GET', '/api/admin/notifications/unread-count', owner)).json.unread_count;
+  ok('Platform notification inbox surfaces the signup_request event (unread)',
+    inbox.status === 200 && (inbox.json.items ?? []).some((n: any) => n.type === 'signup_request' && n.is_read === false) && unread0 >= 1,
+    `st=${inbox.status} unread=${unread0}`);
+  const markAll = await inj('POST', '/api/admin/notifications/mark-all-read', owner, {});
+  const unread1 = (await inj('GET', '/api/admin/notifications/unread-count', owner)).json.unread_count;
+  ok('mark-all-read clears the god unread count', markAll.status < 300 && markAll.json.ok === true && unread1 === 0, `st=${markAll.status} marked=${markAll.json.marked} unread=${unread1}`);
   const approve = await inj('POST', `/api/admin/signup-requests/${reqId}/approve`, owner, {});
   ok('Approve → provisions the company (201) + status approved', approve.status === 201 && !!approve.json.tenant_id && approve.json.status === 'approved', `${approve.status} tid=${approve.json.tenant_id}`);
   const qLogin = await login('queueco_admin', 'queueco12345');
