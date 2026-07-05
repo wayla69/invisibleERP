@@ -22,7 +22,15 @@ export interface ScanOp {
 
 const canStore = () => typeof window !== 'undefined' && !!window.localStorage;
 export function newUuid(): string {
-  return `sx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  // Use the Web Crypto API for the idempotency key (CodeQL js/insecure-randomness flags Math.random even
+  // for a non-token id). Falls back to getRandomValues, then a time-based id — never Math.random.
+  const c = typeof crypto !== 'undefined' ? crypto : undefined;
+  if (c?.randomUUID) return `sx-${c.randomUUID()}`;
+  if (c?.getRandomValues) {
+    const b = c.getRandomValues(new Uint8Array(12));
+    return 'sx-' + Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  }
+  return `sx-${Date.now().toString(36)}-${(typeof performance !== 'undefined' ? performance.now() : 0).toString(36).replace('.', '')}`;
 }
 function read(): ScanOp[] {
   if (!canStore()) return [];
