@@ -484,6 +484,25 @@ async function main() {
   const jlAfter = (await db.select().from(s.journalLines)).length;
   ok('Doc templates: no GL impact (journal lines unchanged by template authoring)', jlAfter === jlBefore, `before=${jlBefore} after=${jlAfter}`);
 
+  // ── A4 documents wired live (quotation / purchase_order / payslip) + fiscal-integrity for tax invoices ──
+  ok('Doc templates: quotation/PO/payslip are now LIVE in the catalog',
+    ['quotation', 'purchase_order', 'payslip'].every((k) => (dtTypes.json.doc_types ?? []).some((d: any) => d.key === k && d.status === 'live')),
+    `${(dtTypes.json.doc_types ?? []).filter((d: any) => d.status === 'live').map((d: any) => d.key).join(',')}`);
+  // preview an A4 quotation with an accent colour + header note + footer terms → all honoured in the HTML
+  const qPrev = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'quotation', config: { header: { accent_color: '#0F766E', header_note: 'HDR-NOTE-Q' }, footer: { terms_text: 'TERMS-Q-XYZ' }, totals: { show_amount_in_words: false } } });
+  const qHtml = typeof qPrev.json.html === 'string' ? qPrev.json.html : '';
+  ok('Doc templates: A4 quotation preview honours accent + header note + terms', qPrev.status < 300 && qHtml.includes('#0F766E') && qHtml.includes('HDR-NOTE-Q') && qHtml.includes('TERMS-Q-XYZ'), `len=${qHtml.length} accent=${qHtml.includes('#0F766E')}`);
+  ok('Doc templates: A4 quotation preview honours the amount-in-words OFF toggle', qHtml.length > 0 && !qHtml.includes('จำนวนเงินตัวอย่าง'), `hasWords=${qHtml.includes('จำนวนเงินตัวอย่าง')}`);
+  // core integrity: a minimal A4 template still renders the grand total by default
+  const qMin = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'purchase_order', config: {} });
+  const qMinHtml = typeof qMin.json.html === 'string' ? qMin.json.html : '';
+  ok('Doc templates: A4 core integrity — a minimal PO template still renders the grand total', qMinHtml.includes('รวมทั้งสิ้น') && /\d/.test(qMinHtml), `len=${qMinHtml.length}`);
+  // FISCAL integrity: a tax-invoice template that tries to hide the seller tax-id is OVERRIDDEN (ม.86/4) —
+  // the mandatory เลขประจำตัวผู้เสียภาษี line still renders regardless of the knob.
+  const tiPrev = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'tax_invoice_full', config: { body: { show_seller_tax_id: false, show_seller_address: false } } });
+  const tiHtml = typeof tiPrev.json.html === 'string' ? tiPrev.json.html : '';
+  ok('Doc templates: FISCAL integrity — a tax invoice cannot hide the seller tax-id (ม.86/4 forced on)', tiPrev.status < 300 && tiHtml.includes('เลขประจำตัวผู้เสียภาษี'), `hasTaxId=${tiHtml.includes('เลขประจำตัวผู้เสียภาษี')}`);
+
   // ── custom objects (Platform Phase 11 — A1) ──
   // reuses Phase 1 custom-fields for typed values (entity = object_key). hqaa = HQ admin (RLS-scoped).
   const jlBefore2 = (await db.select().from(s.journalLines)).length;

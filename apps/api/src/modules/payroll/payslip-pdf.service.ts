@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { bahtText } from '../../common/bahttext.util';
 import { wrapA4, sellerHeaderHtml, esc, fmtMoney, thaiDate, type DocParty } from '../../common/doc-html';
+import { type A4TemplateConfig, DEFAULT_A4_TEMPLATE, a4LogoHtml, a4HeaderNoteHtml, a4FooterHtml } from '../../common/a4-template';
 import { PdfRenderer } from '../pdf/pdf-renderer.service';
 
 export interface PayslipPrintData {
@@ -28,6 +29,7 @@ export interface PayslipPrintData {
   // Employer contributions (informational — not deducted from the employee)
   sso_employer: number;
   pf_employer: number;
+  template?: A4TemplateConfig; // resolved active no-code template (presentation only); default when absent
 }
 
 // เดือน (Thai month names) for the period header.
@@ -51,13 +53,13 @@ export class PayslipPdfService {
     return this.pdf.render(html, { format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
   }
 
-  payslipHtml(p: PayslipPrintData): string {
+  payslipHtml(p: PayslipPrintData, cfg: A4TemplateConfig = DEFAULT_A4_TEMPLATE): string {
     const ccy = esc(p.currency || 'THB');
     const earnings = p.base + p.ot_pay;
     const deductions = p.unpaid + p.sso_employee + p.pf_employee + p.wht;
     return wrapA4(`
       <div class="hdr">
-        ${sellerHeaderHtml(p.seller)}
+        ${sellerHeaderHtml(p.seller, { showAddress: cfg.body.show_seller_address, showTaxId: cfg.body.show_seller_tax_id, logoHtml: a4LogoHtml(cfg, p.seller.logo_url), headerNoteHtml: a4HeaderNoteHtml(cfg) })}
         <div class="ttl">สลิปเงินเดือน<div class="sub">Payslip</div><div class="stt">เอกสารลับเฉพาะบุคคล</div></div>
       </div>
       <table class="meta">
@@ -79,13 +81,10 @@ export class PayslipPdfService {
       <table class="totals">
         <tr class="grand"><td class="tlbl">เงินได้สุทธิ (${ccy})</td><td class="tval">${fmtMoney(p.net)}</td></tr>
       </table>
-      ${p.currency === 'THB' ? `<div class="words">( ${esc(bahtText(p.net))} )</div>` : ''}
+      ${p.currency === 'THB' && cfg.totals.show_amount_in_words ? `<div class="words">( ${esc(bahtText(p.net))} )</div>` : ''}
       <div class="rmk">เงินสมทบนายจ้าง (ไม่หักจากพนักงาน): ประกันสังคม ${fmtMoney(p.sso_employer)}${p.pf_employer ? ` · กองทุนสำรองเลี้ยงชีพ ${fmtMoney(p.pf_employer)}` : ''} ${ccy}${p.entry_no ? ` &nbsp;·&nbsp; อ้างอิงบัญชี ${esc(p.entry_no)}` : ''}</div>
-      <div class="foot">
-        <div class="sign">ผู้จัดทำ (ฝ่ายบุคคล)<div class="who"></div></div>
-        <div class="sign">ผู้รับเงิน (พนักงาน)<div class="who">${esc(p.emp_name ?? '')}</div></div>
-      </div>
-    `, 'สลิปเงินเดือน (Payslip)');
+      ${a4FooterHtml(cfg, { leftDefault: 'ผู้จัดทำ (ฝ่ายบุคคล)', rightDefault: 'ผู้รับเงิน (พนักงาน)', rightWho: p.emp_name ?? '' })}
+    `, 'สลิปเงินเดือน (Payslip)', { accentColor: cfg.header.accent_color });
   }
 }
 
