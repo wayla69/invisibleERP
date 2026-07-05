@@ -52,6 +52,10 @@ export function CommandCenterClient({ initialData }: { initialData: Pack | null 
     try { setPack(await api<Pack>('/api/finance/metrics/pack')); } catch { /* keep the last good snapshot */ } finally { setRefreshing(false); }
   }, []);
 
+  // Client-side fetch on mount — the intended fallback when the server prefetch is skipped (serverApi
+  // returns null with no cookie / on prerender), and a fresh revalidation when it wasn't.
+  useEffect(() => { void refetch(); }, [refetch]);
+
   // Live: the ops dashboard refreshes its snapshot → we get a fin_kpi_refresh (or kpi_refresh) → re-pull.
   const { connected } = useRealtime((e) => { if (e.type === 'fin_kpi_refresh' || e.type === 'kpi_refresh') void refetch(); }, { path: '/api/bi/live/stream' });
 
