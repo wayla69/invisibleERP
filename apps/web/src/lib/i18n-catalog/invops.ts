@@ -378,6 +378,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'shop.view_list': { th: 'มุมมองรายการ', en: 'List view' },
   'shop.results_n': { th: '{n} รายการ', en: '{n} items' },
   'shop.loading_more': { th: 'กำลังโหลดเพิ่ม…', en: 'Loading more…' },
+  'shop.view_cart': { th: 'ดูตะกร้า', en: 'View basket' },
   'shop.add': { th: 'ใส่ตะกร้า', en: 'Add' },
   'shop.add_urgent': { th: 'ใส่แบบด่วน', en: 'Add urgent' },
   'shop.urgent': { th: 'ด่วน', en: 'Urgent' },
