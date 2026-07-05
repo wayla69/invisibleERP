@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS platform_notifications (
   type text NOT NULL,                 -- 'signup_request' | 'company_provisioned' | 'tenant_suspended' | 'tenant_reactivated'
   title text NOT NULL,
   body text,
-  tenant_id bigint,                   -- which company it's about (nullable); NOT a tenant-scoping column
+  about_tenant_id bigint,             -- which company it's about (nullable); deliberately NOT named tenant_id
+                                      -- so the RLS loop + tenant-index guard don't treat this platform table
+                                      -- as tenant-scoped (mirrors signup_requests.created_tenant_id).
   ref_type text,
   ref_id text,
   created_at timestamptz NOT NULL DEFAULT now()

@@ -27,7 +27,7 @@ export class PlatformNotificationsService {
     try {
       await this.db.insert(platformNotifications).values({
         type: input.type, title: input.title, body: input.body ?? null,
-        tenantId: input.tenantId ?? null, refType: input.refType ?? null, refId: input.refId ?? null,
+        aboutTenantId: input.tenantId ?? null, refType: input.refType ?? null, refId: input.refId ?? null,
       });
     } catch (e) {
       logger.warn({ err: (e as Error)?.message, type: input.type }, 'platform notification emit failed');
@@ -43,7 +43,7 @@ export class PlatformNotificationsService {
     const rows = await db
       .select({
         id: platformNotifications.id, type: platformNotifications.type, title: platformNotifications.title,
-        body: platformNotifications.body, tenant_id: platformNotifications.tenantId,
+        body: platformNotifications.body, tenant_id: platformNotifications.aboutTenantId,
         ref_type: platformNotifications.refType, ref_id: platformNotifications.refId,
         created_at: platformNotifications.createdAt, read_at: platformNotificationReads.readAt,
       })
