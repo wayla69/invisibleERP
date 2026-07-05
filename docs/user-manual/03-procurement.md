@@ -119,7 +119,9 @@ other PR.
    Each card also shows the item's **on-hand stock** (red **สินค้าหมด** when zero)
    and its **last purchase price**, so you can judge what to request at a glance.
    Tap the **⭐ star** on a product to save it as a **favourite**, then use the
-   **รายการโปรด** chip to see just your favourites (saved on this device).
+   **รายการโปรด** chip to see just your favourites. Favourites now **follow you
+   across devices** (synced to your account, like your sidebar pins) — star
+   something on your phone and it's there on the desktop too.
 2. **Add to basket.** Press **ใส่ตะกร้า** on a product to drop it in the basket;
    press it again (or use the **+ / −** steppers in the basket) to change the
    quantity.
@@ -154,9 +156,11 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 > you have and jumps straight to the basket.
 
 > **Recurring order? Save it as a รายการประจำ.** In the **รายการประจำ** card, name
-> the current basket and press **บันทึก** to save it (on this device); later press
-> **โหลด** to drop that whole list back into the basket, or the bin icon to remove
-> it. Handy for the monthly/weekly supplies you always request.
+> the current basket and press **บันทึก** to save it; later press **โหลด** to drop
+> that whole list back into the basket, or the bin icon to remove it. Handy for the
+> monthly/weekly supplies you always request — saved templates (like your
+> favourites) **sync to your account**, so they're available on any device you sign
+> in from.
 
 > **Got a barcode scanner? Just scan.** The **สแกนบาร์โค้ด** box beside the search
 > field lets any USB/Bluetooth scanner (they type the code and press Enter) add an
