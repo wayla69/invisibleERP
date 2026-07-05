@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { MasterIo } from '@/components/master-io';
 
 type Cat = {
   code: string; name?: string; name_th?: string;
@@ -94,6 +95,8 @@ export default function ItemCategoriesPage() {
             </div>
           )}
         </StateView>
+
+        <MasterIo entityKey="item_categories" base="item-setup" onImported={() => qc.invalidateQueries({ queryKey: ['item-categories'] })} />
       </div>
     </div>
   );

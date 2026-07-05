@@ -3,18 +3,21 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { MasterDataService, parseCsv } from './masterdata.service';
+import { MasterDataService } from './masterdata.service';
 
-const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-const ImportBody = z.object({
+// Import body shared by the admin master-data endpoints and the item-setup IO endpoints. `xlsx` carries a
+// base64-encoded workbook so the exact template/export file can be re-imported without a Save-As-CSV step.
+export const ImportBody = z.object({
   mode: z.enum(['append', 'replace']).default('append'),
-  format: z.enum(['rows', 'csv']).default('rows'),
+  format: z.enum(['rows', 'csv', 'xlsx']).default('rows'),
   csv: z.string().optional(),
+  xlsx: z.string().optional(),
   rows: z.array(z.record(z.any())).optional(),
   skip_errors: z.boolean().optional(),
 });
-type ImportBodyT = z.infer<typeof ImportBody>;
+export type ImportBodyT = z.infer<typeof ImportBody>;
 
 @Controller('api/admin/master-data')
 @Permissions('masterdata')
@@ -44,23 +47,23 @@ export class MasterDataController {
   }
 
   @Post(':entity/import')
-  import(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
-    const rows = b.format === 'csv' ? parseCsv(b.csv ?? '') : (b.rows ?? []);
+  async import(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
+    const rows = await this.svc.rowsFromInput(b);
     return this.svc.importRows(entity, b.mode, rows, u);
   }
 
   // Dry-run: validate every row and report all errors, without touching the DB.
   @Post(':entity/import/validate')
-  validate(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
-    const rows = b.format === 'csv' ? parseCsv(b.csv ?? '') : (b.rows ?? []);
+  async validate(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
+    const rows = await this.svc.rowsFromInput(b);
     return this.svc.validateReport(entity, b.mode, rows, u);
   }
 
   // Validated commit: by default refuses an import with any bad row (imports nothing); with skip_errors it
   // imports the valid rows and reports the rest. Also reports already-existing rows it skipped (append).
   @Post(':entity/import/checked')
-  importChecked(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
-    const rows = b.format === 'csv' ? parseCsv(b.csv ?? '') : (b.rows ?? []);
+  async importChecked(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
+    const rows = await this.svc.rowsFromInput(b);
     return this.svc.importChecked(entity, b.mode, rows, u, b.skip_errors ?? false);
   }
 }

@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { MasterIo } from '@/components/master-io';
 
 type Tax = {
   code: string; name?: string; name_th?: string; kind?: 'vat' | 'wht'; rate?: number;
@@ -111,6 +112,8 @@ export default function TaxCodesPage() {
             </div>
           )}
         </StateView>
+
+        <MasterIo entityKey="tax_codes" base="item-setup" onImported={() => qc.invalidateQueries({ queryKey: ['tax-codes'] })} />
       </div>
     </div>
   );

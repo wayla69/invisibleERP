@@ -229,6 +229,13 @@ configuration and bills of materials.
 
 **Screen:** `/master-data` · **Required permission:** `masterdata`.
 
+> **On the setup screens too.** **หมวดสินค้า (Item Categories)** (`/setup/item-categories`)
+> and **รหัสภาษี (Tax Codes — VAT / WHT)** (`/setup/tax-codes`) now carry the **same
+> Export / Template / Import panel** at the bottom of their own page — so you can bulk-load
+> or download those two lists without leaving for the Master Data screen. There it needs
+> only the setup permission for that page (`md_item` / `md_config` / `masterdata` / `exec`),
+> not the broad `masterdata` duty.
+
 You can load many records at once from a spreadsheet — items, customers, vendors,
 locations, prices, promotions, BoMs, **menu items (POS)**, assets, and the item-posting
 setup records **หมวดสินค้า (Item Categories)** and **รหัสภาษี (Tax Codes — VAT / WHT)**.
@@ -247,7 +254,9 @@ Re-importing the same file is safe: rows whose **SKU** already exists are skippe
 duplicated.
 
 1. **Download the template** (or **export** the current data) for the record type,
-   fill it in, and save as **CSV**.
+   and fill it in. Keep it as **Excel (.xlsx)** or save as **CSV** — the importer
+   accepts **both**, so the file you just downloaded goes straight back in with no
+   “Save As CSV” step.
 2. **Choose a file** — the system **checks every row first** (a dry run that
    changes nothing) and shows a **preview**: how many rows are valid, and a table
    of any problems (missing required value, a number/date that won't parse, or a
