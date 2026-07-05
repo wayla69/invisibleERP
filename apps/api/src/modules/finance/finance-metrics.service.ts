@@ -424,9 +424,9 @@ export class FinanceMetricsService {
   // FX exposure — open AR (receivable) and AP (payable) outstanding by non-THB currency (face amounts).
   private async fxExposure() {
     const arRows = await this.db.select({ currency: arInvoices.currency, out: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)),0)` })
-      .from(arInvoices).where(and(sql`${arInvoices.status}::text <> 'Paid'`, ne(arInvoices.currency, 'THB'))).groupBy(arInvoices.currency);
+      .from(arInvoices).where(and(ne(arInvoices.status, 'Paid'), ne(arInvoices.currency, 'THB'))).groupBy(arInvoices.currency);
     const apRows = await this.db.select({ currency: apTransactions.currency, out: sql<string>`coalesce(sum(${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)),0)` })
-      .from(apTransactions).where(and(sql`${apTransactions.status}::text <> 'Paid'`, ne(apTransactions.currency, 'THB'))).groupBy(apTransactions.currency);
+      .from(apTransactions).where(and(ne(apTransactions.status, 'Paid'), ne(apTransactions.currency, 'THB'))).groupBy(apTransactions.currency);
     const by = new Map<string, { currency: string; receivable: number; payable: number }>();
     for (const r of arRows) { const c = r.currency ?? '—'; const e = by.get(c) ?? { currency: c, receivable: 0, payable: 0 }; e.receivable = round2(num(r.out)); by.set(c, e); }
     for (const r of apRows) { const c = r.currency ?? '—'; const e = by.get(c) ?? { currency: c, receivable: 0, payable: 0 }; e.payable = round2(num(r.out)); by.set(c, e); }
