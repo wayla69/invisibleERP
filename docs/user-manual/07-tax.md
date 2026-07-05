@@ -60,6 +60,22 @@ never reused).
 
 [screenshot: tax invoice list with full/abbreviated tabs]
 
+> **Branding the full tax invoice.** The **full tax invoice (ใบกำกับภาษีเต็มรูป)** PDF now uses your
+> company's active **document template** — set it up in **Settings → Document templates** (choose
+> *ใบกำกับภาษีเต็มรูป*). You can adjust the accent colour, logo, an extra header note, footer terms,
+> the signature captions, and whether the amount-in-words line prints. This is **presentation only** —
+> for legal (ม.86/4) reasons the seller name, address and Tax ID **always print** even if you switch
+> those toggles off, and the "ใบกำกับภาษี" heading, VAT line and total can never be hidden or changed.
+> If no template is set, the standard brand layout is used. See *Platform customization → Document
+> templates* (`12-platform-customization.md`).
+
+> **Branding the abbreviated slip.** The **abbreviated tax invoice (ใบกำกับภาษีอย่างย่อ, ม.86/6)** is an
+> 80mm thermal slip, so its template exposes only the two things that make sense on receipt paper: a
+> **header note** (a slogan/branch line under your shop name) and **footer notes** (a bottom line + extra
+> lines). Choose *ใบกำกับภาษีอย่างย่อ* in **Settings → Document templates** — the live preview shows the
+> real slip. The seller name/Tax ID, the "ใบกำกับภาษีอย่างย่อ" title and the VAT-inclusive total always
+> print (ม.86/6); accent colour, logo and signatures don't apply to a thermal slip.
+
 ### Issue a credit note / debit note (ใบลดหนี้ ม.86/10 / ใบเพิ่มหนี้ ม.86/9)
 
 When a sale changes **after** its tax invoice was issued, adjust it with a note — never by editing or

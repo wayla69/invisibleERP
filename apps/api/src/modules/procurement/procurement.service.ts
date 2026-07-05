@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, invBalances, projects, tenants } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -13,6 +13,8 @@ import { ymd } from '../../database/queries';
 import { GrPdfService, type GrPrintData } from './gr-pdf.service';
 import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
+import { normalizeA4Template } from '../../common/a4-template';
+import { DocumentTemplatesService } from '../document-templates/document-templates.service';
 import type { JwtUser } from '../../common/decorators';
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -43,6 +45,7 @@ export class ProcurementService {
     @Optional() private readonly commitments?: CommitmentsService, // M1 (PROJ-12) — BoQ-line budget encumbrance
     @Optional() private readonly grPdf?: GrPdfService,             // ใบรับสินค้า renderer
     @Optional() private readonly docEmail?: DocEmailService,        // @Global MailModule
+    @Optional() private readonly docTemplates?: DocumentTemplatesService, // no-code PO template (presentation)
   ) {}
 
   // D2 — best-effort LINE push to the requester(s) of every PR linked to a PO (pr_items.po_no), closing
@@ -180,40 +183,89 @@ export class ProcurementService {
     return { items: rows.map((r: any) => ({ item_id: r.item_id, item_description: r.item_description ?? null, uom: r.uom ?? null, unit_price: n(r.unit_price), last_price: lastPrice.has(r.item_id) ? lastPrice.get(r.item_id)! : null })) };
   }
 
-  // Product catalog for the "shop → basket → requisition" screen (pr_raise). A read-only browse of the
-  // item master GROUPED BY product category so staff can pick items into a basket and check out a PR
-  // (createPr) that lands with procurement. Category label comes from item_categories (via items.category_id,
-  // RLS-scoped to the caller's tenant), falling back to the free-text items.category, then "ไม่ระบุหมวด".
-  // Optional keyword (code/description ILIKE) + category-key filter; `items` is company-wide.
-  async catalog(_user: JwtUser, opts?: { q?: string; category?: string; limit?: number }) {
+  // Product catalog for the "shop → basket → requisition" screen (pr_raise). A read-only, PAGINATED browse
+  // of the item master for a Grab/Shopee-style grid/list: an infinite-scroll page of items (offset/limit)
+  // for the selected category + keyword, plus the FULL category summary (chips stay stable while paging).
+  // Category label comes from item_categories (via items.category_id, RLS-scoped to the caller's tenant),
+  // falling back to the free-text items.category, then "ไม่ระบุหมวด". `items` is company-wide.
+  async catalog(user: JwtUser, opts?: { q?: string; category?: string; limit?: number; offset?: number }) {
     const db = this.db;
     const kw = (typeof opts?.q === 'string' ? opts.q : '').trim().slice(0, 100);
     const cat = (typeof opts?.category === 'string' ? opts.category : '').trim().slice(0, 100);
-    const limit = Math.min(Math.max(opts?.limit ?? 500, 1), 1000);
+    const limit = Math.min(Math.max(opts?.limit ?? 24, 1), 100);
+    const offset = Math.max(opts?.offset ?? 0, 0);
+    const catLabel = (r: any) => String(r.cat_name_th || r.cat_name || r.free_category || 'ไม่ระบุหมวด');
+    const catKey = (r: any) => String(r.cat_code || r.free_category || 'uncategorized');
+    const kwWhere = kw ? or(ilike(items.itemId, `%${kw}%`), ilike(items.itemDescription, `%${kw}%`)) : undefined;
+
+    // Category summary (+ per-category totals) — one grouped aggregate over the keyword filter (DB-side
+    // count), folded into the derived category key/label. Drives the chip row and the paging total.
+    const agg = await db.select({
+      cat_code: itemCategories.code, cat_name: itemCategories.name, cat_name_th: itemCategories.nameTh,
+      free_category: items.category, n: sql<number>`count(*)`,
+    }).from(items).leftJoin(itemCategories, eq(items.categoryId, itemCategories.id))
+      .where(kwWhere ?? sql`true`)
+      .groupBy(itemCategories.code, itemCategories.name, itemCategories.nameTh, items.category);
+    const catMap = new Map<string, { key: string; label: string; count: number }>();
+    let totalAll = 0;
+    for (const r of agg) {
+      const key = catKey(r); const cnt = Number(r.n ?? 0); totalAll += cnt;
+      const e = catMap.get(key) ?? { key, label: catLabel(r), count: 0 }; e.count += cnt; catMap.set(key, e);
+    }
+    const categories = [...catMap.values()].sort((a, b) => a.label.localeCompare(b.label, 'th'));
+    const total = cat ? (catMap.get(cat)?.count ?? 0) : totalAll;
+
+    // Selected-category filter on the DERIVED key (real category code, else the free-text value, else the
+    // "uncategorized" bucket = no category at all). `and()` ignores undefined, so it composes cleanly with
+    // the keyword filter for the page slice (both undefined ⇒ fall back to `true`).
+    const catWhere = cat === 'uncategorized'
+      ? and(isNull(items.categoryId), or(isNull(items.category), eq(items.category, '')))
+      : cat
+        ? or(eq(itemCategories.code, cat), and(isNull(items.categoryId), eq(items.category, cat)))
+        : undefined;
+
     const rows = await db.select({
       item_id: items.itemId, item_description: items.itemDescription, uom: items.uom,
       unit_price: items.unitPrice, image_key: items.imageKey,
       free_category: items.category, cat_name: itemCategories.name, cat_name_th: itemCategories.nameTh, cat_code: itemCategories.code,
     }).from(items).leftJoin(itemCategories, eq(items.categoryId, itemCategories.id))
-      .where(kw ? or(ilike(items.itemId, `%${kw}%`), ilike(items.itemDescription, `%${kw}%`)) : sql`true`)
-      .orderBy(asc(items.itemDescription)).limit(limit);
-    const catLabel = (r: any) => String(r.cat_name_th || r.cat_name || r.free_category || 'ไม่ระบุหมวด');
-    const catKey = (r: any) => String(r.cat_code || r.free_category || 'uncategorized');
-    // distinct category summary over the (keyword-filtered) result so the pills stay stable while a
-    // single category is selected client-side or via the `category` filter below.
-    const catMap = new Map<string, { key: string; label: string; count: number }>();
-    for (const r of rows) {
-      const key = catKey(r); const e = catMap.get(key) ?? { key, label: catLabel(r), count: 0 };
-      e.count++; catMap.set(key, e);
+      .where(and(kwWhere, catWhere) ?? sql`true`)
+      .orderBy(asc(items.itemDescription), asc(items.itemId)).limit(limit).offset(offset);
+
+    // Per-item context for THIS page only (bounded to `limit`): on-hand across the caller's tenant locations
+    // (like lowStock) + the last purchase price (most recent PO line, like searchItems). Both nullable.
+    const ids = rows.map((r) => r.item_id).filter(Boolean);
+    const onHandMap = new Map<string, number>();
+    const lastPriceMap = new Map<string, number>();
+    if (ids.length) {
+      const bal = await db.select({ itemId: invBalances.itemId, onHand: sql<string>`sum(${invBalances.onHandQty})` })
+        .from(invBalances)
+        .where(and(inArray(invBalances.itemId, ids), user.tenantId != null ? eq(invBalances.tenantId, user.tenantId) : undefined))
+        .groupBy(invBalances.itemId);
+      for (const b of bal) onHandMap.set(String(b.itemId), n(b.onHand));
+      const pr = await db.select({ itemId: poItems.itemId, unitPrice: poItems.unitPrice, id: poItems.id })
+        .from(poItems).where(inArray(poItems.itemId, ids)).orderBy(desc(poItems.id));
+      for (const p of pr) if (!lastPriceMap.has(String(p.itemId))) lastPriceMap.set(String(p.itemId), n(p.unitPrice));
     }
-    const categories = [...catMap.values()].sort((a, b) => a.label.localeCompare(b.label, 'th'));
-    let list = rows.map((r: any) => ({
+
+    const list = rows.map((r) => ({
       item_id: r.item_id, item_description: r.item_description ?? null, uom: r.uom ?? null,
       unit_price: n(r.unit_price), image_key: r.image_key ?? null,
       category: catLabel(r), category_key: catKey(r),
+      on_hand: onHandMap.has(r.item_id) ? onHandMap.get(r.item_id)! : null,
+      last_price: lastPriceMap.has(r.item_id) ? lastPriceMap.get(r.item_id)! : null,
     }));
-    if (cat) list = list.filter((x) => x.category_key === cat);
-    return { items: list, categories, count: list.length };
+    return { items: list, categories, total, offset, limit, has_more: offset + list.length < total, count: list.length };
+  }
+
+  // Thumbnail for a catalog item (pr_raise) — returns the in-DB image data-URL so the shop grid can show it
+  // as an inline <img>. Same low-risk browse duty as the catalog itself (the item-master `images` admin
+  // endpoint is masterdata-gated). 404 when the item has no image.
+  async catalogItemImage(_user: JwtUser, itemId: string) {
+    const id = String(itemId ?? '').slice(0, 100);
+    const [r] = await this.db.select({ dataUrl: itemImages.dataUrl }).from(itemImages).where(eq(itemImages.itemId, id)).limit(1);
+    if (!r?.dataUrl) throw new NotFoundException({ code: 'NO_IMAGE', message: 'No image for item', messageTh: 'ไม่มีรูปสำหรับสินค้านี้' });
+    return { item_id: id, data_url: r.dataUrl };
   }
 
   // Vendor search for the PR→PO panel — pick a real supplier (ties the PO to the vendor master, so
@@ -645,6 +697,9 @@ export class ProcurementService {
     const subtotal = lines.reduce((a, l) => a + l.amount, 0);
     const vatRate = t?.vatRegistered ? n(t.vatRate ?? 0.07) : 0;
     const vatAmount = Math.round(subtotal * vatRate * 100) / 100;
+    // Resolve the tenant's active PO template (presentation only); a lookup failure never blocks the doc.
+    let template = normalizeA4Template({});
+    try { if (this.docTemplates) template = normalizeA4Template(await this.docTemplates.resolveActive('purchase_order')); } catch { /* keep default */ }
 
     return {
       po_no: po.poNo, po_date: po.poDate ?? null, expected_date: po.expectedDate ?? null, status: String(po.status ?? ''),
@@ -653,12 +708,13 @@ export class ProcurementService {
       buyer: {
         name: t?.legalName || t?.name || 'บริษัทของฉัน', address: buyerAddress || (t?.address ?? '-'),
         tax_id: t?.taxId ?? null, branch_label: t?.branchLabelTh ?? 'สำนักงานใหญ่', phone: t?.phone ?? null,
+        logo_url: t?.logoUrl ?? null,
       },
       vendor: {
         name: vendorRow?.name ?? po.vendorName ?? '-', address: vendorRow?.address ?? null, tax_id: vendorRow?.taxId ?? null,
         contact: vendorRow?.contact ?? null, phone: vendorRow?.phone ?? null, payment_terms: vendorRow?.paymentTerms ?? null,
       },
-      lines, subtotal, vat_rate: vatRate, vat_amount: vatAmount, grand_total: Math.round((subtotal + vatAmount) * 100) / 100,
+      lines, subtotal, vat_rate: vatRate, vat_amount: vatAmount, grand_total: Math.round((subtotal + vatAmount) * 100) / 100, template,
     };
   }
 
@@ -682,11 +738,20 @@ export class ProcurementService {
     return this.grPdf.goodsReceiptHtml(g);
   }
   renderGrPdf(g: GrPrintData): Promise<Buffer | null> { return this.grPdf ? this.grPdf.renderToPdf(this.grPdf.goodsReceiptHtml(g)) : Promise.resolve(null); }
-  async emailGr(grNo: string, toEmail: string, user: JwtUser) {
+  // Recent goods receipts (for the /receiving list surface — print/email each). goods_receipts carries no
+  // tenant_id (procurement is buyer-side), consistent with the existing GR print/email endpoints.
+  async listGrs(_user: JwtUser, limit = 50) {
+    const db = this.db;
+    const rows = await db.select().from(goodsReceipts).orderBy(desc(goodsReceipts.id)).limit(Math.min(Math.max(limit, 1), 100));
+    return { grs: rows.map((g: any) => ({ gr_no: g.grNo, gr_date: g.grDate ?? null, po_no: g.poNo ?? null, vendor_name: g.vendorName ?? null, currency: g.currency ?? 'THB', received_by: g.receivedBy ?? null })), count: rows.length };
+  }
+
+  async emailGr(grNo: string, toEmail: string | undefined, user: JwtUser) {
     if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
     const g = await this.getGrForPrint(grNo, user);
+    // Default the recipient to the vendor's email on file (master data) when to_email is omitted.
     const res = await this.docEmail.sendDocument({
-      to: toEmail, from: g.seller.email ?? undefined, filename: g.gr_no,
+      to: toEmail?.trim() || g.vendor.email || '', from: g.seller.email ?? undefined, filename: g.gr_no,
       subject: `ใบรับสินค้า ${g.gr_no} จาก ${g.seller.name}`,
       text: `แนบใบรับสินค้าเลขที่ ${g.gr_no}${g.po_no ? ` (อ้างอิง PO ${g.po_no})` : ''} จำนวน ${g.lines.length} รายการ\n\n${g.seller.name}`,
       html: this.goodsReceiptHtml(g),

@@ -15,7 +15,9 @@ const RejectBody = z.object({ reason: z.string().optional() });
 const AdvanceBody = z.object({ payee: z.string().min(1), amount: z.number().positive(), purpose: z.string().optional(), expense_account: z.string().optional(), tenant_id: z.number().optional(), project_code: z.string().optional(), boq_line_id: z.number().int().positive().optional() });
 const SettleBody = z.object({ settled_expense: z.number().nonnegative(), returned_cash: z.number().nonnegative().optional(), expense_account: z.string().optional() });
 const WriteOffBody = z.object({ tenant_id: z.number().optional(), customer_name: z.string().optional(), amount: z.number().positive(), reason: z.string().min(1) });
-const DocEmailBody = z.object({ to_email: z.string().email() });
+// to_email optional — when omitted the service defaults the recipient to the counterparty's email on file
+// (master data: the customer for the AR invoice / statement / receipt).
+const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 const AllowanceComputeBody = z.object({
   as_of_date: z.string().optional(),
   method: z.enum(['aging', 'percentage']).optional(),
@@ -104,6 +106,11 @@ export class FinanceController {
     if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="statement-vendor.pdf"`).header('Content-Length', buf.length).send(buf);
     else reply.header('Content-Type', 'text/html; charset=utf-8').send(this.svc.statementHtml(s));
   }
+
+  // Recent AR receipts — the finance list surface (print/email each ใบสำคัญรับเงิน).
+  // Declared before `ar/receipts/:receiptNo/pdf` so the literal `receipts` is never captured as a receiptNo.
+  @Get('ar/receipts') @Permissions('ar', 'exec')
+  listArReceipts(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listArReceipts(u, limit ? Number(limit) : 50); }
 
   // Printable ใบสำคัญรับเงิน (AR receipt voucher).
   @Get('ar/receipts/:receiptNo/pdf') @Permissions('ar', 'exec')

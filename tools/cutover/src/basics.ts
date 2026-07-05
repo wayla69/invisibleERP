@@ -368,7 +368,7 @@ async function main() {
   };
 
   // ───────────────────── Customer / vendor statements of account ─────────────────────
-  const [stmtT] = await db.insert(s.tenants).values({ code: 'STMT', name: 'Statement Customer' }).returning({ id: s.tenants.id });
+  const [stmtT] = await db.insert(s.tenants).values({ code: 'STMT', name: 'Statement Customer', email: 'stmt@cust.example' }).returning({ id: s.tenants.id });
   const stmtTid = Number(stmtT.id);
   await db.insert(s.arInvoices).values([
     { invoiceNo: 'INV-S1', invoiceDate: '2026-01-10', dueDate: '2026-02-10', tenantId: stmtTid, amount: '1000', paidAmount: '400', status: 'Partial' },
@@ -385,8 +385,15 @@ async function main() {
   ok('Statement print: PDF/HTML contains "ใบแจ้งยอดบัญชี" + closing (1,100.00)', stmtPdf.status === 200 && stmtPdf.text.includes('ใบแจ้งยอดบัญชี') && stmtPdf.text.includes('1,100.00'), `${stmtPdf.status} ${String(stmtPdf.text).slice(0, 50)}`);
   const stmtEmail = await inj('POST', `/api/finance/ar/statement/send-email?tenant_id=${stmtTid}&from=2026-01-01&to=2026-02-28`, admin, { to_email: 'customer@example.com' });
   ok('Statement email path wired → EMAIL_NOT_CONFIGURED (503) with no SMTP in CI', stmtEmail.status === 503 && stmtEmail.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${stmtEmail.status} ${stmtEmail.json.error?.code}`);
+  // to_email OPTIONAL — omitting it defaults the recipient to the party's email on file (master data). The
+  // STMT tenant has an email, so the send resolves a recipient and reaches the (unconfigured) transport → 503
+  // rather than 400 NO_RECIPIENT (which is what a party with no email on file would return).
+  const stmtEmailDefault = await inj('POST', `/api/finance/ar/statement/send-email?tenant_id=${stmtTid}&from=2026-01-01&to=2026-02-28`, admin, {});
+  ok('Statement email defaults recipient to the customer email on file when to_email omitted (→ 503, not NO_RECIPIENT)', stmtEmailDefault.status === 503 && stmtEmailDefault.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${stmtEmailDefault.status} ${stmtEmailDefault.json.error?.code}`);
   const rcpPdf = await inj('GET', '/api/finance/ar/receipts/RCP-S1/pdf', admin);
   ok('AR receipt print: PDF/HTML contains "ใบสำคัญรับเงิน" + amount (400.00)', rcpPdf.status === 200 && rcpPdf.text.includes('ใบสำคัญรับเงิน') && rcpPdf.text.includes('400.00'), `${rcpPdf.status} ${String(rcpPdf.text).slice(0, 50)}`);
+  const rcpList = await inj('GET', '/api/finance/ar/receipts', admin);
+  ok('AR receipts list surface returns RCP-S1 (for print/email)', rcpList.status === 200 && (rcpList.json.receipts ?? []).some((r: any) => r.receipt_no === 'RCP-S1'), `${rcpList.status} n=${rcpList.json.count}`);
   const dunPdf = await inj('GET', '/api/finance/ar/collections/INV-A/dunning-letter/pdf', admin);
   ok('Dunning letter print: PDF/HTML contains "หนังสือทวงถามหนี้" + invoice (INV-A)', dunPdf.status === 200 && dunPdf.text.includes('หนังสือทวงถามหนี้') && dunPdf.text.includes('INV-A'), `${dunPdf.status} ${String(dunPdf.text).slice(0, 50)}`);
   // Multi-currency: a separate customer with a THB invoice + a USD invoice (fx 34).
@@ -646,8 +653,11 @@ async function main() {
   // Shop/basket requisition screen (/shop) — the product-catalog browse feeding the basket. Read-only,
   // grouped by product category, same low-risk pr_raise duty as raising the PR itself. Assert the envelope
   // (items + categories) and the urgent-priority checkout path (priority:'Urgent' → PR carries it through).
-  const shopCat = await inj('GET', '/api/procurement/catalog?limit=1000', admin);
-  ok('Shop catalog: browse endpoint returns items + category summary (pr_raise)', shopCat.status === 200 && Array.isArray(shopCat.json?.items) && Array.isArray(shopCat.json?.categories), `${shopCat.status} items=${(shopCat.json?.items ?? []).length} cats=${(shopCat.json?.categories ?? []).length}`);
+  const shopCat = await inj('GET', '/api/procurement/catalog?limit=24&offset=0', admin);
+  const shopCatItemsOk = (shopCat.json?.items ?? []).every((it: any) => 'on_hand' in it && 'last_price' in it);
+  ok('Shop catalog: paginated browse returns items (+on_hand/last_price) + category summary + paging fields (pr_raise)', shopCat.status === 200 && Array.isArray(shopCat.json?.items) && shopCatItemsOk && Array.isArray(shopCat.json?.categories) && typeof shopCat.json?.total === 'number' && typeof shopCat.json?.has_more === 'boolean', `${shopCat.status} items=${(shopCat.json?.items ?? []).length} cats=${(shopCat.json?.categories ?? []).length} total=${shopCat.json?.total} more=${shopCat.json?.has_more}`);
+  const shopImg = await inj('GET', '/api/procurement/catalog/items/NO-SUCH-ITEM/image', admin);
+  ok('Shop catalog: thumbnail endpoint 404s for an item with no image (NO_IMAGE)', shopImg.status === 404 && shopImg.json?.error?.code === 'NO_IMAGE', `${shopImg.status} ${shopImg.json?.error?.code}`);
   const prUrgent = await inj('POST', '/api/procurement/prs', admin, { remarks: 'ด่วน จากหน้าเลือกซื้อสินค้า', priority: 'Urgent', items: [{ item_id: 'ปากกาลูกลื่น 12 ด้าม', item_description: 'ปากกาลูกลื่น 12 ด้าม', request_qty: 1, uom: 'กล่อง', reason: 'ด่วน' }] });
   ok('Shop checkout: urgent free-text (off-catalog) basket line raises a PR with priority=Urgent', prUrgent.status === 201 && /^PR-/.test(prUrgent.json?.pr_no ?? ''), `${prUrgent.status} ${JSON.stringify(prUrgent.json).slice(0, 70)}`);
   const poCap = await inj('POST', '/api/procurement/pos', admin, { vendor_name: 'Capital Vendor', expected_date: daysAgo(0), items: [{ item_id: 'LAPTOP', item_description: 'Dev laptop', order_qty: 2, unit_price: 25000, uom: 'EA', is_capital: true }] });
@@ -673,6 +683,8 @@ async function main() {
   // Printable ใบรับสินค้า (Goods Receipt Note) — title + received item.
   const grPdf = await inj('GET', `/api/procurement/grs/${grCap.json?.gr_no}/pdf`, admin);
   ok('GR note print: PDF/HTML contains "ใบรับสินค้า" + item (LAPTOP)', grPdf.status === 200 && grPdf.text.includes('ใบรับสินค้า') && grPdf.text.includes('LAPTOP'), `${grPdf.status} ${String(grPdf.text).slice(0, 50)}`);
+  const grList = await inj('GET', '/api/procurement/grs', admin);
+  ok('GR list surface returns the created GR (for print/email)', grList.status === 200 && (grList.json.grs ?? []).some((g: any) => g.gr_no === grCap.json?.gr_no), `${grList.status} n=${grList.json.count}`);
   // Capital goods must NOT be capitalised into inventory (1200) at receipt — they route to 1500 via FA-10.
   const elig = (await inj('GET', `/api/assets/registrations/eligible?gr_no=${grCap.json?.gr_no}`, admin)).json;
   ok('Capitalize: GR capital line is eligible for capitalisation (suggested cost = 50000)', (elig.eligible ?? []).length === 1 && near(elig.eligible?.[0]?.suggested_cost, 50000), `n=${elig.eligible?.length} cost=${elig.eligible?.[0]?.suggested_cost}`);

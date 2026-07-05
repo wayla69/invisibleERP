@@ -9,6 +9,8 @@ import { LedgerService } from '../ledger/ledger.service';
 import { QuotePdfService, type QuotePrintData } from './quote-pdf.service';
 import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
+import { normalizeA4Template } from '../../common/a4-template';
+import { DocumentTemplatesService } from '../document-templates/document-templates.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
@@ -24,6 +26,9 @@ export class CpqService {
     // are provided when the app boots via CpqModule.
     @Optional() private readonly quotePdf?: QuotePdfService,
     @Optional() private readonly docEmail?: DocEmailService,
+    // Resolve the tenant's active no-code quotation template at print time (presentation only). @Optional so
+    // the standalone cpq harness still constructs; absent ⇒ the built-in default layout.
+    @Optional() private readonly docTemplates?: DocumentTemplatesService,
   ) {}
 
   // ── Product Configs ──
@@ -202,22 +207,25 @@ export class CpqService {
     const q = await this.assertQuote(quoteId);
     const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, quoteId)).orderBy(quoteLines.lineNo);
     const [t] = q.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(q.tenantId))).limit(1) : [null];
+    // Resolve the tenant's active quotation template (presentation only); a lookup failure never blocks the doc.
+    let template = normalizeA4Template({});
+    try { if (this.docTemplates) template = normalizeA4Template(await this.docTemplates.resolveActive('quotation')); } catch { /* keep default */ }
     return {
       quote_no: q.quoteNo, status: q.status, issued_date: q.issuedDate ?? null, expires_date: q.expiresDate ?? null,
       currency: q.currency ?? 'THB', customer_name: q.customerName, notes: q.notes ?? null, created_by: q.createdBy ?? null,
       seller: sellerParty(t),
       lines: lines.map((l: any) => ({ line_no: l.lineNo, item_code: l.itemCode ?? null, description: l.description, qty: n(l.qty), unit_price: n(l.unitPrice), discount_pct: n(l.discountPct), line_total: n(l.lineTotal) })),
-      subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total),
+      subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), template,
     };
   }
 
   quotationHtml(q: QuotePrintData): string {
     if (!this.quotePdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Quote renderer not wired' });
-    return this.quotePdf.quotationHtml(q);
+    return this.quotePdf.quotationHtml(q, q.template);
   }
 
   async renderQuotePdf(q: QuotePrintData): Promise<Buffer | null> {
-    return this.quotePdf ? this.quotePdf.renderToPdf(this.quotePdf.quotationHtml(q)) : null;
+    return this.quotePdf ? this.quotePdf.renderToPdf(this.quotePdf.quotationHtml(q, q.template)) : null;
   }
 
   // Email the ใบเสนอราคา to the customer as a PDF attachment (HTML fallback when Chromium is absent),

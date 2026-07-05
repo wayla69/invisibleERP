@@ -56,7 +56,7 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([
     { code: 'HQ', name: 'HQ' },
-    { code: 'T1', name: 'ร้านหนึ่ง', legalName: 'บริษัท ร้านหนึ่ง จำกัด', taxId: T1_TAX, vatRegistered: true, branchCode: '00000', branchLabelTh: 'สำนักงานใหญ่', addressLine1: '123 ถนนสุขุมวิท', subDistrict: 'คลองเตย', district: 'คลองเตย', province: 'กรุงเทพมหานคร', postalCode: '10110' },
+    { code: 'T1', name: 'ร้านหนึ่ง', legalName: 'บริษัท ร้านหนึ่ง จำกัด', taxId: T1_TAX, vatRegistered: true, branchCode: '00000', branchLabelTh: 'สำนักงานใหญ่', addressLine1: '123 ถนนสุขุมวิท', subDistrict: 'คลองเตย', district: 'คลองเตย', province: 'กรุงเทพมหานคร', postalCode: '10110', logoUrl: 'https://cdn.example.com/logo-t1.png' },
     { code: 'T2', name: 'ร้านสอง', legalName: 'บริษัท ร้านสอง จำกัด', taxId: T2_TAX, vatRegistered: true, branchCode: '00000', addressLine1: '456 ถนนพระราม 4', province: 'กรุงเทพมหานคร', postalCode: '10500' },
   ]).onConflictDoNothing();
   const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
@@ -66,6 +66,7 @@ async function main() {
     { username: 'cust1', passwordHash: await pw.hash('pw1'), role: 'Customer', tenantId: t1 },
     { username: 'cust2', passwordHash: await pw.hash('pw2'), role: 'Customer', tenantId: t2 },
     { username: 'sales1', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 },
+    { username: 't1mgr', passwordHash: await pw.hash('pw6'), role: 'Admin', tenantId: t1 }, // T1 exec — authors the no-code document template
     { username: 'proc2', passwordHash: await pw.hash('pw4'), role: 'Procurement', tenantId: t2 }, // T2 creditors (AP per shop)
     { username: 't2mgr', passwordHash: await pw.hash('pw5'), role: 'Admin', tenantId: t2 }, // T2 exec — runs the scheduled tax jobs (docs/33 PR4)
   ]).onConflictDoNothing();
@@ -106,6 +107,7 @@ async function main() {
   const cust1 = await login('cust1', 'pw1');
   const cust2 = await login('cust2', 'pw2');
   const sales1 = await login('sales1', 'pw3');
+  const t1mgr = await login('t1mgr', 'pw6'); // T1 exec — authors the no-code document template
   const admin = await login('admin', 'admin123'); // HQ — exec/ar/creditors for statutory reports
 
   // ── ใบกำกับภาษีอย่างย่อ (ม.86/6) ──
@@ -160,6 +162,35 @@ async function main() {
   ok('PDF abbreviated: contains "ใบกำกับภาษีอย่างย่อ" + "ราคารวมภาษีมูลค่าเพิ่มแล้ว"', abPdf.status === 200 && abPdf.text.includes('ใบกำกับภาษีอย่างย่อ') && abPdf.text.includes('ราคารวมภาษีมูลค่าเพิ่มแล้ว'));
   const fullPdf = await inj('GET', `/api/tax-invoices/${full.json.doc_no}/pdf`, sales1);
   ok('PDF full: contains "ใบกำกับภาษี" + "ภาษีมูลค่าเพิ่ม" + Tax ID', fullPdf.status === 200 && fullPdf.text.includes('ใบกำกับภาษี') && fullPdf.text.includes('ภาษีมูลค่าเพิ่ม'));
+
+  // ── No-code document template applied LIVE to the full tax invoice (presentation only; ม.86/4 fiscal
+  // integrity forces the mandatory seller lines on regardless of the hide knobs) ──
+  // The catalog advertises the full tax invoice as live.
+  const dtTypes = await inj('GET', '/api/document-templates/doc-types', t1mgr);
+  ok('Doc templates: full tax invoice is LIVE in the catalog', (dtTypes.json.doc_types ?? []).some((d: any) => d.key === 'tax_invoice_full' && d.status === 'live'), JSON.stringify((dtTypes.json.doc_types ?? []).map((d: any) => `${d.key}:${d.status}`)));
+  // T1 authors an active template that recolours + adds a header note/footer terms, turns OFF amount-in-words,
+  // and (illegally) tries to hide the seller tax-id + address.
+  const tiTpl = await inj('POST', '/api/document-templates', t1mgr, { doc_type: 'tax_invoice_full', name: 'ใบกำกับภาษี ร้านหนึ่ง', config: { header: { accent_color: '#0F766E', header_note: 'HDR-NOTE-TIV', show_logo: true }, body: { show_seller_tax_id: false, show_seller_address: false }, totals: { show_amount_in_words: false }, footer: { terms_text: 'TERMS-TIV-XYZ' } } });
+  ok('Doc templates: full tax-invoice template created (T1)', tiTpl.status < 300 && !!tiTpl.json.id, `${tiTpl.status} ${JSON.stringify(tiTpl.json).slice(0, 80)}`);
+  const fullTpl = await inj('GET', `/api/tax-invoices/${full.json.doc_no}/pdf`, sales1);
+  const ftHtml = typeof fullTpl.text === 'string' ? fullTpl.text : '';
+  ok('PDF full LIVE: honours accent colour + header note + footer terms + logo', fullTpl.status === 200 && ftHtml.includes('#0F766E') && ftHtml.includes('HDR-NOTE-TIV') && ftHtml.includes('TERMS-TIV-XYZ') && ftHtml.includes('brandlogo'), `accent=${ftHtml.includes('#0F766E')} note=${ftHtml.includes('HDR-NOTE-TIV')} terms=${ftHtml.includes('TERMS-TIV-XYZ')} logo=${ftHtml.includes('brandlogo')}`);
+  ok('PDF full LIVE: amount-in-words OFF toggle honoured (no baht-text line)', ftHtml.length > 0 && !ftHtml.includes('class="words"'), `hasWords=${ftHtml.includes('class="words"')}`);
+  // FISCAL integrity: the mandatory ม.86/4 seller tax-id + address survive the hide knobs.
+  ok('PDF full FISCAL: seller tax-id line forced ON despite hide knob (ม.86/4)', ftHtml.includes('เลขประจำตัวผู้เสียภาษีอากร') && ftHtml.includes('123 ถนนสุขุมวิท'), `taxId=${ftHtml.includes('เลขประจำตัวผู้เสียภาษีอากร')} addr=${ftHtml.includes('123 ถนนสุขุมวิท')}`);
+  // core integrity: the statutory title + VAT + total survive a customized template.
+  ok('PDF full core: "ใบกำกับภาษี" + "ภาษีมูลค่าเพิ่ม" + grand total still present under a template', ftHtml.includes('ใบกำกับภาษี') && ftHtml.includes('ภาษีมูลค่าเพิ่ม') && ftHtml.includes('107.00'), `total=${ftHtml.includes('107.00')}`);
+
+  // ── No-code template applied LIVE to the abbreviated 80mm slip (ม.86/6): only the header/footer notes
+  // apply on thermal paper; the mandatory seller identity + VAT-inclusive total are structural ──
+  ok('Doc templates: abbreviated tax invoice is LIVE in the catalog', (dtTypes.json.doc_types ?? []).some((d: any) => d.key === 'tax_invoice_abbreviated' && d.status === 'live'), JSON.stringify((dtTypes.json.doc_types ?? []).map((d: any) => `${d.key}:${d.status}`)));
+  const abTpl = await inj('POST', '/api/document-templates', t1mgr, { doc_type: 'tax_invoice_abbreviated', name: 'สลิปย่อ ร้านหนึ่ง', config: { header: { header_note: 'SLIP-HDR-T1' }, footer: { terms_text: 'SLIP-FTR-T1', extra_lines: ['SLIP-EXTRA-T1'] } } });
+  ok('Doc templates: abbreviated slip template created (T1)', abTpl.status < 300 && !!abTpl.json.id, `${abTpl.status} ${JSON.stringify(abTpl.json).slice(0, 80)}`);
+  const abTplPdf = await inj('GET', `/api/tax-invoices/${ab1.json.doc_no}/pdf`, cust1);
+  const abtHtml = typeof abTplPdf.text === 'string' ? abTplPdf.text : '';
+  ok('PDF abbreviated LIVE: honours header + footer notes on the slip', abTplPdf.status === 200 && abtHtml.includes('SLIP-HDR-T1') && abtHtml.includes('SLIP-FTR-T1') && abtHtml.includes('SLIP-EXTRA-T1'), `hdr=${abtHtml.includes('SLIP-HDR-T1')} ftr=${abtHtml.includes('SLIP-FTR-T1')} extra=${abtHtml.includes('SLIP-EXTRA-T1')}`);
+  ok('PDF abbreviated FISCAL: title + seller tax-id + VAT-inclusive total still print (ม.86/6)', abtHtml.includes('ใบกำกับภาษีอย่างย่อ') && abtHtml.includes('เลขผู้เสียภาษี') && abtHtml.includes('ราคารวมภาษีมูลค่าเพิ่มแล้ว'), `len=${abtHtml.length}`);
+
   const whtPdf = await inj('GET', `/api/wht/certificates/${wht.json.doc_no}/pdf`, sales1);
   ok('PDF WHT: contains "มาตรา 50 ทวิ" + บาทตัวอักษร', whtPdf.status === 200 && whtPdf.text.includes('50 ทวิ') && whtPdf.text.includes('บาท'));
 

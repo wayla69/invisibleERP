@@ -1,14 +1,15 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw, AlertTriangle, ChevronDown, Bookmark, Trash2, ScanLine } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
-import { notifyError, notifySuccess } from '@/lib/notify';
+import { notifyError, notifySuccess, notifyInfo } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
-import { baht } from '@/lib/format';
+import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Button } from '@/components/ui/button';
@@ -16,60 +17,192 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { statusVariant } from '@/components/ui';
+import { cn } from '@/lib/utils';
 
 type CatalogItem = {
   item_id: string; item_description: string | null; uom: string | null;
   unit_price: number; image_key: string | null; category: string; category_key: string;
+  on_hand: number | null; last_price: number | null;
 };
 type Category = { key: string; label: string; count: number };
-type CatalogResp = { items: CatalogItem[]; categories: Category[]; count: number };
+type CatalogPage = { items: CatalogItem[]; categories: Category[]; total: number; offset: number; limit: number; has_more: boolean; count: number };
 type CartLine = { key: string; item_id: string; description: string; uom: string; unit_price: number; qty: number; urgent: boolean; custom: boolean };
+type MyPr = { pr_no: string; pr_date: string | null; status: string; priority: string | null; lines: { item_id: string; request_qty: number; uom?: string | null }[] };
+type LowItem = { item_id: string; item_description: string | null; uom: string | null; on_hand: number; min_stock: number; suggested_qty: number; unit_price: number };
+type BasketTemplate = { name: string; lines: { item_id: string; description: string; uom: string; qty: number }[] };
 
-// Friendly "shop" front-end for a purchase requisition (perm: pr_raise). Staff browse the item master
-// grouped by product category, drop items into a basket (with an "urgent" flag for priority), can type a
-// free-text request for anything not in the register, then check out — which raises ONE PR through the
-// ordinary POST /api/procurement/prs path. It is only a request: Procurement reviews it, approves, and
-// issues the PO (SoD R03/R04 unchanged). A custom line carries its typed text as the item_id so the buyer
-// can reconcile it to a real code (or open a new one) during PR→PO conversion, exactly like the LINE flow.
+const PAGE = 24;
+const VIEW_KEY = 'shop.view';
+const CART_KEY = 'shop.cart';
+const FAVS_KEY = 'shop.favs';
+const TPL_KEY = 'shop.templates';
+
+// Saved basket templates (a per-device "รายการประจำ" to reload a recurring set of items).
+function readTemplates(): BasketTemplate[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const arr = JSON.parse(window.localStorage.getItem(TPL_KEY) ?? '[]');
+    return Array.isArray(arr) ? arr.filter((tp) => tp && typeof tp.name === 'string' && Array.isArray(tp.lines)) : [];
+  } catch { return []; }
+}
+
+// Rehydrate the basket saved on this device so an in-progress requisition survives a refresh / navigation.
+function readCart(): CartLine[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const arr = JSON.parse(window.localStorage.getItem(CART_KEY) ?? '[]');
+    return Array.isArray(arr) ? arr.filter((l) => l && typeof l.key === 'string' && typeof l.item_id === 'string') : [];
+  } catch { return []; }
+}
+
+// Favourite item ids saved on this device (a per-device convenience, like the basket).
+function readFavs(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const arr = JSON.parse(window.localStorage.getItem(FAVS_KEY) ?? '[]');
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []);
+  } catch { return new Set(); }
+}
+
+// A stable pastel background for an item's placeholder tile (Shopee/Grab-style colourful grid) — derived
+// from the item id so the same product always gets the same hue, no image needed.
+function hueFor(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+// Lazy product thumbnail. Only fetches the in-DB image when the item actually has one (image_key set);
+// otherwise renders a coloured initial tile. react-query caches so a re-render never re-fetches.
+function ProductThumb({ item, className }: { item: CatalogItem; className?: string }) {
+  const hasImg = !!item.image_key;
+  const img = useQuery<{ data_url: string }>({
+    queryKey: ['catalog-img', item.item_id],
+    queryFn: () => api(`/api/procurement/catalog/items/${encodeURIComponent(item.item_id)}/image`),
+    enabled: hasImg,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const label = (item.item_description || item.item_id).trim();
+  if (hasImg && img.data?.data_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={img.data.data_url} alt={label} loading="lazy" className={cn('object-cover', className)} />;
+  }
+  const h = hueFor(item.item_id);
+  return (
+    <div
+      className={cn('flex items-center justify-center', className)}
+      style={{ background: `hsl(${h} 70% 92%)`, color: `hsl(${h} 45% 40%)` }}
+      aria-hidden
+    >
+      {hasImg && !img.isError ? (
+        <span className="size-6 animate-pulse rounded-full bg-black/10 dark:bg-white/10" />
+      ) : label ? (
+        <span className="text-2xl font-semibold">{label.slice(0, 1).toUpperCase()}</span>
+      ) : (
+        <ImageOff className="size-6 opacity-50" />
+      )}
+    </div>
+  );
+}
+
+// Friendly "shop" front-end for a purchase requisition (perm: pr_raise). Staff browse the item master in a
+// Grab/Shopee-style grid/list (category chips + infinite scroll), drop items into a basket (with an "urgent"
+// flag for priority), can type a free-text request for anything not in the register, then check out — which
+// raises ONE PR through the ordinary POST /api/procurement/prs path. It is only a request: Procurement
+// reviews it, approves, and issues the PO (SoD R03/R04 unchanged). A custom line carries its typed text as
+// the item_id so the buyer can reconcile it to a real code during PR→PO conversion, exactly like LINE.
 export default function ShopPage() {
   const { t } = useLang();
   const qc = useQueryClient();
+  const router = useRouter();
   const me = useMe();
   // Master-data holders (md_item) can jump straight to the category admin to (re)group the catalog.
   const canManageCategories = hasPerm(me.data, 'md_item', 'masterdata', 'exec');
-  const cat = useQuery<CatalogResp>({ queryKey: ['catalog'], queryFn: () => api('/api/procurement/catalog?limit=1000') });
+  // The requester's own recent PRs (raised here or elsewhere) with live status — closes the loop on-screen.
+  const myPrs = useQuery<{ prs: MyPr[] }>({ queryKey: ['my-prs'], queryFn: () => api('/api/procurement/prs?mine=true&limit=5'), refetchInterval: 30_000 });
+  // Items at/below their reorder point — a quick "top up the low stock" shortcut into the basket.
+  const lowStock = useQuery<{ items: LowItem[]; count: number }>({ queryKey: ['low-stock'], queryFn: () => api('/api/procurement/low-stock?limit=20'), refetchInterval: 60_000 });
+  // Projects the requester can shop INTO (those with an approved BoQ budget) — picking one opens the
+  // budget-restricted project shop (raises a PMR against the BoQ, PROJ-12/13). Empty ⇒ the picker hides.
+  const shopProjects = useQuery<{ projects: { code: string; name: string; status: string }[]; count: number }>({ queryKey: ['pmr-shop-projects'], queryFn: () => api('/api/pmr/projects') });
 
   const [q, setQ] = useState('');
+  const [scan, setScan] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
   const [activeCat, setActiveCat] = useState<string | null>(null);
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const [view, setView] = useState<'grid' | 'list'>(() =>
+    (typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list') ? 'list' : 'grid');
+  const [cart, setCart] = useState<CartLine[]>(readCart);
+  const [favs, setFavs] = useState<Set<string>>(readFavs);
+  const [favOnly, setFavOnly] = useState(false);
+  const [showLow, setShowLow] = useState(false);
+  const [templates, setTemplates] = useState<BasketTemplate[]>(readTemplates);
+  const [tplName, setTplName] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [projectCode, setProjectCode] = useState('');
+  const [requiredDate, setRequiredDate] = useState('');
   const [cName, setCName] = useState('');
   const [cUom, setCUom] = useState('');
   const [cQty, setCQty] = useState(1);
   const [cErr, setCErr] = useState(false);
-  const customSeq = useRef(0);
+  // Seed the custom-line counter past any rehydrated custom keys so new free-text lines never collide.
+  const customSeq = useRef(cart.reduce((m, l) => (l.key.startsWith('c:') ? Math.max(m, Number(l.key.slice(2)) + 1) : m), 0));
+  const sentinel = useRef<HTMLDivElement | null>(null);
 
-  const items = cat.data?.items ?? [];
-  const categories = cat.data?.categories ?? [];
+  useEffect(() => { try { window.localStorage.setItem(VIEW_KEY, view); } catch { /* private mode */ } }, [view]);
+  // Persist the basket on this device (per-device by design — a PR is company-wide but a half-built basket
+  // is personal). Cleared on checkout via setCart([]).
+  useEffect(() => {
+    try {
+      if (cart.length) window.localStorage.setItem(CART_KEY, JSON.stringify(cart));
+      else window.localStorage.removeItem(CART_KEY);
+    } catch { /* private mode */ }
+  }, [cart]);
+  useEffect(() => {
+    try { window.localStorage.setItem(FAVS_KEY, JSON.stringify([...favs])); } catch { /* private mode */ }
+  }, [favs]);
+  useEffect(() => {
+    try { window.localStorage.setItem(TPL_KEY, JSON.stringify(templates)); } catch { /* private mode */ }
+  }, [templates]);
+  // Debounce the search box so typing doesn't fire a request per keystroke.
+  useEffect(() => { const id = setTimeout(() => setDebouncedQ(q.trim()), 250); return () => clearTimeout(id); }, [q]);
 
-  const filtered = useMemo(() => {
-    const kw = q.trim().toLowerCase();
-    return items.filter((it) => {
-      if (activeCat && it.category_key !== activeCat) return false;
-      if (!kw) return true;
-      return it.item_id.toLowerCase().includes(kw) || (it.item_description ?? '').toLowerCase().includes(kw);
-    });
-  }, [items, q, activeCat]);
+  const catalog = useInfiniteQuery({
+    queryKey: ['catalog', debouncedQ, activeCat],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => {
+      const p = new URLSearchParams({ limit: String(PAGE), offset: String(pageParam) });
+      if (debouncedQ) p.set('q', debouncedQ);
+      if (activeCat) p.set('category', activeCat);
+      return api<CatalogPage>(`/api/procurement/catalog?${p.toString()}`);
+    },
+    getNextPageParam: (last, all) => (last.has_more ? all.reduce((a, pg) => a + pg.items.length, 0) : undefined),
+  });
 
-  // Group the visible items by category so the catalog reads as category sections (easy to scan/find).
-  const groups = useMemo(() => {
-    const m = new Map<string, { label: string; items: CatalogItem[] }>();
-    for (const it of filtered) {
-      const g = m.get(it.category_key) ?? { label: it.category, items: [] };
-      g.items.push(it); m.set(it.category_key, g);
-    }
-    return [...m.entries()].map(([key, v]) => ({ key, ...v })).sort((a, b) => a.label.localeCompare(b.label, 'th'));
-  }, [filtered]);
+  const pages = catalog.data?.pages ?? [];
+  const items = useMemo(() => pages.flatMap((p) => p.items), [pages]);
+  const displayItems = useMemo(() => (favOnly ? items.filter((it) => favs.has(it.item_id)) : items), [items, favOnly, favs]);
+  const categories = pages[0]?.categories ?? [];
+  const total = pages[0]?.total ?? 0;
+
+  const toggleFav = (itemId: string) => setFavs((s) => {
+    const next = new Set(s);
+    if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
+    return next;
+  });
+
+  // Auto-load the next page when the sentinel scrolls into view (infinite scroll, no pager buttons).
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting && catalog.hasNextPage && !catalog.isFetchingNextPage) catalog.fetchNextPage();
+    }, { rootMargin: '400px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [catalog.hasNextPage, catalog.isFetchingNextPage, catalog.fetchNextPage, items.length]);
 
   const cartQty = (itemId: string) => cart.find((l) => l.key === `i:${itemId}`)?.qty ?? 0;
 
@@ -82,6 +215,80 @@ export default function ShopPage() {
   const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.floor(qty) || 1) } : l)));
   const toggleUrgent = (key: string) => setCart((c) => c.map((l) => (l.key === key ? { ...l, urgent: !l.urgent } : l)));
   const removeLine = (key: string) => setCart((c) => c.filter((l) => l.key !== key));
+
+  // Add a specific quantity of an item to the basket, merging into any existing line.
+  const addToBasket = (itemId: string, qty: number, uom = '', description = '') => setCart((c) => {
+    const key = `i:${itemId}`;
+    const q = Math.max(1, Math.floor(qty) || 1);
+    const i = c.findIndex((l) => l.key === key);
+    if (i >= 0) return c.map((l, j) => (j === i ? { ...l, qty: l.qty + q } : l));
+    return [...c, { key, item_id: itemId, description, uom, unit_price: 0, qty: q, urgent: false, custom: false }];
+  });
+  const fillLow = (it: LowItem) => addToBasket(it.item_id, it.suggested_qty, it.uom ?? '', it.item_description ?? '');
+  const fillAllLow = () => {
+    const its = lowStock.data?.items ?? [];
+    if (!its.length) return;
+    its.forEach(fillLow);
+    notifySuccess(t('shop.low_filled', { n: its.length }));
+  };
+
+  // Barcode scan-to-add — a hardware scanner types the code then sends Enter, submitting this form.
+  // Exact single match ⇒ drop it straight in the basket; no match ⇒ warn; several ⇒ push it into the
+  // search box so the grid narrows. Reuses the catalog endpoint (no camera lib, works with any USB scanner).
+  const onScan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = scan.trim();
+    if (!code) return;
+    try {
+      const r = await api<CatalogPage>(`/api/procurement/catalog?q=${encodeURIComponent(code)}&limit=1`);
+      if (r.total === 1 && r.items[0]) {
+        const it = r.items[0];
+        addToBasket(it.item_id, 1, it.uom ?? '', it.item_description ?? '');
+        notifySuccess(t('shop.scan_added', { name: it.item_description ?? it.item_id }));
+        setScan('');
+      } else if (r.total === 0) {
+        notifyError(t('shop.scan_not_found', { code }));
+      } else {
+        setQ(code);
+        setScan('');
+        notifyInfo(t('shop.scan_multi', { n: r.total }));
+      }
+    } catch {
+      notifyError(t('shop.scan_not_found', { code }));
+    }
+  };
+
+  // Basket templates (รายการประจำ) — save the current cart under a name, reload/delete later.
+  const saveTemplate = () => {
+    const name = tplName.trim();
+    if (!name) { notifyError(t('shop.tpl_need_name')); return; }
+    if (!cart.length) { notifyError(t('shop.empty_cart_err')); return; }
+    const lines = cart.map((l) => ({ item_id: l.item_id, description: l.description, uom: l.uom, qty: l.qty }));
+    setTemplates((ts) => [...ts.filter((tp) => tp.name !== name), { name, lines }]);
+    setTplName('');
+    notifySuccess(t('shop.tpl_saved', { name }));
+  };
+  const loadTemplate = (tp: BasketTemplate) => {
+    for (const ln of tp.lines) addToBasket(ln.item_id, ln.qty, ln.uom, ln.description);
+    notifySuccess(t('shop.tpl_loaded', { name: tp.name }));
+  };
+  const deleteTemplate = (name: string) => setTemplates((ts) => ts.filter((tp) => tp.name !== name));
+
+  // Re-order: drop a past PR's lines back into the basket (merging quantities into any existing line).
+  const reorder = (pr: MyPr) => {
+    setCart((c) => {
+      const next = [...c];
+      for (const ln of pr.lines ?? []) {
+        const key = `i:${ln.item_id}`;
+        const i = next.findIndex((l) => l.key === key);
+        const qty = Math.max(1, Math.floor(ln.request_qty) || 1);
+        if (i >= 0) next[i] = { ...next[i], qty: next[i].qty + qty };
+        else next.push({ key, item_id: ln.item_id, description: '', uom: ln.uom ?? '', unit_price: 0, qty, urgent: false, custom: false });
+      }
+      return next;
+    });
+    notifySuccess(t('shop.reordered', { no: pr.pr_no }));
+  };
 
   const addCustom = () => {
     const name = cName.trim();
@@ -99,24 +306,41 @@ export default function ShopPage() {
       body: JSON.stringify({
         remarks: remarks || undefined,
         priority: anyUrgent ? 'Urgent' : 'Normal',
+        project_code: projectCode.trim() || undefined,
         items: cart.map((l) => ({
           item_id: l.item_id,
           item_description: l.description || undefined,
           request_qty: l.qty,
           uom: l.uom || undefined,
+          required_date: requiredDate || undefined,
           reason: l.urgent ? t('shop.urgent') : l.custom ? t('shop.custom_line') : undefined,
         })),
       }),
     }),
     onSuccess: (d) => {
       notifySuccess(t('shop.created', { no: d.pr_no }), t('shop.created_desc', { n: d.lines }));
-      setCart([]); setRemarks('');
+      setCart([]); setRemarks(''); setProjectCode(''); setRequiredDate('');
       qc.invalidateQueries({ queryKey: ['prs'] });
+      qc.invalidateQueries({ queryKey: ['my-prs'] });
     },
     onError: (e: any) => notifyError(e?.message ?? t('shop.failed')),
   });
 
   const checkout = () => { if (!cart.length) { notifyError(t('shop.empty_cart_err')); return; } mut.mutate(); };
+
+  const catChip = (key: string | null, label: string, count?: number) => (
+    <button
+      key={key ?? '__all__'}
+      type="button"
+      onClick={() => setActiveCat(key)}
+      className={cn(
+        'whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition-colors',
+        activeCat === key ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-accent',
+      )}
+    >
+      {label}{typeof count === 'number' ? <span className="ml-1 text-xs opacity-70">{count}</span> : null}
+    </button>
+  );
 
   return (
     <div>
@@ -125,6 +349,18 @@ export default function ShopPage() {
         description={t('shop.desc')}
         actions={
           <>
+            {(shopProjects.data?.count ?? 0) > 0 && (
+              <select
+                aria-label={t('shop.proj.pick')}
+                title={t('shop.proj.pick')}
+                className="h-9 max-w-[13rem] rounded-md border bg-background px-2 text-sm"
+                value=""
+                onChange={(e) => { if (e.target.value) router.push(`/shop/project/${encodeURIComponent(e.target.value)}`); }}
+              >
+                <option value="" disabled>🗂️ {t('shop.proj.pick')}</option>
+                {shopProjects.data!.projects.map((p) => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+              </select>
+            )}
             {canManageCategories && (
               <Button asChild variant="outline" size="sm">
                 <Link href="/setup/item-categories"><Layers className="size-4" /> {t('shop.manage_categories')}</Link>
@@ -137,67 +373,179 @@ export default function ShopPage() {
 
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
         {/* ── Catalog ─────────────────────────────────────────────── */}
-        <div className="space-y-4">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('shop.search_ph')} />
-          </div>
-
-          {categories.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant={activeCat === null ? 'default' : 'outline'} className="rounded-full" onClick={() => setActiveCat(null)}>
-                {t('shop.all_categories')}
-              </Button>
-              {categories.map((c) => (
-                <Button key={c.key} size="sm" variant={activeCat === c.key ? 'default' : 'outline'} className="rounded-full" onClick={() => setActiveCat(activeCat === c.key ? null : c.key)}>
-                  {c.label} <span className="ml-1 text-xs opacity-70">{c.count}</span>
-                </Button>
-              ))}
+        <div className="space-y-3">
+          {/* Low-stock quick-add (items at/below their reorder point) */}
+          {(lowStock.data?.count ?? 0) > 0 && (
+            <div className="overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5">
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <button type="button" onClick={() => setShowLow((v) => !v)} className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+                  <AlertTriangle className="size-4 shrink-0 text-amber-500" />
+                  <span className="truncate">{t('shop.low_stock_title')}</span>
+                  <Badge variant="warning" className="shrink-0">{lowStock.data?.count}</Badge>
+                  <ChevronDown className={cn('size-4 shrink-0 transition-transform', showLow && 'rotate-180')} />
+                </button>
+                <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={fillAllLow}>{t('shop.fill_all')}</Button>
+              </div>
+              {showLow && (
+                <ul className="divide-y border-t">
+                  {(lowStock.data?.items ?? []).map((it) => (
+                    <li key={it.item_id} className="flex items-center gap-2 px-3 py-1.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm">{it.item_description || it.item_id}</p>
+                        <p className="text-[11px] text-muted-foreground">{t('shop.on_hand', { n: num(it.on_hand) })} · {t('shop.min_n', { n: num(it.min_stock) })} · {t('shop.suggest_n', { n: num(it.suggested_qty) })}</p>
+                      </div>
+                      <Button size="sm" className="h-7 shrink-0" onClick={() => fillLow(it)}><Plus className="size-3.5" /> {t('shop.fill')}</Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 
-          <StateView q={cat}>
-            {items.length === 0 ? (
-              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{t('shop.empty_catalog')}</p>
-            ) : groups.length === 0 ? (
-              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{t('shop.no_items')}</p>
-            ) : (
-              <div className="space-y-5">
-                {groups.map((g) => (
-                  <section key={g.key} className="space-y-2">
-                    <h3 className="text-sm font-semibold text-muted-foreground">{g.label} <span className="opacity-60">· {g.items.length}</span></h3>
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      {g.items.map((it) => {
-                        const inCart = cartQty(it.item_id);
-                        return (
-                          <div key={it.item_id} className="flex flex-col gap-2 rounded-xl border bg-card p-3 text-card-foreground shadow-sm">
-                            <div className="flex-1">
-                              <p className="line-clamp-2 text-sm font-medium leading-snug">{it.item_description || it.item_id}</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-semibold">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
-                              {inCart > 0 && <Badge variant="secondary" className="text-[11px]">{t('shop.in_cart')} · {inCart}</Badge>}
-                            </div>
-                            <div className="flex gap-2">
-                              <Button size="sm" className="flex-1" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
-                              <Button size="sm" variant="outline" title={t('shop.add_urgent')} aria-label={t('shop.add_urgent')} onClick={() => addItem(it, true)}>
-                                <Zap className="size-4 text-amber-500" />
-                              </Button>
-                            </div>
+          {/* Search + scan + view toggle */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('shop.search_ph')} />
+            </div>
+            <form onSubmit={onScan} className="relative w-40 shrink-0 sm:w-48">
+              <ScanLine className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input className="pl-9" value={scan} onChange={(e) => setScan(e.target.value)} placeholder={t('shop.scan_ph')} aria-label={t('shop.scan_ph')} />
+            </form>
+            <div className="flex shrink-0 rounded-md border p-0.5">
+              <Button size="icon" variant={view === 'grid' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_grid')} title={t('shop.view_grid')} onClick={() => setView('grid')}>
+                <LayoutGrid className="size-4" />
+              </Button>
+              <Button size="icon" variant={view === 'list' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_list')} title={t('shop.view_list')} onClick={() => setView('list')}>
+                <ListIcon className="size-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Favourites toggle + category chips (horizontal scroll, Shopee-style) */}
+          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+            <button
+              type="button"
+              onClick={() => setFavOnly((v) => !v)}
+              className={cn(
+                'flex items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition-colors',
+                favOnly ? 'border-amber-500 bg-amber-500 text-white' : 'bg-background hover:bg-accent',
+              )}
+            >
+              <Star className={cn('size-3.5', favOnly && 'fill-current')} /> {t('shop.favorites')}
+              {favs.size > 0 && <span className="text-xs opacity-80">{favs.size}</span>}
+            </button>
+            {categories.length > 0 && catChip(null, t('shop.all_categories'), total)}
+            {categories.map((c) => catChip(c.key, c.label, c.count))}
+          </div>
+
+          {total > 0 && <p className="text-xs text-muted-foreground">{t('shop.results_n', { n: total })}</p>}
+
+          <StateView q={{ isLoading: catalog.isLoading, error: catalog.error }}>
+            {displayItems.length === 0 ? (
+              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                {favOnly ? t('shop.favorites_empty') : debouncedQ || activeCat ? t('shop.no_items') : t('shop.empty_catalog')}
+              </p>
+            ) : view === 'grid' ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+                {displayItems.map((it) => {
+                  const inCart = cartQty(it.item_id);
+                  const fav = favs.has(it.item_id);
+                  return (
+                    <div key={it.item_id} className="group flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md">
+                      <div className="relative aspect-square w-full overflow-hidden bg-muted">
+                        <ProductThumb item={it} className="size-full" />
+                        <button
+                          type="button"
+                          aria-label={t('shop.favorite')}
+                          title={t('shop.favorite')}
+                          onClick={() => toggleFav(it.item_id)}
+                          className={cn('absolute left-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-background/85 shadow-sm backdrop-blur transition hover:bg-background', fav ? 'text-amber-500' : 'text-muted-foreground')}
+                        >
+                          <Star className={cn('size-4', fav && 'fill-current')} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={t('shop.add_urgent')}
+                          title={t('shop.add_urgent')}
+                          onClick={() => addItem(it, true)}
+                          className="absolute right-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-background/85 text-amber-500 shadow-sm backdrop-blur transition hover:bg-background"
+                        >
+                          <Zap className="size-4" />
+                        </button>
+                      </div>
+                      <div className="flex flex-1 flex-col gap-1 p-2.5">
+                        <p className="line-clamp-2 text-sm font-medium leading-snug">{it.item_description || it.item_id}</p>
+                        <p className="text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                        <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+                          {it.on_hand != null && (
+                            <span className={it.on_hand <= 0 ? 'font-medium text-destructive' : ''}>
+                              {it.on_hand > 0 ? t('shop.on_hand', { n: num(it.on_hand) }) : t('shop.out_of_stock')}
+                            </span>
+                          )}
+                          {it.last_price != null && it.last_price > 0 && <span>{t('shop.last_price', { price: baht(it.last_price) })}</span>}
+                        </div>
+                        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+                          <span className="text-sm font-semibold">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
+                          <div className="flex items-center gap-1.5">
+                            {inCart > 0 && <Badge variant="secondary" className="text-[11px]">{inCart}</Badge>}
+                            <Button size="sm" className="h-8 gap-1 px-2.5" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
                           </div>
-                        );
-                      })}
+                        </div>
+                      </div>
                     </div>
-                  </section>
-                ))}
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="divide-y rounded-xl border">
+                {displayItems.map((it) => {
+                  const inCart = cartQty(it.item_id);
+                  const fav = favs.has(it.item_id);
+                  return (
+                    <div key={it.item_id} className="flex items-center gap-3 p-2.5">
+                      <button
+                        type="button"
+                        aria-label={t('shop.favorite')}
+                        title={t('shop.favorite')}
+                        onClick={() => toggleFav(it.item_id)}
+                        className={cn('shrink-0 transition-colors', fav ? 'text-amber-500' : 'text-muted-foreground hover:text-foreground')}
+                      >
+                        <Star className={cn('size-4', fav && 'fill-current')} />
+                      </button>
+                      <ProductThumb item={it} className="size-14 shrink-0 rounded-lg" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{it.item_description || it.item_id}</p>
+                        <p className="text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                        <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+                          {it.on_hand != null && (
+                            <span className={it.on_hand <= 0 ? 'font-medium text-destructive' : ''}>
+                              {it.on_hand > 0 ? t('shop.on_hand', { n: num(it.on_hand) }) : t('shop.out_of_stock')}
+                            </span>
+                          )}
+                          {it.last_price != null && it.last_price > 0 && <span>{t('shop.last_price', { price: baht(it.last_price) })}</span>}
+                        </div>
+                        {it.unit_price > 0 && <p className="text-sm font-semibold">{baht(it.unit_price)}</p>}
+                      </div>
+                      {inCart > 0 && <Badge variant="secondary" className="shrink-0">{t('shop.in_cart')} · {inCart}</Badge>}
+                      <Button size="sm" variant="outline" className="shrink-0" title={t('shop.add_urgent')} aria-label={t('shop.add_urgent')} onClick={() => addItem(it, true)}>
+                        <Zap className="size-4 text-amber-500" />
+                      </Button>
+                      <Button size="sm" className="shrink-0" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
+                    </div>
+                  );
+                })}
               </div>
             )}
+
+            {/* Infinite-scroll sentinel + loading state */}
+            <div ref={sentinel} className="h-8" />
+            {catalog.isFetchingNextPage && <p className="py-2 text-center text-xs text-muted-foreground">{t('shop.loading_more')}</p>}
           </StateView>
         </div>
 
         {/* ── Basket + custom request (sticky on desktop) ──────────── */}
-        <div className="space-y-4 lg:sticky lg:top-4">
+        <div id="shop-basket" className="scroll-mt-4 space-y-4 lg:sticky lg:top-4">
           <Card className="gap-3">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -244,6 +592,17 @@ export default function ShopPage() {
                 </div>
               )}
 
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="shop-project">{t('shop.project_code')}</Label>
+                  <Input id="shop-project" value={projectCode} onChange={(e) => setProjectCode(e.target.value)} placeholder={t('shop.project_code_ph')} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="shop-needby">{t('shop.required_date')}</Label>
+                  <Input id="shop-needby" type="date" value={requiredDate} onChange={(e) => setRequiredDate(e.target.value)} />
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <Label htmlFor="shop-remarks">{t('shop.remarks')}</Label>
                 <textarea
@@ -275,8 +634,80 @@ export default function ShopPage() {
               </div>
             </CardContent>
           </Card>
+
+          <Card className="gap-3">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base"><Bookmark className="size-5" /> {t('shop.tpl_title')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex gap-2">
+                <Input value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder={t('shop.tpl_name_ph')} />
+                <Button variant="secondary" className="shrink-0" disabled={cart.length === 0} onClick={saveTemplate}>{t('shop.tpl_save')}</Button>
+              </div>
+              {templates.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t('shop.tpl_empty')}</p>
+              ) : (
+                <ul className="divide-y">
+                  {templates.map((tp) => (
+                    <li key={tp.name} className="flex items-center gap-2 py-1.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{tp.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{t('shop.lines_n', { n: tp.lines.length })}</p>
+                      </div>
+                      <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={() => loadTemplate(tp)}>{t('shop.tpl_load')}</Button>
+                      <Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label={t('shop.remove')} onClick={() => deleteTemplate(tp.name)}><Trash2 className="size-4" /></Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="gap-3">
+            <CardHeader className="flex-row items-center justify-between gap-2">
+              <CardTitle className="flex items-center gap-2 text-base"><ClipboardList className="size-5" /> {t('shop.my_prs_title')}</CardTitle>
+              <Button asChild variant="ghost" size="sm" className="h-7"><Link href="/requisitions">{t('shop.view_all')}</Link></Button>
+            </CardHeader>
+            <CardContent>
+              <StateView q={myPrs} skeleton={<div className="h-16 animate-pulse rounded-lg bg-muted" />}>
+                {(myPrs.data?.prs ?? []).length === 0 ? (
+                  <p className="py-2 text-center text-xs text-muted-foreground">{t('shop.my_prs_empty')}</p>
+                ) : (
+                  <ul className="divide-y">
+                    {(myPrs.data?.prs ?? []).map((pr) => (
+                      <li key={pr.pr_no} className="flex items-center gap-2 py-2">
+                        <Link href="/requisitions" className="min-w-0 flex-1 hover:opacity-80">
+                          <p className="truncate text-sm font-medium">{pr.pr_no}</p>
+                          <p className="text-xs text-muted-foreground">{thaiDate(pr.pr_date)} · {t('shop.lines_n', { n: pr.lines?.length ?? 0 })}</p>
+                        </Link>
+                        <Badge variant={statusVariant(pr.status)} className="shrink-0">{pr.status}</Badge>
+                        {(pr.lines?.length ?? 0) > 0 && (
+                          <Button size="icon" variant="ghost" className="size-7 shrink-0" title={t('shop.reorder')} aria-label={t('shop.reorder')} onClick={() => reorder(pr)}>
+                            <RefreshCw className="size-4" />
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </StateView>
+            </CardContent>
+          </Card>
         </div>
       </div>
+
+      {/* Mobile-only floating cart — jumps down to the basket (which stacks below the catalog on phones). */}
+      {cart.length > 0 && (
+        <button
+          type="button"
+          onClick={() => document.getElementById('shop-basket')?.scrollIntoView({ behavior: 'smooth' })}
+          aria-label={t('shop.view_cart')}
+          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-primary-foreground shadow-lg transition-transform active:scale-95 lg:hidden"
+        >
+          <ShoppingCart className="size-5" />
+          <span className="text-sm font-semibold">{t('shop.lines_n', { n: cart.length })}</span>
+        </button>
+      )}
     </div>
   );
 }

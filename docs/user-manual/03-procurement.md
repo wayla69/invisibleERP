@@ -111,9 +111,15 @@ other PR.
 
 **Screen:** `/shop` (**เลือกซื้อสินค้า**) · **Required permission:** `pr_raise`
 
-1. **Browse by category.** Products from the item register are shown as cards
-   **grouped by product category**, so they are easy to find. Use the **search box**
-   (name or code) or tap a **category pill** to filter.
+1. **Browse the catalog (Grab/Shopee-style).** Products from the item register are
+   shown as a **grid of picture cards** (with the item's photo, or a colour tile when
+   it has none) — switch to a **list view** with the ⊞/☰ toggle (your choice is
+   remembered). Tap a **category chip** along the top to filter, or use the **search
+   box** (name or code). The grid **loads more as you scroll** — no page buttons.
+   Each card also shows the item's **on-hand stock** (red **สินค้าหมด** when zero)
+   and its **last purchase price**, so you can judge what to request at a glance.
+   Tap the **⭐ star** on a product to save it as a **favourite**, then use the
+   **รายการโปรด** chip to see just your favourites (saved on this device).
 2. **Add to basket.** Press **ใส่ตะกร้า** on a product to drop it in the basket;
    press it again (or use the **+ / −** steppers in the basket) to change the
    quantity.
@@ -126,13 +132,55 @@ other PR.
    added to the basket as a **ขอเพิ่ม (ไม่มีในทะเบียน)** line; Procurement assigns the
    real item code when it becomes a PO.
 5. **Add a note (optional)** for Procurement — e.g. which branch, a preferred
-   brand, or when you need it.
+   brand, or when you need it. You can also tag the request to a **project code**
+   (an unknown code is rejected) and set a **ต้องการภายในวันที่ (needed-by)** date,
+   both optional.
 6. **Checkout.** Press **ส่งคำขอซื้อให้จัดซื้อ**. A green toast confirms the PR
    number; track its status on **คำขอซื้อ (PR)** (`/requisitions`) or the Approvals
    screen.
 
 **Expected result:** One purchase requisition is created for every item in the
 basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval.
+
+> **Top up what's running low.** When any item has fallen to/below its reorder
+> point, a **สินค้าใกล้หมด** banner appears at the top of the catalog — expand it
+> to see each low item (on-hand vs reorder point + a suggested top-up quantity),
+> press **เติม** to add one at its suggested quantity, or **เติมทั้งหมด** to add
+> them all to the basket at once.
+
+> **Your basket is saved on this device** — if you refresh or navigate away
+> mid-shop, the items are still there when you come back (it clears once you check
+> out). On a phone, a **floating cart button** (bottom-right) shows how many lines
+> you have and jumps straight to the basket.
+
+> **Recurring order? Save it as a รายการประจำ.** In the **รายการประจำ** card, name
+> the current basket and press **บันทึก** to save it (on this device); later press
+> **โหลด** to drop that whole list back into the basket, or the bin icon to remove
+> it. Handy for the monthly/weekly supplies you always request.
+
+> **Got a barcode scanner? Just scan.** The **สแกนบาร์โค้ด** box beside the search
+> field lets any USB/Bluetooth scanner (they type the code and press Enter) add an
+> item hands-free: an exact match drops straight into the basket, an unknown code
+> shows *ไม่พบสินค้า*, and if several items match the code the grid filters to them
+> so you can pick. No app or camera setup needed.
+
+> **Buying for a project? Shop into its budget.** If you work on projects, a
+> **ซื้อเข้าโครงการ** picker appears in the shop header (and a *Shop for this project*
+> button sits on the project page). Pick a project and you get a shop showing **only
+> the items its approved budget (BoQ) allows**, each with its remaining budget. Add
+> them and check out — this raises a **ใบขอเบิกวัสดุ (Project Material Requisition)**:
+> if it's within budget it's fulfilled from stock or turned into a purchase
+> requisition automatically; if it goes over a line's budget it's sent to an
+> authorised person to approve first. **An item that isn't in the project's budget
+> can't be added here** — an authorised person must add it to the project budget
+> first (see *Project accounting* → *material requisitions*). This keeps project
+> spend inside the approved budget by design (controls **PROJ-12/PROJ-13**).
+
+> **Track your requests without leaving the page.** A **คำขอซื้อล่าสุดของฉัน** card
+> (below the basket) lists your last few requisitions with their live approval
+> **status** — tap one (or **ดูทั้งหมด**) to open the full requisitions page. Press
+> the **↻ สั่งซ้ำ** button on a past requisition to drop its items straight back into
+> the basket.
 
 > **Where does the category grouping come from?** The cards are grouped by each
 > item's category in the **item register** — the real *หมวดสินค้า* (`item_categories`,
@@ -285,9 +333,13 @@ On the **RFQ list**, each RFQ row has a **🖨️ พิมพ์** and **✉️
 ### Print / email a goods receipt note (ใบรับสินค้า / GR)
 
 After receiving goods, the GR note documents what arrived — for filing or to countersign back
-to the supplier. Open `GET /api/procurement/grs/{GR-…}/pdf` for the PDF (the supplier, the
+to the supplier. The **รับสินค้าล่าสุด (GR)** list on the **รับสินค้า (GR)** screen (`/receiving`)
+shows recent goods receipts, each with a **🖨️ พิมพ์** and **✉️ ส่งอีเมล** action — the email
+recipient **defaults to the vendor's email on file** (from the vendor master) when you leave the
+prompt blank. Or call `GET /api/procurement/grs/{GR-…}/pdf` for the PDF (the supplier, the
 referenced PO, the received item lines with lot numbers and a receiver-signature block), or
-`POST …/grs/{GR-…}/send-email {to_email}` to email it. Read-only — printing posts nothing.
+`POST …/grs/{GR-…}/send-email` to email it (a recent-receipts list is at `GET …/grs`). Read-only
+— printing posts nothing.
 
 ### Attach the invoice / receipt photo to a PO
 

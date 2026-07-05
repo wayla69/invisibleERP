@@ -549,6 +549,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-032 | AR output VAT routes to the item vat_code account | GL-21 | 06 §14 (rev 0.10) |
 | UAT-TAX-033 | PP30↔GL reconciliation spans the VAT-account set | TAX-04 | 06 §14 (rev 0.10) |
 | UAT-TAX-034 | WHT tax_code defaults the income type + rate on an AP payment | TAX-03 | 06 §14 (rev 0.11) |
+| UAT-TAX-035 | Issue a credit note (ใบลดหนี้ ม.86/10) against a tax invoice | TAX-07 | 06 §14 (rev 0.12) |
+| UAT-TAX-036 | Maker-checker on a credit/debit note (SoD) | TAX-07, GL-05 | 06 §14 (rev 0.12) |
+| UAT-TAX-037 | An approved credit/debit note adjusts output VAT in its period | TAX-07, TAX-04 | 06 §14 (rev 0.12) |
+| UAT-TAX-038 | Print a credit note as a ม.86/10 document | TAX-07 | 06 §14 (rev 0.12) |
+| UAT-TAX-039 | Full tax invoice PDF applies the no-code document template (presentation only; ม.86/4 fiscal integrity) | TAX-01 | 06 §14 (rev 0.13), 27 §7.13 |
+| UAT-TAX-040 | Abbreviated 80mm slip applies the no-code document template (presentation only; ม.86/6 fiscal integrity) | TAX-01 | 06 §14 (rev 0.14), 27 §7.13 |
 
 ## 07 — Payroll → `05-payroll.md`
 

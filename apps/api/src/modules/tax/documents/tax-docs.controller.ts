@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Query, Body, Res } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body, Res, Optional } from '@nestjs/common';
 import { z } from 'zod';
 import type { FastifyReply } from 'fastify';
 import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
@@ -9,6 +9,8 @@ import { buildEtaxInvoiceXml } from './etax-xml';
 import { getSigningMaterial, signEtaxXml } from './etax-sign';
 import { EtaxEmailService } from './etax-email.service';
 import { IssueFullBody, type IssueFullDto } from './dto';
+import { normalizeA4Template, type A4TemplateConfig } from '../../../common/a4-template';
+import { DocumentTemplatesService } from '../../document-templates/document-templates.service';
 
 const VoidBody = z.object({ reason: z.string().optional() });
 const SendEmailBody = z.object({ to_email: z.string().email() });
@@ -26,7 +28,18 @@ export class TaxDocsController {
     private readonly svc: TaxInvoiceService,
     private readonly pdf: TaxDocsPdfService,
     private readonly etaxEmail: EtaxEmailService,
+    @Optional() private readonly docTemplates?: DocumentTemplatesService, // no-code full-tax-invoice template (presentation)
   ) {}
+
+  // The tenant's active, presentation-only template for a FISCAL A4 doc. Normalized with { fiscal: true } so
+  // the mandatory ม.86/4 seller name/address/tax-id lines are always kept; a lookup failure never blocks the
+  // document (fall open to the brand default).
+  private async fiscalTemplate(docType: string): Promise<A4TemplateConfig> {
+    try {
+      if (this.docTemplates) return normalizeA4Template(await this.docTemplates.resolveActive(docType), { fiscal: true });
+    } catch { /* keep default */ }
+    return normalizeA4Template({}, { fiscal: true });
+  }
 
   // ใบกำกับภาษีเต็มรูป (ม.86/4)
   @Post('full') @Permissions('ar', 'pos')
@@ -101,9 +114,9 @@ export class TaxDocsController {
   @Get(':docNo/pdf') @Permissions('ar', 'pos', 'cust_pos')
   async pdfDoc(@Param('docNo') docNo: string, @Query('copy') copy: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const inv = await this.svc.getByDocNo(u, docNo);
-    const html = inv.type === 'abbreviated' ? this.pdf.abbreviatedTaxInvoiceHtml(inv)
+    const html = inv.type === 'abbreviated' ? this.pdf.abbreviatedTaxInvoiceHtml(inv, await this.fiscalTemplate('tax_invoice_abbreviated'))
       : (inv.type === 'credit_note' || inv.type === 'debit_note') ? this.pdf.creditDebitNoteHtml(inv)
-      : this.pdf.fullTaxInvoiceHtml(inv, copy === '1' || copy === 'copy');
+      : this.pdf.fullTaxInvoiceHtml(inv, copy === '1' || copy === 'copy', await this.fiscalTemplate('tax_invoice_full'));
     const buf = await this.pdf.renderToPdf(html, inv.type === 'abbreviated');
     if (buf) {
       reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${docNo}.pdf"`).header('Content-Length', buf.length).send(buf);

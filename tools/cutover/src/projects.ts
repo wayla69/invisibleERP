@@ -244,6 +244,16 @@ async function main() {
   const acAfter = await inj('GET', '/api/projects/action-center', admin);
   ok('Action center clears pmr_over_budget after approval', !(acAfter.json.items ?? []).some((i: any) => i.kind === 'pmr_over_budget' && i.ref === pmrNo), 'cleared');
 
+  // ── 9e-bis. Shop-for-a-project reads (pr_raise-safe): shoppable projects + approved-BoQ shelf with remaining ──
+  // These thin reads back the /shop project mode: a requester browses ONLY what the approved BoQ allows.
+  const shopProjs = await inj('GET', '/api/pmr/projects', admin);
+  ok('Shoppable projects lists PRJ-A (has an approved/locked BoQ)', (shopProjs.json.projects ?? []).some((p: any) => p.code === 'PRJ-A'), JSON.stringify({ count: shopProjs.json.count }));
+  const shelf = await inj('GET', '/api/pmr/project/PRJ-A/boq', admin);
+  const shelfCement = (shelf.json.lines ?? []).find((l: any) => l.item_no === 'CEMENT');
+  ok('Project shelf serves the approved BoQ material line CEMENT with remaining budget (−2500 after the overage)',
+    !!shelfCement && ['approved', 'locked'].includes(shelf.json.boq_status) && near(shelfCement.remaining, -2500) && near(shelfCement.budget, 15000),
+    JSON.stringify({ st: shelf.json.boq_status, r: shelfCement?.remaining, b: shelfCement?.budget }));
+
   // ── 9f. Stock reservation → issue-to-project (M3, INV-13): reserve on-hand stock, issue into project WIP ──
   await db.insert(s.invBalances).values({ tenantId: hq, itemId: 'STEEL', itemDescription: 'เหล็ก', locationId: 'WH-MAIN', onHandQty: '100', avgCost: '50', totalValue: '5000', costingMethod: 'moving_avg' });
   const avail0 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);

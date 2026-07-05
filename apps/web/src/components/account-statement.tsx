@@ -63,11 +63,12 @@ export function AccountStatement({
   const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
   const qs = `${partyParam ?? ''}&from=${from}&to=${to}`;
   const emailStmt = useMutation({
-    mutationFn: (to_email: string) => api<{ to: string }>(`${pdfPath}/send-email?${qs}`, { method: 'POST', body: JSON.stringify({ to_email }) }),
+    mutationFn: (to_email: string | undefined) => api<{ to: string }>(`${pdfPath}/send-email?${qs}`, { method: 'POST', body: JSON.stringify({ to_email }) }),
     onSuccess: (r) => notifySuccess(t('doc.email_sent', { to: r.to })),
     onError: (e: any) => notifyError(e.message),
   });
-  const promptEmail = () => { const e = window.prompt(t('doc.email_prompt')); if (e) emailStmt.mutate(e); };
+  // Blank prompt → the party's email on file (master data); the server returns NO_RECIPIENT if none.
+  const promptEmail = () => { const e = window.prompt(t('doc.email_prompt_default')); if (e === null) return; emailStmt.mutate(e.trim() || undefined); };
   const d = query.data;
   const typeLabel = (ty: string) => (TYPE_KEY[ty] ? t(TYPE_KEY[ty]) : ty);
   const chargeLabel = side === 'ar' ? t('mx.acstmt_charge_ar') : t('mx.acstmt_charge_ap');

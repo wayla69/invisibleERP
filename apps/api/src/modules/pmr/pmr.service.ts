@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectBoqLines, projectMaterialRequisitions, pmrLines } from '../../database/schema';
+import { projects, projectBoq, projectBoqLines, projectMaterialRequisitions, pmrLines, items } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { ProcurementService } from '../procurement/procurement.service';
@@ -16,6 +16,8 @@ const EPS = 0.005;
 
 export interface PmrLineDto { boq_line_id: number; item_no?: string; qty: number; unit_cost: number }
 export interface PmrSubmitDto { project_code: string; items: PmrLineDto[]; vendor_name?: string }
+// A shoppable BoQ line for the project-shop shelf (approved-budget material line + remaining budget).
+export interface ShelfLine { boq_line_id: number; item_no: string; item_description: string | null; uom: string | null; rate: number; budget: number; committed: number; remaining: number; image_key: string | null }
 
 // Project Material Requisition (PMR) — M2, docs/32, PROJ-13. The one document by which site staff draw
 // material against a project's BoQ. Decision tree on submit:
@@ -197,6 +199,62 @@ export class PmrService {
       requested_by: m.requestedBy, approved_by: m.approvedBy, rejection_reason: m.rejectionReason, created_at: m.createdAt,
       lines: lines.map((l: any) => ({ id: Number(l.id), boq_line_id: Number(l.boqLineId), item_no: l.itemNo, qty: n(l.qty), unit_cost: n(l.unitCost), est_cost: n(l.estCost), remaining: n(l.remaining), over_budget: l.overBudget })),
     };
+  }
+
+  // ── Shop-for-a-project read model (pr_raise-safe) ────────────────────────────────────────────────
+  // The requisition-raiser (`pr_raise`) can browse WHAT a project's approved budget allows, and only that —
+  // the projects/BoQ endpoints proper are exec/planner/ar-gated, so these two thin reads expose ONLY the
+  // shoppable slice (project code+name, and the approved BoQ's material lines with remaining budget). No
+  // financials/EVM leak. A requester cannot cart an item that is not on the approved BoQ (see PROJ-12/13,
+  // enforced on submit() above), so the shop restricts them to exactly these lines.
+
+  // Active projects whose latest BoQ is approved/locked — i.e. the projects a requester can shop into.
+  async shoppableProjects() {
+    const rows = await this.db
+      .select({ code: projects.projectCode, name: projects.name, status: projects.status, boqStatus: projectBoq.status })
+      .from(projects)
+      .innerJoin(projectBoq, eq(projectBoq.projectId, projects.id))
+      .where(and(inArray(projectBoq.status, ['approved', 'locked']), sql`${projects.status} <> 'Closed'`));
+    // A project can carry several approved BoQ versions — one shoppable entry per project code.
+    const seen = new Map<string, { code: string; name: string; status: string }>();
+    for (const r of rows) if (!seen.has(r.code)) seen.set(r.code, { code: r.code, name: r.name, status: r.status });
+    const list = [...seen.values()].sort((a, b) => a.code.localeCompare(b.code));
+    return { projects: list, count: list.length };
+  }
+
+  // The approved BoQ's material lines (itemNo set) for a project, each with budget / committed / remaining —
+  // the "shelf" a requester shops from. Falls back to an empty shelf (no approved BoQ ⇒ nothing shoppable).
+  async shoppableBoq(code: string) {
+    const p = await this.projectRow(code);
+    const [boq] = await this.db.select().from(projectBoq)
+      .where(and(eq(projectBoq.projectId, Number(p.id)), inArray(projectBoq.status, ['approved', 'locked'])))
+      .orderBy(desc(projectBoq.id)).limit(1);
+    if (!boq) return { project_code: code, project_name: p.name, boq_no: null as string | null, boq_status: null as string | null, tolerance_pct: r2(n(p.budgetTolerancePct)), lines: [] as ShelfLine[], budget_total: 0, committed_total: 0, remaining_total: 0 };
+    const rawLines = await this.db.select().from(projectBoqLines)
+      .where(and(eq(projectBoqLines.boqId, Number(boq.id)), sql`${projectBoqLines.itemNo} is not null`))
+      .orderBy(projectBoqLines.lineNo);
+    const lineIds = rawLines.map((l: any) => Number(l.id));
+    const committedByLine = await this.commitments.committedByLine(lineIds);
+    // Enrich each line with the item master (description / uom / image) for a Grab/Shopee-style card.
+    const itemNos = [...new Set(rawLines.map((l: any) => l.itemNo).filter(Boolean) as string[])];
+    const itemRows = itemNos.length
+      ? await this.db.select({ itemId: items.itemId, desc: items.itemDescription, uom: items.uom, imageKey: items.imageKey }).from(items).where(inArray(items.itemId, itemNos))
+      : [];
+    const itemBy = new Map(itemRows.map((r: any) => [r.itemId, r]));
+    let bt = 0, ct = 0;
+    const lines = rawLines.map((l: any) => {
+      const budget = r2(l.budgetAmount);
+      const committed = r2(committedByLine.get(Number(l.id)) ?? 0);
+      const remaining = r2(budget - committed);
+      bt = r2(bt + budget); ct = r2(ct + committed);
+      const im = itemBy.get(l.itemNo);
+      return {
+        boq_line_id: Number(l.id), item_no: l.itemNo as string,
+        item_description: l.description ?? im?.desc ?? l.itemNo, uom: l.uom ?? im?.uom ?? '',
+        rate: r2(l.rate), budget, committed, remaining, image_key: im?.imageKey ?? null,
+      };
+    });
+    return { project_code: code, project_name: p.name, boq_no: boq.boqNo, boq_status: boq.status, tolerance_pct: r2(n(p.budgetTolerancePct)), lines, budget_total: bt, committed_total: ct, remaining_total: r2(bt - ct) };
   }
 
   // PMRs for a project (newest first) — the requisition list / approval inbox feed.

@@ -4,18 +4,33 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { documentTemplates, tenants } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { buildSampleReceiptData, renderReceiptHtml, normalizeReceiptTemplate, type ReceiptData } from '../printing/receipt-render';
+import { normalizeA4Template, renderA4SamplePreview, renderAbbreviatedSlipPreview } from '../../common/a4-template';
+import type { DocParty } from '../../common/doc-html';
 
-// Catalog of customizable document types. `receipt` is wired to the live render (Platform Phase 10 — A3);
-// the rest can be authored + stored now and are rendered as the wiring lands in later increments.
+// Catalog of customizable document types. `receipt` (Platform Phase 10 — A3) plus the A4 documents
+// `quotation` / `purchase_order` / `payslip` / `tax_invoice_full` AND the 80mm `tax_invoice_abbreviated` slip
+// are wired to the LIVE render (their per-module renderer applies the tenant's active template at print time).
+// For the fiscal tax invoices the config is normalized with { fiscal: true } so the mandatory ม.86/4-6 seller
+// lines are always kept. The abbreviated slip honours only the thermal-appropriate knobs (header + footer note).
 const DOC_TYPES = [
   { key: 'receipt', label_th: 'ใบเสร็จรับเงิน', label_en: 'Sales receipt', status: 'live' },
-  { key: 'tax_invoice_abbreviated', label_th: 'ใบกำกับภาษีอย่างย่อ', label_en: 'Abbreviated tax invoice', status: 'planned' },
-  { key: 'tax_invoice_full', label_th: 'ใบกำกับภาษีเต็มรูป', label_en: 'Full tax invoice', status: 'planned' },
-  { key: 'quotation', label_th: 'ใบเสนอราคา', label_en: 'Quotation', status: 'planned' },
-  { key: 'purchase_order', label_th: 'ใบสั่งซื้อ', label_en: 'Purchase order', status: 'planned' },
-  { key: 'payslip', label_th: 'สลิปเงินเดือน', label_en: 'Payslip', status: 'planned' },
+  { key: 'tax_invoice_abbreviated', label_th: 'ใบกำกับภาษีอย่างย่อ', label_en: 'Abbreviated tax invoice', status: 'live' },
+  { key: 'tax_invoice_full', label_th: 'ใบกำกับภาษีเต็มรูป', label_en: 'Full tax invoice', status: 'live' },
+  { key: 'quotation', label_th: 'ใบเสนอราคา', label_en: 'Quotation', status: 'live' },
+  { key: 'purchase_order', label_th: 'ใบสั่งซื้อ', label_en: 'Purchase order', status: 'live' },
+  { key: 'payslip', label_th: 'สลิปเงินเดือน', label_en: 'Payslip', status: 'live' },
 ] as const;
 const DOC_TYPE_KEYS = DOC_TYPES.map((d) => d.key) as readonly string[];
+
+// A4 documents driven by the shared common/a4-template.ts config. `fiscal` force-keeps mandatory
+// seller-identity lines (ม.86/4) regardless of the stored knobs. Receipt is handled separately (80mm slip).
+const A4_META: Record<string, { title: string; subtitle: string; fiscal: boolean }> = {
+  quotation: { title: 'ใบเสนอราคา', subtitle: 'Quotation', fiscal: false },
+  purchase_order: { title: 'ใบสั่งซื้อ', subtitle: 'Purchase Order', fiscal: false },
+  payslip: { title: 'สลิปเงินเดือน', subtitle: 'Payslip', fiscal: false },
+  tax_invoice_abbreviated: { title: 'ใบกำกับภาษีอย่างย่อ', subtitle: 'Abbreviated Tax Invoice', fiscal: true },
+  tax_invoice_full: { title: 'ใบกำกับภาษีเต็มรูป', subtitle: 'Full Tax Invoice', fiscal: true },
+};
 
 // Document templates (Platform Phase 10 — A3). A tenant authors no-code, presentation-only templates for
 // customer-facing documents. Templates carry NO amounts and post NOTHING to the ledger; one per (tenant,
@@ -34,10 +49,12 @@ export class DocumentTemplatesService {
     }
   }
 
-  // Normalize a config blob per doc_type. Receipt gets the full typed/clamped shape; others are stored as a
-  // plain object placeholder until their render wiring lands.
+  // Normalize a config blob per doc_type into its complete, safe, typed shape. Receipt is the 80mm slip
+  // config; the A4 documents share the a4-template config (fiscal types force mandatory-field knobs on).
   private normalize(docType: string, config: any) {
     if (docType === 'receipt') return normalizeReceiptTemplate(config);
+    const a4 = A4_META[docType];
+    if (a4) return normalizeA4Template(config, { fiscal: a4.fiscal });
     return config && typeof config === 'object' ? config : {};
   }
 
@@ -119,17 +136,27 @@ export class DocumentTemplatesService {
   // Live preview: render representative data through the posted config WITHOUT touching any real document.
   async preview(docType: string, config: any, user: JwtUser): Promise<{ doc_type: string; html: string }> {
     this.assertDocType(docType);
-    if (docType !== 'receipt') {
-      const dt = DOC_TYPES.find((d) => d.key === docType);
-      const html = `<!doctype html><meta charset="utf-8"><div style="font-family:sans-serif;padding:24px;color:#475569;text-align:center">`
-        + `<p style="font-size:14px"><b>${dt?.label_th ?? docType}</b> — ตัวอย่างยังไม่พร้อมในรุ่นนี้</p>`
-        + `<p style="font-size:12px">Live preview for this document type is not available yet (the template is saved and will apply when its rendering lands).</p></div>`;
-      return { doc_type: docType, html };
-    }
     const db = this.db;
     let t: any = null;
     if (user.tenantId != null) [t] = await db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1);
     const addr = t ? [t.addressLine1, t.addressLine2, t.subDistrict, t.district, t.province, t.postalCode].filter(Boolean).join(' ') : '';
+
+    // A4 documents: render the representative preview through the shared a4-template config.
+    const a4 = A4_META[docType];
+    if (a4) {
+      const seller: DocParty = {
+        name: t?.legalName || t?.name || 'บริษัทตัวอย่าง', address: addr || 'ที่อยู่บริษัท',
+        tax_id: t?.taxId ?? '0000000000000', branch_label: t?.branchLabelTh ?? 'สำนักงานใหญ่',
+        phone: t?.phone ?? null, email: t?.email ?? null, logo_url: t?.logoUrl ?? null,
+      };
+      const cfg = normalizeA4Template(config, { fiscal: a4.fiscal });
+      // The abbreviated tax invoice is an 80mm thermal slip, not an A4 page — preview it as the real slip so
+      // what the tenant sees matches the printed ม.86/6 output.
+      if (docType === 'tax_invoice_abbreviated') return { doc_type: docType, html: renderAbbreviatedSlipPreview(cfg, { seller }) };
+      return { doc_type: docType, html: renderA4SamplePreview(cfg, { title: a4.title, subtitle: a4.subtitle, seller }) };
+    }
+
+    // Receipt (80mm slip).
     const seller: ReceiptData['seller'] = {
       name: t?.name ?? 'ร้านตัวอย่าง', legal_name: t?.legalName ?? null, branch_label: t?.branchLabelTh ?? 'สำนักงานใหญ่',
       tax_id: t?.taxId ?? '0000000000000', address: addr || 'ที่อยู่ร้าน', vat_registered: !!t?.vatRegistered,

@@ -35,7 +35,8 @@ const PrToPoBody = z.object({
   lines: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), create_item: z.boolean().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional(), is_capital: z.boolean().optional() })).min(1),
 });
 const CancelBody = z.object({ reason: z.string().min(1) });
-const DocEmailBody = z.object({ to_email: z.string().email() });
+// to_email optional — defaults to the vendor's email on file (master data) when omitted.
+const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 // D4 — receive a partial qty of one PO line.
 const ReceiveItemBody = z.object({ item_id: z.string().min(1), qty: z.number().positive() });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
@@ -97,11 +98,16 @@ export class ProcurementController {
 
   // Product catalog for the shop/basket requisition screen (/shop) — read-only item-master browse grouped
   // by product category, so staff can pick items into a basket and check out a PR. Same low-risk pr_raise
-  // duty as raising the PR itself. Optional q (code/description) + category-key filter.
+  // duty as raising the PR itself. Paginated (offset/limit) for the Grab/Shopee-style infinite-scroll grid;
+  // optional q (code/description) + category-key filter. Returns the item page + the full category summary.
   @Get('catalog') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
-  catalog(@CurrentUser() u: JwtUser, @Query('q') q?: string, @Query('category') category?: string, @Query('limit') limit?: string) {
-    return this.svc.catalog(u, { q, category, limit: limit ? Number(limit) : undefined });
+  catalog(@CurrentUser() u: JwtUser, @Query('q') q?: string, @Query('category') category?: string, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.svc.catalog(u, { q, category, limit: limit ? Number(limit) : undefined, offset: offset ? Number(offset) : undefined });
   }
+
+  // Catalog item thumbnail (pr_raise) — the in-DB image data-URL for a shop-grid <img>. 404 if none.
+  @Get('catalog/items/:itemId/image') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  catalogItemImage(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.catalogItemImage(u, itemId); }
 
   // Vendor search for the PR→PO panel (pick a real supplier from the master).
   @Get('vendors/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
@@ -184,7 +190,7 @@ export class ProcurementController {
   @Get('pos/:poNo/pdf') @Permissions('procurement', 'planner', 'exec', 'wh_receive', 'warehouse')
   async printPo(@Param('poNo') poNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const po = await this.svc.getPoForPrint(poNo, u);
-    const html = this.poPdf.purchaseOrderHtml(po);
+    const html = this.poPdf.purchaseOrderHtml(po, po.template);
     const buf = await this.poPdf.renderToPdf(html);
     if (buf) {
       reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${poNo}.pdf"`).header('Content-Length', buf.length).send(buf);
@@ -198,6 +204,10 @@ export class ProcurementController {
   // wh_receive, so existing warehouse roles keep access; 'procurement' alone no longer can receive.
   @Post('grs') @Permissions('wh_receive')
   createGr(@Body(new ZodValidationPipe(GrBody)) b: CreateGrDto, @CurrentUser() u: JwtUser) { return this.svc.createGr(b, u); }
+
+  // Recent goods receipts — the /receiving list surface (print/email each GR note).
+  @Get('grs') @Permissions('wh_receive', 'warehouse', 'procurement', 'creditors', 'exec')
+  listGrs(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listGrs(u, limit ? Number(limit) : 50); }
 
   // Printable ใบรับสินค้า (Goods Receipt Note) — HTML→PDF, HTML fallback when Chromium absent.
   @Get('grs/:grNo/pdf') @Permissions('wh_receive', 'warehouse', 'procurement', 'creditors', 'exec')

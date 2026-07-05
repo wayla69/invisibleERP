@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { bahtText } from '../../common/bahttext.util';
 import { wrapA4, sellerHeaderHtml, esc, fmtMoney, fmtQty, thaiDate, type DocParty } from '../../common/doc-html';
+import { type A4TemplateConfig, DEFAULT_A4_TEMPLATE, a4LogoHtml, a4HeaderNoteHtml, a4FooterHtml } from '../../common/a4-template';
 import { PdfRenderer } from '../pdf/pdf-renderer.service';
 
 export interface QuotePrintData {
@@ -17,6 +18,7 @@ export interface QuotePrintData {
   subtotal: number;
   discount_total: number;
   total: number;
+  template?: A4TemplateConfig; // resolved active no-code template (presentation only); default when absent
 }
 
 // HTML → PDF template for the ใบเสนอราคา (Quotation). Same shell/formatters as the other business
@@ -29,18 +31,18 @@ export class QuotePdfService {
     return this.pdf.render(html, { format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
   }
 
-  quotationHtml(q: QuotePrintData): string {
+  quotationHtml(q: QuotePrintData, cfg: A4TemplateConfig = DEFAULT_A4_TEMPLATE): string {
     const rows = q.lines.map((l) => `
       <tr><td class="c">${l.line_no}</td><td>${esc(l.item_code ?? '')}</td><td>${esc(l.description)}</td>
       <td class="r">${fmtQty(l.qty)}</td><td class="r">${fmtMoney(l.unit_price)}</td>
       <td class="r">${l.discount_pct ? `${fmtQty(l.discount_pct)}%` : '-'}</td><td class="r">${fmtMoney(l.line_total)}</td></tr>`).join('');
     const ccy = esc(q.currency || 'THB');
-    const words = q.currency === 'THB' ? `<div class="words">( ${esc(bahtText(q.total))} )</div>` : '';
+    const words = q.currency === 'THB' && cfg.totals.show_amount_in_words ? `<div class="words">( ${esc(bahtText(q.total))} )</div>` : '';
     const discountRow = q.discount_total > 0
       ? `<tr><td class="tlbl">ส่วนลด</td><td class="tval">-${fmtMoney(q.discount_total)}</td></tr>` : '';
     return wrapA4(`
       <div class="hdr">
-        ${sellerHeaderHtml(q.seller)}
+        ${sellerHeaderHtml(q.seller, { showAddress: cfg.body.show_seller_address, showTaxId: cfg.body.show_seller_tax_id, logoHtml: a4LogoHtml(cfg, q.seller.logo_url), headerNoteHtml: a4HeaderNoteHtml(cfg) })}
         <div class="ttl">ใบเสนอราคา<div class="sub">Quotation</div><div class="stt">${esc(statusTh(q.status))}</div></div>
       </div>
       <table class="meta">
@@ -58,11 +60,8 @@ export class QuotePdfService {
       </table>
       ${words}
       ${q.notes ? `<div class="rmk"><span class="b">หมายเหตุ:</span> ${esc(q.notes)}</div>` : ''}
-      <div class="foot">
-        <div class="sign">ผู้เสนอราคา<div class="who">${esc(q.created_by ?? '')}</div></div>
-        <div class="sign">ผู้อนุมัติ / ผู้สั่งซื้อ (ลูกค้า)<div class="who"></div></div>
-      </div>
-    `, 'ใบเสนอราคา (Quotation)');
+      ${a4FooterHtml(cfg, { leftDefault: 'ผู้เสนอราคา', leftWho: q.created_by ?? '', rightDefault: 'ผู้อนุมัติ / ผู้สั่งซื้อ (ลูกค้า)' })}
+    `, 'ใบเสนอราคา (Quotation)', { accentColor: cfg.header.accent_color });
   }
 }
 

@@ -188,6 +188,15 @@ async function main() {
   const badEmail = await inj('POST', `/api/payroll/slips/${somSlip.id}/send-email`, admin, { to_email: 'not-an-email' });
   ok('Payslip email rejects an invalid recipient → 400', badEmail.status === 400, `${badEmail.status}`);
 
+  // ── no-code document template applied LIVE to the payslip (Platform Phase 10 — wire planned→live) ──
+  // Author a payslip template (presentation only) then re-fetch the slip: the tenant's header note + accent
+  // must be genuinely consumed at render time (not just stored). Admin carries users/exec for the designer.
+  const tplRes = await inj('POST', '/api/document-templates', admin, { doc_type: 'payslip', name: 'สลิปบริษัท', config: { header: { header_note: 'PAYSLIP-HDR-Z', accent_color: '#0F766E' }, footer: { terms_text: 'ข้อมูลลับ โปรดเก็บรักษา' } } });
+  ok('Payslip template: create (first → default)', tplRes.status < 300 && tplRes.json.is_default === true, `${tplRes.status} ${JSON.stringify(tplRes.json).slice(0, 60)}`);
+  const themedSlip = await injRaw('GET', `/api/payroll/slips/${somSlip.id}/pdf`, admin);
+  ok('Payslip template applied LIVE: the tenant header note + accent are rendered on the slip', themedSlip.status === 200 && themedSlip.body.includes('PAYSLIP-HDR-Z') && themedSlip.body.includes('#0F766E') && themedSlip.body.includes('ข้อมูลลับ โปรดเก็บรักษา'), `note=${themedSlip.body.includes('PAYSLIP-HDR-Z')} accent=${themedSlip.body.includes('#0F766E')}`);
+  ok('Payslip template: core integrity — net pay + masked citizen ID still render under a custom template', themedSlip.body.includes('เงินได้สุทธิ') && themedSlip.body.includes('x-xxxx-xxxxx-xx-3') && !themedSlip.body.includes('1234567890123'), 'net + masked id present');
+
   // ── 7. cross-tenant guard (C2): an HQ super-admin (no tenant) must name a tenant; the run is scoped ──
   // seed an active employee under ANOTHER tenant — it must NOT be swept into an HQ payroll run.
   await db.insert(s.employees).values({ tenantId: t2, empCode: 'EMP-T2-1', name: 'OtherCo Staff', monthlySalary: '20000', active: true }).onConflictDoNothing();

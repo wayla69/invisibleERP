@@ -11,6 +11,8 @@ import { computePayslipFull, overtimePay } from './payroll-calc';
 import { sellerParty } from '../../common/doc-party';
 import { PayslipPdfService, type PayslipPrintData, maskNationalId } from './payslip-pdf.service';
 import { DocEmailService } from '../mail/doc-email.service';
+import { normalizeA4Template } from '../../common/a4-template';
+import { DocumentTemplatesService } from '../document-templates/document-templates.service';
 
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -33,6 +35,9 @@ export class PayrollService implements OnModuleInit {
     // harnesses that build PayrollService without PdfModule/MailModule still compile (print path just 404s).
     @Optional() private readonly payslipPdf?: PayslipPdfService,
     @Optional() private readonly docEmail?: DocEmailService,
+    // Resolve the tenant's active no-code payslip template at print time (presentation only). @Optional so
+    // partial harnesses still construct; absent ⇒ the built-in default layout.
+    @Optional() private readonly docTemplates?: DocumentTemplatesService,
   ) {}
 
   // Register the worker handler for an async payroll run. The worker has already established the job's tenant
@@ -307,6 +312,9 @@ export class PayrollService implements OnModuleInit {
     const [t] = slip.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(slip.tenantId))).limit(1) : [null];
     const gross = n(slip.gross), ot = n(slip.otPay), unpaid = n(slip.unpaid);
     const period = run?.period ?? '';
+    // Resolve the tenant's active payslip template (presentation only); a lookup failure never blocks the slip.
+    let template = normalizeA4Template({});
+    try { if (this.docTemplates) template = normalizeA4Template(await this.docTemplates.resolveActive('payslip')); } catch { /* keep default */ }
     return {
       slip_id: Number(slip.id), period, pay_date: period ? `${period}-28` : null, entry_no: run?.entryNo ?? null,
       emp_code: slip.empCode ?? emp?.empCode ?? null, emp_name: slip.empName ?? emp?.name ?? null,
@@ -314,16 +322,16 @@ export class PayrollService implements OnModuleInit {
       national_id: maskNationalId(slip.nationalId), currency: 'THB', seller: sellerParty(t),
       base: r2(gross - ot + unpaid), ot_pay: ot, gross, unpaid,
       sso_employee: n(slip.ssoEmployee), pf_employee: n(slip.pfEmployee), wht: n(slip.wht), net: n(slip.net),
-      sso_employer: n(slip.ssoEmployer), pf_employer: n(slip.pfEmployer),
+      sso_employer: n(slip.ssoEmployer), pf_employer: n(slip.pfEmployer), template,
     };
   }
 
   payslipHtml(p: PayslipPrintData): string {
     if (!this.payslipPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Payslip renderer not wired' });
-    return this.payslipPdf.payslipHtml(p);
+    return this.payslipPdf.payslipHtml(p, p.template);
   }
   renderPayslipPdf(p: PayslipPrintData): Promise<Buffer | null> {
-    return this.payslipPdf ? this.payslipPdf.renderToPdf(this.payslipPdf.payslipHtml(p)) : Promise.resolve(null);
+    return this.payslipPdf ? this.payslipPdf.renderToPdf(this.payslipPdf.payslipHtml(p, p.template)) : Promise.resolve(null);
   }
 
   // Email the payslip as a PDF attachment (HTML fallback when Chromium absent). Employees carry no email

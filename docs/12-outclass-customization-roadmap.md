@@ -124,9 +124,25 @@ nothing to the GL. That discipline is itself part of "outclass."
 - **Docs:** `process-narratives/27-platform-customization.md` §7.10 (+RACI, control matrix, error codes,
   revision 0.2); user manual `12-platform-customization.md`; UAT `08-admin-sod-uat.md` UAT-ADM-040/041 +
   traceability. No new RCM control (operational/presentation; reinforces REST-10 receipt tie-out — unaffected).
-- **Deferred (next increment of Phase 10):** template-driven rendering for abbreviated/full tax invoices
-  (presentation-only, mandatory fields preserved), quotations, POs, payslips; logo file upload to object
-  storage (today a pasted https URL / data-URI, per Phase 9).
+- **Delivered (next increment, 2026-07-05):** template-driven LIVE rendering for the A4 documents
+  **quotation, purchase order and payslip** — a shared `common/a4-template.ts` config (accent, logo, header
+  note, seller-line toggles, amount-in-words, signature captions, footer terms) applied by each per-module
+  renderer at print time via the parameterized `common/doc-html.ts` shell; the designer previews a real A4
+  sample per type + per-type web knob panels. See narrative `27-platform-customization.md` §7.13 / rev 1.7.
+- **Delivered (2026-07-05):** template-driven LIVE rendering for the **full tax invoice (ใบกำกับภาษีเต็มรูป,
+  ม.86/4)** — its own fiscal shell (`tax-docs-pdf.service.ts`) **parameterized in place** with the same accent
+  gate + the shared `a4LogoHtml`/`a4HeaderNoteHtml`/`a4FooterHtml` helpers; the tax-docs controller resolves
+  the active template fail-open and normalizes it with **`{ fiscal: true }`**, so the ม.86/4 mandatory seller
+  name/address/tax-id are force-kept regardless of the knobs. `tax_invoice_full` flips to `live`; seller logo
+  is read live from the tenant. See narrative `27-platform-customization.md` §7.13 / rev 1.8; `taxdocs` 87.
+- **Delivered (2026-07-05):** template-driven LIVE rendering for the **abbreviated (80mm thermal) tax invoice
+  (ใบกำกับภาษีอย่างย่อ, ม.86/6)** — its slip layout moved into a shared pure renderer (`common/a4-template.ts`
+  `renderAbbreviatedTaxSlip`) used by both the live renderer and the designer preview, honouring only the
+  thermal-appropriate knobs (header note + footer notes); the mandatory ม.86/6 seller name/Tax ID + VAT total
+  are structural. `tax_invoice_abbreviated` flips to `live` (both tax invoices now live); the designer preview
+  renders the real 80mm slip. See narrative `27-platform-customization.md` §7.13 / rev 1.9; `taxdocs` 91, `ext` 284.
+- **Deferred (next increment of Phase 10):** logo file upload to object storage (today a pasted https URL /
+  data-URI, per Phase 9).
 
 ---
 

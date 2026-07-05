@@ -15,5 +15,6 @@ export function sellerParty(t: any | null | undefined): DocParty {
     branch_label: t?.branchLabelTh ?? 'สำนักงานใหญ่',
     phone: t?.phone ?? null,
     email: t?.email ?? null,
+    logo_url: t?.logoUrl ?? null,
   };
 }
