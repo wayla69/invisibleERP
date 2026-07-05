@@ -10,6 +10,9 @@ import { WebhookService } from '../platform/webhook.service';
 import { LineNotifyService } from '../messaging/line-notify.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd } from '../../database/queries';
+import { GrPdfService, type GrPrintData } from './gr-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
+import { sellerParty } from '../../common/doc-party';
 import type { JwtUser } from '../../common/decorators';
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -38,6 +41,8 @@ export class ProcurementService {
     @Optional() private readonly webhooks?: WebhookService, // Phase 8 — outbound webhook fan-out (best-effort)
     @Optional() private readonly lineNotify?: LineNotifyService, // D2 — close-the-loop LINE pushes to the PR requester
     @Optional() private readonly commitments?: CommitmentsService, // M1 (PROJ-12) — BoQ-line budget encumbrance
+    @Optional() private readonly grPdf?: GrPdfService,             // ใบรับสินค้า renderer
+    @Optional() private readonly docEmail?: DocEmailService,        // @Global MailModule
   ) {}
 
   // D2 — best-effort LINE push to the requester(s) of every PR linked to a PO (pr_items.po_no), closing
@@ -655,6 +660,38 @@ export class ProcurementService {
       },
       lines, subtotal, vat_rate: vatRate, vat_amount: vatAmount, grand_total: Math.round((subtotal + vatAmount) * 100) / 100,
     };
+  }
+
+  // Assemble the printable ใบรับสินค้า (Goods Receipt Note) — header + received lines + vendor + our-company.
+  async getGrForPrint(grNo: string, user: JwtUser): Promise<GrPrintData> {
+    const db = this.db;
+    const [gr] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.grNo, grNo)).limit(1);
+    if (!gr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'GR not found', messageTh: 'ไม่พบใบรับสินค้า' });
+    const lineRows = await db.select().from(grItems).where(eq(grItems.grId, Number(gr.id)));
+    const vendorRow = gr.vendorId ? (await db.select().from(vendors).where(eq(vendors.id, Number(gr.vendorId))).limit(1))[0] : null;
+    const [t] = user.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1) : [null];
+    return {
+      gr_no: gr.grNo, gr_date: gr.grDate ?? null, po_no: gr.poNo ?? null, remarks: gr.remarks ?? null,
+      received_by: gr.receivedBy ?? null, currency: gr.currency ?? 'THB', seller: sellerParty(t),
+      vendor: { name: vendorRow?.name ?? gr.vendorName ?? '-', address: vendorRow?.address ?? null, tax_id: vendorRow?.taxId ?? null, branch_label: null, phone: vendorRow?.phone ?? null, email: vendorRow?.email ?? null },
+      lines: lineRows.map((l: any) => ({ item_id: l.itemId ?? null, description: l.itemDescription ?? null, received_qty: n(l.receivedQty), uom: l.uom ?? null, unit_cost: n(l.unitCost), lot_no: l.lotNo ?? null })),
+    };
+  }
+  goodsReceiptHtml(g: GrPrintData): string {
+    if (!this.grPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'GR renderer not wired' });
+    return this.grPdf.goodsReceiptHtml(g);
+  }
+  renderGrPdf(g: GrPrintData): Promise<Buffer | null> { return this.grPdf ? this.grPdf.renderToPdf(this.grPdf.goodsReceiptHtml(g)) : Promise.resolve(null); }
+  async emailGr(grNo: string, toEmail: string, user: JwtUser) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const g = await this.getGrForPrint(grNo, user);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: g.seller.email ?? undefined, filename: g.gr_no,
+      subject: `ใบรับสินค้า ${g.gr_no} จาก ${g.seller.name}`,
+      text: `แนบใบรับสินค้าเลขที่ ${g.gr_no}${g.po_no ? ` (อ้างอิง PO ${g.po_no})` : ''} จำนวน ${g.lines.length} รายการ\n\n${g.seller.name}`,
+      html: this.goodsReceiptHtml(g),
+    });
+    return { ...res, gr_no: g.gr_no };
   }
 
   // ── GR ── (received_qty++ ; stock_movement ; lot_ledger ; auto-close PO)

@@ -101,6 +101,8 @@ export function VendorCardsClient() {
               setFrom={setFrom}
               setTo={setTo}
               filename={`ap-statement-${selected}-${from}_${to}.csv`}
+              pdfPath="/api/finance/ap/statement"
+              partyParam={`vendor=${encodeURIComponent(selected)}`}
             />
           ) : (
             <AccountStatement title="" side="ap" query={stmtQ} from={from} to={to} setFrom={setFrom} setTo={setTo} filename="" empty />

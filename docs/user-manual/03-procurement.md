@@ -142,7 +142,9 @@ still-Pending one); a procurement/planner/exec holder sees **all** PRs and gets
 engine). The table auto-refreshes; use **รีเฟรช** to pull the latest immediately.
 
 **Turning an approved PR into a PO (➡️ สร้าง PO):** on an **Approved** PR, procurement
-presses **➡️ สร้าง PO** to open a conversion panel. Because a PR line may be a free-text
+presses **➡️ สร้าง PO** to open the conversion panel — a **pop-up dialog** centred over the
+screen (so it is clearly visible on a phone, not tucked below the register table). Close it
+with **✕**, the ⎋ key, or by tapping outside. Because a PR line may be a free-text
 name (e.g. typed in LINE chat, possibly misspelt or not yet coded), each line is
 **reconciled to a real item** before the PO is raised:
 - **เทียบทะเบียน** — type/adjust the name and press **ค้นหา/เทียบ** to search the item
@@ -259,6 +261,24 @@ for the buyer's reference only; the actual **ใบกำกับภาษี**
 > The PO document is presentation-only — printing it changes nothing and posts nothing to the ledger.
 > If your browser shows the page as HTML instead of a PDF, the print server is simply rendering in
 > fallback mode; the content is identical and still prints correctly.
+
+### Print / email a request for quotation (ใบขอเสนอราคา / RFQ)
+
+**Screen:** `/procurement/rfqs` · **Required permission:** `procurement`.
+
+On the **RFQ list**, each RFQ row has a **🖨️ พิมพ์** and **✉️ ส่งอีเมล** action:
+
+- **พิมพ์** opens the RFQ as a PDF — the items to be quoted (with a blank price column for
+  the supplier to fill), the required-by date and an invitation to quote.
+- **ส่งอีเมล** prompts for the supplier's email and sends the RFQ as a PDF attachment (needs
+  the shop's mail account configured).
+
+### Print / email a goods receipt note (ใบรับสินค้า / GR)
+
+After receiving goods, the GR note documents what arrived — for filing or to countersign back
+to the supplier. Open `GET /api/procurement/grs/{GR-…}/pdf` for the PDF (the supplier, the
+referenced PO, the received item lines with lot numbers and a receiver-signature block), or
+`POST …/grs/{GR-…}/send-email {to_email}` to email it. Read-only — printing posts nothing.
 
 ### Attach the invoice / receipt photo to a PO
 

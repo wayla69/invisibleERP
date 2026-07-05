@@ -380,6 +380,15 @@ async function main() {
   ok('Customer statement: running balance over 3 dated lines', (stmt.lines ?? []).length === 3 && near(stmt.lines?.[stmt.lines.length - 1]?.balance, 1100), `n=${stmt.lines?.length} last=${stmt.lines?.[stmt.lines.length - 1]?.balance}`);
   const stmtFeb = (await inj('GET', `/api/finance/ar/statement?tenant_id=${stmtTid}&from=2026-02-01&to=2026-02-28`, admin)).json;
   ok('Customer statement: opening balance struck before the window (1000)', near(stmtFeb.opening_balance, 1000) && near(stmtFeb.closing_balance, 1100), `open=${stmtFeb.opening_balance} close=${stmtFeb.closing_balance}`);
+  // ── Printable finance documents: statement · AR receipt voucher · dunning letter (HTML fallback in CI) ──
+  const stmtPdf = await inj('GET', `/api/finance/ar/statement/pdf?tenant_id=${stmtTid}&from=2026-01-01&to=2026-02-28`, admin);
+  ok('Statement print: PDF/HTML contains "ใบแจ้งยอดบัญชี" + closing (1,100.00)', stmtPdf.status === 200 && stmtPdf.text.includes('ใบแจ้งยอดบัญชี') && stmtPdf.text.includes('1,100.00'), `${stmtPdf.status} ${String(stmtPdf.text).slice(0, 50)}`);
+  const stmtEmail = await inj('POST', `/api/finance/ar/statement/send-email?tenant_id=${stmtTid}&from=2026-01-01&to=2026-02-28`, admin, { to_email: 'customer@example.com' });
+  ok('Statement email path wired → EMAIL_NOT_CONFIGURED (503) with no SMTP in CI', stmtEmail.status === 503 && stmtEmail.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${stmtEmail.status} ${stmtEmail.json.error?.code}`);
+  const rcpPdf = await inj('GET', '/api/finance/ar/receipts/RCP-S1/pdf', admin);
+  ok('AR receipt print: PDF/HTML contains "ใบสำคัญรับเงิน" + amount (400.00)', rcpPdf.status === 200 && rcpPdf.text.includes('ใบสำคัญรับเงิน') && rcpPdf.text.includes('400.00'), `${rcpPdf.status} ${String(rcpPdf.text).slice(0, 50)}`);
+  const dunPdf = await inj('GET', '/api/finance/ar/collections/INV-A/dunning-letter/pdf', admin);
+  ok('Dunning letter print: PDF/HTML contains "หนังสือทวงถามหนี้" + invoice (INV-A)', dunPdf.status === 200 && dunPdf.text.includes('หนังสือทวงถามหนี้') && dunPdf.text.includes('INV-A'), `${dunPdf.status} ${String(dunPdf.text).slice(0, 50)}`);
   // Multi-currency: a separate customer with a THB invoice + a USD invoice (fx 34).
   const [stmt2T] = await db.insert(s.tenants).values({ code: 'STMT2', name: 'FX Customer' }).returning({ id: s.tenants.id });
   const stmt2Tid = Number(stmt2T.id);
@@ -661,6 +670,9 @@ async function main() {
   ok('Delivery note print: PDF/HTML contains "ใบส่งของ" + item ("Dev laptop")', doPdf.status === 200 && doPdf.text.includes('ใบส่งของ') && doPdf.text.includes('Dev laptop'), `${doPdf.status} ${String(doPdf.text).slice(0, 60)}`);
   const grCap = await inj('POST', '/api/procurement/grs', admin, { po_no: poCap.json?.po_no, items: [{ item_id: 'LAPTOP', received_qty: 2, unit_cost: 25000, uom: 'EA' }] });
   ok('Capitalize: GR receives the capital line, PO auto-closes', grCap.status === 201 && /^GR-/.test(grCap.json?.gr_no ?? '') && grCap.json?.po_status === 'Closed', JSON.stringify(grCap.json).slice(0, 90));
+  // Printable ใบรับสินค้า (Goods Receipt Note) — title + received item.
+  const grPdf = await inj('GET', `/api/procurement/grs/${grCap.json?.gr_no}/pdf`, admin);
+  ok('GR note print: PDF/HTML contains "ใบรับสินค้า" + item (LAPTOP)', grPdf.status === 200 && grPdf.text.includes('ใบรับสินค้า') && grPdf.text.includes('LAPTOP'), `${grPdf.status} ${String(grPdf.text).slice(0, 50)}`);
   // Capital goods must NOT be capitalised into inventory (1200) at receipt — they route to 1500 via FA-10.
   const elig = (await inj('GET', `/api/assets/registrations/eligible?gr_no=${grCap.json?.gr_no}`, admin)).json;
   ok('Capitalize: GR capital line is eligible for capitalisation (suggested cost = 50000)', (elig.eligible ?? []).length === 1 && near(elig.eligible?.[0]?.suggested_cost, 50000), `n=${elig.eligible?.length} cost=${elig.eligible?.[0]?.suggested_cost}`);

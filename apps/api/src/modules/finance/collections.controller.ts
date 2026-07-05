@@ -1,8 +1,11 @@
-import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, HttpCode, Res } from '@nestjs/common';
 import { z } from 'zod';
+import type { FastifyReply } from 'fastify';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CollectionsService, DUNNING_STAGES } from './collections.service';
+
+const DocEmailBody = z.object({ to_email: z.string().email() });
 
 const DunningBody = z.object({
   stage: z.enum(DUNNING_STAGES),
@@ -34,6 +37,19 @@ export class CollectionsController {
   @Post('collections/:invoiceNo/dunning') @Permissions('ar')
   dun(@Param('invoiceNo') invoiceNo: string, @Body(new ZodValidationPipe(DunningBody)) b: z.infer<typeof DunningBody>, @CurrentUser() u: JwtUser) {
     return this.svc.recordDunning(invoiceNo, b, u);
+  }
+
+  // Printable หนังสือทวงถามหนี้ (Dunning / collection letter) over the latest dunning action — HTML→PDF.
+  @Get('collections/:invoiceNo/dunning-letter/pdf') @Permissions('ar', 'exec')
+  async dunningLetterPdf(@Param('invoiceNo') invoiceNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const d = await this.svc.getDunningLetterForPrint(invoiceNo, u);
+    const buf = await this.svc.renderDunningPdf(d);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${d.dunning_no}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(this.svc.dunningLetterHtml(d));
+  }
+  @Post('collections/:invoiceNo/dunning-letter/send-email') @HttpCode(200) @Permissions('ar', 'exec')
+  emailDunningLetter(@Param('invoiceNo') invoiceNo: string, @Body(new ZodValidationPipe(DocEmailBody)) b: z.infer<typeof DocEmailBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.emailDunningLetter(invoiceNo, b.to_email, u);
   }
 
   // All-customer credit positions — aggregate view for the credit-hold management dashboard.

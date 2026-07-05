@@ -520,9 +520,14 @@ function CollectionsSection() {
               { key: 'current_stage', label: t('fin.col_current_stage'), render: (r: any) => r.current_stage ? <Badge variant={stageBadge(r.current_stage)}>{stageLabel(r.current_stage)}</Badge> : <span className="text-muted-foreground">—</span> },
               { key: 'recommended_stage', label: t('fin.col_recommended'), render: (r: any) => r.recommended_stage ? <Badge variant={r.escalate ? 'destructive' : 'outline'}>{stageLabel(r.recommended_stage)}</Badge> : <span className="text-muted-foreground">—</span> },
               { key: 'act', label: '', sortable: false, render: (r: any) => (
-                <Button variant="ghost" size="sm" onClick={() => { setForm({ stage: r.recommended_stage ?? 'reminder', channel: 'email', promise_to_pay_date: '', notes: '' }); setDun(r); }}>
-                  <BellRing className="size-4" /> {t('fin.dun')}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => { setForm({ stage: r.recommended_stage ?? 'reminder', channel: 'email', promise_to_pay_date: '', notes: '' }); setDun(r); }}>
+                    <BellRing className="size-4" /> {t('fin.dun')}
+                  </Button>
+                  <Button variant="ghost" size="sm" asChild title={t('fin.dun_letter')}>
+                    <a href={`${BASE}/api/finance/ar/collections/${encodeURIComponent(r.invoice_no)}/dunning-letter/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-4" /></a>
+                  </Button>
+                </div>
               ) },
             ]}
           />

@@ -1,17 +1,56 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { rfqs, rfqItems, supplierQuotes, supplierQuoteItems, vendors } from '../../database/schema';
+import { rfqs, rfqItems, supplierQuotes, supplierQuoteItems, vendors, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { ProcurementService } from '../procurement/procurement.service';
+import { RfqPdfService, type RfqPrintData } from './rfq-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
+import { sellerParty } from '../../common/doc-party';
 
 // RFQ → supplier quotes → award → PO. Award delegates to ProcurementService.createPo (no GL duplication;
 // GL begins downstream at the GR-driven AP invoice). Supplier screening blocks quotes from blocked vendors.
 @Injectable()
 export class RfqService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService, private readonly procurement: ProcurementService) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly docNo: DocNumberService,
+    private readonly procurement: ProcurementService,
+    @Optional() private readonly rfqPdf?: RfqPdfService,      // ใบขอเสนอราคา renderer
+    @Optional() private readonly docEmail?: DocEmailService,  // @Global MailModule
+  ) {}
+
+  // Assemble the printable ใบขอเสนอราคา (RFQ) — header + item lines + our-company block.
+  async getRfqForPrint(rfqNo: string, user: JwtUser): Promise<RfqPrintData> {
+    const db = this.db;
+    const [r] = await db.select().from(rfqs).where(eq(rfqs.rfqNo, rfqNo)).limit(1);
+    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'RFQ not found', messageTh: 'ไม่พบ RFQ' });
+    const items = await db.select().from(rfqItems).where(eq(rfqItems.rfqId, Number(r.id)));
+    const [t] = user.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1) : [null];
+    return {
+      rfq_no: r.rfqNo, rfq_date: r.rfqDate ?? null, required_date: r.requiredDate ?? null, status: String(r.status ?? ''),
+      remarks: r.remarks ?? null, created_by: r.createdBy ?? null, seller: sellerParty(t), vendor_name: null,
+      lines: items.map((i: any) => ({ item_id: i.itemId ?? null, description: i.itemDescription ?? null, qty: n(i.qty), uom: i.uom ?? null })),
+    };
+  }
+  rfqHtml(r: RfqPrintData): string {
+    if (!this.rfqPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'RFQ renderer not wired' });
+    return this.rfqPdf.rfqHtml(r);
+  }
+  renderRfqPdf(r: RfqPrintData): Promise<Buffer | null> { return this.rfqPdf ? this.rfqPdf.renderToPdf(this.rfqPdf.rfqHtml(r)) : Promise.resolve(null); }
+  async emailRfq(rfqNo: string, toEmail: string, user: JwtUser) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const r = await this.getRfqForPrint(rfqNo, user);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: r.seller.email ?? undefined, filename: r.rfq_no,
+      subject: `ใบขอเสนอราคา ${r.rfq_no} จาก ${r.seller.name}`,
+      text: `เรียนผู้ขาย,\n\nบริษัทขอเชิญท่านเสนอราคาตามใบขอเสนอราคาเลขที่ ${r.rfq_no} (${r.lines.length} รายการ) ที่แนบมา\n\n${r.seller.name}`,
+      html: this.rfqHtml(r),
+    });
+    return { ...res, rfq_no: r.rfq_no };
+  }
 
   async createRfq(dto: { items: { item_id: string; item_description?: string; qty: number; uom?: string }[]; required_date?: string; remarks?: string }, user: JwtUser) {
     const db = this.db;

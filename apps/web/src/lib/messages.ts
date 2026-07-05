@@ -452,6 +452,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'fin.col_current_stage': { th: 'ขั้นปัจจุบัน', en: 'Current stage' },
   'fin.col_recommended': { th: 'แนะนำ', en: 'Recommended' },
   'fin.dun': { th: 'ทวงถาม', en: 'Dun' },
+  'fin.dun_letter': { th: 'พิมพ์หนังสือทวงถาม (PDF)', en: 'Print dunning letter (PDF)' },
   'fin.dun_title': { th: 'บันทึกการทวงถาม {invoice}', en: 'Record dunning {invoice}' },
   'fin.dun_stage': { th: 'ขั้นการทวงถาม', en: 'Dunning stage' },
   'fin.dun_channel': { th: 'ช่องทาง', en: 'Channel' },
