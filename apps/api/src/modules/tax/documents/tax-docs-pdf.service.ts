@@ -52,6 +52,47 @@ export class TaxDocsPdfService {
     `, 'ใบกำกับภาษีเต็มรูป');
   }
 
+  // ── ใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) — A4 ──
+  creditDebitNoteHtml(inv: any): string {
+    const isCredit = inv.type === 'credit_note';
+    const title = isCredit ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้';
+    const section = isCredit ? 'ตามมาตรา 86/10' : 'ตามมาตรา 86/9';
+    const rows = inv.lines.map((l: any, i: number) => `
+      <tr><td class="c">${i + 1}</td><td>${esc(l.description)}</td>
+      <td class="r">${l.qty != null ? fmtQty(l.qty) : ''}</td>
+      <td class="r">${l.unit_price != null ? fmtMoney(l.unit_price) : ''}</td>
+      <td class="r">${fmtMoney(l.amount)}</td></tr>`).join('');
+    const b = inv.buyer ?? {};
+    const pending = inv.status === 'PendingApproval';
+    return wrapA4(`
+      <div class="hdr">
+        <div>
+          <div class="t1">${esc(inv.seller.name)}</div>
+          <div>${esc(inv.seller.address)}</div>
+          <div>เลขประจำตัวผู้เสียภาษีอากร ${esc(formatTaxId(inv.seller.tax_id))} &nbsp; (${esc(inv.seller.branch_label)})</div>
+        </div>
+        <div class="ttl">${title}<div class="copy">${section}${pending ? ' · (รออนุมัติ)' : ''}</div></div>
+      </div>
+      <table class="meta">
+        <tr><td class="lbl">ลูกค้า (ผู้ซื้อ)</td><td>${esc(b.name ?? '-')}</td><td class="lbl">เลขที่</td><td>${esc(inv.doc_no)}</td></tr>
+        <tr><td class="lbl">ที่อยู่</td><td>${esc(b.address ?? '-')}</td><td class="lbl">วันที่</td><td>${esc(thaiDate(inv.issue_date))}</td></tr>
+        <tr><td class="lbl">เลขประจำตัวผู้เสียภาษีผู้ซื้อ</td><td>${esc(b.tax_id ? formatTaxId(b.tax_id) : '-')}</td><td class="lbl">อ้างอิงใบกำกับภาษีเดิม</td><td>${esc(inv.original_doc_no ?? '-')}</td></tr>
+        <tr><td class="lbl">เหตุผล</td><td colspan="3">${esc(inv.reason ?? '-')}</td></tr>
+      </table>
+      <table class="grid">
+        <thead><tr><th class="c">ลำดับ</th><th>รายการที่${isCredit ? 'ลด' : 'เพิ่ม'}</th><th class="r">จำนวน</th><th class="r">ราคา/หน่วย</th><th class="r">${isCredit ? 'มูลค่าที่ลด' : 'มูลค่าที่เพิ่ม'}</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <table class="totals">
+        <tr><td class="tlbl">${isCredit ? 'ผลต่างมูลค่าสินค้า/บริการ' : 'มูลค่าที่เพิ่ม'}</td><td class="tval">${fmtMoney(inv.subtotal)}</td></tr>
+        <tr><td class="tlbl">ภาษีมูลค่าเพิ่ม 7%</td><td class="tval">${fmtMoney(inv.vat_amount)}</td></tr>
+        <tr class="grand"><td class="tlbl">${isCredit ? 'จำนวนเงินที่ลดทั้งสิ้น' : 'จำนวนเงินที่เพิ่มทั้งสิ้น'}</td><td class="tval">${fmtMoney(inv.grand_total)}</td></tr>
+      </table>
+      <div class="words">( ${esc(bahtText(inv.grand_total))} )</div>
+      <div class="foot"><div class="sign">ผู้รับเอกสาร / ผู้ซื้อ</div><div class="sign">ผู้มีอำนาจลงนาม</div></div>
+    `, title);
+  }
+
   // ── ใบกำกับภาษีอย่างย่อ (ม.86/6) — 80mm thermal slip ──
   abbreviatedTaxInvoiceHtml(inv: any): string {
     const rows = inv.lines.map((l: any) => `

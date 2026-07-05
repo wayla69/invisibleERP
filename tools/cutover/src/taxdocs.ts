@@ -310,6 +310,35 @@ async function main() {
   const ppSet = (await inj('GET', `/api/tax-reports/pp30?month=${curMonth}&year=${curYear}`, t2mgr)).json;
   ok('PR6: PP30 reconciliation spans the VAT-account set (2100 + 2101 + 2102)', /2100/.test(ppSet.reconciliation.gl_account) && /2101/.test(ppSet.reconciliation.gl_account) && /2102/.test(ppSet.reconciliation.gl_account), ppSet.reconciliation.gl_account);
 
+  // ── ใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) — credit/debit note: maker-checker + VAT adjustment (TAX-07) ──
+  // `full` (net 100 / vat 7) is the original. Deltas are measured against the running output-VAT so the block
+  // is robust to the totals accumulated by the PR6/PR7 activity above.
+  const ovBefore = (await inj('GET', `/api/tax-reports/output-vat?month=${curMonth}&year=${curYear}`, admin)).json.totals.vat;
+  const cn = await inj('POST', '/api/tax-invoices/credit-note', sales1, { original_doc_no: full.json.doc_no, reason: 'สินค้าชำรุด คืนทั้งจำนวน', lines: [{ description: 'คืนสินค้า A', amount: 100 }] });
+  ok('CN: issued CN-YYYYMM-NNNN as PendingApproval + a Draft GL entry', /^CN-\d{6}-\d{4}$/.test(cn.json.doc_no ?? '') && cn.json.status === 'PendingApproval' && !!cn.json.gl_entry_no && cn.json.gl_status === 'Draft', `${cn.status} ${JSON.stringify(cn.json).slice(0, 90)}`);
+  ok('CN: VAT 7% of 100 = 7 (subtotal 100, total 107) + references the original', near(cn.json.subtotal, 100) && near(cn.json.vat_amount, 7) && near(cn.json.grand_total, 107) && cn.json.original_doc_no === full.json.doc_no);
+  const ovPending = (await inj('GET', `/api/tax-reports/output-vat?month=${curMonth}&year=${curYear}`, admin)).json.totals.vat;
+  ok('CN: a PENDING note is EXCLUDED from output-VAT until approved', near(ovPending, ovBefore), `before=${ovBefore} pending=${ovPending}`);
+  const cnSelf = await inj('POST', `/api/tax-invoices/${cn.json.doc_no}/approve-note`, sales1);
+  ok('CN: maker cannot approve their own note (SOD_VIOLATION 403)', cnSelf.status === 403 && cnSelf.json.error?.code === 'SOD_VIOLATION', `${cnSelf.status} ${cnSelf.json.error?.code}`);
+  const cnAppr = await inj('POST', `/api/tax-invoices/${cn.json.doc_no}/approve-note`, admin);
+  ok('CN: a DIFFERENT user approves → Issued + GL Posted', [200, 201].includes(cnAppr.status) && cnAppr.json.status === 'Issued' && cnAppr.json.gl?.status === 'Posted', `${cnAppr.status} ${JSON.stringify(cnAppr.json).slice(0, 90)}`);
+  const ovAfter = (await inj('GET', `/api/tax-reports/output-vat?month=${curMonth}&year=${curYear}`, admin)).json.totals.vat;
+  ok('CN: an approved credit note REDUCES output VAT by 7', near(ovAfter, ovBefore - 7), `before=${ovBefore} after=${ovAfter}`);
+  const cnNoReason = await inj('POST', '/api/tax-invoices/credit-note', sales1, { original_doc_no: full.json.doc_no, reason: '', lines: [{ description: 'x', amount: 10 }] });
+  ok('CN: reason is required (400)', cnNoReason.status === 400, `${cnNoReason.status}`);
+  const cnOver = await inj('POST', '/api/tax-invoices/credit-note', sales1, { original_doc_no: full.json.doc_no, reason: 'เกินมูลค่า', lines: [{ description: 'x', amount: 5000 }] });
+  ok('CN: cannot credit more than the original net (CREDIT_EXCEEDS_ORIGINAL 400)', cnOver.status === 400 && cnOver.json.error?.code === 'CREDIT_EXCEEDS_ORIGINAL', `${cnOver.status} ${cnOver.json.error?.code}`);
+  // Debit note (ใบเพิ่มหนี้) — increases the sale + output VAT.
+  const dn = await inj('POST', '/api/tax-invoices/debit-note', sales1, { original_doc_no: full.json.doc_no, reason: 'คิดราคาขาดไป', lines: [{ description: 'ส่วนต่างราคา', amount: 50 }] });
+  ok('DN: issued DN-YYYYMM-NNNN PendingApproval + VAT 3.5', /^DN-\d{6}-\d{4}$/.test(dn.json.doc_no ?? '') && dn.json.status === 'PendingApproval' && near(dn.json.vat_amount, 3.5), `${dn.status} ${JSON.stringify(dn.json).slice(0, 80)}`);
+  const dnAppr = await inj('POST', `/api/tax-invoices/${dn.json.doc_no}/approve-note`, admin);
+  ok('DN: approved → Issued + GL Posted', dnAppr.json.status === 'Issued' && dnAppr.json.gl?.status === 'Posted', JSON.stringify(dnAppr.json).slice(0, 90));
+  const ovDn = (await inj('GET', `/api/tax-reports/output-vat?month=${curMonth}&year=${curYear}`, admin)).json.totals.vat;
+  ok('DN: an approved debit note INCREASES output VAT by 3.5', near(ovDn, ovAfter + 3.5), `after=${ovAfter} dn=${ovDn}`);
+  const cnPdf = await inj('GET', `/api/tax-invoices/${cn.json.doc_no}/pdf`, sales1);
+  ok('CN PDF: contains "ใบลดหนี้" + มาตรา 86/10 + original ref + reason', cnPdf.status === 200 && cnPdf.text.includes('ใบลดหนี้') && cnPdf.text.includes('86/10') && cnPdf.text.includes(full.json.doc_no) && cnPdf.text.includes('ชำรุด'), `${cnPdf.status}`);
+
   await app.close();
   await pg.close();
 

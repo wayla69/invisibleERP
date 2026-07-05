@@ -1,14 +1,20 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { taxInvoices, taxInvoiceLines, custPosSales, custPosItems, arInvoices, tenants } from '../../../database/schema';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { TaxService } from '../tax.service';
+import { LedgerService } from '../../ledger/ledger.service';
 import { n, fx, ymd } from '../../../database/queries';
 import type { JwtUser } from '../../../common/decorators';
 import { sellerSnapshot, isValidTaxId } from './tax-docs.snapshot';
 import type { IssueFullDto } from './dto';
 import { EtaxService } from '../../pos/fiscal/etax.service';
+
+const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+
+// dto for issuing a ใบลดหนี้/ใบเพิ่มหนี้ (credit/debit note) against a prior full tax invoice.
+export interface AdjustmentNoteDto { original_doc_no: string; reason: string; lines: { description: string; qty?: number; unit_price?: number; amount: number }[] }
 
 @Injectable()
 export class TaxInvoiceService {
@@ -17,6 +23,7 @@ export class TaxInvoiceService {
     private readonly docNo: DocNumberService,
     private readonly tax: TaxService,
     @Optional() private readonly etax?: EtaxService,   // wiring: auto-submit full tax invoices to RD e-Tax
+    @Optional() private readonly ledger?: LedgerService, // credit/debit-note GL posting (maker-checker, TAX-07)
   ) {}
 
   private async tenantRow(tenantId: number) {
@@ -145,6 +152,92 @@ export class TaxInvoiceService {
     return { ...shape(head), lines: lines.map(shapeLine) };
   }
 
+  // ── ใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) — adjust a prior full tax invoice ──
+  // Issued as PendingApproval + a Draft GL entry; a DIFFERENT user approves (approveAdjustment → GL-05 SoD),
+  // which flips the note to Issued AND posts the GL. Amounts are the POSITIVE magnitude of the difference;
+  // the output-VAT report signs them by type (credit − / debit +) for the note's issue period.
+  async issueAdjustment(kind: 'credit_note' | 'debit_note', dto: AdjustmentNoteDto, user: JwtUser) {
+    const db = this.db;
+    if (!dto.reason?.trim()) {
+      throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A reason is required (ม.86/10(4))', messageTh: 'ต้องระบุเหตุผลการออกใบลดหนี้/เพิ่มหนี้' });
+    }
+    const [orig] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, dto.original_doc_no)).limit(1);
+    if (!orig) throw new NotFoundException({ code: 'ORIGINAL_NOT_FOUND', message: 'Original tax invoice not found', messageTh: 'ไม่พบใบกำกับภาษีที่อ้างถึง' });
+    if (orig.status !== 'Issued') throw new BadRequestException({ code: 'ORIGINAL_NOT_ISSUED', message: `Original is ${orig.status}, not Issued`, messageTh: 'ใบกำกับภาษีต้นทางไม่อยู่ในสถานะออกแล้ว' });
+    if (orig.type === 'credit_note' || orig.type === 'debit_note') {
+      throw new BadRequestException({ code: 'CANNOT_ADJUST_A_NOTE', message: 'Cannot issue a note against another note', messageTh: 'ออกใบลดหนี้/เพิ่มหนี้อ้างอิงใบลดหนี้/เพิ่มหนี้ไม่ได้' });
+    }
+    const tenantId = Number(orig.tenantId);
+    const seller = await this.tenantRow(tenantId);
+    this.assertCanIssue(seller);
+
+    const lines = (dto.lines ?? []).filter((l) => n(l.amount) !== 0);
+    if (!lines.length) throw new BadRequestException({ code: 'NO_LINES', message: 'No adjustment lines', messageTh: 'ไม่มีรายการปรับปรุง' });
+    const subtotal = round2(lines.reduce((a, l) => a + n(l.amount), 0));
+    if (subtotal <= 0) throw new BadRequestException({ code: 'INVALID_AMOUNT', message: 'Adjustment amount must be positive', messageTh: 'มูลค่าปรับปรุงต้องมากกว่าศูนย์' });
+    // A credit note cannot reduce the sale by more than the original net value (ม.82/10 basis).
+    if (kind === 'credit_note' && subtotal > n(orig.subtotal) + 0.005) {
+      throw new BadRequestException({ code: 'CREDIT_EXCEEDS_ORIGINAL', message: `Credit ${subtotal} exceeds original net ${n(orig.subtotal)}`, messageTh: 'มูลค่าลดหนี้เกินมูลค่าตามใบกำกับภาษีเดิม' });
+    }
+    const vatRate = n(orig.vatRate);
+    const vat = round2(subtotal * vatRate);
+    const total = round2(subtotal + vat);
+    const prefix = kind === 'credit_note' ? 'CN' : 'DN';
+    const docNo = await this.docNo.nextMonthlyTenant(prefix, tenantId);
+
+    // Draft GL (maker-checker): a credit note REVERSES the sale (Dr revenue + Dr output-VAT / Cr AR); a debit
+    // note ADDS to it (Dr AR / Cr revenue + Cr output-VAT). Posted to the AR control account via subledger.
+    let je: any = null;
+    if (this.ledger) {
+      const glLines = kind === 'credit_note'
+        ? [{ account_code: '4000', debit: subtotal, memo: `ใบลดหนี้ ${docNo}` }, { account_code: '2100', debit: vat, memo: 'กลับภาษีขาย' }, { account_code: '1100', credit: total, memo: `ลดลูกหนี้ ${orig.buyerName ?? ''}` }]
+        : [{ account_code: '1100', debit: total, memo: `เพิ่มลูกหนี้ ${orig.buyerName ?? ''}` }, { account_code: '4000', credit: subtotal, memo: `ใบเพิ่มหนี้ ${docNo}` }, { account_code: '2100', credit: vat, memo: 'ภาษีขายเพิ่ม' }];
+      je = await this.ledger.postEntry({
+        source: prefix, sourceRef: docNo, tenantId, createdBy: user.username, viaSubledger: true, pendingApproval: true,
+        memo: `${kind === 'credit_note' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้'} ${docNo} (อ้างอิง ${orig.docNo})`, lines: glLines,
+      });
+    }
+
+    const [head] = await db.insert(taxInvoices).values({
+      tenantId, docNo, type: kind, issueDate: ymd(), sourceType: orig.sourceType, sourceRef: orig.sourceRef,
+      ...sellerSnapshot(seller),
+      buyerName: orig.buyerName, buyerTaxId: orig.buyerTaxId, buyerBranchCode: orig.buyerBranchCode, buyerAddress: orig.buyerAddress,
+      subtotal: fx(subtotal, 2), vatRate: fx(vatRate, 4), vatAmount: fx(vat, 2), grandTotal: fx(total, 2), isVatInclusive: false,
+      status: 'PendingApproval', originalDocNo: orig.docNo, reason: dto.reason.trim(), glEntryNo: je?.entry_no ?? null, createdBy: user.username,
+    }).returning({ id: taxInvoices.id });
+    await this.insertLines(Number(head!.id), tenantId, lines.map((l, i) => ({
+      lineNo: i + 1, itemId: null, description: l.description, qty: l.qty ?? null, uom: null, unitPrice: l.unit_price ?? null, discount: 0, amount: n(l.amount),
+    })));
+    return { ...(await this.getByDocNo(user, docNo)), gl_entry_no: je?.entry_no ?? null, gl_status: je ? 'Draft' : null };
+  }
+
+  // Checker approves the note: SoD-blocked if approver === maker (also re-enforced by the ledger). Posts the
+  // linked Draft GL entry (→ VAT/GL land) and flips the note PendingApproval → Issued (→ hits the VAT report).
+  async approveAdjustment(docNo: string, approver: JwtUser) {
+    const db = this.db;
+    const [head] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, docNo)).limit(1);
+    if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Note not found', messageTh: 'ไม่พบเอกสาร' });
+    if (head.type !== 'credit_note' && head.type !== 'debit_note') throw new BadRequestException({ code: 'NOT_A_NOTE', message: 'Not a credit/debit note', messageTh: 'ไม่ใช่ใบลดหนี้/เพิ่มหนี้' });
+    if (head.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Note is ${head.status}, not pending`, messageTh: 'เอกสารไม่ได้รออนุมัติ' });
+    if (head.createdBy && head.createdBy === approver.username) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a note you issued', messageTh: 'ผู้ออกเอกสารอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
+    let gl: any = null;
+    if (head.glEntryNo && this.ledger) gl = await this.ledger.approveEntry(head.glEntryNo, approver); // posts GL + re-enforces SoD
+    await db.update(taxInvoices).set({ status: 'Issued' }).where(eq(taxInvoices.id, head.id));
+    return { doc_no: docNo, status: 'Issued', gl: gl ? { entry_no: gl.entry_no, status: gl.status } : null };
+  }
+
+  async rejectAdjustment(docNo: string, approver: JwtUser, reason?: string) {
+    const db = this.db;
+    const [head] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, docNo)).limit(1);
+    if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Note not found', messageTh: 'ไม่พบเอกสาร' });
+    if (head.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Note is ${head.status}, not pending`, messageTh: 'เอกสารไม่ได้รออนุมัติ' });
+    if (head.glEntryNo && this.ledger) await this.ledger.rejectEntry(head.glEntryNo, approver, reason);
+    await db.update(taxInvoices).set({ status: 'Voided', voidReason: reason ?? null }).where(eq(taxInvoices.id, head.id));
+    return { doc_no: docNo, status: 'Voided' };
+  }
+
   async void(user: JwtUser, docNo: string, reason: string) {
     const db = this.db;
     const [head] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, docNo)).limit(1);
@@ -164,6 +257,8 @@ function shape(r: any) {
     currency: r.currency, subtotal: n(r.subtotal), discount: n(r.discount), vat_rate: n(r.vatRate),
     vat_amount: n(r.vatAmount), grand_total: n(r.grandTotal), is_vat_inclusive: r.isVatInclusive,
     book_no: r.bookNo, notes: r.notes, created_by: r.createdBy, created_at: r.createdAt,
+    // credit/debit note fields (null on ordinary invoices)
+    original_doc_no: r.originalDocNo ?? null, reason: r.reason ?? null, gl_entry_no: r.glEntryNo ?? null,
   };
 }
 function shapeLine(l: any) {

@@ -12,6 +12,13 @@ import { IssueFullBody, type IssueFullDto } from './dto';
 
 const VoidBody = z.object({ reason: z.string().optional() });
 const SendEmailBody = z.object({ to_email: z.string().email() });
+// ใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) against a prior full tax invoice.
+const AdjustmentNoteBody = z.object({
+  original_doc_no: z.string().min(1),
+  reason: z.string().min(1),
+  lines: z.array(z.object({ description: z.string().min(1), qty: z.number().optional(), unit_price: z.number().optional(), amount: z.number() })).min(1),
+});
+const RejectNoteBody = z.object({ reason: z.string().optional() });
 
 @Controller('api/tax-invoices')
 export class TaxDocsController {
@@ -48,6 +55,25 @@ export class TaxDocsController {
     return this.svc.void(u, docNo, b.reason ?? '');
   }
 
+  // ── ใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) — issued by the seller (ar/pos), each posts a Draft GL entry ──
+  @Post('credit-note') @Permissions('ar', 'pos')
+  creditNote(@Body(new ZodValidationPipe(AdjustmentNoteBody)) b: z.infer<typeof AdjustmentNoteBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.issueAdjustment('credit_note', b, u);
+  }
+  @Post('debit-note') @Permissions('ar', 'pos')
+  debitNote(@Body(new ZodValidationPipe(AdjustmentNoteBody)) b: z.infer<typeof AdjustmentNoteBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.issueAdjustment('debit_note', b, u);
+  }
+  // Maker-checker (TAX-07): a DIFFERENT user (approvals/gl_close/exec) approves → posts the GL + flips to Issued.
+  @Post(':docNo/approve-note') @Permissions('approvals', 'gl_close', 'exec')
+  approveNote(@Param('docNo') docNo: string, @CurrentUser() u: JwtUser) {
+    return this.svc.approveAdjustment(docNo, u);
+  }
+  @Post(':docNo/reject-note') @Permissions('approvals', 'gl_close', 'exec')
+  rejectNote(@Param('docNo') docNo: string, @Body(new ZodValidationPipe(RejectNoteBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectAdjustment(docNo, u, b.reason);
+  }
+
   // ETDA "e-Tax Invoice by Email" (income ≤ 30M/yr, no CA cert): email the invoice to the buyer with a
   // CC to ETDA's time-stamp mailbox, which stamps it and returns it.
   @Post(':docNo/send-etax-email') @Permissions('ar', 'pos')
@@ -75,7 +101,9 @@ export class TaxDocsController {
   @Get(':docNo/pdf') @Permissions('ar', 'pos', 'cust_pos')
   async pdfDoc(@Param('docNo') docNo: string, @Query('copy') copy: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const inv = await this.svc.getByDocNo(u, docNo);
-    const html = inv.type === 'abbreviated' ? this.pdf.abbreviatedTaxInvoiceHtml(inv) : this.pdf.fullTaxInvoiceHtml(inv, copy === '1' || copy === 'copy');
+    const html = inv.type === 'abbreviated' ? this.pdf.abbreviatedTaxInvoiceHtml(inv)
+      : (inv.type === 'credit_note' || inv.type === 'debit_note') ? this.pdf.creditDebitNoteHtml(inv)
+      : this.pdf.fullTaxInvoiceHtml(inv, copy === '1' || copy === 'copy');
     const buf = await this.pdf.renderToPdf(html, inv.type === 'abbreviated');
     if (buf) {
       reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${docNo}.pdf"`).header('Content-Length', buf.length).send(buf);

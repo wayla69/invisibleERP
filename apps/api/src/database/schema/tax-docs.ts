@@ -6,8 +6,11 @@
 import { pgTable, bigserial, bigint, text, numeric, date, boolean, timestamp, integer, jsonb, pgEnum, unique } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
-export const taxInvoiceTypeEnum = pgEnum('tax_invoice_type', ['full', 'abbreviated']);
-export const taxInvoiceStatusEnum = pgEnum('tax_invoice_status', ['Issued', 'Voided', 'Replaced']);
+// credit_note = ใบลดหนี้ (ม.86/10) · debit_note = ใบเพิ่มหนี้ (ม.86/9) — sibling adjustment documents (0248)
+export const taxInvoiceTypeEnum = pgEnum('tax_invoice_type', ['full', 'abbreviated', 'credit_note', 'debit_note']);
+// PendingApproval = an issued credit/debit note awaiting the maker-checker GL approval (TAX-07); it is
+// excluded from the ภ.พ.30 output-VAT report until approved (which flips it to Issued + posts the GL).
+export const taxInvoiceStatusEnum = pgEnum('tax_invoice_status', ['Issued', 'Voided', 'Replaced', 'PendingApproval']);
 export const taxDocSourceEnum = pgEnum('tax_doc_source', ['POS', 'AR']);
 
 export const taxInvoices = pgTable('tax_invoices', {
@@ -40,6 +43,11 @@ export const taxInvoices = pgTable('tax_invoices', {
   isVatInclusive: boolean('is_vat_inclusive').notNull().default(false),      // true = abbreviated slip display
   status: taxInvoiceStatusEnum('status').notNull().default('Issued'),
   replacesDocNo: text('replaces_doc_no'),                  // ใบแทน / reissue chain
+  // Credit/Debit note (0248) — the referenced original ใบกำกับภาษี, the adjustment reason (ม.86/10(3)/(4)),
+  // and the linked GL entry (Draft until the maker-checker approval posts it, TAX-07).
+  originalDocNo: text('original_doc_no'),
+  reason: text('reason'),
+  glEntryNo: text('gl_entry_no'),
   voidReason: text('void_reason'),
   notes: text('notes'),
   createdBy: text('created_by'),

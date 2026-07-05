@@ -60,6 +60,32 @@ never reused).
 
 [screenshot: tax invoice list with full/abbreviated tabs]
 
+### Issue a credit note / debit note (ใบลดหนี้ ม.86/10 / ใบเพิ่มหนี้ ม.86/9)
+
+When a sale changes **after** its tax invoice was issued, adjust it with a note — never by editing or
+re-issuing the original invoice.
+
+- **ใบลดหนี้ (credit note)** reduces the sale + output VAT — returned goods, a price reduction, a defect, or
+  a discount given after the sale.
+- **ใบเพิ่มหนี้ (debit note)** increases it — an undercharge or extra goods delivered.
+
+**Screen:** `/tax/invoices` → the **ออกใบลดหนี้ / ใบเพิ่มหนี้** card · **Required permission:** `ar` / `pos`.
+
+1. Pick **ใบลดหนี้** or **ใบเพิ่มหนี้**.
+2. Enter the **original tax invoice number** it references, the **reason** (required — ม.86/10(4)), the
+   **adjustment value** (before VAT) and an optional line description.
+3. Press **ออกเอกสาร (รออนุมัติ)**.
+
+**Expected result:** a `CN-…` / `DN-…` document is issued with status **รออนุมัติ (PendingApproval)** and a
+**Draft** GL entry — it does **not** yet affect output VAT or the ledger.
+
+> **Maker-checker (control TAX-07).** A **different** person (finance — `approvals`/`gl_close`/`exec`) must
+> press **อนุมัติ** on the note row. Approval posts the GL reversal (credit note: Dr revenue + Dr output VAT
+> / Cr AR; debit note: the reverse) **and** flips the note to **Issued**, at which point it appears on the
+> **ภ.พ.30** output-VAT report — a credit note **reduces** output VAT, a debit note **increases** it — in the
+> note's issue month. The issuer **cannot** approve their own note (*ผู้ออกเอกสารอนุมัติเองไม่ได้*). A credit
+> note cannot exceed the original invoice value. Print the note (ม.86/10 form) from the **PDF** action.
+
 ---
 
 ## 3. e-Tax invoices (electronic submission)
