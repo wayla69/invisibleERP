@@ -48,6 +48,11 @@ async function seed(db: any) {
     tenantId: hq.id, assetNo: 'FA-TEST', name: 'Test Fridge', acquireDate: ymd(),
     acquireCost: '25000', usefulLifeMonths: 120, netBookValue: '25000', status: 'active', location: 'Kitchen',
   }).onConflictDoNothing();
+  // An OLD asset, acquired long ago and never scan-verified — a deterministic FA-12 verification exception.
+  await db.insert(s.fixedAssets).values({
+    tenantId: hq.id, assetNo: 'FA-OLD', name: 'Old Cabinet', acquireDate: '2020-01-01',
+    acquireCost: '1000', usefulLifeMonths: 120, netBookValue: '1000', status: 'active', location: 'Storage',
+  }).onConflictDoNothing();
 }
 
 async function main() {
@@ -290,6 +295,24 @@ async function main() {
   ok('close audit raises a custody request for the misplaced asset', (close2.status === 200 || close2.status === 201) && close2.json.custody_requests_raised === 1, `raised=${close2.json.custody_requests_raised}`);
   const custList = await inj('GET', '/api/assets/custody?status=PendingApproval', token);
   ok('audit-raised custody request pending (source=audit → Room C)', Array.isArray(custList.json.requests) && custList.json.requests.some((r: any) => r.asset_no === 'FA-TEST' && r.source === 'audit' && r.to_location === 'Room C'), `n=${custList.json.count}`);
+
+  // ── 3e. BI SURFACES — audit results report + "not verified in N days" exception ──────────
+  const unver = await inj('GET', '/api/assets/unverified?days=90', token);
+  ok('unverified exceptions include the old never-scanned asset', unver.status === 200 && Array.isArray(unver.json.exceptions) && unver.json.exceptions.some((e: any) => e.asset_no === 'FA-OLD' && e.ever_verified === false), `count=${unver.json.count}`);
+  ok('recently-verified asset is NOT an exception', !unver.json.exceptions.some((e: any) => e.asset_no === 'FA-TEST'), `fa-test present=${unver.json.exceptions.some((e: any) => e.asset_no === 'FA-TEST')}`);
+
+  const auditRep = await inj('GET', '/api/assets/audit-report', token);
+  ok('audit-report returns audits + custody exceptions', auditRep.status === 200 && Array.isArray(auditRep.json.audits) && auditRep.json.audits.length >= 2 && auditRep.json.totals.pending_custody >= 1, `audits=${auditRep.json.audits?.length} pending=${auditRep.json.totals?.pending_custody}`);
+
+  const rtypes = await inj('GET', '/api/bi/report-types', token);
+  const rkeys = (rtypes.json.report_types ?? []).map((r: any) => r.key);
+  ok('BI report-types include asset_audit + asset_verification_exceptions', rkeys.includes('asset_audit') && rkeys.includes('asset_verification_exceptions'), `has=${rkeys.filter((k: string) => k.startsWith('asset_')).join(',')}`);
+
+  // Schedule + run the exception report through the BI scheduler (proves it's a real schedulable report type).
+  const sub = await inj('POST', '/api/bi/subscriptions', token, { name: 'Unverified assets', report_type: 'asset_verification_exceptions', frequency: 'monthly', filters: { days: 90 } });
+  ok('create asset_verification_exceptions subscription', (sub.status === 200 || sub.status === 201) && sub.json.id != null, `status=${sub.status}`);
+  const runRep = await inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, token);
+  ok('run exception report → success + summary counts the exception', (runRep.status === 200 || runRep.status === 201) && runRep.json.status === 'success' && /not verified/.test(runRep.json.summary ?? ''), `status=${runRep.json.status} sum=${runRep.json.summary}`);
 
   await app.close();
   await pg.close();
