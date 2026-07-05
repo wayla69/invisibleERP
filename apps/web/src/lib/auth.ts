@@ -9,6 +9,7 @@ export interface Me {
   customer_name: string | null;
   permissions: string[];
   must_change_password?: boolean;
+  is_platform_owner?: boolean; // configured platform owner ("god") — gates the cross-company switcher
 }
 
 export function useMe() {

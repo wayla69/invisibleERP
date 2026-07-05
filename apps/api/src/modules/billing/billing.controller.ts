@@ -33,6 +33,8 @@ type RejectDto = z.infer<typeof RejectBody>;
 
 const CheckoutBody = z.object({ plan_code: z.string().min(1) });
 const ChangePlanBody = z.object({ plan_code: z.string().min(1) });
+const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
+const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
 
 @Controller('api')
 export class BillingController {
@@ -93,6 +95,42 @@ export class BillingController {
   @Post('admin/signup-requests/:id/reject') @PlatformAdmin() @HttpCode(200)
   rejectRequest(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: RejectDto, @CurrentUser() u: JwtUser) {
     return this.svc.rejectSignupRequest(Number(id), u.username, b.reason);
+  }
+
+  // Company directory for the platform owner ("god") — backs the web company-switcher so god can pick a
+  // single company to scope its view to (see the X-Act-As-Tenant header in TenantTxInterceptor). Lists ALL
+  // tenants (runs under the @PlatformAdmin RLS bypass); non-owners 403 at the guard.
+  @Get('admin/tenants') @PlatformAdmin()
+  listTenants() {
+    return this.svc.listTenants();
+  }
+
+  // Cross-company AI-token usage aggregate (Platform Console AI-spend panel).
+  @Get('admin/ai-usage') @PlatformAdmin()
+  adminAiUsage() {
+    return this.svc.aiUsageByTenant();
+  }
+
+  // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.
+  @Get('admin/tenants/:id') @PlatformAdmin()
+  tenantDetail(@Param('id') id: string) {
+    return this.svc.getTenantDetail(Number(id));
+  }
+
+  // Platform-level subscription control for one company (no impersonation): change plan / extend trial.
+  @Post('admin/tenants/:id/plan') @PlatformAdmin() @HttpCode(200)
+  setTenantPlan(@Param('id') id: string, @Body(new ZodValidationPipe(ChangePlanBody)) b: { plan_code: string }) {
+    return this.svc.changePlan(Number(id), b.plan_code);
+  }
+
+  @Post('admin/tenants/:id/extend-trial') @PlatformAdmin() @HttpCode(200)
+  extendTrial(@Param('id') id: string, @Body(new ZodValidationPipe(ExtendTrialBody)) b: { days: number }) {
+    return this.svc.extendTrial(Number(id), b.days);
+  }
+
+  @Post('admin/tenants/:id/tags') @PlatformAdmin() @HttpCode(200)
+  setTenantTags(@Param('id') id: string, @Body(new ZodValidationPipe(TagsBody)) b: { tags: string[] }) {
+    return this.svc.setTenantTags(Number(id), b.tags);
   }
 
   // Tenant lifecycle (#5) — a platform owner suspends a company (its users are then blocked,

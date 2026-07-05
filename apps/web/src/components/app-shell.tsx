@@ -3,11 +3,11 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ChevronDown, ChevronRight, ChevronUp, LogOut, Search, Star } from 'lucide-react';
+import { Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, ShieldCheck, Star } from 'lucide-react';
 
 import { useQuery } from '@tanstack/react-query';
 
-import { api, hasSession, logout as apiLogout } from '@/lib/api';
+import { api, hasSession, logout as apiLogout, getActingTenant, setActingTenant, type ActingTenant } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { useModuleFlags } from '@/lib/modules';
 import {
@@ -108,6 +108,159 @@ function NavSubSection({
         <span className="truncate">{title}</span>
       </button>
       <div className={cn(open ? 'block' : 'hidden', 'group-data-[collapsible=icon]:block')}>{children}</div>
+    </div>
+  );
+}
+
+// God-only nav group (Platform Console). Appended AFTER the permission filter so it is gated solely on
+// is_platform_owner — a per-tenant Admin (who also passes every perm) never sees it.
+const PLATFORM_GROUP: NavGroup = {
+  title: 'nav.group.platform',
+  items: [{ label: 'nav.platform', href: '/platform', icon: ShieldCheck, perms: [] }],
+};
+
+/**
+ * Persistent scope banner under the header — god only. In the combined view it warns that every figure sums
+ * ALL companies (so a dashboard number isn't misread as one company's); while acting-as it names the company
+ * in scope and offers a one-click return to the combined view. Complements the sidebar switcher/badge.
+ */
+function GodScopeBanner() {
+  const [acting, setActing] = React.useState<ActingTenant | null>(null);
+  React.useEffect(() => setActing(getActingTenant()), []);
+  const exit = () => { setActingTenant(null); window.location.reload(); };
+  const toggleReadOnly = () => { if (acting) { setActingTenant({ ...acting, readOnly: !acting.readOnly }); window.location.reload(); } };
+  if (acting) {
+    return (
+      <div className={cn('flex items-center gap-2 border-b px-4 py-1.5 text-xs', acting.readOnly ? 'border-amber-500/40 bg-amber-500/10' : 'border-primary/30 bg-primary/10')}>
+        <Building2 className={cn('size-3.5 shrink-0', acting.readOnly ? 'text-amber-600 dark:text-amber-400' : 'text-primary')} />
+        <span className="flex-1 truncate">
+          กำลังดูข้อมูลของ <b>{acting.name}</b>{acting.code ? ` (${acting.code})` : ''} — {acting.readOnly ? <b>อ่านอย่างเดียว</b> : 'มุมมองผู้ดูแลแพลตฟอร์ม'}
+        </span>
+        <button type="button" onClick={toggleReadOnly} className="shrink-0 rounded px-2 py-0.5 font-medium hover:bg-black/5 dark:hover:bg-white/10" title="สลับโหมดอ่านอย่างเดียว / แก้ไขได้">
+          {acting.readOnly ? 'เปิดให้แก้ไข' : 'อ่านอย่างเดียว'}
+        </button>
+        <button type="button" onClick={exit} className="shrink-0 rounded px-2 py-0.5 font-medium text-primary hover:bg-primary/15">ออกเป็นมุมมองรวม</button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 border-b border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground">
+      <Globe className="size-3.5 shrink-0" />
+      <span>โหมดผู้ดูแลแพลตฟอร์ม — กำลังดู <b>รวมทุกบริษัท</b> (ตัวเลขรวมทุกบริษัท) เลือกดูรายบริษัทได้จากแถบซ้ายบน</span>
+    </div>
+  );
+}
+
+interface SwitcherCompany { id: number; code: string; name: string; suspended: boolean }
+
+/**
+ * Cross-company switcher for the platform owner ("god"). A god otherwise sees every company's data combined
+ * with no way to tell which company a row belongs to. Picking a company here stores it (api.setActingTenant)
+ * so every request carries `X-Act-As-Tenant` and the server narrows the god's RLS scope to that one company;
+ * "ทุกบริษัท" clears it and restores the global view. The trigger doubles as the current-company badge.
+ * Rendered ONLY for a god (`me.is_platform_owner`). Kept inside this already-'use client' shell (rather than
+ * its own file) so it stays a client island without adding to the 'use client' ratchet.
+ */
+const RECENT_COMPANIES_KEY = 'ie-god-recent-companies'; // most-recent-first, capped
+function readRecentCompanies(): ActingTenant[] {
+  return readJson<ActingTenant[]>(RECENT_COMPANIES_KEY, []).filter((c) => c && typeof c.id === 'number').slice(0, 5);
+}
+function pushRecentCompany(c: ActingTenant) {
+  if (typeof window === 'undefined') return;
+  const next = [c, ...readRecentCompanies().filter((r) => r.id !== c.id)].slice(0, 5);
+  localStorage.setItem(RECENT_COMPANIES_KEY, JSON.stringify(next));
+}
+
+function CompanySwitcher() {
+  const { data: companies } = useQuery<SwitcherCompany[]>({
+    queryKey: ['admin-tenants'],
+    queryFn: () => api<SwitcherCompany[]>('/api/admin/tenants'),
+    staleTime: 5 * 60_000,
+  });
+  const [acting, setActing] = React.useState<ActingTenant | null>(null);
+  const [recents, setRecents] = React.useState<ActingTenant[]>([]);
+  const [query, setQuery] = React.useState('');
+  React.useEffect(() => { setActing(getActingTenant()); setRecents(readRecentCompanies()); }, []);
+
+  const pick = (tnt: ActingTenant | null) => {
+    if (tnt) pushRecentCompany(tnt);
+    setActingTenant(tnt);
+    // Reload so every cached query refetches under the new scope (see setActingTenant).
+    window.location.reload();
+  };
+
+  const currentName = acting?.name ?? 'ทุกบริษัท';
+  const isGlobal = acting == null;
+  const q = query.trim().toLowerCase();
+  const list = (companies ?? []).filter((c) => !q || `${c.name} ${c.code}`.toLowerCase().includes(q));
+  // Recents only when not searching, and only companies still in the directory (name may have changed).
+  const recentItems = q ? [] : recents
+    .map((r) => (companies ?? []).find((c) => c.id === r.id))
+    .filter((c): c is SwitcherCompany => !!c && c.id !== acting?.id)
+    .slice(0, 4);
+
+  const row = (c: SwitcherCompany) => (
+    <DropdownMenuItem key={c.id} onSelect={(e) => { e.preventDefault(); pick({ id: c.id, name: c.name, code: c.code }); }} className="gap-2">
+      <Building2 className="size-4" />
+      <span className="grid flex-1 leading-tight">
+        <span className={cn('truncate', c.suspended && 'text-muted-foreground line-through')}>{c.name}</span>
+        <span className="truncate text-[10px] text-muted-foreground">{c.code}{c.suspended ? ' · ระงับ' : ''}</span>
+      </span>
+      {acting?.id === c.id && <Check className="size-4 text-primary" />}
+    </DropdownMenuItem>
+  );
+
+  return (
+    <div className="px-1 pb-1 group-data-[collapsible=icon]:hidden">
+      <DropdownMenu onOpenChange={(o) => !o && setQuery('')}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted',
+              isGlobal ? 'border-dashed text-muted-foreground' : 'border-primary/40 bg-primary/5 text-foreground',
+            )}
+            aria-label="เลือกบริษัทที่ต้องการดูข้อมูล"
+          >
+            {isGlobal ? <Globe className="size-3.5 shrink-0" /> : <Building2 className="size-3.5 shrink-0 text-primary" />}
+            <span className="grid flex-1 leading-tight">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">กำลังดูข้อมูลของ</span>
+              <span className="truncate font-medium">{currentName}</span>
+            </span>
+            <ChevronsUpDown className="size-3.5 shrink-0 opacity-60" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="max-h-[70vh] w-64 overflow-y-auto">
+          <DropdownMenuLabel className="text-xs">มุมมองผู้ดูแลแพลตฟอร์ม (god)</DropdownMenuLabel>
+          {/* Search — stop keydown propagation so the menu's typeahead doesn't steal keystrokes. */}
+          <div className="px-1 py-1">
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder="ค้นหาบริษัท…"
+              className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+          </div>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={(e) => { e.preventDefault(); pick(null); }} className="gap-2">
+            <Globe className="size-4" />
+            <span className="flex-1">ทุกบริษัท (รวม)</span>
+            {isGlobal && <Check className="size-4 text-primary" />}
+          </DropdownMenuItem>
+          {recentItems.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">เพิ่งดู</DropdownMenuLabel>
+              {recentItems.map(row)}
+            </>
+          )}
+          <DropdownMenuSeparator />
+          {q && <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">ผลค้นหา ({list.length})</DropdownMenuLabel>}
+          {list.length === 0 ? <div className="px-3 py-2 text-xs text-muted-foreground">ไม่พบบริษัท</div> : list.map(row)}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -356,16 +509,19 @@ export function AppShell({
   const wsNav = React.useMemo(() => (enableWorkspaces ? navForWorkspace(nav, workspace) : nav), [enableWorkspaces, nav, workspace]);
   const groupOrder = moduleFlags.data?.groupOrder;
   const itemOrder = moduleFlags.data?.itemOrder;
+  const isGod = me.data?.is_platform_owner ?? false;
   const groups = React.useMemo(() => {
     const filtered = filterByPerm(wsNav);
     const base = filtered.length ? filtered : wsNav; // fall back while loading
-    return orderGroups(base, groupOrder); // admin-curated system-wide category order
-  }, [filterByPerm, wsNav, groupOrder]);
+    const ordered = orderGroups(base, groupOrder); // admin-curated system-wide category order
+    return isGod ? [...ordered, PLATFORM_GROUP] : ordered; // platform console — god only
+  }, [filterByPerm, wsNav, groupOrder, isGod]);
   const paletteGroups = React.useMemo(() => {
     const filtered = filterByPerm(nav);
     const base = filtered.length ? filtered : nav;
-    return orderGroups(base, groupOrder); // keep the ⌘K palette in the same admin-curated order as the sidebar
-  }, [filterByPerm, nav, groupOrder]);
+    const ordered = orderGroups(base, groupOrder); // keep the ⌘K palette in the same admin-curated order as the sidebar
+    return isGod ? [...ordered, PLATFORM_GROUP] : ordered;
+  }, [filterByPerm, nav, groupOrder, isGod]);
 
   const isActive = (href: string) =>
     pathname === href || (href !== '/dashboard' && href !== '/portal/dashboard' && pathname.startsWith(href + '/'));
@@ -557,6 +713,7 @@ export function AppShell({
               </div>
             </div>
           )}
+          {me.data?.is_platform_owner && <CompanySwitcher />}
         </SidebarHeader>
 
         <SidebarContent>
@@ -674,6 +831,7 @@ export function AppShell({
           </div>
         </header>
 
+        {isGod && <GodScopeBanner />}
         <div className={cn('flex-1 pt-4 sm:pt-6 app-content-pad')}>{children}</div>
       </SidebarInset>
 

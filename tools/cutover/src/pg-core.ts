@@ -63,8 +63,9 @@ async function main() {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
 
-  const inj = async (m: string, url: string, token?: string, payload?: any) => {
-    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
+  const inj = async (m: string, url: string, token?: string, payload?: any, extraHeaders?: Record<string, string>) => {
+    const headers = { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(extraHeaders ?? {}) };
+    const res = await app.inject({ method: m as any, url, headers, payload });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
     return { status: res.statusCode, json };
   };
@@ -167,8 +168,30 @@ async function main() {
   // mc_seed companies (both org-1 tenants + org-2 + the org-null signup), NOT just its own org's 2. This is
   // the "Admin stays org-scoped, god sees everything" guarantee. Env is read per-request, so we set it live.
   process.env.PLATFORM_ADMIN_USERNAMES = 'godadmin';
-  const godSees = await mcCnt(await mcTok('godadmin'));
+  const godTok = await mcTok('godadmin');
+  const godSees = await mcCnt(godTok);
   ok('multi-company: platform-owner "god" sees ALL companies across every org (4) while Admin stays org-scoped', godSees === 4, `god=${godSees}`);
+
+  // God company-switcher (act-as): the same god, now sending `X-Act-As-Tenant: <ORG2CO>`, must see ONLY that
+  // one company's rows (1) — the interceptor drops the global bypass and pins app.tenant_id to the chosen
+  // tenant. This is what backs the web sidebar switcher + current-company badge. Restoring the header to a
+  // sibling org tenant (mA2) likewise scopes to 1, proving it re-scopes per selection (not a sticky value).
+  const godActB = (await inj('GET', '/api/jobs?type=mc_seed', godTok, undefined, { 'x-act-as-tenant': String(mB) })).json.count;
+  ok('multi-company: god "act-as" (X-Act-As-Tenant) narrows the global view to the ONE chosen company (1)', godActB === 1, `godActB=${godActB}`);
+  const godActA2 = (await inj('GET', '/api/jobs?type=mc_seed', godTok, undefined, { 'x-act-as-tenant': String(mA2) })).json.count;
+  ok('multi-company: god "act-as" re-scopes per selection — switching companies shows only the new one (1)', godActA2 === 1, `godActA2=${godActA2}`);
+  // A NON-god (org2 Admin) sending the same header is IGNORED — act-as only ever narrows a god, never widens
+  // anyone. org2admin is already scoped to its own single company, so it still sees exactly 1 (its own).
+  const nonGodAct = (await inj('GET', '/api/jobs?type=mc_seed', await mcTok('org2admin'), undefined, { 'x-act-as-tenant': String(mA1) })).json.count;
+  ok('multi-company: X-Act-As-Tenant from a NON-god is ignored (no cross-company widening)', nonGodAct === 1, `nonGodAct=${nonGodAct}`);
+
+  // God "read-only" act-as: a GET still returns the scoped rows, but any mutating request is blocked before
+  // the handler runs (safe inspection view). Uses a real POST route the god is otherwise authorised for.
+  const roRead = (await inj('GET', '/api/jobs?type=mc_seed', godTok, undefined, { 'x-act-as-tenant': String(mB), 'x-act-as-read-only': '1' })).json.count;
+  const roWrite = await inj('POST', '/api/tenant/starter-pack', godTok, {}, { 'x-act-as-tenant': String(mB), 'x-act-as-read-only': '1' });
+  ok('multi-company: god read-only act-as allows GET but blocks writes (403 READONLY_IMPERSONATION)',
+    roRead === 1 && roWrite.status === 403 && roWrite.json.error?.code === 'READONLY_IMPERSONATION',
+    `read=${roRead} write=${roWrite.status} ${roWrite.json.error?.code}`);
   delete process.env.PLATFORM_ADMIN_USERNAMES;
   delete process.env.TENANCY_MODE; // restore harness default
 

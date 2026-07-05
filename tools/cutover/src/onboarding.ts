@@ -114,6 +114,58 @@ async function main() {
   ok('Platform-created company is org-isolated + fully provisioned (org_id=tenant id, 12 periods)', Number(pcRows[0].t_org) === Number(created.json.tenant_id) && Number(pcRows[0].u_org) === Number(created.json.tenant_id) && pcRows[0].periods === 12, JSON.stringify(pcRows[0]));
   const platLogin = await login('platco_admin', 'platco12345');
   ok('The newly platform-created Admin can log in', !!platLogin.json.token, `st=${platLogin.status}`);
+  // Company directory (backs the Platform Console table + the switcher). Lists EVERY tenant enriched with
+  // status/plan/user-count; a non-platform-admin is blocked at the guard.
+  const dirDenied = await inj('GET', '/api/admin/tenants', platLogin.json.token); // platco_admin is NOT a platform owner
+  ok('GET /api/admin/tenants blocked for a non-platform-admin (403)', dirDenied.status === 403, `${dirDenied.status} ${dirDenied.json.error?.code}`);
+  const dir = await inj('GET', '/api/admin/tenants', owner); // owner1 IS the platform owner
+  const dirRows = Array.isArray(dir.json) ? dir.json : [];
+  const createdRow = dirRows.find((r: any) => Number(r.id) === Number(created.json.tenant_id));
+  ok('GET /api/admin/tenants lists all companies enriched (status/plan/users) incl. the just-provisioned one',
+    dir.status === 200 && dirRows.length >= 2 && !!createdRow && typeof createdRow.users === 'number' && 'status' in createdRow && 'plan_code' in createdRow,
+    `n=${dirRows.length} created={status:${createdRow?.status},plan:${createdRow?.plan_code},users:${createdRow?.users}}`);
+  // Company detail drawer (Platform Console) — full profile + subscription + counts + recent activity.
+  const detail = await inj('GET', `/api/admin/tenants/${created.json.tenant_id}`, owner);
+  ok('GET /api/admin/tenants/:id returns company detail (subscription + counts + activity)',
+    detail.status === 200 && detail.json.id === Number(created.json.tenant_id) && !!detail.json.subscription && typeof detail.json.counts?.users === 'number' && Array.isArray(detail.json.recent_activity),
+    `st=${detail.status} plan=${detail.json.subscription?.plan_code} users=${detail.json.counts?.users}`);
+  // Platform subscription control — extend trial (pushes trial_ends_at out, status Trialing).
+  const ext = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/extend-trial`, owner, { days: 14 });
+  ok('POST /api/admin/tenants/:id/extend-trial extends the trial (status Trialing, future end)',
+    ext.status === 200 && ext.json.status === 'Trialing' && new Date(ext.json.trial_ends_at).getTime() > Date.now(),
+    `st=${ext.status} ends=${ext.json.trial_ends_at}`);
+  // Platform subscription control — change plan (no impersonation).
+  const chg = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/plan`, owner, { plan_code: 'pro' });
+  ok('POST /api/admin/tenants/:id/plan changes the plan cross-tenant (status Active)',
+    chg.status === 200 && chg.json.plan === 'pro' && chg.json.status === 'Active', `st=${chg.status} plan=${chg.json.plan}`);
+  // Directory carries setup_complete (drives the "ตั้งค่ายังไม่เสร็จ" needs-attention card).
+  const dir2 = await inj('GET', '/api/admin/tenants', owner);
+  ok('GET /api/admin/tenants rows carry setup_complete', Array.isArray(dir2.json) && dir2.json.every((r: any) => typeof r.setup_complete === 'boolean'), `sample=${dir2.json?.[0]?.setup_complete}`);
+  // Company tags/segments (migration 0246) — set + reflected in the directory.
+  const setTags = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/tags`, owner, { tags: ['enterprise', 'enterprise', ' vip '] });
+  const dirTags = ((await inj('GET', '/api/admin/tenants', owner)).json as any[]).find((r) => Number(r.id) === Number(created.json.tenant_id));
+  ok('POST /api/admin/tenants/:id/tags sets deduped/trimmed tags reflected in the directory',
+    setTags.status === 200 && Array.isArray(setTags.json.tags) && setTags.json.tags.length === 2 && JSON.stringify(dirTags?.tags) === JSON.stringify(['enterprise', 'vip']),
+    `set=${JSON.stringify(setTags.json.tags)} dir=${JSON.stringify(dirTags?.tags)}`);
+  // Cross-company AI usage aggregate (Platform Console AI-spend panel).
+  const aiu = await inj('GET', '/api/admin/ai-usage', owner);
+  ok('GET /api/admin/ai-usage returns a per-company token aggregate (array, sorted by spend)',
+    aiu.status === 200 && Array.isArray(aiu.json) && aiu.json.every((r: any) => typeof r.tenant_id === 'number' && typeof r.total_tokens === 'number'),
+    `st=${aiu.status} n=${Array.isArray(aiu.json) ? aiu.json.length : 'x'}`);
+  // Detail + subscription control are platform-owner-gated too.
+  // Cross-company activity feed (Platform Console) — owner (Admin, single-company bypass) sees audit rows
+  // across tenants; the new tenant_id filter narrows to exactly one company.
+  const auditAll = await inj('GET', '/api/admin/audit?limit=200', owner);
+  const allRows = (auditAll.json.rows ?? []) as any[];
+  const pickTid = allRows.map((r) => r.tenant_id).find((x) => x != null);
+  const auditOne = pickTid != null ? ((await inj('GET', `/api/admin/audit?limit=200&tenant_id=${pickTid}`, owner)).json.rows ?? []) as any[] : [];
+  ok('GET /api/admin/audit?tenant_id filters the fleet-wide feed to exactly one company',
+    auditAll.status === 200 && allRows.length > 0 && (pickTid == null || (auditOne.length > 0 && auditOne.every((r) => Number(r.tenant_id) === Number(pickTid)))),
+    `all=${allRows.length} pick=${pickTid} one=${auditOne.length}`);
+  // Detail + subscription control are platform-owner-gated too.
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // temporarily drop owner's platform status
+  const detailDenied = await inj('GET', `/api/admin/tenants/${created.json.tenant_id}`, owner);
+  ok('GET /api/admin/tenants/:id blocked for a non-platform-admin (403)', detailDenied.status === 403, `${detailDenied.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3c. Invite-link onboarding (ITGC-AC-18 #2): a platform owner issues a SINGLE-USE, expiring invite;

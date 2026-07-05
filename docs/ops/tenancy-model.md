@@ -101,6 +101,82 @@ role you can log in as that sees *everything*. When you still need one operator 
 - Every cross-tenant read/write a god makes still runs with `req.__rlsBypass=true`, which the audit
   interceptor records — so god actions are attributable in `audit_log`.
 
+### 2ter. God company-switcher (act-as-one-company)
+A god's whole point is the global bypass — so out of the box it sees **every company's rows combined**, with
+no cue to which company a given row belongs to. To make that view usable, the web sidebar shows a **company
+switcher** (only for a god — gated on `is_platform_owner` from `GET /api/auth/me`) that doubles as a
+**current-company badge**:
+
+- The switcher lists all companies (`GET /api/admin/tenants`, `@PlatformAdmin`) with a **search box** and a
+  **"เพิ่งดู" (recently viewed)** shortlist (device-local). Picking one stores it client-side and sends
+  **`X-Act-As-Tenant: <tenantId>`** on every request; **"ทุกบริษัท (รวม)"** clears it and restores the global
+  view.
+- `common/tenant-tx.interceptor.ts` honours that header **only for a god** (never a normal Admin/staff) and
+  **only on non-provisioning routes** (a `@PlatformAdmin` route keeps its full bypass so the directory itself
+  still lists every company). When set, it **drops the god's bypass** and pins `app.tenant_id` to the chosen
+  tenant, so RLS returns exactly that one company's rows — the same visibility that company's own Admin has.
+  It also repoints the request's `user.tenantId` so writes (and the incidental writes some GETs do) act as
+  that company too.
+- **It only ever REDUCES a god's visibility** (a god already sees everything), so trusting a client header
+  here is not a privilege-escalation path — a non-god sending it is ignored (`pg-core` asserts this). God
+  actions while acting-as are still attributable: the audit interceptor records `god_act_as_tenant` on the
+  mutation's `audit_log` meta.
+- **Read-only act-as (safe inspection).** Adding **`X-Act-As-Read-Only: 1`** alongside the act-as header makes
+  the interceptor **reject any mutating request** (POST/PUT/PATCH/DELETE → `403 READONLY_IMPERSONATION`) while
+  GETs still work — a god can enter a company to look/support with zero risk of writing. The web scope banner
+  exposes a **อ่านอย่างเดียว ⇄ เปิดให้แก้ไข** toggle. ToE: `pg-core` asserts a read-only god GET returns the
+  scoped rows while a POST is blocked 403.
+
+### 2quater. Platform Console (`/platform`)
+A god runs the whole fleet, so the platform-owner operations that were previously **API-only**
+(`@PlatformAdmin`) now have a single web home — **`/platform`**, a nav entry surfaced **only** when
+`is_platform_owner` is true (injected after the permission filter, so a per-tenant Admin never sees it).
+It gathers:
+
+- **Companies** — every tenant from `GET /api/admin/tenants` (enriched: subscription status, plan,
+  user-count, trial end, created date, `setup_complete`, `tags`). Row actions: **เข้าดู** (sets the act-as
+  scope via the switcher then jumps to `/dashboard`), **ระงับ/คืนสถานะ** (`POST /api/admin/tenants/:id/suspend|reactivate`),
+  and header **เปิดบริษัทใหม่** (`POST /api/admin/tenants`). **Bulk actions** — select rows to suspend /
+  reactivate / extend-trial / change-plan many companies at once (parallel per-company calls). **Tags/segments**
+  — label companies (`POST /api/admin/tenants/:id/tags`; `tenants.tags` jsonb, migration 0246) and filter the
+  table by a tag chip.
+- **Onboarding** — the pending **request queue** (`GET /api/admin/signup-requests?status=pending` →
+  approve/reject) and **invite links** (`POST/GET /api/admin/signup-invites`; the raw token shows once).
+- **กิจกรรม (Activity)** — the **cross-company audit feed**: `GET /api/admin/audit` (a god's RLS bypass
+  returns every tenant's rows) with a per-**company** filter (new `tenant_id` query param), result filter,
+  free-text search, a **hash-chain verify** (`GET /api/admin/audit/verify`, ITGC-AC-16), and **CSV export**
+  (`GET /api/admin/audit/export`; the query gained a `tenant_id` filter). Each row shows which company it
+  belongs to (`tenant_id` → name), and a **"เฉพาะการข้ามบริษัท (god)"** lens filters to rows a god ran
+  cross-tenant (`meta.god_act_as_tenant`/`rls_bypass`) — the impersonation/governance view — the fleet-wide
+  *who-did-what*, for oversight and incident response.
+- **ภาพรวม (Overview)** — cross-company SaaS KPIs from `GET /api/billing/saas-metrics` (MRR/ARR/ARPU,
+  paying/trialing counts, DAU/MAU + stickiness, 30-day churn, plan mix) plus a **needs-attention** panel
+  derived from the company list + request queue (pending requests, trials ending within 7 days, past-due,
+  suspended, **setup-incomplete** — `GET /api/admin/tenants` now returns `setup_complete`) — the
+  *what-needs-me-now* summary for the fleet. Plus a **system-health** strip (DB pool / queue backlog /
+  dead-letters / cache from `GET /api/ops/metrics` + `GET /api/jobs/ops-metrics`) and a **cross-company AI
+  spend** table (top token spenders + overage from `GET /api/admin/ai-usage`).
+- **Company detail drawer** — clicking a company name opens a slide-over with its full picture
+  (`GET /api/admin/tenants/:id`: profile, subscription, user/branch counts, cumulative AI usage, recent
+  audit activity) plus **platform subscription controls that need no impersonation** —
+  **`POST /api/admin/tenants/:id/plan`** (change plan) and **`POST /api/admin/tenants/:id/extend-trial`**
+  (push the trial out N days, back to Trialing) — and **act-as jump** shortcuts: **เข้าดูบริษัทนี้** (into its
+  dashboard) and **จัดการผู้ใช้** (into its `/admin/users` — reset password / revoke sessions / deactivate,
+  reusing the standard user-admin screen scoped to that company; no separate cross-tenant user API needed).
+
+The console **auto-refreshes** (companies 60s, request queue 45s) so new signup requests and status changes
+surface without a manual reload, and a **toast fires when a new pending request arrives** — near-real-time
+alerting appropriate for platform events (a true SSE push channel is a possible future enhancement).
+
+The page is a server shell (`page.tsx`, prefetches via `serverApi`) + a client island; access is enforced by
+the API (`@PlatformAdmin`/`exec` → 403 for non-owners), the nav gate is only chrome. ToE: `cutover/onboarding.ts`
+(`GET /api/admin/tenants` lists all companies enriched; blocked for a non-owner).
+
+**Scope banner (safety).** Because the combined god view silently sums every company, a persistent banner
+under the header (god only) states the current scope: in the combined view it warns figures span **all**
+companies; while acting-as it names the company and offers one-click return to the combined view — so a
+dashboard number is never misread as one company's.
+
 **Provision one (two steps — account, then bypass):**
 1. Create the account: `GOD_PASSWORD='<temp>' pnpm --filter @ierp/api db:create-god` (`GOD_USERNAME` defaults
    to `godmimi`; in production add `ALLOW_PROD_GOD=1`). It inserts a role=`Admin` user with
@@ -174,4 +250,13 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 | 1.4 | 2026-07-03 | Platform / Security | **Invite-link onboarding** (ITGC-AC-18, onboarding-flow #2): platform owners issue single-use, expiring invites (`POST`/`GET /api/admin/signup-invites`, `@PlatformAdmin`); the invitee signs up with `invite_token` even when public signup is disabled (`400 INVALID_INVITE` if invalid/used/expired; single-use). Platform-level `signup_invites` table (migration 0233, hash-only, no tenant_id/RLS). ToE: `cutover/onboarding.ts` (issue-auth 403, bogus/valid/reuse, used-list). |
 | 1.5 | 2026-07-03 | Platform / Security | **Approval-queue onboarding** (ITGC-AC-18, onboarding-flow #3): public `POST /api/auth/signup-requests` creates a PENDING request (no tenant); a platform owner reviews (`GET /api/admin/signup-requests`) and approves (`…/:id/approve` → provisions with the requester's hashed password) or rejects (`…/:id/reject`). Dup pending → 409 REQUEST_PENDING; handled → 409 REQUEST_NOT_PENDING. Table `signup_requests` (migration 0234, platform-level; `created_tenant_id` not `tenant_id`). ToE: `cutover/onboarding.ts` (request→pending→approve→login, dup, reject, non-owner 403, re-approve 409). |
 | 1.7 | 2026-07-04 | Platform / Security | **Platform owner = "god" (cross-org super-user).** `common/tenant-tx.interceptor.ts` now grants a **global RLS bypass on EVERY route** to any `PLATFORM_ADMIN_USERNAMES` member (previously only on `@PlatformAdmin` management endpoints), so an ops-designated owner sees/operates across ALL tenants while a per-tenant Admin stays org-scoped under `multi-company`. Gated by env (not an assignable DB role) to prevent in-app privilege escalation; god actions still flagged to the audit interceptor. New §1 bullet + §2bis. ToE: `cutover/pg-core.ts` (god sees all 4 companies; same-org non-god Admin sees only its org — `god===4`, `org1===2`). Deploy config: documented the tenancy/onboarding vars (`TENANCY_MODE`/`PLATFORM_ADMIN_USERNAMES`/`PUBLIC_SIGNUP_ENABLED`) in `.env.example`, `docker-compose.yml`, and `railway-setup.md` §2.2; `env.validation.ts` now emits boot warnings listing configured god accounts and flagging the `PUBLIC_SIGNUP_ENABLED`-on-without-`multi-company` footgun. Added a `db:create-god` bootstrap script (`apps/api/src/database/create-god-user.ts`) to provision a god candidate account (default username `godmimi`, role Admin, must-change-password; prod-gated by `ALLOW_PROD_GOD=1`) — §2bis "Provision one". |
+| 1.16 | 2026-07-04 | Platform / Security | **Read-only act-as (safe inspection).** `X-Act-As-Read-Only: 1` alongside the act-as header makes the interceptor reject mutating requests (403 READONLY_IMPERSONATION) while GETs still work; the web scope banner adds an อ่านอย่างเดียว⇄เปิดให้แก้ไข toggle. §2ter extended. ToE: `pg-core` (read-only GET works, POST blocked 403). |
+| 1.15 | 2026-07-04 | Platform / Security | **Platform Console — bulk actions + tags/segments.** Companies table gains **bulk** suspend/reactivate/extend-trial/change-plan over selected rows (parallel per-company calls) and **tags/segments**: `tenants.tags` jsonb (migration 0246), `POST /api/admin/tenants/:id/tags` (`@PlatformAdmin`, deduped/trimmed/capped), tags surfaced on `GET /api/admin/tenants` + the drawer, with a tag-chip filter on the table. §2quater extended. ToE: `cutover/onboarding.ts` (tags set/dedup/reflect). |
+| 1.14 | 2026-07-04 | Platform / Security | **Platform Console wave-2 quick wins.** Switcher **search + recently-viewed**; Overview gains a **system-health** strip (`GET /api/ops/metrics` + `GET /api/jobs/ops-metrics`), a **cross-company AI-spend** table (new `GET /api/admin/ai-usage`, `@PlatformAdmin`), and a **setup-incomplete** needs-attention card (`GET /api/admin/tenants` now returns `setup_complete`); the Activity tab gains a **god-only (impersonation) lens** (filters `meta.god_act_as_tenant`/`rls_bypass`). §2ter/§2quater extended. ToE: `cutover/onboarding.ts` (setup_complete field; ai-usage aggregate). |
+| 1.13 | 2026-07-04 | Platform / Security | **Platform Console — user-support shortcut + auto-refresh alerts.** The company drawer now has a **จัดการผู้ใช้** act-as shortcut into that company's `/admin/users` (reset password / revoke sessions / deactivate — reuses the standard screen scoped to the company; no new cross-tenant user API). The console auto-refreshes (companies 60s, requests 45s) and toasts when a new pending signup request arrives — near-real-time alerting (SSE push is a possible future step). Web-only. §2quater extended. |
+| 1.12 | 2026-07-04 | Platform / Security | **Platform Console — cross-company Activity tab.** Added a fleet-wide audit feed to the console: `GET /api/admin/audit` (a god's RLS bypass returns every tenant's rows) gained a `tenant_id` filter param so a god can scope the combined feed to one company; the tab also does result/text filtering, hash-chain verify (ITGC-AC-16), and CSV export, and labels each row with its company. §2quater extended. ToE: `cutover/onboarding.ts` (tenant_id filter narrows the fleet feed to one company). |
+| 1.11 | 2026-07-04 | Platform / Security | **Platform Console — company detail drawer + subscription control.** Click a company → a slide-over with `GET /api/admin/tenants/:id` (profile, subscription, user/branch counts, cumulative AI usage, recent audit activity) and platform-level subscription actions that need no impersonation: `POST /api/admin/tenants/:id/plan` (change plan) + `POST /api/admin/tenants/:id/extend-trial`. §2quater extended. ToE: `cutover/onboarding.ts` (detail shape; extend-trial; change-plan; non-owner 403). |
+| 1.10 | 2026-07-04 | Platform / Security | **Platform Console — Overview + scope banner.** Added an **ภาพรวม** tab (cross-company SaaS KPIs from `GET /api/billing/saas-metrics` — MRR/ARR/ARPU, paying/trialing, DAU/MAU, churn, plan mix) with a **needs-attention** panel (pending requests, trials ending ≤7d, past-due, suspended) derived from the company list + queue. Added a god-only **scope banner** under the header: warns the combined view sums all companies, and while acting-as names the company + one-click return. §2quater extended. Web-only (no new API/control). |
+| 1.9 | 2026-07-04 | Platform / Security | **Platform Console (`/platform`).** Gave the platform owner a single web home for the previously API-only `@PlatformAdmin` operations — a god-only nav entry (gated on `is_platform_owner`) with a **Companies** table (`GET /api/admin/tenants`, now enriched with subscription status/plan/user-count/trial/created) offering act-as jump + suspend/reactivate + provision, and an **Onboarding** panel (signup-request approve/reject + issue/list invites). Server shell + client island; access enforced by `@PlatformAdmin`. New §2quater. ToE: `cutover/onboarding.ts` (enriched directory lists all companies; non-owner 403). |
+| 1.8 | 2026-07-04 | Platform / Security | **God company-switcher (act-as-one-company).** A god otherwise sees every company's rows combined with no cue to which company each belongs to. Added a web sidebar **company switcher + current-company badge** (gated on `is_platform_owner`, new field on `GET /api/auth/me`) backed by a new **`GET /api/admin/tenants`** (`@PlatformAdmin`) directory. Selecting a company sends **`X-Act-As-Tenant`**; `common/tenant-tx.interceptor.ts` honours it **only for a god, only on non-provisioning routes**, dropping the bypass and pinning `app.tenant_id` (+ `user.tenantId`) to that tenant so RLS returns just that company's rows. Only ever narrows a god (a non-god's header is ignored); audit records `god_act_as_tenant`. New §2ter. ToE: `cutover/pg-core.ts` (act-as narrows to 1, re-scopes per selection, non-god ignored). |
 | 1.6 | 2026-07-03 | Platform / Security | **Setup checklist + starter (onboarding #4, setup UX):** `GET /api/tenant/onboarding-status` (steps + percent + next) and `POST /api/tenant/starter-pack` (idempotent HQ branch). **Company lifecycle (onboarding #5, ITGC-AC-18):** platform owner `POST /api/admin/tenants/:id/suspend`/`reactivate` — a suspended company's users are blocked at the guard (`403 TENANT_SUSPENDED`); platform owners are exempt; audit-logged. Column `tenants.suspended_at` (migration 0235). ToE: `cutover/onboarding.ts` (checklist advance + idempotent starter; suspend→blocked→reactivate→restored, non-owner 403). |

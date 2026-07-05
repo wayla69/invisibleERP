@@ -21,8 +21,10 @@ export class AuditViewerController {
     @Query('entity') entity?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('tenant_id') tenant_id?: string,
   ) {
-    const filters: AuditFilters = { actor, action, status, entity, from, to };
+    const tenantId = tenant_id != null && /^\d+$/.test(tenant_id) ? Number(tenant_id) : undefined;
+    const filters: AuditFilters = { actor, action, status, entity, from, to, tenantId };
     return this.svc.query(filters, Math.min(qint('limit', limit, 50), 200), Math.max(qint('offset', offset, 0), 0));
   }
 

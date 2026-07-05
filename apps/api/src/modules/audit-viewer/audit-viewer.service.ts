@@ -14,6 +14,9 @@ export interface AuditFilters {
   entity?: string;
   from?: string;
   to?: string;
+  // Scope to one company — only meaningful for a caller that sees across tenants (HQ/god RLS bypass);
+  // a tenant-scoped admin already sees only its own rows, so this narrows to a no-op/refinement for them.
+  tenantId?: number | null;
 }
 
 // Read-only viewer over the append-only audit_log. Tenant isolation is enforced by RLS (a tenant-scoped
@@ -34,6 +37,7 @@ export class AuditViewerService {
     if (f.action) c.push(ilike(auditLog.action, `%${f.action}%`));
     if (f.entity) c.push(ilike(auditLog.entity, `%${f.entity}%`));
     if (f.status) c.push(eq(auditLog.status, f.status));
+    if (f.tenantId != null) c.push(eq(auditLog.tenantId, f.tenantId));
     if (f.from) { const d = new Date(f.from); if (!isNaN(d.getTime())) c.push(gte(auditLog.ts, d)); }
     if (f.to) { const d = new Date(f.to); if (!isNaN(d.getTime())) c.push(lte(auditLog.ts, d)); }
     return c.length ? and(...c) : undefined;

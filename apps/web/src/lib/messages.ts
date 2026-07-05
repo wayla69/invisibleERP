@@ -307,6 +307,8 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.setup': { th: 'ตั้งค่ากิจการ', en: 'Company Setup' },
   'nav.billing': { th: 'แพ็กเกจ', en: 'Billing' },
   'nav.settings_page': { th: 'ตั้งค่า', en: 'Settings' },
+  'nav.platform': { th: 'ศูนย์ควบคุมแพลตฟอร์ม', en: 'Platform Console' },
+  'nav.group.platform': { th: 'แพลตฟอร์ม', en: 'Platform' },
 
   // ── Dashboard (ERP home) ──────────────────────────────────────────────────
   'dash.title': { th: 'แดชบอร์ด', en: 'Dashboard' },

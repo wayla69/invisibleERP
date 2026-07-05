@@ -30,6 +30,38 @@ function csrfHeader(method?: string): Record<string, string> {
   return t ? { 'X-CSRF-Token': t } : {};
 }
 
+// ── God company-switcher (platform owner "act-as-company") ────────────────────────────────────────────
+// A platform owner otherwise sees ALL companies' rows combined. Picking a company in the sidebar switcher
+// stores its {id,name} here; every request then carries `X-Act-As-Tenant`, and the server narrows the god's
+// RLS scope to that one company. Ignored by the server for non-god users, so it's safe to always attach.
+const ACTING_TENANT_KEY = 'ie-god-company';
+export interface ActingTenant { id: number; name: string; code?: string; readOnly?: boolean }
+
+export function getActingTenant(): ActingTenant | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const v = JSON.parse(localStorage.getItem(ACTING_TENANT_KEY) ?? 'null');
+    return v && typeof v.id === 'number' ? (v as ActingTenant) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Persist (or clear, when passed null) the god's selected company. The caller reloads so every cached query
+// refetches under the new scope — simpler and less error-prone than surgically invalidating each one.
+export function setActingTenant(t: ActingTenant | null): void {
+  if (typeof window === 'undefined') return;
+  if (t) localStorage.setItem(ACTING_TENANT_KEY, JSON.stringify(t));
+  else localStorage.removeItem(ACTING_TENANT_KEY);
+}
+
+function actingTenantHeader(): Record<string, string> {
+  const t = getActingTenant();
+  if (!t) return {};
+  // Read-only inspection: the server rejects mutating requests while this is set (safe support view).
+  return { 'X-Act-As-Tenant': String(t.id), ...(t.readOnly ? { 'X-Act-As-Read-Only': '1' } : {}) };
+}
+
 // Log out: clear the server cookies, then bounce to /login. Best-effort on the network call.
 export async function logout(): Promise<void> {
   try {
@@ -94,6 +126,7 @@ function buildHeaders(init: RequestInit): Record<string, string> {
   return {
     ...(init.body != null ? { 'Content-Type': 'application/json' } : {}),
     ...csrfHeader(init.method),
+    ...actingTenantHeader(),
     ...((init.headers as Record<string, string>) ?? {}),
   };
 }
@@ -124,7 +157,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
 export async function apiDownload(path: string, filename: string, init: RequestInit = {}): Promise<void> {
   const res = await fetchWithTimeout(`${BASE}${path}`, {
     ...init,
-    headers: { ...csrfHeader(init.method), ...(init.headers ?? {}) },
+    headers: { ...csrfHeader(init.method), ...actingTenantHeader(), ...(init.headers ?? {}) },
   }, 60_000); // exports/PDF generation can be slow — allow longer
   if (!res.ok) {
     if (handleUnauthorized(res.status)) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');

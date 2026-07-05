@@ -10,6 +10,7 @@ import { PasswordService } from './password.service';
 import { LoginAttemptStore } from './login-attempt.store';
 import { encrypt, decrypt } from '../../common/crypto';
 import { normalizeUsername } from '../../common/username';
+import { isPlatformAdmin } from '../../common/decorators';
 
 @Injectable()
 export class AuthService {
@@ -285,7 +286,8 @@ export class AuthService {
 
   async me(user: AuthUser): Promise<AuthUser> {
     const [row] = await this.db.select({ m: users.mustChangePassword }).from(users).where(eq(users.username, user.username)).limit(1);
-    return { ...user, must_change_password: !!row?.m };
+    // is_platform_owner drives the web company-switcher (only a "god" sees it). Env-derived, never a claim.
+    return { ...user, must_change_password: !!row?.m, is_platform_owner: isPlatformAdmin(user.username) };
   }
 
   // A5 — rotate password (verify current, set new, clear the force-change flag). Min 8 chars.
