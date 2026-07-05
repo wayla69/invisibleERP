@@ -62,11 +62,19 @@ export function scanCodeId(text: string | null | undefined): string | undefined 
   return id || undefined;
 }
 
+/** Strip trailing '/' with a linear scan (a `/\/+$/` regex is a polynomial-ReDoS sink on
+ *  uncontrolled input — CodeQL js/polynomial-redos). */
+export function stripTrailingSlashes(s: string | null | undefined): string {
+  const str = String(s ?? '');
+  let end = str.length;
+  while (end > 0 && str.charCodeAt(end - 1) === 47 /* '/' */) end--;
+  return str.slice(0, end);
+}
+
 /** Build the deep-link URL that a printed QR encodes when a web base URL is configured:
  *  `<base>/q?d=<url-encoded payload>`. With no base, callers encode the raw payload instead. */
 export function qrLink(base: string, payload: string): string {
-  const b = String(base ?? '').replace(/\/+$/, '');
-  return `${b}/q?d=${encodeURIComponent(payload)}`;
+  return `${stripTrailingSlashes(base)}/q?d=${encodeURIComponent(payload)}`;
 }
 
 export function buildItemQrPayload(p: {

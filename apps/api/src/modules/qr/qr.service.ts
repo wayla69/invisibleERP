@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as QRCode from 'qrcode';
-import { qrLink } from '@ierp/shared';
+import { qrLink, stripTrailingSlashes } from '@ierp/shared';
 import { PdfRenderer } from '../pdf/pdf-renderer.service';
 
 export interface QrLabel {
@@ -23,7 +23,7 @@ export class QrService {
   // phone's native camera opens the `/q` resolver page; unset (dev/tests/on-prem without a public host)
   // ⇒ the raw payload is encoded, matching the legacy behaviour. The plain-text `payload` the API returns
   // alongside the image is ALWAYS the raw payload (what a wedge scanner / the in-app scanner reads).
-  private readonly webBase = String(process.env.WEB_BASE_URL ?? '').replace(/\/+$/, '');
+  private readonly webBase = stripTrailingSlashes(process.env.WEB_BASE_URL);
   constructor(private readonly pdf: PdfRenderer) {}
 
   /** What the QR image encodes: a deep-link URL when WEB_BASE_URL is configured, else the raw payload. */

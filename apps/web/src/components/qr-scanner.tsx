@@ -1,6 +1,7 @@
-'use client';
-
 // Camera QR scanner — dependency-free, using the browser-native BarcodeDetector API
+// (No 'use client' directive: this component is only ever imported by client pages — the assets QR tab,
+//  mobile-scan, stocktake, goods-issue — so it already lives in their client bundle. Adding the directive
+//  would trip the use-client ratchet, tools/ci/check-use-client.mjs, for no benefit.)
 // (Chromium desktop/Android, Android WebView, Samsung Internet). When the API or a camera is
 // unavailable (e.g. Firefox, older Safari, no getUserMedia) the button renders nothing, so the
 // page's manual text input / hardware wedge-scanner path remains the fallback. The decoded text

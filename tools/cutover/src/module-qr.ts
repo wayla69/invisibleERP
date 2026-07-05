@@ -235,13 +235,13 @@ async function main() {
   ok('asset scan-update accepts a URL-wrapped code', (scanUrl.status === 200 || scanUrl.status === 201) && scanUrl.json.location === 'Zone C', `status=${scanUrl.status} loc=${scanUrl.json.location}`);
 
   // ── 3c. RESOLVE ENDPOINT (powers the /q resolver page) ───────────────────────────────────
-  const resA = await inj('GET', `/api/scan/sessions/resolve?code=${encodeURIComponent('ASSET_ID:FA-TEST')}`, token);
+  const resA = await inj('GET', `/api/scan/sessions/resolve?d=${encodeURIComponent('ASSET_ID:FA-TEST')}`, token);
   ok('resolve asset → kind=asset,id=FA-TEST', resA.status === 200 && resA.json.kind === 'asset' && resA.json.id === 'FA-TEST', `kind=${resA.json.kind} id=${resA.json.id}`);
-  const resI = await inj('GET', '/api/scan/sessions/resolve?code=A', token);
+  const resI = await inj('GET', '/api/scan/sessions/resolve?d=A', token);
   ok('resolve item → kind=item,id=A', resI.status === 200 && resI.json.kind === 'item' && resI.json.id === 'A', `kind=${resI.json.kind} id=${resI.json.id}`);
-  const resUrl = await inj('GET', `/api/scan/sessions/resolve?code=${encodeURIComponent(wrapped)}`, token);
+  const resUrl = await inj('GET', `/api/scan/sessions/resolve?d=${encodeURIComponent(wrapped)}`, token);
   ok('resolve accepts a URL-wrapped code', resUrl.status === 200 && resUrl.json.kind === 'asset' && resUrl.json.id === 'FA-TEST', `kind=${resUrl.json.kind} id=${resUrl.json.id}`);
-  const resNone = await inj('GET', '/api/scan/sessions/resolve?code=NOPE-404', token);
+  const resNone = await inj('GET', '/api/scan/sessions/resolve?d=NOPE-404', token);
   ok('resolve unknown code → kind=unknown', resNone.status === 200 && resNone.json.kind === 'unknown', `kind=${resNone.json.kind}`);
 
   await app.close();

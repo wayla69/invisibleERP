@@ -1,17 +1,18 @@
-'use client';
-
-// Public deep-link resolver for a scanned asset/inventory QR.
-// A printed QR (when WEB_BASE_URL is configured) encodes `<base>/q?d=<payload>`, so a phone's *native*
-// camera opens this page. We parse the payload, identify the item/asset, and — once authenticated — show
-// live details + one-tap links into the relevant workspace. Unauthenticated visitors see what was scanned
-// and a login link that returns here (the shared `api()` also auto-bounces 401s to /login?next=).
-import { useEffect, useState } from 'react';
+// Public deep-link resolver for a scanned asset/inventory QR — a SERVER component (no client JS).
+// A printed QR (when WEB_BASE_URL is set) encodes `<base>/q?d=<payload>`, so a phone's native camera
+// opens this page. We parse the payload, resolve it against the API server-side (cookie-forwarded via
+// serverApi — null when there's no session or the item is unknown), and render identity + one-tap links
+// into the workspace. Kept server-first per docs/28 §4 (the use-client ratchet); it needs no interactivity
+// beyond links, so there is no client island.
+import Link from 'next/link';
 import { Boxes, Landmark, PackageSearch, ScanLine } from 'lucide-react';
-import { api, hasSession } from '@/lib/api';
-import { parseQrPayload, type QrPayload } from '@/lib/qr';
-import { useLang } from '@/lib/i18n';
-import { Button } from '@/components/ui/button';
+import { serverApi } from '@/lib/server-api';
+import { parseQrPayload } from '@/lib/qr';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+
+// cookies() (inside serverApi) already opts this route out of prerendering; explicit for clarity.
+export const dynamic = 'force-dynamic';
 
 interface Resolved {
   kind: 'item' | 'asset' | 'unknown';
@@ -24,46 +25,39 @@ interface Resolved {
   status?: string | null;
 }
 
-export default function QrResolverPage() {
-  const { t } = useLang();
-  const [code, setCode] = useState('');
-  const [search, setSearch] = useState('');
-  const [parsed, setParsed] = useState<QrPayload>({});
-  const [resolved, setResolved] = useState<Resolved | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [authed, setAuthed] = useState(false);
+function firstParam(v: string | string[] | undefined): string {
+  return typeof v === 'string' ? v : Array.isArray(v) ? (v[0] ?? '') : '';
+}
 
-  useEffect(() => {
-    setSearch(window.location.search);
-    const sp = new URLSearchParams(window.location.search);
-    const raw = sp.get('d') ?? sp.get('code') ?? sp.get('payload') ?? '';
-    setCode(raw);
-    setParsed(parseQrPayload(raw));
-    const session = hasSession();
-    setAuthed(session);
-    if (!raw || !session) { setLoading(false); return; }
-    api<Resolved>(`/api/scan/sessions/resolve?code=${encodeURIComponent(raw)}`)
-      .then((r) => setResolved(r))
-      .catch(() => setResolved(null))
-      .finally(() => setLoading(false));
-  }, []);
+export default async function QrResolverPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  // Deep links are built as `/q?d=<payload>` (see qrLink). Read only the non-sensitive `d` param.
+  const code = firstParam(sp.d);
+  const parsed = parseQrPayload(code);
+  // Live lookup, server-side. serverApi returns null with no session / on error → we fall back to the
+  // payload the tag itself carries (DESC/LOC) plus a login link.
+  const resolved = code ? await serverApi<Resolved>(`/api/scan/sessions/resolve?d=${encodeURIComponent(code)}`) : null;
 
-  const id = resolved?.id || parsed.ITEM_ID || parsed.ASSET_ID || code;
   const kind: 'item' | 'asset' | 'unknown' =
-    resolved?.kind ?? (parsed.ASSET_ID ? 'asset' : parsed.ITEM_ID ? 'item' : 'unknown');
+    resolved && resolved.kind !== 'unknown' ? resolved.kind : parsed.ASSET_ID ? 'asset' : parsed.ITEM_ID ? 'item' : 'unknown';
+  const id = resolved?.id || parsed.ITEM_ID || parsed.ASSET_ID || code;
   const desc = resolved?.description ?? parsed.DESC ?? '';
-  const loginHref = `/login?next=${encodeURIComponent('/q' + search)}`;
+  const loginHref = `/login?next=${encodeURIComponent('/q?d=' + code)}`;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6">
       <Card className="w-full gap-4 p-6">
         <div className="flex items-center gap-2 text-muted-foreground">
           <ScanLine className="size-5" />
-          <span className="text-sm font-medium">{t('qr.q_title')}</span>
+          <span className="text-sm font-medium">ผลการสแกน QR · Scanned QR</span>
         </div>
 
         {!code ? (
-          <p className="text-sm text-muted-foreground">{t('qr.q_no_code')}</p>
+          <p className="text-sm text-muted-foreground">ไม่พบข้อมูลในลิงก์ QR นี้ · No data in this QR link</p>
         ) : (
           <>
             <div className="flex items-start gap-3">
@@ -72,46 +66,41 @@ export default function QrResolverPage() {
               </div>
               <div className="min-w-0">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                  {kind === 'asset' ? t('qr.q_kind_asset') : kind === 'item' ? t('qr.q_kind_item') : t('qr.q_kind_unknown')}
+                  {kind === 'asset' ? 'สินทรัพย์ · Asset' : kind === 'item' ? 'สินค้า · Item' : 'รหัสที่สแกน · Scanned code'}
                 </div>
                 <div className="truncate text-lg font-semibold">{id}</div>
                 {desc && <div className="truncate text-sm text-muted-foreground">{desc}</div>}
               </div>
             </div>
 
-            {loading ? (
-              <p className="text-sm text-muted-foreground">{t('qr.q_loading')}</p>
-            ) : resolved && resolved.kind !== 'unknown' ? (
+            {resolved && resolved.kind !== 'unknown' ? (
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
                 {resolved.kind === 'asset' && resolved.location != null && (
-                  <><dt className="text-muted-foreground">{t('qr.q_location')}</dt><dd>{resolved.location || '—'}</dd></>
+                  <><dt className="text-muted-foreground">ตำแหน่ง · Location</dt><dd>{resolved.location || '—'}</dd></>
                 )}
                 {resolved.kind === 'asset' && resolved.status != null && (
-                  <><dt className="text-muted-foreground">{t('qr.q_status')}</dt><dd>{resolved.status}</dd></>
+                  <><dt className="text-muted-foreground">สถานะ · Status</dt><dd>{resolved.status}</dd></>
                 )}
                 {resolved.kind === 'item' && resolved.uom != null && (
-                  <><dt className="text-muted-foreground">{t('qr.q_uom')}</dt><dd>{resolved.uom || '—'}</dd></>
+                  <><dt className="text-muted-foreground">หน่วย · Unit</dt><dd>{resolved.uom || '—'}</dd></>
                 )}
                 {resolved.kind === 'item' && resolved.price != null && (
-                  <><dt className="text-muted-foreground">{t('qr.q_price')}</dt><dd>{resolved.price}</dd></>
+                  <><dt className="text-muted-foreground">ราคา · Price</dt><dd>{resolved.price}</dd></>
                 )}
               </dl>
-            ) : authed && resolved?.kind === 'unknown' ? (
-              <p className="text-sm text-muted-foreground">{t('qr.q_not_found')}</p>
             ) : null}
 
-            {/* Actions — deep links into the right workspace. */}
+            {/* Actions — deep links into the right workspace. Navigating there prompts login if needed. */}
             <div className="flex flex-wrap gap-2">
-              {!authed ? (
-                <Button asChild><a href={loginHref}>{t('qr.q_login')}</a></Button>
-              ) : kind === 'asset' ? (
-                <Button asChild><a href="/assets"><Landmark className="size-4" /> {t('qr.q_open_assets')}</a></Button>
+              {kind === 'asset' ? (
+                <Button asChild><Link href="/assets"><Landmark className="size-4" /> เปิดทะเบียนสินทรัพย์ · Open assets</Link></Button>
               ) : (
                 <>
-                  <Button asChild><a href="/mobile-scan"><ScanLine className="size-4" /> {t('qr.q_open_scan')}</a></Button>
-                  <Button asChild variant="outline"><a href="/goods-issue"><PackageSearch className="size-4" /> {t('qr.q_open_stock')}</a></Button>
+                  <Button asChild><Link href="/mobile-scan"><ScanLine className="size-4" /> สแกนมือถือ · Mobile scan</Link></Button>
+                  <Button asChild variant="outline"><Link href="/goods-issue"><PackageSearch className="size-4" /> สต๊อก · Stock</Link></Button>
                 </>
               )}
+              {!resolved && <Button asChild variant="ghost"><Link href={loginHref}>เข้าสู่ระบบ · Log in</Link></Button>}
             </div>
 
             <code className="block break-all rounded bg-muted px-2 py-1 text-center text-xs text-muted-foreground">{code}</code>

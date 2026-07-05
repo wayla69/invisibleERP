@@ -15,7 +15,7 @@ export class ScanController {
 
   // Resolve a scanned code → item/asset (the /q deep-link resolver). Broad read access: any operator who
   // can scan on the floor (mobile/warehouse) or manage assets (exec/creditors) may identify a tag.
-  @Get('resolve') @Permissions('mobile', 'warehouse', 'exec', 'creditors', 'dashboard') resolve(@Query('code') code: string) { return this.svc.resolve(code ?? ''); }
+  @Get('resolve') @Permissions('mobile', 'warehouse', 'exec', 'creditors', 'dashboard') resolve(@Query('d') d: string) { return this.svc.resolve(d ?? ''); }
 
   @Post() open(@Body(new ZodValidationPipe(OpenBody)) b: z.infer<typeof OpenBody>, @CurrentUser() u: JwtUser) { return this.svc.open(b, u); }
   @Get() list(@Query('limit') limit?: string) { return this.svc.listSessions(qint('limit', limit, 50)); }
