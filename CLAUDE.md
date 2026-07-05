@@ -135,6 +135,13 @@ For every such change, review and update as needed:
   conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
   doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage
   the result. Currently **186 controls**.
+- **Adding/removing an RCM control also breaks the `check-rcm-census` gate — bump the tagged census spans.**
+  That gate (a step *inside* the `migrations-journaled` CI job) re-derives the census from `build_rcm.py`
+  and fails if any `<!-- rcm-total -->N<!-- /rcm-total -->` (also `rcm-implemented`/`rcm-partial`/`rcm-gap`)
+  span across `compliance/**.md` + `docs/**.md` disagrees. After a new `add(...)` in `build_rcm.py`, run
+  `node tools/ci/check-rcm-census.mjs`, then update the stale tagged numbers (the 2026-07 PROJ-15 add moved
+  implemented 180→181 / total 183→184 across `CONTROL_STATUS_HONEST.md`, `COSO_ICFR_Audit_Readiness_Plan.md`,
+  `iso27001-gap-analysis.md`, `soc2-readiness.md`). `pnpm install openpyxl` may be needed to run `build_rcm.py`.
 - **Stacked PRs + squash-merge conflicts.** When a feature PR is stacked on another and the base
   squash-merges to `main`, the dependent PR goes `dirty` because main now holds the same content under a
   *different* commit SHA. Resolve by merging `origin/main` and taking **ours** (the stacked branch already
@@ -184,6 +191,19 @@ For every such change, review and update as needed:
   forward** resource/cash forecast (`pipelineSummary` × `resourceCapacity` × milestone/POC billing), and a
   schedulable **period governance pack** (`project_governance_pack` BI report). Read-only aggregators on the
   existing spine — build on, don't duplicate. Three sequential doc-synced PRs.
+- **Project material control + shop-for-a-project (docs/32, PN-16):** the requester-facing shop for a project
+  is a thin surface over the **PMR** spine — do NOT add budget logic to `createPr`. Flow: `/shop` project picker
+  (or the *Shop for this project* button on `/projects/[code]`) → `/shop/project/[code]` browses ONLY the
+  approved BoQ's material lines and checks out into `POST /api/pmr` (`modules/pmr`), so PROJ-12/PROJ-13 enforce
+  it (within budget → PR/stock-issue; over budget → planner/exec maker-checker). The `pr_raise`-safe reads are
+  `GET /api/pmr/projects` + `GET /api/pmr/project/:code/boq` (the projects/BoQ endpoints proper stay
+  exec/planner/ar). An **off-budget** item can't be carted; it goes through **PROJ-15** — `POST /api/pmr/boq-request`
+  (pr_raise, parks pending; `ITEM_ALREADY_BUDGETED`/`NO_APPROVED_BOQ` guards) → `…/boq-request/:reqNo/approve`
+  (planner/exec, ≠ requester) appends a BoQ line + syncs the project budget (table `project_boq_change_requests`,
+  migration 0249). ToE in `tools/cutover/src/projects.ts`. NB: **`items` has no `tenant_id`** (shared master) so
+  new item columns need NO RLS loop (e.g. `items.barcode`, migration 0250, for `/shop` exact scan-to-add via
+  `GET /api/procurement/catalog?barcode=`). `/shop` per-user favourites + basket templates sync via
+  `GET/PUT /api/user-prefs` (`shop_favs`/`shop_templates`, merged by key), localStorage kept as offline cache.
 - **Adjacent-ERP depth (Track D) — reconciled:** `docs/21-track-d-adjacent-erp-plan.md` (v0.2 RECONCILED) —
   an audit found Track D **already built + harness-tested**: MRP/RCCP/plan-to-PR (`modules/mfg-depth/mrp.service.ts`,
   `api/mrp`), QC disposition/scrap (`mfg-depth/quality.service.ts`, `api/quality`), shop-floor ops + routings,
