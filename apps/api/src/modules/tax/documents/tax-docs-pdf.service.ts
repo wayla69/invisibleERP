@@ -3,7 +3,7 @@ import { bahtText } from '../../../common/bahttext.util';
 import { formatTaxId } from './tax-docs.snapshot';
 import { PND_LABELS, WHT_CONDITION_LABELS, incomeType, type PndType } from './wht-rates';
 import { PdfRenderer } from '../../pdf/pdf-renderer.service';
-import { type A4TemplateConfig, DEFAULT_A4_TEMPLATE, a4LogoHtml, a4HeaderNoteHtml, a4FooterHtml } from '../../../common/a4-template';
+import { type A4TemplateConfig, DEFAULT_A4_TEMPLATE, a4LogoHtml, a4HeaderNoteHtml, a4FooterHtml, renderAbbreviatedTaxSlip } from '../../../common/a4-template';
 
 // HTML → PDF templates for the three Thai tax documents. Rendering is delegated to the shared PdfRenderer
 // (external-service offload or pooled Chromium); if unavailable it returns null → caller sends the HTML.
@@ -101,36 +101,14 @@ export class TaxDocsPdfService {
   }
 
   // ── ใบกำกับภาษีอย่างย่อ (ม.86/6) — 80mm thermal slip ──
-  abbreviatedTaxInvoiceHtml(inv: any): string {
-    const rows = inv.lines.map((l: any) => `
-      <tr><td>${esc(l.description)}</td><td class="r">${l.qty != null ? fmtQty(l.qty) : ''}</td><td class="r">${fmtMoney(l.amount)}</td></tr>`).join('');
-    return `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"/>
-      <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet"/>
-      <style>
-        *{box-sizing:border-box} body{font-family:'Sarabun',sans-serif;font-size:11px;margin:0;padding:0;width:74mm}
-        .ct{text-align:center} .b{font-weight:700} hr{border:0;border-top:1px dashed #555;margin:4px 0}
-        table{width:100%;border-collapse:collapse} td{padding:1px 0;vertical-align:top} .r{text-align:right}
-        .ttl{font-size:13px;font-weight:700;margin:2px 0}
-      </style></head><body>
-      <div class="ct b">${esc(inv.seller.name)}</div>
-      <div class="ct">เลขผู้เสียภาษี ${esc(formatTaxId(inv.seller.tax_id))}</div>
-      <div class="ct">(${esc(inv.seller.branch_label)})</div>
-      <hr/>
-      <div class="ct ttl">ใบกำกับภาษีอย่างย่อ</div>
-      <div>เลขที่: ${esc(inv.doc_no)}</div>
-      <div>วันที่: ${esc(thaiDate(inv.issue_date))}</div>
-      <hr/>
-      <table>${rows}</table>
-      <hr/>
-      <table>
-        <tr><td class="b">รวมเงิน (รวม VAT)</td><td class="r b">${fmtMoney(inv.grand_total)}</td></tr>
-        <tr><td>VAT 7% ที่รวมอยู่</td><td class="r">${fmtMoney(inv.vat_amount)}</td></tr>
-      </table>
-      <div class="ct b">** ราคารวมภาษีมูลค่าเพิ่มแล้ว **</div>
-      <hr/>
-      <div class="ct">ขอบคุณที่ใช้บริการ</div>
-      <div class="ct">* ต้องการใบกำกับภาษีเต็มรูป โปรดแจ้งพนักงาน *</div>
-      </body></html>`;
+  // Presentation-only: the tenant's active template can add a header note (slogan/branch) + footer notes; the
+  // mandatory ม.86/6 elements (seller name/tax-id, title, VAT-inclusive total) are structural. The slip layout
+  // is shared with the template designer's preview (common/a4-template.ts) so both paths always agree.
+  abbreviatedTaxInvoiceHtml(inv: any, cfg: A4TemplateConfig = DEFAULT_A4_TEMPLATE): string {
+    return renderAbbreviatedTaxSlip(cfg, {
+      seller: inv.seller, doc_no: inv.doc_no, issue_date: inv.issue_date,
+      lines: inv.lines, grand_total: inv.grand_total, vat_amount: inv.vat_amount,
+    });
   }
 
   // ── หนังสือรับรองการหักภาษี ณ ที่จ่าย 50 ทวิ (ม.50 ทวิ) — A4 form ──

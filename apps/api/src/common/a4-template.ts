@@ -9,7 +9,7 @@
 // FISCAL document (tax invoice, ม.86/4) `normalizeA4Template(raw, { fiscal: true })` force-enables the
 // seller address + tax-id lines regardless of the stored knobs (core integrity).
 
-import { wrapA4, sellerHeaderHtml, type DocParty } from './doc-html';
+import { wrapA4, sellerHeaderHtml, formatTaxId, fmtMoney, fmtQty, thaiDate, type DocParty } from './doc-html';
 
 export type A4TemplateConfig = {
   header: {
@@ -136,6 +136,77 @@ export function renderA4SamplePreview(
 // A tiny Thai baht-text stand-in for the preview (the live renderers use the real common/bahttext.util).
 function bahtTextSample(x: number): string {
   return `จำนวนเงินตัวอย่าง ${(Math.round(x * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })} บาท`;
+}
+
+// ── ใบกำกับภาษีอย่างย่อ (ม.86/6) — the 80mm thermal slip ──────────────────────────────────────────────
+// The data the slip needs — a tiny shape the live renderer (tax-docs-pdf.service) and the template
+// designer's preview both fill, so a tenant's abbreviated-slip template looks identical in both paths.
+export type TaxSlipData = {
+  seller: DocParty;
+  doc_no: string;
+  issue_date: string | null;
+  lines: { description: string; qty?: number | null; amount: number }[];
+  grand_total: number;
+  vat_amount: number;
+  preview?: boolean; // preview stamps a "(ตัวอย่าง)" marker under the title
+};
+
+// Render the abbreviated tax slip through a config. Unlike the A4 documents this is a monochrome thermal
+// slip, so only the knobs that make sense on 74mm paper apply: the header note (a slogan/branch line under
+// the seller identity) and the footer notes (terms_text + extra_lines). Accent colour, logo, seller-line
+// toggles, amount-in-words and signature captions do NOT apply here. The mandatory ม.86/6 elements — seller
+// legal name, tax id, the "ใบกำกับภาษีอย่างย่อ" title and the VAT-inclusive total — are structural and are
+// never gated by a template. Pure (no Nest deps) → the platform preview can call it without a DI cycle.
+export function renderAbbreviatedTaxSlip(cfg: A4TemplateConfig, d: TaxSlipData): string {
+  const rows = d.lines.map((l) => `
+    <tr><td>${esc(l.description)}</td><td class="r">${l.qty != null ? fmtQty(l.qty) : ''}</td><td class="r">${fmtMoney(l.amount)}</td></tr>`).join('');
+  const headerNote = cfg.header.header_note ? `<div class="ct hn">${esc(cfg.header.header_note)}</div>` : '';
+  const footerNotes = [cfg.footer.terms_text, ...cfg.footer.extra_lines]
+    .filter((x) => x && x.trim()).map((l) => `<div class="ct fn">${esc(l)}</div>`).join('');
+  return `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"/>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet"/>
+    <style>
+      *{box-sizing:border-box} body{font-family:'Sarabun',sans-serif;font-size:11px;margin:0;padding:0;width:74mm}
+      .ct{text-align:center} .b{font-weight:700} hr{border:0;border-top:1px dashed #555;margin:4px 0}
+      table{width:100%;border-collapse:collapse} td{padding:1px 0;vertical-align:top} .r{text-align:right}
+      .ttl{font-size:13px;font-weight:700;margin:2px 0} .hn{font-size:11px;margin-top:2px} .fn{font-size:10px;color:#333}
+    </style></head><body>
+    <div class="ct b">${esc(d.seller.name)}</div>
+    <div class="ct">เลขผู้เสียภาษี ${esc(formatTaxId(d.seller.tax_id))}</div>
+    <div class="ct">(${esc(d.seller.branch_label ?? 'สำนักงานใหญ่')})</div>
+    ${headerNote}
+    <hr/>
+    <div class="ct ttl">ใบกำกับภาษีอย่างย่อ${d.preview ? ' (ตัวอย่าง)' : ''}</div>
+    <div>เลขที่: ${esc(d.doc_no)}</div>
+    <div>วันที่: ${esc(thaiDate(d.issue_date))}</div>
+    <hr/>
+    <table>${rows}</table>
+    <hr/>
+    <table>
+      <tr><td class="b">รวมเงิน (รวม VAT)</td><td class="r b">${fmtMoney(d.grand_total)}</td></tr>
+      <tr><td>VAT 7% ที่รวมอยู่</td><td class="r">${fmtMoney(d.vat_amount)}</td></tr>
+    </table>
+    <div class="ct b">** ราคารวมภาษีมูลค่าเพิ่มแล้ว **</div>
+    <hr/>
+    ${footerNotes}
+    <div class="ct">ขอบคุณที่ใช้บริการ</div>
+    <div class="ct">* ต้องการใบกำกับภาษีเต็มรูป โปรดแจ้งพนักงาน *</div>
+    </body></html>`;
+}
+
+// Representative abbreviated slip for the template designer's LIVE PREVIEW (mirrors renderA4SamplePreview but
+// for the 80mm thermal slip), so the preview matches the real ม.86/6 output rather than an A4 mock-up.
+export function renderAbbreviatedSlipPreview(cfg: A4TemplateConfig, opts: { seller: DocParty }): string {
+  const lines = [
+    { description: 'สินค้าตัวอย่าง A', qty: 2, amount: 100 },
+    { description: 'สินค้าตัวอย่าง B', qty: 1, amount: 50 },
+  ];
+  const grand = 150;
+  const vat = Math.round((grand * 7 / 107) * 100) / 100; // VAT-inclusive (ม.86/6)
+  return renderAbbreviatedTaxSlip(cfg, {
+    seller: opts.seller, doc_no: 'ATV-PREVIEW-0001', issue_date: null,
+    lines, grand_total: grand, vat_amount: vat, preview: true,
+  });
 }
 
 // The shared footer: an optional terms paragraph + extra lines, then the two-signature row (with optional

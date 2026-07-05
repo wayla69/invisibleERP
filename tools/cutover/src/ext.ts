@@ -485,8 +485,8 @@ async function main() {
   ok('Doc templates: no GL impact (journal lines unchanged by template authoring)', jlAfter === jlBefore, `before=${jlBefore} after=${jlAfter}`);
 
   // ── A4 documents wired live (quotation / purchase_order / payslip) + fiscal-integrity for tax invoices ──
-  ok('Doc templates: quotation/PO/payslip + full tax invoice are now LIVE in the catalog',
-    ['quotation', 'purchase_order', 'payslip', 'tax_invoice_full'].every((k) => (dtTypes.json.doc_types ?? []).some((d: any) => d.key === k && d.status === 'live')),
+  ok('Doc templates: quotation/PO/payslip + both tax invoices are now LIVE in the catalog',
+    ['quotation', 'purchase_order', 'payslip', 'tax_invoice_full', 'tax_invoice_abbreviated'].every((k) => (dtTypes.json.doc_types ?? []).some((d: any) => d.key === k && d.status === 'live')),
     `${(dtTypes.json.doc_types ?? []).filter((d: any) => d.status === 'live').map((d: any) => d.key).join(',')}`);
   // preview an A4 quotation with an accent colour + header note + footer terms → all honoured in the HTML
   const qPrev = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'quotation', config: { header: { accent_color: '#0F766E', header_note: 'HDR-NOTE-Q' }, footer: { terms_text: 'TERMS-Q-XYZ' }, totals: { show_amount_in_words: false } } });
@@ -502,6 +502,12 @@ async function main() {
   const tiPrev = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'tax_invoice_full', config: { body: { show_seller_tax_id: false, show_seller_address: false } } });
   const tiHtml = typeof tiPrev.json.html === 'string' ? tiPrev.json.html : '';
   ok('Doc templates: FISCAL integrity — a tax invoice cannot hide the seller tax-id (ม.86/4 forced on)', tiPrev.status < 300 && tiHtml.includes('เลขประจำตัวผู้เสียภาษี'), `hasTaxId=${tiHtml.includes('เลขประจำตัวผู้เสียภาษี')}`);
+  // abbreviated (80mm slip): the preview renders the real ม.86/6 slip and honours the header/footer notes;
+  // the mandatory seller tax-id + title still print regardless of the knobs.
+  const abPrev = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'tax_invoice_abbreviated', config: { header: { header_note: 'SLIP-HDR-XYZ' }, footer: { terms_text: 'SLIP-FTR-XYZ' } } });
+  const abHtml = typeof abPrev.json.html === 'string' ? abPrev.json.html : '';
+  ok('Doc templates: abbreviated preview is the 80mm slip + honours header/footer notes', abPrev.status < 300 && abHtml.includes('ใบกำกับภาษีอย่างย่อ') && abHtml.includes('SLIP-HDR-XYZ') && abHtml.includes('SLIP-FTR-XYZ') && abHtml.includes('74mm'), `hdr=${abHtml.includes('SLIP-HDR-XYZ')} ftr=${abHtml.includes('SLIP-FTR-XYZ')}`);
+  ok('Doc templates: abbreviated slip FISCAL integrity — seller tax-id + VAT total still print (ม.86/6)', abHtml.includes('เลขผู้เสียภาษี') && abHtml.includes('รวม VAT'), `len=${abHtml.length}`);
 
   // ── custom objects (Platform Phase 11 — A1) ──
   // reuses Phase 1 custom-fields for typed values (entity = object_key). hqaa = HQ admin (RLS-scoped).

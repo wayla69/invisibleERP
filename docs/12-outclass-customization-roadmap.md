@@ -135,10 +135,14 @@ nothing to the GL. That discipline is itself part of "outclass."
   the active template fail-open and normalizes it with **`{ fiscal: true }`**, so the ม.86/4 mandatory seller
   name/address/tax-id are force-kept regardless of the knobs. `tax_invoice_full` flips to `live`; seller logo
   is read live from the tenant. See narrative `27-platform-customization.md` §7.13 / rev 1.8; `taxdocs` 87.
-- **Deferred (next increment of Phase 10):** template-driven LIVE rendering for the **abbreviated (80mm
-  thermal) tax invoice** (authorable + previewable now, with the ม.86/4 mandatory seller fields force-kept;
-  the live slip wiring is pending); logo file upload to object storage (today a pasted https URL / data-URI,
-  per Phase 9).
+- **Delivered (2026-07-05):** template-driven LIVE rendering for the **abbreviated (80mm thermal) tax invoice
+  (ใบกำกับภาษีอย่างย่อ, ม.86/6)** — its slip layout moved into a shared pure renderer (`common/a4-template.ts`
+  `renderAbbreviatedTaxSlip`) used by both the live renderer and the designer preview, honouring only the
+  thermal-appropriate knobs (header note + footer notes); the mandatory ม.86/6 seller name/Tax ID + VAT total
+  are structural. `tax_invoice_abbreviated` flips to `live` (both tax invoices now live); the designer preview
+  renders the real 80mm slip. See narrative `27-platform-customization.md` §7.13 / rev 1.9; `taxdocs` 91, `ext` 284.
+- **Deferred (next increment of Phase 10):** logo file upload to object storage (today a pasted https URL /
+  data-URI, per Phase 9).
 
 ---
 

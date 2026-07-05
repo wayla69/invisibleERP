@@ -181,6 +181,16 @@ async function main() {
   // core integrity: the statutory title + VAT + total survive a customized template.
   ok('PDF full core: "ใบกำกับภาษี" + "ภาษีมูลค่าเพิ่ม" + grand total still present under a template', ftHtml.includes('ใบกำกับภาษี') && ftHtml.includes('ภาษีมูลค่าเพิ่ม') && ftHtml.includes('107.00'), `total=${ftHtml.includes('107.00')}`);
 
+  // ── No-code template applied LIVE to the abbreviated 80mm slip (ม.86/6): only the header/footer notes
+  // apply on thermal paper; the mandatory seller identity + VAT-inclusive total are structural ──
+  ok('Doc templates: abbreviated tax invoice is LIVE in the catalog', (dtTypes.json.doc_types ?? []).some((d: any) => d.key === 'tax_invoice_abbreviated' && d.status === 'live'), JSON.stringify((dtTypes.json.doc_types ?? []).map((d: any) => `${d.key}:${d.status}`)));
+  const abTpl = await inj('POST', '/api/document-templates', t1mgr, { doc_type: 'tax_invoice_abbreviated', name: 'สลิปย่อ ร้านหนึ่ง', config: { header: { header_note: 'SLIP-HDR-T1' }, footer: { terms_text: 'SLIP-FTR-T1', extra_lines: ['SLIP-EXTRA-T1'] } } });
+  ok('Doc templates: abbreviated slip template created (T1)', abTpl.status < 300 && !!abTpl.json.id, `${abTpl.status} ${JSON.stringify(abTpl.json).slice(0, 80)}`);
+  const abTplPdf = await inj('GET', `/api/tax-invoices/${ab1.json.doc_no}/pdf`, cust1);
+  const abtHtml = typeof abTplPdf.text === 'string' ? abTplPdf.text : '';
+  ok('PDF abbreviated LIVE: honours header + footer notes on the slip', abTplPdf.status === 200 && abtHtml.includes('SLIP-HDR-T1') && abtHtml.includes('SLIP-FTR-T1') && abtHtml.includes('SLIP-EXTRA-T1'), `hdr=${abtHtml.includes('SLIP-HDR-T1')} ftr=${abtHtml.includes('SLIP-FTR-T1')} extra=${abtHtml.includes('SLIP-EXTRA-T1')}`);
+  ok('PDF abbreviated FISCAL: title + seller tax-id + VAT-inclusive total still print (ม.86/6)', abtHtml.includes('ใบกำกับภาษีอย่างย่อ') && abtHtml.includes('เลขผู้เสียภาษี') && abtHtml.includes('ราคารวมภาษีมูลค่าเพิ่มแล้ว'), `len=${abtHtml.length}`);
+
   const whtPdf = await inj('GET', `/api/wht/certificates/${wht.json.doc_no}/pdf`, sales1);
   ok('PDF WHT: contains "มาตรา 50 ทวิ" + บาทตัวอักษร', whtPdf.status === 200 && whtPdf.text.includes('50 ทวิ') && whtPdf.text.includes('บาท'));
 
