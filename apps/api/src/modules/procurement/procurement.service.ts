@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, invBalances, projects, tenants } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -180,40 +180,69 @@ export class ProcurementService {
     return { items: rows.map((r: any) => ({ item_id: r.item_id, item_description: r.item_description ?? null, uom: r.uom ?? null, unit_price: n(r.unit_price), last_price: lastPrice.has(r.item_id) ? lastPrice.get(r.item_id)! : null })) };
   }
 
-  // Product catalog for the "shop → basket → requisition" screen (pr_raise). A read-only browse of the
-  // item master GROUPED BY product category so staff can pick items into a basket and check out a PR
-  // (createPr) that lands with procurement. Category label comes from item_categories (via items.category_id,
-  // RLS-scoped to the caller's tenant), falling back to the free-text items.category, then "ไม่ระบุหมวด".
-  // Optional keyword (code/description ILIKE) + category-key filter; `items` is company-wide.
-  async catalog(_user: JwtUser, opts?: { q?: string; category?: string; limit?: number }) {
+  // Product catalog for the "shop → basket → requisition" screen (pr_raise). A read-only, PAGINATED browse
+  // of the item master for a Grab/Shopee-style grid/list: an infinite-scroll page of items (offset/limit)
+  // for the selected category + keyword, plus the FULL category summary (chips stay stable while paging).
+  // Category label comes from item_categories (via items.category_id, RLS-scoped to the caller's tenant),
+  // falling back to the free-text items.category, then "ไม่ระบุหมวด". `items` is company-wide.
+  async catalog(_user: JwtUser, opts?: { q?: string; category?: string; limit?: number; offset?: number }) {
     const db = this.db;
     const kw = (typeof opts?.q === 'string' ? opts.q : '').trim().slice(0, 100);
     const cat = (typeof opts?.category === 'string' ? opts.category : '').trim().slice(0, 100);
-    const limit = Math.min(Math.max(opts?.limit ?? 500, 1), 1000);
+    const limit = Math.min(Math.max(opts?.limit ?? 24, 1), 100);
+    const offset = Math.max(opts?.offset ?? 0, 0);
+    const catLabel = (r: any) => String(r.cat_name_th || r.cat_name || r.free_category || 'ไม่ระบุหมวด');
+    const catKey = (r: any) => String(r.cat_code || r.free_category || 'uncategorized');
+    const kwWhere = kw ? or(ilike(items.itemId, `%${kw}%`), ilike(items.itemDescription, `%${kw}%`)) : undefined;
+
+    // Category summary (+ per-category totals) — one grouped aggregate over the keyword filter (DB-side
+    // count), folded into the derived category key/label. Drives the chip row and the paging total.
+    const agg = await db.select({
+      cat_code: itemCategories.code, cat_name: itemCategories.name, cat_name_th: itemCategories.nameTh,
+      free_category: items.category, n: sql<number>`count(*)`,
+    }).from(items).leftJoin(itemCategories, eq(items.categoryId, itemCategories.id))
+      .where(kwWhere ?? sql`true`)
+      .groupBy(itemCategories.code, itemCategories.name, itemCategories.nameTh, items.category);
+    const catMap = new Map<string, { key: string; label: string; count: number }>();
+    let totalAll = 0;
+    for (const r of agg as any[]) {
+      const key = catKey(r); const cnt = Number(r.n ?? 0); totalAll += cnt;
+      const e = catMap.get(key) ?? { key, label: catLabel(r), count: 0 }; e.count += cnt; catMap.set(key, e);
+    }
+    const categories = [...catMap.values()].sort((a, b) => a.label.localeCompare(b.label, 'th'));
+    const total = cat ? (catMap.get(cat)?.count ?? 0) : totalAll;
+
+    // Selected-category filter on the DERIVED key (real category code, else the free-text value, else the
+    // "uncategorized" bucket = no category at all). Combined with the keyword filter for the page slice.
+    let catWhere: any = undefined;
+    if (cat === 'uncategorized') catWhere = and(isNull(items.categoryId), or(isNull(items.category), eq(items.category, '')));
+    else if (cat) catWhere = or(eq(itemCategories.code, cat), and(isNull(items.categoryId), eq(items.category, cat)));
+    const conds = [kwWhere, catWhere].filter(Boolean) as any[];
+
     const rows = await db.select({
       item_id: items.itemId, item_description: items.itemDescription, uom: items.uom,
       unit_price: items.unitPrice, image_key: items.imageKey,
       free_category: items.category, cat_name: itemCategories.name, cat_name_th: itemCategories.nameTh, cat_code: itemCategories.code,
     }).from(items).leftJoin(itemCategories, eq(items.categoryId, itemCategories.id))
-      .where(kw ? or(ilike(items.itemId, `%${kw}%`), ilike(items.itemDescription, `%${kw}%`)) : sql`true`)
-      .orderBy(asc(items.itemDescription)).limit(limit);
-    const catLabel = (r: any) => String(r.cat_name_th || r.cat_name || r.free_category || 'ไม่ระบุหมวด');
-    const catKey = (r: any) => String(r.cat_code || r.free_category || 'uncategorized');
-    // distinct category summary over the (keyword-filtered) result so the pills stay stable while a
-    // single category is selected client-side or via the `category` filter below.
-    const catMap = new Map<string, { key: string; label: string; count: number }>();
-    for (const r of rows) {
-      const key = catKey(r); const e = catMap.get(key) ?? { key, label: catLabel(r), count: 0 };
-      e.count++; catMap.set(key, e);
-    }
-    const categories = [...catMap.values()].sort((a, b) => a.label.localeCompare(b.label, 'th'));
-    let list = rows.map((r: any) => ({
+      .where(conds.length ? and(...conds) : sql`true`)
+      .orderBy(asc(items.itemDescription), asc(items.itemId)).limit(limit).offset(offset);
+
+    const list = rows.map((r: any) => ({
       item_id: r.item_id, item_description: r.item_description ?? null, uom: r.uom ?? null,
       unit_price: n(r.unit_price), image_key: r.image_key ?? null,
       category: catLabel(r), category_key: catKey(r),
     }));
-    if (cat) list = list.filter((x) => x.category_key === cat);
-    return { items: list, categories, count: list.length };
+    return { items: list, categories, total, offset, limit, has_more: offset + list.length < total, count: list.length };
+  }
+
+  // Thumbnail for a catalog item (pr_raise) — returns the in-DB image data-URL so the shop grid can show it
+  // as an inline <img>. Same low-risk browse duty as the catalog itself (the item-master `images` admin
+  // endpoint is masterdata-gated). 404 when the item has no image.
+  async catalogItemImage(_user: JwtUser, itemId: string) {
+    const id = String(itemId ?? '').slice(0, 100);
+    const [r] = await this.db.select({ dataUrl: itemImages.dataUrl }).from(itemImages).where(eq(itemImages.itemId, id)).limit(1);
+    if (!r?.dataUrl) throw new NotFoundException({ code: 'NO_IMAGE', message: 'No image for item', messageTh: 'ไม่มีรูปสำหรับสินค้านี้' });
+    return { item_id: id, data_url: r.dataUrl };
   }
 
   // Vendor search for the PR→PO panel — pick a real supplier (ties the PO to the vendor master, so

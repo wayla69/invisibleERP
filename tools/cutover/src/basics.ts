@@ -646,8 +646,10 @@ async function main() {
   // Shop/basket requisition screen (/shop) — the product-catalog browse feeding the basket. Read-only,
   // grouped by product category, same low-risk pr_raise duty as raising the PR itself. Assert the envelope
   // (items + categories) and the urgent-priority checkout path (priority:'Urgent' → PR carries it through).
-  const shopCat = await inj('GET', '/api/procurement/catalog?limit=1000', admin);
-  ok('Shop catalog: browse endpoint returns items + category summary (pr_raise)', shopCat.status === 200 && Array.isArray(shopCat.json?.items) && Array.isArray(shopCat.json?.categories), `${shopCat.status} items=${(shopCat.json?.items ?? []).length} cats=${(shopCat.json?.categories ?? []).length}`);
+  const shopCat = await inj('GET', '/api/procurement/catalog?limit=24&offset=0', admin);
+  ok('Shop catalog: paginated browse returns items + category summary + paging fields (pr_raise)', shopCat.status === 200 && Array.isArray(shopCat.json?.items) && Array.isArray(shopCat.json?.categories) && typeof shopCat.json?.total === 'number' && typeof shopCat.json?.has_more === 'boolean', `${shopCat.status} items=${(shopCat.json?.items ?? []).length} cats=${(shopCat.json?.categories ?? []).length} total=${shopCat.json?.total} more=${shopCat.json?.has_more}`);
+  const shopImg = await inj('GET', '/api/procurement/catalog/items/NO-SUCH-ITEM/image', admin);
+  ok('Shop catalog: thumbnail endpoint 404s for an item with no image (NO_IMAGE)', shopImg.status === 404 && shopImg.json?.error?.code === 'NO_IMAGE', `${shopImg.status} ${shopImg.json?.error?.code}`);
   const prUrgent = await inj('POST', '/api/procurement/prs', admin, { remarks: 'ด่วน จากหน้าเลือกซื้อสินค้า', priority: 'Urgent', items: [{ item_id: 'ปากกาลูกลื่น 12 ด้าม', item_description: 'ปากกาลูกลื่น 12 ด้าม', request_qty: 1, uom: 'กล่อง', reason: 'ด่วน' }] });
   ok('Shop checkout: urgent free-text (off-catalog) basket line raises a PR with priority=Urgent', prUrgent.status === 201 && /^PR-/.test(prUrgent.json?.pr_no ?? ''), `${prUrgent.status} ${JSON.stringify(prUrgent.json).slice(0, 70)}`);
   const poCap = await inj('POST', '/api/procurement/pos', admin, { vendor_name: 'Capital Vendor', expected_date: daysAgo(0), items: [{ item_id: 'LAPTOP', item_description: 'Dev laptop', order_qty: 2, unit_price: 25000, uom: 'EA', is_capital: true }] });

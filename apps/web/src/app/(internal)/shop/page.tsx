@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers } from 'lucide-react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/notify';
@@ -16,31 +16,79 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 type CatalogItem = {
   item_id: string; item_description: string | null; uom: string | null;
   unit_price: number; image_key: string | null; category: string; category_key: string;
 };
 type Category = { key: string; label: string; count: number };
-type CatalogResp = { items: CatalogItem[]; categories: Category[]; count: number };
+type CatalogPage = { items: CatalogItem[]; categories: Category[]; total: number; offset: number; limit: number; has_more: boolean; count: number };
 type CartLine = { key: string; item_id: string; description: string; uom: string; unit_price: number; qty: number; urgent: boolean; custom: boolean };
 
-// Friendly "shop" front-end for a purchase requisition (perm: pr_raise). Staff browse the item master
-// grouped by product category, drop items into a basket (with an "urgent" flag for priority), can type a
-// free-text request for anything not in the register, then check out — which raises ONE PR through the
-// ordinary POST /api/procurement/prs path. It is only a request: Procurement reviews it, approves, and
-// issues the PO (SoD R03/R04 unchanged). A custom line carries its typed text as the item_id so the buyer
-// can reconcile it to a real code (or open a new one) during PR→PO conversion, exactly like the LINE flow.
+const PAGE = 24;
+const VIEW_KEY = 'shop.view';
+
+// A stable pastel background for an item's placeholder tile (Shopee/Grab-style colourful grid) — derived
+// from the item id so the same product always gets the same hue, no image needed.
+function hueFor(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+// Lazy product thumbnail. Only fetches the in-DB image when the item actually has one (image_key set);
+// otherwise renders a coloured initial tile. react-query caches so a re-render never re-fetches.
+function ProductThumb({ item, className }: { item: CatalogItem; className?: string }) {
+  const hasImg = !!item.image_key;
+  const img = useQuery<{ data_url: string }>({
+    queryKey: ['catalog-img', item.item_id],
+    queryFn: () => api(`/api/procurement/catalog/items/${encodeURIComponent(item.item_id)}/image`),
+    enabled: hasImg,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const label = (item.item_description || item.item_id).trim();
+  if (hasImg && img.data?.data_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={img.data.data_url} alt={label} loading="lazy" className={cn('object-cover', className)} />;
+  }
+  const h = hueFor(item.item_id);
+  return (
+    <div
+      className={cn('flex items-center justify-center', className)}
+      style={{ background: `hsl(${h} 70% 92%)`, color: `hsl(${h} 45% 40%)` }}
+      aria-hidden
+    >
+      {hasImg && !img.isError ? (
+        <span className="size-6 animate-pulse rounded-full bg-black/10 dark:bg-white/10" />
+      ) : label ? (
+        <span className="text-2xl font-semibold">{label.slice(0, 1).toUpperCase()}</span>
+      ) : (
+        <ImageOff className="size-6 opacity-50" />
+      )}
+    </div>
+  );
+}
+
+// Friendly "shop" front-end for a purchase requisition (perm: pr_raise). Staff browse the item master in a
+// Grab/Shopee-style grid/list (category chips + infinite scroll), drop items into a basket (with an "urgent"
+// flag for priority), can type a free-text request for anything not in the register, then check out — which
+// raises ONE PR through the ordinary POST /api/procurement/prs path. It is only a request: Procurement
+// reviews it, approves, and issues the PO (SoD R03/R04 unchanged). A custom line carries its typed text as
+// the item_id so the buyer can reconcile it to a real code during PR→PO conversion, exactly like LINE.
 export default function ShopPage() {
   const { t } = useLang();
   const qc = useQueryClient();
   const me = useMe();
   // Master-data holders (md_item) can jump straight to the category admin to (re)group the catalog.
   const canManageCategories = hasPerm(me.data, 'md_item', 'masterdata', 'exec');
-  const cat = useQuery<CatalogResp>({ queryKey: ['catalog'], queryFn: () => api('/api/procurement/catalog?limit=1000') });
 
   const [q, setQ] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
   const [activeCat, setActiveCat] = useState<string | null>(null);
+  const [view, setView] = useState<'grid' | 'list'>(() =>
+    (typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list') ? 'list' : 'grid');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [remarks, setRemarks] = useState('');
   const [cName, setCName] = useState('');
@@ -48,28 +96,39 @@ export default function ShopPage() {
   const [cQty, setCQty] = useState(1);
   const [cErr, setCErr] = useState(false);
   const customSeq = useRef(0);
+  const sentinel = useRef<HTMLDivElement | null>(null);
 
-  const items = cat.data?.items ?? [];
-  const categories = cat.data?.categories ?? [];
+  useEffect(() => { try { window.localStorage.setItem(VIEW_KEY, view); } catch { /* private mode */ } }, [view]);
+  // Debounce the search box so typing doesn't fire a request per keystroke.
+  useEffect(() => { const id = setTimeout(() => setDebouncedQ(q.trim()), 250); return () => clearTimeout(id); }, [q]);
 
-  const filtered = useMemo(() => {
-    const kw = q.trim().toLowerCase();
-    return items.filter((it) => {
-      if (activeCat && it.category_key !== activeCat) return false;
-      if (!kw) return true;
-      return it.item_id.toLowerCase().includes(kw) || (it.item_description ?? '').toLowerCase().includes(kw);
-    });
-  }, [items, q, activeCat]);
+  const catalog = useInfiniteQuery({
+    queryKey: ['catalog', debouncedQ, activeCat],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => {
+      const p = new URLSearchParams({ limit: String(PAGE), offset: String(pageParam) });
+      if (debouncedQ) p.set('q', debouncedQ);
+      if (activeCat) p.set('category', activeCat);
+      return api<CatalogPage>(`/api/procurement/catalog?${p.toString()}`);
+    },
+    getNextPageParam: (last, all) => (last.has_more ? all.reduce((a, pg) => a + pg.items.length, 0) : undefined),
+  });
 
-  // Group the visible items by category so the catalog reads as category sections (easy to scan/find).
-  const groups = useMemo(() => {
-    const m = new Map<string, { label: string; items: CatalogItem[] }>();
-    for (const it of filtered) {
-      const g = m.get(it.category_key) ?? { label: it.category, items: [] };
-      g.items.push(it); m.set(it.category_key, g);
-    }
-    return [...m.entries()].map(([key, v]) => ({ key, ...v })).sort((a, b) => a.label.localeCompare(b.label, 'th'));
-  }, [filtered]);
+  const pages = catalog.data?.pages ?? [];
+  const items = useMemo(() => pages.flatMap((p) => p.items), [pages]);
+  const categories = pages[0]?.categories ?? [];
+  const total = pages[0]?.total ?? 0;
+
+  // Auto-load the next page when the sentinel scrolls into view (infinite scroll, no pager buttons).
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting && catalog.hasNextPage && !catalog.isFetchingNextPage) catalog.fetchNextPage();
+    }, { rootMargin: '400px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [catalog.hasNextPage, catalog.isFetchingNextPage, catalog.fetchNextPage, items.length]);
 
   const cartQty = (itemId: string) => cart.find((l) => l.key === `i:${itemId}`)?.qty ?? 0;
 
@@ -118,6 +177,20 @@ export default function ShopPage() {
 
   const checkout = () => { if (!cart.length) { notifyError(t('shop.empty_cart_err')); return; } mut.mutate(); };
 
+  const catChip = (key: string | null, label: string, count?: number) => (
+    <button
+      key={key ?? '__all__'}
+      type="button"
+      onClick={() => setActiveCat(key)}
+      className={cn(
+        'whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition-colors',
+        activeCat === key ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-accent',
+      )}
+    >
+      {label}{typeof count === 'number' ? <span className="ml-1 text-xs opacity-70">{count}</span> : null}
+    </button>
+  );
+
   return (
     <div>
       <PageHeader
@@ -137,62 +210,95 @@ export default function ShopPage() {
 
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
         {/* ── Catalog ─────────────────────────────────────────────── */}
-        <div className="space-y-4">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('shop.search_ph')} />
+        <div className="space-y-3">
+          {/* Search + view toggle */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('shop.search_ph')} />
+            </div>
+            <div className="flex shrink-0 rounded-md border p-0.5">
+              <Button size="icon" variant={view === 'grid' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_grid')} title={t('shop.view_grid')} onClick={() => setView('grid')}>
+                <LayoutGrid className="size-4" />
+              </Button>
+              <Button size="icon" variant={view === 'list' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_list')} title={t('shop.view_list')} onClick={() => setView('list')}>
+                <ListIcon className="size-4" />
+              </Button>
+            </div>
           </div>
 
+          {/* Category chips (horizontal scroll, Shopee-style) */}
           {categories.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant={activeCat === null ? 'default' : 'outline'} className="rounded-full" onClick={() => setActiveCat(null)}>
-                {t('shop.all_categories')}
-              </Button>
-              {categories.map((c) => (
-                <Button key={c.key} size="sm" variant={activeCat === c.key ? 'default' : 'outline'} className="rounded-full" onClick={() => setActiveCat(activeCat === c.key ? null : c.key)}>
-                  {c.label} <span className="ml-1 text-xs opacity-70">{c.count}</span>
-                </Button>
-              ))}
+            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+              {catChip(null, t('shop.all_categories'), total)}
+              {categories.map((c) => catChip(c.key, c.label, c.count))}
             </div>
           )}
 
-          <StateView q={cat}>
+          {total > 0 && <p className="text-xs text-muted-foreground">{t('shop.results_n', { n: total })}</p>}
+
+          <StateView q={{ isLoading: catalog.isLoading, error: catalog.error }}>
             {items.length === 0 ? (
-              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{t('shop.empty_catalog')}</p>
-            ) : groups.length === 0 ? (
-              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{t('shop.no_items')}</p>
-            ) : (
-              <div className="space-y-5">
-                {groups.map((g) => (
-                  <section key={g.key} className="space-y-2">
-                    <h3 className="text-sm font-semibold text-muted-foreground">{g.label} <span className="opacity-60">· {g.items.length}</span></h3>
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      {g.items.map((it) => {
-                        const inCart = cartQty(it.item_id);
-                        return (
-                          <div key={it.item_id} className="flex flex-col gap-2 rounded-xl border bg-card p-3 text-card-foreground shadow-sm">
-                            <div className="flex-1">
-                              <p className="line-clamp-2 text-sm font-medium leading-snug">{it.item_description || it.item_id}</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-semibold">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
-                              {inCart > 0 && <Badge variant="secondary" className="text-[11px]">{t('shop.in_cart')} · {inCart}</Badge>}
-                            </div>
-                            <div className="flex gap-2">
-                              <Button size="sm" className="flex-1" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
-                              <Button size="sm" variant="outline" title={t('shop.add_urgent')} aria-label={t('shop.add_urgent')} onClick={() => addItem(it, true)}>
-                                <Zap className="size-4 text-amber-500" />
-                              </Button>
-                            </div>
-                          </div>
-                        );
-                      })}
+              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                {debouncedQ || activeCat ? t('shop.no_items') : t('shop.empty_catalog')}
+              </p>
+            ) : view === 'grid' ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+                {items.map((it) => {
+                  const inCart = cartQty(it.item_id);
+                  return (
+                    <div key={it.item_id} className="group flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md">
+                      <div className="relative aspect-square w-full overflow-hidden bg-muted">
+                        <ProductThumb item={it} className="size-full" />
+                        <button
+                          type="button"
+                          aria-label={t('shop.add_urgent')}
+                          title={t('shop.add_urgent')}
+                          onClick={() => addItem(it, true)}
+                          className="absolute right-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-background/85 text-amber-500 shadow-sm backdrop-blur transition hover:bg-background"
+                        >
+                          <Zap className="size-4" />
+                        </button>
+                        {inCart > 0 && <Badge className="absolute left-1.5 top-1.5">{inCart}</Badge>}
+                      </div>
+                      <div className="flex flex-1 flex-col gap-1 p-2.5">
+                        <p className="line-clamp-2 text-sm font-medium leading-snug">{it.item_description || it.item_id}</p>
+                        <p className="text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+                          <span className="text-sm font-semibold">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
+                          <Button size="sm" className="h-8 gap-1 px-2.5" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
+                        </div>
+                      </div>
                     </div>
-                  </section>
-                ))}
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="divide-y rounded-xl border">
+                {items.map((it) => {
+                  const inCart = cartQty(it.item_id);
+                  return (
+                    <div key={it.item_id} className="flex items-center gap-3 p-2.5">
+                      <ProductThumb item={it} className="size-14 shrink-0 rounded-lg" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{it.item_description || it.item_id}</p>
+                        <p className="text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                        {it.unit_price > 0 && <p className="text-sm font-semibold">{baht(it.unit_price)}</p>}
+                      </div>
+                      {inCart > 0 && <Badge variant="secondary" className="shrink-0">{t('shop.in_cart')} · {inCart}</Badge>}
+                      <Button size="sm" variant="outline" className="shrink-0" title={t('shop.add_urgent')} aria-label={t('shop.add_urgent')} onClick={() => addItem(it, true)}>
+                        <Zap className="size-4 text-amber-500" />
+                      </Button>
+                      <Button size="sm" className="shrink-0" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
+                    </div>
+                  );
+                })}
               </div>
             )}
+
+            {/* Infinite-scroll sentinel + loading state */}
+            <div ref={sentinel} className="h-8" />
+            {catalog.isFetchingNextPage && <p className="py-2 text-center text-xs text-muted-foreground">{t('shop.loading_more')}</p>}
           </StateView>
         </div>
 
