@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw, AlertTriangle, ChevronDown, Bookmark, Trash2, ScanLine } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -115,6 +116,7 @@ function ProductThumb({ item, className }: { item: CatalogItem; className?: stri
 export default function ShopPage() {
   const { t } = useLang();
   const qc = useQueryClient();
+  const router = useRouter();
   const me = useMe();
   // Master-data holders (md_item) can jump straight to the category admin to (re)group the catalog.
   const canManageCategories = hasPerm(me.data, 'md_item', 'masterdata', 'exec');
@@ -122,6 +124,9 @@ export default function ShopPage() {
   const myPrs = useQuery<{ prs: MyPr[] }>({ queryKey: ['my-prs'], queryFn: () => api('/api/procurement/prs?mine=true&limit=5'), refetchInterval: 30_000 });
   // Items at/below their reorder point — a quick "top up the low stock" shortcut into the basket.
   const lowStock = useQuery<{ items: LowItem[]; count: number }>({ queryKey: ['low-stock'], queryFn: () => api('/api/procurement/low-stock?limit=20'), refetchInterval: 60_000 });
+  // Projects the requester can shop INTO (those with an approved BoQ budget) — picking one opens the
+  // budget-restricted project shop (raises a PMR against the BoQ, PROJ-12/13). Empty ⇒ the picker hides.
+  const shopProjects = useQuery<{ projects: { code: string; name: string; status: string }[]; count: number }>({ queryKey: ['pmr-shop-projects'], queryFn: () => api('/api/pmr/projects') });
 
   const [q, setQ] = useState('');
   const [scan, setScan] = useState('');
@@ -344,6 +349,18 @@ export default function ShopPage() {
         description={t('shop.desc')}
         actions={
           <>
+            {(shopProjects.data?.count ?? 0) > 0 && (
+              <select
+                aria-label={t('shop.proj.pick')}
+                title={t('shop.proj.pick')}
+                className="h-9 max-w-[13rem] rounded-md border bg-background px-2 text-sm"
+                value=""
+                onChange={(e) => { if (e.target.value) router.push(`/shop/project/${encodeURIComponent(e.target.value)}`); }}
+              >
+                <option value="" disabled>🗂️ {t('shop.proj.pick')}</option>
+                {shopProjects.data!.projects.map((p) => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+              </select>
+            )}
             {canManageCategories && (
               <Button asChild variant="outline" size="sm">
                 <Link href="/setup/item-categories"><Layers className="size-4" /> {t('shop.manage_categories')}</Link>

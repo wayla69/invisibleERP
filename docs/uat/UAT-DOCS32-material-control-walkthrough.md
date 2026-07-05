@@ -56,9 +56,12 @@ Use a line with a known remaining (say a **CEMENT** line, budget ฿15,000, rema
 | 2.3 | On the pending row, click the **approve** (✓) icon **as the requester**. | **Blocked** — `SOD_SELF_APPROVAL`. ✅ control |
 | 2.4 | Approve **as a different authoriser** (the ✓ icon, or one-tap in LINE). | Status → **approved**; a **Draft** project-tagged PO is auto-drafted (`linked_doc_no` a `PO-…`). |
 | 2.5 | Go back to the **BoQ** tab and read the CEMENT line. | The line now shows **คงเหลือ** negative (the authorised overage) — the overage was allowed only *through* approval. |
+| 2.6 | **(Requester shop surface)** As a plain `pr_raise` requester, open `/shop`, use the **ซื้อเข้าโครงการ** picker (or the *Shop for this project* button on the project page) and pick this project. | A shop opens listing **only** the project's approved-BoQ material lines, each with its **remaining budget**. Add a line and **ส่งใบขอเบิกวัสดุ** — it raises the same PMR (within budget → routed; over budget → the authoriser flow above). An item **not** on the approved BoQ is **not shown** and cannot be added. ✅ control |
 
 > **Acceptance:** within-budget draws flow straight through; a draw that would breach the BoQ line is held and
 > requires a *different* authoriser (one-tap on LINE), whose approval drafts the PO. Nothing overruns silently.
+> The `/shop` project surface (2.6) lets a requester who cannot see the project/BoQ endpoints shop only what the
+> approved budget allows — an off-budget item is never offered (`GET /api/pmr/projects`, `GET /api/pmr/project/:code/boq`).
 >
 > **Tolerance note (FU1):** if the project was created with an **over-budget tolerance %**, a draw within that
 > band of the line budget proceeds without the approval step. Set it to `0` for a strict ceiling.
@@ -114,3 +117,4 @@ is logged as a defect against the relevant control (PROJ-12/13/14, INV-13) and r
 | Version | Date | Notes |
 |---|---|---|
 | 1.0 | 2026-07-04 | Initial team walkthrough for the docs/32 material-control web tabs (M0–M4 + FU1–FU4), including the FU4 raise-site-cash actions. Complements the API-level cases UAT-O2C-229..234. |
+| 1.1 | 2026-07-05 | Added step **2.6** — the `pr_raise` requester **shop-for-a-project** surface (`/shop` → *ซื้อเข้าโครงการ* → `/shop/project/[code]`): shops only the approved-BoQ material lines with remaining budget and checks out into the same PMR; an off-budget item is never offered. Backed by `GET /api/pmr/projects` + `GET /api/pmr/project/:code/boq` (`pr_raise`-safe). No new control; ToE in the `projects` harness. Cross-ref PN-16 rev 0.34. |

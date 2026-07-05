@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Area, Line, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
-import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X } from 'lucide-react';
+import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X, ShoppingCart } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -748,7 +748,12 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
       <PageHeader
         title={<span className="flex items-center gap-2">{p?.name ?? code} {p && <Badge variant={statusVariant(p.status)}>{p.status}</Badge>}</span>}
         description={<span>{code}{p?.customer_name ? ` · ${p.customer_name}` : ''} · {p?.billing_type === 'Fixed' ? t('pj.bt_fixed') : t('pj.bt_tm')}{p?.contract_amount ? ` · ${t('pj.contract_amount_label', { amount: baht(p.contract_amount) })}` : ''}</span>}
-        actions={<Button variant="outline" onClick={() => router.push(`/projects/${encodeURIComponent(code)}/status`)}><FileText className="size-4" /> {t('pj.btn_status_report')}</Button>}
+        actions={
+          <>
+            <Button variant="outline" onClick={() => router.push(`/shop/project/${encodeURIComponent(code)}`)}><ShoppingCart className="size-4" /> {t('shop.proj.shop_here')}</Button>
+            <Button variant="outline" onClick={() => router.push(`/projects/${encodeURIComponent(code)}/status`)}><FileText className="size-4" /> {t('pj.btn_status_report')}</Button>
+          </>
+        }
       />
       <StateView q={detail}>
         <Tabs
