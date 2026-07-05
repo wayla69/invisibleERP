@@ -7,6 +7,7 @@ export interface StatementPrintData {
   party_type: 'customer' | 'vendor';
   party_name: string;
   party_tax_id: string | null;
+  party_email?: string | null;   // recipient default for the email path (master data)
   from: string; to: string;
   reporting_currency: string;
   opening_balance: number; total_charges: number; total_payments: number; closing_balance: number;

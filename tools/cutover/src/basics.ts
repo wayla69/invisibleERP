@@ -368,7 +368,7 @@ async function main() {
   };
 
   // ───────────────────── Customer / vendor statements of account ─────────────────────
-  const [stmtT] = await db.insert(s.tenants).values({ code: 'STMT', name: 'Statement Customer' }).returning({ id: s.tenants.id });
+  const [stmtT] = await db.insert(s.tenants).values({ code: 'STMT', name: 'Statement Customer', email: 'stmt@cust.example' }).returning({ id: s.tenants.id });
   const stmtTid = Number(stmtT.id);
   await db.insert(s.arInvoices).values([
     { invoiceNo: 'INV-S1', invoiceDate: '2026-01-10', dueDate: '2026-02-10', tenantId: stmtTid, amount: '1000', paidAmount: '400', status: 'Partial' },
@@ -385,8 +385,15 @@ async function main() {
   ok('Statement print: PDF/HTML contains "ใบแจ้งยอดบัญชี" + closing (1,100.00)', stmtPdf.status === 200 && stmtPdf.text.includes('ใบแจ้งยอดบัญชี') && stmtPdf.text.includes('1,100.00'), `${stmtPdf.status} ${String(stmtPdf.text).slice(0, 50)}`);
   const stmtEmail = await inj('POST', `/api/finance/ar/statement/send-email?tenant_id=${stmtTid}&from=2026-01-01&to=2026-02-28`, admin, { to_email: 'customer@example.com' });
   ok('Statement email path wired → EMAIL_NOT_CONFIGURED (503) with no SMTP in CI', stmtEmail.status === 503 && stmtEmail.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${stmtEmail.status} ${stmtEmail.json.error?.code}`);
+  // to_email OPTIONAL — omitting it defaults the recipient to the party's email on file (master data). The
+  // STMT tenant has an email, so the send resolves a recipient and reaches the (unconfigured) transport → 503
+  // rather than 400 NO_RECIPIENT (which is what a party with no email on file would return).
+  const stmtEmailDefault = await inj('POST', `/api/finance/ar/statement/send-email?tenant_id=${stmtTid}&from=2026-01-01&to=2026-02-28`, admin, {});
+  ok('Statement email defaults recipient to the customer email on file when to_email omitted (→ 503, not NO_RECIPIENT)', stmtEmailDefault.status === 503 && stmtEmailDefault.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${stmtEmailDefault.status} ${stmtEmailDefault.json.error?.code}`);
   const rcpPdf = await inj('GET', '/api/finance/ar/receipts/RCP-S1/pdf', admin);
   ok('AR receipt print: PDF/HTML contains "ใบสำคัญรับเงิน" + amount (400.00)', rcpPdf.status === 200 && rcpPdf.text.includes('ใบสำคัญรับเงิน') && rcpPdf.text.includes('400.00'), `${rcpPdf.status} ${String(rcpPdf.text).slice(0, 50)}`);
+  const rcpList = await inj('GET', '/api/finance/ar/receipts', admin);
+  ok('AR receipts list surface returns RCP-S1 (for print/email)', rcpList.status === 200 && (rcpList.json.receipts ?? []).some((r: any) => r.receipt_no === 'RCP-S1'), `${rcpList.status} n=${rcpList.json.count}`);
   const dunPdf = await inj('GET', '/api/finance/ar/collections/INV-A/dunning-letter/pdf', admin);
   ok('Dunning letter print: PDF/HTML contains "หนังสือทวงถามหนี้" + invoice (INV-A)', dunPdf.status === 200 && dunPdf.text.includes('หนังสือทวงถามหนี้') && dunPdf.text.includes('INV-A'), `${dunPdf.status} ${String(dunPdf.text).slice(0, 50)}`);
   // Multi-currency: a separate customer with a THB invoice + a USD invoice (fx 34).
@@ -676,6 +683,8 @@ async function main() {
   // Printable ใบรับสินค้า (Goods Receipt Note) — title + received item.
   const grPdf = await inj('GET', `/api/procurement/grs/${grCap.json?.gr_no}/pdf`, admin);
   ok('GR note print: PDF/HTML contains "ใบรับสินค้า" + item (LAPTOP)', grPdf.status === 200 && grPdf.text.includes('ใบรับสินค้า') && grPdf.text.includes('LAPTOP'), `${grPdf.status} ${String(grPdf.text).slice(0, 50)}`);
+  const grList = await inj('GET', '/api/procurement/grs', admin);
+  ok('GR list surface returns the created GR (for print/email)', grList.status === 200 && (grList.json.grs ?? []).some((g: any) => g.gr_no === grCap.json?.gr_no), `${grList.status} n=${grList.json.count}`);
   // Capital goods must NOT be capitalised into inventory (1200) at receipt — they route to 1500 via FA-10.
   const elig = (await inj('GET', `/api/assets/registrations/eligible?gr_no=${grCap.json?.gr_no}`, admin)).json;
   ok('Capitalize: GR capital line is eligible for capitalisation (suggested cost = 50000)', (elig.eligible ?? []).length === 1 && near(elig.eligible?.[0]?.suggested_cost, 50000), `n=${elig.eligible?.length} cost=${elig.eligible?.[0]?.suggested_cost}`);

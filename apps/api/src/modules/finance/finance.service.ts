@@ -223,11 +223,13 @@ export class FinanceService {
   }
 
   // Email the ใบแจ้งหนี้/ใบวางบิล to the customer as a PDF attachment (HTML fallback when Chromium absent).
-  async emailArInvoice(invoiceNo: string, toEmail: string, user: JwtUser) {
+  async emailArInvoice(invoiceNo: string, toEmail: string | undefined, user: JwtUser) {
     if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
     const inv = await this.getArInvoiceForPrint(invoiceNo, user);
+    // Default the recipient to the customer's email on file (master data) when the caller omits to_email;
+    // DocEmailService raises NO_RECIPIENT if neither is present.
     const res = await this.docEmail.sendDocument({
-      to: toEmail, from: inv.seller.email ?? undefined, filename: inv.invoice_no,
+      to: toEmail?.trim() || inv.customer.email || '', from: inv.seller.email ?? undefined, filename: inv.invoice_no,
       subject: `ใบแจ้งหนี้ ${inv.invoice_no} จาก ${inv.seller.name}`,
       text: `เรียน ${inv.customer.name},\n\nแนบใบแจ้งหนี้เลขที่ ${inv.invoice_no} จำนวนเงิน ${inv.amount.toLocaleString()} ${inv.currency} (ครบกำหนดชำระ ${inv.due_date ?? '-'})\n\nขอบคุณครับ\n${inv.seller.name}`,
       html: this.arInvoiceHtml(inv),
@@ -239,18 +241,18 @@ export class FinanceService {
   async getCustomerStatementForPrint(tenantId: number, from: string | undefined, to: string | undefined, currency: string | undefined, user: JwtUser): Promise<StatementPrintData> {
     const s = await this.customerStatement(tenantId, from, to, currency);
     const [cust] = await this.db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
-    return this.toStatementPrint(s, 'customer', cust?.legalName || cust?.name || `ลูกค้า #${tenantId}`, cust?.taxId ?? null, await this.sellerFor(user));
+    return this.toStatementPrint(s, 'customer', cust?.legalName || cust?.name || `ลูกค้า #${tenantId}`, cust?.taxId ?? null, cust?.email ?? null, await this.sellerFor(user));
   }
 
   async getVendorStatementForPrint(vendor: string, from: string | undefined, to: string | undefined, currency: string | undefined, user: JwtUser): Promise<StatementPrintData> {
     const s = await this.vendorStatement(vendor, from, to, currency);
     const [v] = await this.db.select().from(vendorsTbl).where(eq(vendorsTbl.name, vendor)).limit(1);
-    return this.toStatementPrint(s, 'vendor', vendor, v?.taxId ?? null, await this.sellerFor(user));
+    return this.toStatementPrint(s, 'vendor', vendor, v?.taxId ?? null, v?.email ?? null, await this.sellerFor(user));
   }
 
-  private toStatementPrint(s: any, party_type: 'customer' | 'vendor', party_name: string, party_tax_id: string | null, seller: DocParty): StatementPrintData {
+  private toStatementPrint(s: any, party_type: 'customer' | 'vendor', party_name: string, party_tax_id: string | null, party_email: string | null, seller: DocParty): StatementPrintData {
     return {
-      party_type, party_name, party_tax_id, from: s.from, to: s.to, reporting_currency: s.reporting_currency,
+      party_type, party_name, party_tax_id, party_email, from: s.from, to: s.to, reporting_currency: s.reporting_currency,
       opening_balance: s.opening_balance, total_charges: s.total_charges, total_payments: s.total_payments, closing_balance: s.closing_balance,
       lines: (s.lines ?? []).map((l: any) => ({ date: l.date, type: l.type, ref: l.ref, charge: n(l.charge), payment: n(l.payment), balance: n(l.balance) })),
       seller,
@@ -263,16 +265,23 @@ export class FinanceService {
   }
   renderStatementPdf(s: StatementPrintData): Promise<Buffer | null> { return this.finDocsPdf ? this.finDocsPdf.renderToPdf(this.finDocsPdf.statementHtml(s)) : Promise.resolve(null); }
 
-  async emailStatement(s: StatementPrintData, toEmail: string) {
+  async emailStatement(s: StatementPrintData, toEmail: string | undefined) {
     if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
     const fname = `statement-${s.party_type}-${s.to}`;
+    // Default the recipient to the party's email on file (master data) when to_email is omitted.
     const res = await this.docEmail.sendDocument({
-      to: toEmail, from: s.seller.email ?? undefined, filename: fname,
+      to: toEmail?.trim() || s.party_email || '', from: s.seller.email ?? undefined, filename: fname,
       subject: `ใบแจ้งยอดบัญชี ${s.party_name} (${s.from} – ${s.to})`,
       text: `แนบใบแจ้งยอดบัญชี ยอดคงเหลือสุทธิ ${s.closing_balance.toLocaleString()} ${s.reporting_currency}\n\n${s.seller.name}`,
       html: this.statementHtml(s),
     });
     return { ...res };
+  }
+
+  // Recent AR receipts (for the finance list surface — print/email each ใบสำคัญรับเงิน). RLS-scoped.
+  async listArReceipts(_user: JwtUser, limit = 50) {
+    const rows = await this.db.select().from(arReceipts).orderBy(desc(arReceipts.id)).limit(Math.min(Math.max(limit, 1), 100));
+    return { receipts: rows.map((r: any) => ({ receipt_no: r.receiptNo, receipt_date: r.receiptDate ?? null, invoice_no: r.invoiceNo ?? null, amount: n(r.amount), method: r.method ?? 'Transfer', ref_no: r.refNo ?? null })), count: rows.length };
   }
 
   // ── ใบสำคัญรับเงิน (AR receipt voucher) — print/email over an ar_receipts row ──
@@ -293,11 +302,12 @@ export class FinanceService {
     return this.finDocsPdf.arReceiptHtml(r);
   }
   renderArReceiptPdf(r: ArReceiptPrintData): Promise<Buffer | null> { return this.finDocsPdf ? this.finDocsPdf.renderToPdf(this.finDocsPdf.arReceiptHtml(r)) : Promise.resolve(null); }
-  async emailArReceipt(receiptNo: string, toEmail: string, user: JwtUser) {
+  async emailArReceipt(receiptNo: string, toEmail: string | undefined, user: JwtUser) {
     if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
     const r = await this.getArReceiptForPrint(receiptNo, user);
+    // Default the recipient to the customer's email on file (master data) when to_email is omitted.
     const res = await this.docEmail.sendDocument({
-      to: toEmail, from: r.seller.email ?? undefined, filename: r.receipt_no,
+      to: toEmail?.trim() || r.customer.email || '', from: r.seller.email ?? undefined, filename: r.receipt_no,
       subject: `ใบสำคัญรับเงิน ${r.receipt_no} จาก ${r.seller.name}`,
       text: `แนบใบสำคัญรับเงินเลขที่ ${r.receipt_no} จำนวนเงิน ${r.amount.toLocaleString()} ${r.currency}\n\n${r.seller.name}`,
       html: this.arReceiptHtml(r),

@@ -5,7 +5,8 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CollectionsService, DUNNING_STAGES } from './collections.service';
 
-const DocEmailBody = z.object({ to_email: z.string().email() });
+// to_email optional — defaults to the customer's email on file (master data) when omitted.
+const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 
 const DunningBody = z.object({
   stage: z.enum(DUNNING_STAGES),

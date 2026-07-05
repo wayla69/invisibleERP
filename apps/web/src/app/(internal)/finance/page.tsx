@@ -166,7 +166,7 @@ function ReceivablesTab() {
   const { t } = useLang();
   const qc = useQueryClient();
   const ar = useQuery<any>({ queryKey: ['fin-ar'], queryFn: () => api('/api/finance/ar?limit=50') });
-  const refresh = () => { for (const k of ['fin-ar', 'fin-kpi', 'fin-ar-aging']) qc.invalidateQueries({ queryKey: [k] }); };
+  const refresh = () => { for (const k of ['fin-ar', 'fin-kpi', 'fin-ar-aging', 'ar-receipts']) qc.invalidateQueries({ queryKey: [k] }); };
 
   // ── AR receipt (record a customer payment against an invoice) ──
   const [arOpen, setArOpen] = useState(false);
@@ -177,13 +177,14 @@ function ReceivablesTab() {
     onError: (e: any) => notifyError(e.message),
   });
 
-  // Email the ใบแจ้งหนี้/ใบวางบิล PDF to the customer (prompts for the recipient address).
+  // Email the ใบแจ้งหนี้/ใบวางบิล PDF to the customer. Leaving the prompt blank sends to the customer's
+  // email on file (master data); the server returns NO_RECIPIENT if there is none.
   const emailInv = useMutation({
-    mutationFn: (v: { no: string; to_email: string }) => api<{ to: string }>(`/api/finance/ar/invoices/${encodeURIComponent(v.no)}/send-email`, { method: 'POST', body: JSON.stringify({ to_email: v.to_email }) }),
+    mutationFn: (v: { no: string; to_email?: string }) => api<{ to: string }>(`/api/finance/ar/invoices/${encodeURIComponent(v.no)}/send-email`, { method: 'POST', body: JSON.stringify({ to_email: v.to_email }) }),
     onSuccess: (r) => notifySuccess(t('doc.email_sent', { to: r.to })),
     onError: (e: any) => notifyError(e.message),
   });
-  const promptEmail = (no: string) => { const to = window.prompt(t('doc.email_prompt')); if (to) emailInv.mutate({ no, to_email: to }); };
+  const promptEmail = (no: string) => { const to = window.prompt(t('doc.email_prompt_default')); if (to === null) return; emailInv.mutate({ no, to_email: to.trim() || undefined }); };
   const syncAr = useMutation({
     mutationFn: () => api('/api/finance/ar/sync', { method: 'POST' }),
     onSuccess: () => { notifySuccess(t('fin.ar_synced')); refresh(); },
@@ -242,9 +243,52 @@ function ReceivablesTab() {
         )}
       </StateView>
 
+      <ReceiptsSection />
       <CollectionsSection />
       <WriteOffSection />
       <ArAgingSection />
+    </div>
+  );
+}
+
+// ── ใบสำคัญรับเงิน (AR receipt vouchers): recent receipts with print + email (recipient defaults to the
+// customer's email on file when the prompt is left blank). ──
+function ReceiptsSection() {
+  const { t } = useLang();
+  const q = useQuery<any>({ queryKey: ['ar-receipts'], queryFn: () => api('/api/finance/ar/receipts'), retry: false });
+  const emailRcp = useMutation({
+    mutationFn: (v: { no: string; to_email?: string }) => api<{ to: string }>(`/api/finance/ar/receipts/${encodeURIComponent(v.no)}/send-email`, { method: 'POST', body: JSON.stringify({ to_email: v.to_email }) }),
+    onSuccess: (r) => notifySuccess(t('doc.email_sent', { to: r.to })),
+    onError: (e: any) => notifyError(e.message),
+  });
+  const promptRcpEmail = (no: string) => { const to = window.prompt(t('doc.email_prompt_default')); if (to === null) return; emailRcp.mutate({ no, to_email: to.trim() || undefined }); };
+  return (
+    <div className="space-y-3">
+      <h2 className="text-base font-semibold">{t('fin.receipts_heading')}</h2>
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.receipts}
+            rowKey={(r: any) => r.receipt_no}
+            emptyState={{ icon: HandCoins, title: t('fin.receipts_empty_title'), description: t('fin.receipts_empty_desc') }}
+            columns={[
+              { key: 'receipt_no', label: t('fin.col_no') },
+              { key: 'receipt_date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.receipt_date) },
+              { key: 'invoice_no', label: t('fin.col_invoice'), render: (r: any) => r.invoice_no ?? '—' },
+              { key: 'amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+              { key: 'method', label: t('fin.f_method'), render: (r: any) => r.method ?? '—' },
+              { key: 'act', label: '', sortable: false, render: (r: any) => (
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}>
+                    <a href={`${BASE}/api/finance/ar/receipts/${encodeURIComponent(r.receipt_no)}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-4" /></a>
+                  </Button>
+                  <Button variant="ghost" size="sm" disabled={emailRcp.isPending} title={t('doc.email')} onClick={() => promptRcpEmail(r.receipt_no)}><Mail className="size-4" /></Button>
+                </div>
+              ) },
+            ]}
+          />
+        )}
+      </StateView>
     </div>
   );
 }
@@ -499,6 +543,14 @@ function CollectionsSection() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  // Email the หนังสือทวงถามหนี้ PDF to the customer. Blank prompt → the customer's email on file (master data).
+  const emailDun = useMutation({
+    mutationFn: (v: { no: string; to_email?: string }) => api<{ to: string }>(`/api/finance/ar/collections/${encodeURIComponent(v.no)}/dunning-letter/send-email`, { method: 'POST', body: JSON.stringify({ to_email: v.to_email }) }),
+    onSuccess: (r) => notifySuccess(t('doc.email_sent', { to: r.to })),
+    onError: (e: any) => notifyError(e.message),
+  });
+  const promptDunEmail = (no: string) => { const to = window.prompt(t('doc.email_prompt_default')); if (to === null) return; emailDun.mutate({ no, to_email: to.trim() || undefined }); };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -527,6 +579,7 @@ function CollectionsSection() {
                   <Button variant="ghost" size="sm" asChild title={t('fin.dun_letter')}>
                     <a href={`${BASE}/api/finance/ar/collections/${encodeURIComponent(r.invoice_no)}/dunning-letter/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-4" /></a>
                   </Button>
+                  <Button variant="ghost" size="sm" disabled={emailDun.isPending} title={t('doc.email')} onClick={() => promptDunEmail(r.invoice_no)}><Mail className="size-4" /></Button>
                 </div>
               ) },
             ]}
