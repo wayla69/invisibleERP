@@ -822,6 +822,65 @@ async function main() {
   const ccList = await inj('GET', '/api/projects/close-reviews', admin);
   ok('PROJ-03: the close review is recorded in the register (Approved)', (ccList.json.reviews ?? []).some((r: any) => r.period === '2026-06' && r.status === 'Approved'), `n=${ccList.json.count}`);
 
+  // ── P0 (docs/35) — shared retention sub-ledger + retention GL accounts (Construction/RE vertical, Phase 0) ──
+  // The primitive Tracks A (customer progress billing / งวดงาน) and B (subcontractor valuations) build on:
+  // withhold retention on certification, release in tranches; balances only (A/B post the matching GL).
+  const coa = await inj('GET', '/api/ledger/accounts', admin);
+  const acct = (c: string) => (coa.json.accounts ?? []).find((a: any) => a.code === c);
+  ok('docs/35 P0: retention GL accounts seeded — 1170 Retention Receivable (Asset), 2440 Retention Payable (Liability)',
+    acct('1170')?.type === 'Asset' && acct('2440')?.type === 'Liability',
+    JSON.stringify({ r1170: acct('1170')?.type, r2440: acct('2440')?.type }));
+
+  const rcCust = await inj('POST', '/api/retention/withhold', admin, { party_type: 'customer', project_code: 'PRJ-A', source_doc_type: 'CLAIM', source_doc_no: 'CLAIM-1', amount: 500 });
+  ok('Retention withhold (customer/งวดงาน) → gl 1170, withheld 500', rcCust.status < 300 && rcCust.json.gl_account === '1170' && near(rcCust.json.withheld, 500), JSON.stringify({ s: rcCust.status, gl: rcCust.json.gl_account }));
+  const custRetId = rcCust.json.id;
+
+  const rcSub = await inj('POST', '/api/retention/withhold', admin, {
+    party_type: 'subcontractor', project_code: 'PRJ-A', source_doc_type: 'SUBVAL', source_doc_no: 'SUBVAL-1', amount: 1000,
+    schedule: [{ due_basis: 'date', due_date: '2020-01-01', pct: 50 }, { due_basis: 'dlp_end', pct: 50 }],
+  });
+  ok('Retention withhold (subcontractor) → gl 2440, withheld 1000, 2-tranche schedule', rcSub.status < 300 && rcSub.json.gl_account === '2440' && near(rcSub.json.withheld, 1000), JSON.stringify({ s: rcSub.status, gl: rcSub.json.gl_account }));
+  const subRetId = rcSub.json.id;
+
+  const rbal1 = await inj('GET', '/api/retention/project/PRJ-A', admin);
+  ok('Retention balance: receivable outstanding 500, payable outstanding 1000',
+    near(rbal1.json.receivable?.outstanding, 500) && near(rbal1.json.payable?.outstanding, 1000),
+    JSON.stringify({ recv: rbal1.json.receivable?.outstanding, pay: rbal1.json.payable?.outstanding }));
+
+  const rel1 = await inj('POST', `/api/retention/${custRetId}/release`, admin, { amount: 200 });
+  ok('Retention partial release 200 (customer) → partially_released, released 200, outstanding 300',
+    rel1.status < 300 && rel1.json.status === 'partially_released' && near(rel1.json.released_amount, 200) && near(rel1.json.outstanding, 300),
+    JSON.stringify({ st: rel1.json.status, rel: rel1.json.released_amount, out: rel1.json.outstanding }));
+
+  const relOver = await inj('POST', `/api/retention/${custRetId}/release`, admin, { amount: 5000 });
+  ok('Over-release beyond outstanding → 400 RETENTION_OVER_RELEASE', relOver.status === 400 && relOver.json.error?.code === 'RETENTION_OVER_RELEASE', `${relOver.status} ${relOver.json.error?.code}`);
+
+  const rbal2 = await inj('GET', '/api/retention/project/PRJ-A', admin);
+  ok('Retention balance after partial release: receivable outstanding 300', near(rbal2.json.receivable?.outstanding, 300), JSON.stringify({ recv: rbal2.json.receivable?.outstanding }));
+
+  const due = await inj('GET', '/api/retention/due', admin); // as_of defaults to today (2020 tranche is overdue; dlp_end is not date-based)
+  const dueSub = (due.json.due ?? []).find((d: any) => d.source_doc_no === 'SUBVAL-1');
+  ok('Retention due worklist: the overdue date-tranche (500) is due; the dlp_end tranche is excluded',
+    dueSub && near(dueSub.amount, 500) && (due.json.due ?? []).length === 1,
+    JSON.stringify({ count: due.json.count, first: dueSub?.amount }));
+
+  const relTranche = await inj('POST', `/api/retention/${subRetId}/release`, admin, { tranche_id: dueSub?.tranche_id });
+  ok('Release a scheduled tranche by id → subcontract retention released 500, outstanding 500',
+    relTranche.status < 300 && near(relTranche.json.released_amount, 500) && near(relTranche.json.outstanding, 500),
+    JSON.stringify({ rel: relTranche.json.released_amount, out: relTranche.json.outstanding }));
+  const dueAfter = await inj('GET', '/api/retention/due', admin);
+  ok('After releasing the tranche it drops off the due worklist (0 due)', (dueAfter.json.due ?? []).length === 0, `count=${dueAfter.json.count}`);
+
+  // SCF classification: a posted JE touching 1170/2440 must bucket into OPERATING working capital (not unclassified).
+  const rje = await inj('POST', '/api/ledger/journal', admin, { date: '2026-06-15', memo: 'retention SCF classify test', lines: [{ account_code: '1170', debit: 500 }, { account_code: '2440', credit: 500 }] });
+  await inj('POST', `/api/ledger/journal/${rje.json.entry_no}/approve`, mgr); // maker-checker: mgr ≠ admin
+  const scf = await inj('GET', '/api/ledger/cash-flow?from=2026-06-01&to=2026-06-30', admin);
+  const wc = scf.json.operating?.working_capital ?? [];
+  ok('SCF: retention receivable (1170) & payable (2440) classify as OPERATING working capital, not unclassified',
+    !(scf.json.unclassified_accounts ?? []).includes('1170') && !(scf.json.unclassified_accounts ?? []).includes('2440') &&
+    wc.some((l: any) => l.account_code === '1170') && wc.some((l: any) => l.account_code === '2440'),
+    JSON.stringify({ uncl: scf.json.unclassified_accounts, codes: wc.map((l: any) => l.account_code) }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

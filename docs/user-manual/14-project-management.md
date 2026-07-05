@@ -262,6 +262,7 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.13 | 2026-07-05 | **Retention (เงินประกันผลงาน) — shared sub-ledger foundation** (docs/35, Phase 0). Two new chart-of-accounts entries appear in ผังบัญชี: **1170 ลูกหนี้เงินประกันผลงาน (Retention Receivable)** and **2440 เจ้าหนี้เงินประกันผลงาน (Retention Payable)**. A retention ledger now tracks amounts **withheld − released = คงค้าง (outstanding)** per contract/subcontract with an optional release schedule, and a *due* worklist for tranches whose release date has passed (controller/treasury endpoints `/api/retention/withhold`, `/api/retention/{id}/release`, `/api/retention/due`, `/api/retention/project/{code}`; `RETENTION_OVER_RELEASE` if a release exceeds the outstanding). This is the plumbing only — the customer **progress-billing (งวดงาน)** screen (Track A) and **subcontractor valuation** screen (Track B) that withhold/release retention as part of certifying a claim arrive in the next phases. |
 | 1.0 | 2026-06-30 | Initial guide — PPM workspace, Gantt/EVM, win/loss dashboard (PPM roadmap `docs/19`). |
 | 1.1 | 2026-06-30 | Project **templates** (`docs/20` B2) — *เริ่มจากแม่แบบ* picker on the create form scaffolds a standard WBS + milestones; `TEMPLATE_EXISTS` / `TEMPLATE_NOT_FOUND` / `PROJECT_HAS_TASKS` added to troubleshooting. |
 | 1.2 | 2026-06-30 | **RACI** on tasks (`docs/20` B3) — Accountable/Responsible inputs + RACI column on the schedule; *งานของฉัน (My tasks)* panel on `/projects`. |

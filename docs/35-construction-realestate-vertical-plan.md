@@ -1,6 +1,6 @@
 # 35 — Construction & Real-Estate Vertical — Progress Billing, Retention, Subcontracts, Tender & Property Sales — Design & Roadmap
 
-> **Date:** 2026-07-05 · **Status:** v0.1 DRAFT — **PLANNING (no code yet)** · **Owner:** ERP / Product
+> **Date:** 2026-07-05 · **Status:** v0.2 — **P0 DELIVERED** (shared retention sub-ledger); Tracks A–D **PLANNED** · **Owner:** ERP / Product
 > **Scope:** Close the remaining gap between our project suite and a purpose-built **construction & real-estate
 > ERP** (benchmark: **Mango ERP / Mango Consultant** — Thailand's leading contractor/developer ERP, which
 > pitches one system "from **bidding** through **project-closing** evaluation"). We already own the material-
@@ -257,7 +257,7 @@ tenant tables. Order chosen so shared foundations land before dependents, cash-f
 
 | Phase | Deliverable | Migration (from) | Control(s) | Harness |
 |---|---|---|---|---|
-| **P0** | Shared **retention sub-ledger** + retention GL accounts | 0249 | (structure; feeds PROJ-15/16) | `projects`/`basics` — withhold/release, GL, SCF bucket |
+| **P0** ✅ **DELIVERED** | Shared **retention sub-ledger** + retention GL accounts (1170/2440) | 0249 | (structure; feeds PROJ-15/16) | `projects` 165→**178** — withhold/release, over-release guard, due worklist, SCF operating-bucket |
 | **P1** | **Track A** progress billing + retention receivable | 0250 | **PROJ-15** | `projects` — claim valuation, certify SoD, retention withhold/release, AR net |
 | **P2** | **Track B** subcontracts + retention payable + back-charge | 0251 | **PROJ-16** | `projects` — subcontract commitment, valuation certify, retention payable, AP net |
 | **P3** | **Track C** tender/estimate → award seeds project+BoQ | 0252 | **PROJ-17** | `projects` — estimate lines, award→project+approved BoQ, win/loss tie-in |
@@ -313,4 +313,5 @@ the property track is fully separable and can be deferred or dropped without aff
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 0.2 | 2026-07-05 | ERP / Product | **Phase 0 DELIVERED — shared retention sub-ledger.** `retention_ledger` + `retention_release_schedule` (migration **0249**, tenant-scoped RLS via the canonical 0232 loop); standalone `RetentionService` (`modules/retention`, DRIZZLE-only) with `withhold`/`release` (atomic `FOR UPDATE` over-release guard → `RETENTION_OVER_RELEASE`)/`due`/`listForProject`, exposed at `/api/retention` (gl_close/exec/ar/creditors). Two new GL accounts **1170 Retention Receivable** (Asset) / **2440 Retention Payable** (Liability) added to the COA seed + bucketed **operating** in `CF_CLASSIFY`. Sub-ledger tracks balances only (A/B post the matching GL) — **no new control, RCM stays 180**. Docs-synced: PN-16 rev 0.35, user-manual 14 rev 2.13, UAT-O2C-243 + traceability. `projects` harness 165→**178**; `basics` 251 / `compliance` 134 / `tenant-idx` / `migration-parity` / `ts-debt` all green; API build + `pnpm -r typecheck` clean. |
 | 0.1 DRAFT | 2026-07-05 | ERP / Product | Initial planning roadmap benchmarking Mango ERP for Construction: progress billing + retention receivable (Track A), subcontractor management + retention payable (Track B), tender/estimate→award (Track C), and an opt-in real-estate developer vertical (Track D), on a shared retention sub-ledger (Phase 0). Builds on `docs/32` material-control spine + PPM/PMO. No code yet. |

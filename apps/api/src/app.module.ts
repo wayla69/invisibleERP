@@ -88,6 +88,7 @@ import { ManufacturingModule } from './modules/manufacturing/manufacturing.modul
 import { ProjectsModule } from './modules/projects/projects.module';
 import { PmrModule } from './modules/pmr/pmr.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
+import { RetentionModule } from './modules/retention/retention.module';
 import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
 import { HcmModule } from './modules/hcm/hcm.module';
 import { PricingModule } from './modules/pricing/pricing.module';
@@ -213,6 +214,7 @@ import { MailModule } from './modules/mail/mail.module';
     ProjectsModule,
     PmrModule,
     ReservationsModule,
+    RetentionModule,
     MfgDepthModule,
     HcmModule,
     PricingModule,
