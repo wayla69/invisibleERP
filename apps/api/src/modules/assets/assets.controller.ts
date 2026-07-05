@@ -11,6 +11,8 @@ const ScanUpdateBody = z.object({ code: z.string().min(1), location: z.string().
 type ScanUpdateBodyT = z.infer<typeof ScanUpdateBody>;
 const RevalueBody = z.object({ new_value: z.number().nonnegative(), reason: z.string().optional(), reval_date: z.string().optional() });
 const RevalRejectBody = z.object({ reason: z.string().optional() });
+const AuditOpenBody = z.object({ location: z.string().optional() });
+const AuditScanBody = z.object({ code: z.string().min(1), client_uuid: z.string().optional() });
 
 @Controller('api/assets')
 @Permissions('exec', 'creditors')
@@ -28,6 +30,18 @@ export class AssetsController {
   }
 
   @Post('scan-update') scanUpdate(@Body(new ZodValidationPipe(ScanUpdateBody)) b: ScanUpdateBodyT, @CurrentUser() u: JwtUser) { return this.svc.scanUpdate(b, u); }
+
+  // ── FA-11 custody-change maker-checker (a scanned move needs a DIFFERENT user's approval) ──
+  @Get('custody') listCustody(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listCustodyRequests(status, u); }
+  @Post('custody/:reqNo/approve') approveCustody(@Param('reqNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveCustody(no, u); }
+  @Post('custody/:reqNo/reject') rejectCustody(@Param('reqNo') no: string, @Body(new ZodValidationPipe(RevalRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectCustody(no, u, b?.reason); }
+
+  // ── Asset audit (physical count by scan) → reconcile against the register ──
+  @Post('audits') openAudit(@Body(new ZodValidationPipe(AuditOpenBody)) b: z.infer<typeof AuditOpenBody>, @CurrentUser() u: JwtUser) { return this.svc.openAudit(b, u); }
+  @Get('audits') listAudits(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listAudits(u, qint('limit', limit, 50)); }
+  @Get('audits/:auditNo') getAudit(@Param('auditNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.getAudit(no, u); }
+  @Post('audits/:auditNo/scan') scanAudit(@Param('auditNo') no: string, @Body(new ZodValidationPipe(AuditScanBody)) b: z.infer<typeof AuditScanBody>, @CurrentUser() u: JwtUser) { return this.svc.scanAudit(no, b, u); }
+  @Post('audits/:auditNo/close') closeAudit(@Param('auditNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.closeAudit(no, u); }
 
   @Post('categories') createCategory(@Body(new ZodValidationPipe(CreateCategoryBody)) b: CreateCategoryDto, @CurrentUser() u: JwtUser) { return this.svc.createCategory(b, u); }
   @Get('categories') listCategories(@CurrentUser() u: JwtUser) { return this.svc.listCategories(u); }

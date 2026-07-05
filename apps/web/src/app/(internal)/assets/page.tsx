@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Boxes, CalendarRange, Coins, FolderTree, Landmark, Play, QrCode, ScanLine, SearchX, X } from 'lucide-react';
+import { Boxes, CalendarRange, Check, ClipboardCheck, Coins, FolderTree, Landmark, MapPin, Play, QrCode, ScanLine, SearchX, WifiOff, X } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { QrScanButton } from '@/components/qr-scanner';
+import { submitScan, useOnline, useScanOutbox } from '@/lib/scan-outbox';
 import { useLang } from '@/lib/i18n';
 
 const selectCls =
@@ -36,6 +37,8 @@ export default function AssetsPage() {
           { key: 'register', label: t('mx.as_tab_register'), content: <Register /> },
           { key: 'capitalize', label: t('mx.as_tab_capitalize'), content: <Capitalize /> },
           { key: 'qr', label: t('mx.as_tab_qr'), content: <QrTags /> },
+          { key: 'audit', label: t('mx.as_tab_audit'), content: <AssetAudit /> },
+          { key: 'custody', label: t('mx.as_tab_custody'), content: <CustodyApprovals /> },
           { key: 'categories', label: t('mx.as_tab_categories'), content: <Categories /> },
           { key: 'runs', label: t('mx.as_tab_runs'), content: <DepreciationRuns /> },
         ]}
@@ -396,8 +399,13 @@ function QrTags() {
   const [scanCode, setScanCode] = useState('');
   const [scanLoc, setScanLoc] = useState('');
   const scan = useMutation({
-    mutationFn: () => api('/api/assets/scan-update', { method: 'POST', body: JSON.stringify({ code: scanCode, location: scanLoc || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(t('mx.as_scan_updated', { assetNo: r.asset_no, location: r.location ?? '—' })); setScanCode(''); setScanLoc(''); qc.invalidateQueries({ queryKey: ['assets'] }); },
+    mutationFn: () => api<any>('/api/assets/scan-update', { method: 'POST', body: JSON.stringify({ code: scanCode, location: scanLoc || undefined }) }),
+    onSuccess: (r: any) => {
+      // FA-11: a move is now a maker-checker request; confirming the same location is an instant verification.
+      if (r.status === 'pending') notifySuccess(t('mx.as_custody_requested', { assetNo: r.asset_no, location: r.to_location ?? '—', reqNo: r.request_no }));
+      else notifySuccess(t('mx.as_scan_verified', { assetNo: r.asset_no, location: r.location ?? '—' }));
+      setScanCode(''); setScanLoc(''); qc.invalidateQueries({ queryKey: ['assets'] }); qc.invalidateQueries({ queryKey: ['asset-custody'] });
+    },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -458,6 +466,171 @@ function QrTags() {
           </div>
         </Card>
       </div>
+    </div>
+  );
+}
+
+// ───────────────────────── Asset audit (physical count by scan) ─────────────────────────
+function AssetAudit() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const online = useOnline();
+  const outbox = useScanOutbox();
+  const [loc, setLoc] = useState('');
+  const [auditNo, setAuditNo] = useState('');
+  const [scanCode, setScanCode] = useState('');
+  const [lastResult, setLastResult] = useState<string>('');
+
+  const recent = useQuery<any>({ queryKey: ['asset-audits'], queryFn: () => api('/api/assets/audits?limit=20'), enabled: !auditNo });
+  const audit = useQuery<any>({ queryKey: ['asset-audit', auditNo], queryFn: () => api(`/api/assets/audits/${auditNo}`), enabled: !!auditNo });
+
+  const open = useMutation({
+    mutationFn: () => api<any>('/api/assets/audits', { method: 'POST', body: JSON.stringify({ location: loc || undefined }) }),
+    onSuccess: (r) => { setAuditNo(r.audit_no); notifySuccess(t('mx.as_audit_opened', { no: r.audit_no, n: r.expected_count })); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const close = useMutation({
+    mutationFn: () => api<any>(`/api/assets/audits/${auditNo}/close`, { method: 'POST' }),
+    onSuccess: (r) => { notifySuccess(t('mx.as_audit_closed', { n: r.custody_requests_raised })); setAuditNo(''); qc.invalidateQueries({ queryKey: ['asset-custody'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  async function doScan(code: string) {
+    if (!code || !auditNo) return;
+    setScanCode('');
+    const r = await submitScan(`/api/assets/audits/${auditNo}/scan`, { code }, `audit ${auditNo}`);
+    outbox.refresh();
+    if (r.queued) { setLastResult(t('mx.as_audit_queued')); }
+    else { const res: any = r.result; setLastResult(`${res?.asset_no ?? code} · ${res?.result ?? ''}`); qc.invalidateQueries({ queryKey: ['asset-audit', auditNo] }); }
+  }
+
+  if (!auditNo) {
+    return (
+      <div className="space-y-4">
+        <Card className="max-w-md gap-3 p-5">
+          <h3 className="text-base font-semibold">{t('mx.as_audit_new')}</h3>
+          <p className="text-sm text-muted-foreground">{t('mx.as_audit_desc')}</p>
+          <div className="grid gap-1.5">
+            <Label htmlFor="audit-loc">{t('mx.as_audit_location')}</Label>
+            <Input id="audit-loc" placeholder={t('mx.as_audit_location_ph')} value={loc} onChange={(e) => setLoc(e.target.value)} />
+          </div>
+          <Button disabled={open.isPending} onClick={() => open.mutate()}><ClipboardCheck className="size-4" /> {t('mx.as_audit_start')}</Button>
+        </Card>
+        <div>
+          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('mx.as_audit_recent')}</h3>
+          <StateView q={recent}>
+            {recent.data && (
+              <DataTable
+                rows={recent.data.audits}
+                columns={[
+                  { key: 'audit_no', label: t('dash.col_no') },
+                  { key: 'location', label: t('mx.as_audit_location'), render: (r: any) => r.location ?? t('mx.as_audit_all_loc') },
+                  { key: 'expected_count', label: t('mx.as_audit_expected'), align: 'right' },
+                  { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                  { key: 'act', label: '', render: (r: any) => r.status === 'Open' ? <Button size="sm" variant="outline" onClick={() => setAuditNo(r.audit_no)}>{t('mx.as_audit_resume')}</Button> : <Button size="sm" variant="ghost" onClick={() => setAuditNo(r.audit_no)}>{t('iv.stk_view')}</Button> },
+                ]}
+                emptyState={{ icon: ClipboardCheck, title: t('mx.as_audit_empty') }}
+              />
+            )}
+          </StateView>
+        </div>
+      </div>
+    );
+  }
+
+  const sum = audit.data?.summary ?? { found: 0, missing: 0, misplaced: 0, unknown: 0 };
+  const isOpen = audit.data?.status === 'Open';
+  return (
+    <div className="space-y-4">
+      <Card className="gap-3 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-base font-semibold">{auditNo} · {audit.data?.location ?? t('mx.as_audit_all_loc')}</h3>
+          <div className="flex items-center gap-2">
+            {!online && <Badge variant="warning"><WifiOff className="mr-1 size-3" /> {t('qr.offline')}</Badge>}
+            {outbox.count > 0 && <Badge variant="info">{t('qr.pending_sync', { n: outbox.count })}</Badge>}
+            <Button variant="ghost" size="sm" onClick={() => setAuditNo('')}>{t('iv.stk_close')}</Button>
+            {isOpen && <Button variant="default" disabled={close.isPending} onClick={() => close.mutate()}><PackageCheckIcon /> {t('mx.as_audit_finish')}</Button>}
+          </div>
+        </div>
+        {isOpen && (
+          <div className="flex items-center gap-2">
+            <Input className="flex-1" placeholder="ASSET_ID:FA-0001|…" value={scanCode} onChange={(e) => setScanCode(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') doScan(scanCode); }} />
+            <Button variant="outline" onClick={() => doScan(scanCode)}>{t('iv.scan_add')}</Button>
+            <QrScanButton continuous onScan={doScan} />
+          </div>
+        )}
+        {lastResult && <p className="text-sm text-muted-foreground"><ScanLine className="mr-1 inline size-4" />{lastResult}</p>}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard label={t('mx.as_audit_found')} value={String(sum.found)} icon={Check} />
+          <StatCard label={t('mx.as_audit_missing')} value={String(sum.missing)} icon={SearchX} />
+          <StatCard label={t('mx.as_audit_misplaced')} value={String(sum.misplaced)} icon={MapPin} />
+          <StatCard label={t('mx.as_audit_unknown')} value={String(sum.unknown)} icon={Boxes} />
+        </div>
+      </Card>
+      <StateView q={audit}>
+        {audit.data && (audit.data.missing.length > 0 || audit.data.misplaced.length > 0) && (
+          <Card className="gap-3 p-5">
+            {audit.data.misplaced.length > 0 && (
+              <div>
+                <h4 className="mb-2 text-sm font-semibold text-warning">{t('mx.as_audit_misplaced')} ({audit.data.misplaced.length})</h4>
+                <DataTable rows={audit.data.misplaced} columns={[{ key: 'asset_no', label: t('mx.as_asset_label') }, { key: 'register_location', label: t('mx.as_audit_reg_loc') }]} />
+                <p className="mt-1 text-xs text-muted-foreground">{t('mx.as_audit_misplaced_note')}</p>
+              </div>
+            )}
+            {audit.data.missing.length > 0 && (
+              <div>
+                <h4 className="mb-2 text-sm font-semibold text-destructive">{t('mx.as_audit_missing')} ({audit.data.missing.length})</h4>
+                <DataTable rows={audit.data.missing} columns={[{ key: 'asset_no', label: t('mx.as_asset_label') }, { key: 'name', label: t('mx.as_asset_name_label') }]} />
+              </div>
+            )}
+          </Card>
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+function PackageCheckIcon() { return <ClipboardCheck className="size-4" />; }
+
+// ───────────────────────── Custody-change approvals (FA-11 maker-checker) ─────────────────────────
+function CustodyApprovals() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['asset-custody'], queryFn: () => api('/api/assets/custody?status=PendingApproval') });
+  const approve = useMutation({
+    mutationFn: (reqNo: string) => api<any>(`/api/assets/custody/${reqNo}/approve`, { method: 'POST' }),
+    onSuccess: (r) => { notifySuccess(t('mx.as_custody_approved', { assetNo: r.asset_no, location: r.location ?? '—' })); qc.invalidateQueries({ queryKey: ['asset-custody'] }); qc.invalidateQueries({ queryKey: ['assets'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: (reqNo: string) => api<any>(`/api/assets/custody/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'rejected' }) }),
+    onSuccess: () => { notifySuccess(t('mx.as_custody_rejected')); qc.invalidateQueries({ queryKey: ['asset-custody'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">{t('mx.as_custody_sod_note')}</p>
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.requests}
+            columns={[
+              { key: 'request_no', label: t('dash.col_no') },
+              { key: 'asset_no', label: t('mx.as_asset_label') },
+              { key: 'move', label: t('mx.as_custody_move'), render: (r: any) => <span className="text-sm">{r.from_location ?? '—'} → <b>{r.to_location ?? '—'}</b></span> },
+              { key: 'source', label: t('mx.as_custody_source'), render: (r: any) => <Badge variant={r.source === 'audit' ? 'info' : 'secondary'}>{r.source}</Badge> },
+              { key: 'requested_by', label: t('mx.as_custody_requested_by') },
+              { key: 'act', label: '', render: (r: any) => (
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate(r.request_no)}><Check className="size-4" /> {t('mx.as_cap_approve')}</Button>
+                  <Button size="sm" variant="outline" disabled={reject.isPending} onClick={() => reject.mutate(r.request_no)}><X className="size-4" /> {t('mx.as_cap_reject')}</Button>
+                </div>
+              ) },
+            ]}
+            emptyState={{ icon: ClipboardCheck, title: t('mx.as_custody_empty'), description: t('mx.as_custody_empty_desc') }}
+          />
+        )}
+      </StateView>
     </div>
   );
 }

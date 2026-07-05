@@ -1758,6 +1758,13 @@
       "when": 2023820000077,
       "tag": "0250_items_barcode",
       "breakpoints": true
+    },
+    {
+      "idx": 251,
+      "version": "7",
+      "when": 2023820000078,
+      "tag": "0251_asset_custody_maker_checker",
+      "breakpoints": true
     }
   ]
 }

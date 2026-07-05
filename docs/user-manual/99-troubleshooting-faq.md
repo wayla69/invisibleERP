@@ -185,6 +185,13 @@ won't start, your browser blocked camera access: allow the camera permission for
 the site and try again. The scanner reads both QR codes and common 1D barcodes
 (EAN/UPC, Code-128, Code-39). You can always enter the code manually.
 
+**I scanned an asset to move it, but the register didn't change.**
+By design (FA-11). Changing an asset's location or holder is a **request** that a
+**different** person must approve — it appears on the assets **Custody approvals**
+(อนุมัติย้ายทรัพย์สิน) tab, and the register only moves once approved. Just
+*confirming* an asset is where the register says needs no approval. You cannot
+approve your own request (`SOD_VIOLATION`).
+
 **I scanned an asset/item QR with my phone's normal camera and it opened a web page.**
 That's expected when your deployment prints deep-link tags: the phone opens the
 resolver page (`/q`), which shows what you scanned and links into the app (you may

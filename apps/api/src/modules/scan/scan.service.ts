@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { scanSessions, scanLines, stockMovements, items, fixedAssets } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -21,18 +21,24 @@ export class ScanService {
     return { session_no: sessionNo, session_type: dto.session_type, status: 'Open' };
   }
 
-  async addLine(sessionNo: string, dto: { qr_data: string; qty?: number; action?: string; lot_no?: string }) {
+  async addLine(sessionNo: string, dto: { qr_data: string; qty?: number; action?: string; lot_no?: string; client_uuid?: string }) {
     const db = this.db;
     const [s] = await db.select().from(scanSessions).where(eq(scanSessions.sessionNo, sessionNo)).limit(1);
     if (!s) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Session not found', messageTh: 'ไม่พบเซสชัน' });
     if (s.status !== 'Open') throw new BadRequestException({ code: 'SESSION_CLOSED', message: 'Session is closed', messageTh: 'เซสชันถูกปิดแล้ว' });
     const p = parseQrPayload(dto.qr_data);
     const itemId = p.ITEM_ID || p.ASSET_ID || dto.qr_data.trim();
+    // Offline replay guard: a line already recorded for this (session, client_uuid) is a no-op.
+    if (dto.client_uuid) {
+      const [dup] = await db.select().from(scanLines).where(and(eq(scanLines.sessionNo, sessionNo), eq(scanLines.clientUuid, dto.client_uuid))).limit(1);
+      if (dup) return { session_no: sessionNo, item_id: dup.itemId, qty: n(dup.qty), deduped: true };
+    }
     await db.insert(scanLines).values({
       sessionNo, scannedAt: new Date(), qrData: dto.qr_data, itemId, itemDescription: p.DESC ?? null, lotNo: dto.lot_no ?? null,
       qty: String(dto.qty ?? 1), uom: p.UOM ?? null, action: dto.action ?? s.sessionType, locationId: s.locationId, confirmed: false,
+      clientUuid: dto.client_uuid ?? null,
     });
-    return { session_no: sessionNo, item_id: itemId, qty: dto.qty ?? 1 };
+    return { session_no: sessionNo, item_id: itemId, qty: dto.qty ?? 1, deduped: false };
   }
 
   // Resolve a scanned code (raw payload OR a /q?d=… deep link) to the underlying item or asset.

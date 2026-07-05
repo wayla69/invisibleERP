@@ -17,6 +17,8 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { QrScanButton } from '@/components/qr-scanner';
+import { submitScan, newUuid, useOnline, useScanOutbox } from '@/lib/scan-outbox';
+import { WifiOff } from 'lucide-react';
 
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const TYPES = ['GR', 'Issue', 'Transfer', 'Count'];
@@ -29,6 +31,8 @@ export default function MobileScanPage() {
   const [loc, setLoc] = useState('WH-MAIN');
   const [scan, setScan] = useState('');
   const [qty, setQty] = useState('1');
+  const online = useOnline();
+  const outbox = useScanOutbox();
 
   const session = useQuery<any>({ queryKey: ['scan-session', sessionNo], queryFn: () => api(`/api/scan/sessions/${sessionNo}`), enabled: !!sessionNo });
   const recent = useQuery<any>({ queryKey: ['scan-sessions'], queryFn: () => api('/api/scan/sessions?limit=20'), enabled: !sessionNo });
@@ -39,10 +43,17 @@ export default function MobileScanPage() {
     onError: (e: any) => notifyError(e.message),
   });
   const addLine = useMutation({
-    mutationFn: (vars: { code: string; qty: number }) => api(`/api/scan/sessions/${sessionNo}/lines`, { method: 'POST', body: JSON.stringify({ qr_data: vars.code, qty: vars.qty }) }),
+    mutationFn: (vars: { code: string; qty: number }) => api(`/api/scan/sessions/${sessionNo}/lines`, { method: 'POST', body: JSON.stringify({ qr_data: vars.code, qty: vars.qty, client_uuid: newUuid() }) }),
     onSuccess: () => { setScan(''); setQty('1'); qc.invalidateQueries({ queryKey: ['scan-session', sessionNo] }); },
     onError: (e: any) => notifyError(e.message),
   });
+  // Continuous camera scanning is offline-capable: each read is queued (idempotent on client_uuid) and
+  // replayed on reconnect. Falls back to a direct add when online.
+  async function scanLine(code: string) {
+    const r = await submitScan(`/api/scan/sessions/${sessionNo}/lines`, { qr_data: code, qty: 1 }, `scan ${sessionNo}`);
+    outbox.refresh();
+    if (!r.queued) qc.invalidateQueries({ queryKey: ['scan-session', sessionNo] });
+  }
   const close = useMutation({
     mutationFn: () => api<any>(`/api/scan/sessions/${sessionNo}/close`, { method: 'POST' }),
     onSuccess: (r) => { notifySuccess(t('iv.scan_toast_closed', { count: r.committed })); setSessionNo(''); },
@@ -87,10 +98,14 @@ export default function MobileScanPage() {
         <Card className="gap-3 p-5">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold">{sessionNo} · {session.data?.session_type}</h3>
-            <Button variant="default" disabled={close.isPending} onClick={() => close.mutate()}><PackageCheck className="size-4" /> {t('iv.scan_close_commit')}</Button>
+            <div className="flex items-center gap-2">
+              {!online && <Badge variant="warning"><WifiOff className="mr-1 size-3" /> {t('qr.offline')}</Badge>}
+              {outbox.count > 0 && <Badge variant="info">{t('qr.pending_sync', { n: outbox.count })}</Badge>}
+              <Button variant="default" disabled={close.isPending} onClick={() => close.mutate()}><PackageCheck className="size-4" /> {t('iv.scan_close_commit')}</Button>
+            </div>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <div className="grid gap-1.5 flex-1 min-w-[220px]"><Label>{t('iv.scan_scan_qr')}</Label><div className="flex items-center gap-2"><Input className="flex-1" value={scan} onChange={(e) => setScan(e.target.value)} placeholder="ITEM_ID:A|…" /><QrScanButton continuous onScan={(code) => addLine.mutate({ code, qty: 1 })} /></div></div>
+            <div className="grid gap-1.5 flex-1 min-w-[220px]"><Label>{t('iv.scan_scan_qr')}</Label><div className="flex items-center gap-2"><Input className="flex-1" value={scan} onChange={(e) => setScan(e.target.value)} placeholder="ITEM_ID:A|…" /><QrScanButton continuous onScan={scanLine} /></div></div>
             <div className="grid gap-1.5"><Label>{t('inv.col_qty')}</Label><Input type="number" className="max-w-[120px]" value={qty} onChange={(e) => setQty(e.target.value)} /></div>
             <Button disabled={!scan || addLine.isPending} onClick={() => addLine.mutate({ code: scan, qty: Number(qty) })}>{t('iv.scan_add')}</Button>
           </div>

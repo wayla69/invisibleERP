@@ -6,7 +6,7 @@ import { ScanService } from './scan.service';
 import { qint, qintOpt } from '../../common/query';
 
 const OpenBody = z.object({ session_type: z.string().min(1), location_id: z.string().optional(), doc_ref: z.string().optional() });
-const LineBody = z.object({ qr_data: z.string().min(1), qty: z.number().optional(), action: z.string().optional(), lot_no: z.string().optional() });
+const LineBody = z.object({ qr_data: z.string().min(1), qty: z.number().optional(), action: z.string().optional(), lot_no: z.string().optional(), client_uuid: z.string().optional() });
 
 @Controller('api/scan/sessions')
 @Permissions('mobile', 'warehouse')
