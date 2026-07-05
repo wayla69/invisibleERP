@@ -33,6 +33,7 @@ import { LedgerModule } from './modules/ledger/ledger.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { PlatformNotificationsModule } from './modules/platform-notifications/platform-notifications.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { AssetsModule } from './modules/assets/assets.module';
@@ -155,6 +156,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     PaymentsModule,
     TaxModule,
     BillingModule,
+    PlatformNotificationsModule,
     PlatformModule,
     RestaurantModule,
     AssetsModule,

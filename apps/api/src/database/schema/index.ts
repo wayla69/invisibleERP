@@ -40,6 +40,7 @@ export * from './payments';
 export * from './billing';
 export * from './signup-invites';
 export * from './signup-requests';
+export * from './platform-notifications';
 export * from './tax-docs';
 export * from './restaurant';
 export * from './assets';
