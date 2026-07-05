@@ -97,11 +97,16 @@ export class ProcurementController {
 
   // Product catalog for the shop/basket requisition screen (/shop) — read-only item-master browse grouped
   // by product category, so staff can pick items into a basket and check out a PR. Same low-risk pr_raise
-  // duty as raising the PR itself. Optional q (code/description) + category-key filter.
+  // duty as raising the PR itself. Paginated (offset/limit) for the Grab/Shopee-style infinite-scroll grid;
+  // optional q (code/description) + category-key filter. Returns the item page + the full category summary.
   @Get('catalog') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
-  catalog(@CurrentUser() u: JwtUser, @Query('q') q?: string, @Query('category') category?: string, @Query('limit') limit?: string) {
-    return this.svc.catalog(u, { q, category, limit: limit ? Number(limit) : undefined });
+  catalog(@CurrentUser() u: JwtUser, @Query('q') q?: string, @Query('category') category?: string, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.svc.catalog(u, { q, category, limit: limit ? Number(limit) : undefined, offset: offset ? Number(offset) : undefined });
   }
+
+  // Catalog item thumbnail (pr_raise) — the in-DB image data-URL for a shop-grid <img>. 404 if none.
+  @Get('catalog/items/:itemId/image') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  catalogItemImage(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.catalogItemImage(u, itemId); }
 
   // Vendor search for the PR→PO panel (pick a real supplier from the master).
   @Get('vendors/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')

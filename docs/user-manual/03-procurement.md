@@ -111,9 +111,11 @@ other PR.
 
 **Screen:** `/shop` (**เลือกซื้อสินค้า**) · **Required permission:** `pr_raise`
 
-1. **Browse by category.** Products from the item register are shown as cards
-   **grouped by product category**, so they are easy to find. Use the **search box**
-   (name or code) or tap a **category pill** to filter.
+1. **Browse the catalog (Grab/Shopee-style).** Products from the item register are
+   shown as a **grid of picture cards** (with the item's photo, or a colour tile when
+   it has none) — switch to a **list view** with the ⊞/☰ toggle (your choice is
+   remembered). Tap a **category chip** along the top to filter, or use the **search
+   box** (name or code). The grid **loads more as you scroll** — no page buttons.
 2. **Add to basket.** Press **ใส่ตะกร้า** on a product to drop it in the basket;
    press it again (or use the **+ / −** steppers in the basket) to change the
    quantity.
