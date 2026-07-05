@@ -71,7 +71,7 @@ async function main() {
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
-    return { status: res.statusCode, json };
+    return { status: res.statusCode, json, text: res.payload };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
 
@@ -634,6 +634,10 @@ async function main() {
   const poCap = await inj('POST', '/api/procurement/pos', admin, { vendor_name: 'Capital Vendor', expected_date: daysAgo(0), items: [{ item_id: 'LAPTOP', item_description: 'Dev laptop', order_qty: 2, unit_price: 25000, uom: 'EA', is_capital: true }] });
   ok('Capitalize: PO raised with a capital line (2 @ 25000 = 50000)', poCap.status === 201 && /^PO-/.test(poCap.json?.po_no ?? '') && near(poCap.json?.total_amount, 50000), JSON.stringify(poCap.json).slice(0, 90));
   await inj('PATCH', `/api/procurement/pos/${poCap.json?.po_no}/approve`, admin, { approve: true });
+  // Printable ใบสั่งซื้อ (Purchase Order) — HTML fallback when Chromium is absent (as in CI): the endpoint
+  // renders the title, the supplier and the ordered line's value so the buyer has a document to send.
+  const poPdf = await inj('GET', `/api/procurement/pos/${poCap.json?.po_no}/pdf`, admin);
+  ok('PO print: PDF/HTML contains "ใบสั่งซื้อ" + supplier + line value (50,000.00)', poPdf.status === 200 && poPdf.text.includes('ใบสั่งซื้อ') && poPdf.text.includes('Capital Vendor') && poPdf.text.includes('50,000.00'), `${poPdf.status} ${String(poPdf.text).slice(0, 60)}`);
   const grCap = await inj('POST', '/api/procurement/grs', admin, { po_no: poCap.json?.po_no, items: [{ item_id: 'LAPTOP', received_qty: 2, unit_cost: 25000, uom: 'EA' }] });
   ok('Capitalize: GR receives the capital line, PO auto-closes', grCap.status === 201 && /^GR-/.test(grCap.json?.gr_no ?? '') && grCap.json?.po_status === 'Closed', JSON.stringify(grCap.json).slice(0, 90));
   // Capital goods must NOT be capitalised into inventory (1200) at receipt — they route to 1500 via FA-10.

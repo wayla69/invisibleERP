@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Patch, Delete, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Query, Body, Res } from '@nestjs/common';
 import { z } from 'zod';
+import type { FastifyReply } from 'fastify';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ProcurementService, type CreatePrDto, type CreatePoDto, type CreateGrDto, type UpsertSupplierPriceDto } from './procurement.service';
 import { AttachmentsService, type AddAttachmentDto } from './attachments.service';
+import { PoPdfService } from './po-pdf.service';
 
 const AttachmentBody = z.object({
   doc_type: z.string().min(1), doc_no: z.string().min(1), data_url: z.string().min(1),
@@ -53,7 +55,7 @@ const SupplierPriceBody = z.object({
 
 @Controller('api/procurement')
 export class ProcurementController {
-  constructor(private readonly svc: ProcurementService, private readonly attachments: AttachmentsService) {}
+  constructor(private readonly svc: ProcurementService, private readonly attachments: AttachmentsService, private readonly poPdf: PoPdfService) {}
 
   // ── Document attachments (0228) — invoice/receipt photos on a PO (evidence for the 3-way match). ──
   // Upload: the people who handle the paper — buyer (procurement), AP clerk (creditors), receiver
@@ -165,6 +167,21 @@ export class ProcurementController {
   @Patch('pos/:poNo/cancel') @Permissions('procurement')
   cancelPo(@Param('poNo') poNo: string, @Body(new ZodValidationPipe(CancelBody)) b: { reason: string }, @CurrentUser() u: JwtUser) {
     return this.svc.cancelPo(poNo, b.reason, u);
+  }
+
+  // Printable ใบสั่งซื้อ (Purchase Order) — HTML→PDF via the shared PdfRenderer, HTML fallback when Chromium
+  // is absent (same graceful-degrade contract as the tax documents). Viewing is open to the buying/receiving
+  // roles + planner/exec who track the order (read-only presentation; no ledger effect).
+  @Get('pos/:poNo/pdf') @Permissions('procurement', 'planner', 'exec', 'wh_receive', 'warehouse')
+  async printPo(@Param('poNo') poNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const po = await this.svc.getPoForPrint(poNo, u);
+    const html = this.poPdf.purchaseOrderHtml(po);
+    const buf = await this.poPdf.renderToPdf(html);
+    if (buf) {
+      reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${poNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    } else {
+      reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+    }
   }
 
   // GR = a warehouse/receiving duty (wh_receive), deliberately segregated from purchase ordering so the

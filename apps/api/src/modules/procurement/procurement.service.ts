@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, invBalances, projects } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, invBalances, projects, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -576,6 +576,49 @@ export class ProcurementService {
     // M1 (PROJ-12) — a cancelled PO releases the BoQ-line budget it encumbered (frees it for other draws).
     if (this.commitments) await this.commitments.release(db, 'PO', poNo);
     return { po_no: poNo, status: 'Cancelled' };
+  }
+
+  // Assemble the printable PO (header + lines + supplier + our-company/buyer block) for the PDF renderer.
+  // The buyer block is the caller's tenant (the company raising the PO); the vendor block is the supplier.
+  // VAT is shown as an ESTIMATE at the buyer tenant's VAT rate only when the tenant is VAT-registered — a PO
+  // is a commitment, not a tax document (the ใบกำกับภาษี is issued by the supplier on delivery), so the row
+  // is suppressed for non-VAT buyers rather than fabricating tax.
+  async getPoForPrint(poNo: string, user: JwtUser): Promise<import('./po-pdf.service').PoPrintData> {
+    const db = this.db;
+    const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
+    if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบ PO' });
+    const lineRows = await db.select().from(poItems).where(eq(poItems.poId, Number(po.id))).orderBy(asc(poItems.id));
+    const vendorRow = po.vendorId ? (await db.select().from(vendors).where(eq(vendors.id, Number(po.vendorId))).limit(1))[0] : null;
+
+    // Buyer = the caller's tenant (our company). HQ/bypass callers may have no tenantId → generic fallback.
+    let t: any = null;
+    if (user.tenantId != null) [t] = await db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1);
+    const buyerAddress = t
+      ? [t.addressLine1, t.addressLine2, t.subDistrict, t.district, t.province, t.postalCode].filter(Boolean).join(' ')
+      : '';
+
+    const lines = lineRows.map((l: any) => ({
+      item_id: l.itemId ?? null, description: l.itemDescription ?? null, qty: n(l.orderQty), uom: l.uom ?? null,
+      unit_price: n(l.unitPrice), amount: n(l.amount ?? n(l.orderQty) * n(l.unitPrice)),
+    }));
+    const subtotal = lines.reduce((a, l) => a + l.amount, 0);
+    const vatRate = t?.vatRegistered ? n(t.vatRate ?? 0.07) : 0;
+    const vatAmount = Math.round(subtotal * vatRate * 100) / 100;
+
+    return {
+      po_no: po.poNo, po_date: po.poDate ?? null, expected_date: po.expectedDate ?? null, status: String(po.status ?? ''),
+      remarks: po.remarks ?? null, currency: po.currency ?? 'THB', created_by: po.createdBy ?? null,
+      approved_by: po.approvedBy ?? null, approved_at: po.approvedAt ? new Date(po.approvedAt).toISOString() : null,
+      buyer: {
+        name: t?.legalName || t?.name || 'บริษัทของฉัน', address: buyerAddress || (t?.address ?? '-'),
+        tax_id: t?.taxId ?? null, branch_label: t?.branchLabelTh ?? 'สำนักงานใหญ่', phone: t?.phone ?? null,
+      },
+      vendor: {
+        name: vendorRow?.name ?? po.vendorName ?? '-', address: vendorRow?.address ?? null, tax_id: vendorRow?.taxId ?? null,
+        contact: vendorRow?.contact ?? null, phone: vendorRow?.phone ?? null, payment_terms: vendorRow?.paymentTerms ?? null,
+      },
+      lines, subtotal, vat_rate: vatRate, vat_amount: vatAmount, grand_total: Math.round((subtotal + vatAmount) * 100) / 100,
+    };
   }
 
   // ── GR ── (received_qty++ ; stock_movement ; lot_ledger ; auto-close PO)

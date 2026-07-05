@@ -20,6 +20,7 @@ This is deliberate separation of duties (the person who *orders* must not also
 |---|---|---|
 | Raise a requisition (PR) | `/requisitions` | **Anyone in the company** — `pr_raise` |
 | Create / approve a PO | `/procurement` | **Procurement** — `procurement` |
+| Print / send a PO (PDF) | `/procurement` (พิมพ์) | **Procurement / Planner / Exec / Warehouse** — view only |
 | Receive goods (GR) | `/receiving` | **Warehouse** — `wh_receive` |
 | 3-way match | `/procurement/match` | **Procurement / Accounting** — `procurement` |
 | **Quick Capture a bill** (snap/upload → send to Accounting) | `/capture` | **Anyone in the company** — `pr_raise` |
@@ -204,6 +205,26 @@ requisitions; approval always happens in the ERP (and never by the requester —
 5. Submit.
 
 **Expected result:** A purchase order is created with a PO number.
+
+### Print / send a PO (PDF)
+
+Once a PO exists you can print it or send it to the supplier as a proper A4 document.
+
+**Screen:** `/procurement` (**ใบสั่งซื้อ (PO)** list) · **Required permission:** any of
+`procurement` / `planner` / `exec` / `wh_receive` / `warehouse` (viewing only).
+
+1. In the **ใบสั่งซื้อ** list, find the PO row.
+2. Click the **พิมพ์** (printer) action at the end of the row.
+3. The purchase order opens in a new tab as a PDF — use your browser's print/save to send or file it.
+
+The document carries **your company** block (legal name, address, 13-digit Tax ID, branch), the
+**supplier** block (name, address, Tax ID, contact, payment terms), the ordered lines, and the total
+in baht text. When your company is **VAT-registered**, an *estimated* 7% VAT line is shown — this is
+for the buyer's reference only; the actual **ใบกำกับภาษี** is issued by the supplier on delivery.
+
+> The PO document is presentation-only — printing it changes nothing and posts nothing to the ledger.
+> If your browser shows the page as HTML instead of a PDF, the print server is simply rendering in
+> fallback mode; the content is identical and still prints correctly.
 
 ### Attach the invoice / receipt photo to a PO
 
