@@ -405,6 +405,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'shop.created_desc': { th: 'จัดซื้อจะพิจารณาและออกใบสั่งซื้อ (PO) ต่อไป — {n} รายการ', en: 'Procurement will review and issue a PO — {n} items' },
   'shop.failed': { th: 'ส่งคำขอซื้อไม่สำเร็จ', en: 'Could not submit the requisition' },
   'shop.view_prs': { th: 'ดูคำขอซื้อของฉัน', en: 'View my requisitions' },
+  'shop.manage_categories': { th: 'จัดการหมวดหมู่', en: 'Manage categories' },
   'iv.req_card_title': { th: 'สร้างคำขอซื้อ (PR)', en: 'Create a requisition (PR)' },
   'iv.req_choose': { th: 'เลือก:', en: 'Select:' },
   'iv.req_choose_code': { th: 'เลือกรหัสที่ตรง:', en: 'Select the matching code:' },

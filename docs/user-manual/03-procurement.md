@@ -134,6 +134,15 @@ other PR.
 **Expected result:** One purchase requisition is created for every item in the
 basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval.
 
+> **Where does the category grouping come from?** The cards are grouped by each
+> item's category in the **item register** — the real *หมวดสินค้า* (`item_categories`,
+> set per item via `category_id`), falling back to the free-text category, otherwise
+> **"ไม่ระบุหมวด"**. To (re)group the catalog: define categories on **ตั้งค่า → ข้อมูลหลัก
+> → หมวดสินค้า** (`/setup/item-categories`) and assign each item its category on
+> **ผังบัญชีสินค้า** (`/setup/items`) or in bulk via **ข้อมูลหลัก** (`/master-data`,
+> the *items* sheet). For convenience, a **จัดการหมวดหมู่** shortcut appears in the
+> `/shop` header for users who hold the `md_item` master-data permission.
+
 **Seeing your PRs on the web:** the requisitions page (`/requisitions`) now shows a
 **คำขอซื้อล่าสุด** table listing every PR — raised here *or* from LINE chat — with its
 lines and status. A plain requester sees their own PRs (with a **ยกเลิก** button for a

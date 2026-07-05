@@ -3,8 +3,9 @@
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send } from 'lucide-react';
+import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
@@ -33,6 +34,9 @@ type CartLine = { key: string; item_id: string; description: string; uom: string
 export default function ShopPage() {
   const { t } = useLang();
   const qc = useQueryClient();
+  const me = useMe();
+  // Master-data holders (md_item) can jump straight to the category admin to (re)group the catalog.
+  const canManageCategories = hasPerm(me.data, 'md_item', 'masterdata', 'exec');
   const cat = useQuery<CatalogResp>({ queryKey: ['catalog'], queryFn: () => api('/api/procurement/catalog?limit=1000') });
 
   const [q, setQ] = useState('');
@@ -119,7 +123,16 @@ export default function ShopPage() {
       <PageHeader
         title={t('shop.title')}
         description={t('shop.desc')}
-        actions={<Button asChild variant="outline" size="sm"><Link href="/requisitions">{t('shop.view_prs')}</Link></Button>}
+        actions={
+          <>
+            {canManageCategories && (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/setup/item-categories"><Layers className="size-4" /> {t('shop.manage_categories')}</Link>
+              </Button>
+            )}
+            <Button asChild variant="outline" size="sm"><Link href="/requisitions">{t('shop.view_prs')}</Link></Button>
+          </>
+        }
       />
 
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
