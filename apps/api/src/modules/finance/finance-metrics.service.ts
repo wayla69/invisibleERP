@@ -223,8 +223,8 @@ export class FinanceMetricsService {
     }
 
     // Stable group ordering so the cross-snapshot growth KPIs sit inside the growth_cash block, not after it.
-    const groupOrder = new Map(METRIC_GROUPS.map((g, i) => [g.id, i]));
-    rows.sort((a, b) => (groupOrder.get(a.group as any) ?? 99) - (groupOrder.get(b.group as any) ?? 99));
+    const groupOrder = new Map<string, number>(METRIC_GROUPS.map((g, i) => [g.id, i] as [string, number]));
+    rows.sort((a, b) => (groupOrder.get(a.group) ?? 99) - (groupOrder.get(b.group) ?? 99));
     const filtered = q.group ? rows.filter((r) => r.group === q.group) : rows;
     return {
       as_of: w.cur.to, window: w.cur, compare: { prior_period: w.pp, prior_year: w.py },

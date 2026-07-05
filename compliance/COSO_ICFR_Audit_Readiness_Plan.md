@@ -44,7 +44,7 @@ You are an **EGC under the JOBS Act**, which changes *when* certain things are r
 
 ## 2. Current state — where we already stand
 
-The RCM scores **<!-- rcm-total -->183<!-- /rcm-total --> controls: <!-- rcm-implemented -->180<!-- /rcm-implemented --> Implemented · <!-- rcm-partial -->3<!-- /rcm-partial --> Partial · <!-- rcm-gap -->0<!-- /rcm-gap --> Gap** (regenerate + verify with `python3 compliance/build_rcm.py --counts`; the 2026-06-23 Phase-A snapshot scored 66: 49/11/6 — kept for history only. After the Phase A ITGC hardening of 2026-06-23 — backup/restore drill OP-01, fail-closed secrets AC-12, least-privilege DB role AC-13, branch protection + deploy gate + traceability + emergency procedure CM-01/02/03/04/05, incident/observability OP-03 — on top of the earlier GL-05, ITGC-AC-06/08/09/10 — see §2.1 and `docs/11-next-upgrade-realworld-roadmap.md`). The system already has materially strong foundations that auditors will credit:
+The RCM scores **<!-- rcm-total -->186<!-- /rcm-total --> controls: <!-- rcm-implemented -->183<!-- /rcm-implemented --> Implemented · <!-- rcm-partial -->3<!-- /rcm-partial --> Partial · <!-- rcm-gap -->0<!-- /rcm-gap --> Gap** (regenerate + verify with `python3 compliance/build_rcm.py --counts`; the 2026-06-23 Phase-A snapshot scored 66: 49/11/6 — kept for history only. After the Phase A ITGC hardening of 2026-06-23 — backup/restore drill OP-01, fail-closed secrets AC-12, least-privilege DB role AC-13, branch protection + deploy gate + traceability + emergency procedure CM-01/02/03/04/05, incident/observability OP-03 — on top of the earlier GL-05, ITGC-AC-06/08/09/10 — see §2.1 and `docs/11-next-upgrade-realworld-roadmap.md`). The system already has materially strong foundations that auditors will credit:
 
 | Control area | What exists today | Evidence (code) |
 |---|---|---|
@@ -231,7 +231,7 @@ Stand up a single, access-controlled evidence repository, organized by control I
 - **RACI per control** lives in the RCM "Gap Remediation" tab; keep it current.
 - **Re-score the RCM** at the end of each phase (re-run `build_rcm.py` after updating statuses) and track Gap→Partial→Implemented burn-down.
 - **Definition of "audit-ready":** all High-priority gaps Implemented with ≥1 quarter of operating evidence; policies approved; evidence repository populated; one successful mock IT-audit.
-- **Honest current baseline + ID crosswalk:** see [`CONTROL_STATUS_HONEST.md`](CONTROL_STATUS_HONEST.md) — current status is **<!-- rcm-implemented -->180<!-- /rcm-implemented --> Implemented / <!-- rcm-partial -->3<!-- /rcm-partial --> Partial / <!-- rcm-gap -->0<!-- /rcm-gap --> Gap of <!-- rcm-total -->183<!-- /rcm-total -->** (the 3 Partials are entity-level governance operation, not software), and the realistic management-ICFR-assertion (404(a)) target is **Q1 2027 at the earliest**. Until then we say "control environment built and ToE-tested", **not** "audit-ready".
+- **Honest current baseline + ID crosswalk:** see [`CONTROL_STATUS_HONEST.md`](CONTROL_STATUS_HONEST.md) — current status is **<!-- rcm-implemented -->183<!-- /rcm-implemented --> Implemented / <!-- rcm-partial -->3<!-- /rcm-partial --> Partial / <!-- rcm-gap -->0<!-- /rcm-gap --> Gap of <!-- rcm-total -->186<!-- /rcm-total -->** (the 3 Partials are entity-level governance operation, not software), and the realistic management-ICFR-assertion (404(a)) target is **Q1 2027 at the earliest**. Until then we say "control environment built and ToE-tested", **not** "audit-ready".
 
 ---
 
