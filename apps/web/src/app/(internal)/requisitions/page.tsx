@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PrForm } from '@/components/procurement-forms';
 
 type PrLine = { item_id: string; request_qty: number; uom: string | null; reason: string | null };
@@ -261,13 +262,16 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
   });
   const canSubmit = lines.every((l) => l.item_id.trim() && Number(l.order_qty) > 0);
 
+  // Modal dialog (portal + fixed overlay) so tapping "สร้าง PO" always surfaces the panel over the
+  // current viewport. Rendered inline before (below the whole register table) it opened off-screen on a
+  // phone, so the button read as unresponsive — the reported bug.
   return (
-    <div className="mt-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="font-semibold">{t('iv.req_create_po_from', { pr: pr.pr_no })}</div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>{t('iv.req_close')}</Button>
-      </div>
-      <div className="mb-3 max-w-lg space-y-1">
+    <Dialog open onOpenChange={(o) => { if (!o) onCancel(); }}>
+      <DialogContent className="max-h-[90vh] gap-3 overflow-y-auto sm:max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>{t('iv.req_create_po_from', { pr: pr.pr_no })}</DialogTitle>
+      </DialogHeader>
+      <div className="max-w-lg space-y-1">
         <Label className="text-xs">{t('iv.req_vendor')}{vendorId ? t('iv.req_vendor_selected') : ''}</Label>
         <div className="flex gap-2">
           <Input value={vendor} onChange={(e) => { setVendor(e.target.value); setVendorId(null); setVendorMatches([]); }} placeholder={t('iv.req_vendor_ph')} />
@@ -328,11 +332,12 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
           </div>
         ))}
       </div>
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-1 flex items-center gap-2">
         <Button size="sm" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>{submit.isPending ? t('iv.req_creating') : t('iv.req_create_po_btn')}</Button>
         <span className="text-xs text-muted-foreground">{t('iv.req_submit_note')}</span>
       </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
