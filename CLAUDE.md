@@ -104,6 +104,25 @@ For every such change, review and update as needed:
   re-created idempotently inside 0218). See `docs/ops/drizzle-migration-debt.md` §3bis.
 - **CI runner pnpm version comes from `package.json` `packageManager` (pnpm@11.8.0).** Do **not** also pin
   `version:` in `pnpm/action-setup` — the two conflict (`ERR_PNPM_BAD_PM_VERSION`) and break every job.
+- **The `build` gate ends with two down-only RATCHETS that fail on *new* debt (not just real errors)** — a
+  clean `tsc`/`next build` locally is **not** enough. (1) `tools/ci/check-ts-debt.mjs`: a new `as any` over
+  `ts-debt-baseline.json.asAny`, **or** any `tsc --noUncheckedIndexedAccess` error over `.strictIndexErrors`,
+  fails. Never add `as any` — use a precise cast (`x as unknown as Parameters<typeof fn>[0]` for cross-pkg
+  Buffer/type friction) or narrow the type. NB the strict-index pass reruns the *whole* `tsc` with the flag,
+  so an **ordinary** type error (e.g. a bad cast) also counts as a strict-index regression — one bad line can
+  trip **both** counters. (2) `tools/ci/check-use-client.mjs`: a new `'use client'` file over
+  `use-client-baseline.json` fails. A shared **client island imported only by already-`'use client'` pages
+  must OMIT its own directive** (it inherits the boundary — pattern: `apps/web/src/components/state-view.tsx`);
+  adding the directive needlessly is what trips it. Run both scripts locally before pushing. Also: **PR CI runs
+  on the branch⋈main *merge* commit**, so a ratchet reads against *current* `main`'s baseline — your local
+  count can be off by the files `main` added since you branched (relative pass/fail still holds).
+- **Bulk master-data import/export is registry-driven; extend it, don't rebuild.** `modules/masterdata`
+  (`master-registry.ts` + `masterdata.service.ts`) drives export/template/validate/import for all entities and
+  accepts **csv / rows / base64 `xlsx`** (`rowsFromInput` → `parseXlsx`/`parseCsv`). Setup screens surface the
+  two item-posting lists (`item_categories`, `tax_codes`) via `/api/item-setup/io/*` — the **same** engine,
+  gated to the setup duties (`md_item`/`md_config`/`masterdata`/`exec`) and allow-listed to those keys so a
+  narrow role gets the bulk surface without the coarse `masterdata` duty (SoD R13). Shared web island
+  `components/master-io.tsx`. Coverage: `ext` harness. Narrative PN-17 §7.3b/3c.
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
   GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
   Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
