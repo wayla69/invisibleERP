@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw } from 'lucide-react';
+import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw, AlertTriangle, ChevronDown } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/notify';
@@ -28,6 +28,7 @@ type Category = { key: string; label: string; count: number };
 type CatalogPage = { items: CatalogItem[]; categories: Category[]; total: number; offset: number; limit: number; has_more: boolean; count: number };
 type CartLine = { key: string; item_id: string; description: string; uom: string; unit_price: number; qty: number; urgent: boolean; custom: boolean };
 type MyPr = { pr_no: string; pr_date: string | null; status: string; priority: string | null; lines: { item_id: string; request_qty: number; uom?: string | null }[] };
+type LowItem = { item_id: string; item_description: string | null; uom: string | null; on_hand: number; min_stock: number; suggested_qty: number; unit_price: number };
 
 const PAGE = 24;
 const VIEW_KEY = 'shop.view';
@@ -108,6 +109,8 @@ export default function ShopPage() {
   const canManageCategories = hasPerm(me.data, 'md_item', 'masterdata', 'exec');
   // The requester's own recent PRs (raised here or elsewhere) with live status — closes the loop on-screen.
   const myPrs = useQuery<{ prs: MyPr[] }>({ queryKey: ['my-prs'], queryFn: () => api('/api/procurement/prs?mine=true&limit=5'), refetchInterval: 30_000 });
+  // Items at/below their reorder point — a quick "top up the low stock" shortcut into the basket.
+  const lowStock = useQuery<{ items: LowItem[]; count: number }>({ queryKey: ['low-stock'], queryFn: () => api('/api/procurement/low-stock?limit=20'), refetchInterval: 60_000 });
 
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -117,6 +120,7 @@ export default function ShopPage() {
   const [cart, setCart] = useState<CartLine[]>(readCart);
   const [favs, setFavs] = useState<Set<string>>(readFavs);
   const [favOnly, setFavOnly] = useState(false);
+  const [showLow, setShowLow] = useState(false);
   const [remarks, setRemarks] = useState('');
   const [projectCode, setProjectCode] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
@@ -189,6 +193,22 @@ export default function ShopPage() {
   const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.floor(qty) || 1) } : l)));
   const toggleUrgent = (key: string) => setCart((c) => c.map((l) => (l.key === key ? { ...l, urgent: !l.urgent } : l)));
   const removeLine = (key: string) => setCart((c) => c.filter((l) => l.key !== key));
+
+  // Add a specific quantity of an item to the basket, merging into any existing line.
+  const addToBasket = (itemId: string, qty: number, uom = '', description = '') => setCart((c) => {
+    const key = `i:${itemId}`;
+    const q = Math.max(1, Math.floor(qty) || 1);
+    const i = c.findIndex((l) => l.key === key);
+    if (i >= 0) return c.map((l, j) => (j === i ? { ...l, qty: l.qty + q } : l));
+    return [...c, { key, item_id: itemId, description, uom, unit_price: 0, qty: q, urgent: false, custom: false }];
+  });
+  const fillLow = (it: LowItem) => addToBasket(it.item_id, it.suggested_qty, it.uom ?? '', it.item_description ?? '');
+  const fillAllLow = () => {
+    const its = lowStock.data?.items ?? [];
+    if (!its.length) return;
+    its.forEach(fillLow);
+    notifySuccess(t('shop.low_filled', { n: its.length }));
+  };
 
   // Re-order: drop a past PR's lines back into the basket (merging quantities into any existing line).
   const reorder = (pr: MyPr) => {
@@ -278,6 +298,34 @@ export default function ShopPage() {
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
         {/* ── Catalog ─────────────────────────────────────────────── */}
         <div className="space-y-3">
+          {/* Low-stock quick-add (items at/below their reorder point) */}
+          {(lowStock.data?.count ?? 0) > 0 && (
+            <div className="overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5">
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <button type="button" onClick={() => setShowLow((v) => !v)} className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+                  <AlertTriangle className="size-4 shrink-0 text-amber-500" />
+                  <span className="truncate">{t('shop.low_stock_title')}</span>
+                  <Badge variant="warning" className="shrink-0">{lowStock.data?.count}</Badge>
+                  <ChevronDown className={cn('size-4 shrink-0 transition-transform', showLow && 'rotate-180')} />
+                </button>
+                <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={fillAllLow}>{t('shop.fill_all')}</Button>
+              </div>
+              {showLow && (
+                <ul className="divide-y border-t">
+                  {(lowStock.data?.items ?? []).map((it) => (
+                    <li key={it.item_id} className="flex items-center gap-2 px-3 py-1.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm">{it.item_description || it.item_id}</p>
+                        <p className="text-[11px] text-muted-foreground">{t('shop.on_hand', { n: num(it.on_hand) })} · {t('shop.min_n', { n: num(it.min_stock) })} · {t('shop.suggest_n', { n: num(it.suggested_qty) })}</p>
+                      </div>
+                      <Button size="sm" className="h-7 shrink-0" onClick={() => fillLow(it)}><Plus className="size-3.5" /> {t('shop.fill')}</Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {/* Search + view toggle */}
           <div className="flex items-center gap-2">
             <div className="relative flex-1">

@@ -142,6 +142,12 @@ other PR.
 **Expected result:** One purchase requisition is created for every item in the
 basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval.
 
+> **Top up what's running low.** When any item has fallen to/below its reorder
+> point, a **สินค้าใกล้หมด** banner appears at the top of the catalog — expand it
+> to see each low item (on-hand vs reorder point + a suggested top-up quantity),
+> press **เติม** to add one at its suggested quantity, or **เติมทั้งหมด** to add
+> them all to the basket at once.
+
 > **Your basket is saved on this device** — if you refresh or navigate away
 > mid-shop, the items are still there when you come back (it clears once you check
 > out). On a phone, a **floating cart button** (bottom-right) shows how many lines
