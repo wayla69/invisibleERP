@@ -231,8 +231,40 @@ export class FinanceMetricsService {
       fiscal_year: fiscalYear, period: period ?? null,
       groups: METRIC_GROUPS,
       budget: budgetRollup ? { revenue: budgetRollup.revenue, expense: budgetRollup.expense, net: budgetRollup.net } : null,
+      // AI-style MD&A narrative (docs/35 Phase 6) — computed from the FULL KPI set (not the group filter).
+      narrative: this.narrate(rows),
       kpis: filtered,
     };
+  }
+
+  // ── MD&A narrative (docs/35 Phase 6) ───────────────────────────────────────────────────────────
+  // A deterministic, explainable "what changed" commentary over the scorecard: a one-line headline plus
+  // bullets for the RAG-red KPIs and the biggest movers. Rule-based (no API key needed) so it is testable
+  // and always available; an LLM can enrich it later off the same structured input.
+  private narrate(kpis: any[]): { headline_th: string; headline_en: string; bullets: { severity: 'red' | 'amber' | 'info'; th: string; en: string }[] } {
+    const by = (id: string) => kpis.find((k) => k.id === id);
+    const unitEn = (u: string) => (u === 'pct' ? '%' : u === 'days' ? 'd' : u === 'x' ? '×' : '');
+    const fmt = (k: any) => (k?.value == null ? '—' : `${k.value.toLocaleString('en-US', { maximumFractionDigits: 2 })}${unitEn(k.unit)}`);
+    const reds = kpis.filter((k) => k.rag === 'red');
+    const ambers = kpis.filter((k) => k.rag === 'amber');
+    const netM = by('net_margin_pct'), revG = by('revenue_growth_mom_pct');
+
+    const hp_en: string[] = [], hp_th: string[] = [];
+    if (netM?.value != null) { hp_en.push(`Net margin ${fmt(netM)}`); hp_th.push(`อัตรากำไรสุทธิ ${fmt(netM)}`); }
+    if (revG?.value != null) { const s = revG.value >= 0 ? '+' : ''; hp_en.push(`revenue ${s}${revG.value}% MoM`); hp_th.push(`รายได้ ${s}${revG.value}% MoM`); }
+    const tail_en = reds.length ? `; ${reds.length} KPI(s) need action` : ambers.length ? `; ${ambers.length} to watch` : '; all KPIs healthy';
+    const tail_th = reds.length ? ` · ${reds.length} รายการต้องดูแล` : ambers.length ? ` · ${ambers.length} รายการเฝ้าระวัง` : ' · ตัวชี้วัดปกติทั้งหมด';
+    const headline_en = (hp_en.join(', ') || 'Financial KPIs') + tail_en;
+    const headline_th = (hp_th.join(' · ') || 'ตัวชี้วัดการเงิน') + tail_th;
+
+    const bullets: { severity: 'red' | 'amber' | 'info'; th: string; en: string }[] = [];
+    for (const k of reds.slice(0, 5)) bullets.push({ severity: 'red', en: `${k.label_en} at ${fmt(k)} is past its threshold`, th: `${k.label} ที่ ${fmt(k)} เกินเกณฑ์ที่กำหนด` });
+    // biggest movers vs prior period not already flagged red
+    const movers = kpis.filter((k) => k.rag !== 'red' && k.delta_pp_pct != null && Math.abs(k.delta_pp_pct) >= 10)
+      .sort((a, b) => Math.abs(b.delta_pp_pct) - Math.abs(a.delta_pp_pct)).slice(0, 3);
+    for (const k of movers) { const dir = k.delta_pp_pct >= 0 ? '↑' : '↓'; bullets.push({ severity: 'info', en: `${k.label_en} ${dir}${Math.abs(k.delta_pp_pct)}% vs prior period (now ${fmt(k)})`, th: `${k.label} ${dir}${Math.abs(k.delta_pp_pct)}% เทียบงวดก่อน (ปัจจุบัน ${fmt(k)})` }); }
+    if (!bullets.length) bullets.push({ severity: 'info', en: 'All KPIs are within their target ranges.', th: 'ตัวชี้วัดทั้งหมดอยู่ในเกณฑ์เป้าหมาย' });
+    return { headline_th, headline_en, bullets };
   }
 
   // ── Single-KPI trend: the metric's value for each of the last N months (sparkline + table) ──

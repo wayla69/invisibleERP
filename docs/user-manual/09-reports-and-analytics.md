@@ -108,6 +108,16 @@ read it:
 **Optional filters on the pack:** `period=YYYY-MM` (a specific month), `from`/`to`
 (a custom window), `group=<family>` (one KPI family), `as_of=YYYY-MM-DD`.
 
+The Command Center also shows a **“What changed”** panel — a plain-language
+summary (an MD&A-style narrative) of the headline movement plus the KPIs that need
+action or moved the most, generated automatically from the numbers.
+
+You can have the scorecard, the cash position and the close cockpit **emailed /
+LINE-delivered on a schedule** — on `/scheduled-reports` (§7) add a subscription of
+type **CFO KPI pack**, **Cash position + 13-week forecast** or **Period-close
+readiness**, pick daily / weekly / monthly, and the delivered summary carries the
+headline figures (the CFO pack includes the “what changed” line).
+
 > **This is the analytical-review control (ELC-07):** the same KPI definitions
 > also feed the executive scorecard and the scheduled KPI pack, so the number you
 > review is the number everywhere. Read-only — it never posts to the ledger.

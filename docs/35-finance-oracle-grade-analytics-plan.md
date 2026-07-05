@@ -297,7 +297,17 @@ exist (`income-statement/by-branch`, `cost-centers`).
   P&L (positive) + a segment with no activity returns zero, not error (control).
 - **Harness:** extend `finance-kpi.ts` — per-branch margins sum to the total P&L.
 
-## PHASE 6 — AI narrative (MD&A) + scheduled KPI packs + benchmarks
+## PHASE 6 — AI narrative (MD&A) + scheduled KPI packs + benchmarks — ✅ DELIVERED (2026-07-05)
+
+**Shipped:** (1) a deterministic **MD&A narrative** on the pack (`narrative` = headline + red/amber/mover
+bullets, th/en) surfaced on the CFO Command Center as a **"What changed"** panel; (2) three schedulable BI
+report types — **`cfo_kpi_pack`**, **`cash_position_pack`**, **`close_status_pack`** — that wrap the metrics
+aggregators and deliver via the existing email/LINE/in-app scheduler, each summary carrying the headline KPIs
+(the CFO pack carries the MD&A headline + red count). Rule-based narrative (no API key needed) so it is
+testable + always available; an LLM can enrich it later off the same structured input. `finance-kpi` harness
+55 checks (narrative), `bi` harness 36 (the three packs generate + schedule + summaries). Benchmarks
+(per-tenant RAG target overrides) deferred as optional. **No new RCM control** — scheduled delivery of
+read-only analytics; ITGC-OP-04 already captures scheduled-job failures. Below is the original plan.
 
 **Goal:** Oracle Narrative-Reporting-style auto-commentary + schedulable/emailable KPI packs.
 **Outcome demo:** a monthly `cfo_kpi_pack` email lands with the scorecard **and** an AI paragraph:
@@ -377,3 +387,4 @@ closes the biggest Oracle gap (a real, comparative, drill-through CFO dashboard)
 | 2026-07-05 | Platform | **Phase 3 DELIVERED** — Controller Close Cockpit: `GET /api/finance/metrics/close/status` + `/finance/close-cockpit` (tie-out REC-04 + readiness GL-19/20 + approvals GOV-01 + checklist, RAG + days-to-close); control GL-22 (RCM 185); `finance-kpi` 41 checks; nav + i18n. |
 | 2026-07-05 | Platform | **Phase 4 DELIVERED** — Treasury / Cash Command: `GET /api/finance/metrics/cash/position` + `/finance/treasury` (GL cash/bank position + 13-week forecast w/ trough + liquidity subset + FX exposure); control TR-01 (RCM 186); `finance-kpi` 48 checks; nav + i18n. |
 | 2026-07-05 | Platform | **Phase 5 DELIVERED** — Segment profitability: `GET /api/finance/metrics/profitability?by=branch\|cost_center\|project` + `/finance/profitability` (per-segment P&L + margins + contribution, reconciles to consolidated P&L); `finance-kpi` 54 checks; nav + i18n. No new control (read-only analytics; reinforces GL-13/ELC-07). |
+| 2026-07-05 | Platform | **Phase 6 DELIVERED (plan complete)** — MD&A narrative on the pack + "What changed" panel; schedulable `cfo_kpi_pack` / `cash_position_pack` / `close_status_pack` report types (wrap the aggregators, deliver via the existing scheduler); `finance-kpi` 55 / `bi` 36 checks. No new control (ITGC-OP-04 covers scheduled-job failures). |

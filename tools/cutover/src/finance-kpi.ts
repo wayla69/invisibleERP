@@ -147,6 +147,11 @@ async function main() {
   ok('RAG set: current_ratio green, dso graded, overdue_ar_pct red', kv('current_ratio')?.rag === 'green' && ['green', 'amber', 'red'].includes(kv('dso')?.rag) && kv('overdue_ar_pct')?.rag === 'red', `cr=${kv('current_ratio')?.rag} dso=${kv('dso')?.rag} oar=${kv('overdue_ar_pct')?.rag}`);
   ok('KPI count = registry (29) + 2 growth = 31', pack.kpis.length === 31, `n=${pack.kpis.length}`);
 
+  // MD&A narrative (docs/35 Phase 6) — headline (net margin + red count) + a red bullet for a breached KPI
+  ok('pack.narrative: headline (net margin 25% · 7 need action) + red bullets flagging breached KPIs',
+    !!pack.narrative && /Net margin 25%/.test(pack.narrative.headline_en ?? '') && /7 KPI\(s\) need action/.test(pack.narrative.headline_en ?? '') && Array.isArray(pack.narrative.bullets) && pack.narrative.bullets.some((b: any) => b.severity === 'red' && /past its threshold/.test(b.en)),
+    `hl="${pack.narrative?.headline_en}" reds=${(pack.narrative?.bullets ?? []).filter((b: any) => b.severity === 'red').length}`);
+
   // Budget comparative (approved budget) reaches the pack
   ok('pack.budget.revenue.budget = 90000 (approved budget)', near(pack.budget?.revenue?.budget, 90000), `=${JSON.stringify(pack.budget?.revenue)}`);
   ok('net_margin_pct carries a budget comparative (vs_budget_pct present)', kv('net_margin_pct')?.budget != null, `budget=${kv('net_margin_pct')?.budget}`);

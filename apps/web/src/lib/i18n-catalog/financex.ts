@@ -779,6 +779,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.cfo.trend_12m': { th: 'แนวโน้ม 12 เดือน', en: '12-month trend' },
   'fnx.cfo.view_detail': { th: 'ดูรายละเอียด →', en: 'View detail →' },
   'fnx.cfo.ttm_note': { th: 'ตัวชี้วัดประสิทธิภาพ (หมุนเวียน/DSO/ROA ฯลฯ) คิดบนฐาน 12 เดือนย้อนหลัง', en: 'Efficiency KPIs (turnover / DSO / ROA …) are on a trailing-12-month basis.' },
+  'fnx.cfo.what_changed': { th: 'สรุปสิ่งที่เปลี่ยนแปลง', en: 'What changed' },
 
   // Controller Close Cockpit (docs/35 Phase 3)
   'fnx.cockpit.title': { th: 'ศูนย์ปิดงวดบัญชี (Controller)', en: 'Close Cockpit' },

@@ -117,6 +117,11 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   tax_pnd_draft: { label: 'จัดทำแบบ ภ.ง.ด.3/53 (ฉบับร่าง)', labelEn: 'Draft PND3/53 WHT filing' },
   // Remittance reminder: the period's amounts due + statutory deadlines (7th PND / 15th PP30).
   tax_remittance_reminder: { label: 'แจ้งเตือนกำหนดนำส่งภาษี', labelEn: 'Tax remittance reminder' },
+  // docs/35 Phase 6 — schedulable finance analytics packs (wrap the FinanceMetricsService aggregators).
+  // Each run recomputes the read-only board and delivers it (email/LINE/in-app) with an MD&A headline.
+  cfo_kpi_pack: { label: 'สรุปตัวชี้วัด CFO + คำอธิบาย', labelEn: 'CFO KPI pack + narrative' },
+  cash_position_pack: { label: 'สถานะเงินสด + พยากรณ์ 13 สัปดาห์', labelEn: 'Cash position + 13-week forecast' },
+  close_status_pack: { label: 'ความพร้อมปิดงวดบัญชี', labelEn: 'Period-close readiness' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -799,6 +804,23 @@ export class BiService implements OnModuleInit {
     if (reportType === 'exec_scorecard') {
       const r = await this.execScorecard(user);
       return { data: r, summary: `Exec: sales(MTD) ${r.finance.sales_mtd}, margin ${r.finance.margin_pct ?? '—'}%, win rate ${r.crm.win_rate_pct ?? '—'}%, portfolio CPI ${r.projects.cpi ?? '—'}, ${r.supply_chain.blocked_invoices} held invoice(s)`, summaryTh: `ผู้บริหาร: ยอดขายเดือนนี้ ${r.finance.sales_mtd} · มาร์จิน ${r.finance.margin_pct ?? '—'}% · อัตราชนะ ${r.crm.win_rate_pct ?? '—'}% · CPI ${r.projects.cpi ?? '—'}` };
+    }
+    // docs/35 Phase 6 — schedulable finance packs (wrap the canonical aggregators; summary carries the MD&A headline).
+    if (reportType === 'cfo_kpi_pack') {
+      if (!this.financeMetrics) throw new BadRequestException({ code: 'FINANCE_METRICS_UNAVAILABLE', message: 'Finance metrics engine not available', messageTh: 'ระบบตัวชี้วัดการเงินไม่พร้อมใช้งาน' });
+      const r: any = await this.financeMetrics.pack({}, user);
+      const reds = r.kpis.filter((k: any) => k.rag === 'red').length;
+      return { data: r, summary: `CFO KPIs (${r.as_of}): ${r.narrative?.headline_en ?? ''} — ${reds} red`, summaryTh: `ตัวชี้วัด CFO (${r.as_of}): ${r.narrative?.headline_th ?? ''}` };
+    }
+    if (reportType === 'cash_position_pack') {
+      if (!this.financeMetrics) throw new BadRequestException({ code: 'FINANCE_METRICS_UNAVAILABLE', message: 'Finance metrics engine not available', messageTh: 'ระบบตัวชี้วัดการเงินไม่พร้อมใช้งาน' });
+      const r: any = await this.financeMetrics.cashPosition({ weeks: 13 }, user);
+      return { data: r, summary: `Cash ${r.total_cash}; projected close ${r.forecast?.projected_closing_cash}; trough ${r.forecast?.min_balance} at wk+${r.forecast?.min_week}`, summaryTh: `เงินสด ${r.total_cash} · คาดการณ์ปลายช่วง ${r.forecast?.projected_closing_cash} · จุดต่ำสุด ${r.forecast?.min_balance} สัปดาห์ +${r.forecast?.min_week}` };
+    }
+    if (reportType === 'close_status_pack') {
+      if (!this.financeMetrics) throw new BadRequestException({ code: 'FINANCE_METRICS_UNAVAILABLE', message: 'Finance metrics engine not available', messageTh: 'ระบบตัวชี้วัดการเงินไม่พร้อมใช้งาน' });
+      const r: any = await this.financeMetrics.closeStatus({}, user);
+      return { data: r, summary: `Close ${r.period}: overall ${r.rag?.overall}; tie-out exceptions ${r.tie_out?.exceptions ?? '—'}; days-to-close ${r.days_to_close}`, summaryTh: `ปิดงวด ${r.period}: สถานะ ${r.rag?.overall} · รายการไม่ตรง ${r.tie_out?.exceptions ?? '—'} · จำนวนวันปิดงวด ${r.days_to_close}` };
     }
     if (reportType === 'ai_overage_billing') {
       if (!this.billing) throw new BadRequestException({ code: 'BILLING_UNAVAILABLE', message: 'Billing service not available', messageTh: 'ระบบเรียกเก็บเงินไม่พร้อมใช้งาน' });

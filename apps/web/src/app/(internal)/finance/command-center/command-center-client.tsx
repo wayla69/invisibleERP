@@ -21,7 +21,8 @@ interface Kpi {
   delta_pp: number | null; delta_yoy: number | null; delta_pp_pct: number | null; delta_yoy_pct: number | null; vs_budget_pct: number | null;
   rag: Rag; drill: { accounts: string[]; href: string };
 }
-interface Pack { as_of: string; groups: { id: string; label: string; labelEn: string }[]; kpis: Kpi[] }
+interface Narrative { headline_th: string; headline_en: string; bullets: { severity: 'red' | 'amber' | 'info'; th: string; en: string }[] }
+interface Pack { as_of: string; groups: { id: string; label: string; labelEn: string }[]; kpis: Kpi[]; narrative?: Narrative }
 
 const RAG_TONE: Record<'green' | 'amber' | 'red', { text: string; bg: string; ring: string; Icon: typeof CheckCircle2 }> = {
   green: { text: 'text-success', bg: 'bg-success/15', ring: 'border-l-success', Icon: CheckCircle2 },
@@ -89,6 +90,22 @@ export function CommandCenterClient({ initialData }: { initialData: Pack | null 
           <RagCount tone="green" n={counts.green} label={t('fnx.cfo.healthy')} />
         </span>
       </div>
+
+      {/* What changed — the MD&A narrative */}
+      {pack.narrative && (
+        <Card className="mb-4 gap-1.5 p-4">
+          <h3 className="text-sm font-semibold">{t('fnx.cfo.what_changed')}</h3>
+          <p className="text-sm text-muted-foreground">{lang === 'th' ? pack.narrative.headline_th : pack.narrative.headline_en}</p>
+          <ul className="mt-1 space-y-1 text-xs">
+            {pack.narrative.bullets.map((b, i) => (
+              <li key={i} className="flex items-start gap-1.5">
+                <span className={`mt-1 size-1.5 shrink-0 rounded-full ${b.severity === 'red' ? 'bg-destructive' : b.severity === 'amber' ? 'bg-warning' : 'bg-info'}`} />
+                <span className={b.severity === 'red' ? 'text-destructive' : 'text-muted-foreground'}>{lang === 'th' ? b.th : b.en}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {pack.groups.map((g) => {
         const kpis = pack.kpis.filter((k) => k.group === g.id);
