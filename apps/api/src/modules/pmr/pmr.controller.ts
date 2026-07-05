@@ -30,6 +30,20 @@ export class PmrController {
     return this.svc.submit(b, u);
   }
 
+  // Shop-for-a-project reads (pr_raise-safe): the projects a requester may shop into, and a project's
+  // approved BoQ material lines with remaining budget. Static segments — never collide with :pmrNo below.
+  @Get('projects')
+  @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  shoppableProjects(@CurrentUser() u: JwtUser) {
+    return this.svc.shoppableProjects();
+  }
+
+  @Get('project/:code/boq')
+  @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  shoppableBoq(@Param('code') code: string, @CurrentUser() u: JwtUser) {
+    return this.svc.shoppableBoq(code);
+  }
+
   @Get('project/:code')
   @Permissions('pr_raise', 'procurement', 'planner', 'exec')
   listForProject(@Param('code') code: string, @CurrentUser() u: JwtUser) {

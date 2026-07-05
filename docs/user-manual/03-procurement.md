@@ -164,6 +164,18 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 > shows *ไม่พบสินค้า*, and if several items match the code the grid filters to them
 > so you can pick. No app or camera setup needed.
 
+> **Buying for a project? Shop into its budget.** If you work on projects, a
+> **ซื้อเข้าโครงการ** picker appears in the shop header (and a *Shop for this project*
+> button sits on the project page). Pick a project and you get a shop showing **only
+> the items its approved budget (BoQ) allows**, each with its remaining budget. Add
+> them and check out — this raises a **ใบขอเบิกวัสดุ (Project Material Requisition)**:
+> if it's within budget it's fulfilled from stock or turned into a purchase
+> requisition automatically; if it goes over a line's budget it's sent to an
+> authorised person to approve first. **An item that isn't in the project's budget
+> can't be added here** — an authorised person must add it to the project budget
+> first (see *Project accounting* → *material requisitions*). This keeps project
+> spend inside the approved budget by design (controls **PROJ-12/PROJ-13**).
+
 > **Track your requests without leaving the page.** A **คำขอซื้อล่าสุดของฉัน** card
 > (below the basket) lists your last few requisitions with their live approval
 > **status** — tap one (or **ดูทั้งหมด**) to open the full requisitions page. Press
