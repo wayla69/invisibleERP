@@ -38,6 +38,10 @@ export default function PrivacyPolicyPage() {
       <p className="mt-8 text-muted-foreground">
         ฉบับเต็ม (อังกฤษ): <code>docs/legal/privacy-policy.md</code> · ข้อกำหนดการใช้บริการและ DPA อยู่ใน <code>docs/legal/</code>
       </p>
+      <p className="mt-6 text-muted-foreground">
+        ดูมาตรการความปลอดภัยและความน่าเชื่อถือของระบบได้ที่{' '}
+        <Link href="/legal/security" className="underline hover:text-primary">ความปลอดภัยและความน่าเชื่อถือ</Link>
+      </p>
       <p className="mt-4">
         <Link href="/signup" className="text-primary hover:underline">← กลับไปสมัครใช้งาน</Link>
       </p>
