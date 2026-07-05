@@ -5,6 +5,8 @@ import { employees, payslips } from '../../database/schema/payroll';
 import { timesheets, leaveRequests, leaveBalances, expenseClaims } from '../../database/schema/hcm';
 import { projects } from '../../database/schema';
 import { FinanceService } from '../finance/finance.service';
+import { PayrollService } from '../payroll/payroll.service';
+import type { PayslipPrintData } from '../payroll/payslip-pdf.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { LineNotifyService } from '../messaging/line-notify.service';
@@ -23,6 +25,9 @@ export class EssService {
     // LC-3 (docs/30) — LINE notify: leave-approvers (holders of the /api/hcm gate perms) hear about a
     // new self-service leave request; the maker is excluded. Best-effort — never blocks the request.
     @Optional() private readonly lineNotify?: LineNotifyService,
+    // Payslip download (PDPA-scoped to the caller's own slip). @Optional so a hand-constructed EssService
+    // still builds; the own-payslip PDF route 404s when absent.
+    @Optional() private readonly payroll?: PayrollService,
   ) {}
 
   // Resolve the logged-in user → their employee row (by user_name link, emp_code fallback). RLS scopes
@@ -72,6 +77,22 @@ export class EssService {
     const emp = await this.me(user);
     const rows = await db.select().from(payslips).where(eq(payslips.employeeId, Number(emp.id))).orderBy(desc(payslips.id)).limit(36);
     return { payslips: rows.map((p: any) => ({ id: Number(p.id), emp_code: p.empCode, gross: n(p.gross), ot_pay: n(p.otPay), sso_employee: n(p.ssoEmployee), pf_employee: n(p.pfEmployee), wht: n(p.wht), net: n(p.net) })), count: rows.length };
+  }
+
+  // PDPA-scoped payslip download: resolve the caller's OWN employee via me(), then fetch the slip with that
+  // employee_id as a hard predicate — a slip id belonging to anyone else 404s, so an employee can never pull
+  // a colleague's payslip even by guessing an id. Rendering is delegated to PayrollService (shared renderer).
+  async myPayslipForPrint(slipId: number, user: JwtUser): Promise<PayslipPrintData> {
+    if (!this.payroll) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Payslip renderer not wired' });
+    const emp = await this.me(user);
+    return this.payroll.getSlipForPrint(slipId, user, Number(emp.id));
+  }
+  payslipHtml(p: PayslipPrintData): string {
+    if (!this.payroll) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Payslip renderer not wired' });
+    return this.payroll.payslipHtml(p);
+  }
+  renderPayslipPdf(p: PayslipPrintData): Promise<Buffer | null> {
+    return this.payroll ? this.payroll.renderPayslipPdf(p) : Promise.resolve(null);
   }
 
   async myExpenses(user: JwtUser) {

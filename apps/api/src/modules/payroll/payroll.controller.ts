@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Query, Optional, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Optional, BadRequestException, HttpCode, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -23,6 +24,7 @@ const EmployeeBody = z.object({
 
 const RejectBody = z.object({ reason: z.string().optional() });
 const RemitBody = z.object({ account_code: z.string().min(1), amount: z.number().positive(), ref: z.string().optional() });
+const DocEmailBody = z.object({ to_email: z.string().email() });
 
 @Controller('api/payroll')
 @Permissions('exec', 'users', 'creditors')
@@ -83,6 +85,22 @@ export class PayrollController {
   @Get('runs/:period/slips')
   getSlips(@Param('period') period: string, @CurrentUser() u: JwtUser) {
     return this.svc.getSlips(period, u);
+  }
+
+  // Printable สลิปเงินเดือน (payslip) for HR/payroll — HTML→PDF via the shared renderer (HTML fallback when
+  // Chromium absent). The controller gate (exec/users/creditors) already restricts this to HR; an employee's
+  // own-slip download is the separate PDPA-scoped ESS route (GET /api/ess/payslips/:id/pdf).
+  @Get('slips/:id/pdf')
+  async slipPdf(@Param('id') id: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const p = await this.svc.getSlipForPrint(Number(id), u);
+    const buf = await this.svc.renderPayslipPdf(p);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="payslip-${p.slip_id}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(this.svc.payslipHtml(p));
+  }
+
+  @Post('slips/:id/send-email') @HttpCode(200)
+  emailSlip(@Param('id') id: string, @Body(new ZodValidationPipe(DocEmailBody)) b: z.infer<typeof DocEmailBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.emailPayslip(Number(id), b.to_email, u);
   }
 
   @Get('pnd1')

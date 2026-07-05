@@ -1132,6 +1132,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'hr.payslips_title': { th: 'สลิปเงินเดือน', en: 'Payslips' },
   'hr.payslips_empty_title': { th: 'ยังไม่มีสลิปเงินเดือน', en: 'No payslips yet' },
   'hr.payslips_empty_desc': { th: 'สลิปจะปรากฏที่นี่หลังจากมีการประมวลผลเงินเดือน', en: 'Payslips appear here once payroll has been processed' },
+  'hr.payslip_download': { th: 'ดาวน์โหลดสลิป (PDF)', en: 'Download payslip (PDF)' },
   'hr.slip_no': { th: 'รอบที่', en: 'Slip no.' },
   'hr.gross_income': { th: 'รายได้รวม', en: 'Gross income' },
   'hr.ot_pay': { th: 'ค่า OT', en: 'OT pay' },

@@ -86,6 +86,14 @@ and its accounting entry is held out of the books until **a different person app
 **Expected result:** Each employee's payslip shows gross pay, each deduction, and
 net pay. Distribute payslips to employees as needed.
 
+**Print / email a payslip (HR/payroll).** Each slip can be printed or emailed as a
+PDF (`GET /api/payroll/slips/:id/pdf`, `POST /api/payroll/slips/:id/send-email`).
+This is restricted to HR/payroll (permission `exec`, `users` or `creditors`);
+an ordinary employee cannot use it — they download **their own** slip through
+self-service instead (see §5.1). On the printed slip the employee's **citizen ID
+is masked to its last 4 digits** (privacy/PDPA), and the employer's SSO/pension
+contributions are shown for information (they are not deducted from the employee).
+
 [screenshot: payslip detail]
 
 ---
@@ -131,6 +139,10 @@ Tabs: **ข้อมูลของฉัน** (My info) · **ขอลางา
 1. Open **ESS** (`/ess`) → **ข้อมูลของฉัน**.
 2. Review your profile, your **leave balances** (entitled / used / remaining), and
    your **payslips** (gross, OT, SSO, pension, withholding tax, net).
+3. Click the **printer icon** on a payslip row to **download it as a PDF**
+   (สลิปเงินเดือน). You can only ever open **your own** slips — the system resolves
+   your employee record from your login, so a link to anyone else's slip is refused.
+   Your citizen ID is masked to its last 4 digits on the PDF.
 
 ### 5.2 Request leave
 1. Go to the **ขอลางาน** tab, choose the leave type, dates, number of days and

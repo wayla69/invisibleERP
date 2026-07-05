@@ -1,13 +1,16 @@
-import { Inject, Injectable, Optional, BadRequestException, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { employees, payruns, payslips, timesheets, leaveRequests } from '../../database/schema';
+import { employees, payruns, payslips, timesheets, leaveRequests, tenants } from '../../database/schema';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { LedgerService } from '../ledger/ledger.service';
 import { JobWorkerService } from '../jobs/job-worker.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { computePayslipFull, overtimePay } from './payroll-calc';
+import { sellerParty } from '../../common/doc-party';
+import { PayslipPdfService, type PayslipPrintData, maskNationalId } from './payslip-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
 
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -26,6 +29,10 @@ export class PayrollService implements OnModuleInit {
     private readonly ledger: LedgerService,
     // @Optional so partial harnesses that construct PayrollService without the (global) JobsModule still work.
     @Optional() private readonly worker?: JobWorkerService,
+    // Printable สลิปเงินเดือน (payslip) renderer + generic document email. @Optional so hand-constructed
+    // harnesses that build PayrollService without PdfModule/MailModule still compile (print path just 404s).
+    @Optional() private readonly payslipPdf?: PayslipPdfService,
+    @Optional() private readonly docEmail?: DocEmailService,
   ) {}
 
   // Register the worker handler for an async payroll run. The worker has already established the job's tenant
@@ -280,7 +287,57 @@ export class PayrollService implements OnModuleInit {
     const [run] = await db.select().from(payruns).where(eq(payruns.period, period)).orderBy(desc(payruns.id)).limit(1);
     if (!run) return { period, slips: [], count: 0 };
     const rows = await db.select().from(payslips).where(eq(payslips.payrunId, Number(run.id))).orderBy(payslips.empCode);
-    return { period, entry_no: run.entryNo, slips: rows.map((s: any) => ({ emp_code: s.empCode, emp_name: s.empName, national_id: s.nationalId, gross: n(s.gross), sso_employee: n(s.ssoEmployee), sso_employer: n(s.ssoEmployer), wht: n(s.wht), net: n(s.net) })), count: rows.length };
+    return { period, entry_no: run.entryNo, slips: rows.map((s: any) => ({ id: Number(s.id), emp_code: s.empCode, emp_name: s.empName, national_id: s.nationalId, gross: n(s.gross), sso_employee: n(s.ssoEmployee), sso_employer: n(s.ssoEmployer), wht: n(s.wht), net: n(s.net) })), count: rows.length };
+  }
+
+  // ── สลิปเงินเดือน (payslip) print/email ──────────────────────────────────────────────────────────
+  // Assemble one printable payslip from its payslip row joined to the payrun (period/pay-date/JE ref) and the
+  // employee (position/department). `restrictEmployeeId`, when set, ANDs an employee_id predicate onto the
+  // lookup — this is the PDPA guard the ESS path passes so an employee can only ever resolve their OWN slip
+  // (a slip id that isn't theirs simply 404s). HR/payroll callers omit it and may print any slip in the tenant
+  // (RLS still scopes the query to the caller's tenant). The citizen-ID is masked on the face of the slip.
+  async getSlipForPrint(slipId: number, user: JwtUser, restrictEmployeeId?: number): Promise<PayslipPrintData> {
+    const db = this.db;
+    const conds = [eq(payslips.id, slipId)];
+    if (restrictEmployeeId != null) conds.push(eq(payslips.employeeId, restrictEmployeeId));
+    const [slip] = await db.select().from(payslips).where(and(...conds)).limit(1);
+    if (!slip) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payslip not found', messageTh: 'ไม่พบสลิปเงินเดือน' });
+    const [run] = await db.select().from(payruns).where(eq(payruns.id, Number(slip.payrunId))).limit(1);
+    const [emp] = slip.employeeId != null ? await db.select().from(employees).where(eq(employees.id, Number(slip.employeeId))).limit(1) : [null];
+    const [t] = slip.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(slip.tenantId))).limit(1) : [null];
+    const gross = n(slip.gross), ot = n(slip.otPay), unpaid = n(slip.unpaid);
+    const period = run?.period ?? '';
+    return {
+      slip_id: Number(slip.id), period, pay_date: period ? `${period}-28` : null, entry_no: run?.entryNo ?? null,
+      emp_code: slip.empCode ?? emp?.empCode ?? null, emp_name: slip.empName ?? emp?.name ?? null,
+      position: emp?.position ?? null, department: emp?.department ?? null,
+      national_id: maskNationalId(slip.nationalId), currency: 'THB', seller: sellerParty(t),
+      base: r2(gross - ot + unpaid), ot_pay: ot, gross, unpaid,
+      sso_employee: n(slip.ssoEmployee), pf_employee: n(slip.pfEmployee), wht: n(slip.wht), net: n(slip.net),
+      sso_employer: n(slip.ssoEmployer), pf_employer: n(slip.pfEmployer),
+    };
+  }
+
+  payslipHtml(p: PayslipPrintData): string {
+    if (!this.payslipPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Payslip renderer not wired' });
+    return this.payslipPdf.payslipHtml(p);
+  }
+  renderPayslipPdf(p: PayslipPrintData): Promise<Buffer | null> {
+    return this.payslipPdf ? this.payslipPdf.renderToPdf(this.payslipPdf.payslipHtml(p)) : Promise.resolve(null);
+  }
+
+  // Email the payslip as a PDF attachment (HTML fallback when Chromium absent). Employees carry no email
+  // column, so the recipient is supplied explicitly (`to_email`); the sender defaults to the company profile.
+  async emailPayslip(slipId: number, toEmail: string, user: JwtUser, restrictEmployeeId?: number) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const p = await this.getSlipForPrint(slipId, user, restrictEmployeeId);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: p.seller.email ?? undefined, filename: `payslip-${p.emp_code ?? p.slip_id}-${p.period}`,
+      subject: `สลิปเงินเดือน ${p.period} — ${p.emp_name ?? p.emp_code ?? ''}`.trim(),
+      text: `เรียน ${p.emp_name ?? ''},\n\nแนบสลิปเงินเดือนงวด ${p.period} เงินได้สุทธิ ${p.net.toLocaleString()} ${p.currency}\n\n${p.seller.name}`,
+      html: this.payslipHtml(p),
+    });
+    return { ...res, slip_id: p.slip_id, period: p.period };
   }
 
   // ภ.ง.ด.1 — monthly salary WHT remittance: per-employee withheld + total payable to the Revenue Dept.

@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Param, Body, Module } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Module, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceModule } from '../finance/finance.module';
+import { PayrollModule } from '../payroll/payroll.module';
 import { EssService } from './ess.service';
 import { MessagingModule } from '../messaging/messaging.module';
 
@@ -21,6 +23,15 @@ export class EssController {
   @Get('leave') @Permissions('ess') leave(@CurrentUser() u: JwtUser) { return this.ess.myLeave(u); }
   @Post('leave') @Permissions('ess') requestLeave(@Body(new ZodValidationPipe(LeaveBody)) b: z.infer<typeof LeaveBody>, @CurrentUser() u: JwtUser) { return this.ess.requestLeave(b, u); }
   @Get('payslips') @Permissions('ess') payslips(@CurrentUser() u: JwtUser) { return this.ess.myPayslips(u); }
+  // Employee's OWN payslip PDF (PDPA-scoped in the service via me() → employee_id predicate). Declared before
+  // any `payslips/:id` write route would be; a slip id that isn't the caller's own resolves to 404.
+  @Get('payslips/:id/pdf') @Permissions('ess')
+  async payslipPdf(@Param('id') id: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const p = await this.ess.myPayslipForPrint(Number(id), u);
+    const buf = await this.ess.renderPayslipPdf(p);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="payslip-${p.slip_id}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(this.ess.payslipHtml(p));
+  }
   @Get('expenses') @Permissions('ess') expenses(@CurrentUser() u: JwtUser) { return this.ess.myExpenses(u); }
   // Approver inbox — list every pending claim awaiting a decision (perm `approvals`, NOT self-scoped).
   // Declared before the `expenses/:id/decide` route so the literal `pending` segment is never captured as an id.
@@ -29,5 +40,5 @@ export class EssController {
   @Post('expenses/:id/decide') @Permissions('approvals') decide(@Param('id') id: string, @Body(new ZodValidationPipe(DecideBody)) b: z.infer<typeof DecideBody>, @CurrentUser() u: JwtUser) { return this.ess.approveExpense(+id, b.approve, u); }
 }
 
-@Module({ imports: [FinanceModule, MessagingModule], controllers: [EssController], providers: [EssService] })
+@Module({ imports: [FinanceModule, MessagingModule, PayrollModule], controllers: [EssController], providers: [EssService] })
 export class EssModule {}
