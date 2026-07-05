@@ -13,6 +13,8 @@ import { ymd } from '../../database/queries';
 import { GrPdfService, type GrPrintData } from './gr-pdf.service';
 import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
+import { normalizeA4Template } from '../../common/a4-template';
+import { DocumentTemplatesService } from '../document-templates/document-templates.service';
 import type { JwtUser } from '../../common/decorators';
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -43,6 +45,7 @@ export class ProcurementService {
     @Optional() private readonly commitments?: CommitmentsService, // M1 (PROJ-12) — BoQ-line budget encumbrance
     @Optional() private readonly grPdf?: GrPdfService,             // ใบรับสินค้า renderer
     @Optional() private readonly docEmail?: DocEmailService,        // @Global MailModule
+    @Optional() private readonly docTemplates?: DocumentTemplatesService, // no-code PO template (presentation)
   ) {}
 
   // D2 — best-effort LINE push to the requester(s) of every PR linked to a PO (pr_items.po_no), closing
@@ -694,6 +697,9 @@ export class ProcurementService {
     const subtotal = lines.reduce((a, l) => a + l.amount, 0);
     const vatRate = t?.vatRegistered ? n(t.vatRate ?? 0.07) : 0;
     const vatAmount = Math.round(subtotal * vatRate * 100) / 100;
+    // Resolve the tenant's active PO template (presentation only); a lookup failure never blocks the doc.
+    let template = normalizeA4Template({});
+    try { if (this.docTemplates) template = normalizeA4Template(await this.docTemplates.resolveActive('purchase_order')); } catch { /* keep default */ }
 
     return {
       po_no: po.poNo, po_date: po.poDate ?? null, expected_date: po.expectedDate ?? null, status: String(po.status ?? ''),
@@ -702,12 +708,13 @@ export class ProcurementService {
       buyer: {
         name: t?.legalName || t?.name || 'บริษัทของฉัน', address: buyerAddress || (t?.address ?? '-'),
         tax_id: t?.taxId ?? null, branch_label: t?.branchLabelTh ?? 'สำนักงานใหญ่', phone: t?.phone ?? null,
+        logo_url: t?.logoUrl ?? null,
       },
       vendor: {
         name: vendorRow?.name ?? po.vendorName ?? '-', address: vendorRow?.address ?? null, tax_id: vendorRow?.taxId ?? null,
         contact: vendorRow?.contact ?? null, phone: vendorRow?.phone ?? null, payment_terms: vendorRow?.paymentTerms ?? null,
       },
-      lines, subtotal, vat_rate: vatRate, vat_amount: vatAmount, grand_total: Math.round((subtotal + vatAmount) * 100) / 100,
+      lines, subtotal, vat_rate: vatRate, vat_amount: vatAmount, grand_total: Math.round((subtotal + vatAmount) * 100) / 100, template,
     };
   }
 

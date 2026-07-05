@@ -190,7 +190,7 @@ export class ProcurementController {
   @Get('pos/:poNo/pdf') @Permissions('procurement', 'planner', 'exec', 'wh_receive', 'warehouse')
   async printPo(@Param('poNo') poNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const po = await this.svc.getPoForPrint(poNo, u);
-    const html = this.poPdf.purchaseOrderHtml(po);
+    const html = this.poPdf.purchaseOrderHtml(po, po.template);
     const buf = await this.poPdf.renderToPdf(html);
     if (buf) {
       reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${poNo}.pdf"`).header('Content-Length', buf.length).send(buf);

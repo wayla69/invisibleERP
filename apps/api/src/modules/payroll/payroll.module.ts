@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { LedgerModule } from '../ledger/ledger.module';
+import { DocumentTemplatesModule } from '../document-templates/document-templates.module';
 import { PayrollController } from './payroll.controller';
 import { PayrollService } from './payroll.service';
 import { PayslipPdfService } from './payslip-pdf.service';
@@ -9,7 +10,7 @@ import { PayslipPdfService } from './payslip-pdf.service';
 // injects the @Global PdfRenderer; DocEmailService is likewise @Global (MailModule) — no import needed for
 // either. PayrollService is exported so the ESS module can serve an employee's own PDPA-scoped payslip.
 @Module({
-  imports: [LedgerModule],
+  imports: [LedgerModule, DocumentTemplatesModule],
   controllers: [PayrollController],
   providers: [PayrollService, PayslipPdfService],
   exports: [PayrollService],

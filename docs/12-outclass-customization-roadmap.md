@@ -124,9 +124,15 @@ nothing to the GL. That discipline is itself part of "outclass."
 - **Docs:** `process-narratives/27-platform-customization.md` §7.10 (+RACI, control matrix, error codes,
   revision 0.2); user manual `12-platform-customization.md`; UAT `08-admin-sod-uat.md` UAT-ADM-040/041 +
   traceability. No new RCM control (operational/presentation; reinforces REST-10 receipt tie-out — unaffected).
-- **Deferred (next increment of Phase 10):** template-driven rendering for abbreviated/full tax invoices
-  (presentation-only, mandatory fields preserved), quotations, POs, payslips; logo file upload to object
-  storage (today a pasted https URL / data-URI, per Phase 9).
+- **Delivered (next increment, 2026-07-05):** template-driven LIVE rendering for the A4 documents
+  **quotation, purchase order and payslip** — a shared `common/a4-template.ts` config (accent, logo, header
+  note, seller-line toggles, amount-in-words, signature captions, footer terms) applied by each per-module
+  renderer at print time via the parameterized `common/doc-html.ts` shell; the designer previews a real A4
+  sample per type + per-type web knob panels. See narrative `27-platform-customization.md` §7.13 / rev 1.7.
+- **Deferred (next increment of Phase 10):** template-driven LIVE rendering for the **abbreviated/full tax
+  invoices** (authorable + previewable now, with the ม.86/4 mandatory seller fields force-kept; the live
+  doc wiring is fiscal-sensitive and pending); logo file upload to object storage (today a pasted https URL
+  / data-URI, per Phase 9).
 
 ---
 
