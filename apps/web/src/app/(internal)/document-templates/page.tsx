@@ -93,6 +93,7 @@ export default function DocumentTemplatesPage() {
   const isLive = activeType?.status === 'live';
   const isA4 = docType !== 'receipt';
   const isFiscal = FISCAL_TYPES.includes(docType);
+  const isSlip = docType === 'tax_invoice_abbreviated'; // 80mm thermal slip — only header/footer notes apply
   const defaultFor = (dt: string): any => (dt === 'receipt' ? DEFAULT_CFG : DEFAULT_A4);
 
   const resetEditor = (dt: string = docType) => { setSelectedId(null); setName(''); setCfg(defaultFor(dt)); setMsg(''); };
@@ -203,7 +204,17 @@ export default function DocumentTemplatesPage() {
               </div>
               </>)}
 
-              {isA4 && (<>
+              {isSlip && (<>
+              <div className="grid gap-2 sm:col-span-2"><Label htmlFor="s_hdr">{t('st.dt.header_note')}</Label><Input id="s_hdr" value={cfg.header.header_note} onChange={(e) => setCfg((c: any) => ({ ...c, header: { ...c.header, header_note: e.target.value } }))} placeholder={t('st.dt.header_note_ph')} /></div>
+              <div className="grid gap-2 sm:col-span-2"><Label htmlFor="s_terms">{t('st.dt.footer_note')}</Label><Input id="s_terms" value={cfg.footer.terms_text} onChange={(e) => setCfg((c: any) => ({ ...c, footer: { ...c.footer, terms_text: e.target.value } }))} placeholder={t('st.dt.footer_note_ph')} /></div>
+              <div className="grid gap-2 sm:col-span-2">
+                <Label htmlFor="s_extra">{t('st.dt.extra_lines')}</Label>
+                <textarea id="s_extra" rows={2} className="rounded-md border bg-transparent px-3 py-2 text-sm" value={cfg.footer.extra_lines.join('\n')} onChange={(e) => setCfg((c: any) => ({ ...c, footer: { ...c.footer, extra_lines: e.target.value.split('\n').slice(0, 5) } }))} placeholder={t('st.dt.extra_lines_ph')} />
+              </div>
+              <p className="sm:col-span-2 text-xs text-muted-foreground">🔒 {t('st.dt.slip_note')}</p>
+              </>)}
+
+              {isA4 && !isSlip && (<>
               <div className="grid gap-2"><Label htmlFor="a_logo">{t('st.dt.logo')}</Label><YesNo id="a_logo" value={cfg.header.show_logo} onChange={(v) => setCfg((c: any) => ({ ...c, header: { ...c.header, show_logo: v } }))} /></div>
               <div className="grid gap-2">
                 <Label htmlFor="a_accent">{t('st.dt.accent')}</Label>

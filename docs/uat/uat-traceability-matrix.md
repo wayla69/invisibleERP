@@ -554,6 +554,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-037 | An approved credit/debit note adjusts output VAT in its period | TAX-07, TAX-04 | 06 §14 (rev 0.12) |
 | UAT-TAX-038 | Print a credit note as a ม.86/10 document | TAX-07 | 06 §14 (rev 0.12) |
 | UAT-TAX-039 | Full tax invoice PDF applies the no-code document template (presentation only; ม.86/4 fiscal integrity) | TAX-01 | 06 §14 (rev 0.13), 27 §7.13 |
+| UAT-TAX-040 | Abbreviated 80mm slip applies the no-code document template (presentation only; ม.86/6 fiscal integrity) | TAX-01 | 06 §14 (rev 0.14), 27 §7.13 |
 
 ## 07 — Payroll → `05-payroll.md`
 

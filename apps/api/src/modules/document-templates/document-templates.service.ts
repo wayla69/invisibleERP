@@ -4,17 +4,17 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { documentTemplates, tenants } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { buildSampleReceiptData, renderReceiptHtml, normalizeReceiptTemplate, type ReceiptData } from '../printing/receipt-render';
-import { normalizeA4Template, renderA4SamplePreview } from '../../common/a4-template';
+import { normalizeA4Template, renderA4SamplePreview, renderAbbreviatedSlipPreview } from '../../common/a4-template';
 import type { DocParty } from '../../common/doc-html';
 
 // Catalog of customizable document types. `receipt` (Platform Phase 10 — A3) plus the A4 documents
-// `quotation` / `purchase_order` / `payslip` / `tax_invoice_full` are wired to the LIVE render (their
-// per-module renderer applies the tenant's active template at print time). For the fiscal full tax invoice
-// the config is normalized with { fiscal: true } so the mandatory ม.86/4 seller lines are always kept. The
-// abbreviated (80mm thermal) tax invoice can be authored + previewed now; its live slip wiring follows.
+// `quotation` / `purchase_order` / `payslip` / `tax_invoice_full` AND the 80mm `tax_invoice_abbreviated` slip
+// are wired to the LIVE render (their per-module renderer applies the tenant's active template at print time).
+// For the fiscal tax invoices the config is normalized with { fiscal: true } so the mandatory ม.86/4-6 seller
+// lines are always kept. The abbreviated slip honours only the thermal-appropriate knobs (header + footer note).
 const DOC_TYPES = [
   { key: 'receipt', label_th: 'ใบเสร็จรับเงิน', label_en: 'Sales receipt', status: 'live' },
-  { key: 'tax_invoice_abbreviated', label_th: 'ใบกำกับภาษีอย่างย่อ', label_en: 'Abbreviated tax invoice', status: 'planned' },
+  { key: 'tax_invoice_abbreviated', label_th: 'ใบกำกับภาษีอย่างย่อ', label_en: 'Abbreviated tax invoice', status: 'live' },
   { key: 'tax_invoice_full', label_th: 'ใบกำกับภาษีเต็มรูป', label_en: 'Full tax invoice', status: 'live' },
   { key: 'quotation', label_th: 'ใบเสนอราคา', label_en: 'Quotation', status: 'live' },
   { key: 'purchase_order', label_th: 'ใบสั่งซื้อ', label_en: 'Purchase order', status: 'live' },
@@ -150,6 +150,9 @@ export class DocumentTemplatesService {
         phone: t?.phone ?? null, email: t?.email ?? null, logo_url: t?.logoUrl ?? null,
       };
       const cfg = normalizeA4Template(config, { fiscal: a4.fiscal });
+      // The abbreviated tax invoice is an 80mm thermal slip, not an A4 page — preview it as the real slip so
+      // what the tenant sees matches the printed ม.86/6 output.
+      if (docType === 'tax_invoice_abbreviated') return { doc_type: docType, html: renderAbbreviatedSlipPreview(cfg, { seller }) };
       return { doc_type: docType, html: renderA4SamplePreview(cfg, { title: a4.title, subtitle: a4.subtitle, seller }) };
     }
 

@@ -114,7 +114,7 @@ export class TaxDocsController {
   @Get(':docNo/pdf') @Permissions('ar', 'pos', 'cust_pos')
   async pdfDoc(@Param('docNo') docNo: string, @Query('copy') copy: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const inv = await this.svc.getByDocNo(u, docNo);
-    const html = inv.type === 'abbreviated' ? this.pdf.abbreviatedTaxInvoiceHtml(inv)
+    const html = inv.type === 'abbreviated' ? this.pdf.abbreviatedTaxInvoiceHtml(inv, await this.fiscalTemplate('tax_invoice_abbreviated'))
       : (inv.type === 'credit_note' || inv.type === 'debit_note') ? this.pdf.creditDebitNoteHtml(inv)
       : this.pdf.fullTaxInvoiceHtml(inv, copy === '1' || copy === 'copy', await this.fiscalTemplate('tax_invoice_full'));
     const buf = await this.pdf.renderToPdf(html, inv.type === 'abbreviated');

@@ -69,6 +69,13 @@ never reused).
 > If no template is set, the standard brand layout is used. See *Platform customization → Document
 > templates* (`12-platform-customization.md`).
 
+> **Branding the abbreviated slip.** The **abbreviated tax invoice (ใบกำกับภาษีอย่างย่อ, ม.86/6)** is an
+> 80mm thermal slip, so its template exposes only the two things that make sense on receipt paper: a
+> **header note** (a slogan/branch line under your shop name) and **footer notes** (a bottom line + extra
+> lines). Choose *ใบกำกับภาษีอย่างย่อ* in **Settings → Document templates** — the live preview shows the
+> real slip. The seller name/Tax ID, the "ใบกำกับภาษีอย่างย่อ" title and the VAT-inclusive total always
+> print (ม.86/6); accent colour, logo and signatures don't apply to a thermal slip.
+
 ### Issue a credit note / debit note (ใบลดหนี้ ม.86/10 / ใบเพิ่มหนี้ ม.86/9)
 
 When a sale changes **after** its tax invoice was issued, adjust it with a note — never by editing or
