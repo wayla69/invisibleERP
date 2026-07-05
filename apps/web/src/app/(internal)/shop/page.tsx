@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw, AlertTriangle, ChevronDown, Bookmark, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/notify';
@@ -29,11 +29,22 @@ type CatalogPage = { items: CatalogItem[]; categories: Category[]; total: number
 type CartLine = { key: string; item_id: string; description: string; uom: string; unit_price: number; qty: number; urgent: boolean; custom: boolean };
 type MyPr = { pr_no: string; pr_date: string | null; status: string; priority: string | null; lines: { item_id: string; request_qty: number; uom?: string | null }[] };
 type LowItem = { item_id: string; item_description: string | null; uom: string | null; on_hand: number; min_stock: number; suggested_qty: number; unit_price: number };
+type BasketTemplate = { name: string; lines: { item_id: string; description: string; uom: string; qty: number }[] };
 
 const PAGE = 24;
 const VIEW_KEY = 'shop.view';
 const CART_KEY = 'shop.cart';
 const FAVS_KEY = 'shop.favs';
+const TPL_KEY = 'shop.templates';
+
+// Saved basket templates (a per-device "รายการประจำ" to reload a recurring set of items).
+function readTemplates(): BasketTemplate[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const arr = JSON.parse(window.localStorage.getItem(TPL_KEY) ?? '[]');
+    return Array.isArray(arr) ? arr.filter((tp) => tp && typeof tp.name === 'string' && Array.isArray(tp.lines)) : [];
+  } catch { return []; }
+}
 
 // Rehydrate the basket saved on this device so an in-progress requisition survives a refresh / navigation.
 function readCart(): CartLine[] {
@@ -121,6 +132,8 @@ export default function ShopPage() {
   const [favs, setFavs] = useState<Set<string>>(readFavs);
   const [favOnly, setFavOnly] = useState(false);
   const [showLow, setShowLow] = useState(false);
+  const [templates, setTemplates] = useState<BasketTemplate[]>(readTemplates);
+  const [tplName, setTplName] = useState('');
   const [remarks, setRemarks] = useState('');
   const [projectCode, setProjectCode] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
@@ -144,6 +157,9 @@ export default function ShopPage() {
   useEffect(() => {
     try { window.localStorage.setItem(FAVS_KEY, JSON.stringify([...favs])); } catch { /* private mode */ }
   }, [favs]);
+  useEffect(() => {
+    try { window.localStorage.setItem(TPL_KEY, JSON.stringify(templates)); } catch { /* private mode */ }
+  }, [templates]);
   // Debounce the search box so typing doesn't fire a request per keystroke.
   useEffect(() => { const id = setTimeout(() => setDebouncedQ(q.trim()), 250); return () => clearTimeout(id); }, [q]);
 
@@ -209,6 +225,22 @@ export default function ShopPage() {
     its.forEach(fillLow);
     notifySuccess(t('shop.low_filled', { n: its.length }));
   };
+
+  // Basket templates (รายการประจำ) — save the current cart under a name, reload/delete later.
+  const saveTemplate = () => {
+    const name = tplName.trim();
+    if (!name) { notifyError(t('shop.tpl_need_name')); return; }
+    if (!cart.length) { notifyError(t('shop.empty_cart_err')); return; }
+    const lines = cart.map((l) => ({ item_id: l.item_id, description: l.description, uom: l.uom, qty: l.qty }));
+    setTemplates((ts) => [...ts.filter((tp) => tp.name !== name), { name, lines }]);
+    setTplName('');
+    notifySuccess(t('shop.tpl_saved', { name }));
+  };
+  const loadTemplate = (tp: BasketTemplate) => {
+    for (const ln of tp.lines) addToBasket(ln.item_id, ln.qty, ln.uom, ln.description);
+    notifySuccess(t('shop.tpl_loaded', { name: tp.name }));
+  };
+  const deleteTemplate = (name: string) => setTemplates((ts) => ts.filter((tp) => tp.name !== name));
 
   // Re-order: drop a past PR's lines back into the basket (merging quantities into any existing line).
   const reorder = (pr: MyPr) => {
@@ -552,6 +584,34 @@ export default function ShopPage() {
                 <Input value={cUom} onChange={(e) => setCUom(e.target.value)} placeholder={t('shop.custom_uom_ph')} className="w-24" />
                 <Button variant="secondary" className="flex-1" onClick={addCustom}><Plus className="size-4" /> {t('shop.custom_add')}</Button>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="gap-3">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base"><Bookmark className="size-5" /> {t('shop.tpl_title')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex gap-2">
+                <Input value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder={t('shop.tpl_name_ph')} />
+                <Button variant="secondary" className="shrink-0" disabled={cart.length === 0} onClick={saveTemplate}>{t('shop.tpl_save')}</Button>
+              </div>
+              {templates.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t('shop.tpl_empty')}</p>
+              ) : (
+                <ul className="divide-y">
+                  {templates.map((tp) => (
+                    <li key={tp.name} className="flex items-center gap-2 py-1.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{tp.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{t('shop.lines_n', { n: tp.lines.length })}</p>
+                      </div>
+                      <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={() => loadTemplate(tp)}>{t('shop.tpl_load')}</Button>
+                      <Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label={t('shop.remove')} onClick={() => deleteTemplate(tp.name)}><Trash2 className="size-4" /></Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
           </Card>
 

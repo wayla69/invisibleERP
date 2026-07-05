@@ -153,6 +153,11 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 > out). On a phone, a **floating cart button** (bottom-right) shows how many lines
 > you have and jumps straight to the basket.
 
+> **Recurring order? Save it as a รายการประจำ.** In the **รายการประจำ** card, name
+> the current basket and press **บันทึก** to save it (on this device); later press
+> **โหลด** to drop that whole list back into the basket, or the bin icon to remove
+> it. Handy for the monthly/weekly supplies you always request.
+
 > **Track your requests without leaving the page.** A **คำขอซื้อล่าสุดของฉัน** card
 > (below the basket) lists your last few requisitions with their live approval
 > **status** — tap one (or **ดูทั้งหมด**) to open the full requisitions page. Press
