@@ -11,6 +11,9 @@ import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd, monthStart, n, fx } from '../../database/queries';
 import { roundCurrency } from '../tax/money';
+import { ArInvoicePdfService, type ArInvoicePrintData } from './ar-invoice-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
+import { sellerParty } from '../../common/doc-party';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
@@ -34,6 +37,9 @@ export class FinanceService {
     // docs/33 PR6 — resolve the VAT leg (rate + output/input GL account) from a tax_code. Optional so the
     // writeflow harness's hand-constructed FinanceService still builds; absent ⇒ the flat 7/107→2100 default.
     @Optional() private readonly determination?: AccountDeterminationService,
+    // Printable ใบแจ้งหนี้/ใบวางบิล + generic document email. @Optional so hand-constructed harnesses build.
+    @Optional() private readonly arInvoicePdf?: ArInvoicePdfService,
+    @Optional() private readonly docEmail?: DocEmailService,
   ) {}
 
   // VAT back-out (7/107) — prefer TaxService.calcInclusive when injected
@@ -166,6 +172,59 @@ export class FinanceService {
   }
 
   // ───────────────────── Statements of account (customer / vendor) ─────────────────────
+  // Assemble the printable ใบแจ้งหนี้/ใบวางบิล (AR billing invoice — NOT the statutory ใบกำกับภาษี).
+  // Seller = the caller's company (tenant); customer = the invoice's tenant (the finance AR list already
+  // treats arInvoices.tenantId as the customer). Line detail is drawn from the linked sales order; with no
+  // order lines a single summary line carries the invoice amount.
+  async getArInvoiceForPrint(invoiceNo: string, user: JwtUser): Promise<ArInvoicePrintData> {
+    const db = this.db;
+    const [inv] = await db.select().from(arInvoices).where(eq(arInvoices.invoiceNo, invoiceNo)).limit(1);
+    if (!inv) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Invoice not found', messageTh: 'ไม่พบใบแจ้งหนี้' });
+    const [seller] = user.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1) : [null];
+    const [cust] = inv.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(inv.tenantId))).limit(1) : [null];
+    let lines: ArInvoicePrintData['lines'] = [];
+    if (inv.orderNo) {
+      const [o] = await db.select().from(orders).where(eq(orders.orderNo, inv.orderNo)).limit(1);
+      if (o) {
+        const ols = await db.select().from(orderLines).where(eq(orderLines.orderId, Number(o.id)));
+        lines = ols.map((l: any) => ({ description: l.itemDescription ?? l.itemId ?? '', qty: n(l.orderQty) || 1, unit_price: n(l.unitPrice), amount: n(l.totalPrice ?? n(l.orderQty) * n(l.unitPrice)) }));
+      }
+    }
+    const amount = n(inv.amount);
+    if (!lines.length) lines = [{ description: inv.orderNo ? `ตามใบสั่งขาย ${inv.orderNo}` : 'ยอดตามใบแจ้งหนี้', qty: 1, unit_price: amount, amount }];
+    const subtotal = lines.reduce((a, l) => a + l.amount, 0);
+    const paid = n(inv.paidAmount);
+    return {
+      invoice_no: inv.invoiceNo, invoice_date: inv.invoiceDate ?? null, due_date: inv.dueDate ?? null,
+      status: String(inv.status ?? ''), currency: inv.currency ?? 'THB', order_no: inv.orderNo ?? null,
+      seller: sellerParty(seller),
+      customer: cust ? sellerParty(cust) : { name: 'ลูกค้า', address: '-', tax_id: null, branch_label: null, phone: null, email: null },
+      lines, subtotal, amount, paid_amount: paid, balance: Math.round((amount - paid) * 100) / 100,
+    };
+  }
+
+  arInvoiceHtml(inv: ArInvoicePrintData): string {
+    if (!this.arInvoicePdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'AR invoice renderer not wired' });
+    return this.arInvoicePdf.arInvoiceHtml(inv);
+  }
+
+  async renderArInvoicePdf(inv: ArInvoicePrintData): Promise<Buffer | null> {
+    return this.arInvoicePdf ? this.arInvoicePdf.renderToPdf(this.arInvoicePdf.arInvoiceHtml(inv)) : null;
+  }
+
+  // Email the ใบแจ้งหนี้/ใบวางบิล to the customer as a PDF attachment (HTML fallback when Chromium absent).
+  async emailArInvoice(invoiceNo: string, toEmail: string, user: JwtUser) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const inv = await this.getArInvoiceForPrint(invoiceNo, user);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: inv.seller.email ?? undefined, filename: inv.invoice_no,
+      subject: `ใบแจ้งหนี้ ${inv.invoice_no} จาก ${inv.seller.name}`,
+      text: `เรียน ${inv.customer.name},\n\nแนบใบแจ้งหนี้เลขที่ ${inv.invoice_no} จำนวนเงิน ${inv.amount.toLocaleString()} ${inv.currency} (ครบกำหนดชำระ ${inv.due_date ?? '-'})\n\nขอบคุณครับ\n${inv.seller.name}`,
+      html: this.arInvoiceHtml(inv),
+    });
+    return { ...res, invoice_no: inv.invoice_no };
+  }
+
   // A running-balance statement over [from,to]: opening balance struck before the window, then every
   // charge (invoice/bill) and payment (receipt/disbursement) in date order, with a closing balance.
   // Multi-currency: each document keeps its own currency + booked fx rate. With no `currency` filter the

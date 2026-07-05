@@ -1,9 +1,12 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { deliveryOrders, doItems, orders, orderLines } from '../../database/schema';
+import { deliveryOrders, doItems, orders, orderLines, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { n, ymd } from '../../database/queries';
+import { DeliveryPdfService, type DeliveryPrintData } from './delivery-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
+import { sellerParty } from '../../common/doc-party';
 import type { JwtUser } from '../../common/decorators';
 
 export interface DeliveryDto {
@@ -15,7 +18,12 @@ const VALID = ['Pending', 'In Transit', 'Delivered', 'Cancelled'];
 // Delivery Orders over the existing logistics.deliveryOrders / doItems tables (created in 0000).
 @Injectable()
 export class DeliveryService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly docNo: DocNumberService,
+    @Optional() private readonly deliveryPdf?: DeliveryPdfService, // provided via DeliveryModule
+    @Optional() private readonly docEmail?: DocEmailService,       // @Global MailModule
+  ) {}
 
   async create(dto: DeliveryDto, user: JwtUser) {
     const db = this.db;
@@ -52,6 +60,43 @@ export class DeliveryService {
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Delivery order not found', messageTh: 'ไม่พบใบส่งสินค้า' });
     const items = await db.select().from(doItems).where(eq(doItems.doId, Number(h.id)));
     return { ...shape(h), items: items.map((i: any) => ({ item_id: i.itemId, item_description: i.itemDescription, qty: n(i.qty), uom: i.uom, order_no: i.orderNo, status: i.status })) };
+  }
+
+  // Assemble the printable ใบส่งของ (header + item lines + our-company seller block) for the PDF/email path.
+  async getForPrint(doNo: string): Promise<DeliveryPrintData> {
+    const db = this.db;
+    const [h] = await db.select().from(deliveryOrders).where(eq(deliveryOrders.doNo, doNo)).limit(1);
+    if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Delivery order not found', messageTh: 'ไม่พบใบส่งสินค้า' });
+    const items = await db.select().from(doItems).where(eq(doItems.doId, Number(h.id)));
+    const [t] = h.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(h.tenantId))).limit(1) : [null];
+    return {
+      do_no: h.doNo, do_date: h.doDate ?? null, status: String(h.status ?? ''), address: h.address ?? null,
+      driver: h.driver ?? null, vehicle: h.vehicle ?? null, remarks: h.remarks ?? null, created_by: h.createdBy ?? null,
+      order_no: items.find((i: any) => i.orderNo)?.orderNo ?? null, seller: sellerParty(t),
+      lines: items.map((i: any) => ({ item_id: i.itemId ?? null, description: i.itemDescription ?? null, qty: n(i.qty), uom: i.uom ?? null })),
+    };
+  }
+
+  deliveryNoteHtml(d: DeliveryPrintData): string {
+    if (!this.deliveryPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Delivery renderer not wired' });
+    return this.deliveryPdf.deliveryNoteHtml(d);
+  }
+
+  async renderPdf(d: DeliveryPrintData): Promise<Buffer | null> {
+    return this.deliveryPdf ? this.deliveryPdf.renderToPdf(this.deliveryPdf.deliveryNoteHtml(d)) : null;
+  }
+
+  // Email the ใบส่งของ to the customer as a PDF attachment (HTML fallback when Chromium absent).
+  async emailDelivery(doNo: string, toEmail: string) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const d = await this.getForPrint(doNo);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: d.seller.email ?? undefined, filename: d.do_no,
+      subject: `ใบส่งของ ${d.do_no} จาก ${d.seller.name}`,
+      text: `แนบใบส่งของเลขที่ ${d.do_no} (${d.lines.length} รายการ)\n\n${d.seller.name}`,
+      html: this.deliveryNoteHtml(d),
+    });
+    return { ...res, do_no: d.do_no };
   }
 
   async updateStatus(doNo: string, dto: { status: string; pod_image_key?: string; driver?: string; vehicle?: string }, _user: JwtUser) {

@@ -6,6 +6,9 @@
 import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'cpq-secret';
 process.env.NODE_ENV = 'test';
+// A sender identity so the doc-email path clears its sender guard and reaches the (unconfigured) SMTP
+// transport — proving the generic email chain is wired end-to-end (render → mailer) → EMAIL_NOT_CONFIGURED.
+process.env.MAIL_FROM = process.env.MAIL_FROM || 'shop@example.com';
 
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -56,7 +59,7 @@ async function main() {
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
     let json: any = {}; try { json = res.json(); } catch { /**/ }
-    return { status: res.statusCode, json };
+    return { status: res.statusCode, json, text: res.payload };
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const [admin, sales1] = [await login('admin', 'admin123'), await login('sales1', 'pw1')];
@@ -86,6 +89,13 @@ async function main() {
   });
   ok('Quote qty=1 → total=58000 (no volume discount)', q1.status === 201 && near(q1.json.total, 58000), `total=${q1.json.total}`);
   const q1Id = q1.json.id;
+
+  // Printable ใบเสนอราคา (Quotation) — HTML fallback when Chromium absent (CI): title + customer + total.
+  const qPdf = await inj('GET', `/api/cpq/quotes/${q1Id}/pdf`, sales1);
+  ok('Quote PDF/HTML contains "ใบเสนอราคา" + customer + total (58,000.00)', qPdf.status === 200 && qPdf.text.includes('ใบเสนอราคา') && qPdf.text.includes('ลูกค้าทดสอบ') && qPdf.text.includes('58,000.00'), `${qPdf.status} ${String(qPdf.text).slice(0, 50)}`);
+  // Generic email path is wired end-to-end: with no SMTP configured in CI it reaches the mailer guard.
+  const qEmail = await inj('POST', `/api/cpq/quotes/${q1Id}/send-email`, sales1, { to_email: 'buyer@example.com' });
+  ok('Quote email path wired → EMAIL_NOT_CONFIGURED (503) with no SMTP in CI', qEmail.status === 503 && qEmail.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${qEmail.status} ${qEmail.json.error?.code}`);
 
   // 6. Create quote with qty=2 → 10% discount: total = 58000*2*0.9 = 104400
   const q2 = await inj('POST', '/api/cpq/quotes', sales1, {

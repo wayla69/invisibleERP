@@ -439,6 +439,21 @@ Orders move through these stages:
 
 [screenshot: order detail with status selector]
 
+### Print or email a delivery note (ใบส่งของ)
+
+**Screen:** `/delivery` · **Required permission:** `delivery`
+
+On the **การจัดส่ง** (`/delivery`) list, each delivery order (`DO-…`) has two actions in
+the **เอกสาร** column:
+
+- **🖨️ พิมพ์ / เปิด PDF** — opens the delivery note (a packing slip with the ship-to
+  address, driver/vehicle and the item lines — no prices) as a PDF in a new tab.
+- **✉️ ส่งอีเมล** — prompts for the customer's email and sends it **as a PDF attachment**
+  (needs the shop's mail account configured, same as the other documents).
+
+> The delivery note is for goods movement and the customer's receiving signature — it
+> carries no prices and posts nothing to the ledger.
+
 ---
 
 ## 4. Parking a bill & manager overrides

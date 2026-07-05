@@ -1,10 +1,10 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, Check, X, FileText, SlidersHorizontal } from 'lucide-react';
+import { Send, Check, X, FileText, SlidersHorizontal, Printer, Mail } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
-import { notifyError } from '@/lib/notify';
+import { notifyError, notifySuccess } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -13,6 +13,8 @@ import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { statusVariant } from '@/components/ui';
+
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // GET /api/cpq/quotes → { quotes: [...], count }
 interface Quote { id: number; quote_no: string; customer_name: string; status: string; issued_date: string | null; expires_date: string | null; subtotal: number; discount_total: number; total: number; created_by: string | null }
@@ -46,6 +48,15 @@ function Quotes() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  // Email the quotation PDF to the customer (prompts for the recipient address).
+  const email = useMutation({
+    mutationFn: (v: { id: number; to_email: string }) =>
+      api<{ to: string }>(`/api/cpq/quotes/${v.id}/send-email`, { method: 'POST', body: JSON.stringify({ to_email: v.to_email }) }),
+    onSuccess: (r) => { notifySuccess(t('doc.email_sent', { to: r.to })); qc.invalidateQueries({ queryKey: ['cpq-quotes'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const promptEmail = (id: number) => { const to = window.prompt(t('doc.email_prompt')); if (to) email.mutate({ id, to_email: to }); };
+
   return (
     <div className="space-y-4">
       <StateView q={q}>
@@ -67,6 +78,12 @@ function Quotes() {
                 sortable: false,
                 render: (r: Quote) => (
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}>
+                      <a href={`${BASE}/api/cpq/quotes/${r.id}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-3.5" /></a>
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={email.isPending} title={t('doc.email')} onClick={() => promptEmail(r.id)}>
+                      <Mail className="size-3.5" />
+                    </Button>
                     {r.status === 'Draft' && (
                       <Button variant="outline" size="sm" disabled={action.isPending} onClick={() => action.mutate({ id: r.id, verb: 'send' })}>
                         <Send className="size-3.5" /> {t('crm.send')}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SearchX, Truck } from 'lucide-react';
+import { SearchX, Truck, Printer, Mail } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { thaiDate } from '@/lib/format';
@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function DeliveryPage() {
@@ -36,6 +37,13 @@ export default function DeliveryPage() {
     mutationFn: (v: { no: string; status: string }) => api(`/api/delivery/${v.no}/status`, { method: 'PATCH', body: JSON.stringify({ status: v.status }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['deliveries'] }),
   });
+  // Email the delivery-note PDF to the customer (prompts for the recipient address).
+  const email = useMutation({
+    mutationFn: (v: { no: string; to_email: string }) => api<{ to: string }>(`/api/delivery/${v.no}/send-email`, { method: 'POST', body: JSON.stringify({ to_email: v.to_email }) }),
+    onSuccess: (r) => notifySuccess(t('doc.email_sent', { to: r.to })),
+    onError: (e: any) => notifyError(e.message),
+  });
+  const promptEmail = (no: string) => { const to = window.prompt(t('doc.email_prompt')); if (to) email.mutate({ no, to_email: to }); };
 
   // Client-side find/filter over the loaded delivery orders.
   const [search, setSearch] = useState('');
@@ -104,6 +112,16 @@ export default function DeliveryPage() {
                 ),
               },
               { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.do_no)}>{t('hx.del.view_items')}</Button> },
+              {
+                key: 'doc', label: t('doc.print_col'), sortable: false, render: (r: any) => (
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}>
+                      <a href={`${BASE}/api/delivery/${encodeURIComponent(r.do_no)}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-4" /></a>
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={email.isPending} title={t('doc.email')} onClick={() => promptEmail(r.do_no)}><Mail className="size-4" /></Button>
+                  </div>
+                ),
+              },
               ]}
               emptyState={
                 search || statusFilter

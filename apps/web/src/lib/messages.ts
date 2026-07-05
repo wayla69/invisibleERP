@@ -810,6 +810,12 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'proc.po_empty_desc': { th: 'สร้าง PO ในแบบฟอร์มด้านบนเพื่อเริ่มต้นการจัดซื้อ', en: 'Create a PO in the form above to start purchasing' },
   'proc.col_print': { th: 'พิมพ์', en: 'Print' },
   'proc.print_po': { th: 'พิมพ์ใบสั่งซื้อ (PDF)', en: 'Print purchase order (PDF)' },
+  // Shared document print/email actions (quotation, delivery note, AR invoice, …)
+  'doc.print_col': { th: 'เอกสาร', en: 'Document' },
+  'doc.print_pdf': { th: 'พิมพ์ / เปิด PDF', en: 'Print / open PDF' },
+  'doc.email': { th: 'ส่งอีเมล', en: 'Email' },
+  'doc.email_prompt': { th: 'กรอกอีเมลผู้รับเพื่อส่งเอกสาร (แนบ PDF)', en: 'Recipient email to send the document (PDF attached)' },
+  'doc.email_sent': { th: 'ส่งอีเมลไปที่ {to} แล้ว', en: 'Emailed to {to}' },
   // attachments card
   'proc.attach_title': { th: 'ไฟล์แนบใบสั่งซื้อ (ใบแจ้งหนี้ / ใบเสร็จ)', en: 'PO attachments (invoice / receipt)' },
   'proc.attach_po_ph': { th: 'เลขที่ PO เช่น PO-20260702-001', en: 'PO no. e.g. PO-20260702-001' },

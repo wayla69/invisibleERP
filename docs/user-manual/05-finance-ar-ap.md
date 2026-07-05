@@ -40,6 +40,21 @@ single column on phones/tablets.
 2. **Expected result:** Invoices (e.g. `INV-…`) are created and the sale, revenue
    and output VAT are posted to the ledger automatically.
 
+### A1b. Print or email a billing invoice (ใบแจ้งหนี้/ใบวางบิล)
+
+On any invoice row in the **AR worklist**, two actions sit next to **รับชำระ**:
+
+- **🖨️ พิมพ์ / เปิด PDF** — opens the billing invoice as a PDF in a new tab (บริษัทของคุณ +
+  the customer + the ordered lines + amount billed / paid / **คงเหลือค้างชำระ**). Use your
+  browser to print or save it.
+- **✉️ ส่งอีเมล** — prompts for the customer's email and sends the invoice **as a PDF
+  attachment**. (Requires the shop's mail account to be configured; until then you'll see
+  *ยังไม่ได้ตั้งค่าอีเมล* — ask your admin to set SMTP.)
+
+> This billing invoice (ใบแจ้งหนี้/ใบวางบิล) is **for collection**, not a tax document — it is
+> **not** the ใบกำกับภาษี. Issue the statutory tax invoice from **ภาษี ▸ ใบกำกับภาษี** as before.
+> Printing/emailing here changes nothing and posts nothing to the ledger.
+
 ### A2. Record a customer receipt (payment in)
 
 1. On the **AR** table, find the invoice and click **Receive payment**

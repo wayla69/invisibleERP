@@ -6,6 +6,9 @@
 import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'basics-secret';
 process.env.NODE_ENV = 'test';
+// A sender identity so the doc-email path clears its sender guard and reaches the (unconfigured) SMTP
+// transport — proving the generic email chain is wired end-to-end (render → mailer) → EMAIL_NOT_CONFIGURED.
+process.env.MAIL_FROM = process.env.MAIL_FROM || 'shop@example.com';
 
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -638,6 +641,17 @@ async function main() {
   // renders the title, the supplier and the ordered line's value so the buyer has a document to send.
   const poPdf = await inj('GET', `/api/procurement/pos/${poCap.json?.po_no}/pdf`, admin);
   ok('PO print: PDF/HTML contains "ใบสั่งซื้อ" + supplier + line value (50,000.00)', poPdf.status === 200 && poPdf.text.includes('ใบสั่งซื้อ') && poPdf.text.includes('Capital Vendor') && poPdf.text.includes('50,000.00'), `${poPdf.status} ${String(poPdf.text).slice(0, 60)}`);
+  // ── External-facing document print/email (quotation covered by cpq.ts; AR invoice + delivery here) ──
+  // AR billing invoice (ใบแจ้งหนี้/ใบวางบิล) — the seeded INV-A (฿1,000) renders with title + amount.
+  const arInvPdf = await inj('GET', '/api/finance/ar/invoices/INV-A/pdf', admin);
+  ok('AR invoice print: PDF/HTML contains "ใบแจ้งหนี้" + amount (1,000.00)', arInvPdf.status === 200 && arInvPdf.text.includes('ใบแจ้งหนี้') && arInvPdf.text.includes('1,000.00'), `${arInvPdf.status} ${String(arInvPdf.text).slice(0, 60)}`);
+  const arInvEmail = await inj('POST', '/api/finance/ar/invoices/INV-A/send-email', admin, { to_email: 'customer@example.com' });
+  ok('AR invoice email path wired → EMAIL_NOT_CONFIGURED (503) with no SMTP in CI', arInvEmail.status === 503 && arInvEmail.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${arInvEmail.status} ${arInvEmail.json.error?.code}`);
+  // Delivery note (ใบส่งของ) — create a DO with explicit lines then render it.
+  const doRes = await inj('POST', '/api/delivery', admin, { address: '123 ถนนทดสอบ กรุงเทพฯ', driver: 'สมชาย', lines: [{ item_id: 'LAPTOP', item_description: 'Dev laptop', qty: 2, uom: 'EA' }] });
+  ok('Delivery note: DO created with a line', /^DO-/.test(doRes.json?.do_no ?? '') && doRes.json?.lines === 1, `${doRes.status} ${JSON.stringify(doRes.json).slice(0, 60)}`);
+  const doPdf = await inj('GET', `/api/delivery/${doRes.json?.do_no}/pdf`, admin);
+  ok('Delivery note print: PDF/HTML contains "ใบส่งของ" + item ("Dev laptop")', doPdf.status === 200 && doPdf.text.includes('ใบส่งของ') && doPdf.text.includes('Dev laptop'), `${doPdf.status} ${String(doPdf.text).slice(0, 60)}`);
   const grCap = await inj('POST', '/api/procurement/grs', admin, { po_no: poCap.json?.po_no, items: [{ item_id: 'LAPTOP', received_qty: 2, unit_cost: 25000, uom: 'EA' }] });
   ok('Capitalize: GR receives the capital line, PO auto-closes', grCap.status === 201 && /^GR-/.test(grCap.json?.gr_no ?? '') && grCap.json?.po_status === 'Closed', JSON.stringify(grCap.json).slice(0, 90));
   // Capital goods must NOT be capitalised into inventory (1200) at receipt — they route to 1500 via FA-10.
