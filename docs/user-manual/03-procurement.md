@@ -116,6 +116,8 @@ other PR.
    it has none) — switch to a **list view** with the ⊞/☰ toggle (your choice is
    remembered). Tap a **category chip** along the top to filter, or use the **search
    box** (name or code). The grid **loads more as you scroll** — no page buttons.
+   Each card also shows the item's **on-hand stock** (red **สินค้าหมด** when zero)
+   and its **last purchase price**, so you can judge what to request at a glance.
 2. **Add to basket.** Press **ใส่ตะกร้า** on a product to drop it in the basket;
    press it again (or use the **+ / −** steppers in the basket) to change the
    quantity.

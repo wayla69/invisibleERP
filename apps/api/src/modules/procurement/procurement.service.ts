@@ -185,7 +185,7 @@ export class ProcurementService {
   // for the selected category + keyword, plus the FULL category summary (chips stay stable while paging).
   // Category label comes from item_categories (via items.category_id, RLS-scoped to the caller's tenant),
   // falling back to the free-text items.category, then "ไม่ระบุหมวด". `items` is company-wide.
-  async catalog(_user: JwtUser, opts?: { q?: string; category?: string; limit?: number; offset?: number }) {
+  async catalog(user: JwtUser, opts?: { q?: string; category?: string; limit?: number; offset?: number }) {
     const db = this.db;
     const kw = (typeof opts?.q === 'string' ? opts.q : '').trim().slice(0, 100);
     const cat = (typeof opts?.category === 'string' ? opts.category : '').trim().slice(0, 100);
@@ -229,10 +229,28 @@ export class ProcurementService {
       .where(and(kwWhere, catWhere) ?? sql`true`)
       .orderBy(asc(items.itemDescription), asc(items.itemId)).limit(limit).offset(offset);
 
-    const list = rows.map((r: any) => ({
+    // Per-item context for THIS page only (bounded to `limit`): on-hand across the caller's tenant locations
+    // (like lowStock) + the last purchase price (most recent PO line, like searchItems). Both nullable.
+    const ids = rows.map((r) => r.item_id).filter(Boolean);
+    const onHandMap = new Map<string, number>();
+    const lastPriceMap = new Map<string, number>();
+    if (ids.length) {
+      const bal = await db.select({ itemId: invBalances.itemId, onHand: sql<string>`sum(${invBalances.onHandQty})` })
+        .from(invBalances)
+        .where(and(inArray(invBalances.itemId, ids), user.tenantId != null ? eq(invBalances.tenantId, user.tenantId) : undefined))
+        .groupBy(invBalances.itemId);
+      for (const b of bal) onHandMap.set(String(b.itemId), n(b.onHand));
+      const pr = await db.select({ itemId: poItems.itemId, unitPrice: poItems.unitPrice, id: poItems.id })
+        .from(poItems).where(inArray(poItems.itemId, ids)).orderBy(desc(poItems.id));
+      for (const p of pr) if (!lastPriceMap.has(String(p.itemId))) lastPriceMap.set(String(p.itemId), n(p.unitPrice));
+    }
+
+    const list = rows.map((r) => ({
       item_id: r.item_id, item_description: r.item_description ?? null, uom: r.uom ?? null,
       unit_price: n(r.unit_price), image_key: r.image_key ?? null,
       category: catLabel(r), category_key: catKey(r),
+      on_hand: onHandMap.has(r.item_id) ? onHandMap.get(r.item_id)! : null,
+      last_price: lastPriceMap.has(r.item_id) ? lastPriceMap.get(r.item_id)! : null,
     }));
     return { items: list, categories, total, offset, limit, has_more: offset + list.length < total, count: list.length };
   }
