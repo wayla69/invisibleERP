@@ -170,6 +170,28 @@ the trough and FX into one treasury review.
 
 ---
 
+## 1e. Segment Profitability (P&L by dimension)
+
+**Screen:** `/finance/profitability` (**กำไร-ขาดทุนตามมิติ**, Finance → Financial
+reports) · **API:** `GET /api/finance/metrics/profitability` · **Required
+permission:** `exec` / `fin_report` / `dashboard`.
+
+**Segment Profitability** breaks the P&L down by an accounting **dimension** — pick
+**by branch / cost centre / project** with the switcher at the top. For each
+segment you see revenue → COGS → gross profit → opex → **net**, its **net margin**
+and its **contribution %** of total net; a net-contribution bar chart ranks the
+segments, and a matrix shows the full breakdown with a total row.
+
+A **✓ badge** confirms the segment totals **tie to the consolidated P&L** (nothing
+falls through the cracks — postings with no dimension roll up to an *Unassigned*
+segment). It's built straight from the multi-dimensional GL, so it's always
+consistent with the statements; read-only, it posts nothing.
+
+> *Customer- and product-level profitability draw on the sub-ledgers rather than a
+> GL dimension and are a planned follow-up.*
+
+---
+
 ## 2. Standard reports (Excel & PDF)
 
 **Required permission:** varies by report (`dashboard` / `pos` / `exec` for sales;

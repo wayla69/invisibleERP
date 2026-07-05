@@ -213,6 +213,31 @@ async function main() {
   const usd = (cpFx.json.fx_exposure ?? []).find((e: any) => e.currency === 'USD');
   ok('cash position: FX exposure picks up the USD payable (payable 1000, net −1000)', !!usd && near(usd.payable, 1000) && near(usd.net, -1000), `usd=${JSON.stringify(usd)}`);
 
+  // ── Segment profitability (docs/35 Phase 5) ────────────────────────────────────────────────────
+  // Tag two branches' P&L (br1: rev 30k / COGS 10k → net 20k; br2: rev 20k / COGS 15k → net 5k). The
+  // original untagged seed (rev 100k, net 25k) lands in "Unassigned". Segment totals must reconcile to
+  // the consolidated P&L (rev 150k, net 50k).
+  await db.insert(s.branches).values([{ tenantId: hq, code: 'BR1', name: 'Branch One' }, { tenantId: hq, code: 'BR2', name: 'Branch Two' }]).onConflictDoNothing();
+  const brId = async (c: string) => Number((await db.select().from(s.branches).where(eq(s.branches.code, c)))[0].id);
+  const [b1, b2] = [await brId('BR1'), await brId('BR2')];
+  const postBr = (ref: string, lines: any[]) => ledger.postEntry({ date: today, source: 'SEED', sourceRef: ref, tenantId: hq, createdBy: 'seed', viaSubledger: true, lines });
+  await postBr('BR1-REV', [{ account_code: '1000', debit: 30000 }, { account_code: '4000', credit: 30000, branch_id: b1 }]);
+  await postBr('BR1-COGS', [{ account_code: '5000', debit: 10000, branch_id: b1 }, { account_code: '2000', credit: 10000 }]);
+  await postBr('BR2-REV', [{ account_code: '1000', debit: 20000 }, { account_code: '4000', credit: 20000, branch_id: b2 }]);
+  await postBr('BR2-COGS', [{ account_code: '5000', debit: 15000, branch_id: b2 }, { account_code: '2000', credit: 15000 }]);
+
+  const prof = await inj('GET', '/api/finance/metrics/profitability?by=branch', admin);
+  ok('profitability?by=branch → 200 with segments + totals + reconciled', prof.status === 200 && Array.isArray(prof.json.segments) && !!prof.json.totals && prof.json.reconciled === true, `st=${prof.status} rec=${prof.json.reconciled}`);
+  ok('profitability: segment revenue/net reconcile to the consolidated P&L (rev 150k, net 50k)', near(prof.json.totals?.revenue, 150000) && near(prof.json.totals?.net, 50000) && near(prof.json.pl?.revenue, 150000), JSON.stringify({ tr: prof.json.totals?.revenue, tn: prof.json.totals?.net, plr: prof.json.pl?.revenue }));
+  const segB1 = (prof.json.segments ?? []).find((x: any) => x.key === String(b1));
+  ok('profitability: branch BR1 segment — rev 30k, net 20k, net margin 66.67%, contribution 40%', segB1 && near(segB1.revenue, 30000) && near(segB1.net, 20000) && near(segB1.net_margin_pct, 66.67) && near(segB1.contribution_pct, 40), JSON.stringify(segB1));
+  const profEmpty = await inj('GET', '/api/finance/metrics/profitability?by=branch&period=2020-01', admin);
+  ok('profitability: an empty period returns zero segments, not an error', profEmpty.status === 200 && profEmpty.json.segment_count === 0 && near(profEmpty.json.totals?.revenue, 0), `st=${profEmpty.status} n=${profEmpty.json.segment_count}`);
+  const profBad = await inj('GET', '/api/finance/metrics/profitability?by=nonsense', admin);
+  ok('profitability: unknown dimension → 400 BAD_DIMENSION', profBad.status === 400 && profBad.json.error?.code === 'BAD_DIMENSION', `st=${profBad.status}`);
+  const profDenied = await inj('GET', '/api/finance/metrics/profitability?by=branch', wh1);
+  ok('permission control: warehouse-only user denied profitability (403)', profDenied.status === 403, `st=${profDenied.status}`);
+
   await app.close();
 
   // ── Report ──

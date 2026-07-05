@@ -1,8 +1,8 @@
 import { Injectable, Optional, Inject, BadRequestException } from '@nestjs/common';
-import { sql, and, ne } from 'drizzle-orm';
+import { sql, and, ne, eq, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { arInvoices, apTransactions, bankAccounts } from '../../database/schema';
+import { arInvoices, apTransactions, bankAccounts, journalLines, journalEntries, accounts, branches, costCenters, projects } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import { TtlCache } from '../../common/ttl-cache';
 import { LedgerService } from '../ledger/ledger.service';
@@ -399,5 +399,85 @@ export class FinanceMetricsService {
     for (const r of arRows) { const c = r.currency ?? '—'; const e = by.get(c) ?? { currency: c, receivable: 0, payable: 0 }; e.receivable = round2(num(r.out)); by.set(c, e); }
     for (const r of apRows) { const c = r.currency ?? '—'; const e = by.get(c) ?? { currency: c, receivable: 0, payable: 0 }; e.payable = round2(num(r.out)); by.set(c, e); }
     return [...by.values()].map((e) => ({ ...e, net: round2(e.receivable - e.payable) })).filter((e) => e.receivable !== 0 || e.payable !== 0);
+  }
+
+  // ── Segment profitability (docs/35 Phase 5, PCM-lite) ──────────────────────────────────────────
+  // Read-only P&L by an accounting dimension that already lives on the postings — branch / cost_center /
+  // project — computed straight from the posted GL (revenue/COGS/opex/net + margins per segment, contribution
+  // %, and a reconcile to the consolidated P&L). No customer/product here — those are sub-ledger, not GL
+  // dimensions (a documented follow-up). Posts nothing.
+  async profitability(q: { by?: string; period?: string; from?: string; to?: string }, user: JwtUser) {
+    const DIMS = ['branch', 'cost_center', 'project'];
+    if (q.by && !DIMS.includes(q.by)) throw new BadRequestException({ code: 'BAD_DIMENSION', message: `by must be one of ${DIMS.join('/')}`, messageTh: 'มิติไม่ถูกต้อง' });
+    const by = q.by && DIMS.includes(q.by) ? q.by : 'branch';
+    const asOf = q.to || ymd();
+    let from: string, to: string;
+    if (q.period && /^\d{4}-\d{2}$/.test(q.period)) { from = `${q.period}-01`; to = endOfPrevMonth(shiftMonths(from, 1)); }
+    else if (q.from && q.to) { from = q.from; to = q.to; }
+    else { from = monthStartOf(asOf); to = asOf; }
+    const key = `fin-kpi:${user.tenantId}:prof:${by}:${from}:${to}`;
+    return this.cache.wrap(key, this.ttl, () => this.profitabilityUncached(by, from, to));
+  }
+
+  private async profitabilityUncached(by: string, from: string, to: string) {
+    const dimCol = by === 'branch' ? journalLines.branchId : by === 'cost_center' ? journalLines.costCenterCode : journalLines.projectId;
+    const rows = await this.db.select({
+      dim: dimCol, account_code: journalLines.accountCode, type: accounts.type,
+      net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)`,
+    }).from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
+      .where(and(eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, from), lte(journalEntries.entryDate, to), inArray(accounts.type, ['Revenue', 'Expense'])))
+      .groupBy(dimCol, journalLines.accountCode, accounts.type);
+
+    const seg = new Map<string, { revenue: number; cogs: number; expense: number }>();
+    for (const r of rows) {
+      const k = r.dim == null || r.dim === '' ? '__unassigned__' : String(r.dim);
+      const e = seg.get(k) ?? { revenue: 0, cogs: 0, expense: 0 };
+      const net = num(r.net); // debit − credit
+      if (r.type === 'Revenue') e.revenue += -net; // revenue is credit-normal
+      else { e.expense += net; if (inSet(String(r.account_code), COGS_ACCOUNTS)) e.cogs += net; }
+      seg.set(k, e);
+    }
+
+    const labels = await this.segmentLabels(by, [...seg.keys()]);
+    let segments = [...seg.entries()].map(([k, e]) => {
+      const revenue = round2(e.revenue), cogs = round2(e.cogs), expense = round2(e.expense);
+      const grossProfit = round2(revenue - cogs), net = round2(revenue - expense), opex = round2(expense - cogs);
+      return {
+        key: k, label: labels.get(k) ?? (k === '__unassigned__' ? 'Unassigned' : k),
+        revenue, cogs, gross_profit: grossProfit, opex, net,
+        gross_margin_pct: revenue > 0 ? round2((grossProfit / revenue) * 100) : null,
+        net_margin_pct: revenue > 0 ? round2((net / revenue) * 100) : null,
+      };
+    });
+    const totalRevenue = round2(segments.reduce((a, s) => a + s.revenue, 0));
+    const totalNet = round2(segments.reduce((a, s) => a + s.net, 0));
+    const totalGross = round2(segments.reduce((a, s) => a + s.gross_profit, 0));
+    segments = segments.map((s) => ({ ...s, contribution_pct: totalNet !== 0 ? round2((s.net / totalNet) * 100) : null }));
+    segments.sort((a, b) => b.net - a.net);
+
+    const is: any = this.ledger ? await this.ledger.incomeStatement(from, to).catch(() => null) : null;
+    return {
+      by, from, to, segment_count: segments.length, segments,
+      totals: { revenue: totalRevenue, gross_profit: totalGross, net: totalNet },
+      pl: is ? { revenue: num(is.revenue), net_income: num(is.net_income) } : null,
+      reconciled: is ? Math.abs(totalRevenue - num(is.revenue)) < 0.01 && Math.abs(totalNet - num(is.net_income)) < 0.01 : null,
+    };
+  }
+
+  // Resolve human labels for the dimension keys (best-effort; falls back to the raw key).
+  private async segmentLabels(by: string, _keys: string[]): Promise<Map<string, string>> {
+    const m = new Map<string, string>();
+    try {
+      if (by === 'branch') {
+        for (const r of await this.db.select({ id: branches.id, code: branches.code, name: branches.name }).from(branches)) m.set(String(r.id), `${r.code} · ${r.name}`);
+      } else if (by === 'cost_center') {
+        for (const r of await this.db.select({ code: costCenters.code, name: costCenters.name }).from(costCenters)) m.set(String(r.code), `${r.code} · ${r.name}`);
+      } else if (by === 'project') {
+        for (const r of await this.db.select({ id: projects.id, code: projects.projectCode, name: projects.name }).from(projects)) m.set(String(r.id), `${r.code} · ${r.name}`);
+      }
+    } catch { /* labels are best-effort; the key stands in */ }
+    return m;
   }
 }

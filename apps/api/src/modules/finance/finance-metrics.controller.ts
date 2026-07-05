@@ -40,6 +40,12 @@ export class FinanceMetricsController {
     return this.svc.cashPosition({ weeks: weeks ? Number(weeks) : undefined }, u);
   }
 
+  // Segment profitability (docs/35 Phase 5): P&L by branch / cost_center / project from the dimensional GL.
+  @Get('profitability') @Permissions('exec', 'fin_report', 'dashboard')
+  profitability(@CurrentUser() u: JwtUser, @Query('by') by?: string, @Query('period') period?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.svc.profitability({ by, period, from, to }, u);
+  }
+
   // Drill-through: the GL account-group rows behind a KPI, as of a date.
   @Get(':id/drill') @Permissions('exec', 'fin_report', 'dashboard', 'ar', 'creditors')
   drill(@Param('id') id: string, @CurrentUser() u: JwtUser, @Query('as_of') asOf?: string) {

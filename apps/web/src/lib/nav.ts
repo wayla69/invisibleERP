@@ -381,6 +381,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'nav.command_center', href: '/finance/command-center', icon: Gauge, perms: ['exec', 'fin_report', 'dashboard', 'ar', 'creditors'] },
           { label: 'nav.close_cockpit', href: '/finance/close-cockpit', icon: ClipboardCheck, perms: ['exec', 'fin_report', 'gl_close', 'dashboard'] },
           { label: 'nav.treasury', href: '/finance/treasury', icon: Vault, perms: ['exec', 'fin_report', 'ar', 'dashboard'] },
+          { label: 'nav.segment_profit', href: '/finance/profitability', icon: PieChart, perms: ['exec', 'fin_report', 'dashboard'] },
           { label: 'nav.financial_statements', href: '/financial-statements', icon: FileText, perms: ['exec', 'fin_report', 'creditors', 'ar'] },
           { label: 'nav.financial_health', href: '/financial-health', icon: CircleDollarSign, perms: ['exec', 'dashboard', 'ar', 'creditors'] },
           { label: 'nav.consolidation', href: '/consolidation', icon: Layers, perms: ['exec'] },

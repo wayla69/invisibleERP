@@ -273,7 +273,17 @@ waterfall (extends `cashFlowForecast` to 13w + scenario overlay), liquidity rati
   AR/AP; balances tie to `trial-balance`. **Control `TR-01` (cash-position review)** if not already covered.
 - **Harness:** extend `cashreport.ts`/`financial-health.ts` for the 13-week forecast + balances tie-out.
 
-## PHASE 5 — Segment profitability analytics (PCM-lite)
+## PHASE 5 — Segment profitability analytics (PCM-lite) — ✅ DELIVERED (2026-07-05)
+
+**Shipped:** `GET /api/finance/metrics/profitability?by=branch|cost_center|project&period=` + `/finance/profitability`
+(server-prefetch page + client island). Segment P&L (revenue → COGS → gross → opex → net + margins per
+segment, contribution %, top-down sorted) computed straight from the **dimensional GL** (branch/cost-centre/
+project already on `journal_lines`), with a **reconcile-to-consolidated-P&L** flag. Web: dimension switcher +
+totals + reconcile badge + a net-contribution bar chart + the per-segment P&L matrix. `finance-kpi` harness
+extended to 54 checks (branch segments reconcile to the P&L: rev 150k / net 50k; empty period → zero, not
+error; bad dimension → 400). Nav + i18n (`fnx.prof.*`). **No new RCM control** — read-only analytics that
+reinforces GL-13 (dimensional completeness) + ELC-07 (analytical review). *Customer/product profitability is
+sub-ledger, not a GL dimension — a documented follow-up.* Below is the original plan.
 
 **Goal:** Oracle PCM-style P&L by dimension.
 **Outcome demo:** `/profitability` upgraded — gross/operating margin **by branch / customer / product /
@@ -366,3 +376,4 @@ closes the biggest Oracle gap (a real, comparative, drill-through CFO dashboard)
 | 2026-07-05 | Platform | **Phase 2 DELIVERED** — `/finance/command-center` web dashboard (RAG scorecard tiles + comparatives + lazy 12-mo sparkline + drill), live `fin_kpi_refresh` SSE, nav + i18n. Web build + `pnpm -r typecheck` clean. |
 | 2026-07-05 | Platform | **Phase 3 DELIVERED** — Controller Close Cockpit: `GET /api/finance/metrics/close/status` + `/finance/close-cockpit` (tie-out REC-04 + readiness GL-19/20 + approvals GOV-01 + checklist, RAG + days-to-close); control GL-22 (RCM 185); `finance-kpi` 41 checks; nav + i18n. |
 | 2026-07-05 | Platform | **Phase 4 DELIVERED** — Treasury / Cash Command: `GET /api/finance/metrics/cash/position` + `/finance/treasury` (GL cash/bank position + 13-week forecast w/ trough + liquidity subset + FX exposure); control TR-01 (RCM 186); `finance-kpi` 48 checks; nav + i18n. |
+| 2026-07-05 | Platform | **Phase 5 DELIVERED** — Segment profitability: `GET /api/finance/metrics/profitability?by=branch\|cost_center\|project` + `/finance/profitability` (per-segment P&L + margins + contribution, reconciles to consolidated P&L); `finance-kpi` 54 checks; nav + i18n. No new control (read-only analytics; reinforces GL-13/ELC-07). |
