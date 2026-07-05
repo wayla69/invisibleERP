@@ -205,7 +205,7 @@ export class ProcurementService {
       .groupBy(itemCategories.code, itemCategories.name, itemCategories.nameTh, items.category);
     const catMap = new Map<string, { key: string; label: string; count: number }>();
     let totalAll = 0;
-    for (const r of agg as any[]) {
+    for (const r of agg) {
       const key = catKey(r); const cnt = Number(r.n ?? 0); totalAll += cnt;
       const e = catMap.get(key) ?? { key, label: catLabel(r), count: 0 }; e.count += cnt; catMap.set(key, e);
     }
@@ -213,18 +213,20 @@ export class ProcurementService {
     const total = cat ? (catMap.get(cat)?.count ?? 0) : totalAll;
 
     // Selected-category filter on the DERIVED key (real category code, else the free-text value, else the
-    // "uncategorized" bucket = no category at all). Combined with the keyword filter for the page slice.
-    let catWhere: any = undefined;
-    if (cat === 'uncategorized') catWhere = and(isNull(items.categoryId), or(isNull(items.category), eq(items.category, '')));
-    else if (cat) catWhere = or(eq(itemCategories.code, cat), and(isNull(items.categoryId), eq(items.category, cat)));
-    const conds = [kwWhere, catWhere].filter(Boolean) as any[];
+    // "uncategorized" bucket = no category at all). `and()` ignores undefined, so it composes cleanly with
+    // the keyword filter for the page slice (both undefined ⇒ fall back to `true`).
+    const catWhere = cat === 'uncategorized'
+      ? and(isNull(items.categoryId), or(isNull(items.category), eq(items.category, '')))
+      : cat
+        ? or(eq(itemCategories.code, cat), and(isNull(items.categoryId), eq(items.category, cat)))
+        : undefined;
 
     const rows = await db.select({
       item_id: items.itemId, item_description: items.itemDescription, uom: items.uom,
       unit_price: items.unitPrice, image_key: items.imageKey,
       free_category: items.category, cat_name: itemCategories.name, cat_name_th: itemCategories.nameTh, cat_code: itemCategories.code,
     }).from(items).leftJoin(itemCategories, eq(items.categoryId, itemCategories.id))
-      .where(conds.length ? and(...conds) : sql`true`)
+      .where(and(kwWhere, catWhere) ?? sql`true`)
       .orderBy(asc(items.itemDescription), asc(items.itemId)).limit(limit).offset(offset);
 
     const list = rows.map((r: any) => ({
