@@ -52,6 +52,7 @@ import {
   Layers,
   ListTree,
   LayoutDashboard,
+  Gauge,
   Lock,
   LayoutTemplate,
   LifeBuoy,
@@ -377,6 +378,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       {
         title: 'nav.sub.fin_reports',
         items: [
+          { label: 'nav.command_center', href: '/finance/command-center', icon: Gauge, perms: ['exec', 'fin_report', 'dashboard', 'ar', 'creditors'] },
           { label: 'nav.financial_statements', href: '/financial-statements', icon: FileText, perms: ['exec', 'fin_report', 'creditors', 'ar'] },
           { label: 'nav.financial_health', href: '/financial-health', icon: CircleDollarSign, perms: ['exec', 'dashboard', 'ar', 'creditors'] },
           { label: 'nav.consolidation', href: '/consolidation', icon: Layers, perms: ['exec'] },

@@ -68,10 +68,18 @@ role with no saved layout falls back to a sensible default set.
 
 ---
 
-## 1b. CFO KPI scorecard (financial ratios & health)
+## 1b. CFO Command Center (financial KPIs & ratios)
 
-**API:** `GET /api/finance/metrics/pack` · **Required permission:** `exec` /
-`fin_report` / `dashboard` (also `ar` / `creditors`).
+**Screen:** `/finance/command-center` (**ศูนย์บัญชาการ CFO**, Finance → Financial
+reports) · **API:** `GET /api/finance/metrics/pack` · **Required permission:**
+`exec` / `fin_report` / `dashboard` (also `ar` / `creditors`).
+
+The **CFO Command Center** shows your finance KPIs as a **red/amber/green
+scorecard** grouped by family. A summary strip counts how many KPIs need action /
+are on watch / are healthy, with a **Live** badge that turns the board real-time
+(it re-pulls whenever the ops dashboard refreshes). Each tile shows the value, its
+RAG chip, and the change **vs prior period / prior year / budget**; click **12-month
+trend** to expand a sparkline, or **View detail →** to drill to the statements.
 
 The finance KPI engine turns your ledger into a **CFO scorecard** — one call
 returns ~31 financial KPIs, each with **RAG** (🟢 green / 🟡 amber / 🔴 red) and
@@ -105,8 +113,7 @@ read it:
 > review is the number everywhere. Read-only — it never posts to the ledger.
 >
 > **Troubleshooting:** “UNKNOWN_METRIC” — the metric id isn't recognised; use an
-> id returned by `…/metrics/pack`. The visual **CFO Command Center** dashboard for
-> these KPIs arrives in the next release (docs/35 Phase 2).
+> id returned by `…/metrics/pack`.
 
 ---
 

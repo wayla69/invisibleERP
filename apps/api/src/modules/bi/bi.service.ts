@@ -493,6 +493,12 @@ export class BiService implements OnModuleInit {
 
     // Streaming analytics (Phase B): push the refreshed KPI snapshot live to any subscribed dashboard.
     this.publishLive({ type: 'kpi_refresh', tenant_id: tid, date, kpi: { sales_mtd: kpi.sales.mtd, open_ar: kpi.receivables.open_ar, open_ap: kpi.payables.open_ap, pipeline_open: kpi.pipeline.open_value } });
+    // docs/35 Phase 2: nudge the CFO Command Center too — a compact finance-KPI headline (+ red-flag count)
+    // so the scorecard tiles refresh live off the same bus. Best-effort; skipped if the engine isn't wired.
+    if (this.financeMetrics) {
+      const fin = await this.financeMetrics.execFinance({ tenantId: tid } as JwtUser).catch(() => null);
+      if (fin) this.publishLive({ type: 'fin_kpi_refresh', tenant_id: tid, date, fin: { net_margin_pct: fin.net_margin_pct, current_ratio: fin.current_ratio, dso: fin.dso, red_flags: fin.red_flags?.length ?? 0 } });
+    }
     return { date, snapshot: row };
   }
 

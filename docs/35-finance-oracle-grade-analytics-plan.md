@@ -198,7 +198,15 @@ comparatives, variance%, and RAG — one call, one source of truth.
   hand-computed value; assert comparatives + RAG; assert drill rows tie to the sub-ledger. Register as a
   cutover gate.
 
-## PHASE 2 — CFO Command Center (web dashboard + live)
+## PHASE 2 — CFO Command Center (web dashboard + live) — ✅ DELIVERED (2026-07-05)
+
+**Shipped:** `/finance/command-center` (server-prefetch page + client island) — a RAG summary strip + the
+KPI scorecard grouped by family; each tile shows value + RAG (icon+label, never colour-alone) + prior-period/
+prior-year/budget deltas, expandable to a lazy 12-month SVG sparkline with a drill link to the statements.
+Live off the SSE bus: `BiService.refreshSnapshot` now also publishes **`fin_kpi_refresh`**, and the client
+re-pulls the pack on it (reuses `useRealtime`). New nav entry (Finance → `nav.command_center`, `Gauge` icon),
+i18n (`fnx.cfo.*`, th/en). Theme-aware (uses the design-system status tokens; dark mode inherited). Below is
+the original plan.
 
 **Goal:** the single-pane executive finance dashboard Oracle infolets deliver.
 **Outcome demo:** `/finance/command-center` shows KPI scorecard tiles (value + RAG + YoY + sparkline), a cash
@@ -339,3 +347,4 @@ closes the biggest Oracle gap (a real, comparative, drill-through CFO dashboard)
 | 2026-07-05 | CTO/CFO | Initial draft for approval — Oracle-grade finance dashboards & KPI plan (Phases 1–6). |
 | 2026-07-05 | Platform | **Phase 1 DELIVERED** — FinanceMetricsService (31 KPIs) + `/api/finance/metrics/*`, exec_scorecard refactor, ELC-07 control, `finance-kpi` harness (34 ✓), doc sync (PN-26 §3c, manual 09 §1b, UAT-RPT-050). |
 | 2026-07-05 | Platform | **Review fix** — efficiency/annualized KPIs (turnover, DSO/DPO/DIO, ROA/ROE, days-cash, runway) moved to a **trailing-12-month basis** (window-length-independent; CLOSE-excluded via new `incomeStatement` `excludeSources` arg) after review showed month-to-date windows distorting them; growth KPIs regrouped into `growth_cash`. Harness 28→34 checks. |
+| 2026-07-05 | Platform | **Phase 2 DELIVERED** — `/finance/command-center` web dashboard (RAG scorecard tiles + comparatives + lazy 12-mo sparkline + drill), live `fin_kpi_refresh` SSE, nav + i18n. Web build + `pnpm -r typecheck` clean. |
