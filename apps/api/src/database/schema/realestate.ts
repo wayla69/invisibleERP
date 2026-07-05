@@ -33,6 +33,7 @@ export const reUnits = pgTable(
     areaSqm: numeric('area_sqm', { precision: 12, scale: 2 }).notNull().default('0'),
     floor: text('floor'),
     listPrice: numeric('list_price', { precision: 16, scale: 2 }).notNull().default('0'),
+    cost: numeric('cost', { precision: 16, scale: 2 }).notNull().default('0'),  // construction cost (relieved at transfer, RE-04)
     status: text('status').notNull().default('available'),   // available | reserved | contracted | transferred
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
@@ -79,6 +80,8 @@ export const reContracts = pgTable(
     createdBy: text('created_by'),
     approvedBy: text('approved_by'),                         // checker — must differ from created_by (SoD)
     approvedAt: timestamp('approved_at', { withTimezone: true }),
+    transferEntryNo: text('transfer_entry_no'),              // the revenue-recognition JE at ownership transfer (RE-04)
+    transferredAt: timestamp('transferred_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   },

@@ -470,6 +470,7 @@ export const projectSubcontracts = pgTable(
     contractValue: numeric('contract_value', { precision: 16, scale: 2 }).notNull().default('0'),
     retentionPct: numeric('retention_pct', { precision: 9, scale: 4 }).notNull().default('0'),
     whtPct: numeric('wht_pct', { precision: 9, scale: 4 }).notNull().default('0'),          // subcontractor WHT % (Depth-2)
+    vatPct: numeric('vat_pct', { precision: 9, scale: 4 }).notNull().default('0'),          // subcontractor input VAT % (docs/35 Depth)
     status: text('status').notNull().default('active'),     // active | closed
     certifiedToDate: numeric('certified_to_date', { precision: 16, scale: 2 }).notNull().default('0'),
     createdBy: text('created_by'),
@@ -514,6 +515,7 @@ export const subcontractValuations = pgTable(
     retentionAmount: numeric('retention_amount', { precision: 16, scale: 2 }).notNull().default('0'),
     backCharge: numeric('back_charge', { precision: 16, scale: 2 }).notNull().default('0'),
     whtAmount: numeric('wht_amount', { precision: 16, scale: 2 }).notNull().default('0'), // WHT withheld (Depth-2)
+    vatAmount: numeric('vat_amount', { precision: 16, scale: 2 }).notNull().default('0'), // input VAT (docs/35 Depth)
     netCertified: numeric('net_certified', { precision: 16, scale: 2 }).notNull().default('0'),
     entryNo: text('entry_no'),
     createdBy: text('created_by'),

@@ -13,7 +13,7 @@ const n = (x: unknown) => Number(x ?? 0);
 const EPS = 0.005;
 
 export interface ScopeDto { boq_line_id: number; amount: number; description?: string }
-export interface CreateSubcontractDto { project_code: string; vendor_name?: string; title?: string; retention_pct?: number; wht_pct?: number; scope: ScopeDto[]; allow_over?: boolean }
+export interface CreateSubcontractDto { project_code: string; vendor_name?: string; title?: string; retention_pct?: number; wht_pct?: number; vat_pct?: number; scope: ScopeDto[]; allow_over?: boolean }
 export interface CreateValuationDto { period?: string; pct_complete: number; back_charge?: number }
 
 // Subcontractor management (docs/35 P2, PROJ-16). A subcontract is a priced scope against BoQ lines; on
@@ -70,7 +70,7 @@ export class SubcontractsService {
     return this.db.transaction(async (tx) => {
       const [h] = await tx.insert(projectSubcontracts).values({
         tenantId, projectId, subcontractNo: subNo, vendorName: dto.vendor_name ?? null, title: dto.title ?? null,
-        contractValue: String(contractValue), retentionPct: String(retentionPct), whtPct: String(Math.max(0, n(dto.wht_pct))), status: 'active', createdBy: user.username,
+        contractValue: String(contractValue), retentionPct: String(retentionPct), whtPct: String(Math.max(0, n(dto.wht_pct))), vatPct: String(Math.max(0, n(dto.vat_pct))), status: 'active', createdBy: user.username,
       }).returning({ id: projectSubcontracts.id });
       const subId = Number(h!.id);
       for (const s of dto.scope) {
@@ -132,8 +132,11 @@ export class SubcontractsService {
     // Depth-2 — Thai construction WHT (ภ.ง.ด.53, 3%): withheld from the subcontractor's payment on the certified
     // service value and remitted to the RD, so what we owe the subcontractor is net − WHT (retention already out).
     const wht = r2((gross * n(s.whtPct)) / 100);
-    const ap = r2(net - wht);
-    if (ap < -EPS) throw new BadRequestException({ code: 'BAD_WHT', message: `WHT ${wht} + retention leaves a negative payable (${ap})`, messageTh: 'ภาษีหัก ณ ที่จ่ายทำให้ยอดจ่ายติดลบ' });
+    // Depth — recoverable INPUT VAT (ภาษีซื้อ) on the subcontractor's invoice: we pay it (raising AP) and
+    // reclaim it (Dr 1300). AP = net service − WHT + input VAT.
+    const vat = r2((gross * n(s.vatPct)) / 100);
+    const ap = r2(net - wht + vat);
+    if (r2(net - wht) < -EPS) throw new BadRequestException({ code: 'BAD_WHT', message: `WHT ${wht} + retention leaves a negative payable`, messageTh: 'ภาษีหัก ณ ที่จ่ายทำให้ยอดจ่ายติดลบ' });
 
     const newCertified = r2(n(s.certifiedToDate) + gross);
     if (newCertified > n(s.contractValue) + 0.01)
@@ -142,10 +145,11 @@ export class SubcontractsService {
 
     const lines: any[] = [];
     if (wipCost > 0) lines.push({ account_code: '1260', debit: wipCost, memo: `Subcontract WIP ${valNo}`, project_id: projectId });
+    if (vat > 0) lines.push({ account_code: '1300', debit: vat, memo: `Input VAT ${valNo}`, project_id: projectId });
     lines.push({ account_code: '2000', credit: ap, memo: `Subcontractor AP ${valNo}`, project_id: projectId });
     if (retention > 0) lines.push({ account_code: '2440', credit: retention, memo: `Retention payable ${valNo}`, project_id: projectId });
     if (wht > 0) lines.push({ account_code: '2361', credit: wht, memo: `Vendor WHT (PND53) ${valNo}`, project_id: projectId });
-    // Dr 1260 (gross−back) balances Cr [AP (net−wht) + retention + wht] = net + retention = gross − back. ✓
+    // Dr [1260 (gross−back) + 1300 VAT] = Cr [AP (net−wht+vat) + retention + wht] → both = gross − back + vat. ✓
 
     const entryNo = await this.db.transaction(async (tx) => {
       const je: any = await this.ledger.postEntry({ source: 'PRJ-SUBVAL', sourceRef: valNo, tenantId, memo: `Subcontract valuation ${valNo}`, createdBy: user.username, lines }, tx);
@@ -155,7 +159,7 @@ export class SubcontractsService {
           amount: retention, tenantId, createdBy: user.username,
         }, tx);
       }
-      await tx.update(subcontractValuations).set({ status: 'certified', certifiedBy: user.username, certifiedAt: new Date(), whtAmount: String(wht), entryNo: je.entry_no, updatedAt: new Date() }).where(eq(subcontractValuations.id, Number(v.id)));
+      await tx.update(subcontractValuations).set({ status: 'certified', certifiedBy: user.username, certifiedAt: new Date(), whtAmount: String(wht), vatAmount: String(vat), entryNo: je.entry_no, updatedAt: new Date() }).where(eq(subcontractValuations.id, Number(v.id)));
       await tx.update(projectSubcontracts).set({ certifiedToDate: String(newCertified), updatedAt: new Date() }).where(eq(projectSubcontracts.id, Number(s.id)));
       // The certified works cost lands in project WIP → keep the project's cost_to_date consistent so progress
       // billing (P1) relieves it correctly.
@@ -163,7 +167,7 @@ export class SubcontractsService {
       await tx.update(projects).set({ costToDate: String(r2(n(proj?.c) + wipCost)) }).where(eq(projects.id, projectId));
       return je.entry_no;
     });
-    return { valuation_no: valNo, entry_no: entryNo, status: 'certified', gross, retention, back_charge: backCharge, wht, net_certified: net, ap_payable: ap, wip_cost: wipCost };
+    return { valuation_no: valNo, entry_no: entryNo, status: 'certified', gross, retention, back_charge: backCharge, wht, vat, net_certified: net, ap_payable: ap, wip_cost: wipCost };
   }
 
   private async getWithin(runner: any, subNo: string) {

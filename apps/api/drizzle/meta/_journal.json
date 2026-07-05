@@ -1786,6 +1786,13 @@
       "when": 2023820000081,
       "tag": "0254_construction_tax",
       "breakpoints": true
+    },
+    {
+      "idx": 255,
+      "version": "7",
+      "when": 2023820000082,
+      "tag": "0255_re_transfer_input_vat",
+      "breakpoints": true
     }
   ]
 }

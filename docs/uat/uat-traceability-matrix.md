@@ -263,6 +263,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RE-01 | Real-estate unit inventory — no double allocation; availability grid ties out (P4) | RE-01 | 31 §3–4, 35 P4 (D1) |
 | UAT-RE-02 | Real-estate sale contract — price/discount authority (maker-checker) (P4) | RE-02, SoD R19 | 31 §3–4, 35 P4 (D2) |
 | UAT-RE-03 | Real-estate installment application — pay-once, exact amount (P4) | RE-03 | 31 §3–4, 35 P4 (D2) |
+| UAT-RE-04 | Real-estate ownership transfer — settled-only, authorised revenue recognition (P5) | RE-04 | 31 §rev0.2, 35 P5 |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

@@ -83,4 +83,5 @@ overdue-installment **dunning**, retention/holdback, and mortgage/loan-bank inte
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 0.2 | 2026-07-05 | Platform | **P5 — ownership transfer + revenue recognition (RE-04).** `POST /api/realestate/contracts/:no/transfer` is an **authorised** (`re_transfer`), **fully-settled-only** (`NOT_FULLY_SETTLED`), idempotent act: the deferred cash in the contract liability (2410) is recognised as **revenue** (Dr 2410 / Cr 4200) at handover and the unit's **construction cost** is relieved (Dr 5800 / Cr 1200), flipping unit + contract to `transferred`. Migration 0255 (`re_units.cost`, `re_contracts.transfer_entry_no/transferred_at`). Also the scheduled sweeps (Depth-5): `re_booking_expire` (frees lapsed bookings) + `re_installment_overdue` (worklist). RCM 187. |
 | 0.1 | 2026-07-05 | Platform | Initial — real-estate developer sales P4 (units/booking/contract/installments), controls RE-01/02/03, SoD R19 (docs/35 Track D). Transfer/recognition (RE-04) + workspace deferred to P5. |

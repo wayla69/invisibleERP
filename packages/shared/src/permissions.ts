@@ -33,8 +33,9 @@ export const PERMISSIONS = [
   'proj_tender',
   // ── Real-estate developer vertical (docs/35 P4, RE-01..03) — a property developer's unit sales. re_sales
   //    manages developments/units/bookings/contracts/installments; re_contract_approve certifies the sale
-  //    contract (maker-checker on the price/discount authority). Ungranted ⇒ the vertical is invisible. ──
-  're_sales', 're_contract_approve',
+  //    contract (maker-checker on the price/discount authority). re_transfer authorises ownership transfer
+  //    (RE-04 — recognises revenue). Ungranted ⇒ the vertical is invisible. ──
+  're_sales', 're_contract_approve', 're_transfer',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -49,7 +50,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'proj_billing', 'proj_billing_certify',
   'proj_subcon', 'proj_subcon_certify',
   'proj_tender',
-  're_sales', 're_contract_approve',
+  're_sales', 're_contract_approve', 're_transfer',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -70,7 +71,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
-  'Real Estate (Developer)': ['re_sales', 're_contract_approve'],
+  'Real Estate (Developer)': ['re_sales', 're_contract_approve', 're_transfer'],
 };
 
 // Canonical role → default permission seed (init_db DEFAULT_PERMS, verbatim).

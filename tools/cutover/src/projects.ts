@@ -873,6 +873,21 @@ async function main() {
   const rlist1 = await inj('GET', '/api/realestate/developments/RED-1/units', admin);
   ok('RE-01: availability grid ties out → 2 contracted, 1 available', rlist1.json.summary?.contracted === 2 && rlist1.json.summary?.available === 1, JSON.stringify(rlist1.json.summary));
 
+  // ── P5 (docs/35) — ownership transfer + revenue recognition (RE-04) ──
+  await inj('POST', '/api/realestate/developments', admin, { dev_code: 'RED-2', name: 'บ้านเดี่ยว' });
+  await inj('POST', '/api/realestate/developments/RED-2/units', admin, { unit_no: 'U-201', unit_type: 'house', list_price: 500000, cost: 300000 });
+  await inj('POST', '/api/realestate/developments/RED-2/units', admin, { unit_no: 'U-202', unit_type: 'house', list_price: 500000, cost: 300000 });
+  const tc1 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-2', unit_no: 'U-201', down_payment: 500000, installment_count: 0 }); // fully paid on down
+  await inj('POST', `/api/realestate/contracts/${tc1.json.contract_no}/approve`, mgr);
+  const xfer = await inj('POST', `/api/realestate/contracts/${tc1.json.contract_no}/transfer`, admin, {});
+  ok('RE-04: transfer a fully-settled contract → revenue 500000, cost 300000 (Dr 2410/Cr 4200 + Dr 5800/Cr 1200), unit transferred',
+    xfer.status < 300 && xfer.json.status === 'transferred' && near(xfer.json.revenue_recognized, 500000) && near(xfer.json.cost_recognized, 300000) && /^JE-/.test(xfer.json.entry_no ?? ''),
+    JSON.stringify({ st: xfer.json.status, rev: xfer.json.revenue_recognized, cost: xfer.json.cost_recognized }));
+  const tc2 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-2', unit_no: 'U-202', down_payment: 100000, installment_count: 4 }); // balance 400000 unpaid
+  await inj('POST', `/api/realestate/contracts/${tc2.json.contract_no}/approve`, mgr);
+  const xferEarly = await inj('POST', `/api/realestate/contracts/${tc2.json.contract_no}/transfer`, admin, {});
+  ok('RE-04: transfer before fully settled → 400 NOT_FULLY_SETTLED', xferEarly.status === 400 && xferEarly.json.error?.code === 'NOT_FULLY_SETTLED', `${xferEarly.status} ${xferEarly.json.error?.code}`);
+
   // ── P3 (docs/35) — tender / estimating → award (Track C, PROJ-17) ──
   // Build a priced estimate, submit, record win/loss, and on a WIN award → seed a project + a DRAFT BoQ from
   // the tender lines (the seeded BoQ's own maker-checker approve sets the controlled budget baseline).
@@ -1051,13 +1066,13 @@ async function main() {
     pocCert.status < 300 && pocCert.json.rev_method === 'poc' && near(pocCert.json.revenue, 0) && near(pocCert.json.billings_in_excess, 50000) && /^JE-/.test(pocCert.json.entry_no ?? ''),
     JSON.stringify({ rm: pocCert.json.rev_method, rev: pocCert.json.revenue, bie: pocCert.json.billings_in_excess }));
 
-  // Depth-2: subcontractor WHT (ภ.ง.ด.53, 3%) withheld from the certified valuation payment.
-  const scWht = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', vendor_name: 'ผู้รับเหมาช่วง WHT', retention_pct: 0, wht_pct: 3, scope: [{ boq_line_id: scL1, amount: 20000 }] });
+  // Depth-2: subcontractor WHT (ภ.ง.ด.53, 3%) + recoverable input VAT (7%) on the certified valuation.
+  const scWht = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', vendor_name: 'ผู้รับเหมาช่วง WHT', retention_pct: 0, wht_pct: 3, vat_pct: 7, scope: [{ boq_line_id: scL1, amount: 20000 }] });
   const svWht = await inj('POST', `/api/subcontracts/${scWht.json.subcontract_no}/valuations`, admin, { pct_complete: 100 });
   const svWhtCert = await inj('POST', `/api/subcontracts/valuations/${svWht.json.valuation_no}/certify`, mgr);
-  ok('Depth-2: subcontract valuation with 3% WHT → gross 20000, WHT 600, AP payable 19400 (Cr 2361), net_certified 20000',
-    svWhtCert.status < 300 && near(svWhtCert.json.wht, 600) && near(svWhtCert.json.ap_payable, 19400) && near(svWhtCert.json.net_certified, 20000),
-    JSON.stringify({ wht: svWhtCert.json.wht, ap: svWhtCert.json.ap_payable }));
+  ok('Depth-2: subcontract valuation → WHT 600 (Cr 2361), input VAT 1400 (Dr 1300), AP payable 20800 (net−WHT+VAT), net_certified 20000',
+    svWhtCert.status < 300 && near(svWhtCert.json.wht, 600) && near(svWhtCert.json.vat, 1400) && near(svWhtCert.json.ap_payable, 20800) && near(svWhtCert.json.net_certified, 20000),
+    JSON.stringify({ wht: svWhtCert.json.wht, vat: svWhtCert.json.vat, ap: svWhtCert.json.ap_payable }));
 
   // ── P0 (docs/35) — shared retention sub-ledger + retention GL accounts (Construction/RE vertical, Phase 0) ──
   // The primitive Tracks A (customer progress billing / งวดงาน) and B (subcontractor valuations) build on:

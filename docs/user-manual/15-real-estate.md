@@ -31,7 +31,16 @@ installment is paid **once** (`INSTALLMENT_PAID`); the cash posts to the contrac
 **RE-03**). The contract view (`GET /api/realestate/contracts/{no}`) shows the schedule with **paid /
 outstanding** so the buyer's position is always clear.
 
+## Ownership transfer (`POST /api/realestate/contracts/{no}/transfer`)
+Once the buyer has **fully paid** (down‑payment + all installments), an authorised user (`re_transfer`)
+**transfers ownership**: this is when the sale's **revenue is recognised** (the deferred cash in the contract
+liability moves to revenue) and the unit's construction **cost is relieved** — the unit and contract flip to
+**transferred**. You can't transfer a contract with any outstanding balance (`NOT_FULLY_SETTLED`). Set a unit's
+**cost** when adding it so the cost is matched at transfer. Scheduled jobs handle **booking expiry** and an
+**overdue‑installment** worklist automatically.
+
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 1.1 | 2026-07-05 | **Ownership transfer + revenue recognition** (docs/35 P5, RE-04) — authorised, fully-settled-only transfer recognises the sale revenue and relieves the unit cost; unit `cost` field added. Scheduled booking-expiry + overdue-installment jobs. |
 | 1.0 | 2026-07-05 | Initial — real-estate developer unit-sales (docs/35 P4): developments/units + availability grid (RE-01), booking, maker-checker sale contract (RE-02), installments (RE-03). Ownership transfer + a dedicated web workspace are a fast-follow. |

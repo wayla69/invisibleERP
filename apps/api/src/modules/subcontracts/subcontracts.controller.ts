@@ -10,6 +10,7 @@ const CreateBody = z.object({
   title: z.string().optional(),
   retention_pct: z.number().min(0).max(100).optional(),
   wht_pct: z.number().min(0).max(100).optional(),
+  vat_pct: z.number().min(0).max(100).optional(),
   allow_over: z.boolean().optional(),
   scope: z.array(z.object({
     boq_line_id: z.number().int().positive(),

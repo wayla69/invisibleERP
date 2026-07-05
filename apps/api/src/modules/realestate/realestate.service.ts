@@ -16,7 +16,7 @@ const GL_CASH = '1000', GL_DEPOSIT = '2210', GL_CONTRACT_LIAB = '2410';
 const addMonths = (d: Date, m: number) => { const x = new Date(d.getTime()); x.setMonth(x.getMonth() + m); return x.toISOString().slice(0, 10); };
 
 export interface CreateDevDto { dev_code: string; name: string; location?: string }
-export interface AddUnitDto { unit_no: string; unit_type?: string; area_sqm?: number; floor?: string; list_price: number }
+export interface AddUnitDto { unit_no: string; unit_type?: string; area_sqm?: number; floor?: string; list_price: number; cost?: number }
 export interface BookDto { dev_code: string; unit_no: string; buyer_name?: string; deposit: number; expires_on?: string }
 export interface CreateContractDto { dev_code: string; unit_no: string; booking_no?: string; buyer_name?: string; discount?: number; down_payment: number; installment_count: number }
 export interface PayDto { amount: number }
@@ -59,7 +59,7 @@ export class RealEstateService {
     if (n(dto.list_price) <= 0) throw new BadRequestException({ code: 'BAD_PRICE', message: 'list_price must be positive', messageTh: 'ราคาต้องมากกว่าศูนย์' });
     await this.db.insert(reUnits).values({
       tenantId: d.tenantId ?? user.tenantId ?? null, reProjectId: Number(d.id), unitNo: dto.unit_no, unitType: dto.unit_type ?? 'condo',
-      areaSqm: String(r2(n(dto.area_sqm))), floor: dto.floor ?? null, listPrice: String(r2(n(dto.list_price))), status: 'available',
+      areaSqm: String(r2(n(dto.area_sqm))), floor: dto.floor ?? null, listPrice: String(r2(n(dto.list_price))), cost: String(r2(n(dto.cost))), status: 'available',
     });
     return this.getUnit(devCode, dto.unit_no);
   }
@@ -194,6 +194,36 @@ export class RealEstateService {
       return je.entry_no;
     });
     return { installment_id: Number(installmentId), seq: inst.seq, amount, status: 'paid', entry_no: entryNo };
+  }
+
+  // Ownership transfer (RE-04, docs/35 P5) — an AUTHORISED (re_transfer), fully-settled-only act. The cash
+  // banked into the contract liability (2410) over the sale is now recognised as REVENUE, and the unit's
+  // construction cost is relieved from inventory (1200) to COGS (5800). Idempotent per contract.
+  async transferOwnership(contractNo: string, user: JwtUser) {
+    const c = await this.contractRow(contractNo);
+    if (c.status !== 'active') throw new BadRequestException({ code: 'CONTRACT_NOT_ACTIVE', message: `Contract ${contractNo} is ${c.status}, not active`, messageTh: 'สัญญาไม่ได้อยู่ในสถานะใช้งาน' });
+    const installments = await this.db.select().from(reInstallments).where(eq(reInstallments.contractId, Number(c.id)));
+    const paid = r2(installments.filter((i: any) => i.status === 'paid').reduce((a: number, i: any) => a + n(i.paidAmount), 0));
+    const outstanding = r2(n(c.balance) - paid);
+    if (outstanding > EPS) throw new BadRequestException({ code: 'NOT_FULLY_SETTLED', message: `Cannot transfer — ${outstanding} still outstanding`, messageTh: 'โอนกรรมสิทธิ์ไม่ได้ ยังมียอดค้างชำระ' });
+    const tenantId = c.tenantId ?? user.tenantId ?? null;
+    if (await this.ledger.alreadyPosted('RE-TRANSFER', contractNo, tenantId)) return { already: true, contract_no: contractNo };
+    const [unit] = await this.db.select().from(reUnits).where(eq(reUnits.id, Number(c.unitId))).limit(1);
+    const price = r2(n(c.price));
+    const cost = r2(n(unit?.cost));
+
+    const entryNo = await this.db.transaction(async (tx) => {
+      const lines: any[] = [
+        { account_code: GL_CONTRACT_LIAB, debit: price, memo: `RE revenue ${contractNo}` },   // release the contract liability…
+        { account_code: '4200', credit: price, memo: `RE sale revenue ${contractNo}` },        // …into revenue on handover
+      ];
+      if (cost > 0) { lines.push({ account_code: '5800', debit: cost, memo: `RE unit cost ${contractNo}` }); lines.push({ account_code: '1200', credit: cost, memo: `RE inventory relieved ${contractNo}` }); }
+      const je: any = await this.ledger.postEntry({ source: 'RE-TRANSFER', sourceRef: contractNo, tenantId, memo: `Ownership transfer ${contractNo}`, createdBy: user.username, lines }, tx);
+      await tx.update(reContracts).set({ status: 'transferred', transferEntryNo: je.entry_no, transferredAt: new Date(), updatedAt: new Date() }).where(eq(reContracts.id, Number(c.id)));
+      await tx.update(reUnits).set({ status: 'transferred', updatedAt: new Date() }).where(eq(reUnits.id, Number(c.unitId)));
+      return je.entry_no;
+    });
+    return { contract_no: contractNo, status: 'transferred', unit_status: 'transferred', revenue_recognized: price, cost_recognized: cost, entry_no: entryNo };
   }
 
   // ── Scheduled sweeps (docs/35 Depth) — ride the BI report scheduler ──

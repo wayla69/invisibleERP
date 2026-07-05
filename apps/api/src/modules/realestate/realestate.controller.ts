@@ -5,7 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { RealEstateService, type CreateDevDto, type AddUnitDto, type BookDto, type CreateContractDto, type PayDto } from './realestate.service';
 
 const DevBody = z.object({ dev_code: z.string().min(1), name: z.string().min(1), location: z.string().optional() });
-const UnitBody = z.object({ unit_no: z.string().min(1), unit_type: z.string().optional(), area_sqm: z.number().nonnegative().optional(), floor: z.string().optional(), list_price: z.number().positive() });
+const UnitBody = z.object({ unit_no: z.string().min(1), unit_type: z.string().optional(), area_sqm: z.number().nonnegative().optional(), floor: z.string().optional(), list_price: z.number().positive(), cost: z.number().nonnegative().optional() });
 const BookBody = z.object({ dev_code: z.string().min(1), unit_no: z.string().min(1), buyer_name: z.string().optional(), deposit: z.number().nonnegative(), expires_on: z.string().optional() });
 const ContractBody = z.object({ dev_code: z.string().min(1), unit_no: z.string().min(1), booking_no: z.string().optional(), buyer_name: z.string().optional(), discount: z.number().min(0).optional(), down_payment: z.number().min(0), installment_count: z.number().int().min(0) });
 const PayBody = z.object({ amount: z.number().positive() });
@@ -46,6 +46,11 @@ export class RealEstateController {
   @Post('installments/:id/pay')
   @Permissions('re_sales', 'ar', 'exec')
   pay(@Param('id') id: string, @Body(new ZodValidationPipe(PayBody)) b: PayDto, @CurrentUser() u: JwtUser) { return this.svc.payInstallment(Number(id), b, u); }
+
+  // Ownership transfer (RE-04) — authorised, fully-settled-only; recognises revenue + relieves the unit cost.
+  @Post('contracts/:no/transfer')
+  @Permissions('re_transfer', 'exec')
+  transfer(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.svc.transferOwnership(no, u); }
 
   @Get('contracts/:no')
   @Permissions('re_sales', 're_contract_approve', 'exec')
