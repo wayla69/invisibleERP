@@ -1,5 +1,17 @@
 import type { Lang } from '../messages';
 export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
+  // ── QR camera scanner (shared component) ──
+  'qr.scan_button': { th: 'สแกน QR', en: 'Scan QR' },
+  'qr.scan_title': { th: 'สแกน QR ด้วยกล้อง', en: 'Scan QR with camera' },
+  'qr.scan_hint': { th: 'เล็งกล้องไปที่ป้าย QR ให้อยู่ในกรอบ', en: 'Point the camera at the QR label until it is in frame' },
+  'qr.scan_denied': { th: 'ไม่ได้รับอนุญาตให้ใช้กล้อง — โปรดอนุญาตแล้วลองใหม่ หรือพิมพ์โค้ดด้วยตนเอง', en: 'Camera permission denied — allow access and retry, or type the code manually' },
+  'qr.scan_camera_error': { th: 'ไม่สามารถเปิดกล้องได้ — ใช้เครื่องสแกนหรือพิมพ์โค้ดแทน', en: 'Could not open the camera — use a hardware scanner or type the code' },
+  'qr.scan_unsupported': { th: 'เบราว์เซอร์นี้ไม่รองรับการสแกนด้วยกล้อง', en: 'This browser does not support camera scanning' },
+  'qr.scan_no_camera': { th: 'ไม่พบกล้องบนอุปกรณ์นี้', en: 'No camera found on this device' },
+  'qr.scan_torch': { th: 'ไฟฉาย', en: 'Torch' },
+  'qr.scan_done': { th: 'เสร็จสิ้น', en: 'Done' },
+  'qr.scan_count': { th: 'สแกนแล้ว {n} รายการ', en: 'Scanned {n}' },
+  // (The public /q resolver page is a server component and renders its labels inline/bilingual — no keys.)
   'mx.as_approved_by': { th: 'อนุมัติโดย', en: 'Approved by' },
   'mx.as_asset_label': { th: 'ทรัพย์สิน', en: 'Asset' },
   'mx.as_asset_name_label': { th: 'ชื่อสินทรัพย์', en: 'Asset name' },

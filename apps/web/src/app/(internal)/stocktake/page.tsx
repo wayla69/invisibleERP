@@ -7,7 +7,8 @@ import { ClipboardCheck, ClipboardList, FileText, Plus, ScanLine, Trash2 } from 
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { num, thaiDate } from '@/lib/format';
-import { parseQrPayload } from '@/lib/qr';
+import { scanCodeId } from '@/lib/qr';
+import { QrScanButton } from '@/components/qr-scanner';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -50,8 +51,8 @@ function NewCount() {
 
   function applyScan(v: string) {
     setScan(v);
-    const code = parseQrPayload(v).ITEM_ID;
-    if (code && (byId[code] || true)) setItemId(code);
+    const code = scanCodeId(v);
+    if (code) setItemId(code);
   }
   function add() {
     if (!itemId || phys === '') return;
@@ -76,7 +77,10 @@ function NewCount() {
       <Card className="gap-3 p-5">
         <div className="grid gap-1.5">
           <Label htmlFor="st-scan"><ScanLine className="mr-1 inline size-4" /> {t('iv.stk_scan_label')}</Label>
-          <Input id="st-scan" placeholder="ITEM_ID:P001|…" value={scan} onChange={(e) => applyScan(e.target.value)} />
+          <div className="flex items-center gap-2">
+            <Input id="st-scan" className="flex-1" placeholder="ITEM_ID:P001|…" value={scan} onChange={(e) => applyScan(e.target.value)} />
+            <QrScanButton onScan={applyScan} />
+          </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div className="grid gap-1.5 min-w-[220px] flex-1">
