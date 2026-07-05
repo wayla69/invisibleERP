@@ -8,6 +8,7 @@ const CreateBody = z.object({
   project_code: z.string().min(1),
   period: z.string().optional(),
   retention_pct: z.number().min(0).max(100).optional(),
+  vat_pct: z.number().min(0).max(100).optional(),
   lines: z.array(z.object({
     boq_line_id: z.number().int().positive(),
     pct_complete_to_date: z.number().min(0).max(100),

@@ -1779,6 +1779,13 @@
       "when": 2023820000080,
       "tag": "0253_realestate",
       "breakpoints": true
+    },
+    {
+      "idx": 254,
+      "version": "7",
+      "when": 2023820000081,
+      "tag": "0254_construction_tax",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,7 @@ const n = (x: unknown) => Number(x ?? 0);
 const EPS = 0.005;
 
 export interface ClaimLineDto { boq_line_id: number; pct_complete_to_date: number }
-export interface CreateClaimDto { project_code: string; period?: string; retention_pct?: number; lines: ClaimLineDto[] }
+export interface CreateClaimDto { project_code: string; period?: string; retention_pct?: number; vat_pct?: number; lines: ClaimLineDto[] }
 
 // Progress billing / งวดงาน (docs/35 P1, PROJ-15). The customer-side revenue engine of a construction
 // contract: a periodic CLAIM values work done to date by BoQ line (cumulative % → value-to-date), bills the
@@ -96,10 +96,13 @@ export class ProgressBillingService {
     const retentionAmount = r2((gross * retentionPct) / 100);
     const claimNo = await this.docNo.nextDaily('PC');
 
+    const vatPct = Math.max(0, n(dto.vat_pct));
+    const vatAmount = r2((gross * vatPct) / 100);
     const [h] = await this.db.insert(projectProgressClaims).values({
       tenantId, projectId, claimNo, seq, period: dto.period ?? null, status: 'draft',
       grossThisClaim: String(gross), prevCertified: String(prevCertified), cumulativeCertified: String(r2(prevCertified + gross)),
       retentionPct: String(retentionPct), retentionAmount: String(retentionAmount), netPayable: String(r2(gross - retentionAmount)),
+      vatPct: String(vatPct), vatAmount: String(vatAmount), revMethod: p.revMethod === 'poc' ? 'poc' : 'billing',
       createdBy: user.username,
     }).returning({ id: projectProgressClaims.id });
     for (const e of evaluated) {
@@ -133,15 +136,35 @@ export class ProgressBillingService {
     if (await this.ledger.alreadyPosted('PRJ-PCLAIM', claimNo, tenantId)) return { already: true, claim_no: claimNo };
 
     const projectId = Number(c.projectId);
-    const lines: any[] = [
-      { account_code: '1100', debit: net, memo: `AR ${claimNo}`, project_id: projectId },
-      { account_code: '4200', credit: gross, memo: `Progress billing ${claimNo}`, project_id: projectId },
-    ];
-    if (retention > 0) lines.splice(1, 0, { account_code: '1170', debit: retention, memo: `Retention receivable ${claimNo}`, project_id: projectId });
-    if (relieve > 0) {
-      lines.push({ account_code: '5800', debit: relieve, memo: 'Project cost of services', project_id: projectId });
-      lines.push({ account_code: '1260', credit: relieve, memo: `WIP relieved ${claimNo}`, project_id: projectId });
+    const vatPct = n(c.vatPct);
+    const vat = r2((gross * vatPct) / 100);       // Depth-2 — output VAT on the certified value
+    const arTotal = r2(net + vat);                // what the customer owes now (net of retention, incl. VAT)
+    const isPoc = c.revMethod === 'poc' || p.revMethod === 'poc'; // Depth-3 — reconcile with the POC engine
+
+    // AR (net of retention + VAT) and the withheld retention are common to both revenue models.
+    const lines: any[] = [{ account_code: '1100', debit: arTotal, memo: `AR ${claimNo}`, project_id: projectId }];
+    if (retention > 0) lines.push({ account_code: '1170', debit: retention, memo: `Retention receivable ${claimNo}`, project_id: projectId });
+
+    let costRecognized = 0, revenue = 0, contractAssetCleared = 0, billingsInExcess = 0;
+    if (isPoc) {
+      // POC project (PROJ-09): a progress claim is a BILLING event, NOT a revenue event — revenue is
+      // recognised over time by recognizePoc. Clear the earned-but-unbilled contract asset (1265), park any
+      // excess as a contract liability (2410, billings in excess). No 4200 revenue, no WIP relief here.
+      const contractAsset = r2(Math.max(0, n(p.recognizedRevenue) - n(p.billedToDate)));
+      contractAssetCleared = r2(Math.min(gross, contractAsset));
+      billingsInExcess = r2(gross - contractAssetCleared);
+      if (contractAssetCleared > 0) lines.push({ account_code: '1265', credit: contractAssetCleared, memo: `Contract asset billed ${claimNo}`, project_id: projectId });
+      if (billingsInExcess > 0) lines.push({ account_code: '2410', credit: billingsInExcess, memo: `Billings in excess ${claimNo}`, project_id: projectId });
+    } else {
+      // Billing-method project: the claim recognises revenue and relieves unbilled WIP to COGS.
+      revenue = gross; costRecognized = relieve;
+      lines.push({ account_code: '4200', credit: gross, memo: `Progress billing ${claimNo}`, project_id: projectId });
+      if (relieve > 0) {
+        lines.push({ account_code: '5800', debit: relieve, memo: 'Project cost of services', project_id: projectId });
+        lines.push({ account_code: '1260', credit: relieve, memo: `WIP relieved ${claimNo}`, project_id: projectId });
+      }
     }
+    if (vat > 0) lines.push({ account_code: '2100', credit: vat, memo: `Output VAT ${claimNo}`, project_id: projectId });
 
     const entryNo = await this.db.transaction(async (tx) => {
       const je: any = await this.ledger.postEntry({ source: 'PRJ-PCLAIM', sourceRef: claimNo, tenantId, memo: `Progress claim ${claimNo}`, createdBy: user.username, lines }, tx);
@@ -153,15 +176,15 @@ export class ProgressBillingService {
       }
       await tx.update(projectProgressClaims).set({
         status: 'certified', certifiedBy: user.username, certifiedAt: new Date(),
-        retentionAmount: String(retention), netPayable: String(net), costRecognized: String(relieve), entryNo: je.entry_no, updatedAt: new Date(),
+        retentionAmount: String(retention), netPayable: String(net), vatAmount: String(vat), costRecognized: String(costRecognized), entryNo: je.entry_no, updatedAt: new Date(),
       }).where(eq(projectProgressClaims.id, Number(c.id)));
       await tx.update(projects).set({
-        billedToDate: String(newBilled), recognizedCost: String(r2(n(p.recognizedCost) + relieve)),
+        billedToDate: String(newBilled), recognizedCost: String(r2(n(p.recognizedCost) + costRecognized)),
       }).where(eq(projects.id, projectId));
       return je.entry_no;
     });
 
-    return { claim_no: claimNo, entry_no: entryNo, status: 'certified', gross, retention, retention_pct: retentionPct, net_payable: net, cost_recognized: relieve };
+    return { claim_no: claimNo, entry_no: entryNo, status: 'certified', gross, retention, retention_pct: retentionPct, net_payable: net, vat, vat_pct: vatPct, ar_total: arTotal, rev_method: isPoc ? 'poc' : 'billing', revenue, cost_recognized: costRecognized, contract_asset_cleared: contractAssetCleared, billings_in_excess: billingsInExcess };
   }
 
   async get(claimNo: string) {
@@ -170,7 +193,8 @@ export class ProgressBillingService {
     return {
       claim_no: c.claimNo, seq: c.seq, period: c.period, status: c.status,
       gross_this_claim: n(c.grossThisClaim), prev_certified: n(c.prevCertified), cumulative_certified: n(c.cumulativeCertified),
-      retention_pct: n(c.retentionPct), retention_amount: n(c.retentionAmount), net_payable: n(c.netPayable), cost_recognized: n(c.costRecognized),
+      retention_pct: n(c.retentionPct), retention_amount: n(c.retentionAmount), net_payable: n(c.netPayable),
+      vat_pct: n(c.vatPct), vat_amount: n(c.vatAmount), rev_method: c.revMethod, cost_recognized: n(c.costRecognized),
       entry_no: c.entryNo, created_by: c.createdBy, certified_by: c.certifiedBy, certified_at: c.certifiedAt,
       lines: lines.map((l: any) => ({
         boq_line_id: Number(l.boqLineId), description: l.description, budget_amount: n(l.budgetAmount),

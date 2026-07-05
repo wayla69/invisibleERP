@@ -1,8 +1,8 @@
 # 35 — Construction & Real-Estate Vertical — Progress Billing, Retention, Subcontracts, Tender & Property Sales — Design & Roadmap
 
-> **Date:** 2026-07-05 · **Status:** v0.7 — **P0–P4 DELIVERED** + **depth follow-ups in progress** (D1 retention release→GL + action center ✅); **P5** (ownership transfer RE-04 + RE workspace) **PLANNED** · **Owner:** ERP / Product
+> **Date:** 2026-07-05 · **Status:** v0.8 — **P0–P4 DELIVERED** + **depth follow-ups** (D1 retention release→GL + action center ✅; D2+D3 VAT/WHT + POC rev-rec reconciliation ✅; D4 web workspace next); **P5** (ownership transfer RE-04) **PLANNED** · **Owner:** ERP / Product
 >
-> **Depth follow-ups** (post-P4 audit — closing "architecturally deep, functionally thin" gaps): **D1** retention *release* posts GL + `retention_due` action-center ✅ · **D2+D3** output VAT + POC/rev-rec reconciliation on progress claims, subcontractor WHT (in progress) · **D4** web workspace + nav (planned).
+> **Depth follow-ups** (post-P4 audit — closing "architecturally deep, functionally thin" gaps): **D1** retention *release* posts GL + `retention_due` action-center ✅ · **D2+D3** output VAT + POC/rev-rec reconciliation on progress claims + subcontractor WHT ✅ · **D4** web workspace + nav (next).
 > **Scope:** Close the remaining gap between our project suite and a purpose-built **construction & real-estate
 > ERP** (benchmark: **Mango ERP / Mango Consultant** — Thailand's leading contractor/developer ERP, which
 > pitches one system "from **bidding** through **project-closing** evaluation"). We already own the material-

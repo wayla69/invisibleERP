@@ -1028,6 +1028,37 @@ async function main() {
   const pbRet2 = await inj('GET', '/api/retention/project/PRJ-PB', admin);
   ok('PROJ-15 → P0: retention receivable outstanding 4800 after two certified claims (3000 + 1800)', near(pbRet2.json.receivable?.outstanding, 4800), JSON.stringify({ recv: pbRet2.json.receivable?.outstanding }));
 
+  // ── Depth-2/3 (docs/35) — output VAT on progress claims, POC/rev-rec reconciliation, subcontractor WHT ──
+  // Depth-2: output VAT on a customer progress claim (billing-method project).
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-VAT', name: 'งานมี VAT', customer_name: 'ผู้ว่าจ้าง', billing_type: 'Fixed', contract_amount: 100000 });
+  const vatBoq = await inj('POST', '/api/projects/PRJ-VAT/boq', admin, { title: 'BoQ VAT', lines: [{ category: 'material', description: 'งานรวม', budget_amount: 100000 }] });
+  await inj('POST', `/api/projects/boq/${vatBoq.json.boq?.id}/approve`, mgr);
+  const vatL1 = (vatBoq.json.lines ?? [])[0]?.id;
+  const vatClaim = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-VAT', retention_pct: 0, vat_pct: 7, lines: [{ boq_line_id: vatL1, pct_complete_to_date: 100 }] });
+  const vatCert = await inj('POST', `/api/progress-billing/${vatClaim.json.claim_no}/certify`, mgr);
+  ok('Depth-2: progress claim with 7% VAT → gross 100000, VAT 7000, AR total 107000, revenue 100000 (billing method)',
+    vatCert.status < 300 && near(vatCert.json.vat, 7000) && near(vatCert.json.ar_total, 107000) && near(vatCert.json.revenue, 100000) && vatCert.json.rev_method === 'billing',
+    JSON.stringify({ vat: vatCert.json.vat, ar: vatCert.json.ar_total, rm: vatCert.json.rev_method }));
+
+  // Depth-3: on a POC project a progress claim is a BILLING event (no revenue; clears contract asset / parks liability).
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-POC3', name: 'งาน POC (progress)', billing_type: 'Fixed', contract_amount: 100000, rev_method: 'poc', estimated_cost: 80000 });
+  const pocBoq = await inj('POST', '/api/projects/PRJ-POC3/boq', admin, { title: 'BoQ POC', lines: [{ category: 'material', description: 'งานรวม', budget_amount: 100000 }] });
+  await inj('POST', `/api/projects/boq/${pocBoq.json.boq?.id}/approve`, mgr);
+  const pocL1 = (pocBoq.json.lines ?? [])[0]?.id;
+  const pocClaim = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-POC3', retention_pct: 0, lines: [{ boq_line_id: pocL1, pct_complete_to_date: 50 }] });
+  const pocCert = await inj('POST', `/api/progress-billing/${pocClaim.json.claim_no}/certify`, mgr);
+  ok('Depth-3: progress claim on a POC project → rev_method poc, revenue 0 (billing event), billings_in_excess 50000 (no double revenue)',
+    pocCert.status < 300 && pocCert.json.rev_method === 'poc' && near(pocCert.json.revenue, 0) && near(pocCert.json.billings_in_excess, 50000) && /^JE-/.test(pocCert.json.entry_no ?? ''),
+    JSON.stringify({ rm: pocCert.json.rev_method, rev: pocCert.json.revenue, bie: pocCert.json.billings_in_excess }));
+
+  // Depth-2: subcontractor WHT (ภ.ง.ด.53, 3%) withheld from the certified valuation payment.
+  const scWht = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', vendor_name: 'ผู้รับเหมาช่วง WHT', retention_pct: 0, wht_pct: 3, scope: [{ boq_line_id: scL1, amount: 20000 }] });
+  const svWht = await inj('POST', `/api/subcontracts/${scWht.json.subcontract_no}/valuations`, admin, { pct_complete: 100 });
+  const svWhtCert = await inj('POST', `/api/subcontracts/valuations/${svWht.json.valuation_no}/certify`, mgr);
+  ok('Depth-2: subcontract valuation with 3% WHT → gross 20000, WHT 600, AP payable 19400 (Cr 2361), net_certified 20000',
+    svWhtCert.status < 300 && near(svWhtCert.json.wht, 600) && near(svWhtCert.json.ap_payable, 19400) && near(svWhtCert.json.net_certified, 20000),
+    JSON.stringify({ wht: svWhtCert.json.wht, ap: svWhtCert.json.ap_payable }));
+
   // ── P0 (docs/35) — shared retention sub-ledger + retention GL accounts (Construction/RE vertical, Phase 0) ──
   // The primitive Tracks A (customer progress billing / งวดงาน) and B (subcontractor valuations) build on:
   // withhold retention on certification, release in tranches; balances only (A/B post the matching GL).
