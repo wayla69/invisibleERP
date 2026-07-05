@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
-import { baht } from '@/lib/format';
+import { baht, num } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 type CatalogItem = {
   item_id: string; item_description: string | null; uom: string | null;
   unit_price: number; image_key: string | null; category: string; category_key: string;
+  on_hand: number | null; last_price: number | null;
 };
 type Category = { key: string; label: string; count: number };
 type CatalogPage = { items: CatalogItem[]; categories: Category[]; total: number; offset: number; limit: number; has_more: boolean; count: number };
@@ -283,6 +284,14 @@ export default function ShopPage() {
                       <div className="flex flex-1 flex-col gap-1 p-2.5">
                         <p className="line-clamp-2 text-sm font-medium leading-snug">{it.item_description || it.item_id}</p>
                         <p className="text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                        <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+                          {it.on_hand != null && (
+                            <span className={it.on_hand <= 0 ? 'font-medium text-destructive' : ''}>
+                              {it.on_hand > 0 ? t('shop.on_hand', { n: num(it.on_hand) }) : t('shop.out_of_stock')}
+                            </span>
+                          )}
+                          {it.last_price != null && it.last_price > 0 && <span>{t('shop.last_price', { price: baht(it.last_price) })}</span>}
+                        </div>
                         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
                           <span className="text-sm font-semibold">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
                           <Button size="sm" className="h-8 gap-1 px-2.5" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
@@ -302,6 +311,14 @@ export default function ShopPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{it.item_description || it.item_id}</p>
                         <p className="text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                        <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+                          {it.on_hand != null && (
+                            <span className={it.on_hand <= 0 ? 'font-medium text-destructive' : ''}>
+                              {it.on_hand > 0 ? t('shop.on_hand', { n: num(it.on_hand) }) : t('shop.out_of_stock')}
+                            </span>
+                          )}
+                          {it.last_price != null && it.last_price > 0 && <span>{t('shop.last_price', { price: baht(it.last_price) })}</span>}
+                        </div>
                         {it.unit_price > 0 && <p className="text-sm font-semibold">{baht(it.unit_price)}</p>}
                       </div>
                       {inCart > 0 && <Badge variant="secondary" className="shrink-0">{t('shop.in_cart')} · {inCart}</Badge>}
