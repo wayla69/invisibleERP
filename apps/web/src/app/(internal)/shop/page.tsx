@@ -28,6 +28,16 @@ type CartLine = { key: string; item_id: string; description: string; uom: string
 
 const PAGE = 24;
 const VIEW_KEY = 'shop.view';
+const CART_KEY = 'shop.cart';
+
+// Rehydrate the basket saved on this device so an in-progress requisition survives a refresh / navigation.
+function readCart(): CartLine[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const arr = JSON.parse(window.localStorage.getItem(CART_KEY) ?? '[]');
+    return Array.isArray(arr) ? arr.filter((l) => l && typeof l.key === 'string' && typeof l.item_id === 'string') : [];
+  } catch { return []; }
+}
 
 // A stable pastel background for an item's placeholder tile (Shopee/Grab-style colourful grid) — derived
 // from the item id so the same product always gets the same hue, no image needed.
@@ -89,16 +99,25 @@ export default function ShopPage() {
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [view, setView] = useState<'grid' | 'list'>(() =>
     (typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list') ? 'list' : 'grid');
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const [cart, setCart] = useState<CartLine[]>(readCart);
   const [remarks, setRemarks] = useState('');
   const [cName, setCName] = useState('');
   const [cUom, setCUom] = useState('');
   const [cQty, setCQty] = useState(1);
   const [cErr, setCErr] = useState(false);
-  const customSeq = useRef(0);
+  // Seed the custom-line counter past any rehydrated custom keys so new free-text lines never collide.
+  const customSeq = useRef(cart.reduce((m, l) => (l.key.startsWith('c:') ? Math.max(m, Number(l.key.slice(2)) + 1) : m), 0));
   const sentinel = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { try { window.localStorage.setItem(VIEW_KEY, view); } catch { /* private mode */ } }, [view]);
+  // Persist the basket on this device (per-device by design — a PR is company-wide but a half-built basket
+  // is personal). Cleared on checkout via setCart([]).
+  useEffect(() => {
+    try {
+      if (cart.length) window.localStorage.setItem(CART_KEY, JSON.stringify(cart));
+      else window.localStorage.removeItem(CART_KEY);
+    } catch { /* private mode */ }
+  }, [cart]);
   // Debounce the search box so typing doesn't fire a request per keystroke.
   useEffect(() => { const id = setTimeout(() => setDebouncedQ(q.trim()), 250); return () => clearTimeout(id); }, [q]);
 
@@ -303,7 +322,7 @@ export default function ShopPage() {
         </div>
 
         {/* ── Basket + custom request (sticky on desktop) ──────────── */}
-        <div className="space-y-4 lg:sticky lg:top-4">
+        <div id="shop-basket" className="scroll-mt-4 space-y-4 lg:sticky lg:top-4">
           <Card className="gap-3">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -383,6 +402,19 @@ export default function ShopPage() {
           </Card>
         </div>
       </div>
+
+      {/* Mobile-only floating cart — jumps down to the basket (which stacks below the catalog on phones). */}
+      {cart.length > 0 && (
+        <button
+          type="button"
+          onClick={() => document.getElementById('shop-basket')?.scrollIntoView({ behavior: 'smooth' })}
+          aria-label={t('shop.view_cart')}
+          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-primary-foreground shadow-lg transition-transform active:scale-95 lg:hidden"
+        >
+          <ShoppingCart className="size-5" />
+          <span className="text-sm font-semibold">{t('shop.lines_n', { n: cart.length })}</span>
+        </button>
+      )}
     </div>
   );
 }

@@ -136,6 +136,11 @@ other PR.
 **Expected result:** One purchase requisition is created for every item in the
 basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval.
 
+> **Your basket is saved on this device** — if you refresh or navigate away
+> mid-shop, the items are still there when you come back (it clears once you check
+> out). On a phone, a **floating cart button** (bottom-right) shows how many lines
+> you have and jumps straight to the basket.
+
 > **Where does the category grouping come from?** The cards are grouped by each
 > item's category in the **item register** — the real *หมวดสินค้า* (`item_categories`,
 > set per item via `category_id`), falling back to the free-text category, otherwise
