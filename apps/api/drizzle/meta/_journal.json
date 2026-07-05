@@ -1737,6 +1737,13 @@
       "when": 2023820000074,
       "tag": "0247_platform_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 248,
+      "version": "7",
+      "when": 2023820000075,
+      "tag": "0248_tax_credit_debit_notes",
+      "breakpoints": true
     }
   ]
 }

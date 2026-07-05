@@ -23,7 +23,7 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type Invoice = {
   doc_no: string;
-  type: 'full' | 'abbreviated';
+  type: 'full' | 'abbreviated' | 'credit_note' | 'debit_note';
   status: string;
   issue_date: string;
   source_type: string;
@@ -32,13 +32,15 @@ type Invoice = {
   subtotal: number;
   vat_amount: number;
   grand_total: number;
+  original_doc_no?: string | null;
+  reason?: string | null;
 };
 
 export default function TaxInvoicesPage() {
   const { t } = useLang();
   const qc = useQueryClient();
-  const typeLabel = (type: string) => (type === 'abbreviated' ? t('tax.type_abbrev') : t('tax.type_full'));
-  const [filter, setFilter] = useState<'' | 'full' | 'abbreviated'>('');
+  const typeLabel = (type: string) => (type === 'abbreviated' ? t('tax.type_abbrev') : type === 'credit_note' ? t('tax.type_credit') : type === 'debit_note' ? t('tax.type_debit') : t('tax.type_full'));
+  const [filter, setFilter] = useState<'' | 'full' | 'abbreviated' | 'credit_note' | 'debit_note'>('');
   const q = useQuery<{ invoices: Invoice[]; count: number }>({
     queryKey: ['tax-invoices', filter],
     queryFn: () => api(`/api/tax-invoices${filter ? `?type=${filter}` : ''}`),
@@ -89,6 +91,29 @@ export default function TaxInvoicesPage() {
   });
   const openEmail = (docNo: string) => { setEmailDoc(docNo); setEmailTo(''); };
 
+  // ── ออกใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) ──
+  const [noteKind, setNoteKind] = useState<'credit_note' | 'debit_note'>('credit_note');
+  const [noteOrig, setNoteOrig] = useState('');
+  const [noteReason, setNoteReason] = useState('');
+  const [noteDesc, setNoteDesc] = useState('');
+  const [noteAmt, setNoteAmt] = useState('');
+  const issueNote = useMutation({
+    mutationFn: () =>
+      api<{ doc_no: string; status: string }>(`/api/tax-invoices/${noteKind === 'credit_note' ? 'credit-note' : 'debit-note'}`, {
+        method: 'POST',
+        body: JSON.stringify({ original_doc_no: noteOrig, reason: noteReason, lines: [{ description: noteDesc || noteReason, amount: Number(noteAmt) }] }),
+      }),
+    onSuccess: (r) => { notifySuccess(t('tax.note_issued', { doc: r.doc_no })); setNoteOrig(''); setNoteReason(''); setNoteDesc(''); setNoteAmt(''); qc.invalidateQueries({ queryKey: ['tax-invoices'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const canIssueNote = !!noteOrig && !!noteReason && Number(noteAmt) > 0 && !issueNote.isPending;
+  // maker-checker approval of a PendingApproval credit/debit note (a DIFFERENT user)
+  const approveNote = useMutation({
+    mutationFn: (docNo: string) => api(`/api/tax-invoices/${docNo}/approve-note`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess(t('tax.note_approved')); qc.invalidateQueries({ queryKey: ['tax-invoices'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   return (
     <div>
       <PageHeader
@@ -105,6 +130,12 @@ export default function TaxInvoicesPage() {
         </Button>
         <Button variant={filter === 'abbreviated' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('abbreviated')}>
           {t('tax.abbrev')}
+        </Button>
+        <Button variant={filter === 'credit_note' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('credit_note')}>
+          {t('tax.type_credit')}
+        </Button>
+        <Button variant={filter === 'debit_note' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('debit_note')}>
+          {t('tax.type_debit')}
         </Button>
       </div>
 
@@ -149,6 +180,42 @@ export default function TaxInvoicesPage() {
           <Button disabled={!canIssue} onClick={() => issue.mutate()}>
             <Receipt className="size-4" /> {issue.isPending ? t('tax.issuing') : t('tax.inv_issue_btn')}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6 max-w-2xl gap-4">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileText className="size-4" /> {t('tax.note_card')}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <Button type="button" variant={noteKind === 'credit_note' ? 'default' : 'outline'} size="sm" onClick={() => setNoteKind('credit_note')}>{t('tax.type_credit')}</Button>
+            <Button type="button" variant={noteKind === 'debit_note' ? 'default' : 'outline'} size="sm" onClick={() => setNoteKind('debit_note')}>{t('tax.type_debit')}</Button>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="note-orig">{t('tax.note_original')}</Label>
+              <Input id="note-orig" value={noteOrig} onChange={(e) => setNoteOrig(e.target.value)} placeholder="TIV-…" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="note-amt">{t('tax.note_amount')}</Label>
+              <Input id="note-amt" type="number" value={noteAmt} onChange={(e) => setNoteAmt(e.target.value)} placeholder="0.00" />
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="note-reason">{t('tax.note_reason')}</Label>
+            <Input id="note-reason" value={noteReason} onChange={(e) => setNoteReason(e.target.value)} placeholder={t('tax.note_reason_ph')} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="note-desc">{t('tax.note_desc')}</Label>
+            <Input id="note-desc" value={noteDesc} onChange={(e) => setNoteDesc(e.target.value)} placeholder={t('tax.optional')} />
+          </div>
+          <Button disabled={!canIssueNote} onClick={() => issueNote.mutate()}>
+            <Plus className="size-4" /> {issueNote.isPending ? t('tax.issuing') : t('tax.note_issue_btn')}
+          </Button>
+          <p className="text-xs text-muted-foreground">{t('tax.note_maker_checker')}</p>
         </CardContent>
       </Card>
 
@@ -210,6 +277,16 @@ export default function TaxInvoicesPage() {
                     <Button variant="ghost" size="sm" title={t('tax.send_etax_email_title')} onClick={() => openEmail(r.doc_no)}>
                       <Mail className="size-4" />
                     </Button>
+                  ),
+                },
+                {
+                  key: 'approve',
+                  label: t('tax.note_approve'),
+                  sortable: false,
+                  render: (r: Invoice) => (
+                    r.status === 'PendingApproval'
+                      ? <Button variant="outline" size="sm" disabled={approveNote.isPending} onClick={() => approveNote.mutate(r.doc_no)}>{t('tax.note_approve')}</Button>
+                      : <span className="text-muted-foreground">—</span>
                   ),
                 },
               ]}

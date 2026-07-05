@@ -31,7 +31,10 @@ export class TaxReportsService {
       date: taxInvoices.issueDate, doc_no: taxInvoices.docNo, type: taxInvoices.type,
       buyer_name: taxInvoices.buyerName, buyer_tax_id: taxInvoices.buyerTaxId, value: taxInvoices.subtotal, vat: taxInvoices.vatAmount,
     }).from(taxInvoices).where(and(eq(taxInvoices.status, 'Issued'), gte(taxInvoices.issueDate, start), lt(taxInvoices.issueDate, end))).orderBy(asc(taxInvoices.issueDate), asc(taxInvoices.docNo));
-    const out = rows.map((r: any) => ({ date: r.date, doc_no: r.doc_no, type: r.type, buyer_name: r.buyer_name ?? 'เงินสด', buyer_tax_id: r.buyer_tax_id ?? '-', value: n(r.value), vat: n(r.vat) }));
+    // A ใบลดหนี้ (credit_note, ม.86/10) REDUCES output VAT and a ใบเพิ่มหนี้ (debit_note, ม.86/9) INCREASES it
+    // in its issue period. Amounts are stored as positive magnitudes, so sign them here (full/abbreviated = +).
+    const sign = (t: string) => (t === 'credit_note' ? -1 : 1);
+    const out = rows.map((r: any) => ({ date: r.date, doc_no: r.doc_no, type: r.type, buyer_name: r.buyer_name ?? 'เงินสด', buyer_tax_id: r.buyer_tax_id ?? '-', value: round2(n(r.value) * sign(r.type)), vat: round2(n(r.vat) * sign(r.type)) }));
     return { report: 'output_vat', month, year, period, rows: out, abbreviated_count: out.filter((r: any) => r.type === 'abbreviated').length, totals: { value: round2(out.reduce((a: number, r: any) => a + r.value, 0)), vat: round2(out.reduce((a: number, r: any) => a + r.vat, 0)), count: out.length } };
   }
 
