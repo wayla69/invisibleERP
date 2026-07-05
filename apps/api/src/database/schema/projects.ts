@@ -523,6 +523,60 @@ export type ProjectSubcontract = typeof projectSubcontracts.$inferSelect;
 export type SubcontractScope = typeof subcontractScope.$inferSelect;
 export type SubcontractValuation = typeof subcontractValuations.$inferSelect;
 
+// Tender / estimating → award (docs/35 P3, PROJ-17). A tender is a pre-award ESTIMATE — a draft BoQ with a
+// cost build-up (bid_rate = unit_cost × (1 + markup%)) tracked estimating → submitted → won/lost. On WIN →
+// award seeds a project + a DRAFT BoQ from the tender lines (bid_rate → BoQ rate), the missing bridge from
+// the CRM pipeline to the BoQ. Nothing hits GL (a modelling surface); the seeded BoQ's own maker-checker
+// (PROJ-12) controls the budget baseline.
+export const projectTenders = pgTable(
+  'project_tenders',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    tenderNo: text('tender_no').notNull(),                  // business key (TND-YYYYMMDD-NNN)
+    crmOppNo: text('crm_opp_no'),                           // optional link to a crm_opportunities deal
+    title: text('title').notNull(),
+    customerName: text('customer_name'),
+    projectCodeHint: text('project_code_hint'),
+    markupPct: numeric('markup_pct', { precision: 9, scale: 4 }).notNull().default('0'),
+    estimatedCost: numeric('estimated_cost', { precision: 16, scale: 2 }).notNull().default('0'),
+    bidPrice: numeric('bid_price', { precision: 16, scale: 2 }).notNull().default('0'),
+    status: text('status').notNull().default('estimating'), // estimating | submitted | won | lost
+    outcomeReason: text('outcome_reason'),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    awardedProjectCode: text('awarded_project_code'),       // set once awarded (idempotency)
+    awardedAt: timestamp('awarded_at', { withTimezone: true }),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTenant: index('idx_tender_tenant').on(t.tenantId, t.status), byNo: unique('idx_tender_no').on(t.tenderNo) }),
+);
+
+// A draft-BoQ estimate line with cost build-up. bid_rate = unit_cost × (1 + markup_pct/100).
+export const tenderBoqLines = pgTable(
+  'tender_boq_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    tenderId: bigint('tender_id', { mode: 'number' }).notNull().references(() => projectTenders.id),
+    lineNo: integer('line_no').notNull().default(0),
+    category: text('category').notNull().default('material'),
+    description: text('description'),
+    uom: text('uom'),
+    qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    unitCost: numeric('unit_cost', { precision: 16, scale: 2 }).notNull().default('0'),
+    markupPct: numeric('markup_pct', { precision: 9, scale: 4 }).notNull().default('0'),
+    bidRate: numeric('bid_rate', { precision: 16, scale: 2 }).notNull().default('0'),
+    costAmount: numeric('cost_amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    bidAmount: numeric('bid_amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTender: index('idx_tender_line_tender').on(t.tenderId), byTenant: index('idx_tender_line_tenant').on(t.tenantId, t.tenderId) }),
+);
+export type ProjectTender = typeof projectTenders.$inferSelect;
+export type TenderBoqLine = typeof tenderBoqLines.$inferSelect;
+
 // Project Material Requisition (PMR) — M2, docs/32, PROJ-13. The single request document by which site staff
 // draw material against a project's BoQ. On submit the system checks each line against its BoQ-line remaining
 // budget: WITHIN budget → routed to procurement (a project-tagged PR is raised); OVER budget → parked

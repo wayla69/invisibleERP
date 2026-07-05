@@ -28,6 +28,9 @@ export const PERMISSIONS = [
   // ── Subcontractor valuation single-duty split (docs/35 P2, PROJ-16; SoD R18) — raising a subcontractor
   //    progress valuation is segregated from certifying it (over-pay a subcontractor / mis-handle retention). ──
   'proj_subcon', 'proj_subcon_certify',
+  // ── Tender / estimating → award (docs/35 P3, PROJ-17) — build/submit estimates and award a won tender
+  //    (which seeds a project + a DRAFT BoQ; the seeded BoQ's own maker-checker controls the budget baseline). ──
+  'proj_tender',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -41,6 +44,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
   'proj_billing', 'proj_billing_certify',
   'proj_subcon', 'proj_subcon_certify',
+  'proj_tender',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -55,7 +59,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Customer Portal': ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track'],
   'My Business': ['cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
   'Sales & Orders': ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
-  'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing'],
+  'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing', 'proj_tender'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
   'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify'],
   'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
@@ -69,7 +73,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Admin: [...PERMISSIONS],
   // 'pr_raise' is seeded into every internal staff role: raising a purchase requisition is company-wide
   // (PR ≠ PO). Customer-portal roles are excluded; Procurement/Planner inherit it via implication.
-  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals', 'pr_raise'],
+  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals', 'pr_raise', 'proj_tender'],
   Customer: ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track', 'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
   Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata', 'pr_raise'],
   // Procurement is now a SoD-clean buying role (0 conflicts): it buys (procurement) and may raise PRs

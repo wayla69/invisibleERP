@@ -91,6 +91,7 @@ import { ReservationsModule } from './modules/reservations/reservations.module';
 import { RetentionModule } from './modules/retention/retention.module';
 import { ProgressBillingModule } from './modules/progress-billing/progress-billing.module';
 import { SubcontractsModule } from './modules/subcontracts/subcontracts.module';
+import { TendersModule } from './modules/tenders/tenders.module';
 import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
 import { HcmModule } from './modules/hcm/hcm.module';
 import { PricingModule } from './modules/pricing/pricing.module';
@@ -219,6 +220,7 @@ import { MailModule } from './modules/mail/mail.module';
     RetentionModule,
     ProgressBillingModule,
     SubcontractsModule,
+    TendersModule,
     MfgDepthModule,
     HcmModule,
     PricingModule,

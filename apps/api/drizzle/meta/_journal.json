@@ -1765,6 +1765,13 @@
       "when": 2023820000078,
       "tag": "0251_subcontracts",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "7",
+      "when": 2023820000079,
+      "tag": "0252_tenders",
+      "breakpoints": true
     }
   ]
 }

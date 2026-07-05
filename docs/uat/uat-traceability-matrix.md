@@ -259,6 +259,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-243 | Retention (เงินประกันผลงาน) shared sub-ledger — withhold / release / due (Phase 0) | Foundation for PROJ-15/PROJ-16 | 16 §14 (rev 0.35), 35 P0 |
 | UAT-O2C-244 | Progress billing / งวดงาน — BoQ-line valuation, maker-checker certify, retention receivable (P1) | PROJ-15, SoD R17 | 16 §7 (29) / §14 (rev 0.36), 35 P1 |
 | UAT-O2C-245 | Subcontractor management — subcontract vs BoQ budget, valuation certify, retention payable (P2) | PROJ-16, SoD R18 | 16 §7 (30) / §14 (rev 0.37), 35 P2 |
+| UAT-O2C-246 | Tender / estimating → award — seed a project + draft BoQ from the winning bid (P3) | PROJ-17 | 16 §7 (31) / §14 (rev 0.38), 35 P3 |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

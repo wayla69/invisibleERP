@@ -822,6 +822,50 @@ async function main() {
   const ccList = await inj('GET', '/api/projects/close-reviews', admin);
   ok('PROJ-03: the close review is recorded in the register (Approved)', (ccList.json.reviews ?? []).some((r: any) => r.period === '2026-06' && r.status === 'Approved'), `n=${ccList.json.count}`);
 
+  // ── P3 (docs/35) — tender / estimating → award (Track C, PROJ-17) ──
+  // Build a priced estimate, submit, record win/loss, and on a WIN award → seed a project + a DRAFT BoQ from
+  // the tender lines (the seeded BoQ's own maker-checker approve sets the controlled budget baseline).
+  const tnd1 = await inj('POST', '/api/tenders', admin, { title: 'อาคารสำนักงาน 3 ชั้น', customer_name: 'บจก. ผู้ว่าจ้าง', project_code: 'PRJ-TND', markup_pct: 20, lines: [
+    { category: 'material', description: 'ฐานราก', qty: 10, unit_cost: 1000 },   // bid_rate 1200 → 12000
+    { category: 'labor', description: 'โครงสร้าง', qty: 5, unit_cost: 2000 },     // bid_rate 2400 → 12000
+  ] });
+  ok('PROJ-17: create tender → estimating, estimated_cost 20000, bid_price 24000 (20% markup)',
+    tnd1.status < 300 && tnd1.json.status === 'estimating' && near(tnd1.json.estimated_cost, 20000) && near(tnd1.json.bid_price, 24000) && near(tnd1.json.overall_markup_pct, 20),
+    JSON.stringify({ s: tnd1.status, est: tnd1.json.estimated_cost, bid: tnd1.json.bid_price }));
+  const tnd1No = tnd1.json.tender_no;
+  const tndAdd = await inj('POST', `/api/tenders/${tnd1No}/lines`, admin, { category: 'subcon', description: 'งานระบบ', qty: 2, unit_cost: 3000, markup_pct: 0 }); // bid_rate 3000 → 6000
+  ok('PROJ-17: add line (per-line markup override 0) → bid_price 30000, estimated_cost 26000, line bid_rate 3000',
+    near(tndAdd.json.bid_price, 30000) && near(tndAdd.json.estimated_cost, 26000) && near((tndAdd.json.lines ?? []).find((l: any) => l.description === 'งานระบบ')?.bid_rate, 3000),
+    JSON.stringify({ bid: tndAdd.json.bid_price, est: tndAdd.json.estimated_cost }));
+  await inj('POST', `/api/tenders/${tnd1No}/submit`, admin);
+  const awEarly = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
+  ok('PROJ-17: award before won → 400 TENDER_NOT_WON', awEarly.status === 400 && awEarly.json.error?.code === 'TENDER_NOT_WON', `${awEarly.status} ${awEarly.json.error?.code}`);
+  await inj('POST', `/api/tenders/${tnd1No}/outcome`, admin, { outcome: 'won' });
+  const award = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
+  ok('PROJ-17: award a won tender → seeds project PRJ-TND (Fixed, contract 30000) + a DRAFT BoQ (budget 30000)',
+    award.status < 300 && award.json.project_code === 'PRJ-TND' && award.json.boq_status === 'draft' && near(award.json.boq_budget_total, 30000) && near(award.json.contract_amount, 30000),
+    JSON.stringify({ pc: award.json.project_code, bs: award.json.boq_status, bt: award.json.boq_budget_total }));
+  const awProj = await inj('GET', '/api/projects/PRJ-TND', admin);
+  ok('PROJ-17: awarded project exists — Fixed, contract 30000', awProj.json.project_code === 'PRJ-TND' && awProj.json.billing_type === 'Fixed' && near(awProj.json.contract_amount, 30000), JSON.stringify({ bt: awProj.json.billing_type, ca: awProj.json.contract_amount }));
+  const awBoq = await inj('GET', '/api/projects/PRJ-TND/boq', admin);
+  ok('PROJ-17: seeded BoQ is DRAFT with 3 lines, L1 rate = bid_rate 1200 (bid → BoQ rate)',
+    awBoq.json.boq?.status === 'draft' && awBoq.json.count === 3 && near((awBoq.json.lines ?? []).find((l: any) => l.description === 'ฐานราก')?.rate, 1200),
+    JSON.stringify({ st: awBoq.json.boq?.status, c: awBoq.json.count }));
+  const awApprove = await inj('POST', `/api/projects/boq/${awBoq.json.boq?.id}/approve`, mgr); // independent approver sets the baseline
+  ok('PROJ-17: an independent approver approves the seeded BoQ → project budget baseline 30000 (controlled)',
+    awApprove.status < 300 && near(awApprove.json.budget_synced, 30000), JSON.stringify({ s: awApprove.status, sync: awApprove.json.budget_synced }));
+  const awAgain = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
+  ok('PROJ-17: re-award a tender → already (idempotent, no duplicate project)', awAgain.json.already === true && awAgain.json.project_code === 'PRJ-TND', JSON.stringify({ a: awAgain.json.already }));
+  const tndReDecide = await inj('POST', `/api/tenders/${tnd1No}/outcome`, admin, { outcome: 'won' });
+  ok('PROJ-17: re-decide a decided tender → 400 TENDER_DECIDED', tndReDecide.status === 400 && tndReDecide.json.error?.code === 'TENDER_DECIDED', `${tndReDecide.status} ${tndReDecide.json.error?.code}`);
+
+  const tnd2 = await inj('POST', '/api/tenders', admin, { title: 'งานที่แพ้ประมูล', markup_pct: 15, lines: [{ description: 'x', qty: 1, unit_cost: 1000 }] });
+  const lossNoReason = await inj('POST', `/api/tenders/${tnd2.json.tender_no}/outcome`, admin, { outcome: 'lost' });
+  ok('PROJ-17: mark a tender lost without a reason → 400 LOSS_REASON_REQUIRED', lossNoReason.status === 400 && lossNoReason.json.error?.code === 'LOSS_REASON_REQUIRED', `${lossNoReason.status} ${lossNoReason.json.error?.code}`);
+  await inj('POST', `/api/tenders/${tnd2.json.tender_no}/outcome`, admin, { outcome: 'lost', reason: 'ราคาสูงกว่าคู่แข่ง' });
+  const tndList = await inj('GET', '/api/tenders', admin);
+  ok('PROJ-17: tender register → win-rate 50% (1 won of 2 decided)', near(tndList.json.win_rate_pct, 50) && tndList.json.count >= 2, JSON.stringify({ wr: tndList.json.win_rate_pct, n: tndList.json.count }));
+
   // ── P2 (docs/35) — subcontractor management + retention payable (Track B, PROJ-16) ──
   // A subcontract reserves BoQ budget (docs/32 commitment); the subcontractor's valuations are certified
   // maker-checker → post AP + WIP + retention PAYABLE (→ the P0 sub-ledger), with back-charges.
