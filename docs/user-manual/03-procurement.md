@@ -158,6 +158,12 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 > **โหลด** to drop that whole list back into the basket, or the bin icon to remove
 > it. Handy for the monthly/weekly supplies you always request.
 
+> **Got a barcode scanner? Just scan.** The **สแกนบาร์โค้ด** box beside the search
+> field lets any USB/Bluetooth scanner (they type the code and press Enter) add an
+> item hands-free: an exact match drops straight into the basket, an unknown code
+> shows *ไม่พบสินค้า*, and if several items match the code the grid filters to them
+> so you can pick. No app or camera setup needed.
+
 > **Track your requests without leaving the page.** A **คำขอซื้อล่าสุดของฉัน** card
 > (below the basket) lists your last few requisitions with their live approval
 > **status** — tap one (or **ดูทั้งหมด**) to open the full requisitions page. Press
