@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -14,6 +15,8 @@ const CreateBody = z.object({
     pct_complete_to_date: z.number().min(0).max(100),
   })).min(1),
 });
+
+const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 
 // Progress billing / งวดงาน (docs/35 P1, PROJ-15). A preparer (proj_billing) raises a progress claim valuing
 // work by BoQ line; an independent certifier (proj_billing_certify, ≠ preparer) certifies it — which posts the
@@ -41,6 +44,25 @@ export class ProgressBillingController {
   @Permissions('proj_billing', 'proj_billing_certify', 'ar', 'exec', 'gl_close')
   listForProject(@Param('code') code: string) {
     return this.svc.listForProject(code);
+  }
+
+  // Printable ใบวางบิลงวดงาน / ใบกำกับภาษี (progress-claim tax invoice) — HTML→PDF via the shared renderer
+  // (HTML fallback when Chromium absent). Two-segment path — never collides with `:claimNo` below.
+  @Get(':claimNo/pdf')
+  @Permissions('proj_billing', 'proj_billing_certify', 'ar', 'exec', 'gl_close')
+  async pdf(@Param('claimNo') claimNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const data = await this.svc.getClaimForPrint(claimNo, u);
+    const html = this.svc.claimHtml(data);
+    const buf = await this.svc.renderClaimPdf(data);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${claimNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  }
+
+  // Email the ใบวางบิลงวดงาน to the employer as a PDF attachment.
+  @Post(':claimNo/send-email') @HttpCode(200)
+  @Permissions('proj_billing', 'proj_billing_certify', 'ar', 'exec')
+  emailClaim(@Param('claimNo') claimNo: string, @Body(new ZodValidationPipe(DocEmailBody)) b: z.infer<typeof DocEmailBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.emailClaim(claimNo, b.to_email, u);
   }
 
   @Get(':claimNo')

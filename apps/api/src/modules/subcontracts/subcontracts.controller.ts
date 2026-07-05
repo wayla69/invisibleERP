@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -23,6 +24,7 @@ const ValuationBody = z.object({
   pct_complete: z.number().min(0).max(100),
   back_charge: z.number().min(0).optional(),
 });
+const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 
 // Subcontractor management (docs/35 P2, PROJ-16). A buyer/PM (proj_subcon) issues a subcontract against BoQ
 // scope (reserving budget) and raises the subcontractor's progress valuations; an independent certifier
@@ -56,6 +58,25 @@ export class SubcontractsController {
   @Permissions('proj_subcon', 'proj_subcon_certify', 'procurement', 'exec', 'gl_close')
   listForProject(@Param('code') code: string) {
     return this.svc.listForProject(code);
+  }
+
+  // Printable ใบรับรองผลงานผู้รับเหมาช่วง (subcontract valuation certificate) — HTML→PDF via the shared
+  // renderer (HTML fallback when Chromium absent). Static 'valuations/…/pdf' path — no :subNo collision.
+  @Get('valuations/:valNo/pdf')
+  @Permissions('proj_subcon', 'proj_subcon_certify', 'procurement', 'exec', 'gl_close')
+  async valuationPdf(@Param('valNo') valNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const data = await this.svc.getValuationForPrint(valNo, u);
+    const html = this.svc.valuationHtml(data);
+    const buf = await this.svc.renderValuationPdf(data);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${valNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  }
+
+  // Email the ใบรับรองผลงานผู้รับเหมาช่วง to the subcontractor as a PDF attachment.
+  @Post('valuations/:valNo/send-email') @HttpCode(200)
+  @Permissions('proj_subcon', 'proj_subcon_certify', 'procurement', 'exec')
+  emailValuation(@Param('valNo') valNo: string, @Body(new ZodValidationPipe(DocEmailBody)) b: z.infer<typeof DocEmailBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.emailValuation(valNo, b.to_email, u);
   }
 
   @Get('valuations/:valNo')

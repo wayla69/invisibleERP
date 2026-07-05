@@ -1,10 +1,14 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectBoqLines, projectProgressClaims, progressClaimLines } from '../../database/schema';
+import { projects, projectBoqLines, projectProgressClaims, progressClaimLines, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { RetentionService } from '../retention/retention.service';
+import { ProgressClaimPdfService, type ProgressClaimPrintData } from './progress-claim-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
+import { sellerParty } from '../../common/doc-party';
+import type { DocParty } from '../../common/doc-html';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
@@ -29,6 +33,9 @@ export class ProgressBillingService {
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
     private readonly retention: RetentionService,
+    // Printable ใบวางบิลงวดงาน / ใบกำกับภาษี + document email. @Optional so hand-constructed harnesses build.
+    @Optional() private readonly claimPdf?: ProgressClaimPdfService,
+    @Optional() private readonly docEmail?: DocEmailService,
   ) {}
 
   private async projectRow(code: string) {
@@ -219,5 +226,57 @@ export class ProgressBillingService {
         cumulative_certified: n(r.cumulativeCertified), certified_by: r.certifiedBy, certified_at: r.certifiedAt,
       })),
     };
+  }
+
+  // Resolve the caller's own tenant profile as the document issuer (our-company header).
+  private async sellerFor(user: JwtUser): Promise<DocParty> {
+    const [t] = user.tenantId != null ? await this.db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1) : [null];
+    return sellerParty(t);
+  }
+
+  // Assemble the printable ใบวางบิลงวดงาน / ใบกำกับภาษี (progress-claim tax invoice, docs/35 P1). Seller = the
+  // caller's company; customer = the project's employer (customer_name on the project); lines = the certified
+  // BoQ movement on the claim. Retention/VAT/AR-total mirror the certification JE.
+  async getClaimForPrint(claimNo: string, user: JwtUser): Promise<ProgressClaimPrintData> {
+    const c = await this.claimRow(claimNo);
+    const [p] = await this.db.select().from(projects).where(eq(projects.id, Number(c.projectId))).limit(1);
+    const lines = await this.db.select().from(progressClaimLines).where(eq(progressClaimLines.claimId, Number(c.id))).orderBy(progressClaimLines.id);
+    const gross = r2(n(c.grossThisClaim));
+    const retentionPct = n(c.retentionPct);
+    const retention = r2(n(c.retentionAmount));
+    const net = r2(gross - retention);
+    const vatPct = n(c.vatPct);
+    const vat = r2(n(c.vatAmount));
+    return {
+      claim_no: c.claimNo, seq: Number(c.seq), period: c.period, status: String(c.status),
+      certified_by: c.certifiedBy ?? null, certified_at: c.certifiedAt,
+      seller: await this.sellerFor(user),
+      customer: { name: p?.customerName || 'ผู้ว่าจ้าง', address: '-', tax_id: null, branch_label: null, phone: null, email: null },
+      project_code: p?.projectCode ?? '', project_name: p?.name ?? null,
+      lines: lines.map((l: any) => ({ description: l.description, pct: n(l.pctCompleteToDate), value_to_date: n(l.valueToDate), previously_certified: n(l.previouslyCertified), value_this_claim: n(l.valueThisClaim) })),
+      gross, retention_pct: retentionPct, retention, net, vat_pct: vatPct, vat, ar_total: r2(net + vat),
+    };
+  }
+
+  claimHtml(data: ProgressClaimPrintData): string {
+    if (!this.claimPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Progress claim renderer not wired' });
+    return this.claimPdf.claimHtml(data);
+  }
+
+  async renderClaimPdf(data: ProgressClaimPrintData): Promise<Buffer | null> {
+    return this.claimPdf ? this.claimPdf.renderToPdf(this.claimPdf.claimHtml(data)) : null;
+  }
+
+  // Email the ใบวางบิลงวดงาน to the employer as a PDF attachment (HTML fallback when Chromium absent).
+  async emailClaim(claimNo: string, toEmail: string | undefined, user: JwtUser) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const data = await this.getClaimForPrint(claimNo, user);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail?.trim() || data.customer.email || '', from: data.seller.email ?? undefined, filename: data.claim_no,
+      subject: `ใบวางบิลงวดงาน ${data.claim_no} จาก ${data.seller.name}`,
+      text: `เรียน ${data.customer.name},\n\nแนบใบวางบิลงวดงานเลขที่ ${data.claim_no} (งวดที่ ${data.seq}) จำนวนเงินที่เรียกเก็บ ${data.ar_total.toLocaleString()} บาท\n\nขอบคุณครับ\n${data.seller.name}`,
+      html: this.claimHtml(data),
+    });
+    return { ...res, claim_no: data.claim_no };
   }
 }

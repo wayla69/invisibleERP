@@ -55,6 +55,11 @@ async function main() {
     let json: any = {}; try { json = res.json(); } catch { /* */ }
     return { status: res.statusCode, json };
   };
+  // Fetch a raw (non-JSON) document response — PDF or the HTML fallback when Chromium is absent (CI).
+  const raw = async (m: string, url: string, token?: string) => {
+    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {} });
+    return { status: res.statusCode, ctype: String(res.headers['content-type'] ?? ''), body: res.body ?? '' };
+  };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
   const mgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'admin123' })).json.token;
 
@@ -1055,6 +1060,12 @@ async function main() {
     vatCert.status < 300 && near(vatCert.json.vat, 7000) && near(vatCert.json.ar_total, 107000) && near(vatCert.json.revenue, 100000) && vatCert.json.rev_method === 'billing',
     JSON.stringify({ vat: vatCert.json.vat, ar: vatCert.json.ar_total, rm: vatCert.json.rev_method }));
 
+  // Document: the ใบวางบิลงวดงาน / ใบกำกับภาษี renders (PDF, or HTML fallback when Chromium absent → CI).
+  const vatPdf = await raw('GET', `/api/progress-billing/${vatClaim.json.claim_no}/pdf`, admin);
+  ok('Document: progress-claim tax invoice renders (PDF or HTML fallback) with the AR total & baht-in-words',
+    vatPdf.status === 200 && (vatPdf.ctype.includes('application/pdf') || (vatPdf.ctype.includes('text/html') && /ใบวางบิลงวดงาน/.test(vatPdf.body) && /107,000/.test(vatPdf.body))),
+    JSON.stringify({ s: vatPdf.status, ct: vatPdf.ctype.split(';')[0] }));
+
   // Depth-3: on a POC project a progress claim is a BILLING event (no revenue; clears contract asset / parks liability).
   await inj('POST', '/api/projects', admin, { project_code: 'PRJ-POC3', name: 'งาน POC (progress)', billing_type: 'Fixed', contract_amount: 100000, rev_method: 'poc', estimated_cost: 80000 });
   const pocBoq = await inj('POST', '/api/projects/PRJ-POC3/boq', admin, { title: 'BoQ POC', lines: [{ category: 'material', description: 'งานรวม', budget_amount: 100000 }] });
@@ -1073,6 +1084,12 @@ async function main() {
   ok('Depth-2: subcontract valuation → WHT 600 (Cr 2361), input VAT 1400 (Dr 1300), AP payable 20800 (net−WHT+VAT), net_certified 20000',
     svWhtCert.status < 300 && near(svWhtCert.json.wht, 600) && near(svWhtCert.json.vat, 1400) && near(svWhtCert.json.ap_payable, 20800) && near(svWhtCert.json.net_certified, 20000),
     JSON.stringify({ wht: svWhtCert.json.wht, vat: svWhtCert.json.vat, ap: svWhtCert.json.ap_payable }));
+
+  // Document: the ใบรับรองผลงานผู้รับเหมาช่วง renders (PDF, or HTML fallback when Chromium absent → CI).
+  const svPdf = await raw('GET', `/api/subcontracts/valuations/${svWht.json.valuation_no}/pdf`, admin);
+  ok('Document: subcontract valuation certificate renders (PDF or HTML fallback) with the AP payable & baht-in-words',
+    svPdf.status === 200 && (svPdf.ctype.includes('application/pdf') || (svPdf.ctype.includes('text/html') && /ใบรับรองผลงานผู้รับเหมาช่วง/.test(svPdf.body) && /20,800/.test(svPdf.body))),
+    JSON.stringify({ s: svPdf.status, ct: svPdf.ctype.split(';')[0] }));
 
   // ── P0 (docs/35) — shared retention sub-ledger + retention GL accounts (Construction/RE vertical, Phase 0) ──
   // The primitive Tracks A (customer progress billing / งวดงาน) and B (subcontractor valuations) build on:

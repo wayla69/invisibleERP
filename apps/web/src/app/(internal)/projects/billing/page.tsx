@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, CheckCircle2, Search } from 'lucide-react';
+import { Plus, CheckCircle2, Search, Printer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring';
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // Progress billing / งวดงาน (docs/35 P1, PROJ-15). Value work by BoQ line, withhold retention, add output VAT,
 // certify maker-checker. Pick a project → raise a claim against a BoQ line → certify.
@@ -86,7 +87,14 @@ export default function BillingPage() {
                 { key: 'retention_amount', label: t('cx.b_col_retention'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.retention_amount)}</span> },
                 { key: 'net_payable', label: t('cx.b_col_net'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.net_payable)}</span> },
                 { key: 'status', label: t('cx.col_status'), render: (r: any) => <Badge variant={r.status === 'certified' ? 'default' : 'secondary'}>{r.status}</Badge> },
-                { key: 'actions', label: '', align: 'right', render: (r: any) => r.status === 'draft' ? <Button size="sm" onClick={() => certify.mutate(r.claim_no)}><CheckCircle2 className="size-3.5" /> {t('cx.b_btn_certify')}</Button> : null },
+                { key: 'actions', label: '', align: 'right', render: (r: any) => (
+                  <div className="flex justify-end gap-1.5">
+                    {r.status === 'draft' && <Button size="sm" onClick={() => certify.mutate(r.claim_no)}><CheckCircle2 className="size-3.5" /> {t('cx.b_btn_certify')}</Button>}
+                    <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}>
+                      <a href={`${BASE}/api/progress-billing/${encodeURIComponent(r.claim_no)}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-3.5" /></a>
+                    </Button>
+                  </div>
+                ) },
               ]}
             />
           )}</StateView>

@@ -4,6 +4,7 @@ import { RetentionModule } from '../retention/retention.module';
 import { CommitmentsModule } from '../commitments/commitments.module';
 import { SubcontractsService } from './subcontracts.service';
 import { SubcontractsController } from './subcontracts.controller';
+import { SubcontractValuationPdfService } from './subcontract-valuation-pdf.service';
 
 // Subcontractor management (docs/35 P2, PROJ-16). Needs the GL (LedgerModule → post the AP/WIP/retention JE),
 // the shared retention sub-ledger (RetentionModule → withhold retention payable) and the commitment ledger
@@ -12,7 +13,7 @@ import { SubcontractsController } from './subcontracts.controller';
 @Module({
   imports: [LedgerModule, RetentionModule, CommitmentsModule],
   controllers: [SubcontractsController],
-  providers: [SubcontractsService],
+  providers: [SubcontractsService, SubcontractValuationPdfService],
   exports: [SubcontractsService],
 })
 export class SubcontractsModule {}

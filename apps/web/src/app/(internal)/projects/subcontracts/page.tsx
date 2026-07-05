@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, FilePlus2, CheckCircle2 } from 'lucide-react';
+import { Plus, Search, FilePlus2, CheckCircle2, Printer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring';
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // Subcontractor management (docs/35 P2, PROJ-16). A subcontract reserves BoQ budget; the subcontractor's
 // valuations are certified maker-checker → AP + WIP + retention payable + WHT.
@@ -96,6 +97,7 @@ export default function SubcontractsPage() {
                   <div className="flex justify-end gap-1.5">
                     <Button size="sm" variant="outline" onClick={() => { const pct = prompt(t('cx.s_prompt_pct')); if (pct) raiseVal.mutate({ subNo: r.subcontract_no, pct: Number(pct) }); }}><FilePlus2 className="size-3.5" /> {t('cx.s_btn_raiseval')}</Button>
                     {vals[r.subcontract_no] && <Button size="sm" onClick={() => certifyVal.mutate(vals[r.subcontract_no]!)}><CheckCircle2 className="size-3.5" /> {t('cx.s_btn_certifyval', { no: vals[r.subcontract_no] })}</Button>}
+                    {vals[r.subcontract_no] && <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}><a href={`${BASE}/api/subcontracts/valuations/${encodeURIComponent(vals[r.subcontract_no]!)}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-3.5" /></a></Button>}
                   </div>
                 ) },
               ]}

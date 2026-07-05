@@ -1,11 +1,15 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectBoqLines, projectSubcontracts, subcontractScope, subcontractValuations } from '../../database/schema';
+import { projects, projectBoqLines, projectSubcontracts, subcontractScope, subcontractValuations, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { RetentionService } from '../retention/retention.service';
 import { CommitmentsService } from '../commitments/commitments.service';
+import { SubcontractValuationPdfService, type SubcontractValuationPrintData } from './subcontract-valuation-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
+import { sellerParty } from '../../common/doc-party';
+import type { DocParty } from '../../common/doc-html';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
@@ -31,6 +35,9 @@ export class SubcontractsService {
     private readonly ledger: LedgerService,
     private readonly retention: RetentionService,
     private readonly commitments: CommitmentsService,
+    // Printable ใบรับรองผลงานผู้รับเหมาช่วง + document email. @Optional so hand-constructed harnesses build.
+    @Optional() private readonly valuationPdf?: SubcontractValuationPdfService,
+    @Optional() private readonly docEmail?: DocEmailService,
   ) {}
 
   private async projectRow(code: string) {
@@ -209,5 +216,64 @@ export class SubcontractsService {
         remaining: r2(n(x.contractValue) - n(x.certifiedToDate)),
       })),
     };
+  }
+
+  // Resolve the caller's own tenant profile as the document issuer (main-contractor header).
+  private async sellerFor(user: JwtUser): Promise<DocParty> {
+    const [t] = user.tenantId != null ? await this.db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1) : [null];
+    return sellerParty(t);
+  }
+
+  // Assemble the printable ใบรับรองผลงานผู้รับเหมาช่วง (subcontract valuation certificate, docs/35 P2). Seller =
+  // the main contractor (caller's company); subcontractor = the vendor on the subcontract. Retention/back-charge/
+  // WHT/VAT/AP mirror the certification JE.
+  async getValuationForPrint(valNo: string, user: JwtUser): Promise<SubcontractValuationPrintData> {
+    const v = await this.valRow(valNo);
+    const [s] = await this.db.select().from(projectSubcontracts).where(eq(projectSubcontracts.id, Number(v.subcontractId))).limit(1);
+    const [p] = s ? await this.db.select().from(projects).where(eq(projects.id, Number(s.projectId))).limit(1) : [null];
+    const scope = s ? await this.db.select().from(subcontractScope).where(eq(subcontractScope.subcontractId, Number(s.id))).orderBy(subcontractScope.id) : [];
+    const gross = r2(n(v.grossThisVal));
+    const retentionPct = n(v.retentionPct);
+    const retention = r2(n(v.retentionAmount));
+    const backCharge = r2(n(v.backCharge));
+    const net = r2(n(v.netCertified));
+    const whtPct = n(s?.whtPct);
+    const wht = r2(n(v.whtAmount) || (gross * whtPct) / 100);
+    const vatPct = n(s?.vatPct);
+    const vat = r2(n(v.vatAmount) || (gross * vatPct) / 100);
+    return {
+      valuation_no: v.valuationNo, seq: Number(v.seq), period: v.period, status: String(v.status),
+      certified_by: v.certifiedBy ?? null, certified_at: v.certifiedAt,
+      seller: await this.sellerFor(user),
+      subcontractor: { name: s?.vendorName || 'ผู้รับเหมาช่วง', address: '-', tax_id: null, branch_label: null, phone: null, email: null },
+      project_code: p?.projectCode ?? '', project_name: p?.name ?? null,
+      subcontract_no: s?.subcontractNo ?? '', subcontract_title: s?.title ?? null,
+      contract_value: n(s?.contractValue), pct_complete: n(v.pctComplete), value_to_date: n(v.valueToDate), prev_certified: n(v.prevCertified),
+      scope: scope.map((x: any) => ({ description: x.description, amount: n(x.amount) })),
+      gross, retention_pct: retentionPct, retention, back_charge: backCharge, wht_pct: whtPct, wht, vat_pct: vatPct, vat,
+      net_certified: net, ap_payable: r2(net - wht + vat),
+    };
+  }
+
+  valuationHtml(data: SubcontractValuationPrintData): string {
+    if (!this.valuationPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Valuation certificate renderer not wired' });
+    return this.valuationPdf.valuationHtml(data);
+  }
+
+  async renderValuationPdf(data: SubcontractValuationPrintData): Promise<Buffer | null> {
+    return this.valuationPdf ? this.valuationPdf.renderToPdf(this.valuationPdf.valuationHtml(data)) : null;
+  }
+
+  // Email the ใบรับรองผลงานผู้รับเหมาช่วง to the subcontractor as a PDF attachment (HTML fallback when Chromium absent).
+  async emailValuation(valNo: string, toEmail: string | undefined, user: JwtUser) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const data = await this.getValuationForPrint(valNo, user);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail?.trim() || data.subcontractor.email || '', from: data.seller.email ?? undefined, filename: data.valuation_no,
+      subject: `ใบรับรองผลงานผู้รับเหมาช่วง ${data.valuation_no} จาก ${data.seller.name}`,
+      text: `เรียน ${data.subcontractor.name},\n\nแนบใบรับรองผลงานงวดที่ ${data.seq} เลขที่ ${data.valuation_no} จำนวนเงินที่ต้องจ่าย ${data.ap_payable.toLocaleString()} บาท\n\nขอบคุณครับ\n${data.seller.name}`,
+      html: this.valuationHtml(data),
+    });
+    return { ...res, valuation_no: data.valuation_no };
   }
 }
