@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff } from 'lucide-react';
+import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
-import { baht, num } from '@/lib/format';
+import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { statusVariant } from '@/components/ui';
 import { cn } from '@/lib/utils';
 
 type CatalogItem = {
@@ -26,6 +27,7 @@ type CatalogItem = {
 type Category = { key: string; label: string; count: number };
 type CatalogPage = { items: CatalogItem[]; categories: Category[]; total: number; offset: number; limit: number; has_more: boolean; count: number };
 type CartLine = { key: string; item_id: string; description: string; uom: string; unit_price: number; qty: number; urgent: boolean; custom: boolean };
+type MyPr = { pr_no: string; pr_date: string | null; status: string; priority: string | null; lines: { item_id: string; request_qty: number }[] };
 
 const PAGE = 24;
 const VIEW_KEY = 'shop.view';
@@ -94,6 +96,8 @@ export default function ShopPage() {
   const me = useMe();
   // Master-data holders (md_item) can jump straight to the category admin to (re)group the catalog.
   const canManageCategories = hasPerm(me.data, 'md_item', 'masterdata', 'exec');
+  // The requester's own recent PRs (raised here or elsewhere) with live status — closes the loop on-screen.
+  const myPrs = useQuery<{ prs: MyPr[] }>({ queryKey: ['my-prs'], queryFn: () => api('/api/procurement/prs?mine=true&limit=5'), refetchInterval: 30_000 });
 
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -191,6 +195,7 @@ export default function ShopPage() {
       notifySuccess(t('shop.created', { no: d.pr_no }), t('shop.created_desc', { n: d.lines }));
       setCart([]); setRemarks('');
       qc.invalidateQueries({ queryKey: ['prs'] });
+      qc.invalidateQueries({ queryKey: ['my-prs'] });
     },
     onError: (e: any) => notifyError(e?.message ?? t('shop.failed')),
   });
@@ -415,6 +420,34 @@ export default function ShopPage() {
                 <Input value={cUom} onChange={(e) => setCUom(e.target.value)} placeholder={t('shop.custom_uom_ph')} className="w-24" />
                 <Button variant="secondary" className="flex-1" onClick={addCustom}><Plus className="size-4" /> {t('shop.custom_add')}</Button>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="gap-3">
+            <CardHeader className="flex-row items-center justify-between gap-2">
+              <CardTitle className="flex items-center gap-2 text-base"><ClipboardList className="size-5" /> {t('shop.my_prs_title')}</CardTitle>
+              <Button asChild variant="ghost" size="sm" className="h-7"><Link href="/requisitions">{t('shop.view_all')}</Link></Button>
+            </CardHeader>
+            <CardContent>
+              <StateView q={myPrs} skeleton={<div className="h-16 animate-pulse rounded-lg bg-muted" />}>
+                {(myPrs.data?.prs ?? []).length === 0 ? (
+                  <p className="py-2 text-center text-xs text-muted-foreground">{t('shop.my_prs_empty')}</p>
+                ) : (
+                  <ul className="divide-y">
+                    {(myPrs.data?.prs ?? []).map((pr) => (
+                      <li key={pr.pr_no}>
+                        <Link href="/requisitions" className="flex items-center justify-between gap-2 py-2 hover:opacity-80">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{pr.pr_no}</p>
+                            <p className="text-xs text-muted-foreground">{thaiDate(pr.pr_date)} · {t('shop.lines_n', { n: pr.lines?.length ?? 0 })}</p>
+                          </div>
+                          <Badge variant={statusVariant(pr.status)} className="shrink-0">{pr.status}</Badge>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </StateView>
             </CardContent>
           </Card>
         </div>
