@@ -300,9 +300,13 @@ On the **RFQ list**, each RFQ row has a **🖨️ พิมพ์** and **✉️
 ### Print / email a goods receipt note (ใบรับสินค้า / GR)
 
 After receiving goods, the GR note documents what arrived — for filing or to countersign back
-to the supplier. Open `GET /api/procurement/grs/{GR-…}/pdf` for the PDF (the supplier, the
+to the supplier. The **รับสินค้าล่าสุด (GR)** list on the **รับสินค้า (GR)** screen (`/receiving`)
+shows recent goods receipts, each with a **🖨️ พิมพ์** and **✉️ ส่งอีเมล** action — the email
+recipient **defaults to the vendor's email on file** (from the vendor master) when you leave the
+prompt blank. Or call `GET /api/procurement/grs/{GR-…}/pdf` for the PDF (the supplier, the
 referenced PO, the received item lines with lot numbers and a receiver-signature block), or
-`POST …/grs/{GR-…}/send-email {to_email}` to email it. Read-only — printing posts nothing.
+`POST …/grs/{GR-…}/send-email` to email it (a recent-receipts list is at `GET …/grs`). Read-only
+— printing posts nothing.
 
 ### Attach the invoice / receipt photo to a PO
 
