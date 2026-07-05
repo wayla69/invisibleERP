@@ -7,6 +7,7 @@ export const items = pgTable('items', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   itemId: text('item_id').notNull().unique(),
   itemDescription: text('item_description'),
+  barcode: text('barcode'),                                     // GTIN/EAN/UPC for hardware scan-to-add (exact match)
   uom: text('uom'),
   baseUom: text('base_uom'),
   conversionFactor: numeric('conversion_factor').default('1'),
