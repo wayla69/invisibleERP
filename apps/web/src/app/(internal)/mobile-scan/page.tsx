@@ -39,7 +39,7 @@ export default function MobileScanPage() {
     onError: (e: any) => notifyError(e.message),
   });
   const addLine = useMutation({
-    mutationFn: () => api(`/api/scan/sessions/${sessionNo}/lines`, { method: 'POST', body: JSON.stringify({ qr_data: scan, qty: Number(qty) }) }),
+    mutationFn: (vars: { code: string; qty: number }) => api(`/api/scan/sessions/${sessionNo}/lines`, { method: 'POST', body: JSON.stringify({ qr_data: vars.code, qty: vars.qty }) }),
     onSuccess: () => { setScan(''); setQty('1'); qc.invalidateQueries({ queryKey: ['scan-session', sessionNo] }); },
     onError: (e: any) => notifyError(e.message),
   });
@@ -90,9 +90,9 @@ export default function MobileScanPage() {
             <Button variant="default" disabled={close.isPending} onClick={() => close.mutate()}><PackageCheck className="size-4" /> {t('iv.scan_close_commit')}</Button>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <div className="grid gap-1.5 flex-1 min-w-[220px]"><Label>{t('iv.scan_scan_qr')}</Label><div className="flex items-center gap-2"><Input className="flex-1" value={scan} onChange={(e) => setScan(e.target.value)} placeholder="ITEM_ID:A|…" /><QrScanButton onScan={setScan} /></div></div>
+            <div className="grid gap-1.5 flex-1 min-w-[220px]"><Label>{t('iv.scan_scan_qr')}</Label><div className="flex items-center gap-2"><Input className="flex-1" value={scan} onChange={(e) => setScan(e.target.value)} placeholder="ITEM_ID:A|…" /><QrScanButton continuous onScan={(code) => addLine.mutate({ code, qty: 1 })} /></div></div>
             <div className="grid gap-1.5"><Label>{t('inv.col_qty')}</Label><Input type="number" className="max-w-[120px]" value={qty} onChange={(e) => setQty(e.target.value)} /></div>
-            <Button disabled={!scan || addLine.isPending} onClick={() => addLine.mutate()}>{t('iv.scan_add')}</Button>
+            <Button disabled={!scan || addLine.isPending} onClick={() => addLine.mutate({ code: scan, qty: Number(qty) })}>{t('iv.scan_add')}</Button>
           </div>
           <DataTable
             rows={session.data?.lines ?? []}

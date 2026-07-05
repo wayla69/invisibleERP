@@ -101,16 +101,24 @@ transferring and counting.
 3. Scan each item / location; lines are added to the session. You can capture a
    tag three ways off the same label:
    - **Camera scan** — tap **สแกน QR / Scan QR** (the camera button next to the
-     scan box) and point your phone/tablet at the QR label. Supported on
-     Chromium-based browsers (Chrome, Edge, Android WebView, Samsung Internet);
-     on other browsers the button is hidden and you use one of the two below.
+     scan box) and point your phone/tablet at the label. Works on **any modern
+     browser with a camera** (Chrome, Edge, Safari/iPhone, Firefox, Android) — it
+     uses the device's built-in scanner where available and otherwise a built-in
+     fallback, so no app install is needed. It reads **both QR codes and common 1D
+     barcodes** (EAN/UPC, Code-128, Code-39, ITF), so an existing product barcode
+     scans too, not just our printed QR tags. On a successful read you get a short
+     **beep + vibrate**; if your phone has a camera light, a **torch** button
+     appears to toggle it for dim aisles. In a scan session the camera stays open
+     for **continuous scanning** — rattle through many items, each added
+     automatically — with a running count and a **Done** button to close.
    - **Hardware scanner** — a USB/Bluetooth wedge scanner types the code into the
      scan box automatically.
    - **Manual** — type or paste the code.
 4. **Close** the session to finalise it.
 
 The same camera-scan button is available on the **Stocktake** (`/stocktake`) and
-**Goods Issue / Transfer** (`/goods-issue`) scan boxes.
+**Goods Issue / Transfer** (`/goods-issue`) scan boxes (single-scan there — it
+fills the item field for you to confirm the quantity).
 
 **Expected result:** The scanned movements are recorded and stock is updated.
 

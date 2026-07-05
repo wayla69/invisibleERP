@@ -178,13 +178,12 @@ By design (maker-checker). A different authorised person must approve it
 Sessions expire after a period of inactivity for security. Simply sign in again.
 
 **The camera "Scan QR" button doesn't appear (or won't open the camera).**
-The in-app camera scanner uses a browser feature available on Chromium-based
-browsers (Chrome, Edge, Android WebView, Samsung Internet). On other browsers
-(e.g. Firefox, older Safari) the button is hidden — use a hardware wedge scanner
-or type/paste the code instead. If the button appears but the camera won't start,
-your browser blocked camera access: allow the camera permission for the site and
-try again (the site must be served over HTTPS). You can always enter the code
-manually.
+The button shows on any modern browser **with a camera**, over **HTTPS**. If it's
+missing, the device has no camera the browser can use (e.g. some desktops) — use a
+hardware wedge scanner or type/paste the code. If the button appears but the camera
+won't start, your browser blocked camera access: allow the camera permission for
+the site and try again. The scanner reads both QR codes and common 1D barcodes
+(EAN/UPC, Code-128, Code-39). You can always enter the code manually.
 
 **I scanned an asset/item QR with my phone's normal camera and it opened a web page.**
 That's expected when your deployment prints deep-link tags: the phone opens the
