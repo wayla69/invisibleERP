@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw, AlertTriangle, ChevronDown, Bookmark, Trash2 } from 'lucide-react';
+import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw, AlertTriangle, ChevronDown, Bookmark, Trash2, ScanLine } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
-import { notifyError, notifySuccess } from '@/lib/notify';
+import { notifyError, notifySuccess, notifyInfo } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -124,6 +124,7 @@ export default function ShopPage() {
   const lowStock = useQuery<{ items: LowItem[]; count: number }>({ queryKey: ['low-stock'], queryFn: () => api('/api/procurement/low-stock?limit=20'), refetchInterval: 60_000 });
 
   const [q, setQ] = useState('');
+  const [scan, setScan] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [view, setView] = useState<'grid' | 'list'>(() =>
@@ -224,6 +225,32 @@ export default function ShopPage() {
     if (!its.length) return;
     its.forEach(fillLow);
     notifySuccess(t('shop.low_filled', { n: its.length }));
+  };
+
+  // Barcode scan-to-add — a hardware scanner types the code then sends Enter, submitting this form.
+  // Exact single match ⇒ drop it straight in the basket; no match ⇒ warn; several ⇒ push it into the
+  // search box so the grid narrows. Reuses the catalog endpoint (no camera lib, works with any USB scanner).
+  const onScan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = scan.trim();
+    if (!code) return;
+    try {
+      const r = await api<CatalogPage>(`/api/procurement/catalog?q=${encodeURIComponent(code)}&limit=1`);
+      if (r.total === 1 && r.items[0]) {
+        const it = r.items[0];
+        addToBasket(it.item_id, 1, it.uom ?? '', it.item_description ?? '');
+        notifySuccess(t('shop.scan_added', { name: it.item_description ?? it.item_id }));
+        setScan('');
+      } else if (r.total === 0) {
+        notifyError(t('shop.scan_not_found', { code }));
+      } else {
+        setQ(code);
+        setScan('');
+        notifyInfo(t('shop.scan_multi', { n: r.total }));
+      }
+    } catch {
+      notifyError(t('shop.scan_not_found', { code }));
+    }
   };
 
   // Basket templates (รายการประจำ) — save the current cart under a name, reload/delete later.
@@ -358,12 +385,16 @@ export default function ShopPage() {
             </div>
           )}
 
-          {/* Search + view toggle */}
+          {/* Search + scan + view toggle */}
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('shop.search_ph')} />
             </div>
+            <form onSubmit={onScan} className="relative w-40 shrink-0 sm:w-48">
+              <ScanLine className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input className="pl-9" value={scan} onChange={(e) => setScan(e.target.value)} placeholder={t('shop.scan_ph')} aria-label={t('shop.scan_ph')} />
+            </form>
             <div className="flex shrink-0 rounded-md border p-0.5">
               <Button size="icon" variant={view === 'grid' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_grid')} title={t('shop.view_grid')} onClick={() => setView('grid')}>
                 <LayoutGrid className="size-4" />
