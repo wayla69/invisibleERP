@@ -226,7 +226,14 @@ snapshot, P&L-vs-budget bars, and AR/AP aging — each tile drills to detail.
 - **Harness:** extend `finance-kpi.ts` for the `fin_kpi_refresh` SSE + tenant isolation (mirror `bi.ts`
   `kpi_refresh` test). Optional Playwright smoke (`command-center.capture.spec.ts`, `testIgnore`d in CI).
 
-## PHASE 3 — Controller Close Cockpit + Reconciliation board
+## PHASE 3 — Controller Close Cockpit + Reconciliation board — ✅ DELIVERED (2026-07-05)
+
+**Shipped:** `GET /api/finance/metrics/close/status?period=` + `/finance/close-cockpit` (server-prefetch page +
+client island). One RAG board composing the existing detective controls: sub-ledger↔GL **tie-out** (REC-04),
+**pre-lock readiness** (GL-19 + snapshot recon GL-20), the **pending maker-checker queue** (GOV-01), and the
+**close checklist** (GL-15/16), plus a **days-to-close** metric. New detective control **GL-22** (close cockpit
+review) → RCM 185 controls. `finance-kpi` harness extended to 41 checks (tie-out break → RED → reconcile →
+GREEN; non-finance role denied). Nav + i18n (`fnx.cockpit.*`). Below is the original plan.
 
 **Goal:** Oracle FCCS Close-Manager / ARCS-style monitoring surface for the controller.
 **Outcome demo:** `/finance/close-cockpit` shows current-period close status: subledger tie-out (green/red),
@@ -348,3 +355,4 @@ closes the biggest Oracle gap (a real, comparative, drill-through CFO dashboard)
 | 2026-07-05 | Platform | **Phase 1 DELIVERED** — FinanceMetricsService (31 KPIs) + `/api/finance/metrics/*`, exec_scorecard refactor, ELC-07 control, `finance-kpi` harness (34 ✓), doc sync (PN-26 §3c, manual 09 §1b, UAT-RPT-050). |
 | 2026-07-05 | Platform | **Review fix** — efficiency/annualized KPIs (turnover, DSO/DPO/DIO, ROA/ROE, days-cash, runway) moved to a **trailing-12-month basis** (window-length-independent; CLOSE-excluded via new `incomeStatement` `excludeSources` arg) after review showed month-to-date windows distorting them; growth KPIs regrouped into `growth_cash`. Harness 28→34 checks. |
 | 2026-07-05 | Platform | **Phase 2 DELIVERED** — `/finance/command-center` web dashboard (RAG scorecard tiles + comparatives + lazy 12-mo sparkline + drill), live `fin_kpi_refresh` SSE, nav + i18n. Web build + `pnpm -r typecheck` clean. |
+| 2026-07-05 | Platform | **Phase 3 DELIVERED** — Controller Close Cockpit: `GET /api/finance/metrics/close/status` + `/finance/close-cockpit` (tie-out REC-04 + readiness GL-19/20 + approvals GOV-01 + checklist, RAG + days-to-close); control GL-22 (RCM 185); `finance-kpi` 41 checks; nav + i18n. |

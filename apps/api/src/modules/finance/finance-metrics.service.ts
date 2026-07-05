@@ -5,6 +5,7 @@ import { TtlCache } from '../../common/ttl-cache';
 import { LedgerService } from '../ledger/ledger.service';
 import { FinanceService } from './finance.service';
 import { BudgetService } from '../budget/budget.service';
+import { CloseService } from '../ledger/close.service';
 import {
   METRICS, METRIC_BY_ID, METRIC_GROUPS, ragOf,
   CASH_ACCOUNTS, RECEIVABLE_ACCOUNTS, INVENTORY_ACCOUNTS, OTHER_CURRENT_ASSET_ACCOUNTS,
@@ -57,6 +58,7 @@ export class FinanceMetricsService {
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly finance?: FinanceService,
     @Optional() private readonly budget?: BudgetService,
+    @Optional() private readonly close?: CloseService,
   ) {}
 
   private readonly cache = new TtlCache();
@@ -282,6 +284,57 @@ export class FinanceMetricsService {
       current_ratio: by('current_ratio'), dso: by('dso'),
       operating_cash_flow: by('operating_cash_flow'), cash_runway_months: by('cash_runway_months'),
       red_flags: pack.kpis.filter((k) => k.rag === 'red').map((k) => ({ id: k.id, label_en: k.label_en, value: k.value })),
+    };
+  }
+
+  // ── Controller Close Cockpit (docs/35 Phase 3, GL-22) ──────────────────────────────────────────
+  // A single read-only "is the period ready to lock?" surface for the controller: composes the existing
+  // detective controls — subledger↔GL tie-out (REC-04), pre-lock readiness (GL-19 + snapshot recon GL-20),
+  // the pending maker-checker queue (GOV-01), and the close checklist/state — into one RAG board with a
+  // days-to-close metric. Posts nothing; every leg is guarded so a partial harness still returns a board.
+  async closeStatus(q: { period?: string }, user: JwtUser) {
+    const period = q.period && /^\d{4}-\d{2}$/.test(q.period) ? q.period : ymd().slice(0, 7);
+    const key = `fin-kpi:${user.tenantId}:close:${period}`;
+    return this.cache.wrap(key, this.ttl, () => this.closeStatusUncached(period));
+  }
+
+  private async closeStatusUncached(period: string) {
+    const [validate, recon, approvals, closeRun] = await Promise.all([
+      this.close ? this.close.validate(period).catch(() => null) : Promise.resolve(null),
+      this.finance ? this.finance.reconcileControls().catch(() => null) : Promise.resolve(null),
+      this.finance ? this.finance.pendingApprovals({ overdue_days: 3 }).catch(() => null) : Promise.resolve(null),
+      this.close ? this.close.status(period).catch(() => null) : Promise.resolve(null), // null ⇒ no close run started yet
+    ]);
+
+    // days-to-close: locked ⇒ lock date − period-end; else elapsed since period-end (0 while still in-period)
+    const periodEnd = endOfPrevMonth(shiftMonths(`${period}-01`, 1));
+    const today = ymd();
+    const dayDiff = (a: string, b: string) => Math.round((parseYmd(a).getTime() - parseYmd(b).getTime()) / 86400000);
+    const lockedAt = closeRun?.locked_at ? String(closeRun.locked_at).slice(0, 10) : null;
+    const daysToClose = lockedAt ? Math.max(0, dayDiff(lockedAt, periodEnd)) : (today > periodEnd ? dayDiff(today, periodEnd) : 0);
+
+    // checklist rollup from the close run's required steps
+    const steps = closeRun?.steps ?? [];
+    const reqSteps = steps.filter((s: any) => s.required);
+    const doneReq = reqSteps.filter((s: any) => s.status === 'done' || s.status === 'completed').length;
+
+    // RAG per pillar
+    const overdue = num(approvals?.overdue);
+    const rag = {
+      tie_out: recon == null ? null : recon.all_reconciled ? 'green' : 'red',
+      readiness: validate == null ? null : validate.ready ? 'green' : (validate.blockers?.length ? 'red' : 'amber'),
+      approvals: approvals == null ? null : overdue === 0 ? 'green' : overdue >= 5 ? 'red' : 'amber',
+    } as Record<string, 'green' | 'amber' | 'red' | null>;
+    const worst = (['tie_out', 'readiness', 'approvals'] as const).map((k) => rag[k]);
+    const overall: 'green' | 'amber' | 'red' = worst.includes('red') ? 'red' : worst.includes('amber') ? 'amber' : 'green';
+
+    return {
+      period, as_of: today, period_end: periodEnd, days_to_close: daysToClose,
+      close_run: closeRun ? { status: closeRun.status, locked_at: closeRun.locked_at, locked_by: closeRun.locked_by ?? null, checklist: { done: doneReq, required: reqSteps.length, steps } } : null,
+      tie_out: recon ? { all_reconciled: recon.all_reconciled, exceptions: recon.exceptions, lines: recon.lines } : null,
+      readiness: validate ? { ready: validate.ready, blockers: validate.blockers, warnings: validate.warnings, checks: validate.checks } : null,
+      approvals: approvals ? { count: approvals.count, overdue: approvals.overdue, oldest_age_days: approvals.oldest_age_days, by_type: approvals.by_type, total_amount: approvals.total_amount, items: (approvals.items ?? []).slice(0, 15) } : null,
+      rag: { ...rag, overall },
     };
   }
 }

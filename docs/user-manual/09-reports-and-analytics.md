@@ -117,6 +117,32 @@ read it:
 
 ---
 
+## 1c. Close Cockpit (period-close readiness)
+
+**Screen:** `/finance/close-cockpit` (**ศูนย์ปิดงวดบัญชี**, Finance → Financial
+reports) · **API:** `GET /api/finance/metrics/close/status` · **Required
+permission:** `exec` / `fin_report` / `gl_close` (also `dashboard`).
+
+The **Close Cockpit** answers one question — *is this period ready to lock?* — on a
+single red/amber/green board, so the controller doesn't have to check four screens.
+A banner shows the **overall status** and **days-to-close**; below it, four pillars,
+each with its own RAG:
+
+- **Sub-ledger tie-out** — AR / AP / inventory / gift-cards / deferred-revenue vs
+  their GL control accounts, with the variance on any that don't match (REC-04).
+- **Pre-lock readiness** — no unposted drafts, entries balance, the period-balance
+  snapshot reconciles to the raw ledger (GL-19 / GL-20).
+- **Pending approvals** — everything still awaiting a maker-checker sign-off, with
+  ageing and an overdue count (GOV-01).
+- **Close checklist** — the required close steps and what's done (appears once a
+  close run is started).
+
+The **overall status turns red** if any control account is out of balance or a hard
+readiness check fails — the controller's cue not to lock yet. Read-only; it posts
+nothing and drives no lock (the lock stays on the period-close screen).
+
+---
+
 ## 2. Standard reports (Excel & PDF)
 
 **Required permission:** varies by report (`dashboard` / `pos` / `exec` for sales;

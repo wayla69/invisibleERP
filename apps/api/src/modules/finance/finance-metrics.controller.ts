@@ -28,6 +28,12 @@ export class FinanceMetricsController {
     return this.svc.trend(id, { periods: periods ? Number(periods) : undefined, as_of: asOf }, u);
   }
 
+  // Controller Close Cockpit (docs/35 Phase 3, GL-22): tie-out + readiness + approvals + checklist for a period.
+  @Get('close/status') @Permissions('exec', 'fin_report', 'gl_close', 'dashboard')
+  closeStatus(@CurrentUser() u: JwtUser, @Query('period') period?: string) {
+    return this.svc.closeStatus({ period }, u);
+  }
+
   // Drill-through: the GL account-group rows behind a KPI, as of a date.
   @Get(':id/drill') @Permissions('exec', 'fin_report', 'dashboard', 'ar', 'creditors')
   drill(@Param('id') id: string, @CurrentUser() u: JwtUser, @Query('as_of') asOf?: string) {

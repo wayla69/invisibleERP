@@ -171,6 +171,28 @@ async function main() {
   const denied = await inj('GET', '/api/finance/metrics/pack', wh1);
   ok('permission control: warehouse-only user denied pack (403)', denied.status === 403, `st=${denied.status}`);
 
+  // ── Controller Close Cockpit (docs/35 Phase 3, GL-22) ──────────────────────────────────────────
+  // The seed leaves AP + inventory sub-ledgers empty while their GL controls (2000=40k, 1200=30k) carry a
+  // balance ⇒ a tie-out break. The cockpit must flag it RED; then we post the matching sub-ledgers and it
+  // must go GREEN. (AR already ties: arInvoices 50k = GL 1100 50k.)
+  const cs1 = await inj('GET', '/api/finance/metrics/close/status', admin);
+  ok('close/status → 200 with tie_out / readiness / approvals / rag', cs1.status === 200 && !!cs1.json.tie_out && !!cs1.json.readiness && !!cs1.json.approvals && !!cs1.json.rag, `st=${cs1.status}`);
+  ok('close cockpit: tie-out RED with the seeded break (AP/inventory sub-ledger ≠ GL control)', cs1.json.rag?.tie_out === 'red' && cs1.json.tie_out?.exceptions >= 1, `tie=${cs1.json.rag?.tie_out} exc=${cs1.json.tie_out?.exceptions}`);
+  ok('close cockpit: overall RED (a tie-out break blocks the close)', cs1.json.rag?.overall === 'red', `overall=${cs1.json.rag?.overall}`);
+  ok('close cockpit: readiness GREEN (no drafts, balanced, snapshot reconciles)', cs1.json.rag?.readiness === 'green' && cs1.json.readiness?.ready === true, `rdy=${cs1.json.rag?.readiness} blockers=${JSON.stringify(cs1.json.readiness?.blockers)}`);
+  ok('close cockpit: no close run started ⇒ close_run null; days_to_close numeric', cs1.json.close_run === null && typeof cs1.json.days_to_close === 'number', `run=${cs1.json.close_run} d=${cs1.json.days_to_close}`);
+
+  await db.insert(s.apTransactions).values([{ txnNo: 'AP-TIE', tenantId: hq, vendorName: 'Vendor', txnType: 'Bill', amount: '40000', paidAmount: '0', status: 'Unpaid', dueDate: today }]).onConflictDoNothing();
+  await db.insert(s.invBalances).values([{ tenantId: hq, itemId: 'ITEM-TIE', totalValue: '30000', onHandQty: '1', avgCost: '30000' }]).onConflictDoNothing();
+  const cs2 = await inj('GET', '/api/finance/metrics/close/status', admin);
+  ok('close cockpit: after posting matching AP+inventory sub-ledgers → tie-out GREEN, overall GREEN, 0 exceptions',
+    cs2.json.rag?.tie_out === 'green' && cs2.json.rag?.overall === 'green' && cs2.json.tie_out?.exceptions === 0,
+    `tie=${cs2.json.rag?.tie_out} overall=${cs2.json.rag?.overall} exc=${cs2.json.tie_out?.exceptions}`);
+
+  // Permission control — a warehouse-only user is denied the close cockpit
+  const csDenied = await inj('GET', '/api/finance/metrics/close/status', wh1);
+  ok('permission control: warehouse-only user denied close cockpit (403)', csDenied.status === 403, `st=${csDenied.status}`);
+
   await app.close();
 
   // ── Report ──
