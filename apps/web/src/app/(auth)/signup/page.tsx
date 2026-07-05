@@ -105,7 +105,10 @@ export default function SignupPage() {
             <Link href="/legal/privacy" className="underline hover:text-primary" target="_blank">
               นโยบายความเป็นส่วนตัว
             </Link>{' '}
-            และข้อกำหนดการใช้บริการ
+            และข้อกำหนดการใช้บริการ ·{' '}
+            <Link href="/legal/security" className="underline hover:text-primary" target="_blank">
+              ความปลอดภัยและความน่าเชื่อถือ
+            </Link>
           </p>
         </form>
 
