@@ -68,6 +68,140 @@ role with no saved layout falls back to a sensible default set.
 
 ---
 
+## 1b. CFO Command Center (financial KPIs & ratios)
+
+**Screen:** `/finance/command-center` (**ศูนย์บัญชาการ CFO**, Finance → Financial
+reports) · **API:** `GET /api/finance/metrics/pack` · **Required permission:**
+`exec` / `fin_report` / `dashboard` (also `ar` / `creditors`).
+
+The **CFO Command Center** shows your finance KPIs as a **red/amber/green
+scorecard** grouped by family. A summary strip counts how many KPIs need action /
+are on watch / are healthy, with a **Live** badge that turns the board real-time
+(it re-pulls whenever the ops dashboard refreshes). Each tile shows the value, its
+RAG chip, and the change **vs prior period / prior year / budget**; click **12-month
+trend** to expand a sparkline, or **View detail →** to drill to the statements.
+
+The finance KPI engine turns your ledger into a **CFO scorecard** — one call
+returns ~31 financial KPIs, each with **RAG** (🟢 green / 🟡 amber / 🔴 red) and
+**comparatives**, computed straight from the posted GL and sub-ledgers:
+
+- **สภาพคล่อง (Liquidity):** current / quick / cash ratio, working capital,
+  days-cash-on-hand, cash-conversion-cycle.
+- **ประสิทธิภาพเงินทุนหมุนเวียน (Efficiency):** DSO, DPO, DIO, AR/AP/inventory turnover.
+- **ความสามารถทำกำไร (Profitability):** gross / operating / net margin, EBITDA + margin, ROA, ROE.
+- **โครงสร้างหนี้สิน (Leverage):** debt-to-equity, interest coverage, net debt.
+- **การเติบโตและกระแสเงินสด (Growth & cash):** revenue growth MoM/YoY, operating & free cash flow, cash runway.
+- **สุขภาพลูกหนี้/เจ้าหนี้ (AR/AP health):** overdue-AR/AP %, AR-over-90-days, allowance coverage.
+
+Each KPI carries its **prior-period, prior-year and budget** comparative and a
+RAG rating against a defined threshold. Margins reflect the period you pick; the
+**efficiency KPIs (turnover, DSO/DPO/DIO, ROA, ROE, days-cash, runway) are always
+on a trailing-12-month basis**, so they read the same whether you open the board on
+the 1st or the 28th. Two companion endpoints let you *explain* a number, not just
+read it:
+
+- `GET /api/finance/metrics/{id}/drill` — the GL account rows behind a KPI (e.g.
+  why the current ratio moved). Drill through a 🔴 KPI straight to the ledger.
+- `GET /api/finance/metrics/{id}/trend?periods=12` — the KPI's month-by-month
+  trend (for a sparkline / line chart).
+
+**Optional filters on the pack:** `period=YYYY-MM` (a specific month), `from`/`to`
+(a custom window), `group=<family>` (one KPI family), `as_of=YYYY-MM-DD`.
+
+The Command Center also shows a **“What changed”** panel — a plain-language
+summary (an MD&A-style narrative) of the headline movement plus the KPIs that need
+action or moved the most, generated automatically from the numbers.
+
+You can have the scorecard, the cash position and the close cockpit **emailed /
+LINE-delivered on a schedule** — on `/scheduled-reports` (§7) add a subscription of
+type **CFO KPI pack**, **Cash position + 13-week forecast** or **Period-close
+readiness**, pick daily / weekly / monthly, and the delivered summary carries the
+headline figures (the CFO pack includes the “what changed” line).
+
+> **This is the analytical-review control (ELC-07):** the same KPI definitions
+> also feed the executive scorecard and the scheduled KPI pack, so the number you
+> review is the number everywhere. Read-only — it never posts to the ledger.
+>
+> **Troubleshooting:** “UNKNOWN_METRIC” — the metric id isn't recognised; use an
+> id returned by `…/metrics/pack`.
+
+---
+
+## 1c. Close Cockpit (period-close readiness)
+
+**Screen:** `/finance/close-cockpit` (**ศูนย์ปิดงวดบัญชี**, Finance → Financial
+reports) · **API:** `GET /api/finance/metrics/close/status` · **Required
+permission:** `exec` / `fin_report` / `gl_close` (also `dashboard`).
+
+The **Close Cockpit** answers one question — *is this period ready to lock?* — on a
+single red/amber/green board, so the controller doesn't have to check four screens.
+A banner shows the **overall status** and **days-to-close**; below it, four pillars,
+each with its own RAG:
+
+- **Sub-ledger tie-out** — AR / AP / inventory / gift-cards / deferred-revenue vs
+  their GL control accounts, with the variance on any that don't match (REC-04).
+- **Pre-lock readiness** — no unposted drafts, entries balance, the period-balance
+  snapshot reconciles to the raw ledger (GL-19 / GL-20).
+- **Pending approvals** — everything still awaiting a maker-checker sign-off, with
+  ageing and an overdue count (GOV-01).
+- **Close checklist** — the required close steps and what's done (appears once a
+  close run is started).
+
+The **overall status turns red** if any control account is out of balance or a hard
+readiness check fails — the controller's cue not to lock yet. Read-only; it posts
+nothing and drives no lock (the lock stays on the period-close screen).
+
+---
+
+## 1d. Treasury / Cash Command (cash position & forecast)
+
+**Screen:** `/finance/treasury` (**ศูนย์บริหารเงินสด**, Finance → Financial
+reports) · **API:** `GET /api/finance/metrics/cash/position` · **Required
+permission:** `exec` / `fin_report` / `ar` (also `dashboard`).
+
+**Treasury / Cash Command** is the forward view of cash on one screen:
+
+- **Headline** — total cash now, the **projected closing** balance, and the
+  **liquidity trough** (the lowest point cash reaches over the next 13 weeks, and
+  which week that is).
+- **13-week cash forecast** — a curve of the projected cash balance, built from
+  open receivables (inflows) and payables (outflows) by due date; the trough week
+  is marked, and a table breaks out inflow / outflow / projected balance per week.
+- **Cash & bank accounts** — the GL cash/bank balances (which tie to the trial
+  balance) plus your configured bank accounts.
+- **Liquidity** — the current / quick / cash ratios, working capital and days-cash
+  (the same figures as the CFO scorecard).
+- **FX exposure** — open receivables/payables in each non-THB currency, with the
+  net position to watch.
+
+Read-only; it posts nothing. It complements the working-capital **score**
+(*Financial Health*) and the raw GL **forecast** by bringing the bank position,
+the trough and FX into one treasury review.
+
+---
+
+## 1e. Segment Profitability (P&L by dimension)
+
+**Screen:** `/finance/profitability` (**กำไร-ขาดทุนตามมิติ**, Finance → Financial
+reports) · **API:** `GET /api/finance/metrics/profitability` · **Required
+permission:** `exec` / `fin_report` / `dashboard`.
+
+**Segment Profitability** breaks the P&L down by an accounting **dimension** — pick
+**by branch / cost centre / project** with the switcher at the top. For each
+segment you see revenue → COGS → gross profit → opex → **net**, its **net margin**
+and its **contribution %** of total net; a net-contribution bar chart ranks the
+segments, and a matrix shows the full breakdown with a total row.
+
+A **✓ badge** confirms the segment totals **tie to the consolidated P&L** (nothing
+falls through the cracks — postings with no dimension roll up to an *Unassigned*
+segment). It's built straight from the multi-dimensional GL, so it's always
+consistent with the statements; read-only, it posts nothing.
+
+> *Customer- and product-level profitability draw on the sub-ledgers rather than a
+> GL dimension and are a planned follow-up.*
+
+---
+
 ## 2. Standard reports (Excel & PDF)
 
 **Required permission:** varies by report (`dashboard` / `pos` / `exec` for sales;
