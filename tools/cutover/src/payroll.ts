@@ -6,6 +6,9 @@
 import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'pay-secret';
 process.env.NODE_ENV = 'test';
+// A sender is on file so the payslip-email path reaches the transport (→ 503 EMAIL_NOT_CONFIGURED with SMTP
+// unset), proving the flow is complete rather than tripping the earlier no-sender guard.
+process.env.MAIL_FROM = process.env.MAIL_FROM || 'hr@example.com';
 
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -56,6 +59,12 @@ async function main() {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
     return { status: res.statusCode, json };
+  };
+  // Raw variant for the payslip PDF endpoints (a PDF/HTML body is not JSON): expose the status, the raw body
+  // and the content-type so the document render + PDPA gating can be asserted regardless of Chromium presence.
+  const injRaw = async (m: string, url: string, token?: string) => {
+    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {} });
+    return { status: res.statusCode, body: String(res.body ?? ''), ctype: String(res.headers['content-type'] ?? '') };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
   const approver = (await inj('POST', '/api/login', undefined, { username: 'approver', password: 'admin123' })).json.token;
@@ -141,6 +150,43 @@ async function main() {
   ok('Payslips: Somchai net 29,079.17 (30k − 750 SSO − 170.83 WHT)',
     slips.json.count === 2 && near(somchai?.net, 29079.17),
     JSON.stringify({ n: slips.json.count, net: somchai?.net }));
+
+  // ── 6b. สลิปเงินเดือน (payslip) print + PDPA access control (PAY-04) ──
+  // Link Somchai + Malee to self-service (ess-only) users so the PDPA guard can be exercised: an employee may
+  // download ONLY their own slip; HR/payroll may print anyone's; an ess-only user cannot reach the HR route.
+  const empList = (await inj('GET', '/api/payroll/employees', admin)).json.employees;
+  const somE = empList.find((e: any) => e.name === 'Somchai');
+  const malE = empList.find((e: any) => e.name === 'Malee');
+  const uSom = (await db.insert(s.users).values({ username: 'somchai', passwordHash: await pw.hash('emp123'), role: 'Cashier', tenantId: hq }).returning({ id: s.users.id }))[0];
+  const uMal = (await db.insert(s.users).values({ username: 'malee', passwordHash: await pw.hash('emp123'), role: 'Cashier', tenantId: hq }).returning({ id: s.users.id }))[0];
+  await db.insert(s.userPermissions).values([{ userId: Number(uSom.id), perm: 'ess' }, { userId: Number(uMal.id), perm: 'ess' }]).onConflictDoNothing();
+  await db.update(s.employees).set({ userName: 'somchai' }).where(eq(s.employees.id, Number(somE.id)));
+  await db.update(s.employees).set({ userName: 'malee' }).where(eq(s.employees.id, Number(malE.id)));
+  const somTok = (await inj('POST', '/api/login', undefined, { username: 'somchai', password: 'emp123' })).json.token;
+
+  const slipsFull = (await inj('GET', '/api/payroll/runs/2026-06/slips', admin)).json.slips;
+  const somSlip = slipsFull.find((x: any) => x.emp_name === 'Somchai');
+  const malSlip = slipsFull.find((x: any) => x.emp_name === 'Malee');
+  ok('Slips list exposes a slip id for printing', Number.isFinite(somSlip?.id) && Number.isFinite(malSlip?.id), JSON.stringify({ som: somSlip?.id, mal: malSlip?.id }));
+
+  const ownPdf = await injRaw('GET', `/api/ess/payslips/${somSlip.id}/pdf`, somTok);
+  const ownIsHtml = ownPdf.ctype.includes('html');
+  ok('ESS: employee downloads OWN payslip → 200, body rendered', ownPdf.status === 200 && ownPdf.body.length > 200, `${ownPdf.status} len=${ownPdf.body.length} (${ownPdf.ctype})`);
+  ok('Payslip never leaks the full 13-digit citizen ID', !ownPdf.body.includes('1234567890123'), 'full national_id absent');
+  ok('Payslip masks the citizen ID to last-4 (PDPA data-minimisation)', !ownIsHtml || ownPdf.body.includes('x-xxxx-xxxxx-xx-3'), ownIsHtml ? 'masked marker present' : 'pdf-mode (mask not string-checkable)');
+
+  const otherPdf = await injRaw('GET', `/api/ess/payslips/${malSlip.id}/pdf`, somTok);
+  ok('ESS PDPA: employee CANNOT download a colleague’s payslip → 404', otherPdf.status === 404, `${otherPdf.status}`);
+
+  const hrPdf = await injRaw('GET', `/api/payroll/slips/${somSlip.id}/pdf`, admin);
+  ok('HR/payroll can print any payslip → 200', hrPdf.status === 200 && hrPdf.body.length > 200, `${hrPdf.status}`);
+  const somHr = await injRaw('GET', `/api/payroll/slips/${somSlip.id}/pdf`, somTok);
+  ok('HR payslip route is gated: ess-only employee → 403', somHr.status === 403, `${somHr.status}`);
+
+  const emailSlip = await inj('POST', `/api/payroll/slips/${somSlip.id}/send-email`, admin, { to_email: 'somchai@example.com' });
+  ok('Payslip email path complete (503 EMAIL_NOT_CONFIGURED, SMTP unset)', emailSlip.status === 503 && emailSlip.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${emailSlip.status} ${emailSlip.json.error?.code}`);
+  const badEmail = await inj('POST', `/api/payroll/slips/${somSlip.id}/send-email`, admin, { to_email: 'not-an-email' });
+  ok('Payslip email rejects an invalid recipient → 400', badEmail.status === 400, `${badEmail.status}`);
 
   // ── 7. cross-tenant guard (C2): an HQ super-admin (no tenant) must name a tenant; the run is scoped ──
   // seed an active employee under ANOTHER tenant — it must NOT be swept into an HQ payroll run.

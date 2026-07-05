@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, CalendarOff, Receipt, Clock, IdCard, Wallet } from 'lucide-react';
+import { Plus, CalendarOff, Receipt, Clock, IdCard, Wallet, Printer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht, num, thaiDate } from '@/lib/format';
@@ -18,6 +18,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // ── API contract (apps/api/src/modules/ess) ───────────────────────────────────
 interface MeResp {
@@ -104,6 +106,11 @@ function MeTab() {
                 { key: 'pf_employee', label: t('hr.pf'), align: 'right', render: (r) => <span className="tabular">{baht(r.pf_employee)}</span> },
                 { key: 'wht', label: t('hr.wht_short'), align: 'right', render: (r) => <span className="tabular">{baht(r.wht)}</span> },
                 { key: 'net', label: t('hr.net_received'), align: 'right', render: (r) => <span className="tabular font-semibold text-success">{baht(r.net)}</span> },
+                { key: 'act', label: '', sortable: false, render: (r) => (
+                  <Button variant="ghost" size="sm" asChild title={t('hr.payslip_download')}>
+                    <a href={`${BASE}/api/ess/payslips/${r.id}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-4" /></a>
+                  </Button>
+                ) },
               ]}
             />
           )}
