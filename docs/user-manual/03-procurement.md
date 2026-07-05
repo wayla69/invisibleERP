@@ -118,6 +118,8 @@ other PR.
    box** (name or code). The grid **loads more as you scroll** — no page buttons.
    Each card also shows the item's **on-hand stock** (red **สินค้าหมด** when zero)
    and its **last purchase price**, so you can judge what to request at a glance.
+   Tap the **⭐ star** on a product to save it as a **favourite**, then use the
+   **รายการโปรด** chip to see just your favourites (saved on this device).
 2. **Add to basket.** Press **ใส่ตะกร้า** on a product to drop it in the basket;
    press it again (or use the **+ / −** steppers in the basket) to change the
    quantity.
@@ -147,7 +149,9 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 
 > **Track your requests without leaving the page.** A **คำขอซื้อล่าสุดของฉัน** card
 > (below the basket) lists your last few requisitions with their live approval
-> **status** — tap one (or **ดูทั้งหมด**) to open the full requisitions page.
+> **status** — tap one (or **ดูทั้งหมด**) to open the full requisitions page. Press
+> the **↻ สั่งซ้ำ** button on a past requisition to drop its items straight back into
+> the basket.
 
 > **Where does the category grouping come from?** The cards are grouped by each
 > item's category in the **item register** — the real *หมวดสินค้า* (`item_categories`,
