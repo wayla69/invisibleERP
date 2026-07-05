@@ -39,6 +39,8 @@ export class AssetsController {
   // ── Asset audit (physical count by scan) → reconcile against the register ──
   @Post('audits') openAudit(@Body(new ZodValidationPipe(AuditOpenBody)) b: z.infer<typeof AuditOpenBody>, @CurrentUser() u: JwtUser) { return this.svc.openAudit(b, u); }
   @Get('audits') listAudits(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listAudits(u, qint('limit', limit, 50)); }
+  @Get('audit-report') auditReport(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.auditReport(u, { limit: qintOpt('limit', limit) }); }
+  @Get('unverified') unverified(@Query('days') days: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.unverifiedAssets(u, { days: qintOpt('days', days) }); }
   @Get('audits/:auditNo') getAudit(@Param('auditNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.getAudit(no, u); }
   @Post('audits/:auditNo/scan') scanAudit(@Param('auditNo') no: string, @Body(new ZodValidationPipe(AuditScanBody)) b: z.infer<typeof AuditScanBody>, @CurrentUser() u: JwtUser) { return this.svc.scanAudit(no, b, u); }
   @Post('audits/:auditNo/close') closeAudit(@Param('auditNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.closeAudit(no, u); }

@@ -393,6 +393,12 @@ without anyone running it by hand.
    deliver the existing variance/scorecard figures on a schedule; the *Project
    governance / status pack* delivers the RAG-ranked portfolio status roll-up (red
    projects, unmitigated-high risks, overdue milestones, pending change orders).
+   For **fixed assets**, two report types surface the physical-custody controls:
+   *Asset audit results* (recent counts with found/missing/misplaced/unknown plus the
+   pending custody-change queue) and **Assets not verified in N days** — a monthly
+   **existence exception** listing every active asset that hasn't been scan-verified
+   within N days (default 90), oldest first, so stale/never-confirmed assets are
+   surfaced for a physical count before period-end.
 2. **Choose a frequency** — daily, weekly or monthly — and optionally an **email
    recipient**.
 3. Save. The report then runs on its schedule: each run posts an **in-app

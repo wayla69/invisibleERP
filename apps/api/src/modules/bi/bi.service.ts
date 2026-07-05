@@ -19,6 +19,7 @@ import { LineNotifyService } from '../messaging/line-notify.service';
 import { CollectionsService } from '../finance/collections.service';
 import { FinanceMetricsService } from '../finance/finance-metrics.service';
 import { EamService } from '../eam/eam.service';
+import { AssetsService } from '../assets/assets.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
 import { RevRecService } from '../revenue/revrec.service';
@@ -67,6 +68,12 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
   // Likewise: each run raises preventive-maintenance work orders for every due PM schedule (idempotent).
   eam_pm_generate: { label: 'สร้างใบสั่งงานซ่อมตามแผน (PM)', labelEn: 'Generate due preventive maintenance' },
+  // Asset audit results (FA-11): recent audits + their found/missing/misplaced/unknown tallies + the
+  // outstanding custody-change requests awaiting approval. Read-only aggregate.
+  asset_audit: { label: 'ผลการตรวจนับทรัพย์สิน', labelEn: 'Asset audit results' },
+  // FA-12 (detective): active assets not physically verified within N days (default 90) — an existence
+  // exception list. Schedule it `monthly` so unverified assets surface for a count before period-end.
+  asset_verification_exceptions: { label: 'ทรัพย์สินที่ไม่ได้ตรวจสอบเกินกำหนด', labelEn: 'Assets not verified in N days' },
   // Likewise: each run re-runs the 3-way match for every BLOCKED AP invoice (EXP-10) — a hold typically
   // clears itself once the outstanding GR posts, releasing the invoice to payment without a manual re-run.
   ap_automatch_rerun: { label: 'จับคู่ 3 ทางซ้ำอัตโนมัติ (ปลดล็อกใบแจ้งหนี้)', labelEn: 'Auto re-match blocked AP invoices' },
@@ -140,6 +147,9 @@ export class BiService implements OnModuleInit {
     // scorecard and the CFO Command Center never drift. @Optional so a partial harness still constructs.
     @Optional() private readonly financeMetrics?: FinanceMetricsService,
     @Optional() private readonly eam?: EamService,
+    // FA-11/FA-12 reporting surfaces: audit results (asset_audit) + the periodic asset-existence exception
+    // monitor (asset_verification_exceptions). @Optional so partial harnesses still construct.
+    @Optional() private readonly assets?: AssetsService,
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly leases?: LeasesService,
     @Optional() private readonly revrec?: RevRecService,
@@ -642,6 +652,16 @@ export class BiService implements OnModuleInit {
       if (!this.eam) throw new BadRequestException({ code: 'EAM_UNAVAILABLE', message: 'EAM service not available', messageTh: 'ระบบบำรุงรักษาไม่พร้อมใช้งาน' });
       const r = await this.eam.runPmDue(user); // idempotent: a schedule with an open WO is skipped
       return { data: r, summary: `PM generation: raised ${r.generated} of ${r.scanned} schedules`, summaryTh: `สร้างใบสั่งงานซ่อมตามแผน: ${r.generated} จาก ${r.scanned} แผน` };
+    }
+    if (reportType === 'asset_audit') {
+      if (!this.assets) throw new BadRequestException({ code: 'ASSETS_UNAVAILABLE', message: 'Assets service not available', messageTh: 'ระบบทรัพย์สินไม่พร้อมใช้งาน' });
+      const r = await this.assets.auditReport(user, { limit: f.limit });
+      return { data: r, summary: `Asset audits: ${r.totals.audits}, missing ${r.totals.missing}, misplaced ${r.totals.misplaced}; ${r.totals.pending_custody} custody request(s) pending`, summaryTh: `ตรวจนับทรัพย์สิน ${r.totals.audits} ครั้ง · ขาดหาย ${r.totals.missing} · ผิดตำแหน่ง ${r.totals.misplaced} · รออนุมัติย้าย ${r.totals.pending_custody}` };
+    }
+    if (reportType === 'asset_verification_exceptions') {
+      if (!this.assets) throw new BadRequestException({ code: 'ASSETS_UNAVAILABLE', message: 'Assets service not available', messageTh: 'ระบบทรัพย์สินไม่พร้อมใช้งาน' });
+      const r = await this.assets.unverifiedAssets(user, { days: f.days });
+      return { data: r, summary: `${r.count} of ${r.total_active} active assets not verified in ${r.days} days`, summaryTh: `${r.count} จาก ${r.total_active} สินทรัพย์ไม่ได้ตรวจสอบเกิน ${r.days} วัน` };
     }
     if (reportType === 'line_daily_digest') {
       const db = this.db;

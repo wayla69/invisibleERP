@@ -606,6 +606,65 @@ export class AssetsService {
     return { audits: rows.map((r: any) => ({ audit_no: r.auditNo, location: r.location, status: r.status, expected_count: r.expectedCount, created_by: r.createdBy })), count: rows.length };
   }
 
+  // Audit results as a report surface (BI report_type 'asset_audit'): recent audits with their scan tallies,
+  // plus the outstanding custody-change exceptions awaiting approval. Read-only aggregation over FA-11 data.
+  async auditReport(user: JwtUser, opts?: { limit?: number }) {
+    const db = this.db;
+    const audits = await db.select().from(assetAudits).orderBy(desc(assetAudits.id)).limit(opts?.limit ?? 50);
+    const tallies = await db.select({ auditNo: assetAuditScans.auditNo, result: assetAuditScans.result, c: sql<number>`count(distinct ${assetAuditScans.assetNo})` })
+      .from(assetAuditScans).groupBy(assetAuditScans.auditNo, assetAuditScans.result);
+    const byAudit = new Map<string, { found: number; misplaced: number; unknown: number }>();
+    for (const t of tallies as { auditNo: string; result: string; c: number }[]) {
+      const m = byAudit.get(t.auditNo) ?? { found: 0, misplaced: 0, unknown: 0 };
+      if (t.result === 'Found') m.found = Number(t.c);
+      else if (t.result === 'Misplaced') m.misplaced = Number(t.c);
+      else if (t.result === 'Unknown') m.unknown = Number(t.c);
+      byAudit.set(t.auditNo, m);
+    }
+    const auditRows = (audits as { auditNo: string; location: string | null; status: string; expectedCount: number; createdBy: string | null; closedBy: string | null }[]).map((a) => {
+      const t = byAudit.get(a.auditNo) ?? { found: 0, misplaced: 0, unknown: 0 };
+      return { audit_no: a.auditNo, location: a.location, status: a.status, expected: a.expectedCount, found: t.found, misplaced: t.misplaced, unknown: t.unknown, missing: Math.max(0, a.expectedCount - t.found), created_by: a.createdBy, closed_by: a.closedBy };
+    });
+    const pending = await db.select().from(assetScanRequests).where(eq(assetScanRequests.status, 'PendingApproval')).orderBy(desc(assetScanRequests.id)).limit(100);
+    const custodyRows = (pending as { reqNo: string; assetNo: string; fromLocation: string | null; toLocation: string | null; source: string; requestedBy: string | null }[]).map((r) => ({ request_no: r.reqNo, asset_no: r.assetNo, from_location: r.fromLocation, to_location: r.toLocation, source: r.source, requested_by: r.requestedBy }));
+    const totals = auditRows.reduce((acc, r) => ({ audits: acc.audits + 1, found: acc.found + r.found, missing: acc.missing + r.missing, misplaced: acc.misplaced + r.misplaced, unknown: acc.unknown + r.unknown }), { audits: 0, found: 0, missing: 0, misplaced: 0, unknown: 0 });
+    return { audits: auditRows, custody_exceptions: custodyRows, totals: { ...totals, pending_custody: custodyRows.length } };
+  }
+
+  // FA-12 (detective): active assets not physically verified within N days. "Verified" = a Scan Verify /
+  // Scan Update movement; a never-verified asset falls back to its acquisition date (implicit receipt).
+  // Read-only — powers the schedulable BI report_type 'asset_verification_exceptions'.
+  async unverifiedAssets(user: JwtUser, opts?: { days?: number }) {
+    const days = opts?.days && opts.days > 0 ? Math.floor(opts.days) : 90;
+    const db = this.db;
+    const aConds = [sql`${fixedAssets.status} = 'active'`];
+    if (user.tenantId != null) aConds.push(eq(fixedAssets.tenantId, user.tenantId));
+    const assets = await db.select().from(fixedAssets).where(and(...aConds));
+    const moves = await db.select({ assetNo: assetMovements.assetNo, last: sql<string>`max(${assetMovements.moveDate})` })
+      .from(assetMovements).where(inArray(assetMovements.moveType, ['Scan Verify', 'Scan Update'])).groupBy(assetMovements.assetNo);
+    const lastByAsset = new Map<string, string>();
+    for (const m of moves as { assetNo: string | null; last: string }[]) if (m.assetNo) lastByAsset.set(m.assetNo, m.last);
+    const now = Date.now();
+    const dayMs = 86_400_000;
+    const exceptions: { asset_no: string; name: string; location: string | null; assigned_to: string | null; last_verified: string | null; last_seen: string | null; days_since: number; ever_verified: boolean }[] = [];
+    for (const a of assets as { assetNo: string; name: string; location: string | null; assignedTo: string | null; acquireDate: string | null }[]) {
+      const lastVerifyRaw = lastByAsset.get(a.assetNo);
+      const lastSeen = lastVerifyRaw ? new Date(lastVerifyRaw) : a.acquireDate ? new Date(a.acquireDate) : null;
+      const ageMs = lastSeen ? now - lastSeen.getTime() : Infinity;
+      if (ageMs > days * dayMs) {
+        exceptions.push({
+          asset_no: a.assetNo, name: a.name, location: a.location ?? null, assigned_to: a.assignedTo ?? null,
+          last_verified: lastVerifyRaw ? ymd(new Date(lastVerifyRaw)) : null,
+          last_seen: lastSeen ? ymd(lastSeen) : null,
+          days_since: Number.isFinite(ageMs) ? Math.floor(ageMs / dayMs) : -1,
+          ever_verified: !!lastVerifyRaw,
+        });
+      }
+    }
+    exceptions.sort((x, y) => y.days_since - x.days_since);
+    return { days, count: exceptions.length, total_active: assets.length, exceptions };
+  }
+
   async assetRegister(_user: JwtUser, status?: string) {
     const db = this.db;
     const where = status ? eq(fixedAssets.status, status as typeof fixedAssets.$inferSelect.status) : undefined;
