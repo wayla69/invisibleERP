@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList } from 'lucide-react';
+import { Search, Plus, Minus, X, Zap, ShoppingCart, PackagePlus, Send, Layers, LayoutGrid, List as ListIcon, ImageOff, ClipboardList, Star, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/notify';
@@ -27,11 +27,12 @@ type CatalogItem = {
 type Category = { key: string; label: string; count: number };
 type CatalogPage = { items: CatalogItem[]; categories: Category[]; total: number; offset: number; limit: number; has_more: boolean; count: number };
 type CartLine = { key: string; item_id: string; description: string; uom: string; unit_price: number; qty: number; urgent: boolean; custom: boolean };
-type MyPr = { pr_no: string; pr_date: string | null; status: string; priority: string | null; lines: { item_id: string; request_qty: number }[] };
+type MyPr = { pr_no: string; pr_date: string | null; status: string; priority: string | null; lines: { item_id: string; request_qty: number; uom?: string | null }[] };
 
 const PAGE = 24;
 const VIEW_KEY = 'shop.view';
 const CART_KEY = 'shop.cart';
+const FAVS_KEY = 'shop.favs';
 
 // Rehydrate the basket saved on this device so an in-progress requisition survives a refresh / navigation.
 function readCart(): CartLine[] {
@@ -40,6 +41,15 @@ function readCart(): CartLine[] {
     const arr = JSON.parse(window.localStorage.getItem(CART_KEY) ?? '[]');
     return Array.isArray(arr) ? arr.filter((l) => l && typeof l.key === 'string' && typeof l.item_id === 'string') : [];
   } catch { return []; }
+}
+
+// Favourite item ids saved on this device (a per-device convenience, like the basket).
+function readFavs(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const arr = JSON.parse(window.localStorage.getItem(FAVS_KEY) ?? '[]');
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []);
+  } catch { return new Set(); }
 }
 
 // A stable pastel background for an item's placeholder tile (Shopee/Grab-style colourful grid) — derived
@@ -105,6 +115,8 @@ export default function ShopPage() {
   const [view, setView] = useState<'grid' | 'list'>(() =>
     (typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list') ? 'list' : 'grid');
   const [cart, setCart] = useState<CartLine[]>(readCart);
+  const [favs, setFavs] = useState<Set<string>>(readFavs);
+  const [favOnly, setFavOnly] = useState(false);
   const [remarks, setRemarks] = useState('');
   const [projectCode, setProjectCode] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
@@ -125,6 +137,9 @@ export default function ShopPage() {
       else window.localStorage.removeItem(CART_KEY);
     } catch { /* private mode */ }
   }, [cart]);
+  useEffect(() => {
+    try { window.localStorage.setItem(FAVS_KEY, JSON.stringify([...favs])); } catch { /* private mode */ }
+  }, [favs]);
   // Debounce the search box so typing doesn't fire a request per keystroke.
   useEffect(() => { const id = setTimeout(() => setDebouncedQ(q.trim()), 250); return () => clearTimeout(id); }, [q]);
 
@@ -142,8 +157,15 @@ export default function ShopPage() {
 
   const pages = catalog.data?.pages ?? [];
   const items = useMemo(() => pages.flatMap((p) => p.items), [pages]);
+  const displayItems = useMemo(() => (favOnly ? items.filter((it) => favs.has(it.item_id)) : items), [items, favOnly, favs]);
   const categories = pages[0]?.categories ?? [];
   const total = pages[0]?.total ?? 0;
+
+  const toggleFav = (itemId: string) => setFavs((s) => {
+    const next = new Set(s);
+    if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
+    return next;
+  });
 
   // Auto-load the next page when the sentinel scrolls into view (infinite scroll, no pager buttons).
   useEffect(() => {
@@ -167,6 +189,22 @@ export default function ShopPage() {
   const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.floor(qty) || 1) } : l)));
   const toggleUrgent = (key: string) => setCart((c) => c.map((l) => (l.key === key ? { ...l, urgent: !l.urgent } : l)));
   const removeLine = (key: string) => setCart((c) => c.filter((l) => l.key !== key));
+
+  // Re-order: drop a past PR's lines back into the basket (merging quantities into any existing line).
+  const reorder = (pr: MyPr) => {
+    setCart((c) => {
+      const next = [...c];
+      for (const ln of pr.lines ?? []) {
+        const key = `i:${ln.item_id}`;
+        const i = next.findIndex((l) => l.key === key);
+        const qty = Math.max(1, Math.floor(ln.request_qty) || 1);
+        if (i >= 0) next[i] = { ...next[i], qty: next[i].qty + qty };
+        else next.push({ key, item_id: ln.item_id, description: '', uom: ln.uom ?? '', unit_price: 0, qty, urgent: false, custom: false });
+      }
+      return next;
+    });
+    notifySuccess(t('shop.reordered', { no: pr.pr_no }));
+  };
 
   const addCustom = () => {
     const name = cName.trim();
@@ -256,29 +294,48 @@ export default function ShopPage() {
             </div>
           </div>
 
-          {/* Category chips (horizontal scroll, Shopee-style) */}
-          {categories.length > 0 && (
-            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-              {catChip(null, t('shop.all_categories'), total)}
-              {categories.map((c) => catChip(c.key, c.label, c.count))}
-            </div>
-          )}
+          {/* Favourites toggle + category chips (horizontal scroll, Shopee-style) */}
+          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+            <button
+              type="button"
+              onClick={() => setFavOnly((v) => !v)}
+              className={cn(
+                'flex items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition-colors',
+                favOnly ? 'border-amber-500 bg-amber-500 text-white' : 'bg-background hover:bg-accent',
+              )}
+            >
+              <Star className={cn('size-3.5', favOnly && 'fill-current')} /> {t('shop.favorites')}
+              {favs.size > 0 && <span className="text-xs opacity-80">{favs.size}</span>}
+            </button>
+            {categories.length > 0 && catChip(null, t('shop.all_categories'), total)}
+            {categories.map((c) => catChip(c.key, c.label, c.count))}
+          </div>
 
           {total > 0 && <p className="text-xs text-muted-foreground">{t('shop.results_n', { n: total })}</p>}
 
           <StateView q={{ isLoading: catalog.isLoading, error: catalog.error }}>
-            {items.length === 0 ? (
+            {displayItems.length === 0 ? (
               <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                {debouncedQ || activeCat ? t('shop.no_items') : t('shop.empty_catalog')}
+                {favOnly ? t('shop.favorites_empty') : debouncedQ || activeCat ? t('shop.no_items') : t('shop.empty_catalog')}
               </p>
             ) : view === 'grid' ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-                {items.map((it) => {
+                {displayItems.map((it) => {
                   const inCart = cartQty(it.item_id);
+                  const fav = favs.has(it.item_id);
                   return (
                     <div key={it.item_id} className="group flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md">
                       <div className="relative aspect-square w-full overflow-hidden bg-muted">
                         <ProductThumb item={it} className="size-full" />
+                        <button
+                          type="button"
+                          aria-label={t('shop.favorite')}
+                          title={t('shop.favorite')}
+                          onClick={() => toggleFav(it.item_id)}
+                          className={cn('absolute left-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-background/85 shadow-sm backdrop-blur transition hover:bg-background', fav ? 'text-amber-500' : 'text-muted-foreground')}
+                        >
+                          <Star className={cn('size-4', fav && 'fill-current')} />
+                        </button>
                         <button
                           type="button"
                           aria-label={t('shop.add_urgent')}
@@ -288,7 +345,6 @@ export default function ShopPage() {
                         >
                           <Zap className="size-4" />
                         </button>
-                        {inCart > 0 && <Badge className="absolute left-1.5 top-1.5">{inCart}</Badge>}
                       </div>
                       <div className="flex flex-1 flex-col gap-1 p-2.5">
                         <p className="line-clamp-2 text-sm font-medium leading-snug">{it.item_description || it.item_id}</p>
@@ -303,7 +359,10 @@ export default function ShopPage() {
                         </div>
                         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
                           <span className="text-sm font-semibold">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
-                          <Button size="sm" className="h-8 gap-1 px-2.5" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
+                          <div className="flex items-center gap-1.5">
+                            {inCart > 0 && <Badge variant="secondary" className="text-[11px]">{inCart}</Badge>}
+                            <Button size="sm" className="h-8 gap-1 px-2.5" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -312,10 +371,20 @@ export default function ShopPage() {
               </div>
             ) : (
               <div className="divide-y rounded-xl border">
-                {items.map((it) => {
+                {displayItems.map((it) => {
                   const inCart = cartQty(it.item_id);
+                  const fav = favs.has(it.item_id);
                   return (
                     <div key={it.item_id} className="flex items-center gap-3 p-2.5">
+                      <button
+                        type="button"
+                        aria-label={t('shop.favorite')}
+                        title={t('shop.favorite')}
+                        onClick={() => toggleFav(it.item_id)}
+                        className={cn('shrink-0 transition-colors', fav ? 'text-amber-500' : 'text-muted-foreground hover:text-foreground')}
+                      >
+                        <Star className={cn('size-4', fav && 'fill-current')} />
+                      </button>
                       <ProductThumb item={it} className="size-14 shrink-0 rounded-lg" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{it.item_description || it.item_id}</p>
@@ -450,14 +519,17 @@ export default function ShopPage() {
                 ) : (
                   <ul className="divide-y">
                     {(myPrs.data?.prs ?? []).map((pr) => (
-                      <li key={pr.pr_no}>
-                        <Link href="/requisitions" className="flex items-center justify-between gap-2 py-2 hover:opacity-80">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{pr.pr_no}</p>
-                            <p className="text-xs text-muted-foreground">{thaiDate(pr.pr_date)} · {t('shop.lines_n', { n: pr.lines?.length ?? 0 })}</p>
-                          </div>
-                          <Badge variant={statusVariant(pr.status)} className="shrink-0">{pr.status}</Badge>
+                      <li key={pr.pr_no} className="flex items-center gap-2 py-2">
+                        <Link href="/requisitions" className="min-w-0 flex-1 hover:opacity-80">
+                          <p className="truncate text-sm font-medium">{pr.pr_no}</p>
+                          <p className="text-xs text-muted-foreground">{thaiDate(pr.pr_date)} · {t('shop.lines_n', { n: pr.lines?.length ?? 0 })}</p>
                         </Link>
+                        <Badge variant={statusVariant(pr.status)} className="shrink-0">{pr.status}</Badge>
+                        {(pr.lines?.length ?? 0) > 0 && (
+                          <Button size="icon" variant="ghost" className="size-7 shrink-0" title={t('shop.reorder')} aria-label={t('shop.reorder')} onClick={() => reorder(pr)}>
+                            <RefreshCw className="size-4" />
+                          </Button>
+                        )}
                       </li>
                     ))}
                   </ul>
