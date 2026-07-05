@@ -127,7 +127,16 @@ deck assembled for you. (It can also be scheduled portfolio-wide via the `projec
 - **ขอเบิกวัสดุ (Material requisitions, PROJ-13)** — raise a **PMR** against a BoQ line (*ขอเบิกวัสดุ*): within
   budget it auto-routes to a project-tagged **PR** (or an on-hand **stock issue**), over budget it parks pending
   and pushes a one-tap **LINE** approval to the authoriser; a *different* person approves/rejects the pending
-  ones here (maker-checker). The KPI band shows open/consumed commitments and the pending count.
+  ones here (maker-checker). The KPI band shows open/consumed commitments and the pending count. Site staff can
+  also raise these from a friendly shop — the **Shop for this project** button (top of the workspace) opens a
+  Grab/Shopee-style shop restricted to this project's approved-budget items.
+- **ขอเพิ่มวัสดุเข้างบ (Material scope-change requests, PROJ-15)** — a requester can only shop items that are
+  already in the approved BoQ; when they need something **not** in the budget they *request* it from the
+  project shop (item, qty, expected price). The request is parked **pending** and adds nothing until an
+  **authorised person (planner/exec, ≠ the requester)** approves it — approval **appends a new line to the
+  approved BoQ and grows the project budget**, so the item becomes shoppable and commitment-enforced. This is
+  the only way to enlarge a project's material budget: a requester proposes, an authoriser approves. Approvers
+  can approve/reject inline on the project-shop page.
 - **จองสต๊อก (Stock reservations, INV-13)** — reserve on-hand stock to the project (the dialog shows
   **available-to-issue** = on-hand − held for the item/warehouse), then **issue-to-project** (moves value into
   project WIP) or **release** a held reservation.

@@ -1744,6 +1744,20 @@
       "when": 2023820000075,
       "tag": "0248_tax_credit_debit_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 249,
+      "version": "7",
+      "when": 2023820000076,
+      "tag": "0249_project_boq_change_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 250,
+      "version": "7",
+      "when": 2023820000077,
+      "tag": "0250_items_barcode",
+      "breakpoints": true
     }
   ]
 }

@@ -160,9 +160,11 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 
 > **Got a barcode scanner? Just scan.** The **สแกนบาร์โค้ด** box beside the search
 > field lets any USB/Bluetooth scanner (they type the code and press Enter) add an
-> item hands-free: an exact match drops straight into the basket, an unknown code
-> shows *ไม่พบสินค้า*, and if several items match the code the grid filters to them
-> so you can pick. No app or camera setup needed.
+> item hands-free. It first looks for an item whose **barcode** exactly matches the
+> scan (set an item's barcode/GTIN in the item master), then falls back to matching
+> the item code or name: an exact hit drops straight into the basket, an unknown
+> code shows *ไม่พบสินค้า*, and if several items match the grid filters to them so
+> you can pick. No app or camera setup needed.
 
 > **Buying for a project? Shop into its budget.** If you work on projects, a
 > **ซื้อเข้าโครงการ** picker appears in the shop header (and a *Shop for this project*
@@ -172,9 +174,16 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 > if it's within budget it's fulfilled from stock or turned into a purchase
 > requisition automatically; if it goes over a line's budget it's sent to an
 > authorised person to approve first. **An item that isn't in the project's budget
-> can't be added here** — an authorised person must add it to the project budget
-> first (see *Project accounting* → *material requisitions*). This keeps project
-> spend inside the approved budget by design (controls **PROJ-12/PROJ-13**).
+> can't be added here.** This keeps project spend inside the approved budget by
+> design (controls **PROJ-12/PROJ-13**).
+
+> **Need something that isn't in the project's budget?** Use the
+> **ขอเพิ่มวัสดุเข้างบ** button on the project-shop page to *request* it — fill in
+> the item, quantity and expected price and submit. It doesn't add anything by
+> itself: an authorised person (a **planner** or **exec**) must approve it into the
+> budget first (you can't approve your own request — maker-checker). Once approved,
+> the item appears on the project's shelf and you can shop it like any other
+> (control **PROJ-15**). Track your requests' status right below the shop shelf.
 
 > **Track your requests without leaving the page.** A **คำขอซื้อล่าสุดของฉัน** card
 > (below the basket) lists your last few requisitions with their live approval

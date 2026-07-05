@@ -290,6 +290,35 @@ export const projectChangeOrders = pgTable(
   (t) => ({ byProject: index('idx_pco_project').on(t.projectId) }),
 );
 
+// Project material scope-change request (docs/32, PROJ-15). A requester (pr_raise) proposes adding a material
+// item that is NOT on the project's approved BoQ; it parks 'pending' until an independent authoriser
+// (planner/exec, ≠ requester) approves — on approval a new material line is appended to the approved BoQ (the
+// budget grows) and the item becomes shoppable. A requester can only request budget, never expand it.
+export const projectBoqChangeRequests = pgTable(
+  'project_boq_change_requests',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    boqId: bigint('boq_id', { mode: 'number' }).references(() => projectBoq.id),  // the BoQ the line is appended to
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    reqNo: text('req_no').notNull(),
+    itemNo: text('item_no'),                                // → items.item_id (may be a new/free-text code)
+    description: text('description'),
+    uom: text('uom'),
+    qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    rate: numeric('rate', { precision: 16, scale: 2 }).notNull().default('0'),
+    amount: numeric('amount', { precision: 16, scale: 2 }).notNull().default('0'), // = qty × rate (added budget)
+    status: text('status').notNull().default('pending'),    // pending | approved | rejected
+    newBoqLineId: bigint('new_boq_line_id', { mode: 'number' }).references(() => projectBoqLines.id), // created on approve
+    requestedBy: text('requested_by'),
+    approvedBy: text('approved_by'),                        // checker — must differ from requested_by (SoD)
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectionReason: text('rejection_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_bqr_project').on(t.projectId), byTenant: index('idx_bqr_tenant').on(t.tenantId, t.status) }),
+);
+
 // Periodic project-health snapshot (PPM upgrade) — a dated EVM/RAG point so the portfolio/status report can
 // show a trajectory (the live EVM is point-in-time). Captured on demand or by the scheduled BI action job.
 export const projectHealthSnapshots = pgTable(

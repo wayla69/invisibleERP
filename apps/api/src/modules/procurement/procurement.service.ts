@@ -188,15 +188,19 @@ export class ProcurementService {
   // for the selected category + keyword, plus the FULL category summary (chips stay stable while paging).
   // Category label comes from item_categories (via items.category_id, RLS-scoped to the caller's tenant),
   // falling back to the free-text items.category, then "ไม่ระบุหมวด". `items` is company-wide.
-  async catalog(user: JwtUser, opts?: { q?: string; category?: string; limit?: number; offset?: number }) {
+  async catalog(user: JwtUser, opts?: { q?: string; category?: string; barcode?: string; limit?: number; offset?: number }) {
     const db = this.db;
     const kw = (typeof opts?.q === 'string' ? opts.q : '').trim().slice(0, 100);
     const cat = (typeof opts?.category === 'string' ? opts.category : '').trim().slice(0, 100);
+    // Exact barcode match (hardware scan-to-add): a scanner types the GTIN/EAN then Enter — resolve the one
+    // item whose `barcode` equals it, not a fuzzy name/code search. Composes with q/category via `and()`.
+    const bc = (typeof opts?.barcode === 'string' ? opts.barcode : '').trim().slice(0, 64);
     const limit = Math.min(Math.max(opts?.limit ?? 24, 1), 100);
     const offset = Math.max(opts?.offset ?? 0, 0);
     const catLabel = (r: any) => String(r.cat_name_th || r.cat_name || r.free_category || 'ไม่ระบุหมวด');
     const catKey = (r: any) => String(r.cat_code || r.free_category || 'uncategorized');
     const kwWhere = kw ? or(ilike(items.itemId, `%${kw}%`), ilike(items.itemDescription, `%${kw}%`)) : undefined;
+    const bcWhere = bc ? eq(items.barcode, bc) : undefined;
 
     // Category summary (+ per-category totals) — one grouped aggregate over the keyword filter (DB-side
     // count), folded into the derived category key/label. Drives the chip row and the paging total.
@@ -204,7 +208,7 @@ export class ProcurementService {
       cat_code: itemCategories.code, cat_name: itemCategories.name, cat_name_th: itemCategories.nameTh,
       free_category: items.category, n: sql<number>`count(*)`,
     }).from(items).leftJoin(itemCategories, eq(items.categoryId, itemCategories.id))
-      .where(kwWhere ?? sql`true`)
+      .where(and(kwWhere, bcWhere) ?? sql`true`)
       .groupBy(itemCategories.code, itemCategories.name, itemCategories.nameTh, items.category);
     const catMap = new Map<string, { key: string; label: string; count: number }>();
     let totalAll = 0;
@@ -229,7 +233,7 @@ export class ProcurementService {
       unit_price: items.unitPrice, image_key: items.imageKey,
       free_category: items.category, cat_name: itemCategories.name, cat_name_th: itemCategories.nameTh, cat_code: itemCategories.code,
     }).from(items).leftJoin(itemCategories, eq(items.categoryId, itemCategories.id))
-      .where(and(kwWhere, catWhere) ?? sql`true`)
+      .where(and(kwWhere, bcWhere, catWhere) ?? sql`true`)
       .orderBy(asc(items.itemDescription), asc(items.itemId)).limit(limit).offset(offset);
 
     // Per-item context for THIS page only (bounded to `limit`): on-hand across the caller's tenant locations

@@ -37,7 +37,7 @@ export const MASTER_REGISTRY: MdEntity[] = [
     table: items, tenantScoped: false, allowReplace: false,
     required: ['Item_ID', 'Item_Description'],
     cols: [
-      C('Item_ID', 'itemId'), C('Item_Description', 'itemDescription'), C('UOM', 'uom'),
+      C('Item_ID', 'itemId'), C('Item_Description', 'itemDescription'), C('Barcode', 'barcode'), C('UOM', 'uom'),
       C('Base_UOM', 'baseUom'), C('Conversion_Factor', 'conversionFactor', 'num'),
       C('Unit_Price', 'unitPrice', 'num'), C('Category', 'category'),
       C('Min_Stock', 'minStock', 'num'), C('Max_Stock', 'maxStock', 'num'),

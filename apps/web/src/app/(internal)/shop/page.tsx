@@ -233,19 +233,25 @@ export default function ShopPage() {
   };
 
   // Barcode scan-to-add — a hardware scanner types the code then sends Enter, submitting this form.
-  // Exact single match ⇒ drop it straight in the basket; no match ⇒ warn; several ⇒ push it into the
-  // search box so the grid narrows. Reuses the catalog endpoint (no camera lib, works with any USB scanner).
+  // First try an EXACT barcode match (a real scanned GTIN/EAN on the item master); if there's no barcode
+  // hit, fall back to a code/name lookup (the scanner may have typed a plain item code, or a human typed a
+  // name): exact single match ⇒ basket; no match ⇒ warn; several ⇒ push into the search box to narrow the grid.
+  // Reuses the catalog endpoint (no camera lib, works with any USB scanner).
+  const addScanned = (it: CatalogItem) => {
+    addToBasket(it.item_id, 1, it.uom ?? '', it.item_description ?? '');
+    notifySuccess(t('shop.scan_added', { name: it.item_description ?? it.item_id }));
+    setScan('');
+  };
   const onScan = async (e: React.FormEvent) => {
     e.preventDefault();
     const code = scan.trim();
     if (!code) return;
     try {
+      const byBarcode = await api<CatalogPage>(`/api/procurement/catalog?barcode=${encodeURIComponent(code)}&limit=1`);
+      if (byBarcode.total === 1 && byBarcode.items[0]) { addScanned(byBarcode.items[0]); return; }
       const r = await api<CatalogPage>(`/api/procurement/catalog?q=${encodeURIComponent(code)}&limit=1`);
       if (r.total === 1 && r.items[0]) {
-        const it = r.items[0];
-        addToBasket(it.item_id, 1, it.uom ?? '', it.item_description ?? '');
-        notifySuccess(t('shop.scan_added', { name: it.item_description ?? it.item_id }));
-        setScan('');
+        addScanned(r.items[0]);
       } else if (r.total === 0) {
         notifyError(t('shop.scan_not_found', { code }));
       } else {

@@ -177,6 +177,21 @@ By design (maker-checker). A different authorised person must approve it
 **My session logged me out unexpectedly.**
 Sessions expire after a period of inactivity for security. Simply sign in again.
 
+**The camera "Scan QR" button doesn't appear (or won't open the camera).**
+The button shows on any modern browser **with a camera**, over **HTTPS**. If it's
+missing, the device has no camera the browser can use (e.g. some desktops) — use a
+hardware wedge scanner or type/paste the code. If the button appears but the camera
+won't start, your browser blocked camera access: allow the camera permission for
+the site and try again. The scanner reads both QR codes and common 1D barcodes
+(EAN/UPC, Code-128, Code-39). You can always enter the code manually.
+
+**I scanned an asset/item QR with my phone's normal camera and it opened a web page.**
+That's expected when your deployment prints deep-link tags: the phone opens the
+resolver page (`/q`), which shows what you scanned and links into the app (you may
+be asked to log in first). If instead the phone shows raw text like
+`ASSET_ID:FA-0001|…`, your tags aren't configured as deep links — scan them with
+the in-app camera scanner or a hardware scanner.
+
 **Can I see other shops' data?**
 No. Each organisation is a separate tenant; you only ever see your own data.
 
