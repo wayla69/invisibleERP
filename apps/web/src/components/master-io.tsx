@@ -1,5 +1,6 @@
-'use client';
-
+// No 'use client' directive: this is a client island imported only by client pages (the Master Data hub +
+// the /setup/tax-codes and /setup/item-categories screens), so it lives inside their client boundary and
+// inherits it — same pattern as components/state-view.tsx. Keeps the use-client ratchet flat (docs/28 §4).
 import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download, FileSpreadsheet, Upload } from 'lucide-react';
