@@ -395,6 +395,61 @@ export const projectCommitments = pgTable(
 );
 export type ProjectCommitment = typeof projectCommitments.$inferSelect;
 
+// Progress billing / งวดงาน (docs/35 P1, PROJ-15). A construction contract is billed in periodic progress
+// CLAIMS: each claim values work done to date by BoQ line (cumulative % → value-to-date), the movement since
+// the last certified claim is billed this claim, RETENTION is withheld per the retention %, and the NET is
+// invoiced. Certification is maker-checker (created_by ≠ certified_by → PROJ-15); on certify it posts revenue
+// + splits AR into net (1100) + retention receivable (1170) and withholds the retention into the shared
+// retention sub-ledger (schema/retention.ts).
+export const projectProgressClaims = pgTable(
+  'project_progress_claims',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    claimNo: text('claim_no').notNull(),                     // business key (PC-YYYYMMDD-NNN)
+    seq: integer('seq').notNull().default(1),                // งวดที่ — 1-based claim number on the project
+    period: text('period'),                                  // billing period label (e.g. 2026-07)
+    status: text('status').notNull().default('draft'),       // draft | certified | invoiced | paid
+    grossThisClaim: numeric('gross_this_claim', { precision: 16, scale: 2 }).notNull().default('0'),
+    prevCertified: numeric('prev_certified', { precision: 16, scale: 2 }).notNull().default('0'),
+    cumulativeCertified: numeric('cumulative_certified', { precision: 16, scale: 2 }).notNull().default('0'),
+    retentionPct: numeric('retention_pct', { precision: 9, scale: 4 }).notNull().default('0'),
+    retentionAmount: numeric('retention_amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    netPayable: numeric('net_payable', { precision: 16, scale: 2 }).notNull().default('0'),
+    costRecognized: numeric('cost_recognized', { precision: 16, scale: 2 }).notNull().default('0'),
+    entryNo: text('entry_no'),                               // the certification JE
+    createdBy: text('created_by'),
+    certifiedBy: text('certified_by'),                       // checker — must differ from created_by (SoD)
+    certifiedAt: timestamp('certified_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_pclaim_project').on(t.tenantId, t.projectId), byNo: unique('idx_pclaim_no').on(t.claimNo) }),
+);
+
+// Per-BoQ-line valuation of a progress claim. value_to_date = boq_line.budget_amount × pct/100;
+// value_this_claim = value_to_date − previously_certified (the movement billed this claim).
+export const progressClaimLines = pgTable(
+  'progress_claim_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    claimId: bigint('claim_id', { mode: 'number' }).notNull().references(() => projectProgressClaims.id),
+    boqLineId: bigint('boq_line_id', { mode: 'number' }).notNull().references(() => projectBoqLines.id),
+    description: text('description'),
+    budgetAmount: numeric('budget_amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    pctCompleteToDate: numeric('pct_complete_to_date', { precision: 9, scale: 4 }).notNull().default('0'),
+    valueToDate: numeric('value_to_date', { precision: 16, scale: 2 }).notNull().default('0'),
+    previouslyCertified: numeric('previously_certified', { precision: 16, scale: 2 }).notNull().default('0'),
+    valueThisClaim: numeric('value_this_claim', { precision: 16, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byClaim: index('idx_pclaim_line_claim').on(t.claimId), byBoq: index('idx_pclaim_line_boq').on(t.tenantId, t.boqLineId) }),
+);
+export type ProjectProgressClaim = typeof projectProgressClaims.$inferSelect;
+export type ProgressClaimLine = typeof progressClaimLines.$inferSelect;
+
 // Project Material Requisition (PMR) — M2, docs/32, PROJ-13. The single request document by which site staff
 // draw material against a project's BoQ. On submit the system checks each line against its BoQ-line remaining
 // budget: WITHIN budget → routed to procurement (a project-tagged PR is raised); OVER budget → parked

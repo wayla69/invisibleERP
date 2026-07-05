@@ -822,6 +822,60 @@ async function main() {
   const ccList = await inj('GET', '/api/projects/close-reviews', admin);
   ok('PROJ-03: the close review is recorded in the register (Approved)', (ccList.json.reviews ?? []).some((r: any) => r.period === '2026-06' && r.status === 'Approved'), `n=${ccList.json.count}`);
 
+  // ── P1 (docs/35) — progress billing / งวดงาน + retention receivable (Track A, PROJ-15) ──
+  // A construction contract billed in periodic progress claims: value work by BoQ line (cumulative), withhold
+  // retention on certification (→ the P0 sub-ledger), maker-checker certify, Fixed-contract cap.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-PB', name: 'งานก่อสร้างงวดงาน', customer_name: 'ผู้ว่าจ้าง', billing_type: 'Fixed', contract_amount: 90000 });
+  const pbBoq = await inj('POST', '/api/projects/PRJ-PB/boq', admin, { title: 'BoQ งวดงาน', lines: [
+    { category: 'material', description: 'งานโครงสร้าง', budget_amount: 60000 },
+    { category: 'material', description: 'งานสถาปัตย์', budget_amount: 40000 },
+  ] });
+  const pbBoqId = pbBoq.json.boq?.id;
+  const pbL1 = (pbBoq.json.lines ?? []).find((l: any) => l.description === 'งานโครงสร้าง')?.id;
+  const pbL2 = (pbBoq.json.lines ?? []).find((l: any) => l.description === 'งานสถาปัตย์')?.id;
+  await inj('POST', `/api/projects/boq/${pbBoqId}/approve`, mgr); // independent approve → budget baseline
+  await inj('POST', '/api/projects/PRJ-PB/cost', admin, { entry_type: 'expense', amount: 20000, description: 'ต้นทุนงาน' }); // WIP 1260 = 20000
+
+  const cl1 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', period: '2026-07', retention_pct: 10, lines: [{ boq_line_id: pbL1, pct_complete_to_date: 50 }, { boq_line_id: pbL2, pct_complete_to_date: 0 }] });
+  ok('PROJ-15: progress claim draft → gross 30000 (L1 50% of 60000), retention 3000, net 27000',
+    cl1.status < 300 && cl1.json.status === 'draft' && near(cl1.json.gross_this_claim, 30000) && near(cl1.json.retention_amount, 3000) && near(cl1.json.net_payable, 27000),
+    JSON.stringify({ s: cl1.status, g: cl1.json.gross_this_claim, r: cl1.json.retention_amount }));
+  const cl1No = cl1.json.claim_no;
+  const cl1Self = await inj('POST', `/api/progress-billing/${cl1No}/certify`, admin); // preparer = admin
+  ok('PROJ-15: preparer self-certify → 400 SOD_SELF_APPROVAL', cl1Self.status === 400 && cl1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${cl1Self.status} ${cl1Self.json.error?.code}`);
+  const cl1Cert = await inj('POST', `/api/progress-billing/${cl1No}/certify`, mgr); // independent certifier
+  ok('PROJ-15: certify → certified, net 27000, retention 3000, cost_recognized 20000 (WIP relieved), JE posted',
+    cl1Cert.status < 300 && cl1Cert.json.status === 'certified' && near(cl1Cert.json.net_payable, 27000) && near(cl1Cert.json.retention, 3000) && near(cl1Cert.json.cost_recognized, 20000) && /^JE-/.test(cl1Cert.json.entry_no ?? ''),
+    JSON.stringify({ st: cl1Cert.json.status, net: cl1Cert.json.net_payable, cr: cl1Cert.json.cost_recognized, je: cl1Cert.json.entry_no }));
+  const cl1Re = await inj('POST', `/api/progress-billing/${cl1No}/certify`, mgr);
+  ok('PROJ-15: re-certify a certified claim → 400 CLAIM_NOT_DRAFT', cl1Re.status === 400 && cl1Re.json.error?.code === 'CLAIM_NOT_DRAFT', `${cl1Re.status} ${cl1Re.json.error?.code}`);
+  const pbRet1 = await inj('GET', '/api/retention/project/PRJ-PB', admin);
+  ok('PROJ-15 → P0: retention 3000 withheld into the shared sub-ledger as a customer receivable',
+    near(pbRet1.json.receivable?.outstanding, 3000) && near(pbRet1.json.receivable?.withheld, 3000), JSON.stringify({ recv: pbRet1.json.receivable }));
+
+  const cl2 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', period: '2026-08', retention_pct: 10, lines: [{ boq_line_id: pbL1, pct_complete_to_date: 80 }] });
+  ok('PROJ-15: claim 2 nets off previously certified → gross 18000 (48000 to-date − 30000 prior), prev 30000',
+    near(cl2.json.gross_this_claim, 18000) && near(cl2.json.lines?.[0]?.value_this_claim, 18000) && near(cl2.json.lines?.[0]?.previously_certified, 30000),
+    JSON.stringify({ g: cl2.json.gross_this_claim, prev: cl2.json.lines?.[0]?.previously_certified }));
+  const cl2Cert = await inj('POST', `/api/progress-billing/${cl2.json.claim_no}/certify`, mgr);
+  ok('PROJ-15: certify claim 2 → net 16200, retention 1800, no more WIP to relieve (cost_recognized 0)',
+    cl2Cert.status < 300 && near(cl2Cert.json.net_payable, 16200) && near(cl2Cert.json.retention, 1800) && near(cl2Cert.json.cost_recognized, 0), JSON.stringify({ net: cl2Cert.json.net_payable, cr: cl2Cert.json.cost_recognized }));
+
+  const cl3 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 80 }] }); // same % → no movement
+  ok('PROJ-15: no work movement since the last claim → 400 NOTHING_TO_BILL', cl3.status === 400 && cl3.json.error?.code === 'NOTHING_TO_BILL', `${cl3.status} ${cl3.json.error?.code}`);
+  const clBad = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 150 }] });
+  ok('PROJ-15: pct > 100 (over-certification) → 400', clBad.status === 400, `${clBad.status}`);
+
+  const cl4 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 100 }, { boq_line_id: pbL2, pct_complete_to_date: 100 }] }); // gross 12000+40000=52000 → billed 100000 > 90000
+  const cl4Cert = await inj('POST', `/api/progress-billing/${cl4.json.claim_no}/certify`, mgr);
+  ok('PROJ-15: certifying beyond the Fixed contract (90000) → 400 BILL_EXCEEDS_CONTRACT', cl4Cert.status === 400 && cl4Cert.json.error?.code === 'BILL_EXCEEDS_CONTRACT', `${cl4Cert.status} ${cl4Cert.json.error?.code}`);
+
+  const pbList = await inj('GET', '/api/progress-billing/project/PRJ-PB', admin);
+  ok('PROJ-15: project claim register → certified_to_date 48000, retention_withheld 4800',
+    near(pbList.json.certified_to_date, 48000) && near(pbList.json.retention_withheld, 4800), JSON.stringify({ ctd: pbList.json.certified_to_date, rw: pbList.json.retention_withheld }));
+  const pbRet2 = await inj('GET', '/api/retention/project/PRJ-PB', admin);
+  ok('PROJ-15 → P0: retention receivable outstanding 4800 after two certified claims (3000 + 1800)', near(pbRet2.json.receivable?.outstanding, 4800), JSON.stringify({ recv: pbRet2.json.receivable?.outstanding }));
+
   // ── P0 (docs/35) — shared retention sub-ledger + retention GL accounts (Construction/RE vertical, Phase 0) ──
   // The primitive Tracks A (customer progress billing / งวดงาน) and B (subcontractor valuations) build on:
   // withhold retention on certification, release in tranches; balances only (A/B post the matching GL).
