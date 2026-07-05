@@ -106,6 +106,8 @@ export default function ShopPage() {
     (typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list') ? 'list' : 'grid');
   const [cart, setCart] = useState<CartLine[]>(readCart);
   const [remarks, setRemarks] = useState('');
+  const [projectCode, setProjectCode] = useState('');
+  const [requiredDate, setRequiredDate] = useState('');
   const [cName, setCName] = useState('');
   const [cUom, setCUom] = useState('');
   const [cQty, setCQty] = useState(1);
@@ -182,18 +184,20 @@ export default function ShopPage() {
       body: JSON.stringify({
         remarks: remarks || undefined,
         priority: anyUrgent ? 'Urgent' : 'Normal',
+        project_code: projectCode.trim() || undefined,
         items: cart.map((l) => ({
           item_id: l.item_id,
           item_description: l.description || undefined,
           request_qty: l.qty,
           uom: l.uom || undefined,
+          required_date: requiredDate || undefined,
           reason: l.urgent ? t('shop.urgent') : l.custom ? t('shop.custom_line') : undefined,
         })),
       }),
     }),
     onSuccess: (d) => {
       notifySuccess(t('shop.created', { no: d.pr_no }), t('shop.created_desc', { n: d.lines }));
-      setCart([]); setRemarks('');
+      setCart([]); setRemarks(''); setProjectCode(''); setRequiredDate('');
       qc.invalidateQueries({ queryKey: ['prs'] });
       qc.invalidateQueries({ queryKey: ['my-prs'] });
     },
@@ -390,6 +394,17 @@ export default function ShopPage() {
                   {anyUrgent && <p className="text-xs font-medium text-destructive">⚡ {t('shop.has_urgent')}</p>}
                 </div>
               )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="shop-project">{t('shop.project_code')}</Label>
+                  <Input id="shop-project" value={projectCode} onChange={(e) => setProjectCode(e.target.value)} placeholder={t('shop.project_code_ph')} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="shop-needby">{t('shop.required_date')}</Label>
+                  <Input id="shop-needby" type="date" value={requiredDate} onChange={(e) => setRequiredDate(e.target.value)} />
+                </div>
+              </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="shop-remarks">{t('shop.remarks')}</Label>
