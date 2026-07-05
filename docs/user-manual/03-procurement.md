@@ -108,7 +108,9 @@ still-Pending one); a procurement/planner/exec holder sees **all** PRs and gets
 engine). The table auto-refreshes; use **รีเฟรช** to pull the latest immediately.
 
 **Turning an approved PR into a PO (➡️ สร้าง PO):** on an **Approved** PR, procurement
-presses **➡️ สร้าง PO** to open a conversion panel. Because a PR line may be a free-text
+presses **➡️ สร้าง PO** to open the conversion panel — a **pop-up dialog** centred over the
+screen (so it is clearly visible on a phone, not tucked below the register table). Close it
+with **✕**, the ⎋ key, or by tapping outside. Because a PR line may be a free-text
 name (e.g. typed in LINE chat, possibly misspelt or not yet coded), each line is
 **reconciled to a real item** before the PO is raised:
 - **เทียบทะเบียน** — type/adjust the name and press **ค้นหา/เทียบ** to search the item
