@@ -152,11 +152,12 @@ export class TaxInvoiceService {
     const shaped = shape(head);
     // The seller name/address/tax-id are an immutable ม.86/4 snapshot; the logo is presentation-only (not a
     // statutory field), so read the tenant's CURRENT logo at render time for the no-code document template.
+    let logoUrl: string | null = null;
     if (head.tenantId != null) {
       const [t] = await db.select({ logoUrl: tenants.logoUrl }).from(tenants).where(eq(tenants.id, Number(head.tenantId))).limit(1);
-      if (t?.logoUrl) (shaped.seller as any).logo_url = t.logoUrl;
+      logoUrl = t?.logoUrl ?? null;
     }
-    return { ...shaped, lines: lines.map(shapeLine) };
+    return { ...shaped, seller: { ...shaped.seller, logo_url: logoUrl }, lines: lines.map(shapeLine) };
   }
 
   // ── ใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) — adjust a prior full tax invoice ──
