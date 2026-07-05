@@ -4,6 +4,9 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { arInvoices, arDunningLog, creditEvents, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { MessagingService } from '../messaging/messaging.service';
+import { FinanceDocsPdfService, type DunningLetterPrintData } from './finance-docs-pdf.service';
+import { DocEmailService } from '../mail/doc-email.service';
+import { sellerParty } from '../../common/doc-party';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -73,7 +76,45 @@ export class CollectionsService {
     // Optional so the writeflow/partial harnesses can construct without the messaging graph; the full app
     // always provides it (MessagingModule) so dunning notices are actually dispatched.
     @Optional() private readonly messaging?: MessagingService,
+    @Optional() private readonly finDocsPdf?: FinanceDocsPdfService, // dunning-letter renderer
+    @Optional() private readonly docEmail?: DocEmailService,          // @Global MailModule
   ) {}
+
+  // ── หนังสือทวงถามหนี้ (Dunning / collection letter) — a printable/emailable letter over the latest
+  // dunning action on an invoice. Read-only presentation; recording a dunning action stays recordDunning(). ──
+  async getDunningLetterForPrint(invoiceNo: string, user: JwtUser): Promise<DunningLetterPrintData> {
+    const db = this.db;
+    const [inv] = await db.select().from(arInvoices).where(eq(arInvoices.invoiceNo, invoiceNo)).limit(1);
+    if (!inv) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Invoice not found', messageTh: 'ไม่พบใบแจ้งหนี้' });
+    const [last] = await db.select().from(arDunningLog).where(eq(arDunningLog.invoiceNo, invoiceNo)).orderBy(desc(arDunningLog.createdAt), desc(arDunningLog.id)).limit(1);
+    const [cust] = inv.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(inv.tenantId))).limit(1) : [null];
+    const [seller] = user.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1) : [null];
+    const outstanding = Number(last?.outstanding ?? (n(inv.amount) - n(inv.paidAmount)));
+    const daysOverdue = Number(last?.daysOverdue ?? 0);
+    return {
+      dunning_no: last?.dunningNo ?? invoiceNo, date: last?.createdAt ? new Date(last.createdAt).toISOString().slice(0, 10) : ymd(),
+      stage: last?.stage ?? 'reminder', invoice_no: invoiceNo, invoice_date: inv.invoiceDate ?? null,
+      outstanding, days_overdue: daysOverdue, promise_to_pay_date: last?.promiseToPayDate ?? null, currency: inv.currency ?? 'THB',
+      customer: cust ? sellerParty(cust) : { name: 'ลูกค้า', address: '-', tax_id: null, branch_label: null, phone: null, email: null },
+      seller: sellerParty(seller),
+    };
+  }
+  dunningLetterHtml(d: DunningLetterPrintData): string {
+    if (!this.finDocsPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Dunning renderer not wired' });
+    return this.finDocsPdf.dunningLetterHtml(d);
+  }
+  renderDunningPdf(d: DunningLetterPrintData): Promise<Buffer | null> { return this.finDocsPdf ? this.finDocsPdf.renderToPdf(this.finDocsPdf.dunningLetterHtml(d)) : Promise.resolve(null); }
+  async emailDunningLetter(invoiceNo: string, toEmail: string, user: JwtUser) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const d = await this.getDunningLetterForPrint(invoiceNo, user);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: d.seller.email ?? undefined, filename: d.dunning_no,
+      subject: `หนังสือทวงถามหนี้ ${d.invoice_no} จาก ${d.seller.name}`,
+      text: `แนบหนังสือทวงถามหนี้สำหรับใบแจ้งหนี้ ${d.invoice_no} ยอดค้าง ${d.outstanding.toLocaleString()} ${d.currency}\n\n${d.seller.name}`,
+      html: this.dunningLetterHtml(d),
+    });
+    return { ...res, invoice_no: d.invoice_no };
+  }
 
   // ───────────────────── Collections worklist ─────────────────────
   // Open AR invoices with aging, the current dunning stage (latest action) and the next recommended rung.

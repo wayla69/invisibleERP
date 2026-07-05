@@ -35,6 +35,7 @@ const PrToPoBody = z.object({
   lines: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), create_item: z.boolean().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional(), is_capital: z.boolean().optional() })).min(1),
 });
 const CancelBody = z.object({ reason: z.string().min(1) });
+const DocEmailBody = z.object({ to_email: z.string().email() });
 // D4 — receive a partial qty of one PO line.
 const ReceiveItemBody = z.object({ item_id: z.string().min(1), qty: z.number().positive() });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
@@ -189,4 +190,17 @@ export class ProcurementController {
   // wh_receive, so existing warehouse roles keep access; 'procurement' alone no longer can receive.
   @Post('grs') @Permissions('wh_receive')
   createGr(@Body(new ZodValidationPipe(GrBody)) b: CreateGrDto, @CurrentUser() u: JwtUser) { return this.svc.createGr(b, u); }
+
+  // Printable ใบรับสินค้า (Goods Receipt Note) — HTML→PDF, HTML fallback when Chromium absent.
+  @Get('grs/:grNo/pdf') @Permissions('wh_receive', 'warehouse', 'procurement', 'creditors', 'exec')
+  async grPdf(@Param('grNo') grNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const g = await this.svc.getGrForPrint(grNo, u);
+    const buf = await this.svc.renderGrPdf(g);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${grNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(this.svc.goodsReceiptHtml(g));
+  }
+  @Post('grs/:grNo/send-email') @Permissions('wh_receive', 'warehouse', 'procurement')
+  emailGr(@Param('grNo') grNo: string, @Body(new ZodValidationPipe(DocEmailBody)) b: z.infer<typeof DocEmailBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.emailGr(grNo, b.to_email, u);
+  }
 }

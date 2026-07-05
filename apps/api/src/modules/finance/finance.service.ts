@@ -12,8 +12,11 @@ import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd, monthStart, n, fx } from '../../database/queries';
 import { roundCurrency } from '../tax/money';
 import { ArInvoicePdfService, type ArInvoicePrintData } from './ar-invoice-pdf.service';
+import { FinanceDocsPdfService, type StatementPrintData, type ArReceiptPrintData } from './finance-docs-pdf.service';
 import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
+import type { DocParty } from '../../common/doc-html';
+import { vendors as vendorsTbl } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
@@ -40,7 +43,14 @@ export class FinanceService {
     // Printable ใบแจ้งหนี้/ใบวางบิล + generic document email. @Optional so hand-constructed harnesses build.
     @Optional() private readonly arInvoicePdf?: ArInvoicePdfService,
     @Optional() private readonly docEmail?: DocEmailService,
+    @Optional() private readonly finDocsPdf?: FinanceDocsPdfService, // statement + AR receipt voucher renderers
   ) {}
+
+  // Resolve the caller's own tenant profile as the document issuer (our-company header).
+  private async sellerFor(user: JwtUser): Promise<DocParty> {
+    const [t] = user.tenantId != null ? await this.db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1) : [null];
+    return sellerParty(t);
+  }
 
   // VAT back-out (7/107) — prefer TaxService.calcInclusive when injected
   private vatSplit(gross: number): { net: number; vat: number } {
@@ -223,6 +233,76 @@ export class FinanceService {
       html: this.arInvoiceHtml(inv),
     });
     return { ...res, invoice_no: inv.invoice_no };
+  }
+
+  // ── ใบแจ้งยอดบัญชี (Statement of account) — print/email over the running-balance statement ──
+  async getCustomerStatementForPrint(tenantId: number, from: string | undefined, to: string | undefined, currency: string | undefined, user: JwtUser): Promise<StatementPrintData> {
+    const s = await this.customerStatement(tenantId, from, to, currency);
+    const [cust] = await this.db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    return this.toStatementPrint(s, 'customer', cust?.legalName || cust?.name || `ลูกค้า #${tenantId}`, cust?.taxId ?? null, await this.sellerFor(user));
+  }
+
+  async getVendorStatementForPrint(vendor: string, from: string | undefined, to: string | undefined, currency: string | undefined, user: JwtUser): Promise<StatementPrintData> {
+    const s = await this.vendorStatement(vendor, from, to, currency);
+    const [v] = await this.db.select().from(vendorsTbl).where(eq(vendorsTbl.name, vendor)).limit(1);
+    return this.toStatementPrint(s, 'vendor', vendor, v?.taxId ?? null, await this.sellerFor(user));
+  }
+
+  private toStatementPrint(s: any, party_type: 'customer' | 'vendor', party_name: string, party_tax_id: string | null, seller: DocParty): StatementPrintData {
+    return {
+      party_type, party_name, party_tax_id, from: s.from, to: s.to, reporting_currency: s.reporting_currency,
+      opening_balance: s.opening_balance, total_charges: s.total_charges, total_payments: s.total_payments, closing_balance: s.closing_balance,
+      lines: (s.lines ?? []).map((l: any) => ({ date: l.date, type: l.type, ref: l.ref, charge: n(l.charge), payment: n(l.payment), balance: n(l.balance) })),
+      seller,
+    };
+  }
+
+  statementHtml(s: StatementPrintData): string {
+    if (!this.finDocsPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Statement renderer not wired' });
+    return this.finDocsPdf.statementHtml(s);
+  }
+  renderStatementPdf(s: StatementPrintData): Promise<Buffer | null> { return this.finDocsPdf ? this.finDocsPdf.renderToPdf(this.finDocsPdf.statementHtml(s)) : Promise.resolve(null); }
+
+  async emailStatement(s: StatementPrintData, toEmail: string) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const fname = `statement-${s.party_type}-${s.to}`;
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: s.seller.email ?? undefined, filename: fname,
+      subject: `ใบแจ้งยอดบัญชี ${s.party_name} (${s.from} – ${s.to})`,
+      text: `แนบใบแจ้งยอดบัญชี ยอดคงเหลือสุทธิ ${s.closing_balance.toLocaleString()} ${s.reporting_currency}\n\n${s.seller.name}`,
+      html: this.statementHtml(s),
+    });
+    return { ...res };
+  }
+
+  // ── ใบสำคัญรับเงิน (AR receipt voucher) — print/email over an ar_receipts row ──
+  async getArReceiptForPrint(receiptNo: string, user: JwtUser): Promise<ArReceiptPrintData> {
+    const db = this.db;
+    const [rc] = await db.select().from(arReceipts).where(eq(arReceipts.receiptNo, receiptNo)).limit(1);
+    if (!rc) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Receipt not found', messageTh: 'ไม่พบใบสำคัญรับเงิน' });
+    const [cust] = rc.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(rc.tenantId))).limit(1) : [null];
+    return {
+      receipt_no: rc.receiptNo, receipt_date: rc.receiptDate ?? null, invoice_no: rc.invoiceNo ?? null,
+      amount: n(rc.amount), method: rc.method ?? 'Transfer', ref_no: rc.refNo ?? null, currency: 'THB',
+      customer: cust ? sellerParty(cust) : { name: 'ลูกค้า', address: '-', tax_id: null, branch_label: null, phone: null, email: null },
+      seller: await this.sellerFor(user),
+    };
+  }
+  arReceiptHtml(r: ArReceiptPrintData): string {
+    if (!this.finDocsPdf) throw new NotFoundException({ code: 'RENDERER_UNAVAILABLE', message: 'Receipt renderer not wired' });
+    return this.finDocsPdf.arReceiptHtml(r);
+  }
+  renderArReceiptPdf(r: ArReceiptPrintData): Promise<Buffer | null> { return this.finDocsPdf ? this.finDocsPdf.renderToPdf(this.finDocsPdf.arReceiptHtml(r)) : Promise.resolve(null); }
+  async emailArReceipt(receiptNo: string, toEmail: string, user: JwtUser) {
+    if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
+    const r = await this.getArReceiptForPrint(receiptNo, user);
+    const res = await this.docEmail.sendDocument({
+      to: toEmail, from: r.seller.email ?? undefined, filename: r.receipt_no,
+      subject: `ใบสำคัญรับเงิน ${r.receipt_no} จาก ${r.seller.name}`,
+      text: `แนบใบสำคัญรับเงินเลขที่ ${r.receipt_no} จำนวนเงิน ${r.amount.toLocaleString()} ${r.currency}\n\n${r.seller.name}`,
+      html: this.arReceiptHtml(r),
+    });
+    return { ...res, receipt_no: r.receipt_no };
   }
 
   // A running-balance statement over [from,to]: opening balance struck before the window, then every

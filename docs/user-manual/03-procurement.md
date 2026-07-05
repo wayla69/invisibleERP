@@ -228,6 +228,24 @@ for the buyer's reference only; the actual **ใบกำกับภาษี**
 > If your browser shows the page as HTML instead of a PDF, the print server is simply rendering in
 > fallback mode; the content is identical and still prints correctly.
 
+### Print / email a request for quotation (ใบขอเสนอราคา / RFQ)
+
+**Screen:** `/procurement/rfqs` · **Required permission:** `procurement`.
+
+On the **RFQ list**, each RFQ row has a **🖨️ พิมพ์** and **✉️ ส่งอีเมล** action:
+
+- **พิมพ์** opens the RFQ as a PDF — the items to be quoted (with a blank price column for
+  the supplier to fill), the required-by date and an invitation to quote.
+- **ส่งอีเมล** prompts for the supplier's email and sends the RFQ as a PDF attachment (needs
+  the shop's mail account configured).
+
+### Print / email a goods receipt note (ใบรับสินค้า / GR)
+
+After receiving goods, the GR note documents what arrived — for filing or to countersign back
+to the supplier. Open `GET /api/procurement/grs/{GR-…}/pdf` for the PDF (the supplier, the
+referenced PO, the received item lines with lot numbers and a receiver-signature block), or
+`POST …/grs/{GR-…}/send-email {to_email}` to email it. Read-only — printing posts nothing.
+
 ### Attach the invoice / receipt photo to a PO
 
 Pin the paper evidence to the order so the 3-way match has its documentation in one place.

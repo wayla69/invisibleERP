@@ -5,6 +5,7 @@
  */
 import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'match-secret';
+process.env.MAIL_FROM = process.env.MAIL_FROM || 'shop@example.com'; // doc-email path reaches the SMTP guard
 process.env.NODE_ENV = 'test';
 
 import { Test } from '@nestjs/testing';
@@ -76,7 +77,7 @@ async function main() {
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
-    return { status: res.statusCode, json };
+    return { status: res.statusCode, json, text: res.payload };
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const admin = await login('admin', 'admin123');
@@ -147,6 +148,11 @@ async function main() {
   // ── G. RFQ → award → PO ──
   const rfq = await inj('POST', '/api/procurement/rfqs', admin, { items: [{ item_id: 'X', qty: 50 }] });
   const rfqNo = rfq.json.rfq_no as string;
+  // Printable ใบขอเสนอราคา (RFQ) + generic email path wired.
+  const rfqPdf = await inj('GET', `/api/procurement/rfqs/${rfqNo}/pdf`, admin);
+  ok('RFQ print: PDF/HTML contains "ใบขอเสนอราคา" + item (X)', rfqPdf.status === 200 && rfqPdf.text.includes('ใบขอเสนอราคา') && rfqPdf.text.includes('X'), `${rfqPdf.status} ${String(rfqPdf.text).slice(0, 50)}`);
+  const rfqEmail = await inj('POST', `/api/procurement/rfqs/${rfqNo}/send-email`, admin, { to_email: 'supplier@example.com' });
+  ok('RFQ email path wired → EMAIL_NOT_CONFIGURED (503) with no SMTP in CI', rfqEmail.status === 503 && rfqEmail.json.error?.code === 'EMAIL_NOT_CONFIGURED', `${rfqEmail.status} ${rfqEmail.json.error?.code}`);
   const qt = await inj('POST', `/api/procurement/rfqs/${rfqNo}/quotes`, admin, { vendor_id: V1, items: [{ item_id: 'X', qty: 50, unit_price: 9.5 }] });
   const awd = await inj('POST', `/api/procurement/rfqs/${rfqNo}/award`, admin, { quote_no: qt.json.quote_no });
   const awdPo = (await pg.query(`SELECT order_qty, unit_price FROM po_items WHERE po_id=(SELECT id FROM purchase_orders WHERE po_no='${awd.json.po_no}')`)).rows as any[];
