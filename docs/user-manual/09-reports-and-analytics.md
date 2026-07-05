@@ -68,6 +68,45 @@ role with no saved layout falls back to a sensible default set.
 
 ---
 
+## 1b. CFO KPI scorecard (financial ratios & health)
+
+**API:** `GET /api/finance/metrics/pack` · **Required permission:** `exec` /
+`fin_report` / `dashboard` (also `ar` / `creditors`).
+
+The finance KPI engine turns your ledger into a **CFO scorecard** — one call
+returns ~31 financial KPIs, each with **RAG** (🟢 green / 🟡 amber / 🔴 red) and
+**comparatives**, computed straight from the posted GL and sub-ledgers:
+
+- **สภาพคล่อง (Liquidity):** current / quick / cash ratio, working capital,
+  days-cash-on-hand, cash-conversion-cycle.
+- **ประสิทธิภาพเงินทุนหมุนเวียน (Efficiency):** DSO, DPO, DIO, AR/AP/inventory turnover.
+- **ความสามารถทำกำไร (Profitability):** gross / operating / net margin, EBITDA + margin, ROA, ROE.
+- **โครงสร้างหนี้สิน (Leverage):** debt-to-equity, interest coverage, net debt.
+- **การเติบโตและกระแสเงินสด (Growth & cash):** revenue growth MoM/YoY, operating & free cash flow, cash runway.
+- **สุขภาพลูกหนี้/เจ้าหนี้ (AR/AP health):** overdue-AR/AP %, AR-over-90-days, allowance coverage.
+
+Each KPI carries its **prior-period, prior-year and budget** comparative and a
+RAG rating against a defined threshold. Two companion endpoints let you *explain*
+a number, not just read it:
+
+- `GET /api/finance/metrics/{id}/drill` — the GL account rows behind a KPI (e.g.
+  why the current ratio moved). Drill through a 🔴 KPI straight to the ledger.
+- `GET /api/finance/metrics/{id}/trend?periods=12` — the KPI's month-by-month
+  trend (for a sparkline / line chart).
+
+**Optional filters on the pack:** `period=YYYY-MM` (a specific month), `from`/`to`
+(a custom window), `group=<family>` (one KPI family), `as_of=YYYY-MM-DD`.
+
+> **This is the analytical-review control (ELC-07):** the same KPI definitions
+> also feed the executive scorecard and the scheduled KPI pack, so the number you
+> review is the number everywhere. Read-only — it never posts to the ledger.
+>
+> **Troubleshooting:** “UNKNOWN_METRIC” — the metric id isn't recognised; use an
+> id returned by `…/metrics/pack`. The visual **CFO Command Center** dashboard for
+> these KPIs arrives in the next release (docs/35 Phase 2).
+
+---
+
 ## 2. Standard reports (Excel & PDF)
 
 **Required permission:** varies by report (`dashboard` / `pos` / `exec` for sales;

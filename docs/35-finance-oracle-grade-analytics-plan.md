@@ -167,7 +167,12 @@ delta_pp_pct, delta_yoy_pct, vs_budget_pct, rag: 'green'|'amber'|'red', trend: n
 
 ---
 
-## PHASE 1 — Finance Metrics Engine (foundation, API-only)
+## PHASE 1 — Finance Metrics Engine (foundation, API-only) — ✅ DELIVERED (2026-07-05)
+
+**Shipped:** `FinanceMetricsService` + `finance-metrics-constants` (31-KPI `METRICS` registry + `FIN_STATEMENT_MAP`
+account groups) + `GET /api/finance/metrics/pack|:id/trend|:id/drill`; `exec_scorecard` finance leg now reads the
+canonical engine; detective control **ELC-07** added to the RCM (→ 184 controls); `finance-kpi` cutover harness
+(28 checks) green; docs synced (PN-26 §3c rev 2.0, user manual 09 §1b, UAT-RPT-050). Below is the original plan.
 
 **Goal:** the canonical `FinanceMetricsService` + `GET /api/finance/metrics/pack|:id/trend|:id/drill`, wired
 into `exec_scorecard` so it stops hand-rolling finance legs.
@@ -288,7 +293,7 @@ exist (`income-statement/by-branch`, `cost-centers`).
 | **TR-01** — Cash-position review | Detective | Weekly liquidity/forecast review (if not already covered by an existing treasury control — confirm during Phase 4) |
 
 All three are **read-only monitoring** controls (no new posting authority ⇒ no new SoD conflict). Add via
-`compliance/build_rcm.py`, regenerate `Oshinei_ERP_SOX_RCM_v1.xlsx` (currently 169 controls → ~172), and
+`compliance/build_rcm.py`, regenerate `Oshinei_ERP_SOX_RCM_v1.xlsx` (Phase 1 adds **ELC-07** → 184 controls), and
 mirror in `tools/cutover/src/compliance.ts`.
 
 ## 5. Sequencing & PR plan
@@ -330,3 +335,4 @@ closes the biggest Oracle gap (a real, comparative, drill-through CFO dashboard)
 | Date | Author | Change |
 |---|---|---|
 | 2026-07-05 | CTO/CFO | Initial draft for approval — Oracle-grade finance dashboards & KPI plan (Phases 1–6). |
+| 2026-07-05 | Platform | **Phase 1 DELIVERED** — FinanceMetricsService (31 KPIs) + `/api/finance/metrics/*`, exec_scorecard refactor, ELC-07 control, `finance-kpi` harness (28 ✓), doc sync (PN-26 §3c, manual 09 §1b, UAT-RPT-050). |

@@ -17,6 +17,7 @@ import { TtlCache } from '../../common/ttl-cache';
 import { MessagingService } from '../messaging/messaging.service';
 import { LineNotifyService } from '../messaging/line-notify.service';
 import { CollectionsService } from '../finance/collections.service';
+import { FinanceMetricsService } from '../finance/finance-metrics.service';
 import { EamService } from '../eam/eam.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
@@ -130,6 +131,9 @@ export class BiService implements OnModuleInit {
     // Optional so a partially-wired test harness can construct BiService without the finance graph;
     // the full app always provides it (FinanceModule), enabling the scheduled ar_collections_dunning job.
     @Optional() private readonly collections?: CollectionsService,
+    // docs/35 Phase 1 — canonical CFO KPI engine; the exec_scorecard finance leg reads from it so the
+    // scorecard and the CFO Command Center never drift. @Optional so a partial harness still constructs.
+    @Optional() private readonly financeMetrics?: FinanceMetricsService,
     @Optional() private readonly eam?: EamService,
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly leases?: LeasesService,
@@ -810,12 +814,20 @@ export class BiService implements OnModuleInit {
     const portfolio: any = this.projects ? await this.projects.portfolioEvm(user).catch(() => null) : null;
     const scorecards: any = this.procurement ? await this.procurement.listScorecards({}, user).catch(() => null) : null;
     const holds: any = this.match ? await this.match.listResults({ blocked: true }, user).catch(() => null) : null;
+    // docs/35 Phase 1 — pull the finance leg from the canonical KPI engine (single source of truth) when
+    // wired; fall back to the legacy trend-derived margin so a partial harness still returns a scorecard.
+    const finMetrics: any = this.financeMetrics ? await this.financeMetrics.execFinance(user).catch(() => null) : null;
     return {
       as_of: new Date().toISOString().slice(0, 10),
       finance: {
         sales_mtd: n(kpi?.sales?.mtd), sales_ytd: n(kpi?.sales?.ytd),
         open_ar: n(kpi?.receivables?.open_ar), open_ap: n(kpi?.payables?.open_ap),
-        margin_pct: finLast ? n(finLast.margin_pct) : null, gross_profit: finLast ? n(finLast.gross_profit) : null,
+        margin_pct: finMetrics ? finMetrics.net_margin_pct : (finLast ? n(finLast.margin_pct) : null),
+        gross_profit: finLast ? n(finLast.gross_profit) : null,
+        gross_margin_pct: finMetrics?.gross_margin_pct ?? null, current_ratio: finMetrics?.current_ratio ?? null,
+        dso: finMetrics?.dso ?? null, operating_cash_flow: finMetrics?.operating_cash_flow ?? null,
+        cash_runway_months: finMetrics?.cash_runway_months ?? null,
+        kpi_red_flags: finMetrics?.red_flags ?? [],
       },
       crm: {
         open_value: n(kpi?.pipeline?.open_value),
