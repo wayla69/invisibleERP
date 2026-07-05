@@ -34,6 +34,12 @@ export class FinanceMetricsController {
     return this.svc.closeStatus({ period }, u);
   }
 
+  // Treasury / Cash Command (docs/35 Phase 4, TR-01): cash/bank position + N-week forecast + liquidity + FX.
+  @Get('cash/position') @Permissions('exec', 'fin_report', 'ar', 'dashboard')
+  cashPosition(@CurrentUser() u: JwtUser, @Query('weeks') weeks?: string) {
+    return this.svc.cashPosition({ weeks: weeks ? Number(weeks) : undefined }, u);
+  }
+
   // Drill-through: the GL account-group rows behind a KPI, as of a date.
   @Get(':id/drill') @Permissions('exec', 'fin_report', 'dashboard', 'ar', 'creditors')
   drill(@Param('id') id: string, @CurrentUser() u: JwtUser, @Query('as_of') asOf?: string) {

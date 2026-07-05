@@ -250,7 +250,16 @@ open reconciliations + aging, pending journal approvals, days-to-close, and a pe
 - **Harness:** extend `basics.ts` (primary GL gate) — seed an intentional tie-out break, assert the cockpit
   reports it red; then reconcile and assert green.
 
-## PHASE 4 — Treasury / Cash Command
+## PHASE 4 — Treasury / Cash Command — ✅ DELIVERED (2026-07-05)
+
+**Shipped:** `GET /api/finance/metrics/cash/position?weeks=13` + `/finance/treasury` (server-prefetch page +
+client island). Composes the GL cash/bank position (per account + house banks, ties to the trial balance),
+the **13-week direct cash forecast** (reuses `cashFlowForecast`/GL-07) with projected closing + the liquidity
+**trough** (min balance + week), the liquidity KPI subset, and **FX exposure** by non-THB currency. Web page:
+headline stats + a single-series cash-forecast area chart (trough marked) + cash/bank, liquidity and FX
+panels. New detective control **TR-01** (treasury cash-position review) → RCM 186. `finance-kpi` harness
+extended to 48 checks (total_cash ties to TB; 13-week forecast 100k→150k; FX picks up a USD payable; role
+denied). Nav + i18n (`fnx.treasury.*`). Below is the original plan.
 
 **Goal:** Oracle Cash-Management-style liquidity view.
 **Outcome demo:** `/finance/treasury` shows bank/cash balances by account, a **13-week direct cash forecast**
@@ -356,3 +365,4 @@ closes the biggest Oracle gap (a real, comparative, drill-through CFO dashboard)
 | 2026-07-05 | Platform | **Review fix** — efficiency/annualized KPIs (turnover, DSO/DPO/DIO, ROA/ROE, days-cash, runway) moved to a **trailing-12-month basis** (window-length-independent; CLOSE-excluded via new `incomeStatement` `excludeSources` arg) after review showed month-to-date windows distorting them; growth KPIs regrouped into `growth_cash`. Harness 28→34 checks. |
 | 2026-07-05 | Platform | **Phase 2 DELIVERED** — `/finance/command-center` web dashboard (RAG scorecard tiles + comparatives + lazy 12-mo sparkline + drill), live `fin_kpi_refresh` SSE, nav + i18n. Web build + `pnpm -r typecheck` clean. |
 | 2026-07-05 | Platform | **Phase 3 DELIVERED** — Controller Close Cockpit: `GET /api/finance/metrics/close/status` + `/finance/close-cockpit` (tie-out REC-04 + readiness GL-19/20 + approvals GOV-01 + checklist, RAG + days-to-close); control GL-22 (RCM 185); `finance-kpi` 41 checks; nav + i18n. |
+| 2026-07-05 | Platform | **Phase 4 DELIVERED** — Treasury / Cash Command: `GET /api/finance/metrics/cash/position` + `/finance/treasury` (GL cash/bank position + 13-week forecast w/ trough + liquidity subset + FX exposure); control TR-01 (RCM 186); `finance-kpi` 48 checks; nav + i18n. |

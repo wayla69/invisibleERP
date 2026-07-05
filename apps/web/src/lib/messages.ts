@@ -223,6 +223,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Finance / Statements ──────────────────────────────────────────────────
   'nav.command_center': { th: 'ศูนย์บัญชาการ CFO', en: 'CFO Command Center' },
   'nav.close_cockpit': { th: 'ศูนย์ปิดงวดบัญชี (Close cockpit)', en: 'Close Cockpit' },
+  'nav.treasury': { th: 'ศูนย์บริหารเงินสด (Treasury)', en: 'Treasury / Cash' },
   'nav.financial_health': { th: 'สุขภาพการเงิน (Financial health)', en: 'Financial Health' },
   'nav.consolidation': { th: 'งบการเงินรวม', en: 'Consolidated Financials' },
 

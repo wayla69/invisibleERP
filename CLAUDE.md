@@ -134,7 +134,7 @@ For every such change, review and update as needed:
 - **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`
   conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
   doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage
-  the result. Currently **185 controls**.
+  the result. Currently **186 controls**.
 - **Stacked PRs + squash-merge conflicts.** When a feature PR is stacked on another and the base
   squash-merges to `main`, the dependent PR goes `dirty` because main now holds the same content under a
   *different* commit SHA. Resolve by merging `origin/main` and taking **ours** (the stacked branch already

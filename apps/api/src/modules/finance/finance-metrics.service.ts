@@ -1,5 +1,8 @@
-import { Injectable, Optional, BadRequestException } from '@nestjs/common';
+import { Injectable, Optional, Inject, BadRequestException } from '@nestjs/common';
+import { sql, and, ne } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { arInvoices, apTransactions, bankAccounts } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import { TtlCache } from '../../common/ttl-cache';
 import { LedgerService } from '../ledger/ledger.service';
@@ -54,6 +57,7 @@ function daysInclusive(from: string, to: string): number {
 @Injectable()
 export class FinanceMetricsService {
   constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
     // @Optional so a partial cutover harness can still construct the service; the full app always wires these.
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly finance?: FinanceService,
@@ -336,5 +340,64 @@ export class FinanceMetricsService {
       approvals: approvals ? { count: approvals.count, overdue: approvals.overdue, oldest_age_days: approvals.oldest_age_days, by_type: approvals.by_type, total_amount: approvals.total_amount, items: (approvals.items ?? []).slice(0, 15) } : null,
       rag: { ...rag, overall },
     };
+  }
+
+  // ── Treasury / Cash Command (docs/35 Phase 4, TR-01) ───────────────────────────────────────────
+  // Read-only liquidity view: the GL cash/bank position (per account + house banks), a 13-week direct cash
+  // forecast (open AR inflows − AP outflows by due date), the liquidity KPI subset, and FX exposure by
+  // currency. Every balance ties to the trial balance. Posts nothing.
+  async cashPosition(q: { weeks?: number }, user: JwtUser) {
+    const weeks = Math.max(1, Math.min(26, Math.floor(Number(q.weeks ?? 13)) || 13));
+    const key = `fin-kpi:${user.tenantId}:cash:${weeks}`;
+    return this.cache.wrap(key, this.ttl, () => this.cashPositionUncached(weeks, user));
+  }
+
+  private async cashPositionUncached(weeks: number, user: JwtUser) {
+    if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger service not wired' });
+    const [forecast, tb, pack, banksRaw, fx] = await Promise.all([
+      this.ledger.cashFlowForecast(weeks),
+      this.ledger.trialBalance(),
+      this.pack({}, user),
+      this.db.select().from(bankAccounts),
+      this.fxExposure(),
+    ]);
+    const balByCode = new Map<string, number>((tb.rows ?? []).map((r: any) => [String(r.account_code), num(r.balance)]));
+    const nameByCode = new Map<string, string>((tb.rows ?? []).map((r: any) => [String(r.account_code), r.account_name]));
+
+    const cashAccounts = CASH_ACCOUNTS.filter((c) => balByCode.has(c)).map((c) => ({ account_code: c, account_name: nameByCode.get(c) ?? c, balance: round2(balByCode.get(c) ?? 0) }));
+    const totalCash = round2(cashAccounts.reduce((a, x) => a + x.balance, 0));
+
+    // House banks — each annotated with the current GL balance of its linked cash account.
+    const banks = (banksRaw ?? []).filter((b: any) => String(b.active ?? 'true') !== 'false').map((b: any) => ({
+      id: Number(b.id), bank_name: b.bankName, account_no: b.accountNo, gl_account_code: b.glAccountCode,
+      currency: b.currency ?? 'THB', gl_balance: round2(balByCode.get(String(b.glAccountCode)) ?? 0),
+    }));
+
+    const liquidity = pack.kpis.filter((k) => k.group === 'liquidity');
+
+    return {
+      as_of: forecast.as_of, weeks, total_cash: totalCash, cash_accounts: cashAccounts, bank_accounts: banks,
+      forecast: {
+        opening_cash: forecast.opening_cash, projected_closing_cash: forecast.projected_closing_cash,
+        total_expected_inflow: forecast.total_expected_inflow, total_expected_outflow: forecast.total_expected_outflow,
+        periods: forecast.periods,
+        // lowest projected balance across the horizon + the week it hits — the liquidity trough to watch.
+        min_balance: Math.min(...forecast.periods.map((p: any) => p.projected_balance)),
+        min_week: forecast.periods.reduce((m: any, p: any) => (p.projected_balance < m.projected_balance ? p : m), forecast.periods[0])?.week ?? 0,
+      },
+      liquidity, fx_exposure: fx,
+    };
+  }
+
+  // FX exposure — open AR (receivable) and AP (payable) outstanding by non-THB currency (face amounts).
+  private async fxExposure() {
+    const arRows = await this.db.select({ currency: arInvoices.currency, out: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)),0)` })
+      .from(arInvoices).where(and(sql`${arInvoices.status}::text <> 'Paid'`, ne(arInvoices.currency, 'THB'))).groupBy(arInvoices.currency);
+    const apRows = await this.db.select({ currency: apTransactions.currency, out: sql<string>`coalesce(sum(${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)),0)` })
+      .from(apTransactions).where(and(sql`${apTransactions.status}::text <> 'Paid'`, ne(apTransactions.currency, 'THB'))).groupBy(apTransactions.currency);
+    const by = new Map<string, { currency: string; receivable: number; payable: number }>();
+    for (const r of arRows) { const c = r.currency ?? '—'; const e = by.get(c) ?? { currency: c, receivable: 0, payable: 0 }; e.receivable = round2(num(r.out)); by.set(c, e); }
+    for (const r of apRows) { const c = r.currency ?? '—'; const e = by.get(c) ?? { currency: c, receivable: 0, payable: 0 }; e.payable = round2(num(r.out)); by.set(c, e); }
+    return [...by.values()].map((e) => ({ ...e, net: round2(e.receivable - e.payable) })).filter((e) => e.receivable !== 0 || e.payable !== 0);
   }
 }

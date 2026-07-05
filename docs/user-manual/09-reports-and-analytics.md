@@ -143,6 +143,33 @@ nothing and drives no lock (the lock stays on the period-close screen).
 
 ---
 
+## 1d. Treasury / Cash Command (cash position & forecast)
+
+**Screen:** `/finance/treasury` (**ศูนย์บริหารเงินสด**, Finance → Financial
+reports) · **API:** `GET /api/finance/metrics/cash/position` · **Required
+permission:** `exec` / `fin_report` / `ar` (also `dashboard`).
+
+**Treasury / Cash Command** is the forward view of cash on one screen:
+
+- **Headline** — total cash now, the **projected closing** balance, and the
+  **liquidity trough** (the lowest point cash reaches over the next 13 weeks, and
+  which week that is).
+- **13-week cash forecast** — a curve of the projected cash balance, built from
+  open receivables (inflows) and payables (outflows) by due date; the trough week
+  is marked, and a table breaks out inflow / outflow / projected balance per week.
+- **Cash & bank accounts** — the GL cash/bank balances (which tie to the trial
+  balance) plus your configured bank accounts.
+- **Liquidity** — the current / quick / cash ratios, working capital and days-cash
+  (the same figures as the CFO scorecard).
+- **FX exposure** — open receivables/payables in each non-THB currency, with the
+  net position to watch.
+
+Read-only; it posts nothing. It complements the working-capital **score**
+(*Financial Health*) and the raw GL **forecast** by bringing the bank position,
+the trough and FX into one treasury review.
+
+---
+
 ## 2. Standard reports (Excel & PDF)
 
 **Required permission:** varies by report (`dashboard` / `pos` / `exec` for sales;

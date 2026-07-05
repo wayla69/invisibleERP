@@ -171,6 +171,20 @@ async function main() {
   const denied = await inj('GET', '/api/finance/metrics/pack', wh1);
   ok('permission control: warehouse-only user denied pack (403)', denied.status === 403, `st=${denied.status}`);
 
+  // ── Treasury / Cash Command (docs/35 Phase 4, TR-01) ───────────────────────────────────────────
+  // Seed state (before the close-cockpit block posts AP): GL cash 1000=100k, AR 50k open, no AP ⇒ a clean
+  // 13-week forecast. total_cash ties to the trial balance; the liquidity KPI subset rides the pack.
+  const cp = await inj('GET', '/api/finance/metrics/cash/position', admin);
+  ok('cash/position → 200 with cash_accounts / forecast / liquidity / fx_exposure', cp.status === 200 && Array.isArray(cp.json.cash_accounts) && !!cp.json.forecast && Array.isArray(cp.json.liquidity) && Array.isArray(cp.json.fx_exposure), `st=${cp.status}`);
+  ok('cash position: total_cash 100000, GL 1000 = 100000 (ties to trial balance)', near(cp.json.total_cash, 100000) && near(cp.json.cash_accounts.find((a: any) => a.account_code === '1000')?.balance, 100000), `tc=${cp.json.total_cash}`);
+  ok('cash forecast: opening 100000, inflow 50000 (AR), outflow 0, closing 150000',
+    near(cp.json.forecast?.opening_cash, 100000) && near(cp.json.forecast?.total_expected_inflow, 50000) && near(cp.json.forecast?.total_expected_outflow, 0) && near(cp.json.forecast?.projected_closing_cash, 150000),
+    JSON.stringify({ o: cp.json.forecast?.opening_cash, i: cp.json.forecast?.total_expected_inflow, x: cp.json.forecast?.total_expected_outflow, c: cp.json.forecast?.projected_closing_cash }));
+  ok('cash forecast: default 13-week horizon → 14 periods; liquidity subset incl. cash_ratio 2.5', cp.json.weeks === 13 && cp.json.forecast?.periods?.length === 14 && near(cp.json.liquidity.find((k: any) => k.id === 'cash_ratio')?.value, 2.5), `wk=${cp.json.weeks} n=${cp.json.forecast?.periods?.length}`);
+  ok('cash position: no FX exposure yet (all THB)', cp.json.fx_exposure.length === 0, `fx=${JSON.stringify(cp.json.fx_exposure)}`);
+  const cpDenied = await inj('GET', '/api/finance/metrics/cash/position', wh1);
+  ok('permission control: warehouse-only user denied cash position (403)', cpDenied.status === 403, `st=${cpDenied.status}`);
+
   // ── Controller Close Cockpit (docs/35 Phase 3, GL-22) ──────────────────────────────────────────
   // The seed leaves AP + inventory sub-ledgers empty while their GL controls (2000=40k, 1200=30k) carry a
   // balance ⇒ a tie-out break. The cockpit must flag it RED; then we post the matching sub-ledgers and it
@@ -192,6 +206,12 @@ async function main() {
   // Permission control — a warehouse-only user is denied the close cockpit
   const csDenied = await inj('GET', '/api/finance/metrics/close/status', wh1);
   ok('permission control: warehouse-only user denied close cockpit (403)', csDenied.status === 403, `st=${csDenied.status}`);
+
+  // Treasury FX exposure — a USD payable shows up as a non-THB exposure (run last: it perturbs the AP tie-out).
+  await db.insert(s.apTransactions).values([{ txnNo: 'AP-USD', tenantId: hq, vendorName: 'US Vendor', txnType: 'Bill', amount: '1000', paidAmount: '0', status: 'Unpaid', currency: 'USD', dueDate: today }]).onConflictDoNothing();
+  const cpFx = await inj('GET', '/api/finance/metrics/cash/position', admin);
+  const usd = (cpFx.json.fx_exposure ?? []).find((e: any) => e.currency === 'USD');
+  ok('cash position: FX exposure picks up the USD payable (payable 1000, net −1000)', !!usd && near(usd.payable, 1000) && near(usd.net, -1000), `usd=${JSON.stringify(usd)}`);
 
   await app.close();
 
