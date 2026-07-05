@@ -485,8 +485,8 @@ async function main() {
   ok('Doc templates: no GL impact (journal lines unchanged by template authoring)', jlAfter === jlBefore, `before=${jlBefore} after=${jlAfter}`);
 
   // ── A4 documents wired live (quotation / purchase_order / payslip) + fiscal-integrity for tax invoices ──
-  ok('Doc templates: quotation/PO/payslip are now LIVE in the catalog',
-    ['quotation', 'purchase_order', 'payslip'].every((k) => (dtTypes.json.doc_types ?? []).some((d: any) => d.key === k && d.status === 'live')),
+  ok('Doc templates: quotation/PO/payslip + full tax invoice are now LIVE in the catalog',
+    ['quotation', 'purchase_order', 'payslip', 'tax_invoice_full'].every((k) => (dtTypes.json.doc_types ?? []).some((d: any) => d.key === k && d.status === 'live')),
     `${(dtTypes.json.doc_types ?? []).filter((d: any) => d.status === 'live').map((d: any) => d.key).join(',')}`);
   // preview an A4 quotation with an accent colour + header note + footer terms → all honoured in the HTML
   const qPrev = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'quotation', config: { header: { accent_color: '#0F766E', header_note: 'HDR-NOTE-Q' }, footer: { terms_text: 'TERMS-Q-XYZ' }, totals: { show_amount_in_words: false } } });
