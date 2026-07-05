@@ -295,6 +295,9 @@ export const INTERNAL_NAV: NavGroup[] = [
       // PR is company-wide (anyone can request) → cross-listed to BOTH surfaces so POS staff can raise one
       // without switching workspaces; buying (PO) + receiving (GR) stay role-segregated (SoD R03/R04).
       { label: 'nav.requisitions', href: '/requisitions', icon: FileText, perms: ['pr_raise', 'procurement', 'planner'], workspace: BOTH },
+      // Friendly "shop" front-end for the same PR: browse the catalog by category → basket → checkout a PR.
+      // Same low-risk pr_raise duty, cross-listed to BOTH so POS/store staff can order supplies too.
+      { label: 'nav.shop', href: '/shop', icon: ShoppingCart, perms: ['pr_raise', 'procurement', 'planner'], workspace: BOTH },
       { label: 'nav.suppliers', href: '/inventory/suppliers', icon: Building2, perms: ['procurement', 'warehouse'] },
       { label: 'nav.purchase_orders', href: '/inventory/purchase-orders', icon: ReceiptText, perms: ['procurement'] },
       { label: 'nav.procurement', href: '/procurement', icon: ShoppingBag, perms: ['procurement'] },

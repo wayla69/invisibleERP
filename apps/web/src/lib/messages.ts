@@ -173,6 +173,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
 
   // ── Procurement ───────────────────────────────────────────────────────────
   'nav.requisitions': { th: 'คำขอซื้อ (PR)', en: 'Purchase Requisitions (PR)' },
+  'nav.shop': { th: 'เลือกซื้อสินค้า', en: 'Shop / Order Supplies' },
   'nav.suppliers': { th: 'ซัพพลายเออร์', en: 'Suppliers' },
   'nav.purchase_orders': { th: 'ใบสั่งซื้อ', en: 'Purchase Orders' },
   'nav.procurement': { th: 'จัดซื้อจัดจ้าง (PO)', en: 'Procurement (PO)' },
