@@ -290,6 +290,7 @@ export const scanLines = pgTable('scan_lines', {
   action: text('action'),
   locationId: text('location_id'),
   confirmed: boolean('confirmed').default(false),
+  clientUuid: text('client_uuid'), // offline idempotency — unique per (session_no, client_uuid) in 0251
 });
 
 // Per-tenant preferred-supplier link for an item (Phase — branch-aware replenishment "buy" leg).

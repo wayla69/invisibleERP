@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, asc, desc, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations, assetRegistrationRequests, journalEntries, grItems, goodsReceipts, items } from '../../database/schema';
+import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations, assetRegistrationRequests, assetScanRequests, assetAudits, assetAuditScans, journalEntries, grItems, goodsReceipts, items } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { QrService } from '../qr/qr.service';
@@ -401,7 +401,10 @@ export class AssetsService {
     return this.qr.labelsPdf(labels, opts.cols ?? 2, opts.rows ?? 4);
   }
 
-  // Scan an asset tag → update its physical LOCATION / holder (not the accounting status enum).
+  // Scan an asset tag → verify presence or REQUEST a custody change (FA-11 maker-checker).
+  // Confirming the current location/holder (no change) logs a non-approval 'Scan Verify' movement.
+  // Any change to location/holder raises a PendingApproval custody request (NO register write here);
+  // a DIFFERENT user must approve before the register moves (see approveCustody). No GL effect.
   async scanUpdate(dto: { code: string; location?: string; assigned_to?: string; note?: string }, user: JwtUser) {
     const parsed = parseQrPayload(dto.code);
     const assetNo = (parsed.ASSET_ID || parsed.ITEM_ID || dto.code || '').trim();
@@ -412,17 +415,195 @@ export class AssetsService {
       if (user.tenantId != null) conds.push(eq(fixedAssets.tenantId, user.tenantId));
       const [a] = await tx.select().from(fixedAssets).where(and(...conds)).limit(1).for('update');
       if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: `Asset ${assetNo} not found`, messageTh: 'ไม่พบสินทรัพย์' });
-      const toLoc = dto.location ?? a.location ?? null;
-      const set: any = { location: toLoc };
-      if (dto.assigned_to !== undefined) set.assignedTo = dto.assigned_to;
-      await tx.update(fixedAssets).set(set).where(eq(fixedAssets.id, a.id));
+      const curLoc = a.location ?? null;
+      const curAssigned = a.assignedTo ?? null;
+      const locChanged = dto.location !== undefined && (dto.location || null) !== curLoc;
+      const assignedChanged = dto.assigned_to !== undefined && (dto.assigned_to || null) !== curAssigned;
+
+      if (!locChanged && !assignedChanged) {
+        // Presence confirmed — log a verification movement immediately (no approval needed).
+        await tx.insert(assetMovements).values({
+          tenantId: a.tenantId ?? user.tenantId ?? null, assetId: Number(a.id), assetNo: a.assetNo,
+          moveType: 'Scan Verify', fromLocation: curLoc, toLocation: curLoc,
+          fromStatus: a.status, toStatus: a.status, note: dto.note ?? null, byUser: user.username,
+        });
+        return { asset_no: a.assetNo, status: 'verified', location: curLoc, assigned_to: curAssigned };
+      }
+
+      // A move — raise a maker-checker custody-change request; the register does NOT move yet.
+      const reqNo = await this.docNo.nextDaily('FAC');
+      const toLoc = locChanged ? (dto.location || null) : curLoc;
+      const toAssigned = assignedChanged ? (dto.assigned_to || null) : curAssigned;
+      await tx.insert(assetScanRequests).values({
+        tenantId: a.tenantId ?? user.tenantId ?? null, reqNo, assetId: Number(a.id), assetNo: a.assetNo,
+        fromLocation: curLoc, toLocation: toLoc, fromAssignedTo: curAssigned, toAssignedTo: toAssigned,
+        note: dto.note ?? null, source: 'scan', status: 'PendingApproval', requestedBy: user.username,
+      });
+      return { asset_no: a.assetNo, status: 'pending', request_no: reqNo, from_location: curLoc, to_location: toLoc, requested_by: user.username };
+    });
+  }
+
+  // FA-11 — approve a pending custody change. Approver MUST differ from the requester (binds even Admin).
+  async approveCustody(reqNo: string, user: JwtUser) {
+    const db = this.db;
+    return db.transaction(async (tx: any) => {
+      const conds = [eq(assetScanRequests.reqNo, reqNo)];
+      if (user.tenantId != null) conds.push(eq(assetScanRequests.tenantId, user.tenantId));
+      const [req] = await tx.select().from(assetScanRequests).where(and(...conds)).limit(1).for('update');
+      if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: `Custody request ${reqNo} not found`, messageTh: 'ไม่พบคำขอย้ายทรัพย์สิน' });
+      if (req.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request ${reqNo} is ${req.status}, not pending`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
+      if (req.requestedBy && req.requestedBy === user.username)
+        throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a custody change you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติการย้ายทรัพย์สินของตนเองได้' });
+      const [a] = await tx.select().from(fixedAssets).where(eq(fixedAssets.id, Number(req.assetId))).limit(1).for('update');
+      if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: `Asset ${req.assetNo} not found`, messageTh: 'ไม่พบสินทรัพย์' });
+      await tx.update(fixedAssets).set({ location: req.toLocation, assignedTo: req.toAssignedTo }).where(eq(fixedAssets.id, a.id));
       await tx.insert(assetMovements).values({
         tenantId: a.tenantId ?? user.tenantId ?? null, assetId: Number(a.id), assetNo: a.assetNo,
-        moveType: 'Scan Update', fromLocation: a.location ?? null, toLocation: toLoc,
-        fromStatus: a.status, toStatus: a.status, note: dto.note ?? null, byUser: user.username,
+        moveType: 'Scan Update', fromLocation: req.fromLocation, toLocation: req.toLocation,
+        fromStatus: a.status, toStatus: a.status, note: `${req.note ? req.note + ' — ' : ''}custody ${reqNo} requested by ${req.requestedBy}`, byUser: user.username,
       });
-      return { asset_no: a.assetNo, location: toLoc, assigned_to: set.assignedTo ?? a.assignedTo ?? null };
+      await tx.update(assetScanRequests).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(assetScanRequests.id, Number(req.id)));
+      return { request_no: reqNo, asset_no: a.assetNo, status: 'approved', location: req.toLocation, assigned_to: req.toAssignedTo, approved_by: user.username, requested_by: req.requestedBy };
     });
+  }
+
+  async rejectCustody(reqNo: string, user: JwtUser, reason?: string) {
+    const db = this.db;
+    const conds = [eq(assetScanRequests.reqNo, reqNo)];
+    if (user.tenantId != null) conds.push(eq(assetScanRequests.tenantId, user.tenantId));
+    const [req] = await db.select().from(assetScanRequests).where(and(...conds)).limit(1);
+    if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: `Custody request ${reqNo} not found`, messageTh: 'ไม่พบคำขอย้ายทรัพย์สิน' });
+    if (req.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request ${reqNo} is ${req.status}, not pending`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
+    await db.update(assetScanRequests).set({ status: 'Rejected', rejectReason: reason ?? null }).where(eq(assetScanRequests.id, Number(req.id)));
+    return { request_no: reqNo, status: 'rejected', rejected_by: user.username };
+  }
+
+  async listCustodyRequests(status: string | undefined, _user: JwtUser) {
+    const db = this.db;
+    const where = status ? eq(assetScanRequests.status, status) : undefined;
+    const rows = await db.select().from(assetScanRequests).where(where).orderBy(desc(assetScanRequests.id)).limit(200);
+    return {
+      requests: rows.map((r: any) => ({
+        request_no: r.reqNo, asset_no: r.assetNo, from_location: r.fromLocation, to_location: r.toLocation,
+        from_assigned_to: r.fromAssignedTo, to_assigned_to: r.toAssignedTo, source: r.source, audit_no: r.auditNo,
+        status: r.status, requested_by: r.requestedBy, approved_by: r.approvedBy, note: r.note,
+      })),
+      count: rows.length,
+    };
+  }
+
+  // ── FA-11 / audit-by-scan ──────────────────────────────────────────────
+  private assetsAtLocation(user: JwtUser, location: string | null) {
+    const conds = [sql`${fixedAssets.status} <> 'disposed'`];
+    if (user.tenantId != null) conds.push(eq(fixedAssets.tenantId, user.tenantId));
+    if (location != null) conds.push(eq(fixedAssets.location, location));
+    return this.db.select().from(fixedAssets).where(and(...conds));
+  }
+
+  async openAudit(dto: { location?: string }, user: JwtUser) {
+    const location = dto.location?.trim() || null;
+    const expected = await this.assetsAtLocation(user, location);
+    const auditNo = await this.docNo.nextDaily('AUD');
+    await this.db.insert(assetAudits).values({
+      tenantId: user.tenantId ?? null, auditNo, location, status: 'Open',
+      expectedCount: expected.length, createdBy: user.username,
+    });
+    return { audit_no: auditNo, location, expected_count: expected.length, status: 'Open' };
+  }
+
+  async scanAudit(auditNo: string, dto: { code: string; client_uuid?: string }, user: JwtUser) {
+    const db = this.db;
+    const aConds = [eq(assetAudits.auditNo, auditNo)];
+    if (user.tenantId != null) aConds.push(eq(assetAudits.tenantId, user.tenantId));
+    const [audit] = await db.select().from(assetAudits).where(and(...aConds)).limit(1);
+    if (!audit) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Audit not found', messageTh: 'ไม่พบการตรวจนับ' });
+    if (audit.status !== 'Open') throw new BadRequestException({ code: 'AUDIT_CLOSED', message: 'Audit is closed', messageTh: 'การตรวจนับถูกปิดแล้ว' });
+    const parsed = parseQrPayload(dto.code);
+    const assetNo = (parsed.ASSET_ID || parsed.ITEM_ID || dto.code || '').trim();
+    if (!assetNo) throw new BadRequestException({ code: 'NO_CODE', message: 'No asset code in QR', messageTh: 'ไม่พบรหัสทรัพย์สินใน QR' });
+    // Offline replay guard: a client_uuid already recorded for this audit is a no-op.
+    if (dto.client_uuid) {
+      const [dup] = await db.select().from(assetAuditScans)
+        .where(and(eq(assetAuditScans.auditNo, auditNo), eq(assetAuditScans.clientUuid, dto.client_uuid))).limit(1);
+      if (dup) return { audit_no: auditNo, asset_no: dup.assetNo, result: dup.result, register_location: dup.registerLocation, deduped: true };
+    }
+    const rConds = [eq(fixedAssets.assetNo, assetNo)];
+    if (user.tenantId != null) rConds.push(eq(fixedAssets.tenantId, user.tenantId));
+    const [a] = await db.select().from(fixedAssets).where(and(...rConds)).limit(1);
+    let result: 'Found' | 'Misplaced' | 'Unknown';
+    let registerLocation: string | null = null;
+    if (!a || a.status === 'disposed') result = 'Unknown';
+    else {
+      registerLocation = a.location ?? null;
+      result = audit.location == null || (a.location ?? null) === audit.location ? 'Found' : 'Misplaced';
+    }
+    await db.insert(assetAuditScans).values({
+      tenantId: user.tenantId ?? null, auditNo, assetNo, result, registerLocation,
+      clientUuid: dto.client_uuid ?? null, scannedBy: user.username,
+    });
+    return { audit_no: auditNo, asset_no: assetNo, result, register_location: registerLocation, deduped: false };
+  }
+
+  async getAudit(auditNo: string, user: JwtUser) {
+    const db = this.db;
+    const aConds = [eq(assetAudits.auditNo, auditNo)];
+    if (user.tenantId != null) aConds.push(eq(assetAudits.tenantId, user.tenantId));
+    const [audit] = await db.select().from(assetAudits).where(and(...aConds)).limit(1);
+    if (!audit) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Audit not found', messageTh: 'ไม่พบการตรวจนับ' });
+    const scans = await db.select().from(assetAuditScans).where(eq(assetAuditScans.auditNo, auditNo)).orderBy(desc(assetAuditScans.id));
+    type ScanRow = { assetNo: string; result: string; registerLocation: string | null };
+    const seen = new Map<string, ScanRow>();
+    for (const s of scans as ScanRow[]) if (!seen.has(s.assetNo)) seen.set(s.assetNo, s); // latest scan per asset
+    const found = [...seen.values()].filter((s) => s.result === 'Found').map((s) => s.assetNo);
+    const misplaced = [...seen.values()].filter((s) => s.result === 'Misplaced').map((s) => ({ asset_no: s.assetNo, register_location: s.registerLocation }));
+    const unknown = [...seen.values()].filter((s) => s.result === 'Unknown').map((s) => s.assetNo);
+    const expected = await this.assetsAtLocation(user, audit.location ?? null);
+    const scannedSet = new Set(seen.keys());
+    const missing = (expected as { assetNo: string; name: string }[]).filter((a) => !scannedSet.has(a.assetNo)).map((a) => ({ asset_no: a.assetNo, name: a.name }));
+    return {
+      audit_no: audit.auditNo, location: audit.location, status: audit.status, expected_count: audit.expectedCount,
+      summary: { found: found.length, missing: missing.length, misplaced: misplaced.length, unknown: unknown.length },
+      found, missing, misplaced, unknown,
+    };
+  }
+
+  // Close an audit → raise a custody-change request (FA-11) for each misplaced asset, proposing to move it
+  // to the audited location. Those requests go through the same maker-checker approval as a scanned move.
+  async closeAudit(auditNo: string, user: JwtUser) {
+    const db = this.db;
+    return db.transaction(async (tx: any) => {
+      const aConds = [eq(assetAudits.auditNo, auditNo)];
+      if (user.tenantId != null) aConds.push(eq(assetAudits.tenantId, user.tenantId));
+      const [audit] = await tx.select().from(assetAudits).where(and(...aConds)).limit(1).for('update');
+      if (!audit) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Audit not found', messageTh: 'ไม่พบการตรวจนับ' });
+      if (audit.status === 'Closed') return { audit_no: auditNo, status: 'Closed', already: true, custody_requests_raised: 0 };
+      let raised = 0;
+      if (audit.location != null) {
+        const scans = await tx.select().from(assetAuditScans).where(eq(assetAuditScans.auditNo, auditNo));
+        const misplaced = new Map<string, any>();
+        for (const s of scans as { assetNo: string; result: string; registerLocation: string | null }[]) if (s.result === 'Misplaced' && !misplaced.has(s.assetNo)) misplaced.set(s.assetNo, s);
+        for (const s of misplaced.values()) {
+          const [pending] = await tx.select().from(assetScanRequests)
+            .where(and(eq(assetScanRequests.assetNo, s.assetNo), eq(assetScanRequests.status, 'PendingApproval'))).limit(1);
+          if (pending) continue; // one custody request pending per asset
+          const [a] = await tx.select().from(fixedAssets).where(eq(fixedAssets.assetNo, s.assetNo)).limit(1);
+          const reqNo = await this.docNo.nextDaily('FAC');
+          await tx.insert(assetScanRequests).values({
+            tenantId: user.tenantId ?? null, reqNo, assetId: a ? Number(a.id) : null, assetNo: s.assetNo,
+            fromLocation: s.registerLocation, toLocation: audit.location, fromAssignedTo: a?.assignedTo ?? null, toAssignedTo: a?.assignedTo ?? null,
+            note: `Audit ${auditNo}: found at ${audit.location}`, source: 'audit', auditNo, status: 'PendingApproval', requestedBy: user.username,
+          });
+          raised++;
+        }
+      }
+      await tx.update(assetAudits).set({ status: 'Closed', closedAt: new Date(), closedBy: user.username }).where(eq(assetAudits.id, audit.id));
+      return { audit_no: auditNo, status: 'Closed', custody_requests_raised: raised };
+    });
+  }
+
+  async listAudits(user: JwtUser, limit = 50) {
+    const rows = await this.db.select().from(assetAudits).orderBy(desc(assetAudits.id)).limit(limit);
+    return { audits: rows.map((r: any) => ({ audit_no: r.auditNo, location: r.location, status: r.status, expected_count: r.expectedCount, created_by: r.createdBy })), count: rows.length };
   }
 
   async assetRegister(_user: JwtUser, status?: string) {

@@ -600,7 +600,7 @@ deferred tax).
 
 **Screen:** `/assets` · **Required permission:** `exec` / `creditors` (finance).
 
-Tabs: Register, **ตั้งทรัพย์สินจาก GR (Capitalize from GR)**, QR Tags, Categories, Depreciation Runs.
+Tabs: Register, **ตั้งทรัพย์สินจาก GR (Capitalize from GR)**, QR Tags, **ตรวจนับทรัพย์สิน (Asset audit)**, **อนุมัติย้ายทรัพย์สิน (Custody approvals)**, Categories, Depreciation Runs.
 
 ### Acquire an asset
 
@@ -709,6 +709,22 @@ Only **one** revaluation can be pending per asset at a time.
 > **native camera**: it lands on a resolver page (`/q`) that identifies the asset
 > and links into the register. The scan box accepts either the raw `ASSET_ID:…`
 > code or the resolver URL.
+
+> **Note — moving an asset needs approval (FA-11).** Scanning to **confirm** an
+> asset is where the register says just records a verification. But **changing** an
+> asset's location or holder is now a **request that a different person approves**
+> (segregation of duties): the register does **not** move until an approver acts.
+> Requests appear on the **อนุมัติย้ายทรัพย์สิน (Custody approvals)** tab — approve or
+> reject them there. You **cannot approve your own** request (the system blocks it).
+
+> **Asset audit (ตรวจนับทรัพย์สิน).** To do a physical count: open the **Asset audit**
+> tab, **Start audit** for a location (leave blank for the whole company), then scan
+> each tag you find (camera / wedge / manual — continuous scanning stays open). The
+> screen tallies **Found / Missing / Misplaced / Unknown** live and lists the missing
+> and misplaced assets. Scanning works **offline** (each scan is queued and syncs when
+> you're back online — a badge shows the pending count). **Close & reconcile** raises a
+> custody-change request (for approval on the Custody approvals tab) for every asset
+> found in the wrong place, proposing to move it to where you counted it.
 
 [screenshot: asset register with depreciation schedule]
 
