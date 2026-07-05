@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, Paperclip, Trash2 } from 'lucide-react';
+import { ClipboardList, Paperclip, Trash2, Printer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -17,6 +17,7 @@ import { statusVariant } from '@/components/ui';
 import { PoForm } from '@/components/procurement-forms';
 
 const PO_LIST_KEY = ['proc-pos'];
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // Procurement team surface — create/approve Purchase Orders against approved requisitions, then track
 // status. Raising a requisition lives at /requisitions (anyone) and goods receipt at /receiving
@@ -55,6 +56,18 @@ export default function ProcurementPage() {
               { key: 'Supplier_Name', label: t('inv.col_supplier') },
               { key: 'Total_Amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => baht(r.Total_Amount) },
               { key: 'Status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
+              {
+                key: 'pdf',
+                label: t('proc.col_print'),
+                sortable: false,
+                render: (r: any) => (
+                  <Button variant="ghost" size="sm" asChild title={t('proc.print_po')}>
+                    <a href={`${BASE}/api/procurement/pos/${encodeURIComponent(r.PO_No)}/pdf`} target="_blank" rel="noopener noreferrer">
+                      <Printer className="size-4" />
+                    </a>
+                  </Button>
+                ),
+              },
             ]}
           />
         )}

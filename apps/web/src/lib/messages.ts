@@ -808,6 +808,8 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'proc.create_po_card': { th: 'สร้างใบสั่งซื้อ (PO)', en: 'Create purchase order (PO)' },
   'proc.po_list': { th: 'ใบสั่งซื้อ', en: 'Purchase orders' },
   'proc.po_empty_desc': { th: 'สร้าง PO ในแบบฟอร์มด้านบนเพื่อเริ่มต้นการจัดซื้อ', en: 'Create a PO in the form above to start purchasing' },
+  'proc.col_print': { th: 'พิมพ์', en: 'Print' },
+  'proc.print_po': { th: 'พิมพ์ใบสั่งซื้อ (PDF)', en: 'Print purchase order (PDF)' },
   // attachments card
   'proc.attach_title': { th: 'ไฟล์แนบใบสั่งซื้อ (ใบแจ้งหนี้ / ใบเสร็จ)', en: 'PO attachments (invoice / receipt)' },
   'proc.attach_po_ph': { th: 'เลขที่ PO เช่น PO-20260702-001', en: 'PO no. e.g. PO-20260702-001' },
