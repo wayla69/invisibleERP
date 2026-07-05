@@ -53,6 +53,24 @@ For every such change, review and update as needed:
    full ~5-min CI cycle. Also check **timing**: the `CodeQL` results gate concludes a few seconds *before*
    the `codeql` analysis job finishes, so a red gate often reflects the **previous** commit's SARIF — a
    freshly-pushed fix can show red purely because the gate is one analysis behind (see gotcha below).
+   **Definitive proof it's stale:** compare the capital `CodeQL` gate's `completed_at` against the lowercase
+   `codeql` job's SARIF-upload time (`get_job_logs` → "Analysis upload status is complete" / "Successfully
+   uploaded results"). If the gate concluded *before* this commit's SARIF finished uploading, it physically
+   read the prior commit's results — do not chase it. And remember `js/sql-injection` needs a **taint
+   source**: a `sum(${col} - ${col})` aggregate that interpolates only column refs (no `@Query` value) can't
+   legitimately fire, so a persistent count that survives your fix means those weren't your sinks.
+8. **A `dirty` PR silently starves CI — re-merge the *current* main.** When `main` advances under an open PR
+   and conflicts, `mergeable_state` goes `dirty` and GitHub **stops scheduling the `pull_request` CI
+   entirely** (it can't build the test-merge ref) — `get_check_runs` returns **0**, and the newest run in
+   `list_workflow_runs` is stuck on the pre-conflict SHA. That looks identical to "CI is slow"; it isn't.
+   Diagnose: `mergeable_state` recomputes lazily (the first `get` after a push returns the stale value and
+   kicks a background recompute; `get` again to see fresh). Fix: **always re-fetch `origin/main` and check
+   `git merge-base --is-ancestor origin/main HEAD`** — main may have advanced *again* since your last merge,
+   so a branch that "should be clean" still conflicts. Merge the live tip, resolve, push; an empty commit
+   only helps if the branch genuinely already contains main. `mergeable_state: unstable` (not `dirty`) means
+   mergeable but a **non-required** check is red/pending — the stale `CodeQL` keeps it at `unstable` (never
+   `clean`) yet does **not** block merge, so verify the *required* gates (`build`, `web-e2e`, harnesses)
+   directly instead of waiting for `clean`.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -125,8 +143,11 @@ For every such change, review and update as needed:
   page (the IdP redirect carries `code`/`id_token` in the URL).
 - **`js/sql-injection` false-positives on Drizzle `sql` templates.** CodeQL flags a `@Query()`-derived
   value interpolated into a `sql\`${col} >= ${param}\`` template even though Drizzle **binds** `${param}`.
-  Use the typed builders (`gte`/`lte`/`eq`/`and`) instead of a raw `sql` template at user-input sites —
-  same parameterized SQL, no sink. (Bit `cashFlowDirect`'s date filter.)
+  Use the typed builders (`gte`/`lte`/`eq`/`ne`/`and`) instead of a raw `sql` template at user-input sites —
+  same parameterized SQL, no sink. (Bit `cashFlowDirect`'s date filter; and `fxExposure`'s `${col}::text <>
+  'Paid'` → `ne(col, 'Paid')`.) But note the query needs a **taint source**: a `sql\`sum(${col} - ${col})\``
+  aggregate that interpolates only column refs (no user input) is **not** a real sink and can't be rewritten
+  with a typed builder anyway — leave it, and don't burn a CI cycle "fixing" a phantom alert on it.
 - **Drizzle migrations MUST be journaled.** Every new `apps/api/drizzle/NNNN_*.sql` needs a matching entry
   appended to `apps/api/drizzle/meta/_journal.json` (sequential `idx`, ascending `when`), or the CI
   `migrations-journaled` gate fails and prod `drizzle-kit migrate` skips it. Verify no duplicate `idx`.
@@ -134,12 +155,38 @@ For every such change, review and update as needed:
 - **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`
   conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
   doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage
-  the result. Currently **186 controls**.
+  the result. Currently **187 controls**. **When `main` added controls too** (a concurrent PR bumped the
+  count): `build_rcm.py` auto-merges cleanly (both control sets combine), so the merged total = base +
+  main's Δ + yours (e.g. 183 + 1 + 3 = 187). Get the truth from `python3 compliance/build_rcm.py --counts`,
+  then reconcile the `<!-- rcm-total -->`/`-implemented`/`-partial`/`-gap` markers in the conflicting census
+  docs (`CONTROL_STATUS_HONEST.md`, `COSO_ICFR_Audit_Readiness_Plan.md`, `iso27001-gap-analysis.md`,
+  `soc2-readiness.md`) to match — resolve to *ours* then `sed` the two differing numbers — and confirm with
+  `node tools/ci/check-rcm-census.mjs` before regenerating the xlsx.
 - **Stacked PRs + squash-merge conflicts.** When a feature PR is stacked on another and the base
   squash-merges to `main`, the dependent PR goes `dirty` because main now holds the same content under a
   *different* commit SHA. Resolve by merging `origin/main` and taking **ours** (the stacked branch already
   contains the base's content as a superset) for every conflict, then regenerate the RCM xlsx. Retarget the
   PR base to `main` only after the base PR merges.
+- **`check-use-client` ratchet + the RSC-serialization trap.** `tools/ci/check-use-client.mjs` counts files
+  whose first line is `'use client'` and may only go DOWN vs `tools/ci/use-client-baseline.json`; a new
+  client-first page must be offset by converting an existing one (or a justified baseline bump, documented
+  in the `_note`, matching the existing precedents). **Two hard constraints learned the hard way:** (1)
+  there is **no server-side `t()`** — i18n is the client `useLang` context — so a display page that shows
+  translated text **cannot** become a pure server component; the canonical pattern is a server-shell
+  `page.tsx` (prefetch via `serverApi`) + a `'use client'` island (renders + `t()` + interactivity), and
+  that island is **irreducible** (it does NOT lower the count). (2) A layout/page can only become a **server
+  component** if every prop it passes to a client child is **serializable** — passing the icon-bearing
+  `INTERNAL_NAV`/`PORTAL_NAV` (Lucide components are functions) across the RSC boundary **fails the web
+  build**: `Functions cannot be passed directly to Client Components`. Fix pattern (how the app layouts were
+  made server components): have the *client* child select the non-serializable data itself behind a
+  serializable prop — `AppShell({ variant: 'internal'|'portal' })` imports the nav internally rather than
+  receiving it. **Always `pnpm --filter @ierp/web build` before claiming a server-conversion works** — the
+  serialization error only surfaces at build/prerender, not typecheck.
+- **After merging `main`, rebuild `@ierp/shared` before trusting typecheck/ratchets.** If the merge brings
+  in new shared exports (e.g. main's `qr.ts` adding `qrLink`/`stripTrailingSlashes`), code importing them
+  fails with `TS2305: has no exported member` against the **stale dist** — which the `check-ts-debt` gate
+  surfaces as phantom "new errors". Read the actual error (`TS2305` ≠ a `noUncheckedIndexedAccess` index
+  error) before assuming new debt, and run `pnpm --filter @ierp/shared build` to resolve.
 - **Authoring `basics` harness GL assertions:** trial-balance rows expose `debit`, `credit`, *and* `balance`
   (= debit − credit). Use `balance` for net-position checks (e.g. a control account that gets both a debit
   and a later credit) — reading the gross `debit` column alone misses the offsetting credit. Service errors
