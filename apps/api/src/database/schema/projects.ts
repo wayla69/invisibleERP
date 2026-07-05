@@ -450,6 +450,79 @@ export const progressClaimLines = pgTable(
 export type ProjectProgressClaim = typeof projectProgressClaims.$inferSelect;
 export type ProgressClaimLine = typeof progressClaimLines.$inferSelect;
 
+// Subcontractor management (docs/35 P2, PROJ-16). A subcontract is a priced scope against BoQ lines executed
+// by a subcontractor; it registers a commitment on those BoQ lines (docs/32 ledger, source SUBCON). The
+// subcontractor's periodic VALUATIONS are certified maker-checker — each withholds retention PAYABLE (2440,
+// shared sub-ledger), deducts back-charges, and posts the certified NET to AP (2000) with the project
+// dimension, capitalising the works cost into project WIP (1260).
+export const projectSubcontracts = pgTable(
+  'project_subcontracts',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    subcontractNo: text('subcontract_no').notNull(),        // business key (SC-YYYYMMDD-NNN)
+    vendorName: text('vendor_name'),                        // the subcontractor
+    title: text('title'),
+    contractValue: numeric('contract_value', { precision: 16, scale: 2 }).notNull().default('0'),
+    retentionPct: numeric('retention_pct', { precision: 9, scale: 4 }).notNull().default('0'),
+    status: text('status').notNull().default('active'),     // active | closed
+    certifiedToDate: numeric('certified_to_date', { precision: 16, scale: 2 }).notNull().default('0'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_subcon_project').on(t.tenantId, t.projectId), byNo: unique('idx_subcon_no').on(t.subcontractNo) }),
+);
+
+// The subcontracted portion of each BoQ line — drives the commitment reserved against that line's budget.
+export const subcontractScope = pgTable(
+  'subcontract_scope',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    subcontractId: bigint('subcontract_id', { mode: 'number' }).notNull().references(() => projectSubcontracts.id),
+    boqLineId: bigint('boq_line_id', { mode: 'number' }).notNull().references(() => projectBoqLines.id),
+    description: text('description'),
+    amount: numeric('amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ bySub: index('idx_subcon_scope_sub').on(t.subcontractId), byBoq: index('idx_subcon_scope_boq').on(t.tenantId, t.boqLineId) }),
+);
+
+// A periodic subcontractor progress valuation (งวดผู้รับเหมาช่วง). value_to_date = contract_value × pct/100;
+// gross_this_val = value_to_date − previously certified; net_certified = gross − retention − back_charge.
+export const subcontractValuations = pgTable(
+  'subcontract_valuations',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    subcontractId: bigint('subcontract_id', { mode: 'number' }).notNull().references(() => projectSubcontracts.id),
+    valuationNo: text('valuation_no').notNull(),            // business key (SV-YYYYMMDD-NNN)
+    seq: integer('seq').notNull().default(1),
+    period: text('period'),
+    status: text('status').notNull().default('draft'),      // draft | certified
+    pctComplete: numeric('pct_complete', { precision: 9, scale: 4 }).notNull().default('0'),
+    valueToDate: numeric('value_to_date', { precision: 16, scale: 2 }).notNull().default('0'),
+    prevCertified: numeric('prev_certified', { precision: 16, scale: 2 }).notNull().default('0'),
+    grossThisVal: numeric('gross_this_val', { precision: 16, scale: 2 }).notNull().default('0'),
+    retentionPct: numeric('retention_pct', { precision: 9, scale: 4 }).notNull().default('0'),
+    retentionAmount: numeric('retention_amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    backCharge: numeric('back_charge', { precision: 16, scale: 2 }).notNull().default('0'),
+    netCertified: numeric('net_certified', { precision: 16, scale: 2 }).notNull().default('0'),
+    entryNo: text('entry_no'),
+    createdBy: text('created_by'),
+    certifiedBy: text('certified_by'),                      // checker — must differ from created_by (SoD)
+    certifiedAt: timestamp('certified_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ bySub: index('idx_subval_sub').on(t.subcontractId), byTenant: index('idx_subval_tenant').on(t.tenantId, t.subcontractId), byNo: unique('idx_subval_no').on(t.valuationNo) }),
+);
+export type ProjectSubcontract = typeof projectSubcontracts.$inferSelect;
+export type SubcontractScope = typeof subcontractScope.$inferSelect;
+export type SubcontractValuation = typeof subcontractValuations.$inferSelect;
+
 // Project Material Requisition (PMR) — M2, docs/32, PROJ-13. The single request document by which site staff
 // draw material against a project's BoQ. On submit the system checks each line against its BoQ-line remaining
 // budget: WITHIN budget → routed to procurement (a project-tagged PR is raised); OVER budget → parked

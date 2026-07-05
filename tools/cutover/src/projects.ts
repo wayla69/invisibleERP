@@ -822,6 +822,63 @@ async function main() {
   const ccList = await inj('GET', '/api/projects/close-reviews', admin);
   ok('PROJ-03: the close review is recorded in the register (Approved)', (ccList.json.reviews ?? []).some((r: any) => r.period === '2026-06' && r.status === 'Approved'), `n=${ccList.json.count}`);
 
+  // ── P2 (docs/35) — subcontractor management + retention payable (Track B, PROJ-16) ──
+  // A subcontract reserves BoQ budget (docs/32 commitment); the subcontractor's valuations are certified
+  // maker-checker → post AP + WIP + retention PAYABLE (→ the P0 sub-ledger), with back-charges.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-SUB', name: 'งานจ้างเหมาช่วง', customer_name: 'เจ้าของงาน', billing_type: 'TM' });
+  const subBoq = await inj('POST', '/api/projects/PRJ-SUB/boq', admin, { title: 'BoQ จ้างเหมา', lines: [
+    { category: 'subcon', description: 'งานเสาเข็ม', budget_amount: 60000 },
+    { category: 'subcon', description: 'งานหลังคา', budget_amount: 40000 },
+  ] });
+  const scBoqId = subBoq.json.boq?.id;
+  const scL1 = (subBoq.json.lines ?? []).find((l: any) => l.description === 'งานเสาเข็ม')?.id;
+  await inj('POST', `/api/projects/boq/${scBoqId}/approve`, mgr);
+
+  const sc1 = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', vendor_name: 'หจก. รับเหมาช่วง', title: 'เสาเข็มเจาะ', retention_pct: 10, scope: [{ boq_line_id: scL1, amount: 40000, description: 'งานเสาเข็ม' }] });
+  ok('PROJ-16: create subcontract → contract_value 40000, retention 10%, active, remaining 40000',
+    sc1.status < 300 && near(sc1.json.contract_value, 40000) && near(sc1.json.retention_pct, 10) && sc1.json.status === 'active' && near(sc1.json.remaining, 40000),
+    JSON.stringify({ s: sc1.status, cv: sc1.json.contract_value, st: sc1.json.status }));
+  const sc1No = sc1.json.subcontract_no;
+  const scCommit = await inj('GET', '/api/projects/PRJ-SUB/commitments', admin);
+  ok('PROJ-16: subcontract reserves BoQ-line budget (docs/32 commitment) → committed 40000',
+    near(scCommit.json.summary?.committed, 40000) && (scCommit.json.commitments ?? []).some((c: any) => c.source_doc_type === 'SUBCON'),
+    JSON.stringify({ committed: scCommit.json.summary?.committed }));
+  const scOver = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', scope: [{ boq_line_id: scL1, amount: 30000 }] }); // 40000+30000 > 60000
+  ok('PROJ-16: subcontract beyond the BoQ-line budget → 400 BUDGET_EXCEEDED (rolled back)', scOver.status === 400 && scOver.json.error?.code === 'BUDGET_EXCEEDED', `${scOver.status} ${scOver.json.error?.code}`);
+
+  const sv1 = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { period: '2026-07', pct_complete: 50 });
+  ok('PROJ-16: valuation draft → gross 20000 (50% of 40000), retention 2000, net 18000',
+    sv1.status < 300 && sv1.json.status === 'draft' && near(sv1.json.gross_this_val, 20000) && near(sv1.json.retention_amount, 2000) && near(sv1.json.net_certified, 18000),
+    JSON.stringify({ g: sv1.json.gross_this_val, net: sv1.json.net_certified }));
+  const sv1No = sv1.json.valuation_no;
+  const sv1Self = await inj('POST', `/api/subcontracts/valuations/${sv1No}/certify`, admin);
+  ok('PROJ-16: preparer self-certify valuation → 400 SOD_SELF_APPROVAL', sv1Self.status === 400 && sv1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${sv1Self.status} ${sv1Self.json.error?.code}`);
+  const sv1Cert = await inj('POST', `/api/subcontracts/valuations/${sv1No}/certify`, mgr);
+  ok('PROJ-16: certify valuation → JE Dr 1260 20000 / Cr 2000 18000 / Cr 2440 2000 (net 18000, retention 2000)',
+    sv1Cert.status < 300 && sv1Cert.json.status === 'certified' && near(sv1Cert.json.net_certified, 18000) && near(sv1Cert.json.retention, 2000) && near(sv1Cert.json.wip_cost, 20000) && /^JE-/.test(sv1Cert.json.entry_no ?? ''),
+    JSON.stringify({ net: sv1Cert.json.net_certified, wip: sv1Cert.json.wip_cost, je: sv1Cert.json.entry_no }));
+  const scRet1 = await inj('GET', '/api/retention/project/PRJ-SUB', admin);
+  ok('PROJ-16 → P0: retention 2000 withheld into the shared sub-ledger as a subcontractor PAYABLE',
+    near(scRet1.json.payable?.outstanding, 2000) && near(scRet1.json.payable?.withheld, 2000), JSON.stringify({ pay: scRet1.json.payable }));
+
+  const sv2 = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { period: '2026-08', pct_complete: 80, back_charge: 1000 });
+  ok('PROJ-16: valuation 2 nets off prior + back-charge → gross 12000 (32000−20000), net 9800 (12000−1200−1000)',
+    near(sv2.json.gross_this_val, 12000) && near(sv2.json.back_charge, 1000) && near(sv2.json.net_certified, 9800), JSON.stringify({ g: sv2.json.gross_this_val, net: sv2.json.net_certified }));
+  const sv2Cert = await inj('POST', `/api/subcontracts/valuations/${sv2.json.valuation_no}/certify`, mgr);
+  ok('PROJ-16: certify valuation 2 → net 9800, wip_cost 11000 (gross − back-charge)', sv2Cert.status < 300 && near(sv2Cert.json.net_certified, 9800) && near(sv2Cert.json.wip_cost, 11000), JSON.stringify({ net: sv2Cert.json.net_certified, wip: sv2Cert.json.wip_cost }));
+
+  const svBad = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { pct_complete: 90, back_charge: 999999 });
+  ok('PROJ-16: back-charge exceeding the net → 400 BAD_BACK_CHARGE', svBad.status === 400 && svBad.json.error?.code === 'BAD_BACK_CHARGE', `${svBad.status} ${svBad.json.error?.code}`);
+  const svNone = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { pct_complete: 80 }); // same cumulative → 0 movement
+  ok('PROJ-16: no progress since the last valuation → 400 NOTHING_TO_CERTIFY', svNone.status === 400 && svNone.json.error?.code === 'NOTHING_TO_CERTIFY', `${svNone.status} ${svNone.json.error?.code}`);
+
+  const scList = await inj('GET', '/api/subcontracts/project/PRJ-SUB', admin);
+  ok('PROJ-16: subcontract register → value 40000, certified_to_date 32000, retention_payable 3200',
+    near(scList.json.subcontract_value, 40000) && near(scList.json.certified_to_date, 32000) && near(scList.json.retention_payable, 3200),
+    JSON.stringify({ v: scList.json.subcontract_value, ctd: scList.json.certified_to_date, rp: scList.json.retention_payable }));
+  const scRet2 = await inj('GET', '/api/retention/project/PRJ-SUB', admin);
+  ok('PROJ-16 → P0: retention payable outstanding 3200 after two certified valuations (2000 + 1200)', near(scRet2.json.payable?.outstanding, 3200), JSON.stringify({ pay: scRet2.json.payable?.outstanding }));
+
   // ── P1 (docs/35) — progress billing / งวดงาน + retention receivable (Track A, PROJ-15) ──
   // A construction contract billed in periodic progress claims: value work by BoQ line (cumulative), withhold
   // retention on certification (→ the P0 sub-ledger), maker-checker certify, Fixed-contract cap.

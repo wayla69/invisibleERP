@@ -25,6 +25,9 @@ export const PERMISSIONS = [
   // ── Project progress billing (งวดงาน) single-duty split (docs/35 P1, PROJ-15; SoD R17) — raising a
   //    progress claim is segregated from certifying it (bill work not done / withhold retention improperly). ──
   'proj_billing', 'proj_billing_certify',
+  // ── Subcontractor valuation single-duty split (docs/35 P2, PROJ-16; SoD R18) — raising a subcontractor
+  //    progress valuation is segregated from certifying it (over-pay a subcontractor / mis-handle retention). ──
+  'proj_subcon', 'proj_subcon_certify',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -37,6 +40,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'md_vendor', 'md_item', 'md_config',
   'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
   'proj_billing', 'proj_billing_certify',
+  'proj_subcon', 'proj_subcon_certify',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -53,8 +57,8 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Sales & Orders': ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
   'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
-  'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify'],
-  'Procurement': ['procurement', 'pr_raise'],
+  'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify'],
+  'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
 };
@@ -71,7 +75,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // Procurement is now a SoD-clean buying role (0 conflicts): it buys (procurement) and may raise PRs
   // (pr_raise) — it no longer bundles paying (creditors), approving (approvals) or the vendor master
   // (masterdata). AP is the ApClerk's duty; vendor-master is MasterDataAdmin's (SoD R02/R03/R07/R13).
-  Procurement: ['procurement', 'pr_raise', 'delivery'],
+  Procurement: ['procurement', 'pr_raise', 'delivery', 'proj_subcon'],
   // Planner is now a SoD-clean supply-chain/analytics role (0 conflicts): can raise and track POs
   // (procurement), view stock (wh_count/wh_custody/lots/locations), read financial reports (fin_report)
   // — but cannot approve workflow items (approvals), post/close GL (exec → R05), adjust stock
@@ -87,7 +91,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   InventoryController: ['wh_adjust', 'pr_raise'],
   StockCounter: ['wh_count', 'pr_raise'],
   GlAccountant: ['gl_post', 'recon_prep', 'fin_report', 'pr_raise'],
-  FinancialController: ['gl_close', 'gl_coa', 'gl_posting_rules', 'approvals', 'fin_report', 'pr_raise', 'proj_billing_certify'],
+  FinancialController: ['gl_close', 'gl_coa', 'gl_posting_rules', 'approvals', 'fin_report', 'pr_raise', 'proj_billing_certify', 'proj_subcon_certify'],
   MasterDataAdmin: ['masterdata', 'bom_master', 'pr_raise'], // coarse 'masterdata' expands to md_vendor/item/config (conflict-free: no transactional perms)
   PricingManager: ['pricelist', 'promos', 'pr_raise'],
   CreditManager: ['crm', 'pr_raise'],
@@ -187,6 +191,8 @@ export const SOD_RULES: SodRule[] = [
     a: ['crm_campaign'], b: ['crm_points_adjust'], severity: 'High', risk: 'Self-issue loyalty value through two channels (campaign coupons + manual adjustment).', mitigation: 'Separate campaign issuance from points adjustment; review issuance + adjustment logs.' },
   { id: 'R17', dutyA: 'Raise progress claim (งวดงาน)', dutyB: 'Certify progress claim',
     a: ['proj_billing'], b: ['proj_billing_certify'], severity: 'High', risk: 'Raise and certify one’s own progress claim — bill work not done and withhold/release retention improperly.', mitigation: 'Separate claim preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-15).' },
+  { id: 'R18', dutyA: 'Raise subcontractor valuation', dutyB: 'Certify subcontractor valuation',
+    a: ['proj_subcon'], b: ['proj_subcon_certify'], severity: 'High', risk: 'Raise and certify one’s own subcontractor valuation — over-pay a subcontractor / mishandle retention and back-charges.', mitigation: 'Separate valuation preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-16).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }
