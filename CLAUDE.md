@@ -171,6 +171,28 @@ For every such change, review and update as needed:
   and a later credit) — reading the gross `debit` column alone misses the offsetting credit. Service errors
   surface as `json.error.code` (the `AllExceptionsFilter` wraps the body in `{ error: {...} }`), not
   `json.code`.
+- **A `tenant_id` COLUMN makes a table "tenant-scoped" to the guards — name platform tables differently.** The
+  `cutover/tenant-idx` gate (R1-1 / AUD-ARC-01) flags **any** table with a `tenant_id` column that lacks a
+  leading `(tenant_id, …)` index, and the generic RLS loop forces RLS on it. A **platform-level** table (read
+  only by gods via the `@PlatformAdmin` bypass — no per-tenant isolation) must therefore **not** call its
+  company column `tenant_id`: use `about_tenant_id` / `created_tenant_id` (see `platform_notifications`,
+  `signup_requests`) so both the guard and the RLS loop skip it. Grant `app_user` on the new table in the
+  migration's `DO $$ … GRANT … $$` block (mirror `0234`/`0247`); no RLS clause needed.
+- **Two web ratchets gate the `build` job (both may only go DOWN, but feature PRs routinely bump them by the
+  count they add — that's the norm, see the baselines' own `_note`).** `tools/ci/check-use-client.mjs` counts
+  files whose first statement is `'use client'` (`use-client-baseline.json`) — a genuinely-interactive new
+  page adds one island; keep it flat by inlining into an existing `'use client'` file, else bump the baseline
+  with a justification. `tools/ci/check-ts-debt.mjs` counts `as any` in **`apps/api/src/**/*.ts` only** (not
+  `.tsx`, not web) (`ts-debt-baseline.json`) — type interceptor-set request fields on the `req` annotation
+  instead of `(req as any)`. Run both locally before pushing; they run AFTER typecheck+build+coverage, so a
+  green typecheck can still fail the `build` job on a ratchet.
+- **A merged PR is finished — restart the branch, don't reuse it.** After your designated branch's PR
+  squash-merges to `main`, follow-up work is a FRESH change: `git fetch origin main && git checkout -B <branch>
+  origin/main`, build, then **`git push --force-with-lease`** (the remote branch still holds the now-merged
+  pre-squash commits, so a fast-forward is impossible — force-with-lease is correct and safe here). The auto
+  classifier blocks force-push + `commit --amend` until the user explicitly authorizes; if the stop-hook flags
+  your tip as unverified, `git commit --amend --no-edit --reset-author` fixes the committer email
+  (`noreply@anthropic.com`). Open a NEW PR for the follow-up. Repo merge convention: **squash**.
 
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
@@ -210,6 +232,18 @@ For every such change, review and update as needed:
   forward** resource/cash forecast (`pipelineSummary` × `resourceCapacity` × milestone/POC billing), and a
   schedulable **period governance pack** (`project_governance_pack` BI report). Read-only aggregators on the
   existing spine — build on, don't duplicate. Three sequential doc-synced PRs.
+- **Platform Console / god (cross-company operations) — DELIVERED (PRs #418 + #420).** The platform owner
+  ("god", `PLATFORM_ADMIN_USERNAMES`) runs the whole fleet from **`/platform`** (a god-only nav group in
+  `apps/web/src/components/app-shell.tsx`, gated on `is_platform_owner` from `GET /api/auth/me`, injected
+  AFTER the perm-filter so per-tenant Admins never see it). UI island: `apps/web/src/app/(internal)/platform/
+  platform-client.tsx` — tabs **ภาพรวม** (SaaS KPIs + needs-attention + system-health + AI-spend), **บริษัท**
+  (provision/suspend/act-as, bulk actions, tags), **Onboarding** (requests/invites), **แจ้งเตือน** (god event
+  inbox), **กิจกรรม** (cross-company audit). Company **switcher + scope banner** live in `app-shell.tsx`.
+  Backend: `@PlatformAdmin` routes in `modules/billing/billing.controller.ts` (`admin/tenants[/:id][/plan|/extend-trial|/tags|/suspend|/reactivate]`, `admin/ai-usage`), `modules/platform-notifications/` (god inbox).
+  **God act-as** is header-driven in `common/tenant-tx.interceptor.ts`: `X-Act-As-Tenant` narrows god to one
+  company (only for a god; a non-god's header is ignored); `X-Act-As-Read-Only: 1` rejects mutations
+  (`403 READONLY_IMPERSONATION`). Web sends both from `apps/web/src/lib/api.ts`. Full model + revision
+  history: `docs/ops/tenancy-model.md` §2bis–§2quinquies. ToE: `cutover/pg-core.ts` + `cutover/onboarding.ts`.
 - **Project material control + shop-for-a-project (docs/32, PN-16):** the requester-facing shop for a project
   is a thin surface over the **PMR** spine — do NOT add budget logic to `createPr`. Flow: `/shop` project picker
   (or the *Shop for this project* button on `/projects/[code]`) → `/shop/project/[code]` browses ONLY the
