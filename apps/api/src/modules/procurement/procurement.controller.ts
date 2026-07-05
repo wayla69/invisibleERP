@@ -95,6 +95,14 @@ export class ProcurementController {
   @Get('items/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
   searchItems(@Query('q') q: string, @Query('limit') limit?: string) { return this.svc.searchItems(q ?? '', limit ? Number(limit) : undefined); }
 
+  // Product catalog for the shop/basket requisition screen (/shop) — read-only item-master browse grouped
+  // by product category, so staff can pick items into a basket and check out a PR. Same low-risk pr_raise
+  // duty as raising the PR itself. Optional q (code/description) + category-key filter.
+  @Get('catalog') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  catalog(@CurrentUser() u: JwtUser, @Query('q') q?: string, @Query('category') category?: string, @Query('limit') limit?: string) {
+    return this.svc.catalog(u, { q, category, limit: limit ? Number(limit) : undefined });
+  }
+
   // Vendor search for the PR→PO panel (pick a real supplier from the master).
   @Get('vendors/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
   searchVendors(@Query('q') q: string, @Query('limit') limit?: string) { return this.svc.searchVendors(q ?? '', limit ? Number(limit) : undefined); }

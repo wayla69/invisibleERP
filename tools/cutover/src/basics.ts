@@ -643,6 +643,13 @@ async function main() {
   // the asset carries its source GR/PO for end-to-end traceability.
   const prCap = await inj('POST', '/api/procurement/prs', admin, { remarks: 'Need 2 laptops', priority: 'Normal', items: [{ item_id: 'LAPTOP', item_description: 'Dev laptop', request_qty: 2, uom: 'EA', reason: 'capex' }] });
   ok('Capitalize: PR raised for the capital request', prCap.status === 201 && /^PR-/.test(prCap.json?.pr_no ?? ''), JSON.stringify(prCap.json).slice(0, 80));
+  // Shop/basket requisition screen (/shop) — the product-catalog browse feeding the basket. Read-only,
+  // grouped by product category, same low-risk pr_raise duty as raising the PR itself. Assert the envelope
+  // (items + categories) and the urgent-priority checkout path (priority:'Urgent' → PR carries it through).
+  const shopCat = await inj('GET', '/api/procurement/catalog?limit=1000', admin);
+  ok('Shop catalog: browse endpoint returns items + category summary (pr_raise)', shopCat.status === 200 && Array.isArray(shopCat.json?.items) && Array.isArray(shopCat.json?.categories), `${shopCat.status} items=${(shopCat.json?.items ?? []).length} cats=${(shopCat.json?.categories ?? []).length}`);
+  const prUrgent = await inj('POST', '/api/procurement/prs', admin, { remarks: 'ด่วน จากหน้าเลือกซื้อสินค้า', priority: 'Urgent', items: [{ item_id: 'ปากกาลูกลื่น 12 ด้าม', item_description: 'ปากกาลูกลื่น 12 ด้าม', request_qty: 1, uom: 'กล่อง', reason: 'ด่วน' }] });
+  ok('Shop checkout: urgent free-text (off-catalog) basket line raises a PR with priority=Urgent', prUrgent.status === 201 && /^PR-/.test(prUrgent.json?.pr_no ?? ''), `${prUrgent.status} ${JSON.stringify(prUrgent.json).slice(0, 70)}`);
   const poCap = await inj('POST', '/api/procurement/pos', admin, { vendor_name: 'Capital Vendor', expected_date: daysAgo(0), items: [{ item_id: 'LAPTOP', item_description: 'Dev laptop', order_qty: 2, unit_price: 25000, uom: 'EA', is_capital: true }] });
   ok('Capitalize: PO raised with a capital line (2 @ 25000 = 50000)', poCap.status === 201 && /^PO-/.test(poCap.json?.po_no ?? '') && near(poCap.json?.total_amount, 50000), JSON.stringify(poCap.json).slice(0, 90));
   await inj('PATCH', `/api/procurement/pos/${poCap.json?.po_no}/approve`, admin, { approve: true });

@@ -19,6 +19,7 @@ This is deliberate separation of duties (the person who *orders* must not also
 | Step | Screen | Who / required permission |
 |---|---|---|
 | Raise a requisition (PR) | `/requisitions` | **Anyone in the company** — `pr_raise` |
+| **Shop for items** (catalog → basket → checkout a PR) | `/shop` | **Anyone in the company** — `pr_raise` |
 | Create / approve a PO | `/procurement` | **Procurement** — `procurement` |
 | Print / send a PO (PDF) | `/procurement` (พิมพ์) | **Procurement / Planner / Exec / Warehouse** — view only |
 | Receive goods (GR) | `/receiving` | **Warehouse** — `wh_receive` |
@@ -99,6 +100,39 @@ handy on the floor or in the stockroom. One-time setup first:
 > as the quantity and everything before it as the item name (and anything after the
 > number as an optional reason). Purchasing assigns the real item code when the PR
 > becomes a PO.
+
+### Shop for items — catalog → basket → checkout (`/shop`)
+
+For an easier, shopping-style way to raise a requisition, use **เลือกซื้อสินค้า**
+(`/shop`, ERP/POS nav → จัดซื้อ). It is the same requisition (a PR) as the form
+above — just a friendlier front-end — so it needs only `pr_raise`, and what you
+check out lands with Procurement for approval and PO conversion exactly like any
+other PR.
+
+**Screen:** `/shop` (**เลือกซื้อสินค้า**) · **Required permission:** `pr_raise`
+
+1. **Browse by category.** Products from the item register are shown as cards
+   **grouped by product category**, so they are easy to find. Use the **search box**
+   (name or code) or tap a **category pill** to filter.
+2. **Add to basket.** Press **ใส่ตะกร้า** on a product to drop it in the basket;
+   press it again (or use the **+ / −** steppers in the basket) to change the
+   quantity.
+3. **Flag urgent (priority).** Need it fast? Press the **⚡ ด่วน** button on the
+   product (or on the basket line). Any urgent line makes the whole requisition go
+   out as **priority "Urgent"** so Procurement can see it should be handled first.
+4. **Can't find it? Ask for it in your own words.** If a product isn't in the
+   register, use the **"ไม่มีสินค้าที่ต้องการ? พิมพ์ขอเพิ่มเองได้"** card to type the
+   item you want (and a unit/quantity) — just like typing a request in LINE. It is
+   added to the basket as a **ขอเพิ่ม (ไม่มีในทะเบียน)** line; Procurement assigns the
+   real item code when it becomes a PO.
+5. **Add a note (optional)** for Procurement — e.g. which branch, a preferred
+   brand, or when you need it.
+6. **Checkout.** Press **ส่งคำขอซื้อให้จัดซื้อ**. A green toast confirms the PR
+   number; track its status on **คำขอซื้อ (PR)** (`/requisitions`) or the Approvals
+   screen.
+
+**Expected result:** One purchase requisition is created for every item in the
+basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval.
 
 **Seeing your PRs on the web:** the requisitions page (`/requisitions`) now shows a
 **คำขอซื้อล่าสุด** table listing every PR — raised here *or* from LINE chat — with its
