@@ -172,7 +172,9 @@ delta_pp_pct, delta_yoy_pct, vs_budget_pct, rag: 'green'|'amber'|'red', trend: n
 **Shipped:** `FinanceMetricsService` + `finance-metrics-constants` (31-KPI `METRICS` registry + `FIN_STATEMENT_MAP`
 account groups) + `GET /api/finance/metrics/pack|:id/trend|:id/drill`; `exec_scorecard` finance leg now reads the
 canonical engine; detective control **ELC-07** added to the RCM (→ 184 controls); `finance-kpi` cutover harness
-(28 checks) green; docs synced (PN-26 §3c rev 2.0, user manual 09 §1b, UAT-RPT-050). Below is the original plan.
+(34 checks) green; docs synced (PN-26 §3c rev 2.0, user manual 09 §1b, UAT-RPT-050). Efficiency KPIs (turnover,
+DSO/DPO/DIO, ROA/ROE, days-cash, runway) use a **trailing-twelve-month basis** so partial-month views aren't
+distorted; margins use the selected window. Below is the original plan.
 
 **Goal:** the canonical `FinanceMetricsService` + `GET /api/finance/metrics/pack|:id/trend|:id/drill`, wired
 into `exec_scorecard` so it stops hand-rolling finance legs.
@@ -335,4 +337,5 @@ closes the biggest Oracle gap (a real, comparative, drill-through CFO dashboard)
 | Date | Author | Change |
 |---|---|---|
 | 2026-07-05 | CTO/CFO | Initial draft for approval — Oracle-grade finance dashboards & KPI plan (Phases 1–6). |
-| 2026-07-05 | Platform | **Phase 1 DELIVERED** — FinanceMetricsService (31 KPIs) + `/api/finance/metrics/*`, exec_scorecard refactor, ELC-07 control, `finance-kpi` harness (28 ✓), doc sync (PN-26 §3c, manual 09 §1b, UAT-RPT-050). |
+| 2026-07-05 | Platform | **Phase 1 DELIVERED** — FinanceMetricsService (31 KPIs) + `/api/finance/metrics/*`, exec_scorecard refactor, ELC-07 control, `finance-kpi` harness (34 ✓), doc sync (PN-26 §3c, manual 09 §1b, UAT-RPT-050). |
+| 2026-07-05 | Platform | **Review fix** — efficiency/annualized KPIs (turnover, DSO/DPO/DIO, ROA/ROE, days-cash, runway) moved to a **trailing-12-month basis** (window-length-independent; CLOSE-excluded via new `incomeStatement` `excludeSources` arg) after review showed month-to-date windows distorting them; growth KPIs regrouped into `growth_cash`. Harness 28→34 checks. |

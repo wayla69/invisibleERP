@@ -125,13 +125,17 @@ async function main() {
   ok('interest_coverage = 6 (EBIT 30k / interest 5k)', near(val('interest_coverage'), 6), `=${val('interest_coverage')}`);
   ok('net_debt = -40000 (lease 60k − cash 100k)', near(val('net_debt'), -40000), `=${val('net_debt')}`);
 
-  // Date-dependent KPIs — assert against the same day-count math the service uses
-  const days = daysInclusive(monthStartOf(today), today);
-  const dsoExpected = Math.round((50000 / 100000) * days * 100) / 100; // arControl 50k / rev 100k × days
-  ok(`dso = arControl/rev×days (${days}d ⇒ ${dsoExpected})`, near(val('dso'), dsoExpected), `=${val('dso')} exp=${dsoExpected}`);
-  const ccc = val('cash_conversion_cycle');
-  ok('cash_conversion_cycle = DSO + DIO − DPO (consistent)', typeof ccc === 'number' && Number.isFinite(ccc), `=${ccc}`);
-  ok('ar_turnover ≈ 365/DSO (annualized)', near(val('ar_turnover'), Math.round((365 / dsoExpected) * 10000) / 10000, 0.01), `=${val('ar_turnover')}`);
+  // Efficiency KPIs — TTM basis (annualized on the trailing-12-month flow, so DATE-INDEPENDENT).
+  // Seed flow all falls inside the trailing year ⇒ ttmRevenue 100k, ttmCogs 40k, ttmNetIncome 25k.
+  ok('dso = 182.5 (AR 50k / TTM rev 100k × 365)', near(val('dso'), 182.5), `=${val('dso')}`);
+  ok('dpo = 365 (AP 40k / TTM COGS 40k × 365)', near(val('dpo'), 365), `=${val('dpo')}`);
+  ok('dio = 273.75 (inv 30k / TTM COGS 40k × 365)', near(val('dio'), 273.75), `=${val('dio')}`);
+  ok('ar_turnover = 2 (TTM rev 100k / AR 50k)', near(val('ar_turnover'), 2), `=${val('ar_turnover')}`);
+  ok('inventory_turnover = 1.3333 (TTM COGS 40k / inv 30k)', near(val('inventory_turnover'), 1.3333), `=${val('inventory_turnover')}`);
+  ok('cash_conversion_cycle = 91.25 (DSO 182.5 + DIO 273.75 − DPO 365)', near(val('cash_conversion_cycle'), 91.25), `=${val('cash_conversion_cycle')}`);
+  ok('roa_pct = 6.76 (TTM NI 25k / assets 370k)', near(val('roa_pct'), 6.76, 0.02), `=${val('roa_pct')}`);
+  ok('roe_pct = 9.26 (TTM NI 25k / equity 270k)', near(val('roe_pct'), 9.26, 0.02), `=${val('roe_pct')}`);
+  ok('cash_runway_months = null (TTM profitable, not burning)', val('cash_runway_months') === null, `=${val('cash_runway_months')}`);
 
   // AR/AP health (from the seeded aging sub-ledger)
   ok('overdue_ar_pct = 40 (20k overdue / 50k)', near(val('overdue_ar_pct'), 40), `=${val('overdue_ar_pct')}`);

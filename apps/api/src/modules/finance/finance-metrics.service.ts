@@ -41,6 +41,7 @@ function shiftYears(s: string, delta: number): string {
   const d = parseYmd(s); d.setUTCFullYear(d.getUTCFullYear() + delta); return fmt(d);
 }
 function endOfPrevMonth(s: string): string { const d = parseYmd(monthStartOf(s)); d.setUTCDate(0); return fmt(d); }
+function ttmStart(to: string): string { const d = parseYmd(to); d.setUTCFullYear(d.getUTCFullYear() - 1); d.setUTCDate(d.getUTCDate() + 1); return fmt(d); } // trailing-12-month start
 function daysInclusive(from: string, to: string): number {
   return Math.max(1, Math.round((parseYmd(to).getTime() - parseYmd(from).getTime()) / 86400000) + 1);
 }
@@ -109,6 +110,15 @@ export class FinanceMetricsService {
     const operatingIncome = round2(netIncome + interest + incomeTax); // EBIT
     const ebitda = round2(operatingIncome + depreciation);
 
+    // Trailing-twelve-month P&L (ending at `to`, CLOSE excluded so a year-end crossing isn't zeroed) — the
+    // basis for annualized/efficiency KPIs (turnover, DSO/DPO/DIO, ROA/ROE, days-cash, runway).
+    const ttm: any = await this.ledger.incomeStatement(ttmStart(to), to, undefined, undefined, ['CLOSE']);
+    const ttmFlow = (codes: string[]) => (ttm.lines ?? []).filter((l: any) => inSet(String(l.account_code), codes)).reduce((a: number, l: any) => a + (num(l.debit) - num(l.credit)), 0);
+    const ttmRevenue = num(ttm.revenue);
+    const ttmCogs = round2(ttmFlow(COGS_ACCOUNTS));
+    const ttmOpex = round2(num(ttm.expense) - ttmCogs - ttmFlow(DEPRECIATION_ACCOUNTS) - ttmFlow(INTEREST_EXPENSE_ACCOUNTS) - ttmFlow(INCOME_TAX_ACCOUNTS));
+    const ttmNetIncome = num(ttm.net_income);
+
     // Cash flow (over [from,to]) — OCF + net investing ⇒ FCF proxy
     let ocf = 0, capex = 0;
     try { const cf: any = await this.ledger.cashFlowStatement(from, to); ocf = num(cf.operating?.net); capex = num(cf.investing?.net); }
@@ -131,6 +141,7 @@ export class FinanceMetricsService {
       currentLiabilities: round2(currentLiabilities), nonCurrentLiabilities: round2(nonCurrentLiabilities), totalLiabilities,
       equity, interestBearingDebt: round2(interestBearingDebt), arControl: round2(arControl), apControl: round2(apControl),
       revenue, cogs, grossProfit, opex, depreciation, interest, incomeTax, operatingIncome, ebitda, netIncome,
+      ttmRevenue, ttmCogs, ttmOpex, ttmNetIncome,
       ocf: round2(ocf), capex: round2(capex), fcf,
       arTotal, arOverdue, ar90plus, allowance: round2(allowance), apTotal, apOverdue,
     };
@@ -205,6 +216,9 @@ export class FinanceMetricsService {
       });
     }
 
+    // Stable group ordering so the cross-snapshot growth KPIs sit inside the growth_cash block, not after it.
+    const groupOrder = new Map(METRIC_GROUPS.map((g, i) => [g.id, i]));
+    rows.sort((a, b) => (groupOrder.get(a.group as any) ?? 99) - (groupOrder.get(b.group as any) ?? 99));
     const filtered = q.group ? rows.filter((r) => r.group === q.group) : rows;
     return {
       as_of: w.cur.to, window: w.cur, compare: { prior_period: w.pp, prior_year: w.py },

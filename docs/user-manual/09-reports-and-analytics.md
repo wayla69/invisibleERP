@@ -86,8 +86,11 @@ returns ~31 financial KPIs, each with **RAG** (🟢 green / 🟡 amber / 🔴 re
 - **สุขภาพลูกหนี้/เจ้าหนี้ (AR/AP health):** overdue-AR/AP %, AR-over-90-days, allowance coverage.
 
 Each KPI carries its **prior-period, prior-year and budget** comparative and a
-RAG rating against a defined threshold. Two companion endpoints let you *explain*
-a number, not just read it:
+RAG rating against a defined threshold. Margins reflect the period you pick; the
+**efficiency KPIs (turnover, DSO/DPO/DIO, ROA, ROE, days-cash, runway) are always
+on a trailing-12-month basis**, so they read the same whether you open the board on
+the 1st or the 28th. Two companion endpoints let you *explain* a number, not just
+read it:
 
 - `GET /api/finance/metrics/{id}/drill` — the GL account rows behind a KPI (e.g.
   why the current ratio moved). Drill through a 🔴 KPI straight to the ledger.

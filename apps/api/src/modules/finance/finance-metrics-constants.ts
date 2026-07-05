@@ -68,10 +68,13 @@ export interface FinSnapshot {
   currentLiabilities: number; nonCurrentLiabilities: number; totalLiabilities: number;
   equity: number; interestBearingDebt: number;
   arControl: number; apControl: number;
-  // P&L (over the window)
+  // P&L (over the window) — used for margins (ratios of same-window flows, window-length-independent)
   revenue: number; cogs: number; grossProfit: number; opex: number;
   depreciation: number; interest: number; incomeTax: number;
   operatingIncome: number; ebitda: number; netIncome: number;
+  // Trailing-twelve-month P&L (ending at `to`, CLOSE excluded) — the basis for annualized/efficiency KPIs
+  // (turnover, DSO/DPO/DIO, ROA/ROE, days-cash, runway) so they are stable regardless of the display window.
+  ttmRevenue: number; ttmCogs: number; ttmOpex: number; ttmNetIncome: number;
   // Cash flow (over the window)
   ocf: number; capex: number; fcf: number;
   // AR/AP health (as of `to`, from aging) — comparatives may be null when not recomputable historically
@@ -81,7 +84,6 @@ export interface FinSnapshot {
 
 const pct = (num: number, den: number): number | null => (den > 0 || den < 0 ? round2((num / den) * 100) : null);
 const ratio = (num: number, den: number): number | null => (den > 0 ? round4(num / den) : null);
-const annualize = (flow: number, days: number): number => (days > 0 ? flow * (365 / days) : 0);
 function round2(x: number): number { return Math.round((Number(x) || 0) * 100) / 100; }
 function round4(x: number): number { return Math.round((Number(x) || 0) * 10000) / 10000; }
 
@@ -104,16 +106,16 @@ export const METRICS: MetricDef[] = [
   { id: 'quick_ratio', group: 'liquidity', label: 'อัตราส่วนทุนหมุนเวียนเร็ว', labelEn: 'Quick (acid-test) ratio', unit: 'ratio', rag: { good: 'up', green: 1.0, amber: 0.8 }, drill: [...CASH_ACCOUNTS, ...RECEIVABLE_ACCOUNTS, ...CURRENT_LIABILITY_ACCOUNTS], compute: (s) => ratio(s.currentAssets - s.inventory, s.currentLiabilities) },
   { id: 'cash_ratio', group: 'liquidity', label: 'อัตราส่วนเงินสด', labelEn: 'Cash ratio', unit: 'ratio', rag: { good: 'up', green: 0.5, amber: 0.2 }, drill: [...CASH_ACCOUNTS, ...CURRENT_LIABILITY_ACCOUNTS], compute: (s) => ratio(s.cash, s.currentLiabilities) },
   { id: 'working_capital', group: 'liquidity', label: 'เงินทุนหมุนเวียนสุทธิ', labelEn: 'Working capital', unit: 'currency', drill: [...CASH_ACCOUNTS, ...RECEIVABLE_ACCOUNTS, ...INVENTORY_ACCOUNTS, ...OTHER_CURRENT_ASSET_ACCOUNTS, ...CURRENT_LIABILITY_ACCOUNTS], compute: (s) => round2(s.currentAssets - s.currentLiabilities) },
-  { id: 'days_cash_on_hand', group: 'liquidity', label: 'จำนวนวันที่มีเงินสดใช้', labelEn: 'Days cash on hand', unit: 'days', rag: { good: 'up', green: 60, amber: 30 }, drill: CASH_ACCOUNTS, compute: (s) => { const dailyOpex = (s.cogs + s.opex) > 0 && s.days > 0 ? (s.cogs + s.opex) / s.days : 0; return dailyOpex > 0 ? round2(s.cash / dailyOpex) : null; } },
-  { id: 'cash_conversion_cycle', group: 'liquidity', label: 'วงจรเงินสด (CCC)', labelEn: 'Cash conversion cycle', unit: 'days', rag: { good: 'down', green: 30, amber: 60 }, compute: (s) => { const dso = s.revenue > 0 ? (s.arControl / s.revenue) * s.days : null; const dpo = s.cogs > 0 ? (s.apControl / s.cogs) * s.days : null; const dio = s.cogs > 0 ? (s.inventory / s.cogs) * s.days : null; return dso == null || dpo == null || dio == null ? null : round2(dso + dio - dpo); } },
+  { id: 'days_cash_on_hand', group: 'liquidity', label: 'จำนวนวันที่มีเงินสดใช้', labelEn: 'Days cash on hand', unit: 'days', rag: { good: 'up', green: 60, amber: 30 }, drill: CASH_ACCOUNTS, compute: (s) => { const dailyOpex = (s.ttmCogs + s.ttmOpex) > 0 ? (s.ttmCogs + s.ttmOpex) / 365 : 0; return dailyOpex > 0 ? round2(s.cash / dailyOpex) : null; } },
+  { id: 'cash_conversion_cycle', group: 'liquidity', label: 'วงจรเงินสด (CCC)', labelEn: 'Cash conversion cycle', unit: 'days', rag: { good: 'down', green: 30, amber: 60 }, compute: (s) => { const dso = s.ttmRevenue > 0 ? (s.arControl / s.ttmRevenue) * 365 : null; const dpo = s.ttmCogs > 0 ? (s.apControl / s.ttmCogs) * 365 : null; const dio = s.ttmCogs > 0 ? (s.inventory / s.ttmCogs) * 365 : null; return dso == null || dpo == null || dio == null ? null : round2(dso + dio - dpo); } },
 
-  // Efficiency
-  { id: 'dso', group: 'efficiency', label: 'ระยะเวลาเก็บหนี้ (DSO)', labelEn: 'Days sales outstanding', unit: 'days', rag: { good: 'down', green: 45, amber: 60 }, drill: AR_CONTROL_ACCOUNTS, compute: (s) => (s.revenue > 0 ? round2((s.arControl / s.revenue) * s.days) : null) },
-  { id: 'dpo', group: 'efficiency', label: 'ระยะเวลาชำระหนี้ (DPO)', labelEn: 'Days payable outstanding', unit: 'days', rag: { good: 'up', green: 30, amber: 20 }, drill: AP_CONTROL_ACCOUNTS, compute: (s) => (s.cogs > 0 ? round2((s.apControl / s.cogs) * s.days) : null) },
-  { id: 'dio', group: 'efficiency', label: 'ระยะเวลาขายสินค้า (DIO)', labelEn: 'Days inventory outstanding', unit: 'days', rag: { good: 'down', green: 30, amber: 60 }, drill: INVENTORY_ACCOUNTS, compute: (s) => (s.cogs > 0 ? round2((s.inventory / s.cogs) * s.days) : null) },
-  { id: 'ar_turnover', group: 'efficiency', label: 'อัตราหมุนเวียนลูกหนี้', labelEn: 'AR turnover', unit: 'x', rag: { good: 'up', green: 8, amber: 4 }, drill: AR_CONTROL_ACCOUNTS, compute: (s) => ratio(annualize(s.revenue, s.days), s.arControl) },
-  { id: 'ap_turnover', group: 'efficiency', label: 'อัตราหมุนเวียนเจ้าหนี้', labelEn: 'AP turnover', unit: 'x', drill: AP_CONTROL_ACCOUNTS, compute: (s) => ratio(annualize(s.cogs, s.days), s.apControl) },
-  { id: 'inventory_turnover', group: 'efficiency', label: 'อัตราหมุนเวียนสินค้าคงเหลือ', labelEn: 'Inventory turnover', unit: 'x', rag: { good: 'up', green: 6, amber: 3 }, drill: INVENTORY_ACCOUNTS, compute: (s) => ratio(annualize(s.cogs, s.days), s.inventory) },
+  // Efficiency — annualized on the trailing-twelve-month flow (window-length-independent)
+  { id: 'dso', group: 'efficiency', label: 'ระยะเวลาเก็บหนี้ (DSO)', labelEn: 'Days sales outstanding', unit: 'days', rag: { good: 'down', green: 45, amber: 60 }, drill: AR_CONTROL_ACCOUNTS, compute: (s) => (s.ttmRevenue > 0 ? round2((s.arControl / s.ttmRevenue) * 365) : null) },
+  { id: 'dpo', group: 'efficiency', label: 'ระยะเวลาชำระหนี้ (DPO)', labelEn: 'Days payable outstanding', unit: 'days', rag: { good: 'up', green: 30, amber: 20 }, drill: AP_CONTROL_ACCOUNTS, compute: (s) => (s.ttmCogs > 0 ? round2((s.apControl / s.ttmCogs) * 365) : null) },
+  { id: 'dio', group: 'efficiency', label: 'ระยะเวลาขายสินค้า (DIO)', labelEn: 'Days inventory outstanding', unit: 'days', rag: { good: 'down', green: 30, amber: 60 }, drill: INVENTORY_ACCOUNTS, compute: (s) => (s.ttmCogs > 0 ? round2((s.inventory / s.ttmCogs) * 365) : null) },
+  { id: 'ar_turnover', group: 'efficiency', label: 'อัตราหมุนเวียนลูกหนี้', labelEn: 'AR turnover', unit: 'x', rag: { good: 'up', green: 8, amber: 4 }, drill: AR_CONTROL_ACCOUNTS, compute: (s) => ratio(s.ttmRevenue, s.arControl) },
+  { id: 'ap_turnover', group: 'efficiency', label: 'อัตราหมุนเวียนเจ้าหนี้', labelEn: 'AP turnover', unit: 'x', drill: AP_CONTROL_ACCOUNTS, compute: (s) => ratio(s.ttmCogs, s.apControl) },
+  { id: 'inventory_turnover', group: 'efficiency', label: 'อัตราหมุนเวียนสินค้าคงเหลือ', labelEn: 'Inventory turnover', unit: 'x', rag: { good: 'up', green: 6, amber: 3 }, drill: INVENTORY_ACCOUNTS, compute: (s) => ratio(s.ttmCogs, s.inventory) },
 
   // Profitability
   { id: 'gross_margin_pct', group: 'profitability', label: 'อัตรากำไรขั้นต้น', labelEn: 'Gross margin %', unit: 'pct', rag: { good: 'up', green: 40, amber: 20 }, compute: (s) => pct(s.grossProfit, s.revenue) },
@@ -121,8 +123,8 @@ export const METRICS: MetricDef[] = [
   { id: 'net_margin_pct', group: 'profitability', label: 'อัตรากำไรสุทธิ', labelEn: 'Net margin %', unit: 'pct', rag: { good: 'up', green: 10, amber: 3 }, compute: (s) => pct(s.netIncome, s.revenue) },
   { id: 'ebitda', group: 'profitability', label: 'EBITDA', labelEn: 'EBITDA', unit: 'currency', compute: (s) => round2(s.ebitda) },
   { id: 'ebitda_margin_pct', group: 'profitability', label: 'อัตรากำไร EBITDA', labelEn: 'EBITDA margin %', unit: 'pct', rag: { good: 'up', green: 15, amber: 5 }, compute: (s) => pct(s.ebitda, s.revenue) },
-  { id: 'roa_pct', group: 'profitability', label: 'ผลตอบแทนต่อสินทรัพย์ (ROA)', labelEn: 'Return on assets %', unit: 'pct', rag: { good: 'up', green: 8, amber: 3 }, compute: (s) => pct(annualize(s.netIncome, s.days), s.totalAssets) },
-  { id: 'roe_pct', group: 'profitability', label: 'ผลตอบแทนต่อส่วนของผู้ถือหุ้น (ROE)', labelEn: 'Return on equity %', unit: 'pct', rag: { good: 'up', green: 15, amber: 5 }, compute: (s) => (s.equity > 0 ? pct(annualize(s.netIncome, s.days), s.equity) : null) },
+  { id: 'roa_pct', group: 'profitability', label: 'ผลตอบแทนต่อสินทรัพย์ (ROA)', labelEn: 'Return on assets %', unit: 'pct', rag: { good: 'up', green: 8, amber: 3 }, compute: (s) => pct(s.ttmNetIncome, s.totalAssets) },
+  { id: 'roe_pct', group: 'profitability', label: 'ผลตอบแทนต่อส่วนของผู้ถือหุ้น (ROE)', labelEn: 'Return on equity %', unit: 'pct', rag: { good: 'up', green: 15, amber: 5 }, compute: (s) => (s.equity > 0 ? pct(s.ttmNetIncome, s.equity) : null) },
 
   // Leverage / solvency
   { id: 'debt_to_equity', group: 'leverage', label: 'อัตราส่วนหนี้สินต่อทุน', labelEn: 'Debt-to-equity', unit: 'ratio', rag: { good: 'down', green: 1.0, amber: 2.0 }, compute: (s) => (s.equity > 0 ? ratio(s.totalLiabilities, s.equity) : null) },
@@ -132,7 +134,7 @@ export const METRICS: MetricDef[] = [
   // Growth & cash  (revenue_growth_* are cross-snapshot — computed in the service, not from one snapshot)
   { id: 'operating_cash_flow', group: 'growth_cash', label: 'กระแสเงินสดจากการดำเนินงาน', labelEn: 'Operating cash flow', unit: 'currency', compute: (s) => round2(s.ocf) },
   { id: 'free_cash_flow', group: 'growth_cash', label: 'กระแสเงินสดอิสระ', labelEn: 'Free cash flow', unit: 'currency', compute: (s) => round2(s.fcf) },
-  { id: 'cash_runway_months', group: 'growth_cash', label: 'ระยะเวลาเงินสดคงเหลือ (เดือน)', labelEn: 'Cash runway (months)', unit: 'months', rag: { good: 'up', green: 12, amber: 6 }, drill: CASH_ACCOUNTS, compute: (s) => { const monthlyBurn = s.netIncome < 0 && s.days > 0 ? (-s.netIncome) * (30 / s.days) : 0; return monthlyBurn > 0 ? round2(s.cash / monthlyBurn) : null; } }, // null ⇒ profitable / not burning
+  { id: 'cash_runway_months', group: 'growth_cash', label: 'ระยะเวลาเงินสดคงเหลือ (เดือน)', labelEn: 'Cash runway (months)', unit: 'months', rag: { good: 'up', green: 12, amber: 6 }, drill: CASH_ACCOUNTS, compute: (s) => { const monthlyBurn = s.ttmNetIncome < 0 ? (-s.ttmNetIncome) / 12 : 0; return monthlyBurn > 0 ? round2(s.cash / monthlyBurn) : null; } }, // null ⇒ profitable / not burning (TTM)
 
   // Receivables & payables health (as-of; comparatives null when aging not historically recomputable)
   { id: 'overdue_ar_pct', group: 'receivables_payables', label: 'สัดส่วนลูกหนี้เกินกำหนด', labelEn: 'Overdue AR %', unit: 'pct', rag: { good: 'down', green: 10, amber: 25 }, drill: AR_CONTROL_ACCOUNTS, compute: (s) => pct(s.arOverdue, s.arTotal) },
