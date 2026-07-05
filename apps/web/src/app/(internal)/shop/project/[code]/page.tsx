@@ -4,8 +4,9 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { Search, Plus, Minus, ShoppingCart, Send, ImageOff, ArrowLeft, AlertTriangle, PackageCheck, Info } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, Send, ImageOff, ArrowLeft, AlertTriangle, PackageCheck, Info, PackagePlus } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess, notifyInfo } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { baht, num } from '@/lib/format';
@@ -123,6 +124,50 @@ export default function ShopProjectPage() {
   });
   const checkout = () => { if (!cartLines.length) { notifyError(t('shop.proj.empty')); return; } mut.mutate(); };
 
+  // Request-to-add flow (PROJ-15): an item NOT on the approved budget can't be carted — a requester proposes
+  // it here and an authoriser (planner/exec) must approve before it becomes shoppable.
+  const [reqOpen, setReqOpen] = useState(false);
+  const [rqName, setRqName] = useState('');
+  const [rqUom, setRqUom] = useState('');
+  const [rqQty, setRqQty] = useState(1);
+  const [rqRate, setRqRate] = useState(0);
+  const boqReqs = useQuery<{ requests: { req_no: string; status: string; description: string | null; item_no: string | null; qty: number; rate: number; amount: number }[]; count: number; pending: number }>({
+    queryKey: ['boq-requests', code],
+    queryFn: () => api(`/api/pmr/project/${encodeURIComponent(code)}/boq-requests`),
+  });
+  const reqMut = useMutation({
+    mutationFn: () => api('/api/pmr/boq-request', {
+      method: 'POST',
+      body: JSON.stringify({ project_code: code, item_no: rqName.trim().slice(0, 120), description: rqName.trim(), uom: rqUom.trim() || undefined, qty: rqQty, rate: rqRate }),
+    }),
+    onSuccess: () => {
+      notifySuccess(t('shop.proj.req_sent'));
+      setRqName(''); setRqUom(''); setRqQty(1); setRqRate(0); setReqOpen(false);
+      boqReqs.refetch();
+    },
+    onError: (e: any) => notifyError(e?.message ?? t('shop.proj.req_failed')),
+  });
+  const submitReq = () => {
+    if (!rqName.trim()) { notifyError(t('shop.proj.req_need_name')); return; }
+    if (rqQty <= 0 || rqRate < 0) { notifyError(t('shop.proj.req_need_qty')); return; }
+    reqMut.mutate();
+  };
+  const reqStatusVariant = (s: string) => (s === 'approved' ? 'default' : s === 'rejected' ? 'destructive' : 'secondary');
+
+  // An authoriser (planner/exec) can approve/reject a pending budget-add request right here (maker-checker is
+  // enforced server-side — you cannot approve your own). On approval the item joins the shelf.
+  const me = useMe();
+  const canApprove = hasPerm(me.data, 'planner', 'exec');
+  const decideMut = useMutation({
+    mutationFn: ({ reqNo, decision }: { reqNo: string; decision: 'approve' | 'reject' }) =>
+      api(`/api/pmr/boq-request/${encodeURIComponent(reqNo)}/${decision}`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (_d, v) => {
+      notifySuccess(v.decision === 'approve' ? t('shop.proj.req_approved') : t('shop.proj.req_rejected'));
+      boqReqs.refetch(); shelf.refetch();
+    },
+    onError: (e: any) => notifyError(e?.message ?? t('shop.proj.req_failed')),
+  });
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4 pb-28 lg:pb-4">
       <PageHeader
@@ -201,10 +246,58 @@ export default function ShopProjectPage() {
               {!filtered.length && <p className="col-span-full py-8 text-center text-sm text-muted-foreground">{t('shop.proj.no_match')}</p>}
             </div>
 
-            <p className="flex items-start gap-1.5 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-              <Info className="mt-0.5 size-3.5 shrink-0" />
-              {t('shop.proj.not_in_budget')}
-            </p>
+            {/* Request-to-add: an off-budget item must be approved into the project budget first (PROJ-15) */}
+            <Card>
+              <CardContent className="space-y-3 py-3">
+                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <Info className="mt-0.5 size-3.5 shrink-0" />
+                  {t('shop.proj.not_in_budget')}
+                </p>
+                {!reqOpen ? (
+                  <Button variant="outline" size="sm" onClick={() => setReqOpen(true)}>
+                    <PackagePlus className="size-4" /> {t('shop.proj.req_open')}
+                  </Button>
+                ) : (
+                  <div className="space-y-2 rounded-lg border p-3">
+                    <p className="text-sm font-medium">{t('shop.proj.req_title')}</p>
+                    <Input value={rqName} onChange={(e) => setRqName(e.target.value)} placeholder={t('shop.proj.req_name_ph')} />
+                    <div className="flex flex-wrap gap-2">
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground">{t('shop.proj.req_qty')}
+                        <Input type="number" min="1" value={rqQty} onChange={(e) => setRqQty(+e.target.value)} className="h-8 w-20" />
+                      </label>
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground">{t('shop.proj.req_rate')}
+                        <Input type="number" min="0" value={rqRate} onChange={(e) => setRqRate(+e.target.value)} className="h-8 w-24" />
+                      </label>
+                      <Input value={rqUom} onChange={(e) => setRqUom(e.target.value)} placeholder={t('shop.proj.req_uom_ph')} className="h-8 w-24" />
+                    </div>
+                    <p className="text-xs text-muted-foreground">{t('shop.proj.req_est', { amt: baht(Math.max(0, rqQty) * Math.max(0, rqRate)) })}</p>
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={reqMut.isPending} onClick={submitReq}><Send className="size-4" /> {reqMut.isPending ? t('shop.proj.submitting') : t('shop.proj.req_submit')}</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setReqOpen(false)}>{t('shop.proj.req_cancel')}</Button>
+                    </div>
+                  </div>
+                )}
+                {(boqReqs.data?.count ?? 0) > 0 && (
+                  <div className="space-y-1 border-t pt-2">
+                    <p className="text-xs font-medium text-muted-foreground">{t('shop.proj.req_list')}</p>
+                    {boqReqs.data!.requests.slice(0, 6).map((r) => (
+                      <div key={r.req_no} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate">{r.description || r.item_no} · {num(r.qty)} × {baht(r.rate)}</span>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {canApprove && r.status === 'pending' && (
+                            <>
+                              <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={decideMut.isPending} onClick={() => decideMut.mutate({ reqNo: r.req_no, decision: 'approve' })}>{t('shop.proj.req_approve')}</Button>
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" disabled={decideMut.isPending} onClick={() => decideMut.mutate({ reqNo: r.req_no, decision: 'reject' })}>{t('shop.proj.req_reject')}</Button>
+                            </>
+                          )}
+                          <Badge variant={reqStatusVariant(r.status)} className="text-[10px]">{t(`shop.proj.req_st_${r.status}`)}</Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
           {/* ── PMR basket (sticky) ────────────────────────────────── */}

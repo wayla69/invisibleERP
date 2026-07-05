@@ -254,6 +254,26 @@ async function main() {
     !!shelfCement && ['approved', 'locked'].includes(shelf.json.boq_status) && near(shelfCement.remaining, -2500) && near(shelfCement.budget, 15000),
     JSON.stringify({ st: shelf.json.boq_status, r: shelfCement?.remaining, b: shelfCement?.budget }));
 
+  // ── 9e-ter. Material scope-change request (PROJ-15): a requester can PROPOSE adding an off-budget item, but
+  // only an independent authoriser can approve it into the budget — then it becomes shoppable. ──
+  const bqrDup = await inj('POST', '/api/pmr/boq-request', admin, { project_code: 'PRJ-A', item_no: 'CEMENT', qty: 1, rate: 100 });
+  ok('Request an already-budgeted item → 400 ITEM_ALREADY_BUDGETED', bqrDup.status === 400 && bqrDup.json.error?.code === 'ITEM_ALREADY_BUDGETED', `${bqrDup.status} ${bqrDup.json.error?.code}`);
+  const shelfBudgetBefore = shelf.json.budget_total;
+  const bqrNew = await inj('POST', '/api/pmr/boq-request', admin, { project_code: 'PRJ-A', item_no: 'PAINT', description: 'สีทาอาคาร', uom: 'ถัง', qty: 10, rate: 200 });
+  const bqrNo = bqrNew.json.req_no;
+  ok('Request a new off-budget item → pending, budget not yet changed', bqrNew.status < 300 && bqrNew.json.status === 'pending' && near(bqrNew.json.amount, 2000), JSON.stringify({ s: bqrNew.status, st: bqrNew.json.status, amt: bqrNew.json.amount }));
+  const shelfPending = await inj('GET', '/api/pmr/project/PRJ-A/boq', admin);
+  ok('Requested item is NOT shoppable while pending', !(shelfPending.json.lines ?? []).some((l: any) => l.item_no === 'PAINT'), 'not on the shelf yet');
+  const bqrSelf = await inj('POST', `/api/pmr/boq-request/${bqrNo}/approve`, admin); // requester = admin
+  ok('Requester self-approves the scope change → 400 SOD_SELF_APPROVAL', bqrSelf.status === 400 && bqrSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${bqrSelf.status} ${bqrSelf.json.error?.code}`);
+  const bqrAppr = await inj('POST', `/api/pmr/boq-request/${bqrNo}/approve`, mgr); // independent authoriser
+  ok('Authoriser approves → approved + a new BoQ line created', bqrAppr.status < 300 && bqrAppr.json.status === 'approved' && !!bqrAppr.json.new_boq_line_id, JSON.stringify({ s: bqrAppr.status, st: bqrAppr.json.status, line: bqrAppr.json.new_boq_line_id }));
+  const shelfAfter = await inj('GET', '/api/pmr/project/PRJ-A/boq', admin);
+  const paintLine = (shelfAfter.json.lines ?? []).find((l: any) => l.item_no === 'PAINT');
+  ok('Approved item is now shoppable (remaining 2000) + shelf budget grew by 2000',
+    !!paintLine && near(paintLine.remaining, 2000) && near(shelfAfter.json.budget_total, shelfBudgetBefore + 2000),
+    JSON.stringify({ r: paintLine?.remaining, bt: shelfAfter.json.budget_total, before: shelfBudgetBefore }));
+
   // ── 9f. Stock reservation → issue-to-project (M3, INV-13): reserve on-hand stock, issue into project WIP ──
   await db.insert(s.invBalances).values({ tenantId: hq, itemId: 'STEEL', itemDescription: 'เหล็ก', locationId: 'WH-MAIN', onHandQty: '100', avgCost: '50', totalValue: '5000', costingMethod: 'moving_avg' });
   const avail0 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);

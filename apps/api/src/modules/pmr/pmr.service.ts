@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectBoq, projectBoqLines, projectMaterialRequisitions, pmrLines, items } from '../../database/schema';
+import { projects, projectBoq, projectBoqLines, projectMaterialRequisitions, pmrLines, items, projectBoqChangeRequests } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { ProcurementService } from '../procurement/procurement.service';
@@ -16,6 +16,9 @@ const EPS = 0.005;
 
 export interface PmrLineDto { boq_line_id: number; item_no?: string; qty: number; unit_cost: number }
 export interface PmrSubmitDto { project_code: string; items: PmrLineDto[]; vendor_name?: string }
+// A request to ADD a material item to a project's approved BoQ budget (PROJ-15 — requester proposes, an
+// independent authoriser approves before the item becomes shoppable).
+export interface BoqChangeDto { project_code: string; item_no?: string; description?: string; uom?: string; qty: number; rate: number }
 // A shoppable BoQ line for the project-shop shelf (approved-budget material line + remaining budget).
 export interface ShelfLine { boq_line_id: number; item_no: string; item_description: string | null; uom: string | null; rate: number; budget: number; committed: number; remaining: number; image_key: string | null }
 
@@ -255,6 +258,107 @@ export class PmrService {
       };
     });
     return { project_code: code, project_name: p.name, boq_no: boq.boqNo, boq_status: boq.status, tolerance_pct: r2(n(p.budgetTolerancePct)), lines, budget_total: bt, committed_total: ct, remaining_total: r2(bt - ct) };
+  }
+
+  // ── Material scope-change requests (PROJ-15) ─────────────────────────────────────────────────────
+  // The authorised path for an item that is NOT on the approved BoQ: a requester proposes adding it, an
+  // independent authoriser (planner/exec, ≠ requester) approves — only then is a new material line appended
+  // to the approved BoQ (the budget grows) and the item becomes shoppable. A requester never expands budget.
+
+  private async bqrRow(reqNo: string) {
+    const [m] = await this.db.select().from(projectBoqChangeRequests).where(eq(projectBoqChangeRequests.reqNo, reqNo)).limit(1);
+    if (!m) throw new NotFoundException({ code: 'BQR_NOT_FOUND', message: `Request ${reqNo} not found`, messageTh: 'ไม่พบคำขอเพิ่มงบ' });
+    return m;
+  }
+
+  // Requester proposes adding a material item to a project's approved budget (posts nothing; parks 'pending').
+  async requestBoqItem(dto: BoqChangeDto, user: JwtUser) {
+    const p = await this.projectRow(dto.project_code);
+    const projectId = Number(p.id);
+    const tenantId = p.tenantId ?? user.tenantId ?? null;
+    const itemNo = dto.item_no?.trim() || null;
+    const qty = n(dto.qty), rate = n(dto.rate);
+    if (qty <= 0 || rate < 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'qty and rate are required', messageTh: 'ต้องระบุจำนวนและราคา/หน่วย' });
+    if (!itemNo && !dto.description?.trim()) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'item name required', messageTh: 'ต้องระบุชื่อสินค้า' });
+    // Append to the latest approved/locked BoQ — a project with no approved budget has nothing to amend yet.
+    const [boq] = await this.db.select().from(projectBoq)
+      .where(and(eq(projectBoq.projectId, projectId), inArray(projectBoq.status, ['approved', 'locked'])))
+      .orderBy(desc(projectBoq.id)).limit(1);
+    if (!boq) throw new BadRequestException({ code: 'NO_APPROVED_BOQ', message: `Project ${dto.project_code} has no approved BoQ`, messageTh: 'โครงการยังไม่มีงบ BoQ ที่อนุมัติ' });
+    // Don't request an item that's already budgeted — the requester should just shop it.
+    if (itemNo) {
+      const existing = await this.db.select({ id: projectBoqLines.id }).from(projectBoqLines)
+        .where(and(eq(projectBoqLines.boqId, Number(boq.id)), eq(projectBoqLines.itemNo, itemNo))).limit(1);
+      if (existing.length) throw new BadRequestException({ code: 'ITEM_ALREADY_BUDGETED', message: `Item ${itemNo} is already on the approved BoQ`, messageTh: 'สินค้านี้อยู่ในงบประมาณโครงการแล้ว' });
+    }
+    const reqNo = await this.docNo.nextDaily('BQR');
+    const amount = r2(qty * rate);
+    await this.db.insert(projectBoqChangeRequests).values({
+      projectId, boqId: Number(boq.id), tenantId, reqNo, itemNo, description: dto.description?.trim() || itemNo,
+      uom: dto.uom ?? null, qty: String(qty), rate: String(rate), amount: String(amount), status: 'pending', requestedBy: user.username,
+    });
+    // Route to the budget owners (planner/exec) — open a workflow instance if one is configured + notify them.
+    await this.workflow?.start({ docType: 'BQR', docNo: reqNo, amount, createdBy: user.username, tenantId: tenantId ?? null });
+    await this.lineNotify?.notifyPermissionHolders(['planner', 'exec'], tenantId,
+      `🔔 คำขอเพิ่มวัสดุเข้างบโครงการ ${dto.project_code}: ${dto.description?.trim() || itemNo} (${amount.toLocaleString()} บาท) — รออนุมัติ`,
+      user.username, 20);
+    return this.getBoqRequest(reqNo);
+  }
+
+  // Approve a scope-change (maker-checker: approver ≠ requester → SOD_SELF_APPROVAL). On approval a new
+  // material line is appended to the approved BoQ and the project budget grows — the item is now shoppable.
+  async approveBoqRequest(reqNo: string, user: JwtUser) {
+    const m = await this.bqrRow(reqNo);
+    if (m.status !== 'pending') throw new BadRequestException({ code: 'BQR_NOT_PENDING', message: `Request is ${m.status}, not pending`, messageTh: 'คำขอไม่ได้อยู่สถานะรออนุมัติ' });
+    if (m.requestedBy && m.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a budget change you requested', messageTh: 'ผู้ขอเพิ่มงบอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    if (this.workflow) { const inst = await this.workflow.pendingInstanceFor('BQR', reqNo); if (inst) await this.workflow.act(Number(inst.id), { decision: 'approve' }, user); }
+    const boqId = Number(m.boqId);
+    const projectId = Number(m.projectId);
+    const maxRows = await this.db.select({ maxNo: sql<number>`coalesce(max(${projectBoqLines.lineNo}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, boqId));
+    const [line] = await this.db.insert(projectBoqLines).values({
+      boqId, projectId, tenantId: m.tenantId ?? null, lineNo: Number(maxRows[0]?.maxNo ?? 0) + 1, category: 'material',
+      itemNo: m.itemNo, description: m.description, uom: m.uom, budgetQty: String(n(m.qty)), rate: String(n(m.rate)), budgetAmount: String(n(m.amount)),
+    }).returning({ id: projectBoqLines.id });
+    // Re-total the BoQ + sync the project budget (same baseline semantics as approveBoq).
+    const totRows = await this.db.select({ total: sql<number>`coalesce(sum(${projectBoqLines.budgetAmount}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, boqId));
+    const total = r2(n(totRows[0]?.total));
+    await this.db.update(projectBoq).set({ budgetTotal: String(total) }).where(eq(projectBoq.id, boqId));
+    await this.db.update(projects).set({ budgetAmount: String(total) }).where(eq(projects.id, projectId));
+    await this.db.update(projectBoqChangeRequests).set({ status: 'approved', approvedBy: user.username, approvedAt: new Date(), newBoqLineId: Number(line!.id) }).where(eq(projectBoqChangeRequests.id, Number(m.id)));
+    await this.lineNotify?.notifyUser(m.requestedBy ?? '', m.tenantId ?? null, `✅ คำขอเพิ่มวัสดุ ${reqNo} เข้างบโครงการอนุมัติแล้ว — เบิกได้เลย`);
+    return this.getBoqRequest(reqNo);
+  }
+
+  async rejectBoqRequest(reqNo: string, reason: string, user: JwtUser) {
+    const m = await this.bqrRow(reqNo);
+    if (m.status !== 'pending') throw new BadRequestException({ code: 'BQR_NOT_PENDING', message: `Request is ${m.status}, not pending`, messageTh: 'คำขอไม่ได้อยู่สถานะรออนุมัติ' });
+    if (m.requestedBy && m.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a budget change you requested', messageTh: 'ผู้ขอเพิ่มงบปฏิเสธเองไม่ได้' });
+    if (this.workflow) { const inst = await this.workflow.pendingInstanceFor('BQR', reqNo); if (inst) await this.workflow.act(Number(inst.id), { decision: 'reject' }, user); else await this.workflow.cancel('BQR', reqNo); }
+    await this.db.update(projectBoqChangeRequests).set({ status: 'rejected', approvedBy: user.username, approvedAt: new Date(), rejectionReason: reason || null }).where(eq(projectBoqChangeRequests.id, Number(m.id)));
+    await this.lineNotify?.notifyUser(m.requestedBy ?? '', m.tenantId ?? null, `❌ คำขอเพิ่มวัสดุ ${reqNo} ถูกปฏิเสธ${reason ? ` — ${reason}` : ''}`);
+    return this.getBoqRequest(reqNo);
+  }
+
+  async getBoqRequest(reqNo: string) {
+    const m = await this.bqrRow(reqNo);
+    const [proj] = await this.db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(m.projectId))).limit(1);
+    return {
+      req_no: m.reqNo, project_code: proj?.c ?? null, status: m.status, item_no: m.itemNo, description: m.description,
+      uom: m.uom, qty: n(m.qty), rate: n(m.rate), amount: n(m.amount), new_boq_line_id: m.newBoqLineId,
+      requested_by: m.requestedBy, approved_by: m.approvedBy, rejection_reason: m.rejectionReason, created_at: m.createdAt,
+    };
+  }
+
+  // Scope-change requests for a project (newest first) — the shop's "requested additions" + approver inbox.
+  async listBoqRequests(code: string) {
+    const p = await this.projectRow(code);
+    const rows = await this.db.select().from(projectBoqChangeRequests).where(eq(projectBoqChangeRequests.projectId, Number(p.id))).orderBy(desc(projectBoqChangeRequests.id));
+    return {
+      project_code: code,
+      requests: rows.map((m: any) => ({ req_no: m.reqNo, status: m.status, item_no: m.itemNo, description: m.description, uom: m.uom, qty: n(m.qty), rate: n(m.rate), amount: n(m.amount), requested_by: m.requestedBy, approved_by: m.approvedBy, rejection_reason: m.rejectionReason, created_at: m.createdAt })),
+      count: rows.length,
+      pending: rows.filter((m: any) => m.status === 'pending').length,
+    };
   }
 
   // PMRs for a project (newest first) — the requisition list / approval inbox feed.
