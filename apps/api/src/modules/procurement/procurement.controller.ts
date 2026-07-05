@@ -101,8 +101,8 @@ export class ProcurementController {
   // duty as raising the PR itself. Paginated (offset/limit) for the Grab/Shopee-style infinite-scroll grid;
   // optional q (code/description) + category-key filter. Returns the item page + the full category summary.
   @Get('catalog') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
-  catalog(@CurrentUser() u: JwtUser, @Query('q') q?: string, @Query('category') category?: string, @Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.svc.catalog(u, { q, category, limit: limit ? Number(limit) : undefined, offset: offset ? Number(offset) : undefined });
+  catalog(@CurrentUser() u: JwtUser, @Query('q') q?: string, @Query('category') category?: string, @Query('barcode') barcode?: string, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.svc.catalog(u, { q, category, barcode, limit: limit ? Number(limit) : undefined, offset: offset ? Number(offset) : undefined });
   }
 
   // Catalog item thumbnail (pr_raise) — the in-DB image data-URL for a shop-grid <img>. 404 if none.

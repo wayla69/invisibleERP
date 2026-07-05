@@ -160,9 +160,11 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 
 > **Got a barcode scanner? Just scan.** The **สแกนบาร์โค้ด** box beside the search
 > field lets any USB/Bluetooth scanner (they type the code and press Enter) add an
-> item hands-free: an exact match drops straight into the basket, an unknown code
-> shows *ไม่พบสินค้า*, and if several items match the code the grid filters to them
-> so you can pick. No app or camera setup needed.
+> item hands-free. It first looks for an item whose **barcode** exactly matches the
+> scan (set an item's barcode/GTIN in the item master), then falls back to matching
+> the item code or name: an exact hit drops straight into the basket, an unknown
+> code shows *ไม่พบสินค้า*, and if several items match the grid filters to them so
+> you can pick. No app or camera setup needed.
 
 > **Buying for a project? Shop into its budget.** If you work on projects, a
 > **ซื้อเข้าโครงการ** picker appears in the shop header (and a *Shop for this project*
