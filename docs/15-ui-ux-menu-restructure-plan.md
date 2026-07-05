@@ -231,6 +231,9 @@ with **zero route changes** and a small additive data-model extension. The orpha
   load (first use migrates the device's local prefs up); writes are debounced (600 ms). **Recents stay
   per-device** (chosen scope — avoids a server write per navigation in the audited API). `NavSubSection` is
   now controlled (fold-state lifted into `AppShell`). Process narrative `27-platform-customization` §7.23.
+  *(Extended 2026-07-05: the same store now also carries `shop_favs` + `shop_templates` — the `/shop`
+  catalog favourites and saved basket templates (รายการประจำ) — so they follow the user across devices too,
+  with the identical union-on-load + debounced-write + `localStorage`-cache pattern. See P2P narrative rev 3.18.)*
 - **Screenshots** ✅ *(delivered 2026-06-25)* — the sidebar `[screenshot: …]` placeholders in the user manual
   are replaced with real captures (`docs/user-manual/img/`: overview, workspace switcher, favourites,
   collapsible settings). Reproducible via the on-demand capture spec `apps/web/e2e/sidebar.capture.spec.ts`

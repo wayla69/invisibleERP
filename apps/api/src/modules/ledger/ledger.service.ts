@@ -689,9 +689,11 @@ export class LedgerService {
 
   // ───────────────────── Income Statement ─────────────────────
   // Revenue − Expense = net income, over [from,to] (entry_date inclusive)
-  async incomeStatement(from: string, to: string, costCenter?: string | null, ledgerCode?: string | null) {
+  // excludeSources lets a trailing-twelve-month P&L (finance-metrics TTM basis) pass ['CLOSE'] so a window
+  // that crosses a fiscal year-end is not understated by the close-out entries that zero P&L into 3100.
+  async incomeStatement(from: string, to: string, costCenter?: string | null, ledgerCode?: string | null, excludeSources?: string[]) {
     const db = this.db;
-    const rows = await this.aggregateByType(db, from, to, costCenter, ledgerCode);
+    const rows = await this.aggregateByType(db, from, to, costCenter, ledgerCode, undefined, excludeSources);
     const revenue = round4(typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit'));
     const expense = round4(typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit'));
     const netIncome = round4(revenue - expense);
