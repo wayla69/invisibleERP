@@ -11,6 +11,16 @@ const UpdateBody = z.object({
   favorites: z.array(z.string().min(1).max(200)).max(100).optional(),
   navFold: z.record(z.boolean()).optional(),
   pos_fav: z.array(z.number().int().positive()).max(200).optional(),
+  shop_favs: z.array(z.string().min(1).max(200)).max(300).optional(),
+  shop_templates: z.array(z.object({
+    name: z.string().min(1).max(120),
+    lines: z.array(z.object({
+      item_id: z.string().min(1).max(200),
+      description: z.string().max(500).default(''),
+      uom: z.string().max(40).default(''),
+      qty: z.number().positive(),
+    })).max(200),
+  })).max(50).optional(),
 });
 
 @Controller('api/user-prefs')
