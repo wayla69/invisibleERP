@@ -130,7 +130,9 @@ other PR.
    added to the basket as a **ขอเพิ่ม (ไม่มีในทะเบียน)** line; Procurement assigns the
    real item code when it becomes a PO.
 5. **Add a note (optional)** for Procurement — e.g. which branch, a preferred
-   brand, or when you need it.
+   brand, or when you need it. You can also tag the request to a **project code**
+   (an unknown code is rejected) and set a **ต้องการภายในวันที่ (needed-by)** date,
+   both optional.
 6. **Checkout.** Press **ส่งคำขอซื้อให้จัดซื้อ**. A green toast confirms the PR
    number; track its status on **คำขอซื้อ (PR)** (`/requisitions`) or the Approvals
    screen.
