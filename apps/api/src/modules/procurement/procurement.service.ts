@@ -731,11 +731,20 @@ export class ProcurementService {
     return this.grPdf.goodsReceiptHtml(g);
   }
   renderGrPdf(g: GrPrintData): Promise<Buffer | null> { return this.grPdf ? this.grPdf.renderToPdf(this.grPdf.goodsReceiptHtml(g)) : Promise.resolve(null); }
-  async emailGr(grNo: string, toEmail: string, user: JwtUser) {
+  // Recent goods receipts (for the /receiving list surface — print/email each). goods_receipts carries no
+  // tenant_id (procurement is buyer-side), consistent with the existing GR print/email endpoints.
+  async listGrs(_user: JwtUser, limit = 50) {
+    const db = this.db;
+    const rows = await db.select().from(goodsReceipts).orderBy(desc(goodsReceipts.id)).limit(Math.min(Math.max(limit, 1), 100));
+    return { grs: rows.map((g: any) => ({ gr_no: g.grNo, gr_date: g.grDate ?? null, po_no: g.poNo ?? null, vendor_name: g.vendorName ?? null, currency: g.currency ?? 'THB', received_by: g.receivedBy ?? null })), count: rows.length };
+  }
+
+  async emailGr(grNo: string, toEmail: string | undefined, user: JwtUser) {
     if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
     const g = await this.getGrForPrint(grNo, user);
+    // Default the recipient to the vendor's email on file (master data) when to_email is omitted.
     const res = await this.docEmail.sendDocument({
-      to: toEmail, from: g.seller.email ?? undefined, filename: g.gr_no,
+      to: toEmail?.trim() || g.vendor.email || '', from: g.seller.email ?? undefined, filename: g.gr_no,
       subject: `ใบรับสินค้า ${g.gr_no} จาก ${g.seller.name}`,
       text: `แนบใบรับสินค้าเลขที่ ${g.gr_no}${g.po_no ? ` (อ้างอิง PO ${g.po_no})` : ''} จำนวน ${g.lines.length} รายการ\n\n${g.seller.name}`,
       html: this.goodsReceiptHtml(g),

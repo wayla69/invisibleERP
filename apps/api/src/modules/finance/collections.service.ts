@@ -104,11 +104,12 @@ export class CollectionsService {
     return this.finDocsPdf.dunningLetterHtml(d);
   }
   renderDunningPdf(d: DunningLetterPrintData): Promise<Buffer | null> { return this.finDocsPdf ? this.finDocsPdf.renderToPdf(this.finDocsPdf.dunningLetterHtml(d)) : Promise.resolve(null); }
-  async emailDunningLetter(invoiceNo: string, toEmail: string, user: JwtUser) {
+  async emailDunningLetter(invoiceNo: string, toEmail: string | undefined, user: JwtUser) {
     if (!this.docEmail) throw new NotFoundException({ code: 'EMAIL_UNAVAILABLE', message: 'Email path not wired' });
     const d = await this.getDunningLetterForPrint(invoiceNo, user);
+    // Default the recipient to the customer's email on file (master data) when to_email is omitted.
     const res = await this.docEmail.sendDocument({
-      to: toEmail, from: d.seller.email ?? undefined, filename: d.dunning_no,
+      to: toEmail?.trim() || d.customer.email || '', from: d.seller.email ?? undefined, filename: d.dunning_no,
       subject: `หนังสือทวงถามหนี้ ${d.invoice_no} จาก ${d.seller.name}`,
       text: `แนบหนังสือทวงถามหนี้สำหรับใบแจ้งหนี้ ${d.invoice_no} ยอดค้าง ${d.outstanding.toLocaleString()} ${d.currency}\n\n${d.seller.name}`,
       html: this.dunningLetterHtml(d),

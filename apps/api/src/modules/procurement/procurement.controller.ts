@@ -35,7 +35,8 @@ const PrToPoBody = z.object({
   lines: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), create_item: z.boolean().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional(), is_capital: z.boolean().optional() })).min(1),
 });
 const CancelBody = z.object({ reason: z.string().min(1) });
-const DocEmailBody = z.object({ to_email: z.string().email() });
+// to_email optional — defaults to the vendor's email on file (master data) when omitted.
+const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 // D4 — receive a partial qty of one PO line.
 const ReceiveItemBody = z.object({ item_id: z.string().min(1), qty: z.number().positive() });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
@@ -203,6 +204,10 @@ export class ProcurementController {
   // wh_receive, so existing warehouse roles keep access; 'procurement' alone no longer can receive.
   @Post('grs') @Permissions('wh_receive')
   createGr(@Body(new ZodValidationPipe(GrBody)) b: CreateGrDto, @CurrentUser() u: JwtUser) { return this.svc.createGr(b, u); }
+
+  // Recent goods receipts — the /receiving list surface (print/email each GR note).
+  @Get('grs') @Permissions('wh_receive', 'warehouse', 'procurement', 'creditors', 'exec')
+  listGrs(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listGrs(u, limit ? Number(limit) : 50); }
 
   // Printable ใบรับสินค้า (Goods Receipt Note) — HTML→PDF, HTML fallback when Chromium absent.
   @Get('grs/:grNo/pdf') @Permissions('wh_receive', 'warehouse', 'procurement', 'creditors', 'exec')

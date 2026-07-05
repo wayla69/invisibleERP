@@ -29,6 +29,7 @@ async function boot(page: Page) {
     if (url.includes('/api/user-prefs')) return json({ favourites: [], nav: {} });
     const m = url.match(/\/api\/procurement\/pos\/([^/]+)\/receive-all/);
     if (m) { receiveAllPo = decodeURIComponent(m[1]); return json({ gr_no: 'GR-E2E-001', po_no: receiveAllPo, po_status: 'Closed', lines: 2 }); }
+    if (url.includes('/api/procurement/grs')) return json({ grs: [], count: 0 }); // recent-GR list surface
     if (url.includes('/api/inventory/purchase-orders')) return json(POS);
     return json({});
   });
