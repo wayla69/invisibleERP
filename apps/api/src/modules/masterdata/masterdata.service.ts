@@ -279,8 +279,10 @@ function xlsxCellText(v: unknown): string {
 // by position (not eachCell) so an empty middle cell doesn't shift later values onto the wrong header.
 export async function parseXlsx(buf: Buffer): Promise<Record<string, string>[]> {
   const wb = new ExcelJS.Workbook();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- exceljs types want the legacy Buffer shape
-  await wb.xlsx.load(buf as any);
+  // exceljs's bundled @types/node types `load(buffer: Buffer<ArrayBuffer>)`, while ours is the newer generic
+  // `Buffer<ArrayBufferLike>` — cast to exceljs's exact declared param type to bridge the cross-package
+  // generic mismatch (no `any`, so it stays clear of the ts-debt ratchet).
+  await wb.xlsx.load(buf as unknown as Parameters<typeof wb.xlsx.load>[0]);
   const ws = wb.worksheets[0];
   if (!ws) return [];
   const headers: string[] = []; // 1-based to align with ExcelJS column numbers
