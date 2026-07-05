@@ -130,7 +130,8 @@ your code below.
 | Code | Meaning | What to do |
 |------|---------|-----------|
 | `SOD_CONFLICT` | You tried to grant a user two conflicting duties. | Remove one duty or assign it to another person. See the SoD report at `/sod` and [Administration](./11-administration.md). |
-| `ADMIN_GRANT_DENIED` | A non-Admin tried to grant the Admin role. | Only an existing Admin can grant Admin. Ask an administrator. |
+| `ADMIN_GRANT_DENIED` | You tried to create or promote a user to the **Admin** role, but you are not the platform owner. | **Only the platform owner may grant the Admin role** (it carries cross-company visibility). A company Admin can manage every **non-Admin** role. Ask the platform owner if a new Admin is genuinely required. See [Administration](./11-administration.md) §1. |
+| `SIGNUP_DISABLED` / request-access | Someone tried to self-open a company. Public self-service signup is **disabled in production**. | The public page now files a **request access** entry instead of creating a company. The platform owner reviews the queue and **approves** it (or provisions/invites directly). No company exists until the platform owner approves. See [Administration](./11-administration.md) §14. |
 
 ### AI assistant
 

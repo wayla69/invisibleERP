@@ -7,7 +7,7 @@ import { PasswordService } from '../auth/password.service';
 import { BillingService } from '../billing/billing.service';
 import { resolvePermissions, detectSodConflicts, type Role, type Permission } from '@ierp/shared';
 import { appendAuditMeta } from '../../common/tenant-context';
-import type { JwtUser } from '../../common/decorators';
+import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { normalizeUsername } from '../../common/username';
 
 export interface CreateUserDto { username: string; password: string; role: string; customer_name?: string; permissions?: string[]; allow_sod_override?: boolean; sod_reason?: string }
@@ -54,16 +54,18 @@ export class AdminUsersService {
   }
 
   // Preventive privilege-escalation guard (ITGC-AC-02 authorization / ITGC-AC-09 SoD-on-provisioning):
-  // only an Admin may grant the Admin role. The RLS
-  // bypass (HQ "sees all") is keyed on role==='Admin', so without this a tenant-scoped AccessAdmin (which
-  // holds the `users` permission) could mint an Admin inside its own tenant — passing the RLS WITH CHECK —
-  // and then log in with full cross-tenant bypass. Applies equally to the SCIM provisioning principal.
+  // ONLY the platform owner ("god", PLATFORM_ADMIN_USERNAMES — e.g. godmimi) may grant the Admin role.
+  // Rationale: the Admin role carries the RLS bypass (HQ "sees all") and, in single-company mode, full
+  // cross-tenant visibility — so minting an Admin is a platform-level privileged-access grant, not a
+  // per-company one. Previously any company Admin could create another Admin; now that authority is
+  // reserved to god so privileged access cannot proliferate inside a tenant (and a tenant-scoped
+  // AccessAdmin holding `users` still cannot escalate). Applies equally to the SCIM provisioning principal.
   private assertCanGrantRole(role: string | undefined, actor: JwtUser | undefined) {
-    if (role === 'Admin' && actor?.role !== 'Admin') {
+    if (role === 'Admin' && !isPlatformAdmin(actor?.username)) {
       throw new ForbiddenException({
         code: 'ADMIN_GRANT_DENIED',
-        message: 'Only an Admin may grant the Admin role',
-        messageTh: 'เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถให้สิทธิ์ Admin ได้',
+        message: 'Only the platform owner may grant the Admin role',
+        messageTh: 'เฉพาะเจ้าของแพลตฟอร์ม (godmimi) เท่านั้นที่สามารถให้สิทธิ์ Admin ได้',
       });
     }
   }

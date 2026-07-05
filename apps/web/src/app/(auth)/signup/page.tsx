@@ -1,9 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2, Rocket } from 'lucide-react';
+import { CheckCircle2, Loader2, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,10 +12,10 @@ import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function SignupPage() {
-  const router = useRouter();
   const [f, setF] = useState({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '', industry: 'restaurant' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
 
   async function onSubmit(e: React.FormEvent) {
@@ -24,18 +23,37 @@ export default function SignupPage() {
     setError('');
     setLoading(true);
     try {
-      await api('/api/auth/signup', { method: 'POST', body: JSON.stringify(f) });
-      await api('/api/login', {
-        method: 'POST',
-        body: JSON.stringify({ username: f.admin_username, password: f.admin_password }),
-      });
-      // /api/login set the session cookies on this response — no client storage needed.
-      router.push('/dashboard');
+      // Company creation is reserved to the platform owner (ITGC-AC-18). The public path submits a
+      // request that the platform owner reviews and approves — no company is created here.
+      await api('/api/auth/signup-requests', { method: 'POST', body: JSON.stringify(f) });
+      setSubmitted(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'สมัครไม่สำเร็จ');
+      setError(err instanceof Error ? err.message : 'ส่งคำขอไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
+  }
+
+  if (submitted) {
+    return (
+      <main className="relative grid min-h-svh place-items-center overflow-hidden bg-muted/30 p-5">
+        <div className="pointer-events-none absolute -top-24 -right-24 size-96 rounded-full bg-primary/5 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -left-24 size-96 rounded-full bg-primary/5 blur-3xl" />
+        <Card className="w-full max-w-md gap-0 p-8 text-center shadow-lg">
+          <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
+            <CheckCircle2 className="size-6" />
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight">ส่งคำขอเรียบร้อยแล้ว</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            คำขอเปิดบริษัท <span className="font-medium">{f.company_name}</span> ถูกส่งให้ผู้ดูแลแพลตฟอร์มพิจารณาแล้ว
+            เมื่อได้รับอนุมัติ เราจะเปิดใช้งานบัญชีผู้ดูแล <span className="font-medium">{f.admin_username}</span> และแจ้งให้ทราบทางอีเมล
+          </p>
+          <Link href="/login" className="mt-6 inline-block text-sm font-medium text-primary hover:underline">
+            กลับไปหน้าเข้าสู่ระบบ
+          </Link>
+        </Card>
+      </main>
+    );
   }
 
   return (
@@ -48,8 +66,8 @@ export default function SignupPage() {
           <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground shadow-sm">
             IE
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">เริ่มใช้งานฟรี</h1>
-          <p className="mt-1 text-sm text-muted-foreground">สร้างพื้นที่ ERP ของกิจการคุณใน 30 วินาที</p>
+          <h1 className="text-xl font-semibold tracking-tight">ขอเปิดใช้งานบริษัท</h1>
+          <p className="mt-1 text-sm text-muted-foreground">กรอกรายละเอียดเพื่อส่งคำขอ — ผู้ดูแลแพลตฟอร์มจะอนุมัติและเปิดบัญชีให้</p>
         </div>
 
         <form onSubmit={onSubmit} className="grid gap-4">
@@ -97,11 +115,11 @@ export default function SignupPage() {
             </Alert>
           )}
           <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}
-            {loading ? 'กำลังสร้าง…' : 'สร้างบัญชีและเริ่มใช้งาน'}
+            {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+            {loading ? 'กำลังส่งคำขอ…' : 'ส่งคำขอเปิดบริษัท'}
           </Button>
           <p className="text-center text-xs text-muted-foreground">
-            การสมัครถือว่ายอมรับ{' '}
+            การส่งคำขอถือว่ายอมรับ{' '}
             <Link href="/legal/privacy" className="underline hover:text-primary" target="_blank">
               นโยบายความเป็นส่วนตัว
             </Link>{' '}

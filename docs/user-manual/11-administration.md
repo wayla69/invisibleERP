@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.10** · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+**Status: DRAFT v0.11** · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -24,6 +24,15 @@ of Duties (SoD) conflict report**, the MFA policy, and multi-branch setup.
 **Expected result:** The user is created. On their first login they will be forced
 to change the password (see [Getting Started](./00-getting-started.md)), and — if
 their role requires it — to enrol in MFA.
+
+> **Only the platform owner can grant the *Admin* role.** As a company Admin you can
+> create and manage users in **every other role** — but you **cannot** create a new
+> *Admin* or promote anyone to *Admin*. The **Admin** option is hidden in the role
+> dropdown for you, and the API rejects the attempt with **`ADMIN_GRANT_DENIED`**
+> ("Only the platform owner may grant the Admin role"). This is deliberate: the Admin
+> role carries cross-company visibility, so adding an Admin is a platform-level
+> privileged-access decision reserved to the platform owner (see §14.3). Ask the
+> platform owner if a new Admin is genuinely needed.
 
 > **Finding a user.** The user list has a **search** box (username, role, or
 > company/tenant) with a live **match count**, so you can locate an account quickly
@@ -59,6 +68,30 @@ their role requires it — to enrol in MFA.
   [Getting Started](./00-getting-started.md) for the full role list).
 - Fine-tune with **per-user permission overrides** when someone needs a little
   more or less than their role.
+
+### 2.1 Role definitions (what each role can do)
+
+Every role now carries a **plain-language name and description** in both Thai and
+English, so you don't have to memorise permission codes to pick the right one. On the
+**Users** screen (`/admin/users`):
+
+- A collapsible **Role guide** lists every role with its definition — expand it to
+  read what access each role grants before you assign it.
+- The **create-user** form shows the **description of the role you've selected** right
+  under the picker.
+- Role **dropdowns show the friendly label**, not the raw code.
+
+The roles are grouped so you can find the right fit quickly:
+
+| Group | What it's for | Examples |
+|---|---|---|
+| **Administration** | Full or access/master-data administration | *Admin*, *AccessAdmin*, *MasterDataAdmin* |
+| **Single-duty (SoD-clean)** | One clean duty each — designed to produce **zero** SoD conflicts; prefer these where strict separation matters | *Cashier*, *ApClerk*, *StockCounter*, *PricingManager*, *PosSupervisor* … |
+| **Broad transition** | Wider, convenience roles for smaller teams or migration | *Sales*, *Warehouse*, *Finance* … |
+| **Customer portal** | External customer/supplier self-service | *Customer*, *SupplierPortal* … |
+
+> This is a **usability aid only** — the definitions describe access, they do not
+> change anyone's permissions. What a role actually grants is unchanged.
 
 > **Note — conflicting permissions are blocked.** If you try to grant a
 > combination that creates a conflict of interest (e.g. both *record sale* and
@@ -470,10 +503,12 @@ create a company. Review the queue at `GET /api/admin/signup-requests` and **app
 company using the details they submitted) or **reject** each one. No account exists until you approve, so
 nobody self-provisions.
 
-**Public self-service signup** (`POST /api/auth/signup` with no invite) is **disabled in production by
-default** (`403 SIGNUP_DISABLED`). Only enable it (`PUBLIC_SIGNUP_ENABLED=true`) if you genuinely want
-outsiders to open their own accounts; otherwise prefer the platform-owner endpoint, invite, or request
-queue above. See `docs/ops/tenancy-model.md`.
+**Public self-service signup is disabled in production — there is no company created without the platform
+owner.** The public sign-up page no longer creates a company: it is now a **"request access" form** that
+files a pending request (see the request queue above) and waits for your approval. The old
+`PUBLIC_SIGNUP_ENABLED` setting **no longer does anything** (it is a no-op) — a company can be opened **only**
+by the platform owner, via the platform-owner endpoint, an invite, or approving a request. See
+`docs/ops/tenancy-model.md`.
 
 ---
 
