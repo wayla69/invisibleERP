@@ -113,7 +113,7 @@ function GrListSection() {
       <StateView q={grs}>
         {grs.data && (
           <DataTable
-            rows={grs.data.grs}
+            rows={grs.data.grs ?? []}
             rowKey={(r: any) => r.gr_no}
             emptyState={{ icon: PackageCheck, title: t('iv.recv_grs_empty_title'), description: t('iv.recv_grs_empty_desc') }}
             columns={[

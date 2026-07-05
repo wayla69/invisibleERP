@@ -268,7 +268,7 @@ function ReceiptsSection() {
       <StateView q={q}>
         {q.data && (
           <DataTable
-            rows={q.data.receipts}
+            rows={q.data.receipts ?? []}
             rowKey={(r: any) => r.receipt_no}
             emptyState={{ icon: HandCoins, title: t('fin.receipts_empty_title'), description: t('fin.receipts_empty_desc') }}
             columns={[
