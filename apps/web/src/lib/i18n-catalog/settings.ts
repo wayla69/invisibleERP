@@ -219,6 +219,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.md.import_desc': { th: 'อัปโหลดไฟล์ CSV หรือ Excel (.xlsx) — ระบบจะตรวจสอบทุกแถวก่อน แล้วให้ยืนยันนำเข้า', en: 'Upload a CSV or Excel (.xlsx) file — the system validates every row first, then asks you to confirm the import' },
   'st.md.import_title': { th: 'นำเข้า (Import)', en: 'Import' },
   'st.md.imported': { th: 'นำเข้า {n} แถวเข้า {entity}', en: 'Imported {n} rows into {entity}' },
+  'st.md.staged_for_approval': { th: 'ส่งให้อนุมัติแล้ว — การนำเข้ามีฟิลด์สำคัญ ({fields}) ต้องให้ผู้อื่นอนุมัติก่อน (คำขอ {req})', en: 'Submitted for approval — the import sets sensitive field(s) ({fields}) and needs an independent approver (request {req})' },
   'st.md.importing': { th: 'กำลังนำเข้า…', en: 'Importing…' },
   'st.md.invalid_badge': { th: 'ผิดพลาด', en: 'Invalid' },
   'st.md.mode': { th: 'โหมด', en: 'Mode' },

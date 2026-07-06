@@ -233,6 +233,17 @@ Gap discussion under "Cross-cutting risk" below.
 - **Remediation:** Stage imports (`PendingApproval` batch) and require a distinct approver before commit;
   at minimum gate financially-sensitive columns (credit limit, price, payment terms, bank a/c) behind a
   second-person approval and emit a master-data change report for detective review.
+- **Status: ✅ REMEDIATED (2026-07-05).** The registry now flags financially-sensitive columns (`sensitive:true`
+  on customer/vendor `Credit_Limit`, vendor `Payment_Terms`, price-list `Base_Price`/`Special_Price`/`Discount_Pct`,
+  promotion `Discount_Pct`/`Discount_Amt`). `importRows`/`importChecked` detect when a batch **sets** any of
+  these and **stage** the whole batch as a `PendingApproval` `masterdata_import_batches` row (migration
+  **0263**, raw rows held as JSON) — nothing is written to the entity table until a **DIFFERENT** user approves
+  it via `POST /api/admin/master-data/import-approvals/:reqNo/approve` (`exec`/`approvals`; self-approval →
+  `403 SOD_VIOLATION`). Non-sensitive imports (items, contacts, tax codes, menu base prices) commit directly as
+  before. Queue: `GET …/import-approvals`; web `master-io` surfaces the staged outcome. ToE: `ext.ts`
+  (non-sensitive commits; sensitive staged/not-written; self-approve 403; distinct approver applies the credit
+  limit + terms). *Residual:* item/menu **base** `Unit_Price`/`Price` left non-sensitive (list price, not a
+  discount) — a follow-up if a control owner wants base-price changes gated too.
 
 ### G6 — Price / promotion rule changes are single-user  ·  **P1 · Medium-High**
 - **Where:** `modules/pricing/pricing.controller.ts` `upsert:35` (`@Permissions('pricelist','exec')`),
@@ -282,6 +293,12 @@ Gap discussion under "Cross-cutting risk" below.
 - **Related:** SoD R02.
 - **Remediation:** Distinct-approver on any change to vendor bank account / payment terms; a
   vendor-bank-change report reviewed independently before the next payment run.
+- **Status: ✅ REMEDIATED (2026-07-05) via G5.** Vendor `Payment_Terms` and `Credit_Limit` are flagged
+  `sensitive` in the registry, so a bulk import that sets them is staged for a distinct approver
+  (`403 SOD_VIOLATION` on self-approval) — see G5. *Note:* the vendor **bank account** (`vendors.bank_account`,
+  encrypted) is not exposed by the registry import nor any other live edit endpoint, so there is currently
+  no single-user code path that changes it — no gate is applicable until such an editor is added (at which
+  point it should reuse this staging mechanism).
 
 ### G11 — Privileged access grants & self-service SoD override  ·  **P1 · High**
 - **Where:** `modules/admin-users/admin-users.service.ts` `create():97`, `update():116`. Both grant
@@ -404,10 +421,12 @@ Scope to approve **before any build.** Each item reuses an existing in-repo patt
    financially-sensitive fields (one workstream; ship the field-level guard first, full staging next).
    — **G7 credit limit ✅ DONE 2026-07-05** (staged change → distinct approver, migration 0261).
    **G6 price/promo ✅ DONE 2026-07-05** (rule staged inactive → distinct approver activates, migration 0262).
-   **G5 bulk-import staging — still open** (architecturally significant: the registry engine drives all
-   master data). **G8 vendor bank/terms** has no dedicated edit endpoint — vendor terms/credit are only
-   changeable via that same bulk import (bank account has no live edit path), so G8 folds into the G5
-   import-staging decision rather than a standalone gate.
+   **G5 bulk-import staging ✅ DONE 2026-07-05** (sensitive-field detection → staged batch → distinct
+   approver, migration 0263). **G8 vendor terms/credit ✅ covered by G5** (they are the vendor sensitive
+   fields); the vendor **bank account** has no live edit path so no gate applies until an editor exists.
+
+**All P1 gaps (G1–G8, G11) are now remediated.** Remaining open items are P2/P3 (G9, G10, G12–G16) and the
+G5 residual (item/menu **base** price left non-sensitive) — none currently scheduled.
 
 *Rationale:* every P1 item is a single user moving cash-equivalents, GL positions, payee identity, or
 access with zero second-person control.

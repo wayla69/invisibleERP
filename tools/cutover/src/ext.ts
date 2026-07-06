@@ -46,6 +46,7 @@ async function main() {
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id },
     { username: 'hqwh', passwordHash: await pw.hash('pw'), role: 'Warehouse', tenantId: hq.id }, // HQ-scoped, non-admin (alerts isolation)
+    { username: 'mdchecker', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq.id }, // G5/G8: distinct approver for sensitive-import maker-checker (≠ admin)
   ]).onConflictDoNothing();
   // seed permissions + role→perm map so non-Admin (RLS-scoped) users can be permission-checked
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
@@ -338,6 +339,22 @@ async function main() {
   const vend = await inj('POST', '/api/admin/master-data/vendors/import/checked', hqwh, { format: 'csv', mode: 'append', csv: 'Vendor_Code,Name\nV-BULK,Acme Co' });
   const vrow = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-BULK')))[0];
   ok('Bulk import: tenant-scoped entity (vendors) is stamped with the importer’s tenant', vend.json.status === 'success' && vend.json.imported === 1 && Number(vrow?.tenantId) === Number(hq.id), `tenant=${vrow?.tenantId} hq=${hq.id}`);
+
+  // ── G5/G8 (audit): a bulk import that SETS a financially-sensitive field (vendor Credit_Limit / Payment_Terms,
+  //    customer credit limit, prices, promo discounts) is STAGED for an independent approver — it does not
+  //    write to the entity table until a DIFFERENT user (exec/approvals ≠ requester) approves it. ──
+  const vendClean = await inj('POST', '/api/admin/master-data/vendors/import/checked', token, { format: 'csv', mode: 'append', csv: 'Vendor_Code,Name\nV-PLAIN,Plain Co' });
+  ok('G5: a non-sensitive vendor import commits directly (no staging)', vendClean.json.status === 'success' && vendClean.json.imported === 1, `${JSON.stringify({ st: vendClean.json.status })}`);
+  const vendSens = await inj('POST', '/api/admin/master-data/vendors/import/checked', token, { format: 'csv', mode: 'append', csv: 'Vendor_Code,Name,Payment_Terms,Credit_Limit\nV-SENS,Risky Co,NET90,500000' });
+  ok('G5: an import that sets a sensitive field (Credit_Limit/Payment_Terms) is STAGED PendingApproval — nothing written', vendSens.json.status === 'PendingApproval' && vendSens.json.pending === true && !!vendSens.json.req_no && (vendSens.json.sensitive_fields ?? []).includes('Credit_Limit') && (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-SENS'))).length === 0, `${JSON.stringify({ st: vendSens.json.status, sf: vendSens.json.sensitive_fields })}`);
+  const mdSelf = await inj('POST', `/api/admin/master-data/import-approvals/${vendSens.json.req_no}/approve`, token);
+  ok('G5: the requester cannot approve their own sensitive import → 403 SOD_VIOLATION', mdSelf.status === 403 && mdSelf.json.error?.code === 'SOD_VIOLATION', `${mdSelf.status} ${mdSelf.json.error?.code}`);
+  const mdchk = (await inj('POST', '/api/login', undefined, { username: 'mdchecker', password: 'pw' })).json.token;
+  const mdAppr = await inj('POST', `/api/admin/master-data/import-approvals/${vendSens.json.req_no}/approve`, mdchk);
+  const vSens = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-SENS')))[0];
+  ok('G5: a distinct approver applies the staged import → the vendor + its credit limit are written', mdAppr.json.status === 'Approved' && mdAppr.json.approved_by === 'mdchecker' && Number(vSens?.creditLimit) === 500000 && vSens?.paymentTerms === 'NET90', `${JSON.stringify({ st: mdAppr.json.status, cl: vSens?.creditLimit, pt: vSens?.paymentTerms })}`);
+  const mdQueue = await inj('GET', '/api/admin/master-data/import-approvals', token);
+  ok('G5: the approvals queue lists pending sensitive imports (none left after approval)', Array.isArray(mdQueue.json.batches) && !mdQueue.json.batches.some((x: any) => x.req_no === vendSens.json.req_no), `n=${mdQueue.json.batches?.length}`);
 
   // menu_items (POS catalog) — a new-company bulk load. Exercises the registry's def/enumVals support:
   // blank Type/Tax_Type cells fall back to the DB default (not an explicit null → NOT-NULL violation),
