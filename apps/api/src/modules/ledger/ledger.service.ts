@@ -522,12 +522,19 @@ export class LedgerService {
   // The ONLY correction is a contra REVERSAL: a new, immediately-Posted entry that swaps every line's
   // debit/credit so original + reversal net to zero on every affected account. The original is flagged
   // is_reversed (the one column the DB trigger permits changing on a posted entry). Every action is logged.
-  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string }) {
+  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string; requireDistinctApprover?: boolean }) {
     const db = this.db;
     const [orig] = await db.select().from(journalEntries).where(eq(journalEntries.id, dto.entryId)).limit(1);
     if (!orig) throw new NotFoundException({ code: 'ENTRY_NOT_FOUND', message: `Journal entry ${dto.entryId} not found`, messageTh: `ไม่พบรายการบัญชี ${dto.entryId}` });
     if (orig.status !== 'Posted') throw new BadRequestException({ code: 'NOT_POSTED', message: `Entry ${orig.entryNo} is ${orig.status}; only Posted entries can be reversed`, messageTh: 'กลับรายการได้เฉพาะรายการที่ผ่านรายการแล้ว' });
     if (orig.isReversed) throw new BadRequestException({ code: 'ALREADY_REVERSED', message: `Entry ${orig.entryNo} has already been reversed`, messageTh: 'รายการนี้ถูกกลับรายการไปแล้ว' });
+    // GL-05 (audit G2): a Posted JE cleared GL-05 maker-checker, so a reversal must not silently undo that
+    // second-person check. On the MANUAL reversal path (requireDistinctApprover, set by the controller) the
+    // reverser must differ from the original preparer — the original preparer cannot unilaterally reverse
+    // their own (independently-approved) entry. System/internal callers (e.g. FX reval) do not set the flag.
+    if (dto.requireDistinctApprover && orig.createdBy && orig.createdBy === dto.reversedBy) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot reverse a journal entry you prepared', messageTh: 'ผู้บันทึกกลับรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
 
     const lines = await db.select().from(journalLines).where(eq(journalLines.entryId, orig.id));
     if (!lines.length) throw new BadRequestException({ code: 'NOT_POSTED', message: `Entry ${orig.entryNo} has no lines to reverse`, messageTh: 'ไม่มีรายการบัญชีให้กลับรายการ' });
@@ -1139,8 +1146,11 @@ export class LedgerService {
     if (bal > 0) lines.push({ account_code: '3000', credit: bal });
     else if (bal < 0) lines.push({ account_code: '3000', debit: -bal });
 
-    const je = await this.postEntry({ date: ymd(), source: 'OPENING', sourceRef: ref, tenantId: tid, memo: `Opening balances ${ref}`, createdBy, lines });
-    return { batch_ref: ref, entry_no: je.entry_no, balanced: true, lines_posted: lines.length, row_errors: rowErrors };
+    // GL-05 (audit G4): opening balances are among the most material, least-scrutinised postings at
+    // go-live, so the batch posts as DRAFT — excluded from balances until a DIFFERENT user approves it via
+    // POST /api/ledger/journal/:entryNo/approve (maker-checker; approver ≠ preparer).
+    const je = await this.postEntry({ date: ymd(), source: 'OPENING', sourceRef: ref, tenantId: tid, memo: `Opening balances ${ref}`, createdBy, lines, pendingApproval: true });
+    return { batch_ref: ref, entry_no: je.entry_no, balanced: true, lines_posted: lines.length, row_errors: rowErrors, status: 'Draft', pending: true };
   }
 
   // Year-end close: post a closing journal zeroing Revenue & Expense into 3100 Retained Earnings,

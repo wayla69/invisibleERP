@@ -1,6 +1,6 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.6 · 2026-07-03**
+**Status: DRAFT v0.7 · 2026-07-05**
 
 This chapter is for **accountants** — *GlAccountant*, *FinancialController* and
 *Admin*. It covers the chart of accounts, manual journal entries with
@@ -243,6 +243,11 @@ net effect on the affected accounts is zero. If you then need the corrected figu
 post a fresh entry with the right amounts.
 
 Notes:
+- **Someone other than the preparer must reverse (maker-checker).** You **cannot reverse a journal entry
+  you prepared** — the system blocks it as a segregation-of-duties violation (`SOD_VIOLATION`, message
+  *"Maker-checker: you cannot reverse a journal entry you prepared"*). This stops the preparer from quietly
+  undoing an entry that a second person had independently approved (which would defeat the GL-05 check). Ask
+  a colleague to reverse it. (Automated system reversals — e.g. period-end FX revaluation — are not affected.)
 - You can only reverse a **Posted** entry (`NOT_POSTED` otherwise) and only **once**
   (`ALREADY_REVERSED` on a second attempt).
 - A reversal still respects the period rules — if its date falls in a **locked** or
@@ -349,6 +354,14 @@ figure.
    Once you've entered every account it should read **สมดุล (balanced)**.
 4. Click **ลงยอดยกมา**.
 
+> **Note — opening balances need a second person's approval (maker-checker, GL-05).** Posting the batch
+> now creates it as a **Draft** (`status: Draft`, pending) that **does not yet affect** the trial balance —
+> exactly like a manual journal entry. A **different** authorised user must **approve** it (on the
+> **รออนุมัติ (JE)** tab, or `POST /api/ledger/journal/{entryNo}/approve`) before it flows into the ledger.
+> Because opening balances set the entire starting position of the books, this second-person check is
+> deliberate. **You cannot approve your own opening batch** — the system blocks it as a
+> segregation-of-duties violation (`SOD_VIOLATION`).
+
 > **Loading a lot of accounts — วางจาก Excel/CSV.** Rather than keying every account,
 > click **วางจาก Excel/CSV**, then copy the rows from your prior-system **trial
 > balance** (Excel / Google Sheets) and paste them in. The columns are **account
@@ -358,9 +371,9 @@ figure.
 > review before posting. Any row that can't post (unknown account, no amount) is
 > reported back with its **row number** — nothing is silently dropped (**ONB-04**).
 
-**Expected result:** A balanced opening journal, dated today, that shows on the trial
-balance. Reconcile it to your prior-system closing trial balance before you rely on the
-new books.
+**Expected result:** A balanced opening journal is created as a **Draft** (pending approval) — it shows on
+the trial balance **only after a second authorised user approves it**. Once approved, reconcile it to your
+prior-system closing trial balance before you rely on the new books.
 
 ---
 

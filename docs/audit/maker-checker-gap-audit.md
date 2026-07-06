@@ -166,6 +166,14 @@ Gap discussion under "Cross-cutting risk" below.
 - **Remediation:** Route the reversal through the same Draft+approve as `postEntry` (post the contra as
   `pendingApproval:true`), OR add a distinct-approver guard so `reversedBy ≠` the original `createdBy`
   **and** the reversal is itself approved by a second finance user.
+- **Status: ✅ REMEDIATED (2026-07-05).** Added a `requireDistinctApprover` flag to `reverseEntry`, set
+  by the manual controller path (`POST /journal/:id/reverse`): the reverser must differ from the original
+  preparer (`orig.createdBy`) or `403 SOD_VIOLATION`. System/internal callers (FX reval) do not set the
+  flag, so automated reversals are unchanged; the contra still posts immediately. This closes the
+  "preparer unilaterally reverses their own approved entry" hole. *Follow-up hardening still open:* a full
+  second-**approval** on the reversal contra itself (Draft+approve) — deferred to avoid the `is_reversed`
+  flag-timing edge cases on this parity-sensitive path. ToE: `basics.ts` (self-reverse → 403; distinct
+  user reverses OK).
 
 ### G3 — Petty-cash fund establishment & replenishment are single-user cash movements  ·  **P1 · High**
 - **Where:** `modules/petty-cash/petty-cash.service.ts` `establishFund():34` (posts `Dr 1015 / Cr 1000`
@@ -191,6 +199,11 @@ Gap discussion under "Cross-cutting risk" below.
 - **Related:** GL-05.
 - **Remediation:** Post opening batches as `pendingApproval:true` (Draft) requiring a distinct
   `gl_close`/controller approval before they affect balances.
+- **Status: ✅ REMEDIATED (2026-07-05).** `postOpeningBalances` now calls `postEntry` with
+  `pendingApproval:true`, so the batch lands **Draft** — excluded from balances until a distinct user
+  approves it via `POST /journal/:entryNo/approve` (self-approval → `403 SOD_VIOLATION`); response carries
+  `status:'Draft', pending:true`. ToE: `opening-balances.ts` (Draft excluded from TB; self-approve 403;
+  distinct approver posts; TB then balances).
 
 ### G5 — Master-data bulk import commits with a single user  ·  **P1 · High**
 - **Where:** `modules/masterdata/masterdata.service.ts` `importRows():93` and `importChecked():198`
@@ -340,8 +353,8 @@ Scope to approve **before any build.** Each item reuses an existing in-repo patt
 `request*/approve*` + `SOD_VIOLATION` pair, or the workflow engine) — no new framework is required.
 
 ### Phase P1 — highest risk: single-user direct-GL / cash-equivalent / access commits
-1. **G2 GL reversal** — post the contra as Draft; require distinct approver (closes the GL-05 bypass).
-2. **G4 Opening balances** — post as `pendingApproval`; distinct approver.
+1. **G2 GL reversal** — post the contra as Draft; require distinct approver (closes the GL-05 bypass). — **✅ DONE 2026-07-05** (distinct-reverser guard; full Draft+approve on the contra is documented follow-up).
+2. **G4 Opening balances** — post as `pendingApproval`; distinct approver. — **✅ DONE 2026-07-05**.
 3. **G3 Petty-cash establish/replenish** — extend the module's own EXP-08 maker-checker to fund cash
    movements.
 4. **G1 Gift-card issuance** — Draft+approve (optionally threshold-gated like REV-16).

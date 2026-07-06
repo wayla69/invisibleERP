@@ -1028,8 +1028,12 @@ async function main() {
 
   // TC-GL-17-02: reverse the posted entry → a contra entry with swapped Dr/Cr; original flagged is_reversed.
   const tb1280Pre = await (async () => { const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json; return (tb.rows ?? []).find((r: any) => r.account_code === '1280')?.balance ?? 0; })();
-  const rev = await inj('POST', `/api/ledger/journal/${glId}/reverse`, admin, { reason: 'duplicate posting' });
-  ok('GL-17: reverse a posted entry → returns reversalId/originalId', rev.status === 200 && typeof rev.json?.reversalId === 'number' && rev.json?.originalId === glId, JSON.stringify(rev.json));
+  // GL-05 (audit G2): the original preparer (admin) cannot reverse their own independently-approved entry —
+  // the reverser must differ (maker-checker), or the reversal would silently undo the GL-05 control.
+  const revSelfG2 = await inj('POST', `/api/ledger/journal/${glId}/reverse`, admin, { reason: 'self-reverse' });
+  ok('GL-17/G2: preparer cannot reverse own entry (403 SOD_VIOLATION)', revSelfG2.status === 403 && revSelfG2.json?.error?.code === 'SOD_VIOLATION', `st=${revSelfG2.status} code=${revSelfG2.json?.error?.code}`);
+  const rev = await inj('POST', `/api/ledger/journal/${glId}/reverse`, mgr, { reason: 'duplicate posting' });
+  ok('GL-17: reverse a posted entry (by a DISTINCT user) → returns reversalId/originalId', rev.status === 200 && typeof rev.json?.reversalId === 'number' && rev.json?.originalId === glId, JSON.stringify(rev.json));
   const revId = rev.json?.reversalId;
   const [revRow] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, revId));
   const revLines = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, revId));
