@@ -20,12 +20,13 @@ import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
-// Grouped display order for the role guide (mirrors the ROLE_META `kind` taxonomy).
-const ROLE_KIND_ORDER: { kind: RoleMetaKind; th: string; en: string }[] = [
-  { kind: 'admin', th: 'ผู้ดูแล', en: 'Administration' },
-  { kind: 'duty', th: 'บทบาทแยกหน้าที่ (SoD-clean)', en: 'Single-duty roles (SoD-clean)' },
-  { kind: 'broad', th: 'บทบาทรวม (ระยะเปลี่ยนผ่าน)', en: 'Broad roles (transition)' },
-  { kind: 'portal', th: 'พอร์ทัลลูกค้า', en: 'Customer portal' },
+// Grouped display order for the role guide (mirrors the ROLE_META `kind` taxonomy). Labels come from the
+// i18n dictionary (st.usr.role_kind_*) via the `labelKey` below.
+const ROLE_KIND_ORDER: { kind: RoleMetaKind; labelKey: string }[] = [
+  { kind: 'admin', labelKey: 'st.usr.role_kind_admin' },
+  { kind: 'duty', labelKey: 'st.usr.role_kind_duty' },
+  { kind: 'broad', labelKey: 'st.usr.role_kind_broad' },
+  { kind: 'portal', labelKey: 'st.usr.role_kind_portal' },
 ];
 type RoleMetaKind = (typeof ROLE_META)[Role]['kind'];
 
@@ -86,12 +87,12 @@ export default function AdminUsersPage() {
   const pendingExc: any[] = exceptions.data?.exceptions ?? [];
   const approveExc = useMutation({
     mutationFn: (reqNo: string) => api(`/api/admin/users/access-exceptions/${reqNo}/approve`, { method: 'POST' }),
-    onSuccess: () => { notifySuccess(lang === 'th' ? 'อนุมัติคำขอข้ามสิทธิ์แล้ว' : 'Access exception approved'); qc.invalidateQueries({ queryKey: ['sod-exceptions'] }); qc.invalidateQueries({ queryKey: ['admin-users'] }); },
+    onSuccess: () => { notifySuccess(t('st.usr.exc_approved')); qc.invalidateQueries({ queryKey: ['sod-exceptions'] }); qc.invalidateQueries({ queryKey: ['admin-users'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const rejectExc = useMutation({
-    mutationFn: (reqNo: string) => { const reason = prompt(lang === 'th' ? 'เหตุผลที่ปฏิเสธ (ไม่บังคับ)' : 'Reject reason (optional)') ?? undefined; return api(`/api/admin/users/access-exceptions/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); },
-    onSuccess: () => { notifySuccess(lang === 'th' ? 'ปฏิเสธคำขอแล้ว' : 'Access exception rejected'); qc.invalidateQueries({ queryKey: ['sod-exceptions'] }); },
+    mutationFn: (reqNo: string) => { const reason = prompt(t('st.usr.exc_reject_prompt')) ?? undefined; return api(`/api/admin/users/access-exceptions/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); },
+    onSuccess: () => { notifySuccess(t('st.usr.exc_rejected')); qc.invalidateQueries({ queryKey: ['sod-exceptions'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -118,8 +119,8 @@ export default function AdminUsersPage() {
       {/* ITGC-AC-09 (audit G11): pending SoD-exception approvals — a conflicting grant needs a second admin. */}
       {pendingExc.length > 0 && (
         <Card className="gap-3 border-amber-300 p-5 dark:border-amber-700">
-          <h3 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-4" /> {lang === 'th' ? 'คำขอข้ามการแบ่งแยกหน้าที่ (SoD) รออนุมัติ' : 'Pending SoD-exception approvals'}</h3>
-          <p className="text-sm text-muted-foreground">{lang === 'th' ? 'การให้สิทธิ์ที่ขัดกับการแบ่งแยกหน้าที่ต้องให้ผู้ดูแลอีกคน (ไม่ใช่ผู้ขอ และไม่ใช่เจ้าของบัญชี) อนุมัติก่อนจึงมีผล' : 'A grant that conflicts with Segregation of Duties must be approved by a different admin (not the requester, not the affected user) before it takes effect.'}</p>
+          <h3 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-4" /> {t('st.usr.exc_title')}</h3>
+          <p className="text-sm text-muted-foreground">{t('st.usr.exc_desc')}</p>
           <div className="space-y-2">
             {pendingExc.map((e: any) => (
               <div key={e.req_no} className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 p-2.5 text-sm">
@@ -127,10 +128,10 @@ export default function AdminUsersPage() {
                 <Badge variant="secondary">{e.role ?? '—'}</Badge>
                 {(e.sod_rules ?? []).map((r: string) => <Badge key={r} variant="warning">{r}</Badge>)}
                 <span className="text-muted-foreground">· {e.reason}</span>
-                <span className="text-xs text-muted-foreground">({lang === 'th' ? 'ขอโดย' : 'by'} {e.requested_by})</span>
+                <span className="text-xs text-muted-foreground">({t('st.usr.exc_by')} {e.requested_by})</span>
                 <div className="ml-auto flex gap-2">
-                  <Button size="sm" disabled={approveExc.isPending} onClick={() => approveExc.mutate(e.req_no)}>{lang === 'th' ? 'อนุมัติ' : 'Approve'}</Button>
-                  <Button size="sm" variant="outline" disabled={rejectExc.isPending} onClick={() => rejectExc.mutate(e.req_no)}>{lang === 'th' ? 'ปฏิเสธ' : 'Reject'}</Button>
+                  <Button size="sm" disabled={approveExc.isPending} onClick={() => approveExc.mutate(e.req_no)}>{t('st.usr.exc_approve')}</Button>
+                  <Button size="sm" variant="outline" disabled={rejectExc.isPending} onClick={() => rejectExc.mutate(e.req_no)}>{t('st.usr.exc_reject')}</Button>
                 </div>
               </div>
             ))}
@@ -141,9 +142,9 @@ export default function AdminUsersPage() {
       <Card className="gap-3 p-5">
         <details className="group">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-base font-semibold">
-            <Info className="size-4" /> {lang === 'th' ? 'คู่มือบทบาท — ความหมายของแต่ละบทบาท' : 'Role guide — what each role means'}
-            <span className="ml-auto text-xs font-normal text-muted-foreground group-open:hidden">{lang === 'th' ? 'แสดง' : 'show'}</span>
-            <span className="ml-auto hidden text-xs font-normal text-muted-foreground group-open:inline">{lang === 'th' ? 'ซ่อน' : 'hide'}</span>
+            <Info className="size-4" /> {t('st.usr.role_guide_title')}
+            <span className="ml-auto text-xs font-normal text-muted-foreground group-open:hidden">{t('st.usr.role_guide_show')}</span>
+            <span className="ml-auto hidden text-xs font-normal text-muted-foreground group-open:inline">{t('st.usr.role_guide_hide')}</span>
           </summary>
           <div className="mt-3 space-y-4">
             {ROLE_KIND_ORDER.map((grp) => {
@@ -151,7 +152,7 @@ export default function AdminUsersPage() {
               if (!roles.length) return null;
               return (
                 <div key={grp.kind}>
-                  <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{lang === 'th' ? grp.th : grp.en}</p>
+                  <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{t(grp.labelKey)}</p>
                   <dl className="grid gap-2 sm:grid-cols-2">
                     {roles.map((r) => (
                       <div key={r} className="rounded-md border border-border/60 p-2.5">
@@ -172,9 +173,9 @@ export default function AdminUsersPage() {
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">{t('st.usr.create_account')}</h3>
         <div className="grid gap-2 sm:grid-cols-4">
-          <div className="grid gap-1.5"><Label>Username</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>Password</Label><PasswordInput value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>Role</Label><select className={selectCls} value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{selectableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}</select></div>
+          <div className="grid gap-1.5"><Label>{t('st.usr.field_username')}</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('st.usr.field_password')}</Label><PasswordInput value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('st.usr.field_role')}</Label><select className={selectCls} value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{selectableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}</select></div>
           <div className="grid gap-1.5"><Label>{t('st.usr.company_optional')}</Label><Input value={f.customer_name} onChange={(e) => setF({ ...f, customer_name: e.target.value })} placeholder="tenant code" /></div>
         </div>
         {roleDesc(f.role) && <p className="text-xs text-muted-foreground">{roleDesc(f.role)}</p>}
@@ -208,8 +209,8 @@ export default function AdminUsersPage() {
                 : { icon: Users, title: t('st.usr.empty_title'), description: t('st.usr.empty_desc') }
             }
             columns={[
-              { key: 'username', label: 'Username' },
-              { key: 'role', label: 'Role', render: (r: any) => {
+              { key: 'username', label: t('st.usr.field_username') },
+              { key: 'role', label: t('st.usr.field_role'), render: (r: any) => {
                 // Always include the row's CURRENT role so an existing Admin still shows correctly, even
                 // though a non-god cannot switch a user TO Admin (that option is hidden + API-enforced).
                 const opts = selectableRoles.includes(r.role) ? selectableRoles : [r.role, ...selectableRoles];
