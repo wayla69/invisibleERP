@@ -21,6 +21,12 @@ interface Quote { id: number; quote_no: string; customer_name: string; status: s
 // GET /api/cpq/configs → { configs: [...], count }
 interface Config { id: number; code: string; name: string; base_price: number; currency: string | null; description: string | null }
 
+// Quote lifecycle (cpq.service.ts transitionQuote): Draft → Sent → Accepted | Rejected.
+const QUOTE_STATUS_KEYS: Record<string, string> = {
+  Draft: 'crm.status_draft', Sent: 'crm.status_sent', Accepted: 'crm.status_accepted', Rejected: 'crm.status_rejected',
+};
+const quoteStatusLabel = (t: (key: string) => string, s: string) => (QUOTE_STATUS_KEYS[s] ? t(QUOTE_STATUS_KEYS[s]) : s);
+
 export default function CpqPage() {
   const { t } = useLang();
   return (
@@ -71,7 +77,7 @@ function Quotes() {
               { key: 'expires_date', label: t('crm.expires_date'), render: (r: Quote) => thaiDate(r.expires_date) },
               { key: 'subtotal', label: t('crm.subtotal'), align: 'right', render: (r: Quote) => <span className="tabular">{baht(r.subtotal)}</span> },
               { key: 'total', label: t('crm.total'), align: 'right', render: (r: Quote) => <span className="tabular">{baht(r.total)}</span> },
-              { key: 'status', label: t('fin.col_status'), render: (r: Quote) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'status', label: t('fin.col_status'), render: (r: Quote) => <Badge variant={statusVariant(r.status)}>{quoteStatusLabel(t, r.status)}</Badge> },
               {
                 key: 'actions',
                 label: t('crm.actions'),

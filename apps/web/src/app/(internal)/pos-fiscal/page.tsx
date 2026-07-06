@@ -47,7 +47,7 @@ function Journal() {
             { key: 'doc_type', label: t('px.fiscal_col_type') },
             { key: 'doc_no', label: t('dash.col_no') },
             { key: 'created_at', label: t('px.fiscal_col_time'), render: (r: any) => thaiDate(r.created_at) },
-            { key: 'hash', label: 'Hash', render: (r: any) => <span className="font-mono text-xs">{String(r.hash).slice(0, 16)}…</span> },
+            { key: 'hash', label: t('px.fiscal_col_hash'), render: (r: any) => <span className="font-mono text-xs">{String(r.hash).slice(0, 16)}…</span> },
           ]} emptyState={{ icon: BookText, title: t('px.fiscal_journal_empty_title'), description: t('px.fiscal_journal_empty_desc') }} />
         )}
       </StateView>

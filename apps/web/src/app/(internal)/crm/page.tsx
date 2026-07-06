@@ -124,6 +124,13 @@ function BranchKpi() {
 
 const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
+// RFM segments computed server-side (crm.service.ts): Champions / Loyal / At Risk / Lost / New.
+const RFM_SEGMENTS = ['Champions', 'Loyal', 'At Risk', 'Lost', 'New'] as const;
+const RFM_SEGMENT_KEYS: Record<string, string> = {
+  Champions: 'crm.rfm_champions', Loyal: 'crm.rfm_loyal', 'At Risk': 'crm.rfm_at_risk', Lost: 'crm.rfm_lost', New: 'crm.rfm_new',
+};
+const rfmSegmentLabel = (t: (key: string) => string, s: string) => (RFM_SEGMENT_KEYS[s] ? t(RFM_SEGMENT_KEYS[s]) : s);
+
 interface Member { id: number; member_code: string; name: string | null; phone: string | null }
 interface Msg { id: number; channel: string; recipient: string | null; body: string; status: string; provider: string | null; campaign: string | null; created_at: string }
 
@@ -175,7 +182,7 @@ function Messaging() {
               </select>
               {audience === 'segment' && (
                 <select className={selectCls} aria-label={t('crm.rfm_segment')} value={segment} onChange={(e) => setSegment(e.target.value)}>
-                  {['Champions', 'Loyal', 'At Risk', 'Lost', 'New'].map((s) => <option key={s} value={s}>{s}</option>)}
+                  {RFM_SEGMENTS.map((s) => <option key={s} value={s}>{t(RFM_SEGMENT_KEYS[s])}</option>)}
                 </select>
               )}
               <select className={selectCls} aria-label={t('crm.send_channel')} value={channel} onChange={(e) => setChannel(e.target.value)}>
@@ -250,7 +257,7 @@ function CustomerLookup() {
                     label={q.data.member.name || q.data.member.member_code}
                     value={
                       q.data.crm
-                        ? <Badge variant={statusVariant(q.data.crm.rfm_segment)}>{q.data.crm.rfm_segment}</Badge>
+                        ? <Badge variant={statusVariant(q.data.crm.rfm_segment)}>{rfmSegmentLabel(t, q.data.crm.rfm_segment)}</Badge>
                         : <Badge variant="muted">{t('crm.no_rfm_profile')}</Badge>
                     }
                     hint={`${q.data.member.member_code}${q.data.member.tier ? ` · ${q.data.member.tier}` : ''}`}

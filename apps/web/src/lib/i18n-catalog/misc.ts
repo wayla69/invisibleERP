@@ -38,6 +38,10 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.as_audit_unknown': { th: 'ไม่รู้จัก', en: 'Unknown' },
   'mx.as_audit_reg_loc': { th: 'ตำแหน่งตามทะเบียน', en: 'Register location' },
   'mx.as_audit_misplaced_note': { th: 'เมื่อปิดการตรวจนับ ระบบจะสร้างคำขอย้ายทรัพย์สินเหล่านี้มายังตำแหน่งที่ตรวจนับ (รออนุมัติ)', en: 'On close, a custody-change request (pending approval) is raised to move each of these to the audited location.' },
+  'mx.as_audit_status_open': { th: 'กำลังตรวจนับ', en: 'Open' },
+  'mx.as_audit_status_closed': { th: 'ปิดแล้ว', en: 'Closed' },
+  'mx.as_gr_no_placeholder': { th: 'เช่น GR-YYYYMMDD-NNN', en: 'e.g. GR-YYYYMMDD-NNN' },
+  'mx.as_scan_code_placeholder': { th: 'เช่น ASSET_ID:FA-0001|…', en: 'e.g. ASSET_ID:FA-0001|…' },
   // ── Custody approvals (FA-11 maker-checker) ──
   'mx.as_custody_sod_note': { th: 'ผู้อนุมัติต้องเป็นคนละคนกับผู้ขอย้าย (แบ่งแยกหน้าที่) — ทะเบียนจะเปลี่ยนเมื่ออนุมัติเท่านั้น', en: 'The approver must differ from the requester (segregation of duties) — the register moves only on approval.' },
   'mx.as_custody_move': { th: 'ย้ายจาก → ไป', en: 'Move' },

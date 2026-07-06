@@ -209,7 +209,7 @@ function RunsTab() {
                 rowKey={(r) => r.id}
                 onRowClick={(r) => setOpenRun((cur) => (cur === r.id ? null : r.id))}
                 columns={[
-                  { key: 'id', label: 'Run', render: (r) => <span className="font-medium">#{r.id}</span> },
+                  { key: 'id', label: t('fnx.consol.col_run'), render: (r) => <span className="font-medium">#{r.id}</span> },
                   { key: 'period', label: t('fnx.consol.col_period') },
                   { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                   { key: 'run_by', label: t('fnx.consol.col_by') },

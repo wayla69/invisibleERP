@@ -164,6 +164,7 @@ export function TreasuryClient({ initialData }: { initialData: CashPosition | nu
 
 // Single-series cash trajectory: an area under the projected-balance line, zero baseline drawn, trough dotted.
 function ForecastChart({ periods }: { periods: Period[] }) {
+  const { t } = useLang();
   if (periods.length < 2) return null;
   const W = 720, H = 140, PL = 4, PR = 4, PT = 8, PB = 16;
   const vals = periods.map((p) => p.projected_balance);
@@ -179,7 +180,7 @@ function ForecastChart({ periods }: { periods: Period[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[560px] text-info" role="img" aria-label="cash forecast">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[560px] text-info" role="img" aria-label={t('fnx.treasury.chart_aria')}>
         <polygon points={area} className="fill-info/10" />
         <line x1={PL} x2={W - PR} y1={zeroY} y2={zeroY} className="stroke-border" strokeWidth={1} strokeDasharray="3 3" />
         <polyline points={line} fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
