@@ -207,7 +207,8 @@ of keying discounts by hand — turn on **apply pricing rules** at checkout. For
 large parties an **auto service charge** is added (a VATable ค่าบริการ that the
 receipt lists as its own line), and the bill can be **satang-rounded** to a
 cash-friendly total. Cashiers *apply* rules; only Pricing/Marketing roles may
-*create* them (segregation of duties).
+*create* them (segregation of duties). Creating or changing a rule does **not**
+put it live immediately — see **Approving a price/promotion rule** below.
 
 This applies to **both** the **dine-in** checkout and the **retail portal POS**
 (`POST /api/portal/pos/sales`). For the retail path, pass the following optional
@@ -230,6 +231,20 @@ and **time window** (e.g. happy hour), a **priority**, and whether it **stacks**
 other rules. The **ทดลองคำนวณ** tab prices a sample basket so you can see which rules
 apply before going live, and **ชุดเซ็ต (Combo)** defines set-menu components. The
 forms reflow to a single column on phones.
+
+**Approving a price/promotion rule (maker-checker — segregation of duties).**
+Creating or changing a pricing/promotion rule now creates a **pending** rule: it
+is saved **inactive** and shows a **รออนุมัติ (PendingApproval)** status on the
+**/pricing** screen, so it applies to **no** sale or quote until it is approved.
+The create toast now confirms the rule was **submitted for approval**. A **second
+authorised user** — one with the **exec** or **approvals** duty, and who is **not
+the person who created/edited the rule** — activates it with the **Approve**
+action on the pending rule (or rejects it with **Reject**). Only on approval does
+the rule become active. The author cannot approve their own rule; attempting to
+self-approve is blocked (**SOD_VIOLATION**). Editing a rule that is already live
+sends it **back to pending** (it goes inactive) until it is approved again.
+(Combo component prices are not yet part of this approval flow — a planned
+follow-up.)
 
 ### QR self-ordering & the kitchen display (KDS)
 

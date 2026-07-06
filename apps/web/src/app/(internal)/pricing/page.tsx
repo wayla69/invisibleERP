@@ -70,10 +70,14 @@ function Rules() {
   const set = (p: Record<string, unknown>) => setF((cur: any) => ({ ...cur, ...p }));
   const save = useMutation({
     mutationFn: () => api('/api/pricing/rules', { method: 'POST', body: JSON.stringify({ name: f.name, type: f.type, scope: f.scope, target_id: f.target_id || undefined, channel: f.channel, dow: f.dow || undefined, time_start: f.time_start || undefined, time_end: f.time_end || undefined, value: f.value ? Number(f.value) : 0, min_qty: Number(f.min_qty) || 1, priority: Number(f.priority) || 100, stackable: f.stackable }) }),
-    onSuccess: () => { notifySuccess(t('hx.pr.rule_saved')); setF({ ...f, name: '', target_id: '', value: '' }); qc.invalidateQueries({ queryKey: ['price-rules'] }); },
+    // G6 (SoD R10): a new rule is staged inactive and needs a different user to activate it.
+    onSuccess: () => { notifySuccess(t('hx.pr.rule_pending')); setF({ ...f, name: '', target_id: '', value: '' }); qc.invalidateQueries({ queryKey: ['price-rules'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const del = useMutation({ mutationFn: (id: number) => api(`/api/pricing/rules/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['price-rules'] }) });
+  // G6 maker-checker: a different user activates/rejects a staged rule (API enforces author ≠ approver).
+  const approve = useMutation({ mutationFn: (id: number) => api(`/api/pricing/rules/${id}/approve`, { method: 'POST' }), onSuccess: () => { notifySuccess(t('hx.pr.rule_activated')); qc.invalidateQueries({ queryKey: ['price-rules'] }); }, onError: (e: any) => notifyError(e.message) });
+  const reject = useMutation({ mutationFn: (id: number) => api(`/api/pricing/rules/${id}/reject`, { method: 'POST', body: JSON.stringify({}) }), onSuccess: () => { notifySuccess(t('hx.pr.rule_rejected')); qc.invalidateQueries({ queryKey: ['price-rules'] }); }, onError: (e: any) => notifyError(e.message) });
 
   // The "value" field means different things per type — hint accordingly.
   const valueHint = f.type === 'percent' ? t('hx.pr.hint_percent')
@@ -154,6 +158,11 @@ function Rules() {
               { key: 'value', label: t('hx.pr.col_value'), align: 'right', render: (r: any) => <span className="tabular">{r.value ?? '—'}</span> },
               { key: 'window', label: t('hx.pr.col_window'), render: (r: any) => r.time_start ? `${r.time_start}–${r.time_end}` : '—' },
               { key: 'stackable', label: t('hx.pr.col_stack'), align: 'center', render: (r: any) => r.stackable ? <Badge>{t('hx.pr.yes')}</Badge> : <span className="text-muted-foreground">—</span> },
+              // G6 (SoD R10): a staged (PendingApproval) rule is inactive until a DIFFERENT user activates it.
+              { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => r.status === 'PendingApproval'
+                ? <div className="flex items-center gap-1.5"><Badge variant="warning">{t('hx.pr.st_pending')}</Badge><Button size="sm" className="h-7" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('hx.pr.approve')}</Button><Button size="sm" variant="outline" className="h-7" disabled={reject.isPending} onClick={() => reject.mutate(r.id)}>{t('hx.pr.reject')}</Button></div>
+                : r.status === 'Rejected' ? <Badge variant="secondary">{t('hx.pr.st_rejected')}</Badge>
+                : <Badge variant={r.active ? 'default' : 'secondary'}>{r.active ? t('hx.pr.st_active') : t('hx.pr.st_inactive')}</Badge> },
               { key: 'act', label: '', sortable: false, render: (r: any) => <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" aria-label={t('hx.pr.del_rule_aria', { name: r.name })} disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
             ]}
           />

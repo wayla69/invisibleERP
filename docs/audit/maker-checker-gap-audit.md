@@ -244,6 +244,14 @@ Gap discussion under "Cross-cutting risk" below.
 - **Related:** SoD R10.
 - **Remediation:** Distinct-approver on price/promo activation (effective-dated Draft → approve), plus a
   price-override detective report.
+- **Status: ✅ REMEDIATED (2026-07-05).** `upsertRule` now **stages** a new/changed rule as `PendingApproval`
+  and **inactive** (migration **0262** adds status/approved_by/approved_at to `price_rules`) — the discount
+  engine reads only `active=true` rules, so a staged rule affects **no** sale until a **DIFFERENT** user
+  activates it via `POST /api/pricing/rules/:id/approve` (`exec`/`approvals`; author self-approval →
+  `403 SOD_VIOLATION`). Editing a live rule re-stages it (goes inactive) until re-approved. Also `…/reject`
+  and the queue `GET …/rules/pending`; web `/pricing` shows per-rule status + Approve/Reject. ToE:
+  `pricing.ts` (staged rule dormant in a quote → self-approve 403 → distinct user activates → applies).
+  *Residual:* `setCombo` (combo component prices) is not yet staged — lower risk, noted as follow-up.
 
 ### G7 — Customer credit-limit change has no dual control  ·  **P1 · Medium-High**
 - **Where:** Only editable via the `masterdata` customers registry (`master-registry.ts:86,98`
@@ -395,7 +403,11 @@ Scope to approve **before any build.** Each item reuses an existing in-repo patt
 6. **G8 Vendor bank/terms + G7 credit limit + G5/G6 price** — staged master-data approval for
    financially-sensitive fields (one workstream; ship the field-level guard first, full staging next).
    — **G7 credit limit ✅ DONE 2026-07-05** (staged change → distinct approver, migration 0261).
-   **G8 vendor bank/terms, G6 price/promo, G5 bulk-import staging — still open** (next increments).
+   **G6 price/promo ✅ DONE 2026-07-05** (rule staged inactive → distinct approver activates, migration 0262).
+   **G5 bulk-import staging — still open** (architecturally significant: the registry engine drives all
+   master data). **G8 vendor bank/terms** has no dedicated edit endpoint — vendor terms/credit are only
+   changeable via that same bulk import (bank account has no live edit path), so G8 folds into the G5
+   import-staging decision rather than a standalone gate.
 
 *Rationale:* every P1 item is a single user moving cash-equivalents, GL positions, payee identity, or
 access with zero second-person control.

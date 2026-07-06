@@ -23,6 +23,11 @@ export const priceRules = pgTable('price_rules', {
   validTo: date('valid_to'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  // Price/promo maker-checker (audit G6, migration 0262): a new/changed rule is staged 'PendingApproval'
+  // and kept inactive until a DIFFERENT user activates it. Legacy rows default 'Active'.
+  status: text('status').notNull().default('Active'), // Active | PendingApproval | Rejected
+  approvedBy: text('approved_by'),                     // checker — must differ from createdBy
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
 });
 
 // Combo (set-menu) component lines — exploded into priced lines by the quote engine.

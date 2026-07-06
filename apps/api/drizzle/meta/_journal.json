@@ -1835,6 +1835,13 @@
       "when": 2023820000088,
       "tag": "0261_credit_limit_maker_checker",
       "breakpoints": true
+    },
+    {
+      "idx": 262,
+      "version": "7",
+      "when": 2023820000089,
+      "tag": "0262_price_rule_maker_checker",
+      "breakpoints": true
     }
   ]
 }

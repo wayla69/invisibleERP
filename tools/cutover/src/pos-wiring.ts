@@ -39,7 +39,10 @@ async function main() {
   // VAT-registered seller so issueFull works (e-Tax auto-submit)
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ Co', vatRegistered: true, taxId: '0105561000003', vatRate: '0.07' }]).onConflictDoNothing();
   const hq = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
-  await db.insert(s.users).values({ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id },
+    { username: 'pricer', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }, // G6: distinct price-rule approver
+  ]).onConflictDoNothing();
   // pricing item, auto-86 recipe, dining table
   await db.insert(s.menuItems).values({ tenantId: hq.id, sku: 'A', name: 'Item A', type: 'food', price: '100' }).onConflictDoNothing();
   const [dish] = await db.insert(s.menuItems).values({ tenantId: hq.id, sku: 'DISH', name: 'Dish', type: 'food', price: '50', trackStock: true, isAvailable: true }).returning({ id: s.menuItems.id });
@@ -69,7 +72,10 @@ async function main() {
   ok('journal chain verifies after auto-feed', (await inj('GET', '/api/pos/journal/verify', token)).json.ok === true);
 
   // ── Wiring: pricing at checkout (opt-in) ──
-  await inj('POST', '/api/pricing/rules', token, { name: 'Half A', scope: 'item', target_id: 'A', type: 'percent', value: 50, priority: 10 });
+  // G6 maker-checker: the rule is staged inactive; a DIFFERENT user (pricer ≠ admin) activates it before it applies.
+  const priceRuleRes = await inj('POST', '/api/pricing/rules', token, { name: 'Half A', scope: 'item', target_id: 'A', type: 'percent', value: 50, priority: 10 });
+  const pricerTok = (await inj('POST', '/api/login', undefined, { username: 'pricer', password: 'admin123' })).json.token;
+  await inj('POST', `/api/pricing/rules/${priceRuleRes.json?.id}/approve`, pricerTok);
   const priced = await inj('POST', '/api/portal/pos/sales', token, { apply_pricing: true, payment_method: 'Cash', items: [{ item_id: 'A', qty: 1, unit_price: 100 }] });
   ok('pricing applied at checkout (50% → discount 50)', priced.json.pricing_discount === 50 && priced.json.total === 53.5, `disc=${priced.json.pricing_discount} total=${priced.json.total}`);
   const noPrice = await inj('POST', '/api/portal/pos/sales', token, { payment_method: 'Cash', items: [{ item_id: 'A', qty: 1, unit_price: 100 }] });

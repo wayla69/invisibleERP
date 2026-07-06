@@ -10,7 +10,7 @@
 | Process owner | `<<Marketing / Revenue Controller>>` |
 | Approver | `<<approver-name / title>>` |
 | Version | **0.1 DRAFT** |
-| Revision date | 2026-07-02 (v1.39) |
+| Revision date | 2026-07-05 (v1.42) |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
 | Related RCM controls | MKT-01, MKT-02, MKT-03, MKT-04; SoD rule R10 |
@@ -65,14 +65,15 @@ This narrative documents the marketing, pricing and loyalty processes: campaign 
 
 ## 6. Roles & Responsibilities (RACI)
 
-The defining SoD rule here is **R10**: the maintenance of price-master, promotions and pricing rules must be segregated from selling, because a single party able to both set price and sell creates a margin-theft / self-dealing risk. Loyalty configuration (which sets the monetary value of points) is likewise segregated from the point-of-sale operators who earn and redeem. Permissions (`marketing`, `loyalty`, `pos`, `order_mgt`, `exec`, `cust_pos`) are JWT-scoped and tenant-isolated by RLS.
+The defining SoD rule here is **R10**: the maintenance of price-master, promotions and pricing rules must be segregated from selling, because a single party able to both set price and sell creates a margin-theft / self-dealing risk. R10 is now enforced not only across the *maintain-vs-sell* boundary but **within pricing-rule maintenance itself as maker-checker**: a rule change is staged inactive and a **different** user must activate it (self-approval → `SOD_VIOLATION`), so no single party can put a discount live unreviewed (see §7 item 5). Loyalty configuration (which sets the monetary value of points) is likewise segregated from the point-of-sale operators who earn and redeem. Permissions (`marketing`, `loyalty`, `pos`, `order_mgt`, `pricelist`, `approvals`, `exec`, `cust_pos`) are JWT-scoped and tenant-isolated by RLS.
 
 | Activity | Marketing | Revenue Controller | Pricing / Master Data | POS Operator | Loyalty Admin |
 |---|---|---|---|---|---|
 | Create / toggle campaign | R | I | I | I | I |
 | Define / toggle promotion | R | A | C | I | I |
 | Maintain price-list | C | A | R | I | I |
-| Maintain pricing rules / combos | I | A | R | I | I |
+| Maintain (stage) pricing rules / combos | I | A | R | I | I |
+| Approve / activate a staged pricing rule | I | A (R) | C | I | I |
 | Apply price at quote (`/pricing/quote`) | I | I | C | R | I |
 | Configure loyalty (`/loyalty/config`) | C | A | I | I | R |
 | Enrol member | R | I | I | C | R |
@@ -90,7 +91,7 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
 
 4. **Surveys / NPS (perm `marketing`).** Surveys and responses are managed via `GET` / `POST /api/surveys` (and responses), with a public customer route at `/api/portal/surveys`, producing NPS. Unknown ids return `NOT_FOUND` (404). *Operational.*
 
-5. **Pricing rules & combos (perm `pos` / `order_mgt` / `exec`; quote also `cust_pos`).** Rules are managed via `GET` / `POST /api/pricing/rules`, `GET /api/pricing/rules/:id`, `DELETE /api/pricing/rules/:id`. Rule types: percent, amount, fixed, bogo, qty_break; scope item / category / all; with `stackable` flag, `priority`, and day-of-week / time / channel / date gates. Combos are maintained via `GET` / `PUT /api/pricing/combos/:sku`. Unknown ids return `NOT_FOUND` (404). *Control: MKT-01 / R10.*
+5. **Pricing rules & combos (maintain perm `pricelist` / `exec`; approve `exec` / `approvals`; quote also `cust_pos`).** Rules are managed via `GET` / `POST /api/pricing/rules`, `GET /api/pricing/rules/:id`, `DELETE /api/pricing/rules/:id`. Rule types: percent, amount, fixed, bogo, qty_break; scope item / category / all; with `stackable` flag, `priority`, and day-of-week / time / channel / date gates. **A price/promo rule change is now maker-checker (R10; migration `0262` adds `status` / `approved_by` / `approved_at` to `price_rules`, legacy rows default `status='Active'`).** `POST /api/pricing/rules` (create OR edit) **stages** the rule `status='PendingApproval'`, `active=false` and returns `{ id, status:'PendingApproval', pending:true }` — the discount engine reads **only `active=true`** rules, so a staged rule affects **no** quote or sale; editing a live rule **re-stages** it (goes inactive) until re-approved. A **different** user activates it via `POST /api/pricing/rules/:id/approve` — only on approval does `active` become `true` and `status` `'Active'`; the author self-approving (`createdBy === approver`) is rejected `403 SOD_VIOLATION`. There is also `POST /api/pricing/rules/:id/reject` and the pending queue `GET /api/pricing/rules/pending`. Combos are maintained via `GET` / `PUT /api/pricing/combos/:sku`. Unknown ids return `NOT_FOUND` (404). *Control: MKT-01 / R10 — a price/promo rule affects no sale until independently approved. Residual: combo component prices (`PUT /api/pricing/combos/:sku`) are **not yet** staged — lower risk, flagged as a follow-up.*
 
 6. **Transient price quote.** `POST /api/pricing/quote` explodes combos, applies eligible rules by priority/stackability, adds a service charge if party size ≥ configured minimum, applies surcharge, and satang-rounds. **No GL is posted** — pricing is transient; the GL is posted when the order/sale finalises elsewhere (`01-order-to-cash.md`, `20-restaurant-operations.md`). *Operational (non-financial at this step).*
 
@@ -188,7 +189,8 @@ flowchart TD
 | 1, 4 | Wasted spend / poor targeting | Operational analytics; non-financial | Operational | — | Campaign & survey reports |
 | 2 | Unauthorised promotion (margin theft) | Promotion maintenance gated `marketing`, segregated from selling | Preventive | MKT-01 / R10 | Promotion change log |
 | 2 | Over-redemption beyond planned budget | `max_uses` cap enforced atomically | Preventive | MKT-02 | Promotion usage counter |
-| 3, 5 | Unauthorised price/rule change | Price-list & rule maintenance segregated from selling; permission split | Preventive | MKT-01 / R10 | Price-list & rule change log |
+| 3, 5 | Unauthorised price/rule change goes live unreviewed | Price-list & rule maintenance segregated from selling (permission split); **pricing-rule change is maker-checker** — `upsertRule` stages `PendingApproval`/`active=false` (engine reads only `active=true`, so a staged rule affects no quote/sale), and a **different** user activates it via `.../rules/:id/approve` (self-approval → `SOD_VIOLATION`); migration `0262` | Preventive | MKT-01 / R10 | `price_rules.status`/`approved_by`/`approved_at`; pending queue; `pricing.ts` ToE (22) |
+| 5 | Combo component prices changed unreviewed (residual) | `PUT /api/pricing/combos/:sku` gated to `pricelist`/`exec` (not yet staged — lower-risk follow-up) | Preventive | MKT-01 / R10 | Combo change log |
 | 6 | Incorrect price applied | Server-side rule engine (priority, stackability, gates); satang rounding | Preventive | MKT-01 | Quote calculation trace |
 | 7 | Mis-valued points liability | Config gated to loyalty/marketing; segregated from POS | Preventive | MKT-03 | `/loyalty/config` change log |
 | 9 | Lost earn increment under concurrency | `FOR UPDATE` lock on balance during earn | Preventive | MKT-03 | DB transaction log |
@@ -260,6 +262,7 @@ flowchart TD
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.42 | 2026-07-05 | Platform | **Maker-checker on price/promo rule activation (audit gap G6; strengthens SoD R10 — no new numbered control).** §7 item 5 + §9 control-matrix rows (step 5) + §6 RACI: `POST /api/pricing/rules` (create/edit) now **stages** the rule `status='PendingApproval'`, `active=false` (the discount engine reads only `active=true`, so a staged rule affects **no** quote or sale); a **different** user activates it via `POST /api/pricing/rules/:id/approve` (author self-approving → `403 SOD_VIOLATION`), with `.../rules/:id/reject` and the pending queue `GET .../rules/pending`. Editing a live rule re-stages it (goes inactive) until re-approved. Migration `0262` adds `status`/`approved_by`/`approved_at` to `price_rules` (legacy rows default `'Active'`). Web `/pricing` shows each rule's status + Approve/Reject for pending rules; the create toast now says "submitted for approval". **Residual:** combo component prices (`PUT /api/pricing/combos/:sku`) are not yet staged — lower-risk follow-up. ToE: `tools/cutover/src/pricing.ts` (22 checks — staged rule inactive, no discount in a quote until approved, self-approval → `SOD_VIOLATION`, distinct approver → discount applies); `pos-p1.ts` (19) + `pos-wiring.ts` (20) updated to activate rules via a distinct approver. No new RCM control (rides R10 / MKT-01). |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-24 | Platform | **LINE OA member CRM:** §7 item 8 — members carry a verified **`line_user_id`** (LINE Login/LIFF; real verify when `LINE_LOGIN_CHANNEL_ID` set, mock token in dev). New `…/members/enroll-line` (idempotent enrol from a LINE id token), `…/members/:id/link-line` (`LINE_ALREADY_LINKED` — one LINE account = one member/tenant, unique-indexed, migration `0105`), and `…/lookup?line_user_id=`. §7 item 11 — LINE pushes now address the member's `line_user_id` (not their phone); the messaging gateway reads its credential at call time. Harness `line-crm.ts`; UAT-O2C-116…118. No GL, no new control. |
 | 0.4 | 2026-06-24 | Platform | **LINE marketing automation — closed loop (MKT-04):** new §7 item 12 — `POST /api/marketing/automation/campaigns` runs behaviour-triggered campaigns (lapsed / birthday / winback / all) that push a **per-member coupon** over LINE (consent-respecting), `…/redeem` tracks the redemption back to the sale (idempotent) and attributes revenue, and `…/campaigns/:id` reports redemption rate + attributed revenue (`campaign_sends`/`automation_campaigns`, migration `0106`). AI read-only tool `get_marketing_audience` (sending stays operator-driven). Web `/campaigns`. Harness `line-automation.ts` (7); UAT-O2C-123. Consent-enforced, no GL. |
