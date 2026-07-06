@@ -125,7 +125,7 @@ export default function ReplenishmentPage() {
                     { key: 'vendor', label: t('iv.repl_col_vendor'), render: (r: any) => r.vendor ?? '—' },
                     { key: 'urgency', label: t('iv.repl_col_urgency'), render: (r: any) => <Badge variant={urgencyVariant(r.urgency)}>{r.urgency}</Badge> },
                     { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-                    { key: 'pr_no', label: 'PR', render: (r: any) => r.pr_no ?? '—' },
+                    { key: 'pr_no', label: t('iv.col_pr_no'), render: (r: any) => r.pr_no ?? '—' },
                   ]}
                   emptyState={{
                     icon: PackageSearch,

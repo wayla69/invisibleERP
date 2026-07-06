@@ -82,11 +82,11 @@ function Library() {
           <p className="text-sm font-medium">{t('mf.bom_materials')}</p>
           <div className="space-y-2">
             <div className="hidden grid-cols-[2fr_1fr_1fr_auto] gap-2 px-1 text-xs font-medium text-muted-foreground sm:grid">
-              <span>Item ID</span><span>{t('mf.bom_qty_use')}</span><span>{t('mf.bom_conv')}</span><span className="w-9" />
+              <span>{t('iv.col_item_id')}</span><span>{t('mf.bom_qty_use')}</span><span>{t('mf.bom_conv')}</span><span className="w-9" />
             </div>
             {lines.map((l, i) => (
               <div key={i} className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2">
-                <Input placeholder="Item ID" aria-label={t('mf.bom_aria_item_row', { n: i + 1 })} value={l.item_id} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { item_id: e.target.value })} />
+                <Input placeholder={t('iv.col_item_id_ph')} aria-label={t('mf.bom_aria_item_row', { n: i + 1 })} value={l.item_id} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { item_id: e.target.value })} />
                 <Input type="number" inputMode="decimal" aria-label={t('mf.bom_aria_qty_row', { n: i + 1 })} value={l.qty_use_uom} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { qty_use_uom: +e.target.value })} />
                 <Input type="number" inputMode="decimal" aria-label={t('mf.bom_aria_conv_row', { n: i + 1 })} value={l.conv_factor} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { conv_factor: +e.target.value })} />
                 <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" aria-label={t('mf.bom_aria_del_row', { n: i + 1 })} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>

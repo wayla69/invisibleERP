@@ -116,7 +116,7 @@ export default function PurchaseOrdersPage() {
               : { icon: ClipboardList, title: t('inv.po_empty_title'), description: t('inv.po_empty_desc') }
           }
           columns={[
-            { key: 'PO_No', label: 'PO' },
+            { key: 'PO_No', label: t('iv.col_po_no') },
             { key: 'PO_Date', label: t('dash.col_date'), render: (r) => thaiDate(r.PO_Date) },
             { key: 'Supplier_Name', label: t('inv.col_supplier'), render: (r) => r.Supplier_Name || '—' },
             { key: 'Total_Amount', label: t('fin.col_amount'), align: 'right', render: (r) => <span className="tabular">{baht(r.Total_Amount)}</span> },

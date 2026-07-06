@@ -468,6 +468,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.costing_default': { th: 'ค่าเริ่มต้น', en: 'default' },
   'mx.costing_config_hint': { th: 'เว้นว่างรหัสสินค้าเพื่อกำหนดค่าเริ่มต้นของทั้งกิจการ (tenant default)', en: 'Leave the item code blank to set the company-wide default (tenant default)' },
   'mx.costing_default_ph': { th: '(ค่าเริ่มต้น)', en: '(default)' },
+  'mx.costing_fifo_option': { th: 'FIFO (เข้าก่อนออกก่อน)', en: 'FIFO (first-in, first-out)' },
   'mx.costing_avg_option': { th: 'AVG (ถัวเฉลี่ย)', en: 'AVG (weighted average)' },
   'mx.costing_std_option': { th: 'STD (มาตรฐาน)', en: 'STD (standard)' },
   'mx.costing_std_cost': { th: 'ต้นทุนมาตรฐาน', en: 'Standard cost' },

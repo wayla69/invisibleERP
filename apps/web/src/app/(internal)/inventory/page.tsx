@@ -116,7 +116,7 @@ export default function InventoryPage() {
               : { icon: Package, title: t('inv.empty_title'), description: t('inv.empty_desc') }
           }
           columns={[
-            { key: 'Item_ID', label: 'Item ID', render: (r) => <Link className="font-medium text-primary hover:underline" href={`/inventory/${encodeURIComponent(r.Item_ID)}`}>{r.Item_ID}</Link> },
+            { key: 'Item_ID', label: t('iv.col_item_id'), render: (r) => <Link className="font-medium text-primary hover:underline" href={`/inventory/${encodeURIComponent(r.Item_ID)}`}>{r.Item_ID}</Link> },
             { key: 'Item_Description', label: t('inv.col_name') },
             { key: 'UOM', label: t('inv.col_uom') },
             { key: 'AV_QTY', label: t('inv.col_onhand'), align: 'right', render: (r) => <span className={cn('tabular', Number(r.AV_QTY) <= 0 && 'font-semibold text-destructive')}>{num(r.AV_QTY)}</span> },

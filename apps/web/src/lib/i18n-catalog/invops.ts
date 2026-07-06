@@ -2,6 +2,13 @@ import type { Lang } from '../messages';
 
 // i18n catalog fragment (invops domain). Merged into MESSAGES in messages.ts. Add `'key': { th, en }` entries.
 export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
+  // ── Shared table-column labels (iv.col_*) — reused across inventory/receiving/replenishment/bom/rfqs (B6a) ──
+  'iv.col_po_no': { th: 'เลขที่ PO', en: 'PO no.' },
+  'iv.col_pr_no': { th: 'เลขที่ PR', en: 'PR no.' },
+  'iv.col_item_id': { th: 'รหัสสินค้า (Item ID)', en: 'Item ID' },
+  'iv.col_item_id_ph': { th: 'รหัสสินค้า', en: 'Item ID' },
+  'iv.col_vendor_id_ph': { th: 'รหัสผู้ขาย', en: 'Vendor ID' },
+  'iv.col_vendor_id_label': { th: 'รหัสผู้ขาย (Vendor ID) *', en: 'Vendor ID *' },
   // ── Quick Capture (iv.cap_*) — paypers-style bill capture (docs/34) ──
   'iv.cap_read_fail': { th: 'อ่านไฟล์ไม่สำเร็จ', en: 'Failed to read the file' },
   'iv.cap_status_needsreview': { th: 'รอตรวจสอบ', en: 'Needs review' },

@@ -84,7 +84,7 @@ export default function SupplierPricesPage() {
       }
       toolbar={
         <>
-          <Input className="w-40" placeholder="Vendor ID" value={vendorFilter} onChange={(e) => setVendorFilter(e.target.value)} aria-label={t('iv.spr_filter_vendor')} />
+          <Input className="w-40" placeholder={t('iv.col_vendor_id_ph')} value={vendorFilter} onChange={(e) => setVendorFilter(e.target.value)} aria-label={t('iv.spr_filter_vendor')} />
           <Input className="w-48" placeholder={t('iv.spr_item_ph')} value={itemFilter} onChange={(e) => setItemFilter(e.target.value)} aria-label={t('iv.spr_filter_item')} />
         </>
       }
@@ -123,7 +123,7 @@ export default function SupplierPricesPage() {
           <DialogHeader><DialogTitle>{t('iv.spr_dialog_title')}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3 py-2">
             <div className="space-y-1">
-              <Label htmlFor="sp-vid">Vendor ID *</Label>
+              <Label htmlFor="sp-vid">{t('iv.col_vendor_id_label')}</Label>
               <Input id="sp-vid" type="number" placeholder="1" value={form.vendor_id} onChange={(e) => setForm((f) => ({ ...f, vendor_id: e.target.value }))} />
             </div>
             <div className="space-y-1">
