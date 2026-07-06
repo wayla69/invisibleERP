@@ -17,6 +17,7 @@ import { CATALOG as CAT_SETTINGS } from './i18n-catalog/settings';
 import { CATALOG as CAT_HRX } from './i18n-catalog/hrx';
 import { CATALOG as CAT_MISC } from './i18n-catalog/misc';
 import { CATALOG as CAT_CONSTRUCTION } from './i18n-catalog/construction';
+import { CATALOG as CAT_PLATFORM } from './i18n-catalog/platform';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -1419,5 +1420,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM,
 );
