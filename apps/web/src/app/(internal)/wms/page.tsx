@@ -142,7 +142,7 @@ function BinsTab() {
                 { key: 'bin_type', label: t('iv.wms_type'), render: (r: any) => r.bin_type ?? '—' },
                 { key: 'location_id', label: t('iv.wms_col_location'), render: (r: any) => r.location_id ?? '—' },
                 { key: 'capacity', label: t('iv.wms_col_capacity'), align: 'right', render: (r: any) => (r.capacity != null ? <span className="tabular">{num(r.capacity)}</span> : '—') },
-                { key: 'active', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.active !== false ? 'success' : 'muted'}>{r.active !== false ? 'Active' : 'Inactive'}</Badge> },
+                { key: 'active', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.active !== false ? 'success' : 'muted'}>{r.active !== false ? t('iv.wms_stat_active') : t('iv.wms_stat_inactive')}</Badge> },
               ]}
               emptyState={{ icon: Boxes, title: t('iv.wms_empty_bins_title'), description: t('iv.wms_empty_bins_desc') }}
             />

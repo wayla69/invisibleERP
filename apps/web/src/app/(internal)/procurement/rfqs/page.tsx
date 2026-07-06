@@ -226,7 +226,7 @@ function RfqCreate() {
           <Label>{t('proc.items')}</Label>
           {lines.map((l, i) => (
             <div key={i} className="grid grid-cols-[2fr_1fr_auto] gap-2">
-              <Input placeholder="Item ID" value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} />
+              <Input placeholder={t('iv.col_item_id_ph')} value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} />
               <Input type="number" min="0" value={l.qty} onChange={(e) => setLine(i, { qty: +e.target.value })} />
               <Button variant="destructive" size="icon" disabled={lines.length <= 1} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
                 <X className="size-4" />

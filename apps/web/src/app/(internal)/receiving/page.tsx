@@ -80,7 +80,7 @@ export default function ReceivingPage() {
               description: t('iv.recv_empty_desc'),
             }}
             columns={[
-              { key: 'PO_No', label: 'PO' },
+              { key: 'PO_No', label: t('iv.col_po_no') },
               { key: 'PO_Date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.PO_Date) },
               { key: 'Supplier_Name', label: t('inv.col_supplier') },
               { key: 'Total_Amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => baht(r.Total_Amount) },
@@ -117,9 +117,9 @@ function GrListSection() {
             rowKey={(r: any) => r.gr_no}
             emptyState={{ icon: PackageCheck, title: t('iv.recv_grs_empty_title'), description: t('iv.recv_grs_empty_desc') }}
             columns={[
-              { key: 'gr_no', label: 'GR' },
+              { key: 'gr_no', label: t('iv.wms_gr_label') },
               { key: 'gr_date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.gr_date) },
-              { key: 'po_no', label: 'PO', render: (r: any) => r.po_no ?? '—' },
+              { key: 'po_no', label: t('iv.col_po_no'), render: (r: any) => r.po_no ?? '—' },
               { key: 'vendor_name', label: t('inv.col_supplier'), render: (r: any) => r.vendor_name ?? '—' },
               { key: 'act', label: '', align: 'right', sortable: false, render: (r: any) => (
                 <div className="flex items-center justify-end gap-1">

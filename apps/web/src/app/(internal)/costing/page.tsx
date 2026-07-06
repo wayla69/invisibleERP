@@ -132,7 +132,7 @@ function ConfigTab() {
                 value={method}
                 onChange={(e) => setMethod(e.target.value as any)}
               >
-                <option value="FIFO">FIFO</option>
+                <option value="FIFO">{t('mx.costing_fifo_option')}</option>
                 <option value="AVG">{t('mx.costing_avg_option')}</option>
                 <option value="STD">{t('mx.costing_std_option')}</option>
               </select>

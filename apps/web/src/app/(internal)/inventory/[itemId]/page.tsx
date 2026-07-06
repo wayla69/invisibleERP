@@ -79,7 +79,7 @@ export default function StockDetailPage() {
                   description: t('inv.no_pos_desc'),
                 }}
                 columns={[
-                  { key: 'PO_No', label: 'PO' },
+                  { key: 'PO_No', label: t('iv.col_po_no') },
                   { key: 'PO_Date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.PO_Date) },
                   { key: 'Supplier_Name', label: t('inv.col_supplier') },
                   { key: 'Order_Qty', label: t('inv.col_ordered'), align: 'right', render: (r: any) => num(r.Order_Qty) },
