@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MessageCircle, RefreshCw } from 'lucide-react';
+import { ClipboardList, MessageCircle, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { DataTable, type Column } from '@/components/data-table';
 import { PrForm } from '@/components/procurement-forms';
 
 type PrLine = { id: number; item_id: string; item_description: string | null; request_qty: number; uom: string | null; reason: string | null; po_no: string | null; line_status: string | null };
@@ -210,84 +211,92 @@ function PrListCard() {
         </Button>
       </CardHeader>
       <CardContent>
-        {q.isLoading ? (
-          <p className="text-sm text-muted-foreground">{t('dash.loading')}</p>
-        ) : prs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t('iv.req_empty_before')} <code className="rounded bg-muted px-1">pr &lt;{t('iv.req_ph_item')}&gt; &lt;{t('iv.req_ph_qty')}&gt;</code> {t('iv.req_empty_after')}</p>
-        ) : (
-          <>
-            {/* Phone/narrow: one card per PR instead of a 5-column table — a real <table> squeezed into a
-                phone width forces every column (esp. the multi-line item list) to wrap into a tall, cramped
-                sliver, and the header row just scrolls away with the rows since nothing pins it. Stacking
-                each PR as its own card reads top-to-bottom instead, with a status-coloured left edge so the
-                list still scans at a glance without a dedicated status column. */}
-            <div className="space-y-3 sm:hidden">
-              {prs.map((pr) => {
-                const badge = STATUS_BADGE[pr.status];
-                const hasActions = q.data?.can_approve
-                  ? pr.status === 'Pending' || pr.status === 'Approved' || pr.status === 'PartiallyConverted'
-                  : pr.status === 'Pending';
-                return (
-                  <div key={pr.pr_no} className={cn('rounded-lg border border-l-4 p-3 text-sm', STATUS_ACCENT[pr.status] ?? 'border-l-muted-foreground/30')}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-medium">{pr.pr_no}</p>
-                        <p className="text-xs text-muted-foreground">{pr.pr_date ?? ''} · {pr.requested_by ?? '-'}</p>
-                      </div>
-                      <div className="text-right">
-                        <Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>
-                        {pr.approved_by ? <p className="mt-0.5 text-xs text-muted-foreground">{t('iv.req_by')} {pr.approved_by}</p> : null}
-                      </div>
+        {/* Phone/narrow: one card per PR instead of a 5-column table — a real <table> squeezed into a
+            phone width forces every column (esp. the multi-line item list) to wrap into a tall, cramped
+            sliver, and the header row just scrolls away with the rows since nothing pins it. Stacking
+            each PR as its own card reads top-to-bottom instead, with a status-coloured left edge so the
+            list still scans at a glance without a dedicated status column. */}
+        <div className="space-y-3 sm:hidden">
+          {q.isLoading ? (
+            <p className="text-sm text-muted-foreground">{t('dash.loading')}</p>
+          ) : prs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('iv.req_empty_before')} <code className="rounded bg-muted px-1">pr &lt;{t('iv.req_ph_item')}&gt; &lt;{t('iv.req_ph_qty')}&gt;</code> {t('iv.req_empty_after')}</p>
+          ) : (
+            prs.map((pr) => {
+              const badge = STATUS_BADGE[pr.status];
+              const hasActions = q.data?.can_approve
+                ? pr.status === 'Pending' || pr.status === 'Approved' || pr.status === 'PartiallyConverted'
+                : pr.status === 'Pending';
+              return (
+                <div key={pr.pr_no} className={cn('rounded-lg border border-l-4 p-3 text-sm', STATUS_ACCENT[pr.status] ?? 'border-l-muted-foreground/30')}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium">{pr.pr_no}</p>
+                      <p className="text-xs text-muted-foreground">{pr.pr_date ?? ''} · {pr.requested_by ?? '-'}</p>
                     </div>
-                    <ul className="mt-2 space-y-1 border-t pt-2">
-                      {pr.lines.map((l, i) => <PrLineItem key={i} l={l} />)}
-                    </ul>
-                    {hasActions && (
-                      <div className="mt-2 border-t pt-2">
-                        <PrActions pr={pr} canApprove={!!q.data?.can_approve} decide={decide} cancel={cancel} onConvert={setConverting} />
-                      </div>
-                    )}
+                    <div className="text-right">
+                      <Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>
+                      {pr.approved_by ? <p className="mt-0.5 text-xs text-muted-foreground">{t('iv.req_by')} {pr.approved_by}</p> : null}
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+                  <ul className="mt-2 space-y-1 border-t pt-2">
+                    {pr.lines.map((l, i) => <PrLineItem key={i} l={l} />)}
+                  </ul>
+                  {hasActions && (
+                    <div className="mt-2 border-t pt-2">
+                      <PrActions pr={pr} canApprove={!!q.data?.can_approve} decide={decide} cancel={cancel} onConvert={setConverting} />
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
 
-            {/* Desktop/tablet: the full register table (unchanged). */}
-            <div className="hidden overflow-x-auto sm:block">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs text-muted-foreground">
-                    <th className="py-2 pr-3">{t('iv.req_col_no_date')}</th>
-                    <th className="py-2 pr-3">{t('iv.req_col_items')}</th>
-                    <th className="py-2 pr-3">{t('iv.req_col_requester')}</th>
-                    <th className="py-2 pr-3">{t('fin.col_status')}</th>
-                    <th className="py-2 pr-3 text-right">{t('iv.req_col_actions')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {prs.map((pr) => {
-                    const badge = STATUS_BADGE[pr.status];
-                    return (
-                      <tr key={pr.pr_no} className="border-b align-top">
-                        <td className="py-2 pr-3 whitespace-nowrap font-medium">{pr.pr_no}<div className="text-xs font-normal text-muted-foreground">{pr.pr_date ?? ''}</div></td>
-                        <td className="py-2 pr-3">
-                          <ul className="space-y-0.5">
-                            {pr.lines.map((l, i) => <PrLineItem key={i} l={l} />)}
-                          </ul>
-                        </td>
-                        <td className="py-2 pr-3 whitespace-nowrap">{pr.requested_by ?? '-'}</td>
-                        <td className="py-2 pr-3"><Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>{pr.approved_by ? <div className="text-xs text-muted-foreground">{t('iv.req_by')} {pr.approved_by}</div> : null}</td>
-                        <td className="py-2 pr-3">
-                          <PrActions pr={pr} canApprove={!!q.data?.can_approve} decide={decide} cancel={cancel} onConvert={setConverting} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
+        {/* Desktop/tablet: the shared DataTable — sortable columns, skeleton rows while loading, and a
+            rich empty state (icon + title + description) instead of a bare line of text. */}
+        <div className="hidden sm:block">
+          <DataTable<Pr>
+            rows={prs}
+            loading={q.isLoading}
+            rowKey={(pr) => pr.pr_no}
+            emptyState={{
+              icon: ClipboardList,
+              title: t('iv.req_empty_title'),
+              description: `${t('iv.req_empty_before')} pr <${t('iv.req_ph_item')}> <${t('iv.req_ph_qty')}> ${t('iv.req_empty_after')}`,
+            }}
+            columns={[
+              {
+                key: 'pr_no', label: t('iv.req_col_no_date'), sortable: true,
+                render: (pr) => <span className="whitespace-nowrap font-medium">{pr.pr_no}<div className="text-xs font-normal text-muted-foreground">{pr.pr_date ?? ''}</div></span>,
+              },
+              {
+                key: 'lines', label: t('iv.req_col_items'), sortable: false,
+                render: (pr) => <ul className="space-y-0.5">{pr.lines.map((l, i) => <PrLineItem key={i} l={l} />)}</ul>,
+              },
+              {
+                key: 'requested_by', label: t('iv.req_col_requester'),
+                render: (pr) => <span className="whitespace-nowrap">{pr.requested_by ?? '-'}</span>,
+              },
+              {
+                key: 'status', label: t('fin.col_status'),
+                render: (pr) => {
+                  const badge = STATUS_BADGE[pr.status];
+                  return (
+                    <>
+                      <Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>
+                      {pr.approved_by ? <div className="text-xs text-muted-foreground">{t('iv.req_by')} {pr.approved_by}</div> : null}
+                    </>
+                  );
+                },
+              },
+              {
+                key: 'actions', label: t('iv.req_col_actions'), align: 'right', sortable: false,
+                render: (pr) => <PrActions pr={pr} canApprove={!!q.data?.can_approve} decide={decide} cancel={cancel} onConvert={setConverting} />,
+              },
+            ] satisfies Column<Pr>[]}
+          />
+        </div>
         {converting && <PrToPoForm pr={converting} onDone={() => { setConverting(null); refresh(); }} onCancel={() => setConverting(null)} />}
       </CardContent>
     </Card>
