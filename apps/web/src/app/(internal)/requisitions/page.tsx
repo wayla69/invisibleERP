@@ -167,61 +167,116 @@ function PrListCard() {
         ) : prs.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('iv.req_empty_before')} <code className="rounded bg-muted px-1">pr &lt;{t('iv.req_ph_item')}&gt; &lt;{t('iv.req_ph_qty')}&gt;</code> {t('iv.req_empty_after')}</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs text-muted-foreground">
-                  <th className="py-2 pr-3">{t('iv.req_col_no_date')}</th>
-                  <th className="py-2 pr-3">{t('iv.req_col_items')}</th>
-                  <th className="py-2 pr-3">{t('iv.req_col_requester')}</th>
-                  <th className="py-2 pr-3">{t('fin.col_status')}</th>
-                  <th className="py-2 pr-3 text-right">{t('iv.req_col_actions')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {prs.map((pr) => {
-                  const badge = STATUS_BADGE[pr.status];
-                  const isPending = pr.status === 'Pending';
-                  return (
-                    <tr key={pr.pr_no} className="border-b align-top">
-                      <td className="py-2 pr-3 whitespace-nowrap font-medium">{pr.pr_no}<div className="text-xs font-normal text-muted-foreground">{pr.pr_date ?? ''}</div></td>
-                      <td className="py-2 pr-3">
-                        <ul className="space-y-0.5">
-                          {pr.lines.map((l, i) => (
-                            <li key={i}>
-                              <span className="font-medium">{l.item_description || l.item_id}</span>
-                              {l.item_description ? <span className="ml-1 text-xs text-muted-foreground">({l.item_id})</span> : null}
-                              {' '}× {l.request_qty}{l.uom ? ` ${l.uom}` : ''}
-                              {l.reason ? <span className="text-xs text-muted-foreground"> — {l.reason}</span> : null}
-                              {l.po_no ? <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">→ {l.po_no}</span> : null}
-                            </li>
-                          ))}
-                        </ul>
-                      </td>
-                      <td className="py-2 pr-3 whitespace-nowrap">{pr.requested_by ?? '-'}</td>
-                      <td className="py-2 pr-3"><Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>{pr.approved_by ? <div className="text-xs text-muted-foreground">{t('iv.req_by')} {pr.approved_by}</div> : null}</td>
-                      <td className="py-2 pr-3">
-                        <div className="flex justify-end gap-2">
-                          {q.data?.can_approve && isPending && (
-                            <>
-                              <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: true })}>{t('fin.approve')}</Button>
-                              <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>{t('iv.req_reject')}</Button>
-                            </>
-                          )}
-                          {q.data?.can_approve && (pr.status === 'Approved' || pr.status === 'PartiallyConverted') && (
-                            <Button size="sm" onClick={() => setConverting(pr)}>{t('iv.req_create_po')}</Button>
-                          )}
-                          {!q.data?.can_approve && isPending && (
-                            <Button size="sm" variant="outline" disabled={cancel.isPending} onClick={() => cancel.mutate(pr.pr_no)}>{t('fin.cancel')}</Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Phone/narrow: one card per PR instead of a 5-column table — a real <table> squeezed into a
+                phone width forces every column (esp. the multi-line item list) to wrap into a tall, cramped
+                sliver, and the header row just scrolls away with the rows since nothing pins it. Stacking
+                each PR as its own card reads top-to-bottom instead. */}
+            <div className="space-y-3 sm:hidden">
+              {prs.map((pr) => {
+                const badge = STATUS_BADGE[pr.status];
+                const isPending = pr.status === 'Pending';
+                return (
+                  <div key={pr.pr_no} className="rounded-lg border p-3 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium">{pr.pr_no}</p>
+                        <p className="text-xs text-muted-foreground">{pr.pr_date ?? ''} · {pr.requested_by ?? '-'}</p>
+                      </div>
+                      <div className="text-right">
+                        <Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>
+                        {pr.approved_by ? <p className="mt-0.5 text-xs text-muted-foreground">{t('iv.req_by')} {pr.approved_by}</p> : null}
+                      </div>
+                    </div>
+                    <ul className="mt-2 space-y-0.5 border-t pt-2">
+                      {pr.lines.map((l, i) => (
+                        <li key={i}>
+                          <span className="font-medium">{l.item_description || l.item_id}</span>
+                          {l.item_description ? <span className="ml-1 text-xs text-muted-foreground">({l.item_id})</span> : null}
+                          {' '}× {l.request_qty}{l.uom ? ` ${l.uom}` : ''}
+                          {l.reason ? <span className="text-xs text-muted-foreground"> — {l.reason}</span> : null}
+                          {l.po_no ? <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">→ {l.po_no}</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                    {(isPending || pr.status === 'Approved' || pr.status === 'PartiallyConverted') && (
+                      <div className="mt-2 flex flex-wrap justify-end gap-2 border-t pt-2">
+                        {q.data?.can_approve && isPending && (
+                          <>
+                            <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: true })}>{t('fin.approve')}</Button>
+                            <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>{t('iv.req_reject')}</Button>
+                          </>
+                        )}
+                        {q.data?.can_approve && (pr.status === 'Approved' || pr.status === 'PartiallyConverted') && (
+                          <Button size="sm" onClick={() => setConverting(pr)}>{t('iv.req_create_po')}</Button>
+                        )}
+                        {!q.data?.can_approve && isPending && (
+                          <Button size="sm" variant="outline" disabled={cancel.isPending} onClick={() => cancel.mutate(pr.pr_no)}>{t('fin.cancel')}</Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop/tablet: the full register table (unchanged). */}
+            <div className="hidden overflow-x-auto sm:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs text-muted-foreground">
+                    <th className="py-2 pr-3">{t('iv.req_col_no_date')}</th>
+                    <th className="py-2 pr-3">{t('iv.req_col_items')}</th>
+                    <th className="py-2 pr-3">{t('iv.req_col_requester')}</th>
+                    <th className="py-2 pr-3">{t('fin.col_status')}</th>
+                    <th className="py-2 pr-3 text-right">{t('iv.req_col_actions')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prs.map((pr) => {
+                    const badge = STATUS_BADGE[pr.status];
+                    const isPending = pr.status === 'Pending';
+                    return (
+                      <tr key={pr.pr_no} className="border-b align-top">
+                        <td className="py-2 pr-3 whitespace-nowrap font-medium">{pr.pr_no}<div className="text-xs font-normal text-muted-foreground">{pr.pr_date ?? ''}</div></td>
+                        <td className="py-2 pr-3">
+                          <ul className="space-y-0.5">
+                            {pr.lines.map((l, i) => (
+                              <li key={i}>
+                                <span className="font-medium">{l.item_description || l.item_id}</span>
+                                {l.item_description ? <span className="ml-1 text-xs text-muted-foreground">({l.item_id})</span> : null}
+                                {' '}× {l.request_qty}{l.uom ? ` ${l.uom}` : ''}
+                                {l.reason ? <span className="text-xs text-muted-foreground"> — {l.reason}</span> : null}
+                                {l.po_no ? <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">→ {l.po_no}</span> : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{pr.requested_by ?? '-'}</td>
+                        <td className="py-2 pr-3"><Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>{pr.approved_by ? <div className="text-xs text-muted-foreground">{t('iv.req_by')} {pr.approved_by}</div> : null}</td>
+                        <td className="py-2 pr-3">
+                          <div className="flex justify-end gap-2">
+                            {q.data?.can_approve && isPending && (
+                              <>
+                                <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: true })}>{t('fin.approve')}</Button>
+                                <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>{t('iv.req_reject')}</Button>
+                              </>
+                            )}
+                            {q.data?.can_approve && (pr.status === 'Approved' || pr.status === 'PartiallyConverted') && (
+                              <Button size="sm" onClick={() => setConverting(pr)}>{t('iv.req_create_po')}</Button>
+                            )}
+                            {!q.data?.can_approve && isPending && (
+                              <Button size="sm" variant="outline" disabled={cancel.isPending} onClick={() => cancel.mutate(pr.pr_no)}>{t('fin.cancel')}</Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
         {converting && <PrToPoForm pr={converting} onDone={() => { setConverting(null); refresh(); }} onCancel={() => setConverting(null)} />}
       </CardContent>
