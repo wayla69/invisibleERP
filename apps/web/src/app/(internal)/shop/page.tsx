@@ -487,13 +487,13 @@ export default function ShopPage() {
                 {favOnly ? t('shop.favorites_empty') : debouncedQ || activeCat ? t('shop.no_items') : t('shop.empty_catalog')}
               </p>
             ) : view === 'grid' ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
                 {displayItems.map((it) => {
                   const inCart = cartQty(it.item_id);
                   const fav = favs.has(it.item_id);
                   return (
                     <div key={it.item_id} className="group flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md">
-                      <div className="relative aspect-square w-full overflow-hidden bg-muted">
+                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
                         <ProductThumb item={it} className="size-full" />
                         <button
                           type="button"
