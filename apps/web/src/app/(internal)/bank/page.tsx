@@ -40,6 +40,9 @@ export default function BankPage() {
     >
       {q.data && (
         <>
+          {/* G9 (audit): a new bank account is created PendingApproval and must be activated by a
+              DIFFERENT user before it can bank cash. */}
+          <PendingBankAccounts onChanged={() => q.refetch()} />
           <DataTable
             rows={q.data.accounts}
             onRowClick={(r: any) => setSelected(r.id)}
@@ -171,6 +174,45 @@ function Reconciliation({ bankAccountId, onClose }: { bankAccountId: number; onC
 }
 
 // ───────── BANK-02 pending bank adjustments (Draft JE awaiting an independent approver) ─────────
+// G9 (audit): bank-account creation maker-checker — a new account is PendingApproval + inactive until a
+// DISTINCT approver activates it (self-approval → 403 SOD_VIOLATION); a pending account cannot bank cash.
+function PendingBankAccounts({ onChanged }: { onChanged: () => void }) {
+  const { t } = useLang();
+  const q = useQuery<any>({ queryKey: ['bank-accounts-pending'], queryFn: () => api('/api/bank/accounts/pending') });
+  const decide = useMutation({
+    mutationFn: ({ id, action }: { id: number; action: 'approve' | 'reject' }) => api<any>(`/api/bank/accounts/${id}/${action}`, { method: 'POST', body: action === 'reject' ? JSON.stringify({}) : undefined }),
+    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? t('fnx.bank.toast_acct_approved') : t('fnx.bank.toast_acct_rejected')); q.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const rows = q.data?.pending ?? [];
+  if (!rows.length) return null;
+  return (
+    <Card className="border-amber-300 p-4 dark:border-amber-700">
+      <h4 className="mb-1 flex items-center gap-2 text-sm font-semibold"><Clock className="size-4" /> {t('fnx.bank.pending_acct_title')}</h4>
+      <p className="mb-3 text-sm text-muted-foreground">{t('fnx.bank.pending_acct_desc')}</p>
+      <DataTable
+        rows={rows}
+        rowKey={(r: any) => r.id}
+        columns={[
+          { key: 'bank_name', label: t('fnx.bank.col_bank') },
+          { key: 'account_no', label: t('fnx.bank.col_account_no') },
+          { key: 'gl_account_code', label: t('fnx.bank.col_gl_account') },
+          { key: 'opening_balance', label: t('fnx.bank.col_opening'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.opening_balance)}</span> },
+          { key: 'requested_by', label: t('fnx.bank.col_requested_by'), render: (r: any) => r.requested_by ?? '—' },
+          { key: 'act', label: '', align: 'right', render: (r: any) => (
+            <div className="flex justify-end gap-1">
+              <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, action: 'approve' })}><Check className="size-4" /> {t('fin.approve')}</Button>
+              <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, action: 'reject' })}><Ban className="size-4" /> {t('fnx.bank.reject')}</Button>
+            </div>
+          ) },
+        ]}
+        emptyState={{ title: t('fnx.bank.empty_pending') }}
+        dense
+      />
+    </Card>
+  );
+}
+
 function PendingAdjustments({ onChanged }: { onChanged: () => void }) {
   const { t } = useLang();
   const q = useQuery<any>({ queryKey: ['bank-pending-adj'], queryFn: () => api('/api/bank/adjustments/pending') });

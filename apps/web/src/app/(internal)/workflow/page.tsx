@@ -30,6 +30,7 @@ export default function WorkflowPage() {
       <Tabs tabs={[
         { key: 'inbox', label: t('st.wf.tab_inbox'), content: <MyApprovals /> },
         { key: 'defs', label: t('st.wf.tab_defs'), content: <Definitions /> },
+        { key: 'readiness', label: t('st.wf.tab_readiness'), content: <Readiness /> },
       ]} />
     </div>
   );
@@ -84,6 +85,36 @@ function MyApprovals() {
         />
       </StateView>
     </div>
+  );
+}
+
+// Cross-cutting control-integrity readiness (maker-checker audit): the engine AUTO-APPROVES a docType with no
+// active workflow definition, so a deploy without seeded definitions silently has no second-person approval on
+// PR/PO/BUDGET/PMR/BQR. This read-only panel surfaces which docTypes currently auto-approve.
+function Readiness() {
+  const { t } = useLang();
+  const q = useQuery<{ doc_types: { doc_type: string; has_active_definition: boolean; auto_approves: boolean }[]; ready: boolean; missing: string[]; message: string }>({
+    queryKey: ['wf-readiness'], queryFn: () => api('/api/workflow/readiness'),
+  });
+  return (
+    <StateView q={q}>
+      {q.data && (
+        <Card className={q.data.ready ? '' : 'border-amber-300 dark:border-amber-700'}>
+          <CardHeader><CardTitle className="flex items-center gap-2 text-sm">{q.data.ready ? <CheckCheck className="size-4" /> : <AlarmClock className="size-4" />} {t('st.wf.readiness_title')}</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">{q.data.ready ? t('st.wf.readiness_ok') : t('st.wf.readiness_warn')}</p>
+            <DataTable
+              rows={q.data.doc_types}
+              rowKey={(r) => r.doc_type}
+              columns={[
+                { key: 'doc_type', label: t('st.wf.col_type'), render: (r) => <Badge variant="info">{r.doc_type}</Badge> },
+                { key: 'status', label: t('st.wf.readiness_col_status'), render: (r) => r.has_active_definition ? <Badge variant="success">{t('st.wf.readiness_has_def')}</Badge> : <Badge variant="warning">{t('st.wf.readiness_auto')}</Badge> },
+              ]}
+            />
+          </CardContent>
+        </Card>
+      )}
+    </StateView>
   );
 }
 

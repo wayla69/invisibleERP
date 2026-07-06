@@ -1,6 +1,11 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.5 · 2026-07-06**
+**Status: DRAFT v0.6 · 2026-07-06**
+
+*v0.6 (2026-07-06): Part C — documented **where the G9 bank-account approval queue lives in
+the app**: a **"Bank accounts pending approval"** card on the **Bank** screen (`/bank`), where a
+**different** user clicks Approve/Reject. UI surfacing of an already-shipped control — no new
+endpoint, no new numbered control.*
 
 *v0.5 (2026-07-06): Part C — clarified that a **bank statement is imported single-user by
 design** and that the **reconciliation certifier** must review the imported (matched/unmatched)
@@ -480,6 +485,11 @@ trail (รออนุมัติ → อนุมัติแล้ว/ปฏ�
 > wrong account number, GL mapping or opening balance and banking cash through it.
 > (Existing accounts are already Approved — this only affects accounts created from
 > now on. Strengthens control **REC-05**.)
+>
+> **Where to find it in the app.** Newly created accounts awaiting a second person appear in a
+> **"Bank accounts pending approval"** card on the **Bank** screen (`/bank`). A **different** user
+> opens that card and clicks **Approve** (or **Reject**) — the creator's own account is not
+> approvable there (self-approval is blocked).
 
 ### To reconcile a bank account
 

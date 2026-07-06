@@ -1,6 +1,6 @@
 # 10 · Approvals
 
-**Status: DRAFT v0.2 · 2026-07-06** · *v0.2 (2026-07-06): added the **workflow readiness check** (`GET /api/workflow/readiness`, `masterdata`/`approvals`/`exec`) — a go-live detective/config control that reports which engine-wired document types (PR/PO/BUDGET/PMR/BQR) lack an active definition and would therefore auto-approve; clarified that a document type with no definition auto-approves. No new numbered control.*
+**Status: DRAFT v0.3 · 2026-07-06** · *v0.3 (2026-07-06): documented **where these controls are surfaced in the app** — the workflow readiness check now appears as a **"Control readiness"** tab on the **Workflow Approvals** screen (`/workflow`), and the two detective exception reports (**"Voids / refunds"** G14, **"Voided tax invoices"** G16) appear as read-only review cards on the **Pending Approvals** screen (`/approvals`). UI surfacing of already-shipped checks — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **workflow readiness check** (`GET /api/workflow/readiness`, `masterdata`/`approvals`/`exec`) — a go-live detective/config control that reports which engine-wired document types (PR/PO/BUDGET/PMR/BQR) lack an active definition and would therefore auto-approve; clarified that a document type with no definition auto-approves. No new numbered control.*
 
 This chapter is for **anyone who approves documents** — managers, financial
 controllers, procurement leads. It covers the approvals inbox, approving and
@@ -123,6 +123,30 @@ types in `missing` (see 4c above) so that PRs, POs and budgets require a real
 second approver instead of sailing through. The check is **read-only** — it only
 tells you what's configured, it doesn't change any behaviour. (Detective /
 configuration control for gap **G-cross-cutting**.)
+
+> **Where to find it in the app.** This readiness check is surfaced as a **"Control
+> readiness"** tab on the **Workflow Approvals** screen (`/workflow`). Open it before
+> go-live to see, per document type (PR/PO/BUDGET/PMR/BQR), whether it has an active
+> definition or would currently **auto-approve**.
+
+---
+
+## 4c-ter. Exception reports (periodic detective review)
+
+Some actions stay **single-user by design** — POS voids and small refunds (to keep
+the till fast) and tax-invoice voids (a Revenue Department requirement keeps the
+number sequence gapless). Those are covered by **detective** review instead of a
+second signature, and the two exception reports are surfaced right here on the
+**Pending Approvals** screen (`/approvals`) as read-only review cards:
+
+- **"Voids / refunds"** — every voided payment and every refund for the window
+  (gap **G14**; full detail in [Sales & POS](./01-sales-and-pos.md)).
+- **"Voided tax invoices"** — every voided tax invoice for the window (gap
+  **G16**; full detail in [Tax](./07-tax.md)).
+
+Both are **read-only** — nothing is approved from these cards. A reviewer
+independent of the till / invoicing scans them periodically (monthly or per shift)
+to spot unusual patterns.
 
 ---
 

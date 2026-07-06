@@ -11,6 +11,8 @@ import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 
 // GOV-01 — unified pending-approvals monitor: every item awaiting independent (maker-checker) approval
@@ -93,6 +95,77 @@ export default function ApprovalsPage() {
           ]}
         />
       )}
+
+      {/* Detective exception reports (maker-checker audit G14/G16): single-user-by-design actions
+          surfaced here for independent periodic review. */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <VoidRefundReport />
+        <VoidedTaxInvoiceReport />
+      </div>
     </ModulePage>
+  );
+}
+
+// G14 (audit — detective): every POS void + refund in the window, for independent review.
+function VoidRefundReport() {
+  const { t } = useLang();
+  const q = useQuery<{ voids: { payment_no: string; amount: number; by: string | null; at: string }[]; refunds: { refund_no: string; amount: number; reason: string | null; by: string | null; at: string }[]; void_count: number; refund_count: number; void_total: number; refund_total: number }>({
+    queryKey: ['exc-voids-refunds'], queryFn: () => api('/api/payments/exceptions/voids-refunds'),
+  });
+  const d = q.data;
+  const rows = [
+    ...(d?.voids ?? []).map((v) => ({ kind: t('appr.exc_void'), ref: v.payment_no, amount: v.amount, detail: '—', by: v.by, at: v.at })),
+    ...(d?.refunds ?? []).map((r) => ({ kind: t('appr.exc_refund'), ref: r.refund_no, amount: r.amount, detail: r.reason ?? '—', by: r.by, at: r.at })),
+  ];
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-sm">{t('appr.exc_vr_title')}</CardTitle></CardHeader>
+      <CardContent>
+        <p className="mb-3 text-xs text-muted-foreground">{t('appr.exc_vr_desc')}{d ? ` · ${t('appr.exc_vr_summary', { voids: d.void_count, refunds: d.refund_count })}` : ''}</p>
+        <DataTable
+          rows={rows}
+          rowKey={(r, i) => `${r.ref}-${i}`}
+          columns={[
+            { key: 'kind', label: t('appr.exc_col_kind'), render: (r: any) => <Badge variant="outline">{r.kind}</Badge> },
+            { key: 'ref', label: t('appr.col_ref'), render: (r: any) => <span className="font-mono text-xs">{r.ref}</span> },
+            { key: 'amount', label: t('appr.col_value'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+            { key: 'by', label: t('fin.col_requester'), render: (r: any) => r.by ?? '—' },
+            { key: 'at', label: t('appr.col_requested_at'), render: (r: any) => (r.at ? thaiDate(r.at) : '—') },
+          ]}
+          emptyState={{ title: t('appr.exc_none') }}
+          dense
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+// G16 (audit — detective): every voided tax invoice in the window, for independent review.
+function VoidedTaxInvoiceReport() {
+  const { t } = useLang();
+  const q = useQuery<{ voided: { doc_no: string; type: string; issue_date: string; grand_total: number; void_reason: string | null; created_by: string | null }[]; count: number; total: number }>({
+    queryKey: ['exc-voided-tax'], queryFn: () => api('/api/tax-invoices/exceptions/voided'),
+  });
+  const rows = q.data?.voided ?? [];
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-sm">{t('appr.exc_tax_title')}</CardTitle></CardHeader>
+      <CardContent>
+        <p className="mb-3 text-xs text-muted-foreground">{t('appr.exc_tax_desc')}{q.data ? ` · ${t('appr.exc_tax_summary', { n: q.data.count })}` : ''}</p>
+        <DataTable
+          rows={rows}
+          rowKey={(r: any) => r.doc_no}
+          columns={[
+            { key: 'doc_no', label: t('appr.col_ref'), render: (r: any) => <span className="font-mono text-xs">{r.doc_no}</span> },
+            { key: 'grand_total', label: t('appr.col_value'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.grand_total)}</span> },
+            { key: 'void_reason', label: t('appr.exc_col_reason'), render: (r: any) => <span className="text-muted-foreground">{r.void_reason ?? '—'}</span> },
+            { key: 'created_by', label: t('fin.col_requester'), render: (r: any) => r.created_by ?? '—' },
+            { key: 'issue_date', label: t('appr.exc_col_issue_date'), render: (r: any) => (r.issue_date ? thaiDate(r.issue_date) : '—') },
+          ]}
+          emptyState={{ title: t('appr.exc_none') }}
+          dense
+        />
+      </CardContent>
+    </Card>
   );
 }

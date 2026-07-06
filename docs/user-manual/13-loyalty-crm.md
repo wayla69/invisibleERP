@@ -1,6 +1,6 @@
 # Members & Points CRM (สมาชิก & แต้ม)
 
-**Status: DRAFT v0.1** · Last updated: 2026-07-06 · For: Sales, Marketing, Loyalty Admin, Managers
+**Status: DRAFT v0.2** · Last updated: 2026-07-06 · For: Sales, Marketing, Loyalty Admin, Managers
 
 This guide covers the loyalty CRM — the **member directory**, the **360° member view**, the **PDPA
 consent register**, and the **points-liability** report. Configuring earn/redeem rates is in
@@ -244,6 +244,9 @@ consumer page, not the staff app; LINE LIFF is a future wrapper on the same logi
    > `.../reject` discards it). The staff member who requested it **cannot approve their own** transfer — that is blocked
    > (`SOD_VIOLATION`). Smaller staff transfers (500 points or fewer) **and members sending their own points** in the `/m`
    > app still go through **immediately**.
+   > **Where to find it in the app.** Over-threshold staff transfers awaiting release appear in a
+   > **"Point transfers pending approval"** card on the **Loyalty** config screen (`/loyalty`), where a
+   > **different** approver (**Approvals/Exec**) clicks **Approve** (or **Reject**).
    **บัตรใน Wallet ของมือถือ (V5):** กด **"เพิ่มลงใน Wallet"** บนการ์ด `/m` เพื่อเก็บบัตรสมาชิกไว้ใน
    Apple Wallet / Google Wallet (`POST /api/member/wallet-pass`) — บัตรแสดง ชื่อร้าน รหัสสมาชิก (QR) ระดับ
    และแต้ม **เท่านั้น** (ไม่มีเบอร์โทร/วันเกิด — PDPA) และแต้มบนบัตรจะอัปเดตตามการสะสม/แลกโดยอัตโนมัติ
@@ -523,5 +526,6 @@ claim points by uploading a photo of the receipt.
 | 1.32 | 2026-07-02 | Platform | **V1 (docs/29) member-app completion:** §9 — the /m app now shows the tier-ladder strip (level + ×earn + progress), an expiring-points warning chip (new self-scoped `GET /api/member/points/expiring`, read-only over the W1 register), the **ส่งแต้มให้เพื่อน** transfer form (W1 API, guards surfaced verbatim), and the full points history (สะสม/แลก/โอน/หมดอายุ). No new permissions or controls. |
 | 1.31 | 2026-07-02 | Platform | **W3 (docs/27) NPS + governance:** new §7c — post-purchase NPS micro-survey (single-use tokenized link, no PII; detractor ≤6 fires `loyalty.nps_detractor` into Automation/Webhooks; summary + 360 flag; schedulable `nps_post_purchase` job) and the *กติกาการส่ง* governance card on `/settings/messaging` (opt-in quiet hours + global weekly marketing cap, transactional exempt, audited skips). New error codes `NPS_ALREADY_SENT`, `NPS_ALREADY_ANSWERED`/`NPS_EXPIRED`. |
 | 1.30 | 2026-07-02 | Platform | **W2 (docs/27) coalition network:** new §7b **เครือข่ายพันธมิตรแต้ม** — HQ creates a points network and adds shops (`/loyalty` card); partner tills resolve members by phone (badge shows code/name/tier/points/home shop only — no contact data crosses shops); earn/redeem at any shop in the network lands on the member's home-shop ledger, and every cross-shop movement books a balanced intercompany clearing entry that HQ settles. New error codes `NOT_IN_COALITION`, `COALITION_HQ_ONLY` (+ `PERIOD_CLOSED` on coalition moves). |
+| 1.39 | 2026-07-06 | Platform | **G13 — where the approval queue lives in the app:** §9 callout now notes that over-threshold staff point-transfers awaiting release appear in a **"Point transfers pending approval"** card on the **Loyalty** config screen (`/loyalty`), where a **different** approver (Approvals/Exec) clicks Approve/Reject. UI surfacing of the already-shipped G13 control — no new endpoint, no new numbered control. |
 | 1.38 | 2026-07-06 | Platform | **G13 — large staff point-transfers need a second approver:** §9 gains a control callout — a **staff-initiated** transfer over **500 points** is held for approval and moves **no points** until a **different** authorised user (**Approvals/Exec**) approves it (`POST /api/loyalty/transfers/:reqNo/approve`; queue `.../transfers/pending`; `.../reject` discards); self-approval is blocked (`SOD_VIOLATION`). Smaller staff transfers and members sending their own points still go through immediately. Strengthens SoD R15/R16 (rides LYL-18; no new control). |
 | 1.29 | 2026-07-02 | Platform | **W1 (docs/27) tier economics + points liquidity:** §7 **ตัวคูณแต้มตามระดับ** — tier-ladder card on `/loyalty` sets ×earn per tier (Gold ×2 earns double **at the till**, audited in the ledger; liability accrues the multiplied points automatically); §9 **โอนแต้มให้เพื่อน** — member-to-member point transfer by phone (same shop, all-or-nothing, daily cap `เพดานโอนแต้มต่อวัน`, 0 = off; staff-assist route for the back office; LYL-18); §4 **เตือนแต้มใกล้หมดอายุ** — the daily sweep fires `loyalty.points_expiring` into Automation/Webhooks 30 days ahead, one nudge per expiring batch. New error codes `SELF_TRANSFER`, `RECIPIENT_NOT_FOUND`, `TRANSFER_CAP`, `TRANSFER_DISABLED`. |
