@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Inject, Patch, Post } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { Body, Controller, Get, Inject, Param, Patch, Post, HttpCode, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenants, branches, users, menuItems } from '../../database/schema';
+import { tenants, branches, users, menuItems, tenantProfileChangeRequests } from '../../database/schema';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BillingService } from './billing.service';
@@ -57,12 +57,17 @@ export class TenantController {
   @Permissions('users')
   async updateProfile(@Body(new ZodValidationPipe(ProfileBody)) b: ProfileBody, @CurrentUser() user: JwtUser) {
     const id = await this.billing.resolveTenantId({ username: user.username, customerName: user.customerName });
+    const [cur] = await this.db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
+    // G15 (maker-checker): tax_id and promptpay_id are payment-integrity / legal-identity fields — the
+    // PromptPay id decides which target RECEIVES customer QR payments — so a *change* to either is NOT applied
+    // here; it is staged for a distinct approver (see stageProfileChange). All other profile fields (address,
+    // phone, branding, VAT flags) still apply immediately. A no-op (same value) never stages.
     const patch: Record<string, unknown> = {};
     const map: Record<string, string> = {
-      legal_name: 'legalName', name: 'name', tax_id: 'taxId', branch_code: 'branchCode',
+      legal_name: 'legalName', name: 'name', branch_code: 'branchCode',
       vat_registered: 'vatRegistered', tax_country: 'taxCountry', phone: 'phone', email: 'email',
       address_line1: 'addressLine1', address_line2: 'addressLine2', sub_district: 'subDistrict',
-      district: 'district', province: 'province', postal_code: 'postalCode', promptpay_id: 'promptpayId',
+      district: 'district', province: 'province', postal_code: 'postalCode',
       default_language: 'defaultLanguage', logo_url: 'logoUrl', tagline: 'tagline',
     };
     for (const [k, col] of Object.entries(map)) if (b[k as keyof ProfileBody] !== undefined) patch[col] = b[k as keyof ProfileBody];
@@ -70,8 +75,76 @@ export class TenantController {
     if (b.branding_prefs !== undefined) patch.brandingPrefs = b.branding_prefs;
     if (Object.keys(patch).length) await this.db.update(tenants).set(patch).where(eq(tenants.id, id));
     if (b.vat_rate !== undefined || b.tax_country !== undefined) this.tax.invalidateTenantTax(id); // drop stale cache
+
+    // Stage the sensitive fields if either is genuinely changing.
+    const newTaxId = b.tax_id !== undefined && b.tax_id !== (cur?.taxId ?? null) ? b.tax_id : undefined;
+    const newPromptpay = b.promptpay_id !== undefined && b.promptpay_id !== (cur?.promptpayId ?? null) ? b.promptpay_id : undefined;
+    let pendingChange: { req_no: string; fields: string[] } | undefined;
+    if (newTaxId !== undefined || newPromptpay !== undefined) {
+      pendingChange = await this.stageProfileChange(id, user, cur, newTaxId, newPromptpay);
+    }
     const [t] = await this.db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
-    return this.fmt(t);
+    return { ...this.fmt(t), ...(pendingChange ? { pending_change: pendingChange } : {}) };
+  }
+
+  // G15 helper: park a change to tax_id / promptpay_id as PendingApproval (one open request per tenant).
+  private async stageProfileChange(tenantId: number, user: JwtUser, cur: any, taxId?: string, promptpayId?: string) {
+    // Supersede any earlier still-open request for this tenant so the queue holds only the latest.
+    await this.db.update(tenantProfileChangeRequests)
+      .set({ status: 'Superseded' })
+      .where(and(eq(tenantProfileChangeRequests.tenantId, tenantId), eq(tenantProfileChangeRequests.status, 'PendingApproval')));
+    const [row] = await this.db.insert(tenantProfileChangeRequests).values({
+      tenantId, reqNo: 'TPC-PENDING',
+      promptpayId: promptpayId ?? null, taxId: taxId ?? null,
+      prevPromptpayId: cur?.promptpayId ?? null, prevTaxId: cur?.taxId ?? null,
+      status: 'PendingApproval', requestedBy: user.username,
+    }).returning({ id: tenantProfileChangeRequests.id });
+    const reqNo = `TPC-${String(Number(row!.id)).padStart(5, '0')}`;
+    await this.db.update(tenantProfileChangeRequests).set({ reqNo }).where(eq(tenantProfileChangeRequests.id, Number(row!.id)));
+    const fields = [taxId !== undefined ? 'tax_id' : null, promptpayId !== undefined ? 'promptpay_id' : null].filter(Boolean) as string[];
+    return { req_no: reqNo, fields };
+  }
+
+  // Checker queue — profile changes awaiting approval.
+  @Get('profile-approvals')
+  @Permissions('users', 'exec', 'approvals')
+  async pendingProfileChanges(@CurrentUser() user: JwtUser) {
+    const id = await this.billing.resolveTenantId({ username: user.username, customerName: user.customerName });
+    const rows = await this.db.select().from(tenantProfileChangeRequests)
+      .where(and(eq(tenantProfileChangeRequests.tenantId, id), eq(tenantProfileChangeRequests.status, 'PendingApproval')))
+      .orderBy(desc(tenantProfileChangeRequests.id));
+    return { pending: rows.map((r: any) => ({ req_no: r.reqNo, tax_id: r.taxId, promptpay_id: r.promptpayId, prev_tax_id: r.prevTaxId, prev_promptpay_id: r.prevPromptpayId, requested_by: r.requestedBy, requested_at: r.requestedAt })), count: rows.length };
+  }
+
+  // Approve a staged profile change (checker; approver ≠ requester → 403 SOD_VIOLATION). Applies to `tenants`.
+  @Post('profile-approvals/:reqNo/approve')
+  @HttpCode(200)
+  @Permissions('exec', 'approvals')
+  async approveProfileChange(@Param('reqNo') reqNo: string, @CurrentUser() user: JwtUser) {
+    const id = await this.billing.resolveTenantId({ username: user.username, customerName: user.customerName });
+    const [r] = await this.db.select().from(tenantProfileChangeRequests)
+      .where(and(eq(tenantProfileChangeRequests.tenantId, id), eq(tenantProfileChangeRequests.reqNo, reqNo))).limit(1);
+    if (!r || r.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_PROFILE_CHANGE', message: 'No profile change pending approval', messageTh: 'ไม่พบคำขอเปลี่ยนข้อมูลที่รออนุมัติ' });
+    if (r.requestedBy && r.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The requester cannot approve their own profile change', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้' });
+    const patch: Record<string, unknown> = {};
+    if (r.taxId !== null) patch.taxId = r.taxId;
+    if (r.promptpayId !== null) patch.promptpayId = r.promptpayId;
+    if (Object.keys(patch).length) await this.db.update(tenants).set(patch).where(eq(tenants.id, id));
+    await this.db.update(tenantProfileChangeRequests).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(tenantProfileChangeRequests.id, Number(r.id)));
+    const [t] = await this.db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
+    return { req_no: reqNo, status: 'Approved', approved_by: user.username, requested_by: r.requestedBy, profile: this.fmt(t) };
+  }
+
+  @Post('profile-approvals/:reqNo/reject')
+  @HttpCode(200)
+  @Permissions('exec', 'approvals')
+  async rejectProfileChange(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(z.object({ reason: z.string().optional() }))) body: { reason?: string }, @CurrentUser() user: JwtUser) {
+    const id = await this.billing.resolveTenantId({ username: user.username, customerName: user.customerName });
+    const [r] = await this.db.select().from(tenantProfileChangeRequests)
+      .where(and(eq(tenantProfileChangeRequests.tenantId, id), eq(tenantProfileChangeRequests.reqNo, reqNo))).limit(1);
+    if (!r || r.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_PROFILE_CHANGE', message: 'No profile change pending approval', messageTh: 'ไม่พบคำขอเปลี่ยนข้อมูลที่รออนุมัติ' });
+    await this.db.update(tenantProfileChangeRequests).set({ status: 'Rejected', rejectReason: body.reason ?? null }).where(eq(tenantProfileChangeRequests.id, Number(r.id)));
+    return { req_no: reqNo, status: 'Rejected', rejected_by: user.username };
   }
 
   // Onboarding checklist (ITGC-AC-18 #4) — the setup wizard's data backbone. Reports which first-run steps

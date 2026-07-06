@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, asc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts, cashMovements, bankDeposits } from '../../database/schema';
@@ -39,6 +39,8 @@ export class BankService {
     const db = this.db;
     const [bank] = await db.select().from(bankAccounts).where(and(eq(bankAccounts.id, dto.bank_account_id), eq(bankAccounts.tenantId, user.tenantId as number))).limit(1);
     if (!bank) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Bank account not found', messageTh: 'ไม่พบบัญชีธนาคาร' });
+    // G9: a bank account still pending maker-checker approval cannot receive cash (it defines the GL mapping).
+    if (bank.status !== 'Approved') throw new BadRequestException({ code: 'BANK_NOT_APPROVED', message: 'Bank account is pending approval and cannot be used yet', messageTh: 'บัญชีธนาคารรออนุมัติ ยังใช้งานไม่ได้' });
     const conds = [eq(cashMovements.tenantId, user.tenantId as number), sql`${cashMovements.type}::text = 'drop'`, sql`${cashMovements.depositId} is null`];
     const drops = await db.select().from(cashMovements).where(and(...conds));
     const chosen = dto.movement_nos?.length ? drops.filter((d: any) => dto.movement_nos!.includes(d.movementNo)) : drops;
@@ -78,18 +80,54 @@ export class BankService {
     };
   }
 
+  // G9 (maker-checker): create the bank account 'PendingApproval' + inactive. It defines the account no,
+  // the GL mapping deposits reconcile to, and the opening balance — a rogue mapping can misdirect cash — so
+  // it must not be usable until a DISTINCT approver activates it (see approveBankAccount / createDeposit gate).
   async createBankAccount(dto: CreateBankAccountDto, user: JwtUser) {
     const db = this.db;
     const [acc] = await db.select({ code: accounts.code }).from(accounts).where(eq(accounts.code, dto.gl_account_code)).limit(1);
     if (!acc) throw new BadRequestException({ code: 'BAD_GL_ACCOUNT', message: `GL account ${dto.gl_account_code} not found`, messageTh: 'ไม่พบรหัสบัญชี GL' });
-    const [b] = await db.insert(bankAccounts).values({ tenantId: user.tenantId ?? null, bankName: dto.bank_name, accountNo: dto.account_no, glAccountCode: dto.gl_account_code, currency: dto.currency, openingBalance: fx(dto.opening_balance, 4), createdBy: user.username }).onConflictDoNothing().returning();
+    const [b] = await db.insert(bankAccounts).values({ tenantId: user.tenantId ?? null, bankName: dto.bank_name, accountNo: dto.account_no, glAccountCode: dto.gl_account_code, currency: dto.currency, openingBalance: fx(dto.opening_balance, 4), active: 'false', status: 'PendingApproval', requestedBy: user.username, createdBy: user.username }).onConflictDoNothing().returning();
     if (!b) throw new BadRequestException({ code: 'BANK_EXISTS', message: 'Bank account already exists', messageTh: 'มีบัญชีธนาคารนี้แล้ว' });
-    return shapeAcct(b);
+    return { ...shapeAcct(b), status: 'PendingApproval', pending: true, requested_by: user.username };
   }
+
+  // Checker queue — bank accounts awaiting activation.
+  async listPendingBankAccounts(user: JwtUser) {
+    const db = this.db;
+    const conds = [eq(bankAccounts.status, 'PendingApproval')];
+    if (user.tenantId != null) conds.push(eq(bankAccounts.tenantId, user.tenantId));
+    const rows = await db.select().from(bankAccounts).where(and(...conds)).orderBy(asc(bankAccounts.id));
+    return { pending: rows.map((b: any) => ({ ...shapeAcct(b), requested_by: b.requestedBy })), count: rows.length };
+  }
+
+  // Approve a pending bank account (checker; approver ≠ requester → 403 SOD_VIOLATION). Activates it for use.
+  async approveBankAccount(id: number, user: JwtUser) {
+    const db = this.db;
+    const conds = [eq(bankAccounts.id, id)];
+    if (user.tenantId != null) conds.push(eq(bankAccounts.tenantId, user.tenantId));
+    const [b] = await db.select().from(bankAccounts).where(and(...conds)).limit(1);
+    if (!b || b.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_BANK_ACCOUNT', message: 'No bank account pending approval', messageTh: 'ไม่พบบัญชีธนาคารที่รออนุมัติ' });
+    if (b.requestedBy && b.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The requester cannot approve their own bank account', messageTh: 'ผู้ขอไม่สามารถอนุมัติบัญชีธนาคารของตนเองได้' });
+    const [u] = await db.update(bankAccounts).set({ status: 'Approved', active: 'true', approvedBy: user.username, approvedAt: new Date() }).where(eq(bankAccounts.id, id)).returning();
+    return { ...shapeAcct(u), status: 'Approved', approved_by: user.username, requested_by: b.requestedBy };
+  }
+
+  // Reject a pending bank account (checker) — discards it.
+  async rejectBankAccount(id: number, user: JwtUser) {
+    const db = this.db;
+    const conds = [eq(bankAccounts.id, id)];
+    if (user.tenantId != null) conds.push(eq(bankAccounts.tenantId, user.tenantId));
+    const [b] = await db.select().from(bankAccounts).where(and(...conds)).limit(1);
+    if (!b || b.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_BANK_ACCOUNT', message: 'No bank account pending approval', messageTh: 'ไม่พบบัญชีธนาคารที่รออนุมัติ' });
+    await db.update(bankAccounts).set({ status: 'Rejected', active: 'false' }).where(eq(bankAccounts.id, id));
+    return { id, status: 'Rejected', rejected_by: user.username };
+  }
+
   async listBankAccounts(_user: JwtUser) {
     const db = this.db;
     const rows = await db.select().from(bankAccounts).orderBy(asc(bankAccounts.id));
-    return { accounts: rows.map(shapeAcct), count: rows.length };
+    return { accounts: rows.map((b: any) => ({ ...shapeAcct(b), status: b.status })), count: rows.length };
   }
 
   async importStatement(bankAccountId: number, dto: ImportStatementDto, user: JwtUser) {

@@ -337,6 +337,13 @@ Gap discussion under "Cross-cutting risk" below.
 - **Related:** SoD R07/R10; revenue-recognition assertions.
 - **Remediation:** Require the acceptance/revenue-posting step to be performed by a user distinct from the
   quote creator (or route large/discounted quotes through the workflow engine).
+- **Status: ✅ REMEDIATED (2026-07-06).** `acceptQuote` now enforces a distinct-actor guard: when a billable
+  quote (`total > 0`) is accepted and revenue would post (`Dr 1100 AR / Cr 4000`), the acceptor must differ
+  from the quote's `createdBy` or `403 SOD_VIOLATION` — one person cannot both build/discount a quote and
+  self-recognise its revenue. Enforced whenever the ledger is wired (always in production); the ledger-less
+  standalone quote pipeline is a pure status transition and is unaffected. No migration (uses the existing
+  `quotes.createdBy`). ToE: `cpq-gl.ts` (author self-accept → 403; a distinct exec user accepts → AR/revenue
+  posts, TB balanced).
 
 ### G13 — Loyalty staff-initiated point movements are single-user (and the assumed control does not exist)  ·  **P2 · Medium-High**
 - **Where:** `modules/loyalty/loyalty.controller.ts` — member point **transfer** `:116`
@@ -351,6 +358,20 @@ Gap discussion under "Cross-cutting risk" below.
 - **Related:** SoD R15/R16.
 - **Remediation:** Implement the assumed control: over-threshold manual point grants/transfers park as
   `Pending` and require a distinct approver; reconcile the SoD narrative/RCM to match reality.
+- **Status: ✅ REMEDIATED (2026-07-06).** A staff-initiated P2P point transfer of **more than 500 points**
+  (`STAFF_TRANSFER_APPROVAL_THRESHOLD`) is now STAGED as a `PendingApproval` `pending_point_transfers` row
+  (migration **0266**) — **no points move** — and executed only when a **DISTINCT** approver releases it via
+  `POST /api/loyalty/transfers/:reqNo/approve` (`approvals`/`exec`; self-approval → `403 SOD_VIOLATION`); the
+  real locked move (balance + daily-cap re-check) runs on approval and attributes the ledger rows to the
+  maker. Sub-threshold staff transfers and member self-service transfers still move immediately (fast
+  counter, mirrors the gift-card threshold gate). `…/reject` discards; `GET …/transfers/pending` is the
+  queue. *Scope note (RCM/narrative reconciliation):* the audit's finding that the assumed R15/R16
+  maker-checker did **not** exist is now reconciled — the only prior distinct-actor control was the
+  member-submitted **receipt** queue (unchanged); **manual point grants** flow through that already-
+  dual-controlled receipt-approval path, and bulk **expiry/breakage** is a liability-reducing detective
+  sweep gated to `crm_points_adjust`/`exec` (no self-enrichment vector), so the preventive gate is applied
+  where value is *moved* (transfers). ToE: `loyalty.ts` (over-threshold staged/no-move; requester
+  self-approve → 403; distinct approver releases → points move; queue clears).
 
 ### G9 — Bank account creation is single-user  ·  **P2 · Medium**
 - **Where:** `modules/bank/bank.service.ts` `createBankAccount():85`. Route `bank.controller.ts:23`.
@@ -360,6 +381,14 @@ Gap discussion under "Cross-cutting risk" below.
   mapping can misdirect reconciliation or mask activity (R02-adjacent). Opening balance is set here too.
 - **Remediation:** Distinct-approver on new bank accounts and on any change to account number / GL
   mapping.
+- **Status: ✅ REMEDIATED (2026-07-06).** `createBankAccount` now creates the account `PendingApproval` +
+  inactive (migration **0264** adds `status`/`requested_by`/`approved_by`/`approved_at`; existing rows
+  backfill to `Approved`). It **cannot bank cash** — `createDeposit` rejects a non-approved account
+  (`400 BANK_NOT_APPROVED`) — until a **DISTINCT** approver activates it via
+  `POST /api/bank/accounts/:id/approve` (`approvals`/`exec`; self-approval → `403 SOD_VIOLATION`). `…/reject`
+  discards; `GET /api/bank/accounts/pending` is the queue. ToE: `cash-banking.ts` (new account Pending;
+  deposit to a pending account → `BANK_NOT_APPROVED`; requester self-approve → 403; distinct approver
+  activates → banking proceeds), `bankrec.ts` (create → distinct approve before use).
 
 ### G15 — Tenant financial profile (PromptPay id, Tax ID) is single-user  ·  **P2 · Medium**
 - **Where:** `modules/billing/tenant.controller.ts` `updateProfile():58` (fields include
@@ -371,6 +400,14 @@ Gap discussion under "Cross-cutting risk" below.
   legal identity on issued tax invoices.
 - **Remediation:** Distinct-approver on changes to payment-receiving fields (PromptPay/bank) and tax id;
   notify on change.
+- **Status: ✅ REMEDIATED (2026-07-06).** `PATCH /api/tenant/profile` no longer applies a change to
+  `promptpay_id` or `tax_id` directly — a genuine change to either is STAGED as a `PendingApproval`
+  `tenant_profile_change_requests` row (migration **0265**) and written to `tenants` only when a **DISTINCT**
+  approver releases it via `POST /api/tenant/profile-approvals/:reqNo/approve` (`exec`/`approvals`;
+  self-approval → `403 SOD_VIOLATION`). All other profile fields (address, phone, branding, VAT flags) still
+  apply immediately; a no-op (same value) never stages. `…/reject` discards; `GET …/profile-approvals` is the
+  queue. ToE: `promptpay.ts` (PromptPay change staged/not-applied; QR still refused while pending; requester
+  self-approve → 403; distinct approver applies → QR then generates).
 
 ### G10 — Bank statement import (Weak)  ·  **P3**
 - **Where:** `modules/bank/bank.service.ts` `importStatement():99`.
@@ -432,12 +469,22 @@ G5 residual (item/menu **base** price left non-sensitive) — none currently sch
 access with zero second-person control.
 
 ### Phase P2 — revenue/liability recognition & payment-target integrity
-7. **G12 CPQ self-accept** — separate quote author from revenue-posting acceptor.
+7. **G12 CPQ self-accept** — separate quote author from revenue-posting acceptor. — **✅ DONE 2026-07-06**
+   (distinct-actor guard on `acceptQuote` when revenue posts; no migration).
 8. **G13 Loyalty staff point grants/transfers/expiry** — implement the assumed over-threshold
-   maker-checker; reconcile RCM/narrative (R15/R16).
-9. **G15 Tenant PromptPay/Tax-ID** — distinct-approver on payment-receiving fields.
-10. **G9 Bank account create/edit** — distinct-approver.
+   maker-checker; reconcile RCM/narrative (R15/R16). — **✅ DONE 2026-07-06** (staff transfers > 500 pts
+   staged → distinct approver, migration 0266; grants covered by the existing receipt queue, expiry is a
+   detective sweep — narrative/RCM reconciled).
+9. **G15 Tenant PromptPay/Tax-ID** — distinct-approver on payment-receiving fields. — **✅ DONE 2026-07-06**
+   (tax_id/promptpay_id change staged → distinct approver, migration 0265).
+10. **G9 Bank account create/edit** — distinct-approver. — **✅ DONE 2026-07-06** (account created
+    PendingApproval, unusable until a distinct approver activates it, migration 0264).
 11. **Cross-cutting** — production readiness assertion that workflow definitions exist for PR/PO/BUDGET.
+    — *P3 batch (detective/config).*
+
+**All P2 preventive gaps (G9, G12, G13, G15) are now remediated.** Remaining open items are the P3
+detective batch (G10, G14, G16 + the cross-cutting workflow-definition readiness check) and the G5 residual
+(item/menu **base** price left non-sensitive).
 
 ### Phase P3 — detective-first (documentation + exception reports; preventive optional)
 12. **G10 Bank statement import** — fold into reconciliation-certifier evidence.

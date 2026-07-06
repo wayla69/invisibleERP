@@ -73,8 +73,10 @@ async function main() {
 
   // create a bank account on 1010
   const acc = await inj('POST', '/api/bank/accounts', admin, { bank_name: 'กสิกรไทย', account_no: '111-2-33333', gl_account_code: '1010', opening_balance: 0 });
-  ok('Bank account created (gl 1010)', (acc.status === 200 || acc.status === 201) && acc.json.gl_account_code === '1010', `${acc.status} ${JSON.stringify(acc.json).slice(0, 70)}`);
+  ok('Bank account created (gl 1010, PendingApproval)', (acc.status === 200 || acc.status === 201) && acc.json.gl_account_code === '1010' && acc.json.status === 'PendingApproval', `${acc.status} ${JSON.stringify(acc.json).slice(0, 80)}`);
   const bankId = acc.json.id;
+  // G9 maker-checker: activate the account via a DISTINCT approver (approver ≠ admin) before use.
+  await inj('POST', `/api/bank/accounts/${bankId}/approve`, approver);
 
   // seed 2 GL cash movements on 1010: deposit +1000, payment -200
   await postJE(admin, { date: '2028-03-05', source: 'Manual', memo: 'deposit', lines: [{ account_code: '1010', debit: 1000 }, { account_code: '4000', credit: 1000 }] });

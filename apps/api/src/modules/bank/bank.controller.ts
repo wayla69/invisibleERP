@@ -22,6 +22,11 @@ export class BankController {
 
   @Post('accounts') createAccount(@Body(new ZodValidationPipe(CreateBankAccountBody)) b: CreateBankAccountDto, @CurrentUser() u: JwtUser) { return this.svc.createBankAccount(b, u); }
   @Get('accounts') listAccounts(@CurrentUser() u: JwtUser) { return this.svc.listBankAccounts(u); }
+  // G9 maker-checker: a new bank account is created PendingApproval; a DIFFERENT approver activates it
+  // (approver ≠ requester → 403 SOD_VIOLATION) before it can bank cash.
+  @Get('accounts/pending') @Permissions('approvals', 'exec') pendingAccounts(@CurrentUser() u: JwtUser) { return this.svc.listPendingBankAccounts(u); }
+  @Post('accounts/:id/approve') @HttpCode(200) @Permissions('approvals', 'exec') approveAccount(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.approveBankAccount(+id, u); }
+  @Post('accounts/:id/reject') @HttpCode(200) @Permissions('approvals', 'exec') rejectAccount(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.rejectBankAccount(+id, u); }
 
   @Post('accounts/:id/statements') importStatement(@Param('id') id: string, @Body(new ZodValidationPipe(ImportStatementBody)) b: ImportStatementDto, @CurrentUser() u: JwtUser) { return this.svc.importStatement(+id, b, u); }
   @Post('accounts/:id/auto-match') autoMatch(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.autoMatch(+id, u); }

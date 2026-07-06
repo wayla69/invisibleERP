@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, sql, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { productConfigs, configOptions, pricingRules, quotes, quoteLines } from '../../database/schema/cpq';
@@ -164,6 +164,14 @@ export class CpqService {
     const q = await this.assertQuote(quoteId);
     if (q.expiresDate && new Date(q.expiresDate) < new Date()) {
       throw new BadRequestException({ code: 'QUOTE_EXPIRED', message: 'Cannot accept expired quote', messageTh: 'ใบเสนอราคาหมดอายุแล้ว' });
+    }
+    // G12 (SoD R07/R10): accepting a billable quote recognises revenue (Dr 1100 AR / Cr 4000). The acceptor
+    // must be a DIFFERENT user from the quote's author — one person may not both build/discount a quote and
+    // self-recognise its revenue. Enforced only when revenue actually posts (ledger wired + billable total),
+    // which is always so in production (CpqModule provides the ledger); the ledger-less standalone quote
+    // pipeline (no GL) is a pure status transition and is unaffected.
+    if (this.ledger && n(q.total) > 0 && q.createdBy && q.createdBy === user.username) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Quote author cannot accept their own quote — revenue recognition needs a second person', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติรับใบเสนอราคาของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
     }
     const res = await this.transitionQuote(quoteId, 'Accepted', ['Sent'], user);
     // quote-to-cash: book the won quote to AR + revenue (idempotent per quote)
