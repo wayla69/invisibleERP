@@ -34,7 +34,7 @@ export default function ProjectCrmPage() {
       <PageHeader
         title={t('pj.crm_title')}
         description={t('pj.crm_desc')}
-        actions={<Button variant="outline" onClick={() => router.push('/projects/pipeline')}><BarChart3 className="size-4" /> Win/Loss</Button>}
+        actions={<Button variant="outline" onClick={() => router.push('/projects/pipeline')}><BarChart3 className="size-4" /> {t('pj.btn_win_loss')}</Button>}
       />
       <Tabs tabs={[
         { key: 'opps', label: t('pj.tab_opps'), content: <Opportunities /> },
@@ -175,7 +175,7 @@ function Opportunities() {
             { key: 'expected_close_date', label: t('pj.col_expected_close'), render: (r: any) => r.expected_close_date ?? '—' },
             { key: 'stage', label: t('pj.col_stage'), sortable: false, render: (r: any) => (r.stage === 'won' || r.stage === 'lost') ? stageBadge(r.stage) : (
               <select className={`${selectCls} w-36`} value={r.stage} onChange={(e) => setStage.mutate({ oppNo: r.opp_no, stage: e.target.value })}>
-                {STAGES.map((st) => <option key={st} value={st}>{st}</option>)}
+                {STAGES.map((st) => <option key={st} value={st}>{t(`pj.pipe_stage_${st}`)}</option>)}
               </select>
             ) },
             { key: 'act', label: '', sortable: false, render: (r: any) => r.stage === 'won'

@@ -50,6 +50,9 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'pj.col_depends_on': { th: 'ขึ้นกับ', en: 'Depends on' },
   'pj.col_period': { th: 'งวด', en: 'Period' },
   'pj.col_clearing': { th: 'พักบัญชี', en: 'Clearing' },
+  'pj.col_wip': { th: 'งานระหว่างทำ (WIP)', en: 'WIP' },
+  'pj.col_boq_line': { th: 'รายการ BoQ', en: 'BoQ line' },
+  'pj.col_je': { th: 'รายการบัญชี (JE)', en: 'JE' },
   'pj.open_th': { th: 'เปิดอยู่', en: 'Open' },
   'pj.col_amount': { th: 'จำนวน', en: 'Amount' },
   'pj.amount_th': { th: 'มูลค่า', en: 'Value' },
@@ -91,6 +94,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'pj.save_cost': { th: 'บันทึกต้นทุน', en: 'Save cost' },
   'pj.btn_log_cost': { th: 'ลงต้นทุน', en: 'Log cost' },
   'pj.btn_invoice': { th: 'ออกใบแจ้งหนี้', en: 'Issue invoice' },
+  'pj.btn_win_loss': { th: 'Win/Loss', en: 'Win/Loss' },
 
   // ── projects list page ──
   'pj.projects_title': { th: 'โครงการ (Projects)', en: 'Projects' },

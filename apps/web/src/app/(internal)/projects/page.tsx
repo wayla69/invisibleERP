@@ -76,8 +76,8 @@ export default function ProjectsPage() {
         title={t('pj.projects_title')}
         description={t('pj.projects_desc')}
         actions={<div className="flex gap-2">
-          <Button variant="outline" onClick={() => router.push('/projects/portfolio')}><LayoutDashboard className="size-4" /> Portfolio</Button>
-          <Button variant="outline" onClick={() => router.push('/projects/pipeline')}><Target className="size-4" /> Win/Loss</Button>
+          <Button variant="outline" onClick={() => router.push('/projects/portfolio')}><LayoutDashboard className="size-4" /> {t('pj.btn_portfolio')}</Button>
+          <Button variant="outline" onClick={() => router.push('/projects/pipeline')}><Target className="size-4" /> {t('pj.btn_win_loss')}</Button>
         </div>}
       />
 
@@ -154,7 +154,7 @@ export default function ProjectsPage() {
               { key: 'cost_to_date', label: t('pj.col_cost_to_date'), align: 'right', render: (r: Project) => <span className="tabular">{baht(r.cost_to_date)}</span> },
               { key: 'budget_used_pct', label: t('pj.col_budget_used'), align: 'right', render: (r: Project) => r.budget_used_pct == null ? '—' : <span className={`tabular ${r.over_budget ? 'font-medium text-destructive' : r.budget_used_pct >= 85 ? 'text-warning-foreground dark:text-warning' : 'text-muted-foreground'}`} title={t('pj.budget_hint', { budget: baht(r.budget_amount), remaining: baht(r.budget_variance ?? 0) })}>{r.budget_used_pct}%{r.over_budget ? ' ⚠' : ''}</span> },
               { key: 'billed_to_date', label: t('pj.col_billed'), align: 'right', render: (r: Project) => <span className="tabular">{baht(r.billed_to_date)}{r.billed_pct != null ? <span className="ml-1 text-xs text-muted-foreground">({r.billed_pct}%)</span> : null}</span> },
-              { key: 'wip', label: 'WIP', align: 'right', render: (r: Project) => <span className="tabular">{baht(r.wip)}</span> },
+              { key: 'wip', label: t('pj.col_wip'), align: 'right', render: (r: Project) => <span className="tabular">{baht(r.wip)}</span> },
               { key: 'non_billable_cost', label: t('pj.col_non_billable'), align: 'right', render: (r: Project) => <span className={`tabular ${r.non_billable_cost > 0 ? 'text-destructive' : 'text-muted-foreground'}`} title={t('pj.non_billable_hint')}>{baht(r.non_billable_cost)}</span> },
               { key: 'margin', label: t('pj.col_margin'), align: 'right', render: (r: Project) => <span className={`tabular ${r.margin < 0 ? 'text-destructive' : ''}`}>{baht(r.margin)}</span> },
               { key: 'status', label: t('fin.col_status'), render: (r: Project) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
