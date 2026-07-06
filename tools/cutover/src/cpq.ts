@@ -112,12 +112,15 @@ async function main() {
   const sent = await inj('POST', `/api/cpq/quotes/${q1Id}/send`, sales1);
   ok('Send quote → status=Sent', sent.status === 200 && sent.json.status === 'Sent', JSON.stringify(sent.json));
 
-  // 9. Accept quote → Accepted
-  const accepted = await inj('POST', `/api/cpq/quotes/${q1Id}/accept`, sales1);
-  ok('Accept quote → status=Accepted', accepted.status === 200 && accepted.json.status === 'Accepted', JSON.stringify(accepted.json));
+  // 9. Accept quote → Accepted (G12 maker-checker: the quote author cannot self-accept a billable quote —
+  //    revenue recognition needs a second person; a DISTINCT user accepts).
+  const selfAccept = await inj('POST', `/api/cpq/quotes/${q1Id}/accept`, sales1);
+  ok('G12: quote author self-accept → 403 SOD_VIOLATION (no revenue)', selfAccept.status === 403 && selfAccept.json.error?.code === 'SOD_VIOLATION', `${selfAccept.status} ${selfAccept.json.error?.code}`);
+  const accepted = await inj('POST', `/api/cpq/quotes/${q1Id}/accept`, admin);
+  ok('Accept quote (distinct user) → status=Accepted', accepted.status === 200 && accepted.json.status === 'Accepted', JSON.stringify(accepted.json));
 
   // 10. Cannot accept already-accepted quote (invalid transition)
-  const dblAccept = await inj('POST', `/api/cpq/quotes/${q1Id}/accept`, sales1);
+  const dblAccept = await inj('POST', `/api/cpq/quotes/${q1Id}/accept`, admin);
   ok('Double-accept → 400 (invalid transition)', dblAccept.status === 400, `status=${dblAccept.status}`);
 
   // 11. Reject draft quote → Rejected
