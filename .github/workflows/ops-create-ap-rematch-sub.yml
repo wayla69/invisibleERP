@@ -2,15 +2,14 @@
 # scheduler (bi-scheduler.yml) re-runs the AP three-way auto-match nightly and unblocks matchable invoices
 # (EXP-10). The API has no in-process scheduler, so this one-time subscription + the daily bi-scheduler cron
 # together are what make the job recur. Runs on a GitHub runner (which CAN reach Railway, unlike a dev
-# sandbox); authenticates as the same `exec` service account the scheduler uses. Idempotent — it checks for
-# an existing subscription of the same report type on the account's tenant and no-ops instead of duplicating.
+# sandbox); authenticates with an API key (Bearer, no password login). Idempotent — it checks for an
+# existing subscription of the same report type on the key's tenant and no-ops instead of duplicating.
 #
 # Prereqs (repository level — Settings → Secrets and variables → Actions):
-#   vars.PROD_API_URL  — base URL of the deployed API (already set)
-#   secrets.SWEEP_USER — the `exec` service account (same one bi-scheduler.yml uses)
-#   secrets.SWEEP_PASS — its password
-# The subscription is created on the SERVICE ACCOUNT'S tenant; run once per tenant that uses AP intake (with
-# that tenant's account). Re-running is safe.
+#   vars.PROD_API_URL    — base URL of the deployed API (optional; defaults to the invisibleERP domain)
+#   secrets.SWEEP_API_KEY — an app API key (in-app: Settings → API Keys; prefixed `ierp_`). The default
+#                           'read' scope already grants the `exec` permission the BI endpoints need.
+# The subscription is created on the KEY'S tenant; create one key per tenant that uses AP intake. Re-run-safe.
 name: "Ops - create ap_automatch_rerun subscription"
 
 on:
@@ -38,8 +37,8 @@ jobs:
       - name: Create the report subscription (idempotent)
         env:
           PROD_API_URL: ${{ vars.PROD_API_URL }}
-          SWEEP_USER: ${{ secrets.SWEEP_USER }}
-          SWEEP_PASS: ${{ secrets.SWEEP_PASS }}
+          SWEEP_API_KEY: ${{ secrets.SWEEP_API_KEY }}
+          SWEEP_PASS: ${{ secrets.SWEEP_PASS }}   # compat: also accept an ierp_ key pasted into the legacy slot
           RT: ${{ inputs.report_type }}
           FREQ: ${{ inputs.frequency }}
           SUBNAME: ${{ inputs.name }}
@@ -48,15 +47,29 @@ jobs:
           # PROD_API_URL falls back to the invisibleERP public domain when the repo variable is unset, so
           # the job doesn't depend on a correctly-scoped Actions variable. Override by setting vars.PROD_API_URL.
           PROD_API_URL="${PROD_API_URL:-https://invisibleerp-production.up.railway.app}"
-          if [ -z "${SWEEP_USER:-}" ] || [ -z "${SWEEP_PASS:-}" ]; then
-            echo "::error::SWEEP_USER / SWEEP_PASS not set — add them as repository secrets (a service account holding the exec permission)"; exit 1
+          # Auth is an API key (Settings → API Keys, prefixed ierp_) used as a Bearer token — no password
+          # login. The default 'read' scope maps server-side to include the `exec` permission the BI
+          # subscription endpoints require (common/guards.ts SCOPE_ALIASES). Machine principal, tenant-scoped.
+          # Take the key from SWEEP_API_KEY, or (compat) from the legacy SWEEP_PASS slot if it holds an ierp_ key.
+          TOK="${SWEEP_API_KEY:-}"
+          if [ -z "$TOK" ]; then case "${SWEEP_PASS:-}" in ierp_*) TOK="$SWEEP_PASS";; esac; fi
+          if [ -z "$TOK" ]; then
+            echo "::error::No API key found — put the ierp_ key in a repo secret named SWEEP_API_KEY (or the legacy SWEEP_PASS). Create it in the app: Settings → API Keys."
+            echo "  seen: SWEEP_API_KEY length=${#SWEEP_API_KEY}, SWEEP_PASS length=${#SWEEP_PASS} (both 0 ⇒ nothing reached the job — check the secret name/scope: repo Actions Secret, exact name)"
+            exit 1
           fi
+          case "$TOK" in ierp_*) ;; *) echo "::warning::key does not start with 'ierp_' (length=${#TOK}) — is it the full raw key?";; esac
           echo "Health check: $PROD_API_URL/healthz"
           code=000
           for i in $(seq 1 12); do code=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_API_URL/healthz" || true); [ "$code" = "200" ] && break; echo "  health=$code ($i)"; sleep 5; done
           [ "$code" = "200" ] || { echo "::error::API health check failed (last=$code)"; exit 1; }
-          TOK=$(curl -s -X POST "$PROD_API_URL/api/login" -H 'Content-Type: application/json' -d "$(jq -nc --arg u "$SWEEP_USER" --arg p "$SWEEP_PASS" '{username:$u,password:$p}')" | jq -r '.token // empty')
-          [ -n "$TOK" ] || { echo "::error::login failed (check SWEEP_USER/SWEEP_PASS — needs the exec permission)"; exit 1; }
+          # Verify the key authenticates + carries exec before creating anything (clearer than a 401 on POST).
+          AUTHCK=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOK" "$PROD_API_URL/api/bi/subscriptions")
+          if [ "$AUTHCK" != "200" ]; then
+            echo "::error::API key auth/permission check failed (GET /api/bi/subscriptions -> $AUTHCK; expected 200)"
+            echo "  401 = key invalid/revoked; 403 = key lacks the exec permission (recreate with the 'read' or 'exec'/'*' scope)"
+            exit 1
+          fi
           # Idempotency: skip if a subscription of this report type already exists on the caller's tenant.
           EXIST=$(curl -s -H "Authorization: Bearer $TOK" "$PROD_API_URL/api/bi/subscriptions" | jq -r --arg rt "$RT" '[.[]? | select(.report_type==$rt)] | length' 2>/dev/null || echo 0)
           if [ "${EXIST:-0}" != "0" ]; then
