@@ -118,6 +118,7 @@ function Modules() {
         <p className="text-sm text-muted-foreground">
           <b>{t('st.set.hide_menu_label')}</b>{t('st.set.hide_menu_desc')}<b>{t('st.set.disable_module_label')}</b>{t('st.set.disable_module_desc')}
         </p>
+        <p className="text-xs text-muted-foreground">{t('st.set.per_company_note')}</p>
         <div className="flex flex-wrap items-center gap-1.5">
           {navDisabled.size > 0 && <Badge variant={statusVariant('Cancelled')}>{t('st.set.hidden_menus_badge', { count: navDisabled.size })}</Badge>}
           {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>{t('st.set.disabled_modules_badge', { count: disabledCount })}</Badge>}

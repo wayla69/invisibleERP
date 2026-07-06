@@ -206,7 +206,7 @@ export default function ShopProjectPage() {
               <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('shop.proj.search_ph')} />
             </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
               {filtered.map((l) => {
                 const qty = cart[l.boq_line_id] ?? 0;
                 const est = l.rate * Math.max(qty, 0);
@@ -214,7 +214,7 @@ export default function ShopProjectPage() {
                 const soldOut = l.remaining <= 0.005;
                 return (
                   <Card key={l.boq_line_id} className="flex flex-col overflow-hidden">
-                    <div className="relative aspect-square w-full bg-muted">
+                    <div className="relative aspect-[4/3] w-full bg-muted">
                       <LineThumb line={l} className="size-full" />
                       {soldOut && <Badge variant="secondary" className="absolute left-1.5 top-1.5 text-[10px]">{t('shop.proj.no_headroom')}</Badge>}
                     </div>
