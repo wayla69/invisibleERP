@@ -491,9 +491,17 @@ export default function ShopPage() {
 
           <StateView q={{ isLoading: catalog.isLoading, error: catalog.error }}>
             {displayItems.length === 0 ? (
-              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                {favOnly ? t('shop.favorites_empty') : debouncedQ || activeCat ? t('shop.no_items') : t('shop.empty_catalog')}
-              </p>
+              <div className="mx-auto flex max-w-sm flex-col items-center gap-2 rounded-xl border border-dashed p-8 text-center">
+                <div className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
+                  {favOnly ? <Star className="size-6" /> : debouncedQ || activeCat ? <Search className="size-6" /> : <PackagePlus className="size-6" />}
+                </div>
+                <span className="text-sm font-medium text-foreground">
+                  {favOnly ? t('shop.favorites') : debouncedQ || activeCat ? t('shop.no_items') : t('shop.empty_catalog')}
+                </span>
+                <p className="text-sm text-muted-foreground">
+                  {favOnly ? t('shop.favorites_empty') : debouncedQ || activeCat ? t('shop.no_items_desc') : t('shop.empty_catalog_desc')}
+                </p>
+              </div>
             ) : view === 'grid' ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
                 {displayItems.map((it) => {
