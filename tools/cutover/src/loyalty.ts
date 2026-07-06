@@ -187,6 +187,25 @@ async function main() {
   const trX = await inj('POST', `/api/loyalty/members/${m2}/transfer`, loystaff, { to_member_id: Number(en3.json.id), points: 10 });
   ok('W1 P2P: recipient in another tenant → 404 RECIPIENT_NOT_FOUND (no cross-shop leak)', trX.status === 404 && trX.json.error?.code === 'RECIPIENT_NOT_FOUND', `${trX.status} ${trX.json.error?.code}`);
 
+  // ── G13 (maker-checker audit): a staff P2P transfer ABOVE the approval threshold (500) is STAGED for a
+  //    DISTINCT approver — one person cannot move point-value (a TFRS-15 liability) to a controlled member
+  //    on their own (SoD R15/R16). Sub-threshold transfers (above) still move immediately. ──
+  await db.insert(s.users).values([
+    { username: 'lpmkr', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 }, // requests + holds approvals (SoD guard, not perm-denial)
+    { username: 'lpchk', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 }, // distinct approver
+  ]).onConflictDoNothing();
+  const [lpmkr, lpchk] = [await login('lpmkr', 'pw'), await login('lpchk', 'pw')];
+  const m2Bal = () => (async () => Number((await db.select().from(s.posMembers).where(eq(s.posMembers.id, m2)))[0].balance))();
+  const balBefore = await m2Bal();
+  const trBig = await inj('POST', `/api/loyalty/members/${m2}/transfer`, lpmkr, { to_member_id: m1, points: 600 });
+  ok('G13: over-threshold staff transfer (600 > 500) → staged PendingApproval, no points move', (trBig.status === 200 || trBig.status === 201) && trBig.json.status === 'PendingApproval' && trBig.json.pending === true && /^PPT-/.test(trBig.json.req_no ?? '') && (await m2Bal()) === balBefore, JSON.stringify({ s: trBig.status, st: trBig.json.status, rq: trBig.json.req_no, bal: await m2Bal(), was: balBefore }));
+  const trBigSelf = await inj('POST', `/api/loyalty/transfers/${trBig.json.req_no}/approve`, lpmkr);
+  ok('G13: requester cannot self-approve their own staged transfer → 403 SOD_VIOLATION', trBigSelf.status === 403 && trBigSelf.json.error?.code === 'SOD_VIOLATION' && (await m2Bal()) === balBefore, `${trBigSelf.status} ${trBigSelf.json.error?.code}`);
+  const trBigAppr = await inj('POST', `/api/loyalty/transfers/${trBig.json.req_no}/approve`, lpchk);
+  ok('G13: distinct approver releases the transfer → 600 moves, balance drops', (trBigAppr.status === 200 || trBigAppr.status === 201) && trBigAppr.json.status === 'Approved' && trBigAppr.json.approved_by === 'lpchk' && (await m2Bal()) === balBefore - 600, JSON.stringify({ s: trBigAppr.status, by: trBigAppr.json.approved_by, bal: await m2Bal(), exp: balBefore - 600 }));
+  const trQ = await inj('GET', '/api/loyalty/transfers/pending', lpchk);
+  ok('G13: pending-transfer queue clears after approval', (trQ.json.pending ?? []).length === 0, JSON.stringify({ n: trQ.json.count }));
+
   // ── 17. expiry look-ahead: loyalty.points_expiring fires once per member × expire-by batch ──
   await inj('PUT', '/api/loyalty/config', admin, { expiry_days: 60 });
   await inj('POST', '/api/automation/rules', admin, { name: 'เตือนแต้มใกล้หมดอายุ', event_type: 'loyalty.points_expiring', action: { type: 'notification', message: 'แต้มของคุณใกล้หมดอายุ' } });

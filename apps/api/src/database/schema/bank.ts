@@ -14,6 +14,13 @@ export const bankAccounts = pgTable('bank_accounts', {
   currency: text('currency').default('THB'),
   openingBalance: numeric('opening_balance', { precision: 18, scale: 4 }).notNull().default('0'),
   active: text('active').default('true'),
+  // G9 (audit) maker-checker: a new bank account (account no + GL mapping + opening balance) is created
+  // 'PendingApproval' and not usable until a DISTINCT approver activates it. Existing rows backfill to
+  // 'Approved' (migration 0264 default) so they stay usable.
+  status: text('status').notNull().default('Approved'),
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqBankAcct: unique('uq_bank_acct').on(t.tenantId, t.accountNo) }));

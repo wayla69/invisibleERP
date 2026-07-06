@@ -46,6 +46,7 @@ async function main() {
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'cash1', passwordHash: await pw.hash('pw1'), role: 'PosSupervisor', tenantId: t1 },   // pos_till (drops) — no exec/ar
     { username: 'fin1', passwordHash: await pw.hash('pw2'), role: 'ArClerk', tenantId: t1 },          // ar (banks)
+    { username: 'bankchk', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 },         // G9: distinct bank-account approver (exec/approvals)
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
@@ -62,11 +63,25 @@ async function main() {
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const cash1 = await login('cash1', 'pw1');
   const fin1 = await login('fin1', 'pw2');
+  const bankchk = await login('bankchk', 'pw3');
   const admin = await login('admin', 'admin123');
   const gl = async (code: string) => Number(((await pg.query(`SELECT coalesce(sum(jl.debit)-sum(jl.credit),0) v FROM journal_lines jl JOIN journal_entries je ON je.id=jl.entry_id WHERE jl.account_code='${code}' AND je.status='Posted' AND je.tenant_id=${t1}`)).rows as any[])[0].v);
 
   // a bank account (GL 1010) + a till with two cash drops (300 + 200 = 500 to the safe)
   const bank = await inj('POST', '/api/bank/accounts', fin1, { bank_name: 'KBank', account_no: '123-4-56789', gl_account_code: '1010' });
+  // ── G9 maker-checker: a new bank account is created PendingApproval and cannot bank cash until a DISTINCT
+  //    approver activates it (the GL mapping / account no it defines is a payment-integrity control). ──
+  ok('G9: new bank account is PendingApproval (not usable)', bank.json.status === 'PendingApproval' && bank.json.pending === true, JSON.stringify(bank.json).slice(0, 90));
+  const preBank = await inj('POST', '/api/bank/deposits', fin1, { bank_account_id: bank.json.id });
+  ok('G9: deposit to a pending bank account → 400 BANK_NOT_APPROVED', preBank.status === 400 && preBank.json.error?.code === 'BANK_NOT_APPROVED', `${preBank.status} ${preBank.json.error?.code}`);
+  // Self-approval guard: admin (holds the approval duty) creates a throwaway account and tries to approve it
+  // itself → 403 SOD_VIOLATION (a perm-holder, so this is the SoD guard firing, not a permission denial).
+  const selfAcct = await inj('POST', '/api/bank/accounts', admin, { bank_name: 'SCB', account_no: '999-9-99999', gl_account_code: '1010' });
+  const selfAppr = await inj('POST', `/api/bank/accounts/${selfAcct.json.id}/approve`, admin);
+  ok('G9: requester cannot self-approve their own bank account → 403 SOD_VIOLATION', selfAppr.status === 403 && selfAppr.json.error?.code === 'SOD_VIOLATION', `${selfAppr.status} ${selfAppr.json.error?.code}`);
+  // A DISTINCT approver (bankchk ≠ fin1, same tenant) activates the main account so the flow below can use it.
+  const apprBank = await inj('POST', `/api/bank/accounts/${bank.json.id}/approve`, bankchk);
+  ok('G9: distinct approver activates the bank account', apprBank.status === 200 && apprBank.json.status === 'Approved' && apprBank.json.approved_by === 'bankchk', JSON.stringify(apprBank.json).slice(0, 90));
   const till = await inj('POST', '/api/payments/till/open', cash1, { opening_float: 1000 });
   const tillId = Number((await db.select().from(s.tillSessions).where(eq(s.tillSessions.sessionNo, till.json.session_no)))[0].id);
   await inj('POST', `/api/payments/till/${tillId}/cash-movement`, cash1, { type: 'drop', amount: 300, reason: 'ฝากเซฟ' });

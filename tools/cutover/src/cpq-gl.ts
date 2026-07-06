@@ -38,7 +38,11 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    // G12: a distinct exec approver so the quote author does not self-accept revenue (SoD R07/R10).
+    { username: 'sales2', passwordHash: await pw.hash('sales2123'), role: 'Sales', tenantId: hq },
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -52,6 +56,7 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
+  const sales2 = (await inj('POST', '/api/login', undefined, { username: 'sales2', password: 'sales2123' })).json.token;
 
   // ── 1. config base 50000 → quote qty 1 = 50000 ──
   const cfg = await inj('POST', '/api/cpq/configs', admin, { code: 'LAPTOP', name: 'Laptop', base_price: 50000 });
@@ -60,8 +65,13 @@ async function main() {
 
   // ── 2. send → accept → GL posted ──
   await inj('POST', `/api/cpq/quotes/${q.json.id}/send`, admin);
-  const acc = await inj('POST', `/api/cpq/quotes/${q.json.id}/accept`, admin);
-  ok('Accept quote → AR posted 50000, GL JE', near(acc.json.ar_posted, 50000) && /^JE-/.test(acc.json.entry_no ?? ''), JSON.stringify({ ar: acc.json.ar_posted, e: acc.json.entry_no }));
+  // G12 (SoD R07/R10): the quote author (admin) cannot self-accept a billable quote — revenue recognition
+  // needs a second person. Self-accept is refused 403 SOD_VIOLATION and the quote stays Sent (no GL).
+  const selfAcc = await inj('POST', `/api/cpq/quotes/${q.json.id}/accept`, admin);
+  ok('G12: quote author self-accept → 403 SOD_VIOLATION (no revenue)', selfAcc.status === 403 && selfAcc.json.error?.code === 'SOD_VIOLATION', JSON.stringify({ s: selfAcc.status, c: selfAcc.json.error?.code }));
+  // A DISTINCT exec user (sales2) accepts → revenue recognised.
+  const acc = await inj('POST', `/api/cpq/quotes/${q.json.id}/accept`, sales2);
+  ok('Accept quote (distinct user) → AR posted 50000, GL JE', near(acc.json.ar_posted, 50000) && /^JE-/.test(acc.json.entry_no ?? ''), JSON.stringify({ ar: acc.json.ar_posted, e: acc.json.entry_no }));
 
   // ── 3. GL: 1100 AR dr 50000, 4000 revenue cr 50000, TB balanced ──
   const tb = await inj('GET', '/api/ledger/trial-balance', admin);
