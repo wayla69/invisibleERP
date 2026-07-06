@@ -151,16 +151,16 @@ export default function TaxInvoicesPage() {
               <Label htmlFor="src">{t('tax.inv_source')}</Label>
               <div className="flex gap-2">
                 <Button type="button" variant={src === 'POS' ? 'default' : 'outline'} size="sm" onClick={() => setSrc('POS')}>
-                  POS
+                  {t('tax.src_pos')}
                 </Button>
                 <Button type="button" variant={src === 'AR' ? 'default' : 'outline'} size="sm" onClick={() => setSrc('AR')}>
-                  AR
+                  {t('tax.src_ar')}
                 </Button>
               </div>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="src-ref">{t('tax.inv_source_ref', { field: src === 'POS' ? 'sale_no' : 'invoice_no' })}</Label>
-              <Input id="src-ref" value={srcRef} onChange={(e) => setSrcRef(e.target.value)} placeholder={src === 'POS' ? 'SALE-…' : 'INV-…'} />
+              <Input id="src-ref" value={srcRef} onChange={(e) => setSrcRef(e.target.value)} placeholder={src === 'POS' ? t('tax.src_ref_ph_pos') : t('tax.src_ref_ph_ar')} />
             </div>
           </div>
           <div className="grid gap-2">
@@ -197,7 +197,7 @@ export default function TaxInvoicesPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="note-orig">{t('tax.note_original')}</Label>
-              <Input id="note-orig" value={noteOrig} onChange={(e) => setNoteOrig(e.target.value)} placeholder="TIV-…" />
+              <Input id="note-orig" value={noteOrig} onChange={(e) => setNoteOrig(e.target.value)} placeholder={t('tax.note_original_ph')} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="note-amt">{t('tax.note_amount')}</Label>
@@ -242,12 +242,12 @@ export default function TaxInvoicesPage() {
                 { key: 'buyer', label: t('tax.col_buyer'), render: (r: Invoice) => r.buyer?.name ?? t('tax.cash') },
                 { key: 'source_ref', label: t('tax.col_ref'), render: (r: Invoice) => `${r.source_type} · ${r.source_ref}` },
                 { key: 'subtotal', label: t('tax.col_value'), align: 'right', render: (r: Invoice) => <span className="tabular">{baht(r.subtotal)}</span> },
-                { key: 'vat_amount', label: 'VAT', align: 'right', render: (r: Invoice) => <span className="tabular">{baht(r.vat_amount)}</span> },
+                { key: 'vat_amount', label: t('tax.col_vat'), align: 'right', render: (r: Invoice) => <span className="tabular">{baht(r.vat_amount)}</span> },
                 { key: 'grand_total', label: t('tax.col_total'), align: 'right', render: (r: Invoice) => <span className="tabular">{baht(r.grand_total)}</span> },
                 { key: 'status', label: t('fin.col_status'), render: (r: Invoice) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                 {
                   key: 'pdf',
-                  label: 'PDF',
+                  label: t('tax.col_pdf'),
                   sortable: false,
                   render: (r: Invoice) => (
                     <Button variant="ghost" size="sm" asChild>
@@ -259,7 +259,7 @@ export default function TaxInvoicesPage() {
                 },
                 {
                   key: 'xml',
-                  label: 'e-Tax XML',
+                  label: t('tax.col_etax_xml'),
                   sortable: false,
                   render: (r: Invoice) => (
                     <Button variant="ghost" size="sm" asChild title={t('tax.dl_etax_xml')}>
@@ -326,7 +326,7 @@ export default function TaxInvoicesPage() {
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="email-to">{t('tax.buyer_email')}</Label>
-            <Input id="email-to" type="email" placeholder="buyer@example.com" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} />
+            <Input id="email-to" type="email" placeholder={t('tax.buyer_email_ph')} value={emailTo} onChange={(e) => setEmailTo(e.target.value)} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEmailDoc(null)}>{t('tax.close')}</Button>
