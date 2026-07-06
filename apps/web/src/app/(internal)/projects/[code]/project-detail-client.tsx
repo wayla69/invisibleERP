@@ -337,7 +337,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             { key: 'item_id', label: t('pj.resv_col_item') },
             { key: 'location_id', label: t('pj.resv_col_location') },
             { key: 'qty', label: t('pj.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
-            { key: 'boq_line_id', label: 'BoQ line', render: (r: any) => r.boq_line_id ?? '—' },
+            { key: 'boq_line_id', label: t('pj.col_boq_line'), render: (r: any) => r.boq_line_id ?? '—' },
             { key: 'issue_no', label: t('pj.resv_col_issue_no'), render: (r: any) => r.issue_no ?? '—' },
             { key: 'status', label: t('pj.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
             { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'held' ? (
@@ -698,9 +698,9 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             { key: 'entry_date', label: t('dash.col_date') },
             { key: 'entry_type', label: t('pj.col_type') },
             { key: 'description', label: t('pj.col_description'), render: (r: any) => r.description ?? '—' },
-            { key: 'billable', label: t('pj.col_billable'), render: (r: any) => r.billable ? <Badge variant="success">billable</Badge> : <Badge variant="muted">non-billable</Badge> },
+            { key: 'billable', label: t('pj.col_billable'), render: (r: any) => r.billable ? <Badge variant="success">{t('pj.col_billable')}</Badge> : <Badge variant="muted">{t('pj.col_non_billable')}</Badge> },
             { key: 'amount', label: t('pj.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-            { key: 'entry_no', label: 'JE', render: (r: any) => <span className="text-xs text-muted-foreground">{r.entry_no ?? '—'}</span> },
+            { key: 'entry_no', label: t('pj.col_je'), render: (r: any) => <span className="text-xs text-muted-foreground">{r.entry_no ?? '—'}</span> },
           ]}
           emptyState={{ icon: Clock, title: t('pj.empty_cost_title'), description: t('pj.empty_cost_desc') }}
         />
