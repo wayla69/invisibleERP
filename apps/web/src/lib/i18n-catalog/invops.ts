@@ -539,6 +539,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'iv.req_desc': { th: 'แจ้งความต้องการซื้อสินค้า/บริการ — ทุกคนในองค์กรสร้างได้ ทีมจัดซื้อจะพิจารณาอนุมัติและออกใบสั่งซื้อ (PO) ต่อไป', en: 'Request goods/services — anyone in the organization can raise one; Procurement reviews, approves, and issues the purchase order (PO)' },
   'iv.req_empty_after': { th: 'ในแชท LINE', en: 'in the LINE chat' },
   'iv.req_empty_before': { th: 'ยังไม่มีคำขอซื้อ — สร้างจากฟอร์มด้านบน หรือพิมพ์', en: 'No requisitions yet — create one from the form above, or type' },
+  'iv.req_empty_title': { th: 'ยังไม่มีคำขอซื้อ', en: 'No requisitions yet' },
   'iv.req_form_note': { th: 'คำขอซื้อจะถูกส่งเข้าสู่ขั้นตอนอนุมัติของทีมจัดซื้อโดยอัตโนมัติ — ติดตามสถานะการอนุมัติได้ที่หน้า “รายการรออนุมัติ / อนุมัติงาน”', en: 'The requisition is routed to Procurement for approval automatically — track approval status on the "Approvals" page' },
   'iv.req_from_request': { th: 'จากคำขอ:', en: 'From request:' },
   'iv.req_gen_link_code': { th: 'สร้างรหัสเชื่อม LINE', en: 'Generate LINE link code' },
