@@ -22,6 +22,20 @@ export const PERMISSIONS = [
   //    by a coarse perm (so a transacting/portal role can't inherit them and trip R14–R16); assigned directly
   //    to SoD-clean CRM roles. Endpoints gate `crm_* OR coarse` so existing coarse roles keep working. ──
   'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
+  // ── Project progress billing (งวดงาน) single-duty split (docs/35 P1, PROJ-16; SoD R17) — raising a
+  //    progress claim is segregated from certifying it (bill work not done / withhold retention improperly). ──
+  'proj_billing', 'proj_billing_certify',
+  // ── Subcontractor valuation single-duty split (docs/35 P2, PROJ-17; SoD R18) — raising a subcontractor
+  //    progress valuation is segregated from certifying it (over-pay a subcontractor / mis-handle retention). ──
+  'proj_subcon', 'proj_subcon_certify',
+  // ── Tender / estimating → award (docs/35 P3, PROJ-18) — build/submit estimates and award a won tender
+  //    (which seeds a project + a DRAFT BoQ; the seeded BoQ's own maker-checker controls the budget baseline). ──
+  'proj_tender',
+  // ── Real-estate developer vertical (docs/35 P4, RE-01..03) — a property developer's unit sales. re_sales
+  //    manages developments/units/bookings/contracts/installments; re_contract_approve certifies the sale
+  //    contract (maker-checker on the price/discount authority). re_transfer authorises ownership transfer
+  //    (RE-04 — recognises revenue). Ungranted ⇒ the vertical is invisible. ──
+  're_sales', 're_contract_approve', 're_transfer',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -33,6 +47,10 @@ export const SUB_PERMISSIONS: Permission[] = [
   'gl_post', 'gl_close', 'gl_coa', 'gl_posting_rules', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
   'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
+  'proj_billing', 'proj_billing_certify',
+  'proj_subcon', 'proj_subcon_certify',
+  'proj_tender',
+  're_sales', 're_contract_approve', 're_transfer',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -47,12 +65,13 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Customer Portal': ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track'],
   'My Business': ['cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
   'Sales & Orders': ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
-  'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing'],
+  'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing', 'proj_tender'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
-  'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules'],
-  'Procurement': ['procurement', 'pr_raise'],
+  'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify'],
+  'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
+  'Real Estate (Developer)': ['re_sales', 're_contract_approve', 're_transfer'],
 };
 
 // Canonical role → default permission seed (init_db DEFAULT_PERMS, verbatim).
@@ -61,13 +80,13 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Admin: [...PERMISSIONS],
   // 'pr_raise' is seeded into every internal staff role: raising a purchase requisition is company-wide
   // (PR ≠ PO). Customer-portal roles are excluded; Procurement/Planner inherit it via implication.
-  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals', 'pr_raise'],
+  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals', 'pr_raise', 'proj_tender'],
   Customer: ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track', 'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
   Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata', 'pr_raise'],
   // Procurement is now a SoD-clean buying role (0 conflicts): it buys (procurement) and may raise PRs
   // (pr_raise) — it no longer bundles paying (creditors), approving (approvals) or the vendor master
   // (masterdata). AP is the ApClerk's duty; vendor-master is MasterDataAdmin's (SoD R02/R03/R07/R13).
-  Procurement: ['procurement', 'pr_raise', 'delivery'],
+  Procurement: ['procurement', 'pr_raise', 'delivery', 'proj_subcon'],
   // Planner is now a SoD-clean supply-chain/analytics role (0 conflicts): can raise and track POs
   // (procurement), view stock (wh_count/wh_custody/lots/locations), read financial reports (fin_report)
   // — but cannot approve workflow items (approvals), post/close GL (exec → R05), adjust stock
@@ -76,14 +95,14 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // ── SoD-clean single-duty roles (the remediated design — each verified to produce 0 SoD conflicts) ──
   Cashier: ['pos_sell', 'pr_raise'],
   PosSupervisor: ['pos_refund', 'pos_till', 'pos_close', 'pr_raise'],
-  ArClerk: ['ar', 'order_mgt', 'claim_mgt', 'delivery', 'pr_raise'],
+  ArClerk: ['ar', 'order_mgt', 'claim_mgt', 'delivery', 'pr_raise', 'proj_billing'],
   ApClerk: ['creditors', 'pr_raise'],
   Buyer: ['procurement'],
   WarehouseOperator: ['wh_receive', 'wh_custody', 'lots', 'locations', 'mobile', 'images', 'pr_raise'],
   InventoryController: ['wh_adjust', 'pr_raise'],
   StockCounter: ['wh_count', 'pr_raise'],
   GlAccountant: ['gl_post', 'recon_prep', 'fin_report', 'pr_raise'],
-  FinancialController: ['gl_close', 'gl_coa', 'gl_posting_rules', 'approvals', 'fin_report', 'pr_raise'],
+  FinancialController: ['gl_close', 'gl_coa', 'gl_posting_rules', 'approvals', 'fin_report', 'pr_raise', 'proj_billing_certify', 'proj_subcon_certify'],
   MasterDataAdmin: ['masterdata', 'bom_master', 'pr_raise'], // coarse 'masterdata' expands to md_vendor/item/config (conflict-free: no transactional perms)
   PricingManager: ['pricelist', 'promos', 'pr_raise'],
   CreditManager: ['crm', 'pr_raise'],
@@ -181,6 +200,12 @@ export const SOD_RULES: SodRule[] = [
     a: ['crm_points_adjust'], b: ['crm_member'], severity: 'High', risk: 'Enrol a ghost member and credit points to it.', mitigation: 'Separate member enrolment from points adjustment; over-threshold adjust routes via maker-checker approval.' },
   { id: 'R16', dutyA: 'Campaign issuance of point-bearing value', dutyB: 'Points adjustment',
     a: ['crm_campaign'], b: ['crm_points_adjust'], severity: 'High', risk: 'Self-issue loyalty value through two channels (campaign coupons + manual adjustment).', mitigation: 'Separate campaign issuance from points adjustment; review issuance + adjustment logs.' },
+  { id: 'R17', dutyA: 'Raise progress claim (งวดงาน)', dutyB: 'Certify progress claim',
+    a: ['proj_billing'], b: ['proj_billing_certify'], severity: 'High', risk: 'Raise and certify one’s own progress claim — bill work not done and withhold/release retention improperly.', mitigation: 'Separate claim preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-16).' },
+  { id: 'R18', dutyA: 'Raise subcontractor valuation', dutyB: 'Certify subcontractor valuation',
+    a: ['proj_subcon'], b: ['proj_subcon_certify'], severity: 'High', risk: 'Raise and certify one’s own subcontractor valuation — over-pay a subcontractor / mishandle retention and back-charges.', mitigation: 'Separate valuation preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-17).' },
+  { id: 'R19', dutyA: 'Draft real-estate sale contract', dutyB: 'Approve sale contract',
+    a: ['re_sales'], b: ['re_contract_approve'], severity: 'High', risk: 'Draft and approve one’s own unit sale contract — grant an unauthorised price/discount to a related buyer.', mitigation: 'Separate contract drafting from approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, RE-02).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }

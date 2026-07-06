@@ -55,6 +55,11 @@ async function main() {
     let json: any = {}; try { json = res.json(); } catch { /* */ }
     return { status: res.statusCode, json };
   };
+  // Fetch a raw (non-JSON) document response — PDF or the HTML fallback when Chromium is absent (CI).
+  const raw = async (m: string, url: string, token?: string) => {
+    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {} });
+    return { status: res.statusCode, ctype: String(res.headers['content-type'] ?? ''), body: res.body ?? '' };
+  };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
   const mgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'admin123' })).json.token;
 
@@ -841,6 +846,352 @@ async function main() {
     (ccAppr.status === 200 || ccAppr.status === 201) && ccAppr.json.status === 'Approved' && ccAppr.json.approved_by === 'mgr', JSON.stringify({ st: ccAppr.json.status, by: ccAppr.json.approved_by }));
   const ccList = await inj('GET', '/api/projects/close-reviews', admin);
   ok('PROJ-03: the close review is recorded in the register (Approved)', (ccList.json.reviews ?? []).some((r: any) => r.period === '2026-06' && r.status === 'Approved'), `n=${ccList.json.count}`);
+
+  // ── P4 (docs/35) — real-estate developer vertical: units → booking → contract → installments (RE-01/02/03) ──
+  await inj('POST', '/api/realestate/developments', admin, { dev_code: 'RED-1', name: 'เดอะ คอนโด', location: 'กรุงเทพฯ' });
+  await inj('POST', '/api/realestate/developments/RED-1/units', admin, { unit_no: 'U-101', unit_type: 'condo', area_sqm: 35, list_price: 1000000 });
+  await inj('POST', '/api/realestate/developments/RED-1/units', admin, { unit_no: 'U-102', unit_type: 'condo', area_sqm: 55, list_price: 2000000 });
+  await inj('POST', '/api/realestate/developments/RED-1/units', admin, { unit_no: 'U-103', unit_type: 'condo', area_sqm: 40, list_price: 1000000 });
+  const rlist0 = await inj('GET', '/api/realestate/developments/RED-1/units', admin);
+  ok('RE-01: development unit grid → 3 units, all available', rlist0.json.summary?.total === 3 && rlist0.json.summary?.available === 3, JSON.stringify(rlist0.json.summary));
+
+  const rbk1 = await inj('POST', '/api/realestate/bookings', admin, { dev_code: 'RED-1', unit_no: 'U-101', buyer_name: 'คุณสมชาย', deposit: 50000 });
+  ok('RE-01: book an available unit → held, deposit 50000 (unit → reserved)', rbk1.status < 300 && rbk1.json.status === 'held' && near(rbk1.json.deposit, 50000), JSON.stringify({ s: rbk1.status, st: rbk1.json.status }));
+  const rbkDup = await inj('POST', '/api/realestate/bookings', admin, { dev_code: 'RED-1', unit_no: 'U-101', deposit: 10000 });
+  ok('RE-01: re-book a reserved unit → 400 UNIT_NOT_AVAILABLE', rbkDup.status === 400 && rbkDup.json.error?.code === 'UNIT_NOT_AVAILABLE', `${rbkDup.status} ${rbkDup.json.error?.code}`);
+
+  const rc1 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-101', booking_no: rbk1.json.booking_no, buyer_name: 'คุณสมชาย', discount: 100000, down_payment: 200000, installment_count: 4 });
+  ok('RE-02: draft contract → price 900000 (1,000,000 − 100,000), balance 700000, draft (no GL)',
+    rc1.status < 300 && rc1.json.status === 'draft' && near(rc1.json.price, 900000) && near(rc1.json.balance, 700000), JSON.stringify({ st: rc1.json.status, p: rc1.json.price }));
+  const rc1No = rc1.json.contract_no;
+  const rc1Self = await inj('POST', `/api/realestate/contracts/${rc1No}/approve`, admin);
+  ok('RE-02: drafter self-approves the contract → 400 SOD_SELF_APPROVAL', rc1Self.status === 400 && rc1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${rc1Self.status} ${rc1Self.json.error?.code}`);
+  const rc1Appr = await inj('POST', `/api/realestate/contracts/${rc1No}/approve`, mgr);
+  ok('RE-02: independent approver → active; down_payment 200000, cash_collected 150000 (50000 deposit reclassed)',
+    rc1Appr.status < 300 && rc1Appr.json.status === 'active' && near(rc1Appr.json.down_payment, 200000) && near(rc1Appr.json.cash_collected, 150000), JSON.stringify({ st: rc1Appr.json.status, cc: rc1Appr.json.cash_collected }));
+  const rc1Get = await inj('GET', `/api/realestate/contracts/${rc1No}`, admin);
+  ok('RE-02/03: contract has 4 installments of 175000, outstanding 700000',
+    rc1Get.json.installments?.length === 4 && near(rc1Get.json.installments?.[0]?.amount, 175000) && near(rc1Get.json.outstanding, 700000), JSON.stringify({ n: rc1Get.json.installments?.length, out: rc1Get.json.outstanding }));
+
+  const inst1 = rc1Get.json.installments?.[0]?.id;
+  const pay1 = await inj('POST', `/api/realestate/installments/${inst1}/pay`, admin, { amount: 175000 });
+  ok('RE-03: pay installment 1 (exact 175000) → paid (Dr 1000 / Cr 2410)', pay1.status < 300 && pay1.json.status === 'paid' && /^JE-/.test(pay1.json.entry_no ?? ''), JSON.stringify({ st: pay1.json.status, je: pay1.json.entry_no }));
+  const payDup = await inj('POST', `/api/realestate/installments/${inst1}/pay`, admin, { amount: 175000 });
+  ok('RE-03: pay the same installment again → 400 INSTALLMENT_PAID', payDup.status === 400 && payDup.json.error?.code === 'INSTALLMENT_PAID', `${payDup.status} ${payDup.json.error?.code}`);
+  const inst2 = rc1Get.json.installments?.[1]?.id;
+  const payBad = await inj('POST', `/api/realestate/installments/${inst2}/pay`, admin, { amount: 100000 });
+  ok('RE-03: pay a wrong amount (≠ scheduled) → 400 BAD_AMOUNT', payBad.status === 400 && payBad.json.error?.code === 'BAD_AMOUNT', `${payBad.status} ${payBad.json.error?.code}`);
+  const rc1Get2 = await inj('GET', `/api/realestate/contracts/${rc1No}`, admin);
+  ok('RE-03: after one payment → installments_paid 175000, outstanding 525000', near(rc1Get2.json.installments_paid, 175000) && near(rc1Get2.json.outstanding, 525000), JSON.stringify({ paid: rc1Get2.json.installments_paid, out: rc1Get2.json.outstanding }));
+
+  // no-booking contract (down-payment straight to cash → contract liability, no deposit reclass)
+  const rc2 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-102', down_payment: 400000, installment_count: 2 });
+  const rc2Appr = await inj('POST', `/api/realestate/contracts/${rc2.json.contract_no}/approve`, mgr);
+  ok('RE-02: no-booking contract approved → active, cash_collected 400000 (full down-payment)', rc2Appr.status < 300 && rc2Appr.json.status === 'active' && near(rc2Appr.json.cash_collected, 400000), JSON.stringify({ cc: rc2Appr.json.cash_collected }));
+
+  const rBadDisc = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-103', discount: 2000000, down_payment: 0, installment_count: 1 });
+  ok('RE-02: discount beyond the list price → 400 BAD_DISCOUNT', rBadDisc.status === 400 && rBadDisc.json.error?.code === 'BAD_DISCOUNT', `${rBadDisc.status} ${rBadDisc.json.error?.code}`);
+  const rBadDown = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-103', discount: 0, down_payment: 5000000, installment_count: 0 });
+  ok('RE-02: down-payment beyond the price → 400 BAD_DOWN_PAYMENT', rBadDown.status === 400 && rBadDown.json.error?.code === 'BAD_DOWN_PAYMENT', `${rBadDown.status} ${rBadDown.json.error?.code}`);
+  const rReContract = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-1', unit_no: 'U-101', down_payment: 0, installment_count: 1 });
+  ok('RE-01: contract an already-contracted unit → 400 UNIT_NOT_CONTRACTABLE', rReContract.status === 400 && rReContract.json.error?.code === 'UNIT_NOT_CONTRACTABLE', `${rReContract.status} ${rReContract.json.error?.code}`);
+  const rlist1 = await inj('GET', '/api/realestate/developments/RED-1/units', admin);
+  ok('RE-01: availability grid ties out → 2 contracted, 1 available', rlist1.json.summary?.contracted === 2 && rlist1.json.summary?.available === 1, JSON.stringify(rlist1.json.summary));
+
+  // ── P5 (docs/35) — ownership transfer + revenue recognition (RE-04) ──
+  await inj('POST', '/api/realestate/developments', admin, { dev_code: 'RED-2', name: 'บ้านเดี่ยว' });
+  await inj('POST', '/api/realestate/developments/RED-2/units', admin, { unit_no: 'U-201', unit_type: 'house', list_price: 500000, cost: 300000 });
+  await inj('POST', '/api/realestate/developments/RED-2/units', admin, { unit_no: 'U-202', unit_type: 'house', list_price: 500000, cost: 300000 });
+  const tc1 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-2', unit_no: 'U-201', down_payment: 500000, installment_count: 0 }); // fully paid on down
+  await inj('POST', `/api/realestate/contracts/${tc1.json.contract_no}/approve`, mgr);
+  const xfer = await inj('POST', `/api/realestate/contracts/${tc1.json.contract_no}/transfer`, admin, {});
+  ok('RE-04: transfer a fully-settled contract → revenue 500000, cost 300000 (Dr 2410/Cr 4200 + Dr 5800/Cr 1200), unit transferred',
+    xfer.status < 300 && xfer.json.status === 'transferred' && near(xfer.json.revenue_recognized, 500000) && near(xfer.json.cost_recognized, 300000) && /^JE-/.test(xfer.json.entry_no ?? ''),
+    JSON.stringify({ st: xfer.json.status, rev: xfer.json.revenue_recognized, cost: xfer.json.cost_recognized }));
+  const tc2 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-2', unit_no: 'U-202', down_payment: 100000, installment_count: 4 }); // balance 400000 unpaid
+  await inj('POST', `/api/realestate/contracts/${tc2.json.contract_no}/approve`, mgr);
+  const xferEarly = await inj('POST', `/api/realestate/contracts/${tc2.json.contract_no}/transfer`, admin, {});
+  ok('RE-04: transfer before fully settled → 400 NOT_FULLY_SETTLED', xferEarly.status === 400 && xferEarly.json.error?.code === 'NOT_FULLY_SETTLED', `${xferEarly.status} ${xferEarly.json.error?.code}`);
+
+  // ── P3 (docs/35) — tender / estimating → award (Track C, PROJ-18) ──
+  // Build a priced estimate, submit, record win/loss, and on a WIN award → seed a project + a DRAFT BoQ from
+  // the tender lines (the seeded BoQ's own maker-checker approve sets the controlled budget baseline).
+  const tnd1 = await inj('POST', '/api/tenders', admin, { title: 'อาคารสำนักงาน 3 ชั้น', customer_name: 'บจก. ผู้ว่าจ้าง', project_code: 'PRJ-TND', markup_pct: 20, lines: [
+    { category: 'material', description: 'ฐานราก', qty: 10, unit_cost: 1000 },   // bid_rate 1200 → 12000
+    { category: 'labor', description: 'โครงสร้าง', qty: 5, unit_cost: 2000 },     // bid_rate 2400 → 12000
+  ] });
+  ok('PROJ-18: create tender → estimating, estimated_cost 20000, bid_price 24000 (20% markup)',
+    tnd1.status < 300 && tnd1.json.status === 'estimating' && near(tnd1.json.estimated_cost, 20000) && near(tnd1.json.bid_price, 24000) && near(tnd1.json.overall_markup_pct, 20),
+    JSON.stringify({ s: tnd1.status, est: tnd1.json.estimated_cost, bid: tnd1.json.bid_price }));
+  const tnd1No = tnd1.json.tender_no;
+  const tndAdd = await inj('POST', `/api/tenders/${tnd1No}/lines`, admin, { category: 'subcon', description: 'งานระบบ', qty: 2, unit_cost: 3000, markup_pct: 0 }); // bid_rate 3000 → 6000
+  ok('PROJ-18: add line (per-line markup override 0) → bid_price 30000, estimated_cost 26000, line bid_rate 3000',
+    near(tndAdd.json.bid_price, 30000) && near(tndAdd.json.estimated_cost, 26000) && near((tndAdd.json.lines ?? []).find((l: any) => l.description === 'งานระบบ')?.bid_rate, 3000),
+    JSON.stringify({ bid: tndAdd.json.bid_price, est: tndAdd.json.estimated_cost }));
+  await inj('POST', `/api/tenders/${tnd1No}/submit`, admin);
+  const awEarly = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
+  ok('PROJ-18: award before won → 400 TENDER_NOT_WON', awEarly.status === 400 && awEarly.json.error?.code === 'TENDER_NOT_WON', `${awEarly.status} ${awEarly.json.error?.code}`);
+  await inj('POST', `/api/tenders/${tnd1No}/outcome`, admin, { outcome: 'won' });
+  const award = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
+  ok('PROJ-18: award a won tender → seeds project PRJ-TND (Fixed, contract 30000) + a DRAFT BoQ (budget 30000)',
+    award.status < 300 && award.json.project_code === 'PRJ-TND' && award.json.boq_status === 'draft' && near(award.json.boq_budget_total, 30000) && near(award.json.contract_amount, 30000),
+    JSON.stringify({ pc: award.json.project_code, bs: award.json.boq_status, bt: award.json.boq_budget_total }));
+  const awProj = await inj('GET', '/api/projects/PRJ-TND', admin);
+  ok('PROJ-18: awarded project exists — Fixed, contract 30000', awProj.json.project_code === 'PRJ-TND' && awProj.json.billing_type === 'Fixed' && near(awProj.json.contract_amount, 30000), JSON.stringify({ bt: awProj.json.billing_type, ca: awProj.json.contract_amount }));
+  const awBoq = await inj('GET', '/api/projects/PRJ-TND/boq', admin);
+  ok('PROJ-18: seeded BoQ is DRAFT with 3 lines, L1 rate = bid_rate 1200 (bid → BoQ rate)',
+    awBoq.json.boq?.status === 'draft' && awBoq.json.count === 3 && near((awBoq.json.lines ?? []).find((l: any) => l.description === 'ฐานราก')?.rate, 1200),
+    JSON.stringify({ st: awBoq.json.boq?.status, c: awBoq.json.count }));
+  const awApprove = await inj('POST', `/api/projects/boq/${awBoq.json.boq?.id}/approve`, mgr); // independent approver sets the baseline
+  ok('PROJ-18: an independent approver approves the seeded BoQ → project budget baseline 30000 (controlled)',
+    awApprove.status < 300 && near(awApprove.json.budget_synced, 30000), JSON.stringify({ s: awApprove.status, sync: awApprove.json.budget_synced }));
+  const awAgain = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
+  ok('PROJ-18: re-award a tender → already (idempotent, no duplicate project)', awAgain.json.already === true && awAgain.json.project_code === 'PRJ-TND', JSON.stringify({ a: awAgain.json.already }));
+  const tndReDecide = await inj('POST', `/api/tenders/${tnd1No}/outcome`, admin, { outcome: 'won' });
+  ok('PROJ-18: re-decide a decided tender → 400 TENDER_DECIDED', tndReDecide.status === 400 && tndReDecide.json.error?.code === 'TENDER_DECIDED', `${tndReDecide.status} ${tndReDecide.json.error?.code}`);
+
+  const tnd2 = await inj('POST', '/api/tenders', admin, { title: 'งานที่แพ้ประมูล', markup_pct: 15, lines: [{ description: 'x', qty: 1, unit_cost: 1000 }] });
+  const lossNoReason = await inj('POST', `/api/tenders/${tnd2.json.tender_no}/outcome`, admin, { outcome: 'lost' });
+  ok('PROJ-18: mark a tender lost without a reason → 400 LOSS_REASON_REQUIRED', lossNoReason.status === 400 && lossNoReason.json.error?.code === 'LOSS_REASON_REQUIRED', `${lossNoReason.status} ${lossNoReason.json.error?.code}`);
+  await inj('POST', `/api/tenders/${tnd2.json.tender_no}/outcome`, admin, { outcome: 'lost', reason: 'ราคาสูงกว่าคู่แข่ง' });
+  const tndList = await inj('GET', '/api/tenders', admin);
+  ok('PROJ-18: tender register → win-rate 50% (1 won of 2 decided)', near(tndList.json.win_rate_pct, 50) && tndList.json.count >= 2, JSON.stringify({ wr: tndList.json.win_rate_pct, n: tndList.json.count }));
+
+  // ── P2 (docs/35) — subcontractor management + retention payable (Track B, PROJ-17) ──
+  // A subcontract reserves BoQ budget (docs/32 commitment); the subcontractor's valuations are certified
+  // maker-checker → post AP + WIP + retention PAYABLE (→ the P0 sub-ledger), with back-charges.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-SUB', name: 'งานจ้างเหมาช่วง', customer_name: 'เจ้าของงาน', billing_type: 'TM' });
+  const subBoq = await inj('POST', '/api/projects/PRJ-SUB/boq', admin, { title: 'BoQ จ้างเหมา', lines: [
+    { category: 'subcon', description: 'งานเสาเข็ม', budget_amount: 60000 },
+    { category: 'subcon', description: 'งานหลังคา', budget_amount: 40000 },
+  ] });
+  const scBoqId = subBoq.json.boq?.id;
+  const scL1 = (subBoq.json.lines ?? []).find((l: any) => l.description === 'งานเสาเข็ม')?.id;
+  await inj('POST', `/api/projects/boq/${scBoqId}/approve`, mgr);
+
+  const sc1 = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', vendor_name: 'หจก. รับเหมาช่วง', title: 'เสาเข็มเจาะ', retention_pct: 10, scope: [{ boq_line_id: scL1, amount: 40000, description: 'งานเสาเข็ม' }] });
+  ok('PROJ-17: create subcontract → contract_value 40000, retention 10%, active, remaining 40000',
+    sc1.status < 300 && near(sc1.json.contract_value, 40000) && near(sc1.json.retention_pct, 10) && sc1.json.status === 'active' && near(sc1.json.remaining, 40000),
+    JSON.stringify({ s: sc1.status, cv: sc1.json.contract_value, st: sc1.json.status }));
+  const sc1No = sc1.json.subcontract_no;
+  const scCommit = await inj('GET', '/api/projects/PRJ-SUB/commitments', admin);
+  ok('PROJ-17: subcontract reserves BoQ-line budget (docs/32 commitment) → committed 40000',
+    near(scCommit.json.summary?.committed, 40000) && (scCommit.json.commitments ?? []).some((c: any) => c.source_doc_type === 'SUBCON'),
+    JSON.stringify({ committed: scCommit.json.summary?.committed }));
+  const scOver = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', scope: [{ boq_line_id: scL1, amount: 30000 }] }); // 40000+30000 > 60000
+  ok('PROJ-17: subcontract beyond the BoQ-line budget → 400 BUDGET_EXCEEDED (rolled back)', scOver.status === 400 && scOver.json.error?.code === 'BUDGET_EXCEEDED', `${scOver.status} ${scOver.json.error?.code}`);
+
+  const sv1 = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { period: '2026-07', pct_complete: 50 });
+  ok('PROJ-17: valuation draft → gross 20000 (50% of 40000), retention 2000, net 18000',
+    sv1.status < 300 && sv1.json.status === 'draft' && near(sv1.json.gross_this_val, 20000) && near(sv1.json.retention_amount, 2000) && near(sv1.json.net_certified, 18000),
+    JSON.stringify({ g: sv1.json.gross_this_val, net: sv1.json.net_certified }));
+  const sv1No = sv1.json.valuation_no;
+  const sv1Self = await inj('POST', `/api/subcontracts/valuations/${sv1No}/certify`, admin);
+  ok('PROJ-17: preparer self-certify valuation → 400 SOD_SELF_APPROVAL', sv1Self.status === 400 && sv1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${sv1Self.status} ${sv1Self.json.error?.code}`);
+  const sv1Cert = await inj('POST', `/api/subcontracts/valuations/${sv1No}/certify`, mgr);
+  ok('PROJ-17: certify valuation → JE Dr 1260 20000 / Cr 2000 18000 / Cr 2440 2000 (net 18000, retention 2000)',
+    sv1Cert.status < 300 && sv1Cert.json.status === 'certified' && near(sv1Cert.json.net_certified, 18000) && near(sv1Cert.json.retention, 2000) && near(sv1Cert.json.wip_cost, 20000) && /^JE-/.test(sv1Cert.json.entry_no ?? ''),
+    JSON.stringify({ net: sv1Cert.json.net_certified, wip: sv1Cert.json.wip_cost, je: sv1Cert.json.entry_no }));
+  const scRet1 = await inj('GET', '/api/retention/project/PRJ-SUB', admin);
+  ok('PROJ-17 → P0: retention 2000 withheld into the shared sub-ledger as a subcontractor PAYABLE',
+    near(scRet1.json.payable?.outstanding, 2000) && near(scRet1.json.payable?.withheld, 2000), JSON.stringify({ pay: scRet1.json.payable }));
+
+  const sv2 = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { period: '2026-08', pct_complete: 80, back_charge: 1000 });
+  ok('PROJ-17: valuation 2 nets off prior + back-charge → gross 12000 (32000−20000), net 9800 (12000−1200−1000)',
+    near(sv2.json.gross_this_val, 12000) && near(sv2.json.back_charge, 1000) && near(sv2.json.net_certified, 9800), JSON.stringify({ g: sv2.json.gross_this_val, net: sv2.json.net_certified }));
+  const sv2Cert = await inj('POST', `/api/subcontracts/valuations/${sv2.json.valuation_no}/certify`, mgr);
+  ok('PROJ-17: certify valuation 2 → net 9800, wip_cost 11000 (gross − back-charge)', sv2Cert.status < 300 && near(sv2Cert.json.net_certified, 9800) && near(sv2Cert.json.wip_cost, 11000), JSON.stringify({ net: sv2Cert.json.net_certified, wip: sv2Cert.json.wip_cost }));
+
+  const svBad = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { pct_complete: 90, back_charge: 999999 });
+  ok('PROJ-17: back-charge exceeding the net → 400 BAD_BACK_CHARGE', svBad.status === 400 && svBad.json.error?.code === 'BAD_BACK_CHARGE', `${svBad.status} ${svBad.json.error?.code}`);
+  const svNone = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { pct_complete: 80 }); // same cumulative → 0 movement
+  ok('PROJ-17: no progress since the last valuation → 400 NOTHING_TO_CERTIFY', svNone.status === 400 && svNone.json.error?.code === 'NOTHING_TO_CERTIFY', `${svNone.status} ${svNone.json.error?.code}`);
+
+  const scList = await inj('GET', '/api/subcontracts/project/PRJ-SUB', admin);
+  ok('PROJ-17: subcontract register → value 40000, certified_to_date 32000, retention_payable 3200',
+    near(scList.json.subcontract_value, 40000) && near(scList.json.certified_to_date, 32000) && near(scList.json.retention_payable, 3200),
+    JSON.stringify({ v: scList.json.subcontract_value, ctd: scList.json.certified_to_date, rp: scList.json.retention_payable }));
+  const scRet2 = await inj('GET', '/api/retention/project/PRJ-SUB', admin);
+  ok('PROJ-17 → P0: retention payable outstanding 3200 after two certified valuations (2000 + 1200)', near(scRet2.json.payable?.outstanding, 3200), JSON.stringify({ pay: scRet2.json.payable?.outstanding }));
+
+  // ── P1 (docs/35) — progress billing / งวดงาน + retention receivable (Track A, PROJ-16) ──
+  // A construction contract billed in periodic progress claims: value work by BoQ line (cumulative), withhold
+  // retention on certification (→ the P0 sub-ledger), maker-checker certify, Fixed-contract cap.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-PB', name: 'งานก่อสร้างงวดงาน', customer_name: 'ผู้ว่าจ้าง', billing_type: 'Fixed', contract_amount: 90000 });
+  const pbBoq = await inj('POST', '/api/projects/PRJ-PB/boq', admin, { title: 'BoQ งวดงาน', lines: [
+    { category: 'material', description: 'งานโครงสร้าง', budget_amount: 60000 },
+    { category: 'material', description: 'งานสถาปัตย์', budget_amount: 40000 },
+  ] });
+  const pbBoqId = pbBoq.json.boq?.id;
+  const pbL1 = (pbBoq.json.lines ?? []).find((l: any) => l.description === 'งานโครงสร้าง')?.id;
+  const pbL2 = (pbBoq.json.lines ?? []).find((l: any) => l.description === 'งานสถาปัตย์')?.id;
+  await inj('POST', `/api/projects/boq/${pbBoqId}/approve`, mgr); // independent approve → budget baseline
+  await inj('POST', '/api/projects/PRJ-PB/cost', admin, { entry_type: 'expense', amount: 20000, description: 'ต้นทุนงาน' }); // WIP 1260 = 20000
+
+  const cl1 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', period: '2026-07', retention_pct: 10, lines: [{ boq_line_id: pbL1, pct_complete_to_date: 50 }, { boq_line_id: pbL2, pct_complete_to_date: 0 }] });
+  ok('PROJ-16: progress claim draft → gross 30000 (L1 50% of 60000), retention 3000, net 27000',
+    cl1.status < 300 && cl1.json.status === 'draft' && near(cl1.json.gross_this_claim, 30000) && near(cl1.json.retention_amount, 3000) && near(cl1.json.net_payable, 27000),
+    JSON.stringify({ s: cl1.status, g: cl1.json.gross_this_claim, r: cl1.json.retention_amount }));
+  const cl1No = cl1.json.claim_no;
+  const cl1Self = await inj('POST', `/api/progress-billing/${cl1No}/certify`, admin); // preparer = admin
+  ok('PROJ-16: preparer self-certify → 400 SOD_SELF_APPROVAL', cl1Self.status === 400 && cl1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${cl1Self.status} ${cl1Self.json.error?.code}`);
+  const cl1Cert = await inj('POST', `/api/progress-billing/${cl1No}/certify`, mgr); // independent certifier
+  ok('PROJ-16: certify → certified, net 27000, retention 3000, cost_recognized 20000 (WIP relieved), JE posted',
+    cl1Cert.status < 300 && cl1Cert.json.status === 'certified' && near(cl1Cert.json.net_payable, 27000) && near(cl1Cert.json.retention, 3000) && near(cl1Cert.json.cost_recognized, 20000) && /^JE-/.test(cl1Cert.json.entry_no ?? ''),
+    JSON.stringify({ st: cl1Cert.json.status, net: cl1Cert.json.net_payable, cr: cl1Cert.json.cost_recognized, je: cl1Cert.json.entry_no }));
+  const cl1Re = await inj('POST', `/api/progress-billing/${cl1No}/certify`, mgr);
+  ok('PROJ-16: re-certify a certified claim → 400 CLAIM_NOT_DRAFT', cl1Re.status === 400 && cl1Re.json.error?.code === 'CLAIM_NOT_DRAFT', `${cl1Re.status} ${cl1Re.json.error?.code}`);
+  const pbRet1 = await inj('GET', '/api/retention/project/PRJ-PB', admin);
+  ok('PROJ-16 → P0: retention 3000 withheld into the shared sub-ledger as a customer receivable',
+    near(pbRet1.json.receivable?.outstanding, 3000) && near(pbRet1.json.receivable?.withheld, 3000), JSON.stringify({ recv: pbRet1.json.receivable }));
+
+  const cl2 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', period: '2026-08', retention_pct: 10, lines: [{ boq_line_id: pbL1, pct_complete_to_date: 80 }] });
+  ok('PROJ-16: claim 2 nets off previously certified → gross 18000 (48000 to-date − 30000 prior), prev 30000',
+    near(cl2.json.gross_this_claim, 18000) && near(cl2.json.lines?.[0]?.value_this_claim, 18000) && near(cl2.json.lines?.[0]?.previously_certified, 30000),
+    JSON.stringify({ g: cl2.json.gross_this_claim, prev: cl2.json.lines?.[0]?.previously_certified }));
+  const cl2Cert = await inj('POST', `/api/progress-billing/${cl2.json.claim_no}/certify`, mgr);
+  ok('PROJ-16: certify claim 2 → net 16200, retention 1800, no more WIP to relieve (cost_recognized 0)',
+    cl2Cert.status < 300 && near(cl2Cert.json.net_payable, 16200) && near(cl2Cert.json.retention, 1800) && near(cl2Cert.json.cost_recognized, 0), JSON.stringify({ net: cl2Cert.json.net_payable, cr: cl2Cert.json.cost_recognized }));
+
+  const cl3 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 80 }] }); // same % → no movement
+  ok('PROJ-16: no work movement since the last claim → 400 NOTHING_TO_BILL', cl3.status === 400 && cl3.json.error?.code === 'NOTHING_TO_BILL', `${cl3.status} ${cl3.json.error?.code}`);
+  const clBad = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 150 }] });
+  ok('PROJ-16: pct > 100 (over-certification) → 400', clBad.status === 400, `${clBad.status}`);
+
+  const cl4 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 100 }, { boq_line_id: pbL2, pct_complete_to_date: 100 }] }); // gross 12000+40000=52000 → billed 100000 > 90000
+  const cl4Cert = await inj('POST', `/api/progress-billing/${cl4.json.claim_no}/certify`, mgr);
+  ok('PROJ-16: certifying beyond the Fixed contract (90000) → 400 BILL_EXCEEDS_CONTRACT', cl4Cert.status === 400 && cl4Cert.json.error?.code === 'BILL_EXCEEDS_CONTRACT', `${cl4Cert.status} ${cl4Cert.json.error?.code}`);
+
+  const pbList = await inj('GET', '/api/progress-billing/project/PRJ-PB', admin);
+  ok('PROJ-16: project claim register → certified_to_date 48000, retention_withheld 4800',
+    near(pbList.json.certified_to_date, 48000) && near(pbList.json.retention_withheld, 4800), JSON.stringify({ ctd: pbList.json.certified_to_date, rw: pbList.json.retention_withheld }));
+  const pbRet2 = await inj('GET', '/api/retention/project/PRJ-PB', admin);
+  ok('PROJ-16 → P0: retention receivable outstanding 4800 after two certified claims (3000 + 1800)', near(pbRet2.json.receivable?.outstanding, 4800), JSON.stringify({ recv: pbRet2.json.receivable?.outstanding }));
+
+  // ── Depth-2/3 (docs/35) — output VAT on progress claims, POC/rev-rec reconciliation, subcontractor WHT ──
+  // Depth-2: output VAT on a customer progress claim (billing-method project).
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-VAT', name: 'งานมี VAT', customer_name: 'ผู้ว่าจ้าง', billing_type: 'Fixed', contract_amount: 100000 });
+  const vatBoq = await inj('POST', '/api/projects/PRJ-VAT/boq', admin, { title: 'BoQ VAT', lines: [{ category: 'material', description: 'งานรวม', budget_amount: 100000 }] });
+  await inj('POST', `/api/projects/boq/${vatBoq.json.boq?.id}/approve`, mgr);
+  const vatL1 = (vatBoq.json.lines ?? [])[0]?.id;
+  const vatClaim = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-VAT', retention_pct: 0, vat_pct: 7, lines: [{ boq_line_id: vatL1, pct_complete_to_date: 100 }] });
+  const vatCert = await inj('POST', `/api/progress-billing/${vatClaim.json.claim_no}/certify`, mgr);
+  ok('Depth-2: progress claim with 7% VAT → gross 100000, VAT 7000, AR total 107000, revenue 100000 (billing method)',
+    vatCert.status < 300 && near(vatCert.json.vat, 7000) && near(vatCert.json.ar_total, 107000) && near(vatCert.json.revenue, 100000) && vatCert.json.rev_method === 'billing',
+    JSON.stringify({ vat: vatCert.json.vat, ar: vatCert.json.ar_total, rm: vatCert.json.rev_method }));
+
+  // Document: the ใบวางบิลงวดงาน / ใบกำกับภาษี renders (PDF, or HTML fallback when Chromium absent → CI).
+  const vatPdf = await raw('GET', `/api/progress-billing/${vatClaim.json.claim_no}/pdf`, admin);
+  ok('Document: progress-claim tax invoice renders (PDF or HTML fallback) with the AR total & baht-in-words',
+    vatPdf.status === 200 && (vatPdf.ctype.includes('application/pdf') || (vatPdf.ctype.includes('text/html') && /ใบวางบิลงวดงาน/.test(vatPdf.body) && /107,000/.test(vatPdf.body))),
+    JSON.stringify({ s: vatPdf.status, ct: vatPdf.ctype.split(';')[0] }));
+
+  // Depth-3: on a POC project a progress claim is a BILLING event (no revenue; clears contract asset / parks liability).
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-POC3', name: 'งาน POC (progress)', billing_type: 'Fixed', contract_amount: 100000, rev_method: 'poc', estimated_cost: 80000 });
+  const pocBoq = await inj('POST', '/api/projects/PRJ-POC3/boq', admin, { title: 'BoQ POC', lines: [{ category: 'material', description: 'งานรวม', budget_amount: 100000 }] });
+  await inj('POST', `/api/projects/boq/${pocBoq.json.boq?.id}/approve`, mgr);
+  const pocL1 = (pocBoq.json.lines ?? [])[0]?.id;
+  const pocClaim = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-POC3', retention_pct: 0, lines: [{ boq_line_id: pocL1, pct_complete_to_date: 50 }] });
+  const pocCert = await inj('POST', `/api/progress-billing/${pocClaim.json.claim_no}/certify`, mgr);
+  ok('Depth-3: progress claim on a POC project → rev_method poc, revenue 0 (billing event), billings_in_excess 50000 (no double revenue)',
+    pocCert.status < 300 && pocCert.json.rev_method === 'poc' && near(pocCert.json.revenue, 0) && near(pocCert.json.billings_in_excess, 50000) && /^JE-/.test(pocCert.json.entry_no ?? ''),
+    JSON.stringify({ rm: pocCert.json.rev_method, rev: pocCert.json.revenue, bie: pocCert.json.billings_in_excess }));
+
+  // Depth-2: subcontractor WHT (ภ.ง.ด.53, 3%) + recoverable input VAT (7%) on the certified valuation.
+  const scWht = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', vendor_name: 'ผู้รับเหมาช่วง WHT', retention_pct: 0, wht_pct: 3, vat_pct: 7, scope: [{ boq_line_id: scL1, amount: 20000 }] });
+  const svWht = await inj('POST', `/api/subcontracts/${scWht.json.subcontract_no}/valuations`, admin, { pct_complete: 100 });
+  const svWhtCert = await inj('POST', `/api/subcontracts/valuations/${svWht.json.valuation_no}/certify`, mgr);
+  ok('Depth-2: subcontract valuation → WHT 600 (Cr 2361), input VAT 1400 (Dr 1300), AP payable 20800 (net−WHT+VAT), net_certified 20000',
+    svWhtCert.status < 300 && near(svWhtCert.json.wht, 600) && near(svWhtCert.json.vat, 1400) && near(svWhtCert.json.ap_payable, 20800) && near(svWhtCert.json.net_certified, 20000),
+    JSON.stringify({ wht: svWhtCert.json.wht, vat: svWhtCert.json.vat, ap: svWhtCert.json.ap_payable }));
+
+  // Document: the ใบรับรองผลงานผู้รับเหมาช่วง renders (PDF, or HTML fallback when Chromium absent → CI).
+  const svPdf = await raw('GET', `/api/subcontracts/valuations/${svWht.json.valuation_no}/pdf`, admin);
+  ok('Document: subcontract valuation certificate renders (PDF or HTML fallback) with the AP payable & baht-in-words',
+    svPdf.status === 200 && (svPdf.ctype.includes('application/pdf') || (svPdf.ctype.includes('text/html') && /ใบรับรองผลงานผู้รับเหมาช่วง/.test(svPdf.body) && /20,800/.test(svPdf.body))),
+    JSON.stringify({ s: svPdf.status, ct: svPdf.ctype.split(';')[0] }));
+
+  // ── P0 (docs/35) — shared retention sub-ledger + retention GL accounts (Construction/RE vertical, Phase 0) ──
+  // The primitive Tracks A (customer progress billing / งวดงาน) and B (subcontractor valuations) build on:
+  // withhold retention on certification, release in tranches; balances only (A/B post the matching GL).
+  const coa = await inj('GET', '/api/ledger/accounts', admin);
+  const acct = (c: string) => (coa.json.accounts ?? []).find((a: any) => a.code === c);
+  ok('docs/35 P0: retention GL accounts seeded — 1170 Retention Receivable (Asset), 2440 Retention Payable (Liability)',
+    acct('1170')?.type === 'Asset' && acct('2440')?.type === 'Liability',
+    JSON.stringify({ r1170: acct('1170')?.type, r2440: acct('2440')?.type }));
+
+  const rcCust = await inj('POST', '/api/retention/withhold', admin, { party_type: 'customer', project_code: 'PRJ-A', source_doc_type: 'CLAIM', source_doc_no: 'CLAIM-1', amount: 500 });
+  ok('Retention withhold (customer/งวดงาน) → gl 1170, withheld 500', rcCust.status < 300 && rcCust.json.gl_account === '1170' && near(rcCust.json.withheld, 500), JSON.stringify({ s: rcCust.status, gl: rcCust.json.gl_account }));
+  const custRetId = rcCust.json.id;
+
+  const rcSub = await inj('POST', '/api/retention/withhold', admin, {
+    party_type: 'subcontractor', project_code: 'PRJ-A', source_doc_type: 'SUBVAL', source_doc_no: 'SUBVAL-1', amount: 1000,
+    schedule: [{ due_basis: 'date', due_date: '2020-01-01', pct: 50 }, { due_basis: 'dlp_end', pct: 50 }],
+  });
+  ok('Retention withhold (subcontractor) → gl 2440, withheld 1000, 2-tranche schedule', rcSub.status < 300 && rcSub.json.gl_account === '2440' && near(rcSub.json.withheld, 1000), JSON.stringify({ s: rcSub.status, gl: rcSub.json.gl_account }));
+  const subRetId = rcSub.json.id;
+
+  const rbal1 = await inj('GET', '/api/retention/project/PRJ-A', admin);
+  ok('Retention balance: receivable outstanding 500, payable outstanding 1000',
+    near(rbal1.json.receivable?.outstanding, 500) && near(rbal1.json.payable?.outstanding, 1000),
+    JSON.stringify({ recv: rbal1.json.receivable?.outstanding, pay: rbal1.json.payable?.outstanding }));
+
+  const rel1 = await inj('POST', `/api/retention/${custRetId}/release`, admin, { amount: 200 });
+  ok('Retention partial release 200 (customer) → partially_released, released 200, outstanding 300, JE posted (Depth-1: Dr 1100 / Cr 1170)',
+    rel1.status < 300 && rel1.json.status === 'partially_released' && near(rel1.json.released_amount, 200) && near(rel1.json.outstanding, 300) && /^JE-/.test(rel1.json.entry_no ?? ''),
+    JSON.stringify({ st: rel1.json.status, rel: rel1.json.released_amount, je: rel1.json.entry_no }));
+
+  const relOver = await inj('POST', `/api/retention/${custRetId}/release`, admin, { amount: 5000 });
+  ok('Over-release beyond outstanding → 400 RETENTION_OVER_RELEASE', relOver.status === 400 && relOver.json.error?.code === 'RETENTION_OVER_RELEASE', `${relOver.status} ${relOver.json.error?.code}`);
+
+  const rbal2 = await inj('GET', '/api/retention/project/PRJ-A', admin);
+  ok('Retention balance after partial release: receivable outstanding 300', near(rbal2.json.receivable?.outstanding, 300), JSON.stringify({ recv: rbal2.json.receivable?.outstanding }));
+
+  const due = await inj('GET', '/api/retention/due', admin); // as_of defaults to today (2020 tranche is overdue; dlp_end is not date-based)
+  const dueSub = (due.json.due ?? []).find((d: any) => d.source_doc_no === 'SUBVAL-1');
+  ok('Retention due worklist: the overdue date-tranche (500) is due; the dlp_end tranche is excluded',
+    dueSub && near(dueSub.amount, 500) && (due.json.due ?? []).length === 1,
+    JSON.stringify({ count: due.json.count, first: dueSub?.amount }));
+
+  const relTranche = await inj('POST', `/api/retention/${subRetId}/release`, admin, { tranche_id: dueSub?.tranche_id });
+  ok('Release a scheduled tranche by id → subcontract retention released 500, outstanding 500, JE posted (Depth-1: Dr 2440 / Cr 2000)',
+    relTranche.status < 300 && near(relTranche.json.released_amount, 500) && near(relTranche.json.outstanding, 500) && /^JE-/.test(relTranche.json.entry_no ?? ''),
+    JSON.stringify({ rel: relTranche.json.released_amount, je: relTranche.json.entry_no }));
+  const dueAfter = await inj('GET', '/api/retention/due', admin);
+  ok('After releasing the tranche it drops off the due worklist (0 due)', (dueAfter.json.due ?? []).length === 0, `count=${dueAfter.json.count}`);
+
+  // Depth-1: an overdue retention tranche surfaces on the PMO action center as `retention_due`.
+  await inj('POST', '/api/retention/withhold', admin, { party_type: 'customer', project_code: 'PRJ-A', source_doc_type: 'CLAIM', source_doc_no: 'CLAIM-DUE', amount: 800, schedule: [{ due_basis: 'date', due_date: '2019-06-01', pct: 100 }] });
+  const acRet = await inj('GET', '/api/projects/action-center', admin);
+  const retItem = (acRet.json.items ?? []).find((i: any) => i.kind === 'retention_due' && i.ref === 'CLAIM-DUE');
+  ok('Depth-1: an overdue retention tranche surfaces on the action center as retention_due', !!retItem && near(retItem.meta?.amount, 800), JSON.stringify({ found: !!retItem, kinds: acRet.json.summary?.by_kind?.retention_due }));
+
+  // SCF classification: a posted JE touching 1170/2440 must bucket into OPERATING working capital (not unclassified).
+  const rje = await inj('POST', '/api/ledger/journal', admin, { date: '2026-06-15', memo: 'retention SCF classify test', lines: [{ account_code: '1170', debit: 500 }, { account_code: '2440', credit: 500 }] });
+  await inj('POST', `/api/ledger/journal/${rje.json.entry_no}/approve`, mgr); // maker-checker: mgr ≠ admin
+  const scf = await inj('GET', '/api/ledger/cash-flow?from=2026-06-01&to=2026-06-30', admin);
+  const wc = scf.json.operating?.working_capital ?? [];
+  ok('SCF: retention receivable (1170) & payable (2440) classify as OPERATING working capital, not unclassified',
+    !(scf.json.unclassified_accounts ?? []).includes('1170') && !(scf.json.unclassified_accounts ?? []).includes('2440') &&
+    wc.some((l: any) => l.account_code === '1170') && wc.some((l: any) => l.account_code === '2440'),
+    JSON.stringify({ uncl: scf.json.unclassified_accounts, codes: wc.map((l: any) => l.account_code) }));
+
+  // ── Depth: scheduled sweeps (docs/35) — retention release due, booking expiry, installment overdue ──
+  await inj('POST', '/api/retention/withhold', admin, { party_type: 'customer', project_code: 'PRJ-A', source_doc_type: 'CLAIM', source_doc_no: 'CLAIM-SWEEP', amount: 1000, schedule: [{ due_basis: 'date', due_date: '2018-01-01', pct: 100 }] });
+  const rrSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Retention release', report_type: 'retention_release_due', frequency: 'monthly' });
+  const rrRun = await inj('POST', `/api/bi/subscriptions/${rrSub.json.id}/run`, admin, {});
+  ok('Sweep: retention_release_due auto-releases past-due tranches (posts GL)', rrRun.json.status === 'success' && /released\s+[1-9]/.test(rrRun.json.summary ?? ''), JSON.stringify({ s: rrRun.json.status, sum: (rrRun.json.summary ?? '').slice(0, 50) }));
+
+  await inj('POST', '/api/realestate/bookings', admin, { dev_code: 'RED-1', unit_no: 'U-103', deposit: 5000, expires_on: '2018-01-01' });
+  const beSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Booking expiry', report_type: 're_booking_expire', frequency: 'daily' });
+  const beRun = await inj('POST', `/api/bi/subscriptions/${beSub.json.id}/run`, admin, {});
+  ok('Sweep: re_booking_expire cancels lapsed bookings + frees the unit', beRun.json.status === 'success' && /expired\s+[1-9]/.test(beRun.json.summary ?? ''), JSON.stringify({ s: beRun.json.status, sum: (beRun.json.summary ?? '').slice(0, 50) }));
+  const u103 = await inj('GET', '/api/realestate/developments/RED-1/units', admin);
+  ok('Sweep: the expired booking freed U-103 back to available', (u103.json.units ?? []).find((x: any) => x.unit_no === 'U-103')?.status === 'available', JSON.stringify({ st: (u103.json.units ?? []).find((x: any) => x.unit_no === 'U-103')?.status }));
+
+  const ioSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Installment overdue', report_type: 're_installment_overdue', frequency: 'daily' });
+  const ioRun = await inj('POST', `/api/bi/subscriptions/${ioSub.json.id}/run`, admin, {});
+  ok('Sweep: re_installment_overdue runs (detective worklist)', ioRun.json.status === 'success' && /[Oo]verdue installments/.test(ioRun.json.summary ?? ''), JSON.stringify({ s: ioRun.json.status, sum: (ioRun.json.summary ?? '').slice(0, 40) }));
 
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

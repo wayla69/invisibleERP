@@ -80,6 +80,10 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '5950', name: 'Deferred Tax Expense', type: 'Expense' },             // ค่าใช้จ่าย(รายได้)ภาษีเงินได้รอการตัดบัญชี — deferred tax expense/benefit (TAX-06)
   { code: '2410', name: 'Contract Liability / Deferred Revenue', type: 'Liability' }, // หนี้สินตามสัญญา/รายได้รอรับรู้ (TFRS 15) — deferred revenue released as POs are satisfied (REV-19)
   { code: '2420', name: 'Refund Liability', type: 'Liability' },               // หนี้สินค่าคืนเงิน — provision for expected returns/refunds (TFRS 15, REV-19)
+  { code: '1300', name: 'Input VAT', type: 'Asset' },                         // ภาษีซื้อ — recoverable input VAT (e.g. on subcontractor valuations, docs/35 Depth)
+  // Construction/real-estate retention (docs/35 Phase 0) — the shared retention sub-ledger's GL anchors.
+  { code: '1170', name: 'Retention Receivable', type: 'Asset' },              // ลูกหนี้เงินประกันผลงาน — retention withheld by the customer on a progress claim, collectible on release (Track A)
+  { code: '2440', name: 'Retention Payable', type: 'Liability' },             // เจ้าหนี้เงินประกันผลงาน — retention we withhold from a subcontractor valuation, payable on release (Track B)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -101,8 +105,11 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '1250': { bucket: 'operating', label: 'งานระหว่างทำ (Work-in-process)' },
   '1260': { bucket: 'operating', label: 'ต้นทุนโครงการที่ยังไม่เรียกเก็บ (Unbilled project cost)' },
   '1265': { bucket: 'operating', label: 'สินทรัพย์ตามสัญญา (Contract asset / unbilled receivable)' },
+  '1170': { bucket: 'operating', label: 'ลูกหนี้เงินประกันผลงาน (Retention receivable)' }, // docs/35 Phase 0 — retention withheld by customers (working-capital asset)
+  '1300': { bucket: 'operating', label: 'ภาษีซื้อ (Input VAT recoverable)' }, // docs/35 Depth — recoverable input VAT (working-capital asset)
   // Operating — current liabilities (an increase releases cash)
   '2000': { bucket: 'operating', label: 'เจ้าหนี้การค้า (Accounts payable)' },
+  '2440': { bucket: 'operating', label: 'เจ้าหนี้เงินประกันผลงาน (Retention payable)' }, // docs/35 Phase 0 — retention withheld from subcontractors (working-capital liability)
   '2100': { bucket: 'operating', label: 'ภาษีค้างจ่าย (Tax payable)' },
   '2150': { bucket: 'operating', label: 'เจ้าหนี้ระหว่างบริษัท (Intercompany payable)' },
   '2200': { bucket: 'operating', label: 'เงินมัดจำลูกค้า/บัตรของขวัญ (Customer deposits)' },

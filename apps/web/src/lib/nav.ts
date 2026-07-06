@@ -430,10 +430,22 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.pm_portfolio', href: '/projects/portfolio', icon: LayoutDashboard, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.pm_action_center', href: '/projects/action-center', icon: BellRing, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
+      // Construction/real-estate vertical (docs/35): tender→award, progress billing (งวดงาน), subcontracts.
+      { label: 'nav.pm_tenders', href: '/projects/tenders', icon: FileSignature, perms: ['proj_tender', 'marketing', 'exec'] },
+      { label: 'nav.pm_billing', href: '/projects/billing', icon: ReceiptText, perms: ['proj_billing', 'ar', 'exec'] },
+      { label: 'nav.pm_subcontracts', href: '/projects/subcontracts', icon: Handshake, perms: ['proj_subcon', 'procurement', 'exec'] },
       { label: 'nav.pm_crm', href: '/projects/crm', icon: Handshake, perms: ['crm', 'exec', 'ar'] },
       { label: 'nav.pm_pipeline', href: '/projects/pipeline', icon: Target, perms: ['exec', 'planner', 'ar', 'crm'] },
       { label: 'nav.pm_close', href: '/projects/close', icon: Lock, perms: ['exec'] },
       { label: 'nav.pm_settings', href: '/projects/settings', icon: SlidersHorizontal, perms: ['exec', 'planner'] },
+    ],
+  },
+  // ─── Real Estate (developer vertical, docs/35 P4). Permission-gated (re_sales) — invisible without it. ───
+  {
+    title: 'nav.group.realestate',
+    workspace: ['erp'],
+    items: [
+      { label: 'nav.re_developments', href: '/realestate', icon: Building2, perms: ['re_sales', 're_contract_approve', 'exec'] },
     ],
   },
   {
