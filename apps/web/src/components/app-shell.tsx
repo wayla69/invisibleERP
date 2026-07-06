@@ -127,6 +127,7 @@ const PLATFORM_GROUP: NavGroup = {
  * in scope and offers a one-click return to the combined view. Complements the sidebar switcher/badge.
  */
 function GodScopeBanner() {
+  const { t } = useLang();
   const [acting, setActing] = React.useState<ActingTenant | null>(null);
   React.useEffect(() => setActing(getActingTenant()), []);
   const exit = () => { setActingTenant(null); window.location.reload(); };
@@ -136,19 +137,19 @@ function GodScopeBanner() {
       <div className={cn('flex items-center gap-2 border-b px-4 py-1.5 text-xs', acting.readOnly ? 'border-amber-500/40 bg-amber-500/10' : 'border-primary/30 bg-primary/10')}>
         <Building2 className={cn('size-3.5 shrink-0', acting.readOnly ? 'text-amber-600 dark:text-amber-400' : 'text-primary')} />
         <span className="flex-1 truncate">
-          กำลังดูข้อมูลของ <b>{acting.name}</b>{acting.code ? ` (${acting.code})` : ''} — {acting.readOnly ? <b>อ่านอย่างเดียว</b> : 'มุมมองผู้ดูแลแพลตฟอร์ม'}
+          {t('plt.scope_acting_as')} <b>{acting.name}</b>{acting.code ? ` (${acting.code})` : ''} — {acting.readOnly ? <b>{t('plt.scope_read_only')}</b> : t('plt.scope_admin_view')}
         </span>
-        <button type="button" onClick={toggleReadOnly} className="shrink-0 rounded px-2 py-0.5 font-medium hover:bg-black/5 dark:hover:bg-white/10" title="สลับโหมดอ่านอย่างเดียว / แก้ไขได้">
-          {acting.readOnly ? 'เปิดให้แก้ไข' : 'อ่านอย่างเดียว'}
+        <button type="button" onClick={toggleReadOnly} className="shrink-0 rounded px-2 py-0.5 font-medium hover:bg-black/5 dark:hover:bg-white/10" title={t('plt.scope_toggle_title')}>
+          {acting.readOnly ? t('plt.scope_enable_edit') : t('plt.scope_read_only_btn')}
         </button>
-        <button type="button" onClick={exit} className="shrink-0 rounded px-2 py-0.5 font-medium text-primary hover:bg-primary/15">ออกเป็นมุมมองรวม</button>
+        <button type="button" onClick={exit} className="shrink-0 rounded px-2 py-0.5 font-medium text-primary hover:bg-primary/15">{t('plt.scope_exit_to_combined')}</button>
       </div>
     );
   }
   return (
     <div className="flex items-center gap-2 border-b border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground">
       <Globe className="size-3.5 shrink-0" />
-      <span>โหมดผู้ดูแลแพลตฟอร์ม — กำลังดู <b>รวมทุกบริษัท</b> (ตัวเลขรวมทุกบริษัท) เลือกดูรายบริษัทได้จากแถบซ้ายบน</span>
+      <span>{t('plt.scope_combined_mode_pre')} <b>{t('plt.scope_all_companies')}</b> {t('plt.scope_combined_mode_post')}</span>
     </div>
   );
 }
@@ -174,6 +175,7 @@ function pushRecentCompany(c: ActingTenant) {
 }
 
 function CompanySwitcher() {
+  const { t } = useLang();
   const { data: companies } = useQuery<SwitcherCompany[]>({
     queryKey: ['admin-tenants'],
     queryFn: () => api<SwitcherCompany[]>('/api/admin/tenants'),
@@ -191,7 +193,7 @@ function CompanySwitcher() {
     window.location.reload();
   };
 
-  const currentName = acting?.name ?? 'ทุกบริษัท';
+  const currentName = acting?.name ?? t('plt.sw_all_companies');
   const isGlobal = acting == null;
   const q = query.trim().toLowerCase();
   const list = (companies ?? []).filter((c) => !q || `${c.name} ${c.code}`.toLowerCase().includes(q));
@@ -206,7 +208,7 @@ function CompanySwitcher() {
       <Building2 className="size-4" />
       <span className="grid flex-1 leading-tight">
         <span className={cn('truncate', c.suspended && 'text-muted-foreground line-through')}>{c.name}</span>
-        <span className="truncate text-[10px] text-muted-foreground">{c.code}{c.suspended ? ' · ระงับ' : ''}</span>
+        <span className="truncate text-[10px] text-muted-foreground">{c.code}{c.suspended ? t('plt.sw_suspended') : ''}</span>
       </span>
       {acting?.id === c.id && <Check className="size-4 text-primary" />}
     </DropdownMenuItem>
@@ -222,18 +224,18 @@ function CompanySwitcher() {
               'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted',
               isGlobal ? 'border-dashed text-muted-foreground' : 'border-primary/40 bg-primary/5 text-foreground',
             )}
-            aria-label="เลือกบริษัทที่ต้องการดูข้อมูล"
+            aria-label={t('plt.sw_aria_label')}
           >
             {isGlobal ? <Globe className="size-3.5 shrink-0" /> : <Building2 className="size-3.5 shrink-0 text-primary" />}
             <span className="grid flex-1 leading-tight">
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">กำลังดูข้อมูลของ</span>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('plt.sw_viewing_data_for')}</span>
               <span className="truncate font-medium">{currentName}</span>
             </span>
             <ChevronsUpDown className="size-3.5 shrink-0 opacity-60" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="max-h-[70vh] w-64 overflow-y-auto">
-          <DropdownMenuLabel className="text-xs">มุมมองผู้ดูแลแพลตฟอร์ม (god)</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-xs">{t('plt.sw_menu_label')}</DropdownMenuLabel>
           {/* Search — stop keydown propagation so the menu's typeahead doesn't steal keystrokes. */}
           <div className="px-1 py-1">
             <input
@@ -241,26 +243,26 @@ function CompanySwitcher() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.stopPropagation()}
-              placeholder="ค้นหาบริษัท…"
+              placeholder={t('plt.sw_search_ph')}
               className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             />
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={(e) => { e.preventDefault(); pick(null); }} className="gap-2">
             <Globe className="size-4" />
-            <span className="flex-1">ทุกบริษัท (รวม)</span>
+            <span className="flex-1">{t('plt.sw_all_combined')}</span>
             {isGlobal && <Check className="size-4 text-primary" />}
           </DropdownMenuItem>
           {recentItems.length > 0 && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">เพิ่งดู</DropdownMenuLabel>
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('plt.sw_recent')}</DropdownMenuLabel>
               {recentItems.map(row)}
             </>
           )}
           <DropdownMenuSeparator />
-          {q && <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">ผลค้นหา ({list.length})</DropdownMenuLabel>}
-          {list.length === 0 ? <div className="px-3 py-2 text-xs text-muted-foreground">ไม่พบบริษัท</div> : list.map(row)}
+          {q && <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('plt.sw_search_results', { n: list.length })}</DropdownMenuLabel>}
+          {list.length === 0 ? <div className="px-3 py-2 text-xs text-muted-foreground">{t('plt.sw_no_company_found')}</div> : list.map(row)}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

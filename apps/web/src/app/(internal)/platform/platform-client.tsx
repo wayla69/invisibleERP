@@ -7,6 +7,7 @@ import { Activity, AlertTriangle, Bell, Building2, CheckCheck, CircleDollarSign,
 import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError, notifyInfo } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -61,26 +62,27 @@ interface SignupRequest {
 
 const INDUSTRIES = ['restaurant', 'retail', 'distribution', 'services', 'manufacturing'];
 
-function statusBadge(s: string | null) {
+function statusBadge(s: string | null, t: (key: string, vars?: Record<string, string | number>) => string) {
   const variant =
     s === 'Active' ? 'default'
     : s === 'Trialing' ? 'secondary'
     : s === 'Suspended' ? 'destructive'
     : s === 'PastDue' ? 'destructive'
     : 'outline';
-  const th =
-    s === 'Active' ? 'ใช้งาน'
-    : s === 'Trialing' ? 'ทดลอง'
-    : s === 'Suspended' ? 'ระงับ'
-    : s === 'PastDue' ? 'ค้างชำระ'
-    : s === 'Canceled' ? 'ยกเลิก'
+  const label =
+    s === 'Active' ? t('plt.status_active')
+    : s === 'Trialing' ? t('plt.status_trialing')
+    : s === 'Suspended' ? t('plt.status_suspended')
+    : s === 'PastDue' ? t('plt.status_past_due')
+    : s === 'Canceled' ? t('plt.status_canceled')
     : (s ?? '—');
-  return <Badge variant={variant as 'default' | 'secondary' | 'destructive' | 'outline'}>{th}</Badge>;
+  return <Badge variant={variant as 'default' | 'secondary' | 'destructive' | 'outline'}>{label}</Badge>;
 }
 
 // Slide-over with the full picture of one company (drill-down without fully switching into it) + the
 // platform subscription controls (change plan / extend trial). Lives in this already-'use client' island.
 function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose: () => void; onChanged: () => void }) {
+  const { t } = useLang();
   const detail = useQuery<any>({
     queryKey: ['tenant-detail', id],
     queryFn: () => api(`/api/admin/tenants/${id}`),
@@ -98,18 +100,18 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
 
   const saveTags = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean) }) }),
-    onSuccess: () => { notifySuccess('บันทึกแท็กแล้ว'); detail.refetch(); onChanged(); },
+    onSuccess: () => { notifySuccess(t('plt.drawer_tags_saved')); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const changePlan = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan_code: plan }) }),
-    onSuccess: () => { notifySuccess('เปลี่ยนแพ็กเกจแล้ว'); detail.refetch(); onChanged(); },
+    onSuccess: () => { notifySuccess(t('plt.drawer_plan_changed')); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
   const extendTrial = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: Number(days) || 14 }) }),
-    onSuccess: () => { notifySuccess('ต่อระยะทดลองแล้ว'); detail.refetch(); onChanged(); },
+    onSuccess: () => { notifySuccess(t('plt.drawer_trial_extended')); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -118,79 +120,82 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
     <Sheet open={id != null} onOpenChange={(o) => { if (!o) onClose(); }}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>{d?.name ?? 'รายละเอียดบริษัท'}</SheetTitle>
-          <SheetDescription>{d ? `${d.code}${d.legal_name ? ` · ${d.legal_name}` : ''}` : 'กำลังโหลด…'}</SheetDescription>
+          <SheetTitle>{d?.name ?? t('plt.drawer_title_fallback')}</SheetTitle>
+          <SheetDescription>{d ? `${d.code}${d.legal_name ? ` · ${d.legal_name}` : ''}` : t('plt.drawer_loading')}</SheetDescription>
         </SheetHeader>
         <StateView q={detail}>
           {d && (
             <div className="space-y-5 px-4 pb-6 text-sm">
               {/* Snapshot */}
               <div className="grid grid-cols-2 gap-3">
-                <div><div className="text-xs text-muted-foreground">สถานะ</div>{statusBadge(d.suspended ? 'Suspended' : d.subscription?.status ?? null)}</div>
-                <div><div className="text-xs text-muted-foreground">แพ็กเกจ</div>{d.subscription?.plan_code ?? '—'}</div>
-                <div><div className="text-xs text-muted-foreground">ผู้ใช้ · สาขา</div>{d.counts.users} · {d.counts.branches}</div>
-                <div><div className="text-xs text-muted-foreground">ทดลองถึง</div>{d.subscription?.trial_ends_at ? thaiDate(d.subscription.trial_ends_at) : '—'}</div>
-                <div><div className="text-xs text-muted-foreground">เลขภาษี</div>{d.tax_id ?? '—'}</div>
-                <div><div className="text-xs text-muted-foreground">เปิดเมื่อ</div>{d.created_at ? thaiDate(d.created_at) : '—'}</div>
+                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_status')}</div>{statusBadge(d.suspended ? 'Suspended' : d.subscription?.status ?? null, t)}</div>
+                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_plan')}</div>{d.subscription?.plan_code ?? '—'}</div>
+                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_users_branches')}</div>{d.counts.users} · {d.counts.branches}</div>
+                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_trial_until')}</div>{d.subscription?.trial_ends_at ? thaiDate(d.subscription.trial_ends_at) : '—'}</div>
+                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_tax_id')}</div>{d.tax_id ?? '—'}</div>
+                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_opened_at')}</div>{d.created_at ? thaiDate(d.created_at) : '—'}</div>
               </div>
               {d.suspended && (
                 <div className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs">
-                  ถูกระงับ{d.suspended_by ? ` โดย ${d.suspended_by}` : ''}{d.suspend_reason ? ` — ${d.suspend_reason}` : ''}
+                  {t('plt.drawer_suspended_note', {
+                    by: d.suspended_by ? t('plt.drawer_suspended_by', { who: d.suspended_by }) : '',
+                    reason: d.suspend_reason ? t('plt.drawer_suspended_reason', { reason: d.suspend_reason }) : '',
+                  })}
                 </div>
               )}
 
               {/* AI usage */}
               <div>
-                <div className="mb-1 text-xs font-medium text-muted-foreground">การใช้ AI (สะสม)</div>
-                <div className="text-sm">in {num(d.ai_usage.input_tokens)} · out {num(d.ai_usage.output_tokens)} · overage {num(d.ai_usage.overage_tokens)} โทเคน</div>
+                <div className="mb-1 text-xs font-medium text-muted-foreground">{t('plt.drawer_ai_usage')}</div>
+                <div className="text-sm">{t('plt.drawer_ai_usage_line', { input: num(d.ai_usage.input_tokens), output: num(d.ai_usage.output_tokens), overage: num(d.ai_usage.overage_tokens) })}</div>
               </div>
 
               {/* Subscription controls (platform-level, no impersonation) */}
               <div className="space-y-2 rounded-md border p-3">
-                <div className="text-xs font-medium">จัดการ subscription</div>
+                <div className="text-xs font-medium">{t('plt.drawer_subscription_mgmt')}</div>
                 <div className="flex items-end gap-2">
                   <div className="grid flex-1 gap-1">
-                    <Label className="text-xs">เปลี่ยนแพ็กเกจ</Label>
+                    <Label className="text-xs">{t('plt.drawer_change_plan')}</Label>
                     <select className="h-9 rounded-md border border-input bg-transparent px-2 text-sm" value={plan} onChange={(e) => setPlan(e.target.value)}>
-                      <option value="">— เลือก —</option>
+                      <option value="">{t('plt.drawer_choose')}</option>
                       {(plans.data?.plans ?? []).map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
                     </select>
                   </div>
-                  <Button size="sm" onClick={() => changePlan.mutate()} disabled={!plan || changePlan.isPending}>เปลี่ยน</Button>
+                  <Button size="sm" onClick={() => changePlan.mutate()} disabled={!plan || changePlan.isPending}>{t('plt.drawer_change_btn')}</Button>
                 </div>
                 <div className="flex items-end gap-2">
                   <div className="grid w-24 gap-1">
-                    <Label className="text-xs">ต่อ trial (วัน)</Label>
+                    <Label className="text-xs">{t('plt.drawer_extend_trial_days')}</Label>
                     <Input value={days} onChange={(e) => setDays(e.target.value)} />
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => extendTrial.mutate()} disabled={extendTrial.isPending}>ต่อระยะทดลอง</Button>
+                  <Button size="sm" variant="outline" onClick={() => extendTrial.mutate()} disabled={extendTrial.isPending}>{t('plt.drawer_extend_trial_btn')}</Button>
                 </div>
               </div>
 
               {/* Tags/segments */}
               <div className="space-y-1">
-                <Label className="text-xs">แท็ก/กลุ่ม (คั่นด้วย ,)</Label>
+                <Label className="text-xs">{t('plt.drawer_tags_label')}</Label>
                 <div className="flex items-end gap-2">
-                  <Input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} placeholder="enterprise, trial-risk" />
-                  <Button size="sm" variant="outline" onClick={() => saveTags.mutate()} disabled={saveTags.isPending}>บันทึก</Button>
+                  <Input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} placeholder={t('plt.drawer_tags_placeholder')} />
+                  <Button size="sm" variant="outline" onClick={() => saveTags.mutate()} disabled={saveTags.isPending}>{t('plt.drawer_save')}</Button>
                 </div>
               </div>
 
               {/* Quick actions — jump into the company (act-as) for the full workspace or its user admin. */}
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => { setActingTenant({ id: d.id, name: d.name, code: d.code }); window.location.assign('/dashboard'); }}>
-                  <Eye className="size-3.5" /> เข้าดูบริษัทนี้
+                  <Eye className="size-3.5" /> {t('plt.drawer_view_company')}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => { setActingTenant({ id: d.id, name: d.name, code: d.code }); window.location.assign('/admin/users'); }}>
-                  <Users className="size-3.5" /> จัดการผู้ใช้ (รีเซ็ตรหัส/เตะ session)
+                  <Users className="size-3.5" /> {t('plt.drawer_manage_users')}
                 </Button>
               </div>
 
               {/* Recent activity */}
               <div>
-                <div className="mb-1 text-xs font-medium text-muted-foreground">กิจกรรมล่าสุด</div>
+                <div className="mb-1 text-xs font-medium text-muted-foreground">{t('plt.drawer_recent_activity')}</div>
                 <div className="space-y-1">
-                  {(d.recent_activity ?? []).length === 0 && <div className="text-xs text-muted-foreground">ยังไม่มีกิจกรรม</div>}
+                  {(d.recent_activity ?? []).length === 0 && <div className="text-xs text-muted-foreground">{t('plt.drawer_no_activity')}</div>}
                   {(d.recent_activity ?? []).map((a: any, i: number) => (
                     <div key={i} className="flex items-center gap-2 text-xs">
                       <span className={a.status === 'fail' ? 'text-destructive' : 'text-muted-foreground'}>{a.status === 'fail' ? '✕' : '✓'}</span>
@@ -215,6 +220,7 @@ export default function PlatformConsole({
   initialCompanies?: Company[];
   initialRequests?: SignupRequest[];
 }) {
+  const { t } = useLang();
   const qc = useQueryClient();
   // Auto-refresh so the fleet view stays current without a manual reload — new signup requests, trials
   // slipping past due, etc. surface on their own (near-real-time; platform events aren't sub-second).
@@ -256,7 +262,7 @@ export default function PlatformConsole({
   });
   const markAllNotif = useMutation({
     mutationFn: () => api('/api/admin/notifications/mark-all-read', { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: () => { notifs.refetch(); notifySuccess('ทำเครื่องหมายอ่านทั้งหมดแล้ว'); },
+    onSuccess: () => { notifs.refetch(); notifySuccess(t('plt.notif_mark_all_done')); },
   });
   const comps = companies.data ?? [];
 
@@ -280,7 +286,7 @@ export default function PlatformConsole({
     const res = await Promise.allSettled(targets.map(fn));
     const okN = res.filter((r) => r.status === 'fulfilled').length;
     const failN = res.length - okN;
-    failN ? notifyError(`${label}: สำเร็จ ${okN}, ล้มเหลว ${failN}`) : notifySuccess(`${label} ${okN} บริษัทสำเร็จ`);
+    failN ? notifyError(t('plt.bulk_result', { label, ok: okN, fail: failN })) : notifySuccess(t('plt.bulk_success', { label, n: okN }));
     clearSel();
     refresh();
   };
@@ -296,7 +302,7 @@ export default function PlatformConsole({
   useEffect(() => {
     const n = requests.data?.length ?? 0;
     if (prevPending.current != null && n > prevPending.current) {
-      notifyInfo(`มีคำขอเปิดบริษัทใหม่ ${n - prevPending.current} รายการ — ดูที่แท็บ Onboarding`);
+      notifyInfo(t('plt.new_pending_toast', { n: n - prevPending.current }));
     }
     prevPending.current = n;
   }, [requests.data]);
@@ -314,11 +320,11 @@ export default function PlatformConsole({
   });
   const companyName = (tid: any) => {
     const c = comps.find((x) => Number(x.id) === Number(tid));
-    return c ? c.name : (tid == null ? '— (ระบบ)' : `#${tid}`);
+    return c ? c.name : (tid == null ? t('plt.act_system_actor') : `#${tid}`);
   };
   const verifyChain = useMutation({
     mutationFn: () => api<{ ok: boolean; broken_at?: any }>('/api/admin/audit/verify'),
-    onSuccess: (r) => r.ok ? notifySuccess('ห่วงโซ่ audit ครบถ้วน (ไม่พบการแก้ไข)') : notifyError(`พบความผิดปกติของห่วงโซ่ audit${r.broken_at ? ` ที่ #${r.broken_at}` : ''}`),
+    onSuccess: (r) => r.ok ? notifySuccess(t('plt.act_chain_ok')) : notifyError(t('plt.act_chain_broken', { at: r.broken_at ? t('plt.act_chain_broken_at', { id: r.broken_at }) : '' })),
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -331,7 +337,7 @@ export default function PlatformConsole({
   const suspend = useMutation({
     mutationFn: (c: Company) =>
       api(`/api/admin/tenants/${c.id}/${c.suspended ? 'reactivate' : 'suspend'}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (_d, c) => { notifySuccess(c.suspended ? `คืนสถานะ ${c.name} แล้ว` : `ระงับ ${c.name} แล้ว`); refresh(); },
+    onSuccess: (_d, c) => { notifySuccess(c.suspended ? t('plt.company_reactivated', { name: c.name }) : t('plt.company_suspended', { name: c.name })); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -340,7 +346,7 @@ export default function PlatformConsole({
   const provision = useMutation({
     mutationFn: () => api('/api/admin/tenants', { method: 'POST', body: JSON.stringify(prov) }),
     onSuccess: () => {
-      notifySuccess(`เปิดบริษัท ${prov.company_name} แล้ว`);
+      notifySuccess(t('plt.prov_created', { name: prov.company_name }));
       setProv({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '', industry: 'restaurant' });
       setProvOpen(false);
       refresh();
@@ -350,16 +356,16 @@ export default function PlatformConsole({
 
   const approve = useMutation({
     mutationFn: (r: SignupRequest) => api(`/api/admin/signup-requests/${r.id}/approve`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (_d, r) => { notifySuccess(`อนุมัติ ${r.company_name} แล้ว`); refresh(); },
+    onSuccess: (_d, r) => { notifySuccess(t('plt.onb_approved', { name: r.company_name })); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
     mutationFn: (r: SignupRequest) => {
-      const reason = prompt(`เหตุผลที่ปฏิเสธ ${r.company_name} (ไม่บังคับ)`);
+      const reason = prompt(t('plt.onb_reject_prompt', { name: r.company_name }));
       if (reason === null) return Promise.resolve(null);
       return api(`/api/admin/signup-requests/${r.id}/reject`, { method: 'POST', body: JSON.stringify({ reason: reason || undefined }) });
     },
-    onSuccess: (d, r) => { if (d) { notifySuccess(`ปฏิเสธ ${r.company_name} แล้ว`); refresh(); } },
+    onSuccess: (d, r) => { if (d) { notifySuccess(t('plt.onb_rejected', { name: r.company_name })); refresh(); } },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -371,15 +377,15 @@ export default function PlatformConsole({
       method: 'POST',
       body: JSON.stringify({ company_name: inv.company_name || undefined, email: inv.email || undefined, ttl_hours: Number(inv.ttl_hours) || undefined }),
     }),
-    onSuccess: (d) => { setLastInvite(d); setInv({ company_name: '', email: '', ttl_hours: '72' }); notifySuccess('ออกลิงก์เชิญแล้ว — คัดลอกโทเคนด้านล่าง (แสดงครั้งเดียว)'); refresh(); },
+    onSuccess: (d) => { setLastInvite(d); setInv({ company_name: '', email: '', ttl_hours: '72' }); notifySuccess(t('plt.inv_issued')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
   const companyCols: Column<Company>[] = [
     { key: 'sel', label: '', render: (c) => (
-      <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSel(c.id)} onClick={(e) => e.stopPropagation()} aria-label={`เลือก ${c.name}`} />
+      <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSel(c.id)} onClick={(e) => e.stopPropagation()} aria-label={t('plt.select_company_aria', { name: c.name })} />
     ) },
-    { key: 'name', label: 'บริษัท', sortable: true, render: (c) => (
+    { key: 'name', label: t('plt.col_company'), sortable: true, render: (c) => (
       <div className="grid gap-0.5">
         <button type="button" className="grid text-left leading-tight hover:underline" onClick={() => setDetailId(c.id)}>
           <span className="font-medium">{c.name}</span>
@@ -392,33 +398,33 @@ export default function PlatformConsole({
         )}
       </div>
     ) },
-    { key: 'status', label: 'สถานะ', render: (c) => statusBadge(c.status) },
-    { key: 'plan_code', label: 'แพ็กเกจ', render: (c) => c.plan_code ?? '—' },
-    { key: 'users', label: 'ผู้ใช้', align: 'right', sortable: true, render: (c) => c.users },
-    { key: 'trial_ends_at', label: 'ทดลองถึง', render: (c) => (c.trial_ends_at ? thaiDate(c.trial_ends_at) : '—') },
-    { key: 'created_at', label: 'เปิดเมื่อ', sortable: true, render: (c) => (c.created_at ? thaiDate(c.created_at) : '—') },
+    { key: 'status', label: t('plt.col_status'), render: (c) => statusBadge(c.status, t) },
+    { key: 'plan_code', label: t('plt.col_plan'), render: (c) => c.plan_code ?? '—' },
+    { key: 'users', label: t('plt.col_users'), align: 'right', sortable: true, render: (c) => c.users },
+    { key: 'trial_ends_at', label: t('plt.col_trial_until'), render: (c) => (c.trial_ends_at ? thaiDate(c.trial_ends_at) : '—') },
+    { key: 'created_at', label: t('plt.col_opened_at'), sortable: true, render: (c) => (c.created_at ? thaiDate(c.created_at) : '—') },
     { key: 'actions', label: '', align: 'right', render: (c) => (
       <div className="flex justify-end gap-1">
-        <Button size="sm" variant="outline" onClick={() => view(c)}><Eye className="size-3.5" /> เข้าดู</Button>
+        <Button size="sm" variant="outline" onClick={() => view(c)}><Eye className="size-3.5" /> {t('plt.action_view')}</Button>
         <Button size="sm" variant={c.suspended ? 'outline' : 'ghost'} onClick={() => suspend.mutate(c)} disabled={suspend.isPending}>
-          {c.suspended ? <><Play className="size-3.5" /> คืนสถานะ</> : <><Pause className="size-3.5" /> ระงับ</>}
+          {c.suspended ? <><Play className="size-3.5" /> {t('plt.action_reactivate')}</> : <><Pause className="size-3.5" /> {t('plt.action_suspend')}</>}
         </Button>
       </div>
     ) },
   ];
 
   const requestCols: Column<SignupRequest>[] = [
-    { key: 'company_name', label: 'บริษัท', render: (r) => (
+    { key: 'company_name', label: t('plt.col_company'), render: (r) => (
       <div className="grid leading-tight">
         <span className="font-medium">{r.company_name}</span>
         <span className="text-xs text-muted-foreground">{r.tenant_code} · {r.admin_username}{r.email ? ` · ${r.email}` : ''}</span>
       </div>
     ) },
-    { key: 'requested_at', label: 'ขอเมื่อ', render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
+    { key: 'requested_at', label: t('plt.onb_requested_at'), render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
     { key: 'actions', label: '', align: 'right', render: (r) => (
       <div className="flex justify-end gap-1">
-        <Button size="sm" onClick={() => approve.mutate(r)} disabled={approve.isPending}>อนุมัติ</Button>
-        <Button size="sm" variant="ghost" onClick={() => reject.mutate(r)} disabled={reject.isPending}>ปฏิเสธ</Button>
+        <Button size="sm" onClick={() => approve.mutate(r)} disabled={approve.isPending}>{t('plt.onb_approve')}</Button>
+        <Button size="sm" variant="ghost" onClick={() => reject.mutate(r)} disabled={reject.isPending}>{t('plt.onb_reject')}</Button>
       </div>
     ) },
   ];
@@ -426,32 +432,32 @@ export default function PlatformConsole({
   const provisionDialog = (
     <Dialog open={provOpen} onOpenChange={setProvOpen}>
       <DialogTrigger asChild>
-        <Button><Plus className="size-4" /> เปิดบริษัทใหม่</Button>
+        <Button><Plus className="size-4" /> {t('plt.prov_new_company_btn')}</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>เปิดบริษัทใหม่</DialogTitle>
-          <DialogDescription>สร้าง tenant + ผู้ดูแล (Admin) + ผังบัญชีตามอุตสาหกรรม ให้บริษัทใหม่ทันที</DialogDescription>
+          <DialogTitle>{t('plt.prov_new_company_btn')}</DialogTitle>
+          <DialogDescription>{t('plt.prov_dialog_desc')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <div className="grid gap-1"><Label>ชื่อกิจการ</Label><Input value={prov.company_name} onChange={(e) => setProv({ ...prov, company_name: e.target.value })} placeholder="ร้านโอชิเนอิ" /></div>
+          <div className="grid gap-1"><Label>{t('plt.prov_company_name')}</Label><Input value={prov.company_name} onChange={(e) => setProv({ ...prov, company_name: e.target.value })} placeholder={t('plt.prov_company_name_ph')} /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1"><Label>รหัส tenant</Label><Input value={prov.tenant_code} onChange={(e) => setProv({ ...prov, tenant_code: e.target.value })} placeholder="OSHINEI" /></div>
-            <div className="grid gap-1"><Label>อุตสาหกรรม</Label>
+            <div className="grid gap-1"><Label>{t('plt.prov_tenant_code')}</Label><Input value={prov.tenant_code} onChange={(e) => setProv({ ...prov, tenant_code: e.target.value })} placeholder="OSHINEI" /></div>
+            <div className="grid gap-1"><Label>{t('plt.prov_industry')}</Label>
               <select className="h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={prov.industry} onChange={(e) => setProv({ ...prov, industry: e.target.value })}>
                 {INDUSTRIES.map((i) => <option key={i} value={i}>{i}</option>)}
               </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1"><Label>ชื่อผู้ใช้ Admin</Label><Input value={prov.admin_username} onChange={(e) => setProv({ ...prov, admin_username: e.target.value })} /></div>
-            <div className="grid gap-1"><Label>รหัสผ่าน Admin</Label><Input type="password" value={prov.admin_password} onChange={(e) => setProv({ ...prov, admin_password: e.target.value })} /></div>
+            <div className="grid gap-1"><Label>{t('plt.prov_admin_username')}</Label><Input value={prov.admin_username} onChange={(e) => setProv({ ...prov, admin_username: e.target.value })} /></div>
+            <div className="grid gap-1"><Label>{t('plt.prov_admin_password')}</Label><Input type="password" value={prov.admin_password} onChange={(e) => setProv({ ...prov, admin_password: e.target.value })} /></div>
           </div>
-          <div className="grid gap-1"><Label>อีเมล</Label><Input type="email" value={prov.email} onChange={(e) => setProv({ ...prov, email: e.target.value })} /></div>
+          <div className="grid gap-1"><Label>{t('plt.prov_email')}</Label><Input type="email" value={prov.email} onChange={(e) => setProv({ ...prov, email: e.target.value })} /></div>
         </div>
         <DialogFooter>
           <Button onClick={() => provision.mutate()} disabled={provision.isPending || !prov.company_name || !prov.tenant_code || !prov.admin_username || !prov.admin_password}>
-            {provision.isPending ? 'กำลังสร้าง…' : 'สร้างบริษัท'}
+            {provision.isPending ? t('plt.prov_creating') : t('plt.prov_create_btn')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -461,29 +467,29 @@ export default function PlatformConsole({
   const inviteDialog = (
     <Dialog open={invOpen} onOpenChange={(o) => { setInvOpen(o); if (!o) setLastInvite(null); }}>
       <DialogTrigger asChild>
-        <Button variant="outline"><Ticket className="size-4" /> ออกลิงก์เชิญ</Button>
+        <Button variant="outline"><Ticket className="size-4" /> {t('plt.inv_issue_btn')}</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>ออกลิงก์เชิญเปิดบริษัท</DialogTitle>
-          <DialogDescription>ลิงก์ใช้ครั้งเดียว มีวันหมดอายุ — ผู้รับสมัครเองได้แม้ปิด public signup</DialogDescription>
+          <DialogTitle>{t('plt.inv_dialog_title')}</DialogTitle>
+          <DialogDescription>{t('plt.inv_dialog_desc')}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <div className="grid gap-1"><Label>ชื่อบริษัท (ไม่บังคับ)</Label><Input value={inv.company_name} onChange={(e) => setInv({ ...inv, company_name: e.target.value })} /></div>
+          <div className="grid gap-1"><Label>{t('plt.inv_company_name_optional')}</Label><Input value={inv.company_name} onChange={(e) => setInv({ ...inv, company_name: e.target.value })} /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1"><Label>อีเมล (ไม่บังคับ)</Label><Input type="email" value={inv.email} onChange={(e) => setInv({ ...inv, email: e.target.value })} /></div>
-            <div className="grid gap-1"><Label>อายุ (ชม.)</Label><Input value={inv.ttl_hours} onChange={(e) => setInv({ ...inv, ttl_hours: e.target.value })} /></div>
+            <div className="grid gap-1"><Label>{t('plt.inv_email_optional')}</Label><Input type="email" value={inv.email} onChange={(e) => setInv({ ...inv, email: e.target.value })} /></div>
+            <div className="grid gap-1"><Label>{t('plt.inv_ttl_hours')}</Label><Input value={inv.ttl_hours} onChange={(e) => setInv({ ...inv, ttl_hours: e.target.value })} /></div>
           </div>
           {lastInvite && (
             <div className="rounded-md border border-primary/40 bg-primary/5 p-2 text-xs">
-              <div className="font-medium">โทเคนเชิญ (คัดลอกเลย — จะไม่แสดงอีก):</div>
+              <div className="font-medium">{t('plt.inv_token_label')}</div>
               <code className="mt-1 block break-all rounded bg-background p-1.5">{lastInvite.invite_token}</code>
-              {lastInvite.expires_at && <div className="mt-1 text-muted-foreground">หมดอายุ {thaiDate(lastInvite.expires_at)}</div>}
+              {lastInvite.expires_at && <div className="mt-1 text-muted-foreground">{t('plt.inv_expires', { date: thaiDate(lastInvite.expires_at) })}</div>}
             </div>
           )}
         </div>
         <DialogFooter>
-          <Button onClick={() => issueInvite.mutate()} disabled={issueInvite.isPending}>{issueInvite.isPending ? 'กำลังออก…' : 'ออกลิงก์'}</Button>
+          <Button onClick={() => issueInvite.mutate()} disabled={issueInvite.isPending}>{issueInvite.isPending ? t('plt.inv_issuing') : t('plt.inv_issue_link_btn')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -494,8 +500,8 @@ export default function PlatformConsole({
     <StateView q={companies}>
       {allTags.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-muted-foreground">แท็ก:</span>
-          <button type="button" onClick={() => setTagFilter('')} className={cn('rounded-full border px-2 py-0.5', !tagFilter && 'border-primary bg-primary/10 text-primary')}>ทั้งหมด</button>
+          <span className="text-muted-foreground">{t('plt.tags_label')}</span>
+          <button type="button" onClick={() => setTagFilter('')} className={cn('rounded-full border px-2 py-0.5', !tagFilter && 'border-primary bg-primary/10 text-primary')}>{t('plt.tags_all')}</button>
           {allTags.map((tg) => (
             <button key={tg} type="button" onClick={() => setTagFilter(tg)} className={cn('rounded-full border px-2 py-0.5', tagFilter === tg && 'border-primary bg-primary/10 text-primary')}>{tg}</button>
           ))}
@@ -503,25 +509,25 @@ export default function PlatformConsole({
       )}
       {selected.size > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-xs">
-          <span className="font-medium">เลือก {selected.size} บริษัท</span>
+          <span className="font-medium">{t('plt.bulk_selected', { n: selected.size })}</span>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/suspend`, { method: 'POST', body: JSON.stringify({}) }), 'ระงับ')}><Pause className="size-3.5" /> ระงับ</Button>
-            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/reactivate`, { method: 'POST', body: JSON.stringify({}) }), 'คืนสถานะ')}><Play className="size-3.5" /> คืนสถานะ</Button>
-            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: 14 }) }), 'ต่อ trial')}><Clock className="size-3.5" /> ต่อ trial 14 วัน</Button>
+            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/suspend`, { method: 'POST', body: JSON.stringify({}) }), t('plt.bulk_label_suspend'))}><Pause className="size-3.5" /> {t('plt.bulk_suspend')}</Button>
+            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/reactivate`, { method: 'POST', body: JSON.stringify({}) }), t('plt.bulk_label_reactivate'))}><Play className="size-3.5" /> {t('plt.bulk_reactivate')}</Button>
+            <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: 14 }) }), t('plt.bulk_label_extend_trial'))}><Clock className="size-3.5" /> {t('plt.bulk_extend_trial14')}</Button>
             <select className="h-8 rounded-md border border-input bg-transparent px-2" value={bulkPlan} onChange={(e) => setBulkPlan(e.target.value)}>
-              <option value="">เปลี่ยนแพ็กเกจ…</option>
+              <option value="">{t('plt.bulk_change_plan_ph')}</option>
               {(bulkPlans.data?.plans ?? []).map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
             </select>
-            <Button size="sm" variant="ghost" disabled={!bulkPlan} onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/plan`, { method: 'POST', body: JSON.stringify({ plan_code: bulkPlan }) }), 'เปลี่ยนแพ็กเกจ')}>ใช้</Button>
+            <Button size="sm" variant="ghost" disabled={!bulkPlan} onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/plan`, { method: 'POST', body: JSON.stringify({ plan_code: bulkPlan }) }), t('plt.bulk_label_change_plan'))}>{t('plt.bulk_apply')}</Button>
           </div>
-          <button type="button" className="ml-auto text-muted-foreground hover:underline" onClick={clearSel}>ล้าง</button>
+          <button type="button" className="ml-auto text-muted-foreground hover:underline" onClick={clearSel}>{t('plt.bulk_clear')}</button>
         </div>
       )}
       <DataTable
         rows={companyRows}
         columns={companyCols}
         rowKey={(c) => c.id}
-        emptyState={{ icon: Building2, title: tagFilter ? 'ไม่มีบริษัทในแท็กนี้' : 'ยังไม่มีบริษัท', description: tagFilter ? 'ลองเลือกแท็กอื่น' : 'เปิดบริษัทแรกด้วยปุ่ม “เปิดบริษัทใหม่”' }}
+        emptyState={{ icon: Building2, title: tagFilter ? t('plt.empty_no_tag_title') : t('plt.empty_no_company_title'), description: tagFilter ? t('plt.empty_no_tag_desc') : t('plt.empty_no_company_desc') }}
       />
     </StateView>
   );
@@ -529,29 +535,29 @@ export default function PlatformConsole({
   const onboardingTab = (
     <div className="space-y-6">
       <div>
-        <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><UserPlus className="size-4 text-primary" /> คำขอเปิดบริษัท (รออนุมัติ)</h3>
+        <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><UserPlus className="size-4 text-primary" /> {t('plt.onb_requests_title')}</h3>
         <StateView q={requests}>
           <DataTable
             rows={requests.data ?? []}
             columns={requestCols}
             rowKey={(r) => r.id}
-            emptyState={{ icon: UserPlus, title: 'ไม่มีคำขอค้าง', description: 'คำขอผ่านฟอร์ม “ขอเปิดบริษัท” จะมาโผล่ที่นี่' }}
+            emptyState={{ icon: UserPlus, title: t('plt.onb_empty_title'), description: t('plt.onb_empty_desc') }}
           />
         </StateView>
       </div>
       <div>
-        <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Ticket className="size-4 text-primary" /> ลิงก์เชิญ</h3>
+        <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Ticket className="size-4 text-primary" /> {t('plt.onb_invites_title')}</h3>
         <StateView q={invites}>
           <DataTable
             rows={invites.data ?? []}
             columns={[
-              { key: 'company_name', label: 'บริษัท', render: (i: any) => i.company_name ?? '—' },
-              { key: 'email', label: 'อีเมล', render: (i: any) => i.email ?? '—' },
-              { key: 'status', label: 'สถานะ', render: (i: any) => (i.status === 'used' ? 'ใช้แล้ว' : i.status === 'expired' ? 'หมดอายุ' : 'รอใช้') },
-              { key: 'expires_at', label: 'หมดอายุ', render: (i: any) => (i.expires_at ? thaiDate(i.expires_at) : '—') },
+              { key: 'company_name', label: t('plt.onb_invite_col_company'), render: (i: any) => i.company_name ?? '—' },
+              { key: 'email', label: t('plt.onb_invite_col_email'), render: (i: any) => i.email ?? '—' },
+              { key: 'status', label: t('plt.onb_invite_col_status'), render: (i: any) => (i.status === 'used' ? t('plt.onb_invite_status_used') : i.status === 'expired' ? t('plt.onb_invite_status_expired') : t('plt.onb_invite_status_pending')) },
+              { key: 'expires_at', label: t('plt.onb_invite_col_expires'), render: (i: any) => (i.expires_at ? thaiDate(i.expires_at) : '—') },
             ]}
             rowKey={(i: any, idx) => i.id ?? idx}
-            emptyText="ยังไม่มีลิงก์เชิญ"
+            emptyText={t('plt.onb_invite_empty')}
           />
         </StateView>
       </div>
@@ -572,51 +578,51 @@ export default function PlatformConsole({
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
         <div className="grid gap-1">
-          <Label className="text-xs">บริษัท</Label>
+          <Label className="text-xs">{t('plt.act_company')}</Label>
           <select className={selectCls} value={auditCompany} onChange={(e) => setAuditCompany(e.target.value)}>
-            <option value="">ทุกบริษัท</option>
+            <option value="">{t('plt.act_all_companies')}</option>
             {comps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div className="grid gap-1">
-          <Label className="text-xs">ผล</Label>
+          <Label className="text-xs">{t('plt.act_result')}</Label>
           <select className={selectCls} value={auditStatus} onChange={(e) => setAuditStatus(e.target.value)}>
-            <option value="">ทั้งหมด</option>
-            <option value="success">สำเร็จ</option>
-            <option value="fail">ล้มเหลว</option>
+            <option value="">{t('plt.act_all')}</option>
+            <option value="success">{t('plt.act_success')}</option>
+            <option value="fail">{t('plt.act_fail')}</option>
           </select>
         </div>
         <div className="grid flex-1 gap-1">
-          <Label className="text-xs">ค้นหา (ผู้ทำ/การกระทำ)</Label>
-          <Input value={auditText} onChange={(e) => setAuditText(e.target.value)} placeholder="เช่น POST /api/ledger…" />
+          <Label className="text-xs">{t('plt.act_search_label')}</Label>
+          <Input value={auditText} onChange={(e) => setAuditText(e.target.value)} placeholder={t('plt.act_search_ph')} />
         </div>
         <label className="flex items-center gap-1.5 text-xs">
           <input type="checkbox" checked={auditGodOnly} onChange={(e) => setAuditGodOnly(e.target.checked)} />
-          เฉพาะการข้ามบริษัท (god)
+          {t('plt.act_god_only')}
         </label>
         <Button size="sm" variant="outline" onClick={() => verifyChain.mutate()} disabled={verifyChain.isPending}>
-          <ShieldCheck className="size-3.5" /> ตรวจ hash-chain
+          <ShieldCheck className="size-3.5" /> {t('plt.act_verify_chain')}
         </Button>
         <Button size="sm" variant="outline" onClick={() => apiDownload(`/api/admin/audit/export?${auditQs.replace('limit=100', '')}`, 'audit-log.csv')}>
-          <Download className="size-3.5" /> ส่งออก CSV
+          <Download className="size-3.5" /> {t('plt.act_export_csv')}
         </Button>
       </div>
       <StateView q={audit}>
         <DataTable
           rows={auditRows}
           columns={[
-            { key: 'ts', label: 'เวลา', render: (r: any) => (r.ts ? thaiDate(r.ts) : '—') },
-            { key: 'tenant_id', label: 'บริษัท', render: (r: any) => companyName(r.tenant_id) },
-            { key: 'actor', label: 'ผู้ทำ', render: (r: any) => r.actor ?? '—' },
-            { key: 'action', label: 'การกระทำ', render: (r: any) => <span className="font-mono text-xs">{r.action ?? ''}</span> },
-            { key: 'status', label: 'ผล', render: (r: any) => <Badge variant={r.status === 'fail' ? 'destructive' : 'secondary'}>{r.status === 'fail' ? 'ล้มเหลว' : 'สำเร็จ'}</Badge> },
+            { key: 'ts', label: t('plt.act_col_time'), render: (r: any) => (r.ts ? thaiDate(r.ts) : '—') },
+            { key: 'tenant_id', label: t('plt.act_col_company'), render: (r: any) => companyName(r.tenant_id) },
+            { key: 'actor', label: t('plt.act_col_actor'), render: (r: any) => r.actor ?? '—' },
+            { key: 'action', label: t('plt.act_col_action'), render: (r: any) => <span className="font-mono text-xs">{r.action ?? ''}</span> },
+            { key: 'status', label: t('plt.act_col_result'), render: (r: any) => <Badge variant={r.status === 'fail' ? 'destructive' : 'secondary'}>{r.status === 'fail' ? t('plt.act_fail') : t('plt.act_success')}</Badge> },
           ]}
           rowKey={(r: any) => r.id}
-          emptyText="ไม่มีกิจกรรมตามเงื่อนไข"
+          emptyText={t('plt.act_empty')}
           pageSize={50}
         />
       </StateView>
-      <p className="text-xs text-muted-foreground">แสดงล่าสุด {num(audit.data?.rows?.length ?? 0)} รายการ (จากทั้งหมด {num(audit.data?.total ?? 0)}) — กรองบริษัท/ผลเพื่อเจาะจง แล้วส่งออก CSV ได้ทั้งชุด</p>
+      <p className="text-xs text-muted-foreground">{t('plt.act_showing', { shown: num(audit.data?.rows?.length ?? 0), total: num(audit.data?.total ?? 0) })}</p>
     </div>
   );
 
@@ -629,14 +635,14 @@ export default function PlatformConsole({
   const notificationsTab = (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{num(notifs.data?.unread_count ?? 0)} ยังไม่อ่าน · ทั้งหมด {num(notifs.data?.total ?? 0)}</span>
+        <span className="text-xs text-muted-foreground">{t('plt.notif_unread_of_total', { unread: num(notifs.data?.unread_count ?? 0), total: num(notifs.data?.total ?? 0) })}</span>
         <Button size="sm" variant="outline" disabled={!(notifs.data?.unread_count ?? 0) || markAllNotif.isPending} onClick={() => markAllNotif.mutate()}>
-          <CheckCheck className="size-3.5" /> อ่านทั้งหมด
+          <CheckCheck className="size-3.5" /> {t('plt.notif_mark_all_read')}
         </Button>
       </div>
       <StateView q={notifs}>
         <div className="divide-y rounded-md border">
-          {(notifs.data?.items ?? []).length === 0 && <div className="p-4 text-center text-xs text-muted-foreground">ยังไม่มีการแจ้งเตือน</div>}
+          {(notifs.data?.items ?? []).length === 0 && <div className="p-4 text-center text-xs text-muted-foreground">{t('plt.notif_empty')}</div>}
           {(notifs.data?.items ?? []).map((nt: any) => (
             <div key={nt.id} className={cn('flex items-start gap-2 p-3 text-sm', !nt.is_read && 'bg-primary/5')}>
               <div className="mt-0.5 shrink-0">{notifIcon(nt.type)}</div>
@@ -646,10 +652,10 @@ export default function PlatformConsole({
                 <span className="text-[10px] text-muted-foreground">{nt.created_at ? thaiDate(nt.created_at) : ''}</span>
               </div>
               {nt.tenant_id != null && (
-                <button type="button" className="shrink-0 text-xs text-primary hover:underline" onClick={() => setDetailId(nt.tenant_id)}>ดูบริษัท</button>
+                <button type="button" className="shrink-0 text-xs text-primary hover:underline" onClick={() => setDetailId(nt.tenant_id)}>{t('plt.notif_view_company')}</button>
               )}
               {!nt.is_read && (
-                <button type="button" className="shrink-0 text-xs text-muted-foreground hover:underline" onClick={() => markNotif.mutate(nt.id)}>อ่านแล้ว</button>
+                <button type="button" className="shrink-0 text-xs text-muted-foreground hover:underline" onClick={() => markNotif.mutate(nt.id)}>{t('plt.notif_mark_read')}</button>
               )}
             </div>
           ))}
@@ -676,67 +682,67 @@ export default function PlatformConsole({
         <div className="space-y-6">
           {/* Revenue + engagement KPIs (cross-company; god RLS bypass spans the whole book). */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="MRR (รายเดือน)" value={baht(metrics.data.revenue.mrr)} icon={CircleDollarSign} tone="primary" hint={`ARR ${baht(metrics.data.revenue.arr)} · ARPU ${baht(metrics.data.revenue.arpu)}`} />
-            <StatCard label="บริษัทที่จ่ายเงิน" value={num(metrics.data.subscriptions.active)} icon={Building2} tone="success" hint={`ทดลอง ${num(metrics.data.subscriptions.trialing)} · ค้างชำระ ${num(metrics.data.subscriptions.past_due)}`} />
-            <StatCard label="ผู้ใช้ active (30 วัน)" value={num(metrics.data.engagement.mau)} icon={Users} tone="info" hint={`วันนี้ ${num(metrics.data.engagement.dau)} · stickiness ${metrics.data.engagement.stickiness_pct}%`} />
-            <StatCard label="Churn (30 วัน)" value={`${metrics.data.churn.churn_rate_30d_pct}%`} icon={TrendingUp} tone={metrics.data.churn.churn_rate_30d_pct > 5 ? 'danger' : 'default'} hint={`ยกเลิก ${num(metrics.data.churn.canceled_30d)} ราย`} />
+            <StatCard label={t('plt.ov_mrr')} value={baht(metrics.data.revenue.mrr)} icon={CircleDollarSign} tone="primary" hint={t('plt.ov_mrr_hint', { arr: baht(metrics.data.revenue.arr), arpu: baht(metrics.data.revenue.arpu) })} />
+            <StatCard label={t('plt.ov_paying_companies')} value={num(metrics.data.subscriptions.active)} icon={Building2} tone="success" hint={t('plt.ov_paying_hint', { trialing: num(metrics.data.subscriptions.trialing), past_due: num(metrics.data.subscriptions.past_due) })} />
+            <StatCard label={t('plt.ov_mau')} value={num(metrics.data.engagement.mau)} icon={Users} tone="info" hint={t('plt.ov_mau_hint', { dau: num(metrics.data.engagement.dau), stickiness: metrics.data.engagement.stickiness_pct })} />
+            <StatCard label={t('plt.ov_churn')} value={`${metrics.data.churn.churn_rate_30d_pct}%`} icon={TrendingUp} tone={metrics.data.churn.churn_rate_30d_pct > 5 ? 'danger' : 'default'} hint={t('plt.ov_churn_hint', { n: num(metrics.data.churn.canceled_30d) })} />
           </div>
 
           {/* Needs-attention — what a god should act on. Open the Onboarding tab for the request queue. */}
           <div>
-            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><AlertTriangle className="size-4 text-warning-foreground dark:text-warning" /> ต้องดูแล</h3>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><AlertTriangle className="size-4 text-warning-foreground dark:text-warning" /> {t('plt.ov_needs_attention')}</h3>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StatCard label="คำขอรออนุมัติ" value={num(pending)} icon={UserPlus} tone={pending ? 'warning' : 'default'} hint="ดูที่แท็บ Onboarding" />
-              <StatCard label="ทดลองใกล้หมด (7 วัน)" value={num(trialSoonN)} icon={Clock} tone={trialSoonN ? 'warning' : 'default'} />
-              <StatCard label="ค้างชำระ" value={num(pastDueN)} icon={CircleDollarSign} tone={pastDueN ? 'danger' : 'default'} />
-              <StatCard label="ถูกระงับ" value={num(suspendedN)} icon={PauseCircle} tone={suspendedN ? 'danger' : 'default'} />
-              <StatCard label="ตั้งค่ายังไม่เสร็จ" value={num(setupIncompleteN)} icon={AlertTriangle} tone={setupIncompleteN ? 'warning' : 'default'} hint="ข้อมูลภาษี/ที่อยู่ไม่ครบ" />
+              <StatCard label={t('plt.ov_pending_requests')} value={num(pending)} icon={UserPlus} tone={pending ? 'warning' : 'default'} hint={t('plt.ov_pending_requests_hint')} />
+              <StatCard label={t('plt.ov_trial_ending')} value={num(trialSoonN)} icon={Clock} tone={trialSoonN ? 'warning' : 'default'} />
+              <StatCard label={t('plt.ov_past_due')} value={num(pastDueN)} icon={CircleDollarSign} tone={pastDueN ? 'danger' : 'default'} />
+              <StatCard label={t('plt.ov_suspended')} value={num(suspendedN)} icon={PauseCircle} tone={suspendedN ? 'danger' : 'default'} />
+              <StatCard label={t('plt.ov_setup_incomplete')} value={num(setupIncompleteN)} icon={AlertTriangle} tone={setupIncompleteN ? 'warning' : 'default'} hint={t('plt.ov_setup_incomplete_hint')} />
             </div>
           </div>
 
           {/* Platform health (item 10) — DB pool, cache, queue backlog + dead-letters. */}
           <div>
-            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Server className="size-4 text-primary" /> สุขภาพระบบ</h3>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Server className="size-4 text-primary" /> {t('plt.ov_system_health')}</h3>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StatCard label="DB pool" value={`${ops.data ? '' : '—'}${jobs.data?.pool?.saturation_pct ?? 0}%`} icon={Database} tone={(jobs.data?.pool?.saturation_pct ?? 0) > 80 ? 'danger' : 'default'} hint={`in-flight ${num(jobs.data?.pool?.in_flight_tx ?? 0)}/${num(jobs.data?.pool?.max ?? 0)}`} />
-              <StatCard label="งานในคิว" value={num(jobs.data?.jobs?.queued ?? 0)} icon={Activity} hint={`ทำงาน ${num(jobs.data?.jobs?.running ?? 0)}`} />
-              <StatCard label="งานล้มเหลว (dead-letter)" value={num(jobs.data?.jobs?.failed ?? 0)} icon={AlertTriangle} tone={(jobs.data?.jobs?.failed ?? 0) > 0 ? 'danger' : 'default'} hint={`ค้าง ${num(jobs.data?.jobs?.stuck ?? 0)}`} />
-              <StatCard label="Cache" value={ops.data?.cache?.provider ?? '—'} icon={Database} hint={ops.data ? `hits ${num(ops.data.cache?.hits ?? 0)} · queue ${ops.data.scale?.queue_provider ?? '—'}` : ''} />
+              <StatCard label={t('plt.ov_db_pool')} value={`${ops.data ? '' : '—'}${jobs.data?.pool?.saturation_pct ?? 0}%`} icon={Database} tone={(jobs.data?.pool?.saturation_pct ?? 0) > 80 ? 'danger' : 'default'} hint={t('plt.ov_db_pool_hint', { inflight: num(jobs.data?.pool?.in_flight_tx ?? 0), max: num(jobs.data?.pool?.max ?? 0) })} />
+              <StatCard label={t('plt.ov_jobs_queued')} value={num(jobs.data?.jobs?.queued ?? 0)} icon={Activity} hint={t('plt.ov_jobs_queued_hint', { running: num(jobs.data?.jobs?.running ?? 0) })} />
+              <StatCard label={t('plt.ov_jobs_failed')} value={num(jobs.data?.jobs?.failed ?? 0)} icon={AlertTriangle} tone={(jobs.data?.jobs?.failed ?? 0) > 0 ? 'danger' : 'default'} hint={t('plt.ov_jobs_failed_hint', { stuck: num(jobs.data?.jobs?.stuck ?? 0) })} />
+              <StatCard label={t('plt.ov_cache')} value={ops.data?.cache?.provider ?? '—'} icon={Database} hint={ops.data ? t('plt.ov_cache_hint', { hits: num(ops.data.cache?.hits ?? 0), queue: ops.data.scale?.queue_provider ?? '—' }) : ''} />
             </div>
           </div>
 
           {/* AI spend oversight (item 5) — top token spenders across companies. */}
           <div>
-            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4 text-primary" /> การใช้ AI ข้ามบริษัท</h3>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4 text-primary" /> {t('plt.ov_ai_cross_company')}</h3>
             <Card className="p-0">
               <DataTable
                 rows={(aiUsage.data ?? []).slice(0, 10)}
                 columns={[
-                  { key: 'name', label: 'บริษัท', render: (r: any) => <button type="button" className="text-left hover:underline" onClick={() => setDetailId(r.tenant_id)}>{r.name}</button> },
-                  { key: 'total_tokens', label: 'โทเคนรวม', align: 'right', render: (r: any) => num(r.total_tokens) },
-                  { key: 'overage_tokens', label: 'overage', align: 'right', render: (r: any) => <span className={r.overage_tokens > 0 ? 'text-destructive' : ''}>{num(r.overage_tokens)}</span> },
+                  { key: 'name', label: t('plt.ov_ai_col_company'), render: (r: any) => <button type="button" className="text-left hover:underline" onClick={() => setDetailId(r.tenant_id)}>{r.name}</button> },
+                  { key: 'total_tokens', label: t('plt.ov_ai_col_total_tokens'), align: 'right', render: (r: any) => num(r.total_tokens) },
+                  { key: 'overage_tokens', label: t('plt.ov_ai_col_overage'), align: 'right', render: (r: any) => <span className={r.overage_tokens > 0 ? 'text-destructive' : ''}>{num(r.overage_tokens)}</span> },
                 ]}
                 rowKey={(r: any) => r.tenant_id}
-                emptyText="ยังไม่มีการใช้ AI"
+                emptyText={t('plt.ov_ai_empty')}
               />
             </Card>
           </div>
 
           {/* Plan mix — active subscriptions + MRR contribution per plan. */}
           <div>
-            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Activity className="size-4 text-primary" /> สัดส่วนตามแพ็กเกจ</h3>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Activity className="size-4 text-primary" /> {t('plt.ov_plan_mix')}</h3>
             <Card className="p-0">
               <DataTable
                 rows={metrics.data.by_plan ?? []}
                 columns={[
-                  { key: 'name', label: 'แพ็กเกจ', render: (p: any) => <span className="font-medium">{p.name}</span> },
-                  { key: 'price_monthly', label: 'ราคา/เดือน', align: 'right', render: (p: any) => baht(p.price_monthly) },
-                  { key: 'active_subscriptions', label: 'ใช้งาน', align: 'right', render: (p: any) => num(p.active_subscriptions) },
-                  { key: 'trialing', label: 'ทดลอง', align: 'right', render: (p: any) => num(p.trialing) },
-                  { key: 'mrr', label: 'MRR', align: 'right', render: (p: any) => baht(p.mrr) },
+                  { key: 'name', label: t('plt.ov_plan_col_name'), render: (p: any) => <span className="font-medium">{p.name}</span> },
+                  { key: 'price_monthly', label: t('plt.ov_plan_col_price'), align: 'right', render: (p: any) => baht(p.price_monthly) },
+                  { key: 'active_subscriptions', label: t('plt.ov_plan_col_active'), align: 'right', render: (p: any) => num(p.active_subscriptions) },
+                  { key: 'trialing', label: t('plt.ov_plan_col_trialing'), align: 'right', render: (p: any) => num(p.trialing) },
+                  { key: 'mrr', label: t('plt.ov_plan_col_mrr'), align: 'right', render: (p: any) => baht(p.mrr) },
                 ]}
                 rowKey={(p: any) => p.plan}
-                emptyText="ยังไม่มีแพ็กเกจ"
+                emptyText={t('plt.ov_plan_empty')}
               />
             </Card>
           </div>
@@ -748,18 +754,18 @@ export default function PlatformConsole({
   return (
     <div>
       <PageHeader
-        title="ศูนย์ควบคุมแพลตฟอร์ม"
-        description="ดูแลทุกบริษัทในระบบ — เปิด/ระงับบริษัท, อนุมัติคำขอ, ออกลิงก์เชิญ และเข้าดูข้อมูลรายบริษัท"
+        title={t('plt.page_title')}
+        description={t('plt.page_desc')}
         actions={<div className="flex gap-2">{inviteDialog}{provisionDialog}</div>}
       />
       <Tabs
         urlParam="tab"
         tabs={[
-          { key: 'overview', label: 'ภาพรวม', content: overviewTab },
-          { key: 'companies', label: `บริษัท (${companies.data?.length ?? 0})`, content: companiesTab },
-          { key: 'onboarding', label: pending ? `Onboarding (${pending})` : 'Onboarding', content: onboardingTab },
-          { key: 'notifications', label: (notifs.data?.unread_count ?? 0) > 0 ? `แจ้งเตือน (${notifs.data?.unread_count})` : 'แจ้งเตือน', content: notificationsTab },
-          { key: 'activity', label: 'กิจกรรม', content: activityTab },
+          { key: 'overview', label: t('plt.tab_overview'), content: overviewTab },
+          { key: 'companies', label: `${t('plt.tab_companies')} (${companies.data?.length ?? 0})`, content: companiesTab },
+          { key: 'onboarding', label: pending ? `${t('plt.tab_onboarding')} (${pending})` : t('plt.tab_onboarding'), content: onboardingTab },
+          { key: 'notifications', label: (notifs.data?.unread_count ?? 0) > 0 ? `${t('plt.tab_notifications')} (${notifs.data?.unread_count})` : t('plt.tab_notifications'), content: notificationsTab },
+          { key: 'activity', label: t('plt.tab_activity'), content: activityTab },
         ]}
       />
       <CompanyDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={refresh} />
