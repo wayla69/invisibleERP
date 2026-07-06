@@ -97,7 +97,34 @@ function BalanceSheet({ lp }: { lp: string }) {
   const Section = ({ title, rows, subtotal, extra }: { title: string; rows: any[]; subtotal: number; extra?: { label: string; amount: number } }) => (
     <Card className="gap-2 p-5">
       <h3 className="text-sm font-semibold text-muted-foreground">{title}</h3>
-      <table className="w-full text-sm">
+      {/* Phone-width fallback: a real <table> squeezed to phone width crushes the account-code /
+          account-name / amount columns into an unreadable sliver, and the subtotal row loses its
+          visual weight. Below `sm` we stack each line as code+name atop its amount instead. */}
+      <div className="space-y-1 sm:hidden">
+        {rows.map((l) => (
+          <div key={l.account_code} className="flex items-baseline justify-between gap-3 py-0.5 text-sm">
+            <span className="min-w-0">
+              <span className="text-muted-foreground tabular">{l.account_code}</span>{' '}
+              {l.account_name ?? l.account_code}
+            </span>
+            <span className="shrink-0 tabular">{baht(l.balance)}</span>
+          </div>
+        ))}
+        {extra && (
+          <div className="flex items-baseline justify-between gap-3 py-0.5 text-sm">
+            <span className="italic text-muted-foreground">{extra.label}</span>
+            <span className="shrink-0 tabular">{baht(extra.amount)}</span>
+          </div>
+        )}
+        {rows.length === 0 && !extra && (
+          <div className="py-2 text-center text-sm text-muted-foreground">{t('fnx.fs.no_rows')}</div>
+        )}
+        <div className="flex items-baseline justify-between gap-3 border-t pt-1 text-sm font-semibold">
+          <span>{t('fnx.fs.total', { name: title })}</span>
+          <span className="shrink-0 tabular">{baht(subtotal)}</span>
+        </div>
+      </div>
+      <table className="hidden w-full text-sm sm:table">
         <tbody>
           {rows.map((l) => (
             <tr key={l.account_code}>
@@ -212,7 +239,25 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
   const LineTable = ({ title, rows, subtotal, tone }: { title: string; rows: any[]; subtotal: number; tone?: string }) => (
     <Card className="gap-2 p-5">
       <h3 className="text-sm font-semibold text-muted-foreground">{title}</h3>
-      <table className="w-full text-sm">
+      <div className="space-y-1 sm:hidden">
+        {rows.map((l) => (
+          <div key={l.account_code} className="flex items-baseline justify-between gap-3 py-0.5 text-sm">
+            <span className="min-w-0">
+              <span className="text-muted-foreground tabular">{l.account_code}</span>{' '}
+              {l.account_name ?? l.account_code}
+            </span>
+            <span className="shrink-0 tabular">{baht(l.amount)}</span>
+          </div>
+        ))}
+        {rows.length === 0 && (
+          <div className="py-2 text-center text-sm text-muted-foreground">{t('fnx.fs.no_rows')}</div>
+        )}
+        <div className={`flex items-baseline justify-between gap-3 border-t pt-1 text-sm font-semibold ${tone ?? ''}`}>
+          <span>{t('fnx.fs.total', { name: title })}</span>
+          <span className="shrink-0 tabular">{baht(subtotal)}</span>
+        </div>
+      </div>
+      <table className="hidden w-full text-sm sm:table">
         <tbody>
           {rows.map((l) => (
             <tr key={l.account_code}>
@@ -321,11 +366,22 @@ function CashFlow({ lp }: { lp: string }) {
   });
   const d = q.data;
 
+  // Each cash-flow line renders twice: a <table> row for sm+ and a stacked label/amount div for phones
+  // (a bare 2-col <table> still wraps long activity labels awkwardly against a squeezed amount column).
   const flowRow = (label: string, amount: number, key: string | number) => (
     <tr key={key}>
       <td className="py-0.5 pr-3">{label}</td>
       <td className={`py-0.5 text-right tabular ${amount < 0 ? 'text-destructive' : ''}`}>{baht(amount)}</td>
     </tr>
+  );
+  const flowRowCard = (label: string, amount: number, key: string | number, cls = '') => (
+    <div key={key} className={`flex items-baseline justify-between gap-3 py-0.5 ${cls}`}>
+      <span className="min-w-0">{label}</span>
+      <span className={`shrink-0 tabular ${amount < 0 ? 'text-destructive' : ''}`}>{baht(amount)}</span>
+    </div>
+  );
+  const flowHeaderCard = (label: string, key: string | number) => (
+    <div key={key} className="pt-3 pb-1 text-xs font-medium text-muted-foreground first:pt-0">{label}</div>
   );
 
   return (
@@ -361,7 +417,21 @@ function CashFlow({ lp }: { lp: string }) {
               <StatCard label={t('fnx.fs.cf_financing')} value={baht(d.financing?.net)} />
             </div>
             <Card className="gap-2 p-5">
-              <table className="w-full text-sm">
+              <div className="text-sm sm:hidden">
+                {flowHeaderCard(t('fnx.fs.op_activities'), 'h-op')}
+                {flowRowCard(t('fnx.fs.net_income_row'), d.operating?.net_income ?? 0, 'ni')}
+                {(d.operating?.adjustments ?? []).map((a: any, i: number) => flowRowCard(`+ ${a.label ?? a.account_name}`, a.amount, `adj${i}`))}
+                {(d.operating?.working_capital ?? []).map((a: any, i: number) => flowRowCard(`Δ ${a.label ?? a.account_name}`, a.amount, `wc${i}`))}
+                {flowRowCard(t('fnx.fs.net_op_cash'), d.operating?.net, 'net-op', 'border-t pt-1.5 mt-0.5 font-medium')}
+                {(d.investing?.lines ?? []).length > 0 && flowHeaderCard(t('fnx.fs.inv_activities'), 'h-inv')}
+                {(d.investing?.lines ?? []).map((a: any, i: number) => flowRowCard(a.label ?? a.account_name, a.amount, `inv${i}`))}
+                {(d.financing?.lines ?? []).length > 0 && flowHeaderCard(t('fnx.fs.fin_activities'), 'h-fin')}
+                {(d.financing?.lines ?? []).map((a: any, i: number) => flowRowCard(a.label ?? a.account_name, a.amount, `fin${i}`))}
+                {flowRowCard(t('fnx.fs.net_change_cash'), d.net_change_in_cash, 'net-change', 'border-t pt-1.5 mt-0.5 font-semibold')}
+                {flowRowCard(t('fnx.fs.cash_begin'), d.cash_beginning, 'cb', 'text-muted-foreground')}
+                {flowRowCard(t('fnx.fs.cash_end'), d.cash_ending, 'ce', 'text-muted-foreground')}
+              </div>
+              <table className="hidden w-full text-sm sm:table">
                 <tbody>
                   <tr className="text-muted-foreground"><td className="pb-1 font-medium">{t('fnx.fs.op_activities')}</td><td /></tr>
                   {flowRow(t('fnx.fs.net_income_row'), d.operating?.net_income ?? 0, 'ni')}
@@ -394,7 +464,20 @@ function CashFlow({ lp }: { lp: string }) {
               <StatCard label={t('fnx.fs.cf_financing')} value={baht(d.financing?.net)} />
             </div>
             <Card className="gap-2 p-5">
-              <table className="w-full text-sm">
+              <div className="text-sm sm:hidden">
+                {flowHeaderCard(t('fnx.fs.op_activities'), 'h-op')}
+                {flowRowCard(t('fnx.fs.receipts_customers'), d.operating?.receipts_from_customers ?? 0, 'r')}
+                {flowRowCard(t('fnx.fs.payments_suppliers'), d.operating?.payments_to_suppliers ?? 0, 'p')}
+                {flowRowCard(t('fnx.fs.tax_payroll'), d.operating?.tax_and_payroll ?? 0, 't')}
+                {flowRowCard(t('fnx.fs.other_operating'), d.operating?.other_operating ?? 0, 'o')}
+                {flowRowCard(t('fnx.fs.net_op_cash'), d.operating?.net, 'net-op', 'border-t pt-1.5 mt-0.5 font-medium')}
+                {flowRowCard(t('fnx.fs.inv_activities'), d.investing?.net ?? 0, 'i')}
+                {flowRowCard(t('fnx.fs.fin_activities'), d.financing?.net ?? 0, 'f')}
+                {flowRowCard(t('fnx.fs.net_change_cash'), d.net_change_in_cash, 'net-change', 'border-t pt-1.5 mt-0.5 font-semibold')}
+                {flowRowCard(t('fnx.fs.cash_begin'), d.cash_beginning, 'cb', 'text-muted-foreground')}
+                {flowRowCard(t('fnx.fs.cash_end'), d.cash_ending, 'ce', 'text-muted-foreground')}
+              </div>
+              <table className="hidden w-full text-sm sm:table">
                 <tbody>
                   <tr className="text-muted-foreground"><td className="pb-1 font-medium">{t('fnx.fs.op_activities')}</td><td /></tr>
                   {flowRow(t('fnx.fs.receipts_customers'), d.operating?.receipts_from_customers ?? 0, 'r')}
@@ -428,7 +511,34 @@ function CashFlow({ lp }: { lp: string }) {
             </div>
             <Card className="gap-2 p-5">
               <h3 className="text-sm font-semibold text-muted-foreground">{t('fnx.fs.forecast_title')}</h3>
-              <table className="w-full text-sm">
+              {/* Phone-width fallback: 5 columns squeezed to phone width leaves each figure a near-illegible
+                  sliver, so below `sm` each week becomes its own card with the amounts as label/value rows. */}
+              <div className="space-y-2 sm:hidden">
+                {(d.periods ?? []).map((p: any) => (
+                  <div key={p.week} className="rounded-lg border p-3 text-sm">
+                    <div className="font-medium">{p.week === 0 ? t('fnx.fs.week_due') : t('fnx.fs.week_plus', { week: p.week })}</div>
+                    <dl className="mt-1.5 space-y-1 border-t pt-1.5">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <dt className="text-xs text-muted-foreground">{t('fnx.fs.col_in')}</dt>
+                        <dd className="tabular">{p.inflow ? baht(p.inflow) : '—'}</dd>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <dt className="text-xs text-muted-foreground">{t('fnx.fs.col_out')}</dt>
+                        <dd className="tabular">{p.outflow ? baht(p.outflow) : '—'}</dd>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <dt className="text-xs text-muted-foreground">{t('fnx.fs.col_net')}</dt>
+                        <dd className={`tabular ${p.net < 0 ? 'text-destructive' : ''}`}>{baht(p.net)}</dd>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <dt className="text-xs text-muted-foreground">{t('fnx.fs.col_proj_balance')}</dt>
+                        <dd className={`tabular font-medium ${p.projected_balance < 0 ? 'text-destructive' : ''}`}>{baht(p.projected_balance)}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                ))}
+              </div>
+              <table className="hidden w-full text-sm sm:table">
                 <thead>
                   <tr className="text-left text-muted-foreground">
                     <th className="pb-2 font-medium">{t('fnx.fs.col_week')}</th>
