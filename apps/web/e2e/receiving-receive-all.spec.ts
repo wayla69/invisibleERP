@@ -40,12 +40,16 @@ test('receiving: PO list renders + one-tap รับครบ posts receive-all 
   await boot(page);
   await page.goto('/receiving');
 
-  // ① both POs render in the list
-  await expect(page.getByText('PO-E2E-APPR')).toBeVisible();
-  await expect(page.getByText('PO-E2E-DONE')).toBeVisible();
+  // ① both POs render in the list. Scoped to the desktop `table` (this suite runs at the Desktop Chrome
+  // viewport): DataTable also renders a phone-width card list for the same rows (hidden via CSS below
+  // `sm:`, but still in the DOM), so an unscoped text match would resolve to both and violate Playwright's
+  // strict mode — same tradeoff already documented in requisitions-pr-to-po.spec.ts.
+  await expect(page.locator('table').getByText('PO-E2E-APPR')).toBeVisible();
+  await expect(page.locator('table').getByText('PO-E2E-DONE')).toBeVisible();
 
-  // ② exactly one รับครบ button (the Closed PO must NOT offer it)
-  const receiveBtns = page.getByRole('button', { name: 'รับครบ' });
+  // ② exactly one รับครบ button (the Closed PO must NOT offer it) — scoped to the desktop table for the
+  // same reason as ①, since the same button also renders in the (hidden) mobile card copy of the row.
+  const receiveBtns = page.locator('table').getByRole('button', { name: 'รับครบ' });
   await expect(receiveBtns).toHaveCount(1);
 
   // ③ clicking it POSTs receive-all for the approved PO
