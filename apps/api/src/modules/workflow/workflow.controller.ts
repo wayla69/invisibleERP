@@ -19,6 +19,10 @@ export class WorkflowController {
   createDefinition(@Body(new ZodValidationPipe(DefinitionBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.createDefinition(b, u); }
   @Get('definitions') @Permissions('masterdata', 'approvals')
   listDefinitions(@CurrentUser() u: JwtUser) { return this.svc.listDefinitions(u); }
+  // Control-integrity readiness (maker-checker audit, cross-cutting): reports which engine-wired docTypes
+  // (PR/PO/BUDGET/PMR/BQR) lack an active approval workflow and therefore currently auto-approve.
+  @Get('readiness') @Permissions('masterdata', 'approvals', 'exec')
+  readiness(@CurrentUser() u: JwtUser) { return this.svc.readiness(u); }
   @Patch('definitions/:id') @Permissions('masterdata')
   setDefinitionActive(@Param('id') id: string, @Body(new ZodValidationPipe(ActiveBody)) b: { active: boolean }, @CurrentUser() u: JwtUser) { return this.svc.setDefinitionActive(+id, b.active, u); }
   @Put('definitions/:id') @Permissions('masterdata')

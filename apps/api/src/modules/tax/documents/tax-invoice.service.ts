@@ -254,6 +254,25 @@ export class TaxInvoiceService {
     await db.update(taxInvoices).set({ status: 'Voided', voidReason: reason ?? null }).where(eq(taxInvoices.id, head.id));
     return { doc_no: docNo, status: 'Voided' };
   }
+
+  // G16 (maker-checker audit — detective): a void of an issued fiscal document is single-user (sequence-/
+  // audit-logged; credit/debit NOTES are separately dual-controlled via TAX-07). This read-only EXCEPTION
+  // REPORT lists every VOIDED tax invoice (doc no, reason, amount, who/when) for independent periodic review,
+  // so the residual risk is detective-covered. Tenant-scoped (RLS); optional [from,to] on issue_date.
+  async voidedExceptions(user: JwtUser, range: { from?: string; to?: string }) {
+    const db = this.db;
+    const conds: any[] = [eq(taxInvoices.status, 'Voided')];
+    if (range.from) conds.push(sql`${taxInvoices.issueDate} >= ${range.from}`);
+    if (range.to) conds.push(sql`${taxInvoices.issueDate} <= ${range.to}`);
+    const rows = await db.select({ docNo: taxInvoices.docNo, type: taxInvoices.type, issueDate: taxInvoices.issueDate, sourceType: taxInvoices.sourceType, sourceRef: taxInvoices.sourceRef, grandTotal: taxInvoices.grandTotal, voidReason: taxInvoices.voidReason, createdBy: taxInvoices.createdBy })
+      .from(taxInvoices).where(and(...conds)).orderBy(desc(taxInvoices.id)).limit(500);
+    const total = rows.reduce((a: number, r: any) => a + n(r.grandTotal), 0);
+    return {
+      from: range.from ?? null, to: range.to ?? null,
+      voided: rows.map((r: any) => ({ doc_no: r.docNo, type: r.type, issue_date: r.issueDate, source_type: r.sourceType, source_ref: r.sourceRef, grand_total: n(r.grandTotal), void_reason: r.voidReason, created_by: r.createdBy })),
+      count: rows.length, total: Math.round(total * 100) / 100,
+    };
+  }
 }
 
 function shape(r: any) {

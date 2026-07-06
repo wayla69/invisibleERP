@@ -415,6 +415,11 @@ Gap discussion under "Cross-cutting risk" below.
   downstream **reconciliation is separately certified** (R06, item 6) and adjustments are dual-controlled
   (BANK-02). Compensating detective control exists; residual risk is low. Recommend it be included in the
   reconciliation certifier's evidence review rather than a new preventive gate.
+- **Status: ✅ ADDRESSED (2026-07-06) — documentation (no new preventive gate, per the assessment).** The
+  cash-treasury narrative (PN-07) now records that statement import is single-user by design and folds the
+  imported-statement lines into the **reconciliation certifier's evidence** (R06): the certifier reviews the
+  matched/unmatched lines before signing off, so an unauthorised or erroneous import is caught at
+  certification. No code change — the compensating detective control is made explicit.
 
 ### G14 — POS void / sub-threshold refund (Weak)  ·  **P3**
 - **Where:** `payments/payments.controller.ts` `void:68` (`@Permissions('pos_refund','ar')`),
@@ -424,12 +429,22 @@ Gap discussion under "Cross-cutting risk" below.
   `pos_refund` / `pos_till` permission split (R08) and (b) the independent till-variance approval
   (item 10) as a detective control. Residual risk accepted; recommend periodic void/refund exception
   review. Consider lowering/ configuring the REV-16 threshold if void abuse is a concern.
+- **Status: ✅ ADDRESSED (2026-07-06) — detective exception report.** `GET /api/payments/exceptions/voids-refunds`
+  (`exec`/`ar`/`fin_report`; optional `from`/`to`) lists every void + refund in a window with who/when/amount
+  and totals, tenant-scoped, for independent periodic review — the recommended detective control. Voids and
+  sub-threshold refunds remain single-user by design (till speed; REV-16 gates large refunds). ToE:
+  `refund-approval.ts` (the report surfaces the executed refunds for review).
 
 ### G16 — Issued tax-invoice void (Weak)  ·  **P3**
 - **Where:** `tax/documents/tax-docs.controller.ts` `void:66`.
 - **Assessment:** Single-user void of an issued tax document. Credit/debit *notes* are dual-controlled
   (TAX-07). A void is sequence/audit-logged; risk is largely detective-covered. Recommend an exception
   report on voided fiscal documents rather than a preventive gate.
+- **Status: ✅ ADDRESSED (2026-07-06) — detective exception report.** `GET /api/tax-invoices/exceptions/voided`
+  (`exec`/`ar`/`fin_report`; optional `from`/`to` on issue date) lists every voided tax invoice (doc no, type,
+  amount, void reason, who) with count/total, tenant-scoped, for independent periodic review — the recommended
+  detective control. The void itself stays single-user (numbers are never reused; RD requirement). ToE:
+  `taxdocs.ts` (voiding an issued invoice → it surfaces in the report with its reason).
 
 ### Cross-cutting risk — workflow-engine dependence on configured definitions
 Items 16, 17, 20 (PR/PO/Budget) are dual-controlled **only if** an active workflow *definition* exists
@@ -438,6 +453,14 @@ that ships without seeded definitions silently has **no** approval on PRs, POs, 
 configuration-integrity gap, not a code gap: recommend a startup assertion / readiness check that a
 definition exists for each engine-wired docType in production, and a control test that a fresh tenant
 cannot raise-and-auto-approve a PO.
+- **Status: ✅ ADDRESSED (2026-07-06) — detective readiness reporter.** `WorkflowService.readiness()` +
+  `GET /api/workflow/readiness` (`masterdata`/`approvals`/`exec`) report, per the caller's tenant, which
+  engine-wired docTypes (`ENGINE_WIRED_DOCTYPES = PR, PO, BUDGET, PMR, BQR`) lack an active workflow
+  definition and therefore currently auto-approve (`ready`/`missing`/per-docType `auto_approves`). This makes
+  the config gap detectable by an admin or a deploy readiness probe. Auto-approve-when-unconfigured is
+  intentionally retained (zero-config deploys) — this only surfaces the gap, it does not change behaviour.
+  ToE: `workflow.ts` (no definitions → `ready=false`, PR/PO/BUDGET in `missing`; after seeding a PR
+  definition → PR no longer auto-approves).
 
 ---
 
@@ -487,9 +510,19 @@ detective batch (G10, G14, G16 + the cross-cutting workflow-definition readiness
 (item/menu **base** price left non-sensitive).
 
 ### Phase P3 — detective-first (documentation + exception reports; preventive optional)
-12. **G10 Bank statement import** — fold into reconciliation-certifier evidence.
-13. **G14 POS void/sub-threshold refund** — void/refund exception report; tune REV-16 threshold.
-14. **G16 Tax-invoice void** — voided-fiscal-document exception report.
+12. **G10 Bank statement import** — fold into reconciliation-certifier evidence. — **✅ DONE 2026-07-06**
+    (documentation — PN-07; no new gate).
+13. **G14 POS void/sub-threshold refund** — void/refund exception report; tune REV-16 threshold. — **✅ DONE
+    2026-07-06** (`GET /api/payments/exceptions/voids-refunds`).
+14. **G16 Tax-invoice void** — voided-fiscal-document exception report. — **✅ DONE 2026-07-06**
+    (`GET /api/tax-invoices/exceptions/voided`).
+15. **Cross-cutting readiness** — `GET /api/workflow/readiness` reports engine-wired docTypes that lack a
+    definition (auto-approve). — **✅ DONE 2026-07-06**.
+
+**All P3 detective items + the cross-cutting readiness check are now addressed.** With P1 (G1–G8, G11) and
+P2 preventive (G9, G12, G13, G15) remediated, **every gap in this audit (G1–G16 + cross-cutting) is now
+closed** — preventively where value moves, detectively where single-user action is retained by design. The
+only remaining note is the G5 residual (item/menu **base** list price left non-sensitive by design).
 
 ---
 

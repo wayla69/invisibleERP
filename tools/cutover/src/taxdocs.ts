@@ -370,6 +370,13 @@ async function main() {
   const cnPdf = await inj('GET', `/api/tax-invoices/${cn.json.doc_no}/pdf`, sales1);
   ok('CN PDF: contains "ใบลดหนี้" + มาตรา 86/10 + original ref + reason', cnPdf.status === 200 && cnPdf.text.includes('ใบลดหนี้') && cnPdf.text.includes('86/10') && cnPdf.text.includes(full.json.doc_no) && cnPdf.text.includes('ชำรุด'), `${cnPdf.status}`);
 
+  // ── G16 (maker-checker audit — detective): a void of an issued fiscal document must surface in the
+  //    voided-fiscal-document EXCEPTION REPORT for independent periodic review. ──
+  const vd = await inj('PATCH', `/api/tax-invoices/${fullAr.json.doc_no}/void`, sales1, { reason: 'ออกผิดฉบับ' });
+  ok('G16: void an issued full tax invoice → Voided', vd.json.status === 'Voided', JSON.stringify(vd.json).slice(0, 60));
+  const vExc = await inj('GET', '/api/tax-invoices/exceptions/voided', t1mgr);
+  ok('G16: voided-fiscal-document exception report lists the voided invoice + reason', vExc.status === 200 && (vExc.json.voided ?? []).some((r: any) => r.doc_no === fullAr.json.doc_no && r.void_reason === 'ออกผิดฉบับ') && vExc.json.count >= 1, JSON.stringify({ c: vExc.json.count }));
+
   await app.close();
   await pg.close();
 
