@@ -1,6 +1,6 @@
 # 01 · Sales & Point of Sale (POS)
 
-**Status: DRAFT v0.6** · *v0.6 (2026-06-29): added **PIN quick-login at the till** (numeric keypad on `/login`), the combined **"เข้าสู่ระบบ / เปิดกะ"** (login + open shift) action, the self-service **ตั้ง PIN หน้าร้าน** page (`/pos-pin`), and the **ตั้ง PIN** action on the admin Users page; privileged/finance accounts must still use password + MFA (cannot use a PIN). Control ITGC-AC-17.* · *v0.5 (2026-06-27): SoD screen split — new dedicated screens `/pos/refunds` (refund authorization queue, `pos_refund`) and `/pos/till` (till management, `pos_till`); `/pos/register` now shows as `pos_sell` primary perm; "บันทึกคืนสินค้า" button on `/returns` hidden from `pos_sell`-only cashiers (requires `pos_refund`). Controls R08/R12.* · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
+**Status: DRAFT v0.7** · *v0.7 (2026-07-05): **gift-card issuance maker-checker** — issuing a gift card **above ฿5,000** now creates a **pending** card that a finance approver (`creditors`/`exec`, a different person from the issuer) must approve before it holds value or can be redeemed; cards **฿5,000 or less** still issue instantly; **self-approval is blocked**. Controls GC-01 / SoD R14.* · *v0.6 (2026-06-29): added **PIN quick-login at the till** (numeric keypad on `/login`), the combined **"เข้าสู่ระบบ / เปิดกะ"** (login + open shift) action, the self-service **ตั้ง PIN หน้าร้าน** page (`/pos-pin`), and the **ตั้ง PIN** action on the admin Users page; privileged/finance accounts must still use password + MFA (cannot use a PIN). Control ITGC-AC-17.* · *v0.5 (2026-06-27): SoD screen split — new dedicated screens `/pos/refunds` (refund authorization queue, `pos_refund`) and `/pos/till` (till management, `pos_till`); `/pos/register` now shows as `pos_sell` primary perm; "บันทึกคืนสินค้า" button on `/returns` hidden from `pos_sell`-only cashiers (requires `pos_refund`). Controls R08/R12.* · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
 
 This chapter is for **Cashiers, Sales staff, POS Supervisors and Returns Clerks**.
 It covers ringing up sales, taking orders, credit checks, returns and refunds,
@@ -580,6 +580,19 @@ status or search a card number, and click **ประวัติ** on any card 
 transaction history (issue / redeem / store-credit top-up) with the running balance and
 the linked sale. The register is **store-scoped**. Use it to look a customer's card up,
 and to tie the outstanding balance out to the GL at period close.
+
+> **Big gift cards need a finance approver's OK (maker-checker).** Because a gift card is
+> cash-equivalent stored value, issuing one **above ฿5,000** doesn't go live at the till
+> straight away — the card is created **รออนุมัติ (pending approval)** and holds **no value**
+> yet (it **can't be redeemed** — a redemption attempt is refused with **GIFT_CARD_INACTIVE**).
+> A **different** person with finance oversight of the liability (a *creditors* or *exec*
+> holder, **not** the cashier who issued it) approves it — this posts the accounting
+> (Dr 1000 Cash / Cr 2200 Customer Deposits) and turns the card **active** and spendable. The
+> person who issued the card **can't approve their own** (the system blocks it with
+> **SOD_VIOLATION**), and approving a card that isn't pending returns **NOT_PENDING**. Cards
+> of **฿5,000 or less** still issue **instantly** as before, so everyday sales stay fast.
+> Store credit minted from a **return** is unaffected — it's already controlled by the return
+> flow. (Control **GC-01**; SoD **R14**.)
 
 ---
 

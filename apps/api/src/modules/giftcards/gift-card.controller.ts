@@ -12,6 +12,11 @@ export class GiftCardController {
   @Post('issue') @Permissions('pos')
   issue(@Body(new ZodValidationPipe(IssueGiftCardBody)) b: IssueGiftCardDto, @CurrentUser() u: JwtUser) { return this.svc.issue(b, u); }
 
+  // Approve a high-value PendingApproval issuance (audit G1 maker-checker) — a DIFFERENT user (finance
+  // oversight of the 2200 liability) activates the card and posts the GL. Self-approval → 403 SOD_VIOLATION.
+  @Post(':card_no/approve') @Permissions('creditors', 'exec')
+  approveIssue(@Param('card_no') cardNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveIssue(cardNo, u); }
+
   // Gift-card register — all cards + outstanding (Active-balance) liability. Visible to POS + finance.
   @Get() @Permissions('pos', 'creditors', 'exec')
   list(@CurrentUser() u: JwtUser, @Query('status') status?: string, @Query('search') search?: string, @Query('limit') limit?: string) {

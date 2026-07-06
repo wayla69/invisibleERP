@@ -1765,6 +1765,13 @@
       "when": 2023820000078,
       "tag": "0251_asset_custody_maker_checker",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "7",
+      "when": 2023820000079,
+      "tag": "0252_gift_card_issue_approval",
+      "breakpoints": true
     }
   ]
 }

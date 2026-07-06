@@ -152,6 +152,13 @@ Gap discussion under "Cross-cutting risk" below.
   `POST /giftcards/:no/approve` gated to a distinct approver (`SOD_VIOLATION` when
   `issuedBy === approver`), post the GL only on approval. Optionally threshold-gate (small face values
   auto-issue) to keep the till fast, mirroring REV-16.
+- **Status: ✅ REMEDIATED (2026-07-05).** Threshold-gated: face ≤ 5000 THB auto-issues (Active + GL) to
+  keep the till fast; face > 5000 is created `PendingApproval` with **no GL** and **not redeemable**
+  (`GIFT_CARD_INACTIVE`) until `POST /api/pos/gift-cards/:cardNo/approve` (`creditors`/`exec`) by a user ≠
+  the issuer posts `Dr 1000 / Cr 2200` and activates it (self-approval → `403 SOD_VIOLATION`). Enum value
+  added by migration **0252**. Returns-minted store credit (`creditFromReturn`) is unchanged (driven by
+  the controlled return flow). ToE: `giftcards.ts` (pending → not redeemable → self-approve 403 → distinct
+  approver posts GL).
 
 ### G2 — Any posted GL journal can be reversed by one user  ·  **P1 · High**
 - **Where:** `modules/ledger/ledger.service.ts` `reverseEntry():525`. Builds a swapped-Dr/Cr contra
@@ -364,7 +371,7 @@ Scope to approve **before any build.** Each item reuses an existing in-repo patt
 2. **G4 Opening balances** — post as `pendingApproval`; distinct approver. — **✅ DONE 2026-07-05**.
 3. **G3 Petty-cash establish/replenish** — extend the module's own EXP-08 maker-checker to fund cash
    movements. — **✅ DONE 2026-07-05** (funding request `kind:'funding'`, distinct-approver posts the cash-in).
-4. **G1 Gift-card issuance** — Draft+approve (optionally threshold-gated like REV-16).
+4. **G1 Gift-card issuance** — Draft+approve (optionally threshold-gated like REV-16). — **✅ DONE 2026-07-05** (threshold-gated at 5000 THB; distinct finance approver posts the GL; migration 0252).
 5. **G11 Access grants + SoD override** — distinct-approver on permission/role grants and, mandatorily,
    on `allow_sod_override`.
 6. **G8 Vendor bank/terms + G7 credit limit + G5/G6 price** — staged master-data approval for

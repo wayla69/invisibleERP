@@ -273,6 +273,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'px.gift_status_Active': { th: 'ใช้งานได้', en: 'Active' },
   'px.gift_status_Redeemed': { th: 'ใช้หมดแล้ว', en: 'Redeemed' },
   'px.gift_status_Void': { th: 'ยกเลิก', en: 'Void' },
+  'px.gift_status_PendingApproval': { th: 'รออนุมัติ', en: 'Pending approval' },
   'px.gift_title': { th: 'บัตรของขวัญ / เครดิตร้าน (Gift Cards)', en: 'Gift cards / store credit' },
   'px.gift_txn_balance': { th: 'คงเหลือ', en: 'Balance' },
   'px.gift_txn_empty_desc': { th: 'บัตรนี้ยังไม่มีความเคลื่อนไหว', en: 'This card has no activity yet' },
