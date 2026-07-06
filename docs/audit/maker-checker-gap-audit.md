@@ -186,6 +186,13 @@ Gap discussion under "Cross-cutting risk" below.
 - **Related:** EXP-08 / SoD R07.
 - **Remediation:** Apply the module's own EXP-08 pattern to establishment/replenishment — park as
   `PendingApproval` with no GL until a distinct `creditors/exec` holder approves.
+- **Status: ✅ REMEDIATED (2026-07-05).** Both `establishFund` (initial cash) and `replenishFund` now
+  raise a maker-checker **funding request** (reuses `expense_requests` with `kind:'funding'` — no
+  migration): the fund record is created with balance 0, and the cash-in (Dr petty-cash / Cr 1000) posts
+  and lifts the balance only when a **distinct** user approves via the existing
+  `POST /petty-cash/requests/:reqNo/approve` (self-approval → `403 SOD_VIOLATION`; float ceiling re-checked
+  → `422 OVER_FLOAT`). ToE: `basics.ts` (establish/replenish → PendingApproval; self-approve 403; distinct
+  approver funds), `compliance.ts`, `line-crm.ts`.
 
 ### G4 — Opening balances post directly to the GL, single-user  ·  **P1 · High**
 - **Where:** `modules/ledger/ledger.service.ts` `postOpeningBalances():1120`; `postEntry` call at
@@ -356,7 +363,7 @@ Scope to approve **before any build.** Each item reuses an existing in-repo patt
 1. **G2 GL reversal** — post the contra as Draft; require distinct approver (closes the GL-05 bypass). — **✅ DONE 2026-07-05** (distinct-reverser guard; full Draft+approve on the contra is documented follow-up).
 2. **G4 Opening balances** — post as `pendingApproval`; distinct approver. — **✅ DONE 2026-07-05**.
 3. **G3 Petty-cash establish/replenish** — extend the module's own EXP-08 maker-checker to fund cash
-   movements.
+   movements. — **✅ DONE 2026-07-05** (funding request `kind:'funding'`, distinct-approver posts the cash-in).
 4. **G1 Gift-card issuance** — Draft+approve (optionally threshold-gated like REV-16).
 5. **G11 Access grants + SoD override** — distinct-approver on permission/role grants and, mandatorily,
    on `allow_sod_override`.

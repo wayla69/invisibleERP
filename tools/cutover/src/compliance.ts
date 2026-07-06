@@ -901,7 +901,11 @@ async function main() {
   // A petty-cash fund holds cash capped at a credit limit; each expense/advance is a request a DIFFERENT user
   // must approve before the GL posts and the fund is decremented; a draw cannot exceed the fund balance.
   const pcFund = await inj('POST', '/api/finance/petty-cash/funds', admin, { fund_code: 'PCFZ-1', float_limit: 3000, initial_amount: 3000 });
-  ok('EXP-08: establish a petty-cash fund within its float (balance 3000)', pcFund.json?.balance === 3000, JSON.stringify({ st: pcFund.status, bal: pcFund.json?.balance }));
+  ok('EXP-08/G3: establish a petty-cash fund → initial funding PendingApproval (no cash yet, balance 0)', pcFund.json?.pending === true && pcFund.json?.balance === 0 && !!pcFund.json?.funding_req_no, JSON.stringify({ st: pcFund.status, bal: pcFund.json?.balance, pend: pcFund.json?.pending }));
+  const pcFundSelf = await inj('POST', `/api/finance/petty-cash/requests/${pcFund.json?.funding_req_no}/approve`, admin);
+  ok('EXP-08/G3: fund establishment self-approval blocked → 403 SOD_VIOLATION', pcFundSelf.status === 403 && pcFundSelf.json?.error?.code === 'SOD_VIOLATION', `${pcFundSelf.status}/${pcFundSelf.json?.error?.code}`);
+  const pcFundAppr = await inj('POST', `/api/finance/petty-cash/requests/${pcFund.json?.funding_req_no}/approve`, whchk);
+  ok('EXP-08/G3: an independent approver funds the imprest → Dr 1015 / Cr 1000 (balance 3000)', pcFundAppr.json?.fund_balance === 3000 && pcFundAppr.json?.approved_by === 'whchk', JSON.stringify({ fb: pcFundAppr.json?.fund_balance }));
   const pcReq = await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCFZ-1', kind: 'expense', payee: 'Office supplies', amount: 1000, expense_account: '5100', doc_ref: 'RCPT-Z1' });
   ok('EXP-08: expense request raised PendingApproval (no GL yet)', pcReq.json?.status === 'PendingApproval' && pcReq.json?.amount === 1000, JSON.stringify({ st: pcReq.json?.status }));
   const pcSelf = await inj('POST', `/api/finance/petty-cash/requests/${pcReq.json?.req_no}/approve`, admin);

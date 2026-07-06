@@ -848,6 +848,11 @@ async function main() {
   await db.update(s.users).set({ lineUserId: 'Uapboss' }).where(eq(s.users.username, 'apboss'));
   const fund = await inj('POST', '/api/finance/petty-cash/funds', token, { fund_code: 'PCF-LINE', name: 'LINE test fund', float_limit: 5000, initial_amount: 2000 });
   ok('LC-2: seed petty-cash fund created', fund.status === 200 || fund.status === 201, JSON.stringify({ s: fund.status }));
+  // EXP-08 (audit G3): the initial funding is now maker-checker — a DIFFERENT user (apboss, creditors) approves
+  // it so the fund actually holds cash for the chat expense draws below (requester=boss ≠ approver=apboss).
+  const apbossFundTok = (await inj('POST', '/api/login', undefined, { username: 'apboss', password: 'pw' })).json.token as string;
+  const fundAppr = await inj('POST', `/api/finance/petty-cash/requests/${fund.json?.funding_req_no}/approve`, apbossFundTok);
+  ok('LC-2: petty-cash fund funded on independent approval (balance 2000)', fundAppr.json?.fund_balance === 2000, JSON.stringify({ fb: fundAppr.json?.fund_balance }));
 
   // 20a. permission — a linked user without creditors/exec cannot raise.
   const pexDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20a', source: { userId: 'Usomchai' }, message: { id: 'mid-20a', type: 'text', text: 'expense PCF-LINE 100 น้ำแข็ง' } }] });

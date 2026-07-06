@@ -88,6 +88,8 @@ your code below.
 | `BAD_FREQUENCY` | A recurring journal was created with a cadence other than `daily` / `weekly` / `monthly`. | Choose one of the three supported cadences. |
 | `SETTLE_MISMATCH` | When settling a petty-cash advance, the **spend + cash returned** didn't equal the amount advanced. | Re-enter so `settled_expense + returned_cash` exactly equals the advance. See [Finance — AR & AP](./05-finance-ar-ap.md). |
 | `ALREADY_SETTLED` | You tried to settle a cash advance that's already settled. | No action needed — it's already accounted for. |
+| `OVER_FLOAT` | Establishing a petty-cash fund with an opening amount, replenishing one, **or approving that funding**, would push the fund above its float limit (วงเงิน). | Reduce the amount to within the remaining float (or raise the fund's float limit). Note fund establishment + replenishment are **maker-checked** (EXP-08): the request is checked at raise time and again on approval, and a **second** person approves before any cash posts. |
+| `INSUFFICIENT_FLOAT` | A petty-cash **expense / advance draw** exceeds the fund's available balance. | Fund or replenish the fund first (this itself needs an independent approval), or reduce the draw. See [Finance — AR & AP → Petty cash funds](./05-finance-ar-ap.md). |
 | `NO_CHANGE` | An asset revaluation was entered at the **current** net book value (nothing to post). | Enter a different value, or cancel. See [General Ledger → Fixed assets](./06-general-ledger.md). |
 | `BAD_VALUE` / `BAD_AMOUNT` / `BAD_MONTHS` / `BAD_TERM` | A prepaid / lease / advance / revaluation was created with an invalid number (negative amount, zero/negative term or months). | Enter a positive amount and a positive whole number of months / term. |
 | `SOD_VIOLATION` | Self-approval blocked — you can't approve your own document (e.g. your own journal entry, **or an AP payment you requested**). | A **different** authorised person must approve it. |
@@ -185,6 +187,15 @@ hardware wedge scanner or type/paste the code. If the button appears but the cam
 won't start, your browser blocked camera access: allow the camera permission for
 the site and try again. The scanner reads both QR codes and common 1D barcodes
 (EAN/UPC, Code-128, Code-39). You can always enter the code manually.
+
+**I set up a petty-cash fund with an opening amount (or topped one up) but no cash posted.**
+By design (EXP-08). Establishing a fund with an initial amount, and every
+**replenishment**, now raise a **pending funding request** that a **different**
+authorised user (`creditors` / `exec`) must approve on the petty-cash **Maker-checker**
+tab — it also shows in the **Approvals** queue. Only on their approval does the cash
+post (**Dr 1015 Petty Cash / Cr 1000 Cash**) and the fund balance rise; the fund holds
+no cash until then. You **cannot approve your own** funding request (`SOD_VIOLATION`),
+and an amount over the fund's float limit is rejected (`OVER_FLOAT`).
 
 **I scanned an asset to move it, but the register didn't change.**
 By design (FA-11). Changing an asset's location or holder is a **request** that a

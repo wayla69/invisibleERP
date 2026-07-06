@@ -435,8 +435,13 @@ async function main() {
   const pc1015Before = await tbBalance('1015');
   const pc5100Before = await tbDebit('5100');
   const pc1180Before = await tbBalance('1180');
+  // EXP-08 (audit G3): fund establishment raises a maker-checker FUNDING request — no cash until approved.
   const fund = await inj('POST', '/api/finance/petty-cash/funds', admin, { fund_code: 'PCF-1', name: 'HQ petty cash', float_limit: 5000, initial_amount: 5000 });
-  ok('EXP-08: establish fund within float (Dr 1015 / Cr 1000 = 5000)', fund.status === 201 && fund.json?.balance === 5000 && near(await tbBalance('1015'), pc1015Before + 5000), `bal=${fund.json?.balance} 1015=${await tbBalance('1015')}`);
+  ok('EXP-08/G3: establish fund → initial funding PendingApproval, no GL yet (balance 0, 1015 unchanged)', fund.status === 201 && fund.json?.pending === true && fund.json?.balance === 0 && !!fund.json?.funding_req_no && near(await tbBalance('1015'), pc1015Before), `pending=${fund.json?.pending} bal=${fund.json?.balance} 1015=${await tbBalance('1015')}`);
+  const fundSelf = await inj('POST', `/api/finance/petty-cash/requests/${fund.json?.funding_req_no}/approve`, admin);
+  ok('EXP-08/G3: fund establishment self-approval blocked → 403 SOD_VIOLATION', fundSelf.status === 403 && fundSelf.json?.error?.code === 'SOD_VIOLATION', `${fundSelf.status} ${fundSelf.json?.error?.code}`);
+  const fundAppr = await inj('POST', `/api/finance/petty-cash/requests/${fund.json?.funding_req_no}/approve`, mgr);
+  ok('EXP-08/G3: a different user approves the funding → Dr 1015 / Cr 1000 (5000); balance 5000', fundAppr.status === 200 && fundAppr.json?.fund_balance === 5000 && near(await tbBalance('1015'), pc1015Before + 5000), `fb=${fundAppr.json?.fund_balance} 1015=${await tbBalance('1015')}`);
   const overFund = await inj('POST', '/api/finance/petty-cash/funds', admin, { fund_code: 'PCF-OVER', float_limit: 1000, initial_amount: 2000 });
   ok('EXP-08: initial cash above the float is rejected (OVER_FLOAT)', overFund.status === 400 && overFund.json?.error?.code === 'OVER_FLOAT', `st=${overFund.status} code=${overFund.json?.error?.code}`);
   // direct expense request → maker-checker, no GL until approved
@@ -456,8 +461,11 @@ async function main() {
   ok('EXP-08: settle advance (1500 spend + 500 back to fund) clears 1180; fund 2300', stlAdv.status === 200 && stlAdv.json?.status === 'Settled' && near(await tbBalance('1180'), pc1180Before) && near(await tbBalance('1015'), pc1015Before + 2300), `1180=${await tbBalance('1180')} 1015=${await tbBalance('1015')}`);
   const rplOver = await inj('POST', '/api/finance/petty-cash/funds/PCF-1/replenish', admin, { amount: 4000 });
   ok('EXP-08: replenish beyond the float limit rejected (OVER_FLOAT)', rplOver.status === 422 && rplOver.json?.error?.code === 'OVER_FLOAT', `st=${rplOver.status} code=${rplOver.json?.error?.code}`);
+  // EXP-08 (audit G3): replenishment is also maker-checker — raises a funding request; cash posts on approval.
   const rplOk = await inj('POST', '/api/finance/petty-cash/funds/PCF-1/replenish', admin, { amount: 2000 });
-  ok('EXP-08: replenish within the float tops the fund back up (2300 → 4300)', rplOk.status === 200 && rplOk.json?.balance === 4300 && near(await tbBalance('1015'), pc1015Before + 4300), `bal=${rplOk.json?.balance}`);
+  ok('EXP-08/G3: replenish raises a PendingApproval funding request (no GL yet)', rplOk.status === 200 && rplOk.json?.pending === true && !!rplOk.json?.funding_req_no && near(await tbBalance('1015'), pc1015Before + 2300), `pending=${rplOk.json?.pending} 1015=${await tbBalance('1015')}`);
+  const rplAppr = await inj('POST', `/api/finance/petty-cash/requests/${rplOk.json?.funding_req_no}/approve`, mgr);
+  ok('EXP-08/G3: a different user approves replenish → tops the fund back up (2300 → 4300)', rplAppr.status === 200 && rplAppr.json?.fund_balance === 4300 && near(await tbBalance('1015'), pc1015Before + 4300), `fb=${rplAppr.json?.fund_balance}`);
   await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCF-1', kind: 'expense', payee: 'Pending one', amount: 100, doc_ref: 'RCPT-PEND' });
   const pcPend = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
   ok('EXP-08: pending petty-cash requests surface in the GOV-01 monitor', (pcPend.items ?? []).some((i: any) => i.control === 'EXP-08'), `types=${JSON.stringify(pcPend.by_type ?? {})}`);

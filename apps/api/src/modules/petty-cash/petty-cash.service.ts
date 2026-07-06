@@ -30,7 +30,10 @@ export class PettyCashService {
     @Optional() private readonly commitments?: CommitmentsService, // FU1 (docs/32) — site cash consumes BoQ budget
   ) {}
 
-  // ── Fund: establish (fund it Dr 1015 / Cr 1000 up to the float) + replenish (top up to the float) ──
+  // ── Fund: establish + replenish. Both move real cash INTO the imprest (Dr 1015 / Cr 1000) — so per the
+  //    maker-checker audit (gap G3) that cash-in is now a FUNDING request (EXP-08): it posts to the GL and
+  //    lifts the fund balance only when a DIFFERENT user approves it. The fund record itself is created at
+  //    establishment (balance 0) so the fund exists while its initial funding awaits approval. ──
   async establishFund(dto: EstablishFundDto, user: JwtUser) {
     const db = this.db;
     const tenantId = user.tenantId ?? null;
@@ -41,24 +44,40 @@ export class PettyCashService {
     const glAccount = dto.gl_account ?? '1015';
     const [f] = await db.insert(pettyCashFunds).values({
       tenantId, fundCode: dto.fund_code, name: dto.name ?? null, custodian: dto.custodian ?? null, department: dto.department ?? null,
-      glAccount, floatLimit: String(float), balance: String(initial), status: 'active', createdBy: user.username,
+      glAccount, floatLimit: String(float), balance: '0', status: 'active', createdBy: user.username,
     }).onConflictDoNothing().returning({ id: pettyCashFunds.id });
     if (!f) throw new BadRequestException({ code: 'FUND_EXISTS', message: `Fund ${dto.fund_code} already exists`, messageTh: 'มีกองทุนนี้อยู่แล้ว' });
-    if (initial > 0 && this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'PCF', sourceRef: dto.fund_code, tenantId, memo: `Establish petty cash ${dto.fund_code}`, createdBy: user.username, lines: [{ account_code: glAccount, debit: initial }, { account_code: '1000', credit: initial }] });
     await this.statusLog?.log('PCF', dto.fund_code, '', 'active', user.username);
-    return { fund_code: dto.fund_code, float_limit: float, balance: initial, gl_account: glAccount };
+    // The initial cash injection is a maker-checker funding request (no GL / no balance until approved).
+    if (initial > 0) {
+      const reqNo = await this.raiseFunding(Number(f!.id), dto.fund_code, tenantId, initial, user, `Establish petty cash ${dto.fund_code}`);
+      return { fund_code: dto.fund_code, float_limit: float, balance: 0, gl_account: glAccount, funding_req_no: reqNo, pending: true };
+    }
+    return { fund_code: dto.fund_code, float_limit: float, balance: 0, gl_account: glAccount };
   }
 
   async replenishFund(fundCode: string, dto: ReplenishDto, user: JwtUser) {
-    const db = this.db;
     const fund = await this.fundByCode(fundCode, user);
     const amount = round2(dto.amount);
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     const newBal = round2(n(fund.balance) + amount);
     if (newBal > n(fund.floatLimit) + 1e-9) throw new UnprocessableEntityException({ code: 'OVER_FLOAT', message: `Replenish would exceed the float limit ${n(fund.floatLimit)} (balance ${n(fund.balance)} + ${amount})`, messageTh: `เกินวงเงินของกองทุน (${n(fund.floatLimit)})` });
-    await db.update(pettyCashFunds).set({ balance: String(newBal) }).where(eq(pettyCashFunds.id, Number(fund.id)));
-    if (this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'PCF-RPL', sourceRef: `${fundCode}:${ymd()}:${amount}`, tenantId: fund.tenantId ?? user.tenantId ?? null, memo: `Replenish petty cash ${fundCode}`, createdBy: user.username, lines: [{ account_code: fund.glAccount, debit: amount }, { account_code: '1000', credit: amount }] });
-    return { fund_code: fundCode, replenished: amount, balance: newBal, float_limit: n(fund.floatLimit) };
+    // EXP-08 (audit G3): replenishment is a maker-checker funding request — the cash-in posts only on approval.
+    const reqNo = await this.raiseFunding(Number(fund.id), fundCode, fund.tenantId ?? user.tenantId ?? null, amount, user, `Replenish petty cash ${fundCode}`);
+    return { fund_code: fundCode, requested: amount, balance: n(fund.balance), float_limit: n(fund.floatLimit), funding_req_no: reqNo, pending: true };
+  }
+
+  // Raise a PendingApproval FUNDING request against a fund (maker; NO GL until a distinct user approves).
+  private async raiseFunding(fundId: number, fundCode: string, tenantId: number | null, amount: number, user: JwtUser, purpose: string) {
+    const reqNo = await this.docNo.nextDaily('PCF');
+    await this.db.insert(expenseRequests).values({
+      tenantId, reqNo, fundId, kind: 'funding', purpose, amount: String(amount),
+      status: 'PendingApproval', requestedBy: user.username,
+    });
+    await this.statusLog?.log('PCF', reqNo, '', 'PendingApproval', user.username);
+    await this.lineNotify?.notifyPermissionHolders(['creditors', 'exec'], tenantId,
+      `🔔 รออนุมัติเติมเงินสดย่อย: ${reqNo} (${fundCode} ${amount} บาท โดย ${user.username})\nอนุมัติที่หน้า /petty-cash`, user.username);
+    return reqNo;
   }
 
   async listFunds(user: JwtUser) {
@@ -112,6 +131,23 @@ export class PettyCashService {
     const req = await this.pendingRequest(reqNo, user);
     if (req.requestedBy && req.requestedBy === user.username)
       throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an expense you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
+    // EXP-08 (audit G3): a FUNDING request (fund establishment / replenishment) posts the cash-in — Dr the
+    // petty-cash account / Cr 1000 Cash — and lifts the fund balance, only on this independent approval.
+    if (req.kind === 'funding') {
+      const fund = (await db.select().from(pettyCashFunds).where(eq(pettyCashFunds.id, Number(req.fundId))).limit(1))[0];
+      if (!fund) throw new NotFoundException({ code: 'FUND_NOT_FOUND', message: 'Fund not found', messageTh: 'ไม่พบกองทุน' });
+      const amount = round2(n(req.amount));
+      const newBal = round2(n(fund.balance) + amount);
+      if (newBal > n(fund.floatLimit) + 1e-9) throw new UnprocessableEntityException({ code: 'OVER_FLOAT', message: `Funding would exceed the float limit ${n(fund.floatLimit)} (balance ${n(fund.balance)} + ${amount})`, messageTh: `เกินวงเงินของกองทุน (${n(fund.floatLimit)})` });
+      const tenantId = req.tenantId ?? user.tenantId ?? null;
+      let glRef: string | null = null;
+      if (this.ledger) { const je: any = await this.ledger.postEntry({ date: ymd(), source: 'PCF', sourceRef: reqNo, tenantId, memo: `Fund petty cash ${fund.fundCode} — ${reqNo}`, createdBy: user.username, lines: [{ account_code: fund.glAccount, debit: amount }, { account_code: '1000', credit: amount }] }); glRef = je?.entry_no ?? null; }
+      await db.update(pettyCashFunds).set({ balance: String(newBal) }).where(eq(pettyCashFunds.id, Number(fund.id)));
+      await db.update(expenseRequests).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date(), glRef }).where(eq(expenseRequests.id, Number(req.id)));
+      await this.statusLog?.log('PCF', reqNo, 'PendingApproval', 'Approved', user.username);
+      if (req.requestedBy) await this.lineNotify?.notifyUser(req.requestedBy, tenantId, `✅ ${reqNo} เติมเงินสดย่อยอนุมัติแล้ว (โดย ${user.username}) — ${amount} บาท`);
+      return { req_no: reqNo, kind: 'funding', fund_code: fund.fundCode, status: 'Approved', funded: amount, fund_balance: newBal, approved_by: user.username, prepared_by: req.requestedBy, journal_no: glRef };
+    }
     const fund = (await db.select().from(pettyCashFunds).where(eq(pettyCashFunds.id, Number(req.fundId))).limit(1))[0];
     if (!fund) throw new NotFoundException({ code: 'FUND_NOT_FOUND', message: 'Fund not found', messageTh: 'ไม่พบกองทุน' });
     const amount = round2(n(req.amount));
