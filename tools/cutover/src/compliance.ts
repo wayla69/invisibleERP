@@ -303,9 +303,22 @@ async function main() {
   const blockMsg = String(blocked.json.error?.message ?? '');
   ok('ITGC-AC-09: block identifies the violated SoD rule (R03 procurement ✗ creditors)', blockMsg.includes('R03'), blockMsg);
 
-  // 3. Explicit override WITH a reason is honoured (justified-override path → user created).
+  // 3. Explicit override WITH a reason is STAGED for two-person approval (audit G11) — it is NOT applied by
+  //    the grantor. A DIFFERENT admin must approve the exception before the conflicting grant takes effect.
   const overridden = await inj('POST', '/api/admin/users', admin, { username: 'sod_override', password: 'pw1234', role: 'Sales', permissions: conflictPerms, allow_sod_override: true, sod_reason: 'small entity, compensating monthly review by CFO' });
-  ok('ITGC-AC-09: justified override (allow_sod_override + reason) is honoured', (overridden.status === 200 || overridden.status === 201), `${overridden.status} ${overridden.json.error?.code ?? ''}`);
+  const excNo = overridden.json.access_exception_req_no;
+  const notYet = !((await inj('GET', '/api/admin/users', admin)).json.users ?? []).some((u: any) => u.username === 'sod_override');
+  ok('ITGC-AC-09/G11: justified override is STAGED PendingApproval (grantor cannot self-apply — user NOT created)',
+    overridden.json.status === 'PendingApproval' && overridden.json.pending === true && !!excNo && (overridden.json.sod_rules ?? []).includes('R03') && notYet, `st=${overridden.json.status} req=${excNo} created=${!notYet}`);
+  // 3a. The requester cannot approve their own exception → 403 SOD_VIOLATION.
+  const excSelf = await inj('POST', `/api/admin/users/access-exceptions/${excNo}/approve`, admin);
+  ok('ITGC-AC-09/G11: requester cannot self-approve the SoD exception → 403 SOD_VIOLATION', excSelf.status === 403 && excSelf.json.error?.code === 'SOD_VIOLATION', `${excSelf.status} ${excSelf.json.error?.code}`);
+  // 3b. A DIFFERENT admin (≠ requester, ≠ target) approves → the grant is applied (user created).
+  const excApprover = await login('whchk', 'pw'); // a distinct Admin (holds 'users'); whchk ≠ admin ≠ sod_override
+  const excAppr = await inj('POST', `/api/admin/users/access-exceptions/${excNo}/approve`, excApprover);
+  const nowCreated = ((await inj('GET', '/api/admin/users', admin)).json.users ?? []).some((u: any) => u.username === 'sod_override');
+  ok('ITGC-AC-09/G11: a distinct admin approves → exception applied, user created with the (justified) conflicting set',
+    excAppr.json.status === 'Approved' && excAppr.json.approved_by === 'whchk' && excAppr.json.requested_by === 'admin' && nowCreated, `st=${excAppr.json.status} by=${excAppr.json.approved_by} created=${nowCreated}`);
 
   // 4. Override WITHOUT a reason is still rejected (reason is mandatory for the audit trail).
   const noReason = await inj('POST', '/api/admin/users', admin, { username: 'sod_noreason', password: 'pw1234', role: 'Sales', permissions: conflictPerms, allow_sod_override: true });

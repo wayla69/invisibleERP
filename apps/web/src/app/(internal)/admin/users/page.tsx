@@ -79,6 +79,22 @@ export default function AdminUsersPage() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  // ── ITGC-AC-09 (audit G11): two-person SoD-exception queue ──
+  // A SoD-conflicting grant is staged PendingApproval; a DIFFERENT admin (≠ requester, ≠ affected user)
+  // approves it here. The API enforces the distinct-approver rule (self-approval → SOD_VIOLATION).
+  const exceptions = useQuery<any>({ queryKey: ['sod-exceptions'], queryFn: () => api('/api/admin/users/access-exceptions?status=PendingApproval') });
+  const pendingExc: any[] = exceptions.data?.exceptions ?? [];
+  const approveExc = useMutation({
+    mutationFn: (reqNo: string) => api(`/api/admin/users/access-exceptions/${reqNo}/approve`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess(lang === 'th' ? 'อนุมัติคำขอข้ามสิทธิ์แล้ว' : 'Access exception approved'); qc.invalidateQueries({ queryKey: ['sod-exceptions'] }); qc.invalidateQueries({ queryKey: ['admin-users'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const rejectExc = useMutation({
+    mutationFn: (reqNo: string) => { const reason = prompt(lang === 'th' ? 'เหตุผลที่ปฏิเสธ (ไม่บังคับ)' : 'Reject reason (optional)') ?? undefined; return api(`/api/admin/users/access-exceptions/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); },
+    onSuccess: () => { notifySuccess(lang === 'th' ? 'ปฏิเสธคำขอแล้ว' : 'Access exception rejected'); qc.invalidateQueries({ queryKey: ['sod-exceptions'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const [search, setSearch] = useState('');
   const users: any[] = list.data?.users ?? [];
   const filtered = useMemo(() => {
@@ -99,6 +115,28 @@ export default function AdminUsersPage() {
           {lastCert && <span className="text-sm text-muted-foreground">{t('st.usr.last_cert', { period: lastCert.period, by: lastCert.reviewed_by, count: lastCert.user_count, conflicts: lastCert.conflict_user_count })}</span>}
         </div>
       </Card>
+      {/* ITGC-AC-09 (audit G11): pending SoD-exception approvals — a conflicting grant needs a second admin. */}
+      {pendingExc.length > 0 && (
+        <Card className="gap-3 border-amber-300 p-5 dark:border-amber-700">
+          <h3 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-4" /> {lang === 'th' ? 'คำขอข้ามการแบ่งแยกหน้าที่ (SoD) รออนุมัติ' : 'Pending SoD-exception approvals'}</h3>
+          <p className="text-sm text-muted-foreground">{lang === 'th' ? 'การให้สิทธิ์ที่ขัดกับการแบ่งแยกหน้าที่ต้องให้ผู้ดูแลอีกคน (ไม่ใช่ผู้ขอ และไม่ใช่เจ้าของบัญชี) อนุมัติก่อนจึงมีผล' : 'A grant that conflicts with Segregation of Duties must be approved by a different admin (not the requester, not the affected user) before it takes effect.'}</p>
+          <div className="space-y-2">
+            {pendingExc.map((e: any) => (
+              <div key={e.req_no} className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 p-2.5 text-sm">
+                <span className="font-medium">{e.target_username}</span>
+                <Badge variant="secondary">{e.role ?? '—'}</Badge>
+                {(e.sod_rules ?? []).map((r: string) => <Badge key={r} variant="warning">{r}</Badge>)}
+                <span className="text-muted-foreground">· {e.reason}</span>
+                <span className="text-xs text-muted-foreground">({lang === 'th' ? 'ขอโดย' : 'by'} {e.requested_by})</span>
+                <div className="ml-auto flex gap-2">
+                  <Button size="sm" disabled={approveExc.isPending} onClick={() => approveExc.mutate(e.req_no)}>{lang === 'th' ? 'อนุมัติ' : 'Approve'}</Button>
+                  <Button size="sm" variant="outline" disabled={rejectExc.isPending} onClick={() => rejectExc.mutate(e.req_no)}>{lang === 'th' ? 'ปฏิเสธ' : 'Reject'}</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       {/* Role guide — plain-language definition of every role so an admin understands what access each grants. */}
       <Card className="gap-3 p-5">
         <details className="group">

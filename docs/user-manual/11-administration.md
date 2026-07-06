@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.11** · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+**Status: DRAFT v0.12** · *v0.12 (2026-07-05): §2.2 — granting an SoD-conflicting set with a justified override is now a two-person maker-checker; it stages a **Pending SoD-exception** request that a **different** admin (≠ requester, ≠ the affected user) must approve/reject (self-approval → `SOD_VIOLATION`), with the who/why/rules recorded in the audit trail (audit gap G11, part b).* · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -98,6 +98,33 @@ The roles are grouped so you can find the right fit quickly:
 > *issue refund*, or both *raise PO* and *pay supplier*), the system warns or
 > blocks with `SOD_CONFLICT`. Resolve it by removing one of the conflicting
 > duties or assigning it to a different person. See the SoD report below.
+
+### 2.2 Granting a conflicting set anyway — needs a second admin (SoD exception)
+
+Sometimes a small team genuinely needs one person to hold two conflicting duties,
+with a compensating control. You can request this by supplying a **justification**
+(the *allow SoD override* option with a reason) when you save the user — **but you
+can no longer authorize your own exception.** The request is **staged for approval**,
+not applied:
+
+- The user is **not** created (or, on an edit, **not** changed) yet. Instead the
+  system files a **pending SoD-exception request** and tells you it is awaiting
+  approval (status *PendingApproval*, with a request number and the rule(s) it
+  breaches). Saving **without** a reason is still blocked outright with
+  `SOD_CONFLICT`.
+- A **different** administrator must approve it on the **Pending SoD-exception
+  approvals** queue on the Users screen (**Approve** / **Reject**). The approver has
+  to be someone **other than the person who requested it *and* other than the user the
+  access is for** — if you try to approve your own request (or approve access to your
+  own account) the system refuses with **`SOD_VIOLATION`**. Only on approval is the
+  user actually created / the permission granted.
+- Who requested, who approved, the justification, and which rule(s) were overridden
+  are all written to the tamper-proof [Audit trail](#11-audit-trail-who-changed-what-and-when)
+  as the evidence for the exception.
+
+> This is the two-person rule ("maker–checker") applied to SoD exceptions: no single
+> administrator can both request and grant an override. Prefer removing the conflict
+> (single-duty roles) over raising an exception wherever strict separation matters.
 
 ---
 

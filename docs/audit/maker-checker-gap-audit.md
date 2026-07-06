@@ -283,6 +283,17 @@ Gap discussion under "Cross-cutting risk" below.
 - **Remediation:** Require a distinct approver for (a) any permission/role grant and (b) especially any
   `allow_sod_override` — the override must be approved by someone other than the grantor and other than
   the affected user. Log both as maker-checker events feeding the UAR.
+- **Status: ✅ REMEDIATED (2026-07-05) — part (b); part (a) intentionally deferred.** The self-service SoD
+  override is gone: a conflicting grant with `allow_sod_override` + reason is now **staged** as a
+  PendingApproval `access_grant_exceptions` row (migration **0253**) and applied only when a **DIFFERENT**
+  admin approves it via `POST /api/admin/users/access-exceptions/:reqNo/approve` — the approver must differ
+  from BOTH the requester and the affected user (else `403 SOD_VIOLATION`); who-requested / who-approved /
+  why / which-rules is persisted in the hash-chained audit_log. Web queue on `/admin/users`. Part (a) —
+  distinct-approver on *every* role/permission grant — was **deliberately not done**: it is a large
+  workflow change on top of the already-layered controls (god-only Admin grants, the preventive SoD block,
+  and the quarterly UAR AC-08); revisit only if a control owner requires it. ToE: `compliance.ts`
+  (staged → grantor self-approve 403 → distinct admin approves → applied; evidence in audit_log).
+  Earlier related hardening (same audit): granting the **Admin** role is already god-only (`ADMIN_GRANT_DENIED`).
 
 ### G12 — CPQ quote self-accept posts AR/revenue  ·  **P2 · Medium-High**
 - **Where:** `modules/cpq/cpq.service.ts` `acceptQuote():163`; posts `Dr 1100 AR / Cr 4000 Revenue` on
@@ -373,7 +384,7 @@ Scope to approve **before any build.** Each item reuses an existing in-repo patt
    movements. — **✅ DONE 2026-07-05** (funding request `kind:'funding'`, distinct-approver posts the cash-in).
 4. **G1 Gift-card issuance** — Draft+approve (optionally threshold-gated like REV-16). — **✅ DONE 2026-07-05** (threshold-gated at 5000 THB; distinct finance approver posts the GL; migration 0252).
 5. **G11 Access grants + SoD override** — distinct-approver on permission/role grants and, mandatorily,
-   on `allow_sod_override`.
+   on `allow_sod_override`. — **✅ DONE 2026-07-05** (SoD override → two-person staged approval, migration 0253; blanket per-grant approval intentionally deferred — see G11 status).
 6. **G8 Vendor bank/terms + G7 credit limit + G5/G6 price** — staged master-data approval for
    financially-sensitive fields (one workstream; ship the field-level guard first, full staging next).
 

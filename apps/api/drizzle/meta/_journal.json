@@ -1772,6 +1772,13 @@
       "when": 2023820000079,
       "tag": "0252_gift_card_issue_approval",
       "breakpoints": true
+    },
+    {
+      "idx": 253,
+      "version": "7",
+      "when": 2023820000080,
+      "tag": "0253_access_grant_exceptions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,10 +1,10 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, UnprocessableEntityException, ForbiddenException, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { users, userPermissions, tenants, accessReviews } from '../../database/schema';
-import { desc } from 'drizzle-orm';
+import { users, userPermissions, tenants, accessReviews, accessGrantExceptions } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { BillingService } from '../billing/billing.service';
+import { DocNumberService } from '../../common/doc-number.service';
 import { resolvePermissions, detectSodConflicts, type Role, type Permission } from '@ierp/shared';
 import { appendAuditMeta } from '../../common/tenant-context';
 import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
@@ -20,37 +20,83 @@ export class AdminUsersService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly passwords: PasswordService,
     private readonly billing: BillingService,
+    private readonly docNo: DocNumberService,
   ) {}
 
-  // Preventive SoD guard (ITGC-AC-09): block assigning a per-user permission OVERRIDE that holds duties on
-  // both sides of a conflict rule, unless the admin explicitly overrides WITH a reason (which is logged).
-  // A per-user override REPLACES the role default (see resolvePermissions precedence), so the override set
-  // IS the user's effective permission set — checking it here is checking the effective grant.
-  // Role-default conflicts (legacy coarse roles in transition) are GRANDFATHERED: not blocked here, but a
-  // detective warning is emitted so the quarterly UAR (getAccessReview) still surfaces them.
-  private assertNoSodConflict(username: string, role: string | undefined, perms: string[] | undefined, allowOverride?: boolean, reason?: string) {
-    if (!perms?.length) {
-      // No override → the bare role decides. Surface (don't block) any grandfathered role-default conflict.
-      if (role) {
-        const roleConflicts = detectSodConflicts(resolvePermissions(role as Role));
-        if (roleConflicts.length) this.logger.warn(`Grandfathered SoD conflict on role "${role}" for "${username}" — rules ${roleConflicts.map((c) => c.ruleId).join(',')}; tracked by quarterly UAR.`);
-      }
-      return;
-    }
-    const conflicts = detectSodConflicts(perms as Permission[]);
-    if (!conflicts.length) return;
+  // Detective log for a GRANDFATHERED role-default conflict (legacy coarse roles in transition): a bare
+  // role assignment (no per-user override) is not blocked, but the outstanding conflict is surfaced for the
+  // quarterly UAR. A per-user override REPLACES the role default (resolvePermissions precedence), so when an
+  // override IS supplied the override set is what we evaluate (see sodConflictOrThrow).
+  private logGrandfatheredRoleConflict(username: string, role: string | undefined) {
+    if (!role) return;
+    const roleConflicts = detectSodConflicts(resolvePermissions(role as Role));
+    if (roleConflicts.length) this.logger.warn(`Grandfathered SoD conflict on role "${role}" for "${username}" — rules ${roleConflicts.map((c) => c.ruleId).join(',')}; tracked by quarterly UAR.`);
+  }
+
+  // Preventive SoD guard (ITGC-AC-09): a per-user permission OVERRIDE holding duties on both sides of a
+  // conflict rule is BLOCKED (422 SOD_CONFLICT) unless the admin supplies allow_sod_override + a reason.
+  // Returns the conflicts (empty if none). When it returns a NON-empty list, the caller must NOT apply the
+  // grant directly — per audit G11 a SoD exception is a two-person control: it is STAGED for approval by a
+  // DIFFERENT admin (stageException) rather than self-authorized by the grantor.
+  private sodConflictOrThrow(perms: string[] | undefined, allowOverride?: boolean, reason?: string) {
+    const conflicts = perms?.length ? detectSodConflicts(perms as Permission[]) : [];
+    if (!conflicts.length) return conflicts;
     if (!allowOverride || !reason?.trim()) {
       throw new UnprocessableEntityException({
         code: 'SOD_CONFLICT',
-        message: `Permission set creates SoD conflict(s): ${conflicts.map((c) => `${c.ruleId} (${c.dutyA} ✗ ${c.dutyB})`).join('; ')}. To proceed, set allow_sod_override=true with a sod_reason.`,
-        messageTh: 'ชุดสิทธิ์ขัดกับการแบ่งแยกหน้าที่ (SoD) — หากจำเป็นต้องระบุเหตุผลและยืนยันการข้าม',
+        message: `Permission set creates SoD conflict(s): ${conflicts.map((c) => `${c.ruleId} (${c.dutyA} ✗ ${c.dutyB})`).join('; ')}. To proceed, set allow_sod_override=true with a sod_reason — the exception is then routed to a second admin for approval.`,
+        messageTh: 'ชุดสิทธิ์ขัดกับการแบ่งแยกหน้าที่ (SoD) — ต้องระบุเหตุผลและยืนยันการข้าม แล้วส่งให้ผู้ดูแลอีกคนอนุมัติ',
         conflicts,
       });
     }
-    // ITGC-AC-09 evidence (round-2 AUD-SEC-04): persist WHO overrode WHAT and WHY into the
-    // hash-chained audit_log row for this mutation — the log line alone is ephemeral stdout.
-    appendAuditMeta({ sod_override: { username, reason: reason.trim(), rules: conflicts.map((c) => c.ruleId) } });
-    this.logger.warn(`SoD override for "${username}" by reason="${reason}" — conflicts: ${conflicts.map((c) => c.ruleId).join(',')}`);
+    return conflicts;
+  }
+
+  // Stage a SoD-conflicting grant as a PendingApproval exception (G11 two-person control). The grant does
+  // NOT take effect until a DIFFERENT admin approves it (approveException). For a new user the password is
+  // hashed and held here until approval (mirrors signup_requests).
+  private async stageException(p: { isNewUser: boolean; targetUsername: string; role?: string; permissions: string[]; customerName?: string; passwordHash?: string; reason: string; rules: string[]; tenantId?: number | null }, actor: JwtUser) {
+    const reqNo = await this.docNo.nextDaily('AGE');
+    const tenantId = p.tenantId !== undefined ? p.tenantId : await this.tenantIdFor(p.customerName);
+    await this.db.insert(accessGrantExceptions).values({
+      tenantId: tenantId ?? null, reqNo, targetUsername: p.targetUsername, isNewUser: p.isNewUser ? 'true' : 'false',
+      passwordHash: p.passwordHash ?? null, role: p.role ?? null, permissions: JSON.stringify(p.permissions),
+      customerName: p.customerName ?? null, sodRules: p.rules.join(','), reason: p.reason, status: 'PendingApproval', requestedBy: actor.username,
+    });
+    this.logger.warn(`SoD exception ${reqNo} STAGED for "${p.targetUsername}" by "${actor.username}" — rules ${p.rules.join(',')}; awaiting independent approval.`);
+    return { access_exception_req_no: reqNo, status: 'PendingApproval', pending: true, sod_rules: p.rules, target: p.targetUsername, message: 'SoD-conflict grant staged for independent approval by a different admin' };
+  }
+
+  // Apply a user CREATE (shared by the no-conflict create path and an approved exception).
+  private async applyCreate(p: { username: string; password?: string; passwordHash?: string; role?: string; customerName?: string; permissions?: string[] }) {
+    const db = this.db;
+    const [exists] = await db.select({ id: users.id }).from(users).where(eq(users.username, p.username)).limit(1);
+    if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${p.username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
+    const tenantId = await this.tenantIdFor(p.customerName);
+    // Enforce the plan's maxUsers ceiling before inserting (PLAN_USER_LIMIT). Admin principal (tenantId=null)
+    // is cross-tenant HQ — no limit applies.
+    if (tenantId != null) await this.billing.checkUserLimit(tenantId);
+    const hash = p.passwordHash ?? await this.passwords.hash(p.password!);
+    const [u] = await db.insert(users).values({ username: p.username, passwordHash: hash, role: p.role as typeof users.$inferInsert.role, tenantId, mustChangePassword: true }).returning({ id: users.id });
+    if (p.permissions?.length) await db.insert(userPermissions).values(p.permissions.map((perm) => ({ userId: Number(u!.id), perm }))).onConflictDoNothing();
+    return { username: p.username, role: p.role, created: true };
+  }
+
+  // Apply a user UPDATE (shared by the no-conflict update path and an approved exception).
+  private async applyUpdate(u: typeof users.$inferSelect, dto: { role?: string; customer_name?: string; permissions?: string[] }) {
+    const db = this.db;
+    const set: any = {};
+    if (dto.role) set.role = dto.role;
+    if (dto.customer_name !== undefined) set.tenantId = await this.tenantIdFor(dto.customer_name || undefined);
+    // docs/27 R2-2 / AUD-SEC-02 — an authorization change takes effect IMMEDIATELY: bumping tokens_valid_from
+    // rejects every earlier-issued token at the next request so the user re-authenticates with the fresh set.
+    if (dto.role || dto.permissions) set.tokensValidFrom = new Date();
+    if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, u.id));
+    if (dto.permissions) {
+      await db.delete(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
+      if (dto.permissions.length) await db.insert(userPermissions).values(dto.permissions.map((perm) => ({ userId: Number(u.id), perm }))).onConflictDoNothing();
+    }
+    return { username: u.username, updated: true, sessions_revoked: !!(dto.role || dto.permissions) };
   }
 
   // Preventive privilege-escalation guard (ITGC-AC-02 authorization / ITGC-AC-09 SoD-on-provisioning):
@@ -94,17 +140,13 @@ export class AdminUsersService {
     this.assertCanGrantRole(dto.role, actor);
     const [exists] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
     if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
-    this.assertNoSodConflict(username, dto.role, dto.permissions, dto.allow_sod_override, dto.sod_reason);
-    const tenantId = await this.tenantIdFor(dto.customer_name);
-    // Enforce the plan's maxUsers ceiling before inserting (PLAN_USER_LIMIT).
-    // Admin principal (tenantId=null) is cross-tenant HQ — no limit applies.
-    if (tenantId != null) await this.billing.checkUserLimit(tenantId);
-    const hash = await this.passwords.hash(dto.password);
-    const [u] = await db.insert(users).values({ username, passwordHash: hash, role: dto.role as typeof users.$inferInsert.role, tenantId, mustChangePassword: true }).returning({ id: users.id });
-    if (dto.permissions?.length) {
-      await db.insert(userPermissions).values(dto.permissions.map((p) => ({ userId: Number(u!.id), perm: p }))).onConflictDoNothing();
+    // G11: a SoD-conflicting override is staged for a DIFFERENT admin to approve — not applied here.
+    const conflicts = this.sodConflictOrThrow(dto.permissions, dto.allow_sod_override, dto.sod_reason);
+    if (conflicts.length) {
+      return this.stageException({ isNewUser: true, targetUsername: username, role: dto.role, permissions: dto.permissions!, customerName: dto.customer_name, passwordHash: await this.passwords.hash(dto.password), reason: dto.sod_reason!.trim(), rules: conflicts.map((c) => c.ruleId) }, actor);
     }
-    return { username, role: dto.role, created: true };
+    this.logGrandfatheredRoleConflict(username, dto.role);
+    return this.applyCreate({ username, password: dto.password, role: dto.role, customerName: dto.customer_name, permissions: dto.permissions });
   }
 
   async update(username: string, dto: UpdateUserDto, actor: JwtUser) {
@@ -113,22 +155,65 @@ export class AdminUsersService {
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
     this.assertCanGrantRole(dto.role, actor);
-    this.assertNoSodConflict(username, dto.role ?? (u.role as string), dto.permissions, dto.allow_sod_override, dto.sod_reason);
-    const set: any = {};
-    if (dto.role) set.role = dto.role;
-    if (dto.customer_name !== undefined) set.tenantId = await this.tenantIdFor(dto.customer_name || undefined);
-    // docs/27 R2-2 / AUD-SEC-02 — an authorization change takes effect IMMEDIATELY, not at token expiry:
-    // fine-grained permissions ride the JWT claim (guards re-derive only the role live), so narrowing a
-    // user's role/overrides must invalidate their outstanding sessions. Bumping tokens_valid_from makes the
-    // global guard reject every earlier-issued token (same watermark as revokeAllSessions) — the user
-    // re-authenticates and receives freshly resolved permissions. Zero per-request cost.
-    if (dto.role || dto.permissions) set.tokensValidFrom = new Date();
-    if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, u.id));
-    if (dto.permissions) {
-      await db.delete(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
-      if (dto.permissions.length) await db.insert(userPermissions).values(dto.permissions.map((p) => ({ userId: Number(u.id), perm: p }))).onConflictDoNothing();
+    // G11: a SoD-conflicting override is staged for a DIFFERENT admin to approve — not applied here.
+    const conflicts = this.sodConflictOrThrow(dto.permissions, dto.allow_sod_override, dto.sod_reason);
+    if (conflicts.length) {
+      return this.stageException({ isNewUser: false, targetUsername: username, role: dto.role, permissions: dto.permissions!, customerName: dto.customer_name, reason: dto.sod_reason!.trim(), rules: conflicts.map((c) => c.ruleId), tenantId: u.tenantId ?? null }, actor);
     }
-    return { username, updated: true, sessions_revoked: !!(dto.role || dto.permissions) };
+    this.logGrandfatheredRoleConflict(username, dto.role ?? (u.role as string));
+    return this.applyUpdate(u, { role: dto.role, customer_name: dto.customer_name, permissions: dto.permissions });
+  }
+
+  // ── ITGC-AC-09 (audit G11): two-person control over a SoD exception ──────────
+  // List staged SoD-exception requests (the pending maker-checker queue + history).
+  async listExceptions(status?: string) {
+    const db = this.db;
+    const rows = await db.select().from(accessGrantExceptions)
+      .where(status ? eq(accessGrantExceptions.status, status) : undefined)
+      .orderBy(desc(accessGrantExceptions.id)).limit(200);
+    return {
+      exceptions: rows.map((r: any) => ({
+        req_no: r.reqNo, target_username: r.targetUsername, is_new_user: r.isNewUser === 'true', role: r.role,
+        permissions: r.permissions ? JSON.parse(r.permissions) : [], customer_name: r.customerName,
+        sod_rules: (r.sodRules ?? '').split(',').filter(Boolean), reason: r.reason, status: r.status,
+        requested_by: r.requestedBy, requested_at: r.requestedAt, approved_by: r.approvedBy, approved_at: r.approvedAt, reject_reason: r.rejectReason,
+      })),
+      count: rows.length,
+    };
+  }
+
+  private async pendingException(reqNo: string) {
+    const [ex] = await this.db.select().from(accessGrantExceptions).where(and(eq(accessGrantExceptions.reqNo, reqNo), eq(accessGrantExceptions.status, 'PendingApproval'))).limit(1);
+    if (!ex) throw new NotFoundException({ code: 'NOT_PENDING', message: `No access exception pending approval for ${reqNo}`, messageTh: 'ไม่มีคำขอข้ามสิทธิ์ที่รออนุมัติ' });
+    return ex;
+  }
+
+  // Approve a staged SoD exception — the checker must differ from the requester AND from the affected user
+  // (a grantor cannot self-authorize, and no one can approve granting themselves). Applies the grant on approval.
+  async approveException(reqNo: string, actor: JwtUser) {
+    const db = this.db;
+    const ex = await this.pendingException(reqNo);
+    if (ex.requestedBy && ex.requestedBy === actor.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an access exception you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติคำขอข้ามสิทธิ์ของตนเองได้' });
+    if (ex.targetUsername === actor.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an access exception that grants yourself', messageTh: 'แยกหน้าที่: อนุมัติการให้สิทธิ์แก่ตนเองไม่ได้' });
+    const permissions: string[] = ex.permissions ? JSON.parse(ex.permissions) : [];
+    // ITGC-AC-09 evidence: persist WHO requested, WHO approved, WHY, and the rules into the hash-chained audit row.
+    appendAuditMeta({ sod_override: { username: ex.targetUsername, requested_by: ex.requestedBy, approved_by: actor.username, reason: ex.reason, rules: (ex.sodRules ?? '').split(',').filter(Boolean) } });
+    const applied = ex.isNewUser === 'true'
+      ? await this.applyCreate({ username: ex.targetUsername, passwordHash: ex.passwordHash ?? undefined, role: ex.role ?? undefined, customerName: ex.customerName ?? undefined, permissions })
+      : await (async () => {
+          const [u] = await db.select().from(users).where(eq(users.username, ex.targetUsername)).limit(1);
+          if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
+          return this.applyUpdate(u, { role: ex.role ?? undefined, customer_name: ex.customerName ?? undefined, permissions });
+        })();
+    await db.update(accessGrantExceptions).set({ status: 'Approved', approvedBy: actor.username, approvedAt: new Date() }).where(eq(accessGrantExceptions.id, Number(ex.id)));
+    return { req_no: reqNo, status: 'Approved', approved_by: actor.username, requested_by: ex.requestedBy, target: ex.targetUsername, ...applied };
+  }
+
+  async rejectException(reqNo: string, actor: JwtUser, reason?: string) {
+    const db = this.db;
+    const ex = await this.pendingException(reqNo);
+    await db.update(accessGrantExceptions).set({ status: 'Rejected', approvedBy: actor.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(accessGrantExceptions.id, Number(ex.id)));
+    return { req_no: reqNo, status: 'Rejected', rejected_by: actor.username };
   }
 
   async resetPassword(username: string, newPassword: string) {
