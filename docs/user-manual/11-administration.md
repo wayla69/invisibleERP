@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.12** · *v0.12 (2026-07-05): §2.2 — granting an SoD-conflicting set with a justified override is now a two-person maker-checker; it stages a **Pending SoD-exception** request that a **different** admin (≠ requester, ≠ the affected user) must approve/reject (self-approval → `SOD_VIOLATION`), with the who/why/rules recorded in the audit trail (audit gap G11, part b).* · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+**Status: DRAFT v0.13** · *v0.13 (2026-07-05): §8 — a bulk master-data import that **sets** a financially-sensitive field (customer/vendor credit limit, vendor payment term, price-list price, promotion discount) is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve before anything is written (self-approval → `SOD_VIOLATION`); ordinary imports are unaffected (audit gaps G5+G8; strengthens SoD R02/R09/R10/R13).* · *v0.12 (2026-07-05): §2.2 — granting an SoD-conflicting set with a justified override is now a two-person maker-checker; it stages a **Pending SoD-exception** request that a **different** admin (≠ requester, ≠ the affected user) must approve/reject (self-approval → `SOD_VIOLATION`), with the who/why/rules recorded in the audit trail (audit gap G11, part b).* · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -331,6 +331,20 @@ before committing, and bad rows never silently corrupt your data.
 
 > **Append vs Replace:** *Append* adds new records and skips existing keys.
 > *Replace* (only where allowed) wipes the current data first — use with care.
+
+> **Sensitive money fields need a second person to approve (maker-checker).** If your
+> import **sets** a financially-sensitive field — a **customer or vendor credit limit**,
+> a **vendor payment term**, a **price-list price**, or a **promotion discount** — the
+> import is **not written straight away.** Instead it is **submitted for approval**: you'll
+> see a message that it's *pending* (with a request number and which sensitive field(s) it
+> changes), and **no data changes until a second authorised person approves it.** That
+> approver must have the **exec / approvals** permission and must be **someone other than
+> you** — if you try to approve your own import the system refuses with **`SOD_VIOLATION`**.
+> Once approved, the rows are written to your company's data; the request can also be
+> **rejected**, which discards the batch. Ordinary imports that don't touch those money
+> fields — items, contacts, tax codes, plain menu prices — are **unaffected** and still
+> import immediately. This is the two-person rule that stops one person bulk-changing
+> fraud-relevant figures on their own (SoD rules R02 / R09 / R10 / R13).
 
 ---
 

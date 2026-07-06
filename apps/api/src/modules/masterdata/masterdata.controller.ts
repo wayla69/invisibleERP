@@ -18,6 +18,7 @@ export const ImportBody = z.object({
   skip_errors: z.boolean().optional(),
 });
 export type ImportBodyT = z.infer<typeof ImportBody>;
+const RejectBody = z.object({ reason: z.string().max(500).optional() });
 
 @Controller('api/admin/master-data')
 @Permissions('masterdata')
@@ -28,6 +29,16 @@ export class MasterDataController {
   entities() {
     return this.svc.entities();
   }
+
+  // ── Sensitive-import maker-checker (audit G5/G7/G8) — declared before the `:entity/*` routes so these
+  //    literal paths win over the `:entity` param. An import that sets a financially-sensitive field
+  //    (credit limits, vendor terms, prices, promo discounts) is staged here; a DISTINCT user approves it. ──
+  @Get('import-approvals') @Permissions('masterdata', 'exec', 'approvals')
+  pendingBatches(@Query('status') status?: string) { return this.svc.listPendingBatches(status); }
+  @Post('import-approvals/:reqNo/approve') @Permissions('exec', 'approvals')
+  approveBatch(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveBatch(reqNo, u); }
+  @Post('import-approvals/:reqNo/reject') @Permissions('exec', 'approvals')
+  rejectBatch(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectBatch(reqNo, u, b.reason); }
 
   @Get(':entity/export')
   async export(@Param('entity') entity: string, @Query('format') format: string | undefined, @Res() reply: FastifyReply) {

@@ -83,12 +83,17 @@ export function MasterIo({ entityKey, base = 'admin', onImported }: { entityKey:
     if (!ent || !source) return;
     setMsg(''); setBusy('commit');
     try {
-      const r = await api<{ status: string; imported: number; skipped: number; errors: ImpErr[] }>(
+      const r = await api<{ status: string; imported: number; skipped: number; errors: ImpErr[]; pending?: boolean; req_no?: string; sensitive_fields?: string[] }>(
         `${root}/${ent.key}/import/checked`,
         { method: 'POST', body: JSON.stringify({ ...source, mode, skip_errors: skipErrors }) },
       );
       if (r.status === 'invalid') {
         setMsg(`❌ ${t('st.md.commit_errors', { n: r.errors.length })}`);
+      } else if (r.status === 'PendingApproval') {
+        // Maker-checker (audit G5/G7/G8): the import sets a financially-sensitive field, so it is staged
+        // for an independent approver instead of committing — surface that, don't imply it was written.
+        setMsg(`⏳ ${t('st.md.staged_for_approval', { fields: (r.sensitive_fields ?? []).join(', '), req: r.req_no ?? '' })}`);
+        setReport(null); setSource(null);
       } else {
         setMsg(`✅ ${t('st.md.imported', { n: r.imported, entity: ent.label_th })}${r.skipped ? ` · ${t('st.md.skipped_suffix', { n: r.skipped })}` : ''}`);
         setReport(null); setSource(null); onImported?.();

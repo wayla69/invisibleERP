@@ -1,7 +1,10 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
+import { and, eq, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { masterdataImportBatches } from '../../database/schema';
 import { fx } from '../../database/queries';
+import { DocNumberService } from '../../common/doc-number.service';
 import type { JwtUser } from '../../common/decorators';
 import { MASTER_REGISTRY, findEntity, type MdEntity, type MdCol, type MdType } from './master-registry';
 
@@ -10,7 +13,34 @@ const HEADER_FONT = 'FFFFFFFF';
 
 @Injectable()
 export class MasterDataService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly docNo: DocNumberService,
+  ) {}
+
+  // Financially-sensitive headers (audit G5/G7/G8) actually SET by this batch — a non-empty value in any row
+  // for a column flagged `sensitive` in the registry. If any are touched, the import is staged for approval.
+  private sensitiveTouched(e: MdEntity, rows: Record<string, any>[]): string[] {
+    const sens = e.cols.filter((c) => c.sensitive).map((c) => c.header);
+    if (!sens.length) return [];
+    const hit = new Set<string>();
+    for (const raw of rows) for (const h of sens) { const v = raw[h]; if (v != null && String(v).trim() !== '') hit.add(h); }
+    return sens.filter((h) => hit.has(h));
+  }
+
+  // Stage a sensitive import batch (maker; NO write to the entity table until a distinct user approves it).
+  private async stageImportBatch(e: MdEntity, mode: 'append' | 'replace', rows: Record<string, any>[], user: JwtUser, sensitiveFields: string[]) {
+    const reqNo = await this.docNo.nextDaily('MDI');
+    await this.db.insert(masterdataImportBatches).values({
+      tenantId: user.tenantId ?? null, reqNo, entityKey: e.key, mode, rows: JSON.stringify(rows),
+      rowCount: rows.length, sensitiveFields: sensitiveFields.join(','), status: 'PendingApproval', requestedBy: user.username,
+    });
+    return {
+      entity: e.key, mode, status: 'PendingApproval' as const, pending: true, req_no: reqNo,
+      sensitive_fields: sensitiveFields, row_count: rows.length,
+      message: `Import sets financially-sensitive field(s) [${sensitiveFields.join(', ')}] — staged for independent approval`,
+    };
+  }
 
   entities() {
     return {
@@ -128,6 +158,10 @@ export class MasterDataService {
       values.push(o);
     });
 
+    // Maker-checker (audit G5/G7/G8): a batch that sets a financially-sensitive field is staged for approval.
+    const sensitive = this.sensitiveTouched(e, rows);
+    if (sensitive.length) return this.stageImportBatch(e, mode, rows, user, sensitive);
+
     const db = this.db;
     let count = 0;
     await db.transaction(async (tx: any) => {
@@ -197,6 +231,23 @@ export class MasterDataService {
 
   async importChecked(key: string, mode: 'append' | 'replace', rows: Record<string, any>[], user: JwtUser, skipErrors: boolean) {
     const e = this.entOrThrow(key);
+    // Maker-checker (audit G5/G7/G8): if the batch sets a financially-sensitive field, validate it (so a
+    // broken batch is rejected up-front, not staged) then STAGE it for a distinct approver instead of committing.
+    const sensitive = this.sensitiveTouched(e, rows);
+    if (sensitive.length) {
+      const v = this.validateCore(e, mode, rows, user);
+      const blocking = v.errors.some((x) => x.row === 0);
+      if (blocking || (v.invalid > 0 && !skipErrors)) {
+        return { entity: key, mode, status: 'invalid' as const, total: v.total, imported: 0, skipped: v.total, errors: v.errors };
+      }
+      return this.stageImportBatch(e, mode, rows, user, sensitive);
+    }
+    return this.commitChecked(e, mode, rows, user, skipErrors);
+  }
+
+  // The actual validated commit (shared by the non-sensitive importChecked path and an APPROVED staged batch).
+  private async commitChecked(e: MdEntity, mode: 'append' | 'replace', rows: Record<string, any>[], user: JwtUser, skipErrors: boolean) {
+    const key = e.key;
     const v = this.validateCore(e, mode, rows, user);
     const blocking = v.errors.some((x) => x.row === 0); // entity/columns/replace problems can't be skipped
     if (blocking || (v.invalid > 0 && !skipErrors)) {
@@ -219,6 +270,46 @@ export class MasterDataService {
     const allErrors = [...v.errors, ...extra];
     const status: 'partial' | 'success' = allErrors.length ? 'partial' : 'success';
     return { entity: key, mode, status, total: v.total, imported, skipped: v.total - imported, errors: allErrors };
+  }
+
+  // ── Sensitive-import maker-checker: queue / approve / reject (audit G5/G7/G8) ──
+  async listPendingBatches(status?: string) {
+    const rows = await this.db.select().from(masterdataImportBatches)
+      .where(status ? eq(masterdataImportBatches.status, status) : eq(masterdataImportBatches.status, 'PendingApproval'))
+      .orderBy(desc(masterdataImportBatches.id)).limit(200);
+    return {
+      batches: rows.map((r: any) => ({
+        req_no: r.reqNo, entity: r.entityKey, mode: r.mode, row_count: r.rowCount,
+        sensitive_fields: (r.sensitiveFields ?? '').split(',').filter(Boolean), status: r.status,
+        requested_by: r.requestedBy, requested_at: r.requestedAt, approved_by: r.approvedBy, approved_at: r.approvedAt, reject_reason: r.rejectReason,
+      })),
+      count: rows.length,
+    };
+  }
+
+  private async pendingBatch(reqNo: string) {
+    const [b] = await this.db.select().from(masterdataImportBatches).where(and(eq(masterdataImportBatches.reqNo, reqNo), eq(masterdataImportBatches.status, 'PendingApproval'))).limit(1);
+    if (!b) throw new NotFoundException({ code: 'NOT_PENDING', message: `No import batch pending approval for ${reqNo}`, messageTh: 'ไม่มีชุดข้อมูลนำเข้าที่รออนุมัติ' });
+    return b;
+  }
+
+  // Approve a staged sensitive import — a DIFFERENT user than the requester (self-approval → 403 SOD_VIOLATION)
+  // commits it. The rows are re-applied in the requesting user's tenant context so they land in the right tenant.
+  async approveBatch(reqNo: string, user: JwtUser) {
+    const b = await this.pendingBatch(reqNo);
+    if (b.requestedBy && b.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an import you requested', messageTh: 'ผู้ขอนำเข้าอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    const e = this.entOrThrow(b.entityKey);
+    const rows = JSON.parse(b.rows) as Record<string, any>[];
+    const asRequester = { username: b.requestedBy ?? user.username, tenantId: b.tenantId ?? null } as JwtUser;
+    const result = await this.commitChecked(e, b.mode as 'append' | 'replace', rows, asRequester, true);
+    await this.db.update(masterdataImportBatches).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date(), result: JSON.stringify(result) }).where(eq(masterdataImportBatches.id, Number(b.id)));
+    return { req_no: reqNo, status: 'Approved' as const, approved_by: user.username, requested_by: b.requestedBy, entity: e.key, mode: b.mode, result };
+  }
+
+  async rejectBatch(reqNo: string, user: JwtUser, reason?: string) {
+    const b = await this.pendingBatch(reqNo);
+    await this.db.update(masterdataImportBatches).set({ status: 'Rejected', approvedBy: user.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(masterdataImportBatches.id, Number(b.id)));
+    return { req_no: reqNo, status: 'Rejected', rejected_by: user.username };
   }
 }
 

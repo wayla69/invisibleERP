@@ -15,6 +15,10 @@ export interface MdCol {
   // Allowed values for an enum column. Matched case-insensitively and stored lower-cased; a value outside
   // the set is a per-row BAD_ENUM error instead of a hard DB failure inside the import transaction.
   enumVals?: string[];
+  // Financially-sensitive field (maker-checker audit G5/G7/G8): a bulk import that sets/changes this column
+  // is a fraud-relevant master-data edit (credit limits R09, vendor terms R02, prices/discounts R10), so the
+  // whole batch is STAGED for an independent approver instead of committing directly.
+  sensitive?: boolean;
 }
 export interface MdEntity {
   key: string;
@@ -83,7 +87,7 @@ export const MASTER_REGISTRY: MdEntity[] = [
     cols: [
       C('Code', 'code'), C('Name', 'name'), C('Contact_Name', 'contactName'),
       C('Phone', 'phone'), C('Email', 'email'), C('Tax_ID', 'taxId'), C('Address', 'address'),
-      C('Credit_Term', 'creditTerm'), C('Credit_Limit', 'creditLimit', 'num'),
+      C('Credit_Term', 'creditTerm'), C('Credit_Limit', 'creditLimit', 'num', { sensitive: true }),
     ],
   },
   {
@@ -94,8 +98,8 @@ export const MASTER_REGISTRY: MdEntity[] = [
       C('Vendor_Code', 'vendorCode'), C('Name', 'name'), C('Is_Supplier', 'isSupplier', 'bool'),
       C('Is_Creditor', 'isCreditor', 'bool'), C('Contact', 'contact'), C('Phone', 'phone'),
       C('Email', 'email'), C('Address', 'address'), C('Tax_ID', 'taxId'),
-      C('Payment_Terms', 'paymentTerms'), C('Lead_Time_Days', 'leadTimeDays', 'int'),
-      C('Credit_Limit', 'creditLimit', 'num'), C('Category', 'category'), C('Active', 'active', 'bool'),
+      C('Payment_Terms', 'paymentTerms', 'str', { sensitive: true }), C('Lead_Time_Days', 'leadTimeDays', 'int'),
+      C('Credit_Limit', 'creditLimit', 'num', { sensitive: true }), C('Category', 'category'), C('Active', 'active', 'bool'),
     ],
   },
   {
@@ -116,8 +120,8 @@ export const MASTER_REGISTRY: MdEntity[] = [
     required: ['Item_ID', 'Special_Price'],
     cols: [
       C('List_Name', 'listName'), C('Item_ID', 'itemId'), C('Item_Description', 'itemDescription'),
-      C('Base_Price', 'basePrice', 'num'), C('Special_Price', 'specialPrice', 'num'),
-      C('Discount_Pct', 'discountPct', 'num'), C('Min_Qty', 'minQty', 'num'),
+      C('Base_Price', 'basePrice', 'num', { sensitive: true }), C('Special_Price', 'specialPrice', 'num', { sensitive: true }),
+      C('Discount_Pct', 'discountPct', 'num', { sensitive: true }), C('Min_Qty', 'minQty', 'num'),
       C('Valid_From', 'validFrom', 'date'), C('Valid_To', 'validTo', 'date'),
     ],
   },
@@ -128,8 +132,8 @@ export const MASTER_REGISTRY: MdEntity[] = [
     cols: [
       C('Promo_ID', 'promoId'), C('Promo_Name', 'promoName'), C('Promo_Type', 'promoType'),
       C('Start_Date', 'startDate', 'date'), C('End_Date', 'endDate', 'date'),
-      C('Min_Amount', 'minAmount', 'num'), C('Discount_Pct', 'discountPct', 'num'),
-      C('Discount_Amt', 'discountAmt', 'num'), C('Active', 'active', 'bool'),
+      C('Min_Amount', 'minAmount', 'num'), C('Discount_Pct', 'discountPct', 'num', { sensitive: true }),
+      C('Discount_Amt', 'discountAmt', 'num', { sensitive: true }), C('Active', 'active', 'bool'),
     ],
   },
   {
