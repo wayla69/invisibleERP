@@ -207,7 +207,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-145 | Credit Manager places a manual hold | REV-08, R09 | 01 §7, §9 |
 | UAT-O2C-146 | Credit check denies a manually-held customer (CREDIT_HOLD) | REV-08 | 01 §9, §13 |
 | UAT-O2C-147 | Self-release blocked, second person releases (SOD_SELF_RELEASE) | REV-08, R09 | 01 §7, §9, §13 |
-| UAT-O2C-148 | Credit-limit change is audited | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-148 | Credit-limit change is STAGED for approval (ceiling not moved) | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-247 | Credit-limit change — requester cannot self-approve (SOD_VIOLATION) | REV-08, R09 | 01 §7, §9, §13 |
+| UAT-O2C-248 | Credit-limit change — a distinct approver applies it (→ 50000) | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-249 | Credit-change audit shows the limit_change old→new | REV-08, R09 | 01 §7, §9 |
 | UAT-O2C-149 | Customer statement of account (running balance) | REV-12 | 01 §7 |
 | UAT-O2C-150 | Customer statement — multi-currency (base + filter) | REV-12 | 01 §7 |
 | UAT-O2C-151 | Register quick sale (tap → cash → receipt + drawer) | Feature (POS register) | 01 §7 |

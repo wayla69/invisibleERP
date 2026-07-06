@@ -191,15 +191,25 @@ action on an account. Every action is written to a **credit-events audit trail**
   surfaced on the credit-status view.
 - **Release a hold** (`POST /api/finance/ar/credit-release {tenant_id}`): clears the
   hold. An account that isn't on hold returns `NOT_ON_HOLD`.
-- **Change a credit limit** (`POST /api/finance/ar/credit-limit {tenant_id,
-  new_limit, reason}`): updates the limit and logs the old → new value.
+- **Request a credit-limit change** (`POST /api/finance/ar/credit-limit {tenant_id,
+  new_limit, reason}`): this **no longer changes the limit on its own** — it **stages a
+  pending request** (you get back a `req_no` and `status: PendingApproval`) and logs
+  the requested old → new value. The customer's ceiling does **not** move yet.
+- **Approve (or reject) the pending change** — a **second authorised user** (`approvals`
+  / `exec`), who must be **different from the requester**, works the **Pending
+  credit-limit approvals** queue on the `/finance/credit-hold` screen and clicks
+  **Approve** (`POST /api/finance/ar/credit-limit/:reqNo/approve`) or **Reject**
+  (`…/:reqNo/reject`). **Only on approval** does the new limit take effect; the audit
+  entry then flips to *Approved* and records who approved it and when. If the requester
+  tries to approve their own change it is blocked with `SOD_VIOLATION`.
 
 > **Note — separation of duties:** the **credit limit** is master data maintained by
 > the *Credit Manager*, kept separate from order entry, so nobody can raise a limit
-> and then sell against it (rule R09). A **release also requires a second person**:
-> the user who *placed* a hold cannot lift their own hold (`SOD_SELF_RELEASE`) — it
-> takes an approver (`approvals` / `exec`), so a single person can't both block and
-> unblock an account.
+> and then sell against it (rule R09). Both a **credit-limit change** and a **hold
+> release** now require **two people**: the user who *requests* a limit change cannot
+> approve it themselves (`SOD_VIOLATION`), and the user who *placed* a hold cannot lift
+> their own hold (`SOD_SELF_RELEASE`) — each takes a second approver (`approvals` /
+> `exec`), so a single person can't both raise/block and apply/unblock an account.
 
 ### A5. Allowance for doubtful accounts (provision for bad debts)
 

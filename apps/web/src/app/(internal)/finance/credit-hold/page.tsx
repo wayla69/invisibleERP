@@ -85,15 +85,33 @@ export default function CreditHoldPage() {
     onError: (e: any) => notifyError(e?.message ?? t('fnx.credhold.err_release')),
   });
 
-  const changeLimit = useMutation<{ customer: string; old_limit: number; new_limit: number }, Error, { tenant_id: number; new_limit: number; reason?: string }>({
-    mutationFn: (b) => api('/api/finance/ar/credit-limit', { method: 'POST', body: JSON.stringify(b) }) as Promise<{ customer: string; old_limit: number; new_limit: number }>,
+  // REV-08 (audit G7): a credit-limit change is staged for an independent approver — reflect the pending outcome.
+  const changeLimit = useMutation<{ customer: string; new_limit: number; pending?: boolean }, Error, { tenant_id: number; new_limit: number; reason?: string }>({
+    mutationFn: (b) => api('/api/finance/ar/credit-limit', { method: 'POST', body: JSON.stringify(b) }) as Promise<{ customer: string; new_limit: number; pending?: boolean }>,
     onSuccess: (r) => {
-      notifySuccess(t('fnx.credhold.toast_limit', { customer: r.customer, oldLimit: baht(r.old_limit), newLimit: baht(r.new_limit) }));
+      notifySuccess(t('fnx.credhold.toast_limit_pending', { customer: r.customer, newLimit: baht(r.new_limit) }));
       setLimitDialog(null); setNewLimit(''); setLimitReason('');
+      qc.invalidateQueries({ queryKey: ['credit-limit-pending'] });
       refresh();
     },
     onError: (e: any) => notifyError(e?.message ?? t('fnx.credhold.err_limit')),
   });
+
+  // Pending credit-limit approvals (a change must be approved by a different user).
+  const pendingLimits = useQuery<{ requests: { req_no: string; customer: string; old_limit: number; new_limit: number; reason: string | null; requested_by: string }[] }>({
+    queryKey: ['credit-limit-pending'], queryFn: () => api('/api/finance/ar/credit-limit/pending'),
+  });
+  const approveLimit = useMutation<{ customer: string; new_limit: number }, Error, string>({
+    mutationFn: (reqNo) => api(`/api/finance/ar/credit-limit/${reqNo}/approve`, { method: 'POST' }) as Promise<{ customer: string; new_limit: number }>,
+    onSuccess: (r) => { notifySuccess(t('fnx.credhold.toast_limit_approved', { customer: r.customer, newLimit: baht(r.new_limit) })); qc.invalidateQueries({ queryKey: ['credit-limit-pending'] }); refresh(); },
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.credhold.err_limit')),
+  });
+  const rejectLimit = useMutation<unknown, Error, string>({
+    mutationFn: (reqNo) => api(`/api/finance/ar/credit-limit/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => { notifySuccess(t('fnx.credhold.toast_limit_rejected')); qc.invalidateQueries({ queryKey: ['credit-limit-pending'] }); },
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.credhold.err_limit')),
+  });
+  const pendingLimitRows = pendingLimits.data?.requests ?? [];
 
   const data = positions.data;
   const totalExposure = (data?.positions ?? []).reduce((a, p) => a + p.exposure, 0);
@@ -107,6 +125,30 @@ export default function CreditHoldPage() {
         title={t('fnx.credhold.title')}
         description={t('fnx.credhold.desc')}
       />
+
+      {/* REV-08 (audit G7): credit-limit changes staged for an independent approver. */}
+      {pendingLimitRows.length > 0 && (
+        <Card className="border-amber-300 dark:border-amber-700">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base"><ShieldAlert className="size-4" /> {t('fnx.credhold.pending_title')}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-sm text-muted-foreground">{t('fnx.credhold.pending_desc')}</p>
+            {pendingLimitRows.map((r) => (
+              <div key={r.req_no} className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 p-2.5 text-sm">
+                <span className="font-medium">{r.customer}</span>
+                <span className="text-muted-foreground">{baht(r.old_limit)} → <span className="font-medium text-foreground">{baht(r.new_limit)}</span></span>
+                {r.reason && <span className="text-xs text-muted-foreground">· {r.reason}</span>}
+                <Badge variant="secondary" className="text-xs">{r.requested_by}</Badge>
+                <div className="ml-auto flex gap-2">
+                  <Button size="sm" disabled={approveLimit.isPending} onClick={() => approveLimit.mutate(r.req_no)}>{t('fnx.credhold.btn_approve')}</Button>
+                  <Button size="sm" variant="outline" disabled={rejectLimit.isPending} onClick={() => rejectLimit.mutate(r.req_no)}>{t('fnx.credhold.btn_reject')}</Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard

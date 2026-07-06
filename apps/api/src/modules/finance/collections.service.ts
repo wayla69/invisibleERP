@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { sql, eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { arInvoices, arDunningLog, creditEvents, tenants } from '../../database/schema';
@@ -295,15 +295,48 @@ export class CollectionsService {
     return { tenant_id: tenantId, customer: t.code, credit_hold: false, by: user.username };
   }
 
-  // Change a customer's credit limit, recording old→new for the credit-change report.
+  // Request a customer credit-limit change (audit G7 / REV-08, SoD R09). A limit change — raise the ceiling,
+  // then sell on credit — is fraud-relevant, so it is no longer applied by the requester: it is STAGED as a
+  // PendingApproval credit_events row (recording old→new for the credit-change report) and applied only when
+  // a DIFFERENT user approves it via approveLimitChange (self-approval → 403 SOD_VIOLATION).
   async changeLimit(tenantId: number, newLimit: number, reason: string | undefined, user: JwtUser) {
     const db = this.db;
     const [t] = await db.select({ id: tenants.id, code: tenants.code, creditLimit: tenants.creditLimit }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
     const oldLimit = n(t.creditLimit);
-    await db.update(tenants).set({ creditLimit: String(round2(newLimit)) }).where(eq(tenants.id, tenantId));
-    await db.insert(creditEvents).values({ tenantId, eventType: 'limit_change', oldLimit: String(oldLimit), newLimit: String(round2(newLimit)), reason: reason ?? null, actionedBy: user.username });
-    return { tenant_id: tenantId, customer: t.code, old_limit: oldLimit, new_limit: round2(newLimit), by: user.username };
+    const reqNo = await this.docNo.nextDaily('CUS');
+    await db.insert(creditEvents).values({ tenantId, eventType: 'limit_change', oldLimit: String(oldLimit), newLimit: String(round2(newLimit)), reason: reason ?? null, actionedBy: user.username, status: 'PendingApproval', reqNo });
+    return { tenant_id: tenantId, customer: t.code, old_limit: oldLimit, new_limit: round2(newLimit), req_no: reqNo, status: 'PendingApproval', pending: true, requested_by: user.username };
+  }
+
+  // Approve a staged credit-limit change — a DIFFERENT user than the requester applies the new limit
+  // (self-approval → 403 SOD_VIOLATION). Only on approval does the customer's ceiling actually move.
+  async approveLimitChange(reqNo: string, user: JwtUser) {
+    const db = this.db;
+    const [ev] = await db.select().from(creditEvents).where(and(eq(creditEvents.reqNo, reqNo), eq(creditEvents.status, 'PendingApproval'))).limit(1);
+    if (!ev) throw new NotFoundException({ code: 'NOT_PENDING', message: `No credit-limit change pending approval for ${reqNo}`, messageTh: 'ไม่มีคำขอเปลี่ยนวงเงินที่รออนุมัติ' });
+    if (ev.actionedBy && ev.actionedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a credit-limit change you requested', messageTh: 'ผู้ขอเปลี่ยนวงเงินอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    const newLimit = round2(n(ev.newLimit));
+    await db.update(tenants).set({ creditLimit: String(newLimit) }).where(eq(tenants.id, Number(ev.tenantId)));
+    await db.update(creditEvents).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(creditEvents.id, Number(ev.id)));
+    const [t] = await db.select({ code: tenants.code }).from(tenants).where(eq(tenants.id, Number(ev.tenantId))).limit(1);
+    return { req_no: reqNo, tenant_id: Number(ev.tenantId), customer: t?.code ?? null, old_limit: n(ev.oldLimit), new_limit: newLimit, status: 'Approved', approved_by: user.username, requested_by: ev.actionedBy };
+  }
+
+  async rejectLimitChange(reqNo: string, user: JwtUser, reason?: string) {
+    const db = this.db;
+    const [ev] = await db.select().from(creditEvents).where(and(eq(creditEvents.reqNo, reqNo), eq(creditEvents.status, 'PendingApproval'))).limit(1);
+    if (!ev) throw new NotFoundException({ code: 'NOT_PENDING', message: `No credit-limit change pending approval for ${reqNo}`, messageTh: 'ไม่มีคำขอเปลี่ยนวงเงินที่รออนุมัติ' });
+    await db.update(creditEvents).set({ status: 'Rejected', approvedBy: user.username, approvedAt: new Date(), reason: reason ?? ev.reason }).where(eq(creditEvents.id, Number(ev.id)));
+    return { req_no: reqNo, status: 'Rejected', rejected_by: user.username };
+  }
+
+  async listPendingLimitChanges() {
+    const db = this.db;
+    const rows = await db.select({ reqNo: creditEvents.reqNo, tenantId: creditEvents.tenantId, code: tenants.code, oldLimit: creditEvents.oldLimit, newLimit: creditEvents.newLimit, reason: creditEvents.reason, requestedBy: creditEvents.actionedBy, requestedAt: creditEvents.createdAt })
+      .from(creditEvents).leftJoin(tenants, eq(creditEvents.tenantId, tenants.id))
+      .where(and(eq(creditEvents.eventType, 'limit_change'), eq(creditEvents.status, 'PendingApproval'))).orderBy(desc(creditEvents.id)).limit(200);
+    return { requests: rows.map((r: any) => ({ req_no: r.reqNo, tenant_id: Number(r.tenantId), customer: r.code, old_limit: n(r.oldLimit), new_limit: n(r.newLimit), reason: r.reason, requested_by: r.requestedBy, requested_at: r.requestedAt })), count: rows.length };
   }
 
   // Credit-change audit for a customer (holds, releases, limit changes) — newest first.

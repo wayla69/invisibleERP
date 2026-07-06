@@ -300,7 +300,14 @@ async function main() {
   ok('Self-release of own hold blocked (SoD)', selfRel.status === 400 && selfRel.json?.error?.code === 'SOD_SELF_RELEASE', `st=${selfRel.status} code=${selfRel.json?.error?.code}`);
   const rel = await inj('POST', '/api/finance/ar/credit-release', mgr2, { tenant_id: cust3, reason: 'Approved release' });
   ok('Independent approver releases the hold', rel.json?.credit_hold === false, JSON.stringify(rel.json));
-  await inj('POST', '/api/finance/ar/credit-limit', admin, { tenant_id: cust3, new_limit: 50000, reason: 'Annual review' });
+  // REV-08 (audit G7): a credit-limit change is maker-checker — staged PendingApproval; the requester
+  // cannot self-approve; a distinct user (approvals/exec) applies it. The ceiling moves only on approval.
+  const climReq = await inj('POST', '/api/finance/ar/credit-limit', admin, { tenant_id: cust3, new_limit: 50000, reason: 'Annual review' });
+  ok('G7: credit-limit change staged PendingApproval (not applied yet)', climReq.json?.pending === true && !!climReq.json?.req_no && climReq.json?.new_limit === 50000, JSON.stringify({ p: climReq.json?.pending, r: climReq.json?.req_no }));
+  const climSelf = await inj('POST', `/api/finance/ar/credit-limit/${climReq.json?.req_no}/approve`, admin);
+  ok('G7: requester cannot approve own credit-limit change → 403 SOD_VIOLATION', climSelf.status === 403 && climSelf.json?.error?.code === 'SOD_VIOLATION', `${climSelf.status} ${climSelf.json?.error?.code}`);
+  const climAppr = await inj('POST', `/api/finance/ar/credit-limit/${climReq.json?.req_no}/approve`, mgr2);
+  ok('G7: a distinct approver applies the credit-limit change (→ 50000)', climAppr.status === 200 || climAppr.status === 201 ? climAppr.json?.status === 'Approved' && climAppr.json?.new_limit === 50000 && climAppr.json?.approved_by === 'mgr' : false, JSON.stringify({ st: climAppr.status, nl: climAppr.json?.new_limit }));
   const ce = (await inj('GET', `/api/finance/ar/credit-events?tenant_id=${cust3}`, admin)).json;
   const types = (ce.events ?? []).map((e: any) => e.event_type);
   const lc = (ce.events ?? []).find((e: any) => e.event_type === 'limit_change');

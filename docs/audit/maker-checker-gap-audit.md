@@ -254,6 +254,13 @@ Gap discussion under "Cross-cutting risk" below.
 - **Related:** SoD R09.
 - **Remediation:** Dedicated `request/approve` for credit-limit changes with a distinct credit-manager
   approver; treat as a sub-case of G5 remediation.
+- **Status: ✅ REMEDIATED (2026-07-05).** `changeLimit` (`POST /api/finance/ar/credit-limit`, `crm`/`exec`)
+  now **stages** the change as a `PendingApproval` `credit_events` row (migration **0261**) — the ceiling
+  does **not** move until a **distinct** user approves it via `POST …/credit-limit/:reqNo/approve`
+  (`approvals`/`exec`; self-approval → `403 SOD_VIOLATION`), mirroring the credit-hold release SoD. Also
+  `…/reject` and the queue `GET …/credit-limit/pending`; web queue on `/finance/credit-hold`. The
+  detective credit-change report (`credit_events`) is unchanged. ToE: `basics.ts` (staged → self-approve
+  403 → distinct approver applies → 50000).
 
 ### G8 — Vendor-master financial fields (bank / terms / credit) are single-user  ·  **P1 · High**
 - **Where:** `masterdata` vendors registry (`master-registry.ts:90-99`) exposes `Payment_Terms`,
@@ -387,6 +394,8 @@ Scope to approve **before any build.** Each item reuses an existing in-repo patt
    on `allow_sod_override`. — **✅ DONE 2026-07-05** (SoD override → two-person staged approval, migration 0260; blanket per-grant approval intentionally deferred — see G11 status).
 6. **G8 Vendor bank/terms + G7 credit limit + G5/G6 price** — staged master-data approval for
    financially-sensitive fields (one workstream; ship the field-level guard first, full staging next).
+   — **G7 credit limit ✅ DONE 2026-07-05** (staged change → distinct approver, migration 0261).
+   **G8 vendor bank/terms, G6 price/promo, G5 bulk-import staging — still open** (next increments).
 
 *Rationale:* every P1 item is a single user moving cash-equivalents, GL positions, payee identity, or
 access with zero second-person control.
