@@ -11,6 +11,8 @@ import { api, hasSession, logout as apiLogout, getActingTenant, setActingTenant,
 import { useMe, hasPerm } from '@/lib/auth';
 import { useModuleFlags } from '@/lib/modules';
 import {
+  INTERNAL_NAV,
+  PORTAL_NAV,
   allGroupItems,
   navForWorkspace,
   orderGroups,
@@ -266,19 +268,23 @@ function CompanySwitcher() {
 }
 
 export function AppShell({
-  nav,
+  variant,
   brand,
   filterPerms = false,
   enableWorkspaces = false,
   children,
 }: {
-  nav: NavGroup[];
+  /** Which nav tree to render. Selected here (not passed as a prop) so the nav — whose items carry
+   *  non-serializable Lucide icon component refs — never crosses the RSC boundary; the layout can then
+   *  stay a server component and pass only serializable props. */
+  variant: 'internal' | 'portal';
   brand: string;
   filterPerms?: boolean;
   /** Show the ERP/POS workspace switcher and filter the sidebar to the active workspace. */
   enableWorkspaces?: boolean;
   children: React.ReactNode;
 }) {
+  const nav: NavGroup[] = variant === 'internal' ? INTERNAL_NAV : PORTAL_NAV;
   const router = useRouter();
   const pathname = usePathname();
   const me = useMe();

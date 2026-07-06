@@ -5,7 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftRight, Plus, ScanLine, Send, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
-import { parseQrPayload } from '@/lib/qr';
+import { scanCodeId } from '@/lib/qr';
+import { QrScanButton } from '@/components/qr-scanner';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
@@ -57,7 +58,7 @@ function MoveForm({ kind }: { kind: 'issue' | 'transfer' }) {
 
   function applyScan(v: string) {
     setScan(v);
-    const code = parseQrPayload(v).ITEM_ID;
+    const code = scanCodeId(v);
     if (code) setItemId(code);
   }
   function add() {
@@ -101,7 +102,10 @@ function MoveForm({ kind }: { kind: 'issue' | 'transfer' }) {
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="gi-scan"><ScanLine className="mr-1 inline size-4" /> {t('iv.gi_scan')}</Label>
-          <Input id="gi-scan" placeholder="ITEM_ID:P001|…" value={scan} onChange={(e) => applyScan(e.target.value)} />
+          <div className="flex items-center gap-2">
+            <Input id="gi-scan" className="flex-1" placeholder="ITEM_ID:P001|…" value={scan} onChange={(e) => applyScan(e.target.value)} />
+            <QrScanButton onScan={applyScan} />
+          </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div className="grid gap-1.5 min-w-[220px] flex-1">

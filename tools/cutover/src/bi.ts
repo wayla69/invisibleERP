@@ -215,6 +215,22 @@ async function main() {
   ok('supplier_scorecard runs success + avg / underperformer summary',
     supRun.json.status === 'success' && /avg/.test(supRun.json.summary ?? '') && /underperformer/.test(supRun.json.summary ?? ''), JSON.stringify({ s: supRun.json.status, sum: (supRun.json.summary ?? '').slice(0, 60) }));
 
+  // ── 19b. docs/35 Phase 6 — schedulable finance packs (cfo_kpi_pack / cash_position_pack / close_status_pack) ──
+  ok('report-types catalog exposes cfo_kpi_pack + cash_position_pack + close_status_pack',
+    ['cfo_kpi_pack', 'cash_position_pack', 'close_status_pack'].every((k) => JSON.stringify(rtypes.json).includes(k)), '');
+  const cfoRun = await runType('cfo_kpi_pack');
+  ok('cfo_kpi_pack runs success + MD&A headline summary (+ red count)',
+    cfoRun.json.status === 'success' && /CFO KPIs/.test(cfoRun.json.summary ?? '') && /red/.test(cfoRun.json.summary ?? ''),
+    JSON.stringify({ s: cfoRun.json.status, sum: (cfoRun.json.summary ?? '').slice(0, 70) }));
+  const cashRun = await runType('cash_position_pack');
+  ok('cash_position_pack runs success + cash / projected-close / trough summary',
+    cashRun.json.status === 'success' && /Cash/.test(cashRun.json.summary ?? '') && /trough/.test(cashRun.json.summary ?? ''),
+    JSON.stringify({ s: cashRun.json.status, sum: (cashRun.json.summary ?? '').slice(0, 70) }));
+  const closeRun = await runType('close_status_pack');
+  ok('close_status_pack runs success + overall / tie-out / days-to-close summary',
+    closeRun.json.status === 'success' && /Close/.test(closeRun.json.summary ?? '') && /days-to-close/.test(closeRun.json.summary ?? ''),
+    JSON.stringify({ s: closeRun.json.status, sum: (closeRun.json.summary ?? '').slice(0, 70) }));
+
   // ── 20. ITGC-OP-04: a scheduled (financial) job that FAILS is captured + alerted + reviewable, not silent ──
   // Force a deterministic failure: insert a subscription whose report type generateReport rejects (bypassing
   // create-time validation via a direct insert), then run it. executeSubscription must record the failure,

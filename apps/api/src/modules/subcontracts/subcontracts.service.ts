@@ -20,10 +20,10 @@ export interface ScopeDto { boq_line_id: number; amount: number; description?: s
 export interface CreateSubcontractDto { project_code: string; vendor_name?: string; title?: string; retention_pct?: number; wht_pct?: number; vat_pct?: number; scope: ScopeDto[]; allow_over?: boolean }
 export interface CreateValuationDto { period?: string; pct_complete: number; back_charge?: number }
 
-// Subcontractor management (docs/35 P2, PROJ-16). A subcontract is a priced scope against BoQ lines; on
+// Subcontractor management (docs/35 P2, PROJ-17). A subcontract is a priced scope against BoQ lines; on
 // creation it REGISTERS a commitment on each scoped BoQ line (docs/32 CommitmentsService, source SUBCON) so it
 // counts against the works budget like a PO (over-budget → BUDGET_EXCEEDED unless allow_over). The
-// subcontractor's periodic VALUATIONS are certified maker-checker (PROJ-16); each certifies the % complete,
+// subcontractor's periodic VALUATIONS are certified maker-checker (PROJ-17); each certifies the % complete,
 // withholds retention PAYABLE (2440, shared sub-ledger), deducts back-charges, and posts the certified NET to
 // AP (2000) with the works cost capitalised into project WIP (1260) — atomically. Standalone module (imports
 // Ledger + Retention + Commitments; none imports this → no DI cycle).
@@ -121,7 +121,7 @@ export class SubcontractsService {
     return this.getValuation(valNo);
   }
 
-  // Certify a draft valuation (maker-checker: certifier ≠ preparer → PROJ-16) → post the AP/WIP/retention JE
+  // Certify a draft valuation (maker-checker: certifier ≠ preparer → PROJ-17) → post the AP/WIP/retention JE
   // + withhold retention payable into the shared sub-ledger, atomically. Capped at the subcontract value.
   async certifyValuation(valNo: string, user: JwtUser) {
     const v = await this.valRow(valNo);

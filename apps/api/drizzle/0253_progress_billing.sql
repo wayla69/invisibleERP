@@ -1,10 +1,10 @@
--- 0250_progress_billing — Construction/real-estate vertical Track A (docs/35 P1, PROJ-15). Progress billing /
+-- 0253_progress_billing — Construction/real-estate vertical Track A (docs/35 P1, PROJ-16). Progress billing /
 -- งวดงาน: a construction contract is billed in periodic progress CLAIMS. Each claim values the work done to
 -- date by BoQ line (cumulative % complete → value-to-date), the movement since the previous certified claim is
 -- the value billed THIS claim, RETENTION (เงินประกันผลงาน) is withheld per the retention %, and the NET is
--- invoiced. Certification is maker-checker (raise ≠ certify → PROJ-15). On certify the claim posts revenue +
+-- invoiced. Certification is maker-checker (raise ≠ certify → PROJ-16). On certify the claim posts revenue +
 -- splits AR into net (1100) + retention receivable (1170) and withholds the retention into the shared
--- retention sub-ledger (migration 0249). Tenant-scoped (RLS + tenant-leading index).
+-- retention sub-ledger (migration 0252). Tenant-scoped (RLS + tenant-leading index).
 CREATE TABLE IF NOT EXISTS project_progress_claims (
   id bigserial PRIMARY KEY,
   tenant_id bigint,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS project_progress_claims (
   cost_recognized numeric(16,2) NOT NULL DEFAULT 0, -- WIP relieved to COGS at certification
   entry_no text,                                    -- the certification JE
   created_by text,
-  certified_by text,                                -- checker — must differ from created_by (SoD, PROJ-15)
+  certified_by text,                                -- checker — must differ from created_by (SoD, PROJ-16)
   certified_at timestamptz,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()

@@ -18,10 +18,10 @@ const EPS = 0.005;
 export interface ClaimLineDto { boq_line_id: number; pct_complete_to_date: number }
 export interface CreateClaimDto { project_code: string; period?: string; retention_pct?: number; vat_pct?: number; lines: ClaimLineDto[] }
 
-// Progress billing / งวดงาน (docs/35 P1, PROJ-15). The customer-side revenue engine of a construction
+// Progress billing / งวดงาน (docs/35 P1, PROJ-16). The customer-side revenue engine of a construction
 // contract: a periodic CLAIM values work done to date by BoQ line (cumulative % → value-to-date), bills the
 // movement since the last certified claim, withholds RETENTION per the retention %, and invoices the NET.
-// Certification is maker-checker (raise ≠ certify → PROJ-15). On certify it posts the billing JE (Dr 1100 AR
+// Certification is maker-checker (raise ≠ certify → PROJ-16). On certify it posts the billing JE (Dr 1100 AR
 // net + Dr 1170 Retention Receivable + Cr 4200 Revenue gross; relieve WIP 1260 → COGS 5800) and withholds the
 // retention into the shared retention sub-ledger (docs/35 P0) — atomically in one transaction. Reuses the
 // LedgerService GL path and RetentionService sub-ledger; queries the project/BoQ tables directly (no
@@ -121,7 +121,7 @@ export class ProgressBillingService {
     return this.get(claimNo);
   }
 
-  // Certify a draft claim (maker-checker: certifier ≠ preparer → PROJ-15) → post the billing JE + withhold
+  // Certify a draft claim (maker-checker: certifier ≠ preparer → PROJ-16) → post the billing JE + withhold
   // retention into the shared sub-ledger, atomically. Fixed-price contracts can't be certified beyond contract.
   async certifyClaim(claimNo: string, user: JwtUser) {
     const c = await this.claimRow(claimNo);

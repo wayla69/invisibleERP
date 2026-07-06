@@ -18,7 +18,7 @@ const CreateBody = z.object({
 
 const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 
-// Progress billing / งวดงาน (docs/35 P1, PROJ-15). A preparer (proj_billing) raises a progress claim valuing
+// Progress billing / งวดงาน (docs/35 P1, PROJ-16). A preparer (proj_billing) raises a progress claim valuing
 // work by BoQ line; an independent certifier (proj_billing_certify, ≠ preparer) certifies it — which posts the
 // billing JE (AR net + retention receivable + revenue; WIP→COGS) and withholds retention into the shared
 // sub-ledger. Maker-checker is enforced in the service (SOD_SELF_APPROVAL).

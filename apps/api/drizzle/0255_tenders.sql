@@ -1,4 +1,4 @@
--- 0252_tenders — Construction/real-estate vertical Track C (docs/35 P3, PROJ-17). Tender / estimating →
+-- 0255_tenders — Construction/real-estate vertical Track C (docs/35 P3, PROJ-18). Tender / estimating →
 -- award: the pre-award bridge between the CRM pipeline and the BoQ. A tender is an ESTIMATE — a draft BoQ with
 -- a cost build-up (qty × unit_cost = cost; bid_rate = unit_cost × (1 + markup%); bid_price = Σ) tracked
 -- estimating → submitted → won/lost. Nothing hits GL (a modelling surface). On WIN → award seeds a PROJECT

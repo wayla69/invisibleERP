@@ -1,9 +1,9 @@
--- 0251_subcontracts — Construction/real-estate vertical Track B (docs/35 P2, PROJ-16). Subcontractor
+-- 0254_subcontracts — Construction/real-estate vertical Track B (docs/35 P2, PROJ-17). Subcontractor
 -- management: a subcontract is a priced scope against BoQ lines executed by a subcontractor. It REGISTERS a
 -- commitment on its BoQ lines (via the docs/32 commitment ledger, source SUBCON) so it counts against the
 -- works budget exactly like a PO. The subcontractor submits periodic VALUATIONS we certify (maker-checker →
--- PROJ-16): each certifies the % complete of the subcontract, withholds RETENTION PAYABLE (เงินประกันผลงาน
--- ค้างจ่าย, into the shared sub-ledger, migration 0249), deducts BACK-CHARGES, and posts the certified NET to
+-- PROJ-17): each certifies the % complete of the subcontract, withholds RETENTION PAYABLE (เงินประกันผลงาน
+-- ค้างจ่าย, into the shared sub-ledger, migration 0252), deducts BACK-CHARGES, and posts the certified NET to
 -- AP with the project dimension. Tenant-scoped (RLS + tenant-leading index).
 CREATE TABLE IF NOT EXISTS project_subcontracts (
   id bigserial PRIMARY KEY,
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS subcontract_valuations (
   net_certified numeric(16,2) NOT NULL DEFAULT 0,
   entry_no text,
   created_by text,
-  certified_by text,                               -- checker — must differ from created_by (SoD, PROJ-16)
+  certified_by text,                               -- checker — must differ from created_by (SoD, PROJ-17)
   certified_at timestamptz,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()

@@ -1,4 +1,4 @@
--- 0253_realestate — Real-estate developer vertical, Track D / P4 (docs/35, RE-01/02/03). A DEVELOPER sells
+-- 0256_realestate — Real-estate developer vertical, Track D / P4 (docs/35, RE-01/02/03). A DEVELOPER sells
 -- units (condos/houses/land) to buyers: a development holds units (re_units, an availability/price grid); a
 -- buyer BOOKS a unit with a reservation deposit (re_bookings → unit reserved); the booking becomes a sale
 -- CONTRACT (re_contracts — price/discount/down-payment, maker-checker on the price/discount authority → RE-02)

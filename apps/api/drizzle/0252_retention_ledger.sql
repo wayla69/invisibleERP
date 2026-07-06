@@ -1,4 +1,4 @@
--- 0249_retention_ledger — Construction/real-estate vertical Phase 0 (docs/35). The SHARED retention
+-- 0252_retention_ledger — Construction/real-estate vertical Phase 0 (docs/35). The SHARED retention
 -- sub-ledger that Tracks A (customer progress billing / งวดงาน) and B (subcontractor valuations) both build
 -- on. A contract withholds retention (เงินประกันผลงาน, e.g. 5–10%) on each certified claim/valuation and
 -- releases it in tranches (typically part on practical completion, the remainder at the end of the

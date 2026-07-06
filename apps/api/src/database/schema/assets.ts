@@ -149,6 +149,60 @@ export const depreciationLines = pgTable('depreciation_lines', {
   nbvAfter: numeric('nbv_after', { precision: 18, scale: 4 }).notNull(),
 });
 
+// FA-11 — asset custody-change maker-checker. A scan that would MOVE an asset (change location/holder)
+// no longer writes the register directly: it raises a PendingApproval request here (NO GL effect); a
+// DIFFERENT user must approve before the register moves + an asset_movements 'Scan Update' row is written.
+// A scan that CONFIRMS the current location (no change) is logged immediately as a 'Scan Verify' movement
+// and needs no approval. Self-approve → SOD_VIOLATION (binds even Admin). tenant-scoped → RLS loop (0251).
+export const assetScanRequests = pgTable('asset_scan_requests', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  reqNo: text('req_no').notNull(),                  // FAC-YYYYMMDD-NNN
+  assetId: bigint('asset_id', { mode: 'number' }).references(() => fixedAssets.id),
+  assetNo: text('asset_no').notNull(),
+  fromLocation: text('from_location'),
+  toLocation: text('to_location'),
+  fromAssignedTo: text('from_assigned_to'),
+  toAssignedTo: text('to_assigned_to'),
+  note: text('note'),
+  source: text('source').notNull().default('scan'), // 'scan' | 'audit'
+  auditNo: text('audit_no'),                         // set when raised by an audit reconciliation
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected
+  requestedBy: text('requested_by'),                // maker (custodian / counter)
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),                  // checker — must differ from requestedBy
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+}, (t) => ({ uqReqNo: unique('uq_asset_scan_req_no').on(t.tenantId, t.reqNo), byStatus: index('idx_asset_scan_req_status').on(t.tenantId, t.status), byAsset: index('idx_asset_scan_req_asset').on(t.assetNo) }));
+
+// Asset audit (physical count by scan). Open a session for a location, scan the tags present; each scan is
+// classified against the register (Found / Misplaced / Unknown). Reconciliation adds Missing (expected at
+// the location but not scanned). Closing raises FA-11 custody-change requests for the misplaced assets.
+export const assetAudits = pgTable('asset_audits', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  auditNo: text('audit_no').notNull(),              // AUD-YYYYMMDD-NNN
+  location: text('location'),                        // null = whole tenant
+  status: text('status').notNull().default('Open'), // Open | Closed
+  expectedCount: integer('expected_count').notNull().default(0),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  closedBy: text('closed_by'),
+}, (t) => ({ uqAuditNo: unique('uq_asset_audit_no').on(t.tenantId, t.auditNo), byStatus: index('idx_asset_audit_status').on(t.tenantId, t.status) }));
+
+export const assetAuditScans = pgTable('asset_audit_scans', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  auditNo: text('audit_no').notNull(),
+  assetNo: text('asset_no').notNull(),
+  result: text('result').notNull(),                 // Found | Misplaced | Unknown
+  registerLocation: text('register_location'),      // where the register says it is (for Misplaced)
+  clientUuid: text('client_uuid'),                  // offline idempotency key — dedup on replay
+  scannedBy: text('scanned_by'),
+  scannedAt: timestamp('scanned_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uqScanUuid: unique('uq_asset_audit_scan_uuid').on(t.tenantId, t.auditNo, t.clientUuid), byAudit: index('idx_asset_audit_scan_audit').on(t.auditNo) }));
+
 export type FixedAsset = typeof fixedAssets.$inferSelect;
 export type AssetCategory = typeof assetCategories.$inferSelect;
 export type DepreciationRun = typeof depreciationRuns.$inferSelect;

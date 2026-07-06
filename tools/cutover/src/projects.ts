@@ -259,6 +259,26 @@ async function main() {
     !!shelfCement && ['approved', 'locked'].includes(shelf.json.boq_status) && near(shelfCement.remaining, -2500) && near(shelfCement.budget, 15000),
     JSON.stringify({ st: shelf.json.boq_status, r: shelfCement?.remaining, b: shelfCement?.budget }));
 
+  // ── 9e-ter. Material scope-change request (PROJ-15): a requester can PROPOSE adding an off-budget item, but
+  // only an independent authoriser can approve it into the budget — then it becomes shoppable. ──
+  const bqrDup = await inj('POST', '/api/pmr/boq-request', admin, { project_code: 'PRJ-A', item_no: 'CEMENT', qty: 1, rate: 100 });
+  ok('Request an already-budgeted item → 400 ITEM_ALREADY_BUDGETED', bqrDup.status === 400 && bqrDup.json.error?.code === 'ITEM_ALREADY_BUDGETED', `${bqrDup.status} ${bqrDup.json.error?.code}`);
+  const shelfBudgetBefore = shelf.json.budget_total;
+  const bqrNew = await inj('POST', '/api/pmr/boq-request', admin, { project_code: 'PRJ-A', item_no: 'PAINT', description: 'สีทาอาคาร', uom: 'ถัง', qty: 10, rate: 200 });
+  const bqrNo = bqrNew.json.req_no;
+  ok('Request a new off-budget item → pending, budget not yet changed', bqrNew.status < 300 && bqrNew.json.status === 'pending' && near(bqrNew.json.amount, 2000), JSON.stringify({ s: bqrNew.status, st: bqrNew.json.status, amt: bqrNew.json.amount }));
+  const shelfPending = await inj('GET', '/api/pmr/project/PRJ-A/boq', admin);
+  ok('Requested item is NOT shoppable while pending', !(shelfPending.json.lines ?? []).some((l: any) => l.item_no === 'PAINT'), 'not on the shelf yet');
+  const bqrSelf = await inj('POST', `/api/pmr/boq-request/${bqrNo}/approve`, admin); // requester = admin
+  ok('Requester self-approves the scope change → 400 SOD_SELF_APPROVAL', bqrSelf.status === 400 && bqrSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${bqrSelf.status} ${bqrSelf.json.error?.code}`);
+  const bqrAppr = await inj('POST', `/api/pmr/boq-request/${bqrNo}/approve`, mgr); // independent authoriser
+  ok('Authoriser approves → approved + a new BoQ line created', bqrAppr.status < 300 && bqrAppr.json.status === 'approved' && !!bqrAppr.json.new_boq_line_id, JSON.stringify({ s: bqrAppr.status, st: bqrAppr.json.status, line: bqrAppr.json.new_boq_line_id }));
+  const shelfAfter = await inj('GET', '/api/pmr/project/PRJ-A/boq', admin);
+  const paintLine = (shelfAfter.json.lines ?? []).find((l: any) => l.item_no === 'PAINT');
+  ok('Approved item is now shoppable (remaining 2000) + shelf budget grew by 2000',
+    !!paintLine && near(paintLine.remaining, 2000) && near(shelfAfter.json.budget_total, shelfBudgetBefore + 2000),
+    JSON.stringify({ r: paintLine?.remaining, bt: shelfAfter.json.budget_total, before: shelfBudgetBefore }));
+
   // ── 9f. Stock reservation → issue-to-project (M3, INV-13): reserve on-hand stock, issue into project WIP ──
   await db.insert(s.invBalances).values({ tenantId: hq, itemId: 'STEEL', itemDescription: 'เหล็ก', locationId: 'WH-MAIN', onHandQty: '100', avgCost: '50', totalValue: '5000', costingMethod: 'moving_avg' });
   const avail0 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
@@ -893,51 +913,51 @@ async function main() {
   const xferEarly = await inj('POST', `/api/realestate/contracts/${tc2.json.contract_no}/transfer`, admin, {});
   ok('RE-04: transfer before fully settled → 400 NOT_FULLY_SETTLED', xferEarly.status === 400 && xferEarly.json.error?.code === 'NOT_FULLY_SETTLED', `${xferEarly.status} ${xferEarly.json.error?.code}`);
 
-  // ── P3 (docs/35) — tender / estimating → award (Track C, PROJ-17) ──
+  // ── P3 (docs/35) — tender / estimating → award (Track C, PROJ-18) ──
   // Build a priced estimate, submit, record win/loss, and on a WIN award → seed a project + a DRAFT BoQ from
   // the tender lines (the seeded BoQ's own maker-checker approve sets the controlled budget baseline).
   const tnd1 = await inj('POST', '/api/tenders', admin, { title: 'อาคารสำนักงาน 3 ชั้น', customer_name: 'บจก. ผู้ว่าจ้าง', project_code: 'PRJ-TND', markup_pct: 20, lines: [
     { category: 'material', description: 'ฐานราก', qty: 10, unit_cost: 1000 },   // bid_rate 1200 → 12000
     { category: 'labor', description: 'โครงสร้าง', qty: 5, unit_cost: 2000 },     // bid_rate 2400 → 12000
   ] });
-  ok('PROJ-17: create tender → estimating, estimated_cost 20000, bid_price 24000 (20% markup)',
+  ok('PROJ-18: create tender → estimating, estimated_cost 20000, bid_price 24000 (20% markup)',
     tnd1.status < 300 && tnd1.json.status === 'estimating' && near(tnd1.json.estimated_cost, 20000) && near(tnd1.json.bid_price, 24000) && near(tnd1.json.overall_markup_pct, 20),
     JSON.stringify({ s: tnd1.status, est: tnd1.json.estimated_cost, bid: tnd1.json.bid_price }));
   const tnd1No = tnd1.json.tender_no;
   const tndAdd = await inj('POST', `/api/tenders/${tnd1No}/lines`, admin, { category: 'subcon', description: 'งานระบบ', qty: 2, unit_cost: 3000, markup_pct: 0 }); // bid_rate 3000 → 6000
-  ok('PROJ-17: add line (per-line markup override 0) → bid_price 30000, estimated_cost 26000, line bid_rate 3000',
+  ok('PROJ-18: add line (per-line markup override 0) → bid_price 30000, estimated_cost 26000, line bid_rate 3000',
     near(tndAdd.json.bid_price, 30000) && near(tndAdd.json.estimated_cost, 26000) && near((tndAdd.json.lines ?? []).find((l: any) => l.description === 'งานระบบ')?.bid_rate, 3000),
     JSON.stringify({ bid: tndAdd.json.bid_price, est: tndAdd.json.estimated_cost }));
   await inj('POST', `/api/tenders/${tnd1No}/submit`, admin);
   const awEarly = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
-  ok('PROJ-17: award before won → 400 TENDER_NOT_WON', awEarly.status === 400 && awEarly.json.error?.code === 'TENDER_NOT_WON', `${awEarly.status} ${awEarly.json.error?.code}`);
+  ok('PROJ-18: award before won → 400 TENDER_NOT_WON', awEarly.status === 400 && awEarly.json.error?.code === 'TENDER_NOT_WON', `${awEarly.status} ${awEarly.json.error?.code}`);
   await inj('POST', `/api/tenders/${tnd1No}/outcome`, admin, { outcome: 'won' });
   const award = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
-  ok('PROJ-17: award a won tender → seeds project PRJ-TND (Fixed, contract 30000) + a DRAFT BoQ (budget 30000)',
+  ok('PROJ-18: award a won tender → seeds project PRJ-TND (Fixed, contract 30000) + a DRAFT BoQ (budget 30000)',
     award.status < 300 && award.json.project_code === 'PRJ-TND' && award.json.boq_status === 'draft' && near(award.json.boq_budget_total, 30000) && near(award.json.contract_amount, 30000),
     JSON.stringify({ pc: award.json.project_code, bs: award.json.boq_status, bt: award.json.boq_budget_total }));
   const awProj = await inj('GET', '/api/projects/PRJ-TND', admin);
-  ok('PROJ-17: awarded project exists — Fixed, contract 30000', awProj.json.project_code === 'PRJ-TND' && awProj.json.billing_type === 'Fixed' && near(awProj.json.contract_amount, 30000), JSON.stringify({ bt: awProj.json.billing_type, ca: awProj.json.contract_amount }));
+  ok('PROJ-18: awarded project exists — Fixed, contract 30000', awProj.json.project_code === 'PRJ-TND' && awProj.json.billing_type === 'Fixed' && near(awProj.json.contract_amount, 30000), JSON.stringify({ bt: awProj.json.billing_type, ca: awProj.json.contract_amount }));
   const awBoq = await inj('GET', '/api/projects/PRJ-TND/boq', admin);
-  ok('PROJ-17: seeded BoQ is DRAFT with 3 lines, L1 rate = bid_rate 1200 (bid → BoQ rate)',
+  ok('PROJ-18: seeded BoQ is DRAFT with 3 lines, L1 rate = bid_rate 1200 (bid → BoQ rate)',
     awBoq.json.boq?.status === 'draft' && awBoq.json.count === 3 && near((awBoq.json.lines ?? []).find((l: any) => l.description === 'ฐานราก')?.rate, 1200),
     JSON.stringify({ st: awBoq.json.boq?.status, c: awBoq.json.count }));
   const awApprove = await inj('POST', `/api/projects/boq/${awBoq.json.boq?.id}/approve`, mgr); // independent approver sets the baseline
-  ok('PROJ-17: an independent approver approves the seeded BoQ → project budget baseline 30000 (controlled)',
+  ok('PROJ-18: an independent approver approves the seeded BoQ → project budget baseline 30000 (controlled)',
     awApprove.status < 300 && near(awApprove.json.budget_synced, 30000), JSON.stringify({ s: awApprove.status, sync: awApprove.json.budget_synced }));
   const awAgain = await inj('POST', `/api/tenders/${tnd1No}/award`, admin, {});
-  ok('PROJ-17: re-award a tender → already (idempotent, no duplicate project)', awAgain.json.already === true && awAgain.json.project_code === 'PRJ-TND', JSON.stringify({ a: awAgain.json.already }));
+  ok('PROJ-18: re-award a tender → already (idempotent, no duplicate project)', awAgain.json.already === true && awAgain.json.project_code === 'PRJ-TND', JSON.stringify({ a: awAgain.json.already }));
   const tndReDecide = await inj('POST', `/api/tenders/${tnd1No}/outcome`, admin, { outcome: 'won' });
-  ok('PROJ-17: re-decide a decided tender → 400 TENDER_DECIDED', tndReDecide.status === 400 && tndReDecide.json.error?.code === 'TENDER_DECIDED', `${tndReDecide.status} ${tndReDecide.json.error?.code}`);
+  ok('PROJ-18: re-decide a decided tender → 400 TENDER_DECIDED', tndReDecide.status === 400 && tndReDecide.json.error?.code === 'TENDER_DECIDED', `${tndReDecide.status} ${tndReDecide.json.error?.code}`);
 
   const tnd2 = await inj('POST', '/api/tenders', admin, { title: 'งานที่แพ้ประมูล', markup_pct: 15, lines: [{ description: 'x', qty: 1, unit_cost: 1000 }] });
   const lossNoReason = await inj('POST', `/api/tenders/${tnd2.json.tender_no}/outcome`, admin, { outcome: 'lost' });
-  ok('PROJ-17: mark a tender lost without a reason → 400 LOSS_REASON_REQUIRED', lossNoReason.status === 400 && lossNoReason.json.error?.code === 'LOSS_REASON_REQUIRED', `${lossNoReason.status} ${lossNoReason.json.error?.code}`);
+  ok('PROJ-18: mark a tender lost without a reason → 400 LOSS_REASON_REQUIRED', lossNoReason.status === 400 && lossNoReason.json.error?.code === 'LOSS_REASON_REQUIRED', `${lossNoReason.status} ${lossNoReason.json.error?.code}`);
   await inj('POST', `/api/tenders/${tnd2.json.tender_no}/outcome`, admin, { outcome: 'lost', reason: 'ราคาสูงกว่าคู่แข่ง' });
   const tndList = await inj('GET', '/api/tenders', admin);
-  ok('PROJ-17: tender register → win-rate 50% (1 won of 2 decided)', near(tndList.json.win_rate_pct, 50) && tndList.json.count >= 2, JSON.stringify({ wr: tndList.json.win_rate_pct, n: tndList.json.count }));
+  ok('PROJ-18: tender register → win-rate 50% (1 won of 2 decided)', near(tndList.json.win_rate_pct, 50) && tndList.json.count >= 2, JSON.stringify({ wr: tndList.json.win_rate_pct, n: tndList.json.count }));
 
-  // ── P2 (docs/35) — subcontractor management + retention payable (Track B, PROJ-16) ──
+  // ── P2 (docs/35) — subcontractor management + retention payable (Track B, PROJ-17) ──
   // A subcontract reserves BoQ budget (docs/32 commitment); the subcontractor's valuations are certified
   // maker-checker → post AP + WIP + retention PAYABLE (→ the P0 sub-ledger), with back-charges.
   await inj('POST', '/api/projects', admin, { project_code: 'PRJ-SUB', name: 'งานจ้างเหมาช่วง', customer_name: 'เจ้าของงาน', billing_type: 'TM' });
@@ -950,51 +970,51 @@ async function main() {
   await inj('POST', `/api/projects/boq/${scBoqId}/approve`, mgr);
 
   const sc1 = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', vendor_name: 'หจก. รับเหมาช่วง', title: 'เสาเข็มเจาะ', retention_pct: 10, scope: [{ boq_line_id: scL1, amount: 40000, description: 'งานเสาเข็ม' }] });
-  ok('PROJ-16: create subcontract → contract_value 40000, retention 10%, active, remaining 40000',
+  ok('PROJ-17: create subcontract → contract_value 40000, retention 10%, active, remaining 40000',
     sc1.status < 300 && near(sc1.json.contract_value, 40000) && near(sc1.json.retention_pct, 10) && sc1.json.status === 'active' && near(sc1.json.remaining, 40000),
     JSON.stringify({ s: sc1.status, cv: sc1.json.contract_value, st: sc1.json.status }));
   const sc1No = sc1.json.subcontract_no;
   const scCommit = await inj('GET', '/api/projects/PRJ-SUB/commitments', admin);
-  ok('PROJ-16: subcontract reserves BoQ-line budget (docs/32 commitment) → committed 40000',
+  ok('PROJ-17: subcontract reserves BoQ-line budget (docs/32 commitment) → committed 40000',
     near(scCommit.json.summary?.committed, 40000) && (scCommit.json.commitments ?? []).some((c: any) => c.source_doc_type === 'SUBCON'),
     JSON.stringify({ committed: scCommit.json.summary?.committed }));
   const scOver = await inj('POST', '/api/subcontracts', admin, { project_code: 'PRJ-SUB', scope: [{ boq_line_id: scL1, amount: 30000 }] }); // 40000+30000 > 60000
-  ok('PROJ-16: subcontract beyond the BoQ-line budget → 400 BUDGET_EXCEEDED (rolled back)', scOver.status === 400 && scOver.json.error?.code === 'BUDGET_EXCEEDED', `${scOver.status} ${scOver.json.error?.code}`);
+  ok('PROJ-17: subcontract beyond the BoQ-line budget → 400 BUDGET_EXCEEDED (rolled back)', scOver.status === 400 && scOver.json.error?.code === 'BUDGET_EXCEEDED', `${scOver.status} ${scOver.json.error?.code}`);
 
   const sv1 = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { period: '2026-07', pct_complete: 50 });
-  ok('PROJ-16: valuation draft → gross 20000 (50% of 40000), retention 2000, net 18000',
+  ok('PROJ-17: valuation draft → gross 20000 (50% of 40000), retention 2000, net 18000',
     sv1.status < 300 && sv1.json.status === 'draft' && near(sv1.json.gross_this_val, 20000) && near(sv1.json.retention_amount, 2000) && near(sv1.json.net_certified, 18000),
     JSON.stringify({ g: sv1.json.gross_this_val, net: sv1.json.net_certified }));
   const sv1No = sv1.json.valuation_no;
   const sv1Self = await inj('POST', `/api/subcontracts/valuations/${sv1No}/certify`, admin);
-  ok('PROJ-16: preparer self-certify valuation → 400 SOD_SELF_APPROVAL', sv1Self.status === 400 && sv1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${sv1Self.status} ${sv1Self.json.error?.code}`);
+  ok('PROJ-17: preparer self-certify valuation → 400 SOD_SELF_APPROVAL', sv1Self.status === 400 && sv1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${sv1Self.status} ${sv1Self.json.error?.code}`);
   const sv1Cert = await inj('POST', `/api/subcontracts/valuations/${sv1No}/certify`, mgr);
-  ok('PROJ-16: certify valuation → JE Dr 1260 20000 / Cr 2000 18000 / Cr 2440 2000 (net 18000, retention 2000)',
+  ok('PROJ-17: certify valuation → JE Dr 1260 20000 / Cr 2000 18000 / Cr 2440 2000 (net 18000, retention 2000)',
     sv1Cert.status < 300 && sv1Cert.json.status === 'certified' && near(sv1Cert.json.net_certified, 18000) && near(sv1Cert.json.retention, 2000) && near(sv1Cert.json.wip_cost, 20000) && /^JE-/.test(sv1Cert.json.entry_no ?? ''),
     JSON.stringify({ net: sv1Cert.json.net_certified, wip: sv1Cert.json.wip_cost, je: sv1Cert.json.entry_no }));
   const scRet1 = await inj('GET', '/api/retention/project/PRJ-SUB', admin);
-  ok('PROJ-16 → P0: retention 2000 withheld into the shared sub-ledger as a subcontractor PAYABLE',
+  ok('PROJ-17 → P0: retention 2000 withheld into the shared sub-ledger as a subcontractor PAYABLE',
     near(scRet1.json.payable?.outstanding, 2000) && near(scRet1.json.payable?.withheld, 2000), JSON.stringify({ pay: scRet1.json.payable }));
 
   const sv2 = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { period: '2026-08', pct_complete: 80, back_charge: 1000 });
-  ok('PROJ-16: valuation 2 nets off prior + back-charge → gross 12000 (32000−20000), net 9800 (12000−1200−1000)',
+  ok('PROJ-17: valuation 2 nets off prior + back-charge → gross 12000 (32000−20000), net 9800 (12000−1200−1000)',
     near(sv2.json.gross_this_val, 12000) && near(sv2.json.back_charge, 1000) && near(sv2.json.net_certified, 9800), JSON.stringify({ g: sv2.json.gross_this_val, net: sv2.json.net_certified }));
   const sv2Cert = await inj('POST', `/api/subcontracts/valuations/${sv2.json.valuation_no}/certify`, mgr);
-  ok('PROJ-16: certify valuation 2 → net 9800, wip_cost 11000 (gross − back-charge)', sv2Cert.status < 300 && near(sv2Cert.json.net_certified, 9800) && near(sv2Cert.json.wip_cost, 11000), JSON.stringify({ net: sv2Cert.json.net_certified, wip: sv2Cert.json.wip_cost }));
+  ok('PROJ-17: certify valuation 2 → net 9800, wip_cost 11000 (gross − back-charge)', sv2Cert.status < 300 && near(sv2Cert.json.net_certified, 9800) && near(sv2Cert.json.wip_cost, 11000), JSON.stringify({ net: sv2Cert.json.net_certified, wip: sv2Cert.json.wip_cost }));
 
   const svBad = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { pct_complete: 90, back_charge: 999999 });
-  ok('PROJ-16: back-charge exceeding the net → 400 BAD_BACK_CHARGE', svBad.status === 400 && svBad.json.error?.code === 'BAD_BACK_CHARGE', `${svBad.status} ${svBad.json.error?.code}`);
+  ok('PROJ-17: back-charge exceeding the net → 400 BAD_BACK_CHARGE', svBad.status === 400 && svBad.json.error?.code === 'BAD_BACK_CHARGE', `${svBad.status} ${svBad.json.error?.code}`);
   const svNone = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { pct_complete: 80 }); // same cumulative → 0 movement
-  ok('PROJ-16: no progress since the last valuation → 400 NOTHING_TO_CERTIFY', svNone.status === 400 && svNone.json.error?.code === 'NOTHING_TO_CERTIFY', `${svNone.status} ${svNone.json.error?.code}`);
+  ok('PROJ-17: no progress since the last valuation → 400 NOTHING_TO_CERTIFY', svNone.status === 400 && svNone.json.error?.code === 'NOTHING_TO_CERTIFY', `${svNone.status} ${svNone.json.error?.code}`);
 
   const scList = await inj('GET', '/api/subcontracts/project/PRJ-SUB', admin);
-  ok('PROJ-16: subcontract register → value 40000, certified_to_date 32000, retention_payable 3200',
+  ok('PROJ-17: subcontract register → value 40000, certified_to_date 32000, retention_payable 3200',
     near(scList.json.subcontract_value, 40000) && near(scList.json.certified_to_date, 32000) && near(scList.json.retention_payable, 3200),
     JSON.stringify({ v: scList.json.subcontract_value, ctd: scList.json.certified_to_date, rp: scList.json.retention_payable }));
   const scRet2 = await inj('GET', '/api/retention/project/PRJ-SUB', admin);
-  ok('PROJ-16 → P0: retention payable outstanding 3200 after two certified valuations (2000 + 1200)', near(scRet2.json.payable?.outstanding, 3200), JSON.stringify({ pay: scRet2.json.payable?.outstanding }));
+  ok('PROJ-17 → P0: retention payable outstanding 3200 after two certified valuations (2000 + 1200)', near(scRet2.json.payable?.outstanding, 3200), JSON.stringify({ pay: scRet2.json.payable?.outstanding }));
 
-  // ── P1 (docs/35) — progress billing / งวดงาน + retention receivable (Track A, PROJ-15) ──
+  // ── P1 (docs/35) — progress billing / งวดงาน + retention receivable (Track A, PROJ-16) ──
   // A construction contract billed in periodic progress claims: value work by BoQ line (cumulative), withhold
   // retention on certification (→ the P0 sub-ledger), maker-checker certify, Fixed-contract cap.
   await inj('POST', '/api/projects', admin, { project_code: 'PRJ-PB', name: 'งานก่อสร้างงวดงาน', customer_name: 'ผู้ว่าจ้าง', billing_type: 'Fixed', contract_amount: 90000 });
@@ -1009,44 +1029,44 @@ async function main() {
   await inj('POST', '/api/projects/PRJ-PB/cost', admin, { entry_type: 'expense', amount: 20000, description: 'ต้นทุนงาน' }); // WIP 1260 = 20000
 
   const cl1 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', period: '2026-07', retention_pct: 10, lines: [{ boq_line_id: pbL1, pct_complete_to_date: 50 }, { boq_line_id: pbL2, pct_complete_to_date: 0 }] });
-  ok('PROJ-15: progress claim draft → gross 30000 (L1 50% of 60000), retention 3000, net 27000',
+  ok('PROJ-16: progress claim draft → gross 30000 (L1 50% of 60000), retention 3000, net 27000',
     cl1.status < 300 && cl1.json.status === 'draft' && near(cl1.json.gross_this_claim, 30000) && near(cl1.json.retention_amount, 3000) && near(cl1.json.net_payable, 27000),
     JSON.stringify({ s: cl1.status, g: cl1.json.gross_this_claim, r: cl1.json.retention_amount }));
   const cl1No = cl1.json.claim_no;
   const cl1Self = await inj('POST', `/api/progress-billing/${cl1No}/certify`, admin); // preparer = admin
-  ok('PROJ-15: preparer self-certify → 400 SOD_SELF_APPROVAL', cl1Self.status === 400 && cl1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${cl1Self.status} ${cl1Self.json.error?.code}`);
+  ok('PROJ-16: preparer self-certify → 400 SOD_SELF_APPROVAL', cl1Self.status === 400 && cl1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${cl1Self.status} ${cl1Self.json.error?.code}`);
   const cl1Cert = await inj('POST', `/api/progress-billing/${cl1No}/certify`, mgr); // independent certifier
-  ok('PROJ-15: certify → certified, net 27000, retention 3000, cost_recognized 20000 (WIP relieved), JE posted',
+  ok('PROJ-16: certify → certified, net 27000, retention 3000, cost_recognized 20000 (WIP relieved), JE posted',
     cl1Cert.status < 300 && cl1Cert.json.status === 'certified' && near(cl1Cert.json.net_payable, 27000) && near(cl1Cert.json.retention, 3000) && near(cl1Cert.json.cost_recognized, 20000) && /^JE-/.test(cl1Cert.json.entry_no ?? ''),
     JSON.stringify({ st: cl1Cert.json.status, net: cl1Cert.json.net_payable, cr: cl1Cert.json.cost_recognized, je: cl1Cert.json.entry_no }));
   const cl1Re = await inj('POST', `/api/progress-billing/${cl1No}/certify`, mgr);
-  ok('PROJ-15: re-certify a certified claim → 400 CLAIM_NOT_DRAFT', cl1Re.status === 400 && cl1Re.json.error?.code === 'CLAIM_NOT_DRAFT', `${cl1Re.status} ${cl1Re.json.error?.code}`);
+  ok('PROJ-16: re-certify a certified claim → 400 CLAIM_NOT_DRAFT', cl1Re.status === 400 && cl1Re.json.error?.code === 'CLAIM_NOT_DRAFT', `${cl1Re.status} ${cl1Re.json.error?.code}`);
   const pbRet1 = await inj('GET', '/api/retention/project/PRJ-PB', admin);
-  ok('PROJ-15 → P0: retention 3000 withheld into the shared sub-ledger as a customer receivable',
+  ok('PROJ-16 → P0: retention 3000 withheld into the shared sub-ledger as a customer receivable',
     near(pbRet1.json.receivable?.outstanding, 3000) && near(pbRet1.json.receivable?.withheld, 3000), JSON.stringify({ recv: pbRet1.json.receivable }));
 
   const cl2 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', period: '2026-08', retention_pct: 10, lines: [{ boq_line_id: pbL1, pct_complete_to_date: 80 }] });
-  ok('PROJ-15: claim 2 nets off previously certified → gross 18000 (48000 to-date − 30000 prior), prev 30000',
+  ok('PROJ-16: claim 2 nets off previously certified → gross 18000 (48000 to-date − 30000 prior), prev 30000',
     near(cl2.json.gross_this_claim, 18000) && near(cl2.json.lines?.[0]?.value_this_claim, 18000) && near(cl2.json.lines?.[0]?.previously_certified, 30000),
     JSON.stringify({ g: cl2.json.gross_this_claim, prev: cl2.json.lines?.[0]?.previously_certified }));
   const cl2Cert = await inj('POST', `/api/progress-billing/${cl2.json.claim_no}/certify`, mgr);
-  ok('PROJ-15: certify claim 2 → net 16200, retention 1800, no more WIP to relieve (cost_recognized 0)',
+  ok('PROJ-16: certify claim 2 → net 16200, retention 1800, no more WIP to relieve (cost_recognized 0)',
     cl2Cert.status < 300 && near(cl2Cert.json.net_payable, 16200) && near(cl2Cert.json.retention, 1800) && near(cl2Cert.json.cost_recognized, 0), JSON.stringify({ net: cl2Cert.json.net_payable, cr: cl2Cert.json.cost_recognized }));
 
   const cl3 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 80 }] }); // same % → no movement
-  ok('PROJ-15: no work movement since the last claim → 400 NOTHING_TO_BILL', cl3.status === 400 && cl3.json.error?.code === 'NOTHING_TO_BILL', `${cl3.status} ${cl3.json.error?.code}`);
+  ok('PROJ-16: no work movement since the last claim → 400 NOTHING_TO_BILL', cl3.status === 400 && cl3.json.error?.code === 'NOTHING_TO_BILL', `${cl3.status} ${cl3.json.error?.code}`);
   const clBad = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 150 }] });
-  ok('PROJ-15: pct > 100 (over-certification) → 400', clBad.status === 400, `${clBad.status}`);
+  ok('PROJ-16: pct > 100 (over-certification) → 400', clBad.status === 400, `${clBad.status}`);
 
   const cl4 = await inj('POST', '/api/progress-billing', admin, { project_code: 'PRJ-PB', lines: [{ boq_line_id: pbL1, pct_complete_to_date: 100 }, { boq_line_id: pbL2, pct_complete_to_date: 100 }] }); // gross 12000+40000=52000 → billed 100000 > 90000
   const cl4Cert = await inj('POST', `/api/progress-billing/${cl4.json.claim_no}/certify`, mgr);
-  ok('PROJ-15: certifying beyond the Fixed contract (90000) → 400 BILL_EXCEEDS_CONTRACT', cl4Cert.status === 400 && cl4Cert.json.error?.code === 'BILL_EXCEEDS_CONTRACT', `${cl4Cert.status} ${cl4Cert.json.error?.code}`);
+  ok('PROJ-16: certifying beyond the Fixed contract (90000) → 400 BILL_EXCEEDS_CONTRACT', cl4Cert.status === 400 && cl4Cert.json.error?.code === 'BILL_EXCEEDS_CONTRACT', `${cl4Cert.status} ${cl4Cert.json.error?.code}`);
 
   const pbList = await inj('GET', '/api/progress-billing/project/PRJ-PB', admin);
-  ok('PROJ-15: project claim register → certified_to_date 48000, retention_withheld 4800',
+  ok('PROJ-16: project claim register → certified_to_date 48000, retention_withheld 4800',
     near(pbList.json.certified_to_date, 48000) && near(pbList.json.retention_withheld, 4800), JSON.stringify({ ctd: pbList.json.certified_to_date, rw: pbList.json.retention_withheld }));
   const pbRet2 = await inj('GET', '/api/retention/project/PRJ-PB', admin);
-  ok('PROJ-15 → P0: retention receivable outstanding 4800 after two certified claims (3000 + 1800)', near(pbRet2.json.receivable?.outstanding, 4800), JSON.stringify({ recv: pbRet2.json.receivable?.outstanding }));
+  ok('PROJ-16 → P0: retention receivable outstanding 4800 after two certified claims (3000 + 1800)', near(pbRet2.json.receivable?.outstanding, 4800), JSON.stringify({ recv: pbRet2.json.receivable?.outstanding }));
 
   // ── Depth-2/3 (docs/35) — output VAT on progress claims, POC/rev-rec reconciliation, subcontractor WHT ──
   // Depth-2: output VAT on a customer progress claim (billing-method project).

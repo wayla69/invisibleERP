@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MessagingModule } from '../messaging/messaging.module';
 import { FinanceModule } from '../finance/finance.module';
 import { EamModule } from '../eam/eam.module';
+import { AssetsModule } from '../assets/assets.module';
 import { LedgerModule } from '../ledger/ledger.module';
 import { LeasesModule } from '../leases/leases.module';
 import { RevenueModule } from '../revenue/revenue.module';
@@ -30,5 +31,5 @@ import { BiController } from './bi.controller';
 // (CrmPipelineService) supply the project_evm + crm_win_loss report types. DRIZZLE is global.
 // BudgetModule/ProcurementModule/MatchModule supply the residual-gap report types budget_variance,
 // supplier_scorecard and the exec_scorecard supply-chain leg (RG-1/2/3).
-@Module({ imports: [MessagingModule, FinanceModule, EamModule, LedgerModule, LeasesModule, RevenueModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule], providers: [BiService], controllers: [BiController], exports: [BiService] })
+@Module({ imports: [MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule], providers: [BiService], controllers: [BiController], exports: [BiService] })
 export class BiModule {}

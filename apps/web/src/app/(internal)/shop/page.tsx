@@ -151,6 +151,38 @@ export default function ShopPage() {
   const customSeq = useRef(cart.reduce((m, l) => (l.key.startsWith('c:') ? Math.max(m, Number(l.key.slice(2)) + 1) : m), 0));
   const sentinel = useRef<HTMLDivElement | null>(null);
 
+  // Cross-device sync for favourites + basket templates (like the sidebar ★ pins). localStorage stays as the
+  // instant/offline cache; GET/PUT /api/user-prefs is the shared source of truth once loaded. On first load
+  // we UNION the server copy with whatever this device already had (so migrating loses nothing) and push the
+  // union up. PUTs are debounced + accumulated so a burst of toggles becomes one write carrying both keys.
+  const prefs = useQuery<{ shop_favs?: string[]; shop_templates?: BasketTemplate[] }>({ queryKey: ['user-prefs'], queryFn: () => api('/api/user-prefs') });
+  const synced = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSave = useRef<{ shop_favs?: string[]; shop_templates?: BasketTemplate[] }>({});
+  const queueSave = (body: { shop_favs?: string[]; shop_templates?: BasketTemplate[] }) => {
+    Object.assign(pendingSave.current, body);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const b = pendingSave.current; pendingSave.current = {};
+      api('/api/user-prefs', { method: 'PUT', body: JSON.stringify(b) }).catch(() => { /* offline: localStorage still holds it */ });
+    }, 600);
+  };
+  useEffect(() => {
+    if (synced.current) return;
+    if (prefs.isError) { synced.current = true; return; }   // offline: keep local, allow future edits to try saving
+    if (!prefs.data) return;
+    synced.current = true;
+    const srvFavs = Array.isArray(prefs.data.shop_favs) ? prefs.data.shop_favs : [];
+    const srvTpls = Array.isArray(prefs.data.shop_templates) ? prefs.data.shop_templates : [];
+    setFavs((local) => new Set([...local, ...srvFavs]));
+    setTemplates((local) => {
+      const byName = new Map<string, BasketTemplate>();
+      for (const tp of srvTpls) byName.set(tp.name, tp);                    // server copy first…
+      for (const tp of local) if (!byName.has(tp.name)) byName.set(tp.name, tp); // …then keep local-only names
+      return [...byName.values()];
+    });
+  }, [prefs.data, prefs.isError]);
+
   useEffect(() => { try { window.localStorage.setItem(VIEW_KEY, view); } catch { /* private mode */ } }, [view]);
   // Persist the basket on this device (per-device by design — a PR is company-wide but a half-built basket
   // is personal). Cleared on checkout via setCart([]).
@@ -162,9 +194,11 @@ export default function ShopPage() {
   }, [cart]);
   useEffect(() => {
     try { window.localStorage.setItem(FAVS_KEY, JSON.stringify([...favs])); } catch { /* private mode */ }
+    if (synced.current) queueSave({ shop_favs: [...favs] });
   }, [favs]);
   useEffect(() => {
     try { window.localStorage.setItem(TPL_KEY, JSON.stringify(templates)); } catch { /* private mode */ }
+    if (synced.current) queueSave({ shop_templates: templates });
   }, [templates]);
   // Debounce the search box so typing doesn't fire a request per keystroke.
   useEffect(() => { const id = setTimeout(() => setDebouncedQ(q.trim()), 250); return () => clearTimeout(id); }, [q]);
@@ -233,19 +267,25 @@ export default function ShopPage() {
   };
 
   // Barcode scan-to-add — a hardware scanner types the code then sends Enter, submitting this form.
-  // Exact single match ⇒ drop it straight in the basket; no match ⇒ warn; several ⇒ push it into the
-  // search box so the grid narrows. Reuses the catalog endpoint (no camera lib, works with any USB scanner).
+  // First try an EXACT barcode match (a real scanned GTIN/EAN on the item master); if there's no barcode
+  // hit, fall back to a code/name lookup (the scanner may have typed a plain item code, or a human typed a
+  // name): exact single match ⇒ basket; no match ⇒ warn; several ⇒ push into the search box to narrow the grid.
+  // Reuses the catalog endpoint (no camera lib, works with any USB scanner).
+  const addScanned = (it: CatalogItem) => {
+    addToBasket(it.item_id, 1, it.uom ?? '', it.item_description ?? '');
+    notifySuccess(t('shop.scan_added', { name: it.item_description ?? it.item_id }));
+    setScan('');
+  };
   const onScan = async (e: React.FormEvent) => {
     e.preventDefault();
     const code = scan.trim();
     if (!code) return;
     try {
+      const byBarcode = await api<CatalogPage>(`/api/procurement/catalog?barcode=${encodeURIComponent(code)}&limit=1`);
+      if (byBarcode.total === 1 && byBarcode.items[0]) { addScanned(byBarcode.items[0]); return; }
       const r = await api<CatalogPage>(`/api/procurement/catalog?q=${encodeURIComponent(code)}&limit=1`);
       if (r.total === 1 && r.items[0]) {
-        const it = r.items[0];
-        addToBasket(it.item_id, 1, it.uom ?? '', it.item_description ?? '');
-        notifySuccess(t('shop.scan_added', { name: it.item_description ?? it.item_id }));
-        setScan('');
+        addScanned(r.items[0]);
       } else if (r.total === 0) {
         notifyError(t('shop.scan_not_found', { code }));
       } else {

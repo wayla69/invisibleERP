@@ -34,7 +34,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
 
   // ── Progress billing ──
   'cx.b_title': { th: 'วางบิลงวดงาน (Progress Billing)', en: 'Progress Billing' },
-  'cx.b_desc': { th: 'ประเมินงานตาม BoQ · หักเงินประกันผลงาน · ออก VAT · รับรองแบบ maker-checker (PROJ-15)', en: 'Value by BoQ line · withhold retention · output VAT · maker-checker certify (PROJ-15)' },
+  'cx.b_desc': { th: 'ประเมินงานตาม BoQ · หักเงินประกันผลงาน · ออก VAT · รับรองแบบ maker-checker (PROJ-16)', en: 'Value by BoQ line · withhold retention · output VAT · maker-checker certify (PROJ-16)' },
   'cx.b_stat_contract': { th: 'มูลค่าสัญญา', en: 'Contract value' },
   'cx.b_stat_certified': { th: 'รับรองสะสม', en: 'Certified to date' },
   'cx.b_stat_retention': { th: 'เงินประกันผลงานหักไว้', en: 'Retention withheld' },
@@ -54,7 +54,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
 
   // ── Subcontracts ──
   'cx.s_title': { th: 'ผู้รับเหมาช่วง (Subcontracts)', en: 'Subcontracts' },
-  'cx.s_desc': { th: 'ผูกงบ BoQ · งวดงานผู้รับเหมาช่วง maker-checker · หักประกันผลงาน + ภาษี ณ ที่จ่าย (PROJ-16)', en: 'Reserve BoQ budget · maker-checker valuations · retention + WHT (PROJ-16)' },
+  'cx.s_desc': { th: 'ผูกงบ BoQ · งวดงานผู้รับเหมาช่วง maker-checker · หักประกันผลงาน + ภาษี ณ ที่จ่าย (PROJ-17)', en: 'Reserve BoQ budget · maker-checker valuations · retention + WHT (PROJ-17)' },
   'cx.s_stat_value': { th: 'มูลค่าสัญญาช่วงรวม', en: 'Total subcontract value' },
   'cx.s_stat_certified': { th: 'รับรองสะสม', en: 'Certified to date' },
   'cx.s_stat_retention': { th: 'เงินประกันผลงานค้างจ่าย', en: 'Retention payable' },

@@ -22,13 +22,13 @@ export const PERMISSIONS = [
   //    by a coarse perm (so a transacting/portal role can't inherit them and trip R14–R16); assigned directly
   //    to SoD-clean CRM roles. Endpoints gate `crm_* OR coarse` so existing coarse roles keep working. ──
   'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
-  // ── Project progress billing (งวดงาน) single-duty split (docs/35 P1, PROJ-15; SoD R17) — raising a
+  // ── Project progress billing (งวดงาน) single-duty split (docs/35 P1, PROJ-16; SoD R17) — raising a
   //    progress claim is segregated from certifying it (bill work not done / withhold retention improperly). ──
   'proj_billing', 'proj_billing_certify',
-  // ── Subcontractor valuation single-duty split (docs/35 P2, PROJ-16; SoD R18) — raising a subcontractor
+  // ── Subcontractor valuation single-duty split (docs/35 P2, PROJ-17; SoD R18) — raising a subcontractor
   //    progress valuation is segregated from certifying it (over-pay a subcontractor / mis-handle retention). ──
   'proj_subcon', 'proj_subcon_certify',
-  // ── Tender / estimating → award (docs/35 P3, PROJ-17) — build/submit estimates and award a won tender
+  // ── Tender / estimating → award (docs/35 P3, PROJ-18) — build/submit estimates and award a won tender
   //    (which seeds a project + a DRAFT BoQ; the seeded BoQ's own maker-checker controls the budget baseline). ──
   'proj_tender',
   // ── Real-estate developer vertical (docs/35 P4, RE-01..03) — a property developer's unit sales. re_sales
@@ -201,9 +201,9 @@ export const SOD_RULES: SodRule[] = [
   { id: 'R16', dutyA: 'Campaign issuance of point-bearing value', dutyB: 'Points adjustment',
     a: ['crm_campaign'], b: ['crm_points_adjust'], severity: 'High', risk: 'Self-issue loyalty value through two channels (campaign coupons + manual adjustment).', mitigation: 'Separate campaign issuance from points adjustment; review issuance + adjustment logs.' },
   { id: 'R17', dutyA: 'Raise progress claim (งวดงาน)', dutyB: 'Certify progress claim',
-    a: ['proj_billing'], b: ['proj_billing_certify'], severity: 'High', risk: 'Raise and certify one’s own progress claim — bill work not done and withhold/release retention improperly.', mitigation: 'Separate claim preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-15).' },
+    a: ['proj_billing'], b: ['proj_billing_certify'], severity: 'High', risk: 'Raise and certify one’s own progress claim — bill work not done and withhold/release retention improperly.', mitigation: 'Separate claim preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-16).' },
   { id: 'R18', dutyA: 'Raise subcontractor valuation', dutyB: 'Certify subcontractor valuation',
-    a: ['proj_subcon'], b: ['proj_subcon_certify'], severity: 'High', risk: 'Raise and certify one’s own subcontractor valuation — over-pay a subcontractor / mishandle retention and back-charges.', mitigation: 'Separate valuation preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-16).' },
+    a: ['proj_subcon'], b: ['proj_subcon_certify'], severity: 'High', risk: 'Raise and certify one’s own subcontractor valuation — over-pay a subcontractor / mishandle retention and back-charges.', mitigation: 'Separate valuation preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-17).' },
   { id: 'R19', dutyA: 'Draft real-estate sale contract', dutyB: 'Approve sale contract',
     a: ['re_sales'], b: ['re_contract_approve'], severity: 'High', risk: 'Draft and approve one’s own unit sale contract — grant an unauthorised price/discount to a related buyer.', mitigation: 'Separate contract drafting from approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, RE-02).' },
 ];

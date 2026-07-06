@@ -7,6 +7,7 @@ export const items = pgTable('items', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   itemId: text('item_id').notNull().unique(),
   itemDescription: text('item_description'),
+  barcode: text('barcode'),                                     // GTIN/EAN/UPC for hardware scan-to-add (exact match)
   uom: text('uom'),
   baseUom: text('base_uom'),
   conversionFactor: numeric('conversion_factor').default('1'),
@@ -289,6 +290,7 @@ export const scanLines = pgTable('scan_lines', {
   action: text('action'),
   locationId: text('location_id'),
   confirmed: boolean('confirmed').default(false),
+  clientUuid: text('client_uuid'), // offline idempotency — unique per (session_no, client_uuid) in 0251
 });
 
 // Per-tenant preferred-supplier link for an item (Phase — branch-aware replenishment "buy" leg).

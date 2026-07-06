@@ -23,7 +23,7 @@ const CreateBody = z.object({
 const OutcomeBody = z.object({ outcome: z.enum(['won', 'lost']), reason: z.string().optional() });
 const AwardBody = z.object({ project_code: z.string().optional() });
 
-// Tender / estimating → award (docs/35 P3, PROJ-17). An estimator (proj_tender) builds a priced estimate,
+// Tender / estimating → award (docs/35 P3, PROJ-18). An estimator (proj_tender) builds a priced estimate,
 // submits it, records the win/loss, and — on a WIN — awards it, which seeds a project + a DRAFT BoQ from the
 // tender lines (the seeded BoQ's own maker-checker approve controls the budget baseline). Read surfaces power
 // the tender register / win-rate.
@@ -61,7 +61,7 @@ export class TendersController {
     return this.svc.setOutcome(tenderNo, b, u);
   }
 
-  // Award a won tender → seed project + draft BoQ (authorised act, PROJ-17).
+  // Award a won tender → seed project + draft BoQ (authorised act, PROJ-18).
   @Post(':tenderNo/award')
   @Permissions('proj_tender', 'exec')
   award(@Param('tenderNo') tenderNo: string, @Body(new ZodValidationPipe(AwardBody)) b: AwardDto, @CurrentUser() u: JwtUser) {

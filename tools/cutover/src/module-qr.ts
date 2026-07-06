@@ -20,7 +20,7 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
-import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS, MODULE_KEYS } from '@ierp/shared';
+import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS, MODULE_KEYS, parseQrPayload, scanCodeId } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const grpOf = (k: string) => Object.entries(PERM_GROUPS).find(([, ks]) => (ks as string[]).includes(k))?.[0] ?? null;
@@ -36,6 +36,8 @@ async function seed(db: any) {
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
   await db.insert(s.users).values({ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
+  // A second HQ user — the independent approver for the FA-11 custody maker-checker (approver ≠ requester).
+  await db.insert(s.users).values({ username: 'checker', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
   // A second tenant + its admin — for the per-tenant menu/module isolation checks.
   await db.insert(s.tenants).values([{ code: 'T2', name: 'Tenant Two' }]).onConflictDoNothing();
   const t2 = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'T2')))[0];
@@ -45,6 +47,11 @@ async function seed(db: any) {
   await db.insert(s.fixedAssets).values({
     tenantId: hq.id, assetNo: 'FA-TEST', name: 'Test Fridge', acquireDate: ymd(),
     acquireCost: '25000', usefulLifeMonths: 120, netBookValue: '25000', status: 'active', location: 'Kitchen',
+  }).onConflictDoNothing();
+  // An OLD asset, acquired long ago and never scan-verified — a deterministic FA-12 verification exception.
+  await db.insert(s.fixedAssets).values({
+    tenantId: hq.id, assetNo: 'FA-OLD', name: 'Old Cabinet', acquireDate: '2020-01-01',
+    acquireCost: '1000', usefulLifeMonths: 120, netBookValue: '1000', status: 'active', location: 'Storage',
   }).onConflictDoNothing();
 }
 
@@ -211,17 +218,101 @@ async function main() {
   ok('asset QR data-url png', aqr.status === 200 && typeof aqr.json.data_url === 'string' && aqr.json.data_url.startsWith('data:image/png'), `status=${aqr.status}`);
   ok('asset QR payload has ASSET_ID', typeof aqr.json.payload === 'string' && aqr.json.payload.includes('ASSET_ID:FA-TEST'));
 
+  // ── 3a. SCAN-UPDATE = FA-11 custody-change maker-checker ──────────────────
+  const checkerLogin = await inj('POST', '/api/login', undefined, { username: 'checker', password: 'admin123' });
+  const checkerTok = checkerLogin.json.token; // a DIFFERENT HQ user — the independent approver
+
   const scan = await inj('POST', '/api/assets/scan-update', token, { code: 'ASSET_ID:FA-TEST|DESC:Test Fridge', location: 'Room B', note: 'moved' });
-  ok('asset scan-update sets location', (scan.status === 200 || scan.status === 201) && scan.json.location === 'Room B', `status=${scan.status} loc=${scan.json.location}`);
+  ok('scan-update change → PENDING custody request (no immediate move)', (scan.status === 200 || scan.status === 201) && scan.json.status === 'pending' && typeof scan.json.request_no === 'string', `status=${scan.status} st=${scan.json.status} req=${scan.json.request_no}`);
+  const reqNo = scan.json.request_no;
+  const preA = (await db.select().from(s.fixedAssets).where(eq(s.fixedAssets.assetNo, 'FA-TEST')))[0];
+  ok('register NOT moved before approval', preA.location === 'Kitchen', `loc=${preA.location}`);
+
+  const selfApprove = await inj('POST', `/api/assets/custody/${reqNo}/approve`, token);
+  ok('self-approve custody → 403 SOD_VIOLATION (binds even Admin)', selfApprove.status === 403 && selfApprove.json?.error?.code === 'SOD_VIOLATION', `status=${selfApprove.status} code=${selfApprove.json?.error?.code}`);
+
+  const approve = await inj('POST', `/api/assets/custody/${reqNo}/approve`, checkerTok);
+  ok('different user approves → register moves to Room B', (approve.status === 200 || approve.status === 201) && approve.json.location === 'Room B' && approve.json.approved_by === 'checker', `status=${approve.status} loc=${approve.json.location} by=${approve.json.approved_by}`);
 
   const mv = await db.select().from(s.assetMovements).where(eq(s.assetMovements.assetNo, 'FA-TEST'));
-  ok('asset movement logged', mv.length === 1 && mv[0].toLocation === 'Room B', `n=${mv.length}`);
+  ok('Scan Update movement logged only on approval', mv.filter((m: any) => m.moveType === 'Scan Update' && m.toLocation === 'Room B').length === 1, `n=${mv.length}`);
+  const postA = (await db.select().from(s.fixedAssets).where(eq(s.fixedAssets.assetNo, 'FA-TEST')))[0];
+  ok('register location now Room B', postA.location === 'Room B', `loc=${postA.location}`);
+
+  const verify = await inj('POST', '/api/assets/scan-update', token, { code: 'ASSET_ID:FA-TEST', location: 'Room B' });
+  ok('scan-update same location → verified (no approval)', (verify.status === 200 || verify.status === 201) && verify.json.status === 'verified', `st=${verify.json.status}`);
+  const vmv = await db.select().from(s.assetMovements).where(eq(s.assetMovements.assetNo, 'FA-TEST'));
+  ok('Scan Verify movement logged for a presence confirmation', vmv.filter((m: any) => m.moveType === 'Scan Verify').length >= 1);
 
   const aLabels = await inj('GET', '/api/assets/qr/labels', token);
   ok('asset labels respond (pdf or html)', aLabels.status === 200 && (aLabels.ctype.includes('pdf') || aLabels.ctype.includes('html')), `ctype=${aLabels.ctype}`);
 
   const iLabels = await inj('POST', '/api/inventory/qr/labels', token, { item_ids: ['A'] });
   ok('inventory item labels respond', (iLabels.status === 200 || iLabels.status === 201) && (iLabels.ctype.includes('pdf') || iLabels.ctype.includes('html')), `status=${iLabels.status} ctype=${iLabels.ctype}`);
+
+  // ── 3b. DEEP-LINK PAYLOAD (URL carrier) — same code works raw or as a /q?d=… URL ──────────
+  const wrapped = `https://erp.example/q?d=${encodeURIComponent('ASSET_ID:FA-TEST|DESC:Test Fridge')}`;
+  ok('parseQrPayload unwraps a /q?d= deep-link URL', parseQrPayload(wrapped).ASSET_ID === 'FA-TEST', `got=${parseQrPayload(wrapped).ASSET_ID}`);
+  ok('parseQrPayload still handles a raw payload', parseQrPayload('ITEM_ID:A|DESC:Apple').ITEM_ID === 'A');
+  ok('scanCodeId falls back to ASSET_ID (was dropped before)', scanCodeId('ASSET_ID:FA-9|DESC:x') === 'FA-9', `got=${scanCodeId('ASSET_ID:FA-9|DESC:x')}`);
+  ok('scanCodeId reads a bare code', scanCodeId('P001') === 'P001');
+
+  // scan-update accepts the URL-wrapped code end-to-end → raises a custody request (move to Zone C).
+  const scanUrl = await inj('POST', '/api/assets/scan-update', token, { code: wrapped, location: 'Zone C' });
+  ok('URL-wrapped scan-update → pending custody request', (scanUrl.status === 200 || scanUrl.status === 201) && scanUrl.json.status === 'pending' && scanUrl.json.asset_no === 'FA-TEST', `status=${scanUrl.status} st=${scanUrl.json.status} asset=${scanUrl.json.asset_no}`);
+  const rej = await inj('POST', `/api/assets/custody/${scanUrl.json.request_no}/reject`, checkerTok, { reason: 'test' });
+  ok('reject custody request', (rej.status === 200 || rej.status === 201) && rej.json.status === 'rejected', `st=${rej.json.status}`);
+
+  // ── 3c. RESOLVE ENDPOINT (powers the /q resolver page) ───────────────────────────────────
+  const resA = await inj('GET', `/api/scan/sessions/resolve?d=${encodeURIComponent('ASSET_ID:FA-TEST')}`, token);
+  ok('resolve asset → kind=asset,id=FA-TEST', resA.status === 200 && resA.json.kind === 'asset' && resA.json.id === 'FA-TEST', `kind=${resA.json.kind} id=${resA.json.id}`);
+  const resI = await inj('GET', '/api/scan/sessions/resolve?d=A', token);
+  ok('resolve item → kind=item,id=A', resI.status === 200 && resI.json.kind === 'item' && resI.json.id === 'A', `kind=${resI.json.kind} id=${resI.json.id}`);
+  const resUrl = await inj('GET', `/api/scan/sessions/resolve?d=${encodeURIComponent(wrapped)}`, token);
+  ok('resolve accepts a URL-wrapped code', resUrl.status === 200 && resUrl.json.kind === 'asset' && resUrl.json.id === 'FA-TEST', `kind=${resUrl.json.kind} id=${resUrl.json.id}`);
+  const resNone = await inj('GET', '/api/scan/sessions/resolve?d=NOPE-404', token);
+  ok('resolve unknown code → kind=unknown', resNone.status === 200 && resNone.json.kind === 'unknown', `kind=${resNone.json.kind}`);
+
+  // ── 3d. AUDIT-BY-SCAN (physical count → reconcile → raise custody requests) ──────────
+  const openAudit = await inj('POST', '/api/assets/audits', token, { location: 'Room B' });
+  ok('open audit → expected includes FA-TEST at Room B', (openAudit.status === 200 || openAudit.status === 201) && openAudit.json.expected_count === 1 && typeof openAudit.json.audit_no === 'string', `exp=${openAudit.json.expected_count}`);
+  const auditNo = openAudit.json.audit_no;
+  const sFound = await inj('POST', `/api/assets/audits/${auditNo}/scan`, token, { code: 'ASSET_ID:FA-TEST', client_uuid: 'u1' });
+  ok('audit scan → Found (asset at audited location)', sFound.json.result === 'Found', `r=${sFound.json.result}`);
+  const sDup = await inj('POST', `/api/assets/audits/${auditNo}/scan`, token, { code: 'ASSET_ID:FA-TEST', client_uuid: 'u1' });
+  ok('audit scan offline replay deduped (client_uuid)', sDup.json.deduped === true, `dedup=${sDup.json.deduped}`);
+  const sUnknown = await inj('POST', `/api/assets/audits/${auditNo}/scan`, token, { code: 'ASSET_ID:NOPE', client_uuid: 'u2' });
+  ok('audit scan unknown code → Unknown', sUnknown.json.result === 'Unknown', `r=${sUnknown.json.result}`);
+  const recon = await inj('GET', `/api/assets/audits/${auditNo}`, token);
+  ok('audit reconcile: found 1, missing 0, unknown 1', recon.json.summary?.found === 1 && recon.json.summary?.missing === 0 && recon.json.summary?.unknown === 1, `sum=${JSON.stringify(recon.json.summary)}`);
+
+  // A DIFFERENT-location audit → FA-TEST (register: Room B) reads Misplaced; closing raises a custody request.
+  const audit2 = await inj('POST', '/api/assets/audits', token, { location: 'Room C' });
+  const audit2No = audit2.json.audit_no;
+  const sMis = await inj('POST', `/api/assets/audits/${audit2No}/scan`, token, { code: 'ASSET_ID:FA-TEST' });
+  ok('audit scan at wrong location → Misplaced', sMis.json.result === 'Misplaced' && sMis.json.register_location === 'Room B', `r=${sMis.json.result} reg=${sMis.json.register_location}`);
+  const close2 = await inj('POST', `/api/assets/audits/${audit2No}/close`, token);
+  ok('close audit raises a custody request for the misplaced asset', (close2.status === 200 || close2.status === 201) && close2.json.custody_requests_raised === 1, `raised=${close2.json.custody_requests_raised}`);
+  const custList = await inj('GET', '/api/assets/custody?status=PendingApproval', token);
+  ok('audit-raised custody request pending (source=audit → Room C)', Array.isArray(custList.json.requests) && custList.json.requests.some((r: any) => r.asset_no === 'FA-TEST' && r.source === 'audit' && r.to_location === 'Room C'), `n=${custList.json.count}`);
+
+  // ── 3e. BI SURFACES — audit results report + "not verified in N days" exception ──────────
+  const unver = await inj('GET', '/api/assets/unverified?days=90', token);
+  ok('unverified exceptions include the old never-scanned asset', unver.status === 200 && Array.isArray(unver.json.exceptions) && unver.json.exceptions.some((e: any) => e.asset_no === 'FA-OLD' && e.ever_verified === false), `count=${unver.json.count}`);
+  ok('recently-verified asset is NOT an exception', !unver.json.exceptions.some((e: any) => e.asset_no === 'FA-TEST'), `fa-test present=${unver.json.exceptions.some((e: any) => e.asset_no === 'FA-TEST')}`);
+
+  const auditRep = await inj('GET', '/api/assets/audit-report', token);
+  ok('audit-report returns audits + custody exceptions', auditRep.status === 200 && Array.isArray(auditRep.json.audits) && auditRep.json.audits.length >= 2 && auditRep.json.totals.pending_custody >= 1, `audits=${auditRep.json.audits?.length} pending=${auditRep.json.totals?.pending_custody}`);
+
+  const rtypes = await inj('GET', '/api/bi/report-types', token);
+  const rkeys = (rtypes.json.report_types ?? []).map((r: any) => r.key);
+  ok('BI report-types include asset_audit + asset_verification_exceptions', rkeys.includes('asset_audit') && rkeys.includes('asset_verification_exceptions'), `has=${rkeys.filter((k: string) => k.startsWith('asset_')).join(',')}`);
+
+  // Schedule + run the exception report through the BI scheduler (proves it's a real schedulable report type).
+  const sub = await inj('POST', '/api/bi/subscriptions', token, { name: 'Unverified assets', report_type: 'asset_verification_exceptions', frequency: 'monthly', filters: { days: 90 } });
+  ok('create asset_verification_exceptions subscription', (sub.status === 200 || sub.status === 201) && sub.json.id != null, `status=${sub.status}`);
+  const runRep = await inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, token);
+  ok('run exception report → success + summary counts the exception', (runRep.status === 200 || runRep.status === 201) && runRep.json.status === 'success' && /not verified/.test(runRep.json.summary ?? ''), `status=${runRep.json.status} sum=${runRep.json.summary}`);
 
   await app.close();
   await pg.close();

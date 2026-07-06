@@ -15,7 +15,7 @@ export interface CreateTenderDto { crm_opp_no?: string; title: string; customer_
 export interface OutcomeDto { outcome: 'won' | 'lost'; reason?: string }
 export interface AwardDto { project_code?: string }
 
-// Tender / estimating → award (docs/35 P3, PROJ-17). The pre-award bridge between the CRM pipeline and the
+// Tender / estimating → award (docs/35 P3, PROJ-18). The pre-award bridge between the CRM pipeline and the
 // BoQ: build a priced estimate (cost build-up per line), track estimating → submitted → won/lost, and on a
 // WIN seed a project + a DRAFT BoQ from the tender lines in one authorised step (the seeded BoQ enters draft
 // → the existing maker-checker approve, so the budget baseline stays controlled). Reuses ProjectsService for
@@ -99,7 +99,7 @@ export class TendersService {
 
   // Award a WON tender → seed a project + a DRAFT BoQ from the tender lines (bid_rate → BoQ rate). Idempotent
   // (one project per tender). The seeded BoQ is draft → the existing maker-checker approve controls the budget
-  // baseline (PROJ-17). Authorised act (proj_tender/exec at the controller).
+  // baseline (PROJ-18). Authorised act (proj_tender/exec at the controller).
   async award(tenderNo: string, dto: AwardDto, user: JwtUser) {
     const t = await this.tenderRow(tenderNo);
     if (t.status !== 'won') throw new BadRequestException({ code: 'TENDER_NOT_WON', message: `Only a won tender can be awarded (status=${t.status})`, messageTh: 'มอบงานได้เฉพาะใบที่ชนะประมูลแล้ว' });

@@ -26,7 +26,7 @@ const ValuationBody = z.object({
 });
 const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 
-// Subcontractor management (docs/35 P2, PROJ-16). A buyer/PM (proj_subcon) issues a subcontract against BoQ
+// Subcontractor management (docs/35 P2, PROJ-17). A buyer/PM (proj_subcon) issues a subcontract against BoQ
 // scope (reserving budget) and raises the subcontractor's progress valuations; an independent certifier
 // (proj_subcon_certify, ≠ preparer) certifies each valuation — posting the AP/WIP/retention-payable JE and
 // withholding retention into the shared sub-ledger. Maker-checker enforced in the service (SOD_SELF_APPROVAL).

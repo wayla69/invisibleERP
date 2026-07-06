@@ -17,7 +17,9 @@ import { TtlCache } from '../../common/ttl-cache';
 import { MessagingService } from '../messaging/messaging.service';
 import { LineNotifyService } from '../messaging/line-notify.service';
 import { CollectionsService } from '../finance/collections.service';
+import { FinanceMetricsService } from '../finance/finance-metrics.service';
 import { EamService } from '../eam/eam.service';
+import { AssetsService } from '../assets/assets.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
 import { RevRecService } from '../revenue/revrec.service';
@@ -68,6 +70,12 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
   // Likewise: each run raises preventive-maintenance work orders for every due PM schedule (idempotent).
   eam_pm_generate: { label: 'สร้างใบสั่งงานซ่อมตามแผน (PM)', labelEn: 'Generate due preventive maintenance' },
+  // Asset audit results (FA-11): recent audits + their found/missing/misplaced/unknown tallies + the
+  // outstanding custody-change requests awaiting approval. Read-only aggregate.
+  asset_audit: { label: 'ผลการตรวจนับทรัพย์สิน', labelEn: 'Asset audit results' },
+  // FA-12 (detective): active assets not physically verified within N days (default 90) — an existence
+  // exception list. Schedule it `monthly` so unverified assets surface for a count before period-end.
+  asset_verification_exceptions: { label: 'ทรัพย์สินที่ไม่ได้ตรวจสอบเกินกำหนด', labelEn: 'Assets not verified in N days' },
   // Likewise: each run re-runs the 3-way match for every BLOCKED AP invoice (EXP-10) — a hold typically
   // clears itself once the outstanding GR posts, releasing the invoice to payment without a manual re-run.
   ap_automatch_rerun: { label: 'จับคู่ 3 ทางซ้ำอัตโนมัติ (ปลดล็อกใบแจ้งหนี้)', labelEn: 'Auto re-match blocked AP invoices' },
@@ -123,6 +131,11 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   tax_pnd_draft: { label: 'จัดทำแบบ ภ.ง.ด.3/53 (ฉบับร่าง)', labelEn: 'Draft PND3/53 WHT filing' },
   // Remittance reminder: the period's amounts due + statutory deadlines (7th PND / 15th PP30).
   tax_remittance_reminder: { label: 'แจ้งเตือนกำหนดนำส่งภาษี', labelEn: 'Tax remittance reminder' },
+  // docs/35 Phase 6 — schedulable finance analytics packs (wrap the FinanceMetricsService aggregators).
+  // Each run recomputes the read-only board and delivers it (email/LINE/in-app) with an MD&A headline.
+  cfo_kpi_pack: { label: 'สรุปตัวชี้วัด CFO + คำอธิบาย', labelEn: 'CFO KPI pack + narrative' },
+  cash_position_pack: { label: 'สถานะเงินสด + พยากรณ์ 13 สัปดาห์', labelEn: 'Cash position + 13-week forecast' },
+  close_status_pack: { label: 'ความพร้อมปิดงวดบัญชี', labelEn: 'Period-close readiness' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -137,7 +150,13 @@ export class BiService implements OnModuleInit {
     // Optional so a partially-wired test harness can construct BiService without the finance graph;
     // the full app always provides it (FinanceModule), enabling the scheduled ar_collections_dunning job.
     @Optional() private readonly collections?: CollectionsService,
+    // docs/35 Phase 1 — canonical CFO KPI engine; the exec_scorecard finance leg reads from it so the
+    // scorecard and the CFO Command Center never drift. @Optional so a partial harness still constructs.
+    @Optional() private readonly financeMetrics?: FinanceMetricsService,
     @Optional() private readonly eam?: EamService,
+    // FA-11/FA-12 reporting surfaces: audit results (asset_audit) + the periodic asset-existence exception
+    // monitor (asset_verification_exceptions). @Optional so partial harnesses still construct.
+    @Optional() private readonly assets?: AssetsService,
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly leases?: LeasesService,
     @Optional() private readonly revrec?: RevRecService,
@@ -499,6 +518,12 @@ export class BiService implements OnModuleInit {
 
     // Streaming analytics (Phase B): push the refreshed KPI snapshot live to any subscribed dashboard.
     this.publishLive({ type: 'kpi_refresh', tenant_id: tid, date, kpi: { sales_mtd: kpi.sales.mtd, open_ar: kpi.receivables.open_ar, open_ap: kpi.payables.open_ap, pipeline_open: kpi.pipeline.open_value } });
+    // docs/35 Phase 2: nudge the CFO Command Center too — a compact finance-KPI headline (+ red-flag count)
+    // so the scorecard tiles refresh live off the same bus. Best-effort; skipped if the engine isn't wired.
+    if (this.financeMetrics) {
+      const fin = await this.financeMetrics.execFinance({ tenantId: tid } as JwtUser).catch(() => null);
+      if (fin) this.publishLive({ type: 'fin_kpi_refresh', tenant_id: tid, date, fin: { net_margin_pct: fin.net_margin_pct, current_ratio: fin.current_ratio, dso: fin.dso, red_flags: fin.red_flags?.length ?? 0 } });
+    }
     return { date, snapshot: row };
   }
 
@@ -637,6 +662,16 @@ export class BiService implements OnModuleInit {
       if (!this.eam) throw new BadRequestException({ code: 'EAM_UNAVAILABLE', message: 'EAM service not available', messageTh: 'ระบบบำรุงรักษาไม่พร้อมใช้งาน' });
       const r = await this.eam.runPmDue(user); // idempotent: a schedule with an open WO is skipped
       return { data: r, summary: `PM generation: raised ${r.generated} of ${r.scanned} schedules`, summaryTh: `สร้างใบสั่งงานซ่อมตามแผน: ${r.generated} จาก ${r.scanned} แผน` };
+    }
+    if (reportType === 'asset_audit') {
+      if (!this.assets) throw new BadRequestException({ code: 'ASSETS_UNAVAILABLE', message: 'Assets service not available', messageTh: 'ระบบทรัพย์สินไม่พร้อมใช้งาน' });
+      const r = await this.assets.auditReport(user, { limit: f.limit });
+      return { data: r, summary: `Asset audits: ${r.totals.audits}, missing ${r.totals.missing}, misplaced ${r.totals.misplaced}; ${r.totals.pending_custody} custody request(s) pending`, summaryTh: `ตรวจนับทรัพย์สิน ${r.totals.audits} ครั้ง · ขาดหาย ${r.totals.missing} · ผิดตำแหน่ง ${r.totals.misplaced} · รออนุมัติย้าย ${r.totals.pending_custody}` };
+    }
+    if (reportType === 'asset_verification_exceptions') {
+      if (!this.assets) throw new BadRequestException({ code: 'ASSETS_UNAVAILABLE', message: 'Assets service not available', messageTh: 'ระบบทรัพย์สินไม่พร้อมใช้งาน' });
+      const r = await this.assets.unverifiedAssets(user, { days: f.days });
+      return { data: r, summary: `${r.count} of ${r.total_active} active assets not verified in ${r.days} days`, summaryTh: `${r.count} จาก ${r.total_active} สินทรัพย์ไม่ได้ตรวจสอบเกิน ${r.days} วัน` };
     }
     if (reportType === 'line_daily_digest') {
       const db = this.db;
@@ -815,6 +850,23 @@ export class BiService implements OnModuleInit {
       const r = await this.execScorecard(user);
       return { data: r, summary: `Exec: sales(MTD) ${r.finance.sales_mtd}, margin ${r.finance.margin_pct ?? '—'}%, win rate ${r.crm.win_rate_pct ?? '—'}%, portfolio CPI ${r.projects.cpi ?? '—'}, ${r.supply_chain.blocked_invoices} held invoice(s)`, summaryTh: `ผู้บริหาร: ยอดขายเดือนนี้ ${r.finance.sales_mtd} · มาร์จิน ${r.finance.margin_pct ?? '—'}% · อัตราชนะ ${r.crm.win_rate_pct ?? '—'}% · CPI ${r.projects.cpi ?? '—'}` };
     }
+    // docs/35 Phase 6 — schedulable finance packs (wrap the canonical aggregators; summary carries the MD&A headline).
+    if (reportType === 'cfo_kpi_pack') {
+      if (!this.financeMetrics) throw new BadRequestException({ code: 'FINANCE_METRICS_UNAVAILABLE', message: 'Finance metrics engine not available', messageTh: 'ระบบตัวชี้วัดการเงินไม่พร้อมใช้งาน' });
+      const r: any = await this.financeMetrics.pack({}, user);
+      const reds = r.kpis.filter((k: any) => k.rag === 'red').length;
+      return { data: r, summary: `CFO KPIs (${r.as_of}): ${r.narrative?.headline_en ?? ''} — ${reds} red`, summaryTh: `ตัวชี้วัด CFO (${r.as_of}): ${r.narrative?.headline_th ?? ''}` };
+    }
+    if (reportType === 'cash_position_pack') {
+      if (!this.financeMetrics) throw new BadRequestException({ code: 'FINANCE_METRICS_UNAVAILABLE', message: 'Finance metrics engine not available', messageTh: 'ระบบตัวชี้วัดการเงินไม่พร้อมใช้งาน' });
+      const r: any = await this.financeMetrics.cashPosition({ weeks: 13 }, user);
+      return { data: r, summary: `Cash ${r.total_cash}; projected close ${r.forecast?.projected_closing_cash}; trough ${r.forecast?.min_balance} at wk+${r.forecast?.min_week}`, summaryTh: `เงินสด ${r.total_cash} · คาดการณ์ปลายช่วง ${r.forecast?.projected_closing_cash} · จุดต่ำสุด ${r.forecast?.min_balance} สัปดาห์ +${r.forecast?.min_week}` };
+    }
+    if (reportType === 'close_status_pack') {
+      if (!this.financeMetrics) throw new BadRequestException({ code: 'FINANCE_METRICS_UNAVAILABLE', message: 'Finance metrics engine not available', messageTh: 'ระบบตัวชี้วัดการเงินไม่พร้อมใช้งาน' });
+      const r: any = await this.financeMetrics.closeStatus({}, user);
+      return { data: r, summary: `Close ${r.period}: overall ${r.rag?.overall}; tie-out exceptions ${r.tie_out?.exceptions ?? '—'}; days-to-close ${r.days_to_close}`, summaryTh: `ปิดงวด ${r.period}: สถานะ ${r.rag?.overall} · รายการไม่ตรง ${r.tie_out?.exceptions ?? '—'} · จำนวนวันปิดงวด ${r.days_to_close}` };
+    }
     if (reportType === 'ai_overage_billing') {
       if (!this.billing) throw new BadRequestException({ code: 'BILLING_UNAVAILABLE', message: 'Billing service not available', messageTh: 'ระบบเรียกเก็บเงินไม่พร้อมใช้งาน' });
       const r = await this.billing.runAiOverageBilling(user, filters?.month); // idempotent per (tenant, month)
@@ -835,12 +887,20 @@ export class BiService implements OnModuleInit {
     const portfolio: any = this.projects ? await this.projects.portfolioEvm(user).catch(() => null) : null;
     const scorecards: any = this.procurement ? await this.procurement.listScorecards({}, user).catch(() => null) : null;
     const holds: any = this.match ? await this.match.listResults({ blocked: true }, user).catch(() => null) : null;
+    // docs/35 Phase 1 — pull the finance leg from the canonical KPI engine (single source of truth) when
+    // wired; fall back to the legacy trend-derived margin so a partial harness still returns a scorecard.
+    const finMetrics: any = this.financeMetrics ? await this.financeMetrics.execFinance(user).catch(() => null) : null;
     return {
       as_of: new Date().toISOString().slice(0, 10),
       finance: {
         sales_mtd: n(kpi?.sales?.mtd), sales_ytd: n(kpi?.sales?.ytd),
         open_ar: n(kpi?.receivables?.open_ar), open_ap: n(kpi?.payables?.open_ap),
-        margin_pct: finLast ? n(finLast.margin_pct) : null, gross_profit: finLast ? n(finLast.gross_profit) : null,
+        margin_pct: finMetrics ? finMetrics.net_margin_pct : (finLast ? n(finLast.margin_pct) : null),
+        gross_profit: finLast ? n(finLast.gross_profit) : null,
+        gross_margin_pct: finMetrics?.gross_margin_pct ?? null, current_ratio: finMetrics?.current_ratio ?? null,
+        dso: finMetrics?.dso ?? null, operating_cash_flow: finMetrics?.operating_cash_flow ?? null,
+        cash_runway_months: finMetrics?.cash_runway_months ?? null,
+        kpi_red_flags: finMetrics?.red_flags ?? [],
       },
       crm: {
         open_value: n(kpi?.pipeline?.open_value),

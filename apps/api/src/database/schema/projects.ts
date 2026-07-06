@@ -290,6 +290,35 @@ export const projectChangeOrders = pgTable(
   (t) => ({ byProject: index('idx_pco_project').on(t.projectId) }),
 );
 
+// Project material scope-change request (docs/32, PROJ-15). A requester (pr_raise) proposes adding a material
+// item that is NOT on the project's approved BoQ; it parks 'pending' until an independent authoriser
+// (planner/exec, ≠ requester) approves — on approval a new material line is appended to the approved BoQ (the
+// budget grows) and the item becomes shoppable. A requester can only request budget, never expand it.
+export const projectBoqChangeRequests = pgTable(
+  'project_boq_change_requests',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    boqId: bigint('boq_id', { mode: 'number' }).references(() => projectBoq.id),  // the BoQ the line is appended to
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    reqNo: text('req_no').notNull(),
+    itemNo: text('item_no'),                                // → items.item_id (may be a new/free-text code)
+    description: text('description'),
+    uom: text('uom'),
+    qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    rate: numeric('rate', { precision: 16, scale: 2 }).notNull().default('0'),
+    amount: numeric('amount', { precision: 16, scale: 2 }).notNull().default('0'), // = qty × rate (added budget)
+    status: text('status').notNull().default('pending'),    // pending | approved | rejected
+    newBoqLineId: bigint('new_boq_line_id', { mode: 'number' }).references(() => projectBoqLines.id), // created on approve
+    requestedBy: text('requested_by'),
+    approvedBy: text('approved_by'),                        // checker — must differ from requested_by (SoD)
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectionReason: text('rejection_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_bqr_project').on(t.projectId), byTenant: index('idx_bqr_tenant').on(t.tenantId, t.status) }),
+);
+
 // Periodic project-health snapshot (PPM upgrade) — a dated EVM/RAG point so the portfolio/status report can
 // show a trajectory (the live EVM is point-in-time). Captured on demand or by the scheduled BI action job.
 export const projectHealthSnapshots = pgTable(
@@ -395,10 +424,10 @@ export const projectCommitments = pgTable(
 );
 export type ProjectCommitment = typeof projectCommitments.$inferSelect;
 
-// Progress billing / งวดงาน (docs/35 P1, PROJ-15). A construction contract is billed in periodic progress
+// Progress billing / งวดงาน (docs/35 P1, PROJ-16). A construction contract is billed in periodic progress
 // CLAIMS: each claim values work done to date by BoQ line (cumulative % → value-to-date), the movement since
 // the last certified claim is billed this claim, RETENTION is withheld per the retention %, and the NET is
-// invoiced. Certification is maker-checker (created_by ≠ certified_by → PROJ-15); on certify it posts revenue
+// invoiced. Certification is maker-checker (created_by ≠ certified_by → PROJ-16); on certify it posts revenue
 // + splits AR into net (1100) + retention receivable (1170) and withholds the retention into the shared
 // retention sub-ledger (schema/retention.ts).
 export const projectProgressClaims = pgTable(
@@ -453,7 +482,7 @@ export const progressClaimLines = pgTable(
 export type ProjectProgressClaim = typeof projectProgressClaims.$inferSelect;
 export type ProgressClaimLine = typeof progressClaimLines.$inferSelect;
 
-// Subcontractor management (docs/35 P2, PROJ-16). A subcontract is a priced scope against BoQ lines executed
+// Subcontractor management (docs/35 P2, PROJ-17). A subcontract is a priced scope against BoQ lines executed
 // by a subcontractor; it registers a commitment on those BoQ lines (docs/32 ledger, source SUBCON). The
 // subcontractor's periodic VALUATIONS are certified maker-checker — each withholds retention PAYABLE (2440,
 // shared sub-ledger), deducts back-charges, and posts the certified NET to AP (2000) with the project
@@ -530,7 +559,7 @@ export type ProjectSubcontract = typeof projectSubcontracts.$inferSelect;
 export type SubcontractScope = typeof subcontractScope.$inferSelect;
 export type SubcontractValuation = typeof subcontractValuations.$inferSelect;
 
-// Tender / estimating → award (docs/35 P3, PROJ-17). A tender is a pre-award ESTIMATE — a draft BoQ with a
+// Tender / estimating → award (docs/35 P3, PROJ-18). A tender is a pre-award ESTIMATE — a draft BoQ with a
 // cost build-up (bid_rate = unit_cost × (1 + markup%)) tracked estimating → submitted → won/lost. On WIN →
 // award seeds a project + a DRAFT BoQ from the tender lines (bid_rate → BoQ rate), the missing bridge from
 // the CRM pipeline to the BoQ. Nothing hits GL (a modelling surface); the seeded BoQ's own maker-checker

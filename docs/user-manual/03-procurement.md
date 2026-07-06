@@ -119,7 +119,9 @@ other PR.
    Each card also shows the item's **on-hand stock** (red **สินค้าหมด** when zero)
    and its **last purchase price**, so you can judge what to request at a glance.
    Tap the **⭐ star** on a product to save it as a **favourite**, then use the
-   **รายการโปรด** chip to see just your favourites (saved on this device).
+   **รายการโปรด** chip to see just your favourites. Favourites now **follow you
+   across devices** (synced to your account, like your sidebar pins) — star
+   something on your phone and it's there on the desktop too.
 2. **Add to basket.** Press **ใส่ตะกร้า** on a product to drop it in the basket;
    press it again (or use the **+ / −** steppers in the basket) to change the
    quantity.
@@ -154,15 +156,19 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 > you have and jumps straight to the basket.
 
 > **Recurring order? Save it as a รายการประจำ.** In the **รายการประจำ** card, name
-> the current basket and press **บันทึก** to save it (on this device); later press
-> **โหลด** to drop that whole list back into the basket, or the bin icon to remove
-> it. Handy for the monthly/weekly supplies you always request.
+> the current basket and press **บันทึก** to save it; later press **โหลด** to drop
+> that whole list back into the basket, or the bin icon to remove it. Handy for the
+> monthly/weekly supplies you always request — saved templates (like your
+> favourites) **sync to your account**, so they're available on any device you sign
+> in from.
 
 > **Got a barcode scanner? Just scan.** The **สแกนบาร์โค้ด** box beside the search
 > field lets any USB/Bluetooth scanner (they type the code and press Enter) add an
-> item hands-free: an exact match drops straight into the basket, an unknown code
-> shows *ไม่พบสินค้า*, and if several items match the code the grid filters to them
-> so you can pick. No app or camera setup needed.
+> item hands-free. It first looks for an item whose **barcode** exactly matches the
+> scan (set an item's barcode/GTIN in the item master), then falls back to matching
+> the item code or name: an exact hit drops straight into the basket, an unknown
+> code shows *ไม่พบสินค้า*, and if several items match the grid filters to them so
+> you can pick. No app or camera setup needed.
 
 > **Buying for a project? Shop into its budget.** If you work on projects, a
 > **ซื้อเข้าโครงการ** picker appears in the shop header (and a *Shop for this project*
@@ -172,9 +178,16 @@ basket (urgent basket → PR priority **Urgent**), awaiting Procurement approval
 > if it's within budget it's fulfilled from stock or turned into a purchase
 > requisition automatically; if it goes over a line's budget it's sent to an
 > authorised person to approve first. **An item that isn't in the project's budget
-> can't be added here** — an authorised person must add it to the project budget
-> first (see *Project accounting* → *material requisitions*). This keeps project
-> spend inside the approved budget by design (controls **PROJ-12/PROJ-13**).
+> can't be added here.** This keeps project spend inside the approved budget by
+> design (controls **PROJ-12/PROJ-13**).
+
+> **Need something that isn't in the project's budget?** Use the
+> **ขอเพิ่มวัสดุเข้างบ** button on the project-shop page to *request* it — fill in
+> the item, quantity and expected price and submit. It doesn't add anything by
+> itself: an authorised person (a **planner** or **exec**) must approve it into the
+> budget first (you can't approve your own request — maker-checker). Once approved,
+> the item appears on the project's shelf and you can shop it like any other
+> (control **PROJ-15**). Track your requests' status right below the shop shelf.
 
 > **Track your requests without leaving the page.** A **คำขอซื้อล่าสุดของฉัน** card
 > (below the basket) lists your last few requisitions with their live approval
