@@ -21,7 +21,7 @@ export type AccessReview = typeof accessReviews.$inferSelect;
 // admin — it is staged here as a PendingApproval request and only takes effect when a DIFFERENT admin
 // (≠ requester and ≠ the affected user) approves it. Captures the intended grant (for a new user, the
 // bcrypt password hash is held until approval, mirroring signup_requests), the violated rule ids, and the
-// justification — the maker-checker evidence the UAR relies on. Tenant-scoped (RLS via migration 0253).
+// justification — the maker-checker evidence the UAR relies on. Tenant-scoped (RLS via migration 0260).
 export const accessGrantExceptions = pgTable('access_grant_exceptions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),

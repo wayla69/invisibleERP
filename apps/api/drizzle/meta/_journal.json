@@ -1745,7 +1745,7 @@
       "tag": "0248_tax_credit_debit_notes",
       "breakpoints": true
     },
-    {
+        {
       "idx": 249,
       "version": "7",
       "when": 2023820000076,
@@ -1770,14 +1770,63 @@
       "idx": 252,
       "version": "7",
       "when": 2023820000079,
-      "tag": "0252_gift_card_issue_approval",
+      "tag": "0252_retention_ledger",
       "breakpoints": true
     },
     {
       "idx": 253,
       "version": "7",
       "when": 2023820000080,
-      "tag": "0253_access_grant_exceptions",
+      "tag": "0253_progress_billing",
+      "breakpoints": true
+    },
+    {
+      "idx": 254,
+      "version": "7",
+      "when": 2023820000081,
+      "tag": "0254_subcontracts",
+      "breakpoints": true
+    },
+    {
+      "idx": 255,
+      "version": "7",
+      "when": 2023820000082,
+      "tag": "0255_tenders",
+      "breakpoints": true
+    },
+    {
+      "idx": 256,
+      "version": "7",
+      "when": 2023820000083,
+      "tag": "0256_realestate",
+      "breakpoints": true
+    },
+    {
+      "idx": 257,
+      "version": "7",
+      "when": 2023820000084,
+      "tag": "0257_construction_tax",
+      "breakpoints": true
+    },
+    {
+      "idx": 258,
+      "version": "7",
+      "when": 2023820000085,
+      "tag": "0258_re_transfer_input_vat",
+      "breakpoints": true
+    },
+    {
+      "idx": 259,
+      "version": "7",
+      "when": 2023820000086,
+      "tag": "0259_gift_card_issue_approval",
+      "breakpoints": true
+    },
+    {
+      "idx": 260,
+      "version": "7",
+      "when": 2023820000087,
+      "tag": "0260_access_grant_exceptions",
       "breakpoints": true
     }
   ]

@@ -285,7 +285,7 @@ Gap discussion under "Cross-cutting risk" below.
   the affected user. Log both as maker-checker events feeding the UAR.
 - **Status: ✅ REMEDIATED (2026-07-05) — part (b); part (a) intentionally deferred.** The self-service SoD
   override is gone: a conflicting grant with `allow_sod_override` + reason is now **staged** as a
-  PendingApproval `access_grant_exceptions` row (migration **0253**) and applied only when a **DIFFERENT**
+  PendingApproval `access_grant_exceptions` row (migration **0260**) and applied only when a **DIFFERENT**
   admin approves it via `POST /api/admin/users/access-exceptions/:reqNo/approve` — the approver must differ
   from BOTH the requester and the affected user (else `403 SOD_VIOLATION`); who-requested / who-approved /
   why / which-rules is persisted in the hash-chained audit_log. Web queue on `/admin/users`. Part (a) —
@@ -382,9 +382,9 @@ Scope to approve **before any build.** Each item reuses an existing in-repo patt
 2. **G4 Opening balances** — post as `pendingApproval`; distinct approver. — **✅ DONE 2026-07-05**.
 3. **G3 Petty-cash establish/replenish** — extend the module's own EXP-08 maker-checker to fund cash
    movements. — **✅ DONE 2026-07-05** (funding request `kind:'funding'`, distinct-approver posts the cash-in).
-4. **G1 Gift-card issuance** — Draft+approve (optionally threshold-gated like REV-16). — **✅ DONE 2026-07-05** (threshold-gated at 5000 THB; distinct finance approver posts the GL; migration 0252).
+4. **G1 Gift-card issuance** — Draft+approve (optionally threshold-gated like REV-16). — **✅ DONE 2026-07-05** (threshold-gated at 5000 THB; distinct finance approver posts the GL; migration 0259).
 5. **G11 Access grants + SoD override** — distinct-approver on permission/role grants and, mandatorily,
-   on `allow_sod_override`. — **✅ DONE 2026-07-05** (SoD override → two-person staged approval, migration 0253; blanket per-grant approval intentionally deferred — see G11 status).
+   on `allow_sod_override`. — **✅ DONE 2026-07-05** (SoD override → two-person staged approval, migration 0260; blanket per-grant approval intentionally deferred — see G11 status).
 6. **G8 Vendor bank/terms + G7 credit limit + G5/G6 price** — staged master-data approval for
    financially-sensitive fields (one workstream; ship the field-level guard first, full staging next).
 

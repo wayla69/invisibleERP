@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { LedgerModule } from '../ledger/ledger.module';
 import { BiLiveModule } from '../bi/bi-live.module';
 import { CommitmentsModule } from '../commitments/commitments.module';
+import { RetentionModule } from '../retention/retention.module';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 
@@ -11,7 +12,7 @@ import { ProjectsService } from './projects.service';
 // CommitmentsModule (M1, PROJ-12) supplies the BoQ-line encumbrance ledger so getBoq can show
 // budget/committed/remaining per line and expose the project commitments read model.
 @Module({
-  imports: [LedgerModule, BiLiveModule, CommitmentsModule],
+  imports: [LedgerModule, BiLiveModule, CommitmentsModule, RetentionModule],
   controllers: [ProjectsController],
   providers: [ProjectsService],
   exports: [ProjectsService],

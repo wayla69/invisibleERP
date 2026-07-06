@@ -16,6 +16,7 @@ import { CATALOG as CAT_PLANBI } from './i18n-catalog/planbi';
 import { CATALOG as CAT_SETTINGS } from './i18n-catalog/settings';
 import { CATALOG as CAT_HRX } from './i18n-catalog/hrx';
 import { CATALOG as CAT_MISC } from './i18n-catalog/misc';
+import { CATALOG as CAT_CONSTRUCTION } from './i18n-catalog/construction';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -257,6 +258,11 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.pm_crm': { th: 'ลีด & โอกาสการขาย', en: 'Leads & Opportunities' },
   'nav.pm_close': { th: 'ปิดงวดโครงการ', en: 'Project Period Close' },
   'nav.pm_settings': { th: 'แม่แบบ & อัตราค่าแรง', en: 'Templates & Rate Cards' },
+  'nav.pm_tenders': { th: 'ประมูลงาน (Tenders)', en: 'Tenders / Estimating' },
+  'nav.pm_billing': { th: 'วางบิลงวดงาน', en: 'Progress Billing' },
+  'nav.pm_subcontracts': { th: 'ผู้รับเหมาช่วง', en: 'Subcontracts' },
+  'nav.group.realestate': { th: 'อสังหาริมทรัพย์', en: 'Real Estate' },
+  'nav.re_developments': { th: 'โครงการ & ยูนิต', en: 'Developments & Units' },
   'nav.profitability': { th: 'กำไรตามมิติ', en: 'Profitability by Dimension' },
   'nav.insights': { th: 'ข้อมูลเชิงลึก (Insights)', en: 'Insights' },
   'nav.bi': { th: 'BI Analytics', en: 'BI Analytics' },
@@ -1401,5 +1407,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION,
 );
