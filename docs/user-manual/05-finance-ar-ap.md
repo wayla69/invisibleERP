@@ -1,6 +1,17 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.3 · 2026-07-05**
+**Status: DRAFT v0.5 · 2026-07-06**
+
+*v0.5 (2026-07-06): Part C — clarified that a **bank statement is imported single-user by
+design** and that the **reconciliation certifier** must review the imported (matched/unmatched)
+statement lines before sign-off, so a wrong/unauthorised import is caught at certification
+(gap **G10** — documentation only, compensating detective control **REC-02**; no code change).*
+
+*v0.4 (2026-07-06): Part C — a **newly created bank account** is now inactive /
+PendingApproval and **cannot receive a deposit** (`BANK_NOT_APPROVED`) until a **different**
+approver (`approvals`/`exec`) activates it (`POST /api/bank/accounts/:id/approve`);
+self-approval is blocked (`SOD_VIOLATION`). Maker-checker gap G9 — strengthens control
+**REC-05** (no new control), migration 0264.*
 
 *v0.3: Part B3 — petty-cash **fund establishment (opening cash) and replenishment** now
 raise a pending **funding request** that a second authorised user must approve before the
@@ -457,6 +468,19 @@ trail (รออนุมัติ → อนุมัติแล้ว/ปฏ�
 > **Note — separation of duties:** The person who **prepares** a reconciliation
 > must **not** be the one who **certifies** it (rule R06).
 
+> **A newly created bank account needs a second person's OK before it can take
+> money.** When you set up a **new bank account** (its account number, the GL
+> account it maps to, and any opening balance), it starts **inactive / รออนุมัติ
+> (PendingApproval)** and **cannot receive a deposit** — banking cash into it is
+> refused with **BANK_NOT_APPROVED** — until a **different** person with approval
+> authority (**Approvals** or **Exec**) activates it (`POST
+> /api/bank/accounts/:id/approve`; **Reject** discards it). The person who created
+> the account **cannot approve their own** (the system blocks it with
+> **SOD_VIOLATION**). This stops one person quietly standing up a bank account with a
+> wrong account number, GL mapping or opening balance and banking cash through it.
+> (Existing accounts are already Approved — this only affects accounts created from
+> now on. Strengthens control **REC-05**.)
+
 ### To reconcile a bank account
 
 1. Go to **Reconciliation** (`/reconciliation`).
@@ -476,6 +500,16 @@ needs investigating.
 
 **Expected result:** The period is marked *Certified*. (You cannot certify a
 reconciliation you prepared yourself.)
+
+> **Before you certify, review the imported statement lines.** A **bank statement is
+> imported by a single user** (this is fine by design — the imported lines only
+> matter once they're *matched*). Your certification is the control that catches a
+> wrong or unauthorised import: as the certifier, **review the matched and unmatched
+> statement lines** before you sign off, and treat any adjustment (bank fees /
+> interest) as a separately-approved item (**BANK-02**). Signing off on lines you
+> haven't reviewed is what defeats the control. (Gap **G10** — the statement import
+> is single-user by design; the certifier's evidence review is the compensating
+> detective control, **REC-02**.)
 
 ## Financial health (how healthy is my working capital?)
 

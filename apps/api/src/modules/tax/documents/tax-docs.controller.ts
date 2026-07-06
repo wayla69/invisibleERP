@@ -58,6 +58,13 @@ export class TaxDocsController {
     return this.svc.list(u, type);
   }
 
+  // G16 (maker-checker audit — detective): voided-fiscal-document exception report for periodic review.
+  // Declared before ':docNo' so the literal path is not captured as a doc number.
+  @Get('exceptions/voided') @Permissions('exec', 'ar', 'fin_report')
+  voidedExceptions(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.voidedExceptions(u, { from, to });
+  }
+
   @Get(':docNo') @Permissions('ar', 'pos', 'cust_pos')
   get(@Param('docNo') docNo: string, @CurrentUser() u: JwtUser) {
     return this.svc.getByDocNo(u, docNo);

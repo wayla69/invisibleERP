@@ -104,6 +104,11 @@ async function main() {
   const list = await inj('GET', '/api/payments/refund-requests', mgr1);
   ok('Refund-request worklist: 2 requests (1 Approved + 1 Rejected), 0 pending', list.json.count === 2 && list.json.pending === 0, JSON.stringify({ c: list.json.count, p: list.json.pending }));
 
+  // ── 9. G14 (detective): the void/refund exception report surfaces every executed refund (500 + 2000)
+  //    for independent periodic review — the compensating detective control for single-user refunds/voids. ──
+  const exc = await inj('GET', '/api/payments/exceptions/voids-refunds', mgr1);
+  ok('G14: void/refund exception report lists the 2 executed refunds (total 2500)', exc.status === 200 && exc.json.refund_count === 2 && near(exc.json.refund_total, 2500) && exc.json.void_count === 0, JSON.stringify({ v: exc.json.void_count, r: exc.json.refund_count, rt: exc.json.refund_total }));
+
   await app.close();
   await pg.close();
   console.log('\n── Payments Refund maker-checker (อนุมัติคืนเงิน) ──');

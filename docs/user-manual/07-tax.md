@@ -1,6 +1,6 @@
 # 07 · Tax
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2 · 2026-07-06** · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
 
 This chapter is for **accountants** and **finance** staff. It covers VAT, tax
 invoices (full and abbreviated), e-Tax submission, withholding tax (WHT)
@@ -56,9 +56,18 @@ never reused).
 
 - **View / list** invoices (filter by full or abbreviated).
 - **Download PDF** — add a copy watermark when issuing a duplicate.
-- **Void** an invoice with a reason if it was issued in error.
+- **Void** an invoice with a reason if it was issued in error. The voided number is **kept and never
+  reused** (a Revenue Department requirement — the sequence stays gapless), so a single user may void; to
+  change the **value** of a sale, issue a **credit / debit note** instead (dual-controlled — see §2 below).
 
 [screenshot: tax invoice list with full/abbreviated tabs]
+
+> **Reviewing voided invoices (exception report).** Because a void is a single-user action, an independent
+> reviewer should periodically check void activity. The **voided-tax-invoice exception report**
+> (`GET /api/tax-invoices/exceptions/voided`, permission `exec` / `ar` / `fin_report`) lists **every voided
+> tax invoice** for a chosen window (add optional `from`/`to` on the **issue date**) — doc number, type,
+> issue date, source, grand total, void **reason** and who created it — with a count and total. It is
+> read-only and company-scoped. This is the recommended **detective** control for invoice voids (gap **G16**).
 
 > **Branding the full tax invoice.** The **full tax invoice (ใบกำกับภาษีเต็มรูป)** PDF now uses your
 > company's active **document template** — set it up in **Settings → Document templates** (choose

@@ -65,6 +65,12 @@ export class PaymentsController {
     return this.svc.rejectRefund(Number(id), u, b?.reason);
   }
 
+  // G14 (maker-checker audit — detective): void/refund exception report for independent periodic review.
+  @Get('exceptions/voids-refunds') @Permissions('exec', 'ar', 'fin_report')
+  voidRefundExceptions(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.voidRefundExceptions({ from, to }, u);
+  }
+
   @Patch(':no/void') @Permissions('pos_refund', 'ar')
   void(@Param('no') no: string, @CurrentUser() u: JwtUser) {
     return this.svc.voidPayment(no, u);

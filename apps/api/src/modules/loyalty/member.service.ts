@@ -1,7 +1,7 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, or, sql, ilike, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { posMembers, posMemberLedger, loyaltyConfig, memberConsents, customerProfiles, loyaltyPostingRuns, loyaltyTiers, loyaltyTierHistory, loyaltyExpiryNotices } from '../../database/schema';
+import { posMembers, posMemberLedger, loyaltyConfig, memberConsents, customerProfiles, loyaltyPostingRuns, loyaltyTiers, loyaltyTierHistory, loyaltyExpiryNotices, pendingPointTransfers } from '../../database/schema';
 import { n } from '../../database/queries';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
@@ -13,6 +13,10 @@ import { isUniqueViolation } from '../../common/db-error';
 import { verifyLineIdToken } from './line-auth';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+
+// G13 (maker-checker): a staff P2P transfer of MORE than this many points stages for a distinct approver
+// instead of moving immediately (self-service member transfers and sub-threshold staff moves are unaffected).
+export const STAFF_TRANSFER_APPROVAL_THRESHOLD = 500;
 
 @Injectable()
 export class MemberService {
@@ -207,6 +211,29 @@ export class MemberService {
     if (!rcpt || rcpt.active === false) throw new NotFoundException({ code: 'RECIPIENT_NOT_FOUND', message: 'Recipient member not found/inactive', messageTh: 'ไม่พบสมาชิกผู้รับ' });
     const toId = Number(rcpt.id);
     if (toId === Number(fromMemberId)) throw new BadRequestException({ code: 'SELF_TRANSFER', message: 'Cannot transfer points to yourself', messageTh: 'โอนแต้มให้ตัวเองไม่ได้' });
+    // G13 (maker-checker): a staff transfer ABOVE the threshold is staged for a distinct approver rather
+    // than moved. First a preliminary sender/balance check (so an over-balance or bad-sender request still
+    // fails fast the same way, before staging); the authoritative locked re-check happens in executeTransfer.
+    if (source === 'staff' && points > STAFF_TRANSFER_APPROVAL_THRESHOLD) {
+      const [snd] = await db.select().from(posMembers).where(and(eq(posMembers.id, Number(fromMemberId)), eq(posMembers.tenantId, tenantId))).limit(1);
+      if (!snd) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Sender not found', messageTh: 'ไม่พบสมาชิกผู้ส่ง' });
+      if (n(snd.balance) < points) throw new ConflictException({ code: 'INSUFFICIENT_POINTS', message: `Balance ${n(snd.balance)} < ${points}`, messageTh: `แต้มไม่พอ (มี ${n(snd.balance)})` });
+      const [row] = await db.insert(pendingPointTransfers).values({
+        tenantId, reqNo: 'PPT-PENDING', fromMemberId: Number(fromMemberId), toMemberId: toId,
+        points: String(points), note: dto.note ? String(dto.note).slice(0, 200) : null,
+        status: 'PendingApproval', requestedBy: user.username,
+      }).returning({ id: pendingPointTransfers.id });
+      const reqNo = `PPT-${String(Number(row!.id)).padStart(5, '0')}`;
+      await db.update(pendingPointTransfers).set({ reqNo }).where(eq(pendingPointTransfers.id, Number(row!.id)));
+      return { status: 'PendingApproval' as const, pending: true, req_no: reqNo, from_member_id: Number(fromMemberId), to_member_id: toId, points };
+    }
+    return this.executeTransfer(tenantId, Number(fromMemberId), toId, points, dto.note, cfg, source === 'self' ? `member:${fromMemberId}` : user.username);
+  }
+
+  // The atomic two-row point move (extracted so the G13 approval path can reuse it). Re-checks balance + the
+  // per-day cap under row locks. createdBy attributes the ledger rows to the maker (requester).
+  private async executeTransfer(tenantId: number, fromMemberId: number, toId: number, points: number, note: string | undefined, cfg: any, createdBy: string) {
+    const db = this.db;
     const refDoc = `P2P-${fromMemberId}-${toId}`;
     const res = await db.transaction(async (tx: any) => {
       // Ascending-id lock order — deterministic across both directions, so A→B and B→A never deadlock.
@@ -230,12 +257,44 @@ export class MemberService {
       await tx.update(posMembers).set({ balance: String(toBal), lastUpdated: now }).where(eq(posMembers.id, toId));
       // NB: lifetime is untouched on both sides — a transfer is not an earn; tiers don't move.
       await tx.insert(posMemberLedger).values([
-        { tenantId, memberId: fromMemberId, txnType: 'Transfer', points: String(-points), balanceAfter: String(fromBal), refDoc, notes: dto.note ? String(dto.note).slice(0, 200) : `to M-${toId}`, createdBy: source === 'self' ? `member:${fromMemberId}` : user.username },
-        { tenantId, memberId: toId, txnType: 'Transfer', points: String(points), balanceAfter: String(toBal), refDoc, notes: `from M-${fromMemberId}`, createdBy: source === 'self' ? `member:${fromMemberId}` : user.username },
+        { tenantId, memberId: fromMemberId, txnType: 'Transfer', points: String(-points), balanceAfter: String(fromBal), refDoc, notes: note ? String(note).slice(0, 200) : `to M-${toId}`, createdBy },
+        { tenantId, memberId: toId, txnType: 'Transfer', points: String(points), balanceAfter: String(toBal), refDoc, notes: `from M-${fromMemberId}`, createdBy },
       ]);
       return { fromBal, toBal };
     });
     return { from_member_id: Number(fromMemberId), to_member_id: toId, points, from_balance: res.fromBal, to_balance: res.toBal, ref_doc: refDoc };
+  }
+
+  // G13 checker queue — staff point transfers awaiting approval.
+  async listPendingTransfers(user: JwtUser) {
+    const db = this.db; const tenantId = this.tid(user);
+    const rows = await db.select().from(pendingPointTransfers)
+      .where(and(eq(pendingPointTransfers.tenantId, tenantId), eq(pendingPointTransfers.status, 'PendingApproval')))
+      .orderBy(desc(pendingPointTransfers.id));
+    return { pending: rows.map((r: any) => ({ req_no: r.reqNo, from_member_id: Number(r.fromMemberId), to_member_id: Number(r.toMemberId), points: n(r.points), note: r.note, requested_by: r.requestedBy, requested_at: r.requestedAt })), count: rows.length };
+  }
+
+  // Approve a staged transfer (checker; approver ≠ requester → 403 SOD_VIOLATION). Runs the real locked move.
+  async approvePendingTransfer(user: JwtUser, reqNo: string) {
+    const db = this.db; const tenantId = this.tid(user);
+    const cfg = await this.config();
+    const [r] = await db.select().from(pendingPointTransfers)
+      .where(and(eq(pendingPointTransfers.tenantId, tenantId), eq(pendingPointTransfers.reqNo, reqNo))).limit(1);
+    if (!r || r.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_TRANSFER', message: 'No point transfer pending approval', messageTh: 'ไม่พบคำขอโอนแต้มที่รออนุมัติ' });
+    if (r.requestedBy && r.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The requester cannot approve their own point transfer', messageTh: 'ผู้ขอไม่สามารถอนุมัติการโอนแต้มของตนเองได้' });
+    // Attribute the ledger rows to the maker (requester); the authoritative balance/cap re-check runs here.
+    const move = await this.executeTransfer(tenantId, Number(r.fromMemberId), Number(r.toMemberId), n(r.points), r.note ?? undefined, cfg, r.requestedBy ?? user.username);
+    await db.update(pendingPointTransfers).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(pendingPointTransfers.id, Number(r.id)));
+    return { req_no: reqNo, status: 'Approved' as const, approved_by: user.username, requested_by: r.requestedBy, ...move };
+  }
+
+  async rejectPendingTransfer(user: JwtUser, reqNo: string, reason?: string) {
+    const db = this.db; const tenantId = this.tid(user);
+    const [r] = await db.select().from(pendingPointTransfers)
+      .where(and(eq(pendingPointTransfers.tenantId, tenantId), eq(pendingPointTransfers.reqNo, reqNo))).limit(1);
+    if (!r || r.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_TRANSFER', message: 'No point transfer pending approval', messageTh: 'ไม่พบคำขอโอนแต้มที่รออนุมัติ' });
+    await db.update(pendingPointTransfers).set({ status: 'Rejected', rejectReason: reason ?? null }).where(eq(pendingPointTransfers.id, Number(r.id)));
+    return { req_no: reqNo, status: 'Rejected' as const, rejected_by: user.username };
   }
 
   // REDEEM quote (validation) — returns the baht value buildSale uses as an order discount.

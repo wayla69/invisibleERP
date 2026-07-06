@@ -1,6 +1,6 @@
 # 10 · Approvals
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2 · 2026-07-06** · *v0.2 (2026-07-06): added the **workflow readiness check** (`GET /api/workflow/readiness`, `masterdata`/`approvals`/`exec`) — a go-live detective/config control that reports which engine-wired document types (PR/PO/BUDGET/PMR/BQR) lack an active definition and would therefore auto-approve; clarified that a document type with no definition auto-approves. No new numbered control.*
 
 This chapter is for **anyone who approves documents** — managers, financial
 controllers, procurement leads. It covers the approvals inbox, approving and
@@ -97,6 +97,32 @@ On **Workflow → ผังการอนุมัติ**, an administrator bu
 pick the **document type**, add **steps** (each: approver role *or* user, amount
 threshold, how many must approve, optional SLA, escalation target, and a
 dimension condition), and save. Toggle a definition active/inactive anytime.
+
+> **Important — no definition means auto-approve.** If a document type has **no
+> active workflow definition**, the engine lets it through **automatically** (this
+> keeps a brand-new site usable out of the box). That is convenient, but it also
+> means that until you build a definition, those documents have **no second-person
+> approval**. Before go-live, make sure every document type that should be
+> maker-checked actually has an active definition — see the readiness check below.
+
+---
+
+## 4c-bis. Workflow readiness check (before go-live)
+
+To confirm your site is actually enforcing maker-checker, run the **workflow
+readiness check**: `GET /api/workflow/readiness` (permission `masterdata` /
+`approvals` / `exec`). For **your company**, it lists every document type wired to
+the approval engine — **PR, PO, BUDGET, PMR, BQR** — and, for each, whether it has
+an **active definition** (`has_active_definition`) and therefore whether it would
+currently **auto-approve** (`auto_approves`). It also returns an overall **`ready`**
+(true only when *all* of them have a definition) and a **`missing`** list (the
+document types that would auto-approve right now).
+
+Use it as a go-live gate: if `ready` is false, build definitions for the document
+types in `missing` (see 4c above) so that PRs, POs and budgets require a real
+second approver instead of sailing through. The check is **read-only** — it only
+tells you what's configured, it doesn't change any behaviour. (Detective /
+configuration control for gap **G-cross-cutting**.)
 
 ---
 

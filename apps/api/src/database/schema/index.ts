@@ -83,6 +83,7 @@ export * from './pos-audit';
 export * from './pos-scale';
 export * from './access-review';
 export * from './masterdata-import';
+export * from './tenant-profile';
 export * from './ai-actions';
 export * from './kb';
 export * from './demand';

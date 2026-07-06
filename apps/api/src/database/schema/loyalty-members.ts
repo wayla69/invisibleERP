@@ -74,6 +74,26 @@ export const loyaltyExpiryNotices = pgTable('loyalty_expiry_notices', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqWindow: uniqueIndex('loyalty_expiry_notices_member_window').on(t.memberId, t.expireBy), idxTenant: index('loyalty_expiry_notices_tenant').on(t.tenantId) }));
 
+// G13 (maker-checker audit): a staff-initiated P2P point transfer ABOVE the approval threshold is a
+// point-value move to another member (a TFRS-15 liability) — potential self-enrichment (R15/R16) — so it is
+// STAGED here as PendingApproval (no points move) and executed only when a DISTINCT approver releases it.
+// Sub-threshold transfers still move immediately to keep the counter fast (mirrors the gift-card threshold).
+export const pendingPointTransfers = pgTable('pending_point_transfers', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  reqNo: text('req_no').notNull(),
+  fromMemberId: bigint('from_member_id', { mode: 'number' }).notNull().references(() => posMembers.id),
+  toMemberId: bigint('to_member_id', { mode: 'number' }).notNull().references(() => posMembers.id),
+  points: numeric('points').notNull(),
+  note: text('note'),
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected
+  requestedBy: text('requested_by'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),                              // checker — must differ from requester
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+}, (t) => ({ uqPptNo: uniqueIndex('uq_pending_point_transfer_no').on(t.tenantId, t.reqNo), idxPptStatus: index('idx_pending_point_transfer_status').on(t.tenantId, t.status) }));
+
 export type PosMember = typeof posMembers.$inferSelect;
 export type PosMemberLedger = typeof posMemberLedger.$inferSelect;
 export type MessageLog = typeof messageLog.$inferSelect;

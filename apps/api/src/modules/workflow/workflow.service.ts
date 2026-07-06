@@ -15,6 +15,10 @@ export interface StepDto { step_no: number; approver_role?: string; approver_use
 // always on (an approver can never be the document's creator).
 @Injectable()
 export class WorkflowService {
+  // Doc types wired to the generic approval engine (procurement PR/PO, pmr PMR/BQR, planning BUDGET). Each is
+  // dual-controlled ONLY if an active workflow definition exists — else start() auto-approves. See readiness().
+  static readonly ENGINE_WIRED_DOCTYPES = ['PR', 'PO', 'BUDGET', 'PMR', 'BQR'] as const;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly sod: SodService,
@@ -82,6 +86,29 @@ export class WorkflowService {
     const db = this.db;
     await db.update(workflowDefinitions).set({ active }).where(eq(workflowDefinitions.id, id));
     return { id, active };
+  }
+
+  // Cross-cutting control-integrity check (maker-checker audit — "workflow-engine dependence on configured
+  // definitions"). `start()` AUTO-APPROVES a docType that has NO active workflow definition, so a deploy that
+  // ships without seeded definitions silently has NO second-person approval on PR/PO/BUDGET (and PMR/BQR).
+  // This read-only reporter surfaces, per the caller's tenant, which engine-wired docTypes lack an active
+  // definition (i.e. currently auto-approve) so an admin / readiness probe can catch the config gap. No
+  // behaviour change — auto-approve-when-unconfigured is retained for zero-config deploys; this only detects.
+  async readiness(_user: JwtUser) {
+    const items: { doc_type: string; has_active_definition: boolean; auto_approves: boolean }[] = [];
+    for (const dt of WorkflowService.ENGINE_WIRED_DOCTYPES) {
+      const def = await this.activeDef(dt);
+      items.push({ doc_type: dt, has_active_definition: !!def, auto_approves: !def });
+    }
+    const missing = items.filter((i) => !i.has_active_definition).map((i) => i.doc_type);
+    return {
+      doc_types: items,
+      ready: missing.length === 0,
+      missing,
+      message: missing.length
+        ? `No active approval workflow for: ${missing.join(', ')} — these document types AUTO-APPROVE (no second-person control) until a workflow definition is seeded.`
+        : 'All engine-wired document types have an active approval workflow.',
+    };
   }
 
   private async activeDef(docType: string) {

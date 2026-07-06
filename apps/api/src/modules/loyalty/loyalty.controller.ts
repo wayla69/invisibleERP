@@ -115,6 +115,14 @@ export class LoyaltyController {
   // liability). Points-adjust duty, same gate as manual adjustments — a cashier cannot move points around.
   @Post('members/:id/transfer') @Permissions('crm_points_adjust', 'loyalty', 'exec')
   transfer(@Param('id') id: string, @Body(new ZodValidationPipe(TransferBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.transferPoints(u, +id, b, 'staff'); }
+  // G13 maker-checker: a staff transfer over the approval threshold is staged; a DISTINCT approver
+  // (approver ≠ requester → 403 SOD_VIOLATION) releases it via these routes.
+  @Get('transfers/pending') @Permissions('approvals', 'exec')
+  pendingTransfers(@CurrentUser() u: JwtUser) { return this.member.listPendingTransfers(u); }
+  @Post('transfers/:reqNo/approve') @Permissions('approvals', 'exec')
+  approveTransfer(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.member.approvePendingTransfer(u, reqNo); }
+  @Post('transfers/:reqNo/reject') @Permissions('approvals', 'exec')
+  rejectTransfer(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectReceiptBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.rejectPendingTransfer(u, reqNo, b?.reason); }
 
   // ── V4 (docs/29, LYL-21): paid VIP membership — plans (marketing), sale (pos/loyalty), recognition (finance) ──
   @Get('membership-plans') @Permissions('loyalty', 'marketing', 'pos')

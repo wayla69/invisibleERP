@@ -1,6 +1,6 @@
 # 01 · Sales & Point of Sale (POS)
 
-**Status: DRAFT v0.7** · *v0.7 (2026-07-05): **gift-card issuance maker-checker** — issuing a gift card **above ฿5,000** now creates a **pending** card that a finance approver (`creditors`/`exec`, a different person from the issuer) must approve before it holds value or can be redeemed; cards **฿5,000 or less** still issue instantly; **self-approval is blocked**. Controls GC-01 / SoD R14.* · *v0.6 (2026-06-29): added **PIN quick-login at the till** (numeric keypad on `/login`), the combined **"เข้าสู่ระบบ / เปิดกะ"** (login + open shift) action, the self-service **ตั้ง PIN หน้าร้าน** page (`/pos-pin`), and the **ตั้ง PIN** action on the admin Users page; privileged/finance accounts must still use password + MFA (cannot use a PIN). Control ITGC-AC-17.* · *v0.5 (2026-06-27): SoD screen split — new dedicated screens `/pos/refunds` (refund authorization queue, `pos_refund`) and `/pos/till` (till management, `pos_till`); `/pos/register` now shows as `pos_sell` primary perm; "บันทึกคืนสินค้า" button on `/returns` hidden from `pos_sell`-only cashiers (requires `pos_refund`). Controls R08/R12.* · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
+**Status: DRAFT v0.9 · 2026-07-06** · *v0.9 (2026-07-06): **void / refund exception report (G14)** — new detective report `GET /api/payments/exceptions/voids-refunds` (`exec`/`ar`/`fin_report`, optional `from`/`to`) lists every voided payment + every refund in a window (no./amount/who/when + counts & totals) for independent periodic review; voids and sub-threshold refunds stay single-user by design (till speed), large refunds still gated by REV-16. Detective control — no new numbered control.* · *v0.8 (2026-07-06): **quote-accept distinct-actor guard (G12)** — accepting a **billable** quote (`POST /api/cpq/quotes/:id/accept`, revenue Dr AR / Cr Sales) now requires the acceptor to be **different** from the quote's creator (revenue recognised by a second person); a self-accept is blocked with **SOD_VIOLATION** and posts no revenue. Strengthens SoD **R07/R10** / **CPQ-03** — no new control, no migration.* · *v0.7 (2026-07-05): **gift-card issuance maker-checker** — issuing a gift card **above ฿5,000** now creates a **pending** card that a finance approver (`creditors`/`exec`, a different person from the issuer) must approve before it holds value or can be redeemed; cards **฿5,000 or less** still issue instantly; **self-approval is blocked**. Controls GC-01 / SoD R14.* · *v0.6 (2026-06-29): added **PIN quick-login at the till** (numeric keypad on `/login`), the combined **"เข้าสู่ระบบ / เปิดกะ"** (login + open shift) action, the self-service **ตั้ง PIN หน้าร้าน** page (`/pos-pin`), and the **ตั้ง PIN** action on the admin Users page; privileged/finance accounts must still use password + MFA (cannot use a PIN). Control ITGC-AC-17.* · *v0.5 (2026-06-27): SoD screen split — new dedicated screens `/pos/refunds` (refund authorization queue, `pos_refund`) and `/pos/till` (till management, `pos_till`); `/pos/register` now shows as `pos_sell` primary perm; "บันทึกคืนสินค้า" button on `/returns` hidden from `pos_sell`-only cashiers (requires `pos_refund`). Controls R08/R12.* · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
 
 This chapter is for **Cashiers, Sales staff, POS Supervisors and Returns Clerks**.
 It covers ringing up sales, taking orders, credit checks, returns and refunds,
@@ -443,6 +443,15 @@ See [Troubleshooting & FAQ](./99-troubleshooting-faq.md) for how to resolve thes
 Orders move through these stages:
 **Pending → Processing → Shipped → Completed** (or *Claimed* / *Cancelled*).
 
+> **Accepting a customer quote that books revenue needs a second person.** When a
+> **billable** quote (a value above zero, `POST /api/cpq/quotes/:id/accept`) is
+> accepted, the system recognises revenue (Dr Accounts Receivable / Cr Sales). The
+> person who **accepts** the quote must be **different** from the person who
+> **created** it — the quote's author can't accept their own quote — so revenue is
+> recognised by a second person. A self-accept is blocked with **SOD_VIOLATION** and
+> **no revenue is posted**. (A zero-value quote with no ledger is just a status
+> change and isn't gated.)
+
 ### To update an order's status
 
 1. Go to **Orders** (`/orders`) and open the order.
@@ -540,6 +549,18 @@ automatically. The dialog shows the RTN number, total returned and refund method
 > The person who asked for the refund **can't approve their own** — this stops refund
 > fraud. Refunds under ฿1,000, and refunds that come with a **product return**, go
 > through immediately as before. (Control **REV-16**.)
+
+> **Reviewing voids & refunds after the fact (exception report).** Voids and small
+> (under-฿1,000) refunds go through with a single user to keep the till fast, so a
+> reviewer independent of the till should look over that activity periodically. The
+> **void / refund exception report** (`GET /api/payments/exceptions/voids-refunds`,
+> permission `exec` / `ar` / `fin_report`) lists **every voided payment and every
+> refund** for a chosen window (add optional `from`/`to` dates as `YYYY-MM-DD`), each
+> with its number, amount, who did it and when, plus a count and total per type. It is
+> read-only — nothing is posted — and store-scoped. Use it monthly (or per shift) to spot
+> unusual void/refund patterns. This is the recommended **detective** control for POS
+> voids and sub-threshold refunds (gap **G14**); large refunds are already gated by
+> REV-16 above.
 
 [screenshot: return dialog with item lines and refund method]
 
