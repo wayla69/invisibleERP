@@ -1,6 +1,6 @@
 # 07 · Tax
 
-**Status: DRAFT v0.2 · 2026-07-06** · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
+**Status: DRAFT v0.3 · 2026-07-06** · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
 
 This chapter is for **accountants** and **finance** staff. It covers VAT, tax
 invoices (full and abbreviated), e-Tax submission, withholding tax (WHT)
@@ -68,6 +68,10 @@ never reused).
 > tax invoice** for a chosen window (add optional `from`/`to` on the **issue date**) — doc number, type,
 > issue date, source, grand total, void **reason** and who created it — with a count and total. It is
 > read-only and company-scoped. This is the recommended **detective** control for invoice voids (gap **G16**).
+>
+> **Where to find it in the app.** This report is surfaced as a read-only **"Voided tax invoices"**
+> review card on the **Pending Approvals** screen (`/approvals`), where a reviewer independent of the
+> person who voids invoices scans it periodically. Nothing is approved from the card — it is review-only.
 
 > **Branding the full tax invoice.** The **full tax invoice (ใบกำกับภาษีเต็มรูป)** PDF now uses your
 > company's active **document template** — set it up in **Settings → Document templates** (choose

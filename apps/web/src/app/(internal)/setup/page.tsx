@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, Building2, Loader2, MapPin, Palette, ReceiptText, Save } from 'lucide-react';
+import { BadgeCheck, Building2, Loader2, MapPin, Palette, ReceiptText, Save, ShieldAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { notifyError, notifySuccess } from '@/lib/notify';
@@ -90,7 +90,17 @@ export default function SetupPage() {
         branding_prefs: form.branding_prefs ?? {},
       }),
     }),
-    onSuccess: (p) => { notifySuccess(t('mx.setup_saved')); qc.setQueryData(['tenant-profile'], p); setForm(p as any); setShowErrors(false); },
+    onSuccess: (p: any) => {
+      // G15 (audit): a change to promptpay_id / tax_id is STAGED for a distinct approver, not applied here —
+      // surface that instead of implying it saved (the returned profile still shows the pre-change values).
+      if (p?.pending_change?.req_no) {
+        notifySuccess(t('mx.setup_staged', { fields: (p.pending_change.fields ?? []).join(', ') }));
+        qc.invalidateQueries({ queryKey: ['tenant-profile-approvals'] });
+      } else {
+        notifySuccess(t('mx.setup_saved'));
+      }
+      qc.setQueryData(['tenant-profile'], p); setForm(p as any); setShowErrors(false);
+    },
     onError: (e: any) => notifyError(e?.message ?? t('mx.setup_save_failed')),
   });
 
@@ -113,6 +123,8 @@ export default function SetupPage() {
       />
       <StateView q={q}>
         <div className="grid max-w-3xl gap-6">
+          {/* G15 (audit): PromptPay-id / tax-id changes are staged for a DIFFERENT approver. */}
+          <ProfileApprovals />
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Building2 className="size-4 text-primary" /> {t('mx.setup_section_identity')}</CardTitle></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -197,5 +209,41 @@ export default function SetupPage() {
         </div>
       </StateView>
     </div>
+  );
+}
+
+// G15 (audit): tenant PromptPay/Tax-ID maker-checker — a staged change is applied only when a DISTINCT
+// approver (exec/approvals) releases it (self-approval → 403 SOD_VIOLATION). Shown only when items are pending.
+function ProfileApprovals() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ pending: { req_no: string; tax_id: string | null; promptpay_id: string | null; prev_tax_id: string | null; prev_promptpay_id: string | null; requested_by: string }[] }>({
+    queryKey: ['tenant-profile-approvals'], queryFn: () => api('/api/tenant/profile-approvals'),
+  });
+  const decide = useMutation({
+    mutationFn: ({ reqNo, action }: { reqNo: string; action: 'approve' | 'reject' }) => api<any>(`/api/tenant/profile-approvals/${reqNo}/${action}`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? t('mx.setup_appr_approved') : t('mx.setup_appr_rejected')); q.refetch(); qc.invalidateQueries({ queryKey: ['tenant-profile'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const rows = q.data?.pending ?? [];
+  if (!rows.length) return null;
+  return (
+    <Card className="border-amber-300 dark:border-amber-700">
+      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ShieldAlert className="size-4" /> {t('mx.setup_appr_title')}</CardTitle></CardHeader>
+      <CardContent className="space-y-2">
+        <p className="text-sm text-muted-foreground">{t('mx.setup_appr_desc')}</p>
+        {rows.map((r) => (
+          <div key={r.req_no} className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 p-2.5 text-sm">
+            {r.promptpay_id != null && <span>PromptPay: <span className="text-muted-foreground">{r.prev_promptpay_id ?? '—'} →</span> <span className="font-medium">{r.promptpay_id}</span></span>}
+            {r.tax_id != null && <span>Tax ID: <span className="text-muted-foreground">{r.prev_tax_id ?? '—'} →</span> <span className="font-medium">{r.tax_id}</span></span>}
+            <Badge variant="secondary" className="text-xs">{r.requested_by}</Badge>
+            <div className="ml-auto flex gap-2">
+              <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ reqNo: r.req_no, action: 'approve' })}>{t('fin.approve')}</Button>
+              <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ reqNo: r.req_no, action: 'reject' })}>{t('fnx.bank.reject')}</Button>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
