@@ -57,9 +57,12 @@ test('requisitions: register shows item names + PR→PO auto-groups by supplier 
   await page.goto('/requisitions');
 
   // ① register renders the approved PR and shows the item NAME (not just the code) — the reported ask.
+  // Scoped to the desktop `table` (this suite runs at the Desktop Chrome viewport): the register also
+  // renders a phone-width card list for the same data (hidden via CSS below `sm:`, but still in the DOM),
+  // so an unscoped text match would resolve to both and violate Playwright's strict mode.
   await expect(page.getByText('คำขอซื้อล่าสุด')).toBeVisible();
-  await expect(page.getByText('PR-E2E-001')).toBeVisible();
-  await expect(page.getByText('กระดาษ A4 80 แกรม')).toBeVisible();
+  await expect(page.locator('table').getByText('PR-E2E-001')).toBeVisible();
+  await expect(page.locator('table').getByText('กระดาษ A4 80 แกรม')).toBeVisible();
 
   // ② open the conversion panel — suggestions auto-form two supplier groups
   await page.getByRole('button', { name: '➡️ สร้าง PO' }).click();
