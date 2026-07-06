@@ -109,6 +109,9 @@ export default function LoyaltyConfig() {
           )}
         </StateView>
 
+        {/* G13 (audit): staff point transfers over the threshold are staged for a DISTINCT approver. */}
+        <TransferApprovals />
+
         {/* W1 (docs/27) — tier ladder: earn multiplier now applies on the REAL earn path (earnInTx) */}
         <Card className="max-w-lg gap-3 p-5">
           <div className="font-semibold">{t('ly.cf_tiers_title')}</div>
@@ -197,5 +200,42 @@ export default function LoyaltyConfig() {
         </Card>
       </div>
     </div>
+  );
+}
+
+// G13 (audit): a staff P2P point transfer above the threshold is staged as PendingApproval and executed
+// only when a DISTINCT approver (approvals/exec) releases it (self-approval → 403 SOD_VIOLATION).
+function TransferApprovals() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ pending: { req_no: string; from_member_id: number; to_member_id: number; points: number; note: string | null; requested_by: string }[] }>({
+    queryKey: ['loy-transfers-pending'], queryFn: () => api('/api/loyalty/transfers/pending'),
+  });
+  const decide = useMutation({
+    mutationFn: ({ reqNo, action }: { reqNo: string; action: 'approve' | 'reject' }) => api<any>(`/api/loyalty/transfers/${reqNo}/${action}`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (_r, v) => { setMsg(v.action === 'approve' ? '✅ ' + t('ly.tr_approved') : t('ly.tr_rejected')); q.refetch(); qc.invalidateQueries({ queryKey: ['loy-members'] }); },
+    onError: (e) => setMsg((e as Error).message),
+  });
+  const [msg, setMsg] = useState('');
+  const rows = q.data?.pending ?? [];
+  if (!rows.length) return null;
+  return (
+    <Card className="max-w-lg gap-3 border-amber-300 p-5 dark:border-amber-700">
+      <div className="font-semibold">{t('ly.tr_title')}</div>
+      <p className="text-sm text-muted-foreground">{t('ly.tr_desc')}</p>
+      {rows.map((r) => (
+        <div key={r.req_no} className="flex flex-wrap items-center gap-2 rounded border p-2 text-sm">
+          <span className="font-medium">{r.points} {t('ly.an_pts')}</span>
+          <span className="text-muted-foreground">M-{r.from_member_id} → M-{r.to_member_id}</span>
+          {r.note && <span className="text-xs text-muted-foreground">· {r.note}</span>}
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{r.requested_by}</span>
+          <div className="ml-auto flex gap-2">
+            <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ reqNo: r.req_no, action: 'approve' })}>{t('fin.approve')}</Button>
+            <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ reqNo: r.req_no, action: 'reject' })}>{t('fnx.bank.reject')}</Button>
+          </div>
+        </div>
+      ))}
+      {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+    </Card>
   );
 }

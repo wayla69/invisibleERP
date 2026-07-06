@@ -401,7 +401,7 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
             <Input className="mt-1" value={l.new_desc} onChange={(e) => setLine(l.pr_line_id, { new_desc: e.target.value })} placeholder={t('iv.req_new_item_ph')} />
           )}
         </div>
-        <div className="flex items-end gap-2">
+        <div className="flex flex-wrap items-end gap-2">
           <div className="w-20 space-y-1"><Label className="text-xs">{t('inv.col_qty')}</Label><Input type="number" value={l.order_qty} onChange={(e) => setLine(l.pr_line_id, { order_qty: Number(e.target.value) })} /></div>
           <div className="w-20 space-y-1"><Label className="text-xs">{t('inv.col_uom')}</Label><Input value={l.uom} onChange={(e) => setLine(l.pr_line_id, { uom: e.target.value })} /></div>
           <div className="w-24 space-y-1"><Label className="text-xs">{t('iv.req_unit_price')}</Label><Input type="number" value={l.unit_price} onChange={(e) => setLine(l.pr_line_id, { unit_price: Number(e.target.value) })} /></div>

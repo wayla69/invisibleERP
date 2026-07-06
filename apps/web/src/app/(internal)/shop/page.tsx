@@ -339,6 +339,9 @@ export default function ShopPage() {
   };
 
   const anyUrgent = cart.some((l) => l.urgent);
+  // Reference-only subtotal for the mobile checkout bar — custom/free-text lines carry unit_price 0
+  // (no catalog price), so this is a "known items" estimate, not the PR's final costed amount.
+  const cartTotal = cart.reduce((s, l) => s + l.unit_price * l.qty, 0);
 
   const mut = useMutation({
     mutationFn: () => api<{ pr_no: string; status: string; lines: number }>('/api/procurement/prs', {
@@ -383,33 +386,31 @@ export default function ShopPage() {
   );
 
   return (
-    <div>
-      <PageHeader
-        title={t('shop.title')}
-        description={t('shop.desc')}
-        actions={
-          <>
-            {(shopProjects.data?.count ?? 0) > 0 && (
-              <select
-                aria-label={t('shop.proj.pick')}
-                title={t('shop.proj.pick')}
-                className="h-9 max-w-[13rem] rounded-md border bg-background px-2 text-sm"
-                value=""
-                onChange={(e) => { if (e.target.value) router.push(`/shop/project/${encodeURIComponent(e.target.value)}`); }}
-              >
-                <option value="" disabled>🗂️ {t('shop.proj.pick')}</option>
-                {shopProjects.data!.projects.map((p) => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
-              </select>
-            )}
-            {canManageCategories && (
-              <Button asChild variant="outline" size="sm">
-                <Link href="/setup/item-categories"><Layers className="size-4" /> {t('shop.manage_categories')}</Link>
-              </Button>
-            )}
-            <Button asChild variant="outline" size="sm"><Link href="/requisitions">{t('shop.view_prs')}</Link></Button>
-          </>
-        }
-      />
+    <div className={cn(cart.length > 0 && 'pb-20 lg:pb-0')}>
+      <PageHeader title={t('shop.title')} description={t('shop.desc')} />
+
+      {/* A standalone (not PageHeader-actions) row so it can wrap freely on a phone — the shared
+          PageHeader actions slot is shrink-0 and would overflow the viewport with 3 items. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {(shopProjects.data?.count ?? 0) > 0 && (
+          <select
+            aria-label={t('shop.proj.pick')}
+            title={t('shop.proj.pick')}
+            className="h-9 max-w-[13rem] rounded-md border bg-background px-2 text-sm"
+            value=""
+            onChange={(e) => { if (e.target.value) router.push(`/shop/project/${encodeURIComponent(e.target.value)}`); }}
+          >
+            <option value="" disabled>🗂️ {t('shop.proj.pick')}</option>
+            {shopProjects.data!.projects.map((p) => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+          </select>
+        )}
+        {canManageCategories && (
+          <Button asChild variant="outline" size="sm">
+            <Link href="/setup/item-categories"><Layers className="size-4" /> {t('shop.manage_categories')}</Link>
+          </Button>
+        )}
+        <Button asChild variant="outline" size="sm"><Link href="/requisitions">{t('shop.view_prs')}</Link></Button>
+      </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
         {/* ── Catalog ─────────────────────────────────────────────── */}
@@ -442,41 +443,48 @@ export default function ShopPage() {
             </div>
           )}
 
-          {/* Search + scan + view toggle */}
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('shop.search_ph')} />
+          {/* Search + category chips stay pinned under the topbar while the grid scrolls — the
+              Shopee/Grab app pattern (sticky just below the site header, at top-14 = its min-h-14). */}
+          <div className="sticky top-14 z-10 -mx-4 space-y-2 border-b bg-background/95 px-4 pb-2 pt-1 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:pt-0 sm:backdrop-blur-none">
+            {/* Search + scan + view toggle — stacks on a phone (search full-width on its own row,
+                scan + view toggle share the second row) instead of squeezing all three into one line. */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('shop.search_ph')} />
+              </div>
+              <div className="flex items-center gap-2">
+                <form onSubmit={onScan} className="relative flex-1 sm:w-48 sm:flex-none">
+                  <ScanLine className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" value={scan} onChange={(e) => setScan(e.target.value)} placeholder={t('shop.scan_ph')} aria-label={t('shop.scan_ph')} />
+                </form>
+                <div className="flex shrink-0 rounded-md border p-0.5">
+                  <Button size="icon" variant={view === 'grid' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_grid')} title={t('shop.view_grid')} onClick={() => setView('grid')}>
+                    <LayoutGrid className="size-4" />
+                  </Button>
+                  <Button size="icon" variant={view === 'list' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_list')} title={t('shop.view_list')} onClick={() => setView('list')}>
+                    <ListIcon className="size-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
-            <form onSubmit={onScan} className="relative w-40 shrink-0 sm:w-48">
-              <ScanLine className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-9" value={scan} onChange={(e) => setScan(e.target.value)} placeholder={t('shop.scan_ph')} aria-label={t('shop.scan_ph')} />
-            </form>
-            <div className="flex shrink-0 rounded-md border p-0.5">
-              <Button size="icon" variant={view === 'grid' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_grid')} title={t('shop.view_grid')} onClick={() => setView('grid')}>
-                <LayoutGrid className="size-4" />
-              </Button>
-              <Button size="icon" variant={view === 'list' ? 'secondary' : 'ghost'} className="size-8" aria-label={t('shop.view_list')} title={t('shop.view_list')} onClick={() => setView('list')}>
-                <ListIcon className="size-4" />
-              </Button>
-            </div>
-          </div>
 
-          {/* Favourites toggle + category chips (horizontal scroll, Shopee-style) */}
-          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-            <button
-              type="button"
-              onClick={() => setFavOnly((v) => !v)}
-              className={cn(
-                'flex items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition-colors',
-                favOnly ? 'border-amber-500 bg-amber-500 text-white' : 'bg-background hover:bg-accent',
-              )}
-            >
-              <Star className={cn('size-3.5', favOnly && 'fill-current')} /> {t('shop.favorites')}
-              {favs.size > 0 && <span className="text-xs opacity-80">{favs.size}</span>}
-            </button>
-            {categories.length > 0 && catChip(null, t('shop.all_categories'), total)}
-            {categories.map((c) => catChip(c.key, c.label, c.count))}
+            {/* Favourites toggle + category chips (horizontal scroll, Shopee-style) */}
+            <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+              <button
+                type="button"
+                onClick={() => setFavOnly((v) => !v)}
+                className={cn(
+                  'flex items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition-colors',
+                  favOnly ? 'border-amber-500 bg-amber-500 text-white' : 'bg-background hover:bg-accent',
+                )}
+              >
+                <Star className={cn('size-3.5', favOnly && 'fill-current')} /> {t('shop.favorites')}
+                {favs.size > 0 && <span className="text-xs opacity-80">{favs.size}</span>}
+              </button>
+              {categories.length > 0 && catChip(null, t('shop.all_categories'), total)}
+              {categories.map((c) => catChip(c.key, c.label, c.count))}
+            </div>
           </div>
 
           {total > 0 && <p className="text-xs text-muted-foreground">{t('shop.results_n', { n: total })}</p>}
@@ -493,7 +501,9 @@ export default function ShopPage() {
                   const fav = favs.has(it.item_id);
                   return (
                     <div key={it.item_id} className="group flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md">
-                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+                      {/* Image-forward: a square hero image (Shopee/Grab-style) so the photo, not the
+                          text block, dominates the card. */}
+                      <div className="relative aspect-square w-full overflow-hidden bg-muted">
                         <ProductThumb item={it} className="size-full" />
                         <button
                           type="button"
@@ -514,9 +524,9 @@ export default function ShopPage() {
                           <Zap className="size-4" />
                         </button>
                       </div>
-                      <div className="flex flex-1 flex-col gap-1 p-2.5">
-                        <p className="line-clamp-2 text-sm font-medium leading-snug">{it.item_description || it.item_id}</p>
-                        <p className="text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                      <div className="flex flex-1 flex-col gap-0.5 p-2">
+                        <p className="line-clamp-2 text-xs font-medium leading-snug sm:text-sm">{it.item_description || it.item_id}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
                         <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
                           {it.on_hand != null && (
                             <span className={it.on_hand <= 0 ? 'font-medium text-destructive' : ''}>
@@ -525,11 +535,13 @@ export default function ShopPage() {
                           )}
                           {it.last_price != null && it.last_price > 0 && <span>{t('shop.last_price', { price: baht(it.last_price) })}</span>}
                         </div>
-                        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-                          <span className="text-sm font-semibold">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
+                        <div className="mt-auto flex items-end justify-between gap-2 pt-1">
+                          {/* Price led large + bold in the brand colour — the one thing a Shopee/Grab
+                              card wants you to notice first after the photo. */}
+                          <span className="text-base font-bold text-primary">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
                           <div className="flex items-center gap-1.5">
                             {inCart > 0 && <Badge variant="secondary" className="text-[11px]">{inCart}</Badge>}
-                            <Button size="sm" className="h-8 gap-1 px-2.5" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
+                            <Button size="icon" className="size-8 shrink-0 rounded-full" aria-label={t('shop.add')} title={t('shop.add')} onClick={() => addItem(it)}><Plus className="size-4" /></Button>
                           </div>
                         </div>
                       </div>
@@ -736,16 +748,30 @@ export default function ShopPage() {
         </div>
       </div>
 
-      {/* Mobile-only floating cart — jumps down to the basket (which stacks below the catalog on phones). */}
+      {/* Mobile-only checkout bar (Shopee/Grab pattern) — pinned to the bottom, shows item count +
+          subtotal, jumps down to the basket (which stacks below the catalog on phones). */}
       {cart.length > 0 && (
         <button
           type="button"
           onClick={() => document.getElementById('shop-basket')?.scrollIntoView({ behavior: 'smooth' })}
           aria-label={t('shop.view_cart')}
-          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-primary-foreground shadow-lg transition-transform active:scale-95 lg:hidden"
+          className="fixed inset-x-0 bottom-0 z-40 flex w-full items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,0,0,0.08)] backdrop-blur transition-transform active:scale-[0.99] supports-[backdrop-filter]:bg-background/85 lg:hidden"
         >
-          <ShoppingCart className="size-5" />
-          <span className="text-sm font-semibold">{t('shop.lines_n', { n: cart.length })}</span>
+          <span className="flex min-w-0 items-center gap-2.5">
+            <span className="relative shrink-0">
+              <ShoppingCart className="size-6 text-primary" />
+              <Badge variant="destructive" className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full p-0 px-1 text-[10px] leading-none">
+                {cart.length}
+              </Badge>
+            </span>
+            <span className="min-w-0 text-left">
+              <span className="block truncate text-[11px] text-muted-foreground">{t('shop.lines_n', { n: cart.length })}</span>
+              <span className="block text-base font-bold text-primary">{baht(cartTotal)}</span>
+            </span>
+          </span>
+          <span className="shrink-0 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">
+            {t('shop.view_cart')}
+          </span>
         </button>
       )}
     </div>
