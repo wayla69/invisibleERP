@@ -24,6 +24,14 @@ import { useLang } from '@/lib/i18n';
 const selectCls =
   'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
+// Asset register status (assets.service.ts): active / fully_depreciated / disposed.
+const ASSET_STATUS_KEYS: Record<string, string> = {
+  active: 'mx.as_filter_active', fully_depreciated: 'mx.as_filter_fully_depreciated', disposed: 'mx.as_filter_disposed',
+};
+// Asset audit status (assets.service.ts assetAudits): Open / Closed.
+const AUDIT_STATUS_KEYS: Record<string, string> = { Open: 'mx.as_audit_status_open', Closed: 'mx.as_audit_status_closed' };
+const statusLabel = (t: (key: string) => string, dict: Record<string, string>, s: string) => (dict[s] ? t(dict[s]) : s);
+
 export default function AssetsPage() {
   const { t } = useLang();
   return (
@@ -93,7 +101,7 @@ function Register() {
                 { key: 'acquire_cost', label: t('mx.as_col_acquire_cost'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.acquire_cost)}</span> },
                 { key: 'accumulated_depreciation', label: t('mx.as_col_accum_dep'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.accumulated_depreciation)}</span> },
                 { key: 'net_book_value', label: t('mx.as_col_nbv'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.net_book_value)}</span> },
-                { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{statusLabel(t, ASSET_STATUS_KEYS, r.status)}</Badge> },
               ]}
               emptyState={
                 status
@@ -316,7 +324,7 @@ function Capitalize() {
         <h3 className="text-base font-semibold">{t('mx.as_cap_search_heading')}</h3>
         <p className="text-sm text-muted-foreground">{t('mx.as_cap_search_desc')}</p>
         <div className="flex flex-wrap items-end gap-2">
-          <div className="grid gap-1.5"><Label htmlFor="gr-no">{t('mx.as_gr_no_label')}</Label><Input id="gr-no" placeholder="GR-YYYYMMDD-NNN" value={grNo} onChange={(e) => setGrNo(e.target.value)} className="w-56" /></div>
+          <div className="grid gap-1.5"><Label htmlFor="gr-no">{t('mx.as_gr_no_label')}</Label><Input id="gr-no" placeholder={t('mx.as_gr_no_placeholder')} value={grNo} onChange={(e) => setGrNo(e.target.value)} className="w-56" /></div>
           <Button disabled={!grNo} onClick={() => setLookup(grNo.trim())}>{t('mx.as_search')}</Button>
         </div>
       </Card>
@@ -453,7 +461,7 @@ function QrTags() {
           <div className="grid gap-1.5">
             <Label htmlFor="scan-code">{t('mx.as_scan_code_label')}</Label>
             <div className="flex items-center gap-2">
-              <Input id="scan-code" className="flex-1" placeholder="ASSET_ID:FA-0001|…" value={scanCode} onChange={(e) => setScanCode(e.target.value)} />
+              <Input id="scan-code" className="flex-1" placeholder={t('mx.as_scan_code_placeholder')} value={scanCode} onChange={(e) => setScanCode(e.target.value)} />
               <QrScanButton onScan={setScanCode} />
             </div>
           </div>
@@ -526,7 +534,7 @@ function AssetAudit() {
                   { key: 'audit_no', label: t('dash.col_no') },
                   { key: 'location', label: t('mx.as_audit_location'), render: (r: any) => r.location ?? t('mx.as_audit_all_loc') },
                   { key: 'expected_count', label: t('mx.as_audit_expected'), align: 'right' },
-                  { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                  { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{statusLabel(t, AUDIT_STATUS_KEYS, r.status)}</Badge> },
                   { key: 'act', label: '', render: (r: any) => r.status === 'Open' ? <Button size="sm" variant="outline" onClick={() => setAuditNo(r.audit_no)}>{t('mx.as_audit_resume')}</Button> : <Button size="sm" variant="ghost" onClick={() => setAuditNo(r.audit_no)}>{t('iv.stk_view')}</Button> },
                 ]}
                 emptyState={{ icon: ClipboardCheck, title: t('mx.as_audit_empty') }}
@@ -554,7 +562,7 @@ function AssetAudit() {
         </div>
         {isOpen && (
           <div className="flex items-center gap-2">
-            <Input className="flex-1" placeholder="ASSET_ID:FA-0001|…" value={scanCode} onChange={(e) => setScanCode(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') doScan(scanCode); }} />
+            <Input className="flex-1" placeholder={t('mx.as_scan_code_placeholder')} value={scanCode} onChange={(e) => setScanCode(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') doScan(scanCode); }} />
             <Button variant="outline" onClick={() => doScan(scanCode)}>{t('iv.scan_add')}</Button>
             <QrScanButton continuous onScan={doScan} />
           </div>
@@ -603,7 +611,7 @@ function CustodyApprovals() {
     onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
-    mutationFn: (reqNo: string) => api<any>(`/api/assets/custody/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'rejected' }) }),
+    mutationFn: (reqNo: string) => api<any>(`/api/assets/custody/${reqNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt(t('mx.as_reject_reason_prompt')) || undefined }) }),
     onSuccess: () => { notifySuccess(t('mx.as_custody_rejected')); qc.invalidateQueries({ queryKey: ['asset-custody'] }); },
     onError: (e: any) => notifyError(e.message),
   });

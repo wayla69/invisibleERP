@@ -225,6 +225,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.consol.col_notes': { th: 'หมายเหตุ', en: 'Notes' },
   'fnx.consol.col_ownership': { th: 'สัดส่วนถือหุ้น', en: 'Ownership' },
   'fnx.consol.col_period': { th: 'งวด', en: 'Period' },
+  'fnx.consol.col_run': { th: 'รอบ', en: 'Run' },
   'fnx.consol.col_time': { th: 'เวลา', en: 'Time' },
   'fnx.consol.col_type': { th: 'ประเภท', en: 'Type' },
   'fnx.consol.empty_entities_title': { th: 'ยังไม่มีบริษัทในกลุ่มนี้', en: 'No entities in this group yet' },
@@ -856,6 +857,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.treasury.week_now': { th: 'ครบกำหนด/เกินกำหนด', en: 'Due now / overdue' },
   'fnx.treasury.no_banks': { th: 'ยังไม่ได้ตั้งค่าบัญชีธนาคาร', en: 'No bank accounts configured' },
   'fnx.treasury.no_fx': { th: 'ไม่มีรายการสกุลต่างประเทศคงค้าง', en: 'No open non-THB balances' },
+  'fnx.treasury.chart_aria': { th: 'กราฟพยากรณ์กระแสเงินสด', en: 'Cash forecast chart' },
 
   // Segment profitability (docs/35 Phase 5)
   'fnx.prof.title': { th: 'กำไร-ขาดทุนตามมิติ (Profitability)', en: 'Segment Profitability' },

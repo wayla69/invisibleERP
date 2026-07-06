@@ -85,7 +85,7 @@ export default function NewOrderPage() {
             <Separator />
 
             <div className="hidden grid-cols-[2fr_1fr_1fr_auto] gap-3 px-1 text-xs font-medium text-muted-foreground sm:grid">
-              <span>Item ID</span>
+              <span>{t('px.new_item_id_label')}</span>
               <span className="text-right">{t('inv.col_qty')}</span>
               <span className="text-right">{t('px.new_price')}</span>
               <span className="w-9" />
@@ -96,7 +96,7 @@ export default function NewOrderPage() {
                 <div key={i} className="grid grid-cols-2 gap-3 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-center">
                   <Input
                     className="col-span-2 sm:col-span-1"
-                    placeholder="Item ID"
+                    placeholder={t('px.new_item_id_label')}
                     aria-label={t('px.new_item_aria', { n: i + 1 })}
                     value={l.item_id}
                     onChange={(e) => setLine(i, { item_id: e.target.value })}

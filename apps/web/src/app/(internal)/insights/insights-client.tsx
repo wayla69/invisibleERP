@@ -155,11 +155,11 @@ function AnomaliesTab() {
                   { key: 'movement_type', label: t('pb.col_type'), render: (r) => <Badge variant="info">{r.movement_type}</Badge> },
                   { key: 'recent_qty', label: t('pb.ins_col_recent'), align: 'right', render: (r) => <span className="tabular">{num(r.recent_qty)}</span> },
                   { key: 'hist_avg', label: t('pb.ins_col_hist_avg'), align: 'right', render: (r) => <span className="tabular">{num(r.hist_avg)}</span> },
-                  { key: 'z_score', label: 'Z-score', align: 'right', render: (r) => <span className="tabular">{r.z_score}</span> },
+                  { key: 'z_score', label: t('pb.ins_col_zscore'), align: 'right', render: (r) => <span className="tabular">{r.z_score}</span> },
                   { key: 'severity', label: t('pb.col_level'), render: (r) => sevBadge(r.severity, t) },
                   {
                     key: '_ai',
-                    label: 'AI',
+                    label: t('pb.ins_col_ai'),
                     sortable: false,
                     render: (r) => (
                       <Button
@@ -229,7 +229,7 @@ function ReplenishmentTab() {
               { key: 'current_stock', label: t('pb.ins_col_stock'), align: 'right', render: (r) => <span className="tabular">{num(r.current_stock)} {r.uom}</span> },
               { key: 'avg_daily_sales', label: t('pb.ins_col_avg_daily'), align: 'right', render: (r) => <span className="tabular">{num(r.avg_daily_sales)}</span> },
               { key: 'days_of_stock', label: t('pb.ins_col_days_left'), align: 'right', render: (r) => <span className="tabular">{r.days_of_stock ?? '—'}</span> },
-              { key: 'lead_time_days', label: 'Lead time', align: 'right', render: (r) => <span className="tabular">{num(r.lead_time_days)}</span> },
+              { key: 'lead_time_days', label: t('pb.ins_col_lead_time'), align: 'right', render: (r) => <span className="tabular">{num(r.lead_time_days)}</span> },
               { key: 'reorder_point', label: t('pb.ins_col_reorder'), align: 'right', render: (r) => <span className="tabular">{num(r.reorder_point)}</span> },
               { key: 'predicted_stockout_date', label: t('pb.ins_col_stockout'), render: (r) => thaiDate(r.predicted_stockout_date) },
               { key: 'urgency', label: t('pb.col_level'), render: (r) => urgencyBadge(r.urgency, t) },
