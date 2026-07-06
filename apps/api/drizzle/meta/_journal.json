@@ -1745,7 +1745,7 @@
       "tag": "0248_tax_credit_debit_notes",
       "breakpoints": true
     },
-        {
+    {
       "idx": 249,
       "version": "7",
       "when": 2023820000076,
@@ -1869,6 +1869,13 @@
       "version": "7",
       "when": 2023820000120,
       "tag": "0266_pending_point_transfers",
+      "breakpoints": true
+    },
+    {
+      "idx": 267,
+      "version": "7",
+      "when": 2023820000130,
+      "tag": "0267_supplier_price_preferred",
       "breakpoints": true
     }
   ]

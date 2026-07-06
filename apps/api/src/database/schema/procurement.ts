@@ -283,6 +283,11 @@ export const supplierPriceLists = pgTable('supplier_price_lists', {
   effectiveFrom: date('effective_from').notNull(),
   effectiveTo: date('effective_to'),
   status: text('status').notNull().default('active'), // 'active' | 'superseded'
+  // "ผู้ขายประจำ" (preferred supplier per item) — the buyer's default source for this item (migration 0267).
+  // At most one active row per (tenant,item) carries preferred=true; setting it unsets the siblings. Drives
+  // the PR→PO auto-group: a line's item is routed to its preferred vendor first, then cheapest active price,
+  // then the most-recent PO vendor. Lives on the (already tenant-scoped, RLS) price list so no new table.
+  preferred: boolean('preferred').notNull().default(false),
   notes: text('notes'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

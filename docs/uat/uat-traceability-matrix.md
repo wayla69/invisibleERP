@@ -357,6 +357,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-092 | LINE copilot AI-drafted expense/advance — confirm-first, EXP-07/08 path | EXP-07/08 (AI drafts) | 07 rev 1.3 |
 | UAT-P2P-093 | Vendor AP card — list → statement of account | EXP-01 / AP | 05-finance-ar-ap.md |
 | UAT-P2P-094 | Convert approved PR → PO (item reconcile against master + open new code) | EXP (PR→PO link) | 02 rev 2.3 |
+| UAT-P2P-111 | PR→PO auto-group by supplier (1 PR → many POs) + item ผู้ขายประจำ (preferred supplier) + item names | EXP-02, EXP-03, R02/R07 (unchanged); PR→PO link | 02 rev 3.20 |
 | UAT-P2P-095 | One-tap รับครบ (receive-all) — web button + LINE `receive <PO no>`; EXP-03 approval gate + R04 hold | EXP-02, EXP-03, R04 | 02 rev 2.4 |
 | UAT-P2P-096 | Reorder low stock → one-tap PR (web สินค้าใกล้หมด card + LINE `low`/`reorder`); createPr path unchanged | EXP-03 (entry integrity) | 02 rev 2.5 |
 | UAT-P2P-097 | Proactive morning low-stock alert (`low_stock_reorder_alert`) → one-tap [สั่งเติมทั้งหมด] reorder | EXP-03 (entry integrity) | 02 rev 2.6 |

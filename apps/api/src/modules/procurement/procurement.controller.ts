@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Query, Body, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Query, Body, Res } from '@nestjs/common';
 import { z } from 'zod';
 import type { FastifyReply } from 'fastify';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -28,11 +28,31 @@ const GrBody = z.object({
   items: z.array(z.object({ item_id: z.string().min(1), received_qty: z.number().positive(), lot_no: z.string().optional(), expiry_date: z.string().optional(), unit_cost: z.number().optional(), uom: z.string().optional() })).min(1),
 });
 const ApproveBody = z.object({ approve: z.boolean().default(true), reason: z.string().optional() });
-// PR → PO conversion: each line is reconciled to a real item (existing code, or create_item:true to open a new one) + priced.
+// PR → PO conversion: each line is reconciled to a real item (existing code, or create_item:true to open a
+// new one) + priced. pr_line_id links a line back to the exact pr_items row (precise stamping in the split
+// path); set_preferred also records the chosen vendor as the item's default supplier.
+const PrToPoLine = z.object({
+  pr_line_id: z.number().int().positive().optional(), item_id: z.string().min(1), item_description: z.string().optional(),
+  create_item: z.boolean().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(),
+  uom: z.string().optional(), is_capital: z.boolean().optional(), set_preferred: z.boolean().optional(),
+});
+// Two shapes: legacy `{ vendor, lines }` (one PO for all lines) OR `{ pos: [{ vendor, lines }, …] }`
+// (one PO per supplier — "1 PO = 1 supplier", so 1 PR fans out into many POs). At least one must be present.
 const PrToPoBody = z.object({
   vendor_id: z.number().optional(), vendor_name: z.string().optional(), expected_date: z.string().optional(), remarks: z.string().optional(),
   currency: z.string().optional(), fx_rate: z.number().optional(),
-  lines: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), create_item: z.boolean().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional(), is_capital: z.boolean().optional() })).min(1),
+  lines: z.array(PrToPoLine).optional(),
+  pos: z.array(z.object({
+    vendor_id: z.number().optional(), vendor_name: z.string().optional(), expected_date: z.string().optional(),
+    remarks: z.string().optional(), currency: z.string().optional(), fx_rate: z.number().optional(),
+    lines: z.array(PrToPoLine).min(1),
+  })).optional(),
+}).refine((b) => (b.lines?.length ?? 0) > 0 || (b.pos?.length ?? 0) > 0, { message: 'lines or pos required', path: ['lines'] });
+// Set/clear an item's preferred supplier. remove:true clears; else the vendor becomes the default (a price
+// row is seeded from unit_price / the last PO price when none exists yet).
+const PreferredVendorBody = z.object({
+  vendor_id: z.number().int().positive(), unit_price: z.number().nonnegative().optional(),
+  uom: z.string().optional(), currency: z.string().optional(), remove: z.boolean().optional(),
 });
 const CancelBody = z.object({ reason: z.string().min(1) });
 // to_email optional — defaults to the vendor's email on file (master data) when omitted.
@@ -112,6 +132,20 @@ export class ProcurementController {
   // Vendor search for the PR→PO panel (pick a real supplier from the master).
   @Get('vendors/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
   searchVendors(@Query('q') q: string, @Query('limit') limit?: string) { return this.svc.searchVendors(q ?? '', limit ? Number(limit) : undefined); }
+
+  // Suggest a supplier per requisition line (preferred price list → cheapest active → last PO vendor) so the
+  // PR→PO screen can auto-group a PR into one PO per vendor. `item_ids` = comma-separated codes. Read-only.
+  @Get('items/suppliers') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  itemSuppliers(@Query('item_ids') itemIds: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.suggestSuppliersForItems((itemIds ?? '').split(',').map((s) => s.trim()).filter(Boolean), u);
+  }
+
+  // Set/clear an item's "ผู้ขายประจำ" (preferred supplier). Sourcing decision: price maintenance is md_vendor,
+  // buying is procurement/planner (SoD-consistent with upsertSupplierPrice). Seeds a price row when none exists.
+  @Put('items/:itemId/preferred-vendor') @Permissions('md_vendor', 'procurement', 'planner')
+  setPreferredVendor(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(PreferredVendorBody)) b: any, @CurrentUser() u: JwtUser) {
+    return this.svc.setPreferredVendor(itemId, b, u);
+  }
 
   // Low-stock reorder list — items at/below their reorder point (on-hand vs items.min_stock), with a
   // suggested top-up qty. Feeds the "สินค้าใกล้หมด" web card + the LINE chat `low` command.

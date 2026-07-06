@@ -30,6 +30,9 @@ export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expecte
   draft?: boolean; authorized_over_budget?: boolean; project_id?: number }
 export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
 export interface UpsertSupplierPriceDto { vendor_id: number; item_id: string; item_description?: string; uom?: string; currency?: string; unit_price: number; min_qty?: number; effective_from: string; effective_to?: string; notes?: string }
+// A single reconciled PR→PO line. pr_line_id links it back to the exact pr_items row (precise stamping in the
+// split path); set_preferred also records the chosen vendor as the item's default supplier (learn-as-you-buy).
+export interface ConvLine { pr_line_id?: number; item_id: string; item_description?: string; create_item?: boolean; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean; set_preferred?: boolean }
 
 @Injectable()
 export class ProcurementService {
@@ -153,6 +156,15 @@ export class ProcurementService {
     if (!heads.length) return { prs: [], can_approve: canSeeAll };
     const ids = heads.map((h: any) => Number(h.id));
     const lines = await db.select().from(prItems).where(sql`${prItems.prId} in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})`);
+    // Enrich the display name: pr_items.item_description is captured at raise-time (shop checkout / manual),
+    // but a chat-raised line may only carry the code — backfill the name from the item master so every line
+    // shows a human name, not just a code (the reported "ดึงชื่อสินค้ามาด้วย"). Company-wide `items`, one lookup.
+    const lineItemIds = [...new Set(lines.map((l: any) => l.itemId).filter(Boolean) as string[])];
+    const nameMap = new Map<string, string>();
+    if (lineItemIds.length) {
+      const im = await db.select({ itemId: items.itemId, desc: items.itemDescription }).from(items).where(inArray(items.itemId, lineItemIds));
+      for (const r of im) if (r.desc) nameMap.set(String(r.itemId), String(r.desc));
+    }
     const byPr = new Map<number, any[]>();
     for (const l of lines) { const k = Number(l.prId); (byPr.get(k) ?? byPr.set(k, []).get(k)!).push(l); }
     return {
@@ -160,7 +172,11 @@ export class ProcurementService {
       prs: heads.map((h: any) => ({
         pr_no: h.prNo, pr_date: h.prDate, requested_by: h.requestedBy, status: h.status, priority: h.priority,
         approved_by: h.approvedBy ?? null,
-        lines: (byPr.get(Number(h.id)) ?? []).map((l: any) => ({ item_id: l.itemId, request_qty: n(l.requestQty), uom: l.uom ?? null, reason: l.reason ?? null })),
+        lines: (byPr.get(Number(h.id)) ?? []).map((l: any) => ({
+          id: Number(l.id), item_id: l.itemId, item_description: l.itemDescription ?? nameMap.get(String(l.itemId)) ?? null,
+          request_qty: n(l.requestQty), uom: l.uom ?? null, reason: l.reason ?? null,
+          po_no: l.poNo ?? null, line_status: l.status ?? null,
+        })),
       })),
     };
   }
@@ -282,6 +298,112 @@ export class ProcurementService {
     return { vendors: rows.map((r: any) => ({ id: Number(r.id), name: r.name, vendor_code: r.vendor_code ?? null })) };
   }
 
+  // Suggest the supplier for each requisition line so the PR→PO screen can auto-group a PR into one PO per
+  // vendor. Resolution per item (best first): (1) the tenant's PREFERRED active price-list row, (2) the
+  // cheapest active price-list row, (3) the most-recent committed PO's vendor. Blocklisted / non-approved
+  // vendors are never suggested (they'd be refused at PO creation anyway). Also returns every candidate
+  // vendor for the item so the buyer can switch a line to a different supplier. Read-only; RLS-scoped.
+  async suggestSuppliersForItems(itemIds: string[], user: JwtUser) {
+    const db = this.db;
+    const ids = [...new Set((itemIds ?? []).map((s) => String(s ?? '').trim()).filter(Boolean))].slice(0, 200);
+    const out: Record<string, { suggested: any; candidates: any[] }> = {};
+    if (!ids.length) return { suggestions: out };
+    const tenantId = user.tenantId ?? null;
+    // Active price-list rows for these items (tenant's own + shared NULL-tenant), joined to the vendor master
+    // so a blocklisted / unapproved supplier can be excluded from the routing.
+    const priceRows = await db.select({
+      itemId: supplierPriceLists.itemId, vendorId: supplierPriceLists.vendorId, unitPrice: supplierPriceLists.unitPrice,
+      uom: supplierPriceLists.uom, preferred: supplierPriceLists.preferred, currency: supplierPriceLists.currency,
+      vendorName: vendors.name, blocklisted: vendors.blocklisted, approvalStatus: vendors.approvalStatus,
+    }).from(supplierPriceLists)
+      .leftJoin(vendors, eq(supplierPriceLists.vendorId, vendors.id))
+      .where(and(
+        eq(supplierPriceLists.status, 'active'),
+        inArray(supplierPriceLists.itemId, ids),
+        tenantId != null ? or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId)) : undefined,
+      ));
+    // Most-recent committed PO vendor per item (fallback when no price list exists for the item).
+    const poRows = await db.select({
+      itemId: poItems.itemId, vendorId: purchaseOrders.vendorId, vendorName: purchaseOrders.vendorName,
+      unitPrice: poItems.unitPrice, uom: poItems.uom, poId: purchaseOrders.id,
+    }).from(poItems).innerJoin(purchaseOrders, eq(poItems.poId, purchaseOrders.id))
+      .where(and(inArray(poItems.itemId, ids), notInArray(purchaseOrders.status, ['Draft', 'Cancelled'])))
+      .orderBy(desc(purchaseOrders.id));
+    const lastPo = new Map<string, any>();
+    for (const p of poRows) { const k = String(p.itemId); if (!lastPo.has(k)) lastPo.set(k, p); }
+
+    for (const item of ids) {
+      const rows = priceRows.filter((r: any) => String(r.itemId) === item && !r.blocklisted && String(r.approvalStatus ?? 'approved') === 'approved');
+      const candidates = rows.map((r: any) => ({
+        vendor_id: Number(r.vendorId), vendor_name: r.vendorName ?? null, unit_price: n(r.unitPrice),
+        uom: r.uom ?? null, currency: r.currency ?? 'THB', preferred: r.preferred === true, source: 'pricelist' as const,
+      })).sort((a, b) => (Number(b.preferred) - Number(a.preferred)) || (a.unit_price - b.unit_price));
+      type Sug = { vendor_id: number; vendor_name: string | null; unit_price: number; uom: string | null; currency: string; preferred: boolean; source: 'pricelist' | 'last_po' };
+      let suggested: Sug | null = candidates[0] ?? null;
+      // Fallback: no usable price list → route to the last committed PO's vendor (if any).
+      if (!suggested) {
+        const lp = lastPo.get(item);
+        if (lp?.vendorId != null) suggested = { vendor_id: Number(lp.vendorId), vendor_name: lp.vendorName ?? null, unit_price: n(lp.unitPrice), uom: lp.uom ?? null, currency: 'THB', preferred: false, source: 'last_po' };
+      }
+      out[item] = { suggested, candidates };
+    }
+    return { suggestions: out };
+  }
+
+  // Set / clear an item's "ผู้ขายประจำ" (preferred supplier) — a sourcing decision that seeds the PR→PO
+  // auto-group. Kept on the tenant-scoped supplier price list: mark ONE active row (tenant,item) preferred,
+  // unsetting its siblings (the partial unique index is the backstop). If no active price row exists for the
+  // chosen vendor+item yet, one is created from the supplied price (the buyer just typed it on the PO) or the
+  // last PO price — so next time the price auto-fills too. Removing a preference just clears the flag.
+  async setPreferredVendor(itemId: string, dto: { vendor_id: number; unit_price?: number; uom?: string; currency?: string; remove?: boolean }, user: JwtUser) {
+    const db = this.db;
+    const item = String(itemId ?? '').trim();
+    if (!item) throw new BadRequestException({ code: 'ITEM_REQUIRED', message: 'item id required', messageTh: 'ต้องระบุรหัสสินค้า' });
+    if (!(Number(dto.vendor_id) > 0)) throw new BadRequestException({ code: 'VENDOR_REQUIRED', message: 'vendor id required', messageTh: 'ต้องระบุผู้ขาย' });
+    const tenantId = user.tenantId ?? null;
+    const tenantCond = tenantId != null ? or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId)) : undefined;
+    // The vendor must exist and be usable (a blocklisted / unapproved supplier cannot become the default).
+    await this.assertSupplierAllowed(Number(dto.vendor_id), null);
+
+    // Clearing a preference: just drop the flag on the item's active rows (idempotent) — no price churn.
+    if (dto.remove === true) {
+      await db.update(supplierPriceLists).set({ preferred: false })
+        .where(and(eq(supplierPriceLists.itemId, item), eq(supplierPriceLists.status, 'active'), tenantCond));
+      return { item_id: item, vendor_id: Number(dto.vendor_id), preferred: false };
+    }
+
+    // Find (or create) the active price row for this vendor+item that will carry the preferred flag.
+    const existing = await db.select({ id: supplierPriceLists.id, uom: supplierPriceLists.uom })
+      .from(supplierPriceLists)
+      .where(and(eq(supplierPriceLists.itemId, item), eq(supplierPriceLists.vendorId, Number(dto.vendor_id)), eq(supplierPriceLists.status, 'active'), tenantCond))
+      .orderBy(desc(supplierPriceLists.id)).limit(1);
+    let targetId = existing[0]?.id ? Number(existing[0].id) : null;
+    if (targetId == null) {
+      // No price yet: seed one from the supplied price, else the last committed PO price for this vendor+item.
+      let price = dto.unit_price != null && n(dto.unit_price) > 0 ? n(dto.unit_price) : null;
+      let uom = dto.uom ?? null;
+      if (price == null) {
+        const [lp] = await db.select({ unitPrice: poItems.unitPrice, uom: poItems.uom })
+          .from(poItems).innerJoin(purchaseOrders, eq(poItems.poId, purchaseOrders.id))
+          .where(and(eq(poItems.itemId, item), eq(purchaseOrders.vendorId, Number(dto.vendor_id)), notInArray(purchaseOrders.status, ['Draft', 'Cancelled'])))
+          .orderBy(desc(purchaseOrders.id)).limit(1);
+        if (lp?.unitPrice != null) { price = n(lp.unitPrice); uom = uom ?? (lp.uom ?? null); }
+      }
+      if (price == null) throw new UnprocessableEntityException({ code: 'PRICE_REQUIRED', message: 'A unit price is needed to set a preferred vendor', messageTh: 'ต้องระบุราคาต่อหน่วยเพื่อตั้งผู้ขายประจำ' });
+      const [row] = await db.insert(supplierPriceLists).values({
+        tenantId, vendorId: Number(dto.vendor_id), itemId: item, uom: uom ?? 'EA', currency: dto.currency ?? 'THB',
+        unitPrice: String(price), minQty: '1', effectiveFrom: ymd(), status: 'active', preferred: false, createdBy: user.username,
+      }).returning({ id: supplierPriceLists.id });
+      targetId = Number(row!.id);
+    }
+    // Enforce single preferred per (tenant,item): clear all active rows first, then flag the chosen one —
+    // this ordering avoids tripping the uq_spl_preferred_per_item partial unique index mid-update.
+    await db.update(supplierPriceLists).set({ preferred: false })
+      .where(and(eq(supplierPriceLists.itemId, item), eq(supplierPriceLists.status, 'active'), tenantCond));
+    await db.update(supplierPriceLists).set({ preferred: true }).where(eq(supplierPriceLists.id, targetId));
+    return { item_id: item, vendor_id: Number(dto.vendor_id), preferred: true };
+  }
+
   // D3 — purchase spend insights for a business month (Asia/Bangkok): total committed spend, the top
   // vendors by spend, and the most-bought items. Sourced from purchase_orders / po_items excluding
   // Draft/Cancelled (a committed-buy view). Read-only aggregate; purchase_orders is company-wide.
@@ -355,25 +477,42 @@ export class ProcurementService {
     return { pr_no: res.pr_no, status: res.status, lines: res.lines, items: low.map((x) => ({ item_id: x.item_id, qty: x.suggested_qty })) };
   }
 
-  // Convert an APPROVED PR into a PO. Each line arrives already reconciled by procurement: an existing
-  // item_id (picked from searchItems) OR a brand-new code to open (create_item:true → an items-master row
-  // is created). The PO is raised through the normal createPo path (vendor screening + approval engine),
-  // then every line of the source PR is stamped with the new PO number and the PR is marked Converted —
-  // closing the PR → PO link (pr_items.po_no) end to end. PR must be Approved (a Pending/Rejected PR 422s).
-  async convertPrToPo(prNo: string, dto: { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; lines: { item_id: string; item_description?: string; create_item?: boolean; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean }[] }, user: JwtUser) {
+  // Convert an APPROVED PR into one OR MORE POs. Each line arrives reconciled by procurement: an existing
+  // item_id (picked from searchItems) OR a brand-new code to open (create_item:true → an items-master row).
+  //
+  // Two shapes, because "1 PO = 1 supplier" ⇒ a PR with lines for several suppliers must fan out:
+  //  • LEGACY (`{ vendor, lines }`) — one PO for all lines; every PR line is stamped with it and the PR is
+  //    marked Converted. Unchanged behaviour (the LINE-chat convert + older callers rely on it exactly).
+  //  • SPLIT (`{ pos: [{ vendor, lines }, …] }`) — one PO per supplier group; each line is linked to its
+  //    OWN PO by pr_line_id (precise) or item_id (fallback). The PR becomes 'Converted' only when every line
+  //    is on a PO, else 'PartiallyConverted' so the remaining lines can be ordered in a later pass. A line
+  //    may carry set_preferred:true to also record its group's vendor as the item's default (setPreferredVendor).
+  // A Pending/Rejected PR 422s; a PartiallyConverted PR may be converted again (to place the rest).
+  async convertPrToPo(prNo: string, dto: {
+    vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number;
+    lines?: ConvLine[];
+    pos?: { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; lines: ConvLine[] }[];
+  }, user: JwtUser) {
     const db = this.db;
     const pr = prNo.toUpperCase();
     const [head] = await db.select().from(purchaseRequests).where(eq(purchaseRequests.prNo, pr)).limit(1);
     if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PR not found', messageTh: 'ไม่พบคำขอซื้อ' });
-    if (head.status !== 'Approved') throw new UnprocessableEntityException({ code: 'PR_NOT_APPROVED', message: `PR must be Approved to convert (is '${head.status}')`, messageTh: `ต้องอนุมัติ PR ก่อนแปลงเป็น PO (สถานะปัจจุบัน '${head.status}')` });
-    if (!dto.lines?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No lines', messageTh: 'ไม่มีรายการ' });
-    for (const l of dto.lines) {
+    if (head.status !== 'Approved' && head.status !== 'PartiallyConverted') throw new UnprocessableEntityException({ code: 'PR_NOT_APPROVED', message: `PR must be Approved to convert (is '${head.status}')`, messageTh: `ต้องอนุมัติ PR ก่อนแปลงเป็น PO (สถานะปัจจุบัน '${head.status}')` });
+
+    const legacy = !(dto.pos && dto.pos.length);
+    const groups = legacy
+      ? [{ vendor_id: dto.vendor_id, vendor_name: dto.vendor_name, expected_date: dto.expected_date, remarks: dto.remarks, currency: dto.currency, fx_rate: dto.fx_rate, lines: dto.lines ?? [] }]
+      : dto.pos!;
+    const allLines = groups.flatMap((g) => g.lines ?? []);
+    if (!allLines.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No lines', messageTh: 'ไม่มีรายการ' });
+    for (const g of groups) if (!(g.lines?.length)) throw new BadRequestException({ code: 'EMPTY_PO', message: 'Each PO needs at least one line', messageTh: 'ใบสั่งซื้อทุกใบต้องมีอย่างน้อย 1 รายการ' });
+    for (const l of allLines) {
       if (!l.item_id?.trim()) throw new BadRequestException({ code: 'ITEM_REQUIRED', message: 'Each line needs a resolved item id', messageTh: 'ทุกบรรทัดต้องเลือกหรือเปิดรหัสสินค้า' });
       if (!(n(l.order_qty) > 0)) throw new BadRequestException({ code: 'BAD_QTY', message: `Bad qty for ${l.item_id}`, messageTh: `จำนวนไม่ถูกต้อง: ${l.item_id}` });
     }
     // Open any brand-new item codes first (idempotent — a code that already exists is left as-is).
     const created: string[] = [];
-    for (const l of dto.lines.filter((x) => x.create_item)) {
+    for (const l of allLines.filter((x) => x.create_item)) {
       const code = l.item_id.trim();
       const [exists] = await db.select({ id: items.id }).from(items).where(eq(items.itemId, code)).limit(1);
       if (!exists) {
@@ -381,20 +520,63 @@ export class ProcurementService {
         created.push(code);
       }
     }
-    // Raise the PO through the normal path (vendor screening + workflow), then link the PR.
-    const po = await this.createPo({
-      vendor_id: dto.vendor_id, vendor_name: dto.vendor_name, expected_date: dto.expected_date,
-      remarks: dto.remarks ?? `จาก ${pr}`, currency: dto.currency, fx_rate: dto.fx_rate,
-      items: dto.lines.map((l) => ({ item_id: l.item_id.trim(), item_description: l.item_description, order_qty: n(l.order_qty), unit_price: n(l.unit_price), uom: l.uom, is_capital: l.is_capital })),
-    }, user);
-    await db.update(prItems).set({ poNo: po.po_no }).where(eq(prItems.prId, Number(head.id)));
-    await db.update(purchaseRequests).set({ status: 'Converted' }).where(eq(purchaseRequests.id, head.id));
-    await this.statusLog.log('PR', pr, 'Approved', 'Converted', user.username);
-    // D2 — tell the requester their requisition is now on a purchase order (best-effort LINE push).
-    if (head.requestedBy && head.requestedBy !== user.username) {
-      await this.lineNotify?.notifyUser(String(head.requestedBy), null, `🛒 คำขอซื้อ ${pr} ของคุณออกใบสั่งซื้อแล้ว → ${po.po_no} (สถานะ ${po.status === 'Approved' ? 'อนุมัติแล้ว' : 'รออนุมัติ'})`);
+
+    // Raise one PO per group through the normal path (vendor screening + workflow), then link the PR lines.
+    const createdPos: { po_no: string; status: string; total_amount: number; vendor_id: number | null; vendor_name: string | null; line_count: number }[] = [];
+    for (const g of groups) {
+      // Resolve the group vendor id up front (for set_preferred); createPo re-resolves for the PO row itself.
+      let gVendorId = g.vendor_id ?? null;
+      if (!gVendorId && g.vendor_name?.trim()) { const [v] = await db.select({ id: vendors.id }).from(vendors).where(eq(vendors.name, g.vendor_name.trim())).limit(1); gVendorId = v?.id ?? null; }
+      const po = await this.createPo({
+        vendor_id: gVendorId ?? undefined, vendor_name: g.vendor_name, expected_date: g.expected_date,
+        remarks: g.remarks ?? `จาก ${pr}`, currency: g.currency, fx_rate: g.fx_rate,
+        items: g.lines.map((l) => ({ item_id: l.item_id.trim(), item_description: l.item_description, order_qty: n(l.order_qty), unit_price: n(l.unit_price), uom: l.uom, is_capital: l.is_capital })),
+      }, user);
+      createdPos.push({ po_no: po.po_no, status: po.status, total_amount: po.total_amount, vendor_id: gVendorId, vendor_name: g.vendor_name ?? null, line_count: g.lines.length });
+
+      if (legacy) {
+        // Preserve the historical behaviour exactly: blanket-stamp every PR line with the single PO number.
+        await db.update(prItems).set({ poNo: po.po_no }).where(eq(prItems.prId, Number(head.id)));
+      } else {
+        // Split: link each group line to THIS PO precisely — by pr_line_id, else the first still-unlinked
+        // PR line with the same item code. Only stamp rows not already on a PO (idempotent across passes).
+        for (const l of g.lines) {
+          if (l.pr_line_id != null) {
+            await db.update(prItems).set({ poNo: po.po_no, status: 'Converted' })
+              .where(and(eq(prItems.id, Number(l.pr_line_id)), eq(prItems.prId, Number(head.id)), isNull(prItems.poNo)));
+          } else {
+            const [cand] = await db.select({ id: prItems.id }).from(prItems)
+              .where(and(eq(prItems.prId, Number(head.id)), eq(prItems.itemId, l.item_id.trim()), isNull(prItems.poNo))).limit(1);
+            if (cand) await db.update(prItems).set({ poNo: po.po_no, status: 'Converted' }).where(eq(prItems.id, Number(cand.id)));
+          }
+          // Learn the item's default supplier when the buyer asks to (best-effort; never fails the convert).
+          if (l.set_preferred && gVendorId) {
+            try { await this.setPreferredVendor(l.item_id.trim(), { vendor_id: gVendorId, unit_price: n(l.unit_price), uom: l.uom }, user); } catch { /* preference is a nicety, not a gate */ }
+          }
+        }
+      }
     }
-    return { pr_no: pr, po_no: po.po_no, po_status: po.status, total_amount: po.total_amount, created_items: created };
+
+    // PR status: legacy always fully closes; split closes only when no line remains unlinked.
+    let newStatus = 'Converted';
+    if (!legacy) {
+      const remaining = await db.select({ id: prItems.id }).from(prItems).where(and(eq(prItems.prId, Number(head.id)), isNull(prItems.poNo)));
+      newStatus = remaining.length === 0 ? 'Converted' : 'PartiallyConverted';
+    }
+    await db.update(purchaseRequests).set({ status: newStatus }).where(eq(purchaseRequests.id, head.id));
+    if (newStatus !== head.status) await this.statusLog.log('PR', pr, head.status ?? '', newStatus, user.username);
+    // D2 — tell the requester their requisition is now on purchase order(s) (best-effort LINE push).
+    if (head.requestedBy && head.requestedBy !== user.username) {
+      const poList = createdPos.map((p) => p.po_no).join(', ');
+      await this.lineNotify?.notifyUser(String(head.requestedBy), null, `🛒 คำขอซื้อ ${pr} ของคุณออกใบสั่งซื้อแล้ว → ${poList}${newStatus === 'PartiallyConverted' ? ' (ยังมีรายการค้างรอสั่งเพิ่ม)' : ''}`);
+    }
+    const first = createdPos[0];
+    return {
+      pr_no: pr, pr_status: newStatus,
+      po_no: first?.po_no ?? null, po_status: first?.status ?? null, // legacy fields (first PO)
+      total_amount: createdPos.reduce((a, p) => a + n(p.total_amount), 0),
+      pos: createdPos, created_items: created,
+    };
   }
 
   // ── Supplier screening (Phase 16) ───────────────────────────────────
