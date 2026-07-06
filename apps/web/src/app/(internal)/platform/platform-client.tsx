@@ -527,6 +527,9 @@ export default function PlatformConsole({
         rows={companyRows}
         columns={companyCols}
         rowKey={(c) => c.id}
+        // First column is a bare selection checkbox (no label) — feature the company name/code
+        // instead as the mobile-card title, or the fallback card shows only a checkbox.
+        cardTitleKey="name"
         emptyState={{ icon: Building2, title: tagFilter ? t('plt.empty_no_tag_title') : t('plt.empty_no_company_title'), description: tagFilter ? t('plt.empty_no_tag_desc') : t('plt.empty_no_company_desc') }}
       />
     </StateView>
