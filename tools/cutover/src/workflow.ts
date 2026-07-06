@@ -87,10 +87,18 @@ async function main() {
   const instOf = async (prNo: string) => ((await pg.query(`SELECT id, status, current_step FROM workflow_instances WHERE doc_no='${prNo}' ORDER BY id DESC LIMIT 1`)).rows as any[])[0];
   const mkPr = (token: string, amount: number) => inj('POST', '/api/procurement/prs', token, { amount, items: [{ item_id: 'A', request_qty: 1 }] });
 
+  // ── 0. Cross-cutting readiness (maker-checker audit): with NO active definition, every engine-wired
+  //    docType AUTO-APPROVES — the readiness reporter must flag that config gap. ──
+  const rdyBefore = await inj('GET', '/api/workflow/readiness', mgr1);
+  ok('Readiness: with no definitions, PR/PO/BUDGET/PMR/BQR all report auto-approve (ready=false)', rdyBefore.status === 200 && rdyBefore.json.ready === false && rdyBefore.json.missing?.includes('PR') && rdyBefore.json.missing?.includes('PO') && rdyBefore.json.missing?.includes('BUDGET'), JSON.stringify({ ready: rdyBefore.json.ready, missing: rdyBefore.json.missing }));
+
   // ── 1. definition CRUD (created by a T1 masterdata user → tenant-visible to the T1 maker) ──
   const def = await inj('POST', '/api/workflow/definitions', mgr1, { doc_type: 'PR', name: 'PR approval', steps: [{ step_no: 1, approver_role: 'Procurement', min_amount: 0 }, { step_no: 2, approver_role: 'Planner', min_amount: 10000 }] });
   const defs = await inj('GET', '/api/workflow/definitions', mgr1);
   ok('Definition CRUD: 2-step PR workflow created + listed active', (def.status === 200 || def.status === 201) && (defs.json.definitions ?? []).some((d: any) => d.doc_type === 'PR' && d.active && d.steps.length === 2), JSON.stringify(def.json));
+  // Readiness now sees the PR definition → PR no longer auto-approves.
+  const rdyAfter = await inj('GET', '/api/workflow/readiness', mgr1);
+  ok('Readiness: after seeding the PR definition, PR has an active workflow (no longer auto-approves)', rdyAfter.json.doc_types?.find((d: any) => d.doc_type === 'PR')?.has_active_definition === true && !rdyAfter.json.missing?.includes('PR'), JSON.stringify({ missing: rdyAfter.json.missing }));
 
   // ── 2. submit routes to step 1 ──
   const pr1 = await mkPr(proc1, 5000);

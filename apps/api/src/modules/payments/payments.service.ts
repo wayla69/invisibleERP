@@ -280,6 +280,38 @@ export class PaymentService {
     return { payment_no: paymentNo, status: 'Voided' };
   }
 
+  // G14 (maker-checker audit — detective control): POS voids and sub-threshold refunds are single-user BY
+  // DESIGN (till speed; large refunds already park for approval via REV-16, and the pos_sell/pos_refund/
+  // pos_till split + till-variance approval are the compensating controls). This read-only EXCEPTION REPORT
+  // surfaces every void + refund in a window for periodic independent review, so the residual risk is
+  // detective-covered rather than unmonitored. Tenant-scoped (RLS); optional [from,to] date filter (YYYY-MM-DD).
+  async voidRefundExceptions(range: { from?: string; to?: string }, user: JwtUser) {
+    const db = this.db;
+    const tenantId = user.tenantId ?? null;
+    const dateConds = (col: any) => {
+      const c: any[] = [];
+      if (range.from) c.push(sql`${col} >= ${range.from}`);
+      if (range.to) c.push(sql`${col} < (${range.to}::date + 1)`);
+      return c;
+    };
+    const voidConds = [sql`${payments.status}::text = 'Voided'`, ...dateConds(payments.createdAt)];
+    if (tenantId != null) voidConds.push(eq(payments.tenantId, tenantId));
+    const voids = await db.select({ paymentNo: payments.paymentNo, saleNo: payments.saleNo, method: payments.method, amount: payments.amount, createdBy: payments.createdBy, createdAt: payments.createdAt })
+      .from(payments).where(and(...voidConds)).orderBy(desc(payments.createdAt)).limit(500);
+    const refConds = [...dateConds(paymentRefunds.createdAt)];
+    if (tenantId != null) refConds.push(eq(paymentRefunds.tenantId, tenantId));
+    const refunds = await db.select({ refundNo: paymentRefunds.refundNo, paymentNo: paymentRefunds.paymentNo, amount: paymentRefunds.amount, reason: paymentRefunds.reason, createdBy: paymentRefunds.createdBy, createdAt: paymentRefunds.createdAt })
+      .from(paymentRefunds).where(refConds.length ? and(...refConds) : undefined).orderBy(desc(paymentRefunds.createdAt)).limit(500);
+    const voidTotal = round2(voids.reduce((a: number, v: any) => a + n(v.amount), 0));
+    const refundTotal = round2(refunds.reduce((a: number, r: any) => a + n(r.amount), 0));
+    return {
+      from: range.from ?? null, to: range.to ?? null,
+      voids: voids.map((v: any) => ({ payment_no: v.paymentNo, sale_no: v.saleNo, method: v.method, amount: n(v.amount), by: v.createdBy, at: v.createdAt })),
+      refunds: refunds.map((r: any) => ({ refund_no: r.refundNo, payment_no: r.paymentNo, amount: n(r.amount), reason: r.reason, by: r.createdBy, at: r.createdAt })),
+      void_count: voids.length, refund_count: refunds.length, void_total: voidTotal, refund_total: refundTotal,
+    };
+  }
+
   // PATCH /api/payments/:no/settle — confirm an async tender (PromptPay/Authorized) as Captured.
   // Completes the lifecycle for gateways that settle out-of-band (so a Pending tender is not a dead-end).
   async settle(paymentNo: string, _user: JwtUser) {

@@ -1,6 +1,11 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.4 · 2026-07-06**
+**Status: DRAFT v0.5 · 2026-07-06**
+
+*v0.5 (2026-07-06): Part C — clarified that a **bank statement is imported single-user by
+design** and that the **reconciliation certifier** must review the imported (matched/unmatched)
+statement lines before sign-off, so a wrong/unauthorised import is caught at certification
+(gap **G10** — documentation only, compensating detective control **REC-02**; no code change).*
 
 *v0.4 (2026-07-06): Part C — a **newly created bank account** is now inactive /
 PendingApproval and **cannot receive a deposit** (`BANK_NOT_APPROVED`) until a **different**
@@ -495,6 +500,16 @@ needs investigating.
 
 **Expected result:** The period is marked *Certified*. (You cannot certify a
 reconciliation you prepared yourself.)
+
+> **Before you certify, review the imported statement lines.** A **bank statement is
+> imported by a single user** (this is fine by design — the imported lines only
+> matter once they're *matched*). Your certification is the control that catches a
+> wrong or unauthorised import: as the certifier, **review the matched and unmatched
+> statement lines** before you sign off, and treat any adjustment (bank fees /
+> interest) as a separately-approved item (**BANK-02**). Signing off on lines you
+> haven't reviewed is what defeats the control. (Gap **G10** — the statement import
+> is single-user by design; the certifier's evidence review is the compensating
+> detective control, **REC-02**.)
 
 ## Financial health (how healthy is my working capital?)
 
