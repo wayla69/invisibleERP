@@ -214,20 +214,42 @@ engine). The table auto-refreshes; use **รีเฟรช** to pull the latest
 **Turning an approved PR into a PO (➡️ สร้าง PO):** on an **Approved** PR, procurement
 presses **➡️ สร้าง PO** to open the conversion panel — a **pop-up dialog** centred over the
 screen (so it is clearly visible on a phone, not tucked below the register table). Close it
-with **✕**, the ⎋ key, or by tapping outside. Because a PR line may be a free-text
-name (e.g. typed in LINE chat, possibly misspelt or not yet coded), each line is
-**reconciled to a real item** before the PO is raised:
+with **✕**, the ⎋ key, or by tapping outside. Each line shows the **item name** (not just the
+code), and — because a PR line may be a free-text name (e.g. typed in LINE chat, possibly
+misspelt or not yet coded) — each line can be **reconciled to a real item** before the PO is
+raised:
 - **เทียบทะเบียน** — type/adjust the name and press **ค้นหา/เทียบ** to search the item
   master; click a match to lock in its code (and pull its default UoM/price).
 - **สินค้าใหม่** — tick this to **open a new item code** on the spot (enter the code +
   description) when the item isn't in the master yet.
 
-Pick the **vendor** with **ค้นหาผู้ขาย** (from the supplier master — ties the PO to vendor
-screening/scorecards; or type a new name), and a **unit price** per line — picking a matched
-item prefills its **last purchase price** (`· ล่าสุด ฿…`). Then **สร้างใบสั่งซื้อ (PO)**. The system
-opens any new item codes, raises the PO through the normal path (vendor screening +
-approval), and **links the PR to the PO** (the PR is marked **ออก PO แล้ว / Converted**).
-Requires the `procurement` permission.
+**One purchase order is placed with one supplier — so the panel splits a PR across
+suppliers for you.** When it opens, the system **suggests a supplier for each line** and
+**groups the lines by supplier**, showing one **ใบสั่งซื้อ (PO) #** card per group. The
+suggestion is chosen in this order: **① the item's ผู้ขายประจำ (preferred supplier) → ②
+the cheapest supplier price on file → ③ the vendor you last bought that item from**; the
+matching **unit price** is pre-filled too. A small tag on each group tells you where the
+suggestion came from (**ผู้ขายประจำ / ราคาที่เคยตั้งไว้ / เคยซื้อล่าสุด**).
+
+- **Change a supplier** — press **เปลี่ยน/เลือกผู้ขาย** on a group header (moves the whole
+  group) or on a single line (splits just that item out to another supplier). Pick from the
+  supplier master, or type a new name.
+- **ผู้ขายที่ยังไม่ได้เลือก** — any line the system couldn't match sits in a **"ยังไม่ได้เลือกผู้ขาย"**
+  box; assign it a supplier (or leave it — those lines simply stay on the PR to order later).
+- **★ ตั้งเป็นผู้ขายประจำ** — tick this on a group to **remember that supplier as the default**
+  for those items, so next time they're suggested automatically (and the price auto-fills).
+
+Then press **สร้าง PO ทั้งหมด (N)**. The system opens any new item codes and raises **one PO
+per supplier group** through the normal path (vendor screening + approval), linking each line
+back to its own PO. The PR is marked **ออก PO แล้ว / Converted** when every line has been
+ordered, or **ออก PO บางส่วน / Partially converted** when some lines were left for later — the
+**➡️ สร้าง PO** button stays available so you can place the rest in another pass. Requires the
+`procurement` permission.
+
+> **Setting a "ผู้ขายประจำ" (preferred supplier) for an item** ties it to a supplier so future
+> requisitions route to the right PO automatically. The quickest way is the **★** tick in the
+> conversion panel above; it's the price-maintenance duty (`md_vendor`, also open to
+> `procurement`/`planner`), kept separate from paying the bill.
 
 **Reorder what's running out (สินค้าใกล้หมด):** when any item's on-hand has dropped
 to/below its **reorder point** (`min_stock` on the item master), a **สินค้าใกล้หมด** card

@@ -533,6 +533,72 @@ async function main() {
   ok('PR→PO: item search returns last purchase price (A4-PAPER last_price = 120 from the PO above)',
     itemSearch2.status === 200 && !!a4 && Number(a4.last_price) === 120, JSON.stringify({ last: a4?.last_price }));
 
+  // 17g-iii-b. Preferred supplier + PR→PO SPLIT (1 PR → many POs, 1 PO = 1 supplier). Two items each routed
+  //   to a DIFFERENT preferred vendor; a split convert fans the PR out into one PO per vendor, links each
+  //   line to its own PO, and only marks the PR Converted when nothing is left (else PartiallyConverted).
+  await db.insert(s.vendors).values({ tenantId: t1, vendorCode: 'V-BETA', name: 'Beta Supplies', isSupplier: true }).onConflictDoNothing();
+  await db.insert(s.items).values([{ itemId: 'SPL-A', itemDescription: 'สินค้า A' }, { itemId: 'SPL-B', itemDescription: 'สินค้า B' }] as any).onConflictDoNothing();
+  const acmeId = Number((await db.select().from(s.vendors).where(and(eq(s.vendors.name, 'ACME Foods'), eq(s.vendors.tenantId, t1))))[0]?.id);
+  const betaId = Number((await db.select().from(s.vendors).where(and(eq(s.vendors.name, 'Beta Supplies'), eq(s.vendors.tenantId, t1))))[0]?.id);
+  // set the preferred supplier per item via the endpoint (seeds an active price row from the given price)
+  const pref1 = await inj('PUT', `/api/procurement/items/SPL-A/preferred-vendor`, token, { vendor_id: acmeId, unit_price: 50 });
+  const pref2 = await inj('PUT', `/api/procurement/items/SPL-B/preferred-vendor`, token, { vendor_id: betaId, unit_price: 80 });
+  ok('PR→PO split: set preferred supplier per item (seeds a price row) → 200 + preferred:true',
+    pref1.status === 200 && pref2.status === 200 && pref1.json.preferred === true && pref2.json.preferred === true,
+    JSON.stringify({ s1: pref1.status, s2: pref2.status }));
+  // items/suppliers suggests the preferred vendor for each line (drives the web auto-group)
+  const sug = await inj('GET', `/api/procurement/items/suppliers?item_ids=SPL-A,SPL-B`, token);
+  ok('PR→PO split: items/suppliers suggests the preferred vendor per item',
+    sug.status === 200 && sug.json.suggestions?.['SPL-A']?.suggested?.vendor_id === acmeId && sug.json.suggestions?.['SPL-B']?.suggested?.vendor_id === betaId,
+    JSON.stringify({ a: sug.json.suggestions?.['SPL-A']?.suggested?.vendor_id, b: sug.json.suggestions?.['SPL-B']?.suggested?.vendor_id }));
+  // A separate Procurement-role approver so the PR workflow (step 1 → Procurement) + its SoD (creator ≠
+  // approver) are both satisfied: boss raises the PR, proc2 approves it, boss converts it.
+  await db.insert(s.users).values({ username: 'proc2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 } as any).onConflictDoNothing();
+  const proc2 = (await inj('POST', '/api/login', undefined, { username: 'proc2', password: 'pw' })).json.token as string;
+  // raise a PR with both items (boss), approve (proc2), and split-convert into two POs (one per vendor)
+  const prSplit = (await inj('POST', '/api/procurement/prs', token, { items: [{ item_id: 'SPL-A', request_qty: 2, uom: 'EA' }, { item_id: 'SPL-B', request_qty: 1, uom: 'EA' }] })).json.pr_no;
+  await inj('PATCH', `/api/procurement/prs/${prSplit}/approve`, proc2, { approve: true });
+  const listSplit = (await inj('GET', `/api/procurement/prs?limit=50`, token)).json.prs ?? [];
+  const prSplitRow = listSplit.find((p: any) => p.pr_no === prSplit);
+  const lnA = prSplitRow?.lines?.find((l: any) => l.item_id === 'SPL-A');
+  const lnB = prSplitRow?.lines?.find((l: any) => l.item_id === 'SPL-B');
+  ok('PR→PO split: listPrs returns per-line id + item_description + po_no (name surfaces, not just code)',
+    !!lnA?.id && lnA?.item_description === 'สินค้า A' && lnA?.po_no === null && lnB?.item_description === 'สินค้า B',
+    JSON.stringify({ aId: lnA?.id, aDesc: lnA?.item_description, aPo: lnA?.po_no }));
+  const split = await inj('POST', `/api/procurement/prs/${prSplit}/to-po`, token, { pos: [
+    { vendor_id: acmeId, lines: [{ pr_line_id: lnA.id, item_id: 'SPL-A', order_qty: 2, unit_price: 50 }] },
+    { vendor_id: betaId, lines: [{ pr_line_id: lnB.id, item_id: 'SPL-B', order_qty: 1, unit_price: 80 }] },
+  ] });
+  const [prSplitAfter] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prSplit));
+  const splitLines = await db.select().from(s.prItems).where(eq(s.prItems.prId, Number(prSplitAfter.id)));
+  const splitPoA = splitLines.find((l: any) => l.itemId === 'SPL-A')?.poNo;
+  const splitPoB = splitLines.find((l: any) => l.itemId === 'SPL-B')?.poNo;
+  ok('PR→PO split: 1 PR → 2 POs (one per vendor), each line linked to its OWN PO, PR marked Converted',
+    (split.status === 200 || split.status === 201) && (split.json.pos ?? []).length === 2
+      && !!splitPoA && !!splitPoB && splitPoA !== splitPoB && prSplitAfter.status === 'Converted',
+    JSON.stringify({ n: (split.json.pos ?? []).length, a: splitPoA, b: splitPoB, st: prSplitAfter.status }));
+
+  // 17g-iii-c. Partial convert: order ONLY one line now → PR is PartiallyConverted; the rest stays open and
+  //   a second convert closes it out. (This is what makes "1 PR → many POs across time" work.)
+  const prPart = (await inj('POST', '/api/procurement/prs', token, { items: [{ item_id: 'SPL-A', request_qty: 1, uom: 'EA' }, { item_id: 'SPL-B', request_qty: 1, uom: 'EA' }] })).json.pr_no;
+  await inj('PATCH', `/api/procurement/prs/${prPart}/approve`, proc2, { approve: true });
+  const prPartRow = ((await inj('GET', `/api/procurement/prs?limit=50`, token)).json.prs ?? []).find((p: any) => p.pr_no === prPart);
+  const pLnA = prPartRow.lines.find((l: any) => l.item_id === 'SPL-A');
+  const pLnB = prPartRow.lines.find((l: any) => l.item_id === 'SPL-B');
+  await inj('POST', `/api/procurement/prs/${prPart}/to-po`, token, { pos: [{ vendor_id: acmeId, lines: [{ pr_line_id: pLnA.id, item_id: 'SPL-A', order_qty: 1, unit_price: 50 }] }] });
+  const [prPartMid] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prPart));
+  const partMidLines = await db.select().from(s.prItems).where(eq(s.prItems.prId, Number(prPartMid.id)));
+  const midOrdered = partMidLines.find((l: any) => l.itemId === 'SPL-A')?.poNo;
+  const midOpen = partMidLines.find((l: any) => l.itemId === 'SPL-B')?.poNo;
+  ok('PR→PO split: partial convert (one line) → PR PartiallyConverted, ordered line linked, other still open',
+    prPartMid.status === 'PartiallyConverted' && !!midOrdered && (midOpen === null || midOpen === undefined),
+    JSON.stringify({ st: prPartMid.status, ordered: midOrdered, open: midOpen }));
+  const rest = await inj('POST', `/api/procurement/prs/${prPart}/to-po`, token, { pos: [{ vendor_id: betaId, lines: [{ pr_line_id: pLnB.id, item_id: 'SPL-B', order_qty: 1, unit_price: 80 }] }] });
+  const [prPartAfter] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prPart));
+  ok('PR→PO split: converting the remaining line closes the PR (Converted) with a distinct 2nd PO',
+    (rest.status === 200 || rest.status === 201) && prPartAfter.status === 'Converted' && rest.json.po_no && rest.json.po_no !== midOrdered,
+    JSON.stringify({ st: prPartAfter.status, po2: rest.json.po_no, po1: midOrdered }));
+
   // 17g-iv. receive <PO> via chat (feature B) — receive ALL outstanding qty in one tap.
   //         Guard: an un-approved PO is refused (EXP-03); once approved a linked wh_receive/procurement
   //         user receives everything → GR created, PO auto-closes; a second receive finds nothing left.

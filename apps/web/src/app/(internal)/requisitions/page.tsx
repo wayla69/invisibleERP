@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MessageCircle, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -15,10 +15,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PrForm } from '@/components/procurement-forms';
 
-type PrLine = { item_id: string; request_qty: number; uom: string | null; reason: string | null };
+type PrLine = { id: number; item_id: string; item_description: string | null; request_qty: number; uom: string | null; reason: string | null; po_no: string | null; line_status: string | null };
 type Pr = { pr_no: string; pr_date: string | null; requested_by: string | null; status: string; priority: string | null; approved_by: string | null; lines: PrLine[] };
 type ItemMatch = { item_id: string; item_description: string | null; uom: string | null; unit_price: number; last_price: number | null };
 type VendorMatch = { id: number; name: string; vendor_code: string | null };
+// Per-item supplier suggestion (preferred → cheapest active price → last PO vendor) driving the PR→PO auto-group.
+type SupplierSuggestion = { vendor_id: number; vendor_name: string | null; unit_price: number; uom: string | null; currency: string; preferred: boolean; source: 'pricelist' | 'last_po' };
+type ItemSuggestion = { suggested: SupplierSuggestion | null; candidates: SupplierSuggestion[] };
 
 // Company-wide requisition surface (perm: pr_raise) — anyone in the company can raise a purchase
 // requisition. A PR is only a request: it is routed to Procurement for approval and conversion to a PO.
@@ -123,6 +126,7 @@ function LowStockCard() {
 const STATUS_BADGE: Record<string, { key: string; variant: 'success' | 'info' | 'muted' | 'destructive' }> = {
   Approved: { key: 'iv.req_status_approved', variant: 'success' },
   Converted: { key: 'iv.req_status_converted', variant: 'success' },
+  PartiallyConverted: { key: 'iv.req_status_partial', variant: 'info' },
   Pending: { key: 'iv.req_status_pending', variant: 'info' },
   Rejected: { key: 'iv.req_status_rejected', variant: 'destructive' },
   Cancelled: { key: 'iv.req_status_cancelled', variant: 'muted' },
@@ -184,7 +188,13 @@ function PrListCard() {
                       <td className="py-2 pr-3">
                         <ul className="space-y-0.5">
                           {pr.lines.map((l, i) => (
-                            <li key={i}>{l.item_id} × {l.request_qty}{l.uom ? ` ${l.uom}` : ''}{l.reason ? <span className="text-xs text-muted-foreground"> — {l.reason}</span> : null}</li>
+                            <li key={i}>
+                              <span className="font-medium">{l.item_description || l.item_id}</span>
+                              {l.item_description ? <span className="ml-1 text-xs text-muted-foreground">({l.item_id})</span> : null}
+                              {' '}× {l.request_qty}{l.uom ? ` ${l.uom}` : ''}
+                              {l.reason ? <span className="text-xs text-muted-foreground"> — {l.reason}</span> : null}
+                              {l.po_no ? <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">→ {l.po_no}</span> : null}
+                            </li>
                           ))}
                         </ul>
                       </td>
@@ -198,7 +208,7 @@ function PrListCard() {
                               <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>{t('iv.req_reject')}</Button>
                             </>
                           )}
-                          {q.data?.can_approve && pr.status === 'Approved' && (
+                          {q.data?.can_approve && (pr.status === 'Approved' || pr.status === 'PartiallyConverted') && (
                             <Button size="sm" onClick={() => setConverting(pr)}>{t('iv.req_create_po')}</Button>
                           )}
                           {!q.data?.can_approve && isPending && (
@@ -219,123 +229,242 @@ function PrListCard() {
   );
 }
 
-// PR → PO conversion. Each PR line (a free-text name from chat) is reconciled to a real item: search the
-// master and pick a match, OR tick "สินค้าใหม่" to open a new code. Procurement adds vendor + unit prices,
-// then submits — the API raises the PO through the normal path and links/closes the PR.
-type ConvLine = { name: string; item_id: string; item_description: string; create_item: boolean; order_qty: number; unit_price: number; uom: string; matches: ItemMatch[]; searching: boolean; searched: boolean };
+// PR → PO conversion (auto-group by supplier). Each still-unordered PR line is reconciled to a real item
+// (search the master / open a new code) and routed to a suggested supplier (preferred → cheapest price →
+// last PO). Because 1 PO = 1 supplier, lines fan out into one PO per vendor: the dialog groups them, lets
+// procurement change a group's or a line's vendor, and submits `pos[]` — the API raises one PO per group,
+// links each line back, and marks the PR Converted (or PartiallyConverted if some lines are left unassigned).
+type EditLine = {
+  pr_line_id: number; item_id: string; item_description: string; create_item: boolean; new_desc: string;
+  order_qty: number; unit_price: number; uom: string;
+  vendor_id: number | null; vendor_name: string; source: SupplierSuggestion['source'] | 'preferred' | 'manual' | null;
+  set_preferred: boolean; candidates: SupplierSuggestion[]; matches: ItemMatch[]; searching: boolean; searched: boolean;
+};
+
+// Inline vendor picker used both on a group header (reassign the whole group) and per line (split one out).
+function VendorAssign({ onPick }: { onPick: (v: { id: number | null; name: string }) => void }) {
+  const { t } = useLang();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [matches, setMatches] = useState<VendorMatch[]>([]);
+  const [busy, setBusy] = useState(false);
+  const search = async () => {
+    if (!q.trim()) return;
+    setBusy(true);
+    try { const r = await api<{ vendors: VendorMatch[] }>(`/api/procurement/vendors/search?q=${encodeURIComponent(q)}`); setMatches(r.vendors); }
+    catch (e: any) { notifyError(e.message); } finally { setBusy(false); }
+  };
+  if (!open) return <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setOpen(true)}>{t('iv.req_change_vendor')}</Button>;
+  return (
+    <div className="mt-1 w-full space-y-1">
+      <div className="flex gap-1">
+        <Input className="h-7 text-xs" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('iv.req_vendor_ph')} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } }} />
+        <Button type="button" variant="outline" size="sm" className="h-7" disabled={busy || !q.trim()} onClick={search}>{busy ? '…' : t('iv.req_search_vendor')}</Button>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {matches.map((v) => (
+          <button key={v.id} type="button" className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent"
+            onClick={() => { onPick({ id: v.id, name: v.name }); setOpen(false); setMatches([]); setQ(''); }}>
+            {v.name}{v.vendor_code ? ` (${v.vendor_code})` : ''}
+          </button>
+        ))}
+        {q.trim() && (
+          <button type="button" className="rounded border border-dashed px-2 py-0.5 text-xs hover:bg-accent"
+            onClick={() => { onPick({ id: null, name: q.trim() }); setOpen(false); setMatches([]); setQ(''); }}>
+            {t('iv.req_use_typed_vendor', { name: q.trim() })}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCancel: () => void }) {
   const { t } = useLang();
-  const [vendor, setVendor] = useState('');
-  const [vendorId, setVendorId] = useState<number | null>(null);
-  const [vendorMatches, setVendorMatches] = useState<VendorMatch[]>([]);
-  const [vendorSearching, setVendorSearching] = useState(false);
-  const searchVendor = async () => {
-    if (!vendor.trim()) return;
-    setVendorSearching(true);
-    try { const r = await api<{ vendors: VendorMatch[] }>(`/api/procurement/vendors/search?q=${encodeURIComponent(vendor)}`); setVendorMatches(r.vendors); }
-    catch (e: any) { notifyError(e.message); } finally { setVendorSearching(false); }
-  };
-  const [lines, setLines] = useState<ConvLine[]>(() => pr.lines.map((l) => ({
-    name: l.item_id, item_id: l.item_id, item_description: '', create_item: false,
-    order_qty: l.request_qty, unit_price: 0, uom: l.uom ?? '', matches: [], searching: false, searched: false,
+  // Only lines not yet on a PO are convertible (a PartiallyConverted PR carries some already-ordered lines).
+  const [lines, setLines] = useState<EditLine[]>(() => pr.lines.filter((l) => !l.po_no).map((l) => ({
+    pr_line_id: l.id, item_id: l.item_id, item_description: l.item_description ?? '', create_item: false, new_desc: '',
+    order_qty: l.request_qty, unit_price: 0, uom: l.uom ?? '', vendor_id: null, vendor_name: '', source: null,
+    set_preferred: false, candidates: [], matches: [], searching: false, searched: false,
   })));
-  const setLine = (i: number, patch: Partial<ConvLine>) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-  const search = async (i: number) => {
-    setLine(i, { searching: true });
+  const [loadingSug, setLoadingSug] = useState(true);
+  const setLine = (id: number, patch: Partial<EditLine>) => setLines((ls) => ls.map((x) => (x.pr_line_id === id ? { ...x, ...patch } : x)));
+
+  // On open, ask the API which supplier fits each line and auto-assign it (buyers can still change any).
+  useEffect(() => {
+    const ids = [...new Set(lines.map((l) => l.item_id).filter(Boolean))];
+    if (!ids.length) { setLoadingSug(false); return; }
+    let alive = true;
+    api<{ suggestions: Record<string, ItemSuggestion> }>(`/api/procurement/items/suppliers?item_ids=${encodeURIComponent(ids.join(','))}`)
+      .then((r) => {
+        if (!alive) return;
+        setLines((ls) => ls.map((l) => {
+          const s = r.suggestions[l.item_id];
+          if (!s?.suggested) return { ...l, candidates: s?.candidates ?? [] };
+          const sg = s.suggested;
+          return {
+            ...l, candidates: s.candidates ?? [], vendor_id: sg.vendor_id, vendor_name: sg.vendor_name ?? '',
+            source: sg.preferred ? 'preferred' : sg.source,
+            unit_price: l.unit_price > 0 ? l.unit_price : (sg.unit_price > 0 ? sg.unit_price : 0),
+            uom: l.uom || (sg.uom ?? ''),
+          };
+        }));
+      })
+      .catch(() => { /* suggestions are a convenience; the buyer can assign manually */ })
+      .finally(() => { if (alive) setLoadingSug(false); });
+    return () => { alive = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const searchItem = async (id: number) => {
+    const line = lines.find((l) => l.pr_line_id === id); if (!line) return;
+    setLine(id, { searching: true });
     try {
-      const r = await api<{ items: ItemMatch[] }>(`/api/procurement/items/search?q=${encodeURIComponent(lines[i]!.item_id || lines[i]!.name)}`);
-      setLine(i, { matches: r.items, searched: true });
-    } catch (e: any) { notifyError(e.message); } finally { setLine(i, { searching: false }); }
+      const r = await api<{ items: ItemMatch[] }>(`/api/procurement/items/search?q=${encodeURIComponent(line.item_id || line.item_description)}`);
+      setLine(id, { matches: r.items, searched: true });
+    } catch (e: any) { notifyError(e.message); } finally { setLine(id, { searching: false }); }
   };
+
+  const assignVendor = (ids: number[], v: { id: number | null; name: string }) =>
+    setLines((ls) => ls.map((l) => (ids.includes(l.pr_line_id) ? { ...l, vendor_id: v.id, vendor_name: v.name, source: 'manual' } : l)));
+
+  // Group lines by their assigned vendor (assigned groups first, the "no vendor yet" bucket last).
+  const groups = useMemo(() => {
+    const map = new Map<string, { key: string; vendor_id: number | null; vendor_name: string; lines: EditLine[] }>();
+    for (const l of lines) {
+      const key = l.vendor_id ? `v${l.vendor_id}` : l.vendor_name ? `n:${l.vendor_name}` : 'none';
+      const g = map.get(key) ?? { key, vendor_id: l.vendor_id, vendor_name: l.vendor_name, lines: [] };
+      g.lines.push(l); map.set(key, g);
+    }
+    const arr = [...map.values()];
+    return arr.sort((a, b) => (a.key === 'none' ? 1 : 0) - (b.key === 'none' ? 1 : 0));
+  }, [lines]);
+  const assignedGroups = groups.filter((g) => g.key !== 'none');
+  const unassigned = groups.find((g) => g.key === 'none');
+
   const submit = useMutation({
-    mutationFn: () => api<{ po_no: string; created_items: string[] }>(`/api/procurement/prs/${pr.pr_no}/to-po`, {
-      method: 'POST',
-      body: JSON.stringify({
-        vendor_id: vendorId ?? undefined,
-        vendor_name: vendor.trim() || undefined,
-        lines: lines.map((l) => ({ item_id: l.item_id.trim(), item_description: l.item_description.trim() || undefined, create_item: l.create_item, order_qty: Number(l.order_qty), unit_price: Number(l.unit_price) || 0, uom: l.uom.trim() || undefined })),
-      }),
-    }),
-    onSuccess: (r) => { notifySuccess(`${t('iv.req_toast_po_created', { po: r.po_no })}${r.created_items?.length ? t('iv.req_toast_new_codes', { count: r.created_items.length }) : ''}`); onDone(); },
+    mutationFn: () => {
+      const pos = assignedGroups.map((g) => ({
+        vendor_id: g.vendor_id ?? undefined, vendor_name: g.vendor_name || undefined,
+        lines: g.lines.map((l) => ({
+          pr_line_id: l.pr_line_id, item_id: l.item_id.trim(),
+          item_description: (l.create_item ? l.new_desc.trim() : l.item_description.trim()) || undefined,
+          create_item: l.create_item, order_qty: Number(l.order_qty), unit_price: Number(l.unit_price) || 0,
+          uom: l.uom.trim() || undefined, set_preferred: l.set_preferred || undefined,
+        })),
+      }));
+      return api<{ pos: { po_no: string }[]; created_items: string[]; pr_status: string }>(`/api/procurement/prs/${pr.pr_no}/to-po`, {
+        method: 'POST', body: JSON.stringify({ pos }),
+      });
+    },
+    onSuccess: (r) => {
+      const list = (r.pos ?? []).map((p) => p.po_no).join(', ');
+      notifySuccess(`${t('iv.req_toast_pos_created', { count: r.pos?.length ?? 0, list })}${r.created_items?.length ? t('iv.req_toast_new_codes', { count: r.created_items.length }) : ''}`);
+      onDone();
+    },
     onError: (e: any) => notifyError(e.message),
   });
-  const canSubmit = lines.every((l) => l.item_id.trim() && Number(l.order_qty) > 0);
 
-  // Modal dialog (portal + fixed overlay) so tapping "สร้าง PO" always surfaces the panel over the
-  // current viewport. Rendered inline before (below the whole register table) it opened off-screen on a
-  // phone, so the button read as unresponsive — the reported bug.
+  const linesValid = lines.every((l) => l.item_id.trim() && Number(l.order_qty) > 0);
+  const canSubmit = linesValid && assignedGroups.length > 0;
+
+  const sourceLabel = (s: EditLine['source']) => s === 'preferred' ? t('iv.req_src_preferred') : s === 'pricelist' ? t('iv.req_src_pricelist') : s === 'last_po' ? t('iv.req_src_last_po') : '';
+
+  const renderLine = (l: EditLine) => (
+    <div key={l.pr_line_id} className="rounded-md border bg-background p-2.5">
+      <div className="mb-1 text-xs text-muted-foreground">{t('iv.req_from_request')} <span className="font-medium text-foreground">{l.item_description || l.item_id}</span>{l.item_description ? <span className="ml-1">({l.item_id})</span> : null}</div>
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <div className="space-y-1">
+          <Label className="text-xs">{t('iv.req_item_code')} {l.create_item ? t('iv.req_item_new') : t('iv.req_item_match')}</Label>
+          <div className="flex gap-2">
+            <Input value={l.item_id} onChange={(e) => setLine(l.pr_line_id, { item_id: e.target.value, searched: false, matches: [] })} placeholder={t('iv.req_item_code')} />
+            <Button type="button" variant="outline" size="sm" disabled={l.searching} onClick={() => searchItem(l.pr_line_id)}>{l.searching ? '…' : t('iv.req_search_match')}</Button>
+          </div>
+          {l.matches.length > 0 && !l.create_item && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              <span className="text-xs text-muted-foreground">{t('iv.req_choose_code')}</span>
+              {l.matches.map((m) => (
+                <button key={m.item_id} type="button" onClick={() => setLine(l.pr_line_id, { item_id: m.item_id, item_description: m.item_description ?? l.item_description, uom: m.uom ?? l.uom, unit_price: (m.last_price ?? m.unit_price) || l.unit_price, matches: [], searched: false })}
+                  className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">
+                  {m.item_id}{m.item_description ? ` — ${m.item_description}` : ''}{m.last_price ? ` · ${t('iv.req_latest')} ฿${m.last_price}` : ''}
+                </button>
+              ))}
+            </div>
+          )}
+          {l.searched && l.matches.length === 0 && !l.create_item && (
+            <p className="pt-1 text-xs text-warning">{t('iv.req_not_found', { id: l.item_id })}</p>
+          )}
+          <label className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
+            <input type="checkbox" checked={l.create_item} onChange={(e) => setLine(l.pr_line_id, { create_item: e.target.checked })} />
+            {t('iv.req_open_new_item')}
+          </label>
+          {l.create_item && (
+            <Input className="mt-1" value={l.new_desc} onChange={(e) => setLine(l.pr_line_id, { new_desc: e.target.value })} placeholder={t('iv.req_new_item_ph')} />
+          )}
+        </div>
+        <div className="flex items-end gap-2">
+          <div className="w-20 space-y-1"><Label className="text-xs">{t('inv.col_qty')}</Label><Input type="number" value={l.order_qty} onChange={(e) => setLine(l.pr_line_id, { order_qty: Number(e.target.value) })} /></div>
+          <div className="w-20 space-y-1"><Label className="text-xs">{t('inv.col_uom')}</Label><Input value={l.uom} onChange={(e) => setLine(l.pr_line_id, { uom: e.target.value })} /></div>
+          <div className="w-24 space-y-1"><Label className="text-xs">{t('iv.req_unit_price')}</Label><Input type="number" value={l.unit_price} onChange={(e) => setLine(l.pr_line_id, { unit_price: Number(e.target.value) })} /></div>
+        </div>
+      </div>
+      {/* per-line: move just this item to a different supplier (splits it into its own group) */}
+      <div className="mt-1"><VendorAssign onPick={(v) => assignVendor([l.pr_line_id], v)} /></div>
+    </div>
+  );
+
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onCancel(); }}>
       <DialogContent className="max-h-[90vh] gap-3 overflow-y-auto sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>{t('iv.req_create_po_from', { pr: pr.pr_no })}</DialogTitle>
       </DialogHeader>
-      <div className="max-w-lg space-y-1">
-        <Label className="text-xs">{t('iv.req_vendor')}{vendorId ? t('iv.req_vendor_selected') : ''}</Label>
-        <div className="flex gap-2">
-          <Input value={vendor} onChange={(e) => { setVendor(e.target.value); setVendorId(null); setVendorMatches([]); }} placeholder={t('iv.req_vendor_ph')} />
-          <Button type="button" variant="outline" size="sm" disabled={vendorSearching || !vendor.trim()} onClick={searchVendor}>{vendorSearching ? '…' : t('iv.req_search_vendor')}</Button>
-        </div>
-        {vendorMatches.length > 0 && (
-          <div className="flex flex-wrap gap-1 pt-1">
-            <span className="text-xs text-muted-foreground">{t('iv.req_choose')}</span>
-            {vendorMatches.map((v) => (
-              <button key={v.id} type="button" onClick={() => { setVendor(v.name); setVendorId(v.id); setVendorMatches([]); }}
-                className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">{v.name}{v.vendor_code ? ` (${v.vendor_code})` : ''}</button>
-            ))}
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">{t('iv.req_vendor_note')}</p>
-      </div>
-      <div className="space-y-3">
-        {lines.map((l, i) => (
-          <div key={i} className="rounded-md border bg-card p-3">
-            <div className="mb-2 text-xs text-muted-foreground">{t('iv.req_from_request')} <span className="font-medium text-foreground">{l.name}</span></div>
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <div className="space-y-1">
-                <Label className="text-xs">{t('iv.req_item_code')} {l.create_item ? t('iv.req_item_new') : t('iv.req_item_match')}</Label>
-                <div className="flex gap-2">
-                  <Input value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value, searched: false, matches: [] })} placeholder={t('iv.req_item_code')} />
-                  <Button type="button" variant="outline" size="sm" disabled={l.searching} onClick={() => search(i)}>{l.searching ? '…' : t('iv.req_search_match')}</Button>
-                </div>
-                {l.matches.length > 0 && !l.create_item && (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    <span className="text-xs text-muted-foreground">{t('iv.req_choose_code')}</span>
-                    {l.matches.map((m) => (
-                      <button key={m.item_id} type="button" onClick={() => setLine(i, { item_id: m.item_id, uom: m.uom ?? l.uom, unit_price: (m.last_price ?? m.unit_price) || l.unit_price, matches: [], searched: false })}
-                        className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">
-                        {m.item_id}{m.item_description ? ` — ${m.item_description}` : ''}{m.last_price ? ` · ${t('iv.req_latest')} ฿${m.last_price}` : ''}
-                      </button>
-                    ))}
+      {lines.length === 0 ? (
+        <p className="py-4 text-sm text-muted-foreground">{t('iv.req_all_ordered')}</p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">{loadingSug ? t('iv.req_suggesting') : t('iv.req_split_note')}</p>
+          <div className="space-y-4">
+            {assignedGroups.map((g, gi) => {
+              const total = g.lines.reduce((a, l) => a + Number(l.order_qty) * (Number(l.unit_price) || 0), 0);
+              const ids = g.lines.map((l) => l.pr_line_id);
+              const src = g.lines[0]?.source;
+              return (
+                <div key={g.key} className="rounded-lg border border-primary/30 bg-card p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="info" className="text-[10px]">{t('iv.req_group_po', { n: gi + 1 })}</Badge>
+                      <span className="font-medium">{g.vendor_name || t('iv.req_unassigned_group')}</span>
+                      {src && src !== 'manual' ? <Badge variant="muted" className="text-[10px]">{sourceLabel(src)}</Badge> : null}
+                    </div>
+                    <div className="text-xs text-muted-foreground">{t('iv.req_group_total')} ฿{total.toLocaleString()}</div>
                   </div>
-                )}
-                {l.searched && l.matches.length === 0 && !l.create_item && (
-                  <p className="pt-1 text-xs text-warning">
-                    {t('iv.req_not_found', { id: l.item_id })}
-                  </p>
-                )}
-                <label className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
-                  <input type="checkbox" checked={l.create_item} onChange={(e) => setLine(i, { create_item: e.target.checked })} />
-                  {t('iv.req_open_new_item')}
-                </label>
-                {l.create_item && (
-                  <Input className="mt-1" value={l.item_description} onChange={(e) => setLine(i, { item_description: e.target.value })} placeholder={t('iv.req_new_item_ph')} />
-                )}
+                  <VendorAssign onPick={(v) => assignVendor(ids, v)} />
+                  <label className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={g.lines.every((l) => l.set_preferred)} onChange={(e) => setLines((ls) => ls.map((l) => (ids.includes(l.pr_line_id) ? { ...l, set_preferred: e.target.checked } : l)))} />
+                    ★ {t('iv.req_set_preferred')}
+                  </label>
+                  <div className="mt-2 space-y-2">{g.lines.map(renderLine)}</div>
+                </div>
+              );
+            })}
+            {unassigned && (
+              <div className="rounded-lg border border-dashed border-warning/50 bg-warning/5 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="font-medium text-warning">{t('iv.req_unassigned_group')}</span>
+                  <span className="text-xs text-muted-foreground">{t('iv.req_unassigned_warn')}</span>
+                </div>
+                <div className="space-y-2">{unassigned.lines.map(renderLine)}</div>
               </div>
-              <div className="flex items-end gap-2">
-                <div className="w-20 space-y-1"><Label className="text-xs">{t('inv.col_qty')}</Label><Input type="number" value={l.order_qty} onChange={(e) => setLine(i, { order_qty: Number(e.target.value) })} /></div>
-                <div className="w-20 space-y-1"><Label className="text-xs">{t('inv.col_uom')}</Label><Input value={l.uom} onChange={(e) => setLine(i, { uom: e.target.value })} /></div>
-                <div className="w-24 space-y-1"><Label className="text-xs">{t('iv.req_unit_price')}</Label><Input type="number" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: Number(e.target.value) })} /></div>
-              </div>
-            </div>
+            )}
           </div>
-        ))}
-      </div>
-      <div className="mt-1 flex items-center gap-2">
-        <Button size="sm" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>{submit.isPending ? t('iv.req_creating') : t('iv.req_create_po_btn')}</Button>
-        <span className="text-xs text-muted-foreground">{t('iv.req_submit_note')}</span>
-      </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>
+              {submit.isPending ? t('iv.req_creating') : t('iv.req_create_pos_btn', { count: assignedGroups.length })}
+            </Button>
+            {!canSubmit && assignedGroups.length === 0 ? <span className="text-xs text-warning">{t('iv.req_no_group_ready')}</span> : <span className="text-xs text-muted-foreground">{t('iv.req_submit_note')}</span>}
+          </div>
+        </>
+      )}
       </DialogContent>
     </Dialog>
   );

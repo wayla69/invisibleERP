@@ -1849,6 +1849,13 @@
       "when": 2023820000090,
       "tag": "0263_masterdata_import_batches",
       "breakpoints": true
+    },
+    {
+      "idx": 264,
+      "version": "7",
+      "when": 2023820000091,
+      "tag": "0264_supplier_price_preferred",
+      "breakpoints": true
     }
   ]
 }
