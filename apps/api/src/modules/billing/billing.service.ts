@@ -13,12 +13,15 @@ import { logger } from '../../observability/logger';
 import type { JwtUser } from '../../common/decorators';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 
-// Public self-serve signup gate (ITGC-AC-18). Always allowed outside production (dev + harnesses run
-// NODE_ENV=test); in production it is FAIL-CLOSED — enabled only when an operator sets PUBLIC_SIGNUP_ENABLED
-// truthy. Pure + env-injectable so it can be unit-tested without booting the app.
+// Public self-serve signup gate (ITGC-AC-18). In PRODUCTION, self-service company provisioning is
+// DISABLED unconditionally — only the platform owner ("god", godmimi) opens a new company (directly via
+// POST /api/admin/tenants, by issuing an invite token, or by approving a request from the public
+// request-access queue POST /api/auth/signup-requests). The legacy PUBLIC_SIGNUP_ENABLED escape hatch no
+// longer re-opens self-serve provisioning in prod; it is retained only so an operator flag is not a hard
+// boot error, and is a no-op for provisioning. Outside production (dev + harnesses run NODE_ENV=test) the
+// path stays open so tests can mint tenants directly. Pure + env-injectable for unit testing.
 export function isSignupAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.NODE_ENV !== 'production') return true;
-  return ['1', 'true', 'yes', 'on'].includes(String(env.PUBLIC_SIGNUP_ENABLED ?? '').trim().toLowerCase());
+  return env.NODE_ENV !== 'production';
 }
 
 export interface SignupDto {

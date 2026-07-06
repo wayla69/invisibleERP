@@ -114,6 +114,19 @@ async function main() {
   ok('Platform-created company is org-isolated + fully provisioned (org_id=tenant id, 12 periods)', Number(pcRows[0].t_org) === Number(created.json.tenant_id) && Number(pcRows[0].u_org) === Number(created.json.tenant_id) && pcRows[0].periods === 12, JSON.stringify(pcRows[0]));
   const platLogin = await login('platco_admin', 'platco12345');
   ok('The newly platform-created Admin can log in', !!platLogin.json.token, `st=${platLogin.status}`);
+
+  // ── 3b2. ITGC-AC-02: ONLY the platform owner may grant the Admin role. platco_admin is a per-tenant
+  //         Admin (holds `users`) but is NOT a platform owner — it must not be able to mint another Admin,
+  //         while the platform owner (owner1) can. A non-Admin role is unaffected. ──
+  const grantAdminDenied = await inj('POST', '/api/admin/users', platLogin.json.token, { username: 'wannabe_admin', password: 'wannabe12345', role: 'Admin' });
+  ok('Company Admin (non-platform) cannot grant the Admin role (403 ADMIN_GRANT_DENIED)', grantAdminDenied.status === 403 && grantAdminDenied.json.error?.code === 'ADMIN_GRANT_DENIED', `${grantAdminDenied.status} ${grantAdminDenied.json.error?.code}`);
+  const grantNonAdmin = await inj('POST', '/api/admin/users', platLogin.json.token, { username: 'platco_sales', password: 'salespass12345', role: 'Sales' });
+  ok('Company Admin CAN still create a non-Admin user (role granularity preserved)', grantNonAdmin.status === 201 && grantNonAdmin.json.created === true, `${grantNonAdmin.status} ${JSON.stringify(grantNonAdmin.json)}`);
+  const grantAdminOk = await inj('POST', '/api/admin/users', owner, { username: 'god_made_admin', password: 'godadmin12345', role: 'Admin' });
+  ok('Platform owner (godmimi) CAN grant the Admin role (201 created)', grantAdminOk.status === 201 && grantAdminOk.json.created === true, `${grantAdminOk.status} ${JSON.stringify(grantAdminOk.json)}`);
+  // A non-platform Admin also cannot PROMOTE an existing user to Admin.
+  const promoteDenied = await inj('PATCH', '/api/admin/users/platco_sales', platLogin.json.token, { role: 'Admin' });
+  ok('Company Admin cannot promote a user to Admin either (403 ADMIN_GRANT_DENIED)', promoteDenied.status === 403 && promoteDenied.json.error?.code === 'ADMIN_GRANT_DENIED', `${promoteDenied.status} ${promoteDenied.json.error?.code}`);
   // Company directory (backs the Platform Console table + the switcher). Lists EVERY tenant enriched with
   // status/plan/user-count; a non-platform-admin is blocked at the guard.
   const dirDenied = await inj('GET', '/api/admin/tenants', platLogin.json.token); // platco_admin is NOT a platform owner

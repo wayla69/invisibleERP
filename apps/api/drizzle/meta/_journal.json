@@ -1814,6 +1814,34 @@
       "when": 2023820000085,
       "tag": "0258_re_transfer_input_vat",
       "breakpoints": true
+    },
+    {
+      "idx": 259,
+      "version": "7",
+      "when": 2023820000086,
+      "tag": "0259_gift_card_issue_approval",
+      "breakpoints": true
+    },
+    {
+      "idx": 260,
+      "version": "7",
+      "when": 2023820000087,
+      "tag": "0260_access_grant_exceptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 261,
+      "version": "7",
+      "when": 2023820000088,
+      "tag": "0261_credit_limit_maker_checker",
+      "breakpoints": true
+    },
+    {
+      "idx": 262,
+      "version": "7",
+      "when": 2023820000089,
+      "tag": "0262_price_rule_maker_checker",
+      "breakpoints": true
     }
   ]
 }

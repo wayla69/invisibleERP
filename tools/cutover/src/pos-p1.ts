@@ -39,7 +39,10 @@ async function main() {
     await db.insert(s.rolePermissions).values((perms as string[]).map((perm) => ({ role: role as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
-  await db.insert(s.users).values({ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id },
+    { username: 'pricer', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }, // G6: distinct approver for price-rule maker-checker (≠ admin)
+  ]).onConflictDoNothing();
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -53,7 +56,10 @@ async function main() {
   };
   const token = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
   ok('login', !!token);
-  const mkRule = (r: any) => inj('POST', '/api/pricing/rules', token, r);
+  // G6 maker-checker (SoD R10): a price rule is staged inactive on create and must be ACTIVATED by a
+  // DIFFERENT user. mkRule creates (admin) then approves (pricer ≠ admin) so downstream pricing is unchanged.
+  const pricerTok = (await inj('POST', '/api/login', undefined, { username: 'pricer', password: 'admin123' })).json.token;
+  const mkRule = async (r: any) => { const res = await inj('POST', '/api/pricing/rules', token, r); if (res.json?.id) await inj('POST', `/api/pricing/rules/${res.json.id}/approve`, pricerTok); return res; };
 
   // ── P1a: pricing engine ──
   await mkRule({ name: 'Happy Hour A', scope: 'item', target_id: 'A', dow: '1', time_start: '14:00', time_end: '16:00', type: 'percent', value: 50, priority: 10 });

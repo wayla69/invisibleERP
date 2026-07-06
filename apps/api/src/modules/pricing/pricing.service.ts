@@ -1,5 +1,5 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { priceRules, comboComponents, menuItems } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
@@ -33,21 +33,48 @@ export class PricingService {
     const rows = await db.select().from(priceRules).orderBy(priceRules.priority);
     return { rules: rows.map(mapRule), count: rows.length };
   }
+  // A price/promo rule change is maker-checker (audit G6, SoD R10): it is STAGED as 'PendingApproval' and
+  // kept INACTIVE (the discount engine reads only active=true rules), so it does not affect any sale until a
+  // DIFFERENT user activates it via approveRule (self-approval → 403 SOD_VIOLATION). Updating an existing
+  // rule re-stages it (active=false) — a changed price cannot go live without a second sign-off either.
   async upsertRule(dto: RuleDto, user: JwtUser) {
     const db = this.db;
     const vals = {
       tenantId: user.tenantId ?? null, name: dto.name, scope: dto.scope ?? 'all', targetId: dto.target_id ?? null,
       channel: dto.channel ?? 'any', location: dto.location ?? null, dow: dto.dow ?? null, timeStart: dto.time_start ?? null,
       timeEnd: dto.time_end ?? null, type: dto.type, value: String(dto.value ?? 0), minQty: dto.min_qty ?? 1,
-      priority: dto.priority ?? 100, stackable: dto.stackable ?? false, active: dto.active ?? true,
+      priority: dto.priority ?? 100, stackable: dto.stackable ?? false, active: false, status: 'PendingApproval',
       validFrom: dto.valid_from ?? null, validTo: dto.valid_to ?? null,
     };
     if (dto.id) {
-      await db.update(priceRules).set(vals).where(eq(priceRules.id, dto.id));
-      return { id: dto.id, updated: true };
+      await db.update(priceRules).set({ ...vals, createdBy: user.username, approvedBy: null, approvedAt: null }).where(eq(priceRules.id, dto.id));
+      return { id: dto.id, updated: true, status: 'PendingApproval', pending: true };
     }
     const [r] = await db.insert(priceRules).values({ ...vals, createdBy: user.username }).returning({ id: priceRules.id });
-    return { id: r!.id, created: true };
+    return { id: r!.id, created: true, status: 'PendingApproval', pending: true };
+  }
+  // Approve a staged rule — a DIFFERENT user than the author activates it (self-approval → SOD_VIOLATION).
+  async approveRule(id: number, user: JwtUser) {
+    const db = this.db;
+    const [r] = await db.select().from(priceRules).where(eq(priceRules.id, id)).limit(1);
+    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: `Price rule ${id} not found`, messageTh: 'ไม่พบกฎราคา' });
+    if (r.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Rule ${id} is ${r.status}, not pending approval`, messageTh: 'กฎนี้ไม่ได้รออนุมัติ' });
+    if (r.createdBy && r.createdBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a price rule you created', messageTh: 'ผู้สร้างกฎราคาอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await db.update(priceRules).set({ active: true, status: 'Active', approvedBy: user.username, approvedAt: new Date() }).where(eq(priceRules.id, id));
+    return { id, status: 'Active', active: true, approved_by: user.username, created_by: r.createdBy };
+  }
+  async rejectRule(id: number, user: JwtUser, reason?: string) {
+    const db = this.db;
+    const [r] = await db.select().from(priceRules).where(eq(priceRules.id, id)).limit(1);
+    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: `Price rule ${id} not found`, messageTh: 'ไม่พบกฎราคา' });
+    if (r.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Rule ${id} is ${r.status}, not pending approval`, messageTh: 'กฎนี้ไม่ได้รออนุมัติ' });
+    await db.update(priceRules).set({ active: false, status: 'Rejected', approvedBy: user.username, approvedAt: new Date() }).where(eq(priceRules.id, id));
+    return { id, status: 'Rejected', rejected_by: user.username, reason: reason ?? null };
+  }
+  async listPendingRules() {
+    const db = this.db;
+    const rows = await db.select().from(priceRules).where(eq(priceRules.status, 'PendingApproval')).orderBy(desc(priceRules.id)).limit(200);
+    return { rules: rows.map(mapRule), count: rows.length };
   }
   async deleteRule(id: number) {
     const db = this.db;
@@ -200,7 +227,7 @@ export class PricingService {
 }
 
 function mapRule(r: any) {
-  return { id: r.id, name: r.name, scope: r.scope, target_id: r.targetId, channel: r.channel, location: r.location, dow: r.dow, time_start: r.timeStart, time_end: r.timeEnd, type: r.type, value: n(r.value), min_qty: r.minQty, priority: r.priority, stackable: r.stackable, active: r.active, valid_from: r.validFrom, valid_to: r.validTo };
+  return { id: r.id, name: r.name, scope: r.scope, target_id: r.targetId, channel: r.channel, location: r.location, dow: r.dow, time_start: r.timeStart, time_end: r.timeEnd, type: r.type, value: n(r.value), min_qty: r.minQty, priority: r.priority, stackable: r.stackable, active: r.active, valid_from: r.validFrom, valid_to: r.validTo, status: r.status ?? 'Active', created_by: r.createdBy ?? null, approved_by: r.approvedBy ?? null };
 }
 
 function ruleApplies(r: any, ctx: { channel?: string; location?: string; isoDow: number; hhmm: string; today: string }): boolean {

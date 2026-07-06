@@ -60,13 +60,12 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   } else if (tmode === 'multi-company') {
     logger.warn('TENANCY_MODE=multi-company — Admin RLS bypass is org-scoped. Ensure tenants.org_id and Admin users.org_id are backfilled, or HQ Admins will see no cross-branch data.');
   }
-  // ITGC-AC-18 onboarding/tenancy footguns. Public self-serve signup mints a tenant + an Admin; under the
-  // single-company global-bypass model that new Admin would see EVERY company's data — so enabling public
-  // signup without multi-company is the isolation hole. Warn loudly (the signup path still works; this is
-  // the deploy-time nudge).
+  // ITGC-AC-18 onboarding/tenancy. In production only the platform owner ("god") opens a company — public
+  // self-serve provisioning is disabled (see isSignupAllowed in billing.service). PUBLIC_SIGNUP_ENABLED is
+  // now a no-op for provisioning; warn if it is still set so an operator does not assume it re-opens signup.
   const signupOn = ['1', 'true', 'yes', 'on'].includes(String(config.PUBLIC_SIGNUP_ENABLED ?? '').trim().toLowerCase());
-  if (signupOn && tmode !== 'multi-company') {
-    logger.warn('PUBLIC_SIGNUP_ENABLED is on but TENANCY_MODE is not multi-company — a self-service signup Admin would get the GLOBAL RLS bypass and see EVERY company\'s data. Set TENANCY_MODE=multi-company on every API service sharing this DB. See docs/ops/tenancy-model.md.');
+  if (signupOn) {
+    logger.warn('PUBLIC_SIGNUP_ENABLED is set but has NO effect — public self-service company signup is disabled; only the platform owner (godmimi) provisions companies, via POST /api/admin/tenants, an invite, or by approving a signup-request. Remove the flag. See docs/ops/tenancy-model.md.');
   }
   // Platform owner = "god": a global RLS bypass on every route. Surface how many are configured so a
   // break-glass account is a conscious, visible choice at boot (empty ⇒ nobody, the secure default).

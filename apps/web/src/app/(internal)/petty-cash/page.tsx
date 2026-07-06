@@ -48,12 +48,15 @@ function FundsTab() {
 
   const create = useMutation({
     mutationFn: () => api<any>('/api/finance/petty-cash/funds', { method: 'POST', body: JSON.stringify({ fund_code: code, name: name || undefined, float_limit: Number(floatLimit), initial_amount: initial ? Number(initial) : undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_fund_opened', { code: r.fund_code, limit: baht(r.float_limit) })); setCode(''); setName(''); setFloatLimit(''); setInitial(''); refresh(); },
+    // EXP-08 (audit G3): the initial cash injection is now a maker-checker funding request — reflect the
+    // pending-approval outcome rather than implying the fund is already cashed.
+    onSuccess: (r: any) => { notifySuccess(r.pending ? t('fnx.petty.toast_fund_pending', { code: r.fund_code, no: r.funding_req_no }) : t('fnx.petty.toast_fund_opened', { code: r.fund_code, limit: baht(r.float_limit) })); setCode(''); setName(''); setFloatLimit(''); setInitial(''); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const replenish = useMutation({
     mutationFn: (fundCode: string) => { const amt = window.prompt(t('fnx.petty.prompt_replenish')); if (!amt) throw new Error(t('fin.cancel')); return api<any>(`/api/finance/petty-cash/funds/${fundCode}/replenish`, { method: 'POST', body: JSON.stringify({ amount: Number(amt) }) }); },
-    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_replenished', { code: r.fund_code, balance: baht(r.balance) })); refresh(); },
+    // EXP-08 (audit G3): replenishment now raises a funding request approved by a different user.
+    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_replenish_pending', { code: r.fund_code, no: r.funding_req_no })); refresh(); },
     onError: (e: any) => { if (e.message !== t('fin.cancel')) notifyError(e.message); },
   });
 

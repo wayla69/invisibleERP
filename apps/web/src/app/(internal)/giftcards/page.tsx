@@ -23,9 +23,10 @@ import { Input } from '@/components/ui/input';
 const selectCls =
   'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
-const statusTone = (s: string): 'success' | 'secondary' | 'destructive' =>
-  s === 'Active' ? 'success' : s === 'Void' ? 'destructive' : 'secondary';
-const STATUS_KEYS = ['Active', 'Redeemed', 'Void'];
+const statusTone = (s: string): 'success' | 'secondary' | 'destructive' | 'warning' =>
+  s === 'Active' ? 'success' : s === 'Void' ? 'destructive' : s === 'PendingApproval' ? 'warning' : 'secondary';
+// PendingApproval (audit G1): a high-value issue awaiting an independent finance approval before it posts.
+const STATUS_KEYS = ['Active', 'Redeemed', 'Void', 'PendingApproval'];
 
 interface GiftCard {
   card_no: string; initial_amount: number; balance: number; status: string; currency: string;

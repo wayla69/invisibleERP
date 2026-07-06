@@ -4,7 +4,9 @@
 import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
-export const giftCardStatusEnum = pgEnum('gift_card_status', ['Active', 'Redeemed', 'Void']);
+// 'PendingApproval' (migration 0259, audit G1): a card issued above the approval threshold is created
+// pending and posts no GL / cannot be redeemed until a DIFFERENT user approves it (maker-checker).
+export const giftCardStatusEnum = pgEnum('gift_card_status', ['Active', 'Redeemed', 'Void', 'PendingApproval']);
 export const giftCardTxnTypeEnum = pgEnum('gift_card_txn_type', ['Issue', 'Redeem', 'Refund', 'Void']);
 
 export const giftCards = pgTable('gift_cards', {

@@ -19,7 +19,9 @@ To define and control the onboarding of a new tenant and its ledger provisioning
 
 ## 3. Scope
 
-**In scope:** Tenant self-service signup (`POST /api/auth/signup` via `BillingService.signup`), uniqueness checks, plan selection, atomic creation of tenant + admin user + subscription, fiscal-year provisioning, forced password change (`POST /api/auth/change-password`) and MFA enrolment, and the opening-balances cutover (`ledger.postOpeningBalances`).
+**In scope:** New-company provisioning (the atomic creation of tenant + admin user + subscription via `BillingService`), the **god-only** provisioning paths in production (direct `POST /api/admin/tenants`, single-use signup invite, or approving a **request-access** queue entry), uniqueness checks, plan selection, fiscal-year provisioning, forced password change (`POST /api/auth/change-password`) and MFA enrolment, and the opening-balances cutover (`ledger.postOpeningBalances`).
+
+> **⚠️ Provisioning is god-only in production (ITGC-AC-18).** Public self-service signup (`POST /api/auth/signup`) is **disabled unconditionally in production** — `BillingService.isSignupAllowed()` returns true only outside production, and the legacy **`PUBLIC_SIGNUP_ENABLED`** env flag is now a **no-op** for provisioning (it neither enables signup nor creates a tenant; `env.validation.ts` warns it has no effect). The public web signup page is now a **request-access form** (`POST /api/auth/signup-requests`) that files a *pending* request and creates **no** tenant. Only the platform owner ("god", `PLATFORM_ADMIN_USERNAMES`) provisions a company — by **direct** `POST /api/admin/tenants`, by issuing a **signup invite**, or by **approving** a queued request (`…/signup-requests/:id/approve`). The atomic-provisioning steps below describe what that god-authorised action performs. Because the first `Admin` is minted with the tenant, keeping provisioning god-only also keeps the *first* Admin grant on the god path (consistent with the AC-02 Admin-grant restriction, `08-itgc.md` §7.A step 3a). Full model + the three onboarding flows: `docs/ops/tenancy-model.md` §2/§2bis.
 
 **Out of scope:** Chart-of-accounts / ledger seeding internals and change management (see `17-master-data-management.md`, `08-itgc.md`, control ITGC-CM); ongoing access reviews and MFA administration (see `08-itgc.md`); period-end close and fiscal-period closing (see `04-general-ledger-close.md`).
 
@@ -48,10 +50,11 @@ To define and control the onboarding of a new tenant and its ledger provisioning
 
 Single-duty roles enforce SoD. The initial administrator necessarily holds broad rights at onboarding; this is a known risk requiring prompt user-access review (UAR) and role split (**R01**, see `08-itgc.md`). COA / ledger structures are code-governed, not runtime-editable, and change only through ITGC change management (**ITGC-CM**).
 
-| Activity | Prospective Tenant | Platform Admin | New Tenant Admin | Controller | Access Admin |
+| Activity | Prospective Tenant | Platform Admin (god) | New Tenant Admin | Controller | Access Admin |
 |---|---|---|---|---|---|
-| Submit signup (`/api/auth/signup`) | **A/R** | I | I | I | I |
-| Atomic tenant + admin + subscription create | (system) | C | I | I | I |
+| Submit **request-access** (`/api/auth/signup-requests`) | **A/R** | I | I | I | I |
+| Authorise provisioning — direct create / issue invite / **approve** request (prod) | I | **A/R** | I | I | I |
+| Atomic tenant + admin + subscription create | (system) | **A/R** | I | I | I |
 | Fiscal-year provisioning | (system) | I | I | C | I |
 | COA / ledger seeding & change | I | C | I | C | I |
 | Forced password change (first admin) | I | I | **A/R** | I | C |
@@ -61,7 +64,8 @@ Single-duty roles enforce SoD. The initial administrator necessarily holds broad
 
 ## 7. Process narrative
 
-1. **Uniqueness validation.** `POST /api/auth/signup` (Public, via `BillingService.signup`) validates that `tenant_code` and `admin_username` are **globally unique** → `CONFLICT` (409) "Tenant code already taken" / "Username already taken" (**ONB-01**).
+0. **Onboarding trigger (production = god-only).** In production the request originates on the **god path**: a platform owner either provisions directly (`POST /api/admin/tenants`), issues a single-use **invite** the prospect redeems, or **approves** a public **request-access** entry (`POST /api/auth/signup-requests` files a pending request; `GET /api/admin/signup-requests` reviews it; `…/:id/approve` provisions with the requester's chosen — hashed — password). Public `POST /api/auth/signup` self-serve provisioning is **off in production** (`isSignupAllowed()` prod-false; `PUBLIC_SIGNUP_ENABLED` no-op) and runs only in dev/harness. Whichever god-authorised path fires, provisioning then proceeds atomically as below (**ITGC-AC-18**).
+1. **Uniqueness validation.** Provisioning validates that `tenant_code` and `admin_username` are **globally unique** → `CONFLICT` (409) "Tenant code already taken" / "Username already taken" (**ONB-01**).
 2. **Plan selection.** A plan is selected, defaulting to `free`; an unrecognized plan → `BAD_REQUEST` (400) "Unknown plan".
 3. **Atomic provisioning.** Within a single transaction the service creates the **tenant** (`code`, `name`, `legalName`, `taxId`, `vatRegistered`, `vatRate`), the **admin user** (role `Admin`, bound to `tenantId`), and the **subscription** (status `Trialing`, `trialEndsAt = now + 14d`). All-or-nothing — a failure rolls back tenant, admin, and subscription together (**ONB-02**).
 4. **Fiscal-year provisioning.** `ledger.provisionFiscalYear(currentYear, tenantId)` idempotently ensures all twelve `YYYY-MM` rows exist in `fiscal_periods` as **OPEN**, so the new tenant can post immediately (completeness of posting periods).
@@ -78,7 +82,11 @@ Single-duty roles enforce SoD. The initial administrator necessarily holds broad
 
 ```mermaid
 flowchart TD
-    A[Prospect POST /api/auth/signup] --> B{tenant_code and admin_username unique?}
+    P0[Prospect POST /api/auth/signup-requests] --> P1[Pending request - NO tenant created ITGC-AC-18]
+    P1 --> P2{Platform owner god reviews queue}
+    P2 -- Reject --> P3[Request rejected - nothing provisioned]
+    P2 -- Approve / direct create / invite --> A
+    A[God-authorised provisioning BillingService] --> B{tenant_code and admin_username unique?}
     B -- No --> B1[Reject CONFLICT 409 ONB-01]
     B -- Yes --> C{Plan known? default free}
     C -- No --> C1[Reject BAD_REQUEST 400 Unknown plan]
@@ -97,12 +105,13 @@ flowchart TD
     L --> M[Initial UAR and role split of admin R01]
 ```
 
-**Swimlane description by role:** The **prospective tenant** submits signup. The **system** enforces global uniqueness, selects the plan, atomically creates tenant + admin + subscription, idempotently provisions twelve open fiscal periods, and (at startup) seeds the code-governed COA and ledgers. The **new tenant admin** completes the forced password change and MFA enrolment. The **Controller** posts the balanced, idempotent opening-balances cutover, with any imbalance routed to 3000 Opening Balance Equity. The **Access Admin** runs the initial UAR and splits the admin role to relieve the onboarding SoD concentration (**R01**).
+**Swimlane description by role:** The **prospective tenant** submits a **request-access** form, which parks a pending request and creates no tenant. The **platform owner (god)** authorises provisioning — approving the request, provisioning directly, or issuing an invite (public self-serve signup is off in production). The **system** then enforces global uniqueness, selects the plan, atomically creates tenant + admin + subscription, idempotently provisions twelve open fiscal periods, and (at startup) seeds the code-governed COA and ledgers. The **new tenant admin** completes the forced password change and MFA enrolment. The **Controller** posts the balanced, idempotent opening-balances cutover, with any imbalance routed to 3000 Opening Balance Equity. The **Access Admin** runs the initial UAR and splits the admin role to relieve the onboarding SoD concentration (**R01**).
 
 ## 9. Control matrix
 
 | Step | Risk | Control | Type | RCM ID | Evidence / Record |
 |---|---|---|---|---|---|
+| 0 | Outsider self-provisions a company (new tenant + Admin with RLS bypass) via public signup | Public self-serve signup disabled in prod (`isSignupAllowed()` prod-false; `PUBLIC_SIGNUP_ENABLED` no-op); public path → request-access queue (no tenant); only god provisions (direct / invite / approve) | Prev / Auto | ITGC-AC-18 | billing.service.ts; signup-gate.test.ts; onboarding ToE |
 | 1 | Duplicate tenant code / username collision | Global uniqueness check → `CONFLICT` 409 | Prev / Auto | ONB-01 | `CONFLICT` test, unique index |
 | 3 | Partial provisioning (orphan tenant/admin/sub) | Single atomic transaction (all-or-nothing) | Prev / Auto | ONB-02 | Atomicity injection test |
 | 4 | Tenant cannot post / missing periods | Idempotent fiscal-year provisioning (12 OPEN months) | Prev / Auto | ONB-02 | `fiscal_periods` export |
@@ -141,6 +150,9 @@ flowchart TD
 
 | Error code | Trigger | Handling |
 |---|---|---|
+| Public `POST /api/auth/signup` in prod | Self-serve provisioning disabled (ITGC-AC-18) | Use the request-access form; a platform owner provisions/approves |
+| `409 REQUEST_PENDING` / `409 REQUEST_NOT_PENDING` | Duplicate pending request / acting on an already-handled request | Wait for review; a resolved request cannot be re-approved |
+| `403 PLATFORM_ADMIN_REQUIRED` | Non-platform-owner calls `POST /api/admin/tenants` | Only a `PLATFORM_ADMIN_USERNAMES` (god) account provisions companies |
 | `CONFLICT` (409) | Tenant code / username already taken | Choose a unique identifier and resubmit |
 | `BAD_REQUEST` (400) "Unknown plan" | Plan not recognized | Select a valid plan (default `free`) |
 | `WEAK_PASSWORD` | New password < 8 chars | Re-enter meeting strength rules |
@@ -154,4 +166,5 @@ flowchart TD
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.3 | 2026-07-05 | Platform / Security | **Provisioning is god-only in production (ITGC-AC-18).** Public self-service signup (`POST /api/auth/signup`) is **disabled unconditionally in production** (`BillingService.isSignupAllowed()` prod-false; the legacy `PUBLIC_SIGNUP_ENABLED` flag is now a **no-op** for provisioning); the public web signup page became a **request-access form** (`POST /api/auth/signup-requests`) that files a pending request and creates no tenant. Only the platform owner ("god", `PLATFORM_ADMIN_USERNAMES`) provisions a company — direct `POST /api/admin/tenants`, a single-use invite, or **approving** a queued request. New §3 callout + §7 step 0 + RACI (request-access vs god-authorise) + Mermaid request-access→approval gate + control-matrix row 0 + error-handling rows. Because the first Admin is minted with the tenant, this keeps the first Admin grant on the god path (aligns with the AC-02 Admin-grant restriction, `08-itgc.md` §7.A step 3a). No new RCM control (strengthens ITGC-AC-18). ToE: `apps/api/test/signup-gate.test.ts` + `cutover/onboarding.ts`. |
 | 0.2 | 2026-06-24 | Platform | Platform Phase 9: §7 step 6a — self-service org profile & **branding** (`PATCH /api/tenant/profile` adds `logo_url`/`tagline`/`branding_prefs`, validated; logo + tagline genuinely rendered on the receipt header, RLS-isolated). Migration 0086 (additive tenant columns). No GL, no new control; verified by the `ext` harness. |

@@ -1,6 +1,6 @@
 # Ops — Multi-tenancy model & TENANCY_MODE (ITGC-AC-18)
 
-> **Status:** v1.3 · **Date:** 2026-07-03 · **Owner:** Platform / Security
+> **Status:** v1.18 · **Date:** 2026-07-05 · **Owner:** Platform / Security
 > How tenant data is isolated, what `TENANCY_MODE` does, and how to choose it for your deployment.
 
 ## 1. The two isolation layers
@@ -26,23 +26,38 @@ bypass_rls='on'  OR  tenant_id = app.tenant_id  OR  (app.org_id set AND tenant_i
 | Mode | Admin sees | Use when |
 |---|---|---|
 | **`single-company`** (default) | **ALL tenants** (global `bypass_rls='on'`) | ONE company; other tenants are your own branches/outlets you want HQ to see. |
-| **`multi-company`** | Only tenants sharing the Admin's **`org_id`**; `org_id=NULL` ⇒ **own tenant only** (fail-closed) | Outsiders can **self-signup** (each signup = an independent company that must NOT see others). |
+| **`multi-company`** | Only tenants sharing the Admin's **`org_id`**; `org_id=NULL` ⇒ **own tenant only** (fail-closed) | You onboard **multiple independent companies** (each provisioned by god — see below — must NOT see the others). |
 
-> ⚠️ **Self-service signup mints a tenant + an `Admin`.** `POST /api/auth/signup`
-> (`modules/billing/billing.service.ts`) creates a **new tenant + an `Admin` user** for every signup. Under
-> the **default** `single-company` mode that new Admin gets the **global bypass** and can read **every**
-> other company's data — so any deployment reachable by outsiders MUST run `TENANCY_MODE=multi-company`.
+> ⚠️ **Provisioning a company mints a tenant + an `Admin`.** `BillingService`
+> (`modules/billing/billing.service.ts`) creates a **new tenant + an `Admin` user** for every provision.
+> Under the **default** `single-company` mode that new Admin gets the **global bypass** and can read **every**
+> other company's data — so any multi-tenant deployment MUST run `TENANCY_MODE=multi-company`. **Public
+> self-service provisioning is off in production** (below), so in prod only a platform owner mints tenants.
 >
-> Two hardenings are now built in (ITGC-AC-18):
-> - **Signup is fail-closed in production** — `POST /api/auth/signup` returns `403 SIGNUP_DISABLED` unless
->   the operator sets **`PUBLIC_SIGNUP_ENABLED`** truthy. Dev + harnesses (`NODE_ENV=test`) are unaffected.
+> Hardenings built in (ITGC-AC-18):
+> - **Public signup is disabled UNCONDITIONALLY in production** — `BillingService.isSignupAllowed()` returns
+>   true only outside production, so `POST /api/auth/signup` provisions nothing in prod. The legacy
+>   **`PUBLIC_SIGNUP_ENABLED`** env flag is now a **NO-OP** for provisioning (it no longer re-opens signup;
+>   `env.validation.ts` warns it has no effect) — the only in-prod company-creation paths are the three
+>   god-authorised flows below. Dev + harnesses (`NODE_ENV=test`) still allow self-serve signup for
+>   convenience. The public web signup page was converted from an instant create-company+login flow into a
+>   **request-access form** (`POST /api/auth/signup-requests`, see the approval-queue bullet) that files a
+>   pending request and creates no tenant.
+> - **Granting the `Admin` role is god-only too (ITGC-AC-02).** Because the `Admin` role is what carries the
+>   RLS bypass / cross-tenant visibility (this whole doc), minting an Admin is a platform-level privileged
+>   grant: `assertCanGrantRole` (`modules/admin-users/admin-users.service.ts`) permits the `Admin` role to be
+>   granted **only by a platform owner** — a non-god who creates OR PATCHes a user to `Admin` gets
+>   **`403 ADMIN_GRANT_DENIED`**; a company Admin still manages every non-Admin role, and the web role
+>   dropdowns hide the Admin option for non-god. Keeping company creation god-only (above) keeps the *first*
+>   Admin on the god path; this rule keeps every *subsequent* Admin there too. ToE `cutover/onboarding.ts`.
 > - **Preferred onboarding = the platform-admin endpoint.** A configured platform owner
 >   (`PLATFORM_ADMIN_USERNAMES`, comma list of usernames) provisions a new company from an authenticated
 >   session via **`POST /api/admin/tenants`** (`@PlatformAdmin`) — same provisioning as signup (tenant + own
 >   org + Admin + trial + fiscal year + industry CoA), audit-logged, **no env toggling and no public
 >   exposure window**. Non-platform callers get `403 PLATFORM_ADMIN_REQUIRED`; empty config ⇒ nobody can (secure
->   default). `PlatformAdminGuard` grants the one-shot RLS bypass needed to write a brand-new tenant. Use
->   `PUBLIC_SIGNUP_ENABLED` only if you actually want open self-service signup.
+>   default). `PlatformAdminGuard` grants the one-shot RLS bypass needed to write a brand-new tenant. **This (or an
+>   invite / the request-access queue) is the ONLY way to open a company in production** — public signup is
+>   off and `PUBLIC_SIGNUP_ENABLED` is a no-op.
 > - **Invite-link onboarding (self-service, gated).** When you want the new company to fill in their own
 >   details, a platform owner issues a **single-use, expiring invite** via **`POST /api/admin/signup-invites`**
 >   (`@PlatformAdmin`; returns the raw token once + expiry — list/status at `GET /api/admin/signup-invites`).
@@ -76,8 +91,8 @@ Verify in the boot log (`EnvValidation`, prod only):
 - `TENANCY_MODE=multi-company — Admin RLS bypass is org-scoped …` confirms the mode took.
 - `PLATFORM_ADMIN_USERNAMES configures N platform owner(s) with a cross-tenant "god" bypass (…)` lists the
   break-glass accounts so they are a visible, conscious choice.
-- `PUBLIC_SIGNUP_ENABLED is on but TENANCY_MODE is not multi-company …` is the **footgun guard** — if you see
-  it, an open signup would hand a new Admin the global bypass; switch the mode (or turn signup off).
+- `PUBLIC_SIGNUP_ENABLED … has no effect` — the flag is now a **no-op**; public signup is disabled in prod
+  regardless, so seeing it set is harmless (remove it to avoid confusion). Company creation is god-only.
 
 ## 2bis. Platform owner = "god" (the cross-org super-user)
 
@@ -258,6 +273,7 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 | 1.4 | 2026-07-03 | Platform / Security | **Invite-link onboarding** (ITGC-AC-18, onboarding-flow #2): platform owners issue single-use, expiring invites (`POST`/`GET /api/admin/signup-invites`, `@PlatformAdmin`); the invitee signs up with `invite_token` even when public signup is disabled (`400 INVALID_INVITE` if invalid/used/expired; single-use). Platform-level `signup_invites` table (migration 0233, hash-only, no tenant_id/RLS). ToE: `cutover/onboarding.ts` (issue-auth 403, bogus/valid/reuse, used-list). |
 | 1.5 | 2026-07-03 | Platform / Security | **Approval-queue onboarding** (ITGC-AC-18, onboarding-flow #3): public `POST /api/auth/signup-requests` creates a PENDING request (no tenant); a platform owner reviews (`GET /api/admin/signup-requests`) and approves (`…/:id/approve` → provisions with the requester's hashed password) or rejects (`…/:id/reject`). Dup pending → 409 REQUEST_PENDING; handled → 409 REQUEST_NOT_PENDING. Table `signup_requests` (migration 0234, platform-level; `created_tenant_id` not `tenant_id`). ToE: `cutover/onboarding.ts` (request→pending→approve→login, dup, reject, non-owner 403, re-approve 409). |
 | 1.7 | 2026-07-04 | Platform / Security | **Platform owner = "god" (cross-org super-user).** `common/tenant-tx.interceptor.ts` now grants a **global RLS bypass on EVERY route** to any `PLATFORM_ADMIN_USERNAMES` member (previously only on `@PlatformAdmin` management endpoints), so an ops-designated owner sees/operates across ALL tenants while a per-tenant Admin stays org-scoped under `multi-company`. Gated by env (not an assignable DB role) to prevent in-app privilege escalation; god actions still flagged to the audit interceptor. New §1 bullet + §2bis. ToE: `cutover/pg-core.ts` (god sees all 4 companies; same-org non-god Admin sees only its org — `god===4`, `org1===2`). Deploy config: documented the tenancy/onboarding vars (`TENANCY_MODE`/`PLATFORM_ADMIN_USERNAMES`/`PUBLIC_SIGNUP_ENABLED`) in `.env.example`, `docker-compose.yml`, and `railway-setup.md` §2.2; `env.validation.ts` now emits boot warnings listing configured god accounts and flagging the `PUBLIC_SIGNUP_ENABLED`-on-without-`multi-company` footgun. Added a `db:create-god` bootstrap script (`apps/api/src/database/create-god-user.ts`) to provision a god candidate account (default username `godmimi`, role Admin, must-change-password; prod-gated by `ALLOW_PROD_GOD=1`) — §2bis "Provision one". |
+| 1.18 | 2026-07-05 | Platform / Security | **Company creation god-only in prod + Admin-grant god-only (ITGC-AC-18 / ITGC-AC-02).** Public self-service signup is now **disabled unconditionally in production** — `BillingService.isSignupAllowed()` is prod-false and the legacy **`PUBLIC_SIGNUP_ENABLED`** flag is a **NO-OP** for provisioning (the boot warning now says it has no effect); the public web signup page became a **request-access form** (`POST /api/auth/signup-requests`, no tenant created). Only a `PLATFORM_ADMIN_USERNAMES` (god) provisions — direct `POST /api/admin/tenants`, invite, or approve-queue. Separately, **granting the `Admin` role is now god-only** (`assertCanGrantRole` → `isPlatformAdmin`): a non-god who creates/PATCHes a user to `Admin` gets **`403 ADMIN_GRANT_DENIED`** (company Admins manage non-Admin roles; the web hides the Admin option for non-god) — because the Admin role carries the RLS bypass, minting one is a platform-level privileged grant. Updated §2 (table, callout, the two AC-18 bullets, boot-log footgun line). No new RCM control (strengthens AC-18/AC-02). ToE: `apps/api/test/signup-gate.test.ts` + `cutover/onboarding.ts` (non-god denied / god 201). |
 | 1.17 | 2026-07-05 | Platform / Security | **Platform notification inbox (god event feed).** New `platform_notifications` + `platform_notification_reads` (migration 0247, platform-level, no RLS); `BillingService` emits `signup_request`/`company_provisioned`/`tenant_suspended`/`tenant_reactivated` (best-effort). God-only `@PlatformAdmin` endpoints `GET /api/admin/notifications` (+`/unread-count`, `POST /:id/read`, `/mark-all-read`) back a **แจ้งเตือน** console tab with per-god read state + unread badge — the durable event log alongside the live needs-attention counts. §2quater extended. ToE: `cutover/onboarding.ts` (signup_request surfaces unread; mark-all clears). |
 | 1.16 | 2026-07-04 | Platform / Security | **Read-only act-as (safe inspection).** `X-Act-As-Read-Only: 1` alongside the act-as header makes the interceptor reject mutating requests (403 READONLY_IMPERSONATION) while GETs still work; the web scope banner adds an อ่านอย่างเดียว⇄เปิดให้แก้ไข toggle. §2ter extended. ToE: `pg-core` (read-only GET works, POST blocked 403). |
 | 1.15 | 2026-07-04 | Platform / Security | **Platform Console — bulk actions + tags/segments.** Companies table gains **bulk** suspend/reactivate/extend-trial/change-plan over selected rows (parallel per-company calls) and **tags/segments**: `tenants.tags` jsonb (migration 0246), `POST /api/admin/tenants/:id/tags` (`@PlatformAdmin`, deduped/trimmed/capped), tags surfaced on `GET /api/admin/tenants` + the drawer, with a tag-chip filter on the table. §2quater extended. ToE: `cutover/onboarding.ts` (tags set/dedup/reflect). |

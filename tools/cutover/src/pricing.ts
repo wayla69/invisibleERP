@@ -74,7 +74,22 @@ async function main() {
   const isoDow = ((bkk.getUTCDay() + 6) % 7) + 1; const wrongDow = (isoDow % 7) + 1;
 
   // ── rules (item-scoped, always-on unless noted) created via the API as the T1 shop ──
-  const mkRule = (b: any) => inj('POST', '/api/pricing/rules', sales1, b);
+  // G6 maker-checker (SoD R10): a rule is staged inactive on create and must be ACTIVATED by a DIFFERENT
+  // user (admin ≠ sales1). mkRule creates then approves so downstream pricing behaves as before.
+  const admin = await login('admin', 'admin123');
+  const mkRule = async (b: any) => { const r = await inj('POST', '/api/pricing/rules', sales1, b); if (r.json?.id) await inj('POST', `/api/pricing/rules/${r.json.id}/approve`, admin); return r; };
+  // Control: a staged rule does NOT apply until approved; the author cannot self-approve. Uses a dedicated
+  // throwaway item GX (200) so activating the test rule does not perturb the other pricing checks.
+  await mkItem('GX', 'ทดสอบ G6', 200);
+  const stagedRule = await inj('POST', '/api/pricing/rules', sales1, { name: 'G6 staged 50%', scope: 'item', target_id: 'GX', type: 'percent', value: 50, priority: 5 });
+  ok('G6: new price rule staged PendingApproval (inactive)', stagedRule.json?.pending === true && stagedRule.json?.status === 'PendingApproval', JSON.stringify({ p: stagedRule.json?.pending, s: stagedRule.json?.status }));
+  const qBeforeAppr = await inj('POST', '/api/pricing/quote', sales1, { lines: [{ sku: 'GX', qty: 1 }] });
+  ok('G6: staged rule does NOT apply in a quote until approved (GX stays 200)', near(qBeforeAppr.json.subtotal, 200) && near(qBeforeAppr.json.line_discount_total, 0), `sub=${qBeforeAppr.json.subtotal} ld=${qBeforeAppr.json.line_discount_total}`);
+  const ruleSelf = await inj('POST', `/api/pricing/rules/${stagedRule.json?.id}/approve`, sales1);
+  ok('G6: author cannot approve own price rule → 403 SOD_VIOLATION', ruleSelf.status === 403 && ruleSelf.json?.error?.code === 'SOD_VIOLATION', `${ruleSelf.status} ${ruleSelf.json?.error?.code}`);
+  const ruleAppr = await inj('POST', `/api/pricing/rules/${stagedRule.json?.id}/approve`, admin);
+  const qAfterAppr = await inj('POST', '/api/pricing/quote', sales1, { lines: [{ sku: 'GX', qty: 1 }] });
+  ok('G6: a distinct user activates the rule → then it applies (GX 50% → line_discount 100)', (ruleAppr.status === 200 || ruleAppr.status === 201) && ruleAppr.json?.active === true && near(qAfterAppr.json.line_discount_total, 100), `active=${ruleAppr.json?.active} ld=${qAfterAppr.json.line_discount_total}`);
   await mkRule({ name: 'ITEMA 20% off', scope: 'item', target_id: 'ITEMA', type: 'percent', value: 20, priority: 10 });
   await mkRule({ name: 'ITEMB BOGO', scope: 'item', target_id: 'ITEMB', type: 'bogo', min_qty: 1, priority: 10 });
   await mkRule({ name: 'ITEMC qty-break 10%', scope: 'item', target_id: 'ITEMC', type: 'qty_break', value: 10, min_qty: 3, priority: 10 });

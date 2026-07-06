@@ -17,6 +17,7 @@ const DunningBody = z.object({
 const CreditCheckBody = z.object({ tenant_id: z.number().int().positive(), amount: z.number().nonnegative() });
 const HoldBody = z.object({ tenant_id: z.number().int().positive(), reason: z.string().optional() });
 const LimitBody = z.object({ tenant_id: z.number().int().positive(), new_limit: z.number().nonnegative(), reason: z.string().optional() });
+const ReasonBody = z.object({ reason: z.string().max(500).optional() });
 
 @Controller('api/finance/ar')
 export class CollectionsController {
@@ -76,9 +77,18 @@ export class CollectionsController {
   @Post('credit-release') @Permissions('approvals', 'exec')
   releaseHold(@Body(new ZodValidationPipe(HoldBody)) b: z.infer<typeof HoldBody>, @CurrentUser() u: JwtUser) { return this.svc.releaseHold(b.tenant_id, b.reason, u); }
 
-  // Change a customer's credit limit (audited).
+  // Request a credit-limit change (audit G7 / REV-08). Staged PendingApproval — a DIFFERENT user must
+  // approve it (the requesting duty is crm/exec; approval requires `approvals`, mirroring credit-release).
   @Post('credit-limit') @Permissions('crm', 'exec')
   changeLimit(@Body(new ZodValidationPipe(LimitBody)) b: z.infer<typeof LimitBody>, @CurrentUser() u: JwtUser) { return this.svc.changeLimit(b.tenant_id, b.new_limit, b.reason, u); }
+
+  // Approve / reject a staged credit-limit change — approver ≠ requester (SoD enforced in the service).
+  @Get('credit-limit/pending') @Permissions('approvals', 'exec', 'ar')
+  pendingLimitChanges() { return this.svc.listPendingLimitChanges(); }
+  @Post('credit-limit/:reqNo/approve') @Permissions('approvals', 'exec')
+  approveLimitChange(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveLimitChange(reqNo, u); }
+  @Post('credit-limit/:reqNo/reject') @Permissions('approvals', 'exec')
+  rejectLimitChange(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(ReasonBody)) b: z.infer<typeof ReasonBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectLimitChange(reqNo, u, b.reason); }
 
   // Credit-change audit (holds / releases / limit changes) for a customer.
   @Get('credit-events') @Permissions('ar', 'exec', 'crm')

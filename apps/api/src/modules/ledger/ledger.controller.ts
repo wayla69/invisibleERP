@@ -172,7 +172,8 @@ export class LedgerController {
   @HttpCode(200)
   @Permissions('gl_post')
   reverseJournal(@Param('id') id: string, @Body(new ZodValidationPipe(ReverseBody)) b: z.infer<typeof ReverseBody>, @CurrentUser() u: JwtUser) {
-    return this.svc.reverseEntry({ entryId: parseInt(id, 10), reversedBy: u.username, reason: b.reason, date: b.date });
+    // requireDistinctApprover: manual reversals enforce reverser ≠ original preparer (GL-05, audit G2).
+    return this.svc.reverseEntry({ entryId: parseInt(id, 10), reversedBy: u.username, reason: b.reason, date: b.date, requireDistinctApprover: true });
   }
 
   // Demonstrates the GL-17 immutability guard (for ops/tests): attempting to void/delete a posted entry is

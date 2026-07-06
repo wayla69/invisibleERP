@@ -1,6 +1,10 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.2 · 2026-07-03**
+**Status: DRAFT v0.3 · 2026-07-05**
+
+*v0.3: Part B3 — petty-cash **fund establishment (opening cash) and replenishment** now
+raise a pending **funding request** that a second authorised user must approve before the
+cash and GL post (self-approval blocked, `SOD_VIOLATION`); strengthens control EXP-08.*
 
 This chapter is for **AR Clerks**, **AP Clerks** and **Procurement / finance**
 staff. It covers customer invoices and receipts (AR), supplier bills and payments
@@ -187,15 +191,25 @@ action on an account. Every action is written to a **credit-events audit trail**
   surfaced on the credit-status view.
 - **Release a hold** (`POST /api/finance/ar/credit-release {tenant_id}`): clears the
   hold. An account that isn't on hold returns `NOT_ON_HOLD`.
-- **Change a credit limit** (`POST /api/finance/ar/credit-limit {tenant_id,
-  new_limit, reason}`): updates the limit and logs the old → new value.
+- **Request a credit-limit change** (`POST /api/finance/ar/credit-limit {tenant_id,
+  new_limit, reason}`): this **no longer changes the limit on its own** — it **stages a
+  pending request** (you get back a `req_no` and `status: PendingApproval`) and logs
+  the requested old → new value. The customer's ceiling does **not** move yet.
+- **Approve (or reject) the pending change** — a **second authorised user** (`approvals`
+  / `exec`), who must be **different from the requester**, works the **Pending
+  credit-limit approvals** queue on the `/finance/credit-hold` screen and clicks
+  **Approve** (`POST /api/finance/ar/credit-limit/:reqNo/approve`) or **Reject**
+  (`…/:reqNo/reject`). **Only on approval** does the new limit take effect; the audit
+  entry then flips to *Approved* and records who approved it and when. If the requester
+  tries to approve their own change it is blocked with `SOD_VIOLATION`.
 
 > **Note — separation of duties:** the **credit limit** is master data maintained by
 > the *Credit Manager*, kept separate from order entry, so nobody can raise a limit
-> and then sell against it (rule R09). A **release also requires a second person**:
-> the user who *placed* a hold cannot lift their own hold (`SOD_SELF_RELEASE`) — it
-> takes an approver (`approvals` / `exec`), so a single person can't both block and
-> unblock an account.
+> and then sell against it (rule R09). Both a **credit-limit change** and a **hold
+> release** now require **two people**: the user who *requests* a limit change cannot
+> approve it themselves (`SOD_VIOLATION`), and the user who *placed* a hold cannot lift
+> their own hold (`SOD_SELF_RELEASE`) — each takes a second approver (`approvals` /
+> `exec`), so a single person can't both raise/block and apply/unblock an account.
 
 ### A5. Allowance for doubtful accounts (provision for bad debts)
 
@@ -368,12 +382,19 @@ This is the controlled way to run a **petty-cash fund** with a spending limit an
 **two-person sign-off** on every payout — use it when a branch or department holds a
 cash float and pays small expenses or staff advances from it.
 
-### Open a fund and set its limit (วงเงิน)
+### Open a fund and set its limit (วงเงิน) — funding needs a second person
 
 On the **กองทุน (Funds)** tab, create a fund with a **float limit** (the most cash it
-may ever hold) and an optional **starting amount**. Funding it posts **Dr Petty Cash
-(1015) / Cr Cash (1000)**. You can never put in more than the float (`OVER_FLOAT`).
-**เติมเงิน (Replenish)** tops a fund back up — also capped at the float.
+may ever hold) and an optional **starting amount**. The fund opens with a **zero
+balance**: setting a starting amount does **not** put cash in straight away — it raises
+a **pending funding request** that a **second authorised user** (`creditors` / `exec`,
+**different from you**) must approve on the **อนุมัติ (Maker-checker)** tab. Only on
+their approval does the cash post **Dr Petty Cash (1015) / Cr Cash (1000)** and the
+balance rise. **เติมเงิน (Replenish)** tops a fund back up the **same way** — a pending
+funding request that a second person approves before the cash posts. You can never
+request more than the float (`OVER_FLOAT`), and **you cannot approve your own funding
+request** (`SOD_VIOLATION`). So no single person can put cash into a fund: the fund
+holds no cash until an independent approval.
 
 ### Open a direct expense or an advance — then a *different* person approves
 
@@ -388,6 +409,11 @@ A **different** person opens the **อนุมัติ (Maker-checker)** tab a
 
 - **direct expense →** Dr the expense account / Cr Petty Cash (1015);
 - **advance →** Dr Employee Advances (1180) / Cr Petty Cash (1015).
+
+The same **อนุมัติ (Maker-checker)** tab also holds the **funding requests** raised when
+you establish a fund with a starting amount or **replenish** one — approving those posts
+**Dr Petty Cash (1015) / Cr Cash (1000)** and lifts the fund balance (still `SOD_VIOLATION`
+if you approve your own).
 
 ### Raise a request from LINE chat (LC-2)
 

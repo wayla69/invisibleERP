@@ -66,6 +66,12 @@ export const creditEvents = pgTable('credit_events', {
   reason: text('reason'),
   actionedBy: text('actioned_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  // Credit-limit maker-checker (audit G7, migration 0261): a limit_change is staged 'PendingApproval' and
+  // applied only when a DIFFERENT user approves it. hold/release rows are instantaneous ⇒ default 'applied'.
+  status: text('status').notNull().default('applied'), // applied | PendingApproval | Approved | Rejected
+  reqNo: text('req_no'),                                // CUS-YYYYMMDD-NNN for a staged limit change
+  approvedBy: text('approved_by'),                      // checker — must differ from actionedBy
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
 });
 
 // Petty cash / employee cash advances (EXP-07). An advance is ISSUED (cash out, Dr 1180 / Cr 1000) and

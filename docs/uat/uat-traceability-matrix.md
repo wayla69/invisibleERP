@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v3.4 · 2026-07-05** · *v3.4: added UAT-GL-126..127 (FA-12 asset verification-exception + audit BI reports; harness `module-qr.ts`).* · *v3.3: added UAT-GL-121..125 (FA-11 asset custody-change maker-checker + audit-by-scan; harness `module-qr.ts`).* · *v3.2: added UAT-INV-069b/069c/070b (cross-browser scanner via @zxing fallback + 1D barcodes + continuous scan; `/q` page e2e `qr-resolver.spec.ts`).* · *v3.1: added UAT-INV-066..070 (QR camera scanning + `/q` deep-link resolver — capture-only, no control change; harness `module-qr.ts`).* · *v3.0: added UAT-P2P-104 (docs/34 Phase 4 — Email-to-Capture: verified send-from address + inbound bill webhook).* · *v2.9: added UAT-P2P-103 (docs/34 Phase 1 — Quick Capture over LINE `บิล` + photo).* · *v2.8: added UAT-P2P-101/102 (docs/34 Quick Capture lane — any `pr_raise` staffer snaps/uploads a bill → NeedsReview draft; SoD capturer ≠ poster).* · *v2.7: added UAT-O2C-234 (docs/32 FU4 — raise site cash from the project workspace; team walkthrough doc added).* · *v2.6: added UAT-P2P-100 (partial receive + short/damaged claim from chat).* · *v2.5: added UAT-P2P-099 (purchase spend insights — chat `spend` + `/spend-summary` + `purchase_spend` report).* · *v2.4: added UAT-P2P-098 (close-the-loop LINE notifications to the PR requester).* · *v2.3: added UAT-P2P-097 (proactive morning low-stock alert → one-tap reorder).* · *v2.2: added UAT-P2P-096 (reorder low stock → one-tap PR — web card + LINE `low`/`reorder`).* · *v2.1: reconciled the UAT-P2P-093 collision after merging main — 093 = vendor AP card (merged separately), PR→PO conversion renumbered to 094, one-tap goods receipt (web รับครบ + LINE `receive`) to 095.* · *v2.0: added the one-tap goods-receipt case (now 095).* · *v1.9: added the PR→PO conversion case (now 094).* · *v1.8: added UAT-RPT-049 (LP-3 — digest 2.0).* · *v1.7: added UAT-P2P-092, UAT-PAY-039, UAT-RPT-048 (LP-2 — copilot uplift).* · *v1.6: added UAT-SEC-049/050 (LP-1 — LINE OA production go-live pack).* · *v1.5: added UAT-P2P-086..091 (EXP-10 — AP invoice intake: scan → PO auto-map → matched-at-posting, duplicate refusal, cumulative guard, scheduled auto re-match release, direct image/PDF upload).* · *v1.5: added UAT-P2P-085 + UAT-RPT-047 (LC-5 copilot + ask).* · *v1.4: added UAT-RPT-046 (LC-4 LINE delivery + digest).* · *v1.3: added UAT-SEC-048 + UAT-PAY-038 (LC-3 leave via chat + channel governance).* · *v1.2: added UAT-P2P-084 (LC-2 petty-cash chat raise + EXP-08 notifications).* · *v1.1: added UAT-P2P-083 (LC-1 one-tap chat approvals).* · *v1.0: added UAT-P2P-081..082 (PO attachment evidence — web + LINE chat photo attach).* · *v0.9: added UAT-P2P-076..080 (LINE chat phase 2 — workflow notifications, chat approve/reject with engine SoD, self-service commands).* · *v0.8: added UAT-P2P-070..075 (LINE chat → PR — link-code identity binding, chat-raised PR into the same approval workflow, entry-integrity negatives).* · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
+**Status: DRAFT v4.0 · 2026-07-05** · *v4.0: price/promo rule activation → two-person maker-checker (audit gap G6) — UAT-O2C-250..252 added (a rule change stages `PendingApproval`/`active=false` so it affects no quote or sale; author self-approve → `SOD_VIOLATION`; a distinct `exec`/`approvals` approver activates it → the discount then applies), strengthening SoD **R10** / **MKT-01** (no new control); migration `0262`; harness `pricing.ts`.* · *v3.9: SoD self-service override → two-person maker-checker (audit gap G11, part b) — UAT-ADM-003 updated + UAT-ADM-117..120 added (a justified SoD override is STAGED PendingApproval and no longer self-applied — user NOT created; requester self-approve → `SOD_VIOLATION`; a distinct admin approves → user created with the conflicting set + who/why/rules persisted in the hash-chained audit meta; no-reason still `SOD_CONFLICT`), strengthening ITGC-AC-09; migration `0253` (`access_grant_exceptions`); harness `compliance.ts`.* · *v3.8: gift-card issuance maker-checker (audit gap G1) — UAT-GL-065..068 added (a gift card is a cash-equivalent 2200 liability; face > 5,000 THB now issues `PendingApproval` → no GL, not redeemable (`GIFT_CARD_INACTIVE`); issuer self-approve → `SOD_VIOLATION`; a distinct `creditors`/`exec` approver posts Dr 1000/Cr 2200 + activates; ≤ 5,000 THB still auto-issues), strengthening GC-01/GL-01 (SoD R14); migration 0252; harness `giftcards.ts`.* · *v3.7: EXP-08 fund-funding maker-checker (audit gap G3) — UAT-P2P-050/056 updated + UAT-P2P-058/059 added (petty-cash **fund establishment & replenishment** now route through a PendingApproval funding request → distinct-user approval posts Dr 1015 / Cr 1000; self-approval → SOD_VIOLATION); harnesses `basics.ts` / `compliance.ts`.* · *v3.6: added UAT-GL-060..064 (GL dual-control gap closures — opening-balance batch maker-checker G4 + distinct-reverser on manual reversal G2, strengthening GL-05/GL-17; harnesses `opening-balances.ts`, `basics.ts`).* · *v3.5: added UAT-ADM-114..116 (ITGC-AC-02 — Admin-grant restricted to the platform owner) + UAT-SEC-054 (ITGC-AC-18 — public signup → request-access queue, god-only company creation); harness `onboarding.ts` + `signup-gate.test.ts`.* · *v3.4: added UAT-GL-126..127 (FA-12 asset verification-exception + audit BI reports; harness `module-qr.ts`).* · *v3.3: added UAT-GL-121..125 (FA-11 asset custody-change maker-checker + audit-by-scan; harness `module-qr.ts`).* · *v3.2: added UAT-INV-069b/069c/070b (cross-browser scanner via @zxing fallback + 1D barcodes + continuous scan; `/q` page e2e `qr-resolver.spec.ts`).* · *v3.1: added UAT-INV-066..070 (QR camera scanning + `/q` deep-link resolver — capture-only, no control change; harness `module-qr.ts`).* · *v3.0: added UAT-P2P-104 (docs/34 Phase 4 — Email-to-Capture: verified send-from address + inbound bill webhook).* · *v2.9: added UAT-P2P-103 (docs/34 Phase 1 — Quick Capture over LINE `บิล` + photo).* · *v2.8: added UAT-P2P-101/102 (docs/34 Quick Capture lane — any `pr_raise` staffer snaps/uploads a bill → NeedsReview draft; SoD capturer ≠ poster).* · *v2.7: added UAT-O2C-234 (docs/32 FU4 — raise site cash from the project workspace; team walkthrough doc added).* · *v2.6: added UAT-P2P-100 (partial receive + short/damaged claim from chat).* · *v2.5: added UAT-P2P-099 (purchase spend insights — chat `spend` + `/spend-summary` + `purchase_spend` report).* · *v2.4: added UAT-P2P-098 (close-the-loop LINE notifications to the PR requester).* · *v2.3: added UAT-P2P-097 (proactive morning low-stock alert → one-tap reorder).* · *v2.2: added UAT-P2P-096 (reorder low stock → one-tap PR — web card + LINE `low`/`reorder`).* · *v2.1: reconciled the UAT-P2P-093 collision after merging main — 093 = vendor AP card (merged separately), PR→PO conversion renumbered to 094, one-tap goods receipt (web รับครบ + LINE `receive`) to 095.* · *v2.0: added the one-tap goods-receipt case (now 095).* · *v1.9: added the PR→PO conversion case (now 094).* · *v1.8: added UAT-RPT-049 (LP-3 — digest 2.0).* · *v1.7: added UAT-P2P-092, UAT-PAY-039, UAT-RPT-048 (LP-2 — copilot uplift).* · *v1.6: added UAT-SEC-049/050 (LP-1 — LINE OA production go-live pack).* · *v1.5: added UAT-P2P-086..091 (EXP-10 — AP invoice intake: scan → PO auto-map → matched-at-posting, duplicate refusal, cumulative guard, scheduled auto re-match release, direct image/PDF upload).* · *v1.5: added UAT-P2P-085 + UAT-RPT-047 (LC-5 copilot + ask).* · *v1.4: added UAT-RPT-046 (LC-4 LINE delivery + digest).* · *v1.3: added UAT-SEC-048 + UAT-PAY-038 (LC-3 leave via chat + channel governance).* · *v1.2: added UAT-P2P-084 (LC-2 petty-cash chat raise + EXP-08 notifications).* · *v1.1: added UAT-P2P-083 (LC-1 one-tap chat approvals).* · *v1.0: added UAT-P2P-081..082 (PO attachment evidence — web + LINE chat photo attach).* · *v0.9: added UAT-P2P-076..080 (LINE chat phase 2 — workflow notifications, chat approve/reject with engine SoD, self-service commands).* · *v0.8: added UAT-P2P-070..075 (LINE chat → PR — link-code identity binding, chat-raised PR into the same approval workflow, entry-integrity negatives).* · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -57,6 +57,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-043 | Repeated wrong PIN trips the lockout (LOGIN_LOCKED) | ITGC-AC-17 / ITGC-AC-07 | 08 §7, §9 |
 | UAT-SEC-044 | Self set-PIN with wrong current password (BAD_CURRENT_PASSWORD) | ITGC-AC-17 | 08 §7, §9 |
 | UAT-SEC-045 | Clear-PIN disables PIN login | ITGC-AC-17 | 08 §7, §9 |
+| UAT-SEC-054 | Public signup files a request (no tenant); god approval provisions; prod self-serve always off | ITGC-AC-18 | 08 §7 (3b), 23 §7 (0) |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 
@@ -90,6 +91,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-023 | Pricing rules apply at dine-in checkout | REV-01, GL-01 | 20 §8 |
 | UAT-O2C-024 | Service charge + satang rounding post & balance | GL-01 | 20 §8 |
 | UAT-O2C-025 | Pricing rules NOT applied unless opted in | REV-01 | 20 §8 |
+| UAT-O2C-250 | Price/promo rule staged PendingApproval — does NOT apply | SoD R10, MKT-01 | 19 §7, §9 (`pricing.ts`) |
+| UAT-O2C-251 | Rule author cannot self-approve (SOD_VIOLATION) | SoD R10 | 19 §7, §9 (`pricing.ts`) |
+| UAT-O2C-252 | Distinct approver activates rule → discount applies | SoD R10, MKT-01 | 19 §7, §9 (`pricing.ts`) |
 | UAT-O2C-026 | Cashier-speed quick-tender & change (UI) | Feature (cashier speed) | 01 §0 |
 | UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
 | UAT-O2C-028 | Diner pulls QR menu | REST-08 | 20 §7 |
@@ -206,7 +210,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-145 | Credit Manager places a manual hold | REV-08, R09 | 01 §7, §9 |
 | UAT-O2C-146 | Credit check denies a manually-held customer (CREDIT_HOLD) | REV-08 | 01 §9, §13 |
 | UAT-O2C-147 | Self-release blocked, second person releases (SOD_SELF_RELEASE) | REV-08, R09 | 01 §7, §9, §13 |
-| UAT-O2C-148 | Credit-limit change is audited | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-148 | Credit-limit change is STAGED for approval (ceiling not moved) | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-247 | Credit-limit change — requester cannot self-approve (SOD_VIOLATION) | REV-08, R09 | 01 §7, §9, §13 |
+| UAT-O2C-248 | Credit-limit change — a distinct approver applies it (→ 50000) | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-249 | Credit-change audit shows the limit_change old→new | REV-08, R09 | 01 §7, §9 |
 | UAT-O2C-149 | Customer statement of account (running balance) | REV-12 | 01 §7 |
 | UAT-O2C-150 | Customer statement — multi-currency (base + filter) | REV-12 | 01 §7 |
 | UAT-O2C-151 | Register quick sale (tap → cash → receipt + drawer) | Feature (POS register) | 01 §7 |
@@ -367,14 +374,16 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-043 | Independent approval creates asset + posts GL (Dr 1500/Cr 2000) | FA-10, GL-01 | 09 §7 |
 | UAT-P2P-044 | GR line cannot be capitalised twice | FA-10 | 09 §7 |
 | UAT-UI-CAP-01 | Capitalize-from-GR screen (eligible → request → approve) | FA-10 | 09 §7 |
-| UAT-P2P-050 | Establish petty-cash fund within float (วงเงิน) | EXP-08 | 07 §7, §9 |
+| UAT-P2P-050 | Establish a fund with opening cash → funding request PendingApproval, no cash until approved (G3) | EXP-08, R07 | 07 §7 (11), §9 |
 | UAT-P2P-051 | Expense request → PendingApproval, no GL | EXP-08 | 07 §7 |
 | UAT-P2P-052 | Petty-cash disbursement self-approval blocked (SoD, incl. Admin) | EXP-08, R07 | 07 §7, §9 |
 | UAT-P2P-053 | Independent approval posts GL + decrements fund | EXP-08, GL-01 | 07 §7, §9 |
 | UAT-P2P-054 | Draw beyond the fund balance blocked | EXP-08 | 07 §7 |
 | UAT-P2P-055 | Advance approve → disburse → settle to fund | EXP-08, GL-01 | 07 §7 |
-| UAT-P2P-056 | Replenish capped at the float limit | EXP-08 | 07 §7 |
+| UAT-P2P-056 | Replenish raises a funding request approved by a distinct user; capped at the float | EXP-08, R07 | 07 §7 (11) |
 | UAT-P2P-057 | Pending petty-cash requests in GOV-01 monitor | EXP-08, GOV-01 | 07 §7 |
+| UAT-P2P-058 | Fund-funding self-approval blocked (SOD_VIOLATION) — basics.ts / compliance.ts | EXP-08, R07 | 07 §7 (11), §9 |
+| UAT-P2P-059 | Independent approval funds the fund (Dr 1015 / Cr 1000, balance rises) — basics.ts / compliance.ts | EXP-08, GL-01 | 07 §7 (11), §9 |
 | UAT-UI-PCX-01 | Petty-cash fund + expense screen (funds → request → approve) | EXP-08 | 07 §7 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
@@ -447,6 +456,15 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-006 | Independent approver posts | GL-05 | 04 §9 |
 | UAT-GL-007 | Reject → Voided | GL-05 | 04 §9 |
 | UAT-GL-008 | Maker-checker binds Admin | GL-05, R05 | 04 §9 |
+| UAT-GL-060 | Opening-balance batch posts as Draft, excluded from TB (maker-checker, gap G4) | GL-05, R05 | 04 §7 (step 4), §9 |
+| UAT-GL-061 | Opening batch self-approval blocked (SOD_VIOLATION) | GL-05, R05 | 04 §7 (step 4), §9, §13 |
+| UAT-GL-062 | Distinct approver posts the opening batch → TB balances | GL-05 | 04 §7 (step 4), §9 |
+| UAT-GL-063 | Preparer cannot reverse own posted entry (distinct reverser, gap G2) | GL-17, GL-05, R05 | 04 §2.2, §9, §13 |
+| UAT-GL-064 | Distinct user reverses the posted entry successfully | GL-17, GL-05 | 04 §2.2, §9 |
+| UAT-GL-065 | High-value gift-card issue (>5,000 THB) → PendingApproval, no GL, not redeemable (maker-checker gap G1) | GC-01, R14 | 22 §7 (steps 1/1a), §9, §13 |
+| UAT-GL-066 | Gift-card issuer cannot self-approve the issuance (SOD_VIOLATION) | GC-01, R14 | 22 §7 (step 1a), §9, §13 |
+| UAT-GL-067 | Distinct finance approver activates the card + posts Dr 1000/Cr 2200 | GC-01, GL-01, R14 | 22 §7 (step 1a), §9 |
+| UAT-GL-068 | Small-value gift-card issue (≤5,000 THB) still auto-issues Active | GC-01, GL-01 | 22 §7 (step 1), §9 |
 | UAT-GL-009 | Unbalanced JE block (UNBALANCED) | GL-02 | 04 §9, §13 |
 | UAT-GL-010 | Trial balance ties | REC-01 | 04 §9 |
 | UAT-GL-011 | Period close lock (PERIOD_CLOSED) | GL-04, R06 | 04 §9, §13 |
@@ -713,6 +731,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-094 | R12 — AR Clerk can see /returns in nav | SoD R12, ITGC-AC-09 | 01 §7 |
 | UAT-ADM-095 | R12 — AR Clerk sees "บันทึกคืนสินค้า" button on /returns | SoD R12, REV-16 | 01 §7 |
 | UAT-ADM-096 | R12 — POS Supervisor (pos_refund only) can reach /returns | SoD R12, POS-01 | 21 §6 |
+| UAT-ADM-114 | Non-platform Admin cannot CREATE an Admin (`ADMIN_GRANT_DENIED`) | ITGC-AC-02 | 08 §7 (3a), §9 |
+| UAT-ADM-115 | Non-platform Admin cannot PROMOTE to Admin; CAN manage a non-Admin role | ITGC-AC-02 | 08 §7 (3a), §9 |
+| UAT-ADM-116 | Platform owner CAN grant the Admin role | ITGC-AC-02 | 08 §7 (3a), §9 |
+| UAT-ADM-117 | SoD override request STAGED PendingApproval, user NOT created (G11 part b) | ITGC-AC-09, R03 | 08 §7 (6), §9 |
+| UAT-ADM-118 | Requester cannot self-approve a staged SoD exception (`SOD_VIOLATION`) | ITGC-AC-09 | 08 §7 (6), §9, §13 |
+| UAT-ADM-119 | Distinct admin approves → user created + who/why/rules in hash-chained audit meta | ITGC-AC-09, R03 | 08 §7 (6), §9 |
+| UAT-ADM-120 | Conflicting set with NO reason still blocked (`SOD_CONFLICT`), incl. UPDATE | ITGC-AC-09, R03 | 08 §7 (6), §9, §13 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 

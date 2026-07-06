@@ -39,7 +39,10 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('approver123'), role: 'Admin', tenantId: hq }, // GL-05 maker-checker: approves opening-balance batches (≠ preparer)
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -53,17 +56,28 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
+  const approver = (await inj('POST', '/api/login', undefined, { username: 'approver', password: 'approver123' })).json.token;
 
-  // ── 1. post opening balances (assets 8000 dr, AP 2000 cr) → equity 6000 cr; balanced JE ──
+  // ── 1. post opening balances (assets 8000 dr, AP 2000 cr) → equity 6000 cr; balanced DRAFT JE ──
+  // GL-05 (audit G4): the batch posts as Draft (pending) — excluded from balances until a DIFFERENT user approves.
   const ob = await inj('POST', '/api/ledger/opening-balances', admin, { batch_ref: 'OB-2026', rows: [
     { account_code: '1000', debit: 5000 }, { account_code: '1200', debit: 3000 }, { account_code: '2000', credit: 2000 },
   ] });
-  ok('Opening balances → balanced JE posted (4 legs incl 3000 equity)', /^JE-/.test(ob.json.entry_no ?? '') && ob.json.balanced === true && ob.json.lines_posted === 4, JSON.stringify({ e: ob.json.entry_no, n: ob.json.lines_posted }));
+  ok('Opening balances → balanced Draft JE posted (4 legs incl 3000 equity), pending approval', /^JE-/.test(ob.json.entry_no ?? '') && ob.json.balanced === true && ob.json.lines_posted === 4 && ob.json.pending === true, JSON.stringify({ e: ob.json.entry_no, n: ob.json.lines_posted, p: ob.json.pending }));
 
-  // ── 2. trial balance balanced; 3000 equity = 6000 credit ──
+  // ── 1b. GL-05: excluded from balances while Draft; the preparer cannot self-approve; a distinct user approves ──
+  const tbPre = await inj('GET', '/api/ledger/trial-balance', admin);
+  const eqPre = (tbPre.json.rows ?? []).find((r: any) => r.account_code === '3000');
+  ok('Draft opening balances excluded from the trial balance until approved', !eqPre || near(eqPre.credit, 0), `3000cr=${eqPre?.credit ?? 0}`);
+  const selfAppr = await inj('POST', `/api/ledger/journal/${ob.json.entry_no}/approve`, admin);
+  ok('Preparer cannot approve own opening-balance batch (403 SOD_VIOLATION)', selfAppr.status === 403 && selfAppr.json?.error?.code === 'SOD_VIOLATION', `st=${selfAppr.status} code=${selfAppr.json?.error?.code}`);
+  const appr = await inj('POST', `/api/ledger/journal/${ob.json.entry_no}/approve`, approver);
+  ok('A distinct approver posts the opening-balance batch', appr.status === 200 && appr.json?.status === 'Posted', `st=${appr.status} status=${appr.json?.status}`);
+
+  // ── 2. after approval: trial balance balanced; 3000 equity = 6000 credit ──
   const tb = await inj('GET', '/api/ledger/trial-balance', admin);
   const eq3000 = (tb.json.rows ?? []).find((r: any) => r.account_code === '3000');
-  ok('Trial balance balanced; 3000 Opening-Balance Equity = 6000 cr', tb.json.totals?.balanced === true && near(eq3000?.credit, 6000), `bal=${tb.json.totals?.balanced} 3000cr=${eq3000?.credit}`);
+  ok('Trial balance balanced; 3000 Opening-Balance Equity = 6000 cr (after approval)', tb.json.totals?.balanced === true && near(eq3000?.credit, 6000), `bal=${tb.json.totals?.balanced} 3000cr=${eq3000?.credit}`);
 
   // ── 3. idempotent on batch_ref ──
   const ob2 = await inj('POST', '/api/ledger/opening-balances', admin, { batch_ref: 'OB-2026', rows: [{ account_code: '1000', debit: 999 }] });

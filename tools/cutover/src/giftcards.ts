@@ -184,6 +184,23 @@ async function main() {
     (rc.lines ?? []).length === 5 && ['1100', '2000', '1200', '2200', '2400'].every((a) => (rc.lines ?? []).some((l: any) => l.account === a)) && gc2200?.reconciled === true && near(gc2200.sub_ledger, gc2200.gl_control) && rc.all_reconciled === true && rc.exceptions === 0,
     `n=${rc.lines?.length} gc(sub=${gc2200?.sub_ledger}/gl=${gc2200?.gl_control}) all=${rc.all_reconciled} exc=${rc.exceptions}`);
 
+  // ── 19. G1 maker-checker: a HIGH-VALUE issue (> 5000 threshold) is PendingApproval — no GL, not redeemable
+  //        until a DIFFERENT user (finance) approves; the issuer cannot self-approve. (Run last so the
+  //        approved card's added 2200 liability does not disturb the earlier register/REC-04 assertions.) ──
+  const bigIss = await inj('POST', '/api/pos/gift-cards/issue', sales1, { amount: 8000, method: 'Cash' });
+  const bigCard = bigIss.json.card_no as string;
+  ok('G1: high-value issue (>5000) → PendingApproval, no GL yet', bigIss.json.pending === true && bigIss.json.status === 'PendingApproval' && bigIss.json.journal_no == null && (await glOf('GCISSUE', bigCard)).length === 0, JSON.stringify(bigIss.json));
+  const bigRedeem = await inj('POST', '/api/pos/gift-cards/redeem', sales1, { card_no: bigCard, amount: 100, sale_no: 'S-NOPE' });
+  ok('G1: a PendingApproval card cannot be redeemed (GIFT_CARD_INACTIVE)', bigRedeem.status === 400 && bigRedeem.json.error?.code === 'GIFT_CARD_INACTIVE', `${bigRedeem.status} ${bigRedeem.json.error?.code}`);
+  const bigSelf = await inj('POST', `/api/pos/gift-cards/${bigCard}/approve`, sales1);
+  ok('G1: issuer cannot self-approve the issuance → 403 SOD_VIOLATION', bigSelf.status === 403 && bigSelf.json.error?.code === 'SOD_VIOLATION', `${bigSelf.status} ${bigSelf.json.error?.code}`);
+  const bigAppr = await inj('POST', `/api/pos/gift-cards/${bigCard}/approve`, admin);
+  ok('G1: a different user approves → Active, issued_by preserved', bigAppr.status === 201 && bigAppr.json.status === 'Active' && bigAppr.json.issued_by === 'sales1', JSON.stringify({ st: bigAppr.status, s: bigAppr.json.status, by: bigAppr.json.issued_by }));
+  const bigGl = await glOf('GCISSUE', bigCard);
+  ok('G1: issuance GL posts ONLY on approval (Dr1000=8000, Cr2200=8000, balanced)', near(leg(bigGl, '1000', 'debit'), 8000) && near(leg(bigGl, '2200', 'credit'), 8000) && bal(bigGl), JSON.stringify(bigGl.map((l: any) => `${l.account_code}:${Number(l.debit) || -Number(l.credit)}`)));
+  const bigBal = await inj('GET', `/api/pos/gift-cards/${bigCard}/balance`, sales1);
+  ok('G1: approved high-value card is now Active + redeemable (balance 8000)', near(bigBal.json.balance, 8000) && bigBal.json.status === 'Active', JSON.stringify(bigBal.json));
+
   console.log('\n── POS Tier 2 #7 Tips + Gift Cards / Store Credit (ทิป + บัตรของขวัญ) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
