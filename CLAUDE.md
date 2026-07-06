@@ -251,7 +251,13 @@ For every such change, review and update as needed:
   is at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` — run with a throwaway config that extends
   `playwright.config` and sets `use.launchOptions.executablePath` to it (+ `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`).
   `*.capture.spec.ts` (screenshot tools, e.g. `e2e/sidebar.capture.spec.ts`) are excluded from CI via
-  `testIgnore`; run them by clearing `testIgnore` in that local config.
+  `testIgnore`; run them by clearing `testIgnore` in that local config. **Phone-viewport specs are
+  `*.mobile.spec.ts`** — they run only under the `mobile-iphone` project (iPhone 13 metrics, `isMobile`, on
+  the Chromium engine since CI installs only Chromium); the default `chromium` project `testIgnore`s them, so
+  a mobile card/bottom-bar layout that only renders below the `sm`/`lg` breakpoint is exercised without
+  disturbing the desktop specs (`e2e/mobile-smoke.mobile.spec.ts` covers Requisitions/Shop/Approvals/POS
+  Register). The card-vs-table recipe is `sm:hidden` card list + `hidden sm:block` table wrapper (see
+  `approvals/page.tsx`, `requisitions/page.tsx`).
 - Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`):
   `pnpm --filter @ierp/cutover compliance` (ICFR controls), `basics` (the finance/GL/EAM smoke — **the
   primary gate for AR/AP, GL, fixed-assets/EAM, leases, cash-flow, collections work; extend it for any such

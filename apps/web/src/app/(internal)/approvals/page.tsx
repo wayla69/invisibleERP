@@ -73,27 +73,81 @@ export default function ApprovalsPage() {
       statsClassName="xl:grid-cols-4"
     >
       {d && (
-        <DataTable
-          rows={d.items}
-          rowKey={(r, i) => `${r.control}-${r.ref}-${i}`}
-          emptyState={{ icon: ClipboardCheck, title: t('appr.empty_title'), description: t('appr.empty_desc') }}
-          columns={[
-            { key: 'control', label: t('appr.col_control'), render: (r) => <Badge variant="outline" className="font-mono">{r.control}</Badge> },
-            { key: 'type', label: t('appr.col_type'), render: (r) => typeLabel(r.type) },
-            { key: 'ref', label: t('appr.col_ref'), render: (r) => <span className="font-mono text-sm">{r.ref}</span> },
-            { key: 'label', label: t('fin.col_detail'), render: (r) => <span className="text-muted-foreground">{r.label}</span> },
-            { key: 'amount', label: t('appr.col_value'), align: 'right', render: (r) => <span className="tabular">฿{num(r.amount)}</span> },
-            { key: 'requested_by', label: t('fin.col_requester'), render: (r) => r.requested_by ?? '—' },
-            { key: 'age_days', label: t('appr.col_age'), align: 'right', render: (r) => r.age_days == null ? '—' : <span className={cn('tabular font-medium', r.age_days >= overdueDays ? 'text-destructive' : 'text-muted-foreground')}>{num(r.age_days)}{r.age_days >= overdueDays ? ' ⚠' : ''}</span> },
-            { key: 'requested_at', label: t('appr.col_requested_at'), render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
-            { key: 'actions', label: '', align: 'right', render: (r) => (r.type === 'till_variance' || r.type === 'refund') ? (
-              <div className="flex justify-end gap-2">
-                <Button size="sm" variant="outline" disabled={approve.isPending || reject.isPending} onClick={() => approve.mutate(r)}>{t('fin.approve')}</Button>
-                <Button size="sm" variant="ghost" disabled={approve.isPending || reject.isPending} onClick={() => reject.mutate(r)}>{t('appr.reject')}</Button>
+        <>
+          {/* Phone/narrow: one card per pending item instead of a 9-column table that a phone can only
+              horizontally scroll. A red left edge flags an overdue item so the queue still scans at a
+              glance, and the inline approve/reject actions (till variance / refund) sit as full-width
+              thumb targets — an approver is the most likely back-office user to act from a phone. */}
+          <div className="space-y-3 sm:hidden">
+            {d.items.length === 0 ? (
+              <div className="rounded-xl border bg-card p-8 text-center">
+                <ClipboardCheck className="mx-auto size-8 text-muted-foreground opacity-40" />
+                <p className="mt-2 text-sm font-medium">{t('appr.empty_title')}</p>
+                <p className="text-sm text-muted-foreground">{t('appr.empty_desc')}</p>
               </div>
-            ) : null },
-          ]}
-        />
+            ) : (
+              d.items.map((r, i) => {
+                const overdue = r.age_days != null && r.age_days >= overdueDays;
+                const canAct = r.type === 'till_variance' || r.type === 'refund';
+                return (
+                  <div key={`${r.control}-${r.ref}-${i}`} className={cn('rounded-lg border border-l-4 bg-card p-3 text-sm', overdue ? 'border-l-destructive' : 'border-l-muted-foreground/30')}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium">{typeLabel(r.type)}</p>
+                        <p className="font-mono text-xs text-muted-foreground">{r.ref}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="tabular font-semibold">฿{num(r.amount)}</p>
+                        <Badge variant="outline" className="mt-0.5 font-mono text-[10px]">{r.control}</Badge>
+                      </div>
+                    </div>
+                    {r.label && <p className="mt-2 border-t pt-2 text-muted-foreground">{r.label}</p>}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                      <span>{r.requested_by ?? '—'}</span>
+                      {r.requested_at && <span>· {thaiDate(r.requested_at)}</span>}
+                      {r.age_days != null && (
+                        <span className={cn('font-medium', overdue && 'text-destructive')}>
+                          · {t('appr.col_age')} {num(r.age_days)}{overdue ? ' ⚠' : ''}
+                        </span>
+                      )}
+                    </div>
+                    {canAct && (
+                      <div className="mt-2 flex gap-2 border-t pt-2">
+                        <Button size="sm" variant="outline" className="flex-1" disabled={approve.isPending || reject.isPending} onClick={() => approve.mutate(r)}>{t('fin.approve')}</Button>
+                        <Button size="sm" variant="ghost" className="flex-1" disabled={approve.isPending || reject.isPending} onClick={() => reject.mutate(r)}>{t('appr.reject')}</Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop/tablet: the full register table (unchanged). */}
+          <div className="hidden sm:block">
+            <DataTable
+              rows={d.items}
+              rowKey={(r, i) => `${r.control}-${r.ref}-${i}`}
+              emptyState={{ icon: ClipboardCheck, title: t('appr.empty_title'), description: t('appr.empty_desc') }}
+              columns={[
+                { key: 'control', label: t('appr.col_control'), render: (r) => <Badge variant="outline" className="font-mono">{r.control}</Badge> },
+                { key: 'type', label: t('appr.col_type'), render: (r) => typeLabel(r.type) },
+                { key: 'ref', label: t('appr.col_ref'), render: (r) => <span className="font-mono text-sm">{r.ref}</span> },
+                { key: 'label', label: t('fin.col_detail'), render: (r) => <span className="text-muted-foreground">{r.label}</span> },
+                { key: 'amount', label: t('appr.col_value'), align: 'right', render: (r) => <span className="tabular">฿{num(r.amount)}</span> },
+                { key: 'requested_by', label: t('fin.col_requester'), render: (r) => r.requested_by ?? '—' },
+                { key: 'age_days', label: t('appr.col_age'), align: 'right', render: (r) => r.age_days == null ? '—' : <span className={cn('tabular font-medium', r.age_days >= overdueDays ? 'text-destructive' : 'text-muted-foreground')}>{num(r.age_days)}{r.age_days >= overdueDays ? ' ⚠' : ''}</span> },
+                { key: 'requested_at', label: t('appr.col_requested_at'), render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
+                { key: 'actions', label: '', align: 'right', render: (r) => (r.type === 'till_variance' || r.type === 'refund') ? (
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="outline" disabled={approve.isPending || reject.isPending} onClick={() => approve.mutate(r)}>{t('fin.approve')}</Button>
+                    <Button size="sm" variant="ghost" disabled={approve.isPending || reject.isPending} onClick={() => reject.mutate(r)}>{t('appr.reject')}</Button>
+                  </div>
+                ) : null },
+              ]}
+            />
+          </div>
+        </>
       )}
 
       {/* Detective exception reports (maker-checker audit G14/G16): single-user-by-design actions
