@@ -72,13 +72,15 @@ export function PrForm({ onDone }: { onDone?: () => void }) {
       <div className="space-y-2">
         <Label>{t('proc.items')}</Label>
         {lines.map((l, i) => (
-          <div key={i} className="grid grid-cols-[1.5fr_2fr_1fr_1fr_1.3fr_auto] gap-2">
-            <Input placeholder="Item ID" value={l.item_id} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { item_id: e.target.value })} />
-            <Input placeholder={t('proc.item_desc')} value={l.item_description} onChange={(e) => setLine(i, { item_description: e.target.value })} />
+          // Fixed 6-column layout only from sm+ (where it fits); on a phone every field stacks full-width
+          // (qty/uom share a row) so nothing gets squeezed unreadably narrow.
+          <div key={i} className="grid grid-cols-2 gap-2 rounded-md border p-2 sm:grid-cols-[1.5fr_2fr_1fr_1fr_1.3fr_auto] sm:items-center sm:border-0 sm:p-0">
+            <Input className="col-span-2 sm:col-span-1" placeholder="Item ID" value={l.item_id} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { item_id: e.target.value })} />
+            <Input className="col-span-2 sm:col-span-1" placeholder={t('proc.item_desc')} value={l.item_description} onChange={(e) => setLine(i, { item_description: e.target.value })} />
             <Input type="number" min="0" placeholder={t('inv.col_qty')} value={l.request_qty} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { request_qty: +e.target.value })} />
             <Input placeholder={t('inv.col_uom')} value={l.uom} onChange={(e) => setLine(i, { uom: e.target.value })} />
-            <Input type="date" value={l.required_date} onChange={(e) => setLine(i, { required_date: e.target.value })} />
-            <Button variant="destructive" size="icon" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
+            <Input className="col-span-2 sm:col-span-1" type="date" value={l.required_date} onChange={(e) => setLine(i, { required_date: e.target.value })} />
+            <Button variant="destructive" size="icon" aria-label={t('shop.remove')} title={t('shop.remove')} className="justify-self-start sm:col-span-1" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
               <X className="size-4" />
             </Button>
             <LineError show={showErrors} msg={lineErr(l)} />
