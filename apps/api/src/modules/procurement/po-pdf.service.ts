@@ -18,7 +18,7 @@ export interface PoPrintData {
   // ผู้สั่งซื้อ (our company — the tenant raising the PO)
   buyer: { name: string; address: string; tax_id: string | null; branch_label: string | null; phone: string | null; logo_url?: string | null };
   // ผู้ขาย/ผู้จำหน่าย (the supplier the PO is issued to)
-  vendor: { name: string; address: string | null; tax_id: string | null; contact: string | null; phone: string | null; payment_terms: string | null };
+  vendor: { code: string | null; name: string; address: string | null; tax_id: string | null; contact: string | null; phone: string | null; payment_terms: string | null };
   lines: { item_id: string | null; description: string | null; qty: number; uom: string | null; unit_price: number; amount: number }[];
   subtotal: number;
   vat_rate: number;   // 0 when the buyer is not VAT-registered → the VAT row is suppressed
@@ -59,24 +59,41 @@ export class PoPdfService {
         ${sellerHeaderHtml(buyer, { showAddress: cfg.body.show_seller_address, showTaxId: cfg.body.show_seller_tax_id, logoHtml: a4LogoHtml(cfg, buyer.logo_url), headerNoteHtml: a4HeaderNoteHtml(cfg) })}
         <div class="ttl">ใบสั่งซื้อ<div class="sub">Purchase Order</div><div class="stt">${esc(statusTh(po.status))}</div></div>
       </div>
-      <table class="meta">
-        <tr><td class="lbl">ผู้ขาย (ผู้จำหน่าย)</td><td>${esc(po.vendor.name)}</td><td class="lbl">เลขที่ใบสั่งซื้อ</td><td>${esc(po.po_no)}</td></tr>
-        <tr><td class="lbl">ที่อยู่</td><td>${esc(po.vendor.address ?? '-')}</td><td class="lbl">วันที่</td><td>${esc(thaiDate(po.po_date))}</td></tr>
-        <tr><td class="lbl">เลขประจำตัวผู้เสียภาษีผู้ขาย</td><td>${esc(po.vendor.tax_id ? formatTaxId(po.vendor.tax_id) : '-')}</td><td class="lbl">กำหนดส่งมอบ</td><td>${esc(thaiDate(po.expected_date))}</td></tr>
-        <tr><td class="lbl">ผู้ติดต่อ</td><td>${esc([po.vendor.contact, po.vendor.phone].filter(Boolean).join(' · ') || '-')}</td><td class="lbl">เงื่อนไขชำระเงิน / สกุลเงิน</td><td>${esc(po.vendor.payment_terms ?? '-')} · ${ccy}</td></tr>
-      </table>
-      <table class="grid">
+      <div class="cards">
+        <div class="card">
+          <h4>ผู้ขาย / ผู้จำหน่าย</h4>
+          <div class="name">${po.vendor.code ? `${esc(po.vendor.code)} — ` : ''}${esc(po.vendor.name)}</div>
+          ${po.vendor.address ? `<div>${esc(po.vendor.address)}</div>` : ''}
+          ${po.vendor.tax_id ? `<div>เลขผู้เสียภาษี ${esc(formatTaxId(po.vendor.tax_id))}</div>` : ''}
+          ${(po.vendor.contact || po.vendor.phone) ? `<div>${esc([po.vendor.contact, po.vendor.phone && `โทร. ${po.vendor.phone}`].filter(Boolean).join(' · '))}</div>` : ''}
+        </div>
+        <div class="card">
+          <h4>รายละเอียดใบสั่งซื้อ</h4>
+          <div class="kv">
+            <div class="k">เลขที่ใบสั่งซื้อ</div><div class="v">${esc(po.po_no)}</div>
+            <div class="k">วันที่</div><div>${esc(thaiDate(po.po_date))}</div>
+            <div class="k">กำหนดส่งมอบ</div><div>${esc(thaiDate(po.expected_date))}</div>
+            <div class="k">เงื่อนไขชำระเงิน</div><div>${esc(po.vendor.payment_terms ?? '-')}</div>
+            <div class="k">สกุลเงิน</div><div>${ccy}</div>
+          </div>
+        </div>
+      </div>
+      <table class="grid pogrid">
         <thead><tr><th class="c">ลำดับ</th><th>รหัสสินค้า</th><th>รายการ</th><th class="r">จำนวน</th><th class="c">หน่วย</th><th class="r">ราคา/หน่วย</th><th class="r">จำนวนเงิน</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <table class="totals">
+      <table class="totals card">
         <tr><td class="tlbl">มูลค่าสินค้า/บริการ</td><td class="tval">${fmtMoney(po.subtotal)}</td></tr>
         ${vatRow}
         <tr class="grand"><td class="tlbl">จำนวนเงินรวมทั้งสิ้น (${ccy})</td><td class="tval">${fmtMoney(po.grand_total)}</td></tr>
       </table>
       ${words}
       ${po.remarks ? `<div class="rmk"><span class="b">หมายเหตุ:</span> ${esc(po.remarks)}</div>` : ''}
-      ${a4FooterHtml(cfg, { leftDefault: 'ผู้จัดทำ / ผู้สั่งซื้อ', leftWho: po.created_by ?? '', rightDefault: 'ผู้อนุมัติ', rightWho: `${po.approved_by ?? ''}${po.approved_at ? ` · ${thaiDate(po.approved_at)}` : ''}` })}
+      ${a4FooterHtml(cfg, {
+        leftDefault: 'ผู้จัดทำ / ผู้สั่งซื้อ', leftWho: po.created_by ?? '',
+        midDefault: 'ผู้ตรวจสอบ',
+        rightDefault: 'ผู้อนุมัติ', rightWho: `${po.approved_by ?? ''}${po.approved_at ? ` · ${thaiDate(po.approved_at)}` : ''}`,
+      })}
     `, 'ใบสั่งซื้อ (Purchase Order)', { accentColor: cfg.header.accent_color });
   }
 }

@@ -60,6 +60,16 @@ export function wrapA4(body: string, title: string, opts: { accentColor?: string
     .foot{margin-top:28px;display:flex;justify-content:space-between}
     .sign{width:45%;text-align:center;border-top:1px solid #999;padding-top:4px;color:#555}
     .sign .who{margin-top:18px;color:#1a1a1a;font-weight:600}
+    .foot.foot3 .sign{width:30%}
+    .cards{display:flex;gap:10px;margin:8px 0} .cards>.card{flex:1}
+    .card{border:1px solid #e2e5e9;border-radius:6px;padding:8px 10px;background:#fafbfc}
+    .card h4{margin:0 0 5px;font-size:10.5px;font-weight:700;color:${A};text-transform:uppercase;letter-spacing:.04em}
+    .card .name{font-weight:700;font-size:12.5px}
+    .kv{display:grid;grid-template-columns:auto 1fr;column-gap:8px;row-gap:2px;font-size:11.5px}
+    .kv .k{color:#666;white-space:nowrap} .kv .v{font-weight:600}
+    table.grid.pogrid{border:1px solid #e2e5e9}
+    table.grid.pogrid tbody tr:nth-child(even) td{background:#f6f8fa}
+    table.totals.card{background:#fafbfc}
   </style></head><body>${body}</body></html>`;
 }
 

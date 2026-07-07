@@ -209,19 +209,25 @@ export function renderAbbreviatedSlipPreview(cfg: A4TemplateConfig, opts: { sell
   });
 }
 
-// The shared footer: an optional terms paragraph + extra lines, then the two-signature row (with optional
-// caption overrides). Renderers pass their own default captions; a non-empty config label overrides them.
+// The shared footer: an optional terms paragraph + extra lines, then a two- or three-signature row (with
+// optional caption overrides). Renderers pass their own default captions; a non-empty config label overrides
+// the left/right ones. A middle signature (e.g. a "checked by" reviewer step) is opt-in via midDefault — when
+// omitted the footer renders exactly as before (existing callers are unaffected).
 export function a4FooterHtml(
   cfg: A4TemplateConfig,
-  signatures: { leftDefault: string; leftWho?: string; rightDefault: string; rightWho?: string },
+  signatures: { leftDefault: string; leftWho?: string; midDefault?: string; midWho?: string; rightDefault: string; rightWho?: string },
 ): string {
   const terms = cfg.footer.terms_text ? `<div class="terms">${esc(cfg.footer.terms_text)}</div>` : '';
   const extra = cfg.footer.extra_lines.map((l) => `<div class="fline">${esc(l)}</div>`).join('');
   const leftCap = cfg.footer.prepared_by_label || signatures.leftDefault;
   const rightCap = cfg.footer.approved_by_label || signatures.rightDefault;
+  const mid = signatures.midDefault
+    ? `<div class="sign">${esc(signatures.midDefault)}<div class="who">${esc(signatures.midWho ?? '')}</div></div>`
+    : '';
   return `${terms}${extra}
-    <div class="foot">
+    <div class="foot${mid ? ' foot3' : ''}">
       <div class="sign">${esc(leftCap)}<div class="who">${esc(signatures.leftWho ?? '')}</div></div>
+      ${mid}
       <div class="sign">${esc(rightCap)}<div class="who">${esc(signatures.rightWho ?? '')}</div></div>
     </div>`;
 }

@@ -899,7 +899,7 @@ export class ProcurementService {
         logo_url: t?.logoUrl ?? null,
       },
       vendor: {
-        name: vendorRow?.name ?? po.vendorName ?? '-', address: vendorRow?.address ?? null, tax_id: vendorRow?.taxId ?? null,
+        code: vendorRow?.vendorCode ?? null, name: vendorRow?.name ?? po.vendorName ?? '-', address: vendorRow?.address ?? null, tax_id: vendorRow?.taxId ?? null,
         contact: vendorRow?.contact ?? null, phone: vendorRow?.phone ?? null, payment_terms: vendorRow?.paymentTerms ?? null,
       },
       lines, subtotal, vat_rate: vatRate, vat_amount: vatAmount, grand_total: Math.round((subtotal + vatAmount) * 100) / 100, template,
