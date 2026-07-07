@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { bahtText } from '../../common/bahttext.util';
-import { wrapA4, sellerHeaderHtml, esc, fmtMoney, fmtQty, thaiDate, formatTaxId, type DocParty } from '../../common/doc-html';
-import { type A4TemplateConfig, DEFAULT_A4_TEMPLATE, a4LogoHtml, a4HeaderNoteHtml, a4FooterHtml } from '../../common/a4-template';
+import { wrapA4, sellerHeaderHtml, esc, fmtMoney, fmtQty, thaiDate, thaiDateTime, formatTaxId, type DocParty } from '../../common/doc-html';
+import { type A4TemplateConfig, DEFAULT_A4_TEMPLATE, a4LogoHtml, a4HeaderNoteHtml } from '../../common/a4-template';
 import { PdfRenderer } from '../pdf/pdf-renderer.service';
 
 // Shape the print endpoint hands us (see ProcurementService.getPoForPrint).
@@ -89,13 +89,34 @@ export class PoPdfService {
       </table>
       ${words}
       ${po.remarks ? `<div class="rmk"><span class="b">หมายเหตุ:</span> ${esc(po.remarks)}</div>` : ''}
-      ${a4FooterHtml(cfg, {
-        leftDefault: 'ผู้จัดทำ / ผู้สั่งซื้อ', leftWho: po.created_by ?? '',
-        midDefault: 'ผู้ตรวจสอบ',
-        rightDefault: 'ผู้อนุมัติ', rightWho: `${po.approved_by ?? ''}${po.approved_at ? ` · ${thaiDate(po.approved_at)}` : ''}`,
-      })}
+      ${poFooterHtml(cfg, po)}
     `, 'ใบสั่งซื้อ (Purchase Order)', { accentColor: cfg.header.accent_color });
   }
+}
+
+// PO-specific footer: the preparer and approver are recorded system actions (createdBy / approvedBy +
+// approvedAt from the real maker-checker workflow — see ProcurementService.approvePo), so they render as an
+// electronic-approval stamp rather than a blank line for a wet-ink signature. There is no "checked by" step
+// in the PO workflow (unlike the maker-checker-APPROVER pattern, this is a maker-approver PO), so that middle
+// box stays a plain blank signature line — never fabricate a stamp for a review that didn't happen.
+function poFooterHtml(cfg: A4TemplateConfig, po: PoPrintData): string {
+  const terms = cfg.footer.terms_text ? `<div class="terms">${esc(cfg.footer.terms_text)}</div>` : '';
+  const extra = cfg.footer.extra_lines.map((l) => `<div class="fline">${esc(l)}</div>`).join('');
+  const preparedCap = cfg.footer.prepared_by_label || 'ผู้จัดทำ / ผู้สั่งซื้อ';
+  const approvedCap = cfg.footer.approved_by_label || 'ผู้อนุมัติ';
+
+  const eStamp = (label: string, verb: string, who: string | null, when: string | null) => who
+    ? `<div class="esign"><div class="cap">${esc(label)}</div>
+         <div class="stamp"><span class="tick">✓</span> ${esc(verb)}ทางอิเล็กทรอนิกส์ผ่านระบบ<br/><b>${esc(who)}</b>${when ? `<br/>${esc(when)}` : ''}</div>
+       </div>`
+    : `<div class="sign">${esc(label)}<div class="who"></div></div>`;
+
+  return `${terms}${extra}
+    <div class="foot foot3">
+      ${eStamp(preparedCap, 'จัดทำ', po.created_by, po.po_date ? thaiDate(po.po_date) : null)}
+      <div class="sign">ผู้ตรวจสอบ<div class="who"></div></div>
+      ${eStamp(approvedCap, 'อนุมัติ', po.approved_by, po.approved_at ? thaiDateTime(po.approved_at) : null)}
+    </div>`;
 }
 
 // Thai label for the PO workflow status shown in the header.

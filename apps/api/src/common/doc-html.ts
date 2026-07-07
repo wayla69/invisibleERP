@@ -3,6 +3,8 @@
 // the purchase order (po-pdf.service.ts) so every printed document reads as one system — same Sarabun
 // webfont, brand colour #1E3C72, money/qty/Thai-Buddhist-date formatting. Pure functions, no Nest deps.
 
+import { bizParts } from './bizdate';
+
 export function esc(v: unknown): string {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -21,6 +23,17 @@ export function thaiDate(v: unknown): string {
   const d = new Date(v as string);
   if (Number.isNaN(d.getTime())) return String(v);
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
+}
+
+// dd/mm/yyyy (Buddhist era) HH:MM น. — for timestamps (e.g. an approval instant) where the time-of-day
+// matters. Bangkok-local via bizParts (CLAUDE.md: business timezone is Asia/Bangkok, not the server's
+// clock timezone), unlike thaiDate() above which only carries a date (no time-of-day to get wrong).
+export function thaiDateTime(v: unknown): string {
+  if (!v) return '-';
+  const d = new Date(v as string);
+  if (Number.isNaN(d.getTime())) return String(v);
+  const p = bizParts(d);
+  return `${String(p.d).padStart(2, '0')}/${String(p.mo).padStart(2, '0')}/${p.y + 543} ${String(p.h).padStart(2, '0')}:${String(p.mi).padStart(2, '0')} น.`;
 }
 
 // 13-digit Thai Tax ID as X-XXXX-XXXXX-XX-X (same shape as tax-docs.snapshot.formatTaxId). Non-13-digit
@@ -69,6 +82,10 @@ export function wrapA4(body: string, title: string, opts: { accentColor?: string
     .kv .k{color:#666;white-space:nowrap} .kv .v{font-weight:600}
     table.grid.pogrid{border:1px solid #e2e5e9}
     table.grid.pogrid tbody tr:nth-child(even) td{background:#f6f8fa}
+    .esign{width:30%;text-align:center}
+    .esign .cap{color:#555;margin-bottom:4px}
+    .esign .stamp{border:1px solid #bfe0cc;background:#f2faf5;border-radius:4px;padding:5px 6px;font-size:10.5px;line-height:1.5}
+    .esign .stamp .tick{color:#1a7a41;font-weight:700} .esign .stamp b{font-size:11px}
     table.totals.card{background:#fafbfc}
   </style></head><body>${body}</body></html>`;
 }
