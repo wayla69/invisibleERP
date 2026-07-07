@@ -5,6 +5,7 @@ import { Providers } from './providers';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
 import { PwaRegister } from '@/components/pwa-register';
+import { ChunkReloadGuard } from '@/components/chunk-reload-guard';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -45,6 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="th" suppressHydrationWarning className={`${inter.variable} ${sarabun.variable}`}>
       <body className="font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
+          <ChunkReloadGuard />
           <PwaRegister />
           <Providers>{children}</Providers>
           <Toaster richColors position="top-right" />
