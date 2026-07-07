@@ -106,7 +106,7 @@ export class PlanGuard implements CanActivate {
 
     // Active (or no row → fail CLOSED to ALWAYS_ON via resolveEntitledSuites's fallback).
     const features = (row?.features as Record<string, unknown>) ?? {};
-    const entitledSuites = resolveEntitledSuites(row?.planCode ?? null, (features as any).suites);
+    const entitledSuites = resolveEntitledSuites(row?.planCode ?? null, features.suites);
     const entitledPerms = new Set<Permission>(permissionsForSuites(entitledSuites));
 
     // Suite gate: block only when NONE of the route's required tokens is entitled (mirrors ModuleEnabledGuard

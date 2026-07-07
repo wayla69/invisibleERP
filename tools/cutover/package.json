@@ -32,6 +32,7 @@
     "hcm": "tsx src/hcm.ts",
     "scm17c": "tsx src/scm17c.ts",
     "sub-billing": "tsx src/sub-billing.ts",
+    "plan-gating": "tsx src/plan-gating.ts",
     "cpq-gl": "tsx src/cpq-gl.ts",
     "promptpay": "tsx src/promptpay.ts",
     "payments-gateway": "tsx src/payments-gateway.ts",

@@ -1,0 +1,126 @@
+/**
+ * Wave 1 · 1.8 — PlanGuard suite-gating behaviour (ToE for the 1.2 monetization gate).
+ * Exercises the compiled PlanGuard's full decision tree against a scripted DB stub — deterministic, no
+ * PGlite/HTTP needed. Proves: default-off = legacy (no suite gating), enforce = suite gating + the fixed
+ * god-only bypass (per-tenant Admin no longer bypasses), shadow = observe-not-block, fail-open on infra
+ * error, fail-closed on missing/unknown plan, and the trial/past-due status handling.
+ *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover plan-gating
+ */
+import 'reflect-metadata';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'plan-gating';
+process.env.NODE_ENV = 'test';
+process.env.PLATFORM_ADMIN_USERNAMES = 'god';
+
+import { PlanGuard } from '../../../apps/api/dist/modules/billing/plan.guard';
+import { PLAN_SUITES } from '@ierp/shared';
+
+const checks: { name: string; ok: boolean; detail?: string }[] = [];
+const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
+
+// Metadata keys (mirror common/decorators + plan-feature.decorator).
+const IS_PUBLIC_KEY = 'isPublic';
+const PLAN_FEATURE_KEY = 'planFeature';
+const PERMISSIONS_KEY = 'permissions';
+
+function stubReflector(meta: Record<string, unknown>) {
+  return { getAllAndOverride: (key: string) => meta[key] } as any;
+}
+// Chainable drizzle-query stub whose terminal .limit() resolves to the scripted rows (or throws).
+function stubDb(rows: any[], throwErr = false) {
+  const builder: any = {};
+  for (const m of ['select', 'from', 'leftJoin', 'where', 'orderBy']) builder[m] = () => builder;
+  builder.limit = () => (throwErr ? Promise.reject(new Error('db blip')) : Promise.resolve(rows));
+  return { select: () => builder } as any;
+}
+function ctx(user: any, meta: Record<string, unknown>, extraReq: Record<string, unknown> = {}) {
+  const req = { user, ...extraReq };
+  return {
+    getType: () => 'http',
+    getHandler: () => () => {},
+    getClass: () => class {},
+    switchToHttp: () => ({ getRequest: () => req }),
+  } as any;
+}
+const planRow = (planCode: string, status = 'Active', extra: Record<string, unknown> = {}) => ({
+  features: { suites: (PLAN_SUITES as any)[planCode], ...(extra as any) },
+  status,
+  trialEndsAt: null,
+  planCode,
+});
+
+// Run the guard once; returns { allowed, code }.
+async function run(
+  mode: 'legacy' | 'shadow' | 'enforce',
+  opts: { user: any; required?: string[]; feature?: string; rows?: any[]; dbError?: boolean; req?: Record<string, unknown> },
+): Promise<{ allowed: boolean; code?: string }> {
+  process.env.ENTITLEMENTS_ENFORCE = mode === 'enforce' ? 'true' : 'false';
+  process.env.ENTITLEMENTS_SHADOW = mode === 'shadow' ? 'true' : 'false';
+  const meta: Record<string, unknown> = { [IS_PUBLIC_KEY]: false, [PERMISSIONS_KEY]: opts.required, [PLAN_FEATURE_KEY]: opts.feature };
+  const guard = new PlanGuard(stubReflector(meta), stubDb(opts.rows ?? [], opts.dbError));
+  try {
+    const allowed = await guard.canActivate(ctx(opts.user, meta, opts.req ?? {}));
+    return { allowed };
+  } catch (e: any) {
+    return { allowed: false, code: e?.response?.code ?? e?.code };
+  }
+}
+
+const tenantUser = (role = 'Sales', username = 'u1') => ({ username, role, tenantId: 7 });
+const adminUser = { username: 'tenantadmin', role: 'Admin', tenantId: 7 };
+const godUser = { username: 'god', role: 'Admin', tenantId: 7 };
+
+async function main() {
+  // ── LEGACY (default off): no suite gating; @RequiresPlanFeature still gates; Admin bypasses (unchanged) ──
+  ok('legacy: ungated route allowed', (await run('legacy', { user: tenantUser(), required: ['procurement'], rows: [planRow('starter')] })).allowed === true);
+  ok('legacy: ai_chat feature blocked when plan lacks it',
+    (await run('legacy', { user: tenantUser(), feature: 'ai_chat', rows: [planRow('starter', 'Active', { ai_chat: false })] })).code === 'PLAN_FEATURE_REQUIRED');
+  ok('legacy: ai_chat allowed when plan has it',
+    (await run('legacy', { user: tenantUser(), feature: 'ai_chat', rows: [planRow('pro', 'Active', { ai_chat: true })] })).allowed === true);
+  ok('legacy: tenant Admin bypasses (unchanged behaviour)',
+    (await run('legacy', { user: adminUser, feature: 'ai_chat', rows: [planRow('starter', 'Active', { ai_chat: false })] })).allowed === true);
+
+  // ── ENFORCE: suite gating + god-only bypass ──
+  ok('enforce: starter (no procurement suite) blocks procurement route → SUITE_NOT_ENTITLED',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: pro (has procurement suite) allows procurement route',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pro')] })).allowed === true);
+  ok('enforce: core token (dashboard) always allowed even on starter',
+    (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: [planRow('starter')] })).allowed === true);
+  ok('enforce: sub-permission (gl_post) passes through (not suite-gated)',
+    (await run('enforce', { user: tenantUser(), required: ['gl_post'], rows: [planRow('starter')] })).allowed === true);
+  ok('enforce: FIX — per-tenant Admin no longer bypasses (blocked on unentitled module)',
+    (await run('enforce', { user: adminUser, required: ['procurement'], rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: platform god (username in PLATFORM_ADMIN_USERNAMES) bypasses',
+    (await run('enforce', { user: godUser, required: ['procurement'], rows: [planRow('starter')] })).allowed === true);
+  ok('enforce: __platformBypass request flag bypasses',
+    (await run('enforce', { user: tenantUser(), required: ['procurement'], rows: [planRow('starter')], req: { __platformBypass: true } })).allowed === true);
+
+  // ── ENFORCE: subscription status handling ──
+  ok('enforce: Trialing (not expired) grants all suites',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [{ features: {}, status: 'Trialing', trialEndsAt: new Date(Date.now() + 86400000), planCode: 'free' }] })).allowed === true);
+  ok('enforce: Trialing (expired) → TRIAL_EXPIRED',
+    (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: [{ features: {}, status: 'Trialing', trialEndsAt: new Date(Date.now() - 86400000), planCode: 'free' }] })).code === 'TRIAL_EXPIRED');
+  ok('enforce: PastDue → SUBSCRIPTION_INACTIVE',
+    (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: [{ features: {}, status: 'PastDue', trialEndsAt: null, planCode: 'starter' }] })).code === 'SUBSCRIPTION_INACTIVE');
+
+  // ── ENFORCE: fail-open / fail-closed ──
+  ok('enforce: infra DB error → FAIL-OPEN (paying tenant never locked out)',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], dbError: true })).allowed === true);
+  ok('enforce: no subscription row → FAIL-CLOSED to core (procurement blocked)',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: no subscription row → core still allowed',
+    (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: [] })).allowed === true);
+  ok('enforce: unknown plan code → fail-closed (procurement blocked)',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [{ features: {}, status: 'Active', trialEndsAt: null, planCode: 'mystery' }] })).code === 'SUITE_NOT_ENTITLED');
+
+  // ── SHADOW: evaluate but never block ──
+  ok('shadow: would-block scenario is ALLOWED (observe-not-block)',
+    (await run('shadow', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')] })).allowed === true);
+
+  console.log('\n── Wave 1 · 1.8 — PlanGuard suite-gating (cutover) ──');
+  for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
+  const failed = checks.filter((c) => !c.ok).length;
+  console.log(failed ? `\n❌ ${failed}/${checks.length} plan-gating checks failed` : `\n✅ All ${checks.length} plan-gating checks passed`);
+  process.exit(failed ? 1 : 0);
+}
+main().catch((e) => { console.error(e); process.exit(1); });

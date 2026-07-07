@@ -46,12 +46,17 @@ PLAN (free / starter / pro / enterprise)
 
 ## 3. Plans → suites (default; DB may override)
 
-| Plan (current code) | Commercial name (1.3) | Suites |
-|---------------------|------------------------|--------|
-| `free` | Free / trial-limited | core, portal, selfservice |
-| `starter` | **Standard** | core, finance, sales, inventory, masterdata, portal, selfservice |
-| `pro` | **Professional** | + procurement, planning, crm_loyalty, ai, multibranch |
-| `enterprise` | **Enterprise** | all suites (custom deals tune via `features.suites`) |
+| Plan (code) | Commercial name | Price (THB/mo) | Seats | Suites |
+|-------------|-----------------|----------------|-------|--------|
+| `free` | Free / trial-limited | 0 | 2 | core, portal, selfservice |
+| `starter` | **Standard** | 1,900 | 10 | core, finance, sales, inventory, masterdata, portal, selfservice |
+| `pro` | **Professional** | 9,900 | 50 | + procurement, planning, crm_loyalty, ai, multibranch |
+| `enterprise` | **Enterprise** | quote (custom) | ∞ | all suites (custom deals tune via `features.suites`) |
+
+Prices/seats/suites are seeded in `PLAN_SEED` (`billing.service.ts`) and upserted idempotently by
+`seedPlans()` at startup — which also **backfills `features.suites`** onto every plan row (the grandfather
+step). Codes are unchanged (`starter`/`pro`) so existing `subscriptions.plan_code` FKs stay valid; only the
+display names/prices changed. Prices are the recommended market-entry defaults — tune after market testing.
 
 ## 4. Known gap — capabilities not yet suite-gatable (follow-up **1.1b**)
 
@@ -95,3 +100,4 @@ node tools/ci/check-entitlements.mjs      # asserts every MODULE_KEY maps to exa
 |---------|------|--------|--------|
 | 0.1 | 2026-07-07 | Platform | Initial packaging spec — plan→suite→module entitlement map (`entitlements.ts`) + CI guard (`check-entitlements.mjs`). Map-only; no enforcement yet (PlanGuard rewire is 1.2). Documented `KNOWN_UNGATED` gap (manufacturing/PPM/HCM/real-estate need gating tokens — 1.1b). |
 | 0.2 | 2026-07-07 | Platform | 1.2 — `PlanGuard` rewired: suite gating behind `ENTITLEMENTS_ENFORCE`/`ENTITLEMENTS_SHADOW` (default off = legacy behaviour), per-tenant Admin bypass removed (god-only), fail-open on infra error / fail-closed on missing plan, `resolveEntitledSuites` grandfather fallback. No behaviour change until enabled; enable SHADOW → backfill (1.3) → ENFORCE. |
+| 0.3 | 2026-07-07 | Platform | 1.3 — real prices + names (Standard ฿1,900 / Professional ฿9,900 / Enterprise quote), seats bumped, and `features.suites` embedded in `PLAN_SEED` so `seedPlans()` backfills every plan row (grandfather done). 1.8 — ToE harness `tools/cutover/src/plan-gating.ts` (19 checks: legacy/shadow/enforce modes, god-only bypass incl. the Admin-bypass fix, fail-open/closed, trial/past-due) — all green. |

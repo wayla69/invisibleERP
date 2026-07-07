@@ -11,6 +11,7 @@ import { normalizeUsername } from '../../common/username';
 import { isUniqueViolation } from '../../common/db-error';
 import { logger } from '../../observability/logger';
 import type { JwtUser } from '../../common/decorators';
+import { PLAN_SUITES } from '@ierp/shared';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 
 // Public self-serve signup gate (ITGC-AC-18). In PRODUCTION, self-service company provisioning is
@@ -64,11 +65,15 @@ interface PlanSeed {
 //   • ai_overage_rate_thb_per_1k — THB billed per 1,000 overage tokens (the band between included and max).
 // This connects the COGS meter (ai_token_usage.overage_tokens) to a price so a heavy tenant is charged for
 // the upstream Anthropic spend rather than served at negative gross margin.
+// The `suites` array on each plan is the DB-explicit copy of the packaging map (docs/36, PLAN_SUITES in
+// @ierp/shared). PlanGuard reads plans.features.suites; embedding it here means seedPlans() (idempotent,
+// runs at startup) BACKFILLS every existing plan row — the grandfather step that must precede enabling
+// ENTITLEMENTS_ENFORCE. resolveEntitledSuites() still falls back to the code default if it is ever absent.
 const PLAN_SEED: PlanSeed[] = [
-  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0 } },
-  { code: 'starter', name: 'Starter', priceMonthly: '990', currency: 'THB', features: { users: 5, locations: 1, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0 } },
-  { code: 'pro', name: 'Pro', priceMonthly: '2900', currency: 'THB', features: { users: 25, locations: 5, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000, ai_tokens_daily_max: 500_000, ai_overage_rate_thb_per_1k: 12 } },
-  { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000, ai_tokens_daily_max: 5_000_000, ai_overage_rate_thb_per_1k: 8 } },
+  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.free, users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0 } },
+  { code: 'starter', name: 'Standard', priceMonthly: '1900', currency: 'THB', features: { suites: PLAN_SUITES.starter, users: 10, locations: 2, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0 } },
+  { code: 'pro', name: 'Professional', priceMonthly: '9900', currency: 'THB', features: { suites: PLAN_SUITES.pro, users: 50, locations: 10, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000, ai_tokens_daily_max: 500_000, ai_overage_rate_thb_per_1k: 12 } },
+  { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.enterprise, users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000, ai_tokens_daily_max: 5_000_000, ai_overage_rate_thb_per_1k: 8 } },
 ];
 
 const TRIAL_DAYS = 14;
