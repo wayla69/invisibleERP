@@ -13,6 +13,10 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { registerEdge } from './common/edge';
+import { assertTenancyBootSafe, strictTenancyBoot } from './common/tenancy-boot-check';
+import { DRIZZLE, type DrizzleDb } from './database/database.module';
+import { tenants } from './database/schema';
+import { count } from 'drizzle-orm';
 import { LedgerService } from './modules/ledger/ledger.service';
 import { BillingService } from './modules/billing/billing.service';
 
@@ -48,6 +52,22 @@ async function bootstrap() {
     () => app.get(BillingService).seedPlans(),
   ]) {
     try { await seed(); } catch (e) { new Logger('Seed').warn(`seed skipped: ${(e as Error).message}`); }
+  }
+
+  // Data-isolation boot check (4.2): refuse/warn if several companies run under single-company mode, where
+  // every tenant Admin would have a global RLS bypass. Best-effort read; only a strict-mode refusal throws.
+  try {
+    const db = app.get<DrizzleDb>(DRIZZLE);
+    await assertTenancyBootSafe({
+      isProd: process.env.NODE_ENV === 'production',
+      mode: process.env.TENANCY_MODE ?? 'single-company',
+      strict: strictTenancyBoot(),
+      countTenants: async () => { const r = await db.select({ n: count() }).from(tenants); return Number(r[0]?.n ?? 0); },
+      logger: new Logger('TenancyBoot'),
+    });
+  } catch (e) {
+    if (/Refusing to boot/.test((e as Error).message)) throw e;
+    new Logger('TenancyBoot').warn(`tenancy boot check skipped: ${(e as Error).message}`);
   }
 
   const port = Number(process.env.PORT ?? 8000);
