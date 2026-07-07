@@ -19,7 +19,20 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    // Desktop specs (everything except *.mobile.spec.ts) run at the Desktop Chrome viewport.
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: ['**/*.mobile.spec.ts'] },
+    // Phone-viewport regression: only *.mobile.spec.ts run here, at an iPhone 13 viewport (390×844,
+    // isMobile/hasTouch) so the card-vs-table + bottom-bar layouts that only appear below the `sm`/`lg`
+    // breakpoints are actually exercised. iPhone 13's default engine is WebKit, but CI installs only
+    // Chromium (`playwright install chromium`), so we keep the phone metrics and force the chromium engine
+    // (isMobile is a Chromium-supported emulation flag).
+    {
+      name: 'mobile-iphone',
+      use: { ...devices['iPhone 13'], browserName: 'chromium' },
+      testMatch: ['**/*.mobile.spec.ts'],
+    },
+  ],
   webServer: {
     command: `pnpm exec next build && pnpm exec next start -p ${PORT}`,
     url: `http://localhost:${PORT}/login`,
