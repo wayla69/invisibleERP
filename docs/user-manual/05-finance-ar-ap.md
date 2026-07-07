@@ -69,6 +69,18 @@ these need a second approval — press save and it takes effect immediately.
 
 Click any row to open its **360° view** — lifetime sales, AR outstanding, and
 loyalty tier/points in one place, whichever silo(s) the customer is linked to.
+From the 360° view you can also:
+
+- Add multiple **ที่อยู่ (addresses)** — billing / shipping / registered /
+  other — and mark one **หลัก (primary)** per customer; delete any address you
+  no longer need.
+- Add multiple **ผู้ติดต่อ (contacts)** — name, title, phone, email — and mark
+  one primary; delete a contact when they leave.
+- Link the customer to a **บริษัทแม่ (parent company)** by its customer number
+  (in the edit dialog) — useful for consolidating credit exposure/reporting
+  across a corporate group. A customer cannot be its own parent.
+
+None of this needs a second approval — it saves immediately.
 
 A customer record is also created (or refreshed) automatically the first time
 you issue a full tax invoice for a new buyer — see [Tax](./07-tax.md) — so you

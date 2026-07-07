@@ -1,8 +1,8 @@
-import { Inject, Injectable, Module, Controller, Get, Post, Patch, Param, Query, Body, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Module, Controller, Get, Post, Patch, Delete, Param, Query, Body, NotFoundException, BadRequestException } from '@nestjs/common';
 import { z } from 'zod';
 import { sql, eq, and, ne, or, ilike, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, arInvoices, tenants, customerMaster, posMembers } from '../../database/schema';
+import { custPosSales, arInvoices, tenants, customerMaster, posMembers, customerAddresses, customerContacts } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
 import { DocNumberService } from '../../common/doc-number.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -71,6 +71,20 @@ const CreateCustomerBody = z.object({
   language: z.string().optional(), external_ref: z.string().optional(),
 });
 const LinkCustomerBody = z.object({ member_id: z.number().int().nullable().optional(), account_code: z.string().nullable().optional() });
+// Party-model depth (master-data audit Phase 4) — a customer can carry more than one address/contact
+// (previously exactly one scalar each), plus an optional pointer at its parent company for consolidated
+// credit/reporting.
+const AddressBody = z.object({
+  address_type: z.enum(['billing', 'shipping', 'registered', 'other']).default('other'),
+  address_line1: z.string().optional(), address_line2: z.string().optional(),
+  sub_district: z.string().optional(), district: z.string().optional(), province: z.string().optional(), postal_code: z.string().optional(),
+  is_primary: z.boolean().optional(),
+});
+const ContactBody = z.object({
+  name: z.string().min(1), title: z.string().optional(), phone: z.string().optional(), email: z.string().optional(),
+  notes: z.string().optional(), is_primary: z.boolean().optional(),
+});
+const ParentBody = z.object({ parent_customer_no: z.string().nullable() });
 // Direct-edit customer master profile (master-data audit Phase 3) — mirrors the vendor-profile direct-edit
 // pattern (0270 follow-up): none of these fields carry the payment-redirection risk that vendor bank details
 // do, so no maker-checker. member_id/account_code stay on the dedicated `link` endpoint (SoD-adjacent linkage).
@@ -198,13 +212,95 @@ export class CustomerMasterService {
     const b2b = c.accountCode ? await this.customers.detail(c.accountCode) : null;
     const arOutstanding = b2b ? n(b2b.ar_balance?.outstanding) : 0;
     const salesLifetime = b2b ? n(b2b.stats?.lifetime_value) : 0;
+    const [addresses, contacts, parent] = await Promise.all([
+      this.listAddresses(customerNo, user),
+      this.listContacts(customerNo, user),
+      c.parentCustomerNo ? this.get(c.parentCustomerNo, user).catch(() => null) : null,
+    ]);
     return {
       customer: shapeCustomer(c),
       loyalty,
       b2b: b2b ? { account_code: c.accountCode, orders: b2b.orders, stats: b2b.stats, ar_balance: b2b.ar_balance } : null,
       summary: { ar_outstanding: arOutstanding, sales_lifetime: salesLifetime, has_loyalty: !!loyalty, has_account: !!b2b },
+      addresses: addresses.addresses, contacts: contacts.contacts,
+      parent: parent ? { customer_no: parent.customer_no, name: parent.name } : null,
     };
   }
+
+  // ── Party-model depth (master-data audit Phase 4): multi-address / multi-contact / parent company ──
+  async setParent(customerNo: string, dto: z.infer<typeof ParentBody>, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    if (dto.parent_customer_no === customerNo) throw new BadRequestException({ code: 'SELF_PARENT', message: 'A customer cannot be its own parent', messageTh: 'ลูกค้าไม่สามารถเป็นบริษัทแม่ของตัวเองได้' });
+    if (dto.parent_customer_no) await this.byNo(dto.parent_customer_no, user); // validates it exists in this tenant
+    await db.update(customerMaster).set({ parentCustomerNo: dto.parent_customer_no }).where(eq(customerMaster.id, Number(c.id)));
+    return this.get(customerNo, user);
+  }
+
+  async addAddress(customerNo: string, dto: z.infer<typeof AddressBody>, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    if (dto.is_primary) await db.update(customerAddresses).set({ isPrimary: false }).where(eq(customerAddresses.customerId, Number(c.id)));
+    const [row] = await db.insert(customerAddresses).values({
+      tenantId: c.tenantId ?? null, customerId: Number(c.id), addressType: dto.address_type,
+      addressLine1: dto.address_line1 ?? null, addressLine2: dto.address_line2 ?? null,
+      subDistrict: dto.sub_district ?? null, district: dto.district ?? null, province: dto.province ?? null, postalCode: dto.postal_code ?? null,
+      isPrimary: dto.is_primary ?? false, createdBy: user.username,
+    }).returning();
+    return shapeAddress(row);
+  }
+
+  async listAddresses(customerNo: string, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    const rows = await db.select().from(customerAddresses).where(eq(customerAddresses.customerId, Number(c.id))).orderBy(desc(customerAddresses.isPrimary), desc(customerAddresses.id));
+    return { addresses: rows.map(shapeAddress), count: rows.length };
+  }
+
+  async deleteAddress(customerNo: string, addressId: number, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    const del = await db.delete(customerAddresses).where(and(eq(customerAddresses.id, addressId), eq(customerAddresses.customerId, Number(c.id)))).returning({ id: customerAddresses.id });
+    if (!del.length) throw new NotFoundException({ code: 'ADDRESS_NOT_FOUND', message: 'Address not found', messageTh: 'ไม่พบที่อยู่นี้' });
+    return { deleted: true };
+  }
+
+  async addContact(customerNo: string, dto: z.infer<typeof ContactBody>, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    if (dto.is_primary) await db.update(customerContacts).set({ isPrimary: false }).where(eq(customerContacts.customerId, Number(c.id)));
+    const [row] = await db.insert(customerContacts).values({
+      tenantId: c.tenantId ?? null, customerId: Number(c.id), name: dto.name, title: dto.title ?? null,
+      phone: dto.phone ?? null, email: dto.email ?? null, notes: dto.notes ?? null, isPrimary: dto.is_primary ?? false, createdBy: user.username,
+    }).returning();
+    return shapeContact(row);
+  }
+
+  async listContacts(customerNo: string, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    const rows = await db.select().from(customerContacts).where(eq(customerContacts.customerId, Number(c.id))).orderBy(desc(customerContacts.isPrimary), desc(customerContacts.id));
+    return { contacts: rows.map(shapeContact), count: rows.length };
+  }
+
+  async deleteContact(customerNo: string, contactId: number, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    const del = await db.delete(customerContacts).where(and(eq(customerContacts.id, contactId), eq(customerContacts.customerId, Number(c.id)))).returning({ id: customerContacts.id });
+    if (!del.length) throw new NotFoundException({ code: 'CONTACT_NOT_FOUND', message: 'Contact not found', messageTh: 'ไม่พบผู้ติดต่อนี้' });
+    return { deleted: true };
+  }
+}
+
+function shapeAddress(a: any) {
+  return {
+    id: Number(a.id), address_type: a.addressType, address_line1: a.addressLine1 ?? null, address_line2: a.addressLine2 ?? null,
+    sub_district: a.subDistrict ?? null, district: a.district ?? null, province: a.province ?? null, postal_code: a.postalCode ?? null,
+    is_primary: a.isPrimary === true, created_by: a.createdBy, created_at: a.createdAt,
+  };
+}
+function shapeContact(c: any) {
+  return { id: Number(c.id), name: c.name, title: c.title ?? null, phone: c.phone ?? null, email: c.email ?? null, notes: c.notes ?? null, is_primary: c.isPrimary === true, created_by: c.createdBy, created_at: c.createdAt };
 }
 
 function shapeCustomer(c: any) {
@@ -213,7 +309,7 @@ function shapeCustomer(c: any) {
     address: c.address ?? null, branch_code: c.branchCode ?? null, member_id: c.memberId != null ? Number(c.memberId) : null,
     account_code: c.accountCode, status: c.status, notes: c.notes, created_by: c.createdBy, created_at: c.createdAt,
     credit_terms: c.creditTerms ?? null, sales_rep: c.salesRep ?? null, category: c.category ?? null,
-    language: c.language ?? null, external_ref: c.externalRef ?? null,
+    language: c.language ?? null, external_ref: c.externalRef ?? null, parent_customer_no: c.parentCustomerNo ?? null,
   };
 }
 
@@ -228,6 +324,13 @@ export class CustomerMasterController {
   @Get(':customerNo/360') view360(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.view360(no, u); }
   @Patch(':customerNo') update(@Param('customerNo') no: string, @Body(new ZodValidationPipe(UpdateCustomerBody)) b: z.infer<typeof UpdateCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.update(no, b, u); }
   @Patch(':customerNo/link') link(@Param('customerNo') no: string, @Body(new ZodValidationPipe(LinkCustomerBody)) b: z.infer<typeof LinkCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.link(no, b, u); }
+  @Patch(':customerNo/parent') setParent(@Param('customerNo') no: string, @Body(new ZodValidationPipe(ParentBody)) b: z.infer<typeof ParentBody>, @CurrentUser() u: JwtUser) { return this.svc.setParent(no, b, u); }
+  @Post(':customerNo/addresses') addAddress(@Param('customerNo') no: string, @Body(new ZodValidationPipe(AddressBody)) b: z.infer<typeof AddressBody>, @CurrentUser() u: JwtUser) { return this.svc.addAddress(no, b, u); }
+  @Get(':customerNo/addresses') listAddresses(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.listAddresses(no, u); }
+  @Delete(':customerNo/addresses/:addressId') deleteAddress(@Param('customerNo') no: string, @Param('addressId') addressId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteAddress(no, +addressId, u); }
+  @Post(':customerNo/contacts') addContact(@Param('customerNo') no: string, @Body(new ZodValidationPipe(ContactBody)) b: z.infer<typeof ContactBody>, @CurrentUser() u: JwtUser) { return this.svc.addContact(no, b, u); }
+  @Get(':customerNo/contacts') listContacts(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.listContacts(no, u); }
+  @Delete(':customerNo/contacts/:contactId') deleteContact(@Param('customerNo') no: string, @Param('contactId') contactId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteContact(no, +contactId, u); }
 }
 
 @Module({ controllers: [CustomersController, CustomerMasterController], providers: [CustomersService, CustomerMasterService], exports: [CustomersService, CustomerMasterService] })

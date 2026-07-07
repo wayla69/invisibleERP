@@ -69,6 +69,19 @@ const VendorProfileBody = z.object({
   lead_time_days: z.number().int().nonnegative().nullish(), rating: z.number().min(0).max(5).nullish(),
   category: z.string().trim().max(50).nullish(), currency: z.string().trim().max(10).nullish(), notes: z.string().trim().max(2000).nullish(),
 });
+// Party-model depth (master-data audit Phase 4) — a vendor can carry more than one address/contact, plus
+// an optional pointer at its parent company for consolidated scorecards/reporting.
+const VendorAddressBody = z.object({
+  address_type: z.enum(['billing', 'shipping', 'registered', 'other']).default('other'),
+  address_line1: z.string().optional(), address_line2: z.string().optional(),
+  sub_district: z.string().optional(), district: z.string().optional(), province: z.string().optional(), postal_code: z.string().optional(),
+  is_primary: z.boolean().optional(),
+});
+const VendorContactBody = z.object({
+  name: z.string().min(1), title: z.string().optional(), phone: z.string().optional(), email: z.string().optional(),
+  notes: z.string().optional(), is_primary: z.boolean().optional(),
+});
+const VendorParentBody = z.object({ parent_vendor_id: z.number().int().positive().nullable() });
 // Vendor bank-detail maker-checker (0270) — stages a change; never applied directly.
 const VendorBankChangeBody = z.object({ bank_name: z.string().optional(), bank_account: z.string().optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
@@ -210,6 +223,21 @@ export class ProcurementController {
   // currency/notes; excludes tax_id/credit_limit/bank details (see VendorProfileBody comment).
   @Patch('vendors/:id/profile') @Permissions('md_vendor')
   updateVendorProfile(@Param('id') id: string, @Body(new ZodValidationPipe(VendorProfileBody)) b: z.infer<typeof VendorProfileBody>, @CurrentUser() u: JwtUser) { return this.svc.updateVendorProfile(+id, b, u); }
+  // ── Party-model depth (master-data audit Phase 4): multi-address / multi-contact / parent company ──
+  @Patch('vendors/:id/parent') @Permissions('md_vendor')
+  setVendorParent(@Param('id') id: string, @Body(new ZodValidationPipe(VendorParentBody)) b: z.infer<typeof VendorParentBody>, @CurrentUser() u: JwtUser) { return this.svc.setVendorParent(+id, b.parent_vendor_id, u); }
+  @Post('vendors/:id/addresses') @Permissions('md_vendor')
+  addVendorAddress(@Param('id') id: string, @Body(new ZodValidationPipe(VendorAddressBody)) b: z.infer<typeof VendorAddressBody>, @CurrentUser() u: JwtUser) { return this.svc.addVendorAddress(+id, b, u); }
+  @Get('vendors/:id/addresses') @Permissions('md_vendor', 'procurement', 'exec')
+  listVendorAddresses(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.listVendorAddresses(+id, u); }
+  @Delete('vendors/:id/addresses/:addressId') @Permissions('md_vendor')
+  deleteVendorAddress(@Param('id') id: string, @Param('addressId') addressId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteVendorAddress(+id, +addressId, u); }
+  @Post('vendors/:id/contacts') @Permissions('md_vendor')
+  addVendorContact(@Param('id') id: string, @Body(new ZodValidationPipe(VendorContactBody)) b: z.infer<typeof VendorContactBody>, @CurrentUser() u: JwtUser) { return this.svc.addVendorContact(+id, b, u); }
+  @Get('vendors/:id/contacts') @Permissions('md_vendor', 'procurement', 'exec')
+  listVendorContacts(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.listVendorContacts(+id, u); }
+  @Delete('vendors/:id/contacts/:contactId') @Permissions('md_vendor')
+  deleteVendorContact(@Param('id') id: string, @Param('contactId') contactId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteVendorContact(+id, +contactId, u); }
   @Post('suppliers/:id/scorecard') @Permissions('procurement')
   scorecard(@Param('id') id: string, @Body(new ZodValidationPipe(ScorecardBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.recomputeScorecard(+id, b.period, u); }
 

@@ -26,6 +26,10 @@ export const customerMaster = pgTable('customer_master', {
   category: text('category'),
   language: text('language').default('th'),
   externalRef: text('external_ref'),
+  // Party-model depth (0272, master-data audit Phase 4) — a subsidiary/branch account can point at its
+  // parent's customer_no for consolidated credit/reporting; self-referencing by customer_no (the natural
+  // key already used everywhere) rather than a numeric FK, since that's how every other lookup here works.
+  parentCustomerNo: text('parent_customer_no'),
   notes: encryptedText('notes'),                   // free-text may hold PII — NOT queried → encrypted at rest
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

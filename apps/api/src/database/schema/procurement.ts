@@ -43,6 +43,11 @@ export const vendors = pgTable('vendors', {
   // Audit hygiene (0270) — the table had no creation trail at all.
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  // Party-model depth (0272, master-data audit Phase 4) — a subsidiary/branch vendor can point at its
+  // parent vendor for consolidated scorecards/reporting. Plain bigint (no inline Drizzle FK), matching the
+  // projects.ts WBS parentId self-reference precedent — a self-referencing FK inside the same table
+  // definition is simplest done this way rather than fighting Drizzle's forward-reference typing.
+  parentVendorId: bigint('parent_vendor_id', { mode: 'number' }),
 });
 
 // ── Phase 16 — Source-to-Pay: RFQ/sourcing, supplier scorecards, 3-way match ──

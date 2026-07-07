@@ -111,6 +111,36 @@ async function main() {
   const cmList = await inj('GET', '/api/customer-master?search=ทดสอบ', admin);
   ok('Customer master: list search finds the created customer with updated fields', (cmList.json.customers ?? []).some((c: any) => c.customer_no === cmNo && c.category === 'Key Account'), `n=${cmList.json.count}`);
 
+  // ── Party-model depth (master-data audit Phase 4) — multi-address / multi-contact / parent company.
+  // customer_master previously carried exactly one scalar address and no contact rows at all. ──
+  const cmParentCreate = await inj('POST', '/api/customer-master', admin, { name: 'บริษัท แม่ จำกัด', kind: 'company' });
+  const cmParentNo = cmParentCreate.json.customer_no as string;
+
+  const addr1 = await inj('POST', `/api/customer-master/${cmNo}/addresses`, admin, { address_type: 'billing', address_line1: '99 ถนนสุขุมวิท', district: 'วัฒนา', province: 'กรุงเทพฯ', postal_code: '10110', is_primary: true });
+  ok('Customer address: add billing address as primary', addr1.status === 201 || addr1.status === 200, `${addr1.status} ${JSON.stringify(addr1.json).slice(0, 150)}`);
+  const addr2 = await inj('POST', `/api/customer-master/${cmNo}/addresses`, admin, { address_type: 'shipping', address_line1: '100 ถนนพระราม 4', is_primary: true });
+  ok('Customer address: add second (shipping) address as primary', addr2.status === 201 || addr2.status === 200, `${addr2.status}`);
+  const addrList = await inj('GET', `/api/customer-master/${cmNo}/addresses`, admin);
+  ok('Customer address: list returns both, only the newest primary', addrList.json.addresses?.length === 2 && addrList.json.addresses.filter((a: any) => a.is_primary).length === 1 && addrList.json.addresses.find((a: any) => a.is_primary)?.address_type === 'shipping', JSON.stringify(addrList.json.addresses));
+  const addrDel = await inj('DELETE', `/api/customer-master/${cmNo}/addresses/${addr1.json.id}`, admin);
+  ok('Customer address: delete the non-primary address', addrDel.status === 200 && addrDel.json.deleted === true, `${addrDel.status}`);
+  const addrDelMissing = await inj('DELETE', `/api/customer-master/${cmNo}/addresses/999999`, admin);
+  ok('Customer address: delete non-existent → 404 ADDRESS_NOT_FOUND', addrDelMissing.status === 404 && addrDelMissing.json.error?.code === 'ADDRESS_NOT_FOUND', `${addrDelMissing.status} ${addrDelMissing.json.error?.code}`);
+
+  const contact1 = await inj('POST', `/api/customer-master/${cmNo}/contacts`, admin, { name: 'คุณสมหญิง', title: 'ผู้จัดการฝ่ายจัดซื้อ', phone: '081-000-0000', is_primary: true });
+  ok('Customer contact: add primary contact', contact1.status === 201 || contact1.status === 200, `${contact1.status} ${JSON.stringify(contact1.json).slice(0, 150)}`);
+  const contactList = await inj('GET', `/api/customer-master/${cmNo}/contacts`, admin);
+  ok('Customer contact: list returns the added contact', contactList.json.contacts?.length === 1 && contactList.json.contacts[0].name === 'คุณสมหญิง', JSON.stringify(contactList.json.contacts));
+  const contactDelMissing = await inj('DELETE', `/api/customer-master/${cmNo}/contacts/999999`, admin);
+  ok('Customer contact: delete non-existent → 404 CONTACT_NOT_FOUND', contactDelMissing.status === 404 && contactDelMissing.json.error?.code === 'CONTACT_NOT_FOUND', `${contactDelMissing.status} ${contactDelMissing.json.error?.code}`);
+
+  const parentSelf = await inj('PATCH', `/api/customer-master/${cmNo}/parent`, admin, { parent_customer_no: cmNo });
+  ok('Customer parent: cannot be its own parent → 400 SELF_PARENT', parentSelf.status === 400 && parentSelf.json.error?.code === 'SELF_PARENT', `${parentSelf.status} ${parentSelf.json.error?.code}`);
+  const parentSet = await inj('PATCH', `/api/customer-master/${cmNo}/parent`, admin, { parent_customer_no: cmParentNo });
+  ok('Customer parent: link to parent company', parentSet.status === 200 && parentSet.json.parent_customer_no === cmParentNo, JSON.stringify(parentSet.json).slice(0, 150));
+  const view360 = await inj('GET', `/api/customer-master/${cmNo}/360`, admin);
+  ok('Customer 360: surfaces addresses/contacts/parent together', view360.json.addresses?.length === 1 && view360.json.contacts?.length === 1 && view360.json.parent?.customer_no === cmParentNo, JSON.stringify({ addr: view360.json.addresses?.length, contacts: view360.json.contacts?.length, parent: view360.json.parent }));
+
   await app.close();
   await pg.close();
 

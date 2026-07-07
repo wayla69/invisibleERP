@@ -646,7 +646,20 @@ approval is required. The same dialog also lets you set the supplier's
 for a reason and immediately prevents new POs/quotes against that vendor
 (see "Screen the vendor" above). Tax ID and credit limit are **not** editable
 here — they stay PII-encrypted / bulk-import-only pending a future dual-control
-design of their own.
+design of their own. The same dialog also has a **รหัสผู้ขายบริษัทแม่ (parent
+vendor ID)** field — link this vendor to its group's parent vendor for
+consolidated spend/reporting (a vendor cannot be its own parent).
+
+### Vendor addresses & contacts
+
+**Screen:** `/inventory/suppliers` — press **ที่อยู่/ผู้ติดต่อ** on a supplier row ·
+**Required permission:** `md_vendor`.
+
+A vendor can carry more than one address (billing / shipping / registered /
+other, one marked **หลัก — primary**) and more than one contact (name, title,
+phone, email), instead of the single scalar address/contact of before. Add or
+delete either from this panel — both save immediately, with no second
+approval (same reasoning as the direct-edit fields above).
 
 ### Supplier scorecards register
 

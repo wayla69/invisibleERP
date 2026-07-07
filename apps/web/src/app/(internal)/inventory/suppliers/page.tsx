@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SearchX, Truck, Landmark, ShieldAlert, Pencil } from 'lucide-react';
+import { SearchX, Truck, Landmark, ShieldAlert, Pencil, MapPin, Contact, Trash2, Building2, Plus } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -25,6 +25,16 @@ interface Supplier {
   Address?: string | null; Rating?: number | string | null; Category?: string | null; Currency?: string | null;
   Lead_Time_Days?: number | null; Notes?: string | null;
   Approval_Status?: string; Blocklisted?: boolean; Blocklist_Reason?: string | null;
+  parent_vendor_id?: number | null;
+}
+
+interface VendorAddress {
+  id: number; address_type: string; address_line1?: string | null; address_line2?: string | null;
+  sub_district?: string | null; district?: string | null; province?: string | null; postal_code?: string | null;
+  is_primary: boolean;
+}
+interface VendorContact {
+  id: number; name: string; title?: string | null; phone?: string | null; email?: string | null; notes?: string | null; is_primary: boolean;
 }
 
 export default function SuppliersPage() {
@@ -36,6 +46,7 @@ export default function SuppliersPage() {
   const [search, setSearch] = useState('');
   const [editingBank, setEditingBank] = useState<Supplier | null>(null);
   const [editingProfile, setEditingProfile] = useState<Supplier | null>(null);
+  const [editingParty, setEditingParty] = useState<Supplier | null>(null);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -115,13 +126,19 @@ export default function SuppliersPage() {
             },
             ...(canEditBank ? [{
               key: 'actions', label: '', sortable: false,
-              render: (r: Supplier) => <Button size="sm" variant="outline" onClick={() => setEditingProfile(r)}><Pencil className="size-4" /> {t('mx.vp_edit')}</Button>,
+              render: (r: Supplier) => (
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setEditingProfile(r)}><Pencil className="size-4" /> {t('mx.vp_edit')}</Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditingParty(r)}><Building2 className="size-4" /> {t('mx.vp_party')}</Button>
+                </div>
+              ),
             }] : []),
           ]}
         />
       )}
       {editingBank && <BankChangeDialog vendor={editingBank} onClose={() => setEditingBank(null)} />}
       {editingProfile && <ProfileDialog vendor={editingProfile} onClose={() => setEditingProfile(null)} />}
+      {editingParty && <VendorPartyPanel vendor={editingParty} onClose={() => setEditingParty(null)} />}
     </ModulePage>
   );
 }
@@ -212,20 +229,28 @@ function ProfileDialog({ vendor, onClose }: { vendor: Supplier; onClose: () => v
     contact: vendor.Contact_Person ?? '', phone: vendor.Phone ?? '', email: vendor.Email ?? '', address: vendor.Address ?? '',
     payment_terms: vendor.Payment_Terms ?? '', lead_time_days: vendor.Lead_Time_Days ?? '', rating: vendor.Rating ?? '',
     category: vendor.Category ?? '', currency: vendor.Currency ?? '', notes: vendor.Notes ?? '',
+    parent_vendor_id: vendor.parent_vendor_id != null ? String(vendor.parent_vendor_id) : '',
   });
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const refresh = () => qc.invalidateQueries({ queryKey: ['suppliers'] });
 
   const save = useMutation({
-    mutationFn: () => api<any>(`/api/procurement/vendors/${vendor.Vendor_ID}/profile`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        contact: form.contact || undefined, phone: form.phone || undefined, email: form.email || undefined, address: form.address || undefined,
-        payment_terms: form.payment_terms || undefined, lead_time_days: form.lead_time_days !== '' ? Number(form.lead_time_days) : undefined,
-        rating: form.rating !== '' ? Number(form.rating) : undefined, category: form.category || undefined,
-        currency: form.currency || undefined, notes: form.notes || undefined,
-      }),
-    }),
+    mutationFn: async () => {
+      const r = await api<any>(`/api/procurement/vendors/${vendor.Vendor_ID}/profile`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          contact: form.contact || undefined, phone: form.phone || undefined, email: form.email || undefined, address: form.address || undefined,
+          payment_terms: form.payment_terms || undefined, lead_time_days: form.lead_time_days !== '' ? Number(form.lead_time_days) : undefined,
+          rating: form.rating !== '' ? Number(form.rating) : undefined, category: form.category || undefined,
+          currency: form.currency || undefined, notes: form.notes || undefined,
+        }),
+      });
+      const prevParent = vendor.parent_vendor_id != null ? String(vendor.parent_vendor_id) : '';
+      if (form.parent_vendor_id !== prevParent) {
+        await api<any>(`/api/procurement/vendors/${vendor.Vendor_ID}/parent`, { method: 'PATCH', body: JSON.stringify({ parent_vendor_id: form.parent_vendor_id ? Number(form.parent_vendor_id) : null }) });
+      }
+      return r;
+    },
     onSuccess: () => { notifySuccess(t('mx.vp_saved')); refresh(); onClose(); },
     onError: (e: any) => notifyError(e.message),
   });
@@ -252,6 +277,9 @@ function ProfileDialog({ vendor, onClose }: { vendor: Supplier; onClose: () => v
           <FormField label={t('mx.vp_f_rating')}><Input type="number" min="0" max="5" step="0.1" value={form.rating} onChange={set('rating')} /></FormField>
           <FormField label={t('mx.vp_f_category')}><Input value={form.category} onChange={set('category')} /></FormField>
           <FormField label={t('mx.vp_f_currency')}><Input value={form.currency} onChange={set('currency')} placeholder="THB" /></FormField>
+          <FormField label={t('mx.vp_f_parent')} hint={t('mx.vp_f_parent_hint')}>
+            <Input type="number" min="1" value={form.parent_vendor_id} onChange={set('parent_vendor_id')} placeholder={String(vendor.Vendor_ID)} />
+          </FormField>
           <FormField label={t('mx.vp_f_notes')} className="sm:col-span-2"><Input value={form.notes} onChange={set('notes')} /></FormField>
           <FormField label={t('mx.vp_col_status')}>
             <Select
@@ -270,6 +298,165 @@ function ProfileDialog({ vendor, onClose }: { vendor: Supplier; onClose: () => v
         <DialogFooter>
           <Button disabled={save.isPending} onClick={() => save.mutate()}>{t('mx.vp_save')}</Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Party-model depth (master-data audit Phase 4) — a vendor can carry more than one address/contact
+// (previously one scalar each). Direct-edit, no maker-checker (mirrors the customer-side pattern).
+function VendorPartyPanel({ vendor, onClose }: { vendor: Supplier; onClose: () => void }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [addingAddress, setAddingAddress] = useState(false);
+  const [addingContact, setAddingContact] = useState(false);
+  const addrQ = useQuery<{ addresses: VendorAddress[] }>({ queryKey: ['vendor-addresses', vendor.Vendor_ID], queryFn: () => api(`/api/procurement/vendors/${vendor.Vendor_ID}/addresses`) });
+  const contactQ = useQuery<{ contacts: VendorContact[] }>({ queryKey: ['vendor-contacts', vendor.Vendor_ID], queryFn: () => api(`/api/procurement/vendors/${vendor.Vendor_ID}/contacts`) });
+  const refreshAddr = () => qc.invalidateQueries({ queryKey: ['vendor-addresses', vendor.Vendor_ID] });
+  const refreshContact = () => qc.invalidateQueries({ queryKey: ['vendor-contacts', vendor.Vendor_ID] });
+
+  const deleteAddress = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/procurement/vendors/${vendor.Vendor_ID}/addresses/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { notifySuccess(t('mx.cm_addr_deleted')); refreshAddr(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const deleteContact = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/procurement/vendors/${vendor.Vendor_ID}/contacts/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { notifySuccess(t('mx.cm_contact_deleted')); refreshContact(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{vendor.Supplier_Name}</DialogTitle>
+          <DialogDescription>{t('mx.vp_party_dialog_desc')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <h4 className="flex items-center gap-1.5 text-sm font-medium"><MapPin className="size-4" /> {t('mx.cm_addresses')}</h4>
+              <Button size="sm" variant="outline" onClick={() => setAddingAddress(true)}><Plus className="size-3.5" /> {t('mx.cm_add_address')}</Button>
+            </div>
+            {(addrQ.data?.addresses ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('mx.cm_no_addresses')}</p>}
+            {(addrQ.data?.addresses ?? []).map((a) => (
+              <div key={a.id} className="flex items-start gap-2 rounded-md border border-border/60 p-2.5 text-sm">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">{t(`mx.cm_addr_type_${a.address_type}` as any)}</Badge>
+                    {a.is_primary && <Badge variant="success" className="text-xs">{t('mx.cm_primary')}</Badge>}
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {[a.address_line1, a.address_line2, a.sub_district, a.district, a.province, a.postal_code].filter(Boolean).join(' ') || '—'}
+                  </div>
+                </div>
+                <Button variant="ghost" size="icon" className="size-7" aria-label={t('mx.cm_delete')} onClick={() => deleteAddress.mutate(a.id)}><Trash2 className="size-4" /></Button>
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <h4 className="flex items-center gap-1.5 text-sm font-medium"><Contact className="size-4" /> {t('mx.cm_contacts')}</h4>
+              <Button size="sm" variant="outline" onClick={() => setAddingContact(true)}><Plus className="size-3.5" /> {t('mx.cm_add_contact')}</Button>
+            </div>
+            {(contactQ.data?.contacts ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('mx.cm_no_contacts')}</p>}
+            {(contactQ.data?.contacts ?? []).map((c) => (
+              <div key={c.id} className="flex items-start gap-2 rounded-md border border-border/60 p-2.5 text-sm">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{c.name}</span>
+                    {c.title && <span className="text-muted-foreground">· {c.title}</span>}
+                    {c.is_primary && <Badge variant="success" className="text-xs">{t('mx.cm_primary')}</Badge>}
+                  </div>
+                  <div className="mt-1 text-muted-foreground">{[c.phone, c.email].filter(Boolean).join(' · ') || '—'}</div>
+                </div>
+                <Button variant="ghost" size="icon" className="size-7" aria-label={t('mx.cm_delete')} onClick={() => deleteContact.mutate(c.id)}><Trash2 className="size-4" /></Button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('fin.cancel')}</Button>
+        </DialogFooter>
+      </DialogContent>
+      {addingAddress && <VendorAddressFormDialog vendorId={vendor.Vendor_ID} onClose={() => setAddingAddress(false)} onSaved={refreshAddr} />}
+      {addingContact && <VendorContactFormDialog vendorId={vendor.Vendor_ID} onClose={() => setAddingContact(false)} onSaved={refreshContact} />}
+    </Dialog>
+  );
+}
+
+function VendorAddressFormDialog({ vendorId, onClose, onSaved }: { vendorId: number; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLang();
+  const [form, setForm] = useState({ address_type: 'other' as 'billing' | 'shipping' | 'registered' | 'other', address_line1: '', address_line2: '', sub_district: '', district: '', province: '', postal_code: '', is_primary: false });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const save = useMutation({
+    mutationFn: () => api<any>(`/api/procurement/vendors/${vendorId}/addresses`, { method: 'POST', body: JSON.stringify(form) }),
+    onSuccess: () => { notifySuccess(t('mx.cm_address_added')); onSaved(); onClose(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>{t('mx.cm_add_address')}</DialogTitle></DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField label={t('mx.cm_col_kind')}>
+            <Select value={form.address_type} onValueChange={(v) => setForm((f) => ({ ...f, address_type: v as typeof form.address_type }))}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="billing">{t('mx.cm_addr_type_billing')}</SelectItem>
+                <SelectItem value="shipping">{t('mx.cm_addr_type_shipping')}</SelectItem>
+                <SelectItem value="registered">{t('mx.cm_addr_type_registered')}</SelectItem>
+                <SelectItem value="other">{t('mx.cm_addr_type_other')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </FormField>
+          <FormField label={t('mx.cm_f_is_primary')}>
+            <Select value={form.is_primary ? '1' : '0'} onValueChange={(v) => setForm((f) => ({ ...f, is_primary: v === '1' }))}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="0">{t('mx.cm_no')}</SelectItem><SelectItem value="1">{t('mx.cm_yes')}</SelectItem></SelectContent>
+            </Select>
+          </FormField>
+          <FormField label={t('mx.cm_f_address_line1')} className="sm:col-span-2"><Input value={form.address_line1} onChange={set('address_line1')} /></FormField>
+          <FormField label={t('mx.cm_f_address_line2')} className="sm:col-span-2"><Input value={form.address_line2} onChange={set('address_line2')} /></FormField>
+          <FormField label={t('mx.cm_f_sub_district')}><Input value={form.sub_district} onChange={set('sub_district')} /></FormField>
+          <FormField label={t('mx.cm_f_district')}><Input value={form.district} onChange={set('district')} /></FormField>
+          <FormField label={t('mx.cm_f_province')}><Input value={form.province} onChange={set('province')} /></FormField>
+          <FormField label={t('mx.cm_f_postal_code')}><Input value={form.postal_code} onChange={set('postal_code')} /></FormField>
+        </div>
+        <DialogFooter><Button disabled={save.isPending} onClick={() => save.mutate()}>{t('mx.cm_save')}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function VendorContactFormDialog({ vendorId, onClose, onSaved }: { vendorId: number; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLang();
+  const [form, setForm] = useState({ name: '', title: '', phone: '', email: '', notes: '', is_primary: false });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const save = useMutation({
+    mutationFn: () => api<any>(`/api/procurement/vendors/${vendorId}/contacts`, { method: 'POST', body: JSON.stringify(form) }),
+    onSuccess: () => { notifySuccess(t('mx.cm_contact_added')); onSaved(); onClose(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>{t('mx.cm_add_contact')}</DialogTitle></DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField label={t('mx.cm_col_name')} required><Input value={form.name} onChange={set('name')} /></FormField>
+          <FormField label={t('mx.cm_f_contact_title')}><Input value={form.title} onChange={set('title')} /></FormField>
+          <FormField label={t('mx.cm_col_phone')}><Input value={form.phone} onChange={set('phone')} /></FormField>
+          <FormField label={t('mx.vp_col_email')}><Input type="email" value={form.email} onChange={set('email')} /></FormField>
+          <FormField label={t('mx.cm_f_is_primary')}>
+            <Select value={form.is_primary ? '1' : '0'} onValueChange={(v) => setForm((f) => ({ ...f, is_primary: v === '1' }))}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="0">{t('mx.cm_no')}</SelectItem><SelectItem value="1">{t('mx.cm_yes')}</SelectItem></SelectContent>
+            </Select>
+          </FormField>
+          <FormField label={t('mx.vp_f_notes')} className="sm:col-span-2"><Input value={form.notes} onChange={set('notes')} /></FormField>
+        </div>
+        <DialogFooter><Button disabled={!form.name || save.isPending} onClick={() => save.mutate()}>{t('mx.cm_save')}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );

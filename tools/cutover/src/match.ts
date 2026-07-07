@@ -228,6 +228,33 @@ async function main() {
     v1Row?.Email === 'v1@example.com' && v1Row?.Currency === 'USD' && near(v1Row?.Rating, 4.5) && v1Row?.Approval_Status === 'approved' && v1Row?.Blocklisted === false,
     JSON.stringify(v1Row).slice(0, 200));
 
+  // ── H4. Party-model depth (master-data audit Phase 4) — vendors previously carried exactly one scalar
+  // address and no contact rows; now multi-address/multi-contact + a self-referencing parent-vendor pointer
+  // for consolidated group spend/reporting. Direct-edit, no maker-checker (no payment-redirection risk). ──
+  const vAddr1 = await inj('POST', `/api/procurement/vendors/${V1}/addresses`, admin, { address_type: 'registered', address_line1: '1 ถนนพหลโยธิน', is_primary: true });
+  ok('Vendor address: add registered address as primary', vAddr1.status === 201 || vAddr1.status === 200, `${vAddr1.status} ${JSON.stringify(vAddr1.json).slice(0, 150)}`);
+  const vAddr2 = await inj('POST', `/api/procurement/vendors/${V1}/addresses`, admin, { address_type: 'shipping', address_line1: '2 ถนนวิภาวดี', is_primary: true });
+  const vAddrList = await inj('GET', `/api/procurement/vendors/${V1}/addresses`, admin);
+  ok('Vendor address: list returns both, only the newest primary', vAddrList.json.addresses?.length === 2 && vAddrList.json.addresses.filter((a: any) => a.is_primary).length === 1 && vAddrList.json.addresses.find((a: any) => a.is_primary)?.address_type === 'shipping', JSON.stringify(vAddrList.json.addresses));
+  const vAddrDel = await inj('DELETE', `/api/procurement/vendors/${V1}/addresses/${vAddr1.json.id}`, admin);
+  ok('Vendor address: delete the non-primary address', vAddrDel.status === 200 && vAddrDel.json.deleted === true, `${vAddrDel.status}`);
+  const vAddrDelMissing = await inj('DELETE', `/api/procurement/vendors/${V1}/addresses/999999`, admin);
+  ok('Vendor address: delete non-existent → 404 ADDRESS_NOT_FOUND', vAddrDelMissing.status === 404 && vAddrDelMissing.json.error?.code === 'ADDRESS_NOT_FOUND', `${vAddrDelMissing.status} ${vAddrDelMissing.json.error?.code}`);
+
+  const vContact1 = await inj('POST', `/api/procurement/vendors/${V1}/contacts`, admin, { name: 'คุณวิชัย', title: 'Sales Manager', phone: '089-000-0000', is_primary: true });
+  ok('Vendor contact: add primary contact', vContact1.status === 201 || vContact1.status === 200, `${vContact1.status} ${JSON.stringify(vContact1.json).slice(0, 150)}`);
+  const vContactList = await inj('GET', `/api/procurement/vendors/${V1}/contacts`, admin);
+  ok('Vendor contact: list returns the added contact', vContactList.json.contacts?.length === 1 && vContactList.json.contacts[0].name === 'คุณวิชัย', JSON.stringify(vContactList.json.contacts));
+  const vContactDelMissing = await inj('DELETE', `/api/procurement/vendors/${V1}/contacts/999999`, admin);
+  ok('Vendor contact: delete non-existent → 404 CONTACT_NOT_FOUND', vContactDelMissing.status === 404 && vContactDelMissing.json.error?.code === 'CONTACT_NOT_FOUND', `${vContactDelMissing.status} ${vContactDelMissing.json.error?.code}`);
+
+  const vParentSelf = await inj('PATCH', `/api/procurement/vendors/${V1}/parent`, admin, { parent_vendor_id: V1 });
+  ok('Vendor parent: cannot be its own parent → 400 SELF_PARENT', vParentSelf.status === 400 && vParentSelf.json.error?.code === 'SELF_PARENT', `${vParentSelf.status} ${vParentSelf.json.error?.code}`);
+  const vParentSet = await inj('PATCH', `/api/procurement/vendors/${V1}/parent`, admin, { parent_vendor_id: VA });
+  ok('Vendor parent: link to parent vendor', vParentSet.status === 200 && vParentSet.json.parent_vendor_id === VA, JSON.stringify(vParentSet.json).slice(0, 150));
+  const vParentRow = (await pg.query(`SELECT parent_vendor_id FROM vendors WHERE id=${V1}`)).rows as any[];
+  ok('Vendor parent: persisted on vendors.parent_vendor_id', Number(vParentRow[0]?.parent_vendor_id) === VA, JSON.stringify(vParentRow[0]));
+
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];
   await runMatch(ap1, poNo, [{ item_id: 'X', qty: 100, unit_price: 10 }]);
