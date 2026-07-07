@@ -78,8 +78,10 @@ test('requisitions: phone renders the PR card list, not the desktop table', asyn
   // <table> (tablet+). At the phone viewport the table must be display:none and the card list must show.
   await expect(page.getByText('คำขอซื้อล่าสุด')).toBeVisible();
   await expect(page.locator('table')).toBeHidden();
-  await expect(page.locator('div.sm\\:hidden').getByText('PR-MOB-001')).toBeVisible();
-  await expect(page.locator('div.sm\\:hidden').getByText('กระดาษ A4 80 แกรม')).toBeVisible();
+  // Scope to the card container (first sm:hidden div) to avoid matching multiple elements
+  const cardList = page.locator('div.sm\\:hidden').first();
+  await expect(cardList.getByText('PR-MOB-001')).toBeVisible();
+  await expect(cardList.getByText('กระดาษ A4 80 แกรม')).toBeVisible();
 });
 
 test('shop: phone shows the pinned bottom checkout bar after adding an item', async ({ page }) => {
@@ -108,7 +110,8 @@ test('approvals: phone renders the pending-approval cards with inline actions, n
   // two always-visible exception-report tables, so scope the hidden-table check to the one holding the
   // pending ref.)
   await expect(page.locator('table', { hasText: 'S-240706-01' })).toBeHidden();
-  const card = page.locator('div.sm\\:hidden');
+  // Scope to the card container (first sm:hidden div) to avoid matching multiple elements
+  const card = page.locator('div.sm\\:hidden').first();
   await expect(card.getByText('S-240706-01')).toBeVisible();
   await expect(card.getByText('REV-13')).toBeVisible();
   await expect(card.getByRole('button', { name: 'อนุมัติ' })).toBeVisible();
