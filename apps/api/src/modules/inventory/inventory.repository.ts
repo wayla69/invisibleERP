@@ -68,8 +68,9 @@ export class InventoryRepository {
 
   async suppliers() {
     return this.db.select({
-      Supplier_ID: vendors.vendorCode, Supplier_Name: vendors.name, Contact_Person: vendors.contact,
+      Vendor_ID: vendors.id, Supplier_ID: vendors.vendorCode, Supplier_Name: vendors.name, Contact_Person: vendors.contact,
       Phone: vendors.phone, Email: vendors.email, Payment_Terms: vendors.paymentTerms,
+      Bank_Name: vendors.bankName, Bank_Account: vendors.bankAccount,
     }).from(vendors).where(eq(vendors.isSupplier, true)).orderBy(vendors.name);
   }
 
