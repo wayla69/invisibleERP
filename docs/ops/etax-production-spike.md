@@ -30,8 +30,9 @@ reconciliation (already done — control **TAX-04**); WHT/ภ.ง.ด. (**TAX-03
 | No-gap running number per seller/month (TIV/ATV) | ✅ EXISTS | `common/doc-number.service.ts` (`nextMonthlyTenant`), `doc_counters_tenant` |
 | Hash-chained tamper journal (RD POS requirement) | ✅ EXISTS | `pos-fiscal/journal.service.ts`, `pos_journal` (REST-02) |
 | ETDA *e-Tax by Email* path (≤30M THB/yr; CC the ETDA timestamp mailbox) | ✅ EXISTS | `tax-docs/etax-email.service.ts`; env `ETAX_TIMESTAMP_EMAIL` + SMTP |
-| SP submission framework (mock + generic `http` POST) | 🟡 PARTIAL | `pos-fiscal/etax.service.ts` (`submitToProvider`); env `ETAX_PROVIDER`/`_URL`/`_TOKEN` |
-| HTML→PDF render (A4 full + 80mm slip) | 🟡 PARTIAL | `tax-docs/tax-docs-pdf.service.ts` (no PDF/A-3) |
+| SP submission framework (mock + pluggable `http` w/ 4 auth schemes + status normalization + bounded retry) | 🟡 PARTIAL | `pos-fiscal/etax-providers.ts` (`resolveEtaxProvider`); env `ETAX_PROVIDER`/`_URL`/`_AUTH_SCHEME`/… — still needs a real SP contract (gap #3) |
+| Submission durability (every attempt persisted, autocommit-safe; retry sweep + operator surface) | ✅ EXISTS | `pos-fiscal/etax.service.ts` (`submit`, `retryFailed`); BI job `etax_submission_retry`; `POST /api/tax/etax/retry-failed` |
+| HTML→PDF render (A4 full + 80mm slip) + PDF/A-3-oriented embedded-XML archival | 🟡 PARTIAL | `tax-docs/tax-docs-pdf.service.ts`; `tax-docs/pdfa3.ts` (`embedEtaxXmlInPdf`), `GET :docNo/etax-pdfa3` — no ICC OutputIntent, not veraPDF-validated (gap #4) |
 | VAT → GL 2100 + ภ.พ.30 reconciliation | ✅ EXISTS | `tax-reports.service.pp30` (TAX-04) |
 
 ## 4. The five remaining gaps (what the spike must close or cost)
@@ -48,12 +49,40 @@ reconciliation (already done — control **TAX-04**); WHT/ภ.ง.ด. (**TAX-03
 2. **A real signing certificate (CA / NRCA-chain) + safe key storage.** `getSigningMaterial()` reads a PEM from env;
    production needs a **CA-issued cert** and the private key in a **KMS/HSM**, not an env var. Lead-time +
    procurement is the long pole.
-3. **A real transmission channel.** Either (a) a **Service Provider** contract (INET / Frank / Leceipt …) —
-   the generic `http` adapter is a drop-in but each SP needs its own auth + payload mapping + status mapping;
-   or (b) commit to the **e-Tax-by-Email** route (only valid ≤30M THB/yr revenue) and **sign** the emailed XML
-   (today it emails the *unsigned* XML).
-4. **PDF/A-3 archival (embedded signed XML).** Current output is HTML→PDF (not PDF/A-3 with XMP + the XML as
-   an embedded attachment). Needed if we deliver a human-readable PDF that also carries the legal XML.
+3. **A real transmission channel — 🟡 PARTIAL (code-side hardening done 2026-07-07, no SP contract yet).**
+   No SP contract exists, so the vendor-specific piece (auth + payload mapping + status mapping for INET /
+   Frank / Leceipt specifically) is still genuinely blocked — nothing here fabricates a vendor API. What's
+   now closed: `submitToProvider` no longer inlines one hard-coded `http` shape — it delegates to a pluggable
+   `etax-providers.ts` (`resolveEtaxProvider`, mirroring `payments/gateways.ts`'s class-per-provider +
+   factory shape) that supports **`ETAX_PROVIDER_AUTH_SCHEME`** = `bearer` (unchanged default, backward
+   compatible with the original `ETAX_PROVIDER_TOKEN`/`_AUTH_HEADER`) / `apikey` / `basic` / `hmac`
+   (`createHmac('sha256', …)` over `${timestamp}.${body}`, mirroring the existing `webhook.service.ts`
+   signing pattern) / `none` — so wiring a real SP is a **config change**, not new code, once a contract
+   exists. Also added: **status-vocabulary normalization** (`accepted`/`success`/`ok`/… → `Accepted`, etc. —
+   passes through anything unrecognized rather than guessing) and a **bounded transient-failure retry**
+   (network error / 5xx only, exponential backoff, `ETAX_PROVIDER_MAX_RETRIES`/`_RETRY_BASE_MS`, env-tunable;
+   a 4xx is never retried — that's a request/config error, not a blip). This is independent of, and much
+   shorter-lived than, the gap-#5 cross-time retry sweep (that handles "the SP was down for an hour"; this
+   handles "one TCP blip mid-request"). Verified in the `etax` cutover harness against a throwaway local
+   stub server (not a real vendor). **Still open:** the actual SP contract/credentials, and — if the e-mail
+   route is chosen instead — signing the emailed XML (today it emails the *unsigned* XML, since ETDA's
+   e-Tax-by-Email scheme timestamps the PDF, not an XML attachment — see `etax-email.service.ts`).
+4. **PDF/A-3 archival (embedded signed XML) — 🟡 PARTIAL (code-level 2026-07-07, not conformance-validated).**
+   New `GET /api/tax-invoices/:docNo/etax-pdfa3` (`pdfa3.ts`, `embedEtaxXmlInPdf`) post-processes the rendered
+   invoice PDF via `pdf-lib` to embed the e-Tax UBL 2.1 XML (signed when a cert is configured, else unsigned)
+   as a named attachment (`AFRelationship: Alternative` — the convention `pdf-lib` itself documents for PDF/A-3,
+   matching how hybrid e-invoicing formats like Factur-X/ZUGFeRD embed XML) plus an XMP metadata packet
+   declaring `pdfaid:part=3`/`conformance=B`. Endpoint fails **cleanly** (503 `PDF_RENDERER_UNAVAILABLE`) rather
+   than serving a broken document when the PDF renderer is down — no HTML fallback, since HTML cannot carry a
+   PDF-embedded attachment. Verified by the dedicated `pdfa3` cutover script via an **independent** check
+   (inflating the PDF's own compressed stream objects with `node:zlib` by hand and searching for the exact XML
+   bytes, rather than trusting `pdf-lib`'s own attachment-reading API — the same "don't self-check" principle
+   as gap #1's `xml-crypto` cross-check). **Explicitly NOT done, and not claimed:** an ICC colour-profile
+   `OutputIntent` (needed for strict PDF/A conformance) and validation against a real PDF/A conformance checker
+   (e.g. veraPDF) — neither is available in this environment. If a real validator later rejects the output for
+   the missing OutputIntent, that is a small, bounded follow-up (embed one standard sRGB ICC profile), not a
+   redesign — see §5 in this doc: whether the RD/SP even requires embedded-XML PDF/A-3 at all is still an open
+   decision, so gold-plating full conformance ahead of that decision was deliberately out of scope here.
 5. **~~Submission durability.~~ ✅ CLOSED (code-level) 2026-07-07.** `EtaxService.submit` now records EVERY
    attempt — Accepted, an explicit SP rejection, or a thrown error (SP unreachable, `ETAX_PROVIDER_URL` not
    configured, etc.) — as a row in `etax_submissions` before rethrowing, and raises an ops alert
@@ -110,9 +139,9 @@ Rough order, **after the cert is in hand** (the cert lead-time itself is the sch
 |---|---|
 | ~~Exclusive XML C14N + sign-path hardening (gap #1)~~ | done — see gap #1 |
 | KMS/HSM key storage + cert wiring (gap #2 code side) | M (2–3 d) |
-| Chosen SP adapter (auth + payload + status map) **or** sign-the-email (gap #3) | M (2–4 d) |
+| Chosen SP adapter — vendor-specific mapping onto the now-generic auth/status scheme, **or** sign-the-email (gap #3) | S–M (1–3 d, down from M–L now the generic adapter + auth schemes exist) |
 | ~~Submission status + retry queue + operator surface (gap #5)~~ | done — see gap #5 |
-| PDF/A-3 (only **if** required by gap #4) | M–L (3–6 d) |
+| PDF/A-3 ICC OutputIntent + veraPDF conformance validation, **only if** required by gap #4's own §5 decision (the XML-embedding + XMP itself is done) | S (1–2 d, down from M–L now the embedding + XMP scaffolding exists) |
 
 ≈ **1.5–2.5 developer-weeks of code** once unblocked — the headline ~200–300 h earlier estimate collapses
 because XAdES signing (with real C14N) + XML + numbering + journal + email + VAT-GL are **already built**.
@@ -124,8 +153,9 @@ The real schedule driver is **external** (cert + SP contract + RD sandbox access
 |---|---|---|
 | CA-cert lead-time | blocks both paths | start procurement **day 1** of the spike |
 | Signature fails the REAL RD/ETDA validator | hard stop | C14N itself is done + independently cross-checked (gap #1); PoC #1 still confirms against the actual validator, not just a library |
-| Vendor lock to one SP | cost / fragility | keep the generic `http` adapter seam; abstract per-SP mapping |
+| Vendor lock to one SP | cost / fragility | **REDUCED** — the adapter now supports 4 configurable auth schemes + status normalization (gap #3, code-level); per-SP mapping is still real work, but no longer coupled to a hard-coded auth shape |
 | ~~Silent submission failure~~ | undelivered legal doc | **CLOSED** — every attempt (success/reject/error) is persisted + retried by the `etax_submission_retry` sweep (gap #5) |
+| PDF/A-3 result rejected by a real validator (no OutputIntent embedded) | rework if PDF/A-3 is required at all | **LOW** — bounded, well-understood follow-up (embed one standard sRGB ICC profile) if §5's own "is it even required" decision comes back yes |
 | Revenue >30M kills Path B | re-plan | confirm the pilot tenant's band up front |
 
 ## 9. Go / No-go criteria
@@ -142,3 +172,4 @@ already deployable) for internal UAT and re-spike when the external blockers cle
 | 0.1 | 2026-06-26 | Platform | Initial spike charter. Current-state verified against the codebase (XAdES signing scaffold now exists; SP submission still mock/http-skeleton; PDF/A-3 absent). Cross-refs: `06-tax-compliance.md` (TAX-01..04), `pos-fiscal/`, `tax-docs/`. |
 | 0.2 | 2026-07-07 | Platform | Gap #1 (Exclusive XML C14N) closed at the code level — `etax-sign.ts` now canonicalizes via `xml-crypto`'s `ExclusiveCanonicalization`, verified against that library's own independent `SignedXml` verifier in the `etax-sign` cutover harness (12 checks, up from 9). Gap #2 (real CA cert + KMS/HSM) is unchanged/still open — no certificate was obtained or fabricated. |
 | 0.3 | 2026-07-07 | Platform | Gap #5 (submission durability) closed at the code level — `EtaxService.submit` persists every attempt (Accepted/Rejected/thrown-error) via the autocommit `PG_CLIENT` so a failure survives the per-request transaction rollback, alerts ops, and is retried by a new idempotent `retryFailed` sweep wired into the BI scheduler (`etax_submission_retry`) plus an on-demand operator endpoint/UI (`POST /api/tax/etax/retry-failed`, `/pos-fiscal` e-Tax tab). `etax` cutover harness extended 9→15 checks. Gaps #2/#3/#4 unchanged/still open. |
+| 0.4 | 2026-07-07 | Platform | Gaps #3 and #4 partially closed at the code level (no SP contract or PDF/A-3 validator was fabricated — both remain genuinely gated on external inputs). Gap #3: `submitToProvider` now delegates to a pluggable `etax-providers.ts` (`resolveEtaxProvider`) supporting 4 auth schemes (bearer/apikey/basic/hmac, env-driven, backward-compatible defaults), status-vocabulary normalization, and a bounded transient-failure retry (network/5xx only, never 4xx) — so wiring a real SP later is a config change. Gap #4: new `GET /api/tax-invoices/:docNo/etax-pdfa3` (`pdfa3.ts`, `embedEtaxXmlInPdf`) embeds the e-Tax XML as a PDF attachment (`AFRelationship: Alternative`) + an XMP packet declaring `pdfaid:part=3`/`conformance=B`; fails cleanly (503) rather than serving a broken doc when the PDF renderer is down; explicitly does NOT embed an ICC OutputIntent or validate against a real conformance checker (veraPDF) — neither is available here, and whether PDF/A-3 is even required is still an open §5 decision. `etax` cutover harness extended 15→21 checks (auth schemes verified against a throwaway local stub, never a real vendor); new dedicated `pdfa3` cutover script (8 checks) verifies the embedding INDEPENDENTLY of `pdf-lib`'s own attachment-reading API (hand-inflates the PDF's compressed streams via `node:zlib` and searches for the exact XML bytes). Control TAX-02 description updated in `build_rcm.py` (RCM regenerated, census unchanged). |

@@ -7,6 +7,7 @@ import { TaxInvoiceService } from './tax-invoice.service';
 import { TaxDocsPdfService } from './tax-docs-pdf.service';
 import { buildEtaxInvoiceXml } from './etax-xml';
 import { getSigningMaterial, signEtaxXml } from './etax-sign';
+import { embedEtaxXmlInPdf } from './pdfa3';
 import { EtaxEmailService } from './etax-email.service';
 import { IssueFullBody, type IssueFullDto } from './dto';
 import { normalizeA4Template, type A4TemplateConfig } from '../../../common/a4-template';
@@ -130,5 +131,28 @@ export class TaxDocsController {
     } else {
       reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
     }
+  }
+
+  // PDF/A-3-oriented archival copy: the same human-readable invoice PDF with the e-Tax UBL 2.1 XML (signed
+  // when a cert is configured, else unsigned) embedded as an attachment — one file that carries both the
+  // legal XML and a readable rendering (docs/ops/etax-production-spike.md gap #4). Requires the PDF renderer
+  // to be available (no HTML fallback here — an HTML file cannot carry a PDF-embedded attachment).
+  @Get(':docNo/etax-pdfa3') @Permissions('ar', 'pos', 'cust_pos')
+  async etaxPdfA3(@Param('docNo') docNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const inv = await this.svc.getByDocNo(u, docNo);
+    const html = inv.type === 'abbreviated' ? this.pdf.abbreviatedTaxInvoiceHtml(inv, await this.fiscalTemplate('tax_invoice_abbreviated'))
+      : (inv.type === 'credit_note' || inv.type === 'debit_note') ? this.pdf.creditDebitNoteHtml(inv)
+      : this.pdf.fullTaxInvoiceHtml(inv, false, await this.fiscalTemplate('tax_invoice_full'));
+    const pdfBytes = await this.pdf.renderToPdf(html, inv.type === 'abbreviated');
+    if (!pdfBytes) {
+      reply.code(503).send({ error: { code: 'PDF_RENDERER_UNAVAILABLE', message: 'PDF renderer unavailable — cannot produce a PDF/A-3 archival copy', messageTh: 'ตัวเรนเดอร์ PDF ไม่พร้อมใช้งาน' } });
+      return;
+    }
+    let xml = buildEtaxInvoiceXml(inv as never);
+    let signed = false;
+    const material = getSigningMaterial();
+    if (material) { xml = signEtaxXml(xml, material); signed = true; }
+    const pdfA3 = await embedEtaxXmlInPdf(pdfBytes, xml, { docNo, signed, sellerName: inv.seller?.name });
+    reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `attachment; filename="${docNo}-pdfa3.pdf"`).header('Content-Length', pdfA3.length).send(pdfA3);
   }
 }
