@@ -663,6 +663,12 @@ approval (same reasoning as the direct-edit fields above). The **จังหว
 (province)** field suggests from the standard 77-province list and is saved in
 its official spelling; the **รหัสไปรษณีย์ (postal code)** must be 5 digits.
 
+The same panel has a **ความสัมพันธ์ (relationships)** section — record links to
+other vendors by type (**บุคคลที่เกี่ยวข้องกัน (related party)**, **บริษัทลูก
+(subsidiary)**, **แฟรนไชส์**, **ผู้รับเหมาช่วง (subcontractor)**, **บริษัทแม่
+(parent)**) by entering the other vendor's ID. The link shows on both vendors;
+a vendor can't relate to itself and the same link can't be added twice.
+
 The same panel has a **ประวัติการแก้ไข (Change history)** section: expand it to see
 who changed what and when — the vendor's creation (onboarding), every field edit
 (old → new), and address/contact changes. Sensitive fields (tax ID, bank account)

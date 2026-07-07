@@ -82,6 +82,12 @@ From the 360° view you can also:
 - Link the customer to a **บริษัทแม่ (parent company)** by its customer number
   (in the edit dialog) — useful for consolidating credit exposure/reporting
   across a corporate group. A customer cannot be its own parent.
+- Record **ความสัมพันธ์ (relationships)** to other customers — pick the type
+  (**Bill-to / Ship-to / Sold-to**, **ผู้ค้ำประกัน (guarantor)**, **บุคคลที่
+  เกี่ยวข้องกัน (related party)** for group/SOX disclosure, **บริษัทลูก
+  (subsidiary)**, **แฟรนไชส์**) and enter the other customer's number. The link
+  shows on *both* customers (as outgoing on one, incoming on the other). A
+  customer can't relate to itself, and the same link can't be added twice.
 
 None of this needs a second approval — it saves immediately.
 

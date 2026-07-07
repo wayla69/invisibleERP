@@ -3,7 +3,8 @@ import { sql, eq, ne, and, desc, asc, isNull, or, ilike, inArray, notInArray, gt
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests, vendorAddresses, vendorContacts, dataChangeLog } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests, vendorAddresses, vendorContacts, dataChangeLog, vendorRelationships } from '../../database/schema';
+import { alias } from 'drizzle-orm/pg-core';
 import { shapeChangeHistory } from '../../common/change-history';
 import { isValidPostalCode, normalizeProvince } from '../../common/thai-address';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -1422,6 +1423,56 @@ export class ProcurementService {
     const rows = await db.select().from(dataChangeLog).where(and(...conds)).orderBy(desc(dataChangeLog.ts)).limit(200);
     return { vendor_id: vendorId, history: shapeChangeHistory(rows), count: rows.length };
   }
+
+  // ── Typed party relationships (master-data audit Phase 8) ────────────────────────────────────────
+  async addVendorRelationship(vendorId: number, dto: { to_vendor_id: number; rel_type: string; note?: string }, user: JwtUser) {
+    const db = this.db;
+    const from = await this.vendorById(vendorId);
+    if (dto.to_vendor_id === vendorId) throw new BadRequestException({ code: 'SELF_RELATION', message: 'A vendor cannot relate to itself', messageTh: 'ผู้ขายไม่สามารถเชื่อมโยงกับตัวเองได้' });
+    const to = await this.vendorById(dto.to_vendor_id);
+    try {
+      const [row] = await db.insert(vendorRelationships).values({
+        tenantId: from.tenantId ?? null, fromVendorId: vendorId, toVendorId: dto.to_vendor_id,
+        relType: dto.rel_type, note: dto.note ?? null, createdBy: user.username,
+      }).returning();
+      return shapeVendorRelationship(row, { vendor_id: dto.to_vendor_id, name: to.name }, 'outgoing');
+    } catch (e) {
+      if (isUniqueViolation(e)) throw new ConflictException({ code: 'RELATION_EXISTS', message: 'This relationship already exists', messageTh: 'มีความสัมพันธ์นี้อยู่แล้ว' });
+      throw e;
+    }
+  }
+
+  async listVendorRelationships(vendorId: number, _user: JwtUser) {
+    const db = this.db;
+    await this.vendorById(vendorId);
+    const toV = alias(vendors, 'to_v');
+    const fromV = alias(vendors, 'from_v');
+    const outgoing = await db.select({ r: vendorRelationships, name: toV.name })
+      .from(vendorRelationships).innerJoin(toV, eq(vendorRelationships.toVendorId, toV.id))
+      .where(eq(vendorRelationships.fromVendorId, vendorId)).orderBy(desc(vendorRelationships.id));
+    const incoming = await db.select({ r: vendorRelationships, name: fromV.name })
+      .from(vendorRelationships).innerJoin(fromV, eq(vendorRelationships.fromVendorId, fromV.id))
+      .where(eq(vendorRelationships.toVendorId, vendorId)).orderBy(desc(vendorRelationships.id));
+    return {
+      vendor_id: vendorId,
+      relationships: [
+        ...outgoing.map((x: any) => shapeVendorRelationship(x.r, { vendor_id: Number(x.r.toVendorId), name: x.name }, 'outgoing')),
+        ...incoming.map((x: any) => shapeVendorRelationship(x.r, { vendor_id: Number(x.r.fromVendorId), name: x.name }, 'incoming')),
+      ],
+    };
+  }
+
+  async deleteVendorRelationship(vendorId: number, relId: number, _user: JwtUser) {
+    const del = await this.db.delete(vendorRelationships)
+      .where(and(eq(vendorRelationships.id, relId), or(eq(vendorRelationships.fromVendorId, vendorId), eq(vendorRelationships.toVendorId, vendorId))))
+      .returning({ id: vendorRelationships.id });
+    if (!del.length) throw new NotFoundException({ code: 'RELATION_NOT_FOUND', message: 'Relationship not found', messageTh: 'ไม่พบความสัมพันธ์นี้' });
+    return { deleted: true };
+  }
+}
+
+function shapeVendorRelationship(r: any, other: { vendor_id: number; name: string }, direction: 'outgoing' | 'incoming') {
+  return { id: Number(r.id), rel_type: r.relType, direction, party: other, note: r.note ?? null, created_by: r.createdBy, created_at: r.createdAt };
 }
 
 function shapeVendorAddress(a: any) {

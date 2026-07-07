@@ -197,6 +197,27 @@ async function main() {
   const unknownProv = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'other', province: 'Springfield' });
   ok('Customer address: an unrecognised province is kept as entered (migration-safe, not rejected)', (unknownProv.status === 201 || unknownProv.status === 200) && unknownProv.json.province === 'Springfield', `province=${unknownProv.json.province}`);
 
+  // ── Typed party relationships (master-data audit Phase 8) — bill-to/guarantor/related-party etc. ──
+  const relA = await inj('POST', '/api/customer-master', admin, { name: 'บริษัท ลูก จำกัด', kind: 'company' });
+  const relANo = relA.json.customer_no as string;
+  const relB = await inj('POST', '/api/customer-master', admin, { name: 'บริษัท ผู้ค้ำ จำกัด', kind: 'company' });
+  const relBNo = relB.json.customer_no as string;
+  const selfRel = await inj('POST', `/api/customer-master/${relANo}/relationships`, admin, { to_customer_no: relANo, rel_type: 'related_party' });
+  ok('Customer relationship: cannot relate to itself → 400 SELF_RELATION', selfRel.status === 400 && selfRel.json.error?.code === 'SELF_RELATION', `${selfRel.status} ${selfRel.json.error?.code}`);
+  const relAdd = await inj('POST', `/api/customer-master/${relANo}/relationships`, admin, { to_customer_no: relBNo, rel_type: 'guarantor', note: 'ค้ำประกันเครดิต' });
+  ok('Customer relationship: add a typed relationship (guarantor)', (relAdd.status === 201 || relAdd.status === 200) && relAdd.json.rel_type === 'guarantor' && relAdd.json.party?.customer_no === relBNo, JSON.stringify(relAdd.json).slice(0, 140));
+  const relDup = await inj('POST', `/api/customer-master/${relANo}/relationships`, admin, { to_customer_no: relBNo, rel_type: 'guarantor' });
+  ok('Customer relationship: duplicate (same from/to/type) → 409 RELATION_EXISTS', relDup.status === 409 && relDup.json.error?.code === 'RELATION_EXISTS', `${relDup.status} ${relDup.json.error?.code}`);
+  const relListA = await inj('GET', `/api/customer-master/${relANo}/relationships`, admin);
+  ok('Customer relationship: A lists it as OUTGOING (A → B guarantor)', (relListA.json.relationships ?? []).some((r: any) => r.direction === 'outgoing' && r.rel_type === 'guarantor' && r.party.customer_no === relBNo), JSON.stringify(relListA.json.relationships));
+  const relListB = await inj('GET', `/api/customer-master/${relBNo}/relationships`, admin);
+  ok('Customer relationship: B sees the same link as INCOMING (from A)', (relListB.json.relationships ?? []).some((r: any) => r.direction === 'incoming' && r.rel_type === 'guarantor' && r.party.customer_no === relANo), JSON.stringify(relListB.json.relationships));
+  const relId = relAdd.json.id as number;
+  const relDelMissing = await inj('DELETE', `/api/customer-master/${relANo}/relationships/999999`, admin);
+  ok('Customer relationship: delete non-existent → 404 RELATION_NOT_FOUND', relDelMissing.status === 404 && relDelMissing.json.error?.code === 'RELATION_NOT_FOUND', `${relDelMissing.status} ${relDelMissing.json.error?.code}`);
+  const relDel = await inj('DELETE', `/api/customer-master/${relANo}/relationships/${relId}`, admin);
+  ok('Customer relationship: delete removes it from both sides', relDel.status === 200 && (await inj('GET', `/api/customer-master/${relBNo}/relationships`, admin)).json.relationships.length === 0, `${relDel.status}`);
+
   await app.close();
   await pg.close();
 

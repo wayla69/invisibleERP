@@ -83,6 +83,12 @@ const VendorContactBody = z.object({
 });
 const VendorParentBody = z.object({ parent_vendor_id: z.number().int().positive().nullable() });
 const VendorMergeBody = z.object({ duplicate_vendor_id: z.number().int().positive() });
+const VENDOR_REL_TYPES = ['related_party', 'subsidiary', 'franchisee', 'subcontractor', 'parent', 'other'] as const;
+const VendorRelationshipBody = z.object({
+  to_vendor_id: z.number().int().positive(),
+  rel_type: z.enum(VENDOR_REL_TYPES).default('related_party'),
+  note: z.string().optional(),
+});
 // Vendor bank-detail maker-checker (0270) — stages a change; never applied directly.
 const VendorBankChangeBody = z.object({ bank_name: z.string().optional(), bank_account: z.string().optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
@@ -239,6 +245,12 @@ export class ProcurementController {
   listVendorContacts(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.listVendorContacts(+id, u); }
   @Get('vendors/:id/history') @Permissions('md_vendor', 'procurement', 'exec')
   vendorHistory(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.vendorHistory(+id, u); }
+  @Post('vendors/:id/relationships') @Permissions('md_vendor')
+  addVendorRelationship(@Param('id') id: string, @Body(new ZodValidationPipe(VendorRelationshipBody)) b: z.infer<typeof VendorRelationshipBody>, @CurrentUser() u: JwtUser) { return this.svc.addVendorRelationship(+id, b, u); }
+  @Get('vendors/:id/relationships') @Permissions('md_vendor', 'procurement', 'exec')
+  listVendorRelationships(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.listVendorRelationships(+id, u); }
+  @Delete('vendors/:id/relationships/:relId') @Permissions('md_vendor')
+  deleteVendorRelationship(@Param('id') id: string, @Param('relId') relId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteVendorRelationship(+id, +relId, u); }
   @Delete('vendors/:id/contacts/:contactId') @Permissions('md_vendor')
   deleteVendorContact(@Param('id') id: string, @Param('contactId') contactId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteVendorContact(+id, +contactId, u); }
   // ── Match-merge / DQM (master-data audit Phase 5): detect + merge duplicate vendors ──

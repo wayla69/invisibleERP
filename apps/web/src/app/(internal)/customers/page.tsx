@@ -14,6 +14,9 @@ import { StateView } from '@/components/state-view';
 import { FormField } from '@/components/form-field';
 import { ChangeHistorySection } from '@/components/change-history-section';
 import { ProvinceInput } from '@/components/province-input';
+import { PartyRelationshipsSection } from '@/components/party-relationships';
+
+const CUSTOMER_REL_TYPES = ['bill_to', 'ship_to', 'sold_to', 'guarantor', 'related_party', 'subsidiary', 'franchisee', 'other'] as const;
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -353,6 +356,15 @@ function Customer360Panel({ customerNo, onClose }: { customerNo: string; onClose
                   </div>
                 ))}
               </div>
+              <PartyRelationshipsSection
+                listUrl={`/api/customer-master/${customerNo}/relationships`}
+                addUrl={`/api/customer-master/${customerNo}/relationships`}
+                deleteBase={`/api/customer-master/${customerNo}/relationships`}
+                queryKey={['customer-relationships', customerNo]}
+                relTypes={CUSTOMER_REL_TYPES}
+                targetPlaceholder={t('mx.rel_target_customer')}
+                buildBody={(target, relType) => ({ to_customer_no: target, rel_type: relType })}
+              />
               <ChangeHistorySection url={`/api/customer-master/${customerNo}/history`} queryKey={['customer-history', customerNo]} />
             </div>
           )}
