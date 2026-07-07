@@ -28,29 +28,83 @@ export class ImageFetchService {
     }
   }
 
-  // Common product names translated to English (Thai → English mappings)
-  private readonly thaiToEnglish: Record<string, string> = {
-    // Electronics
-    แล็ปท็อป: 'laptop',
-    'แล็บท็อป': 'laptop',
-    คอมพิวเตอร์: 'computer',
-    จอภาพ: 'monitor',
-    'จออ': 'monitor',
-    เมาส์: 'mouse',
-    คีย์บอร์ด: 'keyboard',
-    อุปกรณ์: 'device',
-    อุปกรณ์ส่ง: 'equipment',
-    // Office
-    โต๊ะ: 'desk',
-    เก้าอี้: 'chair',
-    ตู้: 'cabinet',
-    // General
-    ชุด: 'set',
-    ร่ม: 'umbrella',
-    กระเป๋า: 'bag',
-    กล่อง: 'box',
-    ถุง: 'bag',
-  };
+  // Thai product/ingredient terms → English search terms. Thai text has no spaces between
+  // compound words (e.g. "ซอสสไปซีมิโสะ" is one unbroken string), so this is matched by
+  // substring scan (longest-first, non-overlapping), not word-splitting.
+  private readonly thaiTerms: ReadonlyArray<readonly [string, string]> = [
+    // Electronics / office (checked first since some are longer compounds)
+    ['แล็ปท็อป', 'laptop'],
+    ['แล็บท็อป', 'laptop'],
+    ['คอมพิวเตอร์', 'computer'],
+    ['จอภาพ', 'monitor'],
+    ['คีย์บอร์ด', 'keyboard'],
+    ['เมาส์', 'mouse'],
+    ['โต๊ะ', 'desk'],
+    ['เก้าอี้', 'chair'],
+    ['ตู้', 'cabinet'],
+    ['กระเป๋า', 'bag'],
+    ['กล่อง', 'box'],
+    ['ถุง', 'bag'],
+    ['ร่ม', 'umbrella'],
+    ['กระดาษ', 'paper'],
+    ['ปากกา', 'pen'],
+    ['ดินสอ', 'pencil'],
+    // Sauces / condiments (food & kitchen catalog)
+    ['สไปซีมิโสะ', 'spicy miso'],
+    ['มิโสะ', 'miso'],
+    ['สไปซี', 'spicy'],
+    ['โซยุ', 'soy sauce'],
+    ['ซีอิ๊ว', 'soy sauce'],
+    ['น้ำปลา', 'fish sauce'],
+    ['น้ำส้มสายชู', 'vinegar'],
+    ['ซอส', 'sauce'],
+    ['พริกไทย', 'pepper'],
+    ['พริก', 'chili'],
+    ['กระเทียม', 'garlic'],
+    ['หอมแดง', 'shallot'],
+    ['น้ำมันหอย', 'oyster sauce'],
+    ['น้ำมันงา', 'sesame oil'],
+    ['น้ำมัน', 'oil'],
+    ['น้ำตาล', 'sugar'],
+    ['เกลือ', 'salt'],
+    ['แป้ง', 'flour'],
+    ['ข้าว', 'rice'],
+    ['เส้น', 'noodles'],
+    ['ไข่', 'egg'],
+    ['นม', 'milk'],
+    ['เนย', 'butter'],
+    ['ผัก', 'vegetable'],
+    ['ผลไม้', 'fruit'],
+    ['เนื้อ', 'meat'],
+    ['หมู', 'pork'],
+    ['ไก่', 'chicken'],
+    ['กุ้ง', 'shrimp'],
+    ['ปลา', 'fish'],
+  ];
+
+  // Greedy longest-match, non-overlapping scan over Thai compound text — collects up to 3
+  // translated terms so a multi-part product name (e.g. ซอสสไปซีมิโสะ) yields a compound
+  // search query ("spicy miso sauce") instead of failing to match at all.
+  private translateThai(description: string): string {
+    const matched: string[] = [];
+    const consumed = new Array(description.length).fill(false);
+
+    for (const [thai, english] of [...this.thaiTerms].sort((a, b) => b[0].length - a[0].length)) {
+      let searchFrom = 0;
+      let idx: number;
+      while ((idx = description.indexOf(thai, searchFrom)) !== -1 && matched.length < 3) {
+        const overlaps = consumed.slice(idx, idx + thai.length).some(Boolean);
+        if (!overlaps) {
+          matched.push(english);
+          for (let i = idx; i < idx + thai.length; i++) consumed[i] = true;
+        }
+        searchFrom = idx + thai.length;
+      }
+      if (matched.length >= 3) break;
+    }
+
+    return matched.join(' ');
+  }
 
   private extractSearchTerms(description: string): string {
     if (!description?.trim()) return '';
@@ -59,14 +113,13 @@ export class ImageFetchService {
     // Check if it's Thai text
     const thaiPattern = /[฀-๿]/;
     if (thaiPattern.test(trimmed)) {
-      // For Thai text, try to translate common words or use first word
-      const words = trimmed.split(/[\s,]+/);
-      for (const word of words) {
-        const translated = this.thaiToEnglish[word.toLowerCase()];
-        if (translated) return translated;
-      }
-      // If no translation found, use first word anyway
-      return words[0] ?? '';
+      const translated = this.translateThai(trimmed);
+      if (translated) return translated;
+      // No known term matched — do NOT fall back to the raw Thai word: Wikimedia Commons has
+      // almost no Thai-tagged content, so a raw-Thai search reliably returns an unrelated
+      // "closest text match" result rather than no result. Signal "no good search term" so the
+      // caller skips straight to the local placeholder instead of an actively misleading photo.
+      return '';
     }
 
     // For English, filter out generic/stopwords and use meaningful terms
@@ -107,10 +160,18 @@ export class ImageFetchService {
         query?: { search?: Array<{ title: string }> };
       };
 
-      if (!data.query?.search?.[0]) return '';
+      // Only accept a hit whose title actually shares a meaningful word with the search term —
+      // Commons free-text search will otherwise happily return its "closest" match (a totally
+      // unrelated travel/landscape photo) rather than no result, which is worse than no image.
+      const queryWords = searchTerm.split(/[\s+]+/).map(w => w.toLowerCase()).filter(w => w.length > 2);
+      const hit = data.query?.search?.find(r => {
+        const title = r.title.toLowerCase();
+        return queryWords.some(w => title.includes(w));
+      });
+      if (!hit) return '';
 
-      // Get image details from the first search result
-      const fileName = encodeURIComponent(data.query.search[0].title);
+      // Get image details from the matched search result
+      const fileName = encodeURIComponent(hit.title);
       const fileUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=File:${fileName}&prop=imageinfo&iiprop=url&format=json`;
 
       const fileController = new AbortController();
@@ -143,26 +204,39 @@ export class ImageFetchService {
     return '';
   }
 
-  // Fallback: Generate a placeholder image with the item name
-  // Uses a placeholder service like Placeholder.com or PlaceholderImage
-  async generatePlaceholder(itemDescription: string): Promise<string> {
-    if (!itemDescription?.trim()) return '';
-    try {
-      // Use picsum.photos as a fallback (public domain photos)
-      // Hash the item description to get a stable ID
-      let hash = 0;
-      for (let i = 0; i < itemDescription.length; i++) {
-        const char = itemDescription.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash = hash & hash; // Convert to 32bit integer
-      }
-      const imageId = Math.abs(hash) % 1000;
-      const placeholderUrl = `https://picsum.photos/400/300?random=${imageId}`;
-      return await this.urlToDataUrl(placeholderUrl);
-    } catch (error) {
-      console.error('Placeholder generation failed:', error);
+  // Fallback: generate a placeholder LOCALLY (an SVG initials tile), never a real photo — a real
+  // photo (even a "random public-domain" one) reads as the actual product image and misleads the
+  // user, whereas a colored initials tile is unambiguously a placeholder. Stable per item
+  // (color + initials derived from a hash of the description) and has no network dependency.
+  private hashString(s: string): number {
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) {
+      hash = (hash << 5) - hash + s.charCodeAt(i);
+      hash = hash & hash; // Convert to 32bit integer
     }
-    return '';
+    return Math.abs(hash);
+  }
+
+  private escapeXml(s: string): string {
+    return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c] ?? c));
+  }
+
+  async generatePlaceholder(itemDescription: string): Promise<string> {
+    const description = itemDescription?.trim();
+    if (!description) return '';
+
+    const hash = this.hashString(description);
+    const hue = hash % 360;
+    const background = `hsl(${hue}, 55%, 45%)`;
+    const initials = this.escapeXml(Array.from(description).slice(0, 2).join('').toUpperCase());
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">
+      <rect width="400" height="300" fill="${background}"/>
+      <text x="200" y="150" font-family="sans-serif" font-size="96" fill="white" fill-opacity="0.85"
+        text-anchor="middle" dominant-baseline="central">${initials}</text>
+    </svg>`;
+
+    return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
   }
 
   // Main method: Try to fetch image with fallbacks
