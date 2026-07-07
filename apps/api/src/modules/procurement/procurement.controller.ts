@@ -129,6 +129,19 @@ export class ProcurementController {
   @Get('catalog/items/:itemId/image') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
   catalogItemImage(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.catalogItemImage(u, itemId); }
 
+  // Populate product images for catalog items — fetches images from the internet based on item descriptions
+  // and stores them as data URLs. Gated to md_item duty (master-data admin). Optionally filters by item IDs.
+  @Post('catalog/populate-images') @Permissions('md_item')
+  populateItemImages(@Body() b: { item_ids?: string[] }) { return this.svc.populateItemImages(b?.item_ids); }
+
+  // Fetch image for a single item from the internet and return as data URL
+  @Get('catalog/items/:itemId/fetch-image') @Permissions('md_item')
+  async fetchItemImage(@Param('itemId') itemId: string) { return { image_data_url: await this.svc.fetchItemImage(itemId) }; }
+
+  // Store a fetched image for an item
+  @Post('catalog/items/:itemId/store-image') @Permissions('md_item')
+  storeItemImage(@Param('itemId') itemId: string, @Body() b: { data_url: string }) { return this.svc.storeItemImage(itemId, b.data_url); }
+
   // Vendor search for the PR→PO panel (pick a real supplier from the master).
   @Get('vendors/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
   searchVendors(@Query('q') q: string, @Query('limit') limit?: string) { return this.svc.searchVendors(q ?? '', limit ? Number(limit) : undefined); }
