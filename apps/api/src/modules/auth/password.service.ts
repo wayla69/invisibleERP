@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { scrypt, randomBytes, timingSafeEqual, createHash, type ScryptOptions } from 'node:crypto';
+import { scrypt, randomBytes, timingSafeEqual, type ScryptOptions } from 'node:crypto';
 
 // promisify(scrypt) resolves to the no-options overload, so wrap manually to pass cost parameters + maxmem.
 function scryptAsync(password: string, salt: string, keylen: number, options: ScryptOptions): Promise<Buffer> {
@@ -24,10 +24,10 @@ const LEGACY_N = 16384; // params of the pre-hardening `scrypt$salt$hash` format
  * Password hashing — scrypt (built-in, no native deps).
  * Hash format (current):  scrypt$<N>$<r>$<p>$<saltHex>$<hashHex>   — parameters are self-describing, so the
  *   work factor can be raised later and old hashes still verify (and are transparently rehashed on login).
- * Back-compat verified (both flagged needsRehash → upgraded on next successful login):
- *   - scrypt$<saltHex>$<hashHex>        legacy scrypt at N=16384
- *   - <64-hex>                          legacy unsalted SHA-256 from the V1 user_store (kept ONLY so an
- *                                       un-migrated account can still log in once to be upgraded; see note).
+ * Back-compat: a legacy parameterized-less scrypt hash (scrypt$<saltHex>$<hashHex>, N=16384) still verifies
+ * and is flagged needsRehash → upgraded to the current format on next successful login.
+ * The pre-V2 unsalted-SHA-256 hash (a bare 64-hex value) is NO LONGER accepted (weak-hash sink, 4.5) — such
+ * an account must be reset by an admin.
  * (Production target remains argon2id — swap the implementation behind this interface without touching callers.)
  */
 @Injectable()
@@ -39,12 +39,11 @@ export class PasswordService {
   }
 
   async verify(password: string, stored: string): Promise<{ ok: boolean; needsRehash: boolean }> {
-    // legacy: unsalted SHA-256 hex (64 chars) from the V1 user_store.make_hash. Trivially crackable on a DB
-    // dump — kept verifiable ONLY so a dormant legacy account can authenticate once and be force-upgraded.
-    if (/^[a-f0-9]{64}$/i.test(stored)) {
-      const legacy = createHash('sha256').update(password).digest('hex');
-      return { ok: timingSafeEqualHex(legacy, stored), needsRehash: true };
-    }
+    // 4.5 — the pre-V2 unsalted SHA-256 login path (V1 user_store, a 64-hex value) is REMOVED. Hashing a
+    // password with unsalted SHA-256 is a weak-hash sink (CodeQL js/insufficient-password-hash) and trivially
+    // crackable on a DB dump. A dormant legacy account can no longer authenticate on the weak hash — it must
+    // be reset by an admin (must_change_password). Reject WITHOUT computing any weak hash.
+    if (/^[a-f0-9]{64}$/i.test(stored)) return { ok: false, needsRehash: false };
     const parts = stored.split('$');
     // current: scrypt$N$r$p$salt$hash
     if (parts[0] === 'scrypt' && parts.length === 6) {
@@ -94,14 +93,4 @@ export class PasswordService {
     }
     return { ok: false, needsRehash: false };
   }
-
-  /** legacy hasher (สำหรับ ETL/test เปรียบเทียบ) */
-  legacySha256(password: string): string {
-    return createHash('sha256').update(password).digest('hex');
-  }
-}
-
-function timingSafeEqualHex(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }

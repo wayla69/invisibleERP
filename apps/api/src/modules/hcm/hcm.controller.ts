@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { HcmService, type TimesheetDto, type LeaveDto } from './hcm.service';
 
@@ -9,6 +10,7 @@ const LeaveBody = z.object({ emp_code: z.string().min(1), leave_type: z.string()
 
 @Controller('api/hcm')
 @Permissions('exec', 'users', 'creditors')
+@RequiresSuite('hcm')
 export class HcmController {
   constructor(private readonly svc: HcmService) {}
 

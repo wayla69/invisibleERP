@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, eq, gte, lt, asc, desc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
-import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes } from '../../../database/schema';
+import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes, vendors } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import { PND_LABELS } from '../documents/wht-rates';
 import { currentTenantStore } from '../../../common/tenant-context';
@@ -41,13 +41,37 @@ export class TaxReportsService {
   // รายงานภาษีซื้อ (input VAT) — from AP bills (AP is tenant-global, exec/creditors only)
   async inputVat(month: number, year: number) {
     const db = this.db; const { start, end, period } = this.win(month, year);
+    // 5.3 — RD รายงานภาษีซื้อ requires the SUPPLIER'S 13-digit Tax ID on every line. Join the vendor master
+    // (vendors.taxId is encryptedText → transparently decrypted on read) so it is populated, not null. VAT is
+    // taken from the recorded vatAmount (an explicit 0 = exempt/zero-rated/non-VAT purchase, correctly NOT
+    // claimed); only a NULL vatAmount (unposted/legacy bill with no recorded VAT) is estimated at 7/107 and
+    // FLAGGED (vat_estimated) so the row is visibly not RD-filable as-is rather than silently over-claiming.
     const rows = await db.select({
       date: apTransactions.invoiceDate, doc_no: apTransactions.txnNo, invoice_no: apTransactions.invoiceNo,
-      vendor_name: apTransactions.vendorName, amount: apTransactions.amount,
-      vat: sql<string>`coalesce(${apTransactions.vatAmount}, round(${apTransactions.amount}*7.0/107.0,2))`,
-    }).from(apTransactions).where(and(isNotNull(apTransactions.invoiceDate), gte(apTransactions.invoiceDate, start), lt(apTransactions.invoiceDate, end))).orderBy(asc(apTransactions.invoiceDate), asc(apTransactions.txnNo));
-    const out = rows.map((r: any) => ({ date: r.date, doc_no: r.doc_no, invoice_no: r.invoice_no, vendor_name: r.vendor_name, vendor_tax_id: null, base: round2(n(r.amount) - n(r.vat)), vat: n(r.vat) }));
-    return { report: 'input_vat', month, year, period, rows: out, totals: { base: round2(out.reduce((a: number, r: any) => a + r.base, 0)), vat: round2(out.reduce((a: number, r: any) => a + r.vat, 0)), count: out.length } };
+      vendor_name: apTransactions.vendorName, vendor_tax_id: vendors.taxId,
+      amount: apTransactions.amount, vat_raw: apTransactions.vatAmount,
+    }).from(apTransactions)
+      .leftJoin(vendors, eq(apTransactions.vendorId, vendors.id))
+      .where(and(isNotNull(apTransactions.invoiceDate), gte(apTransactions.invoiceDate, start), lt(apTransactions.invoiceDate, end)))
+      .orderBy(asc(apTransactions.invoiceDate), asc(apTransactions.txnNo));
+    const out = rows.map((r: any) => {
+      const estimated = r.vat_raw == null;
+      const vat = estimated ? round2(n(r.amount) * 7 / 107) : n(r.vat_raw);
+      const vat_type = estimated ? 'estimated' : (vat === 0 ? 'exempt_or_zero' : 'standard');
+      const vendor_tax_id = r.vendor_tax_id ? String(r.vendor_tax_id) : null;
+      return { date: r.date, doc_no: r.doc_no, invoice_no: r.invoice_no, vendor_name: r.vendor_name, vendor_tax_id, base: round2(n(r.amount) - vat), vat, vat_type, vat_estimated: estimated };
+    });
+    return {
+      report: 'input_vat', month, year, period, rows: out,
+      totals: {
+        base: round2(out.reduce((a: number, r: any) => a + r.base, 0)),
+        vat: round2(out.reduce((a: number, r: any) => a + r.vat, 0)),
+        count: out.length,
+        // RD filing-readiness flags (do not affect the numbers): rows an auditor would reject.
+        missing_tax_id: out.filter((r: any) => !r.vendor_tax_id).length,
+        estimated_rows: out.filter((r: any) => r.vat_estimated).length,
+      },
+    };
   }
 
   // ภ.พ.30 — output − input, reconciled to GL account 2100 movement

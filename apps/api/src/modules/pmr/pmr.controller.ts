@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { PmrService, type PmrSubmitDto, type BoqChangeDto } from './pmr.service';
 
@@ -29,6 +30,7 @@ const BoqChangeBody = z.object({
 // within budget it routes to a project-tagged PR, over budget it parks pending an authoriser (maker-checker +
 // one-tap LINE approval) whose approval auto-drafts a project-tagged PO.
 @Controller('api/pmr')
+@RequiresSuite('projects')
 export class PmrController {
   constructor(private readonly svc: PmrService) {}
 

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { RoutingService, type CreateRoutingDto } from './routing.service';
 import { ShopFloorService, type ReportOpDto } from './shopfloor.service';
@@ -24,6 +25,7 @@ const CapacityBody = z.object({ demand: z.array(z.object({ item_id: z.string(), 
 // ── Routings ──
 @Controller('api/routings')
 @Permissions(...PERMS)
+@RequiresSuite('manufacturing')
 export class RoutingController {
   constructor(private readonly svc: RoutingService) {}
   @Post() create(@Body(new ZodValidationPipe(RoutingBody)) b: CreateRoutingDto, @CurrentUser() u: JwtUser) { return this.svc.createRouting(b, u); }
@@ -34,6 +36,7 @@ export class RoutingController {
 // ── Shop-floor (operations on a work order) ──
 @Controller('api/manufacturing')
 @Permissions(...PERMS)
+@RequiresSuite('manufacturing')
 export class ShopFloorController {
   constructor(private readonly svc: ShopFloorService) {}
   @Post('work-orders/:woNo/routing/:routingCode') generate(@Param('woNo') woNo: string, @Param('routingCode') rc: string, @CurrentUser() u: JwtUser) { return this.svc.generate(woNo, rc, u); }
@@ -44,6 +47,7 @@ export class ShopFloorController {
 // ── Quality ──
 @Controller('api/quality')
 @Permissions(...PERMS)
+@RequiresSuite('manufacturing')
 export class QualityController {
   constructor(private readonly svc: QualityService) {}
   @Post('inspect') inspect(@Body(new ZodValidationPipe(InspectBody)) b: InspectDto, @CurrentUser() u: JwtUser) { return this.svc.inspect(b, u); }
@@ -53,6 +57,7 @@ export class QualityController {
 // ── MRP ──
 @Controller('api/mrp')
 @Permissions('warehouse', 'planner', 'exec')
+@RequiresSuite('manufacturing')
 export class MrpController {
   constructor(private readonly svc: MrpService) {}
   @Post('run') run(@Body(new ZodValidationPipe(MrpBody)) b: MrpRunDto, @CurrentUser() u: JwtUser) { return this.svc.run(b, u); }
@@ -72,6 +77,7 @@ const ScheduleBody = z.object({
 
 @Controller('api/work-centers')
 @Permissions('bom_master', 'warehouse', 'planner', 'exec')
+@RequiresSuite('manufacturing')
 export class WorkCenterController {
   constructor(private readonly svc: ApsService) {}
   @Post() upsert(@Body(new ZodValidationPipe(WorkCenterBody)) b: WorkCenterDto, @CurrentUser() u: JwtUser) { return this.svc.upsertWorkCenter(b, u); }
@@ -80,6 +86,7 @@ export class WorkCenterController {
 
 @Controller('api/aps')
 @Permissions('bom_master', 'warehouse', 'planner', 'exec')
+@RequiresSuite('manufacturing')
 export class ApsController {
   constructor(private readonly svc: ApsService) {}
   // Finite-capacity schedule: sequence routing operations onto work centres (per-op start/finish, dispatch, makespan, late).

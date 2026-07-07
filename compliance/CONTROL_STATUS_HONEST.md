@@ -10,6 +10,12 @@
 
 ## 1. We are NOT "audit-ready" — and we should stop saying it
 
+> **Enforced (3.6):** a CI guard `tools/ci/check-overclaims.mjs` now fails the build if a bare "audit-ready"
+> / "NASDAQ-ready" / "SOC 2 certified" / "100% compliant" (etc.) reappears in `compliance/**` or `docs/**`
+> without an honest qualifier (a negation, the ≥1-quarter-operating-evidence definition, or a dated target).
+> This file is exempt (it discusses the retraction). So the retraction below cannot silently regress in a
+> future doc edit.
+
 "Audit-ready" implies controls are designed, operating, evidenced over time, and externally testable today.
 That is not true and should not be claimed. The accurate statement is:
 

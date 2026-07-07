@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, UseGuards, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards, HttpCode, Header } from '@nestjs/common';
 import { z } from 'zod';
 import { Public, CurrentUser, NoTx, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -6,6 +6,7 @@ import { PublicApiGuard, Scopes } from './public-api.guard';
 import { PublicApiService } from './public-api.service';
 import { PublicLoyaltyService } from './public-loyalty.service';
 import { buildOpenApi } from './openapi';
+import { renderApiReferenceHtml } from './api-reference';
 
 const EnrollBody = z.object({ name: z.string().optional(), phone: z.string().optional(), card_no: z.string().optional(), email: z.string().optional(), birthday: z.string().optional(), marketing_opt_in: z.boolean().optional() })
   .refine((d) => d.phone != null || d.card_no != null || d.email != null || d.name != null, { message: 'at least one identifier required' });
@@ -42,6 +43,16 @@ export class PublicApiController {
   @NoTx()
   openapi() {
     return buildOpenApi();
+  }
+
+  // Human-facing, self-contained HTML reference for the same curated contract (2.12 — developer portal).
+  // No external assets (CSP-safe, offline); the machine-readable spec stays at /api/v1/openapi.json.
+  @Get('docs')
+  @Public()
+  @NoTx()
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  docs() {
+    return renderApiReferenceHtml();
   }
 
   // ── Key identity (valid key, no specific scope) ─────────────────────

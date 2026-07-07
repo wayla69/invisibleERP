@@ -271,3 +271,12 @@ Create & role-change run through `AdminUsersService` → **same SoD checks** as 
 - **Page-only totals** (`/api/finance/ap|ar` รวมเฉพาะหน้า) — คงพฤติกรรมหรือเพิ่ม `grandTotal` แยก field (อย่าเปลี่ยนความหมาย field เดิมเงียบ ๆ)
 - **Supplier match by name OR id** (`/api/inventory/suppliers/{id}` drill-down) — คงตรรกะจน schema consolidate supplier/creditor เสร็จ
 - **เลขเอกสารทุกชนิด** ออกผ่าน `DocNumberService` (sequence) แต่ string ที่คืนต้องตรงรูปแบบเดิม (ดู [docs/03](03-database-schema.md) §doc-numbering)
+
+## Public API developer portal (2.12)
+
+The public REST API (`/api/v1`) publishes a curated, hand-built OpenAPI 3.1 contract (decoupled from
+internal controller churn):
+- **`GET /api/v1/openapi.json`** — machine-readable spec (`@Public`, open).
+- **`GET /api/v1/docs`** — self-contained HTML API reference rendered from the same doc (`@Public`); no
+  external assets (CSP-safe under helmet, works offline), no `@fastify/static`/Swagger-UI dependency. Source:
+  `modules/public-api/api-reference.ts` (renderer) + `openapi.ts` (contract). ToE: `cutover/api-docs` (8/8).

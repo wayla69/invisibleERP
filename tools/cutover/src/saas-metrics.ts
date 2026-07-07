@@ -47,8 +47,8 @@ async function main() {
   await app.getHttpAdapter().getInstance().ready();
   await app.get(BillingService).seedPlans(); // free/starter/pro/enterprise
 
-  // Subscriptions: 2 Active Pro (2900) + 1 Active Starter (990) → MRR 6790; 1 Canceled Pro (this month);
-  // 1 Trialing Free.
+  // Subscriptions: 2 Active Pro (9900) + 1 Active Starter (1900) → MRR 21700; 1 Canceled Pro (this month);
+  // 1 Trialing Free. (Prices per 1.3: Standard 1,900 / Professional 9,900.)
   await db.insert(s.subscriptions).values([
     { tenantId: t1, planCode: 'pro', status: 'Active' },
     { tenantId: t2, planCode: 'pro', status: 'Active' },
@@ -74,12 +74,12 @@ async function main() {
   const r = await inj('GET', '/api/billing/saas-metrics', token);
   const m = r.json;
 
-  ok('MRR = active Pro×2 (2900) + Starter (990) = 6,790', near(m.revenue?.mrr, 6790), `mrr=${m.revenue?.mrr}`);
-  ok('ARR = MRR × 12 = 81,480', near(m.revenue?.arr, 81480), `arr=${m.revenue?.arr}`);
-  ok('ARPU = MRR / active (6790/3 = 2,263.33)', near(m.revenue?.arpu, 2263.33), `arpu=${m.revenue?.arpu}`);
+  ok('MRR = active Pro×2 (9900) + Starter (1900) = 21,700', near(m.revenue?.mrr, 21700), `mrr=${m.revenue?.mrr}`);
+  ok('ARR = MRR × 12 = 260,400', near(m.revenue?.arr, 260400), `arr=${m.revenue?.arr}`);
+  ok('ARPU = MRR / active (21700/3 = 7,233.33)', near(m.revenue?.arpu, 7233.33), `arpu=${m.revenue?.arpu}`);
   ok('subscription counts: 3 active, 1 trialing, 1 canceled', m.subscriptions?.active === 3 && m.subscriptions?.trialing === 1 && m.subscriptions?.canceled === 1, JSON.stringify(m.subscriptions));
   ok('churn: 1 canceled in last 30 days + rate computed', m.churn?.canceled_30d === 1 && m.churn?.churn_rate_30d_pct > 0, JSON.stringify(m.churn));
-  ok('by-plan mix: Pro has 2 active = 5,800 MRR', (m.by_plan ?? []).find((p: any) => p.plan === 'pro')?.mrr === 5800, JSON.stringify((m.by_plan ?? []).find((p: any) => p.plan === 'pro')));
+  ok('by-plan mix: Pro has 2 active = 19,800 MRR', (m.by_plan ?? []).find((p: any) => p.plan === 'pro')?.mrr === 19800, JSON.stringify((m.by_plan ?? []).find((p: any) => p.plan === 'pro')));
   ok('DAU ≥ 3 (u1/u2/u3 active today), MAU > DAU (u4 only in 30d)', m.engagement?.dau >= 3 && m.engagement?.mau >= 4 && m.engagement?.mau >= m.engagement?.dau, JSON.stringify(m.engagement));
   ok('stickiness DAU/MAU is a 0–100 %', m.engagement?.stickiness_pct >= 0 && m.engagement?.stickiness_pct <= 100, `stick=${m.engagement?.stickiness_pct}`);
 
