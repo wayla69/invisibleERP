@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException, BadRequestException, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq, and, sql, isNull } from 'drizzle-orm';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
@@ -14,8 +14,6 @@ import { isPlatformAdmin } from '../../common/decorators';
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger('AuthService');
-
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly jwt: JwtService,
@@ -41,12 +39,8 @@ export class AuthService {
     };
     if (!row) throw fail();
 
-    const { ok, needsRehash, legacyWeak } = await this.passwords.verify(password, row.passwordHash);
+    const { ok, needsRehash } = await this.passwords.verify(password, row.passwordHash);
     if (!ok) throw fail();
-    // 4.5 — surface any account still on the weak legacy SHA-256 hash so operators can migrate + then set
-    // LEGACY_SHA256_LOGIN=off. It is upgraded to scrypt immediately below (needsRehash), so this fires at
-    // most once per account.
-    if (legacyWeak) this.logger.warn(`legacy SHA-256 password used for '${row.username}' — upgraded to scrypt. Set LEGACY_SHA256_LOGIN=off once all accounts are migrated.`);
     // A deactivated account (e.g. SCIM-deprovisioned) cannot authenticate, even with valid credentials.
     if (row.isActive === false)
       throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
@@ -133,7 +127,7 @@ export class AuthService {
     return { res: { token, username: row.username, role, customer_name: customerName, must_change_password: !!row.mustChangePassword, must_setup_mfa: mustSetupMfa }, perms };
   }
 
-  // ── ITGC-AC-07 — refresh-token rotation ──────────────────────────────────────────────────────────
+  // ── ITGC-AC-07 — refresh-token rotation ────────────────────────────────────────────────
   // Access JWTs are short-lived (default 1h). A long-lived opaque refresh token (default 7d) lets the client
   // mint a fresh access token silently. We store only the sha256 hash (never the token itself).
   private static readonly REFRESH_TTL_MS = Number(process.env.REFRESH_TOKEN_TTL_DAYS ?? 7) * 86400_000;
@@ -231,7 +225,7 @@ export class AuthService {
     return { ok: true, username: row.username };
   }
 
-  // ── ITGC-AC-15: session revocation ───────────────────────────────────────────
+  // ── ITGC-AC-15: session revocation ──────────────────────────────────
   // Revoke a single session: add the presented token's jti to the denylist (the guard rejects it thereafter).
   async revokeToken(token: string | undefined) {
     if (!token) return { revoked: false };
@@ -250,7 +244,7 @@ export class AuthService {
     return { username: norm, revoked_all: true };
   }
 
-  // ── ITGC-AC-06: TOTP enrolment lifecycle ────────────────────────────────────
+  // ── ITGC-AC-06: TOTP enrolment lifecycle ──────────────────────────────
   // Generate a pending secret (stored ENCRYPTED; not yet active). Returns the otpauth URI for a QR code.
   async mfaSetup(username: string): Promise<{ secret: string; otpauth_url: string }> {
     const [row] = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
