@@ -661,6 +661,13 @@ phone, email), instead of the single scalar address/contact of before. Add or
 delete either from this panel — both save immediately, with no second
 approval (same reasoning as the direct-edit fields above).
 
+The same panel has a **ประวัติการแก้ไข (Change history)** section: expand it to see
+who changed what and when — the vendor's creation (onboarding), every field edit
+(old → new), and address/contact changes. Sensitive fields (tax ID, bank account)
+show that they changed but mask the value. The history is recorded automatically by
+the database and cannot be edited or deleted, so it stands as audit evidence of every
+vendor-master change.
+
 ### Find & merge duplicate vendors
 
 **Screen:** `/inventory/suppliers` — press **ตรวจข้อมูลซ้ำ (Find duplicates)** ·

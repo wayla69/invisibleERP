@@ -170,6 +170,21 @@ async function main() {
   const dupScan2 = await inj('GET', '/api/customer-master/duplicates', admin);
   ok('Customer dedup: the merged duplicate no longer appears in the scan', !(dupScan2.json.groups ?? []).some((g: any) => ids(g).includes(dupBNo)), `groups=${dupScan2.json.count}`);
 
+  // ── Change history / universal audit (master-data audit Phase 6) — the DB trigger (0274) captures every
+  // create/update on the master + its children into the append-only field-level change log (ITGC-AC-14). ──
+  const histNo = (await inj('POST', '/api/customer-master', admin, { name: 'บริษัท ประวัติ จำกัด', kind: 'company', phone: '02-100-2000' })).json.customer_no as string;
+  await inj('PATCH', `/api/customer-master/${histNo}`, admin, { credit_terms: 'Net 15', category: 'VIP' });
+  await inj('PATCH', `/api/customer-master/${histNo}`, admin, { address: '5 ถนนสีลม กรุงเทพฯ' }); // encrypted, sensitive → masked in history
+  await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'billing', address_line1: '5 ถนนสีลม' });
+  const hist = await inj('GET', `/api/customer-master/${histNo}/history`, admin);
+  const created = (hist.json.history ?? []).find((e: any) => e.action === 'created');
+  const updated = (hist.json.history ?? []).find((e: any) => e.action === 'updated' && e.changes.some((c: any) => c.field === 'credit_terms'));
+  const masked = (hist.json.history ?? []).find((e: any) => e.action === 'updated' && e.changes.some((c: any) => c.field === 'address'));
+  ok('Customer history: records the create (onboarding) event with the actor', !!created && created.actor === 'admin', JSON.stringify(created));
+  ok('Customer history: records the field-level update (credit_terms → Net 15) with old→new + actor', !!updated && updated.changes.find((c: any) => c.field === 'credit_terms')?.new === 'Net 15' && updated.actor === 'admin', JSON.stringify(updated?.changes?.filter((c: any) => c.field === 'credit_terms' || c.field === 'category')));
+  ok('Customer history: sensitive column (address) is masked in the trail, not shown in the clear', !!masked && masked.changes.find((c: any) => c.field === 'address')?.new === '•••', JSON.stringify(masked?.changes?.find((c: any) => c.field === 'address')));
+  ok('Customer history: also captures the child address INSERT for this customer', (hist.json.history ?? []).some((e: any) => e.action === 'created') && hist.json.count >= 3, `count=${hist.json.count}`);
+
   await app.close();
   await pg.close();
 

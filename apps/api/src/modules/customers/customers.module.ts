@@ -1,14 +1,15 @@
 import { Inject, Injectable, Module, Controller, Get, Post, Patch, Delete, Param, Query, Body, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { z } from 'zod';
-import { sql, eq, and, ne, or, ilike, desc } from 'drizzle-orm';
+import { sql, eq, and, ne, or, ilike, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, arInvoices, tenants, customerMaster, posMembers, customerAddresses, customerContacts } from '../../database/schema';
+import { custPosSales, arInvoices, tenants, customerMaster, posMembers, customerAddresses, customerContacts, dataChangeLog } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
 import { DocNumberService } from '../../common/doc-number.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
+import { shapeChangeHistory } from '../../common/change-history';
 
 @Injectable()
 export class CustomersService {
@@ -353,6 +354,24 @@ export class CustomerMasterService {
     }
     return { survivor_no: survivorNo, merged_no: duplicateNo, merged: true };
   }
+
+  // ── Change history (master-data audit Phase 6) — the append-only field-level trail (ITGC-AC-14) for this
+  // customer + its address/contact children, captured by the DB trigger (0274). Read-only, tenant-scoped.
+  async history(customerNo: string, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    const cid = String(c.id);
+    const conds = [
+      or(
+        and(eq(dataChangeLog.tableName, 'customer_master'), eq(dataChangeLog.rowPk, cid)),
+        and(inArray(dataChangeLog.tableName, ['customer_addresses', 'customer_contacts']),
+          sql`coalesce(${dataChangeLog.newValue}->>'customer_id', ${dataChangeLog.oldValue}->>'customer_id') = ${cid}`),
+      ),
+    ];
+    if (user.tenantId != null) conds.push(eq(dataChangeLog.tenantRef, user.tenantId));
+    const rows = await db.select().from(dataChangeLog).where(and(...conds)).orderBy(desc(dataChangeLog.ts)).limit(200);
+    return { customer_no: customerNo, history: shapeChangeHistory(rows), count: rows.length };
+  }
 }
 
 function shapeAddress(a: any) {
@@ -390,6 +409,7 @@ export class CustomerMasterController {
   merge(@Param('survivorNo') no: string, @Body(new ZodValidationPipe(MergeCustomerBody)) b: z.infer<typeof MergeCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.merge(no, b.duplicate_customer_no, u); }
   @Get(':customerNo') get(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.get(no, u); }
   @Get(':customerNo/360') view360(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.view360(no, u); }
+  @Get(':customerNo/history') history(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.history(no, u); }
   @Patch(':customerNo') update(@Param('customerNo') no: string, @Body(new ZodValidationPipe(UpdateCustomerBody)) b: z.infer<typeof UpdateCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.update(no, b, u); }
   @Patch(':customerNo/link') link(@Param('customerNo') no: string, @Body(new ZodValidationPipe(LinkCustomerBody)) b: z.infer<typeof LinkCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.link(no, b, u); }
   @Patch(':customerNo/parent') setParent(@Param('customerNo') no: string, @Body(new ZodValidationPipe(ParentBody)) b: z.infer<typeof ParentBody>, @CurrentUser() u: JwtUser) { return this.svc.setParent(no, b, u); }
