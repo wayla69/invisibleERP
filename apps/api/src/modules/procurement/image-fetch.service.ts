@@ -48,7 +48,9 @@ export class ImageFetchService {
       clearTimeout(timeoutId);
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data: any = await response.json();
+      const data = (await response.json()) as {
+        query?: { search?: Array<{ title: string }> };
+      };
 
       if (!data.query?.search?.[0]) return '';
 
@@ -67,9 +69,16 @@ export class ImageFetchService {
       clearTimeout(fileTimeoutId);
 
       if (!fileResponse.ok) return '';
-      const fileData: any = await fileResponse.json();
+      interface WikimediaPageInfo {
+        imageinfo?: Array<{ url?: string }>;
+      }
+      const fileData = (await fileResponse.json()) as {
+        query?: { pages?: Record<string, WikimediaPageInfo> };
+      };
 
-      const pages = Object.values(fileData.query.pages) as any[];
+      const pages = Object.values(
+        (fileData.query?.pages ?? {}) as Record<string, WikimediaPageInfo>,
+      );
       if (pages[0]?.imageinfo?.[0]?.url) {
         return await this.urlToDataUrl(pages[0].imageinfo[0].url);
       }
