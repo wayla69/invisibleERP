@@ -900,6 +900,24 @@ async function main() {
   const itemGet = (await inj('GET', '/api/item-setup/items/DETLOC', invmgr)).json;
   ok('Setup: item-master fields round-trip on GET', itemGet.barcode === '8850000000012' && near(itemGet.unit_price, 25) && near(itemGet.holding_cost, 0.5), JSON.stringify(itemGet).slice(0, 150));
 
+  // ── Item lifecycle + relationships (master-data audit Phase 10) — DETLOC/CATITEM both seeded above. ──
+  const setStat = await inj('PATCH', '/api/item-setup/items/DETLOC/status', invmgr, { status: 'discontinued', superseded_by: 'CATITEM' });
+  ok('Item lifecycle: mark DETLOC discontinued + point superseded_by at CATITEM', setStat.status === 200 && setStat.json?.status === 'discontinued' && setStat.json?.superseded_by != null, JSON.stringify({ st: setStat.json?.status, sup: setStat.json?.superseded_by }));
+  const relSelf = await inj('POST', '/api/item-setup/items/DETLOC/relationships', invmgr, { to_item_id: 'DETLOC', rel_type: 'substitute' });
+  ok('Item relationship: cannot relate to itself → 400 SELF_RELATION', relSelf.status === 400 && relSelf.json?.error?.code === 'SELF_RELATION', `${relSelf.status} ${relSelf.json?.error?.code}`);
+  const relAdd = await inj('POST', '/api/item-setup/items/DETLOC/relationships', invmgr, { to_item_id: 'CATITEM', rel_type: 'substitute', note: 'ใช้แทนกันได้' });
+  ok('Item relationship: add a typed relationship (substitute → CATITEM)', (relAdd.status === 201 || relAdd.status === 200) && relAdd.json?.rel_type === 'substitute' && relAdd.json?.party?.item_id === 'CATITEM', JSON.stringify(relAdd.json).slice(0, 140));
+  const relDup = await inj('POST', '/api/item-setup/items/DETLOC/relationships', invmgr, { to_item_id: 'CATITEM', rel_type: 'substitute' });
+  ok('Item relationship: duplicate (same from/to/type) → 409 RELATION_EXISTS', relDup.status === 409 && relDup.json?.error?.code === 'RELATION_EXISTS', `${relDup.status} ${relDup.json?.error?.code}`);
+  const relListFrom = await inj('GET', '/api/item-setup/items/DETLOC/relationships', invmgr);
+  ok('Item relationship: DETLOC lists it as OUTGOING', (relListFrom.json?.relationships ?? []).some((r: any) => r.direction === 'outgoing' && r.rel_type === 'substitute' && r.party.item_id === 'CATITEM'), JSON.stringify(relListFrom.json?.relationships));
+  const relListTo = await inj('GET', '/api/item-setup/items/CATITEM/relationships', invmgr);
+  ok('Item relationship: CATITEM sees the same link as INCOMING (from DETLOC)', (relListTo.json?.relationships ?? []).some((r: any) => r.direction === 'incoming' && r.party.item_id === 'DETLOC'), JSON.stringify(relListTo.json?.relationships));
+  const relDelMissing = await inj('DELETE', '/api/item-setup/items/DETLOC/relationships/999999', invmgr);
+  ok('Item relationship: delete non-existent → 404 RELATION_NOT_FOUND', relDelMissing.status === 404 && relDelMissing.json?.error?.code === 'RELATION_NOT_FOUND', `${relDelMissing.status} ${relDelMissing.json?.error?.code}`);
+  const relDel = await inj('DELETE', `/api/item-setup/items/DETLOC/relationships/${relAdd.json.id}`, invmgr);
+  ok('Item relationship: delete removes it from both sides', relDel.status === 200 && (await inj('GET', '/api/item-setup/items/CATITEM/relationships', invmgr)).json.relationships.length === 0, `${relDel.status}`);
+
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).
   await db.insert(s.itemCosting).values({ tenantId: invTid, itemId: 'COSTITEM', method: 'AVG' }).onConflictDoNothing();

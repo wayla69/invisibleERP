@@ -4,6 +4,7 @@ export * from './tenants';
 export * from './branch';
 export * from './users';
 export * from './inventory';
+export * from './item-relationships';
 export * from './sales';
 export * from './procurement';
 export * from './vendor-bank-change';
