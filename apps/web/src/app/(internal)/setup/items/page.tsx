@@ -1,13 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { Boxes, Search, Save } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Boxes, Search, Save, GitMerge, Copy } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useMe } from '@/lib/auth';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -67,6 +69,19 @@ export default function ItemPostingSetupPage() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  // Match-merge / DQM (master-data audit Phase 11). Detection is open to setup users; the merge itself is
+  // gated server-side to the platform owner (items are a shared cross-tenant master), so the merge button
+  // only renders for a god (`me.is_platform_owner`) — a non-god sees the review queue but no merge action.
+  const me = useMe();
+  const qc = useQueryClient();
+  const [showDupes, setShowDupes] = useState(false);
+  const dupes = useQuery<{ groups: any[]; count: number }>({ queryKey: ['item-duplicates'], queryFn: () => api('/api/item-setup/items-duplicates'), enabled: showDupes });
+  const merge = useMutation({
+    mutationFn: ({ survivor, duplicate }: { survivor: string; duplicate: string }) => api<any>('/api/item-setup/items-merge', { method: 'POST', body: JSON.stringify({ survivor_item_id: survivor, duplicate_item_id: duplicate }) }),
+    onSuccess: () => { notifySuccess(t('mx.item_merged')); dupes.refetch(); qc.invalidateQueries({ queryKey: ['item-duplicates'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const categories = cats.data?.categories ?? [];
   const assetCategories = assetCats.data?.categories ?? [];
 
@@ -80,7 +95,50 @@ export default function ItemPostingSetupPage() {
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('st.sitm_search_ph')} onKeyDown={(e) => { if (e.key === 'Enter' && search.trim()) load.mutate(search.trim()); }} />
             <Button disabled={!search.trim() || load.isPending} onClick={() => load.mutate(search.trim())}><Search className="size-4" /> {t('st.sitm_search_btn')}</Button>
           </div>
+          <Button variant="outline" size="sm" className="w-fit" onClick={() => setShowDupes((v) => !v)}><Copy className="size-4" /> {t('mx.item_dedup_title')}</Button>
         </Card>
+
+        {showDupes && (
+          <Card className="max-w-4xl gap-3 p-5 text-sm">
+            <div>
+              <h3 className="text-base font-semibold">{t('mx.item_dedup_title')}</h3>
+              <p className="text-muted-foreground">{t('mx.item_dedup_desc')}</p>
+            </div>
+            {dupes.isLoading ? <p className="text-muted-foreground">…</p> : (dupes.data?.groups.length ?? 0) === 0 ? (
+              <p className="py-4 text-center text-muted-foreground">{t('mx.item_dedup_none')}</p>
+            ) : (
+              <div className="grid max-h-[55vh] gap-3 overflow-y-auto">
+                {dupes.data!.groups.map((g) => (
+                  <Card key={g.primary.item_id} className="gap-2 p-3">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="success" className="text-xs">{t('mx.item_dedup_keep')}</Badge>
+                      <span className="font-medium">{g.primary.item_description || g.primary.item_id}</span>
+                      <span className="text-muted-foreground">{g.primary.item_id}</span>
+                    </div>
+                    <div className="grid gap-2">
+                      {g.duplicates.map((d: any) => (
+                        <div key={d.item_id} className="flex items-center gap-2 rounded-md border border-border/60 p-2">
+                          <div className="flex-1">
+                            <div className="font-medium">{d.item_description || d.item_id} <span className="font-normal text-muted-foreground">{d.item_id}</span></div>
+                            <div className="mt-0.5 flex flex-wrap gap-1">
+                              {d.reasons.map((r: string) => <Badge key={r} variant="secondary" className="text-xs">{t(`mx.item_dedup_reason_${r}` as any)}</Badge>)}
+                              <Badge variant="outline" className="text-xs">{Math.round(d.score * 100)}%</Badge>
+                            </div>
+                          </div>
+                          {me.data?.is_platform_owner && (
+                            <Button size="sm" variant="outline" disabled={merge.isPending} onClick={() => { if (window.confirm(t('mx.item_merge_confirm', { dup: d.item_id, keep: g.primary.item_id }))) merge.mutate({ survivor: g.primary.item_id, duplicate: d.item_id }); }}>
+                              <GitMerge className="size-4" /> {t('mx.item_merge')}
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
 
         {form && (
           <Card className="max-w-4xl gap-4 p-5">

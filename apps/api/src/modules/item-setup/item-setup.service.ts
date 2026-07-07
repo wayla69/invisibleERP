@@ -1,10 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
-import { and, asc, desc, eq, or } from 'drizzle-orm';
+import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { and, asc, desc, eq, ne, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { itemCategories, taxCodes, items, accounts, locations, itemRelationships } from '../../database/schema';
 import { isUniqueViolation } from '../../common/db-error';
-import type { JwtUser } from '../../common/decorators';
+import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
+import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
 
 // Item-posting SETUP master data (docs/33 PR3, GL-21). Maintains the account/tax profile that the
 // AccountDeterminationService resolves at posting time: item categories, tax codes, and the per-item override.
@@ -232,6 +233,63 @@ export class ItemSetupService {
     return { deleted: true };
   }
 
+  // ── Match-merge / DQM (master-data audit Phase 11) ───────────────────────────────────────────────
+  // Detect probable duplicate items in the shared catalogue: exact barcode match plus fuzzy description
+  // similarity (app-side trigram — pg_trgm isn't enabled here). `items` is a global master (no tenant_id),
+  // so this scans the whole catalogue. Read-only review queue for the merge step below.
+  async findDuplicateItems(_user: JwtUser) {
+    const rows = await this.db.select().from(items).where(ne(items.status, 'merged')).orderBy(desc(items.id)).limit(2000);
+    const used = new Set<number>();
+    const groups: any[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const a = rows[i]; if (!a || used.has(Number(a.id))) continue;
+      const dups: any[] = [];
+      for (let j = i + 1; j < rows.length; j++) {
+        const b = rows[j]; if (!b || used.has(Number(b.id))) continue;
+        const reasons: string[] = [];
+        if (a.barcode && b.barcode && normalizeKey(a.barcode) === normalizeKey(b.barcode)) reasons.push('barcode');
+        const score = nameSimilarity(a.itemDescription, b.itemDescription);
+        if (score >= 0.6) reasons.push('description');
+        if (reasons.length) { dups.push({ ...shapeItem(b), score: Math.round(score * 100) / 100, reasons }); used.add(Number(b.id)); }
+      }
+      if (dups.length) { used.add(Number(a.id)); groups.push({ primary: shapeItem(a), duplicates: dups }); }
+    }
+    return { groups, count: groups.length };
+  }
+
+  // Merge a duplicate item INTO a survivor: repoint the duplicate's child rows (by the TEXT item_id key) to
+  // the survivor, drop the duplicate's advisory relationships, fill any blank survivor field from the
+  // duplicate (survivorship), and soft-retire the duplicate (status='merged' + merged_into/by/at). Atomic — a
+  // unique-key collision rolls back and surfaces MERGE_CONFLICT. Because a merge rewrites transactions across
+  // EVERY tenant (items are shared), it is gated to the platform owner (god); a per-tenant Admin is rejected.
+  async mergeItems(survivorItemId: string, duplicateItemId: string, user: JwtUser) {
+    if (!isPlatformAdmin(user.username)) throw new ForbiddenException({ code: 'ITEM_MERGE_HQ_ONLY', message: 'Items are a shared master — only the platform owner may merge them', messageTh: 'สินค้าเป็นข้อมูลกลาง — เฉพาะผู้ดูแลแพลตฟอร์มเท่านั้นที่รวมได้' });
+    if (survivorItemId === duplicateItemId) throw new BadRequestException({ code: 'SELF_MERGE', message: 'Cannot merge an item into itself', messageTh: 'ไม่สามารถรวมสินค้าเข้ากับตัวเองได้' });
+    const survivor = await this.itemRow(survivorItemId);
+    const dup = await this.itemRow(duplicateItemId);
+    if (dup.status === 'merged') throw new BadRequestException({ code: 'ALREADY_MERGED', message: 'Duplicate is already merged', messageTh: 'สินค้ารายการนี้ถูกรวมไปแล้ว' });
+    try {
+      await this.db.transaction(async (tx: any) => {
+        await tx.execute(sql`SELECT md_merge_repoint_text('item_id', 'items', ${survivor.itemId}, ${dup.itemId})`);
+        // re-parent any successor pointers that named the duplicate as their replacement
+        await tx.update(items).set({ supersededBy: Number(survivor.id) }).where(eq(items.supersededBy, Number(dup.id)));
+        // drop the duplicate's advisory relationships (bigint item refs, so untouched by the text repoint)
+        await tx.delete(itemRelationships).where(or(eq(itemRelationships.fromItemId, Number(dup.id)), eq(itemRelationships.toItemId, Number(dup.id))));
+        const fill: Record<string, unknown> = {};
+        const pick = (k: string, s: unknown, d: unknown) => { if ((s === null || s === undefined || s === '') && d !== null && d !== undefined && d !== '') fill[k] = d; };
+        pick('itemDescription', survivor.itemDescription, dup.itemDescription); pick('barcode', survivor.barcode, dup.barcode);
+        pick('uom', survivor.uom, dup.uom); pick('baseUom', survivor.baseUom, dup.baseUom); pick('category', survivor.category, dup.category);
+        pick('categoryId', survivor.categoryId, dup.categoryId); pick('temperatureType', survivor.temperatureType, dup.temperatureType);
+        if (Object.keys(fill).length) await tx.update(items).set(fill).where(eq(items.id, Number(survivor.id)));
+        await tx.update(items).set({ status: 'merged', mergedInto: Number(survivor.id), mergedBy: user.username, mergedAt: new Date() }).where(eq(items.id, Number(dup.id)));
+      });
+    } catch (e) {
+      if (isUniqueViolation(e)) throw new ConflictException({ code: 'MERGE_CONFLICT', message: 'Survivor and duplicate both own a row with the same key — resolve manually', messageTh: 'สินค้าทั้งสองมีรายการที่ซ้ำกัน กรุณาแก้ไขก่อนรวม' });
+      throw e;
+    }
+    return { survivor_item_id: survivorItemId, merged_item_id: duplicateItemId, merged: true };
+  }
+
   // ── Warehouse (location) account defaults — the lowest determination tier (docs/33 PR5) ──
   async listWarehouses(_user: JwtUser) {
     const rows = await this.db.select().from(locations).orderBy(asc(locations.locationId));
@@ -285,6 +343,7 @@ function shapeItem(i: any) {
     min_order_qty: n(i.minOrderQty), order_multiple: n(i.orderMultiple), order_cost: n(i.orderCost), holding_cost: n(i.holdingCost),
     is_fixed_asset: i.isFixedAsset === true, default_asset_category_id: i.defaultAssetCategoryId != null ? Number(i.defaultAssetCategoryId) : null,
     status: i.status ?? 'active', superseded_by: i.supersededBy != null ? Number(i.supersededBy) : null,
+    merged_into: i.mergedInto != null ? Number(i.mergedInto) : null,
   };
 }
 

@@ -189,6 +189,15 @@ visible only to your own company, and removing a link removes it for you only.
 Both status and relationships are change-audited. (You can't relate an item to
 itself, and a duplicate link is rejected.)
 
+The screen also has a **ค้นหาสินค้าซ้ำ (Find duplicate items)** button that opens
+a review queue of probable duplicate items — grouped when they share a barcode or
+have a very similar description. Because the item catalogue is **shared across all
+companies**, actually *merging* two items (which moves every transaction and the
+history from the duplicate onto the item you keep, then retires the duplicate) is
+reserved for the **platform owner**; everyone else sees the review queue but not
+the merge button. A merge cannot be undone, and if the two items own conflicting
+records it is refused so you can resolve them first.
+
 Similarly, **บัญชีตามคลังสินค้า (Warehouse Accounts)** (`/setup/warehouses`)'s
 **แก้ไข (Edit)** action now opens a full warehouse-detail dialog — name, zone,
 type, capacity, temperature, and active status, in addition to the two GL
