@@ -15,6 +15,7 @@ import { FormField } from '@/components/form-field';
 import { ChangeHistorySection } from '@/components/change-history-section';
 import { ProvinceInput } from '@/components/province-input';
 import { PartyRelationshipsSection } from '@/components/party-relationships';
+import { CustomFieldsSection } from '@/components/custom-fields-section';
 
 const CUSTOMER_REL_TYPES = ['bill_to', 'ship_to', 'sold_to', 'guarantor', 'related_party', 'subsidiary', 'franchisee', 'other'] as const;
 import { Button } from '@/components/ui/button';
@@ -365,6 +366,7 @@ function Customer360Panel({ customerNo, onClose }: { customerNo: string; onClose
                 targetPlaceholder={t('mx.rel_target_customer')}
                 buildBody={(target, relType) => ({ to_customer_no: target, rel_type: relType })}
               />
+              <CustomFieldsSection entity="customer" recordId={customerNo} />
               <ChangeHistorySection url={`/api/customer-master/${customerNo}/history`} queryKey={['customer-history', customerNo]} />
             </div>
           )}

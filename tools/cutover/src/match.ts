@@ -305,6 +305,13 @@ async function main() {
   const vRelDel = await inj('DELETE', `/api/procurement/vendors/${VD1}/relationships/${vRelAdd.json.id}`, admin);
   ok('Vendor relationship: delete removes it', vRelDel.status === 200 && vRelDel.json.deleted === true, `${vRelDel.status}`);
 
+  // ── H9. Governed bank master (master-data audit Phase 9) — a recognised bank name is canonicalised when
+  // a bank-detail change is staged (through the maker-checker). ──
+  const bankStage = await inj('PATCH', `/api/procurement/vendors/${VD1}/bank`, admin, { bank_name: 'kbank', bank_account: '123-4-56789-0' });
+  const bankPending = await inj('GET', '/api/procurement/vendor-bank-changes', admin);
+  const bankReq = (bankPending.json.pending ?? []).find((p: any) => p.req_no === bankStage.json.req_no);
+  ok('Governed bank master: staging "kbank" canonicalises the bank name to "ธนาคารกสิกรไทย"', bankReq?.bank_name === 'ธนาคารกสิกรไทย', JSON.stringify({ staged: bankStage.json.status, name: bankReq?.bank_name }));
+
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];
   await runMatch(ap1, poNo, [{ item_id: 'X', qty: 100, unit_price: 10 }]);

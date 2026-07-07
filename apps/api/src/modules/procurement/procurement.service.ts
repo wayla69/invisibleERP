@@ -7,6 +7,7 @@ import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grIt
 import { alias } from 'drizzle-orm/pg-core';
 import { shapeChangeHistory } from '../../common/change-history';
 import { isValidPostalCode, normalizeProvince } from '../../common/thai-address';
+import { normalizeBank } from '../../common/thai-banks';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -722,10 +723,12 @@ export class ProcurementService {
     // Supersede any earlier still-open request for this vendor so the queue holds only the latest.
     await db.update(vendorBankChangeRequests).set({ status: 'Superseded' })
       .where(and(eq(vendorBankChangeRequests.vendorId, vendorId), eq(vendorBankChangeRequests.status, 'PendingApproval')));
+    // Governed bank master (Phase 9): canonicalise a recognised bank name to its official form (unknown kept).
+    const bankName = dto.bank_name ? (normalizeBank(dto.bank_name) ?? dto.bank_name) : (dto.bank_name ?? null);
     const reqNo = await this.docNo.nextDaily('VBC');
     await db.insert(vendorBankChangeRequests).values({
       tenantId: v.tenantId ?? null, vendorId, reqNo,
-      bankName: dto.bank_name ?? null, bankAccount: dto.bank_account ?? null,
+      bankName, bankAccount: dto.bank_account ?? null,
       prevBankName: v.bankName ?? null, prevBankAccount: v.bankAccount ?? null,
       status: 'PendingApproval', requestedBy: user.username,
     });

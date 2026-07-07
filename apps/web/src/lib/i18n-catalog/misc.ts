@@ -576,6 +576,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.rel_type_subcontractor': { th: 'ผู้รับเหมาช่วง', en: 'Subcontractor' },
   'mx.rel_type_parent': { th: 'บริษัทแม่', en: 'Parent' },
   'mx.rel_type_other': { th: 'อื่นๆ', en: 'Other' },
+  'mx.cf_save': { th: 'บันทึกฟิลด์กำหนดเอง', en: 'Save custom fields' },
+  'mx.cf_saved': { th: 'บันทึกฟิลด์กำหนดเองแล้ว', en: 'Custom fields saved' },
   'mx.setup_section_identity': { th: 'ข้อมูลนิติบุคคล', en: 'Legal entity details' },
   'mx.setup_section_vat': { th: 'ภาษีมูลค่าเพิ่ม (VAT)', en: 'Value-added tax (VAT)' },
   'mx.setup_vat_registered': { th: 'จดทะเบียน VAT', en: 'VAT registration' },
