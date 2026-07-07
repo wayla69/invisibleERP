@@ -1884,6 +1884,13 @@
       "when": 2023820000140,
       "tag": "0268_tax_invoice_payment_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 269,
+      "version": "7",
+      "when": 2023820000150,
+      "tag": "0269_customer_master_address",
+      "breakpoints": true
     }
   ]
 }

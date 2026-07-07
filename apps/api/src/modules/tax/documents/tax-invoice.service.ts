@@ -10,6 +10,7 @@ import type { JwtUser } from '../../../common/decorators';
 import { sellerSnapshot, isValidTaxId } from './tax-docs.snapshot';
 import type { IssueFullDto } from './dto';
 import { EtaxService } from '../../pos/fiscal/etax.service';
+import { CustomerMasterService } from '../../customers/customers.module';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -36,6 +37,7 @@ export class TaxInvoiceService {
     private readonly tax: TaxService,
     @Optional() private readonly etax?: EtaxService,   // wiring: auto-submit full tax invoices to RD e-Tax
     @Optional() private readonly ledger?: LedgerService, // credit/debit-note GL posting (maker-checker, TAX-07)
+    @Optional() private readonly customerMaster?: CustomerMasterService, // keeps the customer directory reusable (0269)
   ) {}
 
   private async tenantRow(tenantId: number) {
@@ -141,6 +143,8 @@ export class TaxInvoiceService {
     await this.insertLines(Number(head!.id), tenantId, lines);
     // wiring (best-effort): hand the full tax invoice to the RD/ETDA e-Tax provider
     if (this.etax) { try { await this.etax.submit(docNo, undefined, user); } catch { /* e-Tax submit best-effort */ } }
+    // wiring (best-effort): keep the customer directory reusable so the buyer doesn't need retyping next time
+    if (this.customerMaster) { try { await this.customerMaster.upsertFromInvoiceBuyer(dto.buyer, tenantId, user.username); } catch { /* directory update best-effort */ } }
     return this.getByDocNo(user, docNo);
   }
 

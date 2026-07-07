@@ -388,6 +388,21 @@ async function main() {
   const fullArPdfHtml = typeof fullArPdf.text === 'string' ? fullArPdf.text : '';
   ok('PDF full: "ชำระเงินโดย" section ticks Transfer + shows the bank + due date', fullArPdf.status === 200 && fullArPdfHtml.includes('ชำระเงินโดย') && fullArPdfHtml.includes('☑') && fullArPdfHtml.includes('กสิกรไทย') && fullArPdfHtml.includes('วันครบกำหนดชำระเงิน'), `len=${fullArPdfHtml.length}`);
 
+  // ── docs/34: issuing a full tax invoice keeps customer_master reusable (0269) — a new buyer is upserted
+  //    with address/branch/tax-id; re-issuing for the SAME buyer name refreshes it (no duplicate). ──
+  const custName = 'บริษัท ทดสอบมาสเตอร์ จำกัด';
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-AR3', invoiceDate: periodDate('21'), tenantId: t1, orderNo: 'SO-3', amount: '107', status: 'Unpaid', currency: 'THB' });
+  const cm1 = await inj('POST', '/api/tax-invoices/full', sales1, { source_type: 'AR', source_ref: 'INV-AR3', buyer: { name: custName, tax_id: T2_TAX, branch_code: '00000', address: 'ที่อยู่เดิม กรุงเทพฯ' } });
+  ok('Full: issuing for a new buyer succeeds', cm1.status === 201, `${cm1.status}`);
+  const cmSearch1 = await inj('GET', `/api/customer-master?search=${encodeURIComponent(custName)}`, sales1);
+  const cmRow1 = (cmSearch1.json.customers ?? [])[0];
+  ok('customer_master: new buyer upserted with tax_id/branch/address', cmSearch1.status === 200 && cmSearch1.json.count === 1 && cmRow1?.tax_id === T2_TAX && cmRow1?.branch_code === '00000' && cmRow1?.address === 'ที่อยู่เดิม กรุงเทพฯ', JSON.stringify(cmRow1));
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-AR4', invoiceDate: periodDate('21'), tenantId: t1, orderNo: 'SO-4', amount: '107', status: 'Unpaid', currency: 'THB' });
+  await inj('POST', '/api/tax-invoices/full', sales1, { source_type: 'AR', source_ref: 'INV-AR4', buyer: { name: custName, tax_id: T2_TAX, address: 'ที่อยู่ใหม่ (ย้ายสำนักงาน) กรุงเทพฯ' } });
+  const cmSearch2 = await inj('GET', `/api/customer-master?search=${encodeURIComponent(custName)}`, sales1);
+  const cmRow2 = (cmSearch2.json.customers ?? [])[0];
+  ok('customer_master: re-issuing for the same buyer REFRESHES the address, no duplicate row', cmSearch2.status === 200 && cmSearch2.json.count === 1 && cmRow2?.address === 'ที่อยู่ใหม่ (ย้ายสำนักงาน) กรุงเทพฯ', JSON.stringify({ count: cmSearch2.json.count, address: cmRow2?.address }));
+
   await app.close();
   await pg.close();
 

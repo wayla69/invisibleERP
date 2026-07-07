@@ -39,7 +39,11 @@ for retail POS).
 1. Go to **Tax Invoices** (`/tax/invoices`) → **Full** tab.
 2. Click **Issue full invoice** (**ออกใบเต็มรูป**).
 3. Choose the source (an AR invoice or POS sale) and enter the **buyer's** name,
-   tax ID and address.
+   tax ID and address. **Typing a name you've billed before shows a dropdown**
+   of matching customers (with their tax ID/address) — pick one to fill in the
+   whole buyer block instead of retyping it. A brand-new buyer is saved
+   automatically once the invoice is issued, so it's searchable next time; a
+   repeat buyer's address is kept up to date with whatever you enter.
 4. Optionally set a **payment due date** and **paid by** (transfer / cash /
    cheque / other) — for a **POS** sale this is pre-filled from the sale's own
    payment method if you leave it blank; for an **AR** invoice you set it
