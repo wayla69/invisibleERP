@@ -5,6 +5,7 @@ export * from './branch';
 export * from './users';
 export * from './inventory';
 export * from './item-relationships';
+export * from './scheduled-changes';
 export * from './sales';
 export * from './procurement';
 export * from './vendor-bank-change';

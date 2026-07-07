@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PartyRelationshipsSection } from '@/components/party-relationships';
+import { ScheduledChangesSection } from '@/components/scheduled-changes-section';
 
 const ITEM_REL_TYPES = ['substitute', 'complement', 'supersedes', 'kit_component', 'accessory'] as const;
 
@@ -241,6 +242,7 @@ export default function ItemPostingSetupPage() {
               targetPlaceholder={t('mx.item_rel_target')}
               buildBody={(target, relType) => ({ to_item_id: target, rel_type: relType })}
             />
+            <ScheduledChangesSection entity="item" entityKey={itemId} fields={['unit_price', 'status']} />
           </Card>
         )}
 
