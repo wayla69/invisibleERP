@@ -98,6 +98,22 @@ Single-duty roles enforce SoD: **vendor master** maintenance is segregated from 
     setup users but renders the merge action **only for a god** (`is_platform_owner`). Descriptive data-quality
     tooling — **no GL, no new numbered control** (mirrors the Phase-5 customer/vendor match-merge). Verified by
     the `basics` harness.
+13. **Date-effective (future-dated) master attributes.** A steward **schedules** a change to a supported master
+    field to take effect on a future **business date** via `POST /api/scheduled-changes`
+    `{entity, entity_key, field, new_value, effective_date}` (steward/exec duties). The change is parked in the
+    new tenant-scoped **`scheduled_master_changes`** table (migration **`0278`**, RLS + change-audited) and
+    applied **only when its effective date arrives** by the idempotent daily job
+    **`apply_scheduled_master_changes`** (a BI-scheduler action, `POST /api/scheduled-changes/run-due` for a
+    manual run) — re-running the same day applies nothing. Supported targets today: item `unit_price` / item
+    `status` and customer `credit_limit` (`UNSUPPORTED_FIELD` otherwise; the registry is generic and
+    extensible). A change to a **fraud-relevant** field — **customer `credit_limit`** — is `sensitive` and is
+    **staged `pending_approval`**: it becomes eligible to apply only after a **distinct approver** releases it
+    (`POST /api/scheduled-changes/:id/approve`; self-approval → `403 SOD_VIOLATION`), so a future-dated
+    credit-limit bump **cannot bypass the maker-checker** (audit **G7** / SoD **R09**). Non-sensitive changes go
+    straight to `scheduled`; either can be `…/cancel`led before it applies. On the web, `/setup/items` carries a
+    per-item schedule/list/cancel section. Descriptive master-data depth — **no GL, no new numbered control**
+    (the sensitive path **strengthens** the existing G7/R09 credit-limit maker-checker). Verified by the
+    `basics` harness.
 
 ## 8. Process flow
 
@@ -188,6 +204,10 @@ flowchart TD
 | `SELF_MERGE` (400) | Survivor and duplicate item are the same | Pick two distinct items |
 | `ALREADY_MERGED` (400) | The duplicate item was already merged into a survivor | Refresh the review queue; the item is already retired |
 | `MERGE_CONFLICT` (409) | Survivor and duplicate both own a child row with the same natural key | Resolve the conflicting child rows manually, then retry the merge |
+| `UNSUPPORTED_FIELD` (400) | A scheduled change names an entity:field the registry doesn't support | Use a supported target (item `unit_price`/`status`, customer `credit_limit`) — §7 step 13 |
+| `BAD_DATE` (400) | `effective_date` isn't `YYYY-MM-DD` | Supply a valid ISO date |
+| `SOD_VIOLATION` (403) | The scheduler tried to self-approve a sensitive (credit-limit) scheduled change | A distinct `exec`/`approvals` user must release it (maker ≠ checker; §7 step 13) |
+| `NOT_PENDING` (404) | Approve of a scheduled change not in `pending_approval` | Refresh the queue; it was already released, applied, or cancelled |
 
 ## 14. Revision history
 
@@ -201,4 +221,5 @@ flowchart TD
 | 0.7 | 2026-07-05 | Platform | **Sensitive-field bulk-import maker-checker (audit gaps G5 + G8):** §7 step 3d — registry columns for customer/vendor **credit limits**, vendor **payment terms**, price-list **prices** and promotion **discounts** are flagged `sensitive`; any import batch that SETS one is **staged** as a `PendingApproval` row in the new **`masterdata_import_batches`** table (migration `0263`, raw rows held as JSON) with **nothing written**, and is committed **only by a distinct approver** via `POST /api/admin/master-data/import-approvals/:reqNo/approve` (`exec`/`approvals`) — self-approval → `403 SOD_VIOLATION`; `…/reject` + the `…/import-approvals` queue round it out. Non-sensitive imports still commit directly. §1 related controls (+R10), §2 scope, §6 RACI intro, §8 flow, §9 control matrix and §13 error codes updated. **Strengthens existing SoD R02/R09/R10/R13 (+MDM-01/MDM-03) — no new numbered control.** Vendor bank account (`vendors.bank_account`, encrypted) has no live single-user edit path today (G8 note). Verified by the `ext` harness. |
 | 0.8 | 2026-07-07 | Platform | **Item relationships + lifecycle status (master-data depth):** §7 step 11 — the item master gains a lifecycle `status` (active/inactive/discontinued with an optional `superseded_by` successor; `PATCH /api/item-setup/items/:itemId/status`) and typed **`item_relationships`** (substitute/complement/supersedes/kit_component/accessory; `POST/GET/DELETE …/items/:itemId/relationships`). Relationship rows are **tenant-scoped** (per-shop merchandising choice over the shared `items` master; RLS org-clause per `0232`) with `SELF_RELATION` / `RELATION_EXISTS` / `RELATION_NOT_FOUND` guards; both status and relationship edits ride the `data_change_log` trigger (ITGC-AC-14) + immutable `audit_log`. §13 error codes updated. Migration **`0276`**. Descriptive master-data depth — **no GL, no new control** (mirrors the customer/vendor party-relationship model); verified by the `basics` harness. |
 | 0.9 | 2026-07-07 | Platform | **Item match-merge / DQM (duplicate resolution):** §7 step 12 — detection `GET /api/item-setup/items-duplicates` (barcode + fuzzy description) + merge `POST /api/item-setup/items-merge` repoints the duplicate's child rows by the TEXT `item_id` key (new `md_merge_repoint_text`, migration **`0277`**, covering ~17 item-child tables), survivorship-fills, and soft-retires the duplicate (`status='merged'` + `merged_into`/`merged_by`/`merged_at`). Merge is **god-only** (`ITEM_MERGE_HQ_ONLY`) because `items` is a shared cross-tenant master; `SELF_MERGE`/`ALREADY_MERGED`/`MERGE_CONFLICT` guards. Web `/setup/items` shows the review queue to setup users, merge action to a god only. §13 error codes updated. Descriptive data-quality tooling — **no GL, no new numbered control** (mirrors the Phase-5 customer/vendor match-merge); verified by the `basics` harness. |
+| 0.10 | 2026-07-07 | Platform | **Date-effective (future-dated) master attributes:** §7 step 13 — `POST /api/scheduled-changes` parks a change (item `unit_price`/`status`, customer `credit_limit`) in the new tenant-scoped **`scheduled_master_changes`** table (migration **`0278`**, RLS + change-audited); the idempotent daily job **`apply_scheduled_master_changes`** (BI-scheduler action; `…/run-due` manual) applies it only once the effective business date arrives. A sensitive **customer credit-limit** change is staged `pending_approval` and released only by a **distinct approver** (`…/:id/approve`; self-approval → `SOD_VIOLATION`) — a future-dated bump can't bypass the maker-checker (**strengthens G7 / R09**). `UNSUPPORTED_FIELD`/`BAD_DATE`/`NOT_PENDING` guards; `…/:id/cancel` withdraws an open schedule. Web `/setup/items` per-item schedule/list/cancel section. §13 error codes updated. **No GL, no new numbered control.** This closes the date-effective attribute gap flagged in traceability v5.4. Verified by the `basics` harness. |
 | 0.6 | 2026-07-04 | Platform | **Direct .xlsx import + setup-page IO surface:** §7 step 3b — all import endpoints now accept a base64-encoded **`.xlsx`** workbook (parsed server-side via ExcelJS into the same header-keyed rows as csv), so a downloaded template/export round-trips back in without a Save-As-CSV step. §7 step 3c — **item_categories** and **tax_codes** gain a bulk import/export surface on their own setup screens (`/api/item-setup/io/*`), gated to the setup duties (`md_item`/`md_config`/`masterdata`/`exec`) and restricted by an allow-list to those two entities, so a narrow master-data role gets the bulk surface without the coarse `masterdata` duty (SoD **R13** preserved). §2 in-scope updated. No schema change, no GL, no new control; verified by the `ext` harness (xlsx round-trip, setup IO, and the md_config-only SoD boundary). |

@@ -198,6 +198,15 @@ reserved for the **platform owner**; everyone else sees the review queue but not
 the merge button. A merge cannot be undone, and if the two items own conflicting
 records it is refused so you can resolve them first.
 
+The lifecycle card also lets you **schedule a future-dated change** to an
+item's price or status: pick the field, the new value and an **effective
+date**, and the change is parked until that date, when a daily job applies
+it automatically (nothing changes before then; you can cancel a pending
+one any time). The same mechanism governs a customer's **credit limit** —
+but because a credit-limit change is sensitive, a scheduled one is held for
+a **second person to approve** before it can take effect, and you can never
+approve your own request.
+
 Similarly, **บัญชีตามคลังสินค้า (Warehouse Accounts)** (`/setup/warehouses`)'s
 **แก้ไข (Edit)** action now opens a full warehouse-detail dialog — name, zone,
 type, capacity, temperature, and active status, in addition to the two GL

@@ -1947,6 +1947,13 @@
       "when": 2023820000230,
       "tag": "0277_item_merge",
       "breakpoints": true
+    },
+    {
+      "idx": 278,
+      "version": "7",
+      "when": 2023820000240,
+      "tag": "0278_scheduled_master_changes",
+      "breakpoints": true
     }
   ]
 }

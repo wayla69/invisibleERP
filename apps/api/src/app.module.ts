@@ -66,6 +66,7 @@ import { UserPrefsModule } from './modules/user-prefs/user-prefs.module';
 import { GeoRefModule } from './modules/geo-ref/geo-ref.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { ItemSetupModule } from './modules/item-setup/item-setup.module';
+import { ScheduledChangesModule } from './modules/scheduled-changes/scheduled-changes.module';
 import { AuditViewerModule } from './modules/audit-viewer/audit-viewer.module';
 import { PlanningModule } from './modules/planning/planning.module';
 import { ConsolidationModule } from './modules/consolidation/consolidation.module';
@@ -197,6 +198,7 @@ import { MailModule } from './modules/mail/mail.module';
     GeoRefModule,
     FeatureFlagsModule,
     ItemSetupModule,
+    ScheduledChangesModule,
     AuditViewerModule,
     PlanningModule,
     ConsolidationModule,

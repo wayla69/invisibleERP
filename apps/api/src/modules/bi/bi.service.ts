@@ -22,6 +22,7 @@ import { EamService } from '../eam/eam.service';
 import { AssetsService } from '../assets/assets.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
+import { ScheduledChangesService } from '../scheduled-changes/scheduled-changes.service';
 import { RevRecService } from '../revenue/revrec.service';
 import { ProjectsService } from '../projects/projects.service';
 import { RetentionService } from '../retention/retention.service';
@@ -94,6 +95,7 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
+  apply_scheduled_master_changes: { label: 'ปรับข้อมูลหลักตามวันที่มีผล', labelEn: 'Apply date-effective master changes' },
   // Construction/real-estate sweeps (docs/35 Depth) — each idempotent: retention released on its schedule,
   // bookings expired past their date, overdue property installments surfaced.
   retention_release_due: { label: 'คืนเงินประกันผลงานที่ถึงกำหนด', labelEn: 'Release due retention' },
@@ -162,6 +164,9 @@ export class BiService implements OnModuleInit {
     @Optional() private readonly assets?: AssetsService,
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly leases?: LeasesService,
+    // Date-effective master changes (Phase 12) — the idempotent apply_scheduled_master_changes action job.
+    // @Optional so a partial harness still constructs.
+    @Optional() private readonly scheduledChanges?: ScheduledChangesService,
     @Optional() private readonly revrec?: RevRecService,
     // PPM analytics report types (project_evm portfolio EVM, crm_win_loss). Optional so a partial harness
     // still constructs BiService; the full app provides them (ProjectsModule / CrmPipelineModule).
@@ -745,6 +750,11 @@ export class BiService implements OnModuleInit {
       if (!this.leases) throw new BadRequestException({ code: 'LEASES_UNAVAILABLE', message: 'Lease service not available', messageTh: 'ระบบสัญญาเช่าไม่พร้อมใช้งาน' });
       const r = await this.leases.runDueLeases(user); // idempotent per (lease, period)
       return { data: r, summary: `Lease run: posted ${r.posted} of ${r.scanned} due leases`, summaryTh: `ลงรายการสัญญาเช่า: ${r.posted} จาก ${r.scanned} สัญญา` };
+    }
+    if (reportType === 'apply_scheduled_master_changes') {
+      if (!this.scheduledChanges) throw new BadRequestException({ code: 'SCHEDULED_CHANGES_UNAVAILABLE', message: 'Scheduled-changes service not available', messageTh: 'ระบบตั้งเวลาข้อมูลหลักไม่พร้อมใช้งาน' });
+      const r = await this.scheduledChanges.applyDue(user); // idempotent: only `scheduled` rows due today; applied rows skip
+      return { data: r, summary: `Date-effective master changes: applied ${r.applied} of ${r.scanned} due (as of ${r.as_of})`, summaryTh: `ปรับข้อมูลหลักตามวันที่มีผล: ${r.applied} จาก ${r.scanned} รายการ (ณ ${r.as_of})` };
     }
     if (reportType === 'retention_release_due') {
       if (!this.retention) throw new BadRequestException({ code: 'RETENTION_UNAVAILABLE', message: 'Retention service not available', messageTh: 'ระบบเงินประกันผลงานไม่พร้อมใช้งาน' });

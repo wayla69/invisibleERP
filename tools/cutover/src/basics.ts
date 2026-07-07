@@ -948,6 +948,33 @@ async function main() {
   const mergeAgain = await inj('POST', '/api/item-setup/items-merge', itemgod, { survivor_item_id: 'DUPZA', duplicate_item_id: 'DUPZB' });
   ok('Item DQM: an already-merged duplicate cannot be merged again → 400 ALREADY_MERGED', mergeAgain.status === 400 && mergeAgain.json?.error?.code === 'ALREADY_MERGED', `${mergeAgain.status} ${mergeAgain.json?.error?.code}`);
 
+  // ── Date-effective (future-dated) master attributes (master-data audit Phase 12) ──
+  // A steward schedules a change to a master field; the idempotent daily job applies it only once its
+  // effective date arrives. A change to a sensitive field (customer credit limit) is staged for a distinct
+  // approver first (maker-checker, G7). `admin` (HQ) schedules/runs; `mgr` (a different HQ user) approves.
+  const dayAhead = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  await db.insert(s.items).values({ itemId: 'SCHEDITEM', itemDescription: 'Date-effective item', unitPrice: '10' }).onConflictDoNothing();
+  const schPrice = await inj('POST', '/api/scheduled-changes', admin, { entity: 'item', entity_key: 'SCHEDITEM', field: 'unit_price', new_value: '25', effective_date: daysAgo(2) });
+  ok('Date-effective: schedule a (non-sensitive) item price change → scheduled, not sensitive', schPrice.status === 201 && schPrice.json?.status === 'scheduled' && schPrice.json?.sensitive === false, JSON.stringify(schPrice.json).slice(0, 120));
+  const schFuture = await inj('POST', '/api/scheduled-changes', admin, { entity: 'item', entity_key: 'SCHEDITEM', field: 'status', new_value: 'inactive', effective_date: dayAhead(3) });
+  ok('Date-effective: schedule a future-dated status change (not yet due)', schFuture.status === 201 && schFuture.json?.status === 'scheduled', `${schFuture.status} ${schFuture.json?.status}`);
+  const schBad = await inj('POST', '/api/scheduled-changes', admin, { entity: 'item', entity_key: 'SCHEDITEM', field: 'barcode', new_value: 'x', effective_date: daysAgo(1) });
+  ok('Date-effective: an unsupported field is rejected → 400 UNSUPPORTED_FIELD', schBad.status === 400 && schBad.json?.error?.code === 'UNSUPPORTED_FIELD', `${schBad.status} ${schBad.json?.error?.code}`);
+  const schCredit = await inj('POST', '/api/scheduled-changes', admin, { entity: 'customer', entity_key: 'CUST', field: 'credit_limit', new_value: '99999', effective_date: daysAgo(2) });
+  ok('Date-effective: a sensitive credit-limit change is STAGED pending_approval (G7), not scheduled', schCredit.status === 201 && schCredit.json?.status === 'pending_approval' && schCredit.json?.sensitive === true, JSON.stringify(schCredit.json).slice(0, 120));
+  const schSelf = await inj('POST', `/api/scheduled-changes/${schCredit.json.id}/approve`, admin);
+  ok('Date-effective: the scheduler cannot self-approve a sensitive change → 403 SOD_VIOLATION', schSelf.status === 403 && schSelf.json?.error?.code === 'SOD_VIOLATION', `${schSelf.status} ${schSelf.json?.error?.code}`);
+  const schAppr = await inj('POST', `/api/scheduled-changes/${schCredit.json.id}/approve`, mgr);
+  ok('Date-effective: a distinct approver releases the sensitive change → scheduled', schAppr.status === 201 && schAppr.json?.status === 'scheduled', `${schAppr.status} ${schAppr.json?.status}`);
+  const runDue = await inj('POST', '/api/scheduled-changes/run-due', admin);
+  ok('Date-effective: run-due applies only the due (scheduled) changes — the future-dated one is skipped', runDue.status === 201 && runDue.json?.applied === 2 && runDue.json?.scanned === 2, JSON.stringify(runDue.json));
+  const schedItem = (await inj('GET', '/api/item-setup/items/SCHEDITEM', admin)).json;
+  ok('Date-effective: the due price change is now on the item; the future status change is NOT applied', near(schedItem.unit_price, 25) && schedItem.status === 'active', JSON.stringify({ price: schedItem.unit_price, status: schedItem.status }));
+  const custRow = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'CUST')))[0];
+  ok('Date-effective: the approved credit-limit change was applied to the customer master', near(custRow.creditLimit, 99999), `limit=${custRow.creditLimit}`);
+  const runAgain = await inj('POST', '/api/scheduled-changes/run-due', admin);
+  ok('Date-effective: run-due is idempotent — a second run the same day applies nothing', runAgain.status === 201 && runAgain.json?.applied === 0, JSON.stringify(runAgain.json));
+
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).
   await db.insert(s.itemCosting).values({ tenantId: invTid, itemId: 'COSTITEM', method: 'AVG' }).onConflictDoNothing();
