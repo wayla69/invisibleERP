@@ -1898,6 +1898,13 @@
       "when": 2023820000160,
       "tag": "0270_vendor_bank_change_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 271,
+      "version": "7",
+      "when": 2023820000170,
+      "tag": "0271_customer_master_fields",
+      "breakpoints": true
     }
   ]
 }

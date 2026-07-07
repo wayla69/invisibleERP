@@ -133,6 +133,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.production_plan': { th: 'แผนการผลิต (Production plan)', en: 'Production Plan' },
 
   // ── Customers & CRM ───────────────────────────────────────────────────────
+  'nav.customer_master': { th: 'ข้อมูลหลักลูกค้า', en: 'Customer Master' },
   'nav.pipeline': { th: 'โอกาสการขาย', en: 'Sales Pipeline' },
   'nav.cpq': { th: 'ใบเสนอราคา', en: 'Quotations (CPQ)' },
   'nav.service': { th: 'บริการ & SLA', en: 'Service & SLA' },

@@ -1,4 +1,4 @@
-import { Inject, Injectable, Module, Controller, Get, Post, Patch, Param, Query, Body, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Module, Controller, Get, Post, Patch, Param, Query, Body, NotFoundException, BadRequestException } from '@nestjs/common';
 import { z } from 'zod';
 import { sql, eq, and, ne, or, ilike, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -67,8 +67,20 @@ const CreateCustomerBody = z.object({
   email: z.string().optional(), phone: z.string().optional(), tax_id: z.string().optional(),
   address: z.string().optional(), branch_code: z.string().optional(),
   member_id: z.number().int().optional(), account_code: z.string().optional(), notes: z.string().optional(),
+  credit_terms: z.string().optional(), sales_rep: z.string().optional(), category: z.string().optional(),
+  language: z.string().optional(), external_ref: z.string().optional(),
 });
 const LinkCustomerBody = z.object({ member_id: z.number().int().nullable().optional(), account_code: z.string().nullable().optional() });
+// Direct-edit customer master profile (master-data audit Phase 3) — mirrors the vendor-profile direct-edit
+// pattern (0270 follow-up): none of these fields carry the payment-redirection risk that vendor bank details
+// do, so no maker-checker. member_id/account_code stay on the dedicated `link` endpoint (SoD-adjacent linkage).
+const UpdateCustomerBody = z.object({
+  name: z.string().min(1).optional(), kind: z.enum(['person', 'company']).optional(),
+  email: z.string().nullish(), phone: z.string().nullish(), tax_id: z.string().nullish(),
+  address: z.string().nullish(), branch_code: z.string().nullish(), status: z.enum(['active', 'inactive']).optional(),
+  notes: z.string().nullish(), credit_terms: z.string().nullish(), sales_rep: z.string().nullish(),
+  category: z.string().nullish(), language: z.string().nullish(), external_ref: z.string().nullish(),
+});
 
 @Injectable()
 export class CustomerMasterService {
@@ -82,8 +94,35 @@ export class CustomerMasterService {
       phone: dto.phone ?? null, taxId: dto.tax_id ?? null, address: dto.address ?? null, branchCode: dto.branch_code ?? null,
       memberId: dto.member_id ?? null, accountCode: dto.account_code ?? null,
       status: 'active', notes: dto.notes ?? null, createdBy: user.username,
+      creditTerms: dto.credit_terms ?? null, salesRep: dto.sales_rep ?? null, category: dto.category ?? null,
+      language: dto.language ?? 'th', externalRef: dto.external_ref ?? null,
     });
     return { customer_no: customerNo, name: dto.name, kind: dto.kind };
+  }
+
+  // Direct-edit (master-data audit Phase 3) — the only mutation path before this was create + the invoice-
+  // upsert auto-refresh + link(); there was no way to correct/enrich a record through a web screen at all.
+  async update(customerNo: string, dto: z.infer<typeof UpdateCustomerBody>, user: JwtUser) {
+    const db = this.db;
+    const c = await this.byNo(customerNo, user);
+    const set: Record<string, unknown> = {};
+    if (dto.name !== undefined) set.name = dto.name;
+    if (dto.kind !== undefined) set.kind = dto.kind;
+    if (dto.email !== undefined) set.email = dto.email || null;
+    if (dto.phone !== undefined) set.phone = dto.phone || null;
+    if (dto.tax_id !== undefined) set.taxId = dto.tax_id || null;
+    if (dto.address !== undefined) set.address = dto.address || null;
+    if (dto.branch_code !== undefined) set.branchCode = dto.branch_code || null;
+    if (dto.status !== undefined) set.status = dto.status;
+    if (dto.notes !== undefined) set.notes = dto.notes || null;
+    if (dto.credit_terms !== undefined) set.creditTerms = dto.credit_terms || null;
+    if (dto.sales_rep !== undefined) set.salesRep = dto.sales_rep || null;
+    if (dto.category !== undefined) set.category = dto.category || null;
+    if (dto.language !== undefined) set.language = dto.language || null;
+    if (dto.external_ref !== undefined) set.externalRef = dto.external_ref || null;
+    if (!Object.keys(set).length) throw new BadRequestException({ code: 'NO_FIELDS', message: 'No fields to update', messageTh: 'ไม่มีข้อมูลให้แก้ไข' });
+    await db.update(customerMaster).set(set).where(eq(customerMaster.id, Number(c.id)));
+    return this.get(customerNo, user);
   }
 
   // Called when a full tax invoice (ม.86/4) is issued for a buyer — keeps the master directory reusable
@@ -169,7 +208,13 @@ export class CustomerMasterService {
 }
 
 function shapeCustomer(c: any) {
-  return { customer_no: c.customerNo, name: c.name, kind: c.kind, email: c.email, phone: c.phone, tax_id: c.taxId, address: c.address ?? null, branch_code: c.branchCode ?? null, member_id: c.memberId != null ? Number(c.memberId) : null, account_code: c.accountCode, status: c.status, notes: c.notes, created_by: c.createdBy, created_at: c.createdAt };
+  return {
+    customer_no: c.customerNo, name: c.name, kind: c.kind, email: c.email, phone: c.phone, tax_id: c.taxId,
+    address: c.address ?? null, branch_code: c.branchCode ?? null, member_id: c.memberId != null ? Number(c.memberId) : null,
+    account_code: c.accountCode, status: c.status, notes: c.notes, created_by: c.createdBy, created_at: c.createdAt,
+    credit_terms: c.creditTerms ?? null, sales_rep: c.salesRep ?? null, category: c.category ?? null,
+    language: c.language ?? null, external_ref: c.externalRef ?? null,
+  };
 }
 
 @Controller('api/customer-master')
@@ -181,6 +226,7 @@ export class CustomerMasterController {
   @Get() list(@Query('search') search: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.list({ search }, u); }
   @Get(':customerNo') get(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.get(no, u); }
   @Get(':customerNo/360') view360(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.view360(no, u); }
+  @Patch(':customerNo') update(@Param('customerNo') no: string, @Body(new ZodValidationPipe(UpdateCustomerBody)) b: z.infer<typeof UpdateCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.update(no, b, u); }
   @Patch(':customerNo/link') link(@Param('customerNo') no: string, @Body(new ZodValidationPipe(LinkCustomerBody)) b: z.infer<typeof LinkCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.link(no, b, u); }
 }
 
