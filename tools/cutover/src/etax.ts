@@ -271,7 +271,9 @@ async function main() {
   const subBasic = (await app.inject({ method: 'POST', url: `/api/tax/etax/submit/${docBasic}`, headers: { authorization: `Bearer ${admin}` }, payload: { provider: 'http' } })).json();
   ok("Basic scheme: correct base64 Authorization header + status 'SUCCESS' normalized to Accepted",
     subBasic.status === 'Accepted' && subBasic.provider_ref === 'basic-ok' && capturedAuth === `Basic ${Buffer.from('sp_user:sp_pass').toString('base64')}`,
-    JSON.stringify({ status: subBasic.status, capturedAuth }));
+    // Never print the captured Authorization header itself (even a throwaway test credential) — log a
+    // boolean match instead, so the credential material never lands in console/CI output.
+    JSON.stringify({ status: subBasic.status, authHeaderMatches: capturedAuth === `Basic ${Buffer.from('sp_user:sp_pass').toString('base64')}` }));
   await basicSp.close();
 
   // ── 16. bounded retry on transient 5xx → succeeds on the 3rd attempt ──
