@@ -15,6 +15,7 @@ import { FormField } from '@/components/form-field';
 import { ChangeHistorySection } from '@/components/change-history-section';
 import { ProvinceInput } from '@/components/province-input';
 import { PartyRelationshipsSection } from '@/components/party-relationships';
+import { CustomFieldsSection } from '@/components/custom-fields-section';
 
 const VENDOR_REL_TYPES = ['related_party', 'subsidiary', 'franchisee', 'subcontractor', 'parent', 'other'] as const;
 import { Button } from '@/components/ui/button';
@@ -216,6 +217,8 @@ function BankChangeDialog({ vendor, onClose }: { vendor: Supplier; onClose: () =
   const qc = useQueryClient();
   const [bankName, setBankName] = useState(vendor.Bank_Name ?? '');
   const [bankAccount, setBankAccount] = useState(vendor.Bank_Account ?? '');
+  // Governed bank master (Phase 9) — steer bank_name to the canonical Thai-banks list; server normalises too.
+  const banksQ = useQuery<{ banks: { code: string; th: string; en: string }[] }>({ queryKey: ['geo-banks'], queryFn: () => api('/api/geo/banks'), staleTime: Infinity });
   const stage = useMutation({
     mutationFn: () => api<any>(`/api/procurement/vendors/${vendor.Vendor_ID}/bank`, {
       method: 'PATCH',
@@ -233,7 +236,8 @@ function BankChangeDialog({ vendor, onClose }: { vendor: Supplier; onClose: () =
         </DialogHeader>
         <div className="grid gap-4">
           <FormField label={t('mx.vbc_f_bank_name')} htmlFor="vbc-bank-name">
-            <Input id="vbc-bank-name" value={bankName} onChange={(e) => setBankName(e.target.value)} />
+            <Input id="vbc-bank-name" list="th-banks-list" value={bankName} onChange={(e) => setBankName(e.target.value)} />
+            <datalist id="th-banks-list">{(banksQ.data?.banks ?? []).map((b) => <option key={b.code} value={b.th}>{b.en}</option>)}</datalist>
           </FormField>
           <FormField label={t('mx.vbc_f_bank_account')} htmlFor="vbc-bank-account">
             <Input id="vbc-bank-account" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} />
@@ -450,6 +454,7 @@ function VendorPartyPanel({ vendor, onClose }: { vendor: Supplier; onClose: () =
             targetPlaceholder={t('mx.rel_target_vendor')}
             buildBody={(target, relType) => ({ to_vendor_id: Number(target), rel_type: relType })}
           />
+          <CustomFieldsSection entity="vendor" recordId={String(vendor.Vendor_ID)} />
           <ChangeHistorySection url={`/api/procurement/vendors/${vendor.Vendor_ID}/history`} queryKey={['vendor-history', vendor.Vendor_ID]} />
         </div>
         <DialogFooter>

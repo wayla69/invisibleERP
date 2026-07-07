@@ -88,6 +88,9 @@ From the 360° view you can also:
   (subsidiary)**, **แฟรนไชส์**) and enter the other customer's number. The link
   shows on *both* customers (as outgoing on one, incoming on the other). A
   customer can't relate to itself, and the same link can't be added twice.
+- Fill any **ฟิลด์กำหนดเอง (custom fields)** your organisation has defined — extra
+  fields specific to your business appear here automatically (an admin sets them
+  up under master-data configuration). Enter the values and press save.
 
 None of this needs a second approval — it saves immediately.
 

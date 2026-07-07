@@ -218,6 +218,20 @@ async function main() {
   const relDel = await inj('DELETE', `/api/customer-master/${relANo}/relationships/${relId}`, admin);
   ok('Customer relationship: delete removes it from both sides', relDel.status === 200 && (await inj('GET', `/api/customer-master/${relBNo}/relationships`, admin)).json.relationships.length === 0, `${relDel.status}`);
 
+  // ── Governed bank master + flexfields (master-data audit Phase 9) ──
+  const banks = await inj('GET', '/api/geo/banks', admin);
+  ok('Governed bank master: /api/geo/banks returns the Thai-banks reference', banks.status === 200 && banks.json.count >= 18 && (banks.json.banks ?? []).some((b: any) => b.th === 'ธนาคารกสิกรไทย' && b.code === '004'), `count=${banks.json.count}`);
+  const normBank = await inj('GET', '/api/geo/normalize-bank?q=kbank', admin);
+  ok('Governed bank master: "kbank" normalises to "ธนาคารกสิกรไทย"', normBank.json.canonical === 'ธนาคารกสิกรไทย' && normBank.json.recognized === true, JSON.stringify(normBank.json));
+
+  // Flexfields (Oracle DFF) wired onto the customer master: define a tenant field, set + read a value.
+  const cfDef = await inj('POST', '/api/custom-fields/defs', admin, { entity: 'customer', field_key: 'loyalty_since', label: 'ลูกค้าตั้งแต่ปี', data_type: 'text' });
+  ok('Flexfields: define a custom field on the customer entity', (cfDef.status === 201 || cfDef.status === 200) && cfDef.json.field_key === 'loyalty_since', JSON.stringify(cfDef.json).slice(0, 120));
+  const cfSet = await inj('PUT', '/api/custom-fields/values', admin, { entity: 'customer', record_id: cmNo, values: { loyalty_since: '2019' } });
+  ok('Flexfields: set a custom-field value on a customer record', cfSet.status === 200 && cfSet.json.values?.loyalty_since === '2019', JSON.stringify(cfSet.json).slice(0, 120));
+  const cfGet = await inj('GET', `/api/custom-fields/values?entity=customer&record_id=${cmNo}`, admin);
+  ok('Flexfields: read the value back, projected onto the field definition', (cfGet.json.fields ?? []).some((f: any) => f.field_key === 'loyalty_since' && String(f.value) === '2019'), JSON.stringify(cfGet.json.fields));
+
   await app.close();
   await pg.close();
 
