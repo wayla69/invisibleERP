@@ -11,7 +11,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'plan-gating';
 process.env.NODE_ENV = 'test';
 process.env.PLATFORM_ADMIN_USERNAMES = 'god';
 
-import { PlanGuard } from '../../../apps/api/dist/modules/billing/plan.guard';
+import { PlanGuard, evaluatePastDueGrace, billingGraceDays } from '../../../apps/api/dist/modules/billing/plan.guard';
 import { PLAN_SUITES } from '@ierp/shared';
 
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
@@ -127,6 +127,25 @@ async function main() {
     (await run('enforce', { user: tenantUser(), required: ['exec'], suite: 'manufacturing', rows: [{ features: {}, status: 'Trialing', trialEndsAt: new Date(Date.now() + 86400000), planCode: 'free' }] })).allowed === true);
   ok('legacy: @RequiresSuite NOT enforced when kill-switch off',
     (await run('legacy', { user: tenantUser(), required: ['exec'], suite: 'manufacturing', rows: [planRow('starter')] })).allowed === true);
+
+  // ── 1.4 — PastDue grace window (pure decision) ──
+  const DAY = 86400000;
+  ok('grace: within window + GET → allow', evaluatePastDueGrace({ currentPeriodEnd: new Date(Date.now() - 2 * DAY), graceDays: 7, now: Date.now(), method: 'GET' }) === 'allow');
+  ok('grace: within window + POST → readonly', evaluatePastDueGrace({ currentPeriodEnd: new Date(Date.now() - 2 * DAY), graceDays: 7, now: Date.now(), method: 'POST' }) === 'readonly');
+  ok('grace: past window → block', evaluatePastDueGrace({ currentPeriodEnd: new Date(Date.now() - 10 * DAY), graceDays: 7, now: Date.now(), method: 'GET' }) === 'block');
+  ok('grace: no period info → block (preserve prior)', evaluatePastDueGrace({ currentPeriodEnd: null, graceDays: 7, now: Date.now(), method: 'GET' }) === 'block');
+  ok('grace: default BILLING_GRACE_DAYS = 7', billingGraceDays({} as any) === 7);
+
+  // ── 1.4 — PastDue grace via the guard (enforce) ──
+  const pastDue = (endDaysAgo: number) => [{ features: { suites: PLAN_SUITES.pro }, status: 'PastDue', trialEndsAt: null, currentPeriodEnd: new Date(Date.now() - endDaysAgo * DAY), planCode: 'pro' }];
+  ok('enforce: PastDue within grace + GET (read) → allowed',
+    (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: pastDue(2) })).allowed === true);
+  ok('enforce: PastDue within grace + POST (write) → SUBSCRIPTION_PASTDUE_READONLY',
+    (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: pastDue(2), req: { method: 'POST' } })).code === 'SUBSCRIPTION_PASTDUE_READONLY');
+  ok('enforce: PastDue past grace → SUBSCRIPTION_INACTIVE',
+    (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: pastDue(30) })).code === 'SUBSCRIPTION_INACTIVE');
+  ok('enforce: Canceled → SUBSCRIPTION_INACTIVE (no grace)',
+    (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: [{ features: {}, status: 'Canceled', trialEndsAt: null, currentPeriodEnd: new Date(), planCode: 'pro' }] })).code === 'SUBSCRIPTION_INACTIVE');
 
   // ── SHADOW: evaluate but never block ──
   ok('shadow: would-block scenario is ALLOWED (observe-not-block)',

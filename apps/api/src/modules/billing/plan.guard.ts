@@ -22,6 +22,24 @@ export function entitlementsShadow(env: NodeJS.ProcessEnv = process.env): boolea
   return TRUTHY.has(String(env.ENTITLEMENTS_SHADOW ?? '').trim().toLowerCase());
 }
 
+// 1.4 — PastDue grace window (days) before a lapsed subscription is hard-blocked. Within the window the
+// tenant keeps READ access (can see their data + fix billing) but mutations are blocked; after it, all
+// access is blocked. Default 7 days. So enabling enforcement never abruptly locks a lapsed payer out of
+// their own data.
+export function billingGraceDays(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.BILLING_GRACE_DAYS ?? 7);
+  return Number.isFinite(n) && n >= 0 ? n : 7;
+}
+
+// 'allow' = within grace + a read; 'readonly' = within grace + a mutation (block writes); 'block' = past the
+// grace window (or no period info → preserve the prior immediate-block behaviour).
+export function evaluatePastDueGrace(opts: { currentPeriodEnd: Date | string | null | undefined; graceDays: number; now: number; method: string }): 'allow' | 'readonly' | 'block' {
+  const end = opts.currentPeriodEnd ? new Date(opts.currentPeriodEnd).getTime() : NaN;
+  if (!Number.isFinite(end)) return 'block';
+  if (opts.now > end + opts.graceDays * 86_400_000) return 'block';
+  return ['GET', 'HEAD', 'OPTIONS'].includes(String(opts.method).toUpperCase()) ? 'allow' : 'readonly';
+}
+
 // Enforces subscription plan gates. Runs after JwtAuthGuard + PlatformAdminGuard + PermissionsGuard +
 // ModuleEnabledGuard. When ENTITLEMENTS_ENFORCE is on it gates the route's @Permissions token(s) against
 // the tenant's entitled SUITES (403 SUITE_NOT_ENTITLED) and, additionally, any @RequiresPlanFeature flag
@@ -68,13 +86,14 @@ export class PlanGuard implements CanActivate {
     // Nothing to gate on this route.
     if (!feature && required.length === 0 && !reqSuite) return true;
 
-    let row: { features: unknown; status: string | null; trialEndsAt: Date | null; planCode: string | null } | undefined;
+    let row: { features: unknown; status: string | null; trialEndsAt: Date | null; currentPeriodEnd: Date | null; planCode: string | null } | undefined;
     try {
       [row] = await this.db
         .select({
           features: plans.features,
           status: subscriptions.status,
           trialEndsAt: subscriptions.trialEndsAt,
+          currentPeriodEnd: subscriptions.currentPeriodEnd,
           planCode: subscriptions.planCode,
         })
         .from(subscriptions)
@@ -98,12 +117,32 @@ export class PlanGuard implements CanActivate {
         messageTh: 'ช่วงทดลองใช้งานสิ้นสุดแล้ว กรุณาอัปเกรดแพ็กเกจเพื่อใช้งานต่อ',
       }), user.tenantId, 'TRIAL_EXPIRED', required);
     }
-    if (row?.status === 'PastDue' || row?.status === 'Canceled') {
+    if (row?.status === 'Canceled') {
       return this.decide(shadow, enforce, () => new ForbiddenException({
         code: 'SUBSCRIPTION_INACTIVE',
-        message: `Subscription is ${row!.status}. Please update your billing to restore access.`,
-        messageTh: 'การสมัครสมาชิกไม่ได้ใช้งาน กรุณาตรวจสอบการชำระเงิน',
+        message: 'Subscription is canceled. Please update your billing to restore access.',
+        messageTh: 'การสมัครสมาชิกถูกยกเลิก กรุณาตรวจสอบการชำระเงิน',
       }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required);
+    }
+    if (row?.status === 'PastDue') {
+      // 1.4 — grace window: within it, reads pass (fall through to suite gating); mutations are blocked;
+      // past it, everything is blocked.
+      const grace = evaluatePastDueGrace({ currentPeriodEnd: row.currentPeriodEnd, graceDays: billingGraceDays(), now: Date.now(), method: String(req.method ?? 'GET') });
+      if (grace === 'readonly') {
+        return this.decide(shadow, enforce, () => new ForbiddenException({
+          code: 'SUBSCRIPTION_PASTDUE_READONLY',
+          message: 'Payment is past due — your account is read-only during the grace period. Please update your billing.',
+          messageTh: 'ค้างชำระเงิน — บัญชีอยู่ในโหมดอ่านอย่างเดียวช่วงผ่อนผัน กรุณาชำระเงิน',
+        }), user.tenantId, 'SUBSCRIPTION_PASTDUE_READONLY', required);
+      }
+      if (grace === 'block') {
+        return this.decide(shadow, enforce, () => new ForbiddenException({
+          code: 'SUBSCRIPTION_INACTIVE',
+          message: 'Subscription is past due beyond the grace period. Please update your billing to restore access.',
+          messageTh: 'การสมัครสมาชิกค้างชำระเกินระยะผ่อนผัน กรุณาชำระเงิน',
+        }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required);
+      }
+      // grace === 'allow' → within grace + read: fall through to normal suite gating.
     }
 
     // Active (or no row → fail CLOSED to ALWAYS_ON via resolveEntitledSuites's fallback).
