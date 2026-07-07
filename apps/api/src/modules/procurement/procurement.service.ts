@@ -15,6 +15,7 @@ import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
 import { normalizeA4Template } from '../../common/a4-template';
 import { DocumentTemplatesService } from '../document-templates/document-templates.service';
+import { ImageFetchService } from './image-fetch.service';
 import type { JwtUser } from '../../common/decorators';
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -40,6 +41,7 @@ export class ProcurementService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly statusLog: StatusLogService,
+    private readonly imageFetch: ImageFetchService,
     // @Optional + last so harnesses that construct this service directly (writeflow) without the engine still work
     @Optional() private readonly workflow?: WorkflowService,
     @Optional() private readonly costing?: CostingService, // Phase 17A — inventory costing (opt-in per item)
@@ -1060,5 +1062,115 @@ export class ProcurementService {
     const recv = Math.min(n(qty), remaining); // cap at outstanding — no accidental over-receipt
     if (!(recv > 0)) throw new BadRequestException({ code: 'BAD_QTY', message: 'Received qty must be > 0', messageTh: 'จำนวนรับต้องมากกว่า 0' });
     return this.createGr({ po_no: poNo, remarks: 'รับบางส่วนผ่านแชท', items: [{ item_id: itemId, received_qty: recv, uom: poi.uom ?? undefined }] }, user);
+  }
+
+  // Fetch and populate product images for catalog items (shop /order items) from the internet.
+  // Fetches images based on item descriptions and stores them as data URLs in the item_images table.
+  // Used by the admin endpoint to bulk-populate images for items without them.
+  async populateItemImages(itemIds?: string[]) {
+    const db = this.db;
+
+    // Get items that don't have images yet
+    const whereConditions = itemIds && itemIds.length > 0
+      ? and(isNull(items.imageKey), inArray(items.itemId, itemIds))
+      : isNull(items.imageKey);
+
+    const itemsToFetch = await db.select({
+      itemId: items.itemId,
+      description: items.itemDescription,
+    }).from(items)
+      .where(whereConditions)
+      .limit(100); // Batch to avoid timeouts
+
+    const results = {
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      items: [] as Array<{ item_id: string; status: string; message: string }>,
+    };
+
+    for (const item of itemsToFetch) {
+      try {
+        const dataUrl = await this.imageFetch.fetchProductImage(item.description || item.itemId);
+
+        if (dataUrl) {
+          // Upsert the image — update if exists, insert if not
+          await db.insert(itemImages)
+            .values({
+              itemId: item.itemId,
+              imageKey: `img_${item.itemId}`,
+              dataUrl,
+              updatedAt: new Date(),
+              updatedBy: 'system',
+            })
+            .onConflictDoUpdate({
+              target: itemImages.itemId,
+              set: {
+                imageKey: `img_${item.itemId}`,
+                dataUrl,
+                updatedAt: new Date(),
+                updatedBy: 'system',
+              },
+            });
+
+          // Update the item's imageKey reference
+          await db.update(items)
+            .set({ imageKey: `img_${item.itemId}` })
+            .where(eq(items.itemId, item.itemId));
+
+          results.succeeded++;
+          results.items.push({ item_id: item.itemId, status: 'success', message: 'Image fetched and stored' });
+        } else {
+          results.failed++;
+          results.items.push({ item_id: item.itemId, status: 'failed', message: 'Could not fetch image' });
+        }
+      } catch (error) {
+        results.failed++;
+        results.items.push({ item_id: item.itemId, status: 'error', message: String(error) });
+      }
+      results.processed++;
+    }
+
+    return results;
+  }
+
+  // Fetch image for a single item and return as data URL
+  async fetchItemImage(itemId: string): Promise<string> {
+    const [item] = await this.db.select({
+      description: items.itemDescription,
+    }).from(items).where(eq(items.itemId, itemId)).limit(1);
+
+    if (!item) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Item not found', messageTh: 'ไม่พบสินค้า' });
+
+    return await this.imageFetch.fetchProductImage(item.description || itemId);
+  }
+
+  // Store a fetched image for an item
+  async storeItemImage(itemId: string, dataUrl: string) {
+    // Upsert the image in item_images table
+    await this.db.insert(itemImages)
+      .values({
+        itemId,
+        imageKey: `img_${itemId}`,
+        dataUrl,
+        updatedAt: new Date(),
+        updatedBy: 'system',
+      })
+      .onConflictDoUpdate({
+        target: itemImages.itemId,
+        set: {
+          imageKey: `img_${itemId}`,
+          dataUrl,
+          updatedAt: new Date(),
+          updatedBy: 'system',
+        },
+      });
+
+    // Update the item's imageKey reference
+    await this.db.update(items)
+      .set({ imageKey: `img_${itemId}` })
+      .where(eq(items.itemId, itemId));
+
+    return { item_id: itemId, image_key: `img_${itemId}` };
   }
 }

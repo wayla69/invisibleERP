@@ -4,6 +4,7 @@ import { ProcurementService } from './procurement.service';
 import { AttachmentsService } from './attachments.service';
 import { PoPdfService } from './po-pdf.service';
 import { GrPdfService } from './gr-pdf.service';
+import { ImageFetchService } from './image-fetch.service';
 import { WorkflowModule } from '../workflow/workflow.module';
 import { CostingModule } from '../costing/costing.module';
 import { PlatformModule } from '../platform/platform.module';
@@ -16,5 +17,5 @@ import { DocumentTemplatesModule } from '../document-templates/document-template
 // resolves ProcurementService lazily via ModuleRef, so it never imports ProcurementModule (no DI cycle).
 // CommitmentsModule supplies the BoQ-line encumbrance ledger (M1, PROJ-12) — a project PO reserves budget
 // against its BoQ line (BUDGET_EXCEEDED if it would overrun), releases on cancel, consumes on receipt.
-@Module({ imports: [WorkflowModule, CostingModule, PlatformModule, MessagingModule, CommitmentsModule, DocumentTemplatesModule], controllers: [ProcurementController], providers: [ProcurementService, AttachmentsService, PoPdfService, GrPdfService], exports: [ProcurementService, AttachmentsService] })
+@Module({ imports: [WorkflowModule, CostingModule, PlatformModule, MessagingModule, CommitmentsModule, DocumentTemplatesModule], controllers: [ProcurementController], providers: [ProcurementService, AttachmentsService, PoPdfService, GrPdfService, ImageFetchService], exports: [ProcurementService, AttachmentsService] })
 export class ProcurementModule {}
