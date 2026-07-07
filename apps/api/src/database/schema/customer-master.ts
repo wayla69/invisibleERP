@@ -31,6 +31,12 @@ export const customerMaster = pgTable('customer_master', {
   // key already used everywhere) rather than a numeric FK, since that's how every other lookup here works.
   parentCustomerNo: text('parent_customer_no'),
   notes: encryptedText('notes'),                   // free-text may hold PII — NOT queried → encrypted at rest
+  // Match-merge / DQM (0273, master-data audit Phase 5) — when a duplicate is merged into a survivor it is
+  // soft-retired (status='merged') with a pointer to the survivor's id + who/when, so the merge is fully
+  // traceable and the record is never physically destroyed.
+  mergedInto: bigint('merged_into', { mode: 'number' }),
+  mergedBy: text('merged_by'),
+  mergedAt: timestamp('merged_at', { withTimezone: true }),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqNo: unique('uq_customer_master_no').on(t.tenantId, t.customerNo), byName: index('idx_customer_master_name').on(t.tenantId, t.name), byMember: index('idx_customer_master_member').on(t.memberId) }));

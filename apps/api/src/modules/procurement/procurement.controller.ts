@@ -82,6 +82,7 @@ const VendorContactBody = z.object({
   notes: z.string().optional(), is_primary: z.boolean().optional(),
 });
 const VendorParentBody = z.object({ parent_vendor_id: z.number().int().positive().nullable() });
+const VendorMergeBody = z.object({ duplicate_vendor_id: z.number().int().positive() });
 // Vendor bank-detail maker-checker (0270) — stages a change; never applied directly.
 const VendorBankChangeBody = z.object({ bank_name: z.string().optional(), bank_account: z.string().optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
@@ -238,6 +239,11 @@ export class ProcurementController {
   listVendorContacts(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.listVendorContacts(+id, u); }
   @Delete('vendors/:id/contacts/:contactId') @Permissions('md_vendor')
   deleteVendorContact(@Param('id') id: string, @Param('contactId') contactId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteVendorContact(+id, +contactId, u); }
+  // ── Match-merge / DQM (master-data audit Phase 5): detect + merge duplicate vendors ──
+  @Get('vendors/duplicates') @Permissions('md_vendor', 'procurement', 'exec')
+  findVendorDuplicates(@CurrentUser() u: JwtUser) { return this.svc.findVendorDuplicates(u); }
+  @Post('vendors/:id/merge') @Permissions('md_vendor', 'masterdata', 'exec')
+  mergeVendor(@Param('id') id: string, @Body(new ZodValidationPipe(VendorMergeBody)) b: z.infer<typeof VendorMergeBody>, @CurrentUser() u: JwtUser) { return this.svc.mergeVendor(+id, b.duplicate_vendor_id, u); }
   @Post('suppliers/:id/scorecard') @Permissions('procurement')
   scorecard(@Param('id') id: string, @Body(new ZodValidationPipe(ScorecardBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.recomputeScorecard(+id, b.period, u); }
 

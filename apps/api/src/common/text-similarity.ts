@@ -1,0 +1,46 @@
+// Master-data duplicate detection (master-data audit Phase 5 — DQM). App-side fuzzy matching: pg_trgm is
+// NOT enabled in this deployment (no CREATE EXTENSION in any migration, and the PGlite control harness does
+// not bundle it), so name similarity is computed in application code. Master-data volumes are thousands of
+// rows per tenant, so an O(n²) in-memory pass is fine — this is not a hot path. Dice coefficient over
+// character trigrams (the same shape pg_trgm's similarity() uses), with a NFKC-normalised, punctuation- and
+// legal-suffix-stripped key so "บริษัท เอ จำกัด" and "เอ Co., Ltd." collapse toward each other.
+
+// Common company/legal suffixes (TH + EN) stripped before comparison so they don't inflate similarity for
+// two unrelated companies (both ending "จำกัด") nor deflate it for the same company written two ways.
+const LEGAL_SUFFIXES = [
+  'บริษัท', 'จำกัด', 'มหาชน', 'หจก', 'ห้างหุ้นส่วนจำกัด', 'ห้างหุ้นส่วนสามัญ',
+  'company', 'limited', 'ltd', 'co', 'inc', 'incorporated', 'corp', 'corporation', 'plc', 'llc', 'llp', 'pcl',
+];
+
+export function normalizeName(s: string | null | undefined): string {
+  let n = (s ?? '').toLowerCase().normalize('NFKC');
+  n = n.replace(/[^\p{L}\p{N}\s]/gu, ' ');       // drop punctuation (keep letters/numbers/space, any script)
+  n = n.replace(/\s+/g, ' ').trim();
+  for (const suf of LEGAL_SUFFIXES) {
+    n = n.replace(new RegExp(`(^|\\s)${suf}(\\s|$)`, 'g'), ' ');
+  }
+  return n.replace(/\s+/g, ' ').trim();
+}
+
+function trigrams(s: string): Set<string> {
+  const padded = `  ${s} `;
+  const g = new Set<string>();
+  for (let i = 0; i < padded.length - 2; i++) g.add(padded.slice(i, i + 3));
+  return g;
+}
+
+/** Dice-coefficient trigram similarity in [0,1] over normalised names. 1 = identical after normalisation. */
+export function nameSimilarity(a: string | null | undefined, b: string | null | undefined): number {
+  const na = normalizeName(a), nb = normalizeName(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  const ga = trigrams(na), gb = trigrams(nb);
+  let inter = 0;
+  for (const t of ga) if (gb.has(t)) inter++;
+  return (2 * inter) / (ga.size + gb.size);
+}
+
+/** A cheap exact-key normaliser for phone/email/tax-id equality signals (strip spaces/dashes, lowercase). */
+export function normalizeKey(s: string | null | undefined): string {
+  return (s ?? '').toLowerCase().replace(/[\s\-().]/g, '').trim();
+}

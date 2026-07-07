@@ -141,6 +141,35 @@ async function main() {
   const view360 = await inj('GET', `/api/customer-master/${cmNo}/360`, admin);
   ok('Customer 360: surfaces addresses/contacts/parent together', view360.json.addresses?.length === 1 && view360.json.contacts?.length === 1 && view360.json.parent?.customer_no === cmParentNo, JSON.stringify({ addr: view360.json.addresses?.length, contacts: view360.json.contacts?.length, parent: view360.json.parent }));
 
+  // ── Match-merge / DQM (master-data audit Phase 5) — detect + merge duplicate customers. ──
+  const survA = await inj('POST', '/api/customer-master', admin, { name: 'บริษัท สมาร์ทโซลูชั่น จำกัด', kind: 'company', phone: '02-555-1234' });
+  const survANo = survA.json.customer_no as string;
+  const dupB = await inj('POST', '/api/customer-master', admin, { name: 'สมาร์ทโซลูชั่น', kind: 'company', phone: '02-555-1234', email: 'contact@smart.co.th' });
+  const dupBNo = dupB.json.customer_no as string;
+  await inj('POST', `/api/customer-master/${dupBNo}/addresses`, admin, { address_type: 'billing', address_line1: '1 อาคารสมาร์ท', is_primary: true });
+  await inj('POST', `/api/customer-master/${dupBNo}/contacts`, admin, { name: 'คุณเอ', phone: '081-111-2222', is_primary: true });
+
+  const dupScan = await inj('GET', '/api/customer-master/duplicates', admin);
+  const ids = (g: any) => [g.primary.customer_no, ...g.duplicates.map((d: any) => d.customer_no)];
+  const grp = (dupScan.json.groups ?? []).find((g: any) => ids(g).includes(survANo) && ids(g).includes(dupBNo));
+  ok('Customer dedup: detects the near-duplicate pair (shared phone + similar name)', !!grp && grp.duplicates.some((d: any) => d.reasons.includes('phone') && d.reasons.includes('name')), JSON.stringify(grp?.duplicates?.map((d: any) => ({ no: d.customer_no, reasons: d.reasons, score: d.score }))));
+
+  const selfMerge = await inj('POST', `/api/customer-master/${survANo}/merge`, admin, { duplicate_customer_no: survANo });
+  ok('Customer merge: cannot merge into itself → 400 SELF_MERGE', selfMerge.status === 400 && selfMerge.json.error?.code === 'SELF_MERGE', `${selfMerge.status} ${selfMerge.json.error?.code}`);
+  const merge = await inj('POST', `/api/customer-master/${survANo}/merge`, admin, { duplicate_customer_no: dupBNo });
+  ok('Customer merge: merges duplicate into survivor', (merge.status === 200 || merge.status === 201) && merge.json.merged === true, `${merge.status} ${JSON.stringify(merge.json).slice(0, 120)}`);
+  const dupAfter = await inj('GET', `/api/customer-master/${dupBNo}`, admin);
+  ok('Customer merge: duplicate soft-retired (status=merged, merged_into set, record preserved)', dupAfter.json.status === 'merged' && dupAfter.json.merged_into != null, JSON.stringify({ st: dupAfter.json.status, into: dupAfter.json.merged_into }));
+  const survAddrs = await inj('GET', `/api/customer-master/${survANo}/addresses`, admin);
+  const survContacts = await inj('GET', `/api/customer-master/${survANo}/contacts`, admin);
+  ok('Customer merge: duplicate child rows repointed onto the survivor (address + contact)', (survAddrs.json.addresses?.length ?? 0) >= 1 && (survContacts.json.contacts?.length ?? 0) >= 1, JSON.stringify({ addr: survAddrs.json.addresses?.length, contacts: survContacts.json.contacts?.length }));
+  const survAfter = await inj('GET', `/api/customer-master/${survANo}`, admin);
+  ok('Customer merge: survivorship fills the survivor email from the duplicate', survAfter.json.email === 'contact@smart.co.th', `email=${survAfter.json.email}`);
+  const reMerge = await inj('POST', `/api/customer-master/${survANo}/merge`, admin, { duplicate_customer_no: dupBNo });
+  ok('Customer merge: re-merging an already-merged duplicate → 400 ALREADY_MERGED', reMerge.status === 400 && reMerge.json.error?.code === 'ALREADY_MERGED', `${reMerge.status} ${reMerge.json.error?.code}`);
+  const dupScan2 = await inj('GET', '/api/customer-master/duplicates', admin);
+  ok('Customer dedup: the merged duplicate no longer appears in the scan', !(dupScan2.json.groups ?? []).some((g: any) => ids(g).includes(dupBNo)), `groups=${dupScan2.json.count}`);
+
   await app.close();
   await pg.close();
 
