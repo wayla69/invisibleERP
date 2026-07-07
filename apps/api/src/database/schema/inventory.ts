@@ -8,6 +8,7 @@ export const items = pgTable('items', {
   itemId: text('item_id').notNull().unique(),
   itemDescription: text('item_description'),
   barcode: text('barcode'),                                     // GTIN/EAN/UPC for hardware scan-to-add (exact match)
+  supplyType: text('supply_type').notNull().default('goods'),   // 'goods' | 'service' — VAT tax-point class (5.1, ม.78 vs 78/1). Inert until 5.1b.
   uom: text('uom'),
   baseUom: text('base_uom'),
   conversionFactor: numeric('conversion_factor').default('1'),

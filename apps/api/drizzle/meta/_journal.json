@@ -1954,6 +1954,13 @@
       "when": 2023820000240,
       "tag": "0278_scheduled_master_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 279,
+      "version": "7",
+      "when": 2023820000241,
+      "tag": "0279_tax_point_scaffold",
+      "breakpoints": true
     }
   ]
 }

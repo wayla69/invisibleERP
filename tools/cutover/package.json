@@ -38,6 +38,7 @@
     "mfa-gate": "tsx src/mfa-gate.ts",
     "api-docs": "tsx src/api-docs.ts",
     "input-vat": "tsx src/input-vat.ts",
+    "tax-point": "tsx src/tax-point.ts",
     "cpq-gl": "tsx src/cpq-gl.ts",
     "promptpay": "tsx src/promptpay.ts",
     "payments-gateway": "tsx src/payments-gateway.ts",

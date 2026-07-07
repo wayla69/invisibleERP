@@ -79,7 +79,7 @@ Wired at the points that create a tax document / VAT-bearing event:
 
 | Phase | Scope | ToE |
 |-------|-------|-----|
-| **5.1a** | `resolveTaxPoint()` pure helper + `items.supply_type` + `tax_point_date` columns (migration 0278, default = issue_date) | new `cutover/tax-point` (pure rule matrix: goods/service earliest-of) |
+| **5.1a** ✅ **DONE** | `resolveTaxPoint()` + `resolveInstallmentTaxPoints()` (`modules/tax/tax-point.ts`) + `items.supply_type` (default `goods`) + `tax_invoices.tax_point_date`/`supply_type` (migration **0279**, backfill tax_point_date = issue_date). **Inert** — nothing wired yet. | `cutover/tax-point` 13/13 (goods/service/installment rule matrix); migration-parity + taxdocs 100 + basics 293 green |
 | **5.1b** | Stamp `tax_point_date` at issue (tax-invoice + POS) | extend `taxdocs` (goods delivered-before-invoice → tax point = delivery) |
 | **5.1c** | Reports bucket by tax_point_date + late-tax-point exception | extend `taxdocs` (pp30 periods by tax point; legacy rows unchanged) |
 | **5.1d** | Service advance/deposit output-VAT trigger (merges 5.7) | extend `taxdocs` (service deposit → output VAT at receipt) |
@@ -98,4 +98,5 @@ Wired at the points that create a tax document / VAT-bearing event:
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
 | 0.1 | 2026-07-07 | Platform / Tax | Initial design for review — rule table, data model (`supply_type` + `tax_point_date`, default=issue_date grandfather), `resolveTaxPoint()`, report bucketing, 4-phase plan. Pending tax-advisor sign-off on §1. |
+| 0.3 | 2026-07-07 | Platform / Tax | **5.1a INERT scaffolding shipped.** Migration 0279 adds `items.supply_type` (default `goods`) + `tax_invoices.tax_point_date`/`supply_type` (backfill = issue_date); `modules/tax/tax-point.ts` (`resolveTaxPoint` ม.78/78/1 + `resolveInstallmentTaxPoints` ม.78(2)); ToE `cutover/tax-point` (13/13). No behaviour change — nothing wired at issue/report yet (5.1b+ gated on advisor sign-off). Verified: migration-parity, taxdocs 100, basics 293, all ratchets/gates green. |
 | 0.2 | 2026-07-07 | Platform / Tax | **§1 reconciled against the Revenue Code (ประมวลรัษฎากร).** Added the governing sections + source links (มาตรา 78 goods, 78/1 services, 78(2)+ป.36/2536 installments, 78(3)(4) consignment/export). Corrected the framing to the code's "default-unless-earlier-event" structure. **Key correction:** installment/hire-purchase (real-estate RE-01..03) is **in-scope**, not deferred — tax point per instalment due date (มาตรา 78(2)); added phase 5.1e. Still pending advisor sign-off, but now cited. |

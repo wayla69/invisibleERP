@@ -20,6 +20,8 @@ export const taxInvoices = pgTable('tax_invoices', {
   bookNo: text('book_no'),                                 // เล่มที่ (optional)
   type: taxInvoiceTypeEnum('type').notNull(),              // full | abbreviated
   issueDate: date('issue_date').notNull(),                 // วันที่ออกใบกำกับภาษี
+  taxPointDate: date('tax_point_date'),                    // จุดความรับผิด VAT (ม.78/78/1). 5.1: defaults to issue_date; inert until 5.1b/5.1c.
+  supplyType: text('supply_type'),                         // 'goods' | 'service' fallback classifier when a line has no item (5.1)
   sourceType: taxDocSourceEnum('source_type').notNull(),   // POS | AR
   sourceRef: text('source_ref').notNull(),                 // cust_pos_sales.sale_no | ar_invoices.invoice_no
   // seller snapshot (ม.86/4) — frozen at issue
