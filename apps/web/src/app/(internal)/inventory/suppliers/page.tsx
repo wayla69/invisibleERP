@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SearchX, Truck, Landmark, ShieldAlert, Pencil, MapPin, Contact, Trash2, Building2, Plus } from 'lucide-react';
+import { SearchX, Truck, Landmark, ShieldAlert, Pencil, MapPin, Contact, Trash2, Building2, Plus, GitMerge, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -47,6 +47,7 @@ export default function SuppliersPage() {
   const [editingBank, setEditingBank] = useState<Supplier | null>(null);
   const [editingProfile, setEditingProfile] = useState<Supplier | null>(null);
   const [editingParty, setEditingParty] = useState<Supplier | null>(null);
+  const [dedup, setDedup] = useState(false);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -60,19 +61,22 @@ export default function SuppliersPage() {
       description={t('inv.suppliers_subtitle')}
       query={q}
       toolbar={
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          placeholder={t('inv.suppliers_search_ph')}
-          ariaLabel={t('inv.suppliers_search_aria')}
-          count={
-            q.data
-              ? (search && filtered.length !== rows.length
-                  ? t('inv.suppliers_count_of', { n: num(filtered.length), total: num(rows.length) })
-                  : t('inv.suppliers_count', { n: num(filtered.length) }))
-              : undefined
-          }
-        />
+        <div className="flex items-center gap-2">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder={t('inv.suppliers_search_ph')}
+            ariaLabel={t('inv.suppliers_search_aria')}
+            count={
+              q.data
+                ? (search && filtered.length !== rows.length
+                    ? t('inv.suppliers_count_of', { n: num(filtered.length), total: num(rows.length) })
+                    : t('inv.suppliers_count', { n: num(filtered.length) }))
+                : undefined
+            }
+          />
+          {canEditBank && <Button variant="outline" onClick={() => setDedup(true)}><GitMerge className="size-4" /> {t('mx.cm_dedup')}</Button>}
+        </div>
       }
     >
       <VendorBankApprovals />
@@ -139,7 +143,64 @@ export default function SuppliersPage() {
       {editingBank && <BankChangeDialog vendor={editingBank} onClose={() => setEditingBank(null)} />}
       {editingProfile && <ProfileDialog vendor={editingProfile} onClose={() => setEditingProfile(null)} />}
       {editingParty && <VendorPartyPanel vendor={editingParty} onClose={() => setEditingParty(null)} />}
+      {dedup && <VendorDuplicatesDialog onClose={() => setDedup(false)} />}
     </ModulePage>
+  );
+}
+
+// Match-merge / DQM (master-data audit Phase 5) — steward review queue for probable duplicate vendors.
+// Merging repoints the duplicate's child rows (POs, AP txns, addresses, …) onto the survivor and soft-retires
+// the duplicate (active=false); the record is preserved, never destroyed.
+function VendorDuplicatesDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ groups: any[]; count: number }>({ queryKey: ['vendor-duplicates'], queryFn: () => api('/api/procurement/vendors/duplicates') });
+  const merge = useMutation({
+    mutationFn: ({ survivor, duplicate }: { survivor: number; duplicate: number }) => api<any>(`/api/procurement/vendors/${survivor}/merge`, { method: 'POST', body: JSON.stringify({ duplicate_vendor_id: duplicate }) }),
+    onSuccess: () => { notifySuccess(t('mx.cm_merged')); q.refetch(); qc.invalidateQueries({ queryKey: ['suppliers'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t('mx.cm_dedup_title')}</DialogTitle>
+          <DialogDescription>{t('mx.vp_dedup_desc')}</DialogDescription>
+        </DialogHeader>
+        {q.data && (q.data.groups.length === 0
+          ? <p className="py-6 text-center text-sm text-muted-foreground">{t('mx.cm_dedup_none')}</p>
+          : (
+            <div className="grid max-h-[60vh] gap-3 overflow-y-auto">
+              {q.data.groups.map((g) => (
+                <Card key={g.primary.vendor_id} className="p-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="success" className="text-xs">{t('mx.cm_dedup_keep')}</Badge>
+                    <span className="font-medium">{g.primary.name}</span>
+                    {g.primary.vendor_code && <span className="text-muted-foreground">{g.primary.vendor_code}</span>}
+                  </div>
+                  <div className="mt-2 grid gap-2">
+                    {g.duplicates.map((d: any) => (
+                      <div key={d.vendor_id} className="flex items-center gap-2 rounded-md border border-border/60 p-2">
+                        <div className="flex-1">
+                          <div className="font-medium">{d.name} {d.vendor_code && <span className="font-normal text-muted-foreground">{d.vendor_code}</span>}</div>
+                          <div className="mt-0.5 flex flex-wrap gap-1">
+                            {d.reasons.map((r: string) => <Badge key={r} variant="secondary" className="text-xs">{t(`mx.cm_dedup_reason_${r}` as any)}</Badge>)}
+                            <Badge variant="outline" className="text-xs">{Math.round(d.score * 100)}%</Badge>
+                          </div>
+                        </div>
+                        <Button size="sm" variant="outline" disabled={merge.isPending} onClick={() => { if (window.confirm(t('mx.cm_merge_confirm', { dup: d.name, keep: g.primary.name }))) merge.mutate({ survivor: g.primary.vendor_id, duplicate: d.vendor_id }); }}>
+                          <GitMerge className="size-4" /> {t('mx.cm_merge')}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ))}
+        <DialogFooter><Button variant="outline" onClick={onClose}><X className="size-4" /> {t('fin.cancel')}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

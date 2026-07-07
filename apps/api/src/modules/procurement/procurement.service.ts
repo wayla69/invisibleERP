@@ -1,5 +1,7 @@
-import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
-import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
+import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException, ConflictException } from '@nestjs/common';
+import { sql, eq, ne, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
+import { isUniqueViolation } from '../../common/db-error';
+import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests, vendorAddresses, vendorContacts } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -1338,6 +1340,64 @@ export class ProcurementService {
       .where(eq(items.itemId, itemId));
 
     return { item_id: itemId, image_key: `img_${itemId}` };
+  }
+
+  // ── Match-merge / DQM (master-data audit Phase 5) ────────────────────────────────────────────────
+  // Detect probable duplicate vendors within the tenant: exact tax-id/email/phone signals + fuzzy name
+  // similarity (app-side trigram — pg_trgm isn't enabled here). Read-only steward review queue.
+  async findVendorDuplicates(user: JwtUser) {
+    const db = this.db;
+    const conds = [ne(vendors.active, false)];
+    if (user.tenantId != null) conds.push(eq(vendors.tenantId, user.tenantId));
+    const rows = await db.select().from(vendors).where(and(...conds)).orderBy(desc(vendors.id)).limit(1000);
+    const used = new Set<number>();
+    const groups: any[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const a = rows[i]; if (!a || used.has(Number(a.id))) continue;
+      const dups: any[] = [];
+      for (let j = i + 1; j < rows.length; j++) {
+        const b = rows[j]; if (!b || used.has(Number(b.id))) continue;
+        const reasons: string[] = [];
+        if (a.taxId && b.taxId && normalizeKey(a.taxId) === normalizeKey(b.taxId)) reasons.push('tax_id');
+        if (a.email && b.email && normalizeKey(a.email) === normalizeKey(b.email)) reasons.push('email');
+        if (a.phone && b.phone && normalizeKey(a.phone) === normalizeKey(b.phone)) reasons.push('phone');
+        const score = nameSimilarity(a.name, b.name);
+        if (score >= 0.6) reasons.push('name');
+        if (reasons.length) { dups.push({ vendor_id: Number(b.id), vendor_code: b.vendorCode, name: b.name, score: Math.round(score * 100) / 100, reasons }); used.add(Number(b.id)); }
+      }
+      if (dups.length) { used.add(Number(a.id)); groups.push({ primary: { vendor_id: Number(a.id), vendor_code: a.vendorCode, name: a.name }, duplicates: dups }); }
+    }
+    return { groups, count: groups.length };
+  }
+
+  // Merge a duplicate vendor INTO a survivor: repoint the duplicate's child rows (POs, AP txns, addresses,
+  // contacts, price-lists, …) to the survivor, fill blank survivor fields from the duplicate (survivorship),
+  // and soft-retire the duplicate (active=false + merged_into/by/at). Atomic — a unique-key collision rolls
+  // back and surfaces MERGE_CONFLICT for manual steward resolution. Gated to md_vendor/masterdata/exec.
+  async mergeVendor(survivorId: number, duplicateId: number, user: JwtUser) {
+    if (survivorId === duplicateId) throw new BadRequestException({ code: 'SELF_MERGE', message: 'Cannot merge a vendor into itself', messageTh: 'ไม่สามารถรวมผู้ขายเข้ากับตัวเองได้' });
+    const survivor = await this.vendorById(survivorId);
+    const dup = await this.vendorById(duplicateId);
+    if (dup.active === false && dup.mergedInto != null) throw new BadRequestException({ code: 'ALREADY_MERGED', message: 'Duplicate is already merged', messageTh: 'ผู้ขายรายนี้ถูกรวมไปแล้ว' });
+    const db = this.db;
+    try {
+      await db.transaction(async (tx: any) => {
+        await tx.execute(sql`SELECT md_merge_repoint('vendor_id', 'vendors', ${survivorId}, ${duplicateId})`);
+        // re-parent any subsidiaries that pointed at the duplicate
+        await tx.update(vendors).set({ parentVendorId: survivorId }).where(eq(vendors.parentVendorId, duplicateId));
+        const fill: Record<string, unknown> = {};
+        const pick = (k: string, s: unknown, d: unknown) => { if ((s === null || s === undefined || s === '') && d !== null && d !== undefined && d !== '') fill[k] = d; };
+        pick('contact', survivor.contact, dup.contact); pick('phone', survivor.phone, dup.phone); pick('email', survivor.email, dup.email);
+        pick('address', survivor.address, dup.address); pick('taxId', survivor.taxId, dup.taxId); pick('paymentTerms', survivor.paymentTerms, dup.paymentTerms);
+        pick('category', survivor.category, dup.category); pick('currency', survivor.currency, dup.currency); pick('notes', survivor.notes, dup.notes);
+        if (Object.keys(fill).length) await tx.update(vendors).set(fill).where(eq(vendors.id, survivorId));
+        await tx.update(vendors).set({ active: false, mergedInto: survivorId, mergedBy: user.username, mergedAt: new Date() }).where(eq(vendors.id, duplicateId));
+      });
+    } catch (e) {
+      if (isUniqueViolation(e)) throw new ConflictException({ code: 'MERGE_CONFLICT', message: 'Survivor and duplicate both own a row with the same key — resolve manually', messageTh: 'ผู้ขายทั้งสองมีรายการที่ซ้ำกัน กรุณาแก้ไขก่อนรวม' });
+      throw e;
+    }
+    return { survivor_id: survivorId, merged_id: duplicateId, merged: true };
   }
 }
 

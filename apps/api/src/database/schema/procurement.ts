@@ -48,6 +48,11 @@ export const vendors = pgTable('vendors', {
   // projects.ts WBS parentId self-reference precedent — a self-referencing FK inside the same table
   // definition is simplest done this way rather than fighting Drizzle's forward-reference typing.
   parentVendorId: bigint('parent_vendor_id', { mode: 'number' }),
+  // Match-merge / DQM (0273, master-data audit Phase 5) — a merged-away duplicate is soft-retired
+  // (active=false) with a pointer to the surviving vendor's id + who/when. Never physically deleted.
+  mergedInto: bigint('merged_into', { mode: 'number' }),
+  mergedBy: text('merged_by'),
+  mergedAt: timestamp('merged_at', { withTimezone: true }),
 });
 
 // ── Phase 16 — Source-to-Pay: RFQ/sourcing, supplier scorecards, 3-way match ──

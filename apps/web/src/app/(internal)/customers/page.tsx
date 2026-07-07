@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { IdCard, SearchX, Plus, Pencil, X, MapPin, Contact, Trash2, Building2 } from 'lucide-react';
+import { IdCard, SearchX, Plus, Pencil, X, MapPin, Contact, Trash2, Building2, GitMerge } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, baht, thaiDate } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -44,6 +44,7 @@ export default function CustomersPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
+  const [dedup, setDedup] = useState(false);
   const q = useQuery<{ customers: Customer[] }>({ queryKey: ['customer-master', search], queryFn: () => api(`/api/customer-master${search ? `?search=${encodeURIComponent(search)}` : ''}`) });
   const rows = q.data?.customers ?? [];
 
@@ -63,6 +64,7 @@ export default function CustomersPage() {
             ariaLabel={t('mx.cm_search_aria')}
             count={q.data ? t('mx.cm_count', { n: num(filtered.length) }) : undefined}
           />
+          <Button variant="outline" onClick={() => setDedup(true)}><GitMerge className="size-4" /> {t('mx.cm_dedup')}</Button>
           <Button onClick={() => setCreating(true)}><Plus className="size-4" /> {t('mx.cm_add')}</Button>
         </div>
       }
@@ -96,7 +98,66 @@ export default function CustomersPage() {
       {creating && <CustomerFormDialog onClose={() => setCreating(false)} />}
       {editing && <CustomerFormDialog customer={editing} onClose={() => setEditing(null)} />}
       {viewing && <Customer360Panel customerNo={viewing} onClose={() => setViewing(null)} />}
+      {dedup && <CustomerDuplicatesDialog onClose={() => setDedup(false)} />}
     </ModulePage>
+  );
+}
+
+// Match-merge / DQM (master-data audit Phase 5) — a steward review queue for probable duplicate customers
+// (exact tax-id/email/phone + fuzzy name). Merging repoints the duplicate's child rows onto the survivor and
+// soft-retires the duplicate; the historical record is preserved (status='merged'), never destroyed.
+function CustomerDuplicatesDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ groups: any[]; count: number }>({ queryKey: ['customer-duplicates'], queryFn: () => api('/api/customer-master/duplicates') });
+  const merge = useMutation({
+    mutationFn: ({ survivor, duplicate }: { survivor: string; duplicate: string }) => api<any>(`/api/customer-master/${survivor}/merge`, { method: 'POST', body: JSON.stringify({ duplicate_customer_no: duplicate }) }),
+    onSuccess: () => { notifySuccess(t('mx.cm_merged')); q.refetch(); qc.invalidateQueries({ queryKey: ['customer-master'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t('mx.cm_dedup_title')}</DialogTitle>
+          <DialogDescription>{t('mx.cm_dedup_desc')}</DialogDescription>
+        </DialogHeader>
+        <StateView q={q}>
+          {q.data && (q.data.groups.length === 0
+            ? <p className="py-6 text-center text-sm text-muted-foreground">{t('mx.cm_dedup_none')}</p>
+            : (
+              <div className="grid max-h-[60vh] gap-3 overflow-y-auto">
+                {q.data.groups.map((g) => (
+                  <Card key={g.primary.customer_no} className="p-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="success" className="text-xs">{t('mx.cm_dedup_keep')}</Badge>
+                      <span className="font-medium">{g.primary.name}</span>
+                      <span className="text-muted-foreground">{g.primary.customer_no}</span>
+                    </div>
+                    <div className="mt-2 grid gap-2">
+                      {g.duplicates.map((d: any) => (
+                        <div key={d.customer_no} className="flex items-center gap-2 rounded-md border border-border/60 p-2">
+                          <div className="flex-1">
+                            <div className="font-medium">{d.name} <span className="font-normal text-muted-foreground">{d.customer_no}</span></div>
+                            <div className="mt-0.5 flex flex-wrap gap-1">
+                              {d.reasons.map((r: string) => <Badge key={r} variant="secondary" className="text-xs">{t(`mx.cm_dedup_reason_${r}` as any)}</Badge>)}
+                              <Badge variant="outline" className="text-xs">{Math.round(d.score * 100)}%</Badge>
+                            </div>
+                          </div>
+                          <Button size="sm" variant="outline" disabled={merge.isPending} onClick={() => { if (window.confirm(t('mx.cm_merge_confirm', { dup: d.name, keep: g.primary.name }))) merge.mutate({ survivor: g.primary.customer_no, duplicate: d.customer_no }); }}>
+                            <GitMerge className="size-4" /> {t('mx.cm_merge')}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ))}
+        </StateView>
+        <DialogFooter><Button variant="outline" onClick={onClose}><X className="size-4" /> {t('fin.cancel')}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

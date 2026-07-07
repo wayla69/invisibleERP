@@ -1,4 +1,4 @@
-import { Inject, Injectable, Module, Controller, Get, Post, Patch, Delete, Param, Query, Body, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Module, Controller, Get, Post, Patch, Delete, Param, Query, Body, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { z } from 'zod';
 import { sql, eq, and, ne, or, ilike, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -7,6 +7,8 @@ import { n, ymd } from '../../database/queries';
 import { DocNumberService } from '../../common/doc-number.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { isUniqueViolation } from '../../common/db-error';
+import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 
 @Injectable()
 export class CustomersService {
@@ -85,6 +87,7 @@ const ContactBody = z.object({
   notes: z.string().optional(), is_primary: z.boolean().optional(),
 });
 const ParentBody = z.object({ parent_customer_no: z.string().nullable() });
+const MergeCustomerBody = z.object({ duplicate_customer_no: z.string().min(1) });
 // Direct-edit customer master profile (master-data audit Phase 3) — mirrors the vendor-profile direct-edit
 // pattern (0270 follow-up): none of these fields carry the payment-redirection risk that vendor bank details
 // do, so no maker-checker. member_id/account_code stay on the dedicated `link` endpoint (SoD-adjacent linkage).
@@ -290,6 +293,66 @@ export class CustomerMasterService {
     if (!del.length) throw new NotFoundException({ code: 'CONTACT_NOT_FOUND', message: 'Contact not found', messageTh: 'ไม่พบผู้ติดต่อนี้' });
     return { deleted: true };
   }
+
+  // ── Match-merge / DQM (master-data audit Phase 5) ────────────────────────────────────────────────
+  // Detect probable duplicate customers within the tenant: exact tax-id/email/phone signals plus fuzzy
+  // name similarity (app-side trigram — pg_trgm isn't enabled here). Read-only steward review queue.
+  async findDuplicates(user: JwtUser) {
+    const db = this.db;
+    const conds = [ne(customerMaster.status, 'merged')];
+    if (user.tenantId != null) conds.push(eq(customerMaster.tenantId, user.tenantId));
+    const rows = await db.select().from(customerMaster).where(and(...conds)).orderBy(desc(customerMaster.id)).limit(1000);
+    const used = new Set<number>();
+    const groups: any[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const a = rows[i]; if (!a || used.has(Number(a.id))) continue;
+      const dups: any[] = [];
+      for (let j = i + 1; j < rows.length; j++) {
+        const b = rows[j]; if (!b || used.has(Number(b.id))) continue;
+        const reasons: string[] = [];
+        if (a.taxId && b.taxId && normalizeKey(a.taxId) === normalizeKey(b.taxId)) reasons.push('tax_id');
+        if (a.email && b.email && normalizeKey(a.email) === normalizeKey(b.email)) reasons.push('email');
+        if (a.phone && b.phone && normalizeKey(a.phone) === normalizeKey(b.phone)) reasons.push('phone');
+        const score = nameSimilarity(a.name, b.name);
+        if (score >= 0.6) reasons.push('name');
+        if (reasons.length) { dups.push({ ...shapeCustomer(b), score: Math.round(score * 100) / 100, reasons }); used.add(Number(b.id)); }
+      }
+      if (dups.length) { used.add(Number(a.id)); groups.push({ primary: shapeCustomer(a), duplicates: dups }); }
+    }
+    return { groups, count: groups.length };
+  }
+
+  // Merge a duplicate customer INTO a survivor: repoint the duplicate's child rows (addresses/contacts/…)
+  // to the survivor, fill any blank survivor field from the duplicate (survivorship), and soft-retire the
+  // duplicate (status='merged' + merged_into/by/at). Atomic — a unique-key collision rolls back and surfaces
+  // MERGE_CONFLICT for manual steward resolution. Consequential + audited, so gated to steward duties.
+  async merge(survivorNo: string, duplicateNo: string, user: JwtUser) {
+    if (survivorNo === duplicateNo) throw new BadRequestException({ code: 'SELF_MERGE', message: 'Cannot merge a customer into itself', messageTh: 'ไม่สามารถรวมลูกค้าเข้ากับตัวเองได้' });
+    const survivor = await this.byNo(survivorNo, user);
+    const dup = await this.byNo(duplicateNo, user);
+    if (dup.status === 'merged') throw new BadRequestException({ code: 'ALREADY_MERGED', message: 'Duplicate is already merged', messageTh: 'รายการนี้ถูกรวมไปแล้ว' });
+    const db = this.db;
+    try {
+      await db.transaction(async (tx: any) => {
+        await tx.execute(sql`SELECT md_merge_repoint('customer_id', 'customer_master', ${Number(survivor.id)}, ${Number(dup.id)})`);
+        // re-parent any subsidiaries that pointed at the duplicate
+        await tx.update(customerMaster).set({ parentCustomerNo: survivor.customerNo }).where(eq(customerMaster.parentCustomerNo, dup.customerNo));
+        const fill: Record<string, unknown> = {};
+        const pick = (k: string, s: unknown, d: unknown) => { if ((s === null || s === undefined || s === '') && d !== null && d !== undefined && d !== '') fill[k] = d; };
+        pick('email', survivor.email, dup.email); pick('phone', survivor.phone, dup.phone); pick('taxId', survivor.taxId, dup.taxId);
+        pick('address', survivor.address, dup.address); pick('branchCode', survivor.branchCode, dup.branchCode);
+        pick('memberId', survivor.memberId, dup.memberId); pick('accountCode', survivor.accountCode, dup.accountCode);
+        pick('creditTerms', survivor.creditTerms, dup.creditTerms); pick('salesRep', survivor.salesRep, dup.salesRep);
+        pick('category', survivor.category, dup.category); pick('externalRef', survivor.externalRef, dup.externalRef);
+        if (Object.keys(fill).length) await tx.update(customerMaster).set(fill).where(eq(customerMaster.id, Number(survivor.id)));
+        await tx.update(customerMaster).set({ status: 'merged', mergedInto: Number(survivor.id), mergedBy: user.username, mergedAt: new Date() }).where(eq(customerMaster.id, Number(dup.id)));
+      });
+    } catch (e) {
+      if (isUniqueViolation(e)) throw new ConflictException({ code: 'MERGE_CONFLICT', message: 'Survivor and duplicate both own a row with the same key — resolve manually', messageTh: 'ข้อมูลลูกค้าทั้งสองมีรายการที่ซ้ำกัน กรุณาแก้ไขก่อนรวม' });
+      throw e;
+    }
+    return { survivor_no: survivorNo, merged_no: duplicateNo, merged: true };
+  }
 }
 
 function shapeAddress(a: any) {
@@ -310,6 +373,7 @@ function shapeCustomer(c: any) {
     account_code: c.accountCode, status: c.status, notes: c.notes, created_by: c.createdBy, created_at: c.createdAt,
     credit_terms: c.creditTerms ?? null, sales_rep: c.salesRep ?? null, category: c.category ?? null,
     language: c.language ?? null, external_ref: c.externalRef ?? null, parent_customer_no: c.parentCustomerNo ?? null,
+    merged_into: c.mergedInto != null ? Number(c.mergedInto) : null,
   };
 }
 
@@ -320,6 +384,10 @@ export class CustomerMasterController {
 
   @Post() create(@Body(new ZodValidationPipe(CreateCustomerBody)) b: z.infer<typeof CreateCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.create(b, u); }
   @Get() list(@Query('search') search: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.list({ search }, u); }
+  // Static routes BEFORE the ':customerNo' param route so they aren't captured by it.
+  @Get('duplicates') findDuplicates(@CurrentUser() u: JwtUser) { return this.svc.findDuplicates(u); }
+  @Post(':survivorNo/merge') @Permissions('crm', 'exec', 'masterdata')
+  merge(@Param('survivorNo') no: string, @Body(new ZodValidationPipe(MergeCustomerBody)) b: z.infer<typeof MergeCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.merge(no, b.duplicate_customer_no, u); }
   @Get(':customerNo') get(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.get(no, u); }
   @Get(':customerNo/360') view360(@Param('customerNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.view360(no, u); }
   @Patch(':customerNo') update(@Param('customerNo') no: string, @Body(new ZodValidationPipe(UpdateCustomerBody)) b: z.infer<typeof UpdateCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.update(no, b, u); }

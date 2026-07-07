@@ -71,6 +71,11 @@ async function main() {
   const [va] = await db.insert(s.vendors).values({ tenantId: t1, name: 'ผู้ขายของ T1', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
   const [vb] = await db.insert(s.vendors).values({ tenantId: t2, name: 'ผู้ขายของ T2', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
   const VA = Number(va.id), VB = Number(vb.id);
+  // Two near-duplicate vendors in HQ for the match-merge (DQM) assertions (section H5). Same phone + similar
+  // name so the detector flags both a phone and a name reason.
+  const [vd1] = await db.insert(s.vendors).values({ tenantId: hq, name: 'บริษัท เอบีซี เทรดดิ้ง จำกัด', isSupplier: true, phone: '02-777-8888', approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
+  const [vd2] = await db.insert(s.vendors).values({ tenantId: hq, name: 'เอบีซี เทรดดิ้ง', isSupplier: true, phone: '02-777-8888', email: 'abc@trade.co.th', approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
+  const VD1 = Number(vd1.id), VD2 = Number(vd2.id);
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ bodyLimit: 16 * 1024 * 1024 })); // upload-channel bodies (base64 image/PDF), mirrors main.ts
@@ -254,6 +259,24 @@ async function main() {
   ok('Vendor parent: link to parent vendor', vParentSet.status === 200 && vParentSet.json.parent_vendor_id === VA, JSON.stringify(vParentSet.json).slice(0, 150));
   const vParentRow = (await pg.query(`SELECT parent_vendor_id FROM vendors WHERE id=${V1}`)).rows as any[];
   ok('Vendor parent: persisted on vendors.parent_vendor_id', Number(vParentRow[0]?.parent_vendor_id) === VA, JSON.stringify(vParentRow[0]));
+
+  // ── H5. Match-merge / DQM (master-data audit Phase 5) — detect + merge duplicate vendors. ──
+  await inj('POST', `/api/procurement/vendors/${VD2}/addresses`, admin, { address_type: 'billing', address_line1: '9 อาคารเอบีซี', is_primary: true });
+  const vDupScan = await inj('GET', '/api/procurement/vendors/duplicates', admin);
+  const vGrp = (vDupScan.json.groups ?? []).find((g: any) => [g.primary.vendor_id, ...g.duplicates.map((d: any) => d.vendor_id)].includes(VD1) && [g.primary.vendor_id, ...g.duplicates.map((d: any) => d.vendor_id)].includes(VD2));
+  ok('Vendor dedup: detects the near-duplicate pair (shared phone + similar name)', !!vGrp && vGrp.duplicates.some((d: any) => d.reasons.includes('phone') && d.reasons.includes('name')), JSON.stringify(vGrp?.duplicates?.map((d: any) => ({ id: d.vendor_id, reasons: d.reasons, score: d.score }))));
+  const vSelfMerge = await inj('POST', `/api/procurement/vendors/${VD1}/merge`, admin, { duplicate_vendor_id: VD1 });
+  ok('Vendor merge: cannot merge into itself → 400 SELF_MERGE', vSelfMerge.status === 400 && vSelfMerge.json.error?.code === 'SELF_MERGE', `${vSelfMerge.status} ${vSelfMerge.json.error?.code}`);
+  const vMerge = await inj('POST', `/api/procurement/vendors/${VD1}/merge`, admin, { duplicate_vendor_id: VD2 });
+  ok('Vendor merge: merges duplicate into survivor', (vMerge.status === 200 || vMerge.status === 201) && vMerge.json.merged === true, `${vMerge.status} ${JSON.stringify(vMerge.json).slice(0, 120)}`);
+  const vd2Row = (await pg.query(`SELECT active, merged_into, merged_by FROM vendors WHERE id=${VD2}`)).rows as any[];
+  ok('Vendor merge: duplicate soft-retired (active=false, merged_into set, record preserved)', vd2Row[0]?.active === false && Number(vd2Row[0]?.merged_into) === VD1, JSON.stringify(vd2Row[0]));
+  const vd1Addrs = await inj('GET', `/api/procurement/vendors/${VD1}/addresses`, admin);
+  ok('Vendor merge: duplicate child rows repointed onto the survivor (address)', (vd1Addrs.json.addresses?.length ?? 0) >= 1, `addr=${vd1Addrs.json.addresses?.length}`);
+  const vd1Row = (await db.select().from(s.vendors).where(eq(s.vendors.id, VD1)))[0];
+  ok('Vendor merge: survivorship fills the survivor email from the duplicate', vd1Row?.email === 'abc@trade.co.th', `email=${vd1Row?.email}`);
+  const vReMerge = await inj('POST', `/api/procurement/vendors/${VD1}/merge`, admin, { duplicate_vendor_id: VD2 });
+  ok('Vendor merge: re-merging an already-merged duplicate → 400 ALREADY_MERGED', vReMerge.status === 400 && vReMerge.json.error?.code === 'ALREADY_MERGED', `${vReMerge.status} ${vReMerge.json.error?.code}`);
 
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];

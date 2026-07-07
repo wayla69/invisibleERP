@@ -661,6 +661,22 @@ phone, email), instead of the single scalar address/contact of before. Add or
 delete either from this panel — both save immediately, with no second
 approval (same reasoning as the direct-edit fields above).
 
+### Find & merge duplicate vendors
+
+**Screen:** `/inventory/suppliers` — press **ตรวจข้อมูลซ้ำ (Find duplicates)** ·
+**Required permission:** `md_vendor`.
+
+Opens a review queue of records that look like the same vendor — flagged when they
+share a **tax ID / email / phone**, or have a **similar name** — each with the record
+to *keep* and the probable duplicate(s) (match reason + confidence %). Press **รวม
+(Merge)** to fold a duplicate into the kept vendor: all its POs, AP transactions,
+price lists, addresses and contacts move over, blank fields on the kept record are
+filled in from the duplicate, and the duplicate is retired (kept for audit, never
+deleted). Merging asks for confirmation and **can't be undone**; if the two records
+hold a conflicting entry the system stops so you can resolve it first. Keeping the
+vendor master free of duplicates is what prevents duplicate payments to the "same"
+supplier under two records.
+
 ### Supplier scorecards register
 
 **Screen:** `/supplier-scorecards` (**คะแนนซัพพลายเออร์**, ERP nav → จัดซื้อ) ·

@@ -82,6 +82,17 @@ From the 360° view you can also:
 
 None of this needs a second approval — it saves immediately.
 
+**Find & merge duplicates.** Press **ตรวจข้อมูลซ้ำ (Find duplicates)** in the toolbar
+to open a review queue of records that look like the same customer — flagged when
+they share a **tax ID / email / phone**, or have a **similar name**. Each group shows
+the record to *keep* plus the probable duplicate(s) with the match reason and a
+confidence %. Press **รวม (Merge)** on a duplicate to fold it into the kept record:
+all its addresses, contacts, invoices and history move over, any blank field on the
+kept record is filled in from the duplicate, and the duplicate is retired (kept for
+audit, never deleted). You'll be asked to confirm — **merging can't be undone**. If the
+two records both hold a conflicting entry the system stops with a message so you can
+fix it first, rather than merging incorrectly.
+
 A customer record is also created (or refreshed) automatically the first time
 you issue a full tax invoice for a new buyer — see [Tax](./07-tax.md) — so you
 don't have to add customers here before invoicing them; this screen is for
