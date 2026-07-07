@@ -533,6 +533,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.cm_f_sub_district': { th: 'ตำบล/แขวง', en: 'Sub-district' },
   'mx.cm_f_district': { th: 'อำเภอ/เขต', en: 'District' },
   'mx.cm_f_province': { th: 'จังหวัด', en: 'Province' },
+  'mx.cm_f_province_ph': { th: 'เลือก/พิมพ์จังหวัด', en: 'Select or type a province' },
   'mx.cm_f_postal_code': { th: 'รหัสไปรษณีย์', en: 'Postal code' },
   'mx.cm_contacts': { th: 'ผู้ติดต่อ', en: 'Contacts' },
   'mx.cm_add_contact': { th: 'เพิ่มผู้ติดต่อ', en: 'Add contact' },

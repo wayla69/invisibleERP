@@ -287,6 +287,12 @@ async function main() {
   const vUpd = (vHist.json.history ?? []).find((e: any) => e.action === 'updated' && e.changes.some((c: any) => c.field === 'category' && c.new === 'Strategic'));
   ok('Vendor history: records the field-level profile update (category → Strategic) with old→new + actor', !!vUpd && vUpd.actor === 'admin', JSON.stringify(vUpd?.changes?.filter((c: any) => ['category', 'payment_terms'].includes(c.field))));
 
+  // ── H7. Thai address standardization (master-data audit Phase 7) — province canonicalised, postal validated. ──
+  const vAddrNorm = await inj('POST', `/api/procurement/vendors/${VD1}/addresses`, admin, { address_type: 'registered', province: 'เชียงใหม่ ', postal_code: '50000' });
+  ok('Vendor address: province "เชียงใหม่ " (trailing space) canonicalised to "เชียงใหม่"', (vAddrNorm.status === 201 || vAddrNorm.status === 200) && vAddrNorm.json.province === 'เชียงใหม่', `province=${vAddrNorm.json.province}`);
+  const vBadPostal = await inj('POST', `/api/procurement/vendors/${VD1}/addresses`, admin, { address_type: 'other', postal_code: '5000' });
+  ok('Vendor address: a non-5-digit postal code → 400 POSTAL_INVALID', vBadPostal.status === 400 && vBadPostal.json.error?.code === 'POSTAL_INVALID', `${vBadPostal.status} ${vBadPostal.json.error?.code}`);
+
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];
   await runMatch(ap1, poNo, [{ item_id: 'X', qty: 100, unit_price: 10 }]);

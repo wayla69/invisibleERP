@@ -63,6 +63,7 @@ import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { SavedViewsModule } from './modules/saved-views/saved-views.module';
 import { UserPrefsModule } from './modules/user-prefs/user-prefs.module';
+import { GeoRefModule } from './modules/geo-ref/geo-ref.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { ItemSetupModule } from './modules/item-setup/item-setup.module';
 import { AuditViewerModule } from './modules/audit-viewer/audit-viewer.module';
@@ -193,6 +194,7 @@ import { MailModule } from './modules/mail/mail.module';
     AlertsModule,
     SavedViewsModule,
     UserPrefsModule,
+    GeoRefModule,
     FeatureFlagsModule,
     ItemSetupModule,
     AuditViewerModule,

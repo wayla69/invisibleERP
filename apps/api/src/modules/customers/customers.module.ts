@@ -10,6 +10,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { shapeChangeHistory } from '../../common/change-history';
+import { isValidPostalCode, normalizeProvince } from '../../common/thai-address';
 
 @Injectable()
 export class CustomersService {
@@ -244,11 +245,15 @@ export class CustomerMasterService {
   async addAddress(customerNo: string, dto: z.infer<typeof AddressBody>, user: JwtUser) {
     const db = this.db;
     const c = await this.byNo(customerNo, user);
+    // Thai address standardization (Phase 7): postal code must be 5 digits; province is canonicalised to its
+    // official name when recognised (else kept as entered — data migration carries messy values).
+    if (dto.postal_code && !isValidPostalCode(dto.postal_code)) throw new BadRequestException({ code: 'POSTAL_INVALID', message: 'Postal code must be 5 digits', messageTh: 'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก' });
+    const province = dto.province ? (normalizeProvince(dto.province) ?? dto.province) : null;
     if (dto.is_primary) await db.update(customerAddresses).set({ isPrimary: false }).where(eq(customerAddresses.customerId, Number(c.id)));
     const [row] = await db.insert(customerAddresses).values({
       tenantId: c.tenantId ?? null, customerId: Number(c.id), addressType: dto.address_type,
       addressLine1: dto.address_line1 ?? null, addressLine2: dto.address_line2 ?? null,
-      subDistrict: dto.sub_district ?? null, district: dto.district ?? null, province: dto.province ?? null, postalCode: dto.postal_code ?? null,
+      subDistrict: dto.sub_district ?? null, district: dto.district ?? null, province, postalCode: dto.postal_code ?? null,
       isPrimary: dto.is_primary ?? false, createdBy: user.username,
     }).returning();
     return shapeAddress(row);

@@ -185,6 +185,18 @@ async function main() {
   ok('Customer history: sensitive column (address) is masked in the trail, not shown in the clear', !!masked && masked.changes.find((c: any) => c.field === 'address')?.new === '•••', JSON.stringify(masked?.changes?.find((c: any) => c.field === 'address')));
   ok('Customer history: also captures the child address INSERT for this customer', (hist.json.history ?? []).some((e: any) => e.action === 'created') && hist.json.count >= 3, `count=${hist.json.count}`);
 
+  // ── Thai address standardization (master-data audit Phase 7) — province canonicalised, postal validated. ──
+  const provRef = await inj('GET', '/api/geo/provinces', admin);
+  ok('Geo reference: /api/geo/provinces returns the 77-province canonical list', provRef.status === 200 && provRef.json.count === 77 && (provRef.json.provinces ?? []).some((p: any) => p.th === 'กรุงเทพมหานคร' && p.en === 'Bangkok'), `count=${provRef.json.count}`);
+  const addrNorm = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'shipping', province: 'กรุงเทพ', postal_code: '10230' });
+  ok('Customer address: free-text province "กรุงเทพ" is canonicalised to "กรุงเทพมหานคร"', (addrNorm.status === 201 || addrNorm.status === 200) && addrNorm.json.province === 'กรุงเทพมหานคร', `province=${addrNorm.json.province}`);
+  const addrEn = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'billing', province: 'phuket', postal_code: '83000' });
+  ok('Customer address: English province "phuket" is canonicalised to "ภูเก็ต"', addrEn.json.province === 'ภูเก็ต', `province=${addrEn.json.province}`);
+  const badPostal = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'other', postal_code: '123' });
+  ok('Customer address: a non-5-digit postal code → 400 POSTAL_INVALID', badPostal.status === 400 && badPostal.json.error?.code === 'POSTAL_INVALID', `${badPostal.status} ${badPostal.json.error?.code}`);
+  const unknownProv = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'other', province: 'Springfield' });
+  ok('Customer address: an unrecognised province is kept as entered (migration-safe, not rejected)', (unknownProv.status === 201 || unknownProv.status === 200) && unknownProv.json.province === 'Springfield', `province=${unknownProv.json.province}`);
+
   await app.close();
   await pg.close();
 

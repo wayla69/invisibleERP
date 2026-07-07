@@ -13,6 +13,7 @@ import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { FormField } from '@/components/form-field';
 import { ChangeHistorySection } from '@/components/change-history-section';
+import { ProvinceInput } from '@/components/province-input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -401,8 +402,8 @@ function AddressFormDialog({ customerNo, onClose, onSaved }: { customerNo: strin
           <FormField label={t('mx.cm_f_address_line2')} className="sm:col-span-2"><Input value={form.address_line2} onChange={set('address_line2')} /></FormField>
           <FormField label={t('mx.cm_f_sub_district')}><Input value={form.sub_district} onChange={set('sub_district')} /></FormField>
           <FormField label={t('mx.cm_f_district')}><Input value={form.district} onChange={set('district')} /></FormField>
-          <FormField label={t('mx.cm_f_province')}><Input value={form.province} onChange={set('province')} /></FormField>
-          <FormField label={t('mx.cm_f_postal_code')}><Input value={form.postal_code} onChange={set('postal_code')} /></FormField>
+          <FormField label={t('mx.cm_f_province')}><ProvinceInput value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v }))} placeholder={t('mx.cm_f_province_ph')} /></FormField>
+          <FormField label={t('mx.cm_f_postal_code')}><Input inputMode="numeric" maxLength={5} value={form.postal_code} onChange={set('postal_code')} placeholder="10230" /></FormField>
         </div>
         <DialogFooter><Button disabled={save.isPending} onClick={() => save.mutate()}>{t('mx.cm_save')}</Button></DialogFooter>
       </DialogContent>

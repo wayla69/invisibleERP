@@ -659,7 +659,9 @@ A vendor can carry more than one address (billing / shipping / registered /
 other, one marked **หลัก — primary**) and more than one contact (name, title,
 phone, email), instead of the single scalar address/contact of before. Add or
 delete either from this panel — both save immediately, with no second
-approval (same reasoning as the direct-edit fields above).
+approval (same reasoning as the direct-edit fields above). The **จังหวัด
+(province)** field suggests from the standard 77-province list and is saved in
+its official spelling; the **รหัสไปรษณีย์ (postal code)** must be 5 digits.
 
 The same panel has a **ประวัติการแก้ไข (Change history)** section: expand it to see
 who changed what and when — the vendor's creation (onboarding), every field edit

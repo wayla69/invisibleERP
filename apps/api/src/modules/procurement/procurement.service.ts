@@ -5,6 +5,7 @@ import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests, vendorAddresses, vendorContacts, dataChangeLog } from '../../database/schema';
 import { shapeChangeHistory } from '../../common/change-history';
+import { isValidPostalCode, normalizeProvince } from '../../common/thai-address';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -660,11 +661,14 @@ export class ProcurementService {
   }, user: JwtUser) {
     const db = this.db;
     const v = await this.vendorById(vendorId);
+    // Thai address standardization (Phase 7): 5-digit postal code; province canonicalised when recognised.
+    if (dto.postal_code && !isValidPostalCode(dto.postal_code)) throw new BadRequestException({ code: 'POSTAL_INVALID', message: 'Postal code must be 5 digits', messageTh: 'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก' });
+    const province = dto.province ? (normalizeProvince(dto.province) ?? dto.province) : null;
     if (dto.is_primary) await db.update(vendorAddresses).set({ isPrimary: false }).where(eq(vendorAddresses.vendorId, Number(v.id)));
     const [row] = await db.insert(vendorAddresses).values({
       tenantId: v.tenantId ?? null, vendorId: Number(v.id), addressType: dto.address_type ?? 'other',
       addressLine1: dto.address_line1 ?? null, addressLine2: dto.address_line2 ?? null,
-      subDistrict: dto.sub_district ?? null, district: dto.district ?? null, province: dto.province ?? null, postalCode: dto.postal_code ?? null,
+      subDistrict: dto.sub_district ?? null, district: dto.district ?? null, province, postalCode: dto.postal_code ?? null,
       isPrimary: dto.is_primary ?? false, createdBy: user.username,
     }).returning();
     return shapeVendorAddress(row);
