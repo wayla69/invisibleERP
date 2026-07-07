@@ -42,6 +42,11 @@ export const items = pgTable('items', {
   vatCode: text('vat_code'),
   whtIncomeType: text('wht_income_type'),
   defaultLocationId: text('default_location_id'),
+  // Item lifecycle (master-data audit Phase 10) — active | inactive | discontinued. A discontinued item may
+  // point at its replacement via superseded_by (→ items.id). `items` is a SHARED master (no tenant_id) so
+  // these columns need NO RLS loop (see CLAUDE.md — new item columns are tenant-neutral).
+  status: text('status').notNull().default('active'),
+  supersededBy: bigint('superseded_by', { mode: 'number' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

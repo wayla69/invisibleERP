@@ -12,6 +12,9 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PartyRelationshipsSection } from '@/components/party-relationships';
+
+const ITEM_REL_TYPES = ['substitute', 'complement', 'supersedes', 'kit_component', 'accessory'] as const;
 
 type Profile = {
   item_id: string; item_description?: string; category?: string; category_id?: number | null;
@@ -22,6 +25,7 @@ type Profile = {
   min_stock?: number | null; max_stock?: number | null; avg_daily_usage?: number | null; lead_time_days?: number | null;
   min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
+  status?: string; superseded_by?: number | null;
 };
 
 const NUM_FIELDS = ['conversion_factor', 'unit_price', 'min_stock', 'max_stock', 'avg_daily_usage', 'lead_time_days', 'min_order_qty', 'order_multiple', 'order_cost', 'holding_cost'] as const;
@@ -53,6 +57,13 @@ export default function ItemPostingSetupPage() {
       return api(`/api/item-setup/items/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: JSON.stringify(p) });
     },
     onSuccess: (r: any) => { setForm(r); notifySuccess(t('st.sitm_saved', { item_id: r.item_id })); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  // Item lifecycle (master-data audit Phase 10) — active | inactive | discontinued (+ replacement pointer).
+  const setStatus = useMutation({
+    mutationFn: (status: string) => api<Profile>(`/api/item-setup/items/${encodeURIComponent(itemId)}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    onSuccess: (r) => { setForm(r); notifySuccess(t('mx.item_status_saved')); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -147,6 +158,31 @@ export default function ItemPostingSetupPage() {
             <div>
               <Button disabled={save.isPending} onClick={() => save.mutate()}><Save className="size-4" /> {save.isPending ? t('st.sitm_saving') : t('st.sitm_save_btn')}</Button>
             </div>
+          </Card>
+        )}
+
+        {form && (
+          <Card className="max-w-4xl gap-4 p-5">
+            <div className="grid gap-2 sm:max-w-xs">
+              <Label>{t('mx.item_status')}</Label>
+              <Select value={form.status ?? 'active'} onValueChange={(v) => setStatus.mutate(v)}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">{t('mx.item_status_active')}</SelectItem>
+                  <SelectItem value="inactive">{t('mx.item_status_inactive')}</SelectItem>
+                  <SelectItem value="discontinued">{t('mx.item_status_discontinued')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <PartyRelationshipsSection
+              listUrl={`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships`}
+              addUrl={`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships`}
+              deleteBase={`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships`}
+              queryKey={['item-relationships', itemId]}
+              relTypes={ITEM_REL_TYPES}
+              targetPlaceholder={t('mx.item_rel_target')}
+              buildBody={(target, relType) => ({ to_item_id: target, rel_type: relType })}
+            />
           </Card>
         )}
 
