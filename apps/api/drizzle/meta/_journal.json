@@ -1926,6 +1926,13 @@
       "when": 2023820000200,
       "tag": "0274_master_data_change_log",
       "breakpoints": true
+    },
+    {
+      "idx": 275,
+      "version": "7",
+      "when": 2023820000210,
+      "tag": "0275_party_relationships",
+      "breakpoints": true
     }
   ]
 }

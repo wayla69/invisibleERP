@@ -293,6 +293,18 @@ async function main() {
   const vBadPostal = await inj('POST', `/api/procurement/vendors/${VD1}/addresses`, admin, { address_type: 'other', postal_code: '5000' });
   ok('Vendor address: a non-5-digit postal code → 400 POSTAL_INVALID', vBadPostal.status === 400 && vBadPostal.json.error?.code === 'POSTAL_INVALID', `${vBadPostal.status} ${vBadPostal.json.error?.code}`);
 
+  // ── H8. Typed party relationships (master-data audit Phase 8) — subsidiary/related-party/subcontractor. ──
+  const vRelSelf = await inj('POST', `/api/procurement/vendors/${VD1}/relationships`, admin, { to_vendor_id: VD1, rel_type: 'related_party' });
+  ok('Vendor relationship: cannot relate to itself → 400 SELF_RELATION', vRelSelf.status === 400 && vRelSelf.json.error?.code === 'SELF_RELATION', `${vRelSelf.status} ${vRelSelf.json.error?.code}`);
+  const vRelAdd = await inj('POST', `/api/procurement/vendors/${VD1}/relationships`, admin, { to_vendor_id: VA, rel_type: 'subcontractor', note: 'ผู้รับเหมาช่วง' });
+  ok('Vendor relationship: add a typed relationship (subcontractor)', (vRelAdd.status === 201 || vRelAdd.status === 200) && vRelAdd.json.rel_type === 'subcontractor' && vRelAdd.json.party?.vendor_id === VA, JSON.stringify(vRelAdd.json).slice(0, 140));
+  const vRelDup = await inj('POST', `/api/procurement/vendors/${VD1}/relationships`, admin, { to_vendor_id: VA, rel_type: 'subcontractor' });
+  ok('Vendor relationship: duplicate → 409 RELATION_EXISTS', vRelDup.status === 409 && vRelDup.json.error?.code === 'RELATION_EXISTS', `${vRelDup.status} ${vRelDup.json.error?.code}`);
+  const vRelListVA = await inj('GET', `/api/procurement/vendors/${VA}/relationships`, admin);
+  ok('Vendor relationship: the target vendor sees it as INCOMING', (vRelListVA.json.relationships ?? []).some((r: any) => r.direction === 'incoming' && r.rel_type === 'subcontractor' && r.party.vendor_id === VD1), JSON.stringify(vRelListVA.json.relationships));
+  const vRelDel = await inj('DELETE', `/api/procurement/vendors/${VD1}/relationships/${vRelAdd.json.id}`, admin);
+  ok('Vendor relationship: delete removes it', vRelDel.status === 200 && vRelDel.json.deleted === true, `${vRelDel.status}`);
+
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];
   await runMatch(ap1, poNo, [{ item_id: 'X', qty: 100, unit_price: 10 }]);

@@ -14,6 +14,9 @@ import { DataTable } from '@/components/data-table';
 import { FormField } from '@/components/form-field';
 import { ChangeHistorySection } from '@/components/change-history-section';
 import { ProvinceInput } from '@/components/province-input';
+import { PartyRelationshipsSection } from '@/components/party-relationships';
+
+const VENDOR_REL_TYPES = ['related_party', 'subsidiary', 'franchisee', 'subcontractor', 'parent', 'other'] as const;
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -438,6 +441,15 @@ function VendorPartyPanel({ vendor, onClose }: { vendor: Supplier; onClose: () =
               </div>
             ))}
           </div>
+          <PartyRelationshipsSection
+            listUrl={`/api/procurement/vendors/${vendor.Vendor_ID}/relationships`}
+            addUrl={`/api/procurement/vendors/${vendor.Vendor_ID}/relationships`}
+            deleteBase={`/api/procurement/vendors/${vendor.Vendor_ID}/relationships`}
+            queryKey={['vendor-relationships', vendor.Vendor_ID]}
+            relTypes={VENDOR_REL_TYPES}
+            targetPlaceholder={t('mx.rel_target_vendor')}
+            buildBody={(target, relType) => ({ to_vendor_id: Number(target), rel_type: relType })}
+          />
           <ChangeHistorySection url={`/api/procurement/vendors/${vendor.Vendor_ID}/history`} queryKey={['vendor-history', vendor.Vendor_ID]} />
         </div>
         <DialogFooter>

@@ -48,6 +48,7 @@ export * from './assets';
 export * from './petty-cash';
 export * from './customer-master';
 export * from './party-depth';
+export * from './party-relationships';
 export * from './crm-pipeline';
 export * from './ar-allowance';
 export * from './menu';
