@@ -1,12 +1,13 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, ne, desc } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
-import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { DRIZZLE, PG_CLIENT, type DrizzleDb, type PgClient } from '../../../database/database.module';
 import { etaxSubmissions, taxInvoices, taxInvoiceLines } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import type { JwtUser } from '../../../common/decorators';
 import { buildEtaxInvoiceXml, type EtaxInvoice } from '../../tax/documents/etax-xml';
 import { getSigningMaterial, signEtaxXml } from '../../tax/documents/etax-sign';
+import { captureOpsAlert } from '../../../observability/instrumentation';
 
 // RD/ETDA e-Tax Invoice & e-Receipt submission via a service provider.
 //   • The UBL 2.1 XML (etax-xml) is built from the stored tax invoice, then XAdES-signed when a
@@ -16,7 +17,15 @@ import { getSigningMaterial, signEtaxXml } from '../../tax/documents/etax-sign';
 //     generic SP endpoint (ETAX_PROVIDER_URL/_TOKEN) — drop-in for INET/Frank/Leceipt once creds exist.
 @Injectable()
 export class EtaxService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    // Every non-SSE request runs inside ONE transaction (TenantTxInterceptor) that rolls back on any thrown
+    // exception — so a failure row written via `db` INSIDE the same request that then rethrows (the direct
+    // POST /api/tax/etax/submit/:docNo path) would itself be rolled back, recreating the exact silent-loss bug
+    // this is meant to fix. Write the failure row on the AUTOCOMMIT raw client instead (same pattern as
+    // login_attempts / ai_token_usage) so it survives the enclosing rollback.
+    @Inject(PG_CLIENT) private readonly rawSql: PgClient,
+  ) {}
 
   // Build the e-Tax UBL DTO straight from the stored tax invoice (no cross-module DI → no cycle).
   private async invoiceDto(docNo: string): Promise<EtaxInvoice> {
@@ -63,6 +72,11 @@ export class EtaxService {
     throw new BadRequestException({ code: 'ETAX_PROVIDER_NOT_CONFIGURED', message: `e-Tax provider ${provider} not configured`, messageTh: 'ยังไม่ได้ตั้งค่าผู้ให้บริการ e-Tax' });
   }
 
+  // Submission durability: EVERY attempt is persisted — success, an explicit SP rejection, or a thrown
+  // error (SP unreachable, ETAX_PROVIDER_URL not configured, etc). Previously a thrown error escaped
+  // BEFORE any row was written, so a failed submission left no trace at all — a silent, undelivered legal
+  // document. Now a failure is recorded as status='Rejected' with the error in rd_response.error BEFORE
+  // the exception is rethrown, so it is visible (GET /api/tax/etax) and retryable (retryFailed below).
   async submit(docNo: string, provider: string | undefined, user: JwtUser) {
     const db = this.db;
     const prov = provider ?? process.env.ETAX_PROVIDER ?? 'mock';
@@ -70,7 +84,26 @@ export class EtaxService {
     if (existing) return { doc_no: docNo, status: 'Accepted', provider_ref: existing.providerRef, idempotent: true };
 
     const doc = await this.buildDocument(docNo);
-    const res = await this.submitToProvider(prov, docNo, doc);
+
+    let res: { status: string; providerRef: string; rd: any };
+    try {
+      res = await this.submitToProvider(prov, docNo, doc);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // AUTOCOMMIT write (see constructor note) — must survive this request's transaction rolling back
+      // once `e` is rethrown below. Its own failure (raw connection down) must not replace the REAL error
+      // with an opaque 500 — log it as a separate, distinct alert and still surface the original `e`.
+      try {
+        await this.rawSql`
+          INSERT INTO etax_submissions (tenant_id, doc_no, provider, status, provider_ref, rd_response, submitted_by, submitted_at)
+          VALUES (${user.tenantId ?? null}, ${docNo}, ${prov}, 'Rejected', NULL, ${JSON.stringify({ error: message, signed: doc.signed })}::jsonb, ${user.username}, now())`;
+      } catch (writeErr) {
+        captureOpsAlert('etax_submit_failure_not_recorded', { doc_no: docNo, provider: prov, degraded: 'e-Tax submission failed AND the failure-audit write itself failed — this attempt is untracked' }, writeErr);
+      }
+      captureOpsAlert('etax_submit_failed', { doc_no: docNo, provider: prov, degraded: 'e-Tax submission failed but was recorded for retry (GET /api/tax/etax, or the etax_submission_retry BI job)' }, e);
+      throw e;
+    }
+
     const xmlDigest = createHash('sha256').update(doc.xml).digest('hex');
     await db.insert(etaxSubmissions).values({
       tenantId: user.tenantId ?? null, docNo, provider: prov, status: res.status, providerRef: res.providerRef,
@@ -86,9 +119,35 @@ export class EtaxService {
     return { doc_no: docNo, status: s.status, provider: s.provider, provider_ref: s.providerRef, submitted_at: s.submittedAt, rd_response: s.rdResponse };
   }
 
-  async list(limit = 100) {
+  async list(limit = 100, status?: string) {
     const db = this.db;
-    const rows = await db.select().from(etaxSubmissions).orderBy(desc(etaxSubmissions.id)).limit(limit);
-    return { submissions: rows.map((r: any) => ({ doc_no: r.docNo, provider: r.provider, status: r.status, provider_ref: r.providerRef, signed: r.rdResponse?.signed ?? false, submitted_at: r.submittedAt })), count: rows.length };
+    const conds = status ? [eq(etaxSubmissions.status, status)] : [];
+    const rows = await db.select().from(etaxSubmissions).where(conds.length ? and(...conds) : undefined).orderBy(desc(etaxSubmissions.id)).limit(limit);
+    return { submissions: rows.map((r: any) => ({ doc_no: r.docNo, provider: r.provider, status: r.status, provider_ref: r.providerRef, signed: r.rdResponse?.signed ?? false, error: r.status !== 'Accepted' ? (r.rdResponse?.error ?? r.rdResponse?.message ?? null) : null, submitted_at: r.submittedAt })), count: rows.length };
+  }
+
+  // Idempotent retry sweep (rides the BI report scheduler, see TaxJobsService.runEtaxSubmissionRetry) —
+  // gap #5 in docs/ops/etax-production-spike.md ("submission durability"). Each docNo may have several
+  // attempt rows over time (submit() always inserts, never updates); the LATEST row per docNo is
+  // authoritative (same convention as status() above). Retries every doc whose latest attempt isn't
+  // Accepted yet — a fresh success or failure lands as ANOTHER new row via the normal submit() path.
+  async retryFailed(user: JwtUser, limit = 200) {
+    const db = this.db;
+    const rows = await db.select().from(etaxSubmissions).where(ne(etaxSubmissions.status, 'Accepted')).orderBy(desc(etaxSubmissions.id)).limit(2000);
+    const latestByDoc = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) if (!latestByDoc.has(r.docNo)) latestByDoc.set(r.docNo, r);
+    const toRetry = [...latestByDoc.values()].filter((r) => r.status !== 'Accepted').slice(0, limit);
+
+    const results: { doc_no: string; status: string }[] = [];
+    for (const row of toRetry) {
+      try {
+        const res = await this.submit(row.docNo, row.provider ?? undefined, user);
+        results.push({ doc_no: row.docNo, status: res.status });
+      } catch {
+        results.push({ doc_no: row.docNo, status: 'Rejected' }); // submit() already recorded the failed attempt
+      }
+    }
+    const succeeded = results.filter((r) => r.status === 'Accepted').length;
+    return { scanned: toRetry.length, succeeded, failed: toRetry.length - succeeded, results };
   }
 }

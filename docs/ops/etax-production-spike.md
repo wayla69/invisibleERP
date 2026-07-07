@@ -54,9 +54,24 @@ reconciliation (already done — control **TAX-04**); WHT/ภ.ง.ด. (**TAX-03
    (today it emails the *unsigned* XML).
 4. **PDF/A-3 archival (embedded signed XML).** Current output is HTML→PDF (not PDF/A-3 with XMP + the XML as
    an embedded attachment). Needed if we deliver a human-readable PDF that also carries the legal XML.
-5. **Submission durability.** `tax-invoice.service.issueFull` calls `etax.submit` **best-effort (swallows
-   errors)** — fine for sandbox, **unacceptable for production** (a silent failure = an undelivered legal
-   document). Needs a status field + retry queue + an operator surface (extend the BI scheduler / a register).
+5. **~~Submission durability.~~ ✅ CLOSED (code-level) 2026-07-07.** `EtaxService.submit` now records EVERY
+   attempt — Accepted, an explicit SP rejection, or a thrown error (SP unreachable, `ETAX_PROVIDER_URL` not
+   configured, etc.) — as a row in `etax_submissions` before rethrowing, and raises an ops alert
+   (`etax_submit_failed`). The failure-audit write itself runs on the **AUTOCOMMIT raw pg client**
+   (`PG_CLIENT`, same pattern as `login_attempts`/`ai_token_usage`), not the per-request tenant transaction —
+   every non-SSE request runs inside ONE transaction (`TenantTxInterceptor`) that rolls back on any thrown
+   exception, so a row written on the request's own transaction would itself be discarded the moment `submit`
+   rethrows (the direct `POST /api/tax/etax/submit/:docNo` path hit exactly this during development — see the
+   `etax` cutover harness). A distinct alert (`etax_submit_failure_not_recorded`) fires if even that autocommit
+   write fails, without masking the original error. `EtaxService.retryFailed` is a new idempotent sweep (latest
+   attempt per `doc_no`, retries every non-Accepted one) wired into the BI scheduler as `etax_submission_retry`
+   (`TaxJobsService.runEtaxSubmissionRetry`) and exposed as an on-demand operator action
+   (`POST /api/tax/etax/retry-failed`, `exec`-only) plus a "retry all failed" button + per-row error/retry in
+   the e-Tax operator screen (`/pos-fiscal`, e-Tax tab). `tax-invoice.service.issueFull` still catches locally
+   around its `etax.submit` call (issuance itself must not fail because the SP is down) — but that catch is no
+   longer silent, since the failure is now durably tracked and retried by the sweep. **Residual: none at the
+   code level** — this gap closes independently of gaps #2/#3 (it works with `mock`/`http` today and will keep
+   working once a real SP is wired in).
 
 ## 5. Two delivery paths — decide in the spike
 
@@ -96,7 +111,7 @@ Rough order, **after the cert is in hand** (the cert lead-time itself is the sch
 | ~~Exclusive XML C14N + sign-path hardening (gap #1)~~ | done — see gap #1 |
 | KMS/HSM key storage + cert wiring (gap #2 code side) | M (2–3 d) |
 | Chosen SP adapter (auth + payload + status map) **or** sign-the-email (gap #3) | M (2–4 d) |
-| Submission status + retry queue + operator surface (gap #5) | M (2–3 d) |
+| ~~Submission status + retry queue + operator surface (gap #5)~~ | done — see gap #5 |
 | PDF/A-3 (only **if** required by gap #4) | M–L (3–6 d) |
 
 ≈ **1.5–2.5 developer-weeks of code** once unblocked — the headline ~200–300 h earlier estimate collapses
@@ -110,7 +125,7 @@ The real schedule driver is **external** (cert + SP contract + RD sandbox access
 | CA-cert lead-time | blocks both paths | start procurement **day 1** of the spike |
 | Signature fails the REAL RD/ETDA validator | hard stop | C14N itself is done + independently cross-checked (gap #1); PoC #1 still confirms against the actual validator, not just a library |
 | Vendor lock to one SP | cost / fragility | keep the generic `http` adapter seam; abstract per-SP mapping |
-| Silent submission failure | undelivered legal doc | replace best-effort with a status + retry queue before go-live |
+| ~~Silent submission failure~~ | undelivered legal doc | **CLOSED** — every attempt (success/reject/error) is persisted + retried by the `etax_submission_retry` sweep (gap #5) |
 | Revenue >30M kills Path B | re-plan | confirm the pilot tenant's band up front |
 
 ## 9. Go / No-go criteria
@@ -126,3 +141,4 @@ already deployable) for internal UAT and re-spike when the external blockers cle
 |---|---|---|---|
 | 0.1 | 2026-06-26 | Platform | Initial spike charter. Current-state verified against the codebase (XAdES signing scaffold now exists; SP submission still mock/http-skeleton; PDF/A-3 absent). Cross-refs: `06-tax-compliance.md` (TAX-01..04), `pos-fiscal/`, `tax-docs/`. |
 | 0.2 | 2026-07-07 | Platform | Gap #1 (Exclusive XML C14N) closed at the code level — `etax-sign.ts` now canonicalizes via `xml-crypto`'s `ExclusiveCanonicalization`, verified against that library's own independent `SignedXml` verifier in the `etax-sign` cutover harness (12 checks, up from 9). Gap #2 (real CA cert + KMS/HSM) is unchanged/still open — no certificate was obtained or fabricated. |
+| 0.3 | 2026-07-07 | Platform | Gap #5 (submission durability) closed at the code level — `EtaxService.submit` persists every attempt (Accepted/Rejected/thrown-error) via the autocommit `PG_CLIENT` so a failure survives the per-request transaction rollback, alerts ops, and is retried by a new idempotent `retryFailed` sweep wired into the BI scheduler (`etax_submission_retry`) plus an on-demand operator endpoint/UI (`POST /api/tax/etax/retry-failed`, `/pos-fiscal` e-Tax tab). `etax` cutover harness extended 9→15 checks. Gaps #2/#3/#4 unchanged/still open. |

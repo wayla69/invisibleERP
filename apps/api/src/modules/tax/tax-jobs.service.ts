@@ -7,20 +7,25 @@ import type { JwtUser } from '../../common/decorators';
 import { WhtService } from './documents/wht.service';
 import type { IssueWhtDto } from './documents/dto';
 import { TaxReportsService } from './reports/tax-reports.service';
+import { EtaxService } from '../pos/fiscal/etax.service';
 
 // Scheduled tax automation jobs (docs/33 PR4, TAX-03/TAX-05). Idempotent action jobs the BI scheduler runs:
 //  • tax_wht_cert_batch  — issue the 50-ทวิ certificate for every AP-payment WHT (labour/service withholding)
 //    in a period that doesn't yet have one (closes the pndTieOut "un-certificated WHT" gap).
 //  • tax_pp30_draft / tax_pnd_draft — register the period's PP30 / PND filing as a DRAFT (a human submits).
 //  • tax_remittance_reminder — the period's remittance summary (amounts due + deadlines) for a nudge.
+//  • etax_submission_retry — retry every e-Tax submission stuck at a non-Accepted status (gap #5, submission
+//    durability): EtaxService.submit() now records every attempt (success/reject/thrown error), this just
+//    re-runs submit() for the latest failed row per doc_no.
 // All are read-mostly and safe to re-run: the cert batch skips already-certificated payments; fileReturn is
-// idempotent per (tenant, type, period).
+// idempotent per (tenant, type, period); the e-Tax retry only touches docs not yet Accepted.
 @Injectable()
 export class TaxJobsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly wht: WhtService,
     private readonly reports: TaxReportsService,
+    private readonly etax: EtaxService,
   ) {}
 
   private win(month?: number, year?: number) {
@@ -101,6 +106,11 @@ export class TaxJobsService {
       pp30: { net_vat_payable: round2(pp30.form.vat_payable), deadline: pp30.deadline },
       pnd: { wht_withheld: tie.ap_wht_withheld, uncertificated_wht: tie.uncertificated_wht, deadline: tie.deadline },
     };
+  }
+
+  // ── etax_submission_retry: retry every e-Tax submission whose latest attempt isn't Accepted yet ──
+  async runEtaxSubmissionRetry(user: JwtUser, limit?: number) {
+    return this.etax.retryFailed(user, limit);
   }
 }
 
