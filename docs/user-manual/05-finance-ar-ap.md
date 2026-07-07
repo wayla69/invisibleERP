@@ -73,7 +73,10 @@ From the 360° view you can also:
 
 - Add multiple **ที่อยู่ (addresses)** — billing / shipping / registered /
   other — and mark one **หลัก (primary)** per customer; delete any address you
-  no longer need.
+  no longer need. The **จังหวัด (province)** field suggests from the standard
+  77-province list as you type, and is saved in its official spelling (so
+  "กรุงเทพ", "กทม" and "Bangkok" all become **กรุงเทพมหานคร**); the **รหัสไปรษณีย์
+  (postal code)** must be 5 digits.
 - Add multiple **ผู้ติดต่อ (contacts)** — name, title, phone, email — and mark
   one primary; delete a contact when they leave.
 - Link the customer to a **บริษัทแม่ (parent company)** by its customer number
