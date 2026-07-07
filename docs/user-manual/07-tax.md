@@ -166,7 +166,10 @@ When you pay certain suppliers or staff, you withhold tax and issue a certificat
 4. Save.
 
 **Expected result:** A WHT certificate is created. Download the **PDF** (copies
-1/2/3) for the recipient and your filing.
+1/2/3) for the recipient and your filing. The printed layout follows the
+Revenue Department's official 50-ทวิ template — boxed 13-digit Tax IDs for the
+payer/payee, all 7 ภ.ง.ด. checkboxes, and the 6-row income table (with row 4
+split into (ก) ดอกเบี้ย / (ข) เงินปันผล).
 
 > **Note:** Void a certificate with a reason if it was issued incorrectly.
 

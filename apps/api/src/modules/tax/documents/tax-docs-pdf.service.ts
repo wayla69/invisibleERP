@@ -112,11 +112,14 @@ export class TaxDocsPdfService {
   }
 
   // ── หนังสือรับรองการหักภาษี ณ ที่จ่าย 50 ทวิ (ม.50 ทวิ) — A4 form ──
+  // Layout mirrors the RD's official ล.ย.02/50-ทวิ template: boxed payer/payee columns with a 13-cell
+  // Tax-ID grid, the 7-way ภ.ง.ด. checkbox row (1)–(7), and the 6-item income table with 40(4) split into
+  // (ก) ดอกเบี้ย / (ข) เงินปันผล per the printed form.
   whtCertificateHtml(cert: any, copy: 'copy1' | 'copy2' | 'copy3' = 'copy1'): string {
     const copyLabel = copy === 'copy1' ? 'ฉบับที่ 1 (สำหรับผู้ถูกหักภาษี ณ ที่จ่าย ใช้แนบพร้อมกับแบบแสดงรายการ)'
       : copy === 'copy2' ? 'ฉบับที่ 2 (สำหรับผู้ถูกหักภาษี ณ ที่จ่ายเก็บไว้เป็นหลักฐาน)'
       : 'ฉบับที่ 3 (สำหรับผู้มีหน้าที่หักภาษี ณ ที่จ่าย)';
-    // fixed 6-row income table; place each cert line into its row group
+    // fixed 6-row income table (40(4) split into (ก)/(ข)); place each cert line into its row group
     const rowFor = (codes: string[]) => cert.lines.filter((l: any) => codes.includes(l.income_type));
     const sumRow = (codes: string[]) => {
       const ls = rowFor(codes);
@@ -124,43 +127,56 @@ export class TaxDocsPdfService {
       return { paid: fmtMoney(ls.reduce((a: number, l: any) => a + l.amount_paid, 0)), tax: fmtMoney(ls.reduce((a: number, l: any) => a + l.tax_withheld, 0)), date: thaiDate(ls[0].date_paid ?? cert.date_paid) };
     };
     const r1 = sumRow(['40(1)']); const r2 = sumRow(['40(2)']); const r3 = sumRow(['40(3)']);
-    const r4 = sumRow(['40(4a)', '40(4b)']);
+    const r4a = sumRow(['40(4a)']); const r4b = sumRow(['40(4b)']);
     const r5 = sumRow(['40(5)', '40(6)', '40(7-8)', '3tre-service', '3tre-ad', '3tre-transport', '3tre-prize']);
     const r6 = sumRow(['other']);
     const r5desc = rowFor(['40(5)', '40(6)', '40(7-8)', '3tre-service', '3tre-ad', '3tre-transport', '3tre-prize']).map((l: any) => incomeType(l.income_type)?.labelTh ?? l.income_type).join(', ');
-    const pndBox = (p: PndType) => `<span class="bx">${cert.pnd_type === p ? '☑' : '☐'}</span> ${PND_LABELS[p]}`;
-    const condBox = (c: string) => `<span class="bx">${cert.wht_condition === c ? '☑' : '☐'}</span> ${WHT_CONDITION_LABELS[c]}`;
+    // official numbering: (1) 1ก (2) 1ก พิเศษ (3) 2 (4) 3 (5) 2ก (6) 3ก (7) 53
+    const pndBox = (p: PndType, n: number) => `<span class="bx">${cert.pnd_type === p ? '☑' : '☐'}</span> (${n}) ${PND_LABELS[p]}`;
+    const condBox = (n: number, c: string) => `<span class="bx">${cert.wht_condition === c ? '☑' : '☐'}</span> (${n}) ${WHT_CONDITION_LABELS[c]}`;
     const taxRow = (label: string, s: any) => `<tr><td>${label}</td><td class="c">${s.date}</td><td class="r">${s.paid}</td><td class="r">${s.tax}</td></tr>`;
     return wrapA4(`
       ${cert.is_replacement ? '<div class="ct b" style="color:#b00">** ใบแทน **</div>' : ''}
       <div class="ct copylbl">${esc(copyLabel)}</div>
       <div class="ct ttl50">หนังสือรับรองการหักภาษี ณ ที่จ่าย<br/>ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร</div>
-      <table class="meta"><tr><td class="r">เล่มที่ ${esc(cert.book_no ?? '____')} &nbsp;&nbsp; ลำดับที่ ${esc(cert.run_no ?? cert.doc_no)}</td></tr></table>
-      <div class="party"><span class="b">ผู้มีหน้าที่หักภาษี ณ ที่จ่าย (ผู้จ่ายเงิน):</span></div>
-      <div>เลขประจำตัวผู้เสียภาษีอากร ${esc(formatTaxId(cert.payer.tax_id))}</div>
-      <div>ชื่อ ${esc(cert.payer.name)}</div>
-      <div>ที่อยู่ ${esc(cert.payer.address)}</div>
-      <div class="party" style="margin-top:6px"><span class="b">ผู้ถูกหักภาษี ณ ที่จ่าย (ผู้รับเงิน):</span></div>
-      <div>เลขประจำตัวผู้เสียภาษีอากร ${esc(formatTaxId(cert.payee.tax_id))}</div>
-      <div>ชื่อ ${esc(cert.payee.name)}</div>
-      <div>ที่อยู่ ${esc(cert.payee.address ?? '-')}</div>
-      <div class="pnd">${pndBox('PND1K')} &nbsp; ${pndBox('PND2')} &nbsp; ${pndBox('PND3')} &nbsp; ${pndBox('PND53')}</div>
+      <div class="r" style="font-size:11px;margin-bottom:6px">เล่มที่ ${esc(cert.book_no ?? '-')} &nbsp;&nbsp; เลขที่ ${esc(cert.run_no ?? cert.doc_no)}</div>
+      <table class="wht2col"><tr>
+        <td class="col">
+          <div class="party b">ผู้มีหน้าที่หักภาษี ณ ที่จ่าย :-</div>
+          <div class="txrow">เลขประจำตัวผู้เสียภาษีอากร (13 หลัก)* ${taxIdBoxes(cert.payer.tax_id)}</div>
+          <div>ชื่อ ${esc(cert.payer.name)}</div>
+          <div>ที่อยู่ ${esc(cert.payer.address)}</div>
+        </td>
+        <td class="col">
+          <div class="party b">ผู้ถูกหักภาษี ณ ที่จ่าย :-</div>
+          <div class="txrow">เลขประจำตัวผู้เสียภาษีอากร (13 หลัก)* ${taxIdBoxes(cert.payee.tax_id)}</div>
+          <div>ชื่อ ${esc(cert.payee.name)}</div>
+          <div>ที่อยู่ ${esc(cert.payee.address ?? '-')}</div>
+        </td>
+      </tr></table>
+      <div class="pnd"><span class="b">ลำดับที่</span> ${esc(cert.run_no ?? cert.doc_no)} &nbsp;&nbsp; ยื่นตามแบบ:</div>
+      <div class="pnd">${pndBox('PND1K', 1)} &nbsp; ${pndBox('PND1KS', 2)} &nbsp; ${pndBox('PND2', 3)} &nbsp; ${pndBox('PND3', 4)} &nbsp; ${pndBox('PND2K', 5)} &nbsp; ${pndBox('PND3K', 6)} &nbsp; ${pndBox('PND53', 7)}</div>
       <table class="grid wht">
-        <thead><tr><th>ประเภทเงินได้พึงประเมินที่จ่าย</th><th class="c">วันเดือนปีที่จ่าย</th><th class="r">จำนวนเงินที่จ่าย</th><th class="r">ภาษีที่หักนำส่ง</th></tr></thead>
+        <thead><tr><th>ประเภทเงินได้พึงประเมินที่จ่าย</th><th class="c">วัน เดือน หรือปีภาษี<br/>ที่จ่าย</th><th class="r">จำนวนเงินที่จ่าย</th><th class="r">ภาษีที่หักและนำส่ง</th></tr></thead>
         <tbody>
-          ${taxRow('1. เงินเดือน ค่าจ้าง ฯลฯ ม.40(1)', r1)}
-          ${taxRow('2. ค่าธรรมเนียม ค่านายหน้า ฯลฯ ม.40(2)', r2)}
-          ${taxRow('3. ค่าแห่งลิขสิทธิ์ ฯลฯ ม.40(3)', r3)}
-          ${taxRow('4. ดอกเบี้ย/เงินปันผล ฯลฯ ม.40(4)', r4)}
-          ${taxRow(`5. ตามคำสั่งฯ ม.3 เตรส ${r5desc ? `(${esc(r5desc)})` : '(ค่าจ้างทำของ/บริการ/โฆษณา/เช่า ฯลฯ)'}`, r5)}
-          ${taxRow('6. เงินได้นอกจาก 1.–5.', r6)}
+          ${taxRow('1. เงินเดือน ค่าจ้าง เบี้ยเลี้ยง โบนัส ฯลฯ ตามมาตรา 40(1)', r1)}
+          ${taxRow('2. ค่าธรรมเนียม ค่านายหน้า ฯลฯ ตามมาตรา 40(2)', r2)}
+          ${taxRow('3. ค่าแห่งลิขสิทธิ์ ฯลฯ ตามมาตรา 40(3)', r3)}
+          ${taxRow('4. (ก) ดอกเบี้ย ฯลฯ ตามมาตรา 40(4)(ก)', r4a)}
+          ${taxRow('&nbsp;&nbsp;&nbsp;(ข) เงินปันผล เงินส่วนแบ่งกำไร ฯลฯ ตามมาตรา 40(4)(ข)', r4b)}
+          <tr><td colspan="4" class="subnote">กรณีผู้ได้รับเงินปันผลได้รับเครดิตภาษี จ่ายจากกำไรสุทธิของกิจการที่เสียภาษีเงินได้นิติบุคคลในอัตรา
+            <span class="bx">☐</span>&nbsp;ร้อยละ 30 &nbsp; <span class="bx">☐</span>&nbsp;ร้อยละ 25 &nbsp; <span class="bx">☐</span>&nbsp;ร้อยละ 20 &nbsp; <span class="bx">☐</span>&nbsp;อัตราอื่น (ระบุ) __________</td></tr>
+          ${taxRow(`5. การจ่ายเงินได้ที่ต้องหักภาษี ณ ที่จ่ายตามคำสั่งกรมสรรพากร ที่ ท.ป.4/2528 ฯลฯ${r5desc ? ` (${esc(r5desc)})` : ' (ระบุ)'}`, r5)}
+          ${taxRow('6. เงินได้อื่นๆ (ระบุ)', r6)}
           <tr class="grand"><td class="r">รวมเงินที่จ่ายและภาษีที่หักนำส่ง</td><td></td><td class="r">${fmtMoney(cert.total_paid)}</td><td class="r">${fmtMoney(cert.total_wht)}</td></tr>
         </tbody>
       </table>
-      <div class="words">รวมเงินภาษีที่หักนำส่ง (ตัวอักษร) ( ${esc(bahtText(cert.total_wht))} )</div>
-      <div class="cond">ผู้จ่ายเงิน &nbsp; ${condBox('withhold')} &nbsp; ${condBox('absorb_always')} &nbsp; ${condBox('absorb_once')} &nbsp; <span class="bx">${cert.wht_condition === 'other' ? '☑' : '☐'}</span> อื่นๆ ${esc(cert.wht_condition_other ?? '')}</div>
+      <div class="words">รวมเงินภาษีที่หักนำส่งทั้งสิ้น (ตัวอักษร) ( ${esc(bahtText(cert.total_wht))} )</div>
+      <div class="cond">ผู้จ่ายเงิน &nbsp; ${condBox(1, 'withhold')} &nbsp; ${condBox(2, 'absorb_always')} &nbsp; ${condBox(3, 'absorb_once')} &nbsp; <span class="bx">${cert.wht_condition === 'other' ? '☑' : '☐'}</span> (4) อื่นๆ (ระบุ) ${esc(cert.wht_condition_other ?? '')}</div>
       <div class="certify">ขอรับรองว่าข้อความและตัวเลขดังกล่าวข้างต้นถูกต้องตรงกับความจริงทุกประการ</div>
-      <div class="foot"><div class="sign">ลงชื่อ ${esc(cert.signer_name ?? '')} ผู้จ่ายเงิน<br/>ยื่นวันที่ ${esc(thaiDate(cert.date_paid))}</div></div>
+      <div class="foot" style="justify-content:flex-end"><div class="sign" style="width:55%">ลงชื่อ ${esc(cert.signer_name ?? '')} ผู้จ่ายเงิน<br/>วัน เดือน ปี ที่ออกหนังสือรับรองนี้ ${esc(thaiDate(cert.date_paid))}</div></div>
+      <div class="note50">หมายเหตุ เลขประจำตัวผู้เสียภาษีอากร (13 หลัก) ของบุคคลธรรมดา คือ เลขประจำตัวประชาชนตามกฎหมายว่าด้วยการทะเบียนราษฎร
+        กรณีนิติบุคคลใช้เลขทะเบียนนิติบุคคลที่กรมพัฒนาธุรกิจการค้า กระทรวงพาณิชย์ออกให้</div>
     `, 'หนังสือรับรองหักภาษี ณ ที่จ่าย 50 ทวิ');
   }
 }
@@ -197,7 +213,20 @@ function wrapA4(body: string, title: string, opts: { accentColor?: string } = {}
     .sign{width:45%;text-align:center;border-top:1px solid #999;padding-top:4px;color:#555}
     .sign .who{margin-top:18px;color:#1a1a1a;font-weight:600}
     .party{color:${A}}
+    table.wht2col{border:1px solid #999;margin:6px 0} table.wht2col td.col{width:50%;vertical-align:top;padding:6px;border-right:1px solid #999;font-size:11px}
+    table.wht2col td.col:last-child{border-right:none}
+    .txrow{margin:4px 0;display:flex;align-items:center;flex-wrap:wrap;gap:2px}
+    .txboxes{display:inline-flex;margin-left:4px}
+    .txcell{display:inline-block;width:13px;height:15px;border:1px solid #999;text-align:center;font-size:10px;line-height:15px;margin-right:1px}
+    table.wht td.subnote{border:1px solid #999;font-size:10px;color:#333;padding:3px 6px;height:auto}
+    .note50{margin-top:10px;font-size:10px;color:#555}
   </style></head><body>${body}</body></html>`;
+}
+
+// 13 individual boxed digit cells for a Tax ID, matching the printed ล.ย.02/50-ทวิ form layout
+function taxIdBoxes(id: unknown): string {
+  const d = String(id ?? '').replace(/\D/g, '').padEnd(13, ' ').slice(0, 13);
+  return `<span class="txboxes">${[...d].map((ch) => `<span class="txcell">${ch.trim() ? esc(ch) : ''}</span>`).join('')}</span>`;
 }
 
 function esc(v: unknown): string {
