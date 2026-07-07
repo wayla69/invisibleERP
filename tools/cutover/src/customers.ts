@@ -93,6 +93,24 @@ async function main() {
   const aDenied = await inj('GET', '/api/analytics/replenishment', noperm);
   ok('Analytics permission gate → 403 without planner/dashboard/warehouse', aDenied.status === 403, `status=${aDenied.status}`);
 
+  // ── customer_master CRUD (master-data audit Phase 3) — create/read/update with the new fields
+  // (credit_terms/sales_rep/category/language/external_ref); previously only create + link + the
+  // invoice-issuance auto-upsert existed, with no way to correct/enrich a record through any endpoint. ──
+  const cmCreate = await inj('POST', '/api/customer-master', admin, {
+    name: 'บริษัท ทดสอบ จำกัด', kind: 'company', email: 'test@example.com', phone: '02-000-1111',
+    credit_terms: 'Net 30', sales_rep: 'สมชาย', category: 'Wholesale', language: 'en', external_ref: 'EXT-001',
+  });
+  ok('Customer master: create with Phase-3 fields (credit_terms/sales_rep/category/language/external_ref)', cmCreate.status === 200 || cmCreate.status === 201, `${cmCreate.status} ${JSON.stringify(cmCreate.json).slice(0, 100)}`);
+  const cmNo = cmCreate.json.customer_no as string;
+  const cmGet1 = await inj('GET', `/api/customer-master/${cmNo}`, admin);
+  ok('Customer master: GET projects the new fields', cmGet1.json.credit_terms === 'Net 30' && cmGet1.json.sales_rep === 'สมชาย' && cmGet1.json.category === 'Wholesale' && cmGet1.json.language === 'en' && cmGet1.json.external_ref === 'EXT-001', JSON.stringify(cmGet1.json).slice(0, 200));
+  const cmUpdate = await inj('PATCH', `/api/customer-master/${cmNo}`, admin, { credit_terms: 'Net 60', category: 'Key Account', status: 'inactive' });
+  ok('Customer master: direct-edit update (no maker-checker — no payment-redirection risk)', cmUpdate.status === 200 && cmUpdate.json.credit_terms === 'Net 60' && cmUpdate.json.category === 'Key Account' && cmUpdate.json.status === 'inactive', JSON.stringify(cmUpdate.json).slice(0, 150));
+  const cmEmpty = await inj('PATCH', `/api/customer-master/${cmNo}`, admin, {});
+  ok('Customer master: PATCH with no fields → 400 NO_FIELDS', cmEmpty.status === 400 && cmEmpty.json.error?.code === 'NO_FIELDS', `${cmEmpty.status} ${cmEmpty.json.error?.code}`);
+  const cmList = await inj('GET', '/api/customer-master?search=ทดสอบ', admin);
+  ok('Customer master: list search finds the created customer with updated fields', (cmList.json.customers ?? []).some((c: any) => c.customer_no === cmNo && c.category === 'Key Account'), `n=${cmList.json.count}`);
+
   await app.close();
   await pg.close();
 

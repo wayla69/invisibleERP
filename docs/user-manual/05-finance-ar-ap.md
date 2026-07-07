@@ -53,6 +53,29 @@ single column on phones/tablets.
 
 **Required permission:** `ar` (held by *ArClerk*, *Admin*)
 
+### A0. Customer master (contact & commercial terms)
+
+**Screen:** `/customers` (**ข้อมูลหลักลูกค้า**, ERP nav → CRM) ·
+**Required permission:** `crm` / `ar` / `exec`.
+
+This is the single customer-of-record — the same directory the loyalty
+program (B2C) and B2B account orders/AR both link into. Press **เพิ่มลูกค้า
+(Add customer)** to create one, or **แก้ไข (Edit)** on any row to update its
+contact details (phone, email, address, tax ID/branch for tax invoices) and
+commercial terms: **เครดิต (credit terms)**, **พนักงานขาย (sales rep)**,
+**หมวดลูกค้า (category)**, document **language**, and an **external system
+reference** (useful when migrating customers from another system). None of
+these need a second approval — press save and it takes effect immediately.
+
+Click any row to open its **360° view** — lifetime sales, AR outstanding, and
+loyalty tier/points in one place, whichever silo(s) the customer is linked to.
+
+A customer record is also created (or refreshed) automatically the first time
+you issue a full tax invoice for a new buyer — see [Tax](./07-tax.md) — so you
+don't have to add customers here before invoicing them; this screen is for
+maintaining the record afterward (correcting a typo, setting credit terms,
+assigning a sales rep, etc.).
+
 ### A1. Create invoices from orders
 
 1. On the **รายรับ (AR)** tab, run **Sync AR** (creates invoices from *Shipped* /

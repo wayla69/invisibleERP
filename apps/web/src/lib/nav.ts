@@ -222,6 +222,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'nav.group.crm',
     workspace: ['erp'],
     items: [
+      { label: 'nav.customer_master', href: '/customers', icon: Users, perms: ['crm', 'ar', 'exec'] },
       { label: 'nav.pipeline', href: '/pipeline', icon: Target, perms: ['marketing', 'exec'] },
       { label: 'nav.cpq', href: '/cpq', icon: FileSignature, perms: ['marketing', 'exec'] },
       { label: 'nav.service', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },

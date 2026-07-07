@@ -19,6 +19,13 @@ export const customerMaster = pgTable('customer_master', {
   address: encryptedText('address'),               // buyer address for tax invoices — not searched → encrypted (0269)
   branchCode: text('branch_code'),                 // buyer's VAT branch, e.g. for the ม.86/4 buyer block (0269)
   status: text('status').notNull().default('active'), // active | inactive
+  // Master-data audit Phase 3 (0271) — Oracle/NetSuite-grade fields: credit terms, sales-rep ownership,
+  // segmentation category, preferred document language, and an external system reference for migrated data.
+  creditTerms: text('credit_terms'),
+  salesRep: text('sales_rep'),
+  category: text('category'),
+  language: text('language').default('th'),
+  externalRef: text('external_ref'),
   notes: encryptedText('notes'),                   // free-text may hold PII — NOT queried → encrypted at rest
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
