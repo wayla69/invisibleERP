@@ -145,6 +145,50 @@ test('shop: phone shows a grid-shaped skeleton while the catalog is still loadin
   await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0);
 });
 
+test('shop: phone has no horizontal page overflow with a realistic multi-category catalog', async ({ page }) => {
+  // Regression for a real-device bug: the catalog+basket layout grid had no explicit column template
+  // below `xl` (only `xl:grid-cols-[1fr_360px]`), so it fell back to an implicit auto-sized track that
+  // grows to fit content instead of clamping to the viewport. The 1-item/1-category CATALOG fixture used
+  // by the other shop tests is too small to expose it — the category-chips row (many whitespace-nowrap
+  // chips, one per category) only overflows the page once there are enough real categories, as on
+  // production's 193-item / 8-category catalog.
+  const WIDE_CATEGORIES = [
+    ['kitchen_prep', 'ของเตรียมครัว (Kitchen Prep)', 32], ['prepared', 'ของแปรรูป (Prepared)', 38],
+    ['fresh', 'ของสด (Fresh)', 12], ['rice', 'ข้าว (Rice)', 1], ['seasoning', 'เครื่องปรุง (Seasoning)', 18],
+    ['frozen', 'แช่แข็ง/อื่นๆ (Frozen & Other)', 8], ['sauce', 'ซอส/เครื่องปรุง', 20], ['office', 'สำนักงาน', 10],
+  ] as const;
+  const WIDE_CATALOG = {
+    items: Array.from({ length: 24 }, (_, i) => ({
+      item_id: `ITM-${i + 1}`, item_description: `สินค้า ${i + 1}`, uom: 'EA', unit_price: 20 + i, image_key: null,
+      category: WIDE_CATEGORIES[i % WIDE_CATEGORIES.length][1], category_key: WIDE_CATEGORIES[i % WIDE_CATEGORIES.length][0],
+      on_hand: 10, last_price: 18,
+    })),
+    categories: WIDE_CATEGORIES.map(([key, label, count]) => ({ key, label, count })),
+    total: 193, offset: 0, limit: 24, has_more: true, count: 24,
+  };
+  await page.addInitScript(() => { document.cookie = 'ierp_csrf=e2e; path=/'; });
+  await page.route('**/api/**', async (route) => {
+    const url = route.request().url();
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (url.includes('/api/auth/me')) return json(ME);
+    if (url.includes('/api/modules/effective')) return json({ modules: [], disabled: [] });
+    if (url.includes('/api/user-prefs')) return json({ favourites: [], nav: {}, shop_favs: [], shop_templates: [] });
+    if (url.includes('/api/procurement/low-stock')) return json({ items: [], count: 0 });
+    if (url.includes('/api/procurement/prs')) return json({ can_approve: true, prs: [] });
+    if (url.includes('/api/pmr/projects')) return json({ projects: [], count: 0 });
+    if (url.includes('/api/procurement/catalog')) return json(WIDE_CATALOG);
+    return json({});
+  });
+  await page.goto('/shop');
+  await expect(page.getByText('สินค้า 1', { exact: true })).toBeVisible();
+
+  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(scrollWidth).toBe(clientWidth);
+});
+
 test('approvals: phone renders the pending-approval cards with inline actions, not the table', async ({ page }) => {
   await boot(page);
   await page.goto('/approvals');
