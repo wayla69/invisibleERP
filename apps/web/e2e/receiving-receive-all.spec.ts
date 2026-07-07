@@ -56,3 +56,22 @@ test('receiving: PO list renders + one-tap รับครบ posts receive-all 
   await receiveBtns.click();
   await expect.poll(() => (page as any).__getReceiveAllPo()).toBe('PO-E2E-APPR');
 });
+
+test('receiving: GR form PO number is a dropdown of receivable POs, not free text', async ({ page }) => {
+  await boot(page);
+  await page.goto('/receiving');
+
+  // The dropdown lists only receivable POs (Approved/Received) — the Closed PO must not appear,
+  // same isReceivable gate as the รับครบ button above.
+  const poSelect = page.locator('#gr-po');
+  await expect(poSelect).toBeVisible();
+  await poSelect.click();
+
+  const options = page.getByRole('option');
+  await expect(options).toHaveCount(1);
+  await expect(options.first()).toContainText('PO-E2E-APPR');
+  await expect(options.first()).toContainText('ACME Foods');
+
+  await options.first().click();
+  await expect(poSelect).toContainText('PO-E2E-APPR');
+});
