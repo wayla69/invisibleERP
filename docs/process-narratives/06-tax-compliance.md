@@ -30,7 +30,7 @@ To control the computation, documentation, transmission, and reconciliation of T
 - `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — TAX-01..03.
 - Thai law: Revenue Code VAT 7%, ม.86/4(4) (tax-invoice particulars), ETDA e-Tax UBL 2.1; ภ.ง.ด. WHT returns.
 - Code: `apps/api/src/modules/tax/tax-providers.ts` + `tax.service.ts`, `apps/api/src/modules/tax/documents/etax-xml.ts` + `etax-sign.ts` (XAdES signature) + `etax-email.service.ts`, `apps/api/src/modules/pos/fiscal/etax.service.ts` (provider submission), `apps/api/src/modules/tax/reports/`, `apps/api/src/common/doc-number.service.ts`.
-- **e-Tax production go-live spike (charter + go/no-go):** `docs/ops/etax-production-spike.md` — current-state map, the 5 remaining gaps (Exclusive XML C14N, CA cert + HSM, real SP/email transmission, PDF/A-3, submission retry), the SP-vs-email decision, and the costed workstream. Read this before scheduling the RD go-live workstream.
+- **e-Tax production go-live spike (charter + go/no-go):** `docs/ops/etax-production-spike.md` — current-state map, the remaining gaps (CA cert + HSM, real SP/email transmission, PDF/A-3, submission retry — Exclusive XML C14N is closed as of 2026-07-07), the SP-vs-email decision, and the costed workstream. Read this before scheduling the RD go-live workstream.
 
 ## 5. Definitions & abbreviations
 

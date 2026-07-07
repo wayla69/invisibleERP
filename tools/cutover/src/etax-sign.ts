@@ -8,8 +8,25 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DOMParser } from '@xmldom/xmldom';
+import { SignedXml } from 'xml-crypto';
 import { buildEtaxInvoiceXml } from '../../../apps/api/dist/modules/tax/documents/etax-xml';
 import { getSigningMaterial, signEtaxXml, verifyEtaxSignature } from '../../../apps/api/dist/modules/tax/documents/etax-sign';
+
+// Verify with a THIRD-PARTY XML-DSig library — not our own etax-sign.ts code — so this harness would catch a
+// real interop bug even if it happened to be self-consistent with verifyEtaxSignature (which is exactly what
+// happened during development: a stray whitespace byte between </ds:Signature> and </Invoice> canonicalized
+// differently once a spec-compliant DOM-based enveloped-signature transform removed the Signature element,
+// vs. this repo's own string-reconstruction — both self-checks were green, only this cross-check caught it).
+function independentXmlCryptoCheck(xml: string, certPem: string): boolean {
+  const verifier = new SignedXml();
+  verifier.publicCert = certPem;
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  const sigs = verifier.findSignatures(doc as never);
+  if (!sigs.length) return false;
+  verifier.loadSignature(sigs[0] as never);
+  return verifier.checkSignature(xml);
+}
 
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
@@ -74,10 +91,14 @@ function main() {
   // ── 6. verifies against an explicitly-supplied cert too ──
   ok('verify with supplied cert PEM → valid', verifyEtaxSignature(signed, certPem).valid);
 
+  // ── 6b. an INDEPENDENT XML-DSig library (xml-crypto) also accepts it — real interop, not self-consistency ──
+  ok('independent xml-crypto SignedXml.checkSignature() → valid', independentXmlCryptoCheck(signed, certPem));
+
   // ── 7. tamper the BODY (change an amount) → digest mismatch, invalid ──
   const tamperedBody = signed.replace('>321.00<', '>999.00<');
   const vb = verifyEtaxSignature(tamperedBody);
   ok('tampered amount → docDigestOk=false, invalid (tamper-evident)', tamperedBody !== signed && !vb.docDigestOk && !vb.valid, JSON.stringify(vb));
+  ok('tampered amount → independent xml-crypto verifier also rejects it', !independentXmlCryptoCheck(tamperedBody, certPem));
 
   // ── 8. tamper the SIGNATURE VALUE → signature mismatch, invalid ──
   const sv = signed.match(/<ds:SignatureValue>([^<]+)<\/ds:SignatureValue>/)![1];
