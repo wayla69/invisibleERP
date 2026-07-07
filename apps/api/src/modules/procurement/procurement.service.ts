@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests, vendorAddresses, vendorContacts } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -634,6 +634,70 @@ export class ProcurementService {
     const [row] = await db.update(vendors).set(set).where(eq(vendors.id, vendorId)).returning({ id: vendors.id });
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
     return { vendor_id: vendorId, ...dto };
+  }
+
+  // ── Party-model depth (master-data audit Phase 4): multi-address / multi-contact / parent company ──
+  private async vendorById(vendorId: number) {
+    const [v] = await this.db.select().from(vendors).where(eq(vendors.id, vendorId)).limit(1);
+    if (!v) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
+    return v;
+  }
+
+  async setVendorParent(vendorId: number, parentVendorId: number | null, _user: JwtUser) {
+    const db = this.db;
+    const v = await this.vendorById(vendorId);
+    if (parentVendorId === vendorId) throw new BadRequestException({ code: 'SELF_PARENT', message: 'A vendor cannot be its own parent', messageTh: 'ผู้ขายไม่สามารถเป็นบริษัทแม่ของตัวเองได้' });
+    if (parentVendorId != null) await this.vendorById(parentVendorId); // validates it exists
+    await db.update(vendors).set({ parentVendorId }).where(eq(vendors.id, Number(v.id)));
+    return { vendor_id: vendorId, parent_vendor_id: parentVendorId };
+  }
+
+  async addVendorAddress(vendorId: number, dto: {
+    address_type?: string; address_line1?: string; address_line2?: string; sub_district?: string; district?: string; province?: string; postal_code?: string; is_primary?: boolean;
+  }, user: JwtUser) {
+    const db = this.db;
+    const v = await this.vendorById(vendorId);
+    if (dto.is_primary) await db.update(vendorAddresses).set({ isPrimary: false }).where(eq(vendorAddresses.vendorId, Number(v.id)));
+    const [row] = await db.insert(vendorAddresses).values({
+      tenantId: v.tenantId ?? null, vendorId: Number(v.id), addressType: dto.address_type ?? 'other',
+      addressLine1: dto.address_line1 ?? null, addressLine2: dto.address_line2 ?? null,
+      subDistrict: dto.sub_district ?? null, district: dto.district ?? null, province: dto.province ?? null, postalCode: dto.postal_code ?? null,
+      isPrimary: dto.is_primary ?? false, createdBy: user.username,
+    }).returning();
+    return shapeVendorAddress(row);
+  }
+
+  async listVendorAddresses(vendorId: number, _user: JwtUser) {
+    const rows = await this.db.select().from(vendorAddresses).where(eq(vendorAddresses.vendorId, vendorId)).orderBy(desc(vendorAddresses.isPrimary), desc(vendorAddresses.id));
+    return { addresses: rows.map(shapeVendorAddress), count: rows.length };
+  }
+
+  async deleteVendorAddress(vendorId: number, addressId: number, _user: JwtUser) {
+    const del = await this.db.delete(vendorAddresses).where(and(eq(vendorAddresses.id, addressId), eq(vendorAddresses.vendorId, vendorId))).returning({ id: vendorAddresses.id });
+    if (!del.length) throw new NotFoundException({ code: 'ADDRESS_NOT_FOUND', message: 'Address not found', messageTh: 'ไม่พบที่อยู่นี้' });
+    return { deleted: true };
+  }
+
+  async addVendorContact(vendorId: number, dto: { name: string; title?: string; phone?: string; email?: string; notes?: string; is_primary?: boolean }, user: JwtUser) {
+    const db = this.db;
+    const v = await this.vendorById(vendorId);
+    if (dto.is_primary) await db.update(vendorContacts).set({ isPrimary: false }).where(eq(vendorContacts.vendorId, Number(v.id)));
+    const [row] = await db.insert(vendorContacts).values({
+      tenantId: v.tenantId ?? null, vendorId: Number(v.id), name: dto.name, title: dto.title ?? null,
+      phone: dto.phone ?? null, email: dto.email ?? null, notes: dto.notes ?? null, isPrimary: dto.is_primary ?? false, createdBy: user.username,
+    }).returning();
+    return shapeVendorContact(row);
+  }
+
+  async listVendorContacts(vendorId: number, _user: JwtUser) {
+    const rows = await this.db.select().from(vendorContacts).where(eq(vendorContacts.vendorId, vendorId)).orderBy(desc(vendorContacts.isPrimary), desc(vendorContacts.id));
+    return { contacts: rows.map(shapeVendorContact), count: rows.length };
+  }
+
+  async deleteVendorContact(vendorId: number, contactId: number, _user: JwtUser) {
+    const del = await this.db.delete(vendorContacts).where(and(eq(vendorContacts.id, contactId), eq(vendorContacts.vendorId, vendorId))).returning({ id: vendorContacts.id });
+    if (!del.length) throw new NotFoundException({ code: 'CONTACT_NOT_FOUND', message: 'Contact not found', messageTh: 'ไม่พบผู้ติดต่อนี้' });
+    return { deleted: true };
   }
 
   // ── Vendor bank-detail maker-checker (0270 — closes a BEC/vendor-payment-fraud gap: a single md_vendor
@@ -1275,4 +1339,15 @@ export class ProcurementService {
 
     return { item_id: itemId, image_key: `img_${itemId}` };
   }
+}
+
+function shapeVendorAddress(a: any) {
+  return {
+    id: Number(a.id), address_type: a.addressType, address_line1: a.addressLine1 ?? null, address_line2: a.addressLine2 ?? null,
+    sub_district: a.subDistrict ?? null, district: a.district ?? null, province: a.province ?? null, postal_code: a.postalCode ?? null,
+    is_primary: a.isPrimary === true, created_by: a.createdBy, created_at: a.createdAt,
+  };
+}
+function shapeVendorContact(c: any) {
+  return { id: Number(c.id), name: c.name, title: c.title ?? null, phone: c.phone ?? null, email: c.email ?? null, notes: c.notes ?? null, is_primary: c.isPrimary === true, created_by: c.createdBy, created_at: c.createdAt };
 }

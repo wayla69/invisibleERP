@@ -47,6 +47,7 @@ export * from './restaurant';
 export * from './assets';
 export * from './petty-cash';
 export * from './customer-master';
+export * from './party-depth';
 export * from './crm-pipeline';
 export * from './ar-allowance';
 export * from './menu';

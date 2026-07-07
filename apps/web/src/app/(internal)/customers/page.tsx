@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { IdCard, SearchX, Plus, Pencil, X } from 'lucide-react';
+import { IdCard, SearchX, Plus, Pencil, X, MapPin, Contact, Trash2, Building2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, baht, thaiDate } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -23,7 +23,16 @@ interface Customer {
   customer_no: string; name: string; kind: string; email?: string | null; phone?: string | null; tax_id?: string | null;
   address?: string | null; branch_code?: string | null; account_code?: string | null; member_id?: number | null;
   status: string; notes?: string | null; credit_terms?: string | null; sales_rep?: string | null;
-  category?: string | null; language?: string | null; external_ref?: string | null;
+  category?: string | null; language?: string | null; external_ref?: string | null; parent_customer_no?: string | null;
+}
+
+interface CustomerAddress {
+  id: number; address_type: string; address_line1?: string | null; address_line2?: string | null;
+  sub_district?: string | null; district?: string | null; province?: string | null; postal_code?: string | null;
+  is_primary: boolean;
+}
+interface CustomerContact {
+  id: number; name: string; title?: string | null; phone?: string | null; email?: string | null; notes?: string | null; is_primary: boolean;
 }
 
 // Unified customer master (REV-14/15) — the customer-of-record joining the B2C loyalty and B2B account
@@ -94,6 +103,7 @@ export default function CustomersPage() {
 const emptyForm = {
   name: '', kind: 'person' as 'person' | 'company', email: '', phone: '', tax_id: '', address: '', branch_code: '',
   credit_terms: '', sales_rep: '', category: '', language: 'th', external_ref: '', notes: '', status: 'active' as 'active' | 'inactive',
+  parent_customer_no: '',
 };
 
 function CustomerFormDialog({ customer, onClose }: { customer?: Customer; onClose: () => void }) {
@@ -104,14 +114,21 @@ function CustomerFormDialog({ customer, onClose }: { customer?: Customer; onClos
     tax_id: customer.tax_id ?? '', address: customer.address ?? '', branch_code: customer.branch_code ?? '',
     credit_terms: customer.credit_terms ?? '', sales_rep: customer.sales_rep ?? '', category: customer.category ?? '',
     language: customer.language ?? 'th', external_ref: customer.external_ref ?? '', notes: customer.notes ?? '',
-    status: (customer.status as 'active' | 'inactive') ?? 'active',
+    status: (customer.status as 'active' | 'inactive') ?? 'active', parent_customer_no: customer.parent_customer_no ?? '',
   } : emptyForm);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const save = useMutation({
-    mutationFn: () => customer
-      ? api<any>(`/api/customer-master/${customer.customer_no}`, { method: 'PATCH', body: JSON.stringify(form) })
-      : api<any>('/api/customer-master', { method: 'POST', body: JSON.stringify(form) }),
+    mutationFn: async () => {
+      const { parent_customer_no, ...body } = form;
+      const r = customer
+        ? await api<any>(`/api/customer-master/${customer.customer_no}`, { method: 'PATCH', body: JSON.stringify(body) })
+        : await api<any>('/api/customer-master', { method: 'POST', body: JSON.stringify(body) });
+      if (customer && parent_customer_no !== (customer.parent_customer_no ?? '')) {
+        await api<any>(`/api/customer-master/${customer.customer_no}/parent`, { method: 'PATCH', body: JSON.stringify({ parent_customer_no: parent_customer_no || null }) });
+      }
+      return r;
+    },
     onSuccess: () => { notifySuccess(customer ? t('mx.cm_saved') : t('mx.cm_created')); qc.invalidateQueries({ queryKey: ['customer-master'] }); onClose(); },
     onError: (e: any) => notifyError(e.message),
   });
@@ -153,6 +170,11 @@ function CustomerFormDialog({ customer, onClose }: { customer?: Customer; onClos
           </FormField>
           <FormField label={t('mx.cm_f_external_ref')}><Input value={form.external_ref} onChange={set('external_ref')} /></FormField>
           {customer && (
+            <FormField label={t('mx.cm_f_parent')} hint={t('mx.cm_f_parent_hint')}>
+              <Input value={form.parent_customer_no} onChange={set('parent_customer_no')} placeholder={t('mx.cm_f_parent_ph')} />
+            </FormField>
+          )}
+          {customer && (
             <FormField label={t('mx.cm_col_status')}>
               <Select value={form.status} onValueChange={(v) => setForm((f) => ({ ...f, status: v as 'active' | 'inactive' }))}>
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
@@ -175,7 +197,23 @@ function CustomerFormDialog({ customer, onClose }: { customer?: Customer; onClos
 
 function Customer360Panel({ customerNo, onClose }: { customerNo: string; onClose: () => void }) {
   const { t } = useLang();
+  const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['customer-360', customerNo], queryFn: () => api(`/api/customer-master/${customerNo}/360`) });
+  const [addingAddress, setAddingAddress] = useState(false);
+  const [addingContact, setAddingContact] = useState(false);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['customer-360', customerNo] });
+
+  const deleteAddress = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/customer-master/${customerNo}/addresses/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { notifySuccess(t('mx.cm_addr_deleted')); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const deleteContact = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/customer-master/${customerNo}/contacts/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { notifySuccess(t('mx.cm_contact_deleted')); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-2xl">
@@ -191,6 +229,14 @@ function Customer360Panel({ customerNo, onClose }: { customerNo: string; onClose
                 <Card className="p-3"><div className="text-xs text-muted-foreground">{t('mx.cm_360_ar')}</div><div className="tabular text-base font-semibold">{baht(q.data.summary?.ar_outstanding ?? 0)}</div></Card>
                 <Card className="p-3"><div className="text-xs text-muted-foreground">{t('mx.cm_360_loyalty')}</div><div className="text-base font-semibold">{q.data.loyalty ? `${q.data.loyalty.tier} · ${num(q.data.loyalty.points_balance)} pts` : '—'}</div></Card>
               </div>
+              {q.data.parent && (
+                <Card className="flex items-center gap-2 p-3 text-sm">
+                  <Building2 className="size-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">{t('mx.cm_360_parent')}:</span>
+                  <span className="font-medium">{q.data.parent.name}</span>
+                  <span className="text-muted-foreground">({q.data.parent.customer_no})</span>
+                </Card>
+              )}
               {q.data.b2b?.orders?.length > 0 && (
                 <DataTable
                   rows={q.data.b2b.orders}
@@ -203,12 +249,131 @@ function Customer360Panel({ customerNo, onClose }: { customerNo: string; onClose
                   ]}
                 />
               )}
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="flex items-center gap-1.5 text-sm font-medium"><MapPin className="size-4" /> {t('mx.cm_addresses')}</h4>
+                  <Button size="sm" variant="outline" onClick={() => setAddingAddress(true)}><Plus className="size-3.5" /> {t('mx.cm_add_address')}</Button>
+                </div>
+                {(q.data.addresses ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('mx.cm_no_addresses')}</p>}
+                {(q.data.addresses as CustomerAddress[] ?? []).map((a) => (
+                  <div key={a.id} className="flex items-start gap-2 rounded-md border border-border/60 p-2.5 text-sm">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">{t(`mx.cm_addr_type_${a.address_type}` as any)}</Badge>
+                        {a.is_primary && <Badge variant="success" className="text-xs">{t('mx.cm_primary')}</Badge>}
+                      </div>
+                      <div className="mt-1 text-muted-foreground">
+                        {[a.address_line1, a.address_line2, a.sub_district, a.district, a.province, a.postal_code].filter(Boolean).join(' ') || '—'}
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="icon" className="size-7" aria-label={t('mx.cm_delete')} onClick={() => deleteAddress.mutate(a.id)}><Trash2 className="size-4" /></Button>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="flex items-center gap-1.5 text-sm font-medium"><Contact className="size-4" /> {t('mx.cm_contacts')}</h4>
+                  <Button size="sm" variant="outline" onClick={() => setAddingContact(true)}><Plus className="size-3.5" /> {t('mx.cm_add_contact')}</Button>
+                </div>
+                {(q.data.contacts ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('mx.cm_no_contacts')}</p>}
+                {(q.data.contacts as CustomerContact[] ?? []).map((c) => (
+                  <div key={c.id} className="flex items-start gap-2 rounded-md border border-border/60 p-2.5 text-sm">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{c.name}</span>
+                        {c.title && <span className="text-muted-foreground">· {c.title}</span>}
+                        {c.is_primary && <Badge variant="success" className="text-xs">{t('mx.cm_primary')}</Badge>}
+                      </div>
+                      <div className="mt-1 text-muted-foreground">{[c.phone, c.email].filter(Boolean).join(' · ') || '—'}</div>
+                    </div>
+                    <Button variant="ghost" size="icon" className="size-7" aria-label={t('mx.cm_delete')} onClick={() => deleteContact.mutate(c.id)}><Trash2 className="size-4" /></Button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </StateView>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}><X className="size-4" /> {t('fin.cancel')}</Button>
         </DialogFooter>
+      </DialogContent>
+      {addingAddress && <AddressFormDialog customerNo={customerNo} onClose={() => setAddingAddress(false)} onSaved={refresh} />}
+      {addingContact && <ContactFormDialog customerNo={customerNo} onClose={() => setAddingContact(false)} onSaved={refresh} />}
+    </Dialog>
+  );
+}
+
+function AddressFormDialog({ customerNo, onClose, onSaved }: { customerNo: string; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLang();
+  const [form, setForm] = useState({ address_type: 'other' as 'billing' | 'shipping' | 'registered' | 'other', address_line1: '', address_line2: '', sub_district: '', district: '', province: '', postal_code: '', is_primary: false });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const save = useMutation({
+    mutationFn: () => api<any>(`/api/customer-master/${customerNo}/addresses`, { method: 'POST', body: JSON.stringify(form) }),
+    onSuccess: () => { notifySuccess(t('mx.cm_address_added')); onSaved(); onClose(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>{t('mx.cm_add_address')}</DialogTitle></DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField label={t('mx.cm_col_kind')}>
+            <Select value={form.address_type} onValueChange={(v) => setForm((f) => ({ ...f, address_type: v as typeof form.address_type }))}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="billing">{t('mx.cm_addr_type_billing')}</SelectItem>
+                <SelectItem value="shipping">{t('mx.cm_addr_type_shipping')}</SelectItem>
+                <SelectItem value="registered">{t('mx.cm_addr_type_registered')}</SelectItem>
+                <SelectItem value="other">{t('mx.cm_addr_type_other')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </FormField>
+          <FormField label={t('mx.cm_f_is_primary')}>
+            <Select value={form.is_primary ? '1' : '0'} onValueChange={(v) => setForm((f) => ({ ...f, is_primary: v === '1' }))}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="0">{t('mx.cm_no')}</SelectItem><SelectItem value="1">{t('mx.cm_yes')}</SelectItem></SelectContent>
+            </Select>
+          </FormField>
+          <FormField label={t('mx.cm_f_address_line1')} className="sm:col-span-2"><Input value={form.address_line1} onChange={set('address_line1')} /></FormField>
+          <FormField label={t('mx.cm_f_address_line2')} className="sm:col-span-2"><Input value={form.address_line2} onChange={set('address_line2')} /></FormField>
+          <FormField label={t('mx.cm_f_sub_district')}><Input value={form.sub_district} onChange={set('sub_district')} /></FormField>
+          <FormField label={t('mx.cm_f_district')}><Input value={form.district} onChange={set('district')} /></FormField>
+          <FormField label={t('mx.cm_f_province')}><Input value={form.province} onChange={set('province')} /></FormField>
+          <FormField label={t('mx.cm_f_postal_code')}><Input value={form.postal_code} onChange={set('postal_code')} /></FormField>
+        </div>
+        <DialogFooter><Button disabled={save.isPending} onClick={() => save.mutate()}>{t('mx.cm_save')}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ContactFormDialog({ customerNo, onClose, onSaved }: { customerNo: string; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLang();
+  const [form, setForm] = useState({ name: '', title: '', phone: '', email: '', notes: '', is_primary: false });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const save = useMutation({
+    mutationFn: () => api<any>(`/api/customer-master/${customerNo}/contacts`, { method: 'POST', body: JSON.stringify(form) }),
+    onSuccess: () => { notifySuccess(t('mx.cm_contact_added')); onSaved(); onClose(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>{t('mx.cm_add_contact')}</DialogTitle></DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField label={t('mx.cm_col_name')} required><Input value={form.name} onChange={set('name')} /></FormField>
+          <FormField label={t('mx.cm_f_contact_title')}><Input value={form.title} onChange={set('title')} /></FormField>
+          <FormField label={t('mx.cm_col_phone')}><Input value={form.phone} onChange={set('phone')} /></FormField>
+          <FormField label={t('mx.vp_col_email')}><Input type="email" value={form.email} onChange={set('email')} /></FormField>
+          <FormField label={t('mx.cm_f_is_primary')}>
+            <Select value={form.is_primary ? '1' : '0'} onValueChange={(v) => setForm((f) => ({ ...f, is_primary: v === '1' }))}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="0">{t('mx.cm_no')}</SelectItem><SelectItem value="1">{t('mx.cm_yes')}</SelectItem></SelectContent>
+            </Select>
+          </FormField>
+          <FormField label={t('mx.vp_f_notes')} className="sm:col-span-2"><Input value={form.notes} onChange={set('notes')} /></FormField>
+        </div>
+        <DialogFooter><Button disabled={!form.name || save.isPending} onClick={() => save.mutate()}>{t('mx.cm_save')}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );

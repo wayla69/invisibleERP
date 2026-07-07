@@ -1905,6 +1905,13 @@
       "when": 2023820000170,
       "tag": "0271_customer_master_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 272,
+      "version": "7",
+      "when": 2023820000180,
+      "tag": "0272_party_model_depth",
+      "breakpoints": true
     }
   ]
 }
