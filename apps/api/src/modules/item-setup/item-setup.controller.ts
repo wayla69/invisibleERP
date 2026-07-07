@@ -50,6 +50,8 @@ const WarehouseBody = z.object({
 const ITEM_REL_TYPES = ['substitute', 'complement', 'supersedes', 'kit_component', 'accessory'] as const;
 const ItemRelBody = z.object({ to_item_id: z.string().min(1), rel_type: z.enum(ITEM_REL_TYPES).default('substitute'), note: z.string().optional() });
 const ItemStatusBody = z.object({ status: z.enum(['active', 'inactive', 'discontinued']), superseded_by: z.string().nullish() });
+// Match-merge / DQM (master-data audit Phase 11).
+const ItemMergeBody = z.object({ survivor_item_id: z.string().min(1), duplicate_item_id: z.string().min(1) });
 
 // Item-posting setup (docs/33 PR3). Item categories + tax codes maintenance and the per-item posting-profile
 // override. Gated to master-data setup duties — kept clear of transactional perms (SoD R13).
@@ -121,6 +123,10 @@ export class ItemSetupController {
   @Post('items/:itemId/relationships') addItemRelationship(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemRelBody)) b: z.infer<typeof ItemRelBody>, @CurrentUser() u: JwtUser) { return this.svc.addItemRelationship(itemId, b, u); }
   @Get('items/:itemId/relationships') listItemRelationships(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.listItemRelationships(itemId, u); }
   @Delete('items/:itemId/relationships/:relId') deleteItemRelationship(@Param('itemId') itemId: string, @Param('relId') relId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteItemRelationship(itemId, +relId, u); }
+  // Match-merge / DQM (master-data audit Phase 11) — detect is a read-only review queue for the setup duties;
+  // merge is gated in the service to the platform owner (god) because items are a shared cross-tenant master.
+  @Get('items-duplicates') findDuplicateItems(@CurrentUser() u: JwtUser) { return this.svc.findDuplicateItems(u); }
+  @Post('items-merge') mergeItems(@Body(new ZodValidationPipe(ItemMergeBody)) b: z.infer<typeof ItemMergeBody>, @CurrentUser() u: JwtUser) { return this.svc.mergeItems(b.survivor_item_id, b.duplicate_item_id, u); }
 
   @Get('warehouses') listWarehouses(@CurrentUser() u: JwtUser) { return this.svc.listWarehouses(u); }
   @Patch('warehouses/:locationId') updateWarehouse(@Param('locationId') locationId: string, @Body(new ZodValidationPipe(WarehouseBody)) b: WarehouseAccountsDto, @CurrentUser() u: JwtUser) { return this.svc.updateWarehouseAccounts(locationId, b, u); }
