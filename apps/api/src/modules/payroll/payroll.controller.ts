@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Optional, BadRequestExceptio
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { JobQueueService } from '../jobs/job-queue.service';
 import { PayrollService, type EmployeeDto, PAYROLL_RUN_JOB } from './payroll.service';
@@ -28,6 +29,7 @@ const DocEmailBody = z.object({ to_email: z.string().email() });
 
 @Controller('api/payroll')
 @Permissions('exec', 'users', 'creditors')
+@RequiresSuite('hcm')
 export class PayrollController {
   constructor(
     private readonly svc: PayrollService,

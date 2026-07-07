@@ -28,7 +28,14 @@ export type SuiteKey =
   | 'ai'
   | 'multibranch'
   | 'portal'
-  | 'selfservice';
+  | 'selfservice'
+  // ── Premium/add-on suites (1.1b). These have NO coarse module token of their own — their modules ride on
+  //    generic tokens (exec/planner/bom_master/…) — so they are gated by the class-level @RequiresSuite
+  //    decorator on their controllers rather than by an @Permissions token. Sold as Enterprise/add-on packs. ──
+  | 'manufacturing'
+  | 'projects'
+  | 'hcm'
+  | 'realestate';
 
 // suite → the coarse module permission tokens it unlocks. EVERY MODULE_KEY must appear in exactly one
 // suite (asserted by validateEntitlements()). Sub-permissions are NOT listed here — they are inherited
@@ -62,7 +69,18 @@ export const SUITES: Record<SuiteKey, Permission[]> = {
   ],
   // Employee & vendor self-service portals.
   selfservice: ['ess', 'vendor_portal'],
+  // ── Token-less premium suites (1.1b) — gated via @RequiresSuite on the controller, not by a token. ──
+  manufacturing: [],
+  projects: [],
+  hcm: [],
+  realestate: [],
 };
+
+// Suites that own no module token and are therefore gated exclusively by the @RequiresSuite decorator.
+export const TOKENLESS_SUITES: SuiteKey[] = ['manufacturing', 'projects', 'hcm', 'realestate'];
+
+// All suite keys (handy for validating @RequiresSuite arguments).
+export const SUITE_KEYS = Object.keys(SUITES) as SuiteKey[];
 
 // Suites that are always granted regardless of plan (mirrors ALWAYS_ON_MODULES). Never gated.
 export const ALWAYS_ON_SUITES: SuiteKey[] = ['core'];
@@ -81,6 +99,10 @@ export const SUITE_LABELS: Record<SuiteKey, { en: string; th: string }> = {
   multibranch: { en: 'Multi-branch', th: 'หลายสาขา' },
   portal: { en: 'Customer Portal', th: 'พอร์ทัลลูกค้า' },
   selfservice: { en: 'Self-service Portals', th: 'พอร์ทัลพนักงาน/ผู้ขาย' },
+  manufacturing: { en: 'Manufacturing / MRP', th: 'การผลิต / MRP' },
+  projects: { en: 'Projects / PPM', th: 'บริหารโครงการ' },
+  hcm: { en: 'HCM & Payroll', th: 'บุคคล & เงินเดือน' },
+  realestate: { en: 'Real Estate (Developer)', th: 'อสังหาริมทรัพย์' },
 };
 
 // plan code → suites included. DEFAULT map (a plan row's features.suites JSONB overrides at runtime).
@@ -96,22 +118,18 @@ export const PLAN_SUITES: Record<string, SuiteKey[]> = {
     'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
   ],
-  // Enterprise: everything (custom deals may still tune via features.suites).
+  // Enterprise: everything, incl. the premium/add-on suites (custom deals tune via features.suites).
   enterprise: [
     'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
+    'manufacturing', 'projects', 'hcm', 'realestate',
   ],
 };
 
-// Sellable capabilities that do NOT yet have a distinct coarse permission token and therefore cannot be
-// suite-gated by this map. Follow-up 1.1b must introduce gating tokens for these before they can be sold
-// as add-on packs. Documented so the gap is explicit and machine-visible, not silently missing.
-export const KNOWN_UNGATED: string[] = [
-  'manufacturing', // modules/manufacturing, mfg-depth, bom, planning(demand-ml) — no coarse token
-  'projects_ppm',  // modules/projects, pmr — gated by proj_* SUB_PERMISSIONS, not a suite token
-  'hcm_payroll',   // modules/hcm, payroll, ess(partly) — no coarse HR/payroll token
-  'realestate',    // gated by re_* SUB_PERMISSIONS (vertical), not a suite token
-];
+// (Resolved in 1.1b) Manufacturing/PPM/HCM/Real-estate had no coarse token; they are now sold as the
+// token-less premium suites above, gated by the @RequiresSuite decorator on their controllers. Empty now —
+// kept as the machine-visible "nothing left ungated" marker.
+export const KNOWN_UNGATED: string[] = [];
 
 // Reverse index: permission token → the suite that owns it (built once).
 const PERMISSION_TO_SUITE: Partial<Record<Permission, SuiteKey>> = (() => {

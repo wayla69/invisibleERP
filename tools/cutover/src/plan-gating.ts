@@ -17,10 +17,11 @@ import { PLAN_SUITES } from '@ierp/shared';
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 
-// Metadata keys (mirror common/decorators + plan-feature.decorator).
+// Metadata keys (mirror common/decorators + plan-feature.decorator + requires-suite.decorator).
 const IS_PUBLIC_KEY = 'isPublic';
 const PLAN_FEATURE_KEY = 'planFeature';
 const PERMISSIONS_KEY = 'permissions';
+const REQUIRES_SUITE_KEY = 'requiresSuite';
 
 function stubReflector(meta: Record<string, unknown>) {
   return { getAllAndOverride: (key: string) => meta[key] } as any;
@@ -51,11 +52,11 @@ const planRow = (planCode: string, status = 'Active', extra: Record<string, unkn
 // Run the guard once; returns { allowed, code }.
 async function run(
   mode: 'legacy' | 'shadow' | 'enforce',
-  opts: { user: any; required?: string[]; feature?: string; rows?: any[]; dbError?: boolean; req?: Record<string, unknown> },
+  opts: { user: any; required?: string[]; feature?: string; suite?: string; rows?: any[]; dbError?: boolean; req?: Record<string, unknown> },
 ): Promise<{ allowed: boolean; code?: string }> {
   process.env.ENTITLEMENTS_ENFORCE = mode === 'enforce' ? 'true' : 'false';
   process.env.ENTITLEMENTS_SHADOW = mode === 'shadow' ? 'true' : 'false';
-  const meta: Record<string, unknown> = { [IS_PUBLIC_KEY]: false, [PERMISSIONS_KEY]: opts.required, [PLAN_FEATURE_KEY]: opts.feature };
+  const meta: Record<string, unknown> = { [IS_PUBLIC_KEY]: false, [PERMISSIONS_KEY]: opts.required, [PLAN_FEATURE_KEY]: opts.feature, [REQUIRES_SUITE_KEY]: opts.suite };
   const guard = new PlanGuard(stubReflector(meta), stubDb(opts.rows ?? [], opts.dbError));
   try {
     const allowed = await guard.canActivate(ctx(opts.user, meta, opts.req ?? {}));
@@ -112,6 +113,20 @@ async function main() {
     (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: [] })).allowed === true);
   ok('enforce: unknown plan code → fail-closed (procurement blocked)',
     (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [{ features: {}, status: 'Active', trialEndsAt: null, planCode: 'mystery' }] })).code === 'SUITE_NOT_ENTITLED');
+
+  // ── @RequiresSuite (1.1b): token-less premium suites (Manufacturing/Projects/HCM/Real-estate) ──
+  ok('enforce: starter (no manufacturing suite) blocks @RequiresSuite(manufacturing) → SUITE_NOT_ENTITLED',
+    (await run('enforce', { user: tenantUser(), required: ['exec'], suite: 'manufacturing', rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: enterprise (has manufacturing suite) allows @RequiresSuite(manufacturing)',
+    (await run('enforce', { user: tenantUser(), required: ['exec'], suite: 'manufacturing', rows: [planRow('enterprise')] })).allowed === true);
+  ok('enforce: pro (no projects suite) blocks @RequiresSuite(projects)',
+    (await run('enforce', { user: tenantUser(), required: ['exec'], suite: 'projects', rows: [planRow('pro')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: god bypasses @RequiresSuite even on starter',
+    (await run('enforce', { user: godUser, required: ['exec'], suite: 'manufacturing', rows: [planRow('starter')] })).allowed === true);
+  ok('enforce: Trialing grants @RequiresSuite suites',
+    (await run('enforce', { user: tenantUser(), required: ['exec'], suite: 'manufacturing', rows: [{ features: {}, status: 'Trialing', trialEndsAt: new Date(Date.now() + 86400000), planCode: 'free' }] })).allowed === true);
+  ok('legacy: @RequiresSuite NOT enforced when kill-switch off',
+    (await run('legacy', { user: tenantUser(), required: ['exec'], suite: 'manufacturing', rows: [planRow('starter')] })).allowed === true);
 
   // ── SHADOW: evaluate but never block ──
   ok('shadow: would-block scenario is ALLOWED (observe-not-block)',

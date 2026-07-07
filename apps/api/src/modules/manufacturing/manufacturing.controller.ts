@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ManufacturingService, type CreateWoDto } from './manufacturing.service';
 
@@ -14,6 +15,7 @@ const CompleteBody = z.object({ qty_produced: z.number().positive().optional(), 
 
 @Controller('api/manufacturing')
 @Permissions('bom_master', 'warehouse', 'exec')
+@RequiresSuite('manufacturing')
 export class ManufacturingController {
   constructor(private readonly svc: ManufacturingService) {}
 

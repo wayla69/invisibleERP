@@ -1,11 +1,12 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Inject, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { eq, desc } from 'drizzle-orm';
-import { permissionsForSuites, resolveEntitledSuites, isPermissionEntitled, type Permission } from '@ierp/shared';
+import { permissionsForSuites, resolveEntitledSuites, isPermissionEntitled, type Permission, type SuiteKey } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { subscriptions, plans } from '../../database/schema';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { PLAN_FEATURE_KEY } from './plan-feature.decorator';
+import { REQUIRES_SUITE_KEY } from './requires-suite.decorator';
 
 // ── Rollout modes (Wave 1 · 1.2) ────────────────────────────────────────────────────────────────
 // Suite-based plan gating is DEFAULT-OFF so it never breaks an existing tenant. Three states:
@@ -46,6 +47,7 @@ export class PlanGuard implements CanActivate {
     const user: JwtUser | undefined = req.user;
     const feature = this.reflector.getAllAndOverride<string>(PLAN_FEATURE_KEY, [ctx.getHandler(), ctx.getClass()]);
     const required = this.reflector.getAllAndOverride<Permission[]>(PERMISSIONS_KEY, [ctx.getHandler(), ctx.getClass()]) ?? [];
+    const reqSuite = this.reflector.getAllAndOverride<SuiteKey>(REQUIRES_SUITE_KEY, [ctx.getHandler(), ctx.getClass()]);
 
     const enforce = entitlementsEnforced();
     const shadow = entitlementsShadow();
@@ -64,7 +66,7 @@ export class PlanGuard implements CanActivate {
     if (!user || isGod || !user.tenantId) return true;
 
     // Nothing to gate on this route.
-    if (!feature && required.length === 0) return true;
+    if (!feature && required.length === 0 && !reqSuite) return true;
 
     let row: { features: unknown; status: string | null; trialEndsAt: Date | null; planCode: string | null } | undefined;
     try {
@@ -108,6 +110,15 @@ export class PlanGuard implements CanActivate {
     const features = (row?.features as Record<string, unknown>) ?? {};
     const entitledSuites = resolveEntitledSuites(row?.planCode ?? null, features.suites);
     const entitledPerms = new Set<Permission>(permissionsForSuites(entitledSuites));
+
+    // Premium/add-on suite gate (@RequiresSuite) — a token-less suite is entitled only if the plan lists it.
+    if (reqSuite && !entitledSuites.includes(reqSuite)) {
+      return this.decide(shadow, enforce, () => new ForbiddenException({
+        code: 'SUITE_NOT_ENTITLED',
+        message: `Your current plan does not include this module (${reqSuite}). Please upgrade your plan.`,
+        messageTh: 'แพ็กเกจปัจจุบันของคุณไม่รวมโมดูลนี้ กรุณาอัปเกรดแพ็กเกจ',
+      }), user.tenantId, 'SUITE_NOT_ENTITLED', [reqSuite as unknown as Permission]);
+    }
 
     // Suite gate: block only when NONE of the route's required tokens is entitled (mirrors ModuleEnabledGuard
     // "shows if ANY passes"). Tokens not in the packaging model (sub-permissions) are treated as entitled.

@@ -43,6 +43,10 @@ PLAN (free / starter / pro / enterprise)
 | **multibranch** | branch |
 | **portal** | order_cust, cust_dash, cust_inventory, cust_pos, cust_bom, cust_variance, cust_my_crm, cust_my_suppliers, cust_my_pos, cust_my_users |
 | **selfservice** | ess, vendor_portal |
+| **manufacturing** *(premium)* | — token-less; gated by `@RequiresSuite('manufacturing')` on the Manufacturing/MRP/QC/APS controllers |
+| **projects** *(premium)* | — token-less; gated by `@RequiresSuite('projects')` on the Projects + PMR controllers |
+| **hcm** *(premium)* | — token-less; gated by `@RequiresSuite('hcm')` on the HCM + Payroll controllers |
+| **realestate** *(premium)* | — token-less; gated by `@RequiresSuite('realestate')` on the Real-estate controller |
 
 ## 3. Plans → suites (default; DB may override)
 
@@ -58,16 +62,19 @@ Prices/seats/suites are seeded in `PLAN_SEED` (`billing.service.ts`) and upserte
 step). Codes are unchanged (`starter`/`pro`) so existing `subscriptions.plan_code` FKs stay valid; only the
 display names/prices changed. Prices are the recommended market-entry defaults — tune after market testing.
 
-## 4. Known gap — capabilities not yet suite-gatable (follow-up **1.1b**)
+## 4. Premium/add-on suites — the `@RequiresSuite` mechanism (1.1b, RESOLVED)
 
-The permission-token model is retail/finance-centric. These sellable capabilities have **no distinct
-coarse token**, so they cannot be gated by this map yet. `entitlements.ts` lists them in `KNOWN_UNGATED`;
-1.1b must introduce gating tokens (or a parallel module-registry entitlement) before selling them as packs:
+Manufacturing / PPM / HCM / Real-estate have **no distinct coarse token** (their controllers ride on
+generic tokens like `exec`/`planner`/`bom_master`), so token→suite mapping alone would hand them to any
+plan that has `finance`. 1.1b resolves this with **token-less suites** gated by a class decorator:
 
-- **manufacturing** — `modules/manufacturing`, `mfg-depth`, `bom`, `demand-ml`
-- **projects_ppm** — `modules/projects`, `pmr` (currently gated by `proj_*` sub-permissions)
-- **hcm_payroll** — `modules/hcm`, `payroll` (partly `ess`)
-- **realestate** — gated by `re_*` sub-permissions (vertical)
+- `apps/api/src/modules/billing/requires-suite.decorator.ts` — `@RequiresSuite('<suite>')`.
+- `PlanGuard` reads it and blocks (`403 SUITE_NOT_ENTITLED`) when the tenant's plan does not include the
+  suite — under the same `ENTITLEMENTS_ENFORCE` kill-switch (off = ignored), god-bypassed, trial-granted.
+- Applied to: `ManufacturingController`, mfg-depth (`Routing`/`ShopFloor`/`Quality`/`Mrp`/`WorkCenter`/`Aps`),
+  `ProjectsController`, `PmrController`, `HcmController`, `PayrollController`, `RealEstateController`.
+- Default packaging: these four suites are **Enterprise-only** (`PLAN_SUITES.enterprise`); sell to lower
+  tiers as add-ons via a per-tenant `features.suites` override. `KNOWN_UNGATED` is now empty.
 
 ## 5. Enforcement status
 
@@ -100,4 +107,5 @@ node tools/ci/check-entitlements.mjs      # asserts every MODULE_KEY maps to exa
 |---------|------|--------|--------|
 | 0.1 | 2026-07-07 | Platform | Initial packaging spec — plan→suite→module entitlement map (`entitlements.ts`) + CI guard (`check-entitlements.mjs`). Map-only; no enforcement yet (PlanGuard rewire is 1.2). Documented `KNOWN_UNGATED` gap (manufacturing/PPM/HCM/real-estate need gating tokens — 1.1b). |
 | 0.2 | 2026-07-07 | Platform | 1.2 — `PlanGuard` rewired: suite gating behind `ENTITLEMENTS_ENFORCE`/`ENTITLEMENTS_SHADOW` (default off = legacy behaviour), per-tenant Admin bypass removed (god-only), fail-open on infra error / fail-closed on missing plan, `resolveEntitledSuites` grandfather fallback. No behaviour change until enabled; enable SHADOW → backfill (1.3) → ENFORCE. |
+| 0.4 | 2026-07-07 | Platform | 1.1b — token-less premium suites (manufacturing/projects/hcm/realestate) + `@RequiresSuite` decorator honoured by PlanGuard; applied to 11 controllers; Enterprise-only by default; `KNOWN_UNGATED` emptied. plan-gating ToE extended (+6 checks). |
 | 0.3 | 2026-07-07 | Platform | 1.3 — real prices + names (Standard ฿1,900 / Professional ฿9,900 / Enterprise quote), seats bumped, and `features.suites` embedded in `PLAN_SEED` so `seedPlans()` backfills every plan row (grandfather done). 1.8 — ToE harness `tools/cutover/src/plan-gating.ts` (19 checks: legacy/shadow/enforce modes, god-only bypass incl. the Admin-bypass fix, fail-open/closed, trial/past-due) — all green. |

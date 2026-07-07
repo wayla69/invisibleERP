@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { RealEstateService, type CreateDevDto, type AddUnitDto, type BookDto, type CreateContractDto, type PayDto } from './realestate.service';
 
@@ -15,6 +16,7 @@ const PayBody = z.object({ amount: z.number().positive() });
 // approver (re_contract_approve, ≠ the drafter) approves the contract (maker-checker, RE-02). A non-property
 // tenant simply never grants these permissions → the vertical is invisible.
 @Controller('api/realestate')
+@RequiresSuite('realestate')
 export class RealEstateController {
   constructor(private readonly svc: RealEstateService) {}
 
