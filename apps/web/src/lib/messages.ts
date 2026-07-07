@@ -821,6 +821,8 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // GR
   'proc.gr_po_no': { th: 'เลขที่ใบสั่งซื้อ (PO No.)', en: 'PO number' },
   'proc.err_po_no': { th: 'ระบุเลขที่ใบสั่งซื้อ (PO No.)', en: 'Enter the PO number' },
+  'proc.gr_po_select_ph': { th: 'เลือก PO ที่รอรับสินค้า', en: 'Select a PO awaiting receipt' },
+  'proc.gr_po_none': { th: 'ไม่มี PO ที่รอรับสินค้า', en: 'No POs awaiting receipt' },
   'proc.gr_lines': { th: 'รายการรับเข้า', en: 'Received items' },
   'proc.received_ph': { th: 'รับ', en: 'Received' },
   'proc.err_recv_gt0': { th: 'จำนวนรับต้องมากกว่า 0', en: 'Received quantity must be greater than 0' },
