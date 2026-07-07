@@ -131,6 +131,9 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   tax_pnd_draft: { label: 'จัดทำแบบ ภ.ง.ด.3/53 (ฉบับร่าง)', labelEn: 'Draft PND3/53 WHT filing' },
   // Remittance reminder: the period's amounts due + statutory deadlines (7th PND / 15th PP30).
   tax_remittance_reminder: { label: 'แจ้งเตือนกำหนดนำส่งภาษี', labelEn: 'Tax remittance reminder' },
+  // Submission durability (docs/ops/etax-production-spike.md gap #5): retry every e-Tax submission whose
+  // latest attempt isn't Accepted yet — idempotent, a fresh success or failure lands as a new attempt row.
+  etax_submission_retry: { label: 'ลองส่ง e-Tax ที่ล้มเหลวซ้ำ', labelEn: 'Retry failed e-Tax submissions' },
   // docs/35 Phase 6 — schedulable finance analytics packs (wrap the FinanceMetricsService aggregators).
   // Each run recomputes the read-only board and delivers it (email/LINE/in-app) with an MD&A headline.
   cfo_kpi_pack: { label: 'สรุปตัวชี้วัด CFO + คำอธิบาย', labelEn: 'CFO KPI pack + narrative' },
@@ -783,6 +786,11 @@ export class BiService implements OnModuleInit {
       if (!this.taxJobs) throw new BadRequestException({ code: 'TAX_JOBS_UNAVAILABLE', message: 'Tax jobs service not available', messageTh: 'ระบบงานภาษีไม่พร้อมใช้งาน' });
       const r = await this.taxJobs.remittanceReminder(user, f.month ? Number(f.month) : undefined, f.year ? Number(f.year) : undefined);
       return { data: r, summary: `Remittance ${r.period}: PP30 net VAT ฿${r.pp30.net_vat_payable} (due ${r.pp30.deadline}); WHT ฿${r.pnd.wht_withheld} (due ${r.pnd.deadline}), un-certificated ฿${r.pnd.uncertificated_wht}`, summaryTh: `นำส่งภาษี ${r.period}: VAT สุทธิ ฿${r.pp30.net_vat_payable} (ครบกำหนด ${r.pp30.deadline}); หัก ณ ที่จ่าย ฿${r.pnd.wht_withheld} (ครบกำหนด ${r.pnd.deadline})` };
+    }
+    if (reportType === 'etax_submission_retry') {
+      if (!this.taxJobs) throw new BadRequestException({ code: 'TAX_JOBS_UNAVAILABLE', message: 'Tax jobs service not available', messageTh: 'ระบบงานภาษีไม่พร้อมใช้งาน' });
+      const r = await this.taxJobs.runEtaxSubmissionRetry(user, f.limit ? Number(f.limit) : undefined); // idempotent: only the latest non-Accepted attempt per doc_no is retried
+      return { data: r, summary: `e-Tax retry: ${r.succeeded} of ${r.scanned} succeeded (${r.failed} still failed)`, summaryTh: `ลองส่ง e-Tax ซ้ำ: สำเร็จ ${r.succeeded} จาก ${r.scanned} (ยังล้มเหลว ${r.failed})` };
     }
     if (reportType === 'governance_readiness') {
       if (!this.governance) throw new BadRequestException({ code: 'GOVERNANCE_UNAVAILABLE', message: 'Governance service not available', messageTh: 'ระบบธรรมาภิบาลไม่พร้อมใช้งาน' });

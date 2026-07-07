@@ -141,8 +141,12 @@ export class TaxInvoiceService {
       paidBank: dto.payment?.bank ?? null, paidChequeNo: dto.payment?.cheque_no ?? null, paidBranch: dto.payment?.branch ?? null,
     }).returning({ id: taxInvoices.id });
     await this.insertLines(Number(head!.id), tenantId, lines);
-    // wiring (best-effort): hand the full tax invoice to the RD/ETDA e-Tax provider
-    if (this.etax) { try { await this.etax.submit(docNo, undefined, user); } catch { /* e-Tax submit best-effort */ } }
+    // wiring: hand the full tax invoice to the RD/ETDA e-Tax provider. Issuance must not fail just
+    // because the SP is unreachable, so a submission error is swallowed HERE — but it is no longer
+    // silent: EtaxService.submit() persists every failed attempt (status='Rejected') and raises an ops
+    // alert before rethrowing, so it is visible via GET /api/tax/etax and picked up by the
+    // etax_submission_retry BI job (see docs/ops/etax-production-spike.md gap #5).
+    if (this.etax) { try { await this.etax.submit(docNo, undefined, user); } catch { /* recorded + alerted inside submit(); retried by the BI sweep */ } }
     // wiring (best-effort): keep the customer directory reusable so the buyer doesn't need retyping next time
     if (this.customerMaster) { try { await this.customerMaster.upsertFromInvoiceBuyer(dto.buyer, tenantId, user.username); } catch { /* directory update best-effort */ } }
     return this.getByDocNo(user, docNo);

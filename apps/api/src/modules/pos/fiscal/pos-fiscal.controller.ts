@@ -22,7 +22,9 @@ export class JournalController {
 @Permissions('ar', 'pos', 'exec')
 export class EtaxController {
   constructor(private readonly svc: EtaxService) {}
-  @Get() list(@Query('limit') limit?: string) { return this.svc.list(qint('limit', limit, 100)); }
+  @Get() list(@Query('limit') limit?: string, @Query('status') status?: string) { return this.svc.list(qint('limit', limit, 100), status); }
   @Get('status/:docNo') status(@Param('docNo') docNo: string) { return this.svc.status(docNo); }
   @Post('submit/:docNo') submit(@Param('docNo') docNo: string, @Body(new ZodValidationPipe(SubmitBody)) b: z.infer<typeof SubmitBody>, @CurrentUser() u: JwtUser) { return this.svc.submit(docNo, b.provider, u); }
+  // Operator surface (gap #5, submission durability): manually kick the same retry sweep the BI job runs.
+  @Post('retry-failed') @Permissions('exec') retryFailed(@CurrentUser() u: JwtUser) { return this.svc.retryFailed(u); }
 }

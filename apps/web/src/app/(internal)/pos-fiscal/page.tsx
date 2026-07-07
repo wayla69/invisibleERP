@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck, Send, BookText, FileCheck2 } from 'lucide-react';
+import { ShieldCheck, Send, BookText, FileCheck2, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -61,17 +61,23 @@ function Etax() {
   const q = useQuery<any>({ queryKey: ['etax'], queryFn: () => api('/api/tax/etax?limit=100') });
   const [docNo, setDocNo] = useState('');
   const submit = useMutation({
-    mutationFn: () => api(`/api/tax/etax/submit/${docNo}`, { method: 'POST', body: JSON.stringify({}) }),
+    mutationFn: (doc: string) => api(`/api/tax/etax/submit/${doc}`, { method: 'POST', body: JSON.stringify({}) }),
     onSuccess: (r: any) => { notifySuccess(`${r.doc_no} → ${r.status}${r.idempotent ? ` (${t('px.fiscal_resubmit')})` : ''}`); qc.invalidateQueries({ queryKey: ['etax'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const retryAll = useMutation({
+    mutationFn: () => api('/api/tax/etax/retry-failed', { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (r: any) => { notifySuccess(t('px.fiscal_retry_all_result', { succeeded: r.succeeded, scanned: r.scanned })); qc.invalidateQueries({ queryKey: ['etax'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   return (
     <div className="space-y-4">
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">{t('px.fiscal_etax_heading')}</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Input className="max-w-[240px]" placeholder={t('px.fiscal_docno_ph')} value={docNo} onChange={(e) => setDocNo(e.target.value)} />
-          <Button disabled={!docNo || submit.isPending} onClick={() => submit.mutate()}><Send className="size-4" /> {t('px.fiscal_submit')}</Button>
+          <Button disabled={!docNo || submit.isPending} onClick={() => submit.mutate(docNo)}><Send className="size-4" /> {t('px.fiscal_submit')}</Button>
+          <Button variant="outline" disabled={retryAll.isPending} onClick={() => retryAll.mutate()}><RefreshCw className="size-4" /> {t('px.fiscal_retry_all')}</Button>
         </div>
       </Card>
       <StateView q={q}>
@@ -82,6 +88,10 @@ function Etax() {
             { key: 'provider_ref', label: t('px.fiscal_col_ref') },
             { key: 'submitted_at', label: t('px.fiscal_col_submitted'), render: (r: any) => thaiDate(r.submitted_at) },
             { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status === 'Accepted' ? 'paid' : r.status === 'Rejected' ? 'cancelled' : 'open')}>{r.status}</Badge> },
+            { key: 'error', label: t('px.fiscal_col_error'), render: (r: any) => r.error ? <span className="max-w-[280px] truncate text-xs text-destructive" title={r.error}>{r.error}</span> : null },
+            { key: 'retry', label: '', render: (r: any) => r.status !== 'Accepted' ? (
+              <Button size="sm" variant="outline" disabled={submit.isPending} onClick={() => submit.mutate(r.doc_no)}><RefreshCw className="size-3" /> {t('px.fiscal_retry')}</Button>
+            ) : null },
           ]} emptyState={{ icon: FileCheck2, title: t('px.fiscal_etax_empty_title'), description: t('px.fiscal_etax_empty_desc') }} />
         )}
       </StateView>
