@@ -1919,6 +1919,13 @@
       "when": 2023820000190,
       "tag": "0273_master_data_merge",
       "breakpoints": true
+    },
+    {
+      "idx": 274,
+      "version": "7",
+      "when": 2023820000200,
+      "tag": "0274_master_data_change_log",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@ import { ModulePage } from '@/components/module-page';
 import { SearchInput } from '@/components/search-input';
 import { DataTable } from '@/components/data-table';
 import { FormField } from '@/components/form-field';
+import { ChangeHistorySection } from '@/components/change-history-section';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -436,6 +437,7 @@ function VendorPartyPanel({ vendor, onClose }: { vendor: Supplier; onClose: () =
               </div>
             ))}
           </div>
+          <ChangeHistorySection url={`/api/procurement/vendors/${vendor.Vendor_ID}/history`} queryKey={['vendor-history', vendor.Vendor_ID]} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('fin.cancel')}</Button>

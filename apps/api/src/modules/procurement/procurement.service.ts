@@ -3,7 +3,8 @@ import { sql, eq, ne, and, desc, asc, isNull, or, ilike, inArray, notInArray, gt
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests, vendorAddresses, vendorContacts } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests, vendorAddresses, vendorContacts, dataChangeLog } from '../../database/schema';
+import { shapeChangeHistory } from '../../common/change-history';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -1398,6 +1399,24 @@ export class ProcurementService {
       throw e;
     }
     return { survivor_id: survivorId, merged_id: duplicateId, merged: true };
+  }
+
+  // ── Change history (master-data audit Phase 6) — the append-only field-level trail (ITGC-AC-14) for this
+  // vendor + its address/contact children, captured by the DB trigger (0274). Read-only, tenant-scoped.
+  async vendorHistory(vendorId: number, user: JwtUser) {
+    const db = this.db;
+    await this.vendorById(vendorId);
+    const vid = String(vendorId);
+    const conds = [
+      or(
+        and(eq(dataChangeLog.tableName, 'vendors'), eq(dataChangeLog.rowPk, vid)),
+        and(inArray(dataChangeLog.tableName, ['vendor_addresses', 'vendor_contacts']),
+          sql`coalesce(${dataChangeLog.newValue}->>'vendor_id', ${dataChangeLog.oldValue}->>'vendor_id') = ${vid}`),
+      ),
+    ];
+    if (user.tenantId != null) conds.push(eq(dataChangeLog.tenantRef, user.tenantId));
+    const rows = await db.select().from(dataChangeLog).where(and(...conds)).orderBy(desc(dataChangeLog.ts)).limit(200);
+    return { vendor_id: vendorId, history: shapeChangeHistory(rows), count: rows.length };
   }
 }
 

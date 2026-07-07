@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { IdCard, SearchX, Plus, Pencil, X, MapPin, Contact, Trash2, Building2, GitMerge } from 'lucide-react';
+import { IdCard, SearchX, Plus, Pencil, X, MapPin, Contact, Trash2, Building2, GitMerge, History } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, baht, thaiDate } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -12,6 +12,7 @@ import { SearchInput } from '@/components/search-input';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { FormField } from '@/components/form-field';
+import { ChangeHistorySection } from '@/components/change-history-section';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -351,6 +352,7 @@ function Customer360Panel({ customerNo, onClose }: { customerNo: string; onClose
                   </div>
                 ))}
               </div>
+              <ChangeHistorySection url={`/api/customer-master/${customerNo}/history`} queryKey={['customer-history', customerNo]} />
             </div>
           )}
         </StateView>

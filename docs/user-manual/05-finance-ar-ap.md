@@ -93,6 +93,13 @@ audit, never deleted). You'll be asked to confirm — **merging can't be undone*
 two records both hold a conflicting entry the system stops with a message so you can
 fix it first, rather than merging incorrectly.
 
+**Change history.** Open a customer's **360° view** and expand **ประวัติการแก้ไข
+(Change history)** to see who changed what and when — the record's creation
+(onboarding), every field edit (old → new), and address/contact additions, oldest
+at the bottom. Sensitive fields (tax ID, address, notes) show that they changed but
+mask the value. This history is recorded automatically by the database and cannot be
+edited or deleted, so it stands as audit evidence.
+
 A customer record is also created (or refreshed) automatically the first time
 you issue a full tax invoice for a new buyer — see [Tax](./07-tax.md) — so you
 don't have to add customers here before invoicing them; this screen is for

@@ -237,6 +237,8 @@ export class ProcurementController {
   addVendorContact(@Param('id') id: string, @Body(new ZodValidationPipe(VendorContactBody)) b: z.infer<typeof VendorContactBody>, @CurrentUser() u: JwtUser) { return this.svc.addVendorContact(+id, b, u); }
   @Get('vendors/:id/contacts') @Permissions('md_vendor', 'procurement', 'exec')
   listVendorContacts(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.listVendorContacts(+id, u); }
+  @Get('vendors/:id/history') @Permissions('md_vendor', 'procurement', 'exec')
+  vendorHistory(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.vendorHistory(+id, u); }
   @Delete('vendors/:id/contacts/:contactId') @Permissions('md_vendor')
   deleteVendorContact(@Param('id') id: string, @Param('contactId') contactId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteVendorContact(+id, +contactId, u); }
   // ── Match-merge / DQM (master-data audit Phase 5): detect + merge duplicate vendors ──

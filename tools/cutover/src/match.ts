@@ -278,6 +278,15 @@ async function main() {
   const vReMerge = await inj('POST', `/api/procurement/vendors/${VD1}/merge`, admin, { duplicate_vendor_id: VD2 });
   ok('Vendor merge: re-merging an already-merged duplicate → 400 ALREADY_MERGED', vReMerge.status === 400 && vReMerge.json.error?.code === 'ALREADY_MERGED', `${vReMerge.status} ${vReMerge.json.error?.code}`);
 
+  // ── H6. Change history / universal audit (master-data audit Phase 6) — the DB trigger (0274) captures
+  // every create/update on the vendor master into the append-only field-level change log (ITGC-AC-14).
+  // (VD1 is a tenant-owned vendor; a tenant steward sees their own tenant's trail — shared NULL-tenant
+  // master rows are HQ-scoped, consistent with the audit-viewer's tenant filter.) ──
+  await inj('PATCH', `/api/procurement/vendors/${VD1}/profile`, admin, { category: 'Strategic', payment_terms: 'Net 60' });
+  const vHist = await inj('GET', `/api/procurement/vendors/${VD1}/history`, admin);
+  const vUpd = (vHist.json.history ?? []).find((e: any) => e.action === 'updated' && e.changes.some((c: any) => c.field === 'category' && c.new === 'Strategic'));
+  ok('Vendor history: records the field-level profile update (category → Strategic) with old→new + actor', !!vUpd && vUpd.actor === 'admin', JSON.stringify(vUpd?.changes?.filter((c: any) => ['category', 'payment_terms'].includes(c.field))));
+
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];
   await runMatch(ap1, poNo, [{ item_id: 'X', qty: 100, unit_price: 10 }]);
