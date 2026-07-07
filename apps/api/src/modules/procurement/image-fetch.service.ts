@@ -28,13 +28,68 @@ export class ImageFetchService {
     }
   }
 
+  // Common product names translated to English (Thai → English mappings)
+  private readonly thaiToEnglish: Record<string, string> = {
+    // Electronics
+    แล็ปท็อป: 'laptop',
+    'แล็บท็อป': 'laptop',
+    คอมพิวเตอร์: 'computer',
+    จอภาพ: 'monitor',
+    'จออ': 'monitor',
+    เมาส์: 'mouse',
+    คีย์บอร์ด: 'keyboard',
+    อุปกรณ์: 'device',
+    อุปกรณ์ส่ง: 'equipment',
+    // Office
+    โต๊ะ: 'desk',
+    เก้าอี้: 'chair',
+    ตู้: 'cabinet',
+    // General
+    ชุด: 'set',
+    ร่ม: 'umbrella',
+    กระเป๋า: 'bag',
+    กล่อง: 'box',
+    ถุง: 'bag',
+  };
+
+  private extractSearchTerms(description: string): string {
+    if (!description?.trim()) return '';
+
+    const trimmed = description.trim();
+    // Check if it's Thai text
+    const thaiPattern = /[฀-๿]/;
+    if (thaiPattern.test(trimmed)) {
+      // For Thai text, try to translate common words or use first word
+      const words = trimmed.split(/[\s,]+/);
+      for (const word of words) {
+        const translated = this.thaiToEnglish[word.toLowerCase()];
+        if (translated) return translated;
+      }
+      // If no translation found, use first word anyway
+      return words[0] ?? '';
+    }
+
+    // For English, filter out generic/stopwords and use meaningful terms
+    const stopwords = new Set(['a', 'an', 'the', 'and', 'or', 'is', 'in', 'for', 'of', 'to', 'with', 'by', 'on']);
+    const words = trimmed.split(/[\s,]+/)
+      .filter(w => w.length > 2 && !stopwords.has(w.toLowerCase()));
+
+    if (words.length > 0) {
+      return words.slice(0, 3).join('+');
+    }
+    // Fallback to first word if filtered list is empty
+    const allWords = trimmed.split(/[\s,]+/);
+    return allWords[0] ?? '';
+  }
+
   // Fetch from Wikimedia Commons (free, high-quality, API-friendly)
   // Searches for an image matching the product description
   async fetchFromWikimedia(itemDescription: string): Promise<string> {
     if (!itemDescription?.trim()) return '';
     try {
-      const terms = itemDescription.trim().split(/[\s,]+/);
-      const searchTerm = terms.slice(0, 3).join('+');
+      const searchTerm = this.extractSearchTerms(itemDescription);
+      if (!searchTerm) return '';
+
       const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchTerm)}&format=json&srnamespace=6&srlimit=5`;
 
       const controller = new AbortController();
