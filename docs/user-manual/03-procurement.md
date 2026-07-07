@@ -633,6 +633,21 @@ details actually change; a rejected request leaves them untouched. Staging a
 new request while one is still pending **supersedes** the older one, so the
 approval queue always shows only the latest ask. (Control EXP-11.)
 
+### Editing other vendor details
+
+**Screen:** `/inventory/suppliers` — press **แก้ไข (Edit)** on a supplier row ·
+**Required permission:** `md_vendor`.
+
+Contact person, phone, email, address, payment terms, lead time, rating,
+category, currency, and notes can be updated **directly** — unlike the bank
+account above, none of these carry a payment-redirection risk, so no second
+approval is required. The same dialog also lets you set the supplier's
+**vendor status** (approved / pending / **ระงับ — blocked**); blocking asks
+for a reason and immediately prevents new POs/quotes against that vendor
+(see "Screen the vendor" above). Tax ID and credit limit are **not** editable
+here — they stay PII-encrypted / bulk-import-only pending a future dual-control
+design of their own.
+
 ### Supplier scorecards register
 
 **Screen:** `/supplier-scorecards` (**คะแนนซัพพลายเออร์**, ERP nav → จัดซื้อ) ·

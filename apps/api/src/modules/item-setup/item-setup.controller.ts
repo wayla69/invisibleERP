@@ -31,8 +31,21 @@ const ItemProfileBody = z.object({
   category_id: z.number().int().nullish(),
   revenue_account: acct, cogs_account: acct, inventory_account: acct, valuation_account: acct,
   vat_code: z.string().nullish(), wht_income_type: z.string().nullish(), default_location_id: z.string().nullish(),
+  barcode: z.string().trim().max(64).nullish(), uom: z.string().trim().max(20).nullish(), base_uom: z.string().trim().max(20).nullish(),
+  conversion_factor: z.number().positive().nullish(), unit_price: z.number().nonnegative().nullish(),
+  temperature_type: z.string().trim().max(30).nullish(), bu_id: z.string().trim().max(30).nullish(),
+  min_stock: z.number().nonnegative().nullish(), max_stock: z.number().nonnegative().nullish(),
+  avg_daily_usage: z.number().nonnegative().nullish(), lead_time_days: z.number().nonnegative().nullish(),
+  min_order_qty: z.number().nonnegative().nullish(), order_multiple: z.number().nonnegative().nullish(),
+  order_cost: z.number().nonnegative().nullish(), holding_cost: z.number().nonnegative().nullish(),
+  is_fixed_asset: z.boolean().optional(), default_asset_category_id: z.number().int().nullish(),
 });
-const WarehouseBody = z.object({ inventory_account: acct, adjustment_account: acct });
+const WarehouseBody = z.object({
+  location_name: z.string().trim().max(200).nullish(), zone: z.string().trim().max(50).nullish(),
+  type: z.string().trim().max(50).nullish(), capacity: z.number().nonnegative().nullish(),
+  temperature: z.string().trim().max(50).nullish(), active: z.boolean().optional(), notes: z.string().trim().max(2000).nullish(),
+  inventory_account: acct, adjustment_account: acct,
+});
 
 // Item-posting setup (docs/33 PR3). Item categories + tax codes maintenance and the per-item posting-profile
 // override. Gated to master-data setup duties — kept clear of transactional perms (SoD R13).

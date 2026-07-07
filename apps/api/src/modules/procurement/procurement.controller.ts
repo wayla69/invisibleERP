@@ -60,6 +60,15 @@ const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 // D4 — receive a partial qty of one PO line.
 const ReceiveItemBody = z.object({ item_id: z.string().min(1), qty: z.number().positive() });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
+// Direct-edit vendor master fields (master-data audit Phase 2) — excludes tax_id/credit_limit/bank details
+// (encrypted PII / sensitive-field / maker-checker territory — out of scope for a direct-edit endpoint).
+const VendorProfileBody = z.object({
+  contact: z.string().trim().max(200).nullish(), phone: z.string().trim().max(50).nullish(),
+  email: z.union([z.string().trim().email(), z.literal('')]).nullish(),
+  address: z.string().trim().max(500).nullish(), payment_terms: z.string().trim().max(50).nullish(),
+  lead_time_days: z.number().int().nonnegative().nullish(), rating: z.number().min(0).max(5).nullish(),
+  category: z.string().trim().max(50).nullish(), currency: z.string().trim().max(10).nullish(), notes: z.string().trim().max(2000).nullish(),
+});
 // Vendor bank-detail maker-checker (0270) — stages a change; never applied directly.
 const VendorBankChangeBody = z.object({ bank_name: z.string().optional(), bank_account: z.string().optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
@@ -197,6 +206,10 @@ export class ProcurementController {
   // Legacy 'masterdata' holders still pass (it implies md_vendor/md_item/md_config).
   @Patch('suppliers/:id/status') @Permissions('md_vendor')
   setSupplierStatus(@Param('id') id: string, @Body(new ZodValidationPipe(SupplierStatusBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setSupplierStatus(+id, b, u); }
+  // Direct-edit vendor master profile (master-data audit Phase 2) — contact/address/terms/rating/category/
+  // currency/notes; excludes tax_id/credit_limit/bank details (see VendorProfileBody comment).
+  @Patch('vendors/:id/profile') @Permissions('md_vendor')
+  updateVendorProfile(@Param('id') id: string, @Body(new ZodValidationPipe(VendorProfileBody)) b: z.infer<typeof VendorProfileBody>, @CurrentUser() u: JwtUser) { return this.svc.updateVendorProfile(+id, b, u); }
   @Post('suppliers/:id/scorecard') @Permissions('procurement')
   scorecard(@Param('id') id: string, @Body(new ZodValidationPipe(ScorecardBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.recomputeScorecard(+id, b.period, u); }
 

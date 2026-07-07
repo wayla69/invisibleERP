@@ -607,6 +607,35 @@ export class ProcurementService {
     return { vendor_id: vendorId, approval_status: dto.approval_status, blocklisted: dto.blocklisted };
   }
 
+  // Direct-edit vendor master fields (master-data audit Phase 2) — non-payment-redirection fields with no
+  // fraud-relevant "who changed it" concern, so unlike bank details (0270) they don't need a maker-checker.
+  // taxId/creditLimit/bankName/bankAccount are intentionally excluded here: tax ID and bank account are
+  // encrypted PII, and credit limit is flagged `sensitive` in the bulk-import registry (master-registry.ts) —
+  // both warrant their own dual-control design rather than a quick direct-edit path, so they stay out of
+  // scope for this endpoint (identity fields vendor_code/name/is_supplier/is_creditor also excluded — those
+  // still only come in via the /master-data bulk import).
+  async updateVendorProfile(vendorId: number, dto: {
+    contact?: string | null; phone?: string | null; email?: string | null; address?: string | null; payment_terms?: string | null;
+    lead_time_days?: number | null; rating?: number | null; category?: string | null; currency?: string | null; notes?: string | null;
+  }, _user: JwtUser) {
+    const db = this.db;
+    const set: Record<string, unknown> = {};
+    if (dto.contact !== undefined) set.contact = dto.contact || null;
+    if (dto.phone !== undefined) set.phone = dto.phone || null;
+    if (dto.email !== undefined) set.email = dto.email || null;
+    if (dto.address !== undefined) set.address = dto.address || null;
+    if (dto.payment_terms !== undefined) set.paymentTerms = dto.payment_terms || null;
+    if (dto.lead_time_days !== undefined) set.leadTimeDays = dto.lead_time_days;
+    if (dto.rating !== undefined) set.rating = String(dto.rating);
+    if (dto.category !== undefined) set.category = dto.category || null;
+    if (dto.currency !== undefined) set.currency = dto.currency || null;
+    if (dto.notes !== undefined) set.notes = dto.notes || null;
+    if (!Object.keys(set).length) throw new BadRequestException({ code: 'NO_FIELDS', message: 'No fields to update', messageTh: 'ไม่มีข้อมูลให้แก้ไข' });
+    const [row] = await db.update(vendors).set(set).where(eq(vendors.id, vendorId)).returning({ id: vendors.id });
+    if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
+    return { vendor_id: vendorId, ...dto };
+  }
+
   // ── Vendor bank-detail maker-checker (0270 — closes a BEC/vendor-payment-fraud gap: a single md_vendor
   // user could otherwise redirect a supplier's payee bank details with no second check). Mirrors the G15
   // tenant PromptPay/tax-id pattern exactly: a change is staged PendingApproval and applied to `vendors`

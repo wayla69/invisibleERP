@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SearchX, Truck, Landmark, ShieldAlert } from 'lucide-react';
+import { SearchX, Truck, Landmark, ShieldAlert, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -17,10 +17,14 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface Supplier {
-  Vendor_ID: number; Supplier_ID: string; Supplier_Name?: string; Contact_Person?: string; Phone?: string;
+  Vendor_ID: number; Supplier_ID: string; Supplier_Name?: string; Contact_Person?: string; Phone?: string; Email?: string | null;
   Payment_Terms?: string; Bank_Name?: string | null; Bank_Account?: string | null;
+  Address?: string | null; Rating?: number | string | null; Category?: string | null; Currency?: string | null;
+  Lead_Time_Days?: number | null; Notes?: string | null;
+  Approval_Status?: string; Blocklisted?: boolean; Blocklist_Reason?: string | null;
 }
 
 export default function SuppliersPage() {
@@ -30,7 +34,8 @@ export default function SuppliersPage() {
   const q = useQuery<{ suppliers: Supplier[] }>({ queryKey: ['suppliers'], queryFn: () => api('/api/inventory/suppliers') });
   const rows = q.data?.suppliers ?? [];
   const [search, setSearch] = useState('');
-  const [editing, setEditing] = useState<Supplier | null>(null);
+  const [editingBank, setEditingBank] = useState<Supplier | null>(null);
+  const [editingProfile, setEditingProfile] = useState<Supplier | null>(null);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -83,7 +88,17 @@ export default function SuppliersPage() {
             { key: 'Supplier_Name', label: t('inv.col_name2'), render: (r) => r.Supplier_Name || '—' },
             { key: 'Contact_Person', label: t('inv.col_contact'), render: (r) => r.Contact_Person || '—' },
             { key: 'Phone', label: t('inv.col_phone'), render: (r) => r.Phone || '—' },
+            { key: 'Email', label: t('mx.vp_col_email'), render: (r) => r.Email || '—' },
             { key: 'Payment_Terms', label: t('inv.col_terms'), render: (r) => r.Payment_Terms || '—' },
+            {
+              key: 'Approval_Status',
+              label: t('mx.vp_col_status'),
+              render: (r) => (
+                <Badge variant={r.Blocklisted ? 'destructive' : r.Approval_Status === 'pending' ? 'warning' : 'success'}>
+                  {r.Blocklisted ? t('mx.vp_status_blocked') : r.Approval_Status === 'pending' ? t('mx.vp_status_pending') : t('mx.vp_status_approved')}
+                </Badge>
+              ),
+            },
             {
               key: 'Bank_Account',
               label: t('mx.vbc_col_bank'),
@@ -91,17 +106,22 @@ export default function SuppliersPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm">{r.Bank_Name || r.Bank_Account ? `${r.Bank_Name ?? '—'} · ${r.Bank_Account ?? '—'}` : t('mx.vbc_no_bank')}</span>
                   {canEditBank && (
-                    <Button variant="ghost" size="icon" className="size-7" aria-label={t('mx.vbc_edit_bank')} onClick={() => setEditing(r)}>
+                    <Button variant="ghost" size="icon" className="size-7" aria-label={t('mx.vbc_edit_bank')} onClick={() => setEditingBank(r)}>
                       <Landmark className="size-4" />
                     </Button>
                   )}
                 </div>
               ),
             },
+            ...(canEditBank ? [{
+              key: 'actions', label: '', sortable: false,
+              render: (r: Supplier) => <Button size="sm" variant="outline" onClick={() => setEditingProfile(r)}><Pencil className="size-4" /> {t('mx.vp_edit')}</Button>,
+            }] : []),
           ]}
         />
       )}
-      {editing && <BankChangeDialog vendor={editing} onClose={() => setEditing(null)} />}
+      {editingBank && <BankChangeDialog vendor={editingBank} onClose={() => setEditingBank(null)} />}
+      {editingProfile && <ProfileDialog vendor={editingProfile} onClose={() => setEditingProfile(null)} />}
     </ModulePage>
   );
 }
@@ -178,5 +198,79 @@ function VendorBankApprovals() {
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+// Direct-edit vendor master fields (master-data audit Phase 2) — contact/address/terms/rating/category/
+// currency/notes have no fraud-relevant "who changed it" concern (unlike bank details), so this saves
+// immediately with no maker-checker. Blocklist/approval status uses the existing suppliers/:id/status
+// endpoint (built earlier for Phase 16 supplier screening, previously with no web caller).
+function ProfileDialog({ vendor, onClose }: { vendor: Supplier; onClose: () => void }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    contact: vendor.Contact_Person ?? '', phone: vendor.Phone ?? '', email: vendor.Email ?? '', address: vendor.Address ?? '',
+    payment_terms: vendor.Payment_Terms ?? '', lead_time_days: vendor.Lead_Time_Days ?? '', rating: vendor.Rating ?? '',
+    category: vendor.Category ?? '', currency: vendor.Currency ?? '', notes: vendor.Notes ?? '',
+  });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const refresh = () => qc.invalidateQueries({ queryKey: ['suppliers'] });
+
+  const save = useMutation({
+    mutationFn: () => api<any>(`/api/procurement/vendors/${vendor.Vendor_ID}/profile`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        contact: form.contact || undefined, phone: form.phone || undefined, email: form.email || undefined, address: form.address || undefined,
+        payment_terms: form.payment_terms || undefined, lead_time_days: form.lead_time_days !== '' ? Number(form.lead_time_days) : undefined,
+        rating: form.rating !== '' ? Number(form.rating) : undefined, category: form.category || undefined,
+        currency: form.currency || undefined, notes: form.notes || undefined,
+      }),
+    }),
+    onSuccess: () => { notifySuccess(t('mx.vp_saved')); refresh(); onClose(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const setStatus = useMutation({
+    mutationFn: (body: { approval_status?: string; blocklisted?: boolean; reason?: string }) => api<any>(`/api/procurement/suppliers/${vendor.Vendor_ID}/status`, { method: 'PATCH', body: JSON.stringify(body) }),
+    onSuccess: () => { notifySuccess(t('mx.vp_status_saved')); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{vendor.Supplier_Name}</DialogTitle>
+          <DialogDescription>{t('mx.vp_dialog_desc')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField label={t('inv.col_contact')}><Input value={form.contact} onChange={set('contact')} /></FormField>
+          <FormField label={t('inv.col_phone')}><Input value={form.phone} onChange={set('phone')} /></FormField>
+          <FormField label={t('mx.vp_col_email')}><Input type="email" value={form.email} onChange={set('email')} /></FormField>
+          <FormField label={t('mx.vp_f_address')} className="sm:col-span-2"><Input value={form.address} onChange={set('address')} /></FormField>
+          <FormField label={t('inv.col_terms')}><Input value={form.payment_terms} onChange={set('payment_terms')} placeholder="Net 30" /></FormField>
+          <FormField label={t('mx.vp_f_lead_time')}><Input type="number" min="0" value={form.lead_time_days} onChange={set('lead_time_days')} /></FormField>
+          <FormField label={t('mx.vp_f_rating')}><Input type="number" min="0" max="5" step="0.1" value={form.rating} onChange={set('rating')} /></FormField>
+          <FormField label={t('mx.vp_f_category')}><Input value={form.category} onChange={set('category')} /></FormField>
+          <FormField label={t('mx.vp_f_currency')}><Input value={form.currency} onChange={set('currency')} placeholder="THB" /></FormField>
+          <FormField label={t('mx.vp_f_notes')} className="sm:col-span-2"><Input value={form.notes} onChange={set('notes')} /></FormField>
+          <FormField label={t('mx.vp_col_status')}>
+            <Select
+              value={vendor.Blocklisted ? 'blocked' : (vendor.Approval_Status ?? 'approved')}
+              onValueChange={(v) => setStatus.mutate(v === 'blocked' ? { blocklisted: true, reason: window.prompt(t('mx.vp_block_reason_prompt')) || undefined } : { blocklisted: false, approval_status: v })}
+            >
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="approved">{t('mx.vp_status_approved')}</SelectItem>
+                <SelectItem value="pending">{t('mx.vp_status_pending')}</SelectItem>
+                <SelectItem value="blocked">{t('mx.vp_status_blocked')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </FormField>
+        </div>
+        <DialogFooter>
+          <Button disabled={save.isPending} onClick={() => save.mutate()}>{t('mx.vp_save')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

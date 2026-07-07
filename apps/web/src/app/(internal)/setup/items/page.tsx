@@ -17,7 +17,15 @@ type Profile = {
   item_id: string; item_description?: string; category?: string; category_id?: number | null;
   revenue_account?: string; cogs_account?: string; inventory_account?: string; valuation_account?: string;
   vat_code?: string; wht_income_type?: string; default_location_id?: string;
+  barcode?: string | null; uom?: string | null; base_uom?: string | null; conversion_factor?: number | null;
+  unit_price?: number | null; temperature_type?: string | null; bu_id?: string | null;
+  min_stock?: number | null; max_stock?: number | null; avg_daily_usage?: number | null; lead_time_days?: number | null;
+  min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
+  is_fixed_asset?: boolean; default_asset_category_id?: number | null;
 };
+
+const NUM_FIELDS = ['conversion_factor', 'unit_price', 'min_stock', 'max_stock', 'avg_daily_usage', 'lead_time_days', 'min_order_qty', 'order_multiple', 'order_cost', 'holding_cost'] as const;
+const TEXT_FIELDS = ['barcode', 'uom', 'base_uom', 'temperature_type', 'bu_id'] as const;
 
 // ตั้งค่าบัญชีสินค้า — per-item posting-profile override (docs/33, GL-21). An item's own accounts take
 // precedence over its category; leave a field blank to inherit the category / standard control account.
@@ -27,6 +35,7 @@ export default function ItemPostingSetupPage() {
   const [itemId, setItemId] = useState('');
   const [form, setForm] = useState<Profile | null>(null);
   const cats = useQuery<any>({ queryKey: ['item-categories'], queryFn: () => api('/api/item-setup/categories') });
+  const assetCats = useQuery<any>({ queryKey: ['asset-categories'], queryFn: () => api('/api/assets/categories') });
 
   const load = useMutation({
     mutationFn: (id: string) => api<Profile>(`/api/item-setup/items/${encodeURIComponent(id)}`),
@@ -34,11 +43,13 @@ export default function ItemPostingSetupPage() {
     onError: (e: any) => { setForm(null); notifyError(e.message); },
   });
   const set = (k: keyof Profile) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => f && ({ ...f, [k]: e.target.value }));
+  const setNum = (k: keyof Profile) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => f && ({ ...f, [k]: e.target.value === '' ? null : Number(e.target.value) } as Profile));
 
   const save = useMutation({
     mutationFn: () => {
-      const p: any = { category_id: form!.category_id ?? null };
-      for (const k of ['revenue_account', 'cogs_account', 'inventory_account', 'valuation_account', 'vat_code', 'wht_income_type', 'default_location_id'] as const) p[k] = (form as any)[k] ? (form as any)[k] : null;
+      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null };
+      for (const k of ['revenue_account', 'cogs_account', 'inventory_account', 'valuation_account', 'vat_code', 'wht_income_type', 'default_location_id', ...TEXT_FIELDS] as const) p[k] = (form as any)[k] ? (form as any)[k] : null;
+      for (const k of NUM_FIELDS) p[k] = (form as any)[k] ?? null;
       return api(`/api/item-setup/items/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: JSON.stringify(p) });
     },
     onSuccess: (r: any) => { setForm(r); notifySuccess(t('st.sitm_saved', { item_id: r.item_id })); },
@@ -46,6 +57,7 @@ export default function ItemPostingSetupPage() {
   });
 
   const categories = cats.data?.categories ?? [];
+  const assetCategories = assetCats.data?.categories ?? [];
 
   return (
     <div>
@@ -83,6 +95,54 @@ export default function ItemPostingSetupPage() {
               <Field label={t('st.sitm_vat')}><Input value={form.vat_code ?? ''} onChange={set('vat_code')} placeholder="VAT7" /></Field>
               <Field label={t('st.sitm_wht')}><Input value={form.wht_income_type ?? ''} onChange={set('wht_income_type')} placeholder={t('st.sitm_ph_wht')} /></Field>
               <Field label={t('st.sitm_location')}><Input value={form.default_location_id ?? ''} onChange={set('default_location_id')} placeholder="WH-MAIN" /></Field>
+            </div>
+            <div>
+              <Button disabled={save.isPending} onClick={() => save.mutate()}><Save className="size-4" /> {save.isPending ? t('st.sitm_saving') : t('st.sitm_save_btn')}</Button>
+            </div>
+          </Card>
+        )}
+
+        {form && (
+          <Card className="max-w-4xl gap-4 p-5">
+            <h3 className="text-base font-semibold">{t('st.sitm_master_heading')}</h3>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field label={t('st.sitm_barcode')}><Input value={form.barcode ?? ''} onChange={set('barcode')} /></Field>
+              <Field label={t('st.sitm_uom')}><Input value={form.uom ?? ''} onChange={set('uom')} placeholder="EA" /></Field>
+              <Field label={t('st.sitm_base_uom')}><Input value={form.base_uom ?? ''} onChange={set('base_uom')} placeholder="EA" /></Field>
+              <Field label={t('st.sitm_conversion_factor')}><Input type="number" min="0" step="any" value={form.conversion_factor ?? ''} onChange={setNum('conversion_factor')} /></Field>
+              <Field label={t('st.sitm_unit_price')}><Input type="number" min="0" step="any" value={form.unit_price ?? ''} onChange={setNum('unit_price')} /></Field>
+              <Field label={t('st.sitm_temperature_type')}><Input value={form.temperature_type ?? ''} onChange={set('temperature_type')} /></Field>
+              <Field label={t('st.sitm_bu_id')}><Input value={form.bu_id ?? ''} onChange={set('bu_id')} /></Field>
+              <Field label={t('st.sitm_min_stock')}><Input type="number" min="0" step="any" value={form.min_stock ?? ''} onChange={setNum('min_stock')} /></Field>
+              <Field label={t('st.sitm_max_stock')}><Input type="number" min="0" step="any" value={form.max_stock ?? ''} onChange={setNum('max_stock')} /></Field>
+              <Field label={t('st.sitm_avg_daily_usage')}><Input type="number" min="0" step="any" value={form.avg_daily_usage ?? ''} onChange={setNum('avg_daily_usage')} /></Field>
+              <Field label={t('st.sitm_lead_time_days')}><Input type="number" min="0" step="any" value={form.lead_time_days ?? ''} onChange={setNum('lead_time_days')} /></Field>
+              <Field label={t('st.sitm_min_order_qty')}><Input type="number" min="0" step="any" value={form.min_order_qty ?? ''} onChange={setNum('min_order_qty')} /></Field>
+              <Field label={t('st.sitm_order_multiple')}><Input type="number" min="0" step="any" value={form.order_multiple ?? ''} onChange={setNum('order_multiple')} /></Field>
+              <Field label={t('st.sitm_order_cost')}><Input type="number" min="0" step="any" value={form.order_cost ?? ''} onChange={setNum('order_cost')} /></Field>
+              <Field label={t('st.sitm_holding_cost')}><Input type="number" min="0" step="any" value={form.holding_cost ?? ''} onChange={setNum('holding_cost')} /></Field>
+              <div className="grid gap-2">
+                <Label>{t('st.sitm_is_fixed_asset')}</Label>
+                <Select value={form.is_fixed_asset ? '1' : '0'} onValueChange={(v) => setForm((f) => f && ({ ...f, is_fixed_asset: v === '1' }))}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">{t('st.sitm_no')}</SelectItem>
+                    <SelectItem value="1">{t('st.sitm_yes')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.is_fixed_asset && (
+                <div className="grid gap-2">
+                  <Label>{t('st.sitm_default_asset_category')}</Label>
+                  <Select value={form.default_asset_category_id != null ? String(form.default_asset_category_id) : 'none'} onValueChange={(v) => setForm((f) => f && ({ ...f, default_asset_category_id: v === 'none' ? null : Number(v) }))}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder={t('st.sitm_no_category')} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">{t('st.sitm_no_category_option')}</SelectItem>
+                      {assetCategories.map((c: any) => <SelectItem key={c.id} value={String(c.id)}>{c.code} — {c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             <div>
               <Button disabled={save.isPending} onClick={() => save.mutate()}><Save className="size-4" /> {save.isPending ? t('st.sitm_saving') : t('st.sitm_save_btn')}</Button>

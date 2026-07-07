@@ -206,6 +206,21 @@ async function main() {
   const scoped = await inj('POST', `/api/payroll/runs?period=2026-07&tenant_id=${hq}`, hqadmin);
   ok('HQ admin with tenant_id=HQ → runs ONLY HQ staff (headcount 2, excludes other tenant)', /^JE-/.test(scoped.json.entry_no ?? '') && scoped.json.headcount === 2, JSON.stringify({ e: scoped.json.entry_no, h: scoped.json.headcount }));
 
+  // Master-data audit Phase 2: department/hourly_rate/pf_rate were accepted at creation but missing from the
+  // GET projection (fmtEmp); sso_no/department/allowances/bank_account/start_date now also collectible at
+  // creation. Placed at the END (a 3rd employee would shift the headcount=2 assertions run earlier).
+  const e3 = await inj('POST', '/api/payroll/employees', admin, {
+    name: 'Preecha', national_id: '1112223334445', sso_no: '9998887776', position: 'Chef', department: 'Kitchen',
+    monthly_salary: 20000, hourly_rate: 150, pf_rate: 0.03, allowances: 1000, bank_account: '111-2-33333-4', start_date: '2026-01-15', sso_eligible: true,
+  });
+  ok('Create employee with department/hourly_rate/pf_rate/sso_no/allowances/bank_account/start_date',
+    e3.status < 300 && e3.json.department === 'Kitchen' && near(e3.json.hourly_rate, 150) && near(e3.json.pf_rate, 0.03) && e3.json.sso_no === '9998887776' && near(e3.json.allowances, 1000) && e3.json.bank_account === '111-2-33333-4' && e3.json.start_date === '2026-01-15',
+    JSON.stringify(e3.json).slice(0, 220));
+  const empsList2 = (await inj('GET', '/api/payroll/employees', admin)).json.employees;
+  const e3Row = (empsList2 ?? []).find((r: any) => r.emp_code === e3.json.emp_code);
+  ok('Employee list now projects department/hourly_rate/pf_rate (previously missing from fmtEmp)',
+    e3Row?.department === 'Kitchen' && near(e3Row?.hourly_rate, 150) && near(e3Row?.pf_rate, 0.03), JSON.stringify(e3Row).slice(0, 150));
+
   console.log('\n── C2b — payroll (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
