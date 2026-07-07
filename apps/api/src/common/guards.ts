@@ -7,7 +7,8 @@ import { IS_PUBLIC_KEY, PERMISSIONS_KEY, PLATFORM_ADMIN_KEY, isPlatformAdmin, ty
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { users, revokedTokens, posMembers, tenants } from '../database/schema';
-import { resolvePermissions } from '@ierp/shared';
+import { resolvePermissions, type Role } from '@ierp/shared';
+import { requiresMfaEnrollment, enforcePrivilegedMfa } from './mfa-gate';
 import { AUTH_COOKIE, CSRF_COOKIE, readCookie } from './cookies';
 
 // State-changing methods that require a CSRF double-submit check when authenticated via cookie.
@@ -111,7 +112,7 @@ export class JwtAuthGuard implements CanActivate {
         if (m && m.active === false) throw new UnauthorizedException({ code: 'MEMBER_DEACTIVATED', message: 'This membership is no longer active', messageTh: 'สมาชิกนี้ถูกปิดใช้งาน' });
       }
     } else if (payload.sub) {
-      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, mcp: users.mustChangePassword, tenantSuspended: tenants.suspendedAt })
+      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, mcp: users.mustChangePassword, mfaEnabled: users.mfaEnabled, tenantSuspended: tenants.suspendedAt })
         .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).where(eq(users.username, payload.sub)).limit(1);
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
@@ -138,6 +139,12 @@ export class JwtAuthGuard implements CanActivate {
           if (!allowed.includes(path!)) {
             throw new ForbiddenException({ code: 'PASSWORD_CHANGE_REQUIRED', message: 'Password change required before using the system', messageTh: 'ต้องเปลี่ยนรหัสผ่านก่อนใช้งานระบบ' });
           }
+        }
+        // 4.4 — hard privileged-MFA enrolment gate (ENFORCE_PRIVILEGED_MFA, default off). A privileged role
+        // that has not enrolled TOTP can reach nothing but the MFA-setup/logout/me/change-password endpoints
+        // until it enrols. Mirrors the must_change_password gate; rides this same per-request row read.
+        if (requiresMfaEnrollment({ enforce: enforcePrivilegedMfa(), mfaEnabled: !!u.mfaEnabled, role: (dbRole as Role), path: String(req.url ?? '').split('?')[0]! })) {
+          throw new ForbiddenException({ code: 'MFA_ENROLLMENT_REQUIRED', message: 'Two-factor authentication must be set up before using the system', messageTh: 'ต้องตั้งค่ายืนยันตัวตนสองชั้น (MFA) ก่อนใช้งานระบบ' });
         }
       } else {
         // Round-2 AUD-SEC NEW-3: a STAFF token whose users row no longer exists (hard delete) must not

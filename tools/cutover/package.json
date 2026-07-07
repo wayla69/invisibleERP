@@ -35,6 +35,7 @@
     "plan-gating": "tsx src/plan-gating.ts",
     "tenancy-boot": "tsx src/tenancy-boot.ts",
     "password-hardening": "tsx src/password-hardening.ts",
+    "mfa-gate": "tsx src/mfa-gate.ts",
     "cpq-gl": "tsx src/cpq-gl.ts",
     "promptpay": "tsx src/promptpay.ts",
     "payments-gateway": "tsx src/payments-gateway.ts",
