@@ -2,7 +2,10 @@
  * C2 — e-Tax Invoice XML. Seed a tax invoice + lines → GET /api/tax-invoices/:docNo/etax-xml
  * returns a well-formed UBL 2.1 (ETDA) document with the right parties, tax, totals, lines. Over PGlite.
  * Also covers submission durability (gap #5, docs/ops/etax-production-spike.md): a thrown SP error is
- * persisted (not silently swallowed), visible via list/status, and recoverable by the retry-failed sweep.
+ * persisted (not silently swallowed), visible via list/status, and recoverable by the retry-failed sweep;
+ * the generalized SP adapter (gap #3 — auth schemes, status normalization, bounded retry, etax-providers.ts);
+ * and the etax-pdfa3 endpoint's clean-degrade behaviour when no PDF renderer is available (gap #4 — the
+ * embedding logic itself is covered independently by the `pdfa3` cutover script, see tools/cutover/src/pdfa3.ts).
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover etax
  */
 import 'reflect-metadata';
@@ -18,6 +21,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { createHmac } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
@@ -70,6 +74,25 @@ async function main() {
   await db.insert(s.taxInvoiceLines).values([
     { taxInvoiceId: Number(tiv2.id), tenantId: hq, lineNo: '1', description: 'สินค้า', qty: '1', uom: 'EA', unitPrice: '100.00', discount: '0', amount: '100.00' },
   ]);
+
+  // Minimal extra invoices for the SP-adapter checks below — each provider-auth-scheme test needs its own
+  // fresh docNo since submit() is idempotent-per-doc once Accepted.
+  let nextSeq = 9;
+  async function seedInvoice(): Promise<string> {
+    const n = String(nextSeq++).padStart(4, '0');
+    const doc = `TIV-202606-${n}`;
+    const [row] = await db.insert(s.taxInvoices).values({
+      tenantId: hq, docNo: doc, type: 'full', issueDate: '2026-06-24', sourceType: 'AR', sourceRef: `INV-${n}`,
+      sellerName: 'บริษัท ทดสอบ จำกัด', sellerTaxId: '0105551234567', sellerBranchCode: '00000', sellerBranchLabel: 'สำนักงานใหญ่',
+      sellerAddress: '1 ถนนสุขุมวิท กรุงเทพฯ 10110', buyerName: 'ลูกค้า ดี', buyerTaxId: '0992009876543',
+      buyerBranchCode: '00000', buyerAddress: '1 ถนนสีลม', currency: 'THB',
+      subtotal: '50.00', discount: '0', vatRate: '0.0700', vatAmount: '3.50', grandTotal: '53.50', isVatInclusive: false, status: 'Issued',
+    }).returning({ id: s.taxInvoices.id });
+    await db.insert(s.taxInvoiceLines).values([
+      { taxInvoiceId: Number(row.id), tenantId: hq, lineNo: '1', description: 'สินค้า', qty: '1', uom: 'EA', unitPrice: '50.00', discount: '0', amount: '50.00' },
+    ]);
+    return doc;
+  }
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -180,6 +203,106 @@ async function main() {
   ok('status endpoint reflects the recovered Accepted submission', recoveredStatus.status === 'Accepted' && recoveredStatus.provider_ref === 'sp-ref-recovered', JSON.stringify(recoveredStatus));
   await new Promise<void>((r) => spServer.close(() => r()));
   delete process.env.ETAX_PROVIDER_URL;
+
+  // ── Gap #3 — generalized SP adapter (etax-providers.ts): pluggable auth schemes, status normalization,
+  // bounded retry. No real SP contract exists, so these exercise the GENERIC adapter against a throwaway
+  // local HTTP server standing in for "whichever SP gets wired in later" — not a specific vendor's API.
+  const ETAX_ENV_KEYS = ['ETAX_PROVIDER_URL', 'ETAX_PROVIDER_AUTH_SCHEME', 'ETAX_PROVIDER_TOKEN', 'ETAX_PROVIDER_AUTH_HEADER',
+    'ETAX_PROVIDER_API_KEY', 'ETAX_PROVIDER_API_KEY_HEADER', 'ETAX_PROVIDER_BASIC_USER', 'ETAX_PROVIDER_BASIC_PASS',
+    'ETAX_PROVIDER_HMAC_SECRET', 'ETAX_PROVIDER_SIG_HEADER', 'ETAX_PROVIDER_TS_HEADER', 'ETAX_PROVIDER_MAX_RETRIES', 'ETAX_PROVIDER_RETRY_BASE_MS'];
+  const resetEtaxEnv = () => { for (const k of ETAX_ENV_KEYS) delete process.env[k]; };
+
+  // A capturing stub SP: `respond(reqNum, headers, body)` decides what to send back for the Nth request
+  // (1-based) and returns the request count so far.
+  async function withStubSp(respond: (reqNum: number, headers: Record<string, string | string[] | undefined>, body: string) => { code: number; json: any }) {
+    let count = 0;
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        count++;
+        const { code, json } = respond(count, req.headers, body);
+        res.writeHead(code, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(json));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    process.env.ETAX_PROVIDER_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return { close: () => new Promise<void>((r) => server.close(() => r())), count: () => count };
+  }
+
+  // ── 13. HMAC auth scheme — signature + timestamp headers, verifiably matching the request body ──
+  resetEtaxEnv();
+  process.env.ETAX_PROVIDER_AUTH_SCHEME = 'hmac';
+  process.env.ETAX_PROVIDER_HMAC_SECRET = 's3cr3t-hmac-key';
+  let capturedHmac: { sig?: string; ts?: string; body?: string } = {};
+  const hmacSp = await withStubSp((_n, headers, body) => {
+    capturedHmac = { sig: headers['x-signature'] as string, ts: headers['x-timestamp'] as string, body };
+    return { code: 200, json: { status: 'Accepted', ref: 'hmac-ok' } };
+  });
+  const docHmac = await seedInvoice();
+  const subHmac = (await app.inject({ method: 'POST', url: `/api/tax/etax/submit/${docHmac}`, headers: { authorization: `Bearer ${admin}` }, payload: { provider: 'http' } })).json();
+  const expectedSig = capturedHmac.ts ? 'sha256=' + createHmac('sha256', 's3cr3t-hmac-key').update(`${capturedHmac.ts}.${capturedHmac.body}`).digest('hex') : '';
+  ok('HMAC scheme: X-Signature/X-Timestamp sent + signature verifiably matches the body',
+    subHmac.status === 'Accepted' && subHmac.provider_ref === 'hmac-ok' && !!capturedHmac.sig && capturedHmac.sig === expectedSig,
+    JSON.stringify({ status: subHmac.status, sigOk: capturedHmac.sig === expectedSig }));
+  await hmacSp.close();
+
+  // ── 14. API-key scheme + status normalization ('ok' → Accepted) ──
+  resetEtaxEnv();
+  process.env.ETAX_PROVIDER_AUTH_SCHEME = 'apikey';
+  process.env.ETAX_PROVIDER_API_KEY = 'key-123';
+  let capturedKey: string | undefined;
+  const apikeySp = await withStubSp((_n, headers) => { capturedKey = headers['x-api-key'] as string; return { code: 200, json: { status: 'ok', ref: 'apikey-ok' } }; });
+  const docApikey = await seedInvoice();
+  const subApikey = (await app.inject({ method: 'POST', url: `/api/tax/etax/submit/${docApikey}`, headers: { authorization: `Bearer ${admin}` }, payload: { provider: 'http' } })).json();
+  ok("API-key scheme: X-API-Key sent + status 'ok' normalized to Accepted",
+    subApikey.status === 'Accepted' && subApikey.provider_ref === 'apikey-ok' && capturedKey === 'key-123', JSON.stringify(subApikey));
+  await apikeySp.close();
+
+  // ── 15. Basic auth scheme + status normalization ('SUCCESS' → Accepted) ──
+  resetEtaxEnv();
+  process.env.ETAX_PROVIDER_AUTH_SCHEME = 'basic';
+  process.env.ETAX_PROVIDER_BASIC_USER = 'sp_user';
+  process.env.ETAX_PROVIDER_BASIC_PASS = 'sp_pass';
+  let capturedAuth: string | undefined;
+  const basicSp = await withStubSp((_n, headers) => { capturedAuth = headers['authorization'] as string; return { code: 200, json: { status: 'SUCCESS', ref: 'basic-ok' } }; });
+  const docBasic = await seedInvoice();
+  const subBasic = (await app.inject({ method: 'POST', url: `/api/tax/etax/submit/${docBasic}`, headers: { authorization: `Bearer ${admin}` }, payload: { provider: 'http' } })).json();
+  ok("Basic scheme: correct base64 Authorization header + status 'SUCCESS' normalized to Accepted",
+    subBasic.status === 'Accepted' && subBasic.provider_ref === 'basic-ok' && capturedAuth === `Basic ${Buffer.from('sp_user:sp_pass').toString('base64')}`,
+    JSON.stringify({ status: subBasic.status, capturedAuth }));
+  await basicSp.close();
+
+  // ── 16. bounded retry on transient 5xx → succeeds on the 3rd attempt ──
+  resetEtaxEnv();
+  process.env.ETAX_PROVIDER_MAX_RETRIES = '2';
+  process.env.ETAX_PROVIDER_RETRY_BASE_MS = '5';
+  const retry5xxSp = await withStubSp((n) => n < 3 ? { code: 500, json: { message: 'transient' } } : { code: 200, json: { status: 'Accepted', ref: 'retried-ok' } });
+  const docRetry = await seedInvoice();
+  const subRetry = (await app.inject({ method: 'POST', url: `/api/tax/etax/submit/${docRetry}`, headers: { authorization: `Bearer ${admin}` }, payload: { provider: 'http' } })).json();
+  ok('transient 5xx: bounded retry recovers by the 3rd attempt', subRetry.status === 'Accepted' && subRetry.provider_ref === 'retried-ok' && retry5xxSp.count() === 3, JSON.stringify({ status: subRetry.status, attempts: retry5xxSp.count() }));
+  await retry5xxSp.close();
+
+  // ── 17. a 4xx is NOT retried (it's a request/config error, not a transient blip) — fails on the 1st try ──
+  resetEtaxEnv();
+  const rejectSp = await withStubSp(() => ({ code: 400, json: { status: 'rejected', message: 'bad payload' } }));
+  const docReject = await seedInvoice();
+  const subReject = (await app.inject({ method: 'POST', url: `/api/tax/etax/submit/${docReject}`, headers: { authorization: `Bearer ${admin}` }, payload: { provider: 'http' } })).json();
+  ok('4xx is not retried (single attempt) + status normalized to Rejected', subReject.status === 'Rejected' && rejectSp.count() === 1, JSON.stringify({ status: subReject.status, attempts: rejectSp.count() }));
+  await rejectSp.close();
+  resetEtaxEnv();
+
+  // ── Gap #4 — PDF/A-3-oriented embedded-XML archival endpoint (pdfa3.ts logic itself is covered end-to-end,
+  // independently of pdf-lib's own read-back API, by the dedicated `pdfa3` cutover script — this environment
+  // has no working headless Chromium behind PdfRenderer, same reason taxdocs.ts's plain /pdf checks tolerate
+  // an HTML fallback; this endpoint instead fails CLEANLY (503, not a broken PDF) since HTML can't carry an
+  // embedded attachment). Here we only check the endpoint degrades correctly, not the embedding itself.
+  const pdfa3Res = await app.inject({ method: 'GET', url: `/api/tax-invoices/${docNo}/etax-pdfa3`, headers: { authorization: `Bearer ${admin}` } });
+  const pdfa3Ok = pdfa3Res.statusCode === 200 && /application\/pdf/.test(pdfa3Res.headers['content-type'] as string) && (pdfa3Res.headers['content-disposition'] as string ?? '').includes(`${docNo}-pdfa3.pdf`);
+  const pdfa3Degraded = pdfa3Res.statusCode === 503 && (pdfa3Res.json() as any)?.error?.code === 'PDF_RENDERER_UNAVAILABLE';
+  ok('GET etax-pdfa3 → 200 with the archival PDF when the renderer is available, else a clean 503 (never a broken doc)',
+    pdfa3Ok || pdfa3Degraded, JSON.stringify({ s: pdfa3Res.statusCode, ct: pdfa3Res.headers['content-type'] }));
 
   console.log('\n── C2 — e-Tax Invoice XML (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

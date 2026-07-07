@@ -48,6 +48,7 @@
     "etax": "tsx src/etax.ts",
     "etax-sign": "tsx src/etax-sign.ts",
     "etax-email": "tsx src/etax-email.ts",
+    "pdfa3": "tsx src/pdfa3.ts",
     "worldclass": "tsx src/worldclass.ts",
     "taxdocs": "tsx src/taxdocs.ts",
     "restaurant": "tsx src/restaurant.ts",
@@ -127,6 +128,7 @@
   "devDependencies": {
     "@types/node": "^22.7.4",
     "@xmldom/xmldom": "0.8.13",
+    "pdf-lib": "^1.17.1",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3",
     "xml-crypto": "6.1.2"
