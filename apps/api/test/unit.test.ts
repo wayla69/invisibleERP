@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { ThaiTaxProvider, ZeroTaxProvider } from '../src/modules/tax/tax-providers';
 import { TaxService } from '../src/modules/tax/tax.service';
 import { round2, getCurrency, isSupportedCurrency } from '../src/modules/tax/money';
@@ -11,20 +11,32 @@ import { hmacSha256Hex, verifyWebhookSignature } from '../src/common/crypto';
 import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 describe('e-Tax by Email composer (ETDA, no CA)', () => {
-  const svc = new EtaxEmailService(null as never, null as never, null as never);
+  // Stub TaxDocsPdfService — a plain unit test has no Chromium, and the point of this suite is the message
+  // composition (recipients/subject/attachment), not PDF rendering itself (that's covered by pdf-render /
+  // etax-email cutover harnesses). renderToPdf resolves null so compose() takes its HTML-fallback path.
+  const fakePdf = {
+    fullTaxInvoiceHtml: (inv: any) => `<html>ใบกำกับภาษี ${inv.doc_no}</html>`,
+    abbreviatedTaxInvoiceHtml: (inv: any) => `<html>ใบกำกับภาษีอย่างย่อ ${inv.doc_no}</html>`,
+    creditDebitNoteHtml: (inv: any) => `<html>${inv.doc_no}</html>`,
+    renderToPdf: async () => null,
+  } as unknown as import('../src/modules/tax/documents/tax-docs-pdf.service').TaxDocsPdfService;
+
+  const svc = new EtaxEmailService(null as never, null as never, fakePdf, null as never);
   const inv = {
     doc_no: 'TIV-202606-0009', issue_date: '2026-06-22', currency: 'THB',
     seller: { name: 'ร้านโอชิเนอิ', tax_id: '0105551234567', address: 'กทม.' },
     buyer: { name: 'ลูกค้า' }, subtotal: 100, vat_rate: 0.07, vat_amount: 7, grand_total: 107,
     lines: [{ line_no: 1, description: 'อาหาร', amount: 100 }],
   };
-  const msg = svc.compose(inv as never, 'shop@oshinei.co.th', 'buyer@example.com');
+  let msg: Awaited<ReturnType<typeof svc.compose>>;
+  beforeAll(async () => { msg = await svc.compose(inv as never, 'shop@oshinei.co.th', 'buyer@example.com'); });
+
   it('CC goes to the ETDA time-stamp mailbox', () => expect(msg.cc).toBe(ETAX_TIMESTAMP_EMAIL));
   it('from seller → to buyer', () => { expect(msg.from).toBe('shop@oshinei.co.th'); expect(msg.to).toBe('buyer@example.com'); });
   it('subject carries the doc no', () => expect(msg.subject).toContain('TIV-202606-0009'));
-  it('attaches the e-Tax XML', () => {
-    expect(msg.attachments?.[0].filename).toBe('TIV-202606-0009.xml');
-    expect(String(msg.attachments?.[0].content)).toContain('<Invoice ');
+  it('attaches the readable tax-invoice document, not the raw e-Tax XML (ETDA time-stamps the PDF/HTML, not the XML)', () => {
+    expect(msg.attachments?.[0].filename).toBe('TIV-202606-0009.html');
+    expect(String(msg.attachments?.[0].content)).toContain('TIV-202606-0009');
   });
 });
 
