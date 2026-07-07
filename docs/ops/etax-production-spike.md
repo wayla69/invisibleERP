@@ -26,7 +26,7 @@ reconciliation (already done — control **TAX-04**); WHT/ภ.ง.ด. (**TAX-03
 | Capability | State | Where |
 |---|---|---|
 | UBL 2.1 XML (ETDA-eTaxInvoice-2.0 shape) | ✅ EXISTS | `tax-docs/etax-xml.ts` (`buildEtaxInvoiceXml`) |
-| XAdES signature scaffold (RSA-SHA256 + SignedProperties + SigningCertificate digest) | ✅ EXISTS (scaffold) | `tax-docs/etax-sign.ts` (`signEtaxXml`); env `ETAX_SIGNING_KEY_PEM(_B64)` + `ETAX_SIGNING_CERT_PEM(_B64)` |
+| XAdES signature, real Exclusive XML C14N (RSA-SHA256 + SignedProperties + SigningCertificate digest) | ✅ EXISTS | `tax-docs/etax-sign.ts` (`signEtaxXml`, via `xml-crypto`'s `ExclusiveCanonicalization`); env `ETAX_SIGNING_KEY_PEM(_B64)` + `ETAX_SIGNING_CERT_PEM(_B64)` — still needs a real CA-issued cert (gap #2) |
 | No-gap running number per seller/month (TIV/ATV) | ✅ EXISTS | `common/doc-number.service.ts` (`nextMonthlyTenant`), `doc_counters_tenant` |
 | Hash-chained tamper journal (RD POS requirement) | ✅ EXISTS | `pos-fiscal/journal.service.ts`, `pos_journal` (REST-02) |
 | ETDA *e-Tax by Email* path (≤30M THB/yr; CC the ETDA timestamp mailbox) | ✅ EXISTS | `tax-docs/etax-email.service.ts`; env `ETAX_TIMESTAMP_EMAIL` + SMTP |
@@ -36,11 +36,16 @@ reconciliation (already done — control **TAX-04**); WHT/ภ.ง.ด. (**TAX-03
 
 ## 4. The five remaining gaps (what the spike must close or cost)
 
-1. **Certified canonicalization (Exclusive XML C14N).** `etax-sign.ts` itself flags that deterministic
-   string canonicalization is *self-consistent but not guaranteed to interop with the RD validator* — RD
-   needs DOM-based Exclusive XML C14N (`xml-exc-c14n`). **Risk: HIGH** (a signature the RD rejects is a hard
-   stop). Spike PoC #1 closes this.
-2. **A real signing certificate (CA / NRCA-chain) + safe key storage.** The scaffold reads a PEM from env;
+1. **~~Certified canonicalization (Exclusive XML C14N).~~ ✅ CLOSED (code-level) 2026-07-07.** `etax-sign.ts`
+   now canonicalizes every digested fragment (the enveloped document reference, the XAdES `SignedProperties`
+   reference, and the `SignedInfo` that gets RSA-signed) via `xml-crypto`'s `ExclusiveCanonicalization` over a
+   parsed `@xmldom/xmldom` DOM — real W3C `xml-exc-c14n`, not a string-hash approximation. Verified against an
+   **independent** XML-DSig library (`xml-crypto`'s own `SignedXml.checkSignature()`, not just this repo's own
+   `verifyEtaxSignature`) in the `etax-sign` cutover harness — that cross-check is what caught and fixed a real
+   whitespace/enveloped-transform bug during this work (see harness comments). **Residual risk: LOW-MEDIUM** —
+   an independent open-source verifier accepting the signature is strong evidence, but it is not the same as
+   running it through the actual RD/ETDA validator, which still requires PoC #1 below (blocked on gap #2).
+2. **A real signing certificate (CA / NRCA-chain) + safe key storage.** `getSigningMaterial()` reads a PEM from env;
    production needs a **CA-issued cert** and the private key in a **KMS/HSM**, not an env var. Lead-time +
    procurement is the long pole.
 3. **A real transmission channel.** Either (a) a **Service Provider** contract (INET / Frank / Leceipt …) —
@@ -73,8 +78,9 @@ band and volume.
 1. **Decision:** Path A (which SP) vs Path B, with the reasoning and the pilot tenant.
 2. **CA-cert plan:** issuer (NRCA chain / TDID), lead-time, cost, and the **key-storage** design (KMS/HSM —
    never an env PEM in prod).
-3. **PoC #1 — signature interop:** sign one real invoice with a *test* cert through **Exclusive XML C14N** and
-   pass it through the **ETDA / SP validator**. This is the make-or-break check on gap #1.
+3. **PoC #1 — signature interop:** sign one real invoice with a *test* cert (C14N is done — see gap #1) and
+   pass it through the **ETDA / SP validator** to confirm real-world acceptance, not just an independent
+   library cross-check.
 4. **PoC #2 — sandbox round-trip:** submit one document to the chosen **SP or RD sandbox** and capture the
    acknowledgement (and an induced failure, to design the retry path).
 5. **PDF/A-3 decision:** confirm whether the RD/SP requires the embedded-XML PDF/A-3 at all (many SP flows do
@@ -87,22 +93,22 @@ Rough order, **after the cert is in hand** (the cert lead-time itself is the sch
 
 | Item | Rough effort |
 |---|---|
-| Exclusive XML C14N + sign-path hardening (gap #1) | M (2–4 d) |
+| ~~Exclusive XML C14N + sign-path hardening (gap #1)~~ | done — see gap #1 |
 | KMS/HSM key storage + cert wiring (gap #2 code side) | M (2–3 d) |
 | Chosen SP adapter (auth + payload + status map) **or** sign-the-email (gap #3) | M (2–4 d) |
 | Submission status + retry queue + operator surface (gap #5) | M (2–3 d) |
 | PDF/A-3 (only **if** required by gap #4) | M–L (3–6 d) |
 
-≈ **2–3 developer-weeks of code** once unblocked — the headline ~200–300 h earlier estimate collapses
-because XAdES signing + XML + numbering + journal + email + VAT-GL are **already built**. The real schedule
-driver is **external** (cert + SP contract + RD sandbox access).
+≈ **1.5–2.5 developer-weeks of code** once unblocked — the headline ~200–300 h earlier estimate collapses
+because XAdES signing (with real C14N) + XML + numbering + journal + email + VAT-GL are **already built**.
+The real schedule driver is **external** (cert + SP contract + RD sandbox access).
 
 ## 8. Risk register
 
 | Risk | Impact | Mitigation |
 |---|---|---|
 | CA-cert lead-time | blocks both paths | start procurement **day 1** of the spike |
-| Signature fails RD validator (C14N) | hard stop | PoC #1 *first*; budget the C14N upgrade |
+| Signature fails the REAL RD/ETDA validator | hard stop | C14N itself is done + independently cross-checked (gap #1); PoC #1 still confirms against the actual validator, not just a library |
 | Vendor lock to one SP | cost / fragility | keep the generic `http` adapter seam; abstract per-SP mapping |
 | Silent submission failure | undelivered legal doc | replace best-effort with a status + retry queue before go-live |
 | Revenue >30M kills Path B | re-plan | confirm the pilot tenant's band up front |
@@ -110,7 +116,7 @@ driver is **external** (cert + SP contract + RD sandbox access).
 ## 9. Go / No-go criteria
 
 **Go** if: PoC #1 produces a signature the validator accepts **and** PoC #2 gets a sandbox ack **and** the
-cert lead-time fits the target date. **No-go / defer** if the validator rejects the C14N output or the cert
+cert lead-time fits the target date. **No-go / defer** if the validator rejects the signed output or the cert
 cannot be provisioned in time — in which case ship the **mock/sandbox** pipeline (`ETAX_PROVIDER=mock`,
 already deployable) for internal UAT and re-spike when the external blockers clear.
 
@@ -119,3 +125,4 @@ already deployable) for internal UAT and re-spike when the external blockers cle
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 | 2026-06-26 | Platform | Initial spike charter. Current-state verified against the codebase (XAdES signing scaffold now exists; SP submission still mock/http-skeleton; PDF/A-3 absent). Cross-refs: `06-tax-compliance.md` (TAX-01..04), `pos-fiscal/`, `tax-docs/`. |
+| 0.2 | 2026-07-07 | Platform | Gap #1 (Exclusive XML C14N) closed at the code level — `etax-sign.ts` now canonicalizes via `xml-crypto`'s `ExclusiveCanonicalization`, verified against that library's own independent `SignedXml` verifier in the `etax-sign` cutover harness (12 checks, up from 9). Gap #2 (real CA cert + KMS/HSM) is unchanged/still open — no certificate was obtained or fabricated. |
