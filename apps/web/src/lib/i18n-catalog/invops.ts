@@ -493,6 +493,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'shop.basket_empty': { th: 'ยังไม่มีสินค้าในตะกร้า', en: 'Your basket is empty' },
   'shop.basket_empty_hint': { th: 'เลือกสินค้าจากรายการ หรือพิมพ์ขอสินค้าที่ไม่มีในระบบด้านล่าง', en: 'Pick items from the list, or type a request for an item not in the system below' },
   'shop.qty': { th: 'จำนวน', en: 'Qty' },
+  'shop.qty_decrease': { th: 'ลดจำนวน', en: 'Decrease quantity' },
   'shop.remove': { th: 'ลบออก', en: 'Remove' },
   'shop.mark_urgent': { th: 'ทำเครื่องหมายด่วน', en: 'Mark urgent' },
   'shop.custom_title': { th: 'ไม่มีสินค้าที่ต้องการ? พิมพ์ขอเพิ่มเองได้', en: 'Item not listed? Request it in your own words' },

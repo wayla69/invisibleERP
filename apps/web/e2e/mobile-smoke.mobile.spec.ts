@@ -90,14 +90,22 @@ test('shop: phone shows the floating basket button after adding an item, opens t
 
   // Catalog card renders, then add it to the basket.
   await expect(page.getByText('กระดาษ A4 80 แกรม')).toBeVisible();
-  await page.getByRole('button', { name: 'ใส่ตะกร้า' }).first().click();
+  const addButton = page.getByRole('button', { name: 'ใส่ตะกร้า' }).first();
+  await addButton.click();
+
+  // Once an item's in the basket, the grid card's add button turns into a −/qty/+ stepper (Shopee-style)
+  // so a quantity bump doesn't require opening the basket. The "+" side reuses the same accessible name
+  // as the original add button (same action), so re-clicking it should bump 1 → 2.
+  await expect(page.getByRole('button', { name: 'ลดจำนวน' })).toBeVisible();
+  await addButton.click();
 
   // The floating basket button is `xl:hidden` — present on phones and tablets alike, display:none only at
   // true desktop widths (which get the side-by-side basket sidebar instead). Its accessible name is the
-  // "ดูตะกร้า" (view basket) aria-label; it shows the running subtotal, not a line-count label.
+  // "ดูตะกร้า" (view basket) aria-label; it shows the running subtotal, which confirms the stepper's second
+  // tap actually bumped the quantity to 2 (120 × 2) rather than just re-showing the same line.
   const fab = page.getByRole('button', { name: 'ดูตะกร้า' });
   await expect(fab).toBeVisible();
-  await expect(fab).toContainText('฿120.00');
+  await expect(fab).toContainText('฿240.00');
 
   // Tapping it opens the basket in a bottom sheet (not a scroll-to-sidebar) so checkout is reachable
   // instantly regardless of catalog scroll position — the sheet must show the line + the submit button.
@@ -105,6 +113,36 @@ test('shop: phone shows the floating basket button after adding an item, opens t
   const sheetCheckout = page.getByRole('button', { name: 'ส่งคำขอซื้อให้จัดซื้อ' });
   await expect(sheetCheckout).toBeVisible();
   await expect(page.getByText('กระดาษ A4 80 แกรม').last()).toBeVisible();
+});
+
+test('shop: phone shows a grid-shaped skeleton while the catalog is still loading', async ({ page }) => {
+  await page.addInitScript(() => { document.cookie = 'ierp_csrf=e2e; path=/'; });
+  await page.route('**/api/**', async (route) => {
+    const url = route.request().url();
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (url.includes('/api/auth/me')) return json(ME);
+    if (url.includes('/api/modules/effective')) return json({ modules: [], disabled: [] });
+    if (url.includes('/api/user-prefs')) return json({ favourites: [], nav: {}, shop_favs: [], shop_templates: [] });
+    if (url.includes('/api/pmr/projects')) return json({ projects: [], count: 0 });
+    if (url.includes('/api/procurement/low-stock')) return json({ items: [], count: 0 });
+    if (url.includes('/api/procurement/prs')) return json({ can_approve: true, prs: [] });
+    if (url.includes('/api/procurement/catalog')) {
+      // Hold the catalog response open so the loading state is observable, instead of racing a real
+      // network delay (which would make this test flaky under CI load).
+      await new Promise((r) => setTimeout(r, 800));
+      return json(CATALOG);
+    }
+    return json({});
+  });
+  await page.goto('/shop');
+
+  // Skeleton tiles (data-slot="skeleton") stand in for the grid while `catalog.isLoading` is true.
+  await expect(page.locator('[data-slot="skeleton"]').first()).toBeVisible();
+  await expect(page.getByText('กระดาษ A4 80 แกรม')).not.toBeVisible();
+
+  // Once the (deliberately delayed) response lands, the real grid replaces the skeleton.
+  await expect(page.getByText('กระดาษ A4 80 แกรม')).toBeVisible();
+  await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0);
 });
 
 test('approvals: phone renders the pending-approval cards with inline actions, not the table', async ({ page }) => {

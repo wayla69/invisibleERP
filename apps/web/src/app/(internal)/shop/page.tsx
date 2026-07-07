@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
 import { statusVariant } from '@/components/ui';
 import { cn } from '@/lib/utils';
 
@@ -251,6 +252,15 @@ export default function ShopPage() {
     if (ex) return c.map((l) => (l.key === key ? { ...l, qty: l.qty + 1, urgent: l.urgent || urgent } : l));
     return [...c, { key, item_id: it.item_id, description: it.item_description ?? '', uom: it.uom ?? '', unit_price: it.unit_price, qty: 1, urgent, custom: false }];
   });
+  // Mirror of addItem for the grid card's inline stepper — drops the line once it hits zero instead of
+  // clamping at 1, so the − button can remove the last unit without a separate trash action.
+  const decItem = (itemId: string) => setCart((c) => {
+    const key = `i:${itemId}`;
+    const ex = c.find((l) => l.key === key);
+    if (!ex) return c;
+    if (ex.qty <= 1) return c.filter((l) => l.key !== key);
+    return c.map((l) => (l.key === key ? { ...l, qty: l.qty - 1 } : l));
+  });
   const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.floor(qty) || 1) } : l)));
   const toggleUrgent = (key: string) => setCart((c) => c.map((l) => (l.key === key ? { ...l, urgent: !l.urgent } : l)));
   const removeLine = (key: string) => setCart((c) => c.filter((l) => l.key !== key));
@@ -461,6 +471,35 @@ export default function ShopPage() {
     </>
   );
 
+  // Placeholder shaped like the real grid/list so the initial catalog fetch doesn't flash a bare spinner —
+  // smoother perceived load on the slower mobile connections this screen is built for.
+  const catalogSkeleton = view === 'grid' ? (
+    <div className="grid grid-cols-3 gap-2 sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
+      {Array.from({ length: 9 }, (_, i) => (
+        <div key={i} className="flex flex-col overflow-hidden rounded-xl border bg-card">
+          <Skeleton className="aspect-square w-full rounded-none" />
+          <div className="space-y-1.5 p-1.5 sm:p-2">
+            <Skeleton className="h-3 w-4/5" />
+            <Skeleton className="h-3 w-2/5" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div className="divide-y rounded-xl border">
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 p-2.5">
+          <Skeleton className="size-14 shrink-0 rounded-lg" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-3/5" />
+            <Skeleton className="h-3 w-2/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div className={cn(cart.length > 0 && 'pb-20 xl:pb-0')}>
       <PageHeader title={t('shop.title')} description={t('shop.desc')} />
@@ -567,7 +606,7 @@ export default function ShopPage() {
 
           {total > 0 && <p className="text-xs text-muted-foreground">{t('shop.results_n', { n: total })}</p>}
 
-          <StateView q={{ isLoading: catalog.isLoading, error: catalog.error }}>
+          <StateView q={{ isLoading: catalog.isLoading, error: catalog.error }} skeleton={catalogSkeleton}>
             {displayItems.length === 0 ? (
               <div className="mx-auto flex max-w-sm flex-col items-center gap-2 rounded-xl border border-dashed p-8 text-center">
                 <div className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
@@ -628,10 +667,18 @@ export default function ShopPage() {
                           {/* Price led large + bold in the brand colour — the one thing a Shopee/Grab
                               card wants you to notice first after the photo. */}
                           <span className="text-xs font-bold text-primary sm:text-base">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
-                          <div className="flex items-center gap-1 sm:gap-1.5">
-                            {inCart > 0 && <Badge variant="secondary" className="text-[11px]">{inCart}</Badge>}
+                          {/* Shopee-style: once the item's in the basket, the add button becomes a
+                              −/qty/+ stepper right on the tile — no need to open the basket just to
+                              bump a quantity. */}
+                          {inCart > 0 ? (
+                            <div className="flex shrink-0 items-center gap-0.5 rounded-full border bg-background">
+                              <Button size="icon" variant="ghost" className="size-6 shrink-0 rounded-full sm:size-8" aria-label={t('shop.qty_decrease')} onClick={() => decItem(it.item_id)}><Minus className="size-3 sm:size-4" /></Button>
+                              <span className="min-w-[1.25rem] text-center text-xs font-semibold tabular-nums sm:text-sm">{inCart}</span>
+                              <Button size="icon" variant="ghost" className="size-6 shrink-0 rounded-full sm:size-8" aria-label={t('shop.add')} title={t('shop.add')} onClick={() => addItem(it)}><Plus className="size-3 sm:size-4" /></Button>
+                            </div>
+                          ) : (
                             <Button size="icon" className="size-6 shrink-0 rounded-full sm:size-8" aria-label={t('shop.add')} title={t('shop.add')} onClick={() => addItem(it)}><Plus className="size-3 sm:size-4" /></Button>
-                          </div>
+                          )}
                         </div>
                       </div>
                     </div>
