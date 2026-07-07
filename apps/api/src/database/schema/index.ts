@@ -6,6 +6,7 @@ export * from './users';
 export * from './inventory';
 export * from './sales';
 export * from './procurement';
+export * from './vendor-bank-change';
 export * from './finance';
 export * from './bom';
 export * from './portal';

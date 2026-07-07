@@ -612,6 +612,27 @@ through request → independent approval (see [Finance — AR & AP](./05-finance
 > the clear. Screens, payment files and the duplicate/ghost-vendor monitor still
 > work on the real values for authorized users. (Control ITGC-AC-19.)
 
+### Changing a vendor's bank account (dual control)
+
+**Screen:** `/inventory/suppliers` · **Stage a change:** `md_vendor` · **Approve /
+reject:** `exec` / `approvals` (must be a **different** person from whoever staged
+it).
+
+Because a mis-directed vendor payment is a common fraud pattern (a redirected
+bank account is discovered only when the real supplier calls asking why they
+were not paid), a supplier's bank name / account number **cannot be edited
+directly**. Press the bank icon next to a supplier's bank-account column,
+enter the new **ชื่อธนาคาร (bank name)** / **เลขที่บัญชี (account number)**, and
+submit — this only **requests** the change.
+
+The request appears in an amber **คำขอเปลี่ยนบัญชีธนาคารผู้ขายรออนุมัติ** card at the
+top of the same screen for any `exec`/`approvals` user to **อนุมัติ (approve)** or
+**ปฏิเสธ (reject)**. The person who staged the request **cannot approve their
+own request** — the system rejects it. Only on approval does the vendor's bank
+details actually change; a rejected request leaves them untouched. Staging a
+new request while one is still pending **supersedes** the older one, so the
+approval queue always shows only the latest ask. (Control EXP-11.)
+
 ### Supplier scorecards register
 
 **Screen:** `/supplier-scorecards` (**คะแนนซัพพลายเออร์**, ERP nav → จัดซื้อ) ·
