@@ -37,6 +37,7 @@
     "password-hardening": "tsx src/password-hardening.ts",
     "mfa-gate": "tsx src/mfa-gate.ts",
     "api-docs": "tsx src/api-docs.ts",
+    "input-vat": "tsx src/input-vat.ts",
     "cpq-gl": "tsx src/cpq-gl.ts",
     "promptpay": "tsx src/promptpay.ts",
     "payments-gateway": "tsx src/payments-gateway.ts",
