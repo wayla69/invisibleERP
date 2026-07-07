@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { statusVariant } from '@/components/ui';
 import { cn } from '@/lib/utils';
 
@@ -141,6 +142,10 @@ export default function ShopPage() {
   const [templates, setTemplates] = useState<BasketTemplate[]>(readTemplates);
   const [tplName, setTplName] = useState('');
   const [remarks, setRemarks] = useState('');
+  // Basket bottom sheet (phones/tablets, below `xl`) — the floating basket button opens this instead of
+  // scrolling to a sidebar, so checkout is reachable instantly regardless of how far down the catalog
+  // scroll has gone (the catalog loads more items as you scroll, so "scroll to the basket" could be far).
+  const [basketOpen, setBasketOpen] = useState(false);
   const [projectCode, setProjectCode] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
   const [cName, setCName] = useState('');
@@ -362,7 +367,7 @@ export default function ShopPage() {
     }),
     onSuccess: (d) => {
       notifySuccess(t('shop.created', { no: d.pr_no }), t('shop.created_desc', { n: d.lines }));
-      setCart([]); setRemarks(''); setProjectCode(''); setRequiredDate('');
+      setCart([]); setRemarks(''); setProjectCode(''); setRequiredDate(''); setBasketOpen(false);
       qc.invalidateQueries({ queryKey: ['prs'] });
       qc.invalidateQueries({ queryKey: ['my-prs'] });
     },
@@ -383,6 +388,77 @@ export default function ShopPage() {
     >
       {label}{typeof count === 'number' ? <span className="ml-1 text-xs opacity-70">{count}</span> : null}
     </button>
+  );
+
+  // The basket's lines + project/date/remarks + checkout button — rendered once in the desktop sidebar
+  // Card and once inside the mobile/tablet bottom sheet (a plain render function, not a component, so
+  // calling it twice never causes a remount/focus-loss; `idPrefix` keeps the two copies' input ids unique).
+  const basketBody = (idPrefix: string) => (
+    <>
+      {cart.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-6 text-center">
+          <p className="text-sm font-medium">{t('shop.basket_empty')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('shop.basket_empty_hint')}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {cart.map((l) => (
+            <div key={l.key} className="space-y-2 rounded-lg border p-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{l.description || l.item_id}</p>
+                  {l.custom ? (
+                    <Badge variant="outline" className="mt-0.5 text-[10px]">{t('shop.custom_line')}</Badge>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{l.item_id}{l.uom ? ` · ${l.uom}` : ''}</p>
+                  )}
+                </div>
+                <Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label={t('shop.remove')} onClick={() => removeLine(l.key)}>
+                  <X className="size-4" />
+                </Button>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1">
+                  <Button size="icon" variant="outline" className="size-7" aria-label="-" onClick={() => setQty(l.key, l.qty - 1)}><Minus className="size-3.5" /></Button>
+                  <Input type="number" min="1" value={l.qty} onChange={(e) => setQty(l.key, +e.target.value)} className="h-7 w-14 text-center" />
+                  <Button size="icon" variant="outline" className="size-7" aria-label="+" onClick={() => setQty(l.key, l.qty + 1)}><Plus className="size-3.5" /></Button>
+                </div>
+                <Button size="sm" variant={l.urgent ? 'destructive' : 'outline'} className="h-7" onClick={() => toggleUrgent(l.key)}>
+                  <Zap className="size-3.5" /> {t('shop.urgent')}
+                </Button>
+              </div>
+            </div>
+          ))}
+          {anyUrgent && <p className="text-xs font-medium text-destructive">⚡ {t('shop.has_urgent')}</p>}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1.5">
+          <Label htmlFor={`${idPrefix}-shop-project`}>{t('shop.project_code')}</Label>
+          <Input id={`${idPrefix}-shop-project`} value={projectCode} onChange={(e) => setProjectCode(e.target.value)} placeholder={t('shop.project_code_ph')} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`${idPrefix}-shop-needby`}>{t('shop.required_date')}</Label>
+          <Input id={`${idPrefix}-shop-needby`} type="date" value={requiredDate} onChange={(e) => setRequiredDate(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor={`${idPrefix}-shop-remarks`}>{t('shop.remarks')}</Label>
+        <textarea
+          id={`${idPrefix}-shop-remarks`}
+          value={remarks}
+          onChange={(e) => setRemarks(e.target.value)}
+          placeholder={t('shop.remarks_ph')}
+          className="min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        />
+      </div>
+
+      <Button className="w-full" disabled={mut.isPending || cart.length === 0} onClick={checkout}>
+        <Send className="size-4" /> {mut.isPending ? t('shop.checkout_sending') : t('shop.checkout')}
+      </Button>
+    </>
   );
 
   return (
@@ -610,8 +686,11 @@ export default function ShopPage() {
         </div>
 
         {/* ── Basket + custom request (sticky on desktop) ──────────── */}
-        <div id="shop-basket" className="scroll-mt-4 space-y-4 lg:sticky lg:top-4">
-          <Card className="gap-3">
+        <div className="space-y-4 xl:sticky xl:top-4">
+          {/* Below `xl` the basket lives in the floating-button bottom sheet instead (see below) — showing
+              it again here too would duplicate DOM ids (project/date/remarks inputs) and double the
+              already-long single-column scroll. */}
+          <Card className="hidden gap-3 xl:block">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <ShoppingCart className="size-5" /> {t('shop.basket')}
@@ -619,69 +698,7 @@ export default function ShopPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {cart.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-6 text-center">
-                  <p className="text-sm font-medium">{t('shop.basket_empty')}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{t('shop.basket_empty_hint')}</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {cart.map((l) => (
-                    <div key={l.key} className="space-y-2 rounded-lg border p-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{l.description || l.item_id}</p>
-                          {l.custom ? (
-                            <Badge variant="outline" className="mt-0.5 text-[10px]">{t('shop.custom_line')}</Badge>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">{l.item_id}{l.uom ? ` · ${l.uom}` : ''}</p>
-                          )}
-                        </div>
-                        <Button size="icon" variant="ghost" className="size-7 shrink-0" aria-label={t('shop.remove')} onClick={() => removeLine(l.key)}>
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1">
-                          <Button size="icon" variant="outline" className="size-7" aria-label="-" onClick={() => setQty(l.key, l.qty - 1)}><Minus className="size-3.5" /></Button>
-                          <Input type="number" min="1" value={l.qty} onChange={(e) => setQty(l.key, +e.target.value)} className="h-7 w-14 text-center" />
-                          <Button size="icon" variant="outline" className="size-7" aria-label="+" onClick={() => setQty(l.key, l.qty + 1)}><Plus className="size-3.5" /></Button>
-                        </div>
-                        <Button size="sm" variant={l.urgent ? 'destructive' : 'outline'} className="h-7" onClick={() => toggleUrgent(l.key)}>
-                          <Zap className="size-3.5" /> {t('shop.urgent')}
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                  {anyUrgent && <p className="text-xs font-medium text-destructive">⚡ {t('shop.has_urgent')}</p>}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="shop-project">{t('shop.project_code')}</Label>
-                  <Input id="shop-project" value={projectCode} onChange={(e) => setProjectCode(e.target.value)} placeholder={t('shop.project_code_ph')} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="shop-needby">{t('shop.required_date')}</Label>
-                  <Input id="shop-needby" type="date" value={requiredDate} onChange={(e) => setRequiredDate(e.target.value)} />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="shop-remarks">{t('shop.remarks')}</Label>
-                <textarea
-                  id="shop-remarks"
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                  placeholder={t('shop.remarks_ph')}
-                  className="min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                />
-              </div>
-
-              <Button className="w-full" disabled={mut.isPending || cart.length === 0} onClick={checkout}>
-                <Send className="size-4" /> {mut.isPending ? t('shop.checkout_sending') : t('shop.checkout')}
-              </Button>
+              {basketBody('d')}
             </CardContent>
           </Card>
 
@@ -762,12 +779,13 @@ export default function ShopPage() {
       </div>
 
       {/* Floating basket button (phones + tablets, Shopee/Grab pattern) — a corner pill, not a full-width
-          bar, so it never competes with the catalog for screen space. Jumps down to the basket card (which
-          stacks below the catalog below xl) where the requester reviews lines and submits the PR. */}
+          bar, so it never competes with the catalog for screen space. Opens the basket in a bottom sheet
+          rather than scrolling to a sidebar, so checkout is one tap away no matter how far down the
+          (infinite-scroll) catalog the requester has browsed. */}
       {cart.length > 0 && (
         <button
           type="button"
-          onClick={() => document.getElementById('shop-basket')?.scrollIntoView({ behavior: 'smooth' })}
+          onClick={() => setBasketOpen(true)}
           aria-label={t('shop.view_cart')}
           className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex items-center gap-2 rounded-full bg-primary py-3 pl-4 pr-5 text-primary-foreground shadow-lg transition-transform active:scale-95 xl:hidden"
         >
@@ -780,6 +798,20 @@ export default function ShopPage() {
           <span className="text-sm font-bold">{baht(cartTotal)}</span>
         </button>
       )}
+
+      <Sheet open={basketOpen} onOpenChange={setBasketOpen}>
+        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto xl:hidden">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <ShoppingCart className="size-5" /> {t('shop.basket')}
+              {cart.length > 0 && <Badge variant="secondary">{t('shop.lines_n', { n: cart.length })}</Badge>}
+            </SheetTitle>
+          </SheetHeader>
+          <div className="space-y-3 px-4 pb-4">
+            {basketBody('m')}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

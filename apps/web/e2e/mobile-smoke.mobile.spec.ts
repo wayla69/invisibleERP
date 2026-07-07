@@ -84,7 +84,7 @@ test('requisitions: phone renders the PR card list, not the desktop table', asyn
   await expect(cardList.getByText('กระดาษ A4 80 แกรม')).toBeVisible();
 });
 
-test('shop: phone shows the floating basket button after adding an item', async ({ page }) => {
+test('shop: phone shows the floating basket button after adding an item, opens the checkout sheet', async ({ page }) => {
   await boot(page);
   await page.goto('/shop');
 
@@ -98,6 +98,13 @@ test('shop: phone shows the floating basket button after adding an item', async 
   const fab = page.getByRole('button', { name: 'ดูตะกร้า' });
   await expect(fab).toBeVisible();
   await expect(fab).toContainText('฿120.00');
+
+  // Tapping it opens the basket in a bottom sheet (not a scroll-to-sidebar) so checkout is reachable
+  // instantly regardless of catalog scroll position — the sheet must show the line + the submit button.
+  await fab.click();
+  const sheetCheckout = page.getByRole('button', { name: 'ส่งคำขอซื้อให้จัดซื้อ' });
+  await expect(sheetCheckout).toBeVisible();
+  await expect(page.getByText('กระดาษ A4 80 แกรม').last()).toBeVisible();
 });
 
 test('approvals: phone renders the pending-approval cards with inline actions, not the table', async ({ page }) => {
