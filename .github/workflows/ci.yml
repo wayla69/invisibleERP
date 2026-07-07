@@ -320,6 +320,12 @@ jobs:
         # docs/27 R3-1 / AUD-CMP-01 — tagged counts in compliance/docs markdown must match build_rcm.py.
         run: node tools/ci/check-rcm-census.mjs
 
+      - name: No compliance overclaims (docs may not re-assert what CONTROL_STATUS_HONEST retracts)
+        # 3.6 — fail if a bare "audit-ready"/"NASDAQ-ready"/"SOC 2 certified"/… reappears without an honest
+        # qualifier (a negation, the ≥1-quarter-evidence definition, or a dated target). Keeps IPO messaging
+        # consistent with the retracted overclaim baseline.
+        run: node tools/ci/check-overclaims.mjs
+
   # Real-Postgres smoke (panel #1) — the divergence class PGlite hides: FORCE-RLS under app_user,
   # the 0193 org-scoped policy, and postgres-js Date round-trips. Report-only for now (continue-on-error)
   # until proven stable on main, then promote to a required check.
