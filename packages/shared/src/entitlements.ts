@@ -155,6 +155,21 @@ export function isPermissionEntitled(entitledSuites: readonly SuiteKey[], perm: 
 }
 
 /**
+ * Resolve the suites a tenant is entitled to, given their plan code and the plan row's `features.suites`
+ * JSONB (if any). Precedence: (1) a valid non-empty `features.suites` array (per-plan/DB override, set by
+ * 1.3), else (2) the static PLAN_SUITES default for the plan code (this is the in-code GRANDFATHER — a
+ * legacy plan row without `suites` still resolves to sensible defaults), else (3) ALWAYS_ON only.
+ * ALWAYS_ON suites are always included.
+ */
+export function resolveEntitledSuites(planCode: string | null | undefined, featuresSuites?: unknown): SuiteKey[] {
+  const valid: SuiteKey[] = Array.isArray(featuresSuites)
+    ? (featuresSuites.filter((s) => typeof s === 'string' && (s as string) in SUITES) as SuiteKey[])
+    : [];
+  const base = valid.length ? valid : (planCode && PLAN_SUITES[planCode]) || ALWAYS_ON_SUITES;
+  return [...new Set<SuiteKey>([...ALWAYS_ON_SUITES, ...base])];
+}
+
+/**
  * Invariant check (used by tools/ci/check-entitlements.mjs): every MODULE_KEY maps to EXACTLY ONE suite,
  * no suite lists a non-module (sub-permission) token, and every PLAN_SUITES entry references real suites.
  * Throws with a precise message on any violation so CI fails loudly. Returns a coverage summary.

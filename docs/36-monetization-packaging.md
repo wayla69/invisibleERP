@@ -66,12 +66,21 @@ coarse token**, so they cannot be gated by this map yet. `entitlements.ts` lists
 
 ## 5. Enforcement status
 
-- **1.1 (this change):** map + helpers + CI invariant only. **No runtime enforcement yet** — nothing gates
-  on suites until PlanGuard is rewired.
-- **1.2 (next):** rewire `PlanGuard` to (a) drop the per-tenant `Admin` bypass (only the platform god
-  bypasses), (b) fail-**closed** on error/missing subscription except `ALWAYS_ON`, (c) gate the request's
-  `@Permissions` token against the tenant's entitled suites → `403 SUITE_NOT_ENTITLED`.
-- **1.8:** cutover harness `tools/cutover/src/billing.ts` exercises the plan→suite→403 matrix end-to-end.
+- **1.1 (done):** map + helpers + CI invariant. Pure data; no runtime effect.
+- **1.2 (done):** `PlanGuard` rewired (`apps/api/src/modules/billing/plan.guard.ts`), **DEFAULT-OFF** via two
+  env flags (see `.env.example`):
+  - both off (default) → **legacy behaviour, byte-for-byte** (only `@RequiresPlanFeature` gates, e.g. ai_chat);
+  - `ENTITLEMENTS_SHADOW=true` → evaluate + log `[shadow] WOULD block …`, never block (rollout dry-run);
+  - `ENTITLEMENTS_ENFORCE=true` → gate the route's `@Permissions` token(s) against the tenant's entitled
+    suites → `403 SUITE_NOT_ENTITLED`, plus legacy `@RequiresPlanFeature` → `403 PLAN_FEATURE_REQUIRED`.
+  Fixes: the per-tenant `Admin` bypass is **removed** — only the platform owner (`PLATFORM_ADMIN_USERNAMES`)
+  bypasses; infra error fails **open**, successfully-read missing/unknown plan fails **closed** to `ALWAYS_ON`
+  (via `resolveEntitledSuites`). Blocking mirrors `ModuleEnabledGuard` (block only when NONE of the route's
+  tokens is entitled). Decision logic verified across 20 plan/route combos.
+- **1.2 rollout order (MANDATORY):** enable SHADOW → watch logs → run the 1.3 backfill (every tenant gets
+  `features.suites`) → only then enable ENFORCE. Do NOT enable ENFORCE before the backfill.
+- **1.8 (pending):** cutover harness `tools/cutover/src/billing.ts` — plan→suite→403 matrix + god-bypass +
+  kill-switch modes end-to-end (this is where the UAT negative case is codified).
 
 ## 6. Verify
 
@@ -85,3 +94,4 @@ node tools/ci/check-entitlements.mjs      # asserts every MODULE_KEY maps to exa
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
 | 0.1 | 2026-07-07 | Platform | Initial packaging spec — plan→suite→module entitlement map (`entitlements.ts`) + CI guard (`check-entitlements.mjs`). Map-only; no enforcement yet (PlanGuard rewire is 1.2). Documented `KNOWN_UNGATED` gap (manufacturing/PPM/HCM/real-estate need gating tokens — 1.1b). |
+| 0.2 | 2026-07-07 | Platform | 1.2 — `PlanGuard` rewired: suite gating behind `ENTITLEMENTS_ENFORCE`/`ENTITLEMENTS_SHADOW` (default off = legacy behaviour), per-tenant Admin bypass removed (god-only), fail-open on infra error / fail-closed on missing plan, `resolveEntitledSuites` grandfather fallback. No behaviour change until enabled; enable SHADOW → backfill (1.3) → ENFORCE. |
