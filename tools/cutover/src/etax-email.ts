@@ -1,6 +1,8 @@
 /**
  * C2 — e-Tax Invoice by Email (ETDA, no CA). POST /api/tax-invoices/:docNo/send-etax-email →
- * emails buyer + CC ETDA time-stamp mailbox, XML attached. Uses a capturing mock mailer (no SMTP). Over PGlite.
+ * emails buyer + CC ETDA time-stamp mailbox, PDF attached (the readable document ETDA time-stamps —
+ * NOT the XML instance document, which belongs to the separate CA-signed "e-Tax Invoice & e-Receipt"
+ * scheme). Uses a capturing mock mailer (no SMTP) + the real PdfRenderer. Over PGlite.
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover etax-email
  */
 import 'reflect-metadata';
@@ -79,12 +81,20 @@ async function main() {
     r.status < 300 && r.json.sent === true && r.json.cc === 'csemail@etda.or.th' && /^mock-/.test(r.json.message_id ?? ''),
     JSON.stringify({ s: r.status, cc: r.json.cc }));
 
-  // ── 2. the captured message: from seller, to buyer, CC ETDA, XML attached ──
+  // ── 2. the captured message: from seller, to buyer, CC ETDA, the READABLE document attached ──
+  // ETDA's e-Tax Invoice by Email time-stamp service (and its public validator at validation.teda.th)
+  // operates on the PDF, not the UBL XML instance document — that XML/CA-signature path is the separate
+  // "e-Tax Invoice & e-Receipt" scheme. Chromium is not available in CI, so the renderer falls back to the
+  // same HTML the PDF would have contained; accept either since both are the correct "readable document".
   const m = sent[sent.length - 1];
-  ok('Mailer got: from seller, to buyer, CC ETDA, <docNo>.xml attached',
-    !!m && m.from === 'shop@oshinei.co.th' && m.to === 'buyer@example.com' && m.cc === 'csemail@etda.or.th' &&
-    m.attachments?.[0]?.filename === 'TIV-202606-0011.xml' && String(m.attachments?.[0]?.content).includes('<Invoice '),
-    JSON.stringify({ from: m?.from, att: m?.attachments?.[0]?.filename }));
+  const att = m?.attachments?.[0];
+  const filenameOk = att?.filename === 'TIV-202606-0011.pdf' || att?.filename === 'TIV-202606-0011.html';
+  const contentOk = att?.filename?.endsWith('.html')
+    ? String(att.content).includes('ใบกำกับภาษี')
+    : Buffer.isBuffer(att?.content) && att.content.length > 0;
+  ok('Mailer got: from seller, to buyer, CC ETDA, readable tax-invoice document attached (PDF, or HTML fallback since Chromium is unavailable in CI)',
+    !!m && m.from === 'shop@oshinei.co.th' && m.to === 'buyer@example.com' && m.cc === 'csemail@etda.or.th' && filenameOk && contentOk,
+    JSON.stringify({ from: m?.from, filename: att?.filename, contentType: att?.contentType }));
 
   // ── 3. invalid recipient → 400 (zod) ──
   const bad = await inj('POST', '/api/tax-invoices/TIV-202606-0011/send-etax-email', admin, { to_email: 'not-an-email' });
