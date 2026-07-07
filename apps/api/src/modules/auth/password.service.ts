@@ -38,12 +38,15 @@ export class PasswordService {
     return `scrypt$${N}$${R}$${P}$${salt}$${derived.toString('hex')}`;
   }
 
-  async verify(password: string, stored: string): Promise<{ ok: boolean; needsRehash: boolean }> {
+  async verify(password: string, stored: string): Promise<{ ok: boolean; needsRehash: boolean; legacyWeak?: boolean }> {
     // legacy: unsalted SHA-256 hex (64 chars) from the V1 user_store.make_hash. Trivially crackable on a DB
-    // dump — kept verifiable ONLY so a dormant legacy account can authenticate once and be force-upgraded.
+    // dump — kept verifiable ONLY so a dormant legacy account can authenticate once and be force-upgraded to
+    // scrypt (needsRehash). 4.5: this weak path is now GATED by LEGACY_SHA256_LOGIN — set it off once all
+    // accounts have logged in at least once (upgrading themselves) to close the weak comparison entirely.
     if (/^[a-f0-9]{64}$/i.test(stored)) {
+      if (!legacySha256LoginAllowed()) return { ok: false, needsRehash: false }; // path disabled → reject
       const legacy = createHash('sha256').update(password).digest('hex');
-      return { ok: timingSafeEqualHex(legacy, stored), needsRehash: true };
+      return { ok: timingSafeEqualHex(legacy, stored), needsRehash: true, legacyWeak: true };
     }
     const parts = stored.split('$');
     // current: scrypt$N$r$p$salt$hash
@@ -104,4 +107,12 @@ export class PasswordService {
 function timingSafeEqualHex(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+// 4.5 — the legacy unsalted-SHA-256 login path (V1 user_store) is a weak-hash acceptance path. Kept ON by
+// default so an un-migrated account can still authenticate once (and be upgraded to scrypt), but operators
+// should set LEGACY_SHA256_LOGIN=off after every account has logged in at least once, to reject the weak
+// path entirely. Any value in {0,false,no,off} disables it.
+export function legacySha256LoginAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !['0', 'false', 'no', 'off'].includes(String(env.LEGACY_SHA256_LOGIN ?? '').trim().toLowerCase());
 }

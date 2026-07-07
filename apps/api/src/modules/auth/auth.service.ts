@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException, BadRequestException, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq, and, sql, isNull } from 'drizzle-orm';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
@@ -14,6 +14,8 @@ import { isPlatformAdmin } from '../../common/decorators';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger('AuthService');
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly jwt: JwtService,
@@ -39,8 +41,12 @@ export class AuthService {
     };
     if (!row) throw fail();
 
-    const { ok, needsRehash } = await this.passwords.verify(password, row.passwordHash);
+    const { ok, needsRehash, legacyWeak } = await this.passwords.verify(password, row.passwordHash);
     if (!ok) throw fail();
+    // 4.5 — surface any account still on the weak legacy SHA-256 hash so operators can migrate + then set
+    // LEGACY_SHA256_LOGIN=off. It is upgraded to scrypt immediately below (needsRehash), so this fires at
+    // most once per account.
+    if (legacyWeak) this.logger.warn(`legacy SHA-256 password used for '${row.username}' — upgraded to scrypt. Set LEGACY_SHA256_LOGIN=off once all accounts are migrated.`);
     // A deactivated account (e.g. SCIM-deprovisioned) cannot authenticate, even with valid credentials.
     if (row.isActive === false)
       throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
