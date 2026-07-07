@@ -13,6 +13,18 @@ import { EtaxService } from '../../pos/fiscal/etax.service';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
+// Classify a free-text POS payment method (Cash/PromptPay/Transfer/Card/Comp/…) into the receipt's
+// "ชำระเงินโดย" (Paid By) buckets — เงินสด/โอนเงิน/เช็คธนาคาร/อื่นๆ. Unrecognized methods fall to 'other'
+// with the raw label preserved (paid_by_other) so no information is lost.
+function classifyPaidBy(method: string | null | undefined): { paid_by: 'transfer' | 'cash' | 'cheque' | 'other'; paid_by_other: string | null } {
+  const raw = String(method ?? '').trim();
+  const s = raw.toLowerCase();
+  if (!raw || /^cash$/.test(s) || /เงินสด/.test(raw)) return { paid_by: 'cash', paid_by_other: null };
+  if (/transfer|promptpay|qr/.test(s) || /โอน/.test(raw)) return { paid_by: 'transfer', paid_by_other: null };
+  if (/cheque|check/.test(s) || /เช็ค/.test(raw)) return { paid_by: 'cheque', paid_by_other: null };
+  return { paid_by: 'other', paid_by_other: raw || null };
+}
+
 // dto for issuing a ใบลดหนี้/ใบเพิ่มหนี้ (credit/debit note) against a prior full tax invoice.
 export interface AdjustmentNoteDto { original_doc_no: string; reason: string; lines: { description: string; qty?: number; unit_price?: number; amount: number }[] }
 
@@ -90,6 +102,10 @@ export class TaxInvoiceService {
 
     let tenantId: number, subtotal: number, vat: number, total: number;
     let lines: any[] = [];
+    // Receipt-style "ชำระเงินโดย" (Paid By) — for POS it's derived from the sale's own payment method
+    // (already collected at the register); an explicit dto.payment always overrides (also the only source
+    // for an AR-sourced invoice, which may not be paid yet — due_date covers that case instead).
+    let derivedPayment: { paid_by: 'transfer' | 'cash' | 'cheque' | 'other'; paid_by_other: string | null } | null = null;
 
     if (dto.source_type === 'POS') {
       const [sale] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, dto.source_ref)).limit(1);
@@ -97,6 +113,7 @@ export class TaxInvoiceService {
       tenantId = Number(sale.tenantId); subtotal = n(sale.subtotal); vat = n(sale.taxAmount); total = n(sale.total);
       const items = await db.select().from(custPosItems).where(eq(custPosItems.saleId, Number(sale.id)));
       lines = items.map((it: any, i: number) => ({ lineNo: i + 1, itemId: it.itemId, description: it.itemDescription ?? it.itemId ?? 'สินค้า', qty: n(it.qty), uom: it.uom, unitPrice: n(it.unitPrice), discount: n(0), amount: n(it.amount) }));
+      derivedPayment = classifyPaidBy(sale.paymentMethod);
     } else {
       const [inv] = await db.select().from(arInvoices).where(eq(arInvoices.invoiceNo, dto.source_ref)).limit(1);
       if (!inv) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AR invoice not found', messageTh: 'ไม่พบใบแจ้งหนี้' });
@@ -105,6 +122,9 @@ export class TaxInvoiceService {
       subtotal = inc.net; vat = inc.tax; total = inc.gross;
       lines = [{ lineNo: 1, itemId: null, description: `สินค้า/บริการตามใบแจ้งหนี้ ${dto.source_ref}`, qty: 1, uom: null, unitPrice: subtotal, discount: 0, amount: subtotal }];
     }
+    const payment = dto.payment?.paid_by
+      ? { paid_by: dto.payment.paid_by, paid_by_other: dto.payment.paid_by === 'other' ? (dto.payment.paid_by_other ?? null) : null }
+      : derivedPayment;
 
     const seller = await this.tenantRow(tenantId);
     this.assertCanIssue(seller);
@@ -115,6 +135,8 @@ export class TaxInvoiceService {
       buyerName: dto.buyer.name, buyerTaxId: dto.buyer.tax_id ?? null, buyerBranchCode: dto.buyer.branch_code ?? null, buyerAddress: dto.buyer.address,
       subtotal: fx(subtotal, 2), vatRate: fx(n(seller.vatRate ?? 0.07), 4), vatAmount: fx(vat, 2), grandTotal: fx(total, 2), isVatInclusive: false,
       bookNo: dto.book_no ?? null, notes: dto.notes ?? null, createdBy: user.username,
+      dueDate: dto.due_date ?? null, paidBy: payment?.paid_by ?? null, paidByOther: payment?.paid_by_other ?? null,
+      paidBank: dto.payment?.bank ?? null, paidChequeNo: dto.payment?.cheque_no ?? null, paidBranch: dto.payment?.branch ?? null,
     }).returning({ id: taxInvoices.id });
     await this.insertLines(Number(head!.id), tenantId, lines);
     // wiring (best-effort): hand the full tax invoice to the RD/ETDA e-Tax provider
@@ -150,14 +172,14 @@ export class TaxInvoiceService {
     const db = this.db;
     const lines = await db.select().from(taxInvoiceLines).where(eq(taxInvoiceLines.taxInvoiceId, Number(head.id))).orderBy(taxInvoiceLines.lineNo);
     const shaped = shape(head);
-    // The seller name/address/tax-id are an immutable ม.86/4 snapshot; the logo is presentation-only (not a
-    // statutory field), so read the tenant's CURRENT logo at render time for the no-code document template.
-    let logoUrl: string | null = null;
+    // The seller name/address/tax-id are an immutable ม.86/4 snapshot; the logo/phone/fax are presentation
+    // (contact info, not a statutory ม.86/4 particular), so read the tenant's CURRENT values at render time.
+    let logoUrl: string | null = null, phone: string | null = null, fax: string | null = null;
     if (head.tenantId != null) {
-      const [t] = await db.select({ logoUrl: tenants.logoUrl }).from(tenants).where(eq(tenants.id, Number(head.tenantId))).limit(1);
-      logoUrl = t?.logoUrl ?? null;
+      const [t] = await db.select({ logoUrl: tenants.logoUrl, phone: tenants.phone, fax: tenants.fax }).from(tenants).where(eq(tenants.id, Number(head.tenantId))).limit(1);
+      logoUrl = t?.logoUrl ?? null; phone = t?.phone ?? null; fax = t?.fax ?? null;
     }
-    return { ...shaped, seller: { ...shaped.seller, logo_url: logoUrl }, lines: lines.map(shapeLine) };
+    return { ...shaped, seller: { ...shaped.seller, logo_url: logoUrl, phone, fax }, lines: lines.map(shapeLine) };
   }
 
   // ── ใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) — adjust a prior full tax invoice ──
@@ -286,6 +308,9 @@ function shape(r: any) {
     book_no: r.bookNo, notes: r.notes, created_by: r.createdBy, created_at: r.createdAt,
     // credit/debit note fields (null on ordinary invoices)
     original_doc_no: r.originalDocNo ?? null, reason: r.reason ?? null, gl_entry_no: r.glEntryNo ?? null,
+    // receipt-style payment fields (0268) — presentation/data-adjacent, not ม.86/4-mandatory
+    due_date: r.dueDate ?? null,
+    payment: r.paidBy ? { paid_by: r.paidBy, paid_by_other: r.paidByOther ?? null, bank: r.paidBank ?? null, cheque_no: r.paidChequeNo ?? null, branch: r.paidBranch ?? null } : null,
   };
 }
 function shapeLine(l: any) {

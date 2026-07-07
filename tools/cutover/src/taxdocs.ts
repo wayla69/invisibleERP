@@ -132,6 +132,8 @@ async function main() {
   ok('Full: rejects missing buyer name/address (400)', fullNoBuyer.status === 400, `${fullNoBuyer.status}`);
   const fullAr = await inj('POST', '/api/tax-invoices/full', sales1, { source_type: 'AR', source_ref: 'INV-AR1', buyer: { name: 'ผู้ซื้อ AR', tax_id: T2_TAX, address: 'ที่อยู่ AR' } });
   ok('Full from AR: VAT-inclusive 107 → net 100 + vat 7', near(fullAr.json.subtotal, 100) && near(fullAr.json.vat_amount, 7));
+  ok('Full/POS: Paid By auto-derived from the sale\'s own payment method (Cash)', full.json.payment?.paid_by === 'cash', JSON.stringify(full.json.payment));
+  ok('Full/AR (no payment/due_date given): both null', fullAr.json.payment === null && fullAr.json.due_date === null);
 
   // ── WHT 50 ทวิ (ม.50 ทวิ) ──
   const wht = await inj('POST', '/api/wht/certificates', sales1, { date_paid: periodDate('21'), payee: { name: 'บริษัท ผู้รับเหมา จำกัด', tax_id: PAYEE_TAX, address: 'ที่อยู่ผู้รับเงิน', kind: 'company' }, lines: [{ income_type: '3tre-service', description: 'ค่าบริการ', amount_paid: 10000 }] });
@@ -376,6 +378,15 @@ async function main() {
   ok('G16: void an issued full tax invoice → Voided', vd.json.status === 'Voided', JSON.stringify(vd.json).slice(0, 60));
   const vExc = await inj('GET', '/api/tax-invoices/exceptions/voided', t1mgr);
   ok('G16: voided-fiscal-document exception report lists the voided invoice + reason', vExc.status === 200 && (vExc.json.voided ?? []).some((r: any) => r.doc_no === fullAr.json.doc_no && r.void_reason === 'ออกผิดฉบับ') && vExc.json.count >= 1, JSON.stringify({ c: vExc.json.count }));
+
+  // ── docs/34: receipt-style "ชำระเงินโดย" (Paid By) + due date (migration 0268, presentation/data-adjacent).
+  //    Issued LAST so its output VAT doesn't shift the earlier ภ.พ.30/output-VAT aggregate assertions above. ──
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-AR2', invoiceDate: periodDate('21'), tenantId: t1, orderNo: 'SO-2', amount: '107', status: 'Unpaid', currency: 'THB' });
+  const fullArPaid = await inj('POST', '/api/tax-invoices/full', sales1, { source_type: 'AR', source_ref: 'INV-AR2', buyer: { name: 'ผู้ซื้อ AR2', tax_id: T2_TAX, address: 'ที่อยู่ AR2' }, due_date: periodDate('28'), payment: { paid_by: 'transfer', bank: 'กสิกรไทย', branch: 'สาขาสีลม' } });
+  ok('Full/AR explicit payment + due_date persist', fullArPaid.json.due_date === periodDate('28') && fullArPaid.json.payment?.paid_by === 'transfer' && fullArPaid.json.payment?.bank === 'กสิกรไทย', JSON.stringify({ due: fullArPaid.json.due_date, pay: fullArPaid.json.payment }));
+  const fullArPdf = await inj('GET', `/api/tax-invoices/${fullArPaid.json.doc_no}/pdf`, sales1);
+  const fullArPdfHtml = typeof fullArPdf.text === 'string' ? fullArPdf.text : '';
+  ok('PDF full: "ชำระเงินโดย" section ticks Transfer + shows the bank + due date', fullArPdf.status === 200 && fullArPdfHtml.includes('ชำระเงินโดย') && fullArPdfHtml.includes('☑') && fullArPdfHtml.includes('กสิกรไทย') && fullArPdfHtml.includes('วันครบกำหนดชำระเงิน'), `len=${fullArPdfHtml.length}`);
 
   await app.close();
   await pg.close();

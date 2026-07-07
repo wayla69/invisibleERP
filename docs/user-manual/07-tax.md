@@ -40,10 +40,18 @@ for retail POS).
 2. Click **Issue full invoice** (**ออกใบเต็มรูป**).
 3. Choose the source (an AR invoice or POS sale) and enter the **buyer's** name,
    tax ID and address.
-4. Confirm. VAT at 7% is calculated automatically.
+4. Optionally set a **payment due date** and **paid by** (transfer / cash /
+   cheque / other) — for a **POS** sale this is pre-filled from the sale's own
+   payment method if you leave it blank; for an **AR** invoice you set it
+   explicitly (or leave it blank if the invoice isn't paid yet). Choosing
+   transfer or cheque shows bank/cheque-no/branch fields.
+5. Confirm. VAT at 7% is calculated automatically.
 
 **Expected result:** A sequentially-numbered tax invoice is created (numbers are
-never reused).
+never reused). The printed PDF is a combined ใบเสร็จรับเงิน/ใบกำกับภาษี layout —
+seller Tel/Fax, buyer details + due date, the item table, VAT-separated
+totals, and a **"ชำระเงินโดย (Paid By)"** section showing the recorded payment
+method (or blank checkboxes if none was recorded).
 
 ### Issue an abbreviated tax invoice (from a POS sale)
 

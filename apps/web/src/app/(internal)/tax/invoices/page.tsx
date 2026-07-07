@@ -56,6 +56,12 @@ export default function TaxInvoicesPage() {
   const [buyerName, setBuyerName] = useState('');
   const [buyerTaxId, setBuyerTaxId] = useState('');
   const [buyerAddr, setBuyerAddr] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [paidBy, setPaidBy] = useState<'' | 'transfer' | 'cash' | 'cheque' | 'other'>('');
+  const [paidByOther, setPaidByOther] = useState('');
+  const [paidBank, setPaidBank] = useState('');
+  const [paidChequeNo, setPaidChequeNo] = useState('');
+  const [paidBranch, setPaidBranch] = useState('');
 
   const issue = useMutation({
     mutationFn: () =>
@@ -65,11 +71,14 @@ export default function TaxInvoicesPage() {
           source_type: src,
           source_ref: srcRef,
           buyer: { name: buyerName, tax_id: buyerTaxId || undefined, address: buyerAddr },
+          due_date: dueDate || undefined,
+          payment: paidBy ? { paid_by: paidBy, paid_by_other: paidBy === 'other' ? paidByOther || undefined : undefined, bank: paidBank || undefined, cheque_no: paidChequeNo || undefined, branch: paidBranch || undefined } : undefined,
         }),
       }),
     onSuccess: (r) => {
       notifySuccess(t('tax.inv_issued', { doc: r.doc_no }));
       setSrcRef(''); setBuyerName(''); setBuyerTaxId(''); setBuyerAddr('');
+      setDueDate(''); setPaidBy(''); setPaidByOther(''); setPaidBank(''); setPaidChequeNo(''); setPaidBranch('');
       qc.invalidateQueries({ queryKey: ['tax-invoices'] });
     },
     onError: (e: any) => notifyError(e.message),
@@ -177,6 +186,41 @@ export default function TaxInvoicesPage() {
               <Input id="buyer-addr" value={buyerAddr} onChange={(e) => setBuyerAddr(e.target.value)} placeholder={t('tax.inv_buyer_addr_ph')} />
             </div>
           </div>
+          <div className="grid gap-2 sm:max-w-xs">
+            <Label htmlFor="due-date">{t('tax.inv_due_date')}</Label>
+            <Input id="due-date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label>{t('tax.inv_paid_by')}</Label>
+            <div className="flex flex-wrap gap-2">
+              {(['', 'transfer', 'cash', 'cheque', 'other'] as const).map((k) => (
+                <Button key={k || 'none'} type="button" variant={paidBy === k ? 'default' : 'outline'} size="sm" onClick={() => setPaidBy(k)}>
+                  {k === '' ? t('tax.paid_by_none') : t(`tax.paid_by_${k}`)}
+                </Button>
+              ))}
+            </div>
+          </div>
+          {paidBy === 'other' && (
+            <Input value={paidByOther} onChange={(e) => setPaidByOther(e.target.value)} placeholder={t('tax.paid_by_other_ph')} />
+          )}
+          {(paidBy === 'transfer' || paidBy === 'cheque') && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-2">
+                <Label htmlFor="paid-bank">{t('tax.paid_bank')}</Label>
+                <Input id="paid-bank" value={paidBank} onChange={(e) => setPaidBank(e.target.value)} />
+              </div>
+              {paidBy === 'cheque' && (
+                <div className="grid gap-2">
+                  <Label htmlFor="paid-cheque-no">{t('tax.paid_cheque_no')}</Label>
+                  <Input id="paid-cheque-no" value={paidChequeNo} onChange={(e) => setPaidChequeNo(e.target.value)} />
+                </div>
+              )}
+              <div className="grid gap-2">
+                <Label htmlFor="paid-branch">{t('tax.paid_branch')}</Label>
+                <Input id="paid-branch" value={paidBranch} onChange={(e) => setPaidBranch(e.target.value)} />
+              </div>
+            </div>
+          )}
           <Button disabled={!canIssue} onClick={() => issue.mutate()}>
             <Receipt className="size-4" /> {issue.isPending ? t('tax.issuing') : t('tax.inv_issue_btn')}
           </Button>

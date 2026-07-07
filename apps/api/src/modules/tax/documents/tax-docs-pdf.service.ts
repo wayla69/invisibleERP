@@ -29,33 +29,38 @@ export class TaxDocsPdfService {
       <td class="r">${l.unit_price != null ? fmtMoney(l.unit_price) : ''}</td>
       <td class="r">${fmtMoney(l.amount)}</td></tr>`).join('');
     const b = inv.buyer ?? {};
+    const s = inv.seller ?? {};
+    const telFax = [s.phone ? `Tel ${s.phone}` : '', s.fax ? `Fax ${s.fax}` : ''].filter(Boolean).join(' ');
     return wrapA4(`
       <div class="hdr">
         <div>
           ${a4LogoHtml(cfg, inv.seller.logo_url)}
           <div class="t1">${esc(inv.seller.name)}</div>
           <div>${esc(inv.seller.address)}</div>
+          ${telFax ? `<div>${esc(telFax)}</div>` : ''}
           <div>เลขประจำตัวผู้เสียภาษีอากร ${esc(formatTaxId(inv.seller.tax_id))} &nbsp; (${esc(inv.seller.branch_label)})</div>
           ${a4HeaderNoteHtml(cfg)}
         </div>
-        <div class="ttl">ใบกำกับภาษี/ใบเสร็จรับเงิน<div class="copy">(${copy ? 'สำเนา' : 'ต้นฉบับ'})</div></div>
+        <div class="ttl">ใบเสร็จรับเงิน/ใบกำกับภาษี<div class="copy">(${copy ? 'สำเนา' : 'ต้นฉบับ'})</div></div>
       </div>
       <table class="meta">
         <tr><td class="lbl">ลูกค้า (ผู้ซื้อ)</td><td>${esc(b.name ?? '-')}</td><td class="lbl">เลขที่</td><td>${esc(inv.doc_no)}</td></tr>
         <tr><td class="lbl">ที่อยู่</td><td>${esc(b.address ?? '-')}</td><td class="lbl">วันที่</td><td>${esc(thaiDate(inv.issue_date))}</td></tr>
         <tr><td class="lbl">เลขประจำตัวผู้เสียภาษีผู้ซื้อ</td><td>${esc(b.tax_id ? formatTaxId(b.tax_id) : '-')}</td><td class="lbl">สาขา</td><td>${esc(b.branch_code ? `สาขาที่ ${b.branch_code}` : 'สำนักงานใหญ่')}</td></tr>
+        ${inv.due_date ? `<tr><td></td><td></td><td class="lbl">วันครบกำหนดชำระเงิน</td><td>${esc(thaiDate(inv.due_date))}</td></tr>` : ''}
       </table>
       <table class="grid">
-        <thead><tr><th class="c">ลำดับ</th><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคา/หน่วย</th><th class="r">จำนวนเงิน</th></tr></thead>
+        <thead><tr><th class="c">ลำดับ</th><th>รายการ</th><th class="r">จำนวน</th><th class="r">ราคา/หน่วย</th><th class="r">จำนวนเงิน (ไม่รวมภาษี)</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <table class="totals">
-        <tr><td class="tlbl">มูลค่าสินค้า/บริการ</td><td class="tval">${fmtMoney(inv.subtotal)}</td></tr>
-        <tr><td class="tlbl">ภาษีมูลค่าเพิ่ม 7%</td><td class="tval">${fmtMoney(inv.vat_amount)}</td></tr>
-        <tr class="grand"><td class="tlbl">จำนวนเงินรวมทั้งสิ้น</td><td class="tval">${fmtMoney(inv.grand_total)}</td></tr>
+        <tr><td class="tlbl">มูลค่าสินค้า/บริการ (Sub Total)</td><td class="tval">${fmtMoney(inv.subtotal)}</td></tr>
+        <tr><td class="tlbl">ภาษีมูลค่าเพิ่ม 7% (VAT)</td><td class="tval">${fmtMoney(inv.vat_amount)}</td></tr>
+        <tr class="grand"><td class="tlbl">จำนวนเงินรวมทั้งสิ้น (Grand Total)</td><td class="tval">${fmtMoney(inv.grand_total)}</td></tr>
       </table>
       ${cfg.totals.show_amount_in_words ? `<div class="words">( ${esc(bahtText(inv.grand_total))} )</div>` : ''}
-      ${a4FooterHtml(cfg, { leftDefault: 'ผู้รับสินค้า / ผู้ซื้อ', rightDefault: 'ผู้รับเงิน / ผู้มีอำนาจลงนาม' })}
+      ${paidByHtml(inv.payment)}
+      ${a4FooterHtml(cfg, { leftDefault: 'ผู้รับเงิน (Collector)', rightDefault: 'ผู้อนุมัติจ่ายเงิน (Authorized By)' })}
     `, 'ใบกำกับภาษีเต็มรูป', { accentColor: cfg.header.accent_color });
   }
 
@@ -239,6 +244,8 @@ function wrapA4(body: string, title: string, opts: { accentColor?: string } = {}
     .warnbox{width:46%;font-size:10px;border:1px solid #999;padding:6px;color:#333}
     .certbox{width:50%;text-align:center}
     .stamp{border:1px dashed #999;width:80px;height:50px;margin:6px auto 0;font-size:9px;color:#999;display:flex;align-items:center;justify-content:center;text-align:center}
+    .paidby{border:1px solid #999;padding:6px 8px;margin-top:10px;font-size:11px}
+    .paidby .row{margin-top:3px}
   </style></head><body>${body}</body></html>`;
 }
 
@@ -246,6 +253,25 @@ function wrapA4(body: string, title: string, opts: { accentColor?: string } = {}
 function taxIdBoxes(id: unknown): string {
   const d = String(id ?? '').replace(/\D/g, '').padEnd(13, ' ').slice(0, 13);
   return `<span class="txboxes">${[...d].map((ch) => `<span class="txcell">${ch.trim() ? esc(ch) : ''}</span>`).join('')}</span>`;
+}
+
+// "ชำระเงินโดย" (Paid By) block for the combined ใบเสร็จรับเงิน/ใบกำกับภาษี — a receipt-style payment
+// record, not a ม.86/4-mandatory particular. Always prints the section (boxes unchecked, fields blank when
+// no payment was recorded) so the layout is stable whether or not the invoice carries payment data.
+function paidByHtml(payment: { paid_by?: string; paid_by_other?: string | null; bank?: string | null; cheque_no?: string | null; branch?: string | null } | null | undefined): string {
+  const p = payment ?? {};
+  const box = (k: string) => (p.paid_by === k ? '☑' : '☐');
+  return `
+    <div class="paidby">
+      <div class="b">ชำระเงินโดย (Paid By)</div>
+      <div class="row">
+        <span class="bx">${box('transfer')}</span> โอนเงิน (Transfer) &nbsp;&nbsp;
+        <span class="bx">${box('cash')}</span> เงินสด (Cash) &nbsp;&nbsp;
+        <span class="bx">${box('cheque')}</span> เช็คธนาคาร (Cheque Bank) &nbsp;&nbsp;
+        <span class="bx">${box('other')}</span> อื่นๆ (ระบุ) ${esc(p.paid_by === 'other' ? (p.paid_by_other ?? '') : '')}
+      </div>
+      <div class="row">ธนาคาร (Bank) ${esc(p.bank ?? '')} &nbsp;&nbsp;&nbsp; เลขที่เช็ค (Cheque No.) ${esc(p.cheque_no ?? '')} &nbsp;&nbsp;&nbsp; สาขา (Branch) ${esc(p.branch ?? '')}</div>
+    </div>`;
 }
 
 function esc(v: unknown): string {

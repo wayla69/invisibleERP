@@ -49,6 +49,13 @@ export const taxInvoices = pgTable('tax_invoices', {
   reason: text('reason'),
   glEntryNo: text('gl_entry_no'),
   voidReason: text('void_reason'),
+  // ── Receipt-style payment fields (0268) — a combined ใบเสร็จรับเงิน/ใบกำกับภาษี layout, not ม.86/4-mandatory.
+  dueDate: date('due_date'),                      // วันครบกำหนดชำระเงิน (AR-sourced invoices not yet paid)
+  paidBy: text('paid_by'),                        // 'transfer' | 'cash' | 'cheque' | 'other' | null
+  paidByOther: text('paid_by_other'),              // free-text description when paid_by = 'other'
+  paidBank: text('paid_bank'),                    // ธนาคาร (transfer/cheque)
+  paidChequeNo: text('paid_cheque_no'),           // เลขที่เช็ค
+  paidBranch: text('paid_branch'),                // สาขา (bank branch)
   notes: text('notes'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
