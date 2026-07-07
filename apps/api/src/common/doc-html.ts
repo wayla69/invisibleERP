@@ -3,6 +3,8 @@
 // the purchase order (po-pdf.service.ts) so every printed document reads as one system — same Sarabun
 // webfont, brand colour #1E3C72, money/qty/Thai-Buddhist-date formatting. Pure functions, no Nest deps.
 
+import { bizParts } from './bizdate';
+
 export function esc(v: unknown): string {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -21,6 +23,17 @@ export function thaiDate(v: unknown): string {
   const d = new Date(v as string);
   if (Number.isNaN(d.getTime())) return String(v);
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
+}
+
+// dd/mm/yyyy (Buddhist era) HH:MM น. — for timestamps (e.g. an approval instant) where the time-of-day
+// matters. Bangkok-local via bizParts (CLAUDE.md: business timezone is Asia/Bangkok, not the server's
+// clock timezone), unlike thaiDate() above which only carries a date (no time-of-day to get wrong).
+export function thaiDateTime(v: unknown): string {
+  if (!v) return '-';
+  const d = new Date(v as string);
+  if (Number.isNaN(d.getTime())) return String(v);
+  const p = bizParts(d);
+  return `${String(p.d).padStart(2, '0')}/${String(p.mo).padStart(2, '0')}/${p.y + 543} ${String(p.h).padStart(2, '0')}:${String(p.mi).padStart(2, '0')} น.`;
 }
 
 // 13-digit Thai Tax ID as X-XXXX-XXXXX-XX-X (same shape as tax-docs.snapshot.formatTaxId). Non-13-digit
@@ -44,22 +57,37 @@ export function wrapA4(body: string, title: string, opts: { accentColor?: string
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet"/>
   <style>
-    *{box-sizing:border-box} body{font-family:'Sarabun',sans-serif;color:#1a1a1a;font-size:12px;margin:0}
-    .hdr{display:flex;justify-content:space-between;border-bottom:2px solid ${A};padding-bottom:6px;margin-bottom:8px}
+    *{box-sizing:border-box} body{font-family:'Sarabun',sans-serif;color:#1a1a1a;font-size:12px;margin:0;padding:22px 26px;line-height:1.5}
+    .hdr{display:flex;justify-content:space-between;border-bottom:2px solid ${A};padding-bottom:12px;margin-bottom:16px}
     .brandlogo{max-height:46px;max-width:180px;margin-bottom:4px;display:block} .hnote{font-size:11px;color:#555}
     .t1{font-size:16px;font-weight:700;color:${A}} .ttl{font-size:15px;font-weight:700;color:${A};text-align:right}
     .sub{font-size:11px;font-weight:400;color:#555;letter-spacing:.06em} .stt{font-size:11px;font-weight:600;color:#b00}
     .ct{text-align:center} .b{font-weight:700} .r{text-align:right} .c{text-align:center}
-    table{width:100%;border-collapse:collapse} table.meta td{padding:2px 6px} td.lbl{color:#555;width:18%}
-    table.grid{margin:8px 0} table.grid th{background:${A};color:#fff;padding:5px;text-align:left;font-size:11px}
-    table.grid td{padding:4px 6px;border-bottom:1px solid #e0e0e0} table.grid tr.grand td{border-top:2px solid ${A};font-weight:700}
-    table.totals{width:45%;margin-left:auto;margin-top:6px} table.totals td{padding:3px 6px} td.tval{text-align:right;font-weight:600}
+    table{width:100%;border-collapse:collapse} table.meta td{padding:3px 8px} td.lbl{color:#555;width:18%}
+    table.grid{margin:16px 0} table.grid th{background:${A};color:#fff;padding:8px 8px;text-align:left;font-size:11px}
+    table.grid td{padding:7px 8px;border-bottom:1px solid #e0e0e0} table.grid tr.grand td{border-top:2px solid ${A};font-weight:700}
+    table.totals{width:45%;margin-left:auto;margin-top:14px} table.totals td{padding:5px 8px} td.tval{text-align:right;font-weight:600}
     table.totals tr.grand td{border-top:2px solid ${A};color:${A};font-size:13px}
-    .words{margin-top:8px;font-weight:600;color:${A}} .rmk{margin-top:8px;font-size:11px}
-    .terms{margin-top:10px;font-size:11px;color:#333;white-space:pre-wrap} .fline{margin-top:2px;font-size:11px;color:#555}
-    .foot{margin-top:28px;display:flex;justify-content:space-between}
-    .sign{width:45%;text-align:center;border-top:1px solid #999;padding-top:4px;color:#555}
+    .words{margin-top:14px;font-weight:600;color:${A}} .rmk{margin-top:12px;font-size:11px}
+    .terms{margin-top:14px;font-size:11px;color:#333;white-space:pre-wrap} .fline{margin-top:2px;font-size:11px;color:#555}
+    .foot{margin-top:32px;display:flex;justify-content:space-between}
+    .sign{width:45%;text-align:center;border-top:1px solid #999;padding-top:6px;color:#555}
     .sign .who{margin-top:18px;color:#1a1a1a;font-weight:600}
+    .foot.foot3 .sign{width:30%}
+    .cards{display:flex;gap:14px;margin:16px 0} .cards>.card{flex:1}
+    .card{border:1px solid #e2e5e9;border-radius:8px;padding:12px 14px;background:#fafbfc}
+    .card h4{margin:0 0 8px;font-size:10.5px;font-weight:700;color:${A};text-transform:uppercase;letter-spacing:.04em}
+    .card .name{font-weight:700;font-size:12.5px;margin-bottom:2px}
+    .card > div{margin-top:2px}
+    .kv{display:grid;grid-template-columns:auto 1fr;column-gap:10px;row-gap:5px;font-size:11.5px}
+    .kv .k{color:#666;white-space:nowrap} .kv .v{font-weight:600}
+    table.grid.pogrid{border:1px solid #e2e5e9}
+    table.grid.pogrid tbody tr:nth-child(even) td{background:#f6f8fa}
+    .esign{width:30%;text-align:center}
+    .esign .cap{color:#555;margin-bottom:6px}
+    .esign .stamp{border:1px solid #bfe0cc;background:#f2faf5;border-radius:6px;padding:8px 10px;font-size:10.5px;line-height:1.6}
+    .esign .stamp .tick{color:#1a7a41;font-weight:700} .esign .stamp b{font-size:11px}
+    table.totals.card{background:#fafbfc;padding:6px 4px;border-radius:8px}
   </style></head><body>${body}</body></html>`;
 }
 

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FormField } from '@/components/form-field';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 
 // Shared line-error affordance: a red hint under a line row (shown only after a submit attempt). Line-level
 // validation only kicks in once a line has an Item ID, so the trailing empty "add-a-line" row never nags.
@@ -201,7 +202,9 @@ export function PoForm({ onDone }: { onDone?: () => void }) {
 interface GrLine { item_id: string; received_qty: number; lot_no: string; expiry_date: string; unit_cost: number | ''; uom: string }
 const emptyGrLine = (): GrLine => ({ item_id: '', received_qty: 1, lot_no: '', expiry_date: '', unit_cost: '', uom: '' });
 
-export function GrForm({ onDone }: { onDone?: () => void }) {
+export interface GrPoOption { PO_No: string; Supplier_Name?: string }
+
+export function GrForm({ pos = [], onDone }: { pos?: GrPoOption[]; onDone?: () => void }) {
   const { t } = useLang();
   const [poNo, setPoNo] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -245,7 +248,22 @@ export function GrForm({ onDone }: { onDone?: () => void }) {
   return (
     <div className="space-y-4">
       <FormField htmlFor="gr-po" label={t('proc.gr_po_no')} required error={showErrors ? poErr : undefined} className="sm:max-w-sm">
-        <Input id="gr-po" value={poNo} aria-invalid={showErrors && !!poErr} onChange={(e) => setPoNo(e.target.value)} placeholder="PO-…" />
+        <Select value={poNo || undefined} onValueChange={setPoNo}>
+          <SelectTrigger id="gr-po" className="w-full" aria-invalid={showErrors && !!poErr}>
+            <SelectValue placeholder={t('proc.gr_po_select_ph')} />
+          </SelectTrigger>
+          <SelectContent>
+            {pos.length === 0 ? (
+              <div className="px-2 py-1.5 text-sm text-muted-foreground">{t('proc.gr_po_none')}</div>
+            ) : (
+              pos.map((p) => (
+                <SelectItem key={p.PO_No} value={p.PO_No}>
+                  {p.PO_No}{p.Supplier_Name ? ` — ${p.Supplier_Name}` : ''}
+                </SelectItem>
+              ))
+            )}
+          </SelectContent>
+        </Select>
       </FormField>
       <FormField htmlFor="gr-remarks" label={t('proc.remarks')}>
         <Input id="gr-remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder={t('proc.remarks_ph')} />

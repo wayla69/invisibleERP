@@ -216,11 +216,16 @@ curl -X POST http://localhost:3001/api/auth/login \
 
 This is normal. Wikimedia Commons may not have images for all products:
 
-- **Rare/Obscure Items**: Fallback to placeholder images (stable color per item)
-- **Non-English Names**: Translates first word before searching
-- **Generic Names**: May return unrelated images
+- **Rare/Obscure Items**: Fallback to a generated placeholder tile (stable color + initials,
+  derived from a hash of the item description — no network call, so it never shows an
+  unrelated real photo in place of the actual product)
+- **Thai/Non-English Names**: Translated via a curated Thai product/ingredient dictionary
+  (substring-matched, since Thai compound words have no spaces) before searching
+- **No Dictionary Match / Generic Names**: Search is skipped and the item gets the placeholder
+  tile rather than a guessed — and possibly wrong — Wikimedia result
 
-**Workaround:** Manually upload images for failed items via the admin panel.
+**Workaround:** Manually upload images for failed items via the admin panel, or add the missing
+term to the Thai dictionary in `image-fetch.service.ts`.
 
 ### Timeout After Many Items
 
@@ -356,4 +361,5 @@ For large deployments:
 ## License & Attribution
 
 Images fetched from Wikimedia Commons are under various open licenses.
-Placeholder images are from picsum.photos (public domain).
+Placeholder images are generated locally (SVG initials tile) — no external
+service or license involved.

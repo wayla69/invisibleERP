@@ -65,7 +65,10 @@ export default function ReceivingPage() {
           <CardTitle className="text-base">{t('iv.recv_card_title')}</CardTitle>
         </CardHeader>
         <CardContent>
-          <GrForm onDone={() => { qc.invalidateQueries({ queryKey: PO_LIST_KEY }); qc.invalidateQueries({ queryKey: GR_LIST_KEY }); }} />
+          <GrForm
+            pos={(pos.data?.purchase_orders ?? []).filter((r: any) => isReceivable(String(r.Status)))}
+            onDone={() => { qc.invalidateQueries({ queryKey: PO_LIST_KEY }); qc.invalidateQueries({ queryKey: GR_LIST_KEY }); }}
+          />
         </CardContent>
       </Card>
 
