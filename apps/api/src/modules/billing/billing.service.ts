@@ -12,6 +12,7 @@ import { isUniqueViolation } from '../../common/db-error';
 import { logger } from '../../observability/logger';
 import type { JwtUser } from '../../common/decorators';
 import { PLAN_SUITES } from '@ierp/shared';
+import { computeProration } from './proration';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 
 // Public self-serve signup gate (ITGC-AC-18). In PRODUCTION, self-service company provisioning is
@@ -662,8 +663,18 @@ export class BillingService {
     const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(sql`${subscriptions.createdAt} desc`).limit(1);
     if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for tenant', messageTh: 'ไม่พบการสมัครสมาชิกของร้าน' });
 
+    // 1.6 — mid-cycle proration: unused credit on the OLD plan vs the prorated charge on the NEW plan for
+    // the days left in the period. Informational (surfaced for confirmation); Stripe proration is a follow-up.
+    const [oldPlan] = await db.select({ price: plans.priceMonthly }).from(plans).where(eq(plans.code, sub.planCode)).limit(1);
+    const proration = computeProration({
+      oldPriceMonthly: Number(oldPlan?.price ?? 0),
+      newPriceMonthly: Number(plan.priceMonthly ?? 0),
+      periodEnd: sub.currentPeriodEnd,
+      now: Date.now(),
+    });
+
     await db.update(subscriptions).set({ planCode: target, status: 'Active' }).where(eq(subscriptions.id, sub.id));
-    return { tenant_id: tenantId, plan: target, status: 'Active' };
+    return { tenant_id: tenantId, plan: target, status: 'Active', proration };
   }
 
   // ───────────────────── Plan limit enforcement ─────────────────────

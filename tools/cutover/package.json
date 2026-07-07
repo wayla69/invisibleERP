@@ -40,6 +40,7 @@
     "input-vat": "tsx src/input-vat.ts",
     "tax-point": "tsx src/tax-point.ts",
     "migration-tooling": "tsx src/migration-tooling.ts",
+    "proration": "tsx src/proration.ts",
     "cpq-gl": "tsx src/cpq-gl.ts",
     "promptpay": "tsx src/promptpay.ts",
     "payments-gateway": "tsx src/payments-gateway.ts",
