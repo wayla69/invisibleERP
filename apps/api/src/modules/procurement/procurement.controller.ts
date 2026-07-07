@@ -60,6 +60,9 @@ const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 // D4 — receive a partial qty of one PO line.
 const ReceiveItemBody = z.object({ item_id: z.string().min(1), qty: z.number().positive() });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
+// Vendor bank-detail maker-checker (0270) — stages a change; never applied directly.
+const VendorBankChangeBody = z.object({ bank_name: z.string().optional(), bank_account: z.string().optional() });
+const RejectBody = z.object({ reason: z.string().optional() });
 const ScorecardBody = z.object({ period: z.string().min(1) });
 // T2-D: Supplier price-list versioning — create/version a purchase price; list active; history.
 const SupplierPriceBody = z.object({
@@ -196,6 +199,17 @@ export class ProcurementController {
   setSupplierStatus(@Param('id') id: string, @Body(new ZodValidationPipe(SupplierStatusBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setSupplierStatus(+id, b, u); }
   @Post('suppliers/:id/scorecard') @Permissions('procurement')
   scorecard(@Param('id') id: string, @Body(new ZodValidationPipe(ScorecardBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.recomputeScorecard(+id, b.period, u); }
+
+  // ── Vendor bank-detail maker-checker (0270) — closes a BEC/vendor-payment-fraud gap: md_vendor stages a
+  // change, a DISTINCT exec/approvals user releases it (SoD; self-approval → 403 SOD_VIOLATION). ──
+  @Patch('vendors/:id/bank') @Permissions('md_vendor')
+  stageBankChange(@Param('id') id: string, @Body(new ZodValidationPipe(VendorBankChangeBody)) b: { bank_name?: string; bank_account?: string }, @CurrentUser() u: JwtUser) { return this.svc.stageBankChange(+id, b, u); }
+  @Get('vendor-bank-changes') @Permissions('md_vendor', 'exec', 'approvals')
+  pendingBankChanges(@CurrentUser() u: JwtUser) { return this.svc.pendingBankChanges(u); }
+  @Post('vendor-bank-changes/:reqNo/approve') @Permissions('exec', 'approvals')
+  approveBankChange(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveBankChange(reqNo, u); }
+  @Post('vendor-bank-changes/:reqNo/reject') @Permissions('exec', 'approvals')
+  rejectBankChange(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectBankChange(reqNo, u, b.reason); }
 
   // Supplier-performance register — scorecards ranked by score (with ?period; default = latest per vendor).
   @Get('scorecards') @Permissions('procurement', 'exec')

@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, tenants, vendorBankChangeRequests } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -605,6 +605,79 @@ export class ProcurementService {
     const updated = await db.update(vendors).set(set).where(eq(vendors.id, vendorId)).returning({ id: vendors.id });
     if (!updated.length) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
     return { vendor_id: vendorId, approval_status: dto.approval_status, blocklisted: dto.blocklisted };
+  }
+
+  // ── Vendor bank-detail maker-checker (0270 — closes a BEC/vendor-payment-fraud gap: a single md_vendor
+  // user could otherwise redirect a supplier's payee bank details with no second check). Mirrors the G15
+  // tenant PromptPay/tax-id pattern exactly: a change is staged PendingApproval and applied to `vendors`
+  // only when a DISTINCT approver releases it (403 SOD_VIOLATION on self-approval). ──
+  async stageBankChange(vendorId: number, dto: { bank_name?: string; bank_account?: string }, user: JwtUser) {
+    const db = this.db;
+    if (dto.bank_name === undefined && dto.bank_account === undefined) {
+      throw new BadRequestException({ code: 'NO_FIELDS', message: 'No bank fields to change', messageTh: 'ไม่มีข้อมูลบัญชีธนาคารให้เปลี่ยน' });
+    }
+    const [v] = await db.select().from(vendors).where(eq(vendors.id, vendorId)).limit(1);
+    if (!v) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
+    // Supersede any earlier still-open request for this vendor so the queue holds only the latest.
+    await db.update(vendorBankChangeRequests).set({ status: 'Superseded' })
+      .where(and(eq(vendorBankChangeRequests.vendorId, vendorId), eq(vendorBankChangeRequests.status, 'PendingApproval')));
+    const reqNo = await this.docNo.nextDaily('VBC');
+    await db.insert(vendorBankChangeRequests).values({
+      tenantId: v.tenantId ?? null, vendorId, reqNo,
+      bankName: dto.bank_name ?? null, bankAccount: dto.bank_account ?? null,
+      prevBankName: v.bankName ?? null, prevBankAccount: v.bankAccount ?? null,
+      status: 'PendingApproval', requestedBy: user.username,
+    });
+    return { req_no: reqNo, vendor_id: vendorId, status: 'PendingApproval' };
+  }
+
+  async pendingBankChanges(user: JwtUser) {
+    const db = this.db;
+    const rows = await db.select({
+      reqNo: vendorBankChangeRequests.reqNo, vendorId: vendorBankChangeRequests.vendorId,
+      vendorName: vendors.name, bankName: vendorBankChangeRequests.bankName, bankAccount: vendorBankChangeRequests.bankAccount,
+      prevBankName: vendorBankChangeRequests.prevBankName, prevBankAccount: vendorBankChangeRequests.prevBankAccount,
+      requestedBy: vendorBankChangeRequests.requestedBy, requestedAt: vendorBankChangeRequests.requestedAt,
+    }).from(vendorBankChangeRequests)
+      .innerJoin(vendors, eq(vendors.id, vendorBankChangeRequests.vendorId))
+      .where(eq(vendorBankChangeRequests.status, 'PendingApproval'))
+      .orderBy(desc(vendorBankChangeRequests.id));
+    return {
+      pending: rows.map((r: any) => ({
+        req_no: r.reqNo, vendor_id: Number(r.vendorId), vendor_name: r.vendorName,
+        bank_name: r.bankName, bank_account: r.bankAccount, prev_bank_name: r.prevBankName, prev_bank_account: r.prevBankAccount,
+        requested_by: r.requestedBy, requested_at: r.requestedAt,
+      })),
+      count: rows.length,
+    };
+  }
+
+  private async bankChangeByNo(reqNo: string) {
+    const db = this.db;
+    const [r] = await db.select().from(vendorBankChangeRequests).where(eq(vendorBankChangeRequests.reqNo, reqNo)).limit(1);
+    if (!r || r.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_BANK_CHANGE', message: 'No bank-detail change pending approval', messageTh: 'ไม่พบคำขอเปลี่ยนบัญชีธนาคารที่รออนุมัติ' });
+    return r;
+  }
+
+  async approveBankChange(reqNo: string, approver: JwtUser) {
+    const db = this.db;
+    const r = await this.bankChangeByNo(reqNo);
+    if (r.requestedBy && r.requestedBy === approver.username) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The requester cannot approve their own bank-detail change', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้' });
+    }
+    const set: any = {};
+    if (r.bankName !== null) set.bankName = r.bankName;
+    if (r.bankAccount !== null) set.bankAccount = r.bankAccount;
+    if (Object.keys(set).length) await db.update(vendors).set(set).where(eq(vendors.id, Number(r.vendorId)));
+    await db.update(vendorBankChangeRequests).set({ status: 'Approved', approvedBy: approver.username, approvedAt: new Date() }).where(eq(vendorBankChangeRequests.id, Number(r.id)));
+    return { req_no: reqNo, status: 'Approved', approved_by: approver.username, requested_by: r.requestedBy, vendor_id: Number(r.vendorId) };
+  }
+
+  async rejectBankChange(reqNo: string, approver: JwtUser, reason?: string) {
+    const db = this.db;
+    await this.bankChangeByNo(reqNo);
+    await db.update(vendorBankChangeRequests).set({ status: 'Rejected', rejectReason: reason ?? null }).where(eq(vendorBankChangeRequests.reqNo, reqNo));
+    return { req_no: reqNo, status: 'Rejected', rejected_by: approver.username };
   }
   // Scorecard recompute: on-time/quality remain at 100 (placeholder until claims feed them).
   // price_var_pct: for each GR item received from this vendor, compare unit_cost vs the active

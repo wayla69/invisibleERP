@@ -1891,6 +1891,13 @@
       "when": 2023820000150,
       "tag": "0269_customer_master_address",
       "breakpoints": true
+    },
+    {
+      "idx": 270,
+      "version": "7",
+      "when": 2023820000160,
+      "tag": "0270_vendor_bank_change_requests",
+      "breakpoints": true
     }
   ]
 }

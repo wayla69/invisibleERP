@@ -40,6 +40,9 @@ export const vendors = pgTable('vendors', {
   blocklisted: boolean('blocklisted').notNull().default(false),
   blocklistReason: text('blocklist_reason'),
   scorecardScore: numeric('scorecard_score', { precision: 5, scale: 2 }),
+  // Audit hygiene (0270) — the table had no creation trail at all.
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
 // ── Phase 16 — Source-to-Pay: RFQ/sourcing, supplier scorecards, 3-way match ──

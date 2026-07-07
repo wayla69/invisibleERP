@@ -44,6 +44,10 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    // second Admin — vendors is a shared (tenant_id NULL) master (0034): writing it needs the RLS bypass,
+    // which only an Admin session sets, so the VBC (0270) maker-checker approver must also be Admin (a
+    // DIFFERENT username from the requester still enforces the SoD check).
+    { username: 'vbcApprover', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq },
     // non-Admin (RLS-scoped) procurement users — Procurement role carries both procurement + masterdata
     { username: 'procT1', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },
     { username: 'procT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },
@@ -84,6 +88,7 @@ async function main() {
   const procT1 = await login('procT1', 'pw'); // RLS-scoped to t1
   const procT2 = await login('procT2', 'pw'); // RLS-scoped to t2
   const apprv = await login('apprv', 'pw');   // AP-PAY approver (≠ admin)
+  const vbcApprover = await login('vbcApprover', 'pw'); // VBC (0270) approver — Admin, ≠ admin requester
   const capT1 = await login('capT1', 'pw');   // pr_raise-only capturer (Quick Capture lane)
   const apTxn = async (amount: number) => (await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: V1, txn_type: 'Goods', amount })).json.txn_no as string;
   // AP-PAY maker-checker: requesting a payment (admin) is gated on the 3-way match; a successful request
@@ -167,6 +172,37 @@ async function main() {
   await inj('PATCH', `/api/procurement/suppliers/${V1}/status`, admin, { blocklisted: false, approval_status: 'approved' });
   const okPo = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 10, unit_price: 10 }] });
   ok('Un-blocklist → createPo succeeds again', (okPo.status === 200 || okPo.status === 201) && /^PO-/.test(okPo.json.po_no ?? ''), `${okPo.status}`);
+
+  // ── H2. vendor bank-detail maker-checker (0270) — closes a BEC/vendor-payment-fraud gap: md_vendor
+  // stages a payee bank-detail change, a DISTINCT exec/approvals user must release it before it lands on
+  // `vendors` (mirrors the G15 tenant PromptPay/tax-id pattern). ──
+  const stage1 = await inj('PATCH', `/api/procurement/vendors/${V1}/bank`, admin, { bank_name: 'ธนาคารกรุงเทพ', bank_account: '111-1-11111-1' });
+  ok('VBC: stage bank change → PendingApproval + req_no', stage1.json.status === 'PendingApproval' && /^VBC-/.test(stage1.json.req_no ?? ''), JSON.stringify(stage1.json));
+  const pend1 = await inj('GET', '/api/procurement/vendor-bank-changes', admin);
+  ok('VBC: pending list shows the staged request for V1', (pend1.json.pending ?? []).some((p: any) => p.req_no === stage1.json.req_no && p.vendor_id === V1), JSON.stringify(pend1.json).slice(0, 150));
+  const selfApproveVbc = await inj('POST', `/api/procurement/vendor-bank-changes/${stage1.json.req_no}/approve`, admin);
+  ok('VBC: requester cannot approve own bank-change request → 403 SOD_VIOLATION', selfApproveVbc.status === 403 && selfApproveVbc.json.error?.code === 'SOD_VIOLATION', `${selfApproveVbc.status} ${selfApproveVbc.json.error?.code}`);
+  const approveVbc = await inj('POST', `/api/procurement/vendor-bank-changes/${stage1.json.req_no}/approve`, vbcApprover);
+  // bank_account is encrypted-at-rest (ITGC-AC-19) — decrypts only through the Drizzle ORM layer, so read it
+  // via db.select (not a raw pg.query, which would only see the ciphertext).
+  const vendorAfterApprove = (await db.select().from(s.vendors).where(eq(s.vendors.id, V1)))[0];
+  ok('VBC: distinct approver releases it → vendors.bank_name/bank_account updated', approveVbc.json.status === 'Approved' && vendorAfterApprove?.bankName === 'ธนาคารกรุงเทพ' && vendorAfterApprove?.bankAccount === '111-1-11111-1', JSON.stringify({ st: approveVbc.json.status, row: { bankName: vendorAfterApprove?.bankName, bankAccount: vendorAfterApprove?.bankAccount } }));
+
+  // Re-staging supersedes any still-open request; the earlier one is marked Superseded, not left dangling.
+  const stage2 = await inj('PATCH', `/api/procurement/vendors/${V1}/bank`, admin, { bank_name: 'ธนาคารไทยพาณิชย์', bank_account: '222-2-22222-2' });
+  const stage3 = await inj('PATCH', `/api/procurement/vendors/${V1}/bank`, admin, { bank_name: 'ธนาคารกสิกรไทย', bank_account: '333-3-33333-3' });
+  const pend2 = await inj('GET', '/api/procurement/vendor-bank-changes', admin);
+  const supersededRow = (await pg.query(`SELECT status FROM vendor_bank_change_requests WHERE req_no='${stage2.json.req_no}'`)).rows as any[];
+  ok('VBC: re-staging supersedes the earlier still-pending request (only the latest shows as pending)',
+    supersededRow[0]?.status === 'Superseded' && (pend2.json.pending ?? []).some((p: any) => p.req_no === stage3.json.req_no) && !(pend2.json.pending ?? []).some((p: any) => p.req_no === stage2.json.req_no),
+    JSON.stringify({ superseded: supersededRow[0]?.status, pending: (pend2.json.pending ?? []).map((p: any) => p.req_no) }));
+
+  // Reject leaves vendors untouched.
+  const rejectVbc = await inj('POST', `/api/procurement/vendor-bank-changes/${stage3.json.req_no}/reject`, vbcApprover, { reason: 'ไม่สามารถยืนยันตัวตนได้' });
+  const vendorAfterReject = (await db.select().from(s.vendors).where(eq(s.vendors.id, V1)))[0];
+  ok('VBC: reject → status Rejected, vendors bank details unchanged (still the earlier approved values)',
+    rejectVbc.json.status === 'Rejected' && vendorAfterReject?.bankName === 'ธนาคารกรุงเทพ' && vendorAfterReject?.bankAccount === '111-1-11111-1',
+    JSON.stringify({ st: rejectVbc.json.status, row: { bankName: vendorAfterReject?.bankName, bankAccount: vendorAfterReject?.bankAccount } }));
 
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];
