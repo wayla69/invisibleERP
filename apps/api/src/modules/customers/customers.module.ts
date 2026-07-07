@@ -65,6 +65,7 @@ export class CustomersController {
 const CreateCustomerBody = z.object({
   name: z.string().min(1), kind: z.enum(['person', 'company']).default('person'),
   email: z.string().optional(), phone: z.string().optional(), tax_id: z.string().optional(),
+  address: z.string().optional(), branch_code: z.string().optional(),
   member_id: z.number().int().optional(), account_code: z.string().optional(), notes: z.string().optional(),
 });
 const LinkCustomerBody = z.object({ member_id: z.number().int().nullable().optional(), account_code: z.string().nullable().optional() });
@@ -78,10 +79,41 @@ export class CustomerMasterService {
     const customerNo = await this.docNo.nextDaily('CUS');
     await db.insert(customerMaster).values({
       tenantId: user.tenantId ?? null, customerNo, name: dto.name, kind: dto.kind, email: dto.email ?? null,
-      phone: dto.phone ?? null, taxId: dto.tax_id ?? null, memberId: dto.member_id ?? null, accountCode: dto.account_code ?? null,
+      phone: dto.phone ?? null, taxId: dto.tax_id ?? null, address: dto.address ?? null, branchCode: dto.branch_code ?? null,
+      memberId: dto.member_id ?? null, accountCode: dto.account_code ?? null,
       status: 'active', notes: dto.notes ?? null, createdBy: user.username,
     });
     return { customer_no: customerNo, name: dto.name, kind: dto.kind };
+  }
+
+  // Called when a full tax invoice (ม.86/4) is issued for a buyer — keeps the master directory reusable
+  // (name/tax_id/branch/address) without a separate "add customer" step. Dedup is by exact name match
+  // within the tenant (customer_master has no strict unique-customer key today — see the table's own
+  // "unifying two silos" note — tax_id can't be the dedup key since it's stored encrypted, not equality-
+  // queryable; see database/encrypted-column.ts). An existing match's address/branch/tax-id are refreshed
+  // from the invoice (the issuer is providing the current, authoritative info); a genuinely new buyer name
+  // creates a new record. Best-effort: never blocks or fails invoice issuance.
+  async upsertFromInvoiceBuyer(buyer: { name: string; tax_id?: string | null; address?: string | null; branch_code?: string | null }, tenantId: number | null, username: string) {
+    const db = this.db;
+    const name = buyer.name?.trim();
+    if (!name) return;
+    const conds = [eq(customerMaster.name, name)];
+    if (tenantId != null) conds.push(eq(customerMaster.tenantId, tenantId));
+    const [existing] = await db.select().from(customerMaster).where(and(...conds)).limit(1);
+    if (existing) {
+      const set: any = {};
+      if (buyer.tax_id) set.taxId = buyer.tax_id;
+      if (buyer.address) set.address = buyer.address;
+      if (buyer.branch_code) set.branchCode = buyer.branch_code;
+      if (Object.keys(set).length) await db.update(customerMaster).set(set).where(eq(customerMaster.id, Number(existing.id)));
+      return;
+    }
+    const customerNo = await this.docNo.nextDaily('CUS');
+    await db.insert(customerMaster).values({
+      tenantId, customerNo, name, kind: 'company', taxId: buyer.tax_id ?? null,
+      address: buyer.address ?? null, branchCode: buyer.branch_code ?? null,
+      status: 'active', createdBy: username,
+    });
   }
 
   async list(q: { search?: string }, _user: JwtUser) {
@@ -137,7 +169,7 @@ export class CustomerMasterService {
 }
 
 function shapeCustomer(c: any) {
-  return { customer_no: c.customerNo, name: c.name, kind: c.kind, email: c.email, phone: c.phone, tax_id: c.taxId, member_id: c.memberId != null ? Number(c.memberId) : null, account_code: c.accountCode, status: c.status, notes: c.notes, created_by: c.createdBy, created_at: c.createdAt };
+  return { customer_no: c.customerNo, name: c.name, kind: c.kind, email: c.email, phone: c.phone, tax_id: c.taxId, address: c.address ?? null, branch_code: c.branchCode ?? null, member_id: c.memberId != null ? Number(c.memberId) : null, account_code: c.accountCode, status: c.status, notes: c.notes, created_by: c.createdBy, created_at: c.createdAt };
 }
 
 @Controller('api/customer-master')
@@ -152,5 +184,5 @@ export class CustomerMasterController {
   @Patch(':customerNo/link') link(@Param('customerNo') no: string, @Body(new ZodValidationPipe(LinkCustomerBody)) b: z.infer<typeof LinkCustomerBody>, @CurrentUser() u: JwtUser) { return this.svc.link(no, b, u); }
 }
 
-@Module({ controllers: [CustomersController, CustomerMasterController], providers: [CustomersService, CustomerMasterService] })
+@Module({ controllers: [CustomersController, CustomerMasterController], providers: [CustomersService, CustomerMasterService], exports: [CustomersService, CustomerMasterService] })
 export class CustomersModule {}

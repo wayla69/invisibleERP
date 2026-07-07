@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileText, Receipt, Coins, Ban, Plus, ExternalLink, FileCode, Mail, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -20,6 +20,18 @@ import { statusVariant } from '@/components/ui';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+/** Debounce a fast-changing value (mirrors the omni-search debounce in command-palette.tsx). */
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(id);
+  }, [value, ms]);
+  return v;
+}
+
+type CustomerMatch = { customer_no: string; name: string; tax_id: string | null; address: string | null; branch_code: string | null };
 
 type Invoice = {
   doc_no: string;
@@ -56,6 +68,29 @@ export default function TaxInvoicesPage() {
   const [buyerName, setBuyerName] = useState('');
   const [buyerTaxId, setBuyerTaxId] = useState('');
   const [buyerAddr, setBuyerAddr] = useState('');
+  const [buyerBranchCode, setBuyerBranchCode] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [paidBy, setPaidBy] = useState<'' | 'transfer' | 'cash' | 'cheque' | 'other'>('');
+  const [paidByOther, setPaidByOther] = useState('');
+  const [paidBank, setPaidBank] = useState('');
+  const [paidChequeNo, setPaidChequeNo] = useState('');
+  const [paidBranch, setPaidBranch] = useState('');
+
+  // ── search existing customer master data so the buyer doesn't need retyping (0269) ──
+  const [buyerPickerOpen, setBuyerPickerOpen] = useState(false);
+  const buyerQuery = useDebounced(buyerName.trim(), 300);
+  const custSearch = useQuery<{ customers: CustomerMatch[] }>({
+    queryKey: ['customer-master-search', buyerQuery],
+    queryFn: () => api(`/api/customer-master?search=${encodeURIComponent(buyerQuery)}`),
+    enabled: buyerPickerOpen && buyerQuery.length >= 2,
+    staleTime: 15_000,
+    retry: false,
+  });
+  const custResults = custSearch.data?.customers ?? [];
+  const pickCustomer = (c: CustomerMatch) => {
+    setBuyerName(c.name); setBuyerTaxId(c.tax_id ?? ''); setBuyerAddr(c.address ?? ''); setBuyerBranchCode(c.branch_code ?? '');
+    setBuyerPickerOpen(false);
+  };
 
   const issue = useMutation({
     mutationFn: () =>
@@ -64,12 +99,15 @@ export default function TaxInvoicesPage() {
         body: JSON.stringify({
           source_type: src,
           source_ref: srcRef,
-          buyer: { name: buyerName, tax_id: buyerTaxId || undefined, address: buyerAddr },
+          buyer: { name: buyerName, tax_id: buyerTaxId || undefined, address: buyerAddr, branch_code: buyerBranchCode || undefined },
+          due_date: dueDate || undefined,
+          payment: paidBy ? { paid_by: paidBy, paid_by_other: paidBy === 'other' ? paidByOther || undefined : undefined, bank: paidBank || undefined, cheque_no: paidChequeNo || undefined, branch: paidBranch || undefined } : undefined,
         }),
       }),
     onSuccess: (r) => {
       notifySuccess(t('tax.inv_issued', { doc: r.doc_no }));
-      setSrcRef(''); setBuyerName(''); setBuyerTaxId(''); setBuyerAddr('');
+      setSrcRef(''); setBuyerName(''); setBuyerTaxId(''); setBuyerAddr(''); setBuyerBranchCode('');
+      setDueDate(''); setPaidBy(''); setPaidByOther(''); setPaidBank(''); setPaidChequeNo(''); setPaidBranch('');
       qc.invalidateQueries({ queryKey: ['tax-invoices'] });
     },
     onError: (e: any) => notifyError(e.message),
@@ -163,9 +201,34 @@ export default function TaxInvoicesPage() {
               <Input id="src-ref" value={srcRef} onChange={(e) => setSrcRef(e.target.value)} placeholder={src === 'POS' ? t('tax.src_ref_ph_pos') : t('tax.src_ref_ph_ar')} />
             </div>
           </div>
-          <div className="grid gap-2">
+          <div className="relative grid gap-2">
             <Label htmlFor="buyer-name">{t('tax.inv_buyer_name')}</Label>
-            <Input id="buyer-name" value={buyerName} onChange={(e) => setBuyerName(e.target.value)} placeholder={t('tax.inv_buyer_name_ph')} />
+            <Input
+              id="buyer-name"
+              value={buyerName}
+              onChange={(e) => { setBuyerName(e.target.value); setBuyerPickerOpen(true); }}
+              onFocus={() => setBuyerPickerOpen(true)}
+              onBlur={() => setTimeout(() => setBuyerPickerOpen(false), 150)}
+              placeholder={t('tax.inv_buyer_name_ph')}
+              autoComplete="off"
+            />
+            {buyerPickerOpen && custResults.length > 0 && (
+              <div className="absolute top-full z-10 mt-1 w-full rounded-md border bg-popover shadow-md">
+                {custResults.map((c) => (
+                  <button
+                    key={c.customer_no}
+                    type="button"
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
+                    onMouseDown={() => pickCustomer(c)}
+                  >
+                    <div className="font-medium">{c.name}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {[c.tax_id, c.address].filter(Boolean).join(' · ') || t('tax.optional')}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
@@ -177,6 +240,41 @@ export default function TaxInvoicesPage() {
               <Input id="buyer-addr" value={buyerAddr} onChange={(e) => setBuyerAddr(e.target.value)} placeholder={t('tax.inv_buyer_addr_ph')} />
             </div>
           </div>
+          <div className="grid gap-2 sm:max-w-xs">
+            <Label htmlFor="due-date">{t('tax.inv_due_date')}</Label>
+            <Input id="due-date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label>{t('tax.inv_paid_by')}</Label>
+            <div className="flex flex-wrap gap-2">
+              {(['', 'transfer', 'cash', 'cheque', 'other'] as const).map((k) => (
+                <Button key={k || 'none'} type="button" variant={paidBy === k ? 'default' : 'outline'} size="sm" onClick={() => setPaidBy(k)}>
+                  {k === '' ? t('tax.paid_by_none') : t(`tax.paid_by_${k}`)}
+                </Button>
+              ))}
+            </div>
+          </div>
+          {paidBy === 'other' && (
+            <Input value={paidByOther} onChange={(e) => setPaidByOther(e.target.value)} placeholder={t('tax.paid_by_other_ph')} />
+          )}
+          {(paidBy === 'transfer' || paidBy === 'cheque') && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-2">
+                <Label htmlFor="paid-bank">{t('tax.paid_bank')}</Label>
+                <Input id="paid-bank" value={paidBank} onChange={(e) => setPaidBank(e.target.value)} />
+              </div>
+              {paidBy === 'cheque' && (
+                <div className="grid gap-2">
+                  <Label htmlFor="paid-cheque-no">{t('tax.paid_cheque_no')}</Label>
+                  <Input id="paid-cheque-no" value={paidChequeNo} onChange={(e) => setPaidChequeNo(e.target.value)} />
+                </div>
+              )}
+              <div className="grid gap-2">
+                <Label htmlFor="paid-branch">{t('tax.paid_branch')}</Label>
+                <Input id="paid-branch" value={paidBranch} onChange={(e) => setPaidBranch(e.target.value)} />
+              </div>
+            </div>
+          )}
           <Button disabled={!canIssue} onClick={() => issue.mutate()}>
             <Receipt className="size-4" /> {issue.isPending ? t('tax.issuing') : t('tax.inv_issue_btn')}
           </Button>

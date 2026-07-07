@@ -11,6 +11,7 @@ export const tenants = pgTable('tenants', {
   orgId: bigint('org_id', { mode: 'number' }),
   contactName: text('contact_name'),
   phone: text('phone'),
+  fax: text('fax'),
   email: text('email'),
   taxId: text('tax_id'),
   address: text('address'),

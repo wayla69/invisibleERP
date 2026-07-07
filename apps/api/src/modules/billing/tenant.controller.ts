@@ -20,6 +20,7 @@ const ProfileBody = z.object({
   vat_rate: z.number().min(0).max(1).optional(),
   tax_country: z.string().length(2).optional(),
   phone: z.string().optional(),
+  fax: z.string().optional(),
   email: z.string().email().optional(),
   address_line1: z.string().optional(),
   address_line2: z.string().optional(),
@@ -65,7 +66,7 @@ export class TenantController {
     const patch: Record<string, unknown> = {};
     const map: Record<string, string> = {
       legal_name: 'legalName', name: 'name', branch_code: 'branchCode',
-      vat_registered: 'vatRegistered', tax_country: 'taxCountry', phone: 'phone', email: 'email',
+      vat_registered: 'vatRegistered', tax_country: 'taxCountry', phone: 'phone', fax: 'fax', email: 'email',
       address_line1: 'addressLine1', address_line2: 'addressLine2', sub_district: 'subDistrict',
       district: 'district', province: 'province', postal_code: 'postalCode',
       default_language: 'defaultLanguage', logo_url: 'logoUrl', tagline: 'tagline',
@@ -195,7 +196,7 @@ export class TenantController {
       id: Number(t.id), code: t.code, name: t.name, legal_name: t.legalName, tax_id: t.taxId,
       branch_code: t.branchCode, branch_label_th: t.branchLabelTh,
       vat_registered: !!t.vatRegistered, vat_rate: t.vatRate != null ? Number(t.vatRate) : 0.07, tax_country: t.taxCountry ?? 'TH',
-      phone: t.phone, email: t.email,
+      phone: t.phone, fax: t.fax, email: t.email,
       address_line1: t.addressLine1, address_line2: t.addressLine2, sub_district: t.subDistrict,
       district: t.district, province: t.province, postal_code: t.postalCode,
       promptpay_id: t.promptpayId ?? null,

@@ -16,6 +16,8 @@ export const customerMaster = pgTable('customer_master', {
   taxId: encryptedText('tax_id'),                  // PII-at-rest (panel #2): Thai tax/national ID — NOT queried → safe to encrypt transparently
   memberId: bigint('member_id', { mode: 'number' }), // → pos_members.id (B2C loyalty link)
   accountCode: text('account_code'),               // B2B customer tenant code (orders + AR)
+  address: encryptedText('address'),               // buyer address for tax invoices — not searched → encrypted (0269)
+  branchCode: text('branch_code'),                 // buyer's VAT branch, e.g. for the ม.86/4 buyer block (0269)
   status: text('status').notNull().default('active'), // active | inactive
   notes: encryptedText('notes'),                   // free-text may hold PII — NOT queried → encrypted at rest
   createdBy: text('created_by'),

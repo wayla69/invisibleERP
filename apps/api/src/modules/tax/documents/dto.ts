@@ -8,12 +8,25 @@ const BuyerBlock = z.object({
   address: z.string().min(1),
 });
 
+// Optional "ชำระเงินโดย" (Paid By) block — a receipt-style payment record, not a ม.86/4-mandatory particular.
+// For a POS-sourced invoice the payment method is normally derived from the sale itself (see
+// TaxInvoiceService.issueFull); this lets the caller override or supply it for an AR-sourced invoice.
+const PaymentBlock = z.object({
+  paid_by: z.enum(['transfer', 'cash', 'cheque', 'other']).optional(),
+  paid_by_other: z.string().optional(),
+  bank: z.string().optional(),
+  cheque_no: z.string().optional(),
+  branch: z.string().optional(),
+});
+
 export const IssueFullBody = z.object({
   source_type: z.enum(['POS', 'AR']),
   source_ref: z.string().min(1),
   buyer: BuyerBlock,
   book_no: z.string().optional(),
   notes: z.string().optional(),
+  due_date: z.string().optional(),   // วันครบกำหนดชำระเงิน (mainly for an AR-sourced invoice not yet paid)
+  payment: PaymentBlock.optional(),
 });
 export type IssueFullDto = z.infer<typeof IssueFullBody>;
 
