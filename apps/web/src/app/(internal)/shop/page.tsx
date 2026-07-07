@@ -386,7 +386,7 @@ export default function ShopPage() {
   );
 
   return (
-    <div className={cn(cart.length > 0 && 'pb-20 lg:pb-0')}>
+    <div className={cn(cart.length > 0 && 'pb-20 xl:pb-0')}>
       <PageHeader title={t('shop.title')} description={t('shop.desc')} />
 
       {/* A standalone (not PageHeader-actions) row so it can wrap freely on a phone — the shared
@@ -412,7 +412,9 @@ export default function ShopPage() {
         <Button asChild variant="outline" size="sm"><Link href="/requisitions">{t('shop.view_prs')}</Link></Button>
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
+      {/* Stacked (catalog full-width, basket below) up through tablet — only true desktop widths (xl+)
+          get the side-by-side sidebar basket; phones and tablets use the floating basket button instead. */}
+      <div className="grid items-start gap-4 xl:grid-cols-[1fr_360px]">
         {/* ── Catalog ─────────────────────────────────────────────── */}
         <div className="space-y-3">
           {/* Low-stock quick-add (items at/below their reorder point) */}
@@ -503,7 +505,10 @@ export default function ShopPage() {
                 </p>
               </div>
             ) : view === 'grid' ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
+              /* Fixed 3 columns through tablet widths (phones + iPads alike) so the hero image scales down
+                 with the tile instead of ballooning to fill a wide-but-lonely 2-up row — the auto-fill
+                 minmax(11rem,…) track only kicks in once there's real desktop width (xl+) to spread into. */
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
                 {displayItems.map((it) => {
                   const inCart = cartQty(it.item_id);
                   const fav = favs.has(it.item_id);
@@ -518,24 +523,24 @@ export default function ShopPage() {
                           aria-label={t('shop.favorite')}
                           title={t('shop.favorite')}
                           onClick={() => toggleFav(it.item_id)}
-                          className={cn('absolute left-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-background/85 shadow-sm backdrop-blur transition hover:bg-background', fav ? 'text-amber-500' : 'text-muted-foreground')}
+                          className={cn('absolute left-1 top-1 grid size-6 place-items-center rounded-full bg-background/85 shadow-sm backdrop-blur transition hover:bg-background sm:left-1.5 sm:top-1.5 sm:size-8', fav ? 'text-amber-500' : 'text-muted-foreground')}
                         >
-                          <Star className={cn('size-4', fav && 'fill-current')} />
+                          <Star className={cn('size-3 sm:size-4', fav && 'fill-current')} />
                         </button>
                         <button
                           type="button"
                           aria-label={t('shop.add_urgent')}
                           title={t('shop.add_urgent')}
                           onClick={() => addItem(it, true)}
-                          className="absolute right-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-background/85 text-amber-500 shadow-sm backdrop-blur transition hover:bg-background"
+                          className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-background/85 text-amber-500 shadow-sm backdrop-blur transition hover:bg-background sm:right-1.5 sm:top-1.5 sm:size-8"
                         >
-                          <Zap className="size-4" />
+                          <Zap className="size-3 sm:size-4" />
                         </button>
                       </div>
-                      <div className="flex flex-1 flex-col gap-0.5 p-2">
-                        <p className="line-clamp-2 text-xs font-medium leading-snug sm:text-sm">{it.item_description || it.item_id}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
-                        <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+                      <div className="flex flex-1 flex-col gap-0.5 p-1.5 sm:p-2">
+                        <p className="line-clamp-2 text-[11px] font-medium leading-snug sm:text-sm">{it.item_description || it.item_id}</p>
+                        <p className="hidden truncate text-[11px] text-muted-foreground sm:block">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                        <div className="hidden flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground sm:flex">
                           {it.on_hand != null && (
                             <span className={it.on_hand <= 0 ? 'font-medium text-destructive' : ''}>
                               {it.on_hand > 0 ? t('shop.on_hand', { n: num(it.on_hand) }) : t('shop.out_of_stock')}
@@ -543,13 +548,13 @@ export default function ShopPage() {
                           )}
                           {it.last_price != null && it.last_price > 0 && <span>{t('shop.last_price', { price: baht(it.last_price) })}</span>}
                         </div>
-                        <div className="mt-auto flex items-end justify-between gap-2 pt-1">
+                        <div className="mt-auto flex items-end justify-between gap-1 pt-1">
                           {/* Price led large + bold in the brand colour — the one thing a Shopee/Grab
                               card wants you to notice first after the photo. */}
-                          <span className="text-base font-bold text-primary">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
-                          <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-primary sm:text-base">{it.unit_price > 0 ? baht(it.unit_price) : ''}</span>
+                          <div className="flex items-center gap-1 sm:gap-1.5">
                             {inCart > 0 && <Badge variant="secondary" className="text-[11px]">{inCart}</Badge>}
-                            <Button size="icon" className="size-8 shrink-0 rounded-full" aria-label={t('shop.add')} title={t('shop.add')} onClick={() => addItem(it)}><Plus className="size-4" /></Button>
+                            <Button size="icon" className="size-6 shrink-0 rounded-full sm:size-8" aria-label={t('shop.add')} title={t('shop.add')} onClick={() => addItem(it)}><Plus className="size-3 sm:size-4" /></Button>
                           </div>
                         </div>
                       </div>
@@ -756,30 +761,23 @@ export default function ShopPage() {
         </div>
       </div>
 
-      {/* Mobile-only checkout bar (Shopee/Grab pattern) — pinned to the bottom, shows item count +
-          subtotal, jumps down to the basket (which stacks below the catalog on phones). */}
+      {/* Floating basket button (phones + tablets, Shopee/Grab pattern) — a corner pill, not a full-width
+          bar, so it never competes with the catalog for screen space. Jumps down to the basket card (which
+          stacks below the catalog below xl) where the requester reviews lines and submits the PR. */}
       {cart.length > 0 && (
         <button
           type="button"
           onClick={() => document.getElementById('shop-basket')?.scrollIntoView({ behavior: 'smooth' })}
           aria-label={t('shop.view_cart')}
-          className="fixed inset-x-0 bottom-0 z-40 flex w-full items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,0,0,0.08)] backdrop-blur transition-transform active:scale-[0.99] supports-[backdrop-filter]:bg-background/85 lg:hidden"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex items-center gap-2 rounded-full bg-primary py-3 pl-4 pr-5 text-primary-foreground shadow-lg transition-transform active:scale-95 xl:hidden"
         >
-          <span className="flex min-w-0 items-center gap-2.5">
-            <span className="relative shrink-0">
-              <ShoppingCart className="size-6 text-primary" />
-              <Badge variant="destructive" className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full p-0 px-1 text-[10px] leading-none">
-                {cart.length}
-              </Badge>
-            </span>
-            <span className="min-w-0 text-left">
-              <span className="block truncate text-[11px] text-muted-foreground">{t('shop.lines_n', { n: cart.length })}</span>
-              <span className="block text-base font-bold text-primary">{baht(cartTotal)}</span>
-            </span>
+          <span className="relative shrink-0">
+            <ShoppingCart className="size-5" />
+            <Badge variant="destructive" className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full p-0 px-1 text-[10px] leading-none">
+              {cart.length}
+            </Badge>
           </span>
-          <span className="shrink-0 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">
-            {t('shop.view_cart')}
-          </span>
+          <span className="text-sm font-bold">{baht(cartTotal)}</span>
         </button>
       )}
     </div>
