@@ -6,8 +6,8 @@ import { test, expect, type Page } from '@playwright/test';
  * see playwright.config.ts — so they exercise the responsive layers that are display:none above the
  * `sm`/`lg` breakpoints and would never render at the Desktop Chrome viewport the other specs use.
  *
- * Each assertion targets a MOBILE-SPECIFIC element (a `sm:hidden` card list, an `lg:hidden` bottom bar,
- * the phone-width menu grid), so a regression that reflowed these back into a squeezed desktop table/row
+ * Each assertion targets a MOBILE-SPECIFIC element (a `sm:hidden` card list, an `xl:hidden` floating basket
+ * button, the phone-width menu grid), so a regression that reflowed these back into a squeezed desktop table/row
  * fails here even though the desktop specs stay green. All /api/** calls are stubbed (no backend/DB).
  */
 
@@ -84,7 +84,7 @@ test('requisitions: phone renders the PR card list, not the desktop table', asyn
   await expect(cardList.getByText('กระดาษ A4 80 แกรม')).toBeVisible();
 });
 
-test('shop: phone shows the pinned bottom checkout bar after adding an item', async ({ page }) => {
+test('shop: phone shows the floating basket button after adding an item', async ({ page }) => {
   await boot(page);
   await page.goto('/shop');
 
@@ -92,12 +92,12 @@ test('shop: phone shows the pinned bottom checkout bar after adding an item', as
   await expect(page.getByText('กระดาษ A4 80 แกรม')).toBeVisible();
   await page.getByRole('button', { name: 'ใส่ตะกร้า' }).first().click();
 
-  // The Shopee/Grab-style bottom checkout bar is `lg:hidden` — present only below the `lg` breakpoint, so
-  // it is visible at the phone viewport and would be display:none on desktop. Its accessible name is the
-  // "ดูตะกร้า" (view basket) aria-label.
-  const bar = page.getByRole('button', { name: 'ดูตะกร้า' });
-  await expect(bar).toBeVisible();
-  await expect(bar).toContainText('1 รายการ');
+  // The floating basket button is `xl:hidden` — present on phones and tablets alike, display:none only at
+  // true desktop widths (which get the side-by-side basket sidebar instead). Its accessible name is the
+  // "ดูตะกร้า" (view basket) aria-label; it shows the running subtotal, not a line-count label.
+  const fab = page.getByRole('button', { name: 'ดูตะกร้า' });
+  await expect(fab).toBeVisible();
+  await expect(fab).toContainText('฿120.00');
 });
 
 test('approvals: phone renders the pending-approval cards with inline actions, not the table', async ({ page }) => {
