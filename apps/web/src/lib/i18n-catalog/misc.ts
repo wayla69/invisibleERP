@@ -403,6 +403,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.setup_f_branch_code': { th: 'รหัสสาขา', en: 'Branch code' },
   'mx.setup_h_branch_code': { th: '00000 = สำนักงานใหญ่', en: '00000 = head office' },
   'mx.setup_f_phone': { th: 'โทรศัพท์', en: 'Phone' },
+  'mx.setup_f_fax': { th: 'โทรสาร (Fax)', en: 'Fax' },
   'mx.setup_f_email': { th: 'อีเมล', en: 'Email' },
   'mx.setup_f_promptpay': { th: 'พร้อมเพย์ (สำหรับ QR รับเงิน)', en: 'PromptPay (for payment QR)' },
   'mx.setup_h_promptpay': { th: 'เบอร์มือถือ 10 หลัก หรือเลขบัตร 13 หลัก', en: '10-digit mobile number or 13-digit ID card number' },

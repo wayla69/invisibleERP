@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge';
 interface Profile {
   code: string; name: string; legal_name: string | null; tax_id: string | null; branch_code: string | null;
   vat_registered: boolean; vat_rate: number; tax_country: string;
-  phone: string | null; email: string | null;
+  phone: string | null; fax: string | null; email: string | null;
   address_line1: string | null; address_line2: string | null; sub_district: string | null;
   district: string | null; province: string | null; postal_code: string | null;
   promptpay_id: string | null;
@@ -34,6 +34,7 @@ const FIELDS_IDENTITY: FieldDef[] = [
   { key: 'tax_id', label: 'mx.setup_f_tax_id', hint: 'mx.setup_h_tax_id' },
   { key: 'branch_code', label: 'mx.setup_f_branch_code', hint: 'mx.setup_h_branch_code' },
   { key: 'phone', label: 'mx.setup_f_phone' },
+  { key: 'fax', label: 'mx.setup_f_fax' },
   { key: 'email', label: 'mx.setup_f_email' },
   { key: 'promptpay_id', label: 'mx.setup_f_promptpay', hint: 'mx.setup_h_promptpay' },
 ];
@@ -82,7 +83,7 @@ export default function SetupPage() {
       body: JSON.stringify({
         legal_name: form.legal_name, tax_id: form.tax_id, branch_code: form.branch_code,
         vat_registered: !!form.vat_registered, vat_rate: Number(form.vat_rate) || 0.07, name: form.name,
-        phone: form.phone, email: form.email,
+        phone: form.phone, fax: form.fax, email: form.email,
         address_line1: form.address_line1, address_line2: form.address_line2, sub_district: form.sub_district,
         district: form.district, province: form.province, postal_code: form.postal_code,
         promptpay_id: form.promptpay_id || undefined,
