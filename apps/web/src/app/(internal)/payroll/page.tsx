@@ -46,7 +46,8 @@ function Employees() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['pay-emps'], queryFn: () => api('/api/payroll/employees') });
-  const [f, setF] = useState({ name: '', national_id: '', position: '', monthly_salary: '', hourly_rate: '', pf_rate: '' });
+  const emptyForm = { name: '', national_id: '', sso_no: '', position: '', department: '', monthly_salary: '', hourly_rate: '', pf_rate: '', allowances: '', bank_account: '', start_date: '', sso_eligible: true };
+  const [f, setF] = useState(emptyForm);
 
   const add = useMutation({
     mutationFn: () =>
@@ -55,15 +56,21 @@ function Employees() {
         body: JSON.stringify({
           name: f.name,
           national_id: f.national_id || undefined,
+          sso_no: f.sso_no || undefined,
           position: f.position || undefined,
+          department: f.department || undefined,
           monthly_salary: Number(f.monthly_salary) || 0,
           hourly_rate: Number(f.hourly_rate) || 0,
           pf_rate: Number(f.pf_rate) || 0,
+          allowances: Number(f.allowances) || 0,
+          bank_account: f.bank_account || undefined,
+          start_date: f.start_date || undefined,
+          sso_eligible: f.sso_eligible,
         }),
       }),
     onSuccess: (r) => {
       notifySuccess(t('hr.emp_added', { code: r.emp_code }));
-      setF({ name: '', national_id: '', position: '', monthly_salary: '', hourly_rate: '', pf_rate: '' });
+      setF(emptyForm);
       qc.invalidateQueries({ queryKey: ['pay-emps'] });
     },
     onError: (e: any) => notifyError(e.message),
@@ -76,10 +83,26 @@ function Employees() {
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="grid gap-1.5"><Label>{t('hr.full_name')}</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('hr.national_id')}</Label><Input value={f.national_id} onChange={(e) => setF({ ...f, national_id: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('hr.sso_no')}</Label><Input value={f.sso_no} onChange={(e) => setF({ ...f, sso_no: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('hr.position')}</Label><Input value={f.position} onChange={(e) => setF({ ...f, position: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('hr.department')}</Label><Input value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('hr.start_date')}</Label><Input type="date" value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('hr.salary_baht')}</Label><Input type="number" min="0" value={f.monthly_salary} onChange={(e) => setF({ ...f, monthly_salary: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('hr.hourly_rate_ot')}</Label><Input type="number" min="0" value={f.hourly_rate} onChange={(e) => setF({ ...f, hourly_rate: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('hr.pf_rate')}</Label><Input type="number" min="0" step="0.01" value={f.pf_rate} onChange={(e) => setF({ ...f, pf_rate: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('hr.allowances')}</Label><Input type="number" min="0" value={f.allowances} onChange={(e) => setF({ ...f, allowances: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('hr.bank_account')}</Label><Input value={f.bank_account} onChange={(e) => setF({ ...f, bank_account: e.target.value })} /></div>
+          <div className="grid gap-1.5">
+            <Label>{t('hr.sso_eligible')}</Label>
+            <select
+              className="h-9 rounded-md border bg-transparent px-3 text-sm"
+              value={f.sso_eligible ? '1' : '0'}
+              onChange={(e) => setF({ ...f, sso_eligible: e.target.value === '1' })}
+            >
+              <option value="1">{t('hr.sso_eligible_yes')}</option>
+              <option value="0">{t('hr.sso_eligible_no')}</option>
+            </select>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Button onClick={() => add.mutate()} disabled={!f.name || !f.monthly_salary || add.isPending}><Plus className="size-4" /> {t('hr.add_btn')}</Button>
@@ -94,6 +117,8 @@ function Employees() {
               { key: 'emp_code', label: t('hr.col_code') },
               { key: 'name', label: t('hr.col_name') },
               { key: 'position', label: t('hr.position') },
+              { key: 'department', label: t('hr.department'), render: (r: any) => r.department || '—' },
+              { key: 'start_date', label: t('hr.start_date'), render: (r: any) => r.start_date || '—' },
               { key: 'monthly_salary', label: t('hr.salary'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.monthly_salary)}</span> },
             ]}
           />

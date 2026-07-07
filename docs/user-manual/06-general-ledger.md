@@ -168,6 +168,20 @@ codes** (see [Tax](./07-tax.md)). Leave any of them blank to keep the standard b
 |---------|---------|-----------|
 | `INVALID_POSTING_ACCOUNT` | An item/category account profile points at a code that doesn't exist in the chart, or at a header/control account you can't post to | Fix the account on the item or category to a real, postable code (see the chart above) |
 
+**ตั้งค่าบัญชีสินค้า (Item Posting Setup)** (`/setup/items`) also carries an
+**ข้อมูลหลักสินค้า (Item master)** card below the posting-profile fields — barcode,
+unit of measure / base UOM / conversion factor, list price, temperature type,
+business unit, min/max stock, average daily usage, lead time, MRP lot-sizing
+inputs (min order qty, order multiple, order/holding cost), and the "is a fixed
+asset" flag + default asset category (used by the FA-10 capital-goods routing —
+see [Fixed assets & depreciation](#6-fixed-assets--depreciation) below). These
+columns already existed on the item record; they now have a screen.
+
+Similarly, **บัญชีตามคลังสินค้า (Warehouse Accounts)** (`/setup/warehouses`)'s
+**แก้ไข (Edit)** action now opens a full warehouse-detail dialog — name, zone,
+type, capacity, temperature, and active status, in addition to the two GL
+accounts — instead of only the inventory/adjustment account fields.
+
 ---
 
 ## 2. Manual journal entries with maker-checker approval
@@ -615,6 +629,12 @@ deferred tax).
 
 Tabs: Register, **ตั้งทรัพย์สินจาก GR (Capitalize from GR)**, QR Tags, **ตรวจนับทรัพย์สิน (Asset audit)**, **อนุมัติย้ายทรัพย์สิน (Custody approvals)**, Categories, Depreciation Runs.
 
+The **Register** table shows each asset's **สถานที่ (location)**, **แผนก
+(department)**, **เลขที่ซีเรียล (serial no.)** and **ผู้ถือครอง (assigned to)**
+alongside cost/depreciation/status — set at acquisition (or via **QR Tags** →
+scan-to-update for `assigned_to`/location changes, which route through custody
+approval below).
+
 ### Acquire an asset
 
 1. Go to **Assets** (`/assets`) → **Register**.
@@ -637,8 +657,9 @@ typed in by hand — keeping an audit trail from **PR → PO → GR → asset**.
 2. Go to **Assets** (`/assets`) → **ตั้งทรัพย์สินจาก GR**, enter the **GR number** and
    click **ค้นหา (Search)**. Eligible capital lines are listed with their suggested cost
    (received qty × unit cost).
-3. Click **ตั้งทรัพย์สิน (Register)** on a line, give the asset a **name** and **useful
-   life (months)**, and **ส่งคำขอ (Submit request)**.
+3. Click **ตั้งทรัพย์สิน (Register)** on a line, give the asset a **name**, **useful
+   life (months)**, and optionally its **สถานที่ (location)**, **แผนก (department)**
+   and **เลขที่ซีเรียล (serial no.)** — then **ส่งคำขอ (Submit request)**.
 
 **Expected result:** a registration request (**FAR-…**) is created as
 **"รออนุมัติ" (PendingApproval)** — nothing posts to the books yet.

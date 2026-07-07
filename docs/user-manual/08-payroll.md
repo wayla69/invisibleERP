@@ -17,12 +17,17 @@ Tabs: **Employees** · **Run Payroll** · **PND1** (ภ.ง.ด.1, monthly) ·
 ## 1. Maintain employees
 
 1. Go to **Payroll** (`/payroll`) → **Employees** tab.
-2. Click **Add employee** and enter their details: name, employee code, salary,
-   and statutory settings (Social Security, pension rate).
+2. Click **Add employee** and enter their details: name, citizen ID, SSO number,
+   position, department, start date, salary, hourly rate (for overtime), pension
+   (PF) rate, allowances, bank account, and SSO eligibility.
 3. Save.
 
 **Expected result:** The employee is added and will be included in the next
-payroll run.
+payroll run. The employee list shows department and start date alongside
+position and salary.
+
+> Employee records can currently only be **created** here — there is no edit
+> screen yet, so double-check the details before saving.
 
 > 🔒 **PII protection:** the citizen ID (เลขบัตรประชาชน), SSO number and bank
 > account you enter are **encrypted at rest** (AES-256-GCM) — a database snapshot

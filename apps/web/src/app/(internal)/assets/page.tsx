@@ -102,6 +102,10 @@ function Register() {
                 { key: 'accumulated_depreciation', label: t('mx.as_col_accum_dep'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.accumulated_depreciation)}</span> },
                 { key: 'net_book_value', label: t('mx.as_col_nbv'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.net_book_value)}</span> },
                 { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{statusLabel(t, ASSET_STATUS_KEYS, r.status)}</Badge> },
+                { key: 'location', label: t('mx.as_col_location'), render: (r: any) => r.location || '—' },
+                { key: 'department', label: t('mx.as_col_department'), render: (r: any) => r.department || '—' },
+                { key: 'serial_no', label: t('mx.as_col_serial_no'), render: (r: any) => r.serial_no || '—' },
+                { key: 'assigned_to', label: t('mx.as_col_assigned_to'), render: (r: any) => r.assigned_to || '—' },
               ]}
               emptyState={
                 status
@@ -296,7 +300,7 @@ function Capitalize() {
   const qc = useQueryClient();
   const [grNo, setGrNo] = useState('');
   const [lookup, setLookup] = useState('');
-  const [form, setForm] = useState<{ gr_item_id: number; name: string; life: string } | null>(null);
+  const [form, setForm] = useState<{ gr_item_id: number; name: string; life: string; location: string; department: string; serial_no: string } | null>(null);
 
   const elig = useQuery<any>({ queryKey: ['fa-eligible', lookup], queryFn: () => api(`/api/assets/registrations/eligible?gr_no=${encodeURIComponent(lookup)}`), enabled: !!lookup });
   const queue = useQuery<any>({ queryKey: ['fa-registrations'], queryFn: () => api('/api/assets/registrations?status=PendingApproval') });
@@ -344,14 +348,17 @@ function Capitalize() {
                   { key: 'received_qty', label: t('mx.as_col_received'), align: 'right', render: (r: any) => <span className="tabular">{num(r.received_qty)}</span> },
                   { key: 'unit_cost', label: t('mx.as_col_unit_cost'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.unit_cost)}</span> },
                   { key: 'suggested_cost', label: t('mx.as_col_total_value'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.suggested_cost)}</span> },
-                  { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" onClick={() => setForm({ gr_item_id: r.gr_item_id, name: r.item_description || r.item_id, life: '60' })}>{t('mx.as_capitalize_action')}</Button> },
+                  { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" onClick={() => setForm({ gr_item_id: r.gr_item_id, name: r.item_description || r.item_id, life: '60', location: '', department: '', serial_no: '' })}>{t('mx.as_capitalize_action')}</Button> },
                 ]}
               />
               {form && (
                 <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted/40 p-3">
                   <div className="grid gap-1.5"><Label>{t('mx.as_asset_name_label')}</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-64" /></div>
                   <div className="grid gap-1.5"><Label>{t('mx.as_life_months_label')}</Label><Input type="number" min="1" value={form.life} onChange={(e) => setForm({ ...form, life: e.target.value })} className="w-36" /></div>
-                  <Button disabled={!form.name || !form.life || register.isPending} onClick={() => register.mutate({ gr_no: elig.data.gr_no, gr_item_id: form.gr_item_id, name: form.name, useful_life_months: Number(form.life) })}>{t('mx.as_submit_request')}</Button>
+                  <div className="grid gap-1.5"><Label>{t('mx.as_col_location')}</Label><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className="w-40" /></div>
+                  <div className="grid gap-1.5"><Label>{t('mx.as_col_department')}</Label><Input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} className="w-40" /></div>
+                  <div className="grid gap-1.5"><Label>{t('mx.as_col_serial_no')}</Label><Input value={form.serial_no} onChange={(e) => setForm({ ...form, serial_no: e.target.value })} className="w-40" /></div>
+                  <Button disabled={!form.name || !form.life || register.isPending} onClick={() => register.mutate({ gr_no: elig.data.gr_no, gr_item_id: form.gr_item_id, name: form.name, useful_life_months: Number(form.life), location: form.location || undefined, department: form.department || undefined, serial_no: form.serial_no || undefined })}>{t('mx.as_submit_request')}</Button>
                   <Button variant="ghost" onClick={() => setForm(null)}>{t('fin.cancel')}</Button>
                 </div>
               )}

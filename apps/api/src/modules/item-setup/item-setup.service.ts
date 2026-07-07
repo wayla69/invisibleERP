@@ -26,8 +26,17 @@ export interface ItemProfileDto {
   revenue_account?: string | null; cogs_account?: string | null;
   inventory_account?: string | null; valuation_account?: string | null;
   vat_code?: string | null; wht_income_type?: string | null; default_location_id?: string | null;
+  // Item-master fields (docs master-data audit Phase 2) — exist on `items` since earlier phases (barcode
+  // scan-to-add, MRP lot-sizing, FA-10 capital routing) but had no maintenance surface on this screen.
+  barcode?: string | null; uom?: string | null; base_uom?: string | null; conversion_factor?: number | null;
+  unit_price?: number | null; temperature_type?: string | null; bu_id?: string | null;
+  min_stock?: number | null; max_stock?: number | null; avg_daily_usage?: number | null; lead_time_days?: number | null;
+  min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
+  is_fixed_asset?: boolean; default_asset_category_id?: number | null;
 }
 export interface WarehouseAccountsDto {
+  location_name?: string | null; zone?: string | null; type?: string | null;
+  capacity?: number | null; temperature?: string | null; active?: boolean; notes?: string | null;
   inventory_account?: string | null; adjustment_account?: string | null;
 }
 
@@ -143,10 +152,16 @@ export class ItemSetupService {
 
   async updateItemProfile(itemId: string, dto: ItemProfileDto, _user: JwtUser) {
     await this.assertPostable([dto.revenue_account, dto.cogs_account, dto.inventory_account, dto.valuation_account]);
+    const num = (v?: number | null) => (v != null ? String(v) : undefined);
     const [row] = await this.db.update(items).set({
       categoryId: dto.category_id, revenueAccount: dto.revenue_account, cogsAccount: dto.cogs_account,
       inventoryAccount: dto.inventory_account, valuationAccount: dto.valuation_account,
       vatCode: dto.vat_code, whtIncomeType: dto.wht_income_type, defaultLocationId: dto.default_location_id,
+      barcode: dto.barcode, uom: dto.uom, baseUom: dto.base_uom, conversionFactor: num(dto.conversion_factor),
+      unitPrice: num(dto.unit_price), temperatureType: dto.temperature_type, buId: dto.bu_id,
+      minStock: num(dto.min_stock), maxStock: num(dto.max_stock), avgDailyUsage: num(dto.avg_daily_usage), leadTimeDays: num(dto.lead_time_days),
+      minOrderQty: num(dto.min_order_qty), orderMultiple: num(dto.order_multiple), orderCost: num(dto.order_cost), holdingCost: num(dto.holding_cost),
+      isFixedAsset: dto.is_fixed_asset, defaultAssetCategoryId: dto.default_asset_category_id,
     }).where(eq(items.itemId, itemId)).returning();
     if (!row) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: `Item ${itemId} not found`, messageTh: 'ไม่พบสินค้า' });
     return shapeItem(row);
@@ -161,6 +176,8 @@ export class ItemSetupService {
   async updateWarehouseAccounts(locationId: string, dto: WarehouseAccountsDto, _user: JwtUser) {
     await this.assertPostable([dto.inventory_account, dto.adjustment_account]);
     const [row] = await this.db.update(locations).set({
+      locationName: dto.location_name, zone: dto.zone, type: dto.type,
+      capacity: dto.capacity != null ? String(dto.capacity) : undefined, temperature: dto.temperature, active: dto.active, notes: dto.notes,
       inventoryAccount: dto.inventory_account, adjustmentAccount: dto.adjustment_account,
     }).where(eq(locations.locationId, locationId)).returning();
     if (!row) throw new NotFoundException({ code: 'LOCATION_NOT_FOUND', message: `Warehouse ${locationId} not found`, messageTh: 'ไม่พบคลังสินค้า' });
@@ -169,7 +186,11 @@ export class ItemSetupService {
 }
 
 function shapeWarehouse(l: any) {
-  return { location_id: l.locationId, location_name: l.locationName, zone: l.zone, type: l.type, active: l.active, inventory_account: l.inventoryAccount, adjustment_account: l.adjustmentAccount };
+  return {
+    location_id: l.locationId, location_name: l.locationName, zone: l.zone, type: l.type,
+    capacity: l.capacity != null ? Number(l.capacity) : null, temperature: l.temperature, active: l.active, notes: l.notes,
+    inventory_account: l.inventoryAccount, adjustment_account: l.adjustmentAccount,
+  };
 }
 
 function shapeCategory(c: any) {
@@ -188,9 +209,15 @@ function shapeTaxCode(c: any) {
   };
 }
 function shapeItem(i: any) {
+  const n = (v: any) => (v != null ? Number(v) : null);
   return {
     item_id: i.itemId, item_description: i.itemDescription, category: i.category, category_id: i.categoryId != null ? Number(i.categoryId) : null,
     revenue_account: i.revenueAccount, cogs_account: i.cogsAccount, inventory_account: i.inventoryAccount,
     valuation_account: i.valuationAccount, vat_code: i.vatCode, wht_income_type: i.whtIncomeType, default_location_id: i.defaultLocationId,
+    barcode: i.barcode, uom: i.uom, base_uom: i.baseUom, conversion_factor: n(i.conversionFactor),
+    unit_price: n(i.unitPrice), temperature_type: i.temperatureType, bu_id: i.buId,
+    min_stock: n(i.minStock), max_stock: n(i.maxStock), avg_daily_usage: n(i.avgDailyUsage), lead_time_days: n(i.leadTimeDays),
+    min_order_qty: n(i.minOrderQty), order_multiple: n(i.orderMultiple), order_cost: n(i.orderCost), holding_cost: n(i.holdingCost),
+    is_fixed_asset: i.isFixedAsset === true, default_asset_category_id: i.defaultAssetCategoryId != null ? Number(i.defaultAssetCategoryId) : null,
   };
 }

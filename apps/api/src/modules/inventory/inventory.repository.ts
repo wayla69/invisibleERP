@@ -71,6 +71,9 @@ export class InventoryRepository {
       Vendor_ID: vendors.id, Supplier_ID: vendors.vendorCode, Supplier_Name: vendors.name, Contact_Person: vendors.contact,
       Phone: vendors.phone, Email: vendors.email, Payment_Terms: vendors.paymentTerms,
       Bank_Name: vendors.bankName, Bank_Account: vendors.bankAccount,
+      Address: vendors.address, Rating: vendors.rating, Category: vendors.category, Currency: vendors.currency,
+      Lead_Time_Days: vendors.leadTimeDays, Notes: vendors.notes,
+      Approval_Status: vendors.approvalStatus, Blocklisted: vendors.blocklisted, Blocklist_Reason: vendors.blocklistReason,
     }).from(vendors).where(eq(vendors.isSupplier, true)).orderBy(vendors.name);
   }
 

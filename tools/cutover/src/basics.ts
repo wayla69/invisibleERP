@@ -719,7 +719,9 @@ async function main() {
   const grItemId = elig.eligible?.[0]?.gr_item_id;
   const cap1500Before = await tbDebit('1500');
   const cap2000Before = await tbCredit2('2000');
-  const regReq = await inj('POST', '/api/assets/registrations', admin, { gr_no: grCap.json?.gr_no, gr_item_id: grItemId, name: 'Dev laptop (capex)', useful_life_months: 36 });
+  // Master-data audit Phase 2: location/department/serial_no were already accepted by RegisterFromGrBody end
+  // to end (approveRegistration → acquire), but the /assets capitalize form never collected them — now it does.
+  const regReq = await inj('POST', '/api/assets/registrations', admin, { gr_no: grCap.json?.gr_no, gr_item_id: grItemId, name: 'Dev laptop (capex)', useful_life_months: 36, location: 'Warehouse A', department: 'Kitchen', serial_no: 'SN-001' });
   ok('Capitalize: registration raised as PendingApproval — NO GL yet (Dr 1500 unchanged)', regReq.status === 201 && regReq.json?.status === 'PendingApproval' && near(regReq.json?.acquire_cost, 50000) && near(await tbDebit('1500'), cap1500Before), `st=${regReq.json?.status} 1500=${await tbDebit('1500')}`);
   const regSelf = await inj('POST', `/api/assets/registrations/${regReq.json?.reg_no}/approve`, admin);
   ok('Capitalize: preparer self-approval blocked → 403 SOD_VIOLATION (FA-10)', regSelf.status === 403 && regSelf.json?.error?.code === 'SOD_VIOLATION', `${regSelf.status} ${regSelf.json?.error?.code}`);
@@ -728,6 +730,9 @@ async function main() {
   const capReg = (await inj('GET', '/api/assets', admin)).json;
   const newFa = (capReg.assets ?? []).find((x: any) => x.asset_no === regAppr.json?.asset_no);
   ok('Capitalize: new asset is on the register with source GR/PO traceability', !!newFa && newFa.source_gr_no === grCap.json?.gr_no && newFa.source_po_no === poCap.json?.po_no && near(newFa.acquire_cost, 50000), `gr=${newFa?.source_gr_no} po=${newFa?.source_po_no}`);
+  ok('Capitalize: location/department/serial_no submitted on the capitalize form carry through to the asset',
+    newFa?.location === 'Warehouse A' && newFa?.department === 'Kitchen' && newFa?.serial_no === 'SN-001',
+    JSON.stringify({ location: newFa?.location, department: newFa?.department, serial_no: newFa?.serial_no }));
   const regDup = await inj('POST', '/api/assets/registrations', admin, { gr_no: grCap.json?.gr_no, gr_item_id: grItemId, name: 'dup', useful_life_months: 36 });
   ok('Capitalize: the same GR line cannot be capitalised twice (ALREADY_REGISTERED)', regDup.status === 400 && regDup.json?.error?.code === 'ALREADY_REGISTERED', `st=${regDup.status} code=${regDup.json?.error?.code}`);
 
@@ -854,6 +859,17 @@ async function main() {
   ok('Setup: warehouse with a non-postable inventory account rejected (INVALID_POSTING_ACCOUNT)', whBad.status === 400 && whBad.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `st=${whBad.status} code=${whBad.json?.error?.code}`);
   const whOk = await inj('PATCH', '/api/item-setup/warehouses/WH-DET', invmgr, { inventory_account: '1201' });
   ok('Setup: set a warehouse default inventory account → 1201', whOk.status === 200 && whOk.json?.inventory_account === '1201', JSON.stringify(whOk.json ?? {}).slice(0, 90));
+  // Master-data audit Phase 2: warehouse master fields (name/zone/type/capacity/temperature/active/notes)
+  // were previously read-only (locationName/zone) or entirely unexposed (type/capacity/temperature/notes).
+  const whMaster = await inj('PATCH', '/api/item-setup/warehouses/WH-DET', invmgr, {
+    location_name: 'Cold store B', zone: 'B', type: 'ColdStorage', capacity: 500, temperature: 'Chilled', active: true, notes: 'Backup cold store',
+  });
+  ok('Setup: warehouse master fields now editable (name/zone/type/capacity/temperature/notes)',
+    whMaster.status === 200 && whMaster.json?.location_name === 'Cold store B' && whMaster.json?.zone === 'B' && whMaster.json?.type === 'ColdStorage' && near(whMaster.json?.capacity, 500) && whMaster.json?.temperature === 'Chilled' && whMaster.json?.notes === 'Backup cold store',
+    JSON.stringify(whMaster.json).slice(0, 150));
+  const whList = (await inj('GET', '/api/item-setup/warehouses', invmgr)).json;
+  const whRow = (whList.warehouses ?? []).find((w: any) => w.location_id === 'WH-DET');
+  ok('Setup: warehouse list projects the new master fields', whRow?.type === 'ColdStorage' && near(whRow?.capacity, 500) && whRow?.temperature === 'Chilled', JSON.stringify(whRow).slice(0, 120));
   await db.insert(s.items).values({ itemId: 'WHITEM', itemDescription: 'Warehouse-driven item' }).onConflictDoNothing(); // no item/category override
   // Determination ON: WHITEM has no item/category inventory account, so it falls through to the WAREHOUSE 1201.
   await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'WHITEM', location_id: 'WH-DET', uom: 'EA', qty: 10, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-W1' });
@@ -870,6 +886,19 @@ async function main() {
   const valLoc = (await inj('GET', '/api/inventory/valuation', invmgr)).json;
   const detlocRow = (valLoc.items ?? []).find((i: any) => i.item_id === 'DETLOC');
   ok('Determination: a receipt with no location defaults to the item default_location_id (WH-COLD, not WH-MAIN)', detlocRow?.location_id === 'WH-COLD', `loc=${detlocRow?.location_id}`);
+
+  // Master-data audit Phase 2: item-master fields (barcode/UOM/stock thresholds/MRP lot-sizing/capital-asset
+  // routing) exist on `items` but had zero maintenance surface on /setup/items (posting-profile only).
+  const itemMaster = await inj('PATCH', '/api/item-setup/items/DETLOC', invmgr, {
+    barcode: '8850000000012', uom: 'BOX', base_uom: 'EA', conversion_factor: 12, unit_price: 25,
+    temperature_type: 'Ambient', bu_id: 'BU1', min_stock: 10, max_stock: 200, avg_daily_usage: 3, lead_time_days: 5,
+    min_order_qty: 24, order_multiple: 12, order_cost: 50, holding_cost: 0.5, is_fixed_asset: false,
+  });
+  ok('Setup: item-master fields now editable via /setup/items (barcode/UOM/stock thresholds/MRP lot-sizing)',
+    itemMaster.status === 200 && itemMaster.json?.barcode === '8850000000012' && itemMaster.json?.uom === 'BOX' && near(itemMaster.json?.conversion_factor, 12) && near(itemMaster.json?.min_stock, 10) && near(itemMaster.json?.min_order_qty, 24),
+    JSON.stringify(itemMaster.json).slice(0, 200));
+  const itemGet = (await inj('GET', '/api/item-setup/items/DETLOC', invmgr)).json;
+  ok('Setup: item-master fields round-trip on GET', itemGet.barcode === '8850000000012' && near(itemGet.unit_price, 25) && near(itemGet.holding_cost, 0.5), JSON.stringify(itemGet).slice(0, 150));
 
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).

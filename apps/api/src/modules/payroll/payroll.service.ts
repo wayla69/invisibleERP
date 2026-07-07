@@ -365,6 +365,10 @@ export class PayrollService implements OnModuleInit {
   }
 
   private fmtEmp(r: any) {
-    return { id: Number(r.id), emp_code: r.empCode, name: r.name, national_id: r.nationalId, sso_no: r.ssoNo, position: r.position, monthly_salary: n(r.monthlySalary), allowances: n(r.allowances), sso_eligible: r.ssoEligible !== false, bank_account: r.bankAccount, start_date: r.startDate, active: r.active !== false };
+    return {
+      id: Number(r.id), emp_code: r.empCode, name: r.name, national_id: r.nationalId, sso_no: r.ssoNo,
+      position: r.position, department: r.department, monthly_salary: n(r.monthlySalary), hourly_rate: n(r.hourlyRate), pf_rate: n(r.pfRate),
+      allowances: n(r.allowances), sso_eligible: r.ssoEligible !== false, bank_account: r.bankAccount, start_date: r.startDate, active: r.active !== false,
+    };
   }
 }

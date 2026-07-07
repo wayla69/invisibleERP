@@ -204,6 +204,30 @@ async function main() {
     rejectVbc.json.status === 'Rejected' && vendorAfterReject?.bankName === 'ธนาคารกรุงเทพ' && vendorAfterReject?.bankAccount === '111-1-11111-1',
     JSON.stringify({ st: rejectVbc.json.status, row: { bankName: vendorAfterReject?.bankName, bankAccount: vendorAfterReject?.bankAccount } }));
 
+  // ── H3. vendor master direct-edit (master-data audit Phase 2) — contact/address/terms/rating/category/
+  // currency/notes save immediately (no maker-checker; unlike bank details these carry no payment-redirection
+  // risk). tax_id/credit_limit/bank details stay out of scope for this endpoint (see service-level comment). ──
+  const vpUpdate = await inj('PATCH', `/api/procurement/vendors/${V1}/profile`, admin, {
+    contact: 'คุณสมชาย', phone: '02-111-2222', email: 'v1@example.com', address: '123 ถนนสุขุมวิท กรุงเทพฯ',
+    payment_terms: 'Net 45', lead_time_days: 7, rating: 4.5, category: 'Preferred', currency: 'USD', notes: 'ผู้ขายหลักสำหรับวัตถุดิบ X',
+  });
+  ok('VBC: vendor profile direct-edit saves immediately (no approval step)',
+    vpUpdate.status === 200 && vpUpdate.json.vendor_id === V1, JSON.stringify(vpUpdate.json).slice(0, 150));
+  const vendorAfterProfile = (await db.select().from(s.vendors).where(eq(s.vendors.id, V1)))[0];
+  ok('VBC: vendor profile fields persisted (contact/phone/email/address/terms/lead_time/rating/category/currency/notes)',
+    vendorAfterProfile?.contact === 'คุณสมชาย' && vendorAfterProfile?.phone === '02-111-2222' && vendorAfterProfile?.email === 'v1@example.com'
+      && vendorAfterProfile?.address === '123 ถนนสุขุมวิท กรุงเทพฯ' && vendorAfterProfile?.paymentTerms === 'Net 45' && vendorAfterProfile?.leadTimeDays === 7
+      && near(vendorAfterProfile?.rating, 4.5) && vendorAfterProfile?.category === 'Preferred' && vendorAfterProfile?.currency === 'USD' && vendorAfterProfile?.notes === 'ผู้ขายหลักสำหรับวัตถุดิบ X',
+    JSON.stringify({ contact: vendorAfterProfile?.contact, terms: vendorAfterProfile?.paymentTerms, rating: vendorAfterProfile?.rating, cur: vendorAfterProfile?.currency }));
+  const vpEmpty = await inj('PATCH', `/api/procurement/vendors/${V1}/profile`, admin, {});
+  ok('VBC: vendor profile PATCH with no fields → 400 NO_FIELDS', vpEmpty.status === 400 && vpEmpty.json.error?.code === 'NO_FIELDS', `${vpEmpty.status} ${vpEmpty.json.error?.code}`);
+  // The suppliers list projection (GET /api/inventory/suppliers) now also surfaces these fields for the web UI.
+  const suppliersList = (await inj('GET', '/api/inventory/suppliers', admin)).json;
+  const v1Row = (suppliersList.suppliers ?? []).find((r: any) => r.Vendor_ID === V1);
+  ok('VBC: /api/inventory/suppliers projects the vendor-master fields (Email/Address/Rating/Category/Currency/Approval_Status)',
+    v1Row?.Email === 'v1@example.com' && v1Row?.Currency === 'USD' && near(v1Row?.Rating, 4.5) && v1Row?.Approval_Status === 'approved' && v1Row?.Blocklisted === false,
+    JSON.stringify(v1Row).slice(0, 200));
+
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];
   await runMatch(ap1, poNo, [{ item_id: 'X', qty: 100, unit_price: 10 }]);
