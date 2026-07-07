@@ -623,7 +623,9 @@ bank account is discovered only when the real supplier calls asking why they
 were not paid), a supplier's bank name / account number **cannot be edited
 directly**. Press the bank icon next to a supplier's bank-account column,
 enter the new **ชื่อธนาคาร (bank name)** / **เลขที่บัญชี (account number)**, and
-submit — this only **requests** the change.
+submit — this only **requests** the change. The **ชื่อธนาคาร** field suggests
+from the standard Thai-banks list and is saved in the bank's official name (so
+"kbank" / "กสิกร" become **ธนาคารกสิกรไทย**).
 
 The request appears in an amber **คำขอเปลี่ยนบัญชีธนาคารผู้ขายรออนุมัติ** card at the
 top of the same screen for any `exec`/`approvals` user to **อนุมัติ (approve)** or
@@ -659,7 +661,17 @@ A vendor can carry more than one address (billing / shipping / registered /
 other, one marked **หลัก — primary**) and more than one contact (name, title,
 phone, email), instead of the single scalar address/contact of before. Add or
 delete either from this panel — both save immediately, with no second
-approval (same reasoning as the direct-edit fields above).
+approval (same reasoning as the direct-edit fields above). The **จังหวัด
+(province)** field suggests from the standard 77-province list and is saved in
+its official spelling; the **รหัสไปรษณีย์ (postal code)** must be 5 digits.
+
+The same panel has a **ความสัมพันธ์ (relationships)** section — record links to
+other vendors by type (**บุคคลที่เกี่ยวข้องกัน (related party)**, **บริษัทลูก
+(subsidiary)**, **แฟรนไชส์**, **ผู้รับเหมาช่วง (subcontractor)**, **บริษัทแม่
+(parent)**) by entering the other vendor's ID. The link shows on both vendors;
+a vendor can't relate to itself and the same link can't be added twice. It also
+shows any **ฟิลด์กำหนดเอง (custom fields)** your organisation has defined for
+vendors — fill the values and save.
 
 The same panel has a **ประวัติการแก้ไข (Change history)** section: expand it to see
 who changed what and when — the vendor's creation (onboarding), every field edit

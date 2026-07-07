@@ -9,6 +9,10 @@ process.env.NODE_ENV = 'test';
 // A sender identity so the doc-email path clears its sender guard and reaches the (unconfigured) SMTP
 // transport — proving the generic email chain is wired end-to-end (render → mailer) → EMAIL_NOT_CONFIGURED.
 process.env.MAIL_FROM = process.env.MAIL_FROM || 'shop@example.com';
+// Master-data audit Phase 11: item match-merge is gated to the platform owner (god) because `items` is a
+// shared cross-tenant master. Designate a dedicated god username so only it can merge (a per-tenant Admin
+// like `invmgr` stays non-god and must be rejected ITEM_MERGE_HQ_ONLY).
+process.env.PLATFORM_ADMIN_USERNAMES = process.env.PLATFORM_ADMIN_USERNAMES || 'itemgod';
 
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -743,9 +747,11 @@ async function main() {
   await db.insert(s.users).values([
     { username: 'invmgr', passwordHash: await pw.hash('inv123'), role: 'Admin', tenantId: invTid },
     { username: 'invchk', passwordHash: await pw.hash('inv123'), role: 'Admin', tenantId: invTid }, // INV-07: a different write-off approver
+    { username: 'itemgod', passwordHash: await pw.hash('god123'), role: 'Admin', tenantId: hq }, // Phase 11: the platform owner (only god may merge shared items)
   ]).onConflictDoNothing();
   const invmgr = (await inj('POST', '/api/login', undefined, { username: 'invmgr', password: 'inv123' })).json.token;
   const invchk = (await inj('POST', '/api/login', undefined, { username: 'invchk', password: 'inv123' })).json.token;
+  const itemgod = (await inj('POST', '/api/login', undefined, { username: 'itemgod', password: 'god123' })).json.token;
 
   // Receipt 1: 100 @ 10 = 1000 in. Receipt 2: 100 @ 12 = 1200 in ⇒ moving avg = 2200/200 = 11.
   const r1 = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'SUGAR', item_description: 'Sugar 1kg', uom: 'BAG', qty: 100, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-1' });
@@ -899,6 +905,48 @@ async function main() {
     JSON.stringify(itemMaster.json).slice(0, 200));
   const itemGet = (await inj('GET', '/api/item-setup/items/DETLOC', invmgr)).json;
   ok('Setup: item-master fields round-trip on GET', itemGet.barcode === '8850000000012' && near(itemGet.unit_price, 25) && near(itemGet.holding_cost, 0.5), JSON.stringify(itemGet).slice(0, 150));
+
+  // ── Item lifecycle + relationships (master-data audit Phase 10) — DETLOC/CATITEM both seeded above. ──
+  const setStat = await inj('PATCH', '/api/item-setup/items/DETLOC/status', invmgr, { status: 'discontinued', superseded_by: 'CATITEM' });
+  ok('Item lifecycle: mark DETLOC discontinued + point superseded_by at CATITEM', setStat.status === 200 && setStat.json?.status === 'discontinued' && setStat.json?.superseded_by != null, JSON.stringify({ st: setStat.json?.status, sup: setStat.json?.superseded_by }));
+  const relSelf = await inj('POST', '/api/item-setup/items/DETLOC/relationships', invmgr, { to_item_id: 'DETLOC', rel_type: 'substitute' });
+  ok('Item relationship: cannot relate to itself → 400 SELF_RELATION', relSelf.status === 400 && relSelf.json?.error?.code === 'SELF_RELATION', `${relSelf.status} ${relSelf.json?.error?.code}`);
+  const relAdd = await inj('POST', '/api/item-setup/items/DETLOC/relationships', invmgr, { to_item_id: 'CATITEM', rel_type: 'substitute', note: 'ใช้แทนกันได้' });
+  ok('Item relationship: add a typed relationship (substitute → CATITEM)', (relAdd.status === 201 || relAdd.status === 200) && relAdd.json?.rel_type === 'substitute' && relAdd.json?.party?.item_id === 'CATITEM', JSON.stringify(relAdd.json).slice(0, 140));
+  const relDup = await inj('POST', '/api/item-setup/items/DETLOC/relationships', invmgr, { to_item_id: 'CATITEM', rel_type: 'substitute' });
+  ok('Item relationship: duplicate (same from/to/type) → 409 RELATION_EXISTS', relDup.status === 409 && relDup.json?.error?.code === 'RELATION_EXISTS', `${relDup.status} ${relDup.json?.error?.code}`);
+  const relListFrom = await inj('GET', '/api/item-setup/items/DETLOC/relationships', invmgr);
+  ok('Item relationship: DETLOC lists it as OUTGOING', (relListFrom.json?.relationships ?? []).some((r: any) => r.direction === 'outgoing' && r.rel_type === 'substitute' && r.party.item_id === 'CATITEM'), JSON.stringify(relListFrom.json?.relationships));
+  const relListTo = await inj('GET', '/api/item-setup/items/CATITEM/relationships', invmgr);
+  ok('Item relationship: CATITEM sees the same link as INCOMING (from DETLOC)', (relListTo.json?.relationships ?? []).some((r: any) => r.direction === 'incoming' && r.party.item_id === 'DETLOC'), JSON.stringify(relListTo.json?.relationships));
+  const relDelMissing = await inj('DELETE', '/api/item-setup/items/DETLOC/relationships/999999', invmgr);
+  ok('Item relationship: delete non-existent → 404 RELATION_NOT_FOUND', relDelMissing.status === 404 && relDelMissing.json?.error?.code === 'RELATION_NOT_FOUND', `${relDelMissing.status} ${relDelMissing.json?.error?.code}`);
+  const relDel = await inj('DELETE', `/api/item-setup/items/DETLOC/relationships/${relAdd.json.id}`, invmgr);
+  ok('Item relationship: delete removes it from both sides', relDel.status === 200 && (await inj('GET', '/api/item-setup/items/CATITEM/relationships', invmgr)).json.relationships.length === 0, `${relDel.status}`);
+
+  // ── Item match-merge / DQM (master-data audit Phase 11) — items are a SHARED master, so merge is god-only ──
+  // Two near-identical items (same barcode + description); DUPZB carries a child stock row that must repoint.
+  await db.insert(s.items).values([
+    { itemId: 'DUPZA', itemDescription: 'Zeta Cola 500ml', barcode: '8859999000001' },
+    { itemId: 'DUPZB', itemDescription: 'Zeta Cola 500ml', barcode: '8859999000001' },
+  ]).onConflictDoNothing();
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'DUPZB', uom: 'EA', qty: 20, unit_cost: 8, ref_type: 'GRN', ref_id: 'GRN-DUP' });
+  const dupList = await inj('GET', '/api/item-setup/items-duplicates', invmgr);
+  const dupGroup = (dupList.json?.groups ?? []).find((g: any) => [g.primary.item_id, ...g.duplicates.map((d: any) => d.item_id)].includes('DUPZA') && [g.primary.item_id, ...g.duplicates.map((d: any) => d.item_id)].includes('DUPZB'));
+  ok('Item DQM: detection groups DUPZA/DUPZB by barcode + description', !!dupGroup && (dupGroup.duplicates[0]?.reasons ?? []).includes('barcode') && dupGroup.duplicates[0]?.reasons.includes('description'), JSON.stringify(dupGroup?.duplicates?.[0]?.reasons));
+  const mergeSelf = await inj('POST', '/api/item-setup/items-merge', itemgod, { survivor_item_id: 'DUPZA', duplicate_item_id: 'DUPZA' });
+  ok('Item DQM: cannot merge an item into itself → 400 SELF_MERGE', mergeSelf.status === 400 && mergeSelf.json?.error?.code === 'SELF_MERGE', `${mergeSelf.status} ${mergeSelf.json?.error?.code}`);
+  const mergeNotGod = await inj('POST', '/api/item-setup/items-merge', invmgr, { survivor_item_id: 'DUPZA', duplicate_item_id: 'DUPZB' });
+  ok('Item DQM: a per-tenant Admin (non-god) cannot merge shared items → 403 ITEM_MERGE_HQ_ONLY', mergeNotGod.status === 403 && mergeNotGod.json?.error?.code === 'ITEM_MERGE_HQ_ONLY', `${mergeNotGod.status} ${mergeNotGod.json?.error?.code}`);
+  const merge = await inj('POST', '/api/item-setup/items-merge', itemgod, { survivor_item_id: 'DUPZA', duplicate_item_id: 'DUPZB' });
+  ok('Item DQM: the platform owner merges DUPZB into DUPZA', merge.status === 201 && merge.json?.merged === true, JSON.stringify(merge.json).slice(0, 120));
+  const dupbAfter = (await inj('GET', '/api/item-setup/items/DUPZB', itemgod)).json;
+  ok('Item DQM: the duplicate is soft-retired (status=merged, merged_into set — history preserved)', dupbAfter.status === 'merged' && dupbAfter.merged_into != null, JSON.stringify({ st: dupbAfter.status, into: dupbAfter.merged_into }));
+  const movesSurv = (await inj('GET', '/api/inventory/moves?item_id=DUPZA', invmgr)).json;
+  const movesDup = (await inj('GET', '/api/inventory/moves?item_id=DUPZB', invmgr)).json;
+  ok('Item DQM: the duplicate’s child stock rows repointed to the survivor (text item_id repoint)', (movesSurv.moves ?? []).some((m: any) => m.ref_id === 'GRN-DUP') && !(movesDup.moves ?? []).some((m: any) => m.ref_id === 'GRN-DUP'), `surv=${(movesSurv.moves ?? []).length} dup=${(movesDup.moves ?? []).length}`);
+  const mergeAgain = await inj('POST', '/api/item-setup/items-merge', itemgod, { survivor_item_id: 'DUPZA', duplicate_item_id: 'DUPZB' });
+  ok('Item DQM: an already-merged duplicate cannot be merged again → 400 ALREADY_MERGED', mergeAgain.status === 400 && mergeAgain.json?.error?.code === 'ALREADY_MERGED', `${mergeAgain.status} ${mergeAgain.json?.error?.code}`);
 
   // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
   // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).

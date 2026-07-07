@@ -185,6 +185,53 @@ async function main() {
   ok('Customer history: sensitive column (address) is masked in the trail, not shown in the clear', !!masked && masked.changes.find((c: any) => c.field === 'address')?.new === '•••', JSON.stringify(masked?.changes?.find((c: any) => c.field === 'address')));
   ok('Customer history: also captures the child address INSERT for this customer', (hist.json.history ?? []).some((e: any) => e.action === 'created') && hist.json.count >= 3, `count=${hist.json.count}`);
 
+  // ── Thai address standardization (master-data audit Phase 7) — province canonicalised, postal validated. ──
+  const provRef = await inj('GET', '/api/geo/provinces', admin);
+  ok('Geo reference: /api/geo/provinces returns the 77-province canonical list', provRef.status === 200 && provRef.json.count === 77 && (provRef.json.provinces ?? []).some((p: any) => p.th === 'กรุงเทพมหานคร' && p.en === 'Bangkok'), `count=${provRef.json.count}`);
+  const addrNorm = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'shipping', province: 'กรุงเทพ', postal_code: '10230' });
+  ok('Customer address: free-text province "กรุงเทพ" is canonicalised to "กรุงเทพมหานคร"', (addrNorm.status === 201 || addrNorm.status === 200) && addrNorm.json.province === 'กรุงเทพมหานคร', `province=${addrNorm.json.province}`);
+  const addrEn = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'billing', province: 'phuket', postal_code: '83000' });
+  ok('Customer address: English province "phuket" is canonicalised to "ภูเก็ต"', addrEn.json.province === 'ภูเก็ต', `province=${addrEn.json.province}`);
+  const badPostal = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'other', postal_code: '123' });
+  ok('Customer address: a non-5-digit postal code → 400 POSTAL_INVALID', badPostal.status === 400 && badPostal.json.error?.code === 'POSTAL_INVALID', `${badPostal.status} ${badPostal.json.error?.code}`);
+  const unknownProv = await inj('POST', `/api/customer-master/${histNo}/addresses`, admin, { address_type: 'other', province: 'Springfield' });
+  ok('Customer address: an unrecognised province is kept as entered (migration-safe, not rejected)', (unknownProv.status === 201 || unknownProv.status === 200) && unknownProv.json.province === 'Springfield', `province=${unknownProv.json.province}`);
+
+  // ── Typed party relationships (master-data audit Phase 8) — bill-to/guarantor/related-party etc. ──
+  const relA = await inj('POST', '/api/customer-master', admin, { name: 'บริษัท ลูก จำกัด', kind: 'company' });
+  const relANo = relA.json.customer_no as string;
+  const relB = await inj('POST', '/api/customer-master', admin, { name: 'บริษัท ผู้ค้ำ จำกัด', kind: 'company' });
+  const relBNo = relB.json.customer_no as string;
+  const selfRel = await inj('POST', `/api/customer-master/${relANo}/relationships`, admin, { to_customer_no: relANo, rel_type: 'related_party' });
+  ok('Customer relationship: cannot relate to itself → 400 SELF_RELATION', selfRel.status === 400 && selfRel.json.error?.code === 'SELF_RELATION', `${selfRel.status} ${selfRel.json.error?.code}`);
+  const relAdd = await inj('POST', `/api/customer-master/${relANo}/relationships`, admin, { to_customer_no: relBNo, rel_type: 'guarantor', note: 'ค้ำประกันเครดิต' });
+  ok('Customer relationship: add a typed relationship (guarantor)', (relAdd.status === 201 || relAdd.status === 200) && relAdd.json.rel_type === 'guarantor' && relAdd.json.party?.customer_no === relBNo, JSON.stringify(relAdd.json).slice(0, 140));
+  const relDup = await inj('POST', `/api/customer-master/${relANo}/relationships`, admin, { to_customer_no: relBNo, rel_type: 'guarantor' });
+  ok('Customer relationship: duplicate (same from/to/type) → 409 RELATION_EXISTS', relDup.status === 409 && relDup.json.error?.code === 'RELATION_EXISTS', `${relDup.status} ${relDup.json.error?.code}`);
+  const relListA = await inj('GET', `/api/customer-master/${relANo}/relationships`, admin);
+  ok('Customer relationship: A lists it as OUTGOING (A → B guarantor)', (relListA.json.relationships ?? []).some((r: any) => r.direction === 'outgoing' && r.rel_type === 'guarantor' && r.party.customer_no === relBNo), JSON.stringify(relListA.json.relationships));
+  const relListB = await inj('GET', `/api/customer-master/${relBNo}/relationships`, admin);
+  ok('Customer relationship: B sees the same link as INCOMING (from A)', (relListB.json.relationships ?? []).some((r: any) => r.direction === 'incoming' && r.rel_type === 'guarantor' && r.party.customer_no === relANo), JSON.stringify(relListB.json.relationships));
+  const relId = relAdd.json.id as number;
+  const relDelMissing = await inj('DELETE', `/api/customer-master/${relANo}/relationships/999999`, admin);
+  ok('Customer relationship: delete non-existent → 404 RELATION_NOT_FOUND', relDelMissing.status === 404 && relDelMissing.json.error?.code === 'RELATION_NOT_FOUND', `${relDelMissing.status} ${relDelMissing.json.error?.code}`);
+  const relDel = await inj('DELETE', `/api/customer-master/${relANo}/relationships/${relId}`, admin);
+  ok('Customer relationship: delete removes it from both sides', relDel.status === 200 && (await inj('GET', `/api/customer-master/${relBNo}/relationships`, admin)).json.relationships.length === 0, `${relDel.status}`);
+
+  // ── Governed bank master + flexfields (master-data audit Phase 9) ──
+  const banks = await inj('GET', '/api/geo/banks', admin);
+  ok('Governed bank master: /api/geo/banks returns the Thai-banks reference', banks.status === 200 && banks.json.count >= 18 && (banks.json.banks ?? []).some((b: any) => b.th === 'ธนาคารกสิกรไทย' && b.code === '004'), `count=${banks.json.count}`);
+  const normBank = await inj('GET', '/api/geo/normalize-bank?q=kbank', admin);
+  ok('Governed bank master: "kbank" normalises to "ธนาคารกสิกรไทย"', normBank.json.canonical === 'ธนาคารกสิกรไทย' && normBank.json.recognized === true, JSON.stringify(normBank.json));
+
+  // Flexfields (Oracle DFF) wired onto the customer master: define a tenant field, set + read a value.
+  const cfDef = await inj('POST', '/api/custom-fields/defs', admin, { entity: 'customer', field_key: 'loyalty_since', label: 'ลูกค้าตั้งแต่ปี', data_type: 'text' });
+  ok('Flexfields: define a custom field on the customer entity', (cfDef.status === 201 || cfDef.status === 200) && cfDef.json.field_key === 'loyalty_since', JSON.stringify(cfDef.json).slice(0, 120));
+  const cfSet = await inj('PUT', '/api/custom-fields/values', admin, { entity: 'customer', record_id: cmNo, values: { loyalty_since: '2019' } });
+  ok('Flexfields: set a custom-field value on a customer record', cfSet.status === 200 && cfSet.json.values?.loyalty_since === '2019', JSON.stringify(cfSet.json).slice(0, 120));
+  const cfGet = await inj('GET', `/api/custom-fields/values?entity=customer&record_id=${cmNo}`, admin);
+  ok('Flexfields: read the value back, projected onto the field definition', (cfGet.json.fields ?? []).some((f: any) => f.field_key === 'loyalty_since' && String(f.value) === '2019'), JSON.stringify(cfGet.json.fields));
+
   await app.close();
   await pg.close();
 

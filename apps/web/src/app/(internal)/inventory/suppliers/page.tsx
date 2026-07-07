@@ -13,6 +13,11 @@ import { SearchInput } from '@/components/search-input';
 import { DataTable } from '@/components/data-table';
 import { FormField } from '@/components/form-field';
 import { ChangeHistorySection } from '@/components/change-history-section';
+import { ProvinceInput } from '@/components/province-input';
+import { PartyRelationshipsSection } from '@/components/party-relationships';
+import { CustomFieldsSection } from '@/components/custom-fields-section';
+
+const VENDOR_REL_TYPES = ['related_party', 'subsidiary', 'franchisee', 'subcontractor', 'parent', 'other'] as const;
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -212,6 +217,8 @@ function BankChangeDialog({ vendor, onClose }: { vendor: Supplier; onClose: () =
   const qc = useQueryClient();
   const [bankName, setBankName] = useState(vendor.Bank_Name ?? '');
   const [bankAccount, setBankAccount] = useState(vendor.Bank_Account ?? '');
+  // Governed bank master (Phase 9) — steer bank_name to the canonical Thai-banks list; server normalises too.
+  const banksQ = useQuery<{ banks: { code: string; th: string; en: string }[] }>({ queryKey: ['geo-banks'], queryFn: () => api('/api/geo/banks'), staleTime: Infinity });
   const stage = useMutation({
     mutationFn: () => api<any>(`/api/procurement/vendors/${vendor.Vendor_ID}/bank`, {
       method: 'PATCH',
@@ -229,7 +236,8 @@ function BankChangeDialog({ vendor, onClose }: { vendor: Supplier; onClose: () =
         </DialogHeader>
         <div className="grid gap-4">
           <FormField label={t('mx.vbc_f_bank_name')} htmlFor="vbc-bank-name">
-            <Input id="vbc-bank-name" value={bankName} onChange={(e) => setBankName(e.target.value)} />
+            <Input id="vbc-bank-name" list="th-banks-list" value={bankName} onChange={(e) => setBankName(e.target.value)} />
+            <datalist id="th-banks-list">{(banksQ.data?.banks ?? []).map((b) => <option key={b.code} value={b.th}>{b.en}</option>)}</datalist>
           </FormField>
           <FormField label={t('mx.vbc_f_bank_account')} htmlFor="vbc-bank-account">
             <Input id="vbc-bank-account" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} />
@@ -437,6 +445,16 @@ function VendorPartyPanel({ vendor, onClose }: { vendor: Supplier; onClose: () =
               </div>
             ))}
           </div>
+          <PartyRelationshipsSection
+            listUrl={`/api/procurement/vendors/${vendor.Vendor_ID}/relationships`}
+            addUrl={`/api/procurement/vendors/${vendor.Vendor_ID}/relationships`}
+            deleteBase={`/api/procurement/vendors/${vendor.Vendor_ID}/relationships`}
+            queryKey={['vendor-relationships', vendor.Vendor_ID]}
+            relTypes={VENDOR_REL_TYPES}
+            targetPlaceholder={t('mx.rel_target_vendor')}
+            buildBody={(target, relType) => ({ to_vendor_id: Number(target), rel_type: relType })}
+          />
+          <CustomFieldsSection entity="vendor" recordId={String(vendor.Vendor_ID)} />
           <ChangeHistorySection url={`/api/procurement/vendors/${vendor.Vendor_ID}/history`} queryKey={['vendor-history', vendor.Vendor_ID]} />
         </div>
         <DialogFooter>
@@ -484,8 +502,8 @@ function VendorAddressFormDialog({ vendorId, onClose, onSaved }: { vendorId: num
           <FormField label={t('mx.cm_f_address_line2')} className="sm:col-span-2"><Input value={form.address_line2} onChange={set('address_line2')} /></FormField>
           <FormField label={t('mx.cm_f_sub_district')}><Input value={form.sub_district} onChange={set('sub_district')} /></FormField>
           <FormField label={t('mx.cm_f_district')}><Input value={form.district} onChange={set('district')} /></FormField>
-          <FormField label={t('mx.cm_f_province')}><Input value={form.province} onChange={set('province')} /></FormField>
-          <FormField label={t('mx.cm_f_postal_code')}><Input value={form.postal_code} onChange={set('postal_code')} /></FormField>
+          <FormField label={t('mx.cm_f_province')}><ProvinceInput value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v }))} placeholder={t('mx.cm_f_province_ph')} /></FormField>
+          <FormField label={t('mx.cm_f_postal_code')}><Input inputMode="numeric" maxLength={5} value={form.postal_code} onChange={set('postal_code')} placeholder="50000" /></FormField>
         </div>
         <DialogFooter><Button disabled={save.isPending} onClick={() => save.mutate()}>{t('mx.cm_save')}</Button></DialogFooter>
       </DialogContent>

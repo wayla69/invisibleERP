@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Query, Body, Res, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Query, Body, Res, BadRequestException } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -46,6 +46,12 @@ const WarehouseBody = z.object({
   temperature: z.string().trim().max(50).nullish(), active: z.boolean().optional(), notes: z.string().trim().max(2000).nullish(),
   inventory_account: acct, adjustment_account: acct,
 });
+// Item relationships + lifecycle (master-data audit Phase 10).
+const ITEM_REL_TYPES = ['substitute', 'complement', 'supersedes', 'kit_component', 'accessory'] as const;
+const ItemRelBody = z.object({ to_item_id: z.string().min(1), rel_type: z.enum(ITEM_REL_TYPES).default('substitute'), note: z.string().optional() });
+const ItemStatusBody = z.object({ status: z.enum(['active', 'inactive', 'discontinued']), superseded_by: z.string().nullish() });
+// Match-merge / DQM (master-data audit Phase 11).
+const ItemMergeBody = z.object({ survivor_item_id: z.string().min(1), duplicate_item_id: z.string().min(1) });
 
 // Item-posting setup (docs/33 PR3). Item categories + tax codes maintenance and the per-item posting-profile
 // override. Gated to master-data setup duties — kept clear of transactional perms (SoD R13).
@@ -112,6 +118,15 @@ export class ItemSetupController {
 
   @Get('items/:itemId') getItem(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.getItem(itemId, u); }
   @Patch('items/:itemId') updateItem(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemProfileBody)) b: ItemProfileDto, @CurrentUser() u: JwtUser) { return this.svc.updateItemProfile(itemId, b, u); }
+  // Item lifecycle + relationships (master-data audit Phase 10).
+  @Patch('items/:itemId/status') setItemStatus(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemStatusBody)) b: z.infer<typeof ItemStatusBody>, @CurrentUser() u: JwtUser) { return this.svc.setItemStatus(itemId, b, u); }
+  @Post('items/:itemId/relationships') addItemRelationship(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemRelBody)) b: z.infer<typeof ItemRelBody>, @CurrentUser() u: JwtUser) { return this.svc.addItemRelationship(itemId, b, u); }
+  @Get('items/:itemId/relationships') listItemRelationships(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.listItemRelationships(itemId, u); }
+  @Delete('items/:itemId/relationships/:relId') deleteItemRelationship(@Param('itemId') itemId: string, @Param('relId') relId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteItemRelationship(itemId, +relId, u); }
+  // Match-merge / DQM (master-data audit Phase 11) — detect is a read-only review queue for the setup duties;
+  // merge is gated in the service to the platform owner (god) because items are a shared cross-tenant master.
+  @Get('items-duplicates') findDuplicateItems(@CurrentUser() u: JwtUser) { return this.svc.findDuplicateItems(u); }
+  @Post('items-merge') mergeItems(@Body(new ZodValidationPipe(ItemMergeBody)) b: z.infer<typeof ItemMergeBody>, @CurrentUser() u: JwtUser) { return this.svc.mergeItems(b.survivor_item_id, b.duplicate_item_id, u); }
 
   @Get('warehouses') listWarehouses(@CurrentUser() u: JwtUser) { return this.svc.listWarehouses(u); }
   @Patch('warehouses/:locationId') updateWarehouse(@Param('locationId') locationId: string, @Body(new ZodValidationPipe(WarehouseBody)) b: WarehouseAccountsDto, @CurrentUser() u: JwtUser) { return this.svc.updateWarehouseAccounts(locationId, b, u); }

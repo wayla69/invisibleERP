@@ -287,6 +287,31 @@ async function main() {
   const vUpd = (vHist.json.history ?? []).find((e: any) => e.action === 'updated' && e.changes.some((c: any) => c.field === 'category' && c.new === 'Strategic'));
   ok('Vendor history: records the field-level profile update (category → Strategic) with old→new + actor', !!vUpd && vUpd.actor === 'admin', JSON.stringify(vUpd?.changes?.filter((c: any) => ['category', 'payment_terms'].includes(c.field))));
 
+  // ── H7. Thai address standardization (master-data audit Phase 7) — province canonicalised, postal validated. ──
+  const vAddrNorm = await inj('POST', `/api/procurement/vendors/${VD1}/addresses`, admin, { address_type: 'registered', province: 'เชียงใหม่ ', postal_code: '50000' });
+  ok('Vendor address: province "เชียงใหม่ " (trailing space) canonicalised to "เชียงใหม่"', (vAddrNorm.status === 201 || vAddrNorm.status === 200) && vAddrNorm.json.province === 'เชียงใหม่', `province=${vAddrNorm.json.province}`);
+  const vBadPostal = await inj('POST', `/api/procurement/vendors/${VD1}/addresses`, admin, { address_type: 'other', postal_code: '5000' });
+  ok('Vendor address: a non-5-digit postal code → 400 POSTAL_INVALID', vBadPostal.status === 400 && vBadPostal.json.error?.code === 'POSTAL_INVALID', `${vBadPostal.status} ${vBadPostal.json.error?.code}`);
+
+  // ── H8. Typed party relationships (master-data audit Phase 8) — subsidiary/related-party/subcontractor. ──
+  const vRelSelf = await inj('POST', `/api/procurement/vendors/${VD1}/relationships`, admin, { to_vendor_id: VD1, rel_type: 'related_party' });
+  ok('Vendor relationship: cannot relate to itself → 400 SELF_RELATION', vRelSelf.status === 400 && vRelSelf.json.error?.code === 'SELF_RELATION', `${vRelSelf.status} ${vRelSelf.json.error?.code}`);
+  const vRelAdd = await inj('POST', `/api/procurement/vendors/${VD1}/relationships`, admin, { to_vendor_id: VA, rel_type: 'subcontractor', note: 'ผู้รับเหมาช่วง' });
+  ok('Vendor relationship: add a typed relationship (subcontractor)', (vRelAdd.status === 201 || vRelAdd.status === 200) && vRelAdd.json.rel_type === 'subcontractor' && vRelAdd.json.party?.vendor_id === VA, JSON.stringify(vRelAdd.json).slice(0, 140));
+  const vRelDup = await inj('POST', `/api/procurement/vendors/${VD1}/relationships`, admin, { to_vendor_id: VA, rel_type: 'subcontractor' });
+  ok('Vendor relationship: duplicate → 409 RELATION_EXISTS', vRelDup.status === 409 && vRelDup.json.error?.code === 'RELATION_EXISTS', `${vRelDup.status} ${vRelDup.json.error?.code}`);
+  const vRelListVA = await inj('GET', `/api/procurement/vendors/${VA}/relationships`, admin);
+  ok('Vendor relationship: the target vendor sees it as INCOMING', (vRelListVA.json.relationships ?? []).some((r: any) => r.direction === 'incoming' && r.rel_type === 'subcontractor' && r.party.vendor_id === VD1), JSON.stringify(vRelListVA.json.relationships));
+  const vRelDel = await inj('DELETE', `/api/procurement/vendors/${VD1}/relationships/${vRelAdd.json.id}`, admin);
+  ok('Vendor relationship: delete removes it', vRelDel.status === 200 && vRelDel.json.deleted === true, `${vRelDel.status}`);
+
+  // ── H9. Governed bank master (master-data audit Phase 9) — a recognised bank name is canonicalised when
+  // a bank-detail change is staged (through the maker-checker). ──
+  const bankStage = await inj('PATCH', `/api/procurement/vendors/${VD1}/bank`, admin, { bank_name: 'kbank', bank_account: '123-4-56789-0' });
+  const bankPending = await inj('GET', '/api/procurement/vendor-bank-changes', admin);
+  const bankReq = (bankPending.json.pending ?? []).find((p: any) => p.req_no === bankStage.json.req_no);
+  ok('Governed bank master: staging "kbank" canonicalises the bank name to "ธนาคารกสิกรไทย"', bankReq?.bank_name === 'ธนาคารกสิกรไทย', JSON.stringify({ staged: bankStage.json.status, name: bankReq?.bank_name }));
+
   // ── I. idempotency + reconcile ──
   const before = (await pg.query(`SELECT match_no FROM invoice_match_results WHERE txn_no='${ap1}'`)).rows as any[];
   await runMatch(ap1, poNo, [{ item_id: 'X', qty: 100, unit_price: 10 }]);

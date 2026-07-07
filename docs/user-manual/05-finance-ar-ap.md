@@ -73,12 +73,24 @@ From the 360° view you can also:
 
 - Add multiple **ที่อยู่ (addresses)** — billing / shipping / registered /
   other — and mark one **หลัก (primary)** per customer; delete any address you
-  no longer need.
+  no longer need. The **จังหวัด (province)** field suggests from the standard
+  77-province list as you type, and is saved in its official spelling (so
+  "กรุงเทพ", "กทม" and "Bangkok" all become **กรุงเทพมหานคร**); the **รหัสไปรษณีย์
+  (postal code)** must be 5 digits.
 - Add multiple **ผู้ติดต่อ (contacts)** — name, title, phone, email — and mark
   one primary; delete a contact when they leave.
 - Link the customer to a **บริษัทแม่ (parent company)** by its customer number
   (in the edit dialog) — useful for consolidating credit exposure/reporting
   across a corporate group. A customer cannot be its own parent.
+- Record **ความสัมพันธ์ (relationships)** to other customers — pick the type
+  (**Bill-to / Ship-to / Sold-to**, **ผู้ค้ำประกัน (guarantor)**, **บุคคลที่
+  เกี่ยวข้องกัน (related party)** for group/SOX disclosure, **บริษัทลูก
+  (subsidiary)**, **แฟรนไชส์**) and enter the other customer's number. The link
+  shows on *both* customers (as outgoing on one, incoming on the other). A
+  customer can't relate to itself, and the same link can't be added twice.
+- Fill any **ฟิลด์กำหนดเอง (custom fields)** your organisation has defined — extra
+  fields specific to your business appear here automatically (an admin sets them
+  up under master-data configuration). Enter the values and press save.
 
 None of this needs a second approval — it saves immediately.
 

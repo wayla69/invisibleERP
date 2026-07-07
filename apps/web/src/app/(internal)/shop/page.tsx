@@ -528,10 +528,20 @@ export default function ShopPage() {
       </div>
 
       {/* Stacked (catalog full-width, basket below) up through tablet — only true desktop widths (xl+)
-          get the side-by-side sidebar basket; phones and tablets use the floating basket button instead. */}
-      <div className="grid items-start gap-4 xl:grid-cols-[1fr_360px]">
+          get the side-by-side sidebar basket; phones and tablets use the floating basket button instead.
+          `grid-cols-1` (explicit `minmax(0,1fr)`) below `xl` matters, not just cosmetic: with no column
+          template at all, "grid" falls back to an implicit auto-sized track that grows to fit its content's
+          max-content size instead of clamping to the container — the sticky search/chips bar's full-bleed
+          `-mx-4` child was exactly such content, so the single "column" (and the whole page) rendered ~14px
+          wider than the viewport on a real phone with a realistic (long, many-category) catalog. */}
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[1fr_360px]">
         {/* ── Catalog ─────────────────────────────────────────────── */}
-        <div className="space-y-3">
+        {/* min-w-0: without it, a grid item defaults to min-width:auto (content's intrinsic size), so the
+            category-chips row below — a horizontal-scroll flex of whitespace-nowrap chips — would force
+            this whole track (and the page) wider than the viewport on a real phone with many categories,
+            instead of scrolling within its own bounds. Bit production (193 items/8+ categories) though the
+            4-category dev fixture never showed it. */}
+        <div className="min-w-0 space-y-3">
           {/* Low-stock quick-add (items at/below their reorder point) */}
           {(lowStock.data?.count ?? 0) > 0 && (
             <div className="overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5">
