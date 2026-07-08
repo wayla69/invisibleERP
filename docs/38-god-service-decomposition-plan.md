@@ -1,9 +1,10 @@
 # 38 — God-service decomposition (design for review · workstream 2.1)
 
-> **Status:** DESIGN — the *extraction* still needs explicit sign-off before any code moves. This is a
-> **refactor of financial-critical services with zero intended behaviour change**, so the whole plan is
-> built around *proving* nothing moved. Nothing here changes a public API, a GL posting, or a control —
-> it only relocates code behind unchanged facades.
+> **Status:** IN PROGRESS — sign-off received 2026-07-08 (Wave 4 decision A); the `bi` pilot is underway
+> (PR-1 landed, see §8-log in docs/07-backend.md). This is a **refactor of financial-critical services
+> with zero intended behaviour change**, so the whole plan is built around *proving* nothing moved.
+> Nothing here changes a public API, a GL posting, or a control — it only relocates code behind
+> unchanged facades.
 >
 > **Step 1 (characterize) is DELIVERED** ahead of the sign-off: the golden-master harness
 > `tools/parity/src/goldenmaster.ts` (CI gate `parity/golden`) pins ~500 output paths across all four
@@ -103,4 +104,5 @@ Sign-off on: (a) doing this at all now vs. deferring behind revenue/compliance; 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
 | 0.1 | 2026-07-07 | Platform / IT | Initial decomposition plan for review — characterization-first + facade-preserving recipe, per-service bounded contexts, pilot=bi → ledger last, per-PR guardrails, honest cost/benefit + a recommendation to defer behind revenue/compliance work. |
+| 0.3 | 2026-07-08 | Platform / IT | Sign-off received (user decision A, Wave 4); pilot PR-1 landed — `REPORT_TYPES`/`FREQUENCIES` extracted verbatim to `modules/bi/report-registry.ts` (pure const module: no DI/constructor change, so the goldenmaster positional-construction canary is provably unaffected). Golden 496 identical without re-pin; bi/bi-cache/async-jobs green. PR-2 = `generate` (needs a read-port for the kpiBoard/salesCube/financeTrend/pipelineTrend callbacks — ~20 @Optional deps move), PR-3 = `schedule`. Constructor param ORDER is a HARD constraint (goldenmaster passes the first 12 positionally) — new params append only. |
 | 0.2 | 2026-07-08 | Platform / IT | Step 1 delivered: golden-master characterization harness (`tools/parity/src/goldenmaster.ts` + pinned `golden/goldenmaster.json`, ~500 paths over ledger/procurement/projects/bi) added as CI gate `parity/golden` (§2bis). Extraction itself still awaits §7 sign-off. |
