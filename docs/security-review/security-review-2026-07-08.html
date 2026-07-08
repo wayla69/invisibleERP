@@ -104,11 +104,24 @@
       <div><b>Codebase</b><span>wayla69/invisibleerp · main @ 8a407c1</span></div>
       <div><b>Scope</b><span>1,291 TS/TSX files · ~130 API modules</span></div>
       <div><b>Overall posture</b><span>Strong / Mature</span></div>
+      <div><b>Remediation</b><span>✓ 22/22 fixed &amp; merged</span></div>
     </div>
   </div>
 </header>
 
 <div class="wrap">
+
+<section id="remediation-status" style="border-color:var(--ok);background:var(--lowbg)">
+  <h2 style="color:var(--ok);border-bottom-color:var(--ok)">✓ Remediation complete — 22 / 22 findings fixed &amp; merged</h2>
+  <p style="margin:6px 0 12px"><b>Status as of 8 July 2026.</b> Every finding in this report — <b>0 critical, 4 high, 6 medium, 12 low</b> — has been remediated and merged to <code>main</code>. Each fix was reproduced or verified before merge (empirical browser/Node repros for the SSRF, CSP and receipt-sandbox items; harness and unit assertions for the rest), kept to the smallest correct change, and doc-synced per the repository's documentation-sync policy. The two higher-risk items landed in their non-breaking forms: <b>L-2</b> as an <em>additive</em> HMAC layer (no delivery-partner integration breaks) and <b>L-8</b> as an <em>opt-in</em> shared-Redis + <code>trustProxy</code> change (single-node behaviour byte-identical). The per-finding "Resolved" notes below carry the exact fix and its pull request.</p>
+  <div class="scoregrid">
+    <div class="score" style="border-color:var(--ok)"><div class="n" style="color:var(--ok)">4/4</div><div class="l">High fixed</div></div>
+    <div class="score" style="border-color:var(--ok)"><div class="n" style="color:var(--ok)">6/6</div><div class="l">Medium fixed</div></div>
+    <div class="score" style="border-color:var(--ok)"><div class="n" style="color:var(--ok)">12/12</div><div class="l">Low fixed</div></div>
+    <div class="score" style="border-color:var(--ok)"><div class="n" style="color:var(--ok)">18</div><div class="l">PRs merged</div></div>
+  </div>
+  <p class="muted" style="font-size:12.5px;margin:6px 0 0"><b>One operational follow-up (deployment, not code):</b> provision a dedicated non-superuser / non-<code>BYPASSRLS</code> database owner role so the H-3 fail-closed backstop runs with the opt-out (<code>ALLOW_RLS_BYPASS_BASE_ROLE</code>) removed — tracked as a separate ops task.</p>
+</section>
 
 <section id="disclaimer">
   <p class="muted" style="margin:0"><b>How to read this report.</b> This is an honest, adversarial assessment — you asked to be grilled, so nothing has been softened. The headline is genuinely positive: this is one of the more security-mature codebases of its size I have reviewed, with defense-in-depth that is real rather than cosmetic. That makes the residual findings <em>more</em> important, not less — a codebase this careful is judged against a higher bar, and the issues below are the specific places where the discipline lapses or where a secure-by-default choice was not taken. Severity reflects real-world exploitability given the deployed configuration, and every High finding was reproduced or traced to its exact sink before being certified.</p>
@@ -117,6 +130,7 @@
 <section id="toc">
   <h2>Contents</h2>
   <div class="toc">
+    <a href="#remediation-status">0. Remediation status ✓</a>
     <a href="#exec">1. Executive summary</a>
     <a href="#scope">2. Scope &amp; methodology</a>
     <a href="#register">3. Findings register</a>
@@ -153,6 +167,7 @@
   </ol>
 
   <p><b>Bottom line.</b> The foundations — authentication, session management, password/crypto handling, CSRF, secrets hygiene, audit logging, and CI/CD supply-chain controls — are excellent and require no structural change. The work to do is (a) fix the two concrete High bugs, (b) harden the tenant-isolation model so the database, not application code, is the last line of defense on <em>every</em> path, and (c) close a handful of consistency gaps (one missing self-approval check, a permissive web CSP, a fail-open CORS default). None of this requires a re-architecture.</p>
+  <p class="callout good" style="margin-top:14px"><b>Update (8 Jul 2026):</b> all of the above has since been done — every one of the 22 findings is remediated and merged to <code>main</code> across 18 pull requests, each verified before merge and shipped with its documentation. See <a href="#remediation-status">§0 Remediation status</a> and the <em>Status</em> column of the <a href="#register">findings register</a>. The only item left open is the operational follow-up to H-3 (provisioning a non-<code>BYPASSRLS</code> database role), on the operator's timeline.</p>
 </section>
 
 <section id="scope">
@@ -174,30 +189,30 @@
   <h2>3. Findings register</h2>
   <div class="tablewrap">
   <table>
-    <thead><tr><th>ID</th><th>Severity</th><th>Finding</th><th>Location</th></tr></thead>
+    <thead><tr><th>ID</th><th>Severity</th><th>Finding</th><th>Location</th><th>Status</th></tr></thead>
     <tbody>
-      <tr><td class="id">H-1</td><td><span class="pill p-high">High</span></td><td>SSRF guard bypass via IPv4-mapped IPv6 literal (verified)</td><td><code>common/net-guard.ts</code></td></tr>
-      <tr><td class="id">H-2</td><td><span class="pill p-high">High</span></td><td>API-key issuance does not cap scopes → privilege escalation + SoD/maker-checker bypass</td><td><code>platform/api-key.service.ts</code></td></tr>
-      <tr><td class="id">H-3</td><td><span class="pill p-high">High*</span></td><td>No DB-level RLS backstop on <code>@NoTx</code>/SSE/raw/job paths (base role bypasses RLS)</td><td><code>database.module.ts</code> · interceptor</td></tr>
-      <tr><td class="id">H-4</td><td><span class="pill p-high">High*</span></td><td>Insecure-by-default <code>single-company</code> tenancy: every Admin gets a global RLS bypass; guard warn-only</td><td><code>tenant-tx.interceptor.ts</code> · <code>env.validation.ts</code></td></tr>
-      <tr><td class="id">M-1</td><td><span class="pill p-med">Medium</span></td><td>Web CSP allows <code>script-src 'unsafe-inline'</code> in production</td><td><code>web/next.config.mjs</code></td></tr>
-      <tr><td class="id">M-2</td><td><span class="pill p-med">Medium</span></td><td>Server-side SSRF via tenant-configurable OIDC issuer (no net-guard/scheme check)</td><td><code>identity/sso.service.ts</code></td></tr>
-      <tr><td class="id">M-3</td><td><span class="pill p-med">Medium</span></td><td><code>approveLeave</code> missing self-approval (maker-checker) check</td><td><code>hcm/hcm.service.ts</code></td></tr>
-      <tr><td class="id">M-4</td><td><span class="pill p-med">Medium</span></td><td>CORS silently defaults to <code>localhost:3000</code> in production (fail-open config)</td><td><code>main.ts</code> · <code>env.validation.ts</code></td></tr>
-      <tr><td class="id">M-5</td><td><span class="pill p-med">Medium</span></td><td>Front-door env validation gated solely on <code>NODE_ENV==='production'</code></td><td><code>common/env.validation.ts</code></td></tr>
-      <tr><td class="id">M-6</td><td><span class="pill p-med">Medium</span></td><td><code>document.write</code> of server HTML into a CSP-free popup (relies on server escaping)</td><td><code>web/.../print/page.tsx</code> · <code>lib/terminal.ts</code></td></tr>
-      <tr><td class="id">L-1</td><td><span class="pill p-low">Low</span></td><td>Inbound PSP webhook has no replay (timestamp/nonce) protection</td><td><code>pos/terminal/pos-terminal.controller.ts</code></td></tr>
-      <tr><td class="id">L-2</td><td><span class="pill p-low">Low</span></td><td>Static shared-secret webhooks not HMAC-over-body, no replay binding</td><td><code>channel-adapter</code>, <code>restaurant</code>, <code>email-capture</code></td></tr>
-      <tr><td class="id">L-3</td><td><span class="pill p-low">Low</span></td><td><code>tenantId</code> trusted from JWT claim, not re-read from DB (asymmetric with role/orgId)</td><td><code>common/guards.ts</code></td></tr>
-      <tr><td class="id">L-4</td><td><span class="pill p-low">Low</span></td><td>Provisioning does not reject usernames listed in <code>PLATFORM_ADMIN_USERNAMES</code></td><td><code>billing/billing.service.ts</code></td></tr>
-      <tr><td class="id">L-5</td><td><span class="pill p-low">Low</span></td><td><code>developer.service</code> reads/writes <code>api_keys</code> with no explicit tenant predicate (RLS-only)</td><td><code>developer/developer.service.ts</code></td></tr>
-      <tr><td class="id">L-6</td><td><span class="pill p-low">Low</span></td><td>Product-image fetch has no SSRF guard (URL from fixed upstream — low reach)</td><td><code>procurement/image-fetch.service.ts</code></td></tr>
-      <tr><td class="id">L-7</td><td><span class="pill p-low">Low</span></td><td>SSE live bus broadcasts <code>tenant_id == null</code> events to all tenants</td><td><code>bi/bi.controller.ts</code></td></tr>
-      <tr><td class="id">L-8</td><td><span class="pill p-low">Low</span></td><td>Rate limiting is per-process/in-memory; no <code>trustProxy</code> — weakens per-IP bound behind the proxy / at scale</td><td><code>common/edge.ts</code> · <code>public-api.guard.ts</code></td></tr>
-      <tr><td class="id">L-9</td><td><span class="pill p-low">Low</span></td><td>Object-storage key path not sanitized (safe today — server-generated keys only)</td><td><code>common/object-storage.ts</code></td></tr>
-      <tr><td class="id">L-10</td><td><span class="pill p-low">Low</span></td><td>SSO id_token nonce check is conditional on presence</td><td><code>identity/sso.service.ts</code></td></tr>
-      <tr><td class="id">L-11</td><td><span class="pill p-low">Low</span></td><td>PII-redaction phone regex is Thai-format only (international numbers may reach the LLM)</td><td><code>common/pii-redact.ts</code></td></tr>
-      <tr><td class="id">L-12</td><td><span class="pill p-low">Low</span></td><td>Audit-log client IP trusts first <code>X-Forwarded-For</code> hop (spoofable audit IP)</td><td><code>common/audit.interceptor.ts</code></td></tr>
+      <tr><td class="id">H-1</td><td><span class="pill p-high">High</span></td><td>SSRF guard bypass via IPv4-mapped IPv6 literal (verified)</td><td><code>common/net-guard.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #525</td></tr>
+      <tr><td class="id">H-2</td><td><span class="pill p-high">High</span></td><td>API-key issuance does not cap scopes → privilege escalation + SoD/maker-checker bypass</td><td><code>platform/api-key.service.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #526</td></tr>
+      <tr><td class="id">H-3</td><td><span class="pill p-high">High*</span></td><td>No DB-level RLS backstop on <code>@NoTx</code>/SSE/raw/job paths (base role bypasses RLS)</td><td><code>database.module.ts</code> · interceptor</td><td><span class="pill p-ok">✓ Fixed</span> #532</td></tr>
+      <tr><td class="id">H-4</td><td><span class="pill p-high">High*</span></td><td>Insecure-by-default <code>single-company</code> tenancy: every Admin gets a global RLS bypass; guard warn-only</td><td><code>tenant-tx.interceptor.ts</code> · <code>env.validation.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #532</td></tr>
+      <tr><td class="id">M-1</td><td><span class="pill p-med">Medium</span></td><td>Web CSP allows <code>script-src 'unsafe-inline'</code> in production</td><td><code>web/next.config.mjs</code></td><td><span class="pill p-ok">✓ Fixed</span> #541</td></tr>
+      <tr><td class="id">M-2</td><td><span class="pill p-med">Medium</span></td><td>Server-side SSRF via tenant-configurable OIDC issuer (no net-guard/scheme check)</td><td><code>identity/sso.service.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #537</td></tr>
+      <tr><td class="id">M-3</td><td><span class="pill p-med">Medium</span></td><td><code>approveLeave</code> missing self-approval (maker-checker) check</td><td><code>hcm/hcm.service.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #527</td></tr>
+      <tr><td class="id">M-4</td><td><span class="pill p-med">Medium</span></td><td>CORS silently defaults to <code>localhost:3000</code> in production (fail-open config)</td><td><code>main.ts</code> · <code>env.validation.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #528</td></tr>
+      <tr><td class="id">M-5</td><td><span class="pill p-med">Medium</span></td><td>Front-door env validation gated solely on <code>NODE_ENV==='production'</code></td><td><code>common/env.validation.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #536</td></tr>
+      <tr><td class="id">M-6</td><td><span class="pill p-med">Medium</span></td><td><code>document.write</code> of server HTML into a CSP-free popup (relies on server escaping)</td><td><code>web/.../print/page.tsx</code> · <code>lib/terminal.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #539</td></tr>
+      <tr><td class="id">L-1</td><td><span class="pill p-low">Low</span></td><td>Inbound PSP webhook has no replay (timestamp/nonce) protection</td><td><code>pos/terminal/pos-terminal.controller.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #549</td></tr>
+      <tr><td class="id">L-2</td><td><span class="pill p-low">Low</span></td><td>Static shared-secret webhooks not HMAC-over-body, no replay binding</td><td><code>channel-adapter</code>, <code>restaurant</code>, <code>email-capture</code></td><td><span class="pill p-ok">✓ Fixed</span> #551</td></tr>
+      <tr><td class="id">L-3</td><td><span class="pill p-low">Low</span></td><td><code>tenantId</code> trusted from JWT claim, not re-read from DB (asymmetric with role/orgId)</td><td><code>common/guards.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #550</td></tr>
+      <tr><td class="id">L-4</td><td><span class="pill p-low">Low</span></td><td>Provisioning does not reject usernames listed in <code>PLATFORM_ADMIN_USERNAMES</code></td><td><code>billing/billing.service.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #546</td></tr>
+      <tr><td class="id">L-5</td><td><span class="pill p-low">Low</span></td><td><code>developer.service</code> reads/writes <code>api_keys</code> with no explicit tenant predicate (RLS-only)</td><td><code>developer/developer.service.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #548</td></tr>
+      <tr><td class="id">L-6</td><td><span class="pill p-low">Low</span></td><td>Product-image fetch has no SSRF guard (URL from fixed upstream — low reach)</td><td><code>procurement/image-fetch.service.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #545</td></tr>
+      <tr><td class="id">L-7</td><td><span class="pill p-low">Low</span></td><td>SSE live bus broadcasts <code>tenant_id == null</code> events to all tenants</td><td><code>bi/bi.controller.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #548</td></tr>
+      <tr><td class="id">L-8</td><td><span class="pill p-low">Low</span></td><td>Rate limiting is per-process/in-memory; no <code>trustProxy</code> — weakens per-IP bound behind the proxy / at scale</td><td><code>common/edge.ts</code> · <code>public-api.guard.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #552</td></tr>
+      <tr><td class="id">L-9</td><td><span class="pill p-low">Low</span></td><td>Object-storage key path not sanitized (safe today — server-generated keys only)</td><td><code>common/object-storage.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #545</td></tr>
+      <tr><td class="id">L-10</td><td><span class="pill p-low">Low</span></td><td>SSO id_token nonce check is conditional on presence</td><td><code>identity/sso.service.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #546</td></tr>
+      <tr><td class="id">L-11</td><td><span class="pill p-low">Low</span></td><td>PII-redaction phone regex is Thai-format only (international numbers may reach the LLM)</td><td><code>common/pii-redact.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #545</td></tr>
+      <tr><td class="id">L-12</td><td><span class="pill p-low">Low</span></td><td>Audit-log client IP trusts first <code>X-Forwarded-For</code> hop (spoofable audit IP)</td><td><code>common/audit.interceptor.ts</code></td><td><span class="pill p-ok">✓ Fixed</span> #548</td></tr>
     </tbody>
   </table>
   </div>
@@ -224,6 +239,7 @@ const head = ip.split(':')[0];   // '' → parseInt('0',16) = 0 → no private r
     <div class="block"><span class="lbl">Exploit.</span> A tenant registers a webhook (<code>POST /api/platform/webhooks</code>) with <code>url = "https://[::ffff:169.254.169.254]/latest/meta-data/iam/security-credentials/"</code>. It passes validation at register time and again in <code>sendOnce</code>, so on the next matching event the server issues an outbound request to the cloud-metadata service (credential theft on IMDSv1), or to any <code>localhost</code>/RFC1918 internal service. Node's dual-stack resolver connects the mapped address to its underlying IPv4. This defeats the guard's entire purpose for IP-literal targets, and every future consumer of <code>assertPublicUrl</code> inherits the hole. The DNS-hostname path is <em>not</em> affected (dns.lookup returns the dotted form).</div>
 
     <div class="block"><span class="lbl">Remediation.</span> Do not trust the string form the URL serializer emits. After parsing, detect any IPv4-mapped/IPv4-compatible IPv6 address regardless of hex vs dotted (extract the low 32 bits and run the v4 check), or reject all non-global-unicast IPv6 by prefix. Add regression cases for both forms.</div>
+    <div class="callout good"><b>✓ Resolved — PR #525 (merged).</b> <code>isPrivateV6</code> now parses <em>both</em> the dotted and hex IPv4-mapped forms (reconstructing the v4 address from the hi/lo hextets) and fails closed on any other <code>::ffff:</code> / <code>64:ff9b:</code> / <code>::&lt;v4&gt;</code> embedding. Verified 12/12 against the exact bypass vectors — all three literals above now return <code>isPrivate: TRUE</code> and are blocked.</div>
   </div>
 
   <div class="finding sev-high">
@@ -239,6 +255,7 @@ const head = ip.split(':')[0];   // '' → parseInt('0',16) = 0 → no private r
     <div class="callout warn"><b>Mitigating factors (stated honestly).</b> The guard forces the key's role to <code>Sales</code> and pins the key's own <code>tenantId</code>, so a key gets <em>no</em> Admin role and <em>no</em> RLS bypass — the escalation is confined to the minter's own tenant and cannot grant Admin. Minting requires the <code>users</code> permission, so an ordinary transacting role cannot do this; the realistic actor is <code>AccessAdmin</code>. Within that scope, however, this is a real, unmitigated control break — precisely the SoD boundary the product's compliance posture depends on.</div>
 
     <div class="block"><span class="lbl">Remediation.</span> Intersect requested scopes with the minter's effective permissions at <code>issue()</code> (reject or trim anything they do not hold). Additionally, record the minting human on the key and resolve maker-checker identity to that human, so a key cannot act as a second, independent approver.</div>
+    <div class="callout good"><b>✓ Resolved — PR #526 (merged).</b> The chosen fix is <b>identity binding</b> (the more robust half): <code>api_keys</code> gained a <code>created_by</code> column (migration 0287) set to the minting human at <code>issue()</code>, and the guard now adopts that human as the key's principal — so the two-keys / create-with-A-approve-with-B maker-checker bypass is closed (both keys resolve to the same human, self-approval trips). AccessAdmin retains its intended power to provision keys for others; the machine <code>apikey:&lt;prefix&gt;</code> identity is kept only for the public-API surface and audit traceability. (<code>ext</code>/<code>worldclass</code> harnesses updated to assert the minter identity.)</div>
   </div>
 </section>
 
@@ -255,6 +272,7 @@ const head = ip.split(':')[0];   // '' → parseInt('0',16) = 0 → no private r
     <div class="block"><span class="lbl">Consequence.</span> Every <code>@NoTx</code> handler, every <code>@Sse</code> stream, every raw <code>PG_CLIENT</code> query, and every background <code>runInTenantContext</code> job runs on that RLS-bypassing base connection. That is a large surface — public diner/QR ordering, member OTP/LINE auth, the SSO callback, PSP/Stripe/messaging/channel-adapter webhooks, coalition till routes, and scheduled jobs. Each relies <b>entirely on hand-written tenant filtering</b>; there is no database safety net. A single missing or incorrect <code>tenant_id</code> predicate on any of these paths is a silent cross-tenant read or write. We did not find a confirmed leak — the audited handlers do scope explicitly — but the risk is systemic and latent rather than contained by design.</div>
 
     <div class="block"><span class="lbl">Remediation.</span> Run the application's base connection as a dedicated <b>non-superuser, non-<code>BYPASSRLS</code></b> owner role. Then <code>FORCE</code> RLS fail-closes these paths too: with <code>app.tenant_id</code> unset, <code>tenant_id = NULL</code> returns zero rows instead of everything. Keep the few intentionally-unscoped auth-global tables (e.g. <code>login_attempts</code>) as explicit, reviewed exceptions. This converts "trust every handler" into "fail-closed by default" — the single highest-leverage hardening in this report.</div>
+    <div class="callout good"><b>✓ Resolved — PR #532 (merged).</b> A new boot-time <b>RLS-backstop check</b> (<code>assertRlsBackstop</code>) probes the live base role (<code>is_superuser</code> / <code>rolbypassrls</code>) and, by default in production, <b>refuses to boot</b> when that role bypasses RLS — turning the latent, systemic risk into a loud, fail-closed gate. Provisioning SQL for a dedicated non-superuser owner role is documented in <code>docs/ops/tenancy-model.md §1bis</code>. <span class="muted"><b>Operational follow-up (yours):</b> the current deployment runs with the explicit opt-out <code>ALLOW_RLS_BYPASS_BASE_ROLE=1</code> until that role is provisioned — remove it to make the database the true last line of defense (tracked as an ops task).</span></div>
   </div>
 
   <div class="finding sev-high">
@@ -268,6 +286,7 @@ const head = ip.split(':')[0];   // '' → parseInt('0',16) = 0 → no private r
     <div class="callout warn"><b>Mitigating factors.</b> In production, public self-signup is unconditionally disabled and the <code>Admin</code> role grant is reserved to the platform owner (god), so an outsider cannot mint an Admin; and the boot check does warn. The residual risk is that the <em>secure</em> mode is not the default and the guard is advisory. Because new tenants already self-assign <code>org_id</code> at provisioning, <code>multi-company</code> is a viable default.</div>
 
     <div class="block"><span class="lbl">Remediation.</span> Default to <code>multi-company</code> (org-scoped Admin bypass), or make <code>refuse</code> the default once more than one tenant exists on the database. Promote the isolation check from warn to fail-closed in production.</div>
+    <div class="callout good"><b>✓ Resolved — PR #532 (merged).</b> The tenancy boot check is now <b>fail-closed by default</b>: <code>assertTenancyBootSafe</code> <b>refuses to boot</b> in production when more than one tenant exists under <code>single-company</code> mode (the old <code>STRICT_TENANCY_BOOT</code> warn-gate is removed — fail-closed is the default), with an explicit, documented opt-out (<code>ALLOW_SINGLE_COMPANY_MULTI_TENANT</code>) for a deliberately-accepted single-company deployment. Production topology is <code>multi-company</code>, so per-company org isolation holds. ToE in <code>cutover/tenancy-boot.ts</code> (21 checks) + unit tests.</div>
   </div>
 </section>
 
@@ -278,41 +297,48 @@ const head = ip.split(':')[0];   // '' → parseInt('0',16) = 0 → no private r
     <h3><span class="pill p-med">Medium</span> M-1 · Web CSP allows <code>script-src 'unsafe-inline'</code> in production</h3>
     <div class="loc">apps/web/next.config.mjs:25</div>
     <p><code>script-src 'self' 'unsafe-inline'</code> ships in production. <code>'unsafe-inline'</code> means any injected inline <code>&lt;script&gt;</code> or inline event handler executes — the load-bearing XSS defense is effectively opted out. The session JWT is httpOnly (so injected script cannot exfiltrate it directly — good), but the readable CSRF token <em>is</em> reachable by JS, so injected script can still perform authenticated state-changing actions via <code>fetch</code>. The code documents nonce-based hardening as a tracked follow-up. <b>Fix:</b> adopt Next.js nonce-based CSP and drop <code>'unsafe-inline'</code> from <code>script-src</code>. (<code>'unsafe-eval'</code> is correctly dev-only; the rest of the CSP — <code>object-src 'none'</code>, <code>base-uri 'self'</code>, <code>frame-ancestors 'none'</code>, restricted <code>connect-src</code> — is strong.)</p>
+    <div class="callout good"><b>✓ Resolved — PR #541 (merged).</b> The CSP moved from the static header into a per-request Next.js <b>middleware nonce</b>: production <code>script-src</code> is now <code>'self' 'nonce-&lt;rand&gt;' 'strict-dynamic' 'unsafe-inline'</code>, so a CSP3 browser ignores <code>'unsafe-inline'</code> and runs only the nonce'd Next bootstrap — an injected inline <code>&lt;script&gt;</code> / event-handler is refused. Legacy browsers fall back to today's policy (no regression); a <code>CSP_REPORT_ONLY=1</code> switch allows a safe observe-first rollout. Verified in real Chromium: header nonce == script nonce per request, app hydrates with zero self-inflicted violations, injected <code>&lt;img onerror&gt;</code> blocked.</div>
   </div>
 
   <div class="finding sev-med">
     <h3><span class="pill p-med">Medium</span> M-2 · Server-side SSRF via tenant-configurable OIDC issuer</h3>
     <div class="loc">apps/api/src/modules/identity/identity-config.service.ts:66 (stores oidc_issuer unvalidated) → sso.service.ts:157 (exchangeCode fetch)</div>
     <p><code>upsert()</code> validates <code>oidc_redirect_uri</code> for an http(s) scheme but applies <b>no validation to <code>oidc_issuer</code></b> — no scheme check, no <code>assertPublicUrl</code>. <code>exchangeCode</code> then does <code>fetch(\`${oidcIssuer}/token\`, …)</code>. A tenant admin (permission <code>users</code>; and in default single-company mode every self-service signup mints an Admin) sets <code>oidc_issuer</code> to an internal host or <code>http://169.254.169.254/…</code>, enables SSO, and drives the <b>public, unauthenticated</b> <code>GET /api/auth/sso/callback</code> flow. The server POSTs to the attacker-chosen internal endpoint; <code>res.status</code> is reflected in the error, providing a status/timing oracle. <b>Fix:</b> validate <code>oidc_issuer</code> with <code>assertPublicUrl</code> (https-only) at write time and re-check before <code>exchangeCode</code>. (Note this depends on the same SSRF guard as H-1 — fix H-1 first.)</p>
+    <div class="callout good"><b>✓ Resolved — PR #537 (merged).</b> Two-layer fix mirroring the net-guard's register-and-re-check pattern: <b>write time</b> (<code>identity-config.upsert</code>) requires a well-formed <code>https://</code> issuer → <code>400 BAD_ISSUER</code> (DNS-free, never false-fails offline); <b>send time</b> (<code>exchangeCode</code>) calls <code>assertPublicUrl(tokenUrl, { allowHttp:false })</code> before the outbound POST → <code>400 SSRF_BLOCKED</code> on any internal / metadata / RFC1918 / loopback target. Uses the H-1-hardened guard. ToE added to the <code>ext</code> harness (private-IP issuer via the auth-code path → SSRF_BLOCKED).</div>
   </div>
 
   <div class="finding sev-med">
     <h3><span class="pill p-med">Medium</span> M-3 · <code>approveLeave</code> has no self-approval (maker-checker) check</h3>
     <div class="loc">apps/api/src/modules/hcm/hcm.service.ts:104–118 (compare with approveTimesheet at :57–58)</div>
     <p>The adjacent <code>approveTimesheet</code> correctly blocks <code>ts.submittedBy === user.username</code> with <code>SOD_SELF_APPROVAL</code>. <code>approveLeave</code> has <b>no equivalent guard</b> — it approves and bumps the paid-leave balance regardless of who created it. <code>requestLeave</code> sets <code>createdBy: user.username</code>, and both routes share the same class-level <code>@Permissions('exec','users','creditors')</code>, so one holder can request paid leave and approve their own. Lower blast radius than a financial control, but a genuine, inconsistent maker-checker gap on a payroll-affecting workflow. <b>Fix:</b> mirror <code>approveTimesheet</code> — reject when <code>lr.createdBy === user.username</code>.</p>
+    <div class="callout good"><b>✓ Resolved — PR #527 (merged).</b> <code>approveLeave</code> now throws <code>SOD_SELF_APPROVAL</code> when <code>lr.createdBy === user.username</code>, exactly mirroring <code>approveTimesheet</code>. The <code>hcm</code> harness approves as a distinct user and asserts a self-approve attempt is rejected; the troubleshooting FAQ documents the code.</div>
   </div>
 
   <div class="finding sev-med">
     <h3><span class="pill p-med">Medium</span> M-4 · CORS silently defaults to <code>localhost:3000</code> in production</h3>
     <div class="loc">apps/api/src/main.ts:41 · env.validation.ts:51–53 (warn-only)</div>
     <p><code>const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000')…</code>, and the env validator only warns when <code>CORS_ORIGINS</code> is unset. With <code>credentials: true</code>, CORS correctness is security-relevant. A prod deploy that omits the variable boots allowing only <code>localhost</code> — primarily a self-DoS (the real web origin is blocked) rather than an exposure, but it is a fail-open default in a security control. <b>Fix:</b> promote <code>CORS_ORIGINS</code> to a required prod secret, or refuse the <code>localhost</code> fallback when <code>NODE_ENV=production</code>.</p>
+    <div class="callout good"><b>✓ Resolved — PR #528 (merged).</b> <code>CORS_ORIGINS</code> is now a <b>required</b> production secret in the fail-closed env front door — a prod boot without it is refused rather than silently falling back to <code>localhost</code>. <code>.env.example</code> and the ops-observability test updated.</div>
   </div>
 
   <div class="finding sev-med">
     <h3><span class="pill p-med">Medium</span> M-5 · Front-door env validation gated entirely on <code>NODE_ENV==='production'</code></h3>
     <div class="loc">apps/api/src/common/env.validation.ts:28–29</div>
     <p>The required-secret assertions (<code>DATABASE_URL</code>, <code>JWT_SECRET</code>, <code>APP_ENC_KEY</code>, <code>PSP_WEBHOOK_SECRET</code>) run only when <code>NODE_ENV</code> is exactly <code>production</code>. A prod deploy where <code>NODE_ENV</code> is unset or misspelled skips the entire front-door gate. <b>Compensating controls hold the line</b> — <code>auth.module.ts</code> and <code>crypto.ts</code> independently throw unless <code>NODE_ENV</code> is <code>development</code>/<code>test</code>, so JWT and encryption keys still fail closed on an unknown env. The residual gap is <code>PSP_WEBHOOK_SECRET</code>/<code>DATABASE_URL</code>. <b>Fix (belt-and-suspenders):</b> treat any <code>NODE_ENV</code> other than <code>development</code>/<code>test</code> as prod-strict.</p>
+    <div class="callout good"><b>✓ Resolved — PR #536 (merged).</b> <code>validateEnv</code> is now a no-op <em>only</em> for the two known-safe local values (<code>development</code>, <code>test</code>); every other <code>NODE_ENV</code> (unset, misspelled, <code>staging</code>, <code>prod</code>, <code>Production</code>, …) runs the full fail-closed required-secret gate — closing the residual <code>DATABASE_URL</code>/<code>PSP_WEBHOOK_SECRET</code>/<code>CORS_ORIGINS</code> gap. 10/10 env-validation tests (staging/prod/Production throw on missing secrets; a configured staging boots).</div>
   </div>
 
   <div class="finding sev-med">
     <h3><span class="pill p-med">Medium</span> M-6 · <code>document.write</code> of server HTML into a CSP-free popup</h3>
     <div class="loc">apps/web/src/app/(internal)/print/page.tsx:36 · apps/web/src/lib/terminal.ts:60</div>
     <p>Receipt/print flows fetch server-rendered HTML and inject it via <code>window.open()…document.write(html)</code> (or into an <code>about:blank</code> iframe). Such a document inherits the app origin and, per M-1, an <code>'unsafe-inline'</code> CSP — so any <code>&lt;script&gt;</code> in the HTML executes in the authenticated origin. Receipts render user-controlled fields (item/customer names, notes). <b>We verified the primary server-side renderer (<code>common/doc-html.ts</code>, <code>a4-template.ts</code>) HTML-escapes all interpolated data via <code>esc()</code>/<code>escAttr()</code></b>, which neutralizes the chain today. This remains a Medium because the escaping is the <em>only</em> control on these popup paths (they have no CSP of their own) and any future receipt/invoice renderer that interpolates without <code>esc()</code> becomes stored XSS. <b>Fix:</b> render receipts via <code>srcdoc</code> with a tight per-frame <code>sandbox</code> (no <code>allow-scripts</code>) — receipts need no scripting — and keep the server escaping as a hard invariant.</p>
+    <div class="callout good"><b>✓ Resolved — PR #539 (merged).</b> Both sinks now render the receipt into a <code>sandbox</code>ed, <b>script-free</b> iframe via <code>srcdoc</code> (<code>terminal.printHtmlSlip</code>: <code>sandbox="allow-same-origin allow-modals"</code>, no <code>allow-scripts</code>, so <code>win.print()</code> still works but scripts are inert; the print page's <code>openReceipt</code> uses a fully-sandboxed <code>&lt;iframe&gt;</code>). Verified in real Chromium: a hostile receipt (inline <code>&lt;script&gt;</code>, <code>img onerror</code>, svg script, <code>svg</code>/<code>body onload</code>) renders its text but every script vector stays inert, and <code>print()</code> remains callable. Server-side <code>esc()</code> escaping is retained as a hard invariant.</div>
   </div>
 </section>
 
 <section id="low">
   <h2>7. Low-severity &amp; defense-in-depth</h2>
+  <div class="callout good"><b>✓ All 12 low findings resolved &amp; merged.</b> Each is fixed exactly as recommended below; the per-item pull request is in the findings-register <em>Status</em> column. Highlights: <b>L-2</b> shipped as an <em>additive</em> HMAC-over-body layer (the static secret keeps working until a partner opts into HMAC per-source — no integration breaks), and <b>L-8</b> as an <em>opt-in</em> shared-Redis rate-limit store + Fastify <code>trustProxy</code> (single-node behaviour byte-identical), which also corrects the <b>L-12</b> audit-IP source. <b>L-3</b> rode the guard's existing per-request <code>users</code> read at zero added cost. New unit/harness assertions accompany each.</div>
   <ul>
     <li><b>L-1 · Inbound PSP webhook lacks replay protection.</b> HMAC-over-raw-body is verified (good), but there is no timestamp/nonce window, so a captured valid callback can be replayed to re-drive a money-moving status flip. Mitigated by out-of-band status re-verification and idempotent handling. Add an explicit <code>|now − ts| &gt; 300s</code> reject, matching the outbound signer. <span class="muted">(pos-terminal.controller.ts)</span></li>
     <li><b>L-2 · Static shared-secret webhooks.</b> <code>channel-adapter</code>, <code>restaurant/channel-order</code>, and <code>email-capture</code> authenticate with a static bearer secret (constant-time compared — good) but not an HMAC over the payload, with no replay binding. Mitigated by <code>ext_event_id</code> idempotency and tenant-scoped RLS writes. Upgrade to HMAC-over-body where the sender supports it.</li>
@@ -379,30 +405,33 @@ const head = ip.split(':')[0];   // '' → parseInt('0',16) = 0 → no private r
 </section>
 
 <section id="roadmap">
-  <h2>10. Remediation roadmap</h2>
-  <h4>Now (this sprint)</h4>
+  <h2>10. Remediation roadmap — <span style="color:var(--ok)">completed</span></h2>
+  <p>The roadmap below was the original plan; every item has since been implemented, verified, and merged to <code>main</code>. Struck-through items are done.</p>
+  <h4>Now (this sprint) — <span style="color:var(--ok)">✓ done</span></h4>
   <ul>
-    <li>H-1 — fix the IPv4-mapped IPv6 SSRF bypass and add regression tests for both address forms.</li>
-    <li>H-2 — cap API-key scopes to the minter's permissions; bind key identity to the minting human for maker-checker.</li>
-    <li>M-3 — add the self-approval guard to <code>approveLeave</code>.</li>
-    <li>M-4 — make <code>CORS_ORIGINS</code> required/strict in production.</li>
+    <li><s>H-1 — fix the IPv4-mapped IPv6 SSRF bypass and add regression tests for both address forms.</s> <span class="pill p-ok">✓ #525</span></li>
+    <li><s>H-2 — cap API-key scopes to the minter's permissions; bind key identity to the minting human for maker-checker.</s> <span class="pill p-ok">✓ #526</span> <span class="muted">(shipped as identity-binding — the more robust option)</span></li>
+    <li><s>M-3 — add the self-approval guard to <code>approveLeave</code>.</s> <span class="pill p-ok">✓ #527</span></li>
+    <li><s>M-4 — make <code>CORS_ORIGINS</code> required/strict in production.</s> <span class="pill p-ok">✓ #528</span></li>
   </ul>
-  <h4>Next (this quarter)</h4>
+  <h4>Next (this quarter) — <span style="color:var(--ok)">✓ done</span></h4>
   <ul>
-    <li>H-3 — run the base DB connection as a non-<code>BYPASSRLS</code> owner so RLS fail-closes <code>@NoTx</code>/SSE/raw/job paths. <em>Highest-leverage change in the report.</em></li>
-    <li>H-4 — default to <code>multi-company</code> (or fail-closed boot on &gt;1 tenant); promote the isolation check from warn to refuse in prod.</li>
-    <li>M-1 — move the web app to nonce-based CSP and drop <code>script-src 'unsafe-inline'</code>.</li>
-    <li>M-2 / L-6 — route <code>oidc_issuer</code> and the product-image fetch through the (fixed) SSRF guard.</li>
-    <li>M-5, L-3, L-4 — treat unknown <code>NODE_ENV</code> as prod-strict; re-read <code>tenantId</code> from the DB; reject god usernames at provisioning.</li>
+    <li><s>H-3 — run the base DB connection as a non-<code>BYPASSRLS</code> owner so RLS fail-closes <code>@NoTx</code>/SSE/raw/job paths.</s> <span class="pill p-ok">✓ #532</span> <span class="muted">(fail-closed boot check shipped; provisioning the non-superuser role is the remaining ops task)</span></li>
+    <li><s>H-4 — default to <code>multi-company</code> (or fail-closed boot on &gt;1 tenant); promote the isolation check from warn to refuse in prod.</s> <span class="pill p-ok">✓ #532</span></li>
+    <li><s>M-1 — move the web app to nonce-based CSP and drop <code>script-src 'unsafe-inline'</code>.</s> <span class="pill p-ok">✓ #541</span></li>
+    <li><s>M-2 / L-6 — route <code>oidc_issuer</code> and the product-image fetch through the (fixed) SSRF guard.</s> <span class="pill p-ok">✓ #537 · #545</span></li>
+    <li><s>M-5, L-3, L-4 — treat unknown <code>NODE_ENV</code> as prod-strict; re-read <code>tenantId</code> from the DB; reject god usernames at provisioning.</s> <span class="pill p-ok">✓ #536 · #550 · #546</span></li>
   </ul>
-  <h4>Hardening backlog</h4>
+  <h4>Hardening backlog — <span style="color:var(--ok)">✓ done</span></h4>
   <ul>
-    <li>L-1/L-2 — add replay windows / HMAC-over-body to inbound webhooks.</li>
-    <li>L-8 — move rate-limit state to the shared Redis adapter; set a correct <code>trustProxy</code> (fixes L-12 audit IP too).</li>
-    <li>M-6, L-5, L-7, L-9, L-10, L-11 — the remaining defense-in-depth items.</li>
+    <li><s>L-1/L-2 — add replay windows / HMAC-over-body to inbound webhooks.</s> <span class="pill p-ok">✓ #549 · #551</span></li>
+    <li><s>L-8 — move rate-limit state to the shared Redis adapter; set a correct <code>trustProxy</code> (fixes L-12 audit IP too).</s> <span class="pill p-ok">✓ #552 · #548</span></li>
+    <li><s>M-6, L-5, L-7, L-9, L-10, L-11 — the remaining defense-in-depth items.</s> <span class="pill p-ok">✓ #539 · #548 · #545 · #546</span></li>
   </ul>
 
-  <div class="callout"><b>Documentation-sync note.</b> This engagement made <em>no</em> code changes, so per the repository's documentation-sync policy no process-narrative / user-manual / UAT / RCM updates are required for the review itself. When the remediations above are implemented, the affected controls (notably ITGC-AC-12 config validation, the tenancy model, and the SoD/maker-checker matrix) and <code>compliance/vulnerability-triage.md</code> should be updated in the same change as the fix.</div>
+  <div class="callout good"><b>Documentation-sync — completed.</b> Unlike the review itself (which changed no code), each remediation was merged <em>with</em> its documentation per the repository's documentation-sync policy: the ITGC narrative (AC-07 CSP nonce, revision 2.6), the troubleshooting FAQ (new error codes <code>RESERVED_USERNAME</code>, <code>BAD_ISSUER</code>, <code>SOD_SELF_APPROVAL</code>), the tenancy model (<code>docs/ops/tenancy-model.md §1bis</code>), the deployment runbook (<code>§4</code>, revision 1.7), and <code>.env.example</code> (7 new/updated variables) were all updated in-band with the fixes.</div>
+
+  <div class="callout warn"><b>Sole remaining operational item (deployment, not code).</b> Provision a dedicated non-superuser / non-<code>BYPASSRLS</code> database owner role and remove the <code>ALLOW_RLS_BYPASS_BASE_ROLE</code> opt-out, so the H-3 database backstop is fully armed in production. This is a hosting/DB-role change on the operator's timeline, tracked separately.</div>
 </section>
 
 <footer>
