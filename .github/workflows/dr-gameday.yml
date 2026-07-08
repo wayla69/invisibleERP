@@ -2,12 +2,13 @@ name: DR Game-day
 
 # ITGC-OP-02 — the automatable DR test: execute the recovery end-to-end against a real Postgres and
 # MEASURE the RTO/RPO (backup → simulated disaster → restore → verify → app bring-up). Runs on demand,
-# annually, and once when this branch is pushed (to capture the first measured RTO). Uploads the
-# DR-test report as evidence.
+# MONTHLY (the restore-drill cadence ITGC-OP-01/OP-02 commit to — each run's uploaded report IS that
+# month's restore-drill evidence record), and once when this branch is pushed (to capture the first
+# measured RTO).
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 1 1 *' # annually (Jan 1, 06:00 UTC) — the recurring DR test
+    - cron: '0 6 1 * *' # monthly (1st, 06:00 UTC) — the recurring restore drill / DR test (OP-01/OP-02)
   push:
     branches: ['**dr-gameday**']
 
@@ -47,3 +48,4 @@ jobs:
           name: dr-gameday-report
           path: dr-gameday-out/report.md
           if-no-files-found: warn
+          retention-days: 90 # evidence record — keep the full window GitHub allows; archive monthly reports to docs/ops/dr-test-reports/ per the runbook

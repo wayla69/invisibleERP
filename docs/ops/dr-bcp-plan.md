@@ -1,6 +1,6 @@
 # Disaster Recovery & Business Continuity Plan (ITGC-OP-02)
 
-> **Status:** v1.0 · **Date:** 2026-06-30 · **Owner:** CTO / Platform-SRE · **Review cadence:** annual + after any DR test
+> **Status:** v1.2 · **Date:** 2026-06-30 · **Owner:** CTO / Platform-SRE · **Review cadence:** annual + after any DR test
 > Builds on the backup/restore procedure (`tools/ops/BACKUP-RUNBOOK.md`, ITGC-OP-01). This plan adds the
 > scenario playbooks, roles, communications, business-continuity (degraded-mode) posture, and the **DR test
 > schedule** — the items OP-02 was missing.
@@ -60,7 +60,7 @@ Maintain the status-page + paging routing; PDPA breach notification (controller 
 | Test | Frequency | Evidence |
 |---|---|---|
 | **Restore drill** (restore latest dump → scratch DB → `verify-restore.sh`) | **monthly** | drill log / `restore-drill-cron.sh` output (Alibaba Tier-0 automates it) |
-| **Automated DR game-day** (backup → drop → restore → verify → app bring-up, **measured RTO/RPO**) | **annually + on demand** | CI `DR Game-day` workflow report (`docs/ops/dr-test-reports/`) |
+| **Automated DR game-day** (backup → drop → restore → verify → app bring-up, **measured RTO/RPO**) | **monthly + on demand** (doubles as the monthly restore-drill evidence on GitHub-hosted deploys) | CI `DR Game-day` workflow report artifact (archive to `docs/ops/dr-test-reports/`) |
 | **Full DR tabletop** (walk a region-loss scenario with roles) | **annually** | tabletop minutes + action items |
 | **Live failover game-day** (restore offsite dump into an alternate region, repoint, measure RTO) | **annually** | game-day report with measured RTO/RPO vs targets |
 
@@ -82,3 +82,4 @@ Maintain the status-page + paging routing; PDPA breach notification (controller 
 |---|---|---|---|
 | 1.0 | 2026-06-30 | CTO / Platform-SRE | Initial DR/BCP plan — RTO/RPO tiers, scenario playbooks, BCP degraded-mode, roles/comms, DR test schedule + checklist (OP-02 Gap → Implemented). |
 | 1.1 | 2026-06-30 | Platform / SRE | Added the **automated DR game-day** (CI `DR Game-day` workflow + `cutover/dr-gameday`) and recorded the **first executed test (PASS: RTO 2.6 s, RPO 0)**. |
+| 1.2 | 2026-07-08 | Platform / SRE | **Game-day cadence: annual → MONTHLY** (`dr-gameday.yml` cron) so the automated end-to-end restore test doubles as the monthly restore-drill evidence OP-01/OP-02 commit to on GitHub-hosted deploys (each run uploads its measured-RTO/RPO report, retention 90d; archive to `dr-test-reports/`). RCM OP-02 evidence refs updated. |
