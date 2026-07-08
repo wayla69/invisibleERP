@@ -11,6 +11,7 @@ const baseProd = () => ({
   JWT_SECRET: 'x'.repeat(32),
   APP_ENC_KEY: 'y'.repeat(32),
   PSP_WEBHOOK_SECRET: 'z'.repeat(16),
+  CORS_ORIGINS: 'https://app.example.com', // required in prod (security review M-4) — set so these tests exercise the observability gate, not the CORS check
 });
 
 describe('env.validation — observability recommended by default, enforceable on demand', () => {
