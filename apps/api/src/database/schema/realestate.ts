@@ -14,6 +14,9 @@ export const reProjects = pgTable(
     devCode: text('dev_code').notNull(),
     name: text('name').notNull(),
     location: text('location'),
+    // 5.5 (SBT, ภ.ธ.40) — ภาษีธุรกิจเฉพาะ rate (%) applied at ownership transfer (RE sales in a commercial
+    // manner, ม.91/2(6): 3% + 10% local = 3.3). NULL = SBT accrual OFF (legacy behaviour) — enable per project.
+    sbtRate: numeric('sbt_rate', { precision: 5, scale: 2 }),
     status: text('status').notNull().default('active'),      // active | closed
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -82,6 +85,8 @@ export const reContracts = pgTable(
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     transferEntryNo: text('transfer_entry_no'),              // the revenue-recognition JE at ownership transfer (RE-04)
     transferredAt: timestamp('transferred_at', { withTimezone: true }),
+    sbtRate: numeric('sbt_rate', { precision: 5, scale: 2 }),        // 5.5 — SBT rate applied at transfer (snapshot of the project rate)
+    sbtAmount: numeric('sbt_amount', { precision: 16, scale: 2 }),   // 5.5 — ภ.ธ.40 accrual (Dr 5840 / Cr 2130); NULL = no SBT on this transfer
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   },

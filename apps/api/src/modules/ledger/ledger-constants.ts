@@ -82,6 +82,8 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '2420', name: 'Refund Liability', type: 'Liability' },               // หนี้สินค่าคืนเงิน — provision for expected returns/refunds (TFRS 15, REV-19)
   { code: '1300', name: 'Input VAT', type: 'Asset' },                         // ภาษีซื้อ — recoverable input VAT (e.g. on subcontractor valuations, docs/35 Depth); also the PP36 self-assessed input-VAT credit (ม.83/6)
   { code: '2120', name: 'PP36 VAT Payable (self-assessed)', type: 'Liability' }, // ภ.พ.36 — VAT self-assessed on imported services (ม.83/6), remitted to RD by the 7th; kept OUT of the ภ.พ.30 (2100) set (separate return)
+  { code: '2130', name: 'SBT Payable (ภ.ธ.40)', type: 'Liability' },              // ภาษีธุรกิจเฉพาะค้างจ่าย — SBT on commercial RE sales (ม.91/2(6), 3.3% eff.), remitted on ภ.ธ.40 by the 15th (TAX-09); separate return, out of the VAT sets
+  { code: '5840', name: 'Specific Business Tax Expense', type: 'Expense' },       // ค่าภาษีธุรกิจเฉพาะ — SBT borne by the seller, accrued at ownership transfer (Dr 5840 / Cr 2130)
   // Construction/real-estate retention (docs/35 Phase 0) — the shared retention sub-ledger's GL anchors.
   { code: '1170', name: 'Retention Receivable', type: 'Asset' },              // ลูกหนี้เงินประกันผลงาน — retention withheld by the customer on a progress claim, collectible on release (Track A)
   { code: '2440', name: 'Retention Payable', type: 'Liability' },             // เจ้าหนี้เงินประกันผลงาน — retention we withhold from a subcontractor valuation, payable on release (Track B)
@@ -113,6 +115,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '2440': { bucket: 'operating', label: 'เจ้าหนี้เงินประกันผลงาน (Retention payable)' }, // docs/35 Phase 0 — retention withheld from subcontractors (working-capital liability)
   '2100': { bucket: 'operating', label: 'ภาษีค้างจ่าย (Tax payable)' },
   '2120': { bucket: 'operating', label: 'ภาษีขายนำส่ง ภ.พ.36 (PP36 VAT payable, self-assessed)' }, // imported-service reverse-charge VAT payable (ม.83/6)
+  '2130': { bucket: 'operating', label: 'ภาษีธุรกิจเฉพาะค้างจ่าย ภ.ธ.40 (SBT payable)' }, // SBT on commercial RE sales (ม.91/2(6))
   '2150': { bucket: 'operating', label: 'เจ้าหนี้ระหว่างบริษัท (Intercompany payable)' },
   '2200': { bucket: 'operating', label: 'เงินมัดจำลูกค้า/บัตรของขวัญ (Customer deposits)' },
   '2210': { bucket: 'operating', label: 'เงินรับล่วงหน้า (Customer deposits — prepaid)' },

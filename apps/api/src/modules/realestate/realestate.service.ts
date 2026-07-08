@@ -15,7 +15,7 @@ const GL_CASH = '1000', GL_DEPOSIT = '2210', GL_CONTRACT_LIAB = '2410';
 
 const addMonths = (d: Date, m: number) => { const x = new Date(d.getTime()); x.setMonth(x.getMonth() + m); return x.toISOString().slice(0, 10); };
 
-export interface CreateDevDto { dev_code: string; name: string; location?: string }
+export interface CreateDevDto { dev_code: string; name: string; location?: string; sbt_rate?: number }
 export interface AddUnitDto { unit_no: string; unit_type?: string; area_sqm?: number; floor?: string; list_price: number; cost?: number }
 export interface BookDto { dev_code: string; unit_no: string; buyer_name?: string; deposit: number; expires_on?: string }
 export interface CreateContractDto { dev_code: string; unit_no: string; booking_no?: string; buyer_name?: string; discount?: number; down_payment: number; installment_count: number }
@@ -51,7 +51,7 @@ export class RealEstateService {
 
   // ── D1 — property master & unit inventory ──
   async createDevelopment(dto: CreateDevDto, user: JwtUser) {
-    await this.db.insert(reProjects).values({ tenantId: user.tenantId ?? null, devCode: dto.dev_code, name: dto.name, location: dto.location ?? null, status: 'active', createdBy: user.username });
+    await this.db.insert(reProjects).values({ tenantId: user.tenantId ?? null, devCode: dto.dev_code, name: dto.name, location: dto.location ?? null, sbtRate: dto.sbt_rate != null ? String(dto.sbt_rate) : null, status: 'active', createdBy: user.username });
     return this.listUnits(dto.dev_code);
   }
   async addUnit(devCode: string, dto: AddUnitDto, user: JwtUser) {
@@ -211,6 +211,13 @@ export class RealEstateService {
     const [unit] = await this.db.select().from(reUnits).where(eq(reUnits.id, Number(c.unitId))).limit(1);
     const price = r2(n(c.price));
     const cost = r2(n(unit?.cost));
+    // 5.5 (SBT, TAX-09) — a commercial immovable-property sale is subject to ภาษีธุรกิจเฉพาะ (ม.91/2(6)),
+    // NOT VAT: 3% + 10% local tax = 3.3% of the sale price, filed on ภ.ธ.40 by the 15th of the next month.
+    // Driven by the PROJECT's sbt_rate (NULL = accrual off — legacy books unchanged until enabled); accrues
+    // Dr 5840 SBT expense / Cr 2130 SBT payable in the same transfer JE and stamps the contract.
+    const [project] = unit?.reProjectId ? await this.db.select({ sbtRate: reProjects.sbtRate }).from(reProjects).where(eq(reProjects.id, Number(unit.reProjectId))).limit(1) : [undefined];
+    const sbtRate = project?.sbtRate != null ? Number(project.sbtRate) : null;
+    const sbtAmount = sbtRate != null && sbtRate > 0 ? r2(price * (sbtRate / 100)) : null;
 
     const entryNo = await this.db.transaction(async (tx) => {
       const lines: any[] = [
@@ -218,12 +225,16 @@ export class RealEstateService {
         { account_code: '4200', credit: price, memo: `RE sale revenue ${contractNo}` },        // …into revenue on handover
       ];
       if (cost > 0) { lines.push({ account_code: '5800', debit: cost, memo: `RE unit cost ${contractNo}` }); lines.push({ account_code: '1200', credit: cost, memo: `RE inventory relieved ${contractNo}` }); }
+      if (sbtAmount != null && sbtAmount > 0) {
+        lines.push({ account_code: '5840', debit: sbtAmount, memo: `SBT ${sbtRate}% ${contractNo} (ภ.ธ.40)` });
+        lines.push({ account_code: '2130', credit: sbtAmount, memo: `SBT payable ${contractNo} (ภ.ธ.40)` });
+      }
       const je: any = await this.ledger.postEntry({ source: 'RE-TRANSFER', sourceRef: contractNo, tenantId, memo: `Ownership transfer ${contractNo}`, createdBy: user.username, lines }, tx);
-      await tx.update(reContracts).set({ status: 'transferred', transferEntryNo: je.entry_no, transferredAt: new Date(), updatedAt: new Date() }).where(eq(reContracts.id, Number(c.id)));
+      await tx.update(reContracts).set({ status: 'transferred', transferEntryNo: je.entry_no, transferredAt: new Date(), sbtRate: sbtRate != null ? String(sbtRate) : null, sbtAmount: sbtAmount != null ? String(sbtAmount) : null, updatedAt: new Date() }).where(eq(reContracts.id, Number(c.id)));
       await tx.update(reUnits).set({ status: 'transferred', updatedAt: new Date() }).where(eq(reUnits.id, Number(c.unitId)));
       return je.entry_no;
     });
-    return { contract_no: contractNo, status: 'transferred', unit_status: 'transferred', revenue_recognized: price, cost_recognized: cost, entry_no: entryNo };
+    return { contract_no: contractNo, status: 'transferred', unit_status: 'transferred', revenue_recognized: price, cost_recognized: cost, sbt_amount: sbtAmount, entry_no: entryNo };
   }
 
   // ── Scheduled sweeps (docs/35 Depth) — ride the BI report scheduler ──

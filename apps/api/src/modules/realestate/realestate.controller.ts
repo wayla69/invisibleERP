@@ -5,7 +5,7 @@ import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { RealEstateService, type CreateDevDto, type AddUnitDto, type BookDto, type CreateContractDto, type PayDto } from './realestate.service';
 
-const DevBody = z.object({ dev_code: z.string().min(1), name: z.string().min(1), location: z.string().optional() });
+const DevBody = z.object({ dev_code: z.string().min(1), name: z.string().min(1), location: z.string().optional(), sbt_rate: z.number().min(0).max(10).optional() }); // 5.5 — SBT rate % (e.g. 3.3); omit = no SBT accrual
 const UnitBody = z.object({ unit_no: z.string().min(1), unit_type: z.string().optional(), area_sqm: z.number().nonnegative().optional(), floor: z.string().optional(), list_price: z.number().positive(), cost: z.number().nonnegative().optional() });
 const BookBody = z.object({ dev_code: z.string().min(1), unit_no: z.string().min(1), buyer_name: z.string().optional(), deposit: z.number().nonnegative(), expires_on: z.string().optional() });
 const ContractBody = z.object({ dev_code: z.string().min(1), unit_no: z.string().min(1), booking_no: z.string().optional(), buyer_name: z.string().optional(), discount: z.number().min(0).optional(), down_payment: z.number().min(0), installment_count: z.number().int().min(0) });
