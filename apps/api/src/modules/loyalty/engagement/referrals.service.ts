@@ -2,6 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ConflictExc
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { loyaltyReferrals, posMembers, posMemberLedger } from '../../../database/schema';
+import { blindIndex } from '../../../database/encrypted-column';
 import { n } from '../../../database/queries';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { pgError, isUniqueViolation } from '../../../common/db-error';
@@ -33,7 +34,7 @@ export class ReferralsService {
     // enrollment). Self-referral is blocked either way — including referring one's OWN phone.
     let referredMemberId = dto.referred_member_id ?? null;
     if (referredMemberId == null && dto.referred_phone) {
-      const [byPhone] = await db.select({ id: posMembers.id }).from(posMembers).where(and(eq(posMembers.phone, dto.referred_phone), eq(posMembers.tenantId, tenantId), eq(posMembers.active, true))).limit(1);
+      const [byPhone] = await db.select({ id: posMembers.id }).from(posMembers).where(and(eq(posMembers.phoneBidx, blindIndex(dto.referred_phone) ?? ''), eq(posMembers.tenantId, tenantId), eq(posMembers.active, true))).limit(1);
       if (byPhone) referredMemberId = Number(byPhone.id);
     }
     if (referredMemberId != null) {

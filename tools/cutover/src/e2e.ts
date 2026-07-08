@@ -16,6 +16,7 @@ import { eq } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { blindIndex } from '../../../apps/api/dist/database/encrypted-column';
 import { ymd } from '../../../apps/api/dist/database/queries';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
@@ -47,7 +48,7 @@ async function seed(db: any) {
   const [sale] = await db.insert(s.custPosSales).values({ saleNo: 'SALE-T1-1', saleDate: today, tenantId: t1.id, total: '107', subtotal: '100', taxAmount: '7', status: 'Completed', paymentMethod: 'Cash', createdBy: 'admin' }).returning({ id: s.custPosSales.id });
   await db.insert(s.custPosItems).values({ saleId: Number(sale.id), itemId: 'A', itemDescription: 'Apple', qty: '10', amount: '100' });
   // a loyalty member (for the omni-search member type — its deep-link keys on the numeric id)
-  await db.insert(s.posMembers).values({ tenantId: t1.id, memberCode: 'M001', name: 'Alice Member', phone: '0812345678' });
+  await db.insert(s.posMembers).values({ tenantId: t1.id, memberCode: 'M001', name: 'Alice Member', phone: '0812345678', phoneBidx: blindIndex('0812345678') });
 }
 
 async function main() {

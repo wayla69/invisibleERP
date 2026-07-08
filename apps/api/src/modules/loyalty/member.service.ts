@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional, BadRequestException, NotFoundException, C
 import { eq, and, desc, or, sql, ilike, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, posMemberLedger, loyaltyConfig, memberConsents, customerProfiles, loyaltyPostingRuns, loyaltyTiers, loyaltyTierHistory, loyaltyExpiryNotices, pendingPointTransfers } from '../../database/schema';
+import { blindIndex } from '../../database/encrypted-column';
 import { n } from '../../database/queries';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
@@ -54,7 +55,7 @@ export class MemberService {
     const db = this.db; const tenantId = this.tid(user);
     let row;
     try {
-      [row] = await db.insert(posMembers).values({ tenantId, memberCode: `M-TMP`, name: dto.name ?? null, phone: dto.phone ?? null, cardNo: dto.card_no ?? null, email: dto.email ?? null, birthday: dto.birthday ?? null, marketingOptIn: dto.marketing_opt_in ?? true, balance: '0', lifetime: '0', createdBy: user.username }).returning();
+      [row] = await db.insert(posMembers).values({ tenantId, memberCode: `M-TMP`, name: dto.name ?? null, phone: dto.phone ?? null, phoneBidx: blindIndex(dto.phone), cardNo: dto.card_no ?? null, email: dto.email ?? null, emailBidx: blindIndex(dto.email), birthday: dto.birthday ?? null, marketingOptIn: dto.marketing_opt_in ?? true, balance: '0', lifetime: '0', createdBy: user.username }).returning();
     } catch (e: any) {
       if (isUniqueViolation(e)) throw new ConflictException({ code: 'MEMBER_EXISTS', message: 'Member with this phone/card already exists', messageTh: 'มีสมาชิกที่ใช้เบอร์/บัตรนี้แล้ว' });
       throw e;
@@ -67,7 +68,7 @@ export class MemberService {
   async lookup(q: { phone?: string; card?: string; code?: string; line_user_id?: string }, user: JwtUser) {
     const db = this.db; this.tid(user);
     const conds: any[] = [];
-    if (q.phone) conds.push(eq(posMembers.phone, q.phone));
+    if (q.phone) conds.push(eq(posMembers.phoneBidx, blindIndex(q.phone) ?? ''));
     if (q.card) conds.push(eq(posMembers.cardNo, q.card));
     if (q.code) conds.push(eq(posMembers.memberCode, q.code));
     if (q.line_user_id) conds.push(eq(posMembers.lineUserId, q.line_user_id));
@@ -87,7 +88,7 @@ export class MemberService {
     let row;
     try {
       [row] = await db.insert(posMembers).values({
-        tenantId, memberCode: 'M-TMP', name: dto.name ?? prof.displayName ?? null, phone: dto.phone ?? null,
+        tenantId, memberCode: 'M-TMP', name: dto.name ?? prof.displayName ?? null, phone: dto.phone ?? null, phoneBidx: blindIndex(dto.phone),
         lineUserId: prof.lineUserId, lineDisplayName: prof.displayName ?? null,
         marketingOptIn: dto.marketing_opt_in ?? true, balance: '0', lifetime: '0', createdBy: user.username,
       }).returning();
@@ -129,8 +130,8 @@ export class MemberService {
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const set: any = { lastUpdated: new Date() };
     if (dto.name !== undefined) set.name = dto.name;
-    if (dto.phone !== undefined) set.phone = dto.phone;
-    if (dto.email !== undefined) set.email = dto.email;
+    if (dto.phone !== undefined) { set.phone = dto.phone; set.phoneBidx = blindIndex(dto.phone); }
+    if (dto.email !== undefined) { set.email = dto.email; set.emailBidx = blindIndex(dto.email); }
     if (dto.birthday !== undefined) set.birthday = dto.birthday;
     if (dto.marketing_opt_in !== undefined) set.marketingOptIn = dto.marketing_opt_in;
     if (dto.tier !== undefined) set.tier = dto.tier;
@@ -205,7 +206,7 @@ export class MemberService {
     // Resolve the recipient within the caller's tenant (id or phone).
     const conds: any[] = [eq(posMembers.tenantId, tenantId)];
     if (dto.to_member_id != null) conds.push(eq(posMembers.id, Number(dto.to_member_id)));
-    else if (dto.to_phone) conds.push(eq(posMembers.phone, dto.to_phone));
+    else if (dto.to_phone) conds.push(eq(posMembers.phoneBidx, blindIndex(dto.to_phone) ?? ''));
     else throw new BadRequestException({ code: 'BAD_RECIPIENT', message: 'to_member_id or to_phone required', messageTh: 'ต้องระบุสมาชิกผู้รับ' });
     const [rcpt] = await db.select().from(posMembers).where(and(...conds)).limit(1);
     if (!rcpt || rcpt.active === false) throw new NotFoundException({ code: 'RECIPIENT_NOT_FOUND', message: 'Recipient member not found/inactive', messageTh: 'ไม่พบสมาชิกผู้รับ' });
@@ -343,7 +344,9 @@ export class MemberService {
   async list(q: { q?: string; segment?: string; tier?: string; active?: boolean; limit?: number; offset?: number }, _user: JwtUser) {
     const db = this.db;
     const conds: any[] = [];
-    if (q.q) { const s = `%${q.q}%`; conds.push(or(ilike(posMembers.name, s), ilike(posMembers.phone, s), ilike(posMembers.cardNo, s), ilike(posMembers.memberCode, s))); }
+    // phone is encrypted at rest (0284) — substring match is no longer possible; an exact phone paste still
+    // matches via the blind index, alongside the usual substring match on name/card/member_code.
+    if (q.q) { const s = `%${q.q}%`; conds.push(or(ilike(posMembers.name, s), eq(posMembers.phoneBidx, blindIndex(q.q) ?? ''), ilike(posMembers.cardNo, s), ilike(posMembers.memberCode, s))); }
     if (q.tier) conds.push(eq(posMembers.tier, q.tier));
     if (q.active !== undefined) conds.push(eq(posMembers.active, q.active));
     if (q.segment) conds.push(eq(customerProfiles.rfmSegment, q.segment));

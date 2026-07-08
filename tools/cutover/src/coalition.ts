@@ -16,6 +16,7 @@ import { eq } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { blindIndex } from '../../../apps/api/dist/database/encrypted-column';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -77,8 +78,8 @@ async function main() {
   await inj('PUT', '/api/loyalty/config', admin, { enabled: true, points_per_baht: 1, baht_per_point: 0.1, min_redeem: 0 });
 
   // Seed the home-shop member (A) + a decoy member in the non-coalition shop (C) with a different phone.
-  const [mA] = await db.insert(s.posMembers).values({ tenantId: tA, memberCode: 'M-COALA1', name: 'สมาชิกบ้าน A', phone: '0812223344', balance: '0', lifetime: '0', active: true, createdBy: 'seed' }).returning();
-  await db.insert(s.posMembers).values({ tenantId: tC, memberCode: 'M-OUTC1', name: 'นอกเครือ', phone: '0819998877', balance: '0', lifetime: '0', active: true, createdBy: 'seed' });
+  const [mA] = await db.insert(s.posMembers).values({ tenantId: tA, memberCode: 'M-COALA1', name: 'สมาชิกบ้าน A', phone: '0812223344', phoneBidx: blindIndex('0812223344'), balance: '0', lifetime: '0', active: true, createdBy: 'seed' }).returning();
+  await db.insert(s.posMembers).values({ tenantId: tC, memberCode: 'M-OUTC1', name: 'นอกเครือ', phone: '0819998877', phoneBidx: blindIndex('0819998877'), balance: '0', lifetime: '0', active: true, createdBy: 'seed' });
   const mid = Number(mA.id);
 
   // ── 1. HQ-only configuration ──

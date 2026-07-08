@@ -1,8 +1,9 @@
 # PII-at-rest encryption — rollout (panel Round-2, condition #2)
 
 > **Status: mechanism SHIPPED; phased field rollout IN PROGRESS.**
-> The reusable primitive and the first safe fields are merged; the lookup-keyed fields are scaffolded below
-> with exact steps and deferred so member login / customer search are not broken mid-rollout.
+> The reusable primitive and the first safe fields are merged; `loyalty_members`/`customer_master`
+> phone+email are now encrypted with exact-match blind-index lookup (0284); the remaining lookup-keyed
+> fields are scaffolded below with exact steps and deferred so nothing else breaks mid-rollout.
 
 ## What shipped
 
@@ -20,10 +21,24 @@
   (`controls.service.ts scan`). At-rest ToE lives in the `hcm` + `ext` harnesses.
 - **Backfill shipped:** `pnpm --filter @ierp/api db:backfill:pii` (`database/backfill-encrypt-pii.ts`) —
   idempotent (`not like 'v1:%'` discriminator), re-writes every legacy plaintext row through the column type
-  for ALL encrypted columns above (including the customer_master ones that predate it). Run once per
-  environment after deploy; requires the same `APP_ENC_KEY` as the API.
+  for ALL encrypted columns above (including the customer_master ones that predate it). Also runs a
+  blind-index backfill pass (`BIDX_TARGETS`) that populates any row's `phone_bidx`/`email_bidx` still NULL,
+  reading through Drizzle so it works whether the row is already ciphertext or still legacy plaintext. Run
+  once per environment after deploy; requires the same `APP_ENC_KEY` as the API.
 - **Unit test:** `apps/api/test/pii-encrypt.test.ts` (round-trip, fresh-IV, plaintext passthrough, blind-index
   determinism/normalization).
+- **Applied 2026-07-08 (migration 0284):** `pos_members.phone`/`email` and `customer_master.phone`/`email`
+  encrypted, each with a companion `<col>_bidx` (blindIndex()) column for exact-match lookup. Decision on the
+  substring-search tradeoff (item 3 of the table below): **(a) downgrade to exact-match** — substring/partial
+  phone or email search is retired everywhere (loyalty member search, customer search, global ⌘K search);
+  name/card_no/member_code/customer_no substring search is unaffected. Rewritten call sites: member OTP login
+  (`member-auth.service.ts`), member lookup/P2P-transfer/enroll/update (`member.service.ts`), referral-by-phone
+  (`referrals.service.ts`), coalition cross-shop resolve (`coalition.service.ts`), customer create/update/
+  list/merge (`customers.module.ts`), lead-to-customer conversion (`crm-pipeline.service.ts`), and both search
+  entities in `search.module.ts`. PDPA erasure (`pdpa.service.ts redactMember`) now also nulls the `_bidx`
+  companions. The old plaintext partial-unique index `pos_members_tenant_phone` is replaced by a unique index
+  on `(tenant_id, phone_bidx)` (ciphertext's random IV can no longer enforce "one phone per tenant" itself).
+  At-rest ToE: extend `pg-smoke`/`ext` per the checklist below before the next full harness run.
 
 ## Why the rest is phased (not a rushed big-bang)
 
@@ -33,9 +48,8 @@ remaining PII columns are either **lookup keys** or **substring-searched**, so e
 
 | Table.column | Current use | Required rewire |
 |---|---|---|
-| `loyalty_members.phone` | lookup key (member login/dedupe) | `phone_bidx` + rewrite lookup to filter on bidx |
-| `loyalty_members.email` | dedupe / messaging | `email_bidx` + bidx lookup |
-| `customer_master.email` / `phone` | `ilike` substring search (`customers.module.ts:89`) | **substring search over ciphertext is impossible** — choose: (a) drop substring search and use exact-match bidx, or (b) keep plaintext and accept the residual risk, documented |
+| ~~`loyalty_members.phone` / `email`~~ | ~~lookup key (member login/dedupe) / messaging~~ | **DONE 2026-07-08** — `phone_bidx`/`email_bidx` added (0284), every lookup rewired to filter on bidx |
+| ~~`customer_master.email` / `phone`~~ | ~~`ilike` substring search~~ | **DONE 2026-07-08** — decision (a): downgraded to exact-match bidx (0284); substring search on phone/email retired |
 | `crm_pipeline.email` / `phone` | display (leads) | safe to encrypt if not searched — verify, then apply `encryptedText` |
 | `loyalty_referrals.referred_phone` | display | likely safe — verify, then apply |
 | ~~`hcm` employee identifiers~~ | ~~varies~~ | **DONE 2026-07-02** — `employees.national_id`/`sso_no`/`bank_account` + `payslips.national_id` encrypted; PND1A grouped in app code |
@@ -62,3 +76,4 @@ remaining PII columns are either **lookup keys** or **substring-searched**, so e
 |------|---------|--------|
 | 2026-06-30 | v0.1 | Mechanism + `customer_master.tax_id`/`notes` shipped; lookup-keyed fields scaffolded + deferred. |
 | 2026-07-02 | v0.2 | **docs/27 R0-1:** employee (`national_id`/`sso_no`/`bank_account`), payslip (`national_id`) and vendor (`tax_id`/`bank_account`) columns encrypted; PND1A + ghost-vendor aggregations moved to app-code grouping over decrypted values; idempotent `db:backfill:pii` script ships (covers the earlier customer_master debt too); at-rest ToE in `hcm`/`ext`; RCM ITGC-AC-19 text updated + xlsx regenerated. |
+| 2026-07-08 | v0.3 | **Migration 0284:** `pos_members`/`customer_master` `phone`/`email` encrypted with companion `_bidx` blind-index columns; decision (a) — substring search on phone/email retired in favour of exact-match (member search, customer search, global search); every lookup/dedupe/DSAR-erasure site rewired to filter on the bidx; `db:backfill:pii` extended with a `BIDX_TARGETS` pass. |

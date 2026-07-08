@@ -2,6 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException } from '@nes
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { crmLeads, crmOpportunities, crmActivities, customerMaster } from '../../../database/schema';
+import { blindIndex } from '../../../database/encrypted-column';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { n } from '../../../database/queries';
 import type { JwtUser } from './../../../common/decorators';
@@ -67,7 +68,7 @@ export class CrmPipelineService {
     let customerNo = dto.customer_no ?? null;
     if (!customerNo) {
       customerNo = await this.docNo.nextDaily('CUS');
-      await db.insert(customerMaster).values({ tenantId: user.tenantId ?? null, customerNo, name: l.company || l.name, kind: l.company ? 'company' : 'person', email: l.email ?? null, phone: l.phone ?? null, status: 'active', notes: `Converted from ${leadNo}`, createdBy: user.username });
+      await db.insert(customerMaster).values({ tenantId: user.tenantId ?? null, customerNo, name: l.company || l.name, kind: l.company ? 'company' : 'person', email: l.email ?? null, emailBidx: blindIndex(l.email), phone: l.phone ?? null, phoneBidx: blindIndex(l.phone), status: 'active', notes: `Converted from ${leadNo}`, createdBy: user.username });
     }
     const oppNo = await this.docNo.nextDaily('OPP');
     await db.insert(crmOpportunities).values({ tenantId: user.tenantId ?? null, oppNo, customerNo, name: dto.opportunity_name || `${l.company || l.name} opportunity`, stage: 'qualification', amount: dto.amount != null ? String(dto.amount) : '0', probability: 25, expectedCloseDate: dto.expected_close_date ?? null, owner: l.owner ?? user.username, leadNo, createdBy: user.username });

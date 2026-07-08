@@ -1,6 +1,6 @@
 # Data Retention & Deletion Policy
 
-> **Status: DRAFT v0.4** — owner `<<DPO / Head of Engineering>>`. Retention periods marked `<<…>>` must be
+> **Status: DRAFT v0.5** — owner `<<DPO / Head of Engineering>>`. Retention periods marked `<<…>>` must be
 > confirmed against Thai statutory requirements and customer contracts before this is treated as final.
 
 Governs how long each class of data is kept, when it is deleted, and which data is under a **statutory legal
@@ -14,7 +14,7 @@ and [DPA](../legal/data-processing-agreement.md).
 | **Financial / accounting records** | GL entries, AR/AP, invoices, payments, tax docs | **`<<7 years>>`** (Thai accounting/tax statute) — **LEGAL HOLD, never auto-purged** | Manual, post-statute only, with sign-off |
 | **Audit trail** | `audit_log` (append-only, hash-chained), `data_change_log` | **`<<7 years>>`** — **LEGAL HOLD, immutable, never auto-purged** | Manual archival post-statute only |
 | **Operational transactional** | POS sales, inventory movements, orders | `<<per contract, typically 5–7 years>>` | Manual/archival; not auto-purged |
-| **Member / customer PII** | `pos_members`, contacts, consents, `loyalty_receipt_submissions` (member-submitted receipt photos, LYL-17) | While the relationship is active; on PDPA **erasure** request → redacted + pseudonymised immediately; optionally **auto-anonymized after `<<N ≥ 12>>` months of inactivity** when the tenant opts in | PDPA DSAR erasure workflow (`/api/pdpa/dsar`); opt-in **`pii_retention_sweep`** (PDPA-04, §3a) |
+| **Member / customer PII** | `pos_members`, contacts, consents, `loyalty_receipt_submissions` (member-submitted receipt photos, LYL-17) | While the relationship is active; on PDPA **erasure** request → redacted + pseudonymised immediately; optionally **auto-anonymized after ≥ 12 months of inactivity** (service-enforced floor; each tenant's DPO sets the actual window, opt-in — see §3a) | PDPA DSAR erasure workflow (`/api/pdpa/dsar`); opt-in **`pii_retention_sweep`** (PDPA-04, §3a) |
 | **Ephemeral security tokens** | `revoked_tokens`, `refresh_tokens`, `sso_login_state`, `member_otps` | Until expiry/consumption (minutes–days) | **Auto-purged** by the scheduled `data_retention_purge` job once dead |
 | **Backups** | DB snapshots | **`<<90 days>>`** rolling | Automatic backup rotation |
 | **AI token usage** | `ai_token_usage` (daily counters) | `<<13 months>>` (trend/billing) | Auto-purge candidate (future) |
@@ -63,6 +63,7 @@ This policy is reviewed `<<annually>>` and on any change to statutory requiremen
 ### Revision history
 | Version | Date | Author | Notes |
 | --- | --- | --- | --- |
+| 0.5 DRAFT | 2026-07-08 | Platform | **Doc-consistency fix:** the §1 member/customer PII row's `<<N ≥ 12>>` placeholder was stale — §3a below it already specifies the exact rule (12-month service-enforced floor, per-tenant DPO-set, opt-in). Replaced the placeholder with the code-derived wording; no policy change. Genuine legal-judgment placeholders (owner, the `<<7 years>>`/`<<per contract>>`/`<<90 days>>`/`<<60 days>>`/`<<13 months>>`/`<<30–90 days>>`/`<<annually>>` figures) are left for DPO/counsel confirmation. |
 | 0.4 DRAFT | 2026-07-08 | Platform / Privacy | **§3a — opt-in PII retention sweep (PDPA-04).** Per-tenant `pdpa_retention_policies` (12-month floor, default-OFF) + the `pii_retention_sweep` job anonymize loyalty-member PII past the inactivity window via the DSAR-erasure redaction path (dry-run, idempotent, bounded; audit trail read-time-pseudonymised). §1 member-PII row updated. |
 | 0.1 DRAFT | 2026-06-29 | Platform | Initial policy (panel/legal remediation): retention schedule by data class, statutory legal hold on financial + audit data (excluded from auto-purge, reconciled with PDPA erasure via read-time masking), and the safe automated `data_retention_purge` of dead ephemeral security tokens. Retention periods `<<…>>` pending statutory/contract confirmation. |
 | 0.2 | 2026-07-01 | Platform | Added `loyalty_receipt_submissions` (member-submitted receipt photos, LYL-17) to the Member/customer PII row — same treatment as other member PII (kept while active; redacted on PDPA erasure via `/api/pdpa/dsar`). |

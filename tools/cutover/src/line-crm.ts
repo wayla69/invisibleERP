@@ -20,6 +20,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { blindIndex } from '../../../apps/api/dist/database/encrypted-column';
 import { reportSubscriptions } from '../../../apps/api/dist/database/schema/bi';
 import { setLlmClientForTests } from '../../../apps/api/dist/common/llm-client';
 import { AppModule } from '../../../apps/api/dist/app.module';
@@ -277,7 +278,7 @@ async function main() {
     JSON.stringify({ sms: hSms2?.resolved_provider, configured: hSms2?.configured }));
 
   // ── W3 (docs/27): messaging governance — quiet hours + global weekly marketing cap (marketing only) ──
-  const [gmRow] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-GOV1', name: 'กติกา', phone: '0866660001', email: 'gov@example.com', lineUserId: 'U-gov-1', balance: '0', lifetime: '0', active: true }).returning();
+  const [gmRow] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-GOV1', name: 'กติกา', phone: '0866660001', phoneBidx: blindIndex('0866660001'), email: 'gov@example.com', emailBidx: blindIndex('gov@example.com'), lineUserId: 'U-gov-1', balance: '0', lifetime: '0', active: true }).returning();
   const gmId = Number(gmRow.id);
   const bkkNow = new Date(Date.now() + 7 * 3600_000);
   const hhmm = (d: Date) => `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;

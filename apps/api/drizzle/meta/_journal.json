@@ -1989,6 +1989,13 @@
       "when": 2023820000245,
       "tag": "0283_pdpa_retention_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 284,
+      "version": "7",
+      "when": 2023820000246,
+      "tag": "0284_pii_bidx_phone_email",
+      "breakpoints": true
     }
   ]
 }

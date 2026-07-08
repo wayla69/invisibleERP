@@ -4,6 +4,7 @@ import { sql, eq, and, ne, or, ilike, desc, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, arInvoices, tenants, customerMaster, posMembers, customerAddresses, customerContacts, dataChangeLog, customerRelationships } from '../../database/schema';
+import { blindIndex } from '../../database/encrypted-column';
 import { n, ymd } from '../../database/queries';
 import { DocNumberService } from '../../common/doc-number.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -117,8 +118,8 @@ export class CustomerMasterService {
     const db = this.db;
     const customerNo = await this.docNo.nextDaily('CUS');
     await db.insert(customerMaster).values({
-      tenantId: user.tenantId ?? null, customerNo, name: dto.name, kind: dto.kind, email: dto.email ?? null,
-      phone: dto.phone ?? null, taxId: dto.tax_id ?? null, address: dto.address ?? null, branchCode: dto.branch_code ?? null,
+      tenantId: user.tenantId ?? null, customerNo, name: dto.name, kind: dto.kind, email: dto.email ?? null, emailBidx: blindIndex(dto.email),
+      phone: dto.phone ?? null, phoneBidx: blindIndex(dto.phone), taxId: dto.tax_id ?? null, address: dto.address ?? null, branchCode: dto.branch_code ?? null,
       memberId: dto.member_id ?? null, accountCode: dto.account_code ?? null,
       status: 'active', notes: dto.notes ?? null, createdBy: user.username,
       creditTerms: dto.credit_terms ?? null, salesRep: dto.sales_rep ?? null, category: dto.category ?? null,
@@ -135,8 +136,8 @@ export class CustomerMasterService {
     const set: Record<string, unknown> = {};
     if (dto.name !== undefined) set.name = dto.name;
     if (dto.kind !== undefined) set.kind = dto.kind;
-    if (dto.email !== undefined) set.email = dto.email || null;
-    if (dto.phone !== undefined) set.phone = dto.phone || null;
+    if (dto.email !== undefined) { set.email = dto.email || null; set.emailBidx = blindIndex(dto.email || null); }
+    if (dto.phone !== undefined) { set.phone = dto.phone || null; set.phoneBidx = blindIndex(dto.phone || null); }
     if (dto.tax_id !== undefined) set.taxId = dto.tax_id || null;
     if (dto.address !== undefined) set.address = dto.address || null;
     if (dto.branch_code !== undefined) set.branchCode = dto.branch_code || null;
@@ -184,7 +185,9 @@ export class CustomerMasterService {
 
   async list(q: { search?: string }, _user: JwtUser) {
     const db = this.db;
-    const where = q.search ? or(ilike(customerMaster.name, `%${q.search}%`), ilike(customerMaster.phone, `%${q.search}%`), ilike(customerMaster.email, `%${q.search}%`), ilike(customerMaster.customerNo, `%${q.search}%`)) : undefined;
+    // phone/email are encrypted at rest (0284) — substring match is retired; an exact phone/email paste
+    // still matches via the blind index, alongside the usual substring match on name/customer_no.
+    const where = q.search ? or(ilike(customerMaster.name, `%${q.search}%`), eq(customerMaster.phoneBidx, blindIndex(q.search) ?? ''), eq(customerMaster.emailBidx, blindIndex(q.search) ?? ''), ilike(customerMaster.customerNo, `%${q.search}%`)) : undefined;
     const rows = await db.select().from(customerMaster).where(where).orderBy(desc(customerMaster.id)).limit(200);
     return { customers: rows.map(shapeCustomer), count: rows.length };
   }
@@ -358,6 +361,9 @@ export class CustomerMasterService {
         pick('memberId', survivor.memberId, dup.memberId); pick('accountCode', survivor.accountCode, dup.accountCode);
         pick('creditTerms', survivor.creditTerms, dup.creditTerms); pick('salesRep', survivor.salesRep, dup.salesRep);
         pick('category', survivor.category, dup.category); pick('externalRef', survivor.externalRef, dup.externalRef);
+        // Keep the blind-index columns in sync with whatever email/phone the survivor ends up with.
+        if (fill.email !== undefined) fill.emailBidx = blindIndex(String(fill.email));
+        if (fill.phone !== undefined) fill.phoneBidx = blindIndex(String(fill.phone));
         if (Object.keys(fill).length) await tx.update(customerMaster).set(fill).where(eq(customerMaster.id, Number(survivor.id)));
         await tx.update(customerMaster).set({ status: 'merged', mergedInto: Number(survivor.id), mergedBy: user.username, mergedAt: new Date() }).where(eq(customerMaster.id, Number(dup.id)));
       });

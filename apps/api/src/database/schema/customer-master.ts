@@ -11,8 +11,12 @@ export const customerMaster = pgTable('customer_master', {
   customerNo: text('customer_no').notNull(),       // CUS-YYYYMMDD-NNN
   name: text('name').notNull(),
   kind: text('kind').notNull().default('person'),  // person | company
-  email: text('email'),                            // searched via ilike → kept plaintext (blind-index rollout: see docs/ops/pii-encryption-rollout.md)
-  phone: text('phone'),                            // searched via ilike → kept plaintext (see rollout doc)
+  // PII-at-rest (0284): encrypted; a companion `_bidx` (blindIndex()) column carries the exact-match lookup
+  // key. Substring `ilike` search is no longer possible over phone/email — see docs/ops/pii-encryption-rollout.md.
+  email: encryptedText('email'),
+  emailBidx: text('email_bidx'),
+  phone: encryptedText('phone'),
+  phoneBidx: text('phone_bidx'),
   taxId: encryptedText('tax_id'),                  // PII-at-rest (panel #2): Thai tax/national ID — NOT queried → safe to encrypt transparently
   memberId: bigint('member_id', { mode: 'number' }), // → pos_members.id (B2C loyalty link)
   accountCode: text('account_code'),               // B2B customer tenant code (orders + AR)
@@ -39,6 +43,13 @@ export const customerMaster = pgTable('customer_master', {
   mergedAt: timestamp('merged_at', { withTimezone: true }),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-}, (t) => ({ uqNo: unique('uq_customer_master_no').on(t.tenantId, t.customerNo), byName: index('idx_customer_master_name').on(t.tenantId, t.name), byMember: index('idx_customer_master_member').on(t.memberId) }));
+}, (t) => ({
+  uqNo: unique('uq_customer_master_no').on(t.tenantId, t.customerNo),
+  byName: index('idx_customer_master_name').on(t.tenantId, t.name),
+  byMember: index('idx_customer_master_member').on(t.memberId),
+  // 0284: exact-match search indexes for the encrypted phone/email columns.
+  byPhoneBidx: index('idx_customer_master_phone_bidx').on(t.tenantId, t.phoneBidx),
+  byEmailBidx: index('idx_customer_master_email_bidx').on(t.tenantId, t.emailBidx),
+}));
 
 export type CustomerMaster = typeof customerMaster.$inferSelect;

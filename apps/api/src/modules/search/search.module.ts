@@ -1,8 +1,9 @@
 import { Inject, Injectable, Module, Controller, Get, Query } from '@nestjs/common';
-import { or, ilike, desc, asc, type SQL } from 'drizzle-orm';
+import { or, ilike, eq, desc, asc, type SQL } from 'drizzle-orm';
 import { expandPermissions, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerMaster, vendors, items, custPosSales, arInvoices, taxInvoices, purchaseOrders, posMembers, projects, purchaseRequests, apTransactions, employees } from '../../database/schema';
+import { blindIndex } from '../../database/encrypted-column';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 
 // ── Global "spotlight" search (GET /api/search?q=) ─────────────────────────────────────────────────
@@ -32,18 +33,22 @@ const sub = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).j
 interface EntitySpec {
   type: SearchType;
   perms: Permission[];
-  run(db: DrizzleDb, term: string, limit: number): Promise<SearchResult[]>;
+  // `term` is the ilike-wildcarded string (`%q%`); `rawQ` is the untouched query, used for exact blind-index
+  // matches on encrypted phone/email columns (0284) — ciphertext can't be substring-matched.
+  run(db: DrizzleDb, term: string, limit: number, rawQ: string): Promise<SearchResult[]>;
 }
 
 const ENTITIES: EntitySpec[] = [
   {
     type: 'customer',
     perms: ['crm', 'exec', 'ar'],
-    run: async (db, term, limit) => {
+    run: async (db, term, limit, rawQ) => {
       const rows = await db
         .select({ no: customerMaster.customerNo, name: customerMaster.name, phone: customerMaster.phone })
         .from(customerMaster)
-        .where(or(ilike(customerMaster.name, term), ilike(customerMaster.customerNo, term), ilike(customerMaster.email, term), ilike(customerMaster.phone, term)) as SQL)
+        // phone/email are encrypted at rest (0284) — ilike can't match ciphertext, so an exact phone/email
+        // paste matches via the blind index instead; name/customer_no substring search is unaffected.
+        .where(or(ilike(customerMaster.name, term), ilike(customerMaster.customerNo, term), eq(customerMaster.emailBidx, blindIndex(rawQ) ?? ''), eq(customerMaster.phoneBidx, blindIndex(rawQ) ?? '')) as SQL)
         .orderBy(desc(customerMaster.id))
         .limit(limit);
       return rows.map((r) => ({ type: 'customer' as const, id: r.no, label: r.name, sublabel: sub(r.no, r.phone), href: '/finance/customers' }));
@@ -131,11 +136,12 @@ const ENTITIES: EntitySpec[] = [
     // real per-record detail page ("Member 360"), keyed on the NUMERIC id (not member_code)
     type: 'member',
     perms: ['loyalty', 'marketing', 'crm'],
-    run: async (db, term, limit) => {
+    run: async (db, term, limit, rawQ) => {
       const rows = await db
         .select({ id: posMembers.id, code: posMembers.memberCode, name: posMembers.name, phone: posMembers.phone })
         .from(posMembers)
-        .where(or(ilike(posMembers.memberCode, term), ilike(posMembers.name, term), ilike(posMembers.phone, term)) as SQL)
+        // phone is encrypted at rest (0284) — an exact phone paste matches via the blind index instead.
+        .where(or(ilike(posMembers.memberCode, term), ilike(posMembers.name, term), eq(posMembers.phoneBidx, blindIndex(rawQ) ?? '')) as SQL)
         .orderBy(desc(posMembers.id))
         .limit(limit);
       return rows.map((r) => ({ type: 'member' as const, id: String(r.id), label: r.name || r.code, sublabel: sub(r.code, r.phone), href: `/loyalty/members/${r.id}` }));
@@ -214,7 +220,7 @@ export class SearchService {
     const can = (req: Permission[]) => req.some((p) => held.has(p));
 
     const allowed = ENTITIES.filter((e) => can(e.perms));
-    const batches = await Promise.all(allowed.map((e) => e.run(this.db, term, PER_TYPE)));
+    const batches = await Promise.all(allowed.map((e) => e.run(this.db, term, PER_TYPE, q)));
     const results = batches.flat();
     return { results, count: results.length };
   }

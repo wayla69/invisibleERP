@@ -34,6 +34,7 @@ import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { blindIndex } from '../../../apps/api/dist/database/encrypted-column';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -646,7 +647,7 @@ async function main() {
     `code=${refCreate.json.code} reward=${refReward.json.status} refr=${refReward.json.referrer?.balance} refd=${refReward.json.referred?.balance} again=${refReward2.json.error?.code} cross=${refRewardCross.status}`);
 
   // ════════ LYL-10 — Member self-service app: phone-OTP login, self-scoped access, staff routes blocked ════════
-  const [appMem] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-APP', name: 'แอป', phone: '0890000001', balance: '100', lifetime: '100', active: true }).returning({ id: s.posMembers.id });
+  const [appMem] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-APP', name: 'แอป', phone: '0890000001', phoneBidx: blindIndex('0890000001'), balance: '100', lifetime: '100', active: true }).returning({ id: s.posMembers.id });
   const otpReq = await inj('POST', '/api/member/auth/request-otp', undefined, { phone: '0890000001', tenant_code: 'T1' });
   const badVerify = await inj('POST', '/api/member/auth/verify-otp', undefined, { phone: '0890000001', tenant_code: 'T1', code: '000000' });   // wrong → 401
   const otpVerify = await inj('POST', '/api/member/auth/verify-otp', undefined, { phone: '0890000001', tenant_code: 'T1', code: String(otpReq.json.dev_otp) });
@@ -692,9 +693,9 @@ async function main() {
     `s1=${spin1.json.balance}/${spin1.json.free} s2=${spin2.json.balance}/c${spin2.json.cost_points} hist=${histW.json.spins?.length} B1=${spinB1.json.balance} B2=${spinB2.status}`);
 
   // ════════ LYL-12 — Campaign orchestration: segmented send respects PDPA opt-out, audits, idempotent ════════
-  const [cm1] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP1', name: 'แคมเปญ1', phone: '0891111111', marketingOptIn: true, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
-  const [cm2] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP2', name: 'แคมเปญ2', phone: '0892222222', marketingOptIn: false, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
-  const [cm3] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP3', name: 'แคมเปญ3', phone: '0893333333', marketingOptIn: true, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
+  const [cm1] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP1', name: 'แคมเปญ1', phone: '0891111111', phoneBidx: blindIndex('0891111111'), marketingOptIn: true, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
+  const [cm2] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP2', name: 'แคมเปญ2', phone: '0892222222', phoneBidx: blindIndex('0892222222'), marketingOptIn: false, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
+  const [cm3] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP3', name: 'แคมเปญ3', phone: '0893333333', phoneBidx: blindIndex('0893333333'), marketingOptIn: true, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
   void cm1; void cm2; void cm3;
   const camp = await inj('POST', '/api/loyalty/campaigns', execu, { name: 'โปรสมาชิก VIP', channel: 'sms', audience: 'tier', tier: 'VIPTEST', body: 'รับส่วนลดพิเศษวันนี้!' });
   const sendC = await inj('POST', `/api/loyalty/campaigns/${camp.json.id}/send`, execu);
@@ -770,8 +771,8 @@ async function main() {
     `submit=${rcSubmit.status}/${rcSubmit.json.status} self=${rcSelfApprove.status} approve=${rcApprove.status}/${rcApprove.json.points_granted} bal=${rcMeAfter.json.balance} re-approve=${rcReapprove.status}/${rcReapprove.json.error?.code} dup=${rcDup.status}/${rcDup.json.error?.code} reject=${rcReject.status}/${rcReject.json.status} balAfterReject=${rcMeAfterReject.json.balance}`);
 
   // ════════ LYL-18 — P2P point transfer: atomic two-row move, day-capped, net-zero on the 2250 liability ════════
-  const [p2pA] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-P2PA', name: 'ผู้ส่ง', phone: '0890000041', balance: '500', lifetime: '500', active: true }).returning({ id: s.posMembers.id });
-  const [p2pB] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-P2PB', name: 'ผู้รับ', phone: '0890000042', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  const [p2pA] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-P2PA', name: 'ผู้ส่ง', phone: '0890000041', phoneBidx: blindIndex('0890000041'), balance: '500', lifetime: '500', active: true }).returning({ id: s.posMembers.id });
+  const [p2pB] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-P2PB', name: 'ผู้รับ', phone: '0890000042', phoneBidx: blindIndex('0890000042'), balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
   const liaBefore18 = (await inj('GET', '/api/loyalty/liability', execu)).json;
   const p2pStaff = await inj('POST', `/api/loyalty/members/${Number(p2pA.id)}/transfer`, execu, { to_member_id: Number(p2pB.id), points: 200 });
   const p2pRows = await db.select().from(s.posMemberLedger).where(eq(s.posMemberLedger.refDoc, `P2P-${Number(p2pA.id)}-${Number(p2pB.id)}`));
@@ -811,7 +812,7 @@ async function main() {
   const coalMk = await inj('POST', '/api/coalition', admin, { code: 'CO19', name: 'เครือ LYL-19' });
   await inj('POST', `/api/coalition/${coalMk.json.id}/members`, admin, { tenant_id: t1 });
   await inj('POST', `/api/coalition/${coalMk.json.id}/members`, admin, { tenant_id: hq });
-  const [coalM] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CO19', name: 'สมาชิกเครือ', phone: '0890000051', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  const [coalM] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CO19', name: 'สมาชิกเครือ', phone: '0890000051', phoneBidx: blindIndex('0890000051'), balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
   const coalEarn = await inj('POST', '/api/coalition/earn', coalB, { member_id: Number(coalM.id), net_spend: 100, ref_doc: 'CO19-S1' });
   const coalLed = await db.select().from(s.posMemberLedger).where(eq(s.posMemberLedger.refDoc, 'CO19-S1'));
   const coalIc = await inj('GET', `/api/intercompany/${coalEarn.json.ic_no}`, admin);
@@ -825,7 +826,7 @@ async function main() {
     `hq=${coalDenied.status}/${coalDenied.json.error?.code} earn=${coalEarn.status}/${coalEarn.json.error?.code ?? coalEarn.json.points_earned}/${coalEarn.json.ic_no} led=${coalLed.length}@${(coalLed[0] as any)?.tenantId} ic=${coalIc.json.category}/${coalIc.json.from_tenant_id}->${coalIc.json.to_tenant_id}/${coalIc.json.amount} burn=${coalBurnOver.status}/${coalBurnOver.json.error?.code}`);
 
   // ════════ LYL-20 — NPS detractor → exactly ONE owned, SLA-timed recovery case (V2, docs/29) ════════
-  const [rcm20] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LYL20', name: 'เคสกู้คืน', phone: '0890000061', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  const [rcm20] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LYL20', name: 'เคสกู้คืน', phone: '0890000061', phoneBidx: blindIndex('0890000061'), balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
   await db.insert(s.npsResponses).values({ tenantId: t1, memberId: Number(rcm20.id), token: 'toe-lyl20-tok', expiresAt: new Date(Date.now() + 86400000) });
   const lyl20Ans = await inj('POST', '/api/nps/toe-lyl20-tok', undefined, { score: 2, comment: 'ช้ามาก' });
   const lyl20Again = await inj('POST', '/api/nps/toe-lyl20-tok', undefined, { score: 9 });
@@ -845,7 +846,7 @@ async function main() {
 
   // ════════ LYL-21 — paid VIP: deferred fee, monthly recognition, tier auto-revoke on lapse (V4, docs/29) ════════
   const v4plan = await inj('POST', '/api/loyalty/membership-plans', execu, { code: 'TOE-VIP', name: 'ToE VIP', tier: 'Gold', price: 600, period_months: 6 });
-  const [v4m] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-VIP21', name: 'วีไอพี', phone: '0890000071', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  const [v4m] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-VIP21', name: 'วีไอพี', phone: '0890000071', phoneBidx: blindIndex('0890000071'), balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
   const v4start = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
   const v4sell = await inj('POST', '/api/loyalty/memberships/sell', execu, { member_id: Number(v4m.id), plan_id: v4plan.json.id, start_date: v4start });
   const v4rec = await inj('POST', '/api/loyalty/memberships/recognize', execu, {});
@@ -861,7 +862,7 @@ async function main() {
   // ════════ MKT-12 — Lifecycle journeys: consent-gated, frequency-capped, at-most-once per step ════════
   // An opted-out member enrols but the step send is SKIPPED (audited in message_log); a re-run fires
   // nothing (the enrollment-step was claimed before delivery — claim-first, mirrors MKT-10).
-  const [jm1] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-JNY1', name: 'เจอร์นีย์', phone: '0890000031', balance: '0', lifetime: '0', active: true, marketingOptIn: false }).returning({ id: s.posMembers.id });
+  const [jm1] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-JNY1', name: 'เจอร์นีย์', phone: '0890000031', phoneBidx: blindIndex('0890000031'), balance: '0', lifetime: '0', active: true, marketingOptIn: false }).returning({ id: s.posMembers.id });
   const jny = await inj('POST', '/api/loyalty/journeys', execu, { name: 'MKT-12 series', trigger: 'manual', cap_messages: 1, cap_window_days: 7, steps: [{ wait_days: 0, channel: 'sms', body: 'ยินดีต้อนรับ' }] });
   await inj('POST', `/api/loyalty/journeys/${jny.json.id}/activate`, execu, {});
   await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, execu, { member_id: Number(jm1.id) });

@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { blindIndex } from '../../../apps/api/dist/database/encrypted-column';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -209,7 +210,7 @@ async function main() {
   // ── 17. expiry look-ahead: loyalty.points_expiring fires once per member × expire-by batch ──
   await inj('PUT', '/api/loyalty/config', admin, { expiry_days: 60 });
   await inj('POST', '/api/automation/rules', admin, { name: 'เตือนแต้มใกล้หมดอายุ', event_type: 'loyalty.points_expiring', action: { type: 'notification', message: 'แต้มของคุณใกล้หมดอายุ' } });
-  const [expm] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-EXPIRE1', name: 'ใกล้หมดอายุ', phone: '0810000099', balance: '500', lifetime: '500', createdBy: 'seed' }).returning();
+  const [expm] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-EXPIRE1', name: 'ใกล้หมดอายุ', phone: '0810000099', phoneBidx: blindIndex('0810000099'), balance: '500', lifetime: '500', createdBy: 'seed' }).returning();
   const fortyDaysAgo = new Date(Date.now() - 40 * 86400000);
   await db.insert(s.posMemberLedger).values({ tenantId: t1, memberId: expm.id, txnDate: fortyDaysAgo, txnType: 'Earn', points: '500', balanceAfter: '500', refDoc: 'SEED-EXP', createdBy: 'seed' });
   const mt1 = await inj('POST', '/api/loyalty/maintenance/run', admin, { tenant_id: t1 });

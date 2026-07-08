@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional, BadRequestException, NotFoundException, F
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { coalitions, coalitionMembers, posMembers, tenants, loyaltyConfig } from '../../database/schema';
+import { blindIndex } from '../../database/encrypted-column';
 import { n } from '../../database/queries';
 import { runInTenantContext } from '../../common/tenant-run';
 import { MemberService } from '../loyalty/member.service';
@@ -122,7 +123,7 @@ export class CoalitionService {
       const net = await this.coalitionOf(callerTid);
       if (!net) throw new NotFoundException({ code: 'NOT_IN_COALITION', message: 'This shop is not in a coalition', messageTh: 'ร้านนี้ไม่ได้อยู่ในเครือข่ายพันธมิตรแต้ม' });
       const shopIds = await this.shopsIn(net.coalitionId);
-      const candidates: any[] = await base.select().from(posMembers).where(and(eq(posMembers.phone, phone), eq(posMembers.active, true)));
+      const candidates: any[] = await base.select().from(posMembers).where(and(eq(posMembers.phoneBidx, blindIndex(phone) ?? ''), eq(posMembers.active, true)));
       const m = candidates.find((r: any) => shopIds.includes(Number(r.tenantId)));
       if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'No coalition member with that phone', messageTh: 'ไม่พบสมาชิกเครือข่ายจากเบอร์นี้' });
       const [home] = await base.select({ code: tenants.code, name: tenants.name }).from(tenants).where(eq(tenants.id, m.tenantId)).limit(1);

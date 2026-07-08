@@ -4,6 +4,7 @@ import { eq, and, desc, gt, isNull, sql } from 'drizzle-orm';
 import { randomInt, randomUUID } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { tenants, posMembers, memberOtps, messageLog, revokedTokens } from '../../../database/schema';
+import { blindIndex } from '../../../database/encrypted-column';
 import { n } from '../../../database/queries';
 import { PasswordService } from '../../auth/password.service';
 import { resolveMessageGateway } from '../../messaging/gateways';
@@ -30,7 +31,7 @@ export class MemberAuthService {
     const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, tenantCode)).limit(1);
     if (!t) return null;
     const tenantId = Number(t.id);
-    const [m] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.phone, phone), eq(posMembers.active, true))).limit(1);
+    const [m] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.phoneBidx, blindIndex(phone) ?? ''), eq(posMembers.active, true))).limit(1);
     return m ? { tenantId, member: m } : null;
   }
 

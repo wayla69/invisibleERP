@@ -299,7 +299,7 @@ export class PdpaService {
     // 1. Redact PII in the operational record (keep id + member_code for referential integrity; keep
     //    aggregate balance/tier which are not direct identifiers).
     await db.update(posMembers).set({
-      name: '[erased]', phone: null, email: null, cardNo: null, lineUserId: null, lineDisplayName: null,
+      name: '[erased]', phone: null, phoneBidx: null, email: null, emailBidx: null, cardNo: null, lineUserId: null, lineDisplayName: null,
       birthday: null, marketingOptIn: false, active: false, lastUpdated: new Date(),
     }).where(eq(posMembers.id, Number(m.id)));
     // 2. Withdraw all consents.

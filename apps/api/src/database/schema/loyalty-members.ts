@@ -2,16 +2,22 @@
 // End-consumer members per shop (distinct from tenant-scoped loyalty_points) + append-only points ledger.
 // tenant_id REQUIRED → RLS: each shop owns its own roster. Lookup by phone / card / member_code.
 import { pgTable, bigserial, bigint, text, numeric, timestamp, boolean, date, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
+import { encryptedText } from '../encrypted-column';
 
 export const posMembers = pgTable('pos_members', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   memberCode: text('member_code').notNull(),       // M-000123
   name: text('name'),
-  phone: text('phone'),
+  // PII-at-rest (0284): encrypted; a companion `_bidx` (blindIndex()) column carries the exact-match lookup
+  // key (login/dedupe/transfer). Substring search over phone is no longer possible — see pii-encryption-rollout.md.
+  phone: encryptedText('phone'),
+  phoneBidx: text('phone_bidx'),
   cardNo: text('card_no'),
-  email: text('email'),
+  email: encryptedText('email'),
+  emailBidx: text('email_bidx'),
   // LINE OA identity (the dominant Thai channel). lineUserId is the stable `sub` from LINE Login/LIFF —
   // the address LINE push messages are sent to. Unique per tenant so one LINE account = one member.
   lineUserId: text('line_user_id'),
@@ -29,6 +35,9 @@ export const posMembers = pgTable('pos_members', {
   uqCode: uniqueIndex('pos_members_tenant_code').on(t.tenantId, t.memberCode),
   // NULL line_user_id rows are distinct under a Postgres unique index, so unlinked members never collide.
   uqLine: uniqueIndex('pos_members_tenant_line').on(t.tenantId, t.lineUserId),
+  // 0284: replaces the old plaintext `pos_members_tenant_phone` (ciphertext has a random IV per row, so a
+  // unique index on `phone` itself would no longer enforce anything) — uniqueness now lives on the bidx.
+  uqPhoneBidx: uniqueIndex('pos_members_tenant_phone_bidx').on(t.tenantId, t.phoneBidx).where(sql`${t.phoneBidx} IS NOT NULL`),
 }));
 
 // Message-delivery log for CRM messaging (LINE / SMS / email). Provider-agnostic; mock by default.

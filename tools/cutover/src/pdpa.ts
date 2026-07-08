@@ -18,6 +18,7 @@ import { eq } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { blindIndex } from '../../../apps/api/dist/database/encrypted-column';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -49,7 +50,7 @@ async function main() {
     await db.insert(s.userPermissions).values(['users', 'dashboard'].map((perm) => ({ userId: uid, perm }))).onConflictDoNothing();
   }
   // A member with PII in tenant T1, with a consent + a points-ledger row.
-  const [m] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-0001', name: 'Somchai Jaidee', phone: '0810001234', email: 'somchai@example.com', tier: 'Gold', balance: '500', marketingOptIn: true }).returning();
+  const [m] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-0001', name: 'Somchai Jaidee', phone: '0810001234', phoneBidx: blindIndex('0810001234'), email: 'somchai@example.com', emailBidx: blindIndex('somchai@example.com'), tier: 'Gold', balance: '500', marketingOptIn: true }).returning();
   const memberId = Number(m.id);
   await db.insert(s.memberConsents).values({ tenantId: t1, memberId, purpose: 'marketing', granted: true, grantedAt: new Date() });
   await db.insert(s.posMemberLedger).values({ tenantId: t1, memberId, txnType: 'Earn', points: '500', balanceAfter: '500', refDoc: 'SALE-1' });
@@ -164,9 +165,9 @@ async function main() {
   // ── PDPA-04: PII retention sweep — opt-in, default-OFF, idempotent, reuses the erasure redaction path ──
   // Seed: an OLD member (last ledger activity ~4 years ago) and a RECENT member, both in T1.
   const yearsAgo4 = new Date(Date.now() - 4 * 365 * 86400_000);
-  const [oldM] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-OLD1', name: 'Wichai Kao', phone: '0810009999', email: 'wichai@example.com', enrolledAt: yearsAgo4, lastUpdated: yearsAgo4 }).returning();
+  const [oldM] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-OLD1', name: 'Wichai Kao', phone: '0810009999', phoneBidx: blindIndex('0810009999'), email: 'wichai@example.com', emailBidx: blindIndex('wichai@example.com'), enrolledAt: yearsAgo4, lastUpdated: yearsAgo4 }).returning();
   await db.insert(s.posMemberLedger).values({ tenantId: t1, memberId: Number(oldM.id), txnDate: yearsAgo4, txnType: 'Earn', points: '100', balanceAfter: '100', refDoc: 'SALE-OLD' });
-  await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-NEW1', name: 'Malee Mai', phone: '0810008888' });
+  await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-NEW1', name: 'Malee Mai', phone: '0810008888', phoneBidx: blindIndex('0810008888') });
   // 1. Default-OFF: no policy exists → the sweep touches nothing.
   const sweep0 = await inj('POST', '/api/pdpa/retention/sweep', dpo1, {});
   ok('PDPA-04: no policy → sweep is a no-op (default-off)', sweep0.status === 201 && sweep0.json.policies === 0 && sweep0.json.swept_total === 0, JSON.stringify(sweep0.json));
@@ -187,7 +188,9 @@ async function main() {
   const ledgerRow: any = (await pg.query(`select pseudonym, dsar_id, erased_by from pdpa_erasures where subject_id = ${Number(oldM.id)}`)).rows[0];
   ok('PDPA-04: sweep anonymizes the aged member (name=[erased], identifiers null, deactivated)', sweep1.json.swept_total === 1 && oldAfter.name === '[erased]' && oldAfter.phone == null && oldAfter.email == null && oldAfter.active === false, JSON.stringify({ swept: sweep1.json.swept_total, old: oldAfter }));
   ok('PDPA-04: an erasure-ledger row is recorded (pseudonym, no DSAR, swept by the job)', !!ledgerRow && /^PDPA-ERASED-/.test(ledgerRow.pseudonym) && ledgerRow.dsar_id == null, JSON.stringify(ledgerRow));
-  ok('PDPA-04: the recently-active member is untouched', newAfter.name === 'Malee Mai' && newAfter.phone === '0810008888', JSON.stringify(newAfter));
+  // phone is encrypted at rest (0284) — this raw SQL read sees ciphertext, not the plaintext '0810008888', so
+  // "untouched" is asserted by presence (not null / not erased) rather than an exact plaintext match.
+  ok('PDPA-04: the recently-active member is untouched', newAfter.name === 'Malee Mai' && newAfter.phone != null, JSON.stringify(newAfter));
   // 5. Idempotent: a re-run sweeps nothing (the redacted member is no longer a candidate).
   const sweep2 = await inj('POST', '/api/pdpa/retention/sweep', dpo1, {});
   ok('PDPA-04: re-run sweeps 0 (idempotent — [erased] members are never candidates)', sweep2.json.swept_total === 0, JSON.stringify(sweep2.json));

@@ -1,6 +1,6 @@
 # Members & Points CRM (สมาชิก & แต้ม)
 
-**Status: DRAFT v0.2** · Last updated: 2026-07-06 · For: Sales, Marketing, Loyalty Admin, Managers
+**Status: DRAFT v0.2** · Last updated: 2026-07-08 · For: Sales, Marketing, Loyalty Admin, Managers
 
 This guide covers the loyalty CRM — the **member directory**, the **360° member view**, the **PDPA
 consent register**, and the **points-liability** report. Configuring earn/redeem rates is in
@@ -27,6 +27,9 @@ Below the cards is the searchable member list.
 ## 2. Find a member
 
 1. Type into **Search** (**ค้นหา**) — name, phone, card number, or member code (e.g. `M-000123`).
+   Name, card number, and member code match **anywhere** in the field; phone (PII, encrypted at
+   rest) only matches when you type the **full, exact** number — a partial number (e.g. the last 4
+   digits) will not find the member.
 2. Optionally pick an **RFM group** (**กลุ่ม RFM**): *Champions*, *Loyal*, *At Risk*, *Lost*, *New*.
 3. Press **Search** (**ค้นหา**).
 
@@ -480,6 +483,7 @@ claim points by uploading a photo of the receipt.
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.40 | 2026-07-08 | Platform | **PII-at-rest (migration 0284):** member phone/email are now encrypted with an exact-match blind index. §2 note added — phone search in the member directory (and the customer/global ⌘K search elsewhere in the app) now requires the full, exact number/address; name, card number, and member code are unaffected. See `docs/ops/pii-encryption-rollout.md`. |
 | 0.1 | 2026-06-24 | Platform | Initial guide — CRM Phase 1: member directory, 360 view, points-liability report (acct 2250), PDPA consent register. |
 | 0.2 | 2026-06-24 | Platform | Added §4 points-liability **GL accrual** (`POST /api/loyalty/liability/post`, Dr 5700 / Cr 2250, idempotent, per-shop, period-locked). |
 | 0.3 | 2026-06-24 | Platform | §4: accrual now runs **automatically at period close**; added **points expiry (breakage)** job (`POST /api/loyalty/expire`, `expiry_days`, releases Dr 2250 / Cr 5700). |
