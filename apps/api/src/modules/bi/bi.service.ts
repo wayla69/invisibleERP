@@ -33,6 +33,7 @@ import { NpsService } from '../nps/nps.service';
 import { MembershipService } from '../loyalty/membership.service';
 import { JourneysService } from '../journeys/journeys.service';
 import { cdpConfigured, pushToCdp } from '../../common/cdp-sync';
+import { activeKeyId, needsRotation, encrypt, decrypt } from '../../common/crypto';
 import { BudgetService } from '../budget/budget.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
@@ -125,6 +126,7 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   ai_overage_billing: { label: 'เรียกเก็บค่า AI ส่วนเกิน (รายเดือน)', labelEn: 'Bill AI usage overage (monthly)' },
   usage_overage_billing: { label: 'เรียกเก็บค่าใช้งานส่วนเกิน (e-Tax/POS รายเดือน)', labelEn: 'Bill usage overage (e-Tax/POS, monthly)' },
   pii_retention_sweep: { label: 'ลบล้างข้อมูลส่วนบุคคลที่พ้นระยะเก็บรักษา (PDPA)', labelEn: 'Anonymize PII past retention (PDPA)' },
+  key_rotation_sweep: { label: 'หมุนกุญแจเข้ารหัสข้อมูล (re-encrypt)', labelEn: 'Rotate encryption key (re-encrypt at rest)' },
   // Action job (daily/weekly): each run pushes the tenant's member snapshot (identity + RFM + consent) to an
   // external CDP webhook in batches — idempotent (a full snapshot keyed by member_code) and consent-aware.
   cdp_export_sync: { label: 'ซิงก์ข้อมูลลูกค้าไป CDP', labelEn: 'Sync customer data to CDP' },
@@ -906,6 +908,46 @@ export class BiService implements OnModuleInit {
       // Opt-in per tenant (pdpa_retention_policies, enabled=true); idempotent — an already-anonymized member is never a candidate.
       const r = await this.pdpa.runRetentionSweep(user);
       return { data: r, summary: `PII retention sweep: ${r.swept_total} member(s) anonymized across ${r.policies} enabled polic(ies)`, summaryTh: `ลบล้างข้อมูลส่วนบุคคลพ้นระยะเก็บรักษา: ${r.swept_total} ราย จาก ${r.policies} นโยบายที่เปิดใช้` };
+    }
+    if (reportType === 'key_rotation_sweep') {
+      // 4.3 (ITGC-AC-12) — re-encrypt at-rest ciphertext under the ACTIVE key id (common/crypto.ts keyring).
+      // INERT with no keyring configured: active kid = legacy '1' and every existing blob is already v1 ⇒
+      // needsRotation() is false for every row, so the sweep scans and rotates 0. After ops sets
+      // APP_ENC_KEYRING + APP_ENC_ACTIVE_KID, each run re-encrypts up to 500 rows/column (idempotent — the
+      // ciphertext's embedded key id is the discriminator; re-runs converge to 0). Plaintext legacy rows are
+      // the encrypt-backfill's job (tools db:backfill-encrypt-pii), not rotation's — they are skipped here.
+      const db = this.db;
+      const targets: { table: string; column: string }[] = [
+        { table: 'customer_master', column: 'tax_id' }, { table: 'customer_master', column: 'address' }, { table: 'customer_master', column: 'notes' },
+        { table: 'employees', column: 'national_id' }, { table: 'employees', column: 'sso_no' }, { table: 'employees', column: 'bank_account' },
+        { table: 'payslips', column: 'national_id' },
+        { table: 'vendors', column: 'tax_id' }, { table: 'vendors', column: 'bank_account' },
+        { table: 'vendor_bank_change_requests', column: 'bank_account' }, { table: 'vendor_bank_change_requests', column: 'prev_bank_account' },
+        { table: 'customer_addresses', column: 'address_line1' }, { table: 'vendor_addresses', column: 'address_line1' },
+        { table: 'users', column: 'totp_secret' }, { table: 'webhooks', column: 'secret' },
+        { table: 'tenant_identity', column: 'oidc_client_secret_enc' }, { table: 'tenant_messaging_config', column: 'config_enc' },
+      ];
+      const activeKid = activeKeyId();
+      let scanned = 0, rotated = 0;
+      const perColumn: { table: string; column: string; scanned: number; rotated: number }[] = [];
+      for (const t of targets) {
+        // Identifiers come from the compile-time const list above (never user input); values are bound.
+        const res: any = await db.execute(sql`SELECT id, ${sql.raw(`"${t.column}"`)} AS val FROM ${sql.raw(`"${t.table}"`)} WHERE ${sql.raw(`"${t.column}"`)} LIKE 'v%:%' LIMIT 500`);
+        const rows: any[] = res.rows ?? res;
+        let colScanned = 0, colRotated = 0;
+        for (const row of rows) {
+          colScanned++;
+          const val = String(row.val ?? '');
+          if (!needsRotation(val)) continue; // already under the active key (or a v-prefixed plaintext false-positive)
+          const reenc = encrypt(decrypt(val)); // decrypt via the blob's embedded kid, re-encrypt under the active kid
+          await db.execute(sql`UPDATE ${sql.raw(`"${t.table}"`)} SET ${sql.raw(`"${t.column}"`)} = ${reenc} WHERE id = ${row.id}`);
+          colRotated++;
+        }
+        scanned += colScanned; rotated += colRotated;
+        if (colScanned) perColumn.push({ table: t.table, column: t.column, scanned: colScanned, rotated: colRotated });
+      }
+      const data = { active_key_id: activeKid, scanned, rotated, per_column: perColumn };
+      return { data, summary: `Key rotation sweep (active kid ${activeKid}): re-encrypted ${rotated} of ${scanned} scanned ciphertext(s)`, summaryTh: `หมุนกุญแจเข้ารหัส (kid ${activeKid}): เข้ารหัสใหม่ ${rotated} จาก ${scanned} รายการ` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }

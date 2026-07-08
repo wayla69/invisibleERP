@@ -196,6 +196,38 @@ async function main() {
     rsub.status === 201 && rrun.json.status === 'success' && (rrun.json.summary ?? '').includes('0 member(s)'),
     JSON.stringify({ st: rrun.json.status, sum: rrun.json.summary }).slice(0, 170));
 
+  // ── 17c. key_rotation_sweep (4.3 / ITGC-AC-12): versioned-keyring rotation re-encrypts at-rest ciphertext
+  //         under the ACTIVE key id. Inert with no keyring (rotated 0); with APP_ENC_KEYRING + ACTIVE_KID=2
+  //         a v1 employee national_id is re-encrypted to v2:2: and still decrypts; idempotent; rotate-back
+  //         restores v1 so the harness's later checks see the exact prior world. ──
+  await db.insert(s.employees).values({ tenantId: 1, empCode: 'EMP-KR1', name: 'Rotate Me', nationalId: '1103700099001', monthlySalary: '20000' }).onConflictDoNothing();
+  const krRaw0: any = (await pg.query(`select national_id from employees where emp_code = 'EMP-KR1'`)).rows[0];
+  const krSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Key rotation', report_type: 'key_rotation_sweep', frequency: 'monthly' });
+  const krInert = await inj('POST', `/api/bi/subscriptions/${krSub.json.id}/run`, admin, {});
+  ok('key_rotation_sweep: inert with no keyring (active kid 1, rotated 0; v1 ciphertext untouched)',
+    krRaw0.national_id.startsWith('v1:') && krInert.json.status === 'success' && /kid 1\)/.test(krInert.json.summary ?? '') && /re-encrypted 0 of/.test(krInert.json.summary ?? ''),
+    JSON.stringify({ pre: krRaw0.national_id.slice(0, 6), sum: krInert.json.summary }).slice(0, 160));
+  process.env.APP_ENC_KEYRING = JSON.stringify({ '2': 'bi-harness-rotation-secret-0123456789' });
+  process.env.APP_ENC_ACTIVE_KID = '2';
+  const krRun1 = await inj('POST', `/api/bi/subscriptions/${krSub.json.id}/run`, admin, {});
+  const krRaw1: any = (await pg.query(`select national_id from employees where emp_code = 'EMP-KR1'`)).rows[0];
+  const krRead1 = await db.select({ nid: s.employees.nationalId }).from(s.employees).where(eq(s.employees.empCode, 'EMP-KR1'));
+  ok('key_rotation_sweep: with active kid 2 the v1 blob is re-encrypted to v2:2: and still decrypts',
+    krRun1.json.status === 'success' && krRaw1.national_id.startsWith('v2:2:') && krRead1[0]?.nid === '1103700099001',
+    JSON.stringify({ sum: krRun1.json.summary, at: krRaw1.national_id.slice(0, 6), read: krRead1[0]?.nid }).slice(0, 170));
+  const krRun2 = await inj('POST', `/api/bi/subscriptions/${krSub.json.id}/run`, admin, {});
+  ok('key_rotation_sweep: idempotent — a re-run rotates 0', /re-encrypted 0 of/.test(krRun2.json.summary ?? ''), krRun2.json.summary ?? '');
+  // Rotate BACK to the legacy key (active kid 1) and drop the ring — the world is exactly as before.
+  process.env.APP_ENC_ACTIVE_KID = '1';
+  const krBack = await inj('POST', `/api/bi/subscriptions/${krSub.json.id}/run`, admin, {});
+  delete process.env.APP_ENC_KEYRING;
+  delete process.env.APP_ENC_ACTIVE_KID;
+  const krRaw2: any = (await pg.query(`select national_id from employees where emp_code = 'EMP-KR1'`)).rows[0];
+  const krRead2 = await db.select({ nid: s.employees.nationalId }).from(s.employees).where(eq(s.employees.empCode, 'EMP-KR1'));
+  ok('key_rotation_sweep: rotate-back to kid 1 restores v1 ciphertext that decrypts without the ring',
+    krBack.json.status === 'success' && krRaw2.national_id.startsWith('v1:') && krRead2[0]?.nid === '1103700099001',
+    JSON.stringify({ sum: krBack.json.summary, at: krRaw2.national_id.slice(0, 6), read: krRead2[0]?.nid }).slice(0, 170));
+
   // ── 18. async scheduler: run-async ENQUEUES due subscriptions to the background job queue (returns 202)
   //        instead of running them inline — heavy action jobs then execute on the worker off the request path. ──
   const asub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Async purge', report_type: 'data_retention_purge', frequency: 'daily' });

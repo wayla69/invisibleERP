@@ -22,7 +22,9 @@ webhook in the webhook handler).
 |---|---|---|---|
 | `DATABASE_URL` | ✅ (boot-blocking) | Postgres connection (use the `ierp_app` least-priv role) | on role/password change |
 | `JWT_SECRET` | ✅ (boot-blocking) | Signs session JWTs | quarterly / on suspicion (invalidates sessions) |
-| `APP_ENC_KEY` | ✅ (boot-blocking) | AES-256-GCM key for TOTP seeds + webhook secrets at rest | planned workstream — re-encrypt on rotate |
+| `APP_ENC_KEY` | ✅ (boot-blocking) | Legacy/root AES-256-GCM key (key id `1`) for at-rest ciphertext: TOTP seeds, webhook/SSO/messaging secrets, encrypted PII columns | via the keyring + `key_rotation_sweep` (below) |
+| `APP_ENC_KEYRING` | for rotation | JSON map of key id → secret (`{"2":"<random ≥32 chars>"}`); keys derived per id via **HKDF-SHA256** (salted, label-separated). Malformed JSON fails closed. | add a new kid to rotate |
+| `APP_ENC_ACTIVE_KID` | for rotation | Which keyring id NEW writes encrypt under (unset ⇒ legacy `1`, byte-identical v1 format). An active kid missing from the ring fails closed. | flip after staging the new kid |
 | `PSP_WEBHOOK_SECRET` (or `PSP_WEBHOOK_SECRET_<PROVIDER>`) | ✅ (boot-blocking) | HMAC-verify PSP callbacks | per PSP policy |
 | `CORS_ORIGINS` | recommended (warns) | Explicit allowed web origins | on domain change |
 | `AUTH_COOKIE_DOMAIN` | **required when web & api are on different hosts** (else login bounces) | Scopes the session cookies (`ierp_token`/`ierp_csrf`) to a shared parent domain (e.g. `.example.com`) so both origins share them. Unset ⇒ host-only (single-origin / same-origin proxy). Not a secret. | on domain change |
@@ -52,12 +54,27 @@ webhook in the webhook handler).
 ## 4. Rotation runbook (summary)
 1. Generate the new secret in the store. 2. Stage it (new env value). 3. Roll the service (api is
 stateless; `JWT_SECRET` rotation logs everyone out by design). 4. Verify `/readyz` + a login. 5. Revoke
-the old value. `APP_ENC_KEY` rotation requires re-encrypting stored ciphertext — tracked as its own
-workstream (do **not** rotate it casually; it invalidates stored TOTP/webhook secrets).
+the old value.
+
+**Encryption-at-rest key rotation (`APP_ENC_KEY` → keyring, 4.3):** never swap `APP_ENC_KEY` in place —
+that bricks stored ciphertext. Instead:
+1. Add a new key to the ring: `APP_ENC_KEYRING='{"2":"<new random secret>"}'` (keep `APP_ENC_KEY` set —
+   it remains key id `1` for existing ciphertext).
+2. Set `APP_ENC_ACTIVE_KID=2` and roll the service — new writes are now `v2:2:…`; all old `v1:` data
+   still decrypts (the ciphertext embeds its key id).
+3. Run **`key_rotation_sweep`** (BI scheduler report type, or on demand) until it reports `re-encrypted 0`
+   — it re-encrypts all 17 at-rest ciphertext columns (PII + TOTP + webhook/SSO/messaging secrets) in
+   bounded, idempotent batches (500 rows/column/run).
+4. Only then may `APP_ENC_KEY` be retired (after confirming no `v1:` ciphertext remains).
+Verified by `apps/api/test/key-rotation.test.ts` + the `bi` cutover harness (inert/rotate/idempotent/rotate-back).
 
 ## 5. Known gap / follow-up
-- **KMS-backed envelope encryption + automated rotation** for `APP_ENC_KEY` is not yet implemented
-  (currently a single env-supplied key). Tracked under ITGC-AC-12 as a follow-up.
+- **Key versioning + rotation: DONE (4.3)** — versioned keyring (`APP_ENC_KEYRING`/`APP_ENC_ACTIVE_KID`,
+  HKDF-SHA256 with per-kid label separation) + the idempotent `key_rotation_sweep` re-encrypt job; see §4.
+  **Remaining:** custody of the root secrets in an **external KMS** (AWS/GCP KMS or Vault) instead of env
+  variables — an infrastructure dependency; the keyring already provides the versioning/re-encrypt
+  machinery a KMS would drive. The (currently unused) blind-index helper still derives from the legacy
+  root — give it its own HKDF label before first wiring a `*_bidx` column.
 - **Web auth token hardening** (move from `localStorage` to httpOnly cookie + CSRF) is a cross-cutting
   web+api change deferred to its own tested workstream (ITGC-AC-07) — see the roadmap.
 
@@ -66,4 +83,5 @@ workstream (do **not** rotate it casually; it invalidates stored TOTP/webhook se
 |---|---|---|---|
 | 1.0 | 2026-06-23 | Platform / Security | Initial secrets policy + matrix + rotation; documents boot-time fail-closed validation. |
 | 1.1 | 2026-06-25 | Platform / Security | Added session-cookie scoping env to the matrix — `AUTH_COOKIE_DOMAIN` (required for separate web/api origins), `AUTH_COOKIE_SAMESITE`, `AUTH_COOKIE_MAX_AGE` (non-secret config, documented for completeness). Cross-references `railway-setup.md` §4. |
+| 1.3 | 2026-07-08 | Platform / Security | **4.3 — versioned encryption keyring + rotation runbook.** `APP_ENC_KEYRING`/`APP_ENC_ACTIVE_KID` added to the matrix (HKDF-SHA256, label-separated, fail-closed); §4 gains the staged rotation procedure driven by the idempotent `key_rotation_sweep` job (17 at-rest ciphertext columns); §5 gap narrowed to external-KMS custody of root secrets. |
 | 1.2 | 2026-07-01 | Platform | Documented the customer-messaging gateway credentials — `LINE_CHANNEL_TOKEN`, `SMS_API_KEY`/`SMS_API_URL`/`SMS_SENDER`, `SMTP_*` — that switch the SMS and email channels from dev-mock to real delivery (`messaging/gateways.ts`). |
