@@ -23,3 +23,14 @@ export const backgroundJobs = pgTable('background_jobs', {
 });
 
 export type BackgroundJob = typeof backgroundJobs.$inferSelect;
+
+// Scheduler heartbeats (0286 — docs/27 R1-5 / AUD-ARC-07): one row per scheduler name ('bi_scheduler'),
+// stamped on every due-sweep (external cron, manual, or the optional in-process tick) so a scheduler that
+// was working and silently died is detectable (the worker's reap cycle alerts on a stale row).
+// PLATFORM-level BY DESIGN: no tenant_id column, so the tenant-idx gate and the RLS loop skip it.
+export const schedulerHeartbeats = pgTable('scheduler_heartbeats', {
+  name: text('name').primaryKey(),
+  lastRunAt: timestamp('last_run_at', { withTimezone: true }).notNull().defaultNow(),
+  source: text('source'),
+  detail: jsonb('detail'),
+});

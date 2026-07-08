@@ -138,6 +138,51 @@ async function main() {
   const metricsCross = await inj('GET', '/api/jobs/ops-metrics', t2sales);
   ok('ops-metrics gated to admin/ops (403 for scoped sales user)', metricsCross.status === 403, `status=${metricsCross.status}`);
 
+  // ── 2.7 (docs/27 R1-5 / AUD-ARC-07): cross-tenant scheduler sweep + heartbeat + in-process tick ──
+  const { BiService } = require('../../../apps/api/dist/modules/bi/bi.service');
+  const { SchedulerTickService } = require('../../../apps/api/dist/modules/bi/scheduler-tick.service');
+  const { SchedulerHeartbeatService } = require('../../../apps/api/dist/modules/jobs/scheduler-heartbeat.service');
+  const biSchema = require('../../../apps/api/dist/database/schema/bi');
+  const bi = app.get(BiService);
+  const tickSvc = app.get(SchedulerTickService);
+  const hb = app.get(SchedulerHeartbeatService);
+
+  // 14. two tenants each have a due subscription; the platform-wide sweep enqueues BOTH (the per-tenant
+  // runDue/runDueAsync only ever saw the caller's tenant — the multi-company scheduling gap this closes).
+  await db.insert(biSchema.reportSubscriptions).values([
+    { tenantId: hq, name: 'HQ daily KPI', reportType: 'kpi_board', frequency: 'daily', isActive: true, recipients: [], filters: {}, createdBy: 'admin' },
+    { tenantId: t2, name: 'T2 daily KPI', reportType: 'kpi_board', frequency: 'daily', isActive: true, recipients: [], filters: {}, createdBy: 't2sales' },
+  ]);
+  const sweep = await bi.runDueAllAsync('toe:sweep');
+  ok('cross-tenant sweep enqueues due subscriptions of BOTH tenants', sweep.due === 2 && sweep.enqueued === 2 && sweep.mode === 'queued', JSON.stringify(sweep));
+  await worker.drain();
+  const hqRuns = await db.select().from(biSchema.reportRuns).where(eq(biSchema.reportRuns.tenantId, hq));
+  const t2Runs = await db.select().from(biSchema.reportRuns).where(eq(biSchema.reportRuns.tenantId, t2));
+  ok('worker ran each subscription RLS-scoped in ITS OWN tenant (report_runs in both)', hqRuns.length >= 1 && t2Runs.length >= 1, `hq=${hqRuns.length} t2=${t2Runs.length}`);
+
+  // 15. multi-trigger idempotency — a DUPLICATE enqueue for the just-ran (no longer due) subscription
+  // no-ops at execution time (the handler re-checks dueness), so cron + tick + manual can't double-deliver.
+  const [hqSub] = await db.select().from(biSchema.reportSubscriptions).where(eq(biSchema.reportSubscriptions.tenantId, hq));
+  const dupId = await queue.enqueue({ jobType: 'report_subscription', payload: { subscriptionId: Number(hqSub.id) }, tenantId: hq, actor: 'toe:dup' });
+  await worker.drain();
+  const dupJob = await inj('GET', `/api/jobs/${dupId}`, admin);
+  ok('duplicate enqueue of a not-due subscription no-ops (skipped: not due)', dupJob.json.status === 'done' && dupJob.json.result?.skipped === 'not due', JSON.stringify(dupJob.json.result));
+  ok('no extra report_run from the duplicate', (await db.select().from(biSchema.reportRuns).where(eq(biSchema.reportRuns.tenantId, hq))).length === hqRuns.length);
+
+  // 16. heartbeat — the sweep stamped it; fresh = ok, tiny threshold = stale, unknown scheduler = never.
+  const hbOk = await hb.checkStale('bi_scheduler');
+  ok('heartbeat stamped by the sweep → status ok', hbOk.status === 'ok' && typeof hbOk.age_ms === 'number', JSON.stringify(hbOk));
+  const hbStale = await hb.checkStale('bi_scheduler', 0);
+  ok('stale threshold exceeded → status stale (ops alert path)', hbStale.status === 'stale', JSON.stringify(hbStale));
+  ok('unknown scheduler → status never (fresh install must not page)', (await hb.checkStale('never_configured')).status === 'never');
+  const om = await inj('GET', '/api/jobs/ops-metrics', admin);
+  ok('ops-metrics surfaces scheduler heartbeat posture', ['ok', 'stale'].includes(om.json?.scheduler?.status), JSON.stringify(om.json?.scheduler));
+
+  // 17. in-process tick — default-inert (not armed under test/unset env) but steppable; overlap guard holds.
+  ok('SchedulerTickService default-inert (not armed without SCHEDULER_TICK_MS)', tickSvc.armed === false);
+  const tickRes = await tickSvc.tickOnce();
+  ok('tickOnce() runs the sweep (0 due after the runs above)', tickRes.due === 0 && !tickRes.error, JSON.stringify(tickRes));
+
   await app.close();
   console.log('\n── Step 4 — async background-job queue ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

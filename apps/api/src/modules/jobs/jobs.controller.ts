@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { JobQueueService } from './job-queue.service';
+import { SchedulerHeartbeatService } from './scheduler-heartbeat.service';
 import { runtimeMetrics } from '../../observability/runtime-metrics';
 
 // Read-only status surface for async jobs. RLS-scoped: a tenant only sees its own jobs (the service reads
@@ -8,7 +9,10 @@ import { runtimeMetrics } from '../../observability/runtime-metrics';
 // status of a job they kicked off (e.g. a payroll run).
 @Controller('api/jobs')
 export class JobsController {
-  constructor(private readonly queue: JobQueueService) {}
+  constructor(
+    private readonly queue: JobQueueService,
+    private readonly heartbeat: SchedulerHeartbeatService,
+  ) {}
 
   // Operational metrics (ITGC-OP-04 + capacity visibility). Cross-tenant, so gated by `users` (the ops/
   // admin duty) — NOT the per-tenant `dashboard`. Declared BEFORE the `:id` route so it isn't captured as
@@ -29,6 +33,9 @@ export class JobsController {
       },
       requests: { total_tx: rt.total_tx, slow_tx_count: rt.slow_tx_count, slow_threshold_ms: Number(process.env.SLOW_TX_MS ?? 1000) },
       jobs, // { queued, running, failed, stuck } — failed = dead-letters; stuck = zombie 'running' past threshold
+      // docs/27 R1-5: due-sweep trigger liveness — 'stale' means the cron/tick died silently (alert fires
+      // via the worker's reap cycle; this field makes it poll-able by an external monitor too).
+      scheduler: await this.heartbeat.checkStale(),
     };
   }
 

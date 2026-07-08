@@ -1,7 +1,8 @@
-import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { runInTenantContext } from '../../common/tenant-run';
 import { JobQueueService, type ClaimedJob } from './job-queue.service';
+import { SchedulerHeartbeatService } from './scheduler-heartbeat.service';
 
 export interface JobContext { tenantId: number | null; actor: string | null; bypass: boolean; attempt: number }
 export type JobHandler = (payload: any, ctx: JobContext) => Promise<unknown>;
@@ -26,6 +27,8 @@ export class JobWorkerService implements OnApplicationBootstrap, OnModuleDestroy
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly queue: JobQueueService,
+    // Optional so a partially-constructed harness worker still builds (docs/27 R1-5 heartbeat check).
+    @Optional() private readonly heartbeat?: SchedulerHeartbeatService,
   ) {}
 
   register(jobType: string, handler: JobHandler): void {
@@ -50,11 +53,15 @@ export class JobWorkerService implements OnApplicationBootstrap, OnModuleDestroy
   }
 
   // Reap stuck jobs on an interval (throttled across poll cycles). Public + harness-callable via reap().
+  // The scheduler-heartbeat staleness check (docs/27 R1-5) piggybacks here — the reap cycle is the one
+  // recurring in-process loop that is default-ON in prod, so a silently-dead due-sweep trigger (cron/tick)
+  // is detected even though the trigger itself lives outside the process.
   async maybeReap(): Promise<void> {
     const now = Date.now();
     if (now - this.lastReapAt < this.reapMs) return;
     this.lastReapAt = now;
     try { await this.queue.reapStuck(); } catch (e: any) { this.log.error(`reap failed: ${e?.message ?? e}`); }
+    try { await this.heartbeat?.checkStale(); } catch (e: any) { this.log.error(`heartbeat check failed: ${e?.message ?? e}`); }
   }
 
   // Deterministic entry point for harnesses (the poll loop is off under tests).
