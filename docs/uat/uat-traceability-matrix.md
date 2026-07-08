@@ -52,6 +52,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-057 | PII retention sweep — default-off, 12-month floor, dry-run non-destructive | PDPA-04 | 08 §7 (8c), §9 (19b) |
 | UAT-SEC-058 | PII retention sweep — anonymizes aged members only, ledger row, idempotent, scheduled opt-in | PDPA-04 | 08 §7 (8c), §9 (19b) |
 | UAT-SEC-059 | Encryption-key rotation — keyring inert/rotate/idempotent + fail-closed | ITGC-AC-12 | 08 (rev 2.5); docs/ops/secrets.md §4 |
+| UAT-TAX-046 | SBT accrual at RE ownership transfer (opt-in; default-inert) | TAX-09 | 06 §7 (5b), §9 |
+| UAT-TAX-047 | ภ.ธ.40 report + GL-2130 tie + filing register + calendar | TAX-09, TAX-05 | 06 §7 (5b), §9 |
 | UAT-SEC-036 | Cashier PIN quick-login succeeds | ITGC-AC-17 | 08 §7, §9 |
 | UAT-SEC-037 | PosSupervisor PIN login + open shift (no duplicate) | ITGC-AC-17 / R08 | 08 §7, §9 |
 | UAT-SEC-038 | Self set/rotate own PIN (current-password step-up) | ITGC-AC-17 | 08 §7 |

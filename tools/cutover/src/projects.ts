@@ -913,6 +913,29 @@ async function main() {
   const xferEarly = await inj('POST', `/api/realestate/contracts/${tc2.json.contract_no}/transfer`, admin, {});
   ok('RE-04: transfer before fully settled → 400 NOT_FULLY_SETTLED', xferEarly.status === 400 && xferEarly.json.error?.code === 'NOT_FULLY_SETTLED', `${xferEarly.status} ${xferEarly.json.error?.code}`);
 
+  // ── 5.5 (TAX-09) — ภาษีธุรกิจเฉพาะ (SBT, ภ.ธ.40) on commercial RE sales (ม.91/2(6)) ──
+  // Default-inert first: RED-2 has NO sbt_rate → its transfer above accrued no SBT.
+  ok('TAX-09: a project without sbt_rate accrues NO SBT (default-inert)', xfer.json.sbt_amount == null, JSON.stringify({ sbt: xfer.json.sbt_amount }));
+  // RED-3 opts in at 3.3% (3% SBT + 10% local): a ฿500,000 transfer accrues ฿16,500 (Dr 5840 / Cr 2130).
+  await inj('POST', '/api/realestate/developments', admin, { dev_code: 'RED-3', name: 'ทาวน์โฮม (SBT)', sbt_rate: 3.3 });
+  await inj('POST', '/api/realestate/developments/RED-3/units', admin, { unit_no: 'U-301', unit_type: 'house', list_price: 500000, cost: 300000 });
+  const sbtC1 = await inj('POST', '/api/realestate/contracts', admin, { dev_code: 'RED-3', unit_no: 'U-301', down_payment: 500000, installment_count: 0 });
+  await inj('POST', `/api/realestate/contracts/${sbtC1.json.contract_no}/approve`, mgr);
+  const sbtXfer = await inj('POST', `/api/realestate/contracts/${sbtC1.json.contract_no}/transfer`, admin, {});
+  ok('TAX-09: transfer under a 3.3% SBT project → sbt_amount ฿16,500 accrued in the transfer JE', sbtXfer.status < 300 && near(sbtXfer.json.sbt_amount, 16500) && near(sbtXfer.json.revenue_recognized, 500000), JSON.stringify({ sbt: sbtXfer.json.sbt_amount, rev: sbtXfer.json.revenue_recognized }));
+  const nowD = new Date(); const sbtM = nowD.getMonth() + 1; const sbtY = nowD.getFullYear();
+  const pt40 = await inj('GET', `/api/tax-reports/pt40?month=${sbtM}&year=${sbtY}`, admin);
+  ok('TAX-09: ภ.ธ.40 lists the transfer (gross ฿500,000 → SBT ฿16,500) and ties to GL 2130',
+    pt40.status === 200 && near(pt40.json.totals?.sbt, 16500) && near(pt40.json.totals?.gross_receipts, 500000)
+    && pt40.json.rows?.some((r: any) => r.contract_no === sbtC1.json.contract_no) && pt40.json.reconciliation?.gl_account === '2130' && pt40.json.reconciliation?.tied === true,
+    `${pt40.status} ${JSON.stringify({ t: pt40.json.totals, rec: pt40.json.reconciliation })}`);
+  ok('TAX-09: ภ.ธ.40 deadline = 15th of the following month', /-15$/.test(pt40.json.deadline ?? ''), pt40.json.deadline ?? '');
+  const filePt40 = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PT40', month: sbtM, year: sbtY });
+  ok('TAX-09: file ภ.ธ.40 → DRAFT remitting ฿16,500 (TAX-05 register)', filePt40.json.status === 'DRAFT' && near(filePt40.json.net_vat, 16500), JSON.stringify(filePt40.json).slice(0, 120));
+  const calSbt = await inj('GET', `/api/tax-reports/remittance-calendar?year=${sbtY}`, admin);
+  const pt40Row = (calSbt.json.calendar ?? []).find((c: any) => c.filing_type === 'PT40' && c.period_month === sbtM);
+  ok('TAX-09: remittance calendar lists ภ.ธ.40 (DRAFT, due the 15th)', pt40Row?.status === 'DRAFT' && /-15$/.test(pt40Row?.deadline ?? ''), JSON.stringify(pt40Row ?? {}));
+
   // ── P3 (docs/35) — tender / estimating → award (Track C, PROJ-18) ──
   // Build a priced estimate, submit, record win/loss, and on a WIN award → seed a project + a DRAFT BoQ from
   // the tender lines (the seeded BoQ's own maker-checker approve sets the controlled budget baseline).

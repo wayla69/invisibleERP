@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, eq, gte, lt, asc, desc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
-import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes, vendors } from '../../../database/schema';
+import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes, vendors, reContracts } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import { PND_LABELS } from '../documents/wht-rates';
 import { currentTenantStore } from '../../../common/tenant-context';
@@ -181,6 +181,34 @@ export class TaxReportsService {
     };
   }
 
+  // ภ.ธ.40 (TAX-09) — ภาษีธุรกิจเฉพาะ (Specific Business Tax) on commercial immovable-property sales
+  // (ประมวลรัษฎากร ม.91/2(6)): SBT (3% + 10% local = 3.3% effective) applies INSTEAD of VAT and is filed
+  // monthly on ภ.ธ.40 by the 15th. Sourced from ownership transfers stamped with an SBT accrual
+  // (re_contracts.sbt_amount, posted Dr 5840 / Cr 2130 at transfer); tied to the GL 2130 net movement so a
+  // manual JE touching the SBT payable out-of-process is caught.
+  async pt40(month: number, year: number) {
+    const db = this.db; const { start, end, period } = this.win(month, year);
+    const rows = await db.select({
+      contract_no: reContracts.contractNo, buyer_name: reContracts.buyerName, transferred_at: reContracts.transferredAt,
+      price: reContracts.price, sbt_rate: reContracts.sbtRate, sbt_amount: reContracts.sbtAmount,
+    }).from(reContracts)
+      .where(and(eq(reContracts.status, 'transferred'), isNotNull(reContracts.sbtAmount), sql`${reContracts.transferredAt} >= ${start} AND ${reContracts.transferredAt} < ${end}`))
+      .orderBy(asc(reContracts.transferredAt), asc(reContracts.contractNo));
+    const out = rows.map((r: any) => ({ contract_no: r.contract_no, buyer_name: r.buyer_name, date: r.transferred_at, gross_receipts: round2(n(r.price)), sbt_rate: n(r.sbt_rate), sbt: round2(n(r.sbt_amount)) }));
+    const sbtTotal = round2(out.reduce((a: number, r: any) => a + r.sbt, 0));
+    const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalLines.accountCode, '2130'), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
+    const gl2130 = round2(n(g?.v));
+    return {
+      report: 'pt40', month, year, period, rows: out,
+      totals: { gross_receipts: round2(out.reduce((a: number, r: any) => a + r.gross_receipts, 0)), sbt: sbtTotal, count: out.length },
+      reconciliation: { gl_account: '2130', gl_net_movement: gl2130, report_sbt: sbtTotal, tied: Math.abs(gl2130 - sbtTotal) < 0.01 },
+      deadline: nextMonthDay(month, year, 15),
+      deadline_note: 'ยื่นแบบ ภ.ธ.40 และนำส่งภาษีธุรกิจเฉพาะภายในวันที่ 15 ของเดือนถัดไป',
+    };
+  }
+
   // ───────────────────── Filing register (TAX-05) ─────────────────────
   private tenantId(): number | null { return currentTenantStore()?.tenantId ?? null; }
 
@@ -191,7 +219,7 @@ export class TaxReportsService {
     const db = this.db;
     const tenantId = this.tenantId();
     const ft = type.toUpperCase();
-    if (!['PP30', 'PND3', 'PND53', 'PP36'].includes(ft)) throw new BadRequestException({ code: 'BAD_FILING_TYPE', message: 'filing_type must be PP30/PND3/PND53/PP36', messageTh: 'ประเภทแบบต้องเป็น PP30/PND3/PND53/PP36' });
+    if (!['PP30', 'PND3', 'PND53', 'PP36', 'PT40'].includes(ft)) throw new BadRequestException({ code: 'BAD_FILING_TYPE', message: 'filing_type must be PP30/PND3/PND53/PP36/PT40', messageTh: 'ประเภทแบบต้องเป็น PP30/PND3/PND53/PP36/PT40' });
     let outputVat = 0, inputVat = 0, netVat = 0, taxWithheld = 0, deadline: string, snapshot: any;
     if (ft === 'PP30') {
       const r = await this.pp30(month, year);
@@ -199,6 +227,9 @@ export class TaxReportsService {
     } else if (ft === 'PP36') {
       // ภ.พ.36 remits the self-assessed VAT — carry it as both output_vat and net_vat payable.
       const r = await this.pp36(month, year); outputVat = r.totals.vat; netVat = r.totals.vat; deadline = r.deadline; snapshot = r;
+    } else if (ft === 'PT40') {
+      // ภ.ธ.40 remits the SBT — carried as net_vat payable (the register's generic remittance figure).
+      const r = await this.pt40(month, year); netVat = r.totals.sbt; deadline = r.deadline; snapshot = r;
     } else {
       const r = await this.pnd(ft, month, year); taxWithheld = r.totals.tax_withheld; deadline = r.deadline; snapshot = r;
     }
@@ -253,7 +284,7 @@ export class TaxReportsService {
     const byKey = new Map<string, any>(rows.map((r: any) => [`${r.filingType}|${r.periodMonth}`, r]));
     const out: any[] = [];
     for (let m = 1; m <= 12; m++) {
-      for (const [type, day] of [['PP30', 15], ['PP36', 7], ['PND53', 7], ['PND3', 7]] as [string, number][]) {
+      for (const [type, day] of [['PP30', 15], ['PT40', 15], ['PP36', 7], ['PND53', 7], ['PND3', 7]] as [string, number][]) {
         const f = byKey.get(`${type}|${m}`);
         out.push({
           filing_type: type, period_month: m, period_year: year, deadline: nextMonthDay(m, year, day),

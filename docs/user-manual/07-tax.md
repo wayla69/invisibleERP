@@ -214,6 +214,7 @@ amounts due and the deadlines (ภ.พ.30 by the 15th, ภ.ง.ด. by the 7th).
 | **PP30** (ภ.พ.30) | PP30 | The monthly VAT return: net of output − input |
 | **PP36** (ภ.พ.36) | PP36 | Self-assessed VAT on **imported services** (reverse charge, ม.83/6) |
 | **PND** (ภ.ง.ด.) | PND | Withholding tax report (PND1 salary, PND3 contractor, PND53 other) |
+| **PT40** (ภ.ธ.40) | *(API + filing register)* | Specific Business Tax on commercial real-estate sales (ม.91/2(6)) — see below |
 
 ### To run a report
 
@@ -244,6 +245,24 @@ then claim that amount as input VAT.
 > **Control (TAX-08):** a reverse-charge bill claims **no** vendor VAT on ภ.พ.30 (there
 > is none); the self-assessed 7% is what you report on ภ.พ.36. If you do **not** tick the
 > box, the bill is treated as an ordinary domestic purchase.
+
+### Real-estate sales — ภ.ธ.40 (Specific Business Tax, ม.91/2(6))
+
+Selling immovable property **in a commercial manner** (the real-estate developer module) is subject to
+**SBT at 3.3%** (3% + 10% local tax) **instead of VAT**, filed on **ภ.ธ.40 by the 15th** of the following month.
+
+1. **Enable it per project**: set `sbt_rate` (e.g. `3.3`) when creating the development
+   (`POST /api/realestate/developments`). Projects without a rate accrue nothing — existing books are
+   untouched until you opt in.
+2. At **ownership transfer**, the system accrues the SBT automatically in the same journal entry as the
+   revenue recognition (expense 5840 / payable 2130) and stamps the contract.
+3. At month-end, run **`GET /api/tax-reports/pt40`** for the period — it lists the transfers, totals the SBT
+   to remit, and shows a **reconciliation tie** to the GL. File it from the Filing register (type `PT40`);
+   it appears on the remittance calendar with its 15th deadline.
+
+> **Control (TAX-09):** the ภ.ธ.40 figure must tie to GL account 2130 before filing — an untied amount means
+> a manual entry touched the SBT payable outside the transfer process. Government transfer/land-office fees
+> are not part of SBT and are handled separately.
 
 [screenshot: PP30 VAT return summary]
 
