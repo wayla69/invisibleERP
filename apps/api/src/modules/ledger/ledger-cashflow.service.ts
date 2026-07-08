@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gte, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines, arInvoices, apTransactions } from '../../database/schema';
 import { ymd, n } from '../../database/queries';
@@ -142,9 +142,9 @@ export class LedgerCashflowService {
     const today = ymd();
     const opening = await this.cashBalanceAsOf(today, ledgerCode);
     const ar = await db.select({ due: arInvoices.dueDate, out: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)` })
-      .from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
+      .from(arInvoices).where(ne(arInvoices.status, 'Paid'));
     const ap = await db.select({ due: apTransactions.dueDate, out: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)` })
-      .from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
+      .from(apTransactions).where(ne(apTransactions.status, 'Paid'));
 
     const weekIndex = (due: string | null): number => {
       if (!due) return 0;
