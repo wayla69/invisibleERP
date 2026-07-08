@@ -7,7 +7,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 const b64uDecode = (s: string) => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
 const b64u = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-export interface IdTokenClaims { iss?: string; aud?: string | string[]; sub?: string; email?: string; exp?: number; [k: string]: unknown }
+export interface IdTokenClaims { iss?: string; aud?: string | string[]; sub?: string; email?: string; exp?: number; nonce?: string; [k: string]: unknown }
 
 // Verify an HS256 JWT against `secret`. Returns the claims, or throws with a stable reason string.
 export function verifyHs256(token: string, secret: string): IdTokenClaims {

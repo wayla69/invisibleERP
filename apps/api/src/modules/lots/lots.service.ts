@@ -25,7 +25,8 @@ export class LotsService {
     const db = this.db;
     const today = ymd();
     const rows = await db.select().from(lotLedger).where(and(sql`${lotLedger.expiryDate} is not null`, gt(lotLedger.balance, sql`0`))).orderBy(asc(lotLedger.expiryDate));
-    const buckets = { expired: [] as any[], d0_7: [] as any[], d8_30: [] as any[], d31_plus: [] as any[] };
+    type ExpiryRow = ReturnType<typeof shape> & { days_to_expiry: number };
+    const buckets = { expired: [] as ExpiryRow[], d0_7: [] as ExpiryRow[], d8_30: [] as ExpiryRow[], d31_plus: [] as ExpiryRow[] };
     for (const r of rows) {
       const days = daysBetween(today, String(r.expiryDate));
       const o = { ...shape(r), days_to_expiry: days };
@@ -44,7 +45,7 @@ export class LotsService {
   async fefo(itemId: string) {
     const db = this.db;
     const rows = await db.select().from(lotLedger)
-      .where(and(eq(lotLedger.itemId, itemId), eq(lotLedger.status, 'Active' as any), gt(lotLedger.balance, sql`0`)))
+      .where(and(eq(lotLedger.itemId, itemId), eq(lotLedger.status, 'Active'), gt(lotLedger.balance, sql`0`)))
       .orderBy(asc(lotLedger.expiryDate));
     return { item_id: itemId, lots: rows.map(shape), count: rows.length, total_balance: rows.reduce((a: number, r: any) => a + n(r.balance), 0) };
   }

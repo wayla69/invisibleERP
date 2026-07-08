@@ -20,6 +20,14 @@ export default defineConfig({
         'src/common/crypto.ts',
         'src/common/money.ts',
         'src/common/ttl-cache.ts', // 2.5 shared-cache adapter — contract-tested in test/cache-adapter.test.ts
+        // 2.4 unit-pyramid extension (docs/27 R2-5 unit lane) — pure modules + their suites:
+        'src/common/text-similarity.ts',   // test/pure-utils.test.ts
+        'src/common/thai-address.ts',      // test/pure-utils.test.ts
+        'src/common/bizdate.ts',           // test/pure-utils.test.ts
+        'src/common/db-error.ts',          // test/pure-utils.test.ts
+        'src/modules/tax/documents/wht-rates.ts', // test/tax-rules.test.ts (tax-point.ts already in the glob)
+        'src/modules/payroll/payroll-calc.ts',    // already tested in test/unit.test.ts — now gated
+        'src/modules/payments/promptpay-qr.ts',   // already tested in test/unit.test.ts — now gated
 
         'src/database/encrypted-column.ts',
         'src/observability/runtime-metrics.ts',
@@ -31,9 +39,10 @@ export default defineConfig({
         // to the coverage set WITH unit tests, not before.
         '**/tax-jobs.service.ts',
       ],
-      // Floor locked just below the measured baseline (stmts 63 / branch 80 / funcs 66 / lines 63 as of
-      // 2026-06-30). A change that drops coverage on these modules FAILS the gate. Ratchet UP over time.
-      thresholds: { statements: 60, branches: 75, functions: 62, lines: 60 },
+      // Floor locked just below the measured baseline (stmts 80.3 / branch 89.2 / funcs 79.5 / lines 80.3
+      // as of 2026-07-08, after the 2.4 pure-module suites). A change that drops coverage on these modules
+      // FAILS the gate. Ratchet UP over time.
+      thresholds: { statements: 78, branches: 87, functions: 77, lines: 78 },
     },
   },
   // decorators (@Injectable/@Inject) need experimentalDecorators when esbuild transforms TS

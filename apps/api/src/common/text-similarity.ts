@@ -14,10 +14,15 @@ const LEGAL_SUFFIXES = [
 
 export function normalizeName(s: string | null | undefined): string {
   let n = (s ?? '').toLowerCase().normalize('NFKC');
-  n = n.replace(/[^\p{L}\p{N}\s]/gu, ' ');       // drop punctuation (keep letters/numbers/space, any script)
+  // Drop punctuation, KEEPING combining marks (\p{M}) — Thai vowels/tone marks (◌ิ ◌ำ ◌ั …) are Mark,
+  // not Letter, so without \p{M} 'บริษัท' shredded to 'บร ษ ท', the Thai legal-suffix strip never matched,
+  // and Thai-vs-English variants of the same company scored ~0.2 instead of 1 (found by the 2.4 unit suite).
+  n = n.replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ');
   n = n.replace(/\s+/g, ' ').trim();
   for (const suf of LEGAL_SUFFIXES) {
-    n = n.replace(new RegExp(`(^|\\s)${suf}(\\s|$)`, 'g'), ' ');
+    // NFKC-normalize the suffix too: the input's สระอำ (U+0E33) decomposes to ◌ํ+า under NFKC, so a
+    // composed 'จำกัด' constant would never match the normalized text (2.4 unit-suite finding).
+    n = n.replace(new RegExp(`(^|\\s)${suf.toLowerCase().normalize('NFKC')}(\\s|$)`, 'g'), ' ');
   }
   return n.replace(/\s+/g, ' ').trim();
 }
