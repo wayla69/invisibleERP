@@ -704,7 +704,7 @@ export default function ShopPage() {
                   const inCart = cartQty(it.item_id);
                   const fav = favs.has(it.item_id);
                   return (
-                    <div key={it.item_id} className="flex items-center gap-3 p-2.5">
+                    <div key={it.item_id} className="flex items-center gap-2 p-2.5 sm:gap-3">
                       <button
                         type="button"
                         aria-label={t('shop.favorite')}
@@ -714,10 +714,10 @@ export default function ShopPage() {
                       >
                         <Star className={cn('size-4', fav && 'fill-current')} />
                       </button>
-                      <ProductThumb item={it} className="size-14 shrink-0 rounded-lg" />
+                      <ProductThumb item={it} className="size-12 shrink-0 rounded-lg sm:size-14" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{it.item_description || it.item_id}</p>
-                        <p className="text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
+                        <p className="truncate text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</p>
                         <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
                           {it.on_hand != null && (
                             <span className={it.on_hand <= 0 ? 'font-medium text-destructive' : ''}>
@@ -728,11 +728,22 @@ export default function ShopPage() {
                         </div>
                         {it.unit_price > 0 && <p className="text-sm font-semibold">{baht(it.unit_price)}</p>}
                       </div>
-                      {inCart > 0 && <Badge variant="secondary" className="shrink-0">{t('shop.in_cart')} · {inCart}</Badge>}
-                      <Button size="sm" variant="outline" className="shrink-0" title={t('shop.add_urgent')} aria-label={t('shop.add_urgent')} onClick={() => addItem(it, true)}>
+                      {/* Trailing actions are icon-only on a phone (label appears from `sm`) so the row never
+                          overflows the viewport — the overflow pushed the page wide and shifted the fixed
+                          basket sheet off-screen. */}
+                      {inCart > 0 && (
+                        <Badge variant="secondary" className="shrink-0">
+                          <span className="hidden sm:inline">{t('shop.in_cart')} · </span>{inCart}
+                        </Badge>
+                      )}
+                      <Button size="icon" variant="outline" className="size-8 shrink-0 sm:hidden" title={t('shop.add_urgent')} aria-label={t('shop.add_urgent')} onClick={() => addItem(it, true)}>
                         <Zap className="size-4 text-amber-500" />
                       </Button>
-                      <Button size="sm" className="shrink-0" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
+                      <Button size="sm" variant="outline" className="hidden shrink-0 sm:inline-flex" title={t('shop.add_urgent')} aria-label={t('shop.add_urgent')} onClick={() => addItem(it, true)}>
+                        <Zap className="size-4 text-amber-500" />
+                      </Button>
+                      <Button size="icon" className="size-8 shrink-0 sm:hidden" aria-label={t('shop.add')} title={t('shop.add')} onClick={() => addItem(it)}><Plus className="size-4" /></Button>
+                      <Button size="sm" className="hidden shrink-0 sm:inline-flex" onClick={() => addItem(it)}><Plus className="size-4" /> {t('shop.add')}</Button>
                     </div>
                   );
                 })}
