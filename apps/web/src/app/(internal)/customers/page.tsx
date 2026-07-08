@@ -12,6 +12,7 @@ import { SearchInput } from '@/components/search-input';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { FormField } from '@/components/form-field';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ChangeHistorySection } from '@/components/change-history-section';
 import { ProvinceInput } from '@/components/province-input';
 import { PartyRelationshipsSection } from '@/components/party-relationships';
@@ -115,6 +116,7 @@ export default function CustomersPage() {
 function CustomerDuplicatesDialog({ onClose }: { onClose: () => void }) {
   const { t } = useLang();
   const qc = useQueryClient();
+  const [mergeAsk, setMergeAsk] = useState<{ survivor: string; duplicate: string; dup: string; keep: string } | null>(null);
   const q = useQuery<{ groups: any[]; count: number }>({ queryKey: ['customer-duplicates'], queryFn: () => api('/api/customer-master/duplicates') });
   const merge = useMutation({
     mutationFn: ({ survivor, duplicate }: { survivor: string; duplicate: string }) => api<any>(`/api/customer-master/${survivor}/merge`, { method: 'POST', body: JSON.stringify({ duplicate_customer_no: duplicate }) }),
@@ -150,7 +152,7 @@ function CustomerDuplicatesDialog({ onClose }: { onClose: () => void }) {
                               <Badge variant="outline" className="text-xs">{Math.round(d.score * 100)}%</Badge>
                             </div>
                           </div>
-                          <Button size="sm" variant="outline" disabled={merge.isPending} onClick={() => { if (window.confirm(t('mx.cm_merge_confirm', { dup: d.name, keep: g.primary.name }))) merge.mutate({ survivor: g.primary.customer_no, duplicate: d.customer_no }); }}>
+                          <Button size="sm" variant="outline" disabled={merge.isPending} onClick={() => setMergeAsk({ survivor: g.primary.customer_no, duplicate: d.customer_no, dup: d.name, keep: g.primary.name })}>
                             <GitMerge className="size-4" /> {t('mx.cm_merge')}
                           </Button>
                         </div>
@@ -161,6 +163,14 @@ function CustomerDuplicatesDialog({ onClose }: { onClose: () => void }) {
               </div>
             ))}
         </StateView>
+        <ConfirmDialog
+          open={!!mergeAsk}
+          onOpenChange={(o) => !o && setMergeAsk(null)}
+          title={t('mx.cm_merge')}
+          description={mergeAsk ? t('mx.cm_merge_confirm', { dup: mergeAsk.dup, keep: mergeAsk.keep }) : null}
+          busy={merge.isPending}
+          onConfirm={() => { if (mergeAsk) merge.mutate({ survivor: mergeAsk.survivor, duplicate: mergeAsk.duplicate }); setMergeAsk(null); }}
+        />
         <DialogFooter><Button variant="outline" onClick={onClose}><X className="size-4" /> {t('fin.cancel')}</Button></DialogFooter>
       </DialogContent>
     </Dialog>

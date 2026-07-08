@@ -17,6 +17,7 @@ import { INTERNAL_NAV, allGroupItems, navForWorkspace, orderGroups, orderItems, 
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
@@ -99,6 +100,7 @@ function Modules() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  const [resetAsk, setResetAsk] = useState(false);
   const resetNav = useMutation({
     mutationFn: () => api('/api/admin/modules/nav-reset', { method: 'POST' }),
     onSuccess: () => { notifySuccess(t('st.set.nav_reset_done')); invalidate(); },
@@ -124,11 +126,18 @@ function Modules() {
           {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>{t('st.set.disabled_modules_badge', { count: disabledCount })}</Badge>}
           {(navDisabled.size > 0 || (groupOrder?.length ?? 0) > 0) && (
             <Button variant="outline" size="sm" className="ml-auto" disabled={resetNav.isPending}
-              onClick={() => { if (confirm(t('st.set.reset_nav_confirm'))) resetNav.mutate(); }}>
+              onClick={() => setResetAsk(true)}>
               <RotateCcw className="size-4" /> {t('st.set.reset_nav_btn')}
             </Button>
           )}
         </div>
+        <ConfirmDialog
+          open={resetAsk}
+          onOpenChange={setResetAsk}
+          title={t('st.set.reset_nav_confirm')}
+          busy={resetNav.isPending}
+          onConfirm={() => { setResetAsk(false); resetNav.mutate(); }}
+        />
       </Card>
 
       <StateView q={list}>
