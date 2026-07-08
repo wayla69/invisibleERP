@@ -474,7 +474,7 @@ export default function ShopPage() {
   // Placeholder shaped like the real grid/list so the initial catalog fetch doesn't flash a bare spinner —
   // smoother perceived load on the slower mobile connections this screen is built for.
   const catalogSkeleton = view === 'grid' ? (
-    <div className="grid grid-cols-3 gap-2 sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
       {Array.from({ length: 9 }, (_, i) => (
         <div key={i} className="flex flex-col overflow-hidden rounded-xl border bg-card">
           <Skeleton className="aspect-square w-full rounded-none" />
@@ -501,7 +501,7 @@ export default function ShopPage() {
   );
 
   return (
-    <div className={cn(cart.length > 0 && 'pb-20 xl:pb-0')}>
+    <div className={cn(cart.length > 0 && 'pb-24 lg:pb-0')}>
       <PageHeader title={t('shop.title')} description={t('shop.desc')} />
 
       {/* A standalone (not PageHeader-actions) row so it can wrap freely on a phone — the shared
@@ -534,7 +534,10 @@ export default function ShopPage() {
           max-content size instead of clamping to the container — the sticky search/chips bar's full-bleed
           `-mx-4` child was exactly such content, so the single "column" (and the whole page) rendered ~14px
           wider than the viewport on a real phone with a realistic (long, many-category) catalog. */}
-      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[1fr_360px]">
+      {/* Two-column (catalog + sticky basket sidebar) from `lg` (1024px) up — so landscape tablets and
+          laptops get the sidebar instead of a single stretched column with the basket buried far below the
+          infinite-scroll catalog. Portrait phones/tablets (below lg) keep the floating-basket bottom sheet. */}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         {/* ── Catalog ─────────────────────────────────────────────── */}
         {/* min-w-0: without it, a grid item defaults to min-width:auto (content's intrinsic size), so the
             category-chips row below — a horizontal-scroll flex of whitespace-nowrap chips — would force
@@ -633,7 +636,7 @@ export default function ShopPage() {
               /* Fixed 3 columns through tablet widths (phones + iPads alike) so the hero image scales down
                  with the tile instead of ballooning to fill a wide-but-lonely 2-up row — the auto-fill
                  minmax(11rem,…) track only kicks in once there's real desktop width (xl+) to spread into. */
-              <div className="grid grid-cols-3 gap-2 sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                 {displayItems.map((it) => {
                   const inCart = cartQty(it.item_id);
                   const fav = favs.has(it.item_id);
@@ -743,11 +746,11 @@ export default function ShopPage() {
         </div>
 
         {/* ── Basket + custom request (sticky on desktop) ──────────── */}
-        <div className="space-y-4 xl:sticky xl:top-4">
-          {/* Below `xl` the basket lives in the floating-button bottom sheet instead (see below) — showing
+        <div className="space-y-4 lg:sticky lg:top-4">
+          {/* Below `lg` the basket lives in the floating-button bottom sheet instead (see below) — showing
               it again here too would duplicate DOM ids (project/date/remarks inputs) and double the
               already-long single-column scroll. */}
-          <Card className="hidden gap-3 xl:block">
+          <Card className="hidden gap-3 lg:block">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <ShoppingCart className="size-5" /> {t('shop.basket')}
@@ -844,7 +847,7 @@ export default function ShopPage() {
           type="button"
           onClick={() => setBasketOpen(true)}
           aria-label={t('shop.view_cart')}
-          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex items-center gap-2 rounded-full bg-primary py-3 pl-4 pr-5 text-primary-foreground shadow-lg transition-transform active:scale-95 xl:hidden"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex items-center gap-2 rounded-full bg-primary py-3 pl-4 pr-5 text-primary-foreground shadow-lg transition-transform active:scale-95 lg:hidden"
         >
           <span className="relative shrink-0">
             <ShoppingCart className="size-5" />
@@ -857,7 +860,7 @@ export default function ShopPage() {
       )}
 
       <Sheet open={basketOpen} onOpenChange={setBasketOpen}>
-        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto xl:hidden">
+        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto lg:hidden">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <ShoppingCart className="size-5" /> {t('shop.basket')}
