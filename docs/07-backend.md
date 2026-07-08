@@ -162,3 +162,9 @@ async createPo(dto: CreatePoDto, user: JwtUser) {
 - **Integration** — endpoints + DB (testcontainers Postgres)
 - **Read-parity diff** (Phase 2 gate) — สคริปต์ยิง endpoint เดิม (FastAPI บน SQLite ที่ migrate แล้ว) vs V2 → เทียบ JSON; whitelist เฉพาะจุดที่จงใจแก้ (Dec P&L, auth, page-total)
 - **Contract** — Zod schema = source of truth ของ request/response + AI tool input
+
+## 8. Service decomposition log (docs/38 — characterization-first, facade-preserving)
+
+| Date | Service | Extraction | Notes |
+|---|---|---|---|
+| 2026-07-08 | `bi` (pilot) | PR-1: `REPORT_TYPES` + `FREQUENCIES` → `modules/bi/report-registry.ts` (pure const module) | Zero DI/constructor change; golden-master 496 paths identical without re-pin; bi 41 · bi-cache 6 · async-jobs 26 green. Next: PR-2 `generate` (generateReport + execScorecard behind a read-port), PR-3 `schedule`. |
