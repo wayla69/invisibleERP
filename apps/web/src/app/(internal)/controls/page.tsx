@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { DataTable } from '@/components/data-table';
 
 type Finding = { id: number; control_key: string; severity: string; entity_ref: string; detail: string; amount: number | null; status: string; detected_at: string };
 const sevColor: Record<string, string> = { critical: 'text-destructive', warning: 'text-amber-600', info: 'text-muted-foreground' };
@@ -43,20 +44,18 @@ export default function ControlsPage() {
         <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ShieldAlert className="size-4 text-primary" /> {t('st.ctl.findings')}</CardTitle></CardHeader>
         <CardContent className="overflow-x-auto">
           <StateView q={findings}>
-            {(findings.data?.findings ?? []).length === 0 ? <p className="text-sm text-muted-foreground">{t('st.ctl.no_findings')}</p> : (
-              <table className="w-full text-sm">
-                <thead><tr className="border-b text-left text-muted-foreground"><th className="px-2 py-1 font-medium">{t('st.ctl.col_severity')}</th><th className="px-2 py-1 font-medium">{t('st.ctl.col_control')}</th><th className="px-2 py-1 font-medium">{t('st.ctl.col_detail')}</th><th className="px-2 py-1 font-medium">{t('fin.col_status')}</th><th /></tr></thead>
-                <tbody>{(findings.data?.findings ?? []).map((f) => (
-                  <tr key={f.id} className="border-b">
-                    <td className={`px-2 py-1 font-medium ${sevColor[f.severity] ?? ''}`}>{f.severity}</td>
-                    <td className="px-2 py-1">{f.control_key}</td>
-                    <td className="px-2 py-1">{f.detail}</td>
-                    <td className="px-2 py-1">{f.status}</td>
-                    <td className="px-2 py-1 text-right">{f.status === 'open' && <Button variant="outline" size="sm" disabled={review.isPending} onClick={() => review.mutate(f.id)}><Check className="size-3" /> {t('st.ctl.reviewed')}</Button>}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            )}
+            <DataTable
+              rows={findings.data?.findings ?? []}
+              rowKey={(f) => String(f.id)}
+              emptyText={t('st.ctl.no_findings')}
+              columns={[
+                { key: 'severity', label: t('st.ctl.col_severity'), render: (f) => <span className={`font-medium ${sevColor[f.severity] ?? ''}`}>{f.severity}</span> },
+                { key: 'control_key', label: t('st.ctl.col_control') },
+                { key: 'detail', label: t('st.ctl.col_detail') },
+                { key: 'status', label: t('fin.col_status') },
+                { key: 'act', label: '', sortable: false, render: (f) => f.status === 'open' ? <Button variant="outline" size="sm" disabled={review.isPending} onClick={() => review.mutate(f.id)}><Check className="size-3" /> {t('st.ctl.reviewed')}</Button> : null },
+              ]}
+            />
           </StateView>
         </CardContent>
       </Card>

@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { useLang } from '@/lib/i18n';
+import { DataTable } from '@/components/data-table';
 
 type Provider = { key: string; country: string; label: string };
 type Sub = { id: number; doc_ref: string; provider: string; status: string; ref: string };
@@ -55,10 +56,16 @@ export default function EInvoicePage() {
           <CardHeader><CardTitle className="text-base">{t('mx.ei_history')}</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto">
             <StateView q={subs}>
-              {(subs.data?.submissions ?? []).length === 0 ? <p className="text-sm text-muted-foreground">{t('mx.ei_none')}</p> : (
-                <table className="w-full text-sm"><thead><tr className="border-b text-left text-muted-foreground"><th className="px-2 py-1 font-medium">{t('dash.col_no')}</th><th className="px-2 py-1 font-medium">Ref</th><th className="px-2 py-1 font-medium">{t('fin.col_status')}</th></tr></thead>
-                <tbody>{(subs.data?.submissions ?? []).map((s) => <tr key={s.id} className="border-b"><td className="px-2 py-1">{s.doc_ref}</td><td className="px-2 py-1 font-mono text-xs">{s.ref}</td><td className="px-2 py-1">{s.status}</td></tr>)}</tbody></table>
-              )}
+              <DataTable
+                rows={subs.data?.submissions ?? []}
+                rowKey={(r) => String(r.id)}
+                emptyText={t('mx.ei_none')}
+                columns={[
+                  { key: 'doc_ref', label: t('dash.col_no') },
+                  { key: 'ref', label: 'Ref', render: (r) => <span className="font-mono text-xs">{r.ref}</span> },
+                  { key: 'status', label: t('fin.col_status') },
+                ]}
+              />
             </StateView>
           </CardContent>
         </Card>

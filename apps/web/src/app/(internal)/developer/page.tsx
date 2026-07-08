@@ -8,6 +8,8 @@ import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataTable } from '@/components/data-table';
+import { Select } from '@/components/form-controls';
 
 type Key = { id: number; name: string; prefix: string; scopes: string[]; tier: string; revoked: boolean; last_used_at: string | null };
 type Portal = { scopes: { key: string; desc: string }[]; endpoints: { method: string; path: string; scope: string }[]; tiers: { key: string; label: string; rate_per_min: number }[]; openapi_url: string; keys: Key[] };
@@ -32,22 +34,20 @@ export default function DeveloperPage() {
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Code className="size-4 text-primary" /> API keys</CardTitle></CardHeader>
             <CardContent className="overflow-x-auto">
-              {(q.data?.keys ?? []).length === 0 ? <p className="text-sm text-muted-foreground">{t('st.dev.no_keys')}</p> : (
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b text-left text-muted-foreground"><th className="px-2 py-1 font-medium">Prefix</th><th className="px-2 py-1 font-medium">Scopes</th><th className="px-2 py-1 font-medium">Tier</th></tr></thead>
-                  <tbody>{(q.data?.keys ?? []).map((k) => (
-                    <tr key={k.id} className="border-b">
-                      <td className="px-2 py-1 font-mono text-xs">{k.prefix}…{k.revoked && <span className="ml-1 text-destructive">(revoked)</span>}</td>
-                      <td className="px-2 py-1 text-xs">{k.scopes.join(', ') || '—'}</td>
-                      <td className="px-2 py-1">
-                        <select className="h-8 rounded border bg-transparent px-1 text-xs" value={k.tier} disabled={k.revoked} onChange={(e) => setTier.mutate({ id: k.id, tier: e.target.value })}>
-                          {(q.data?.tiers ?? []).map((tier) => <option key={tier.key} value={tier.key}>{tier.label}</option>)}
-                        </select>
-                      </td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              )}
+              <DataTable
+                rows={q.data?.keys ?? []}
+                rowKey={(k) => String(k.id)}
+                emptyText={t('st.dev.no_keys')}
+                columns={[
+                  { key: 'prefix', label: 'Prefix', render: (k) => <span className="font-mono text-xs">{k.prefix}…{k.revoked && <span className="ml-1 text-destructive">(revoked)</span>}</span> },
+                  { key: 'scopes', label: 'Scopes', sortable: false, render: (k) => <span className="text-xs">{k.scopes.join(', ') || '—'}</span> },
+                  { key: 'tier', label: 'Tier', sortable: false, render: (k) => (
+                    <Select className="h-8 w-auto text-xs" value={k.tier} disabled={k.revoked} onChange={(e) => setTier.mutate({ id: k.id, tier: e.target.value })}>
+                      {(q.data?.tiers ?? []).map((tier) => <option key={tier.key} value={tier.key}>{tier.label}</option>)}
+                    </Select>
+                  ) },
+                ]}
+              />
               {msg && <p className="mt-2 text-sm text-muted-foreground">{msg}</p>}
               <a className="mt-3 inline-flex items-center gap-1 text-sm text-primary" href={`${base}${q.data?.openapi_url ?? ''}`} target="_blank" rel="noreferrer">OpenAPI 3.1 <ExternalLink className="size-3" /></a>
             </CardContent>
