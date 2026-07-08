@@ -50,12 +50,22 @@ PLAN (free / starter / pro / enterprise)
 
 ## 3. Plans → suites (default; DB may override)
 
-| Plan (code) | Commercial name | Price (THB/mo) | Seats | Suites |
-|-------------|-----------------|----------------|-------|--------|
-| `free` | Free / trial-limited | 0 | 2 | core, portal, selfservice |
-| `starter` | **Standard** | 1,900 | 10 | core, finance, sales, inventory, masterdata, portal, selfservice |
-| `pro` | **Professional** | 9,900 | 50 | + procurement, planning, crm_loyalty, ai, multibranch |
-| `enterprise` | **Enterprise** | quote (custom) | ∞ | all suites (custom deals tune via `features.suites`) |
+| Plan (code) | Commercial name | THB/mo | THB/yr (2 mo free) | USD/mo · USD/yr | Seats | Suites |
+|-------------|-----------------|--------|--------------------|------------------|-------|--------|
+| `free` | Free / trial-limited | 0 | — | — | 2 | core, portal, selfservice |
+| `starter` | **Standard** | 1,900 | 19,000 | $55 · $550 | 10 | core, finance, sales, inventory, masterdata, portal, selfservice |
+| `pro` | **Professional** | 9,900 | 99,000 | $285 · $2,850 | 50 | + procurement, planning, crm_loyalty, ai, multibranch |
+| `enterprise` | **Enterprise** | quote (custom) | quote | quote | ∞ | all suites (custom deals tune via `features.suites`) |
+
+**Annual + multi-currency (1.7, migration `0284`, DEFAULT-INERT):** `subscriptions.billing_interval`
+(default `monthly`) + `subscriptions.currency` (default `THB`) record the billing intent;
+`plans.price_yearly` (NULL = not offered annually → `ANNUAL_NOT_OFFERED`) and the per-currency
+`plans.prices` map (absent currency → `CURRENCY_NOT_OFFERED` — fail-closed, never a silent THB fallback)
+drive `resolvePlanPrice`. Checkout passes the resolved amount/interval to Stripe
+(`recurring.interval: month|year`); `changePlan` prorates on the sub's interval basis (365-day annual
+periods) and returns `proration: null + proration_note: 'interval_change'` on a monthly↔annual switch
+(no honest single number across period bases — applied at the next renewal instead). The `/billing` page
+gets a monthly/annual toggle. USD prices are illustrative market-entry defaults — tune after testing.
 
 Prices/seats/suites are seeded in `PLAN_SEED` (`billing.service.ts`) and upserted idempotently by
 `seedPlans()` at startup — which also **backfills `features.suites`** onto every plan row (the grandfather
@@ -141,6 +151,7 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # 
 |---------|------|--------|--------|
 | 0.1 | 2026-07-07 | Platform | Initial packaging spec — plan→suite→module entitlement map (`entitlements.ts`) + CI guard (`check-entitlements.mjs`). Map-only; no enforcement yet (PlanGuard rewire is 1.2). Documented `KNOWN_UNGATED` gap (manufacturing/PPM/HCM/real-estate need gating tokens — 1.1b). |
 | 0.2 | 2026-07-07 | Platform | 1.2 — `PlanGuard` rewired: suite gating behind `ENTITLEMENTS_ENFORCE`/`ENTITLEMENTS_SHADOW` (default off = legacy behaviour), per-tenant Admin bypass removed (god-only), fail-open on infra error / fail-closed on missing plan, `resolveEntitledSuites` grandfather fallback. No behaviour change until enabled; enable SHADOW → backfill (1.3) → ENFORCE. |
+| 0.9 | 2026-07-08 | Platform | 1.7 — **annual billing + multi-currency** (see §3). `plans.price_yearly` + per-currency `plans.prices`, `subscriptions.billing_interval`/`currency` (migration `0284`, default-inert), fail-closed `resolvePlanPrice` (`ANNUAL_NOT_OFFERED`/`CURRENCY_NOT_OFFERED`), Stripe `recurring.interval` year, interval-aware proration (365-day basis; interval switch → note, not a misleading number), `/billing` monthly/annual toggle. ToE: `proration` 12 (+2 annual basis), `saas-metrics` 29 (+7 flow incl. fail-closed + intent stamping). หมวด 1 (Monetization) now 100% complete. |
 | 0.8 | 2026-07-08 | Platform | 1.4 (residual UI) — the `/billing` page now surfaces the FULL meter→price loop: a **metered-usage card** (e-Tax docs / POS txns used-vs-quota for the month, per-meter overage badge + projected charge, from `GET /api/billing/usage`), an **overage charge history** table merging AI + usage runs (`/api/billing/ai-overage/runs` + `/usage-overage/runs`), the **proration** line from `change-plan` shown on plan switch (1.6), and plan-card feature labels for the new quota keys (`etax_docs_monthly`/`pos_txns_monthly`; rate keys + `suites` hidden from the raw dump). No new `'use client'` file (extends the existing page — ratchet flat). |
 | 0.7 | 2026-07-08 | Platform | 1.5 — **usage metering → overage billing** (see §5b). Two generic meters (`etax_docs`, `pos_txns`) in `usage_events` (migration `0281`), captured best-effort/autocommit at `EtaxService.submit` (accepted docs) + `PortalPosService.createSale` (idempotent per doc_no/sale_no) via the new `modules/usage` `UsageMeterService`. Monthly included quota + per-unit overage price added to `PLAN_SEED` **and** backfilled by `0281`. `BillingService.runUsageOverageBilling` charges one Stripe item per (tenant, meter, month), idempotent via `usage_overage_billing_runs` UNIQUE; scheduled BI report type `usage_overage_billing`; read views `GET /api/billing/usage` + `/usage-overage/runs`. No RLS (operator/job meter, like AI tokens). ToE `saas-metrics` +8 (22 total); `taxdocs`/`restaurant`/`sub-billing`/`tenant-idx`/`migration-parity` unregressed. Monetization infra — no ICFR control change. |
 | 0.6 | 2026-07-07 | Platform | 1.6 — mid-cycle **proration** on `changePlan`. `modules/billing/proration.ts` `computeProration()` returns the unused credit on the old plan + prorated charge on the new plan for the days left in the period (`net` >0 = charge, <0 = credit); `changePlan` now returns it. Informational (the Stripe proration-invoice-item is a follow-up). ToE `cutover/proration` (10/10). No behaviour change to the plan switch itself; onboarding 75/75 unregressed. |
