@@ -142,6 +142,10 @@ export const apiKeys = pgTable('api_keys', {
   // Optional expiry (0196) — a key past expires_at is rejected like a revoked key. NULL = non-expiring
   // (back-compat). Issuing with a TTL bounds the blast radius of a leaked machine credential.
   expiresAt: timestamp('expires_at', { withTimezone: true }),
+  // The human who minted the key (security review H-2). At auth time the key principal adopts this identity
+  // for maker-checker/SoD, so a key can't be used to self-approve the minter's own work. NULL = legacy key
+  // (issued before this column) → the guard falls back to the `apikey:<prefix>` machine identity.
+  createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

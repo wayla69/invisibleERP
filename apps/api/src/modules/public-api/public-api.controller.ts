@@ -59,7 +59,10 @@ export class PublicApiController {
   @Get('me')
   @NoTx()
   me(@CurrentUser() u: JwtUser) {
-    return { principal: u.username, tenant_id: u.tenantId, scopes: u.scopes ?? [], version: 'v1' };
+    // Report the machine identity (apikey:<prefix>) as the principal — a stable public-API contract. The
+    // internal `username` is the minting human (H-2, for maker-checker), which the public API doesn't expose.
+    const principal = u.apiKeyPrefix ? `apikey:${u.apiKeyPrefix}` : u.username;
+    return { principal, tenant_id: u.tenantId, scopes: u.scopes ?? [], version: 'v1' };
   }
 
   // ── Scoped read endpoints ───────────────────────────────────────────

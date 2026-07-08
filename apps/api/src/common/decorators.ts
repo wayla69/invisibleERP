@@ -41,6 +41,10 @@ export interface JwtUser {
   // Raw API-key scopes (only set for `ierp_` machine principals; undefined for human JWTs).
   // Used by the public API (/api/v1) scope guard; the permission system is unaffected.
   scopes?: string[];
+  // API-key prefix (only set for `ierp_` machine principals). The key's `username` is bound to the MINTING
+  // HUMAN for maker-checker (H-2); this carries the machine identity separately — used for the public-API
+  // `principal`, per-key rate limiting, and audit traceability. undefined for human JWTs.
+  apiKeyPrefix?: string | null;
   // Loyalty MEMBER principal (set only for role==='Member' tokens from the phone-OTP member app). A member
   // token carries permissions:[] (no staff access) and is RLS-scoped to the member's tenant. See MemberGuard.
   memberId?: number | null;
