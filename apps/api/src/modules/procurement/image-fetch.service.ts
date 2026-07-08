@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { assertPublicUrl } from '../../common/net-guard';
 
 // Image fetching service — retrieves product images from the internet and converts to base64 data-URLs
 // for storage in the item_images table. Supports multiple image sources with fallbacks.
@@ -7,6 +8,12 @@ export class ImageFetchService {
   // Convert image URL to base64 data URL
   async urlToDataUrl(imageUrl: string): Promise<string> {
     try {
+      // SSRF defense-in-depth (security review L-6): the URL here is derived from Wikimedia's imageinfo
+      // response (an external source), so re-resolve it and refuse internal / cloud-metadata / RFC1918 /
+      // loopback destinations before fetching. `allowHttp: false` — image URLs are https. A blocked or
+      // malformed URL throws, is caught below, and the item falls back to the local placeholder.
+      await assertPublicUrl(imageUrl, { allowHttp: false });
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 

@@ -26,6 +26,16 @@ describe('PDPA — PII redaction before the LLM boundary', () => {
     expect(out.memo).toContain('[REDACTED]');
   });
 
+  it('scrubs international phone numbers in free text, not plain amounts (L-11)', () => {
+    const out: any = redactPii({
+      memo: 'US office +1 415 555 2671, UK +44 20 7946 0958, invoice total 1234567 THB',
+    });
+    expect(out.memo).not.toContain('+1 415 555 2671');
+    expect(out.memo).not.toContain('+44 20 7946 0958');
+    expect(out.memo).toContain('[REDACTED]');
+    expect(out.memo).toContain('1234567'); // a plain amount (no leading +) is NOT a phone
+  });
+
   it('handles arrays, nested objects, nulls and non-PII primitives', () => {
     const out: any = redactPii({ rows: [{ amount: 10, note: null }, { amount: 20 }], total: 30, ok: true });
     expect(out.rows[0].amount).toBe(10);

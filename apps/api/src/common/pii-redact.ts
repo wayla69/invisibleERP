@@ -17,10 +17,14 @@ const SENSITIVE_KEY =
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 const ID13_RE = /\b\d{13}\b/g; // Thai national / tax id
 const PHONE_RE = /(?:\+?66|0)\d{1,2}[-\s]?\d{3,4}[-\s]?\d{3,4}/g; // Thai phone shapes
+// International E.164-ish numbers embedded in free text (security review L-11): a leading `+` then a country
+// code and 7+ more digits, allowing spaces / dashes / parens as separators. Requires the `+` so it won't
+// mask plain amounts/counts; runs BEFORE the Thai pattern so `+66…` is caught here too.
+const INTL_PHONE_RE = /\+\d[\d\s().-]{7,}\d/g;
 const MASK = '[REDACTED]';
 
 function scrubString(s: string): string {
-  return s.replace(EMAIL_RE, MASK).replace(ID13_RE, MASK).replace(PHONE_RE, MASK);
+  return s.replace(EMAIL_RE, MASK).replace(ID13_RE, MASK).replace(INTL_PHONE_RE, MASK).replace(PHONE_RE, MASK);
 }
 
 // Deep-clone with PII removed. Numbers/booleans pass through (amounts, counts, dates-as-numbers are not PII);
