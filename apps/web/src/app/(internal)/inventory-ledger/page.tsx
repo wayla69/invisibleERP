@@ -18,12 +18,11 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
 // Perpetual inventory valuation sub-ledger (INV-06): valued receipts/issues/adjustments + moving-average or
 // FIFO/FEFO cost layers, with a GL reconciliation tie-out (sub-ledger value ↔ account 1200).
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 const METHOD_KEYS: Record<string, string> = { moving_avg: 'iv.led_method_moving_avg', fifo: 'iv.led_method_fifo', fefo: 'iv.led_method_fefo' };
 function methodLabel(t: (k: string) => string, m: string) { const k = METHOD_KEYS[m]; return k ? t(k) : m; }
@@ -159,11 +158,11 @@ function ReceiptForm() {
         <Field id="rc-cost" label={t('iv.led_unit_cost_baht')} required><Input id="rc-cost" type="number" min="0" step="any" value={form.unit_cost} onChange={set('unit_cost')} /></Field>
         <Field id="rc-loc" label={t('iv.led_location')}><Input id="rc-loc" value={form.location_id} onChange={set('location_id')} /></Field>
         <Field id="rc-method" label={t('iv.led_method_label')} hint={t('iv.led_method_hint')}>
-          <select id="rc-method" className={selectCls} value={form.costing_method} onChange={set('costing_method')}>
+          <Select id="rc-method"  value={form.costing_method} onChange={set('costing_method')}>
             <option value="moving_avg">{t('iv.led_opt_moving_avg')}</option>
             <option value="fifo">{t('iv.led_opt_fifo')}</option>
             <option value="fefo">{t('iv.led_opt_fefo')}</option>
-          </select>
+          </Select>
         </Field>
         {layered && <Field id="rc-lot" label={t('iv.led_lot_opt')}><Input id="rc-lot" value={form.lot_no} onChange={set('lot_no')} placeholder={t('iv.led_lot_ph')} /></Field>}
         {layered && <Field id="rc-exp" label={t('iv.led_expiry_opt')} hint={t('iv.led_expiry_hint')}><Input id="rc-exp" type="date" value={form.expiry_date} onChange={set('expiry_date')} /></Field>}

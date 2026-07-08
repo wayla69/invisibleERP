@@ -18,8 +18,8 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 // Grouped display order for the role guide (mirrors the ROLE_META `kind` taxonomy). Labels come from the
 // i18n dictionary (st.usr.role_kind_*) via the `labelKey` below.
 const ROLE_KIND_ORDER: { kind: RoleMetaKind; labelKey: string }[] = [
@@ -175,7 +175,7 @@ export default function AdminUsersPage() {
         <div className="grid gap-2 sm:grid-cols-4">
           <div className="grid gap-1.5"><Label>{t('st.usr.field_username')}</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('st.usr.field_password')}</Label><PasswordInput value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>{t('st.usr.field_role')}</Label><select className={selectCls} value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{selectableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}</select></div>
+          <div className="grid gap-1.5"><Label>{t('st.usr.field_role')}</Label><Select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{selectableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}</Select></div>
           <div className="grid gap-1.5"><Label>{t('st.usr.company_optional')}</Label><Input value={f.customer_name} onChange={(e) => setF({ ...f, customer_name: e.target.value })} placeholder="tenant code" /></div>
         </div>
         {roleDesc(f.role) && <p className="text-xs text-muted-foreground">{roleDesc(f.role)}</p>}
@@ -214,7 +214,7 @@ export default function AdminUsersPage() {
                 // Always include the row's CURRENT role so an existing Admin still shows correctly, even
                 // though a non-god cannot switch a user TO Admin (that option is hidden + API-enforced).
                 const opts = selectableRoles.includes(r.role) ? selectableRoles : [r.role, ...selectableRoles];
-                return <select className={selectCls} value={r.role} onChange={(e) => setRole.mutate({ u: r.username, role: e.target.value })} title={roleDesc(r.role)}>{opts.map((x) => <option key={x} value={x}>{roleLabel(x)}</option>)}</select>;
+                return <Select value={r.role} onChange={(e) => setRole.mutate({ u: r.username, role: e.target.value })} title={roleDesc(r.role)}>{opts.map((x) => <option key={x} value={x}>{roleLabel(x)}</option>)}</Select>;
               } },
               { key: 'customer_name', label: t('st.usr.company'), render: (r: any) => r.customer_name ?? '—' },
               { key: 'must_change_password', label: t('st.usr.must_change'), render: (r: any) => r.must_change_password ? <Badge variant="warning">{t('st.usr.yes')}</Badge> : '—' },

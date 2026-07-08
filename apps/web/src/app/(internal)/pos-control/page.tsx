@@ -20,8 +20,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 const ACTION_OPTS: string[] = ['void', 'discount', 'price_override', 'no_sale', 'return'];
 const APPLIES_OPTS: string[] = ['all', 'void', 'discount', 'price_override', 'no_sale', 'return', 'refund', 'paid_out'];
@@ -73,7 +73,7 @@ function ReasonCodes() {
             <Field label={t('px.ctrl_code')} htmlFor="rc-code"><Input id="rc-code" placeholder={t('px.ctrl_code_ph')} value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} /></Field>
             <Field label={t('px.ctrl_desc')} htmlFor="rc-label"><Input id="rc-label" placeholder={t('px.ctrl_reason_label_ph')} value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></Field>
             <Field label={t('px.ctrl_applies_to')} htmlFor="rc-applies">
-              <select id="rc-applies" className={selectCls} value={f.applies_to} onChange={(e) => setF({ ...f, applies_to: e.target.value })}>{APPLIES_OPTS.map((v) => <option key={v} value={v}>{appliesLabel(v)}</option>)}</select>
+              <Select id="rc-applies"  value={f.applies_to} onChange={(e) => setF({ ...f, applies_to: e.target.value })}>{APPLIES_OPTS.map((v) => <option key={v} value={v}>{appliesLabel(v)}</option>)}</Select>
             </Field>
           </div>
           <Button disabled={!f.code || !f.label || save.isPending} onClick={() => save.mutate()}>{save.isPending ? t('px.ctrl_saving') : t('fin.save')}</Button>
@@ -162,7 +162,7 @@ function Overrides() {
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label={t('px.ctrl_type')} htmlFor="ov-action">
-              <select id="ov-action" className={selectCls} value={f.action} onChange={(e) => setF({ ...f, action: e.target.value })}>{ACTION_OPTS.map((v) => <option key={v} value={v}>{actionLabel(v)}</option>)}</select>
+              <Select id="ov-action"  value={f.action} onChange={(e) => setF({ ...f, action: e.target.value })}>{ACTION_OPTS.map((v) => <option key={v} value={v}>{actionLabel(v)}</option>)}</Select>
             </Field>
             <Field label={t('px.ctrl_bill_no')} htmlFor="ov-sale"><Input id="ov-sale" placeholder="SALE-…" value={f.sale_no} onChange={(e) => setF({ ...f, sale_no: e.target.value })} /></Field>
             <Field label={t('px.ctrl_amount_baht')} htmlFor="ov-amt"><Input id="ov-amt" type="number" inputMode="decimal" placeholder="0" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>

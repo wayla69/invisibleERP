@@ -14,8 +14,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface Segment { id?: number; label: string; prize_kind: string; prize_points: number; coupon_kind?: string; coupon_value?: number; weight: number; stock: number | null; won_count?: number }
 interface Wheel { id: number; wheel_code: string; name: string; cost_points: number; daily_free_spins: number; active: boolean; segments: Segment[] }
@@ -67,7 +67,7 @@ export default function WheelsPage() {
               {segs.map((s, i) => (
                 <div key={i} className="grid grid-cols-2 gap-2 rounded-lg border border-border/60 p-2 sm:grid-cols-6">
                   <Input className="sm:col-span-2" value={s.label} onChange={(e) => setSeg(i, { label: e.target.value })} placeholder={t('ly.wh_col_label')} aria-label={t('ly.wh_aria_label', { n: i + 1 })} />
-                  <select className={selectCls} value={s.prize_kind} onChange={(e) => setSeg(i, { prize_kind: e.target.value })} aria-label={t('ly.wh_aria_kind', { n: i + 1 })}><option value="points">{t('ly.wh_opt_points')}</option><option value="coupon">{t('ly.wh_opt_coupon')}</option><option value="none">{t('ly.wh_opt_none')}</option></select>
+                  <Select className="w-auto" value={s.prize_kind} onChange={(e) => setSeg(i, { prize_kind: e.target.value })} aria-label={t('ly.wh_aria_kind', { n: i + 1 })}><option value="points">{t('ly.wh_opt_points')}</option><option value="coupon">{t('ly.wh_opt_coupon')}</option><option value="none">{t('ly.wh_opt_none')}</option></Select>
                   <Input type="number" inputMode="numeric" min="0" value={s.prize_kind === 'points' ? s.prize_points : (s.coupon_value ?? 0)} onChange={(e) => setSeg(i, s.prize_kind === 'points' ? { prize_points: +e.target.value } : { coupon_value: +e.target.value })} placeholder={t('ly.wh_col_value')} title={t('ly.wh_value_title')} aria-label={t('ly.wh_aria_value', { n: i + 1 })} />
                   <Input type="number" inputMode="numeric" min="0" value={s.weight} onChange={(e) => setSeg(i, { weight: +e.target.value })} placeholder={t('ly.wh_col_weight')} title={t('ly.wh_weight_title')} aria-label={t('ly.wh_aria_weight', { n: i + 1 })} />
                   <div className="flex items-center gap-1">

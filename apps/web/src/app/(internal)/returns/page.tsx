@@ -19,12 +19,11 @@ import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
 // Returns register (REV-07): tenant-wide view of POS returns/refunds for ops · finance · audit —
 // refund method, amount, restocked status, GL journal + credit-note links, with a per-return drill-down.
 
-const selectCls =
-  'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface Ret {
   return_no: string; sale_no: string; refund_no: string | null; refund_method: string | null;
@@ -75,13 +74,13 @@ export default function ReturnsPage() {
       toolbar={
         <>
           <SearchInput value={search} onChange={setSearch} placeholder={t('hx.ret.search_ph')} ariaLabel={t('hx.ret.search_aria')} count={d ? t('hx.common.count_items', { n: num(d.count) }) : undefined} />
-          <select className={selectCls} value={method} onChange={(e) => setMethod(e.target.value)} aria-label={t('hx.ret.filter_method')}>
+          <Select className="w-auto" value={method} onChange={(e) => setMethod(e.target.value)} aria-label={t('hx.ret.filter_method')}>
             <option value="">{t('hx.ret.all_methods')}</option>
             <option value="Cash">{t('hx.ret.m_cash')}</option>
             <option value="Transfer">{t('hx.ret.m_transfer')}</option>
             <option value="Card">{t('hx.ret.m_card')}</option>
             <option value="StoreCredit">{t('hx.ret.m_store_credit')}</option>
-          </select>
+          </Select>
           {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">{t('hx.common.updating')}</span>}
         </>
       }
@@ -317,9 +316,9 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>{t('hx.ret.col_method')}</Label>
-                  <select className={selectCls + ' w-full'} value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)}>
+                  <Select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)}>
                     {REFUND_METHODS.map((m) => <option key={m.value} value={m.value}>{t(m.label)}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 <div className="space-y-1">
                   <Label>{t('hx.ret.reason_opt')}</Label>

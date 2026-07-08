@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
 // GET /api/pipeline/stages → BARE ARRAY of DB rows (camelCase)
 interface Stage { id: number; name: string; sequence: number; defaultProbability: number; isWon: boolean; isLost: boolean }
@@ -70,9 +71,7 @@ export default function PipelinePage() {
     onError: (e: Error) => notifyError(e.message),
   });
 
-  const selectCls =
-    'h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
-
+  
   const chartData = (forecast.data?.by_stage ?? []).map((r) => ({ name: r.stage, weighted: r.weighted_value }));
 
   return (
@@ -122,10 +121,10 @@ export default function PipelinePage() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="opp-stage">{t('crm.stage')}</Label>
-                <select id="opp-stage" className={selectCls} value={stageName} onChange={(e) => setStageName(e.target.value)}>
+                <Select id="opp-stage" className="w-auto" value={stageName} onChange={(e) => setStageName(e.target.value)}>
                   <option value="">{t('crm.stage_default_option')}</option>
                   {(stages.data ?? []).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-                </select>
+                </Select>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -165,15 +164,15 @@ export default function PipelinePage() {
                     label: t('crm.move_stage'),
                     sortable: false,
                     render: (r: Opp) => (
-                      <select
-                        className={selectCls}
+                      <Select
+                        className="w-auto"
                         defaultValue=""
                         disabled={move.isPending}
                         onChange={(e) => { if (e.target.value) move.mutate({ id: r.id, stage_name: e.target.value }); }}
                       >
                         <option value="">{t('crm.move_to')}</option>
                         {(stages.data ?? []).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-                      </select>
+                      </Select>
                     ),
                   },
                 ]}

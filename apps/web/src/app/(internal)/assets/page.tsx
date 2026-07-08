@@ -20,9 +20,8 @@ import { statusVariant } from '@/components/ui';
 import { QrScanButton } from '@/components/qr-scanner';
 import { submitScan, useOnline, useScanOutbox } from '@/lib/scan-outbox';
 import { useLang } from '@/lib/i18n';
+import { Select, selectCls } from '@/components/form-controls';
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 // Asset register status (assets.service.ts): active / fully_depreciated / disposed.
 const ASSET_STATUS_KEYS: Record<string, string> = {
@@ -448,10 +447,10 @@ function QrTags() {
           <h3 className="text-base font-semibold">{t('mx.as_qr_single_heading')}</h3>
           <div className="grid gap-1.5 max-w-sm">
             <Label htmlFor="qr-asset">{t('mx.as_asset_label')}</Label>
-            <select id="qr-asset" className={selectCls} value={assetNo} onChange={(e) => setAssetNo(e.target.value)}>
+            <Select id="qr-asset"  value={assetNo} onChange={(e) => setAssetNo(e.target.value)}>
               <option value="">{t('mx.as_select_option')}</option>
               {assets.map((a: any) => <option key={a.asset_no} value={a.asset_no}>{a.asset_no} — {a.name}</option>)}
-            </select>
+            </Select>
           </div>
           {single.data?.data_url && (
             <div className="flex flex-col items-center gap-2">

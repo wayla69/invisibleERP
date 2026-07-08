@@ -19,8 +19,8 @@ import { Label } from '@/components/ui/label';
 import { QrScanButton } from '@/components/qr-scanner';
 import { submitScan, newUuid, useOnline, useScanOutbox } from '@/lib/scan-outbox';
 import { WifiOff } from 'lucide-react';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const TYPES = ['GR', 'Issue', 'Transfer', 'Count'];
 
 export default function MobileScanPage() {
@@ -67,7 +67,7 @@ export default function MobileScanPage() {
         <div className="space-y-4">
           <Card className="max-w-md gap-3 p-5">
             <h3 className="text-base font-semibold">{t('iv.scan_open_new')}</h3>
-            <div className="grid gap-1.5"><Label>{t('iv.scan_type')}</Label><select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((tx) => <option key={tx} value={tx}>{tx}</option>)}</select></div>
+            <div className="grid gap-1.5"><Label>{t('iv.scan_type')}</Label><Select value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((tx) => <option key={tx} value={tx}>{tx}</option>)}</Select></div>
             <div className="grid gap-1.5"><Label>{t('iv.scan_location')}</Label><Input value={loc} onChange={(e) => setLoc(e.target.value)} /></div>
             <Button disabled={open.isPending} onClick={() => open.mutate()}><ScanLine className="size-4" /> {t('iv.scan_open_session')}</Button>
           </Card>

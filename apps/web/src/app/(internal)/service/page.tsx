@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
 // GET /api/service/contracts → { contracts: [...], count }
 interface Contract { id: number; contract_no: string; customer_name: string; sla_tier: string; response_hours: number; resolution_hours: number; start_date: string | null; end_date: string | null; status: string; monthly_value: number }
@@ -26,8 +27,6 @@ interface Sub { id: number; sub_no: string; customer_name: string; product_code:
 // GET /api/service/contracts/:id/events → { events: [...], count }
 interface SlaEvent { id: number; event_no: string; title: string; priority: string; opened_at: string | null; response_due_at: string | null; responded_at: string | null; resolved_at: string | null; resolution_due_at: string | null; response_breached: boolean; resolution_breached: boolean; status: string }
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function ServicePage() {
   const { t } = useLang();
@@ -107,9 +106,9 @@ function Contracts() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="svc-tier">{t('crm.sla_tier')}</Label>
-              <select id="svc-tier" className={selectCls} value={slaTier} onChange={(e) => setSlaTier(e.target.value)}>
+              <Select id="svc-tier"  value={slaTier} onChange={(e) => setSlaTier(e.target.value)}>
                 {['Bronze', 'Silver', 'Gold', 'Platinum'].map((tier) => <option key={tier} value={tier}>{tier}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="svc-start">{t('crm.start_date')}</Label>
@@ -207,9 +206,9 @@ function ContractEvents({ contractId }: { contractId: number }) {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="ev-pri">{t('crm.priority')}</Label>
-            <select id="ev-pri" className={selectCls} value={priority} onChange={(e) => setPriority(e.target.value)}>
+            <Select id="ev-pri"  value={priority} onChange={(e) => setPriority(e.target.value)}>
               {['P1', 'P2', 'P3', 'P4'].map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
+            </Select>
           </div>
           <Button disabled={log.isPending || !title.trim()} onClick={() => log.mutate()}>
             <Plus className="size-4" /> {t('crm.log_event')}

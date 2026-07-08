@@ -19,8 +19,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const STAGES = ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'] as const;
 const stageBadge = (s: string) => <Badge variant={s === 'won' ? 'success' : s === 'lost' ? 'destructive' : 'secondary'}>{s}</Badge>;
 const leadBadge = (s: string) => <Badge variant={s === 'converted' ? 'success' : s === 'lost' ? 'destructive' : s === 'qualified' ? 'info' : 'muted'}>{s}</Badge>;
@@ -174,9 +174,9 @@ function Opportunities() {
             { key: 'weighted', label: t('pj.col_weighted'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.weighted)}</span> },
             { key: 'expected_close_date', label: t('pj.col_expected_close'), render: (r: any) => r.expected_close_date ?? '—' },
             { key: 'stage', label: t('pj.col_stage'), sortable: false, render: (r: any) => (r.stage === 'won' || r.stage === 'lost') ? stageBadge(r.stage) : (
-              <select className={`${selectCls} w-36`} value={r.stage} onChange={(e) => setStage.mutate({ oppNo: r.opp_no, stage: e.target.value })}>
+              <Select className="w-36"  value={r.stage} onChange={(e) => setStage.mutate({ oppNo: r.opp_no, stage: e.target.value })}>
                 {STAGES.map((st) => <option key={st} value={st}>{t(`pj.pipe_stage_${st}`)}</option>)}
-              </select>
+              </Select>
             ) },
             { key: 'act', label: '', sortable: false, render: (r: any) => r.stage === 'won'
               ? <Button size="sm" variant="outline" title={t('pj.tip_convert_project')} onClick={() => { setConv({ opp_no: r.opp_no, name: r.name, amount: r.amount }); setPf({ project_code: '', billing_type: 'Fixed', budget_amount: '', start_date: '', end_date: '' }); }}><FolderPlus className="size-4" /> {t('pj.btn_to_project')}</Button>
@@ -194,9 +194,9 @@ function Opportunities() {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5"><Label>{t('pj.f_project_code')}</Label><Input value={pf.project_code} onChange={(e) => setPf({ ...pf, project_code: e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('pj.billing_type')}</Label>
-                <select className={selectCls} value={pf.billing_type} onChange={(e) => setPf({ ...pf, billing_type: e.target.value })}>
+                <Select value={pf.billing_type} onChange={(e) => setPf({ ...pf, billing_type: e.target.value })}>
                   <option value="Fixed">{t('pj.bt_fixed')}</option><option value="TM">{t('pj.bt_tm')}</option>
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('pj.f_budget')}</Label><Input type="number" min="0" value={pf.budget_amount} onChange={(e) => setPf({ ...pf, budget_amount: e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('pj.f_start')}</Label><Input type="date" value={pf.start_date} onChange={(e) => setPf({ ...pf, start_date: e.target.value })} /></div>

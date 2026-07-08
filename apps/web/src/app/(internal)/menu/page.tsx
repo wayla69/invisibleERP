@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
+import { Select } from '@/components/form-controls';
 
 interface Item {
   id: number;
@@ -49,8 +50,6 @@ interface MenuResp {
   item_count: number;
 }
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function MenuPage() {
   const { t } = useLang();
@@ -153,29 +152,29 @@ function Items() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="mi-cat">{t('mf.menu_tab_categories')}</Label>
-              <select id="mi-cat" className={selectCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <Select id="mi-cat"  value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                 <option value="">{t('mf.menu_none_option')}</option>
                 {cats.data?.categories.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="mi-type">{t('mf.col_type')}</Label>
-              <select id="mi-type" className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>
+              <Select id="mi-type"  value={type} onChange={(e) => setType(e.target.value)}>
                 <option value="food">{t('mf.menu_type_food')}</option>
                 <option value="drink">{t('mf.menu_type_drink')}</option>
                 <option value="retail">{t('mf.menu_type_retail')}</option>
                 <option value="combo">{t('mf.menu_type_combo')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="mi-tax">{t('mf.menu_tax_label')}</Label>
-              <select id="mi-tax" className={selectCls} value={taxType} onChange={(e) => setTaxType(e.target.value)}>
+              <Select id="mi-tax"  value={taxType} onChange={(e) => setTaxType(e.target.value)}>
                 <option value="standard">{t('mf.menu_tax_standard')}</option>
                 <option value="exempt">{t('mf.menu_tax_exempt')}</option>
                 <option value="zero">{t('mf.menu_tax_zero')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2 sm:col-span-2">
               <Label>{t('mf.menu_avail_time_label')}</Label>

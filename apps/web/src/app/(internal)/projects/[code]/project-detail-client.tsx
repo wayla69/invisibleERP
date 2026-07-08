@@ -22,8 +22,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 // CPI/SPI health: ≥1 on/under target (green), 0.9–1 watch (amber), <0.9 at risk (red).
 function indexTone(v: number | null): 'success' | 'warning' | 'danger' | 'default' {
@@ -834,9 +834,9 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5"><Label>{t('pj.col_type')}</Label>
-                <select className={selectCls} value={kf.kind} onChange={(ev) => setKf({ ...kf, kind: ev.target.value })}>
+                <Select value={kf.kind} onChange={(ev) => setKf({ ...kf, kind: ev.target.value })}>
                   <option value="risk">{t('pj.opt_risk')}</option><option value="issue">{t('pj.opt_issue')}</option>
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('pj.col_owner')}</Label><Input value={kf.owner} onChange={(ev) => setKf({ ...kf, owner: ev.target.value })} /></div>
             </div>
@@ -859,9 +859,9 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           <div className="grid gap-3">
             {costDlg === 'cost' && (
               <div className="grid gap-1.5"><Label>{t('pj.f_type')}</Label>
-                <select className={selectCls} value={ctype} onChange={(ev) => setCtype(ev.target.value as 'time' | 'expense')}>
+                <Select value={ctype} onChange={(ev) => setCtype(ev.target.value as 'time' | 'expense')}>
                   <option value="time">{t('pj.type_time')}</option><option value="expense">{t('pj.type_expense')}</option>
-                </select>
+                </Select>
               </div>
             )}
             <div className="grid gap-1.5"><Label>{costDlg === 'bill' && byPct ? t('pj.f_percent_of_contract') : t('pj.f_amount')}</Label><Input type="number" min="0" value={amount} onChange={(ev) => setAmount(ev.target.value)} /></div>
@@ -891,9 +891,9 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5"><Label>{t('pj.boq_col_category')}</Label>
-                <select className={selectCls} value={lf.category} onChange={(ev) => setLf({ ...lf, category: ev.target.value })}>
+                <Select value={lf.category} onChange={(ev) => setLf({ ...lf, category: ev.target.value })}>
                   <option value="material">{t('pj.boq_cat_material')}</option><option value="labor">{t('pj.boq_cat_labor')}</option><option value="equipment">{t('pj.boq_cat_equipment')}</option><option value="subcontract">{t('pj.boq_cat_subcontract')}</option><option value="other">{t('pj.boq_cat_other')}</option>
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('pj.boq_f_item_no')}</Label><Input value={lf.item_no} onChange={(ev) => setLf({ ...lf, item_no: ev.target.value })} /></div>
             </div>
@@ -929,10 +929,10 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           <DialogHeader><DialogTitle>{t('pj.pmr_dlg_submit', { code })}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             <div className="grid gap-1.5"><Label>{t('pj.pmr_f_boq_line')}</Label>
-              <select className={selectCls} value={pf.boq_line_id} onChange={(ev) => setPf({ ...pf, boq_line_id: ev.target.value })}>
+              <Select value={pf.boq_line_id} onChange={(ev) => setPf({ ...pf, boq_line_id: ev.target.value })}>
                 <option value="">{t('pj.pmr_opt_select_line')}</option>
                 {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · {t('pj.boq_remaining')} {baht(l.remaining ?? 0)}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5"><Label>{t('pj.boq_f_item_no')}</Label><Input value={pf.item_no} onChange={(ev) => setPf({ ...pf, item_no: ev.target.value })} /></div>
@@ -956,10 +956,10 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
               <div className="grid gap-1.5"><Label>{t('pj.resv_col_location')}</Label><Input value={zf.location_id} onChange={(ev) => setZf({ ...zf, location_id: ev.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('pj.col_amount')}</Label><Input type="number" min="0" value={zf.qty} onChange={(ev) => setZf({ ...zf, qty: ev.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('pj.resv_f_boq_line')}</Label>
-                <select className={selectCls} value={zf.boq_line_id} onChange={(ev) => setZf({ ...zf, boq_line_id: ev.target.value })}>
+                <Select value={zf.boq_line_id} onChange={(ev) => setZf({ ...zf, boq_line_id: ev.target.value })}>
                   <option value="">{t('pj.resv_opt_none')}</option>
                   {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category}</option>)}
-                </select>
+                </Select>
               </div>
             </div>
             {availItem && <p className="text-xs text-muted-foreground">{t('pj.resv_available_label')} <span className="tabular font-medium text-foreground">{avail.isLoading ? '…' : num(avail.data?.available ?? 0)}</span></p>}
@@ -979,10 +979,10 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             </div>
             <div className="grid gap-1.5"><Label>{t('pj.sc_f_purpose')}</Label><Input value={af.purpose} onChange={(ev) => setAf({ ...af, purpose: ev.target.value })} /></div>
             <div className="grid gap-1.5"><Label>{t('pj.sc_f_boq_link')}</Label>
-              <select className={selectCls} value={af.boq_line_id} onChange={(ev) => setAf({ ...af, boq_line_id: ev.target.value })}>
+              <Select value={af.boq_line_id} onChange={(ev) => setAf({ ...af, boq_line_id: ev.target.value })}>
                 <option value="">{t('pj.sc_opt_no_link')}</option>
                 {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · {t('pj.boq_remaining')} {baht(l.remaining ?? 0)}</option>)}
-              </select>
+              </Select>
             </div>
             <p className="text-xs text-muted-foreground">{t('pj.sc_advance_note')}</p>
           </div>
@@ -997,25 +997,25 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5"><Label>{t('pj.sc_f_fund')}</Label>
-                <select className={selectCls} value={pcf.fund_code} onChange={(ev) => setPcf({ ...pcf, fund_code: ev.target.value })}>
+                <Select value={pcf.fund_code} onChange={(ev) => setPcf({ ...pcf, fund_code: ev.target.value })}>
                   <option value="">{t('pj.sc_opt_select_fund')}</option>
                   {(funds.data?.funds ?? []).map((f: any) => <option key={f.fund_code} value={f.fund_code}>{f.fund_code} · {f.name} ({t('pj.boq_remaining')} {baht(f.balance)})</option>)}
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('pj.col_type')}</Label>
-                <select className={selectCls} value={pcf.kind} onChange={(ev) => setPcf({ ...pcf, kind: ev.target.value })}>
+                <Select value={pcf.kind} onChange={(ev) => setPcf({ ...pcf, kind: ev.target.value })}>
                   <option value="expense">{t('pj.sc_kind_expense')}</option><option value="advance">{t('pj.sc_kind_advance')}</option>
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('pj.sc_f_payee_petty')}</Label><Input value={pcf.payee} onChange={(ev) => setPcf({ ...pcf, payee: ev.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('pj.sc_f_amount')}</Label><Input type="number" min="0" value={pcf.amount} onChange={(ev) => setPcf({ ...pcf, amount: ev.target.value })} /></div>
             </div>
             <div className="grid gap-1.5"><Label>{t('pj.sc_f_purpose')}</Label><Input value={pcf.purpose} onChange={(ev) => setPcf({ ...pcf, purpose: ev.target.value })} /></div>
             <div className="grid gap-1.5"><Label>{t('pj.sc_f_boq_link')}</Label>
-              <select className={selectCls} value={pcf.boq_line_id} onChange={(ev) => setPcf({ ...pcf, boq_line_id: ev.target.value })}>
+              <Select value={pcf.boq_line_id} onChange={(ev) => setPcf({ ...pcf, boq_line_id: ev.target.value })}>
                 <option value="">{t('pj.sc_opt_no_link')}</option>
                 {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category} · {t('pj.boq_remaining')} {baht(l.remaining ?? 0)}</option>)}
-              </select>
+              </Select>
             </div>
             <p className="text-xs text-muted-foreground">{t('pj.sc_petty_note')}</p>
           </div>

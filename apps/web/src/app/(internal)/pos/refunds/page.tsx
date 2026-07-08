@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
+import { Select } from '@/components/form-controls';
 
 // POS Supervisor refund-authorization queue (SoD R08/R12: sell ≠ refund).
 // pos_refund permission only — a Cashier (pos_sell) cannot access this screen.
@@ -91,21 +92,20 @@ export default function PosRefundsPage() {
     },
   ];
 
-  const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring';
-
+  
   return (
     <ModulePage
       title={t('px.refund_title')}
       description={t('px.refund_desc')}
       query={q}
       toolbar={
-        <select className={selectCls} value={filter} onChange={(e) => setFilter(e.target.value as Filter)}
+        <Select className="w-auto" value={filter} onChange={(e) => setFilter(e.target.value as Filter)}
           aria-label={t('px.refund_filter_status_aria')}>
           <option value="Pending">{t('px.refund_pending')}</option>
           <option value="Approved">{t('px.refund_approved_filter')}</option>
           <option value="Rejected">{t('px.refund_reject')}</option>
           <option value="">{t('px.refund_all')}</option>
-        </select>
+        </Select>
       }
       stats={
         <>

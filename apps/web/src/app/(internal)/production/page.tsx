@@ -15,8 +15,8 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function ProductionPage() {
   const { t } = useLang();
@@ -148,12 +148,12 @@ function Quality() {
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">{t('mf.qa_form_title')}</h3>
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="grid gap-1.5"><Label>{t('mf.col_type')}</Label><select className={selectCls} value={f.ref_type} onChange={(e) => setF({ ...f, ref_type: e.target.value })}><option value="WO">{t('mf.qa_ref_wo')}</option><option value="GR">{t('mf.qa_ref_gr')}</option></select></div>
+          <div className="grid gap-1.5"><Label>{t('mf.col_type')}</Label><Select value={f.ref_type} onChange={(e) => setF({ ...f, ref_type: e.target.value })}><option value="WO">{t('mf.qa_ref_wo')}</option><option value="GR">{t('mf.qa_ref_gr')}</option></Select></div>
           <div className="grid gap-1.5"><Label>{t('mf.qa_ref_doc')}</Label><Input value={f.ref_doc} onChange={(e) => setF({ ...f, ref_doc: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('mf.col_product')}</Label><Input value={f.item_id} onChange={(e) => setF({ ...f, item_id: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('mf.qa_inspected_label')}</Label><Input type="number" value={f.qty_inspected} onChange={(e) => setF({ ...f, qty_inspected: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('mf.qa_passed')}</Label><Input type="number" value={f.qty_passed} onChange={(e) => setF({ ...f, qty_passed: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>{t('mf.qa_disposition')}</Label><select className={selectCls} value={f.disposition} onChange={(e) => setF({ ...f, disposition: e.target.value })}><option value="Accept">{t('mf.qa_disp_accept')}</option><option value="Rework">{t('mf.qa_disp_rework')}</option><option value="Quarantine">{t('mf.qa_disp_quarantine')}</option><option value="Scrap">{t('mf.qa_disp_scrap')}</option></select></div>
+          <div className="grid gap-1.5"><Label>{t('mf.qa_disposition')}</Label><Select value={f.disposition} onChange={(e) => setF({ ...f, disposition: e.target.value })}><option value="Accept">{t('mf.qa_disp_accept')}</option><option value="Rework">{t('mf.qa_disp_rework')}</option><option value="Quarantine">{t('mf.qa_disp_quarantine')}</option><option value="Scrap">{t('mf.qa_disp_scrap')}</option></Select></div>
           {f.disposition === 'Scrap' && <div className="grid gap-1.5"><Label>{t('mf.col_unit_cost')}</Label><Input type="number" value={f.unit_cost} onChange={(e) => setF({ ...f, unit_cost: e.target.value })} /></div>}
         </div>
         <div className="flex items-center gap-3"><Button onClick={() => ins.mutate()} disabled={!f.qty_inspected || ins.isPending}><ClipboardCheck className="size-4" /> {t('fin.save')}</Button></div>

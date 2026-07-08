@@ -14,9 +14,8 @@ import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { MasterIo } from '@/components/master-io';
+import { Select } from '@/components/form-controls';
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface Entity { key: string; label_en: string; label_th: string; required: string[]; columns: string[]; allow_replace: boolean }
 interface PopulateResult { processed: number; succeeded: number; failed: number; items: Array<{ item_id: string; status: string; message: string }> }
@@ -68,9 +67,9 @@ export default function MasterDataPage() {
           <Card className="gap-3 p-5">
             <div className="grid gap-1.5 max-w-sm">
               <Label htmlFor="md-ent">{t('st.md.data_type')}</Label>
-              <select id="md-ent" className={selectCls} value={key ?? ''} onChange={(e) => setSel(e.target.value)}>
+              <Select id="md-ent"  value={key ?? ''} onChange={(e) => setSel(e.target.value)}>
                 {entities.map((e) => <option key={e.key} value={e.key}>{e.label_th} ({e.label_en})</option>)}
-              </select>
+              </Select>
             </div>
           </Card>
 

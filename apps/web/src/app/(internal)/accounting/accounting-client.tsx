@@ -22,13 +22,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
 type Account = { code: string; name: string; type: string };
 const today = () => new Date().toISOString().slice(0, 10);
 const monthStart = () => today().slice(0, 8) + '01';
-
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function AccountingWorkspace({ initialTb }: { initialTb?: unknown }) {
   const { t } = useLang();
@@ -344,10 +342,10 @@ function Journal() {
               <Fragment key={i}>
               <tr>
                 <td className="py-1 pr-2">
-                  <select className={selectCls} aria-invalid={!!err} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
+                  <Select aria-invalid={!!err} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
                     <option value="">{t('acct.select_account')}</option>
                     {accounts.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
-                  </select>
+                  </Select>
                 </td>
                 <td className="py-1 pr-2"><Input type="number" min="0" aria-invalid={!!err} value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
                 <td className="py-1 pr-2"><Input type="number" min="0" aria-invalid={!!err} value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
@@ -642,10 +640,10 @@ function OpeningBalances() {
             {lines.map((l, i) => (
               <tr key={i}>
                 <td className="py-1 pr-2">
-                  <select className={selectCls} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
+                  <Select value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
                     <option value="">{t('acct.select_account')}</option>
                     {accounts.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
-                  </select>
+                  </Select>
                 </td>
                 <td className="py-1 pr-2"><Input className="text-right tabular" type="number" min="0" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
                 <td className="py-1 pr-2"><Input className="text-right tabular" type="number" min="0" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
@@ -804,10 +802,10 @@ function GLDetail() {
       <div className="flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="gl-acct">{t('acct.col_account')}</Label>
-          <select id="gl-acct" className={`${selectCls} min-w-[260px]`} value={account} onChange={(e) => setAccount(e.target.value)}>
+          <Select id="gl-acct" className="min-w-[260px]" value={account} onChange={(e) => setAccount(e.target.value)}>
             <option value="">{t('acct.select_account')}</option>
             {accountsQ.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="grid gap-1.5"><Label htmlFor="gl-from">{t('acct.from')}</Label><Input id="gl-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
         <div className="grid gap-1.5"><Label htmlFor="gl-to">{t('acct.to')}</Label><Input id="gl-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
@@ -892,9 +890,9 @@ function SubledgerTieout() {
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid gap-1.5">
             <Label htmlFor="tie-sub">{t('acct.tie_subledger_label')}</Label>
-            <select id="tie-sub" className={`${selectCls} min-w-[200px]`} value={subledger} onChange={(e) => setSubledger(e.target.value as 'AR' | 'AP' | 'INV' | 'FA')}>
+            <Select id="tie-sub" className="min-w-[200px]" value={subledger} onChange={(e) => setSubledger(e.target.value as 'AR' | 'AP' | 'INV' | 'FA')}>
               {(['AR', 'AP', 'INV', 'FA'] as const).map((s) => <option key={s} value={s}>{subLabel(s)}</option>)}
-            </select>
+            </Select>
           </div>
           <Button disabled={run.isPending} onClick={() => run.mutate()}><Scale className="size-4" /> {run.isPending ? t('acct.tie_running') : t('acct.tie_run_btn')}</Button>
         </div>

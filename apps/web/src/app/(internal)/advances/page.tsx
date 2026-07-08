@@ -17,12 +17,11 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
 // Petty-cash / employee advances register (EXP-07): the float-control view ops + finance lacked — every
 // advance with its status, plus the OUTSTANDING (uncleared) total, with issue + settle actions.
 
-const selectCls =
-  'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface Advance {
   advance_no: string; payee: string; purpose: string | null; amount: number; status: string;
@@ -63,11 +62,11 @@ function Register() {
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t('fnx.adv.filter_status')}>
+        <Select className="w-auto" value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t('fnx.adv.filter_status')}>
           <option value="">{t('fnx.adv.status_all')}</option>
           <option value="open">{t('fnx.adv.status_open')}</option>
           <option value="settled">{t('fnx.adv.status_settled')}</option>
-        </select>
+        </Select>
         {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">{t('fnx.adv.updating')}</span>}
       </div>
       <StateView q={q}>

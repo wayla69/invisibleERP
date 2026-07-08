@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
+import { Select } from '@/components/form-controls';
 
 // ── API contract (apps/api/src/modules/demand-ml) ─────────────────────────────
 interface Metrics { algorithm: string; wape: number; mase: number; rmse: number; bias: number; n_test: number }
@@ -31,8 +32,6 @@ interface ForecastRow {
 }
 interface AccuracyResp { runs: number; avg_wape: number | null; avg_mase: number | null; by_algorithm: { algorithm: string; runs: number; avg_wape: number | null }[] }
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const pct = (v: number | null) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`);
 
 const ALGOS = ['', 'naive', 'moving_average', 'ses', 'holt', 'croston'];
@@ -116,9 +115,9 @@ function ForecastTab() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="fc-algo">{t('mf.dem_col_algo')}</Label>
-              <select id="fc-algo" className={selectCls} value={algorithm} onChange={(e) => setAlgorithm(e.target.value)}>
+              <Select id="fc-algo"  value={algorithm} onChange={(e) => setAlgorithm(e.target.value)}>
                 {ALGOS.map((a) => <option key={a} value={a}>{a === '' ? t('mf.dem_auto_select') : a}</option>)}
-              </select>
+              </Select>
             </div>
           </div>
           <Button disabled={run.isPending || !itemId.trim()} onClick={() => run.mutate()}>

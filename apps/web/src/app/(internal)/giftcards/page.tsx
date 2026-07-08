@@ -15,13 +15,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/form-controls';
 
 // Gift-card / store-credit register: every card + the OUTSTANDING liability (Σ Active balances = the
 // unredeemed 2200 Customer-Deposits exposure) + per-card txn drill-down. The list/audit view the
 // gift-card backend (issue/redeem/balance) never had — finance can size the liability, ops can look a card up.
 
-const selectCls =
-  'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 const statusTone = (s: string): 'success' | 'secondary' | 'destructive' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Void' ? 'destructive' : s === 'PendingApproval' ? 'warning' : 'secondary';
@@ -56,12 +55,12 @@ export default function GiftCardsPage() {
       />
       <div className="space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t('px.gift_filter_status')}>
+          <Select className="w-auto" value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t('px.gift_filter_status')}>
             <option value="">{t('px.gift_all_status')}</option>
             <option value="Active">{t('px.gift_opt_active')}</option>
             <option value="Redeemed">{t('px.gift_opt_redeemed')}</option>
             <option value="Void">{t('px.gift_opt_void')}</option>
-          </select>
+          </Select>
           <Input className="w-full sm:w-64" placeholder={t('px.gift_search_ph')} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={t('px.gift_search_aria')} />
           {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">{t('px.gift_updating')}</span>}
         </div>

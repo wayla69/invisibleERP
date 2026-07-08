@@ -20,9 +20,8 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface CountLine { item_id: string; item_description?: string; uom?: string; system_qty: number; physical_qty: number }
 
@@ -85,10 +84,10 @@ function NewCount() {
         <div className="flex flex-wrap items-end gap-2">
           <div className="grid gap-1.5 min-w-[220px] flex-1">
             <Label htmlFor="st-item">{t('iv.stk_item')}</Label>
-            <select id="st-item" className={selectCls} value={itemId} onChange={(e) => setItemId(e.target.value)}>
+            <Select id="st-item"  value={itemId} onChange={(e) => setItemId(e.target.value)}>
               <option value="">{t('iv.stk_select')}</option>
               {items.map((i) => <option key={i.Item_ID} value={i.Item_ID}>{i.Item_ID} — {i.Item_Description}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="st-phys">{t('iv.stk_phys')}</Label>

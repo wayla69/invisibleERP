@@ -16,8 +16,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const tone: Record<string, any> = { draft: 'muted', scheduled: 'info', sent: 'success', cancelled: 'destructive' };
 
 interface Campaign { id: number; campaign_code: string; name: string; channel: string; audience: string; segment: string | null; tier: string | null; saved_segment_id: number | null; status: string; targeted: number; sent_count: number; skipped_count: number; failed_count: number; schedule_at: string | null }
@@ -54,11 +54,11 @@ export default function CampaignsPage() {
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5"><Label>{t('ly.campaign_name')}</Label><Input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder={t('ly.lc_name_ph')} /></div>
-              <div className="grid gap-1.5"><Label>{t('ly.lc_channel')}</Label><select className={selectCls} value={f.channel} onChange={(e) => set({ channel: e.target.value })}><option value="sms">SMS</option><option value="email">Email</option><option value="line">LINE</option></select></div>
-              <div className="grid gap-1.5"><Label>{t('ly.mk_target_group')}</Label><select className={selectCls} value={f.audience} onChange={(e) => set({ audience: e.target.value })}><option value="all">{t('ly.mk_trig_all')}</option><option value="segment">{t('ly.seg_f_segment')}</option><option value="saved_segment">{t('ly.lc_aud_saved')}</option><option value="tier">{t('ly.seg_f_tier')}</option><option value="birthdays_today">{t('ly.lc_aud_bday')}</option></select></div>
+              <div className="grid gap-1.5"><Label>{t('ly.lc_channel')}</Label><Select className="w-auto" value={f.channel} onChange={(e) => set({ channel: e.target.value })}><option value="sms">SMS</option><option value="email">Email</option><option value="line">LINE</option></Select></div>
+              <div className="grid gap-1.5"><Label>{t('ly.mk_target_group')}</Label><Select className="w-auto" value={f.audience} onChange={(e) => set({ audience: e.target.value })}><option value="all">{t('ly.mk_trig_all')}</option><option value="segment">{t('ly.seg_f_segment')}</option><option value="saved_segment">{t('ly.lc_aud_saved')}</option><option value="tier">{t('ly.seg_f_tier')}</option><option value="birthdays_today">{t('ly.lc_aud_bday')}</option></Select></div>
               {f.audience === 'segment' && <div className="grid gap-1.5"><Label>{t('ly.seg_f_segment')}</Label><Input value={f.segment} onChange={(e) => set({ segment: e.target.value })} placeholder={t('ly.seg_value_ph')} /></div>}
               {f.audience === 'tier' && <div className="grid gap-1.5"><Label>{t('ly.lc_tier')}</Label><Input value={f.tier} onChange={(e) => set({ tier: e.target.value })} placeholder={t('ly.lc_tier_ph')} /></div>}
-              {f.audience === 'saved_segment' && <div className="grid gap-1.5"><Label>{t('ly.lc_segment')}</Label><select className={selectCls} value={f.saved_segment_id} onChange={(e) => set({ saved_segment_id: e.target.value })}><option value="">{t('ly.lc_select_segment')}</option>{(segs.data?.segments ?? []).map((sg) => <option key={sg.id} value={sg.id}>{sg.name}</option>)}</select></div>}
+              {f.audience === 'saved_segment' && <div className="grid gap-1.5"><Label>{t('ly.lc_segment')}</Label><Select className="w-auto" value={f.saved_segment_id} onChange={(e) => set({ saved_segment_id: e.target.value })}><option value="">{t('ly.lc_select_segment')}</option>{(segs.data?.segments ?? []).map((sg) => <option key={sg.id} value={sg.id}>{sg.name}</option>)}</Select></div>}
               <div className="grid gap-1.5"><Label>{t('ly.lc_schedule')}</Label><Input type="datetime-local" value={f.schedule_at} onChange={(e) => set({ schedule_at: e.target.value })} /></div>
             </div>
             <div className="grid gap-1.5"><Label>{t('ly.lc_message')}</Label><textarea className="min-h-20 rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" value={f.body} onChange={(e) => set({ body: e.target.value })} placeholder={t('ly.lc_message_ph')} /></div>

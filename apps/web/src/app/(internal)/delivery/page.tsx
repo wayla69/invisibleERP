@@ -17,9 +17,9 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function DeliveryPage() {
   const { t } = useLang();
@@ -106,9 +106,9 @@ export default function DeliveryPage() {
               { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               {
                 key: 'act', label: t('hx.common.update_status'), render: (r: any) => (
-                  <select className={selectCls} value={r.status} onChange={(e) => setStatus.mutate({ no: r.do_no, status: e.target.value })}>
+                  <Select className="w-auto" value={r.status} onChange={(e) => setStatus.mutate({ no: r.do_no, status: e.target.value })}>
                     {['Pending', 'In Transit', 'Delivered', 'Cancelled'].map((st) => <option key={st} value={st}>{st}</option>)}
-                  </select>
+                  </Select>
                 ),
               },
               { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.do_no)}>{t('hx.del.view_items')}</Button> },

@@ -23,13 +23,11 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const monthStart = () => today().slice(0, 8) + '01';
 const yearStart = () => today().slice(0, 4) + '-01-01';
-
-const selectCls =
-  'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 function downloadCsv(name: string, rows: (string | number)[][]) {
   const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -64,14 +62,14 @@ export function FinancialStatementsClient() {
           ledgers.length > 1 ? (
             <label className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">{t('fnx.fs.ledger_std')}</span>
-              <select className={selectCls} value={ledger} onChange={(e) => setLedger(e.target.value)}>
+              <Select value={ledger} onChange={(e) => setLedger(e.target.value)}>
                 {ledgers.map((l) => (
                   <option key={l.code} value={l.is_leading ? '' : l.code}>
                     {l.code}
                     {l.gaap ? ` · ${l.gaap}` : ''}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           ) : undefined
         }

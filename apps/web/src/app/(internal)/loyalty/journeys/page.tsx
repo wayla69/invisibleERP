@@ -19,8 +19,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const tone: Record<string, any> = { draft: 'muted', active: 'success', paused: 'info' };
 
 interface Step { wait_days: number; channel: string; body: string; skip_rule?: { field: string; op: string; value: any } | null; branch_rule?: { field: string; op: string; value: any } | null; branch_to_step?: number | null }
@@ -77,8 +77,8 @@ export default function JourneysPage() {
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-4">
               <div className="grid gap-1.5 sm:col-span-2"><Label>{t('ly.jr_name')}</Label><Input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder={t('ly.jr_name_ph')} /></div>
-              <div className="grid gap-1.5"><Label>{t('ly.jr_trigger')}</Label><select className={selectCls} value={f.trigger} onChange={(e) => set({ trigger: e.target.value })}><option value="manual">{t('ly.jr_trig_manual')}</option><option value="segment">{t('ly.jr_trig_segment')}</option></select></div>
-              {f.trigger === 'segment' && <div className="grid gap-1.5"><Label>{t('ly.lc_segment')}</Label><select className={selectCls} value={f.segment_id} onChange={(e) => set({ segment_id: e.target.value })}><option value="">{t('ly.pt_select')}</option>{(segs.data?.segments ?? []).map((sg) => <option key={sg.id} value={sg.id}>{sg.name}</option>)}</select></div>}
+              <div className="grid gap-1.5"><Label>{t('ly.jr_trigger')}</Label><Select className="w-auto" value={f.trigger} onChange={(e) => set({ trigger: e.target.value })}><option value="manual">{t('ly.jr_trig_manual')}</option><option value="segment">{t('ly.jr_trig_segment')}</option></Select></div>
+              {f.trigger === 'segment' && <div className="grid gap-1.5"><Label>{t('ly.lc_segment')}</Label><Select className="w-auto" value={f.segment_id} onChange={(e) => set({ segment_id: e.target.value })}><option value="">{t('ly.pt_select')}</option>{(segs.data?.segments ?? []).map((sg) => <option key={sg.id} value={sg.id}>{sg.name}</option>)}</Select></div>}
             </div>
             <div className="grid gap-3 sm:grid-cols-4">
               <div className="grid gap-1.5"><Label>{t('ly.jr_cap_messages')}</Label><Input type="number" min="0" value={f.cap_messages} onChange={(e) => set({ cap_messages: e.target.value })} /></div>
@@ -92,25 +92,25 @@ export default function JourneysPage() {
                   <span className="text-sm text-muted-foreground">{t('ly.jr_wait')}</span>
                   <Input className="w-20" type="number" min="0" value={s.wait_days} onChange={(e) => setStep(i, { wait_days: Number(e.target.value) })} aria-label={t('ly.jr_aria_wait', { n: i + 1 })} />
                   <span className="text-sm text-muted-foreground">{t('ly.jr_days_then_send')}</span>
-                  <select className={selectCls} value={s.channel} onChange={(e) => setStep(i, { channel: e.target.value })} aria-label={t('ly.jr_aria_channel', { n: i + 1 })}><option value="sms">SMS</option><option value="email">Email</option><option value="line">LINE</option></select>
+                  <Select className="w-auto" value={s.channel} onChange={(e) => setStep(i, { channel: e.target.value })} aria-label={t('ly.jr_aria_channel', { n: i + 1 })}><option value="sms">SMS</option><option value="email">Email</option><option value="line">LINE</option></Select>
                   <Input className="min-w-64 flex-1" value={s.body} onChange={(e) => setStep(i, { body: e.target.value })} placeholder={t('ly.jr_body_ph')} aria-label={t('ly.jr_aria_body', { n: i + 1 })} />
                   {steps.length > 1 && <Button size="sm" variant="ghost" onClick={() => setSteps((ss) => ss.filter((_, ix) => ix !== i))} aria-label={t('ly.jr_aria_remove', { n: i + 1 })}><X className="size-3.5" /></Button>}
                   {i < steps.length - 1 && (
                     <div className="flex w-full flex-wrap items-center gap-2 pl-6 text-xs text-muted-foreground">
                       <span>{t('ly.jr_branch')}</span>
-                      <select className={selectCls} value={s.branch_to_step ?? ''} onChange={(e) => setStep(i, e.target.value === '' ? { branch_to_step: null, branch_rule: null } : { branch_to_step: Number(e.target.value), branch_rule: s.branch_rule ?? { field: 'recency', op: 'lt', value: '' } })} aria-label={t('ly.jr_aria_branch_to', { n: i + 1 })}>
+                      <Select className="w-auto" value={s.branch_to_step ?? ''} onChange={(e) => setStep(i, e.target.value === '' ? { branch_to_step: null, branch_rule: null } : { branch_to_step: Number(e.target.value), branch_rule: s.branch_rule ?? { field: 'recency', op: 'lt', value: '' } })} aria-label={t('ly.jr_aria_branch_to', { n: i + 1 })}>
                         <option value="">{t('ly.jr_branch_seq')}</option>
                         {steps.map((_, ix) => ix + 1).filter((no) => no > i + 1).map((no) => <option key={no} value={no}>{t('ly.jr_branch_goto', { no })}</option>)}
-                      </select>
+                      </Select>
                       {s.branch_to_step != null && s.branch_rule && (
                         <>
                           <span>{t('ly.jr_when')}</span>
-                          <select className={selectCls} value={s.branch_rule.field} onChange={(e) => setStep(i, { branch_rule: { field: e.target.value, op: OPS_BY_KIND[kindOf(e.target.value)][0], value: '' } })} aria-label={t('ly.jr_aria_bfield', { n: i + 1 })}>
+                          <Select className="w-auto" value={s.branch_rule.field} onChange={(e) => setStep(i, { branch_rule: { field: e.target.value, op: OPS_BY_KIND[kindOf(e.target.value)][0], value: '' } })} aria-label={t('ly.jr_aria_bfield', { n: i + 1 })}>
                             {(catalog.data?.fields ?? []).map((c) => <option key={c.key} value={c.key}>{c.key}</option>)}
-                          </select>
-                          <select className={selectCls} value={s.branch_rule.op} onChange={(e) => setStep(i, { branch_rule: { ...s.branch_rule!, op: e.target.value } })} aria-label={t('ly.jr_aria_bop', { n: i + 1 })}>
+                          </Select>
+                          <Select className="w-auto" value={s.branch_rule.op} onChange={(e) => setStep(i, { branch_rule: { ...s.branch_rule!, op: e.target.value } })} aria-label={t('ly.jr_aria_bop', { n: i + 1 })}>
                             {OPS_BY_KIND[kindOf(s.branch_rule.field)].map((op) => <option key={op} value={op}>{opLabel(op)}</option>)}
-                          </select>
+                          </Select>
                           <Input className="w-28" value={s.branch_rule.value ?? ''} onChange={(e) => setStep(i, { branch_rule: { ...s.branch_rule!, value: e.target.value } })} placeholder={t('ly.jr_value_ph')} aria-label={t('ly.jr_aria_bvalue', { n: i + 1 })} />
                         </>
                       )}
