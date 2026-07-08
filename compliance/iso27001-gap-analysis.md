@@ -91,7 +91,7 @@ and the evidence source. Controls marked **N/A (justified)** have a documented e
 | A.5.32 | Intellectual property rights | Yes | MIT/proprietary licence headers; dependency audit | ✅ Designed |
 | A.5.33 | Protection of records | Yes | 7-year SOX retention; evidence-retention policy (to draft) | 🟡 Evidence-retention policy not yet authored |
 | A.5.34 | Privacy and protection of personally identifiable information | Yes | PDPA policy (DRAFT POL-13); RLS isolates tenant PII | 🟡 POL-13 at DRAFT |
-| A.5.35 | Independent review of information security | Yes | Third-party pen test planned (C4 deliverable) | 🟡 Pen test not yet conducted |
+| A.5.35 | Independent review of information security | Yes | Third-party pen test planned (C4 deliverable); RFP scope drafted, `compliance/pentest-rfp.md` | 🟡 Pen test not yet conducted |
 | A.5.36 | Compliance with policies, rules and standards | Yes | 27-check compliance harness; CI gate on every PR | ✅ Designed |
 | A.5.37 | Documented operating procedures | Yes | 30-cycle process narratives in `docs/process-narratives/` | ✅ Designed |
 
@@ -314,3 +314,4 @@ in Railway's ISO 27001 / SOC 2 report, which is reviewed annually as a complemen
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-28 | Platform | Initial ISO 27001:2022 Annex A gap analysis. 93 controls assessed: 53 ✅, 24 🟡, 3 ❌, 13 N/A. Gap summary, risk register excerpt, SOA skeleton, and remediation roadmap. |
 | 0.2 DRAFT | 2026-07-02 | Platform | Census reconciliation (docs/27 R3-1): SOX-RCM population reference corrected to the generated census (169 as of that date — the tagged census is the live figure) with a machine-readable tag. |
+| 0.3 DRAFT | 2026-07-08 | Platform | A.5.35 note: penetration-test RFP scope drafted (`compliance/pentest-rfp.md`) — vendor sourcing in progress; still 🟡 until an engagement is actually run. |
