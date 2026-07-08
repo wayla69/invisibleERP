@@ -99,6 +99,14 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 > publish failure degrades to local-only delivery with a throttled `realtime_redis_publish_failed` ops
 > alert (see `observability-incident.md`).
 
+> **Multi-replica deploys should also set `CACHE_REDIS_URL`** (docs/27 R1-6 — same Redis add-on works).
+> The BI/finance read caches (`common/ttl-cache.ts`, 30s TTL) are per-process by default — fine on one
+> node, but on 2+ replicas each node recomputes every board and a tenant cache-bust only reaches the node
+> that handled the request. With the URL set, `common/cache-remote.ts` upgrades the cache to a shared
+> Redis read/write-through (busts propagate to every node). Unset = per-process, byte-identical to before
+> the adapter existed. A Redis failure degrades to local compute with a throttled `cache_redis_degraded`
+> ops alert — never a failed read.
+
 ## 5. CI/CD
 - `ci.yml` — build/typecheck/unit, integration harnesses, security (audit + gitleaks), CodeQL, web-e2e.
 - `deploy.yml` — approval-gated production deploy to Railway, pinned to the GitHub `production`
@@ -135,5 +143,6 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
 | 1.3 | 2026-07-02 | Platform | §4: `REALTIME_REDIS_URL` requirement for multi-replica deploys — shared `realtime-bus.ts` (Redis pub/sub) behind both SSE buses (docs/27 R1-3). |
 | 1.4 | 2026-07-03 | Platform | §2A: `preDeployCommand` split — `db:sync-catalog` (guardless idempotent permission-catalog sync, new `src/database/sync-catalog.ts`) replaces `db:seed` per release; full `db:seed` is now a gated **first-boot-only** manual step (R0-3 `ALLOW_PROD_SEED=1` + `SEED_ADMIN_PASSWORD`). Root cause of the post-R0-3 prod-deploy failures (seed guard fired inside the pipeline). |
+| 1.6 | 2026-07-08 | Platform | §4: `CACHE_REDIS_URL` recommendation for multi-replica deploys — shared read-cache adapter (`cache-remote.ts`) behind the BI/finance `TtlCache` (docs/27 R1-6); default unset = per-process, unchanged. |
 | 1.5 | 2026-07-03 | Platform | §5: post-deploy smoke now runs a self-resolving liveness (`/healthz`) + **readiness (`/readyz`, DB-reachable)** floor on every deploy (no silent skip — `PROD_API_URL` falls back to the invisibleERP `RAILWAY_PUBLIC_DOMAIN`), authed coverage optional via `SMOKE_USER`/`SMOKE_PASS`; Railway `healthcheckTimeout` bumped 60s → 300s on both services. New scheduled workflow `bi-scheduler.yml` — the daily external trigger for the report/action subscription scheduler (`ap_automatch_rerun` et al.); the API has no in-process scheduler. |
 | 1.3 | 2026-07-01 | Platform | Link the multi-tenant "link-per-customer" onboarding runbook (`multi-tenant-subdomain-runbook.md`) — shared-deployment subdomain model (RLS-isolated) vs dedicated, tenant provisioning, wildcard DNS/TLS + cookie/CORS, and per-customer cost model. |

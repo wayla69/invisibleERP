@@ -297,6 +297,23 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
   with a service token) in `docs/deployment/`; add a `jobs` heartbeat check so a silent cron death
   is alertable (ties into R2-1 alerting).
 
+### R1-6 · Shared (Redis) read-cache adapter — closes the `/api/ops/metrics` `cache_provider` promise — **DELIVERED 2026-07-08**
+> The BI/finance read caches (`common/ttl-cache.ts`, 30s TTL) were per-process by design — fine on one
+> node, but on 2+ replicas each node recomputes every board and, worse, a tenant cache-bust
+> (`refreshSnapshot` → `bustTenant`) only reaches the node that handled the request. The adapter follows
+> the R1-3 realtime-bus blueprint exactly:
+- **`CACHE_REDIS_URL` unset (default, CI/PGlite, single-node)** → `TtlCache` stays pure in-memory —
+  behavior byte-identical to before the adapter existed (default-inert).
+- **Set** → `common/cache-remote.ts` (lazy `ioredis`, one shared client) upgrades `TtlCache.wrap()` to
+  read/write-through Redis (local map → shared store → compute; a remote hit seeds the local map) and
+  propagates `delete`/`deletePrefix` busts cross-node (bounded `SCAN`+`UNLINK`). Values cross as JSON.
+- **Fail-open**: any Redis failure degrades to local compute with a throttled `cache_redis_degraded`
+  ops alert — a cache must never break the read it fronts (the login-attempt-store idiom).
+- `/api/ops/metrics` `cache_provider` now reports the ACTUAL posture (`redis` only when the URL is set);
+  `CACHE_PROVIDER=redis` without the URL warns at boot (env.validation). Contract-tested with a fake
+  store modelling two replicas (`apps/api/test/cache-adapter.test.ts`, in the vitest coverage set);
+  the `bi-cache` harness keeps proving the default-inert path over the real app.
+
 ---
 
 ## Wave 2 — Security residuals 🛡 (one PR each, small)
@@ -645,3 +662,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 4.3 | 2026-07-02 | ERP/Product | ts-debt tranche #4 (final): noUncheckedIndexedAccess ENABLED in tsconfig (strict 0); as-any 290→120 (residual = irreducible seams). Ratchet-lifetime: as-any 1465→120 (−92%), strict 248→0. AUD-ARC-05 closed |
 | 4.4 | 2026-07-02 | ERP/Product | Round-2 panel residue PR B: SoD-override reason+rules now persisted in the hash-chained audit_log meta via appendAuditMeta (AUD-SEC-04 closed fully; compliance ToE +1 = 121); staff tokens of hard-deleted users rejected (401 USER_NOT_FOUND); server-api forwards only auth/CSRF cookies, logs prefetch failures, refuses defaulted localhost BASE in prod; pii-redact masks non-scalars under sensitive keys and adds bank_account/sso_no/ssn |
 | 4.5 | 2026-07-02 | ERP/Product | Round-2 panel residue PR C: pgbouncer prepared-statement coupling auto-enforced (port-6432 detection → simple protocol; ARC NEW-1); gl_period_balances upsert batched to ONE multi-row statement per entry (write-amplification, ARC NEW-2); forecasting.service.ts sha256 diff-lock in the analytics parity harness (AI NEW-1, negative-tested); token-budget cap math extracted pure (resolveBudgetCaps) + 5 unit tests (AI NEW-2) |
+| 4.6 | 2026-07-08 | ERP/Product | R1-6 delivered: shared (Redis) read-cache adapter behind `TtlCache` (`common/cache-remote.ts`, `CACHE_REDIS_URL`, default-inert, fail-open + throttled `cache_redis_degraded` alert); `/api/ops/metrics` `cache_provider` reports actual posture; contract tests `test/cache-adapter.test.ts` (fake-store two-replica model); env warn on `CACHE_PROVIDER=redis` without the URL |
