@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Invisible ERP V2 — Third-Party Security Review</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1a2230; --muted:#5b6676; --line:#e3e7ee;
+    --brand:#1E3C72; --brand2:#2a5298; --code:#f2f4f8;
+    --crit:#7c1d1d; --critbg:#fdecec; --high:#b42318; --highbg:#fdeceb;
+    --med:#b5540a; --medbg:#fdf1e5; --low:#1f6f43; --lowbg:#e9f6ee;
+    --info:#2a5298; --infobg:#eaf0fb; --ok:#1f6f43;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f141b; --panel:#161d27; --ink:#e7ecf3; --muted:#9aa7b8; --line:#26303d;
+      --brand:#7aa2e3; --brand2:#9bbcf0; --code:#0c1017;
+      --crit:#ff9a9a; --critbg:#2a1414; --high:#ff9d94; --highbg:#2a1513;
+      --med:#f0b56a; --medbg:#2a1e10; --low:#84e0a6; --lowbg:#10241a;
+      --info:#9bbcf0; --infobg:#12203a; --ok:#84e0a6;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f141b; --panel:#161d27; --ink:#e7ecf3; --muted:#9aa7b8; --line:#26303d;
+    --brand:#7aa2e3; --brand2:#9bbcf0; --code:#0c1017;
+    --crit:#ff9a9a; --critbg:#2a1414; --high:#ff9d94; --highbg:#2a1513;
+    --med:#f0b56a; --medbg:#2a1e10; --low:#84e0a6; --lowbg:#10241a;
+    --info:#9bbcf0; --infobg:#12203a; --ok:#84e0a6;
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1a2230; --muted:#5b6676; --line:#e3e7ee;
+    --brand:#1E3C72; --brand2:#2a5298; --code:#f2f4f8;
+    --crit:#7c1d1d; --critbg:#fdecec; --high:#b42318; --highbg:#fdeceb;
+    --med:#b5540a; --medbg:#fdf1e5; --low:#1f6f43; --lowbg:#e9f6ee;
+    --info:#2a5298; --infobg:#eaf0fb; --ok:#1f6f43;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.6;font-size:15px}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px 80px}
+  header.hero{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;padding:44px 20px 40px;margin-bottom:8px}
+  header.hero .inner{max-width:960px;margin:0 auto}
+  header.hero .kicker{text-transform:uppercase;letter-spacing:.14em;font-size:12px;opacity:.85;margin:0 0 8px}
+  header.hero h1{margin:0 0 6px;font-size:30px;line-height:1.2}
+  header.hero p.sub{margin:6px 0 0;opacity:.92;font-size:15px}
+  header.hero .meta{margin-top:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  header.hero .meta div{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:9px 12px}
+  header.hero .meta b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.8;margin-bottom:2px;font-weight:600}
+  header.hero .meta span{font-size:14px;font-weight:600}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin:18px 0}
+  h2{font-size:21px;margin:2px 0 14px;color:var(--brand);border-bottom:2px solid var(--line);padding-bottom:8px}
+  h3{font-size:17px;margin:22px 0 6px}
+  h4{font-size:14px;margin:16px 0 4px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  p{margin:8px 0}
+  a{color:var(--brand2)}
+  code{background:var(--code);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;word-break:break-word}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
+  .pill{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 9px;border-radius:999px;vertical-align:middle}
+  .p-crit{color:var(--crit);background:var(--critbg)} .p-high{color:var(--high);background:var(--highbg)}
+  .p-med{color:var(--med);background:var(--medbg)} .p-low{color:var(--low);background:var(--lowbg)}
+  .p-info{color:var(--info);background:var(--infobg)} .p-ok{color:var(--ok);background:var(--lowbg)}
+  .scoregrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin:16px 0}
+  .score{border:1px solid var(--line);border-radius:10px;padding:14px;text-align:center;background:var(--panel)}
+  .score .n{font-size:30px;font-weight:800;line-height:1}
+  .score .l{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:6px}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700}
+  td.id{font-weight:700;white-space:nowrap}
+  .tablewrap{overflow-x:auto}
+  .finding{border:1px solid var(--line);border-left-width:5px;border-radius:10px;padding:16px 18px;margin:16px 0;background:var(--panel)}
+  .finding.sev-high{border-left-color:var(--high)} .finding.sev-med{border-left-color:var(--med)}
+  .finding.sev-low{border-left-color:var(--low)} .finding.sev-crit{border-left-color:var(--crit)}
+  .finding.sev-info{border-left-color:var(--info)}
+  .finding h3{margin:0 0 4px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+  .finding .loc{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--muted);margin:2px 0 10px;word-break:break-all}
+  .finding .lbl{font-weight:700;color:var(--ink);font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+  .finding .block{margin:10px 0}
+  ul,ol{margin:8px 0;padding-left:22px}
+  li{margin:4px 0}
+  .callout{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:12px 0;background:var(--infobg)}
+  .callout.good{background:var(--lowbg)}
+  .callout.warn{background:var(--medbg)}
+  .muted{color:var(--muted)}
+  .toc{columns:2;column-gap:28px}
+  .toc a{display:block;padding:3px 0;font-size:13.5px;text-decoration:none}
+  @media (max-width:640px){.toc{columns:1}}
+  footer{color:var(--muted);font-size:12.5px;text-align:center;padding:24px 0 0}
+  .themebtn{position:fixed;top:14px;right:14px;z-index:10;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-weight:600}
+  @media print{.themebtn{display:none}}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="(function(){var r=document.documentElement;var d=(r.getAttribute('data-theme')|| (window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));r.setAttribute('data-theme', d==='dark'?'light':'dark');})()">◐ Theme</button>
+
+<header class="hero">
+  <div class="inner">
+    <p class="kicker">Confidential · Third-Party Security Assessment</p>
+    <h1>Invisible ERP V2 — Application &amp; Source-Code Security Review</h1>
+    <p class="sub">Web application &amp; API penetration test combined with a full white-box source-code review of the NestJS/Fastify API, Next.js web app, Drizzle/PostgreSQL data layer, and CI/CD pipeline.</p>
+    <div class="meta">
+      <div><b>Engagement</b><span>White-box code review + logical pentest</span></div>
+      <div><b>Report date</b><span>8 July 2026</span></div>
+      <div><b>Codebase</b><span>wayla69/invisibleerp · main @ 8a407c1</span></div>
+      <div><b>Scope</b><span>1,291 TS/TSX files · ~130 API modules</span></div>
+      <div><b>Overall posture</b><span>Strong / Mature</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="disclaimer">
+  <p class="muted" style="margin:0"><b>How to read this report.</b> This is an honest, adversarial assessment — you asked to be grilled, so nothing has been softened. The headline is genuinely positive: this is one of the more security-mature codebases of its size I have reviewed, with defense-in-depth that is real rather than cosmetic. That makes the residual findings <em>more</em> important, not less — a codebase this careful is judged against a higher bar, and the issues below are the specific places where the discipline lapses or where a secure-by-default choice was not taken. Severity reflects real-world exploitability given the deployed configuration, and every High finding was reproduced or traced to its exact sink before being certified.</p>
+</section>
+
+<section id="toc">
+  <h2>Contents</h2>
+  <div class="toc">
+    <a href="#exec">1. Executive summary</a>
+    <a href="#scope">2. Scope &amp; methodology</a>
+    <a href="#register">3. Findings register</a>
+    <a href="#high">4. High-severity findings</a>
+    <a href="#config">5. High (configuration-dependent) — architecture</a>
+    <a href="#medium">6. Medium-severity findings</a>
+    <a href="#low">7. Low-severity &amp; defense-in-depth</a>
+    <a href="#strengths">8. What is done well</a>
+    <a href="#cleared">9. Cleared / false-positives</a>
+    <a href="#roadmap">10. Remediation roadmap</a>
+  </div>
+</section>
+
+<section id="exec">
+  <h2>1. Executive summary</h2>
+  <p>Invisible ERP V2 is a multi-tenant, Thai-localized ERP built on NestJS (Fastify), Drizzle ORM and PostgreSQL with row-level security (RLS), targeting SOX/ICFR documentation standards ahead of a NASDAQ listing. The application demonstrates <b>strong security engineering</b>: the classic OWASP-Top-10 pitfalls for an ERP of this size are, in the overwhelming majority, already closed — and closed thoughtfully, with fail-closed defaults, layered controls, and extensive in-code rationale.</p>
+
+  <p>We found <b>no critical vulnerabilities</b> and <b>no unauthenticated cross-tenant data leak</b> in the audited paths. We did find <b>two directly-exploitable High-severity issues</b> (an SSRF filter bypass, verified empirically; and an API-key privilege-escalation / Segregation-of-Duties bypass), <b>two High-severity architectural/configuration weaknesses</b> in the tenant-isolation model, and a set of Medium and Low items that are mostly hardening gaps and inconsistencies rather than open doors.</p>
+
+  <div class="scoregrid">
+    <div class="score"><div class="n" style="color:var(--crit)">0</div><div class="l">Critical</div></div>
+    <div class="score"><div class="n" style="color:var(--high)">4</div><div class="l">High <span class="muted">(2 direct · 2 config)</span></div></div>
+    <div class="score"><div class="n" style="color:var(--med)">6</div><div class="l">Medium</div></div>
+    <div class="score"><div class="n" style="color:var(--low)">12</div><div class="l">Low / DiD</div></div>
+    <div class="score"><div class="n" style="color:var(--ok)">✓</div><div class="l">SQLi: none found</div></div>
+  </div>
+
+  <h4>The four issues that matter most</h4>
+  <ol>
+    <li><b>SSRF guard bypass (High, verified).</b> The outbound-URL SSRF guard fails to detect IPv4-mapped IPv6 literals (e.g. <code>https://[::ffff:169.254.169.254]/</code>), so a tenant-registered webhook can reach the cloud-metadata endpoint, <code>localhost</code>, and internal RFC1918 hosts. The guard is otherwise excellent — this is a single missed encoding.</li>
+    <li><b>API-key scope escalation &amp; maker-checker bypass (High).</b> <code>POST /api/platform/api-keys</code> stores whatever scopes the caller asks for without capping them to the caller's own permissions. An <code>AccessAdmin</code> (whose only power is user administration) can mint a key carrying a broad transacting permission set — and, because two API keys are two distinct principals, can create-with-key-A / approve-with-key-B to defeat every self-approval control within its tenant.</li>
+    <li><b>RLS has no DB backstop outside the request transaction (High, architectural).</b> RLS is enforced only inside the per-request <code>SET LOCAL ROLE app_user</code> transaction. Every <code>@NoTx</code> handler, SSE stream, raw-client path and background job runs on the base connection — which, under the typical managed-Postgres superuser role, bypasses RLS entirely and relies solely on hand-written tenant filters.</li>
+    <li><b>Insecure-by-default tenancy mode (High, configuration).</b> The default <code>TENANCY_MODE=single-company</code> grants <em>every</em> tenant Admin a global RLS bypass (sees all tenants). The boot-time safety check only warns unless <code>STRICT_TENANCY_BOOT=1</code>. Mitigated in production by disabled self-signup and god-reserved Admin grants — but the secure mode is not the default.</li>
+  </ol>
+
+  <p><b>Bottom line.</b> The foundations — authentication, session management, password/crypto handling, CSRF, secrets hygiene, audit logging, and CI/CD supply-chain controls — are excellent and require no structural change. The work to do is (a) fix the two concrete High bugs, (b) harden the tenant-isolation model so the database, not application code, is the last line of defense on <em>every</em> path, and (c) close a handful of consistency gaps (one missing self-approval check, a permissive web CSP, a fail-open CORS default). None of this requires a re-architecture.</p>
+</section>
+
+<section id="scope">
+  <h2>2. Scope &amp; methodology</h2>
+  <p>This was a white-box review with full source access, combined with logical exploit reasoning and targeted local reproduction. No testing was performed against a live production environment. Coverage was organized across seven parallel workstreams plus a direct review of the security core:</p>
+  <ul>
+    <li><b>Authentication &amp; session</b> — login, PIN login, MFA/TOTP, refresh-token rotation, JWT signing/verification, lockout, cookies.</li>
+    <li><b>Authorization</b> — role/permission model, guards, IDOR, missing-guard sweep across all <code>*.controller.ts</code>, Segregation-of-Duties / maker-checker enforcement.</li>
+    <li><b>Multi-tenant isolation</b> — RLS policies, the tenant transaction interceptor, GUC/role plumbing, god/platform-admin bypass, act-as-tenant.</li>
+    <li><b>Injection</b> — full SQL-injection sweep of every raw-SQL and dynamic-identifier sink.</li>
+    <li><b>Web frontend</b> — CSP &amp; security headers, XSS sinks, client-side auth gating, secret exposure, token handling.</li>
+    <li><b>Outbound safety</b> — SSRF, webhooks (inbound &amp; outbound), API keys, SCIM, file uploads, PDF/image/XML processing.</li>
+    <li><b>Secrets / config / supply chain</b> — env validation, secret defaults, logging/PII, dependency risk, GitHub Actions pipeline.</li>
+  </ul>
+  <p>Findings are rated <span class="pill p-crit">Critical</span> <span class="pill p-high">High</span> <span class="pill p-med">Medium</span> <span class="pill p-low">Low</span> by real-world exploitability and blast radius under the deployed configuration. "Configuration-dependent" High findings are architectural weaknesses whose exploitability hinges on a deployment setting.</p>
+</section>
+
+<section id="register">
+  <h2>3. Findings register</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>ID</th><th>Severity</th><th>Finding</th><th>Location</th></tr></thead>
+    <tbody>
+      <tr><td class="id">H-1</td><td><span class="pill p-high">High</span></td><td>SSRF guard bypass via IPv4-mapped IPv6 literal (verified)</td><td><code>common/net-guard.ts</code></td></tr>
+      <tr><td class="id">H-2</td><td><span class="pill p-high">High</span></td><td>API-key issuance does not cap scopes → privilege escalation + SoD/maker-checker bypass</td><td><code>platform/api-key.service.ts</code></td></tr>
+      <tr><td class="id">H-3</td><td><span class="pill p-high">High*</span></td><td>No DB-level RLS backstop on <code>@NoTx</code>/SSE/raw/job paths (base role bypasses RLS)</td><td><code>database.module.ts</code> · interceptor</td></tr>
+      <tr><td class="id">H-4</td><td><span class="pill p-high">High*</span></td><td>Insecure-by-default <code>single-company</code> tenancy: every Admin gets a global RLS bypass; guard warn-only</td><td><code>tenant-tx.interceptor.ts</code> · <code>env.validation.ts</code></td></tr>
+      <tr><td class="id">M-1</td><td><span class="pill p-med">Medium</span></td><td>Web CSP allows <code>script-src 'unsafe-inline'</code> in production</td><td><code>web/next.config.mjs</code></td></tr>
+      <tr><td class="id">M-2</td><td><span class="pill p-med">Medium</span></td><td>Server-side SSRF via tenant-configurable OIDC issuer (no net-guard/scheme check)</td><td><code>identity/sso.service.ts</code></td></tr>
+      <tr><td class="id">M-3</td><td><span class="pill p-med">Medium</span></td><td><code>approveLeave</code> missing self-approval (maker-checker) check</td><td><code>hcm/hcm.service.ts</code></td></tr>
+      <tr><td class="id">M-4</td><td><span class="pill p-med">Medium</span></td><td>CORS silently defaults to <code>localhost:3000</code> in production (fail-open config)</td><td><code>main.ts</code> · <code>env.validation.ts</code></td></tr>
+      <tr><td class="id">M-5</td><td><span class="pill p-med">Medium</span></td><td>Front-door env validation gated solely on <code>NODE_ENV==='production'</code></td><td><code>common/env.validation.ts</code></td></tr>
+      <tr><td class="id">M-6</td><td><span class="pill p-med">Medium</span></td><td><code>document.write</code> of server HTML into a CSP-free popup (relies on server escaping)</td><td><code>web/.../print/page.tsx</code> · <code>lib/terminal.ts</code></td></tr>
+      <tr><td class="id">L-1</td><td><span class="pill p-low">Low</span></td><td>Inbound PSP webhook has no replay (timestamp/nonce) protection</td><td><code>pos/terminal/pos-terminal.controller.ts</code></td></tr>
+      <tr><td class="id">L-2</td><td><span class="pill p-low">Low</span></td><td>Static shared-secret webhooks not HMAC-over-body, no replay binding</td><td><code>channel-adapter</code>, <code>restaurant</code>, <code>email-capture</code></td></tr>
+      <tr><td class="id">L-3</td><td><span class="pill p-low">Low</span></td><td><code>tenantId</code> trusted from JWT claim, not re-read from DB (asymmetric with role/orgId)</td><td><code>common/guards.ts</code></td></tr>
+      <tr><td class="id">L-4</td><td><span class="pill p-low">Low</span></td><td>Provisioning does not reject usernames listed in <code>PLATFORM_ADMIN_USERNAMES</code></td><td><code>billing/billing.service.ts</code></td></tr>
+      <tr><td class="id">L-5</td><td><span class="pill p-low">Low</span></td><td><code>developer.service</code> reads/writes <code>api_keys</code> with no explicit tenant predicate (RLS-only)</td><td><code>developer/developer.service.ts</code></td></tr>
+      <tr><td class="id">L-6</td><td><span class="pill p-low">Low</span></td><td>Product-image fetch has no SSRF guard (URL from fixed upstream — low reach)</td><td><code>procurement/image-fetch.service.ts</code></td></tr>
+      <tr><td class="id">L-7</td><td><span class="pill p-low">Low</span></td><td>SSE live bus broadcasts <code>tenant_id == null</code> events to all tenants</td><td><code>bi/bi.controller.ts</code></td></tr>
+      <tr><td class="id">L-8</td><td><span class="pill p-low">Low</span></td><td>Rate limiting is per-process/in-memory; no <code>trustProxy</code> — weakens per-IP bound behind the proxy / at scale</td><td><code>common/edge.ts</code> · <code>public-api.guard.ts</code></td></tr>
+      <tr><td class="id">L-9</td><td><span class="pill p-low">Low</span></td><td>Object-storage key path not sanitized (safe today — server-generated keys only)</td><td><code>common/object-storage.ts</code></td></tr>
+      <tr><td class="id">L-10</td><td><span class="pill p-low">Low</span></td><td>SSO id_token nonce check is conditional on presence</td><td><code>identity/sso.service.ts</code></td></tr>
+      <tr><td class="id">L-11</td><td><span class="pill p-low">Low</span></td><td>PII-redaction phone regex is Thai-format only (international numbers may reach the LLM)</td><td><code>common/pii-redact.ts</code></td></tr>
+      <tr><td class="id">L-12</td><td><span class="pill p-low">Low</span></td><td>Audit-log client IP trusts first <code>X-Forwarded-For</code> hop (spoofable audit IP)</td><td><code>common/audit.interceptor.ts</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="muted" style="font-size:12.5px">* H-3 and H-4 are High-severity architectural/configuration weaknesses whose exploitability depends on the deployment (DB role privileges and <code>TENANCY_MODE</code>). They are the most consequential items in the report and are treated in their own section.</p>
+</section>
+
+<section id="high">
+  <h2>4. High-severity findings</h2>
+
+  <div class="finding sev-high">
+    <h3><span class="pill p-high">High</span> H-1 · SSRF guard bypassed by IPv4-mapped IPv6 literal</h3>
+    <div class="loc">apps/api/src/common/net-guard.ts:33–44 (isPrivateV6) — reached via assertPublicUrl / isPublicUrl</div>
+
+    <div class="block"><span class="lbl">What we found.</span> The SSRF guard is well-designed — it re-resolves DNS immediately before each send (DNS-rebinding defense), blocks RFC1918/loopback/link-local/CGNAT/multicast, and handles the dotted IPv4-mapped IPv6 form. But when a URL host is an IPv4-mapped IPv6 <em>literal</em>, the WHATWG <code>URL</code> parser normalizes it to <b>hex</b> form, which the guard's dotted-only regex does not match. Execution then falls through to a branch that evaluates the empty string and returns "public".</div>
+
+    <div class="block"><span class="lbl">Verified reproduction.</span> Reproduced locally against the exact guard logic:</div>
+    <pre>https://[::ffff:169.254.169.254]/  → host: ::ffff:a9fe:a9fe  → isPrivate: FALSE  *** BYPASS ***
+https://[::ffff:127.0.0.1]/        → host: ::ffff:7f00:1    → isPrivate: FALSE  *** BYPASS ***
+https://[::ffff:10.0.0.5]/         → host: ::ffff:a00:5     → isPrivate: FALSE  *** BYPASS ***</pre>
+    <p>The offending regex only matches the dotted form:</p>
+    <pre>const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);   // never matches ::ffff:a9fe:a9fe
+const head = ip.split(':')[0];   // '' → parseInt('0',16) = 0 → no private range fires → returns false</pre>
+
+    <div class="block"><span class="lbl">Exploit.</span> A tenant registers a webhook (<code>POST /api/platform/webhooks</code>) with <code>url = "https://[::ffff:169.254.169.254]/latest/meta-data/iam/security-credentials/"</code>. It passes validation at register time and again in <code>sendOnce</code>, so on the next matching event the server issues an outbound request to the cloud-metadata service (credential theft on IMDSv1), or to any <code>localhost</code>/RFC1918 internal service. Node's dual-stack resolver connects the mapped address to its underlying IPv4. This defeats the guard's entire purpose for IP-literal targets, and every future consumer of <code>assertPublicUrl</code> inherits the hole. The DNS-hostname path is <em>not</em> affected (dns.lookup returns the dotted form).</div>
+
+    <div class="block"><span class="lbl">Remediation.</span> Do not trust the string form the URL serializer emits. After parsing, detect any IPv4-mapped/IPv4-compatible IPv6 address regardless of hex vs dotted (extract the low 32 bits and run the v4 check), or reject all non-global-unicast IPv6 by prefix. Add regression cases for both forms.</div>
+  </div>
+
+  <div class="finding sev-high">
+    <h3><span class="pill p-high">High</span> H-2 · API-key issuance does not cap scopes to the minter's permissions</h3>
+    <div class="loc">apps/api/src/modules/platform/api-key.service.ts:25–38 (issue) · common/guards.ts:76–86 (scope→permission expansion)</div>
+
+    <div class="block"><span class="lbl">What we found.</span> <code>issue()</code> persists whatever <code>scopes[]</code> the caller submits — <code>const scopes = (dto.scopes ?? []).join(',')</code> — with no validation against the minter's own permission set (the DTO is <code>z.array(z.string()).optional()</code>, no enum, no cap). At authentication time the guard turns those scopes into effective permissions: <code>'*'</code>/<code>'admin'</code> → the full role-default permission set; otherwise each scope becomes a literal permission key.</div>
+
+    <div class="block"><span class="lbl">Exploit — privilege escalation.</span> The <code>AccessAdmin</code> role holds <em>only</em> the <code>users</code> permission and is designed as a non-transacting access-administration role (SoD rule R01 keeps <code>users</code> apart from any transactional duty). An <code>AccessAdmin</code> calls <code>POST /api/platform/api-keys {scopes:['*']}</code>, receives an <code>ierp_…</code> key whose principal carries a broad transacting permission set (<code>ar</code>, <code>creditors</code>, <code>approvals</code>, <code>exec</code>, <code>order_mgt</code>, <code>procurement</code>, …), and uses it to post journals, approve profile/workflow items, etc. — powers they do not hold interactively.</div>
+
+    <div class="block"><span class="lbl">Exploit — maker-checker / SoD bypass.</span> A key principal's username is <code>apikey:&lt;prefix&gt;</code>, distinct from the human's username. Every maker-checker guard compares usernames (<code>requestedBy === user.username</code>). So minting <b>two</b> keys yields <b>two distinct principals</b>: create a document with key A, approve it with key B — the self-approval check never trips. This is a complete maker-checker bypass within the tenant for any holder of <code>users</code>.</div>
+
+    <div class="callout warn"><b>Mitigating factors (stated honestly).</b> The guard forces the key's role to <code>Sales</code> and pins the key's own <code>tenantId</code>, so a key gets <em>no</em> Admin role and <em>no</em> RLS bypass — the escalation is confined to the minter's own tenant and cannot grant Admin. Minting requires the <code>users</code> permission, so an ordinary transacting role cannot do this; the realistic actor is <code>AccessAdmin</code>. Within that scope, however, this is a real, unmitigated control break — precisely the SoD boundary the product's compliance posture depends on.</div>
+
+    <div class="block"><span class="lbl">Remediation.</span> Intersect requested scopes with the minter's effective permissions at <code>issue()</code> (reject or trim anything they do not hold). Additionally, record the minting human on the key and resolve maker-checker identity to that human, so a key cannot act as a second, independent approver.</div>
+  </div>
+</section>
+
+<section id="config">
+  <h2>5. High (configuration-dependent) — tenant-isolation architecture</h2>
+  <p>These two findings share a theme: the tenant-isolation model is correct and fail-closed <em>inside</em> the request transaction, but its guarantees weaken at the edges and depend on deployment settings that are not secure by default. Together they are the most consequential items in this report.</p>
+
+  <div class="finding sev-high">
+    <h3><span class="pill p-high">High*</span> H-3 · No DB-level RLS backstop outside the request transaction</h3>
+    <div class="loc">apps/api/src/database/database.module.ts (base pool role) · common/tenant-tx.interceptor.ts:113 · confirmed via 0002_rls.sql</div>
+
+    <div class="block"><span class="lbl">What we found.</span> RLS is real and <code>FORCE</code>d on every <code>tenant_id</code> table, and the per-request interceptor correctly does <code>SET LOCAL ROLE app_user</code> + sets the tenant/bypass GUCs, so a forgotten <code>WHERE</code> cannot leak inside a normal request. The problem is what runs <em>outside</em> that transaction. The application connects with the <code>DATABASE_URL</code> role and only assumes <code>app_user</code> <em>inside</em> the request tx. On the typical managed-Postgres deployment the base role is a superuser (or holds <code>BYPASSRLS</code>), for which <code>FORCE</code> RLS does not apply. Evidence: <code>etax.service.ts</code> performs a raw <code>INSERT</code> into an RLS+FORCE table with no GUC set and succeeds — which is only possible if the base connection bypasses RLS.</div>
+
+    <div class="block"><span class="lbl">Consequence.</span> Every <code>@NoTx</code> handler, every <code>@Sse</code> stream, every raw <code>PG_CLIENT</code> query, and every background <code>runInTenantContext</code> job runs on that RLS-bypassing base connection. That is a large surface — public diner/QR ordering, member OTP/LINE auth, the SSO callback, PSP/Stripe/messaging/channel-adapter webhooks, coalition till routes, and scheduled jobs. Each relies <b>entirely on hand-written tenant filtering</b>; there is no database safety net. A single missing or incorrect <code>tenant_id</code> predicate on any of these paths is a silent cross-tenant read or write. We did not find a confirmed leak — the audited handlers do scope explicitly — but the risk is systemic and latent rather than contained by design.</div>
+
+    <div class="block"><span class="lbl">Remediation.</span> Run the application's base connection as a dedicated <b>non-superuser, non-<code>BYPASSRLS</code></b> owner role. Then <code>FORCE</code> RLS fail-closes these paths too: with <code>app.tenant_id</code> unset, <code>tenant_id = NULL</code> returns zero rows instead of everything. Keep the few intentionally-unscoped auth-global tables (e.g. <code>login_attempts</code>) as explicit, reviewed exceptions. This converts "trust every handler" into "fail-closed by default" — the single highest-leverage hardening in this report.</div>
+  </div>
+
+  <div class="finding sev-high">
+    <h3><span class="pill p-high">High*</span> H-4 · Insecure-by-default tenancy mode; safety check is warn-only</h3>
+    <div class="loc">apps/api/src/common/tenant-tx.interceptor.ts:52,95–96 · tenancy-boot-check.ts · env.validation.ts:57</div>
+
+    <div class="block"><span class="lbl">What we found.</span> The default <code>TENANCY_MODE=single-company</code> makes <code>bypass = preAuth || isAdmin || …</code> — i.e. <b>any</b> user with role <code>Admin</code> receives <code>app.bypass_rls='on'</code> and sees and writes every tenant's data. The boot-time isolation check only escalates from a warning to a refusal when <code>STRICT_TENANCY_BOOT=1</code>; by default it logs and boots.</div>
+
+    <div class="block"><span class="lbl">Scenario.</span> An operator provisions two companies on one database (the product's core model — the platform owner provisions many tenants) but leaves <code>TENANCY_MODE</code> at its default. Company A's Admin can now read and write Company B's ledger, invoices, payroll and customers via the normal Admin path — no token forgery required.</div>
+
+    <div class="callout warn"><b>Mitigating factors.</b> In production, public self-signup is unconditionally disabled and the <code>Admin</code> role grant is reserved to the platform owner (god), so an outsider cannot mint an Admin; and the boot check does warn. The residual risk is that the <em>secure</em> mode is not the default and the guard is advisory. Because new tenants already self-assign <code>org_id</code> at provisioning, <code>multi-company</code> is a viable default.</div>
+
+    <div class="block"><span class="lbl">Remediation.</span> Default to <code>multi-company</code> (org-scoped Admin bypass), or make <code>refuse</code> the default once more than one tenant exists on the database. Promote the isolation check from warn to fail-closed in production.</div>
+  </div>
+</section>
+
+<section id="medium">
+  <h2>6. Medium-severity findings</h2>
+
+  <div class="finding sev-med">
+    <h3><span class="pill p-med">Medium</span> M-1 · Web CSP allows <code>script-src 'unsafe-inline'</code> in production</h3>
+    <div class="loc">apps/web/next.config.mjs:25</div>
+    <p><code>script-src 'self' 'unsafe-inline'</code> ships in production. <code>'unsafe-inline'</code> means any injected inline <code>&lt;script&gt;</code> or inline event handler executes — the load-bearing XSS defense is effectively opted out. The session JWT is httpOnly (so injected script cannot exfiltrate it directly — good), but the readable CSRF token <em>is</em> reachable by JS, so injected script can still perform authenticated state-changing actions via <code>fetch</code>. The code documents nonce-based hardening as a tracked follow-up. <b>Fix:</b> adopt Next.js nonce-based CSP and drop <code>'unsafe-inline'</code> from <code>script-src</code>. (<code>'unsafe-eval'</code> is correctly dev-only; the rest of the CSP — <code>object-src 'none'</code>, <code>base-uri 'self'</code>, <code>frame-ancestors 'none'</code>, restricted <code>connect-src</code> — is strong.)</p>
+  </div>
+
+  <div class="finding sev-med">
+    <h3><span class="pill p-med">Medium</span> M-2 · Server-side SSRF via tenant-configurable OIDC issuer</h3>
+    <div class="loc">apps/api/src/modules/identity/identity-config.service.ts:66 (stores oidc_issuer unvalidated) → sso.service.ts:157 (exchangeCode fetch)</div>
+    <p><code>upsert()</code> validates <code>oidc_redirect_uri</code> for an http(s) scheme but applies <b>no validation to <code>oidc_issuer</code></b> — no scheme check, no <code>assertPublicUrl</code>. <code>exchangeCode</code> then does <code>fetch(\`${oidcIssuer}/token\`, …)</code>. A tenant admin (permission <code>users</code>; and in default single-company mode every self-service signup mints an Admin) sets <code>oidc_issuer</code> to an internal host or <code>http://169.254.169.254/…</code>, enables SSO, and drives the <b>public, unauthenticated</b> <code>GET /api/auth/sso/callback</code> flow. The server POSTs to the attacker-chosen internal endpoint; <code>res.status</code> is reflected in the error, providing a status/timing oracle. <b>Fix:</b> validate <code>oidc_issuer</code> with <code>assertPublicUrl</code> (https-only) at write time and re-check before <code>exchangeCode</code>. (Note this depends on the same SSRF guard as H-1 — fix H-1 first.)</p>
+  </div>
+
+  <div class="finding sev-med">
+    <h3><span class="pill p-med">Medium</span> M-3 · <code>approveLeave</code> has no self-approval (maker-checker) check</h3>
+    <div class="loc">apps/api/src/modules/hcm/hcm.service.ts:104–118 (compare with approveTimesheet at :57–58)</div>
+    <p>The adjacent <code>approveTimesheet</code> correctly blocks <code>ts.submittedBy === user.username</code> with <code>SOD_SELF_APPROVAL</code>. <code>approveLeave</code> has <b>no equivalent guard</b> — it approves and bumps the paid-leave balance regardless of who created it. <code>requestLeave</code> sets <code>createdBy: user.username</code>, and both routes share the same class-level <code>@Permissions('exec','users','creditors')</code>, so one holder can request paid leave and approve their own. Lower blast radius than a financial control, but a genuine, inconsistent maker-checker gap on a payroll-affecting workflow. <b>Fix:</b> mirror <code>approveTimesheet</code> — reject when <code>lr.createdBy === user.username</code>.</p>
+  </div>
+
+  <div class="finding sev-med">
+    <h3><span class="pill p-med">Medium</span> M-4 · CORS silently defaults to <code>localhost:3000</code> in production</h3>
+    <div class="loc">apps/api/src/main.ts:41 · env.validation.ts:51–53 (warn-only)</div>
+    <p><code>const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000')…</code>, and the env validator only warns when <code>CORS_ORIGINS</code> is unset. With <code>credentials: true</code>, CORS correctness is security-relevant. A prod deploy that omits the variable boots allowing only <code>localhost</code> — primarily a self-DoS (the real web origin is blocked) rather than an exposure, but it is a fail-open default in a security control. <b>Fix:</b> promote <code>CORS_ORIGINS</code> to a required prod secret, or refuse the <code>localhost</code> fallback when <code>NODE_ENV=production</code>.</p>
+  </div>
+
+  <div class="finding sev-med">
+    <h3><span class="pill p-med">Medium</span> M-5 · Front-door env validation gated entirely on <code>NODE_ENV==='production'</code></h3>
+    <div class="loc">apps/api/src/common/env.validation.ts:28–29</div>
+    <p>The required-secret assertions (<code>DATABASE_URL</code>, <code>JWT_SECRET</code>, <code>APP_ENC_KEY</code>, <code>PSP_WEBHOOK_SECRET</code>) run only when <code>NODE_ENV</code> is exactly <code>production</code>. A prod deploy where <code>NODE_ENV</code> is unset or misspelled skips the entire front-door gate. <b>Compensating controls hold the line</b> — <code>auth.module.ts</code> and <code>crypto.ts</code> independently throw unless <code>NODE_ENV</code> is <code>development</code>/<code>test</code>, so JWT and encryption keys still fail closed on an unknown env. The residual gap is <code>PSP_WEBHOOK_SECRET</code>/<code>DATABASE_URL</code>. <b>Fix (belt-and-suspenders):</b> treat any <code>NODE_ENV</code> other than <code>development</code>/<code>test</code> as prod-strict.</p>
+  </div>
+
+  <div class="finding sev-med">
+    <h3><span class="pill p-med">Medium</span> M-6 · <code>document.write</code> of server HTML into a CSP-free popup</h3>
+    <div class="loc">apps/web/src/app/(internal)/print/page.tsx:36 · apps/web/src/lib/terminal.ts:60</div>
+    <p>Receipt/print flows fetch server-rendered HTML and inject it via <code>window.open()…document.write(html)</code> (or into an <code>about:blank</code> iframe). Such a document inherits the app origin and, per M-1, an <code>'unsafe-inline'</code> CSP — so any <code>&lt;script&gt;</code> in the HTML executes in the authenticated origin. Receipts render user-controlled fields (item/customer names, notes). <b>We verified the primary server-side renderer (<code>common/doc-html.ts</code>, <code>a4-template.ts</code>) HTML-escapes all interpolated data via <code>esc()</code>/<code>escAttr()</code></b>, which neutralizes the chain today. This remains a Medium because the escaping is the <em>only</em> control on these popup paths (they have no CSP of their own) and any future receipt/invoice renderer that interpolates without <code>esc()</code> becomes stored XSS. <b>Fix:</b> render receipts via <code>srcdoc</code> with a tight per-frame <code>sandbox</code> (no <code>allow-scripts</code>) — receipts need no scripting — and keep the server escaping as a hard invariant.</p>
+  </div>
+</section>
+
+<section id="low">
+  <h2>7. Low-severity &amp; defense-in-depth</h2>
+  <ul>
+    <li><b>L-1 · Inbound PSP webhook lacks replay protection.</b> HMAC-over-raw-body is verified (good), but there is no timestamp/nonce window, so a captured valid callback can be replayed to re-drive a money-moving status flip. Mitigated by out-of-band status re-verification and idempotent handling. Add an explicit <code>|now − ts| &gt; 300s</code> reject, matching the outbound signer. <span class="muted">(pos-terminal.controller.ts)</span></li>
+    <li><b>L-2 · Static shared-secret webhooks.</b> <code>channel-adapter</code>, <code>restaurant/channel-order</code>, and <code>email-capture</code> authenticate with a static bearer secret (constant-time compared — good) but not an HMAC over the payload, with no replay binding. Mitigated by <code>ext_event_id</code> idempotency and tenant-scoped RLS writes. Upgrade to HMAC-over-body where the sender supports it.</li>
+    <li><b>L-3 · <code>tenantId</code> trusted from the JWT claim.</b> The guard re-reads <code>role</code> and <code>orgId</code> live from the DB but takes <code>tenantId</code> from the token. A user administratively moved to another tenant keeps their old RLS scope until the token expires. Source <code>tenantId</code> from the same per-request user read for consistency. <span class="muted">(guards.ts:156–161)</span></li>
+    <li><b>L-4 · Provisioning does not reject god usernames.</b> <code>isPlatformAdmin()</code> grants global bypass on username membership in <code>PLATFORM_ADMIN_USERNAMES</code> alone. Provisioning/signup check only uniqueness — so if a god name is listed before its account exists, or the god row is ever hard-deleted while still listed, an ordinary provisioning path that claims that username yields an instantly-global-god account. Reject any <code>admin_username ∈ platformAdminUsernames()</code> at provisioning. <span class="muted">(billing.service.ts)</span></li>
+    <li><b>L-5 · <code>developer.service</code> relies solely on RLS.</b> <code>portal()</code> ignores its user arg and selects <code>api_keys</code> with no tenant predicate; <code>setTier()</code> updates by <code>id</code> with no tenant predicate. Blocked only by RLS on <code>api_keys</code> (gated by <code>users</code>). Add an explicit tenant filter, as <code>api-key.service.revoke</code> does.</li>
+    <li><b>L-6 · Product-image fetch has no SSRF guard.</b> <code>urlToDataUrl</code> fetches without <code>assertPublicUrl</code>, but the URL comes from a fixed Wikimedia Commons upstream, not user input — low reach. Route through the guard for defense-in-depth. <span class="muted">(procurement/image-fetch.service.ts)</span></li>
+    <li><b>L-7 · SSE null-tenant broadcast.</b> <code>bi.controller.ts</code> fans a live event with <code>tenant_id == null</code> to <em>every</em> connected tenant. Current publishers set <code>tenant_id</code>, but the null-is-global default is easy to trip, and SSE has no DB backstop (see H-3). Make the SSE filter fail-closed on a missing tenant.</li>
+    <li><b>L-8 · Rate limiting is per-process/in-memory, and no <code>trustProxy</code>.</b> The edge limiter and the public-API limiter keep per-process counters, so under horizontal scaling (or <code>WEB_CONCURRENCY&gt;1</code>) the effective ceiling is <code>max × replicas</code>. Separately, no Fastify <code>trustProxy</code> is configured while the audit log reads <code>X-Forwarded-For</code> first — behind the platform proxy the per-IP throttle key and audit IP can be inaccurate or (for the audit IP) spoofable. Move throttle state to the shared Redis adapter already present, and set a correct <code>trustProxy</code>.</li>
+    <li><b>L-9 · Object-storage key not sanitized.</b> <code>${base()}/${key}</code> is built by concatenation. All current callers pass server-generated keys (no traversal today), but a future caller passing user input containing <code>../</code> or an absolute URL could redirect the PUT/DELETE. Add key validation now. <span class="muted">(object-storage.ts)</span></li>
+    <li><b>L-10 · SSO nonce check conditional on presence.</b> <code>if (claims.nonce !== undefined &amp;&amp; claims.nonce !== st.nonce)</code> skips the binding when the id_token omits a nonce. Mitigated by single-use server-side state consumption (the true replay defense), but validate nonce unconditionally when it was requested. <span class="muted">(sso.service.ts:100)</span></li>
+    <li><b>L-11 · PII redaction is Thai-format only.</b> The LLM-boundary phone regex matches Thai shapes; international numbers embedded in free-text memos may reach the model. Acknowledged as a minimization layer, not the complete control (a signed DPA + pseudonymization is the full control). Broaden the pattern. <span class="muted">(pii-redact.ts:19)</span></li>
+    <li><b>L-12 · Audit IP is spoofable.</b> <code>clientIp()</code> takes the first <code>X-Forwarded-For</code> value without validating it against a trusted proxy, so a client can set the IP recorded in the tamper-evident audit trail. Derive the audit IP from a trusted-proxy configuration. <span class="muted">(audit.interceptor.ts:126–131)</span></li>
+  </ul>
+</section>
+
+<section id="strengths">
+  <h2>8. What is done well</h2>
+  <p>These are not filler — they are the reason the finding count is as low as it is, and they should be preserved through any refactor.</p>
+
+  <h4>Authentication &amp; session</h4>
+  <ul>
+    <li>JWT algorithm pinned <b>both directions</b> (<code>algorithm: 'HS256'</code> on sign, <code>algorithms: ['HS256']</code> on verify) — closes <code>alg:none</code> and RS/HS key-confusion.</li>
+    <li>No committed fallback secret anywhere; dev without <code>JWT_SECRET</code> mints an ephemeral per-process random key; prod fails closed at both the module and the env front door.</li>
+    <li>The auth guard re-reads the <b>live DB</b> for role, active/deactivated, tenant-suspended, <code>tokens_valid_from</code> watermark, must-change-password, and privileged-MFA on <em>every</em> request — a forged or stale token claim cannot escalate, and a hard-deleted user's token stops working immediately.</li>
+    <li>Refresh-token rotation with <b>reuse detection</b> (a replayed rotated/revoked token revokes the whole family); refresh cookie is httpOnly and path-scoped to <code>/api/auth</code>.</li>
+    <li>Per-account lockout (DB-backed, survives restarts) layered under per-IP and stricter per-auth/per-OTP edge buckets. TOTP MFA with AES-256-GCM-encrypted seeds; PIN login hard-blocked for any MFA-requiring role.</li>
+  </ul>
+
+  <h4>Cryptography &amp; secrets</h4>
+  <ul>
+    <li>scrypt password hashing with self-describing, ratcheted work factors and transparent rehash; the legacy unsalted-SHA-256 path was <b>removed</b> (weak-hash sink eliminated). Constant-time comparisons throughout.</li>
+    <li>AES-256-GCM AEAD at rest with a versioned HKDF keyring (label-separated keys), fail-closed on missing/malformed key material.</li>
+    <li>Webhook verification is HMAC-SHA256 over the raw body with a constant-time, length-hiding comparison.</li>
+    <li>Layered fail-closed secret validation; no private keys, default passwords, or committed credentials (gitleaks with a tightly-scoped i18n allowlist confirms this).</li>
+  </ul>
+
+  <h4>Authorization &amp; SoD</h4>
+  <ul>
+    <li>Every controller resolves to at least one authz decorator. Self-approval (maker-checker) is enforced consistently across ~40 flows — GL posting/reversal, PMR/project change-orders, progress billing, subcontracts, payments, petty cash, 3-way match, tax notes, timesheets, and the central workflow engine (which also closes the delegate-approval-to-self hole).</li>
+    <li>Role escalation is explicitly blocked: granting <code>Admin</code> is reserved to the platform owner; SoD-conflicting grants route through a two-person control that blocks self-approval and self-grant.</li>
+    <li>Portal/ESS/payroll <code>:id</code> handlers are ownership-scoped; HQ cross-tenant targeting is defense-in-depth guarded before it reaches services.</li>
+  </ul>
+
+  <h4>Data, platform &amp; supply chain</h4>
+  <ul>
+    <li>DB-enforced, <code>FORCE</code>d RLS with transaction-local GUCs and a fail-closed refusal if <code>app_user</code> cannot be assumed in production (the real backstop inside a request).</li>
+    <li>Tamper-evident, hash-chained append-only audit log (each row binds the previous), with cross-tenant access explicitly flagged on mutations.</li>
+    <li>PII minimization at the LLM boundary plus a DPA fail-closed gate; the exception filter never leaks stack traces or internal messages to clients.</li>
+    <li>Well-built SSRF guard concept (DNS-rebind re-check before send), high-entropy hashed API/SCIM tokens with constant-time compare, strict upload MIME/size allow-lists, no XXE (XML is built-and-escaped, not parsed with external entities).</li>
+    <li>CI/CD: <b>no <code>pull_request_target</code></b> (the classic secret-exfil vector is absent), least-privilege <code>GITHUB_TOKEN</code>, no script-injection sinks, and gitleaks + CodeQL + <code>pnpm audit</code> as hard gates; deploys are approval-gated in a protected environment.</li>
+  </ul>
+</section>
+
+<section id="cleared">
+  <h2>9. Cleared during review (no action needed)</h2>
+  <ul>
+    <li><b>SQL injection — none found.</b> A full sweep traced every raw-SQL and dynamic-identifier sink. All resolve to Drizzle/postgres.js bound parameters or <code>sql.raw()</code> identifiers sourced from compile-time allowlists (the <code>date_trunc</code> period map; the PII key-rotation table/column const list). No string concatenation into SQL, no dynamic <code>ORDER BY</code>/direction from request input, no <code>sql.identifier()</code> on user input. <span class="muted">The one string-built-identifier pattern (bi.service pii-rotation) is safe only because its list is a hardcoded const — worth a guard comment against future change.</span></li>
+    <li><b>Web XSS sinks — clean.</b> No <code>dangerouslySetInnerHTML</code>, <code>innerHTML</code>, <code>eval</code>, or <code>new Function</code> anywhere in <code>apps/web/src</code> (only the <code>document.write</code> print paths of M-6).</li>
+    <li><b>Client secret exposure — clean.</b> Only non-secret <code>NEXT_PUBLIC_*</code> public config is in the bundle; the session JWT is httpOnly and never in localStorage; the SSO callback avoids the sensitive-GET-query sink by forwarding the raw query in the POST body.</li>
+    <li><b>Open redirect — none.</b> The login bounce sets a <code>?next=</code> param but the login page never reads it back.</li>
+    <li><b>alg-confusion in the SSO id_token verifier — closed.</b> <code>verifyHs256</code> pins <code>alg === 'HS256'</code> and rejects everything else, with a constant-time signature compare; SSO also uses single-use server-side state + PKCE and fails closed on an empty client secret.</li>
+  </ul>
+</section>
+
+<section id="roadmap">
+  <h2>10. Remediation roadmap</h2>
+  <h4>Now (this sprint)</h4>
+  <ul>
+    <li>H-1 — fix the IPv4-mapped IPv6 SSRF bypass and add regression tests for both address forms.</li>
+    <li>H-2 — cap API-key scopes to the minter's permissions; bind key identity to the minting human for maker-checker.</li>
+    <li>M-3 — add the self-approval guard to <code>approveLeave</code>.</li>
+    <li>M-4 — make <code>CORS_ORIGINS</code> required/strict in production.</li>
+  </ul>
+  <h4>Next (this quarter)</h4>
+  <ul>
+    <li>H-3 — run the base DB connection as a non-<code>BYPASSRLS</code> owner so RLS fail-closes <code>@NoTx</code>/SSE/raw/job paths. <em>Highest-leverage change in the report.</em></li>
+    <li>H-4 — default to <code>multi-company</code> (or fail-closed boot on &gt;1 tenant); promote the isolation check from warn to refuse in prod.</li>
+    <li>M-1 — move the web app to nonce-based CSP and drop <code>script-src 'unsafe-inline'</code>.</li>
+    <li>M-2 / L-6 — route <code>oidc_issuer</code> and the product-image fetch through the (fixed) SSRF guard.</li>
+    <li>M-5, L-3, L-4 — treat unknown <code>NODE_ENV</code> as prod-strict; re-read <code>tenantId</code> from the DB; reject god usernames at provisioning.</li>
+  </ul>
+  <h4>Hardening backlog</h4>
+  <ul>
+    <li>L-1/L-2 — add replay windows / HMAC-over-body to inbound webhooks.</li>
+    <li>L-8 — move rate-limit state to the shared Redis adapter; set a correct <code>trustProxy</code> (fixes L-12 audit IP too).</li>
+    <li>M-6, L-5, L-7, L-9, L-10, L-11 — the remaining defense-in-depth items.</li>
+  </ul>
+
+  <div class="callout"><b>Documentation-sync note.</b> This engagement made <em>no</em> code changes, so per the repository's documentation-sync policy no process-narrative / user-manual / UAT / RCM updates are required for the review itself. When the remediations above are implemented, the affected controls (notably ITGC-AC-12 config validation, the tenancy model, and the SoD/maker-checker matrix) and <code>compliance/vulnerability-triage.md</code> should be updated in the same change as the fix.</div>
+</section>
+
+<footer>
+  <p>Invisible ERP V2 — Third-Party Security Review · Prepared 8 July 2026 · White-box source review + logical pentest · Confidential.<br/>
+  No live production systems were tested. Severity reflects exploitability under the deployed configuration at the reviewed commit.</p>
+</footer>
+
+</div>
+</body>
+</html>
