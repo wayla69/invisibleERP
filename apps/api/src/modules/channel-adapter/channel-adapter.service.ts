@@ -8,7 +8,7 @@ import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { normalizeAggregatorPayload } from './mappers';
 import { getPlatformProvider } from './providers';
-import { safeEqualStr } from '../../common/crypto';
+import { verifyInboundWebhook } from '../../common/webhook-auth';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const PLATFORMS = ['grab', 'lineman', 'foodpanda', 'robinhood'];
@@ -52,13 +52,18 @@ export class ChannelAdapterService {
   // Inbound order webhook — PUBLIC, authenticated by a per-platform shared secret (store_ref is a public,
   // enumerable slug → NOT an auth factor). Tenant resolved from the adapter via a controlled bypass read,
   // then ALL writes run RLS-scoped under scope.run(tenantId). Idempotent on ext_event_id.
-  async ingestWebhook(platform: string, payload: any, secret?: string) {
+  async ingestWebhook(platform: string, payload: any, secret?: string, sig?: { rawBody?: Buffer | string; signature?: string; timestamp?: string }) {
     if (!PLATFORMS.includes(platform)) throw new BadRequestException({ code: 'BAD_PLATFORM', message: `Unknown platform ${platform}`, messageTh: 'แพลตฟอร์มไม่ถูกต้อง' });
-    // Authenticate: per-platform shared secret, fail-CLOSED in production (a missing config rejects);
-    // lenient only in dev/test so mock/local flows work — mirrors the restaurant aggregator webhook.
-    const expected = process.env[`WEBHOOK_SECRET_${platform.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_SECRET;
-    if (expected) { if (!secret || !safeEqualStr(secret, expected)) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
-    else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
+    // Authenticate (security review L-2): prefer HMAC-over-body when WEBHOOK_HMAC_SECRET_<PLATFORM> /
+    // CHANNEL_WEBHOOK_HMAC_SECRET is configured (binds to the exact payload + optional replay window), else
+    // fall back to the legacy per-platform static shared secret. Fail-CLOSED in production when NEITHER is
+    // configured; lenient only in dev/test so mock/local flows work.
+    const staticSecret = process.env[`WEBHOOK_SECRET_${platform.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_SECRET;
+    const hmacSecret = process.env[`WEBHOOK_HMAC_SECRET_${platform.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_HMAC_SECRET;
+    const auth = verifyInboundWebhook({ rawBody: sig?.rawBody, staticSecret, providedSecret: secret, hmacSecret, signature: sig?.signature, timestamp: sig?.timestamp });
+    if (auth === 'stale') throw new UnauthorizedException({ code: 'WEBHOOK_STALE', message: 'Webhook timestamp outside the allowed window (possible replay)', messageTh: 'เวลาของ webhook หมดอายุ (อาจเป็นการส่งซ้ำ)' });
+    if (auth === 'bad') throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' });
+    if (auth === 'unconfigured' && process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
 
     const norm = normalizeAggregatorPayload(platform, payload);
 

@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Param, Body, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Headers, Req } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { Public, NoTx } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -48,5 +49,14 @@ export class ChannelController {
   // 3rd-party aggregator webhook (Grab/LineMan) — @Public, gated by a per-source shared secret header;
   // idempotent on (source, ext_event_id).
   @Public() @NoTx() @Post('channel/webhook/:source')
-  webhook(@Param('source') source: string, @Headers('x-webhook-secret') secret: string | undefined, @Body(new ZodValidationPipe(WebhookPayload)) body: z.infer<typeof WebhookPayload>) { return this.channel.ingestThirdParty(source, body, secret); }
+  webhook(
+    @Param('source') source: string,
+    @Headers('x-webhook-secret') secret: string | undefined,
+    @Headers('x-webhook-signature') signature: string | undefined,
+    @Headers('x-webhook-timestamp') timestamp: string | undefined,
+    @Req() req: FastifyRequest & { rawBody?: Buffer },
+    @Body(new ZodValidationPipe(WebhookPayload)) body: z.infer<typeof WebhookPayload>,
+  ) {
+    return this.channel.ingestThirdParty(source, body, secret, { rawBody: req.rawBody, signature, timestamp });
+  }
 }
