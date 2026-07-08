@@ -21,6 +21,35 @@ bypass_rls='on'  OR  tenant_id = app.tenant_id  OR  (app.org_id set AND tenant_i
   every route**, regardless of `TENANCY_MODE` — the cross-org super-user. See §2bis.
 - **Pre-auth** (login/signup) gets a temporary bypass to read `users` / create the tenant.
 
+### 1bis. The base connection role MUST NOT bypass RLS (security review H-3)
+
+RLS is enforced **only inside** the per-request `app_user` transaction. Handlers marked **`@NoTx`**, **`@Sse`**
+streams, direct **`PG_CLIENT`** (raw) queries, and **background jobs** run on the **base connection** — the role
+in `DATABASE_URL` — *without* that transaction. If the base role is a **superuser** or has **`BYPASSRLS`** (the
+default on many managed Postgres providers), RLS is **not enforced** on those paths and they rely entirely on
+hand-written `tenant_id` filters; a single omission is a cross-tenant leak.
+
+**Fix — run the API as a dedicated non-superuser, non-`BYPASSRLS` owner role** so `FORCE` RLS fail-closes those
+paths too (with `app.tenant_id` unset, `tenant_id = NULL` returns zero rows). Provision once:
+
+```sql
+-- A login role the API connects as; owns the schema objects but is NOT superuser and does NOT bypass RLS.
+CREATE ROLE ierp_app LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS;
+GRANT USAGE ON SCHEMA public TO ierp_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ierp_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ierp_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ierp_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ierp_app;
+GRANT ierp_app TO app_user;   -- so `SET ROLE app_user` inside the request tx still works
+```
+Then point `DATABASE_URL` at `ierp_app`. Keep the intentionally-unscoped auth-global tables (`login_attempts`,
+scheduler heartbeats, etc.) as reviewed exceptions.
+
+**Boot check.** In production the API now **probes the base role and refuses to boot** if it is superuser / has
+`BYPASSRLS` (`common/tenancy-boot-check.ts` → `assertRlsBackstop`). Set **`ALLOW_RLS_BYPASS_BASE_ROLE=1`** to boot
+with a loud warning instead while you migrate the role (NOT recommended in prod). Best-effort: a probe failure
+(DB not ready) never blocks boot; dev/test are a no-op.
+
 ## 2. `TENANCY_MODE`
 
 | Mode | Admin sees | Use when |
@@ -266,6 +295,7 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 ## 7. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.20 | 2026-07-08 | Security review | **Fail-closed data-isolation boot checks (H-3 / H-4).** (H-4) The tenancy-mode check now **refuses to boot by default** in prod on the dangerous state (single-company + >1 company), instead of warn-only; opt out with `ALLOW_SINGLE_COMPANY_MULTI_TENANT=1`. The old `STRICT_TENANCY_BOOT` flag is removed (its fail-closed behaviour is now the default). (H-3) New `assertRlsBackstop` (§1bis): in prod the API **probes the base DB role and refuses to boot** if it is superuser / has `BYPASSRLS`, since RLS is not enforced on the base connection (`@NoTx`/SSE/raw/job paths); opt out with `ALLOW_RLS_BYPASS_BASE_ROLE=1`, fix by connecting as a non-superuser owner role (§1bis provisioning SQL). Both are prod-only, best-effort (a read/probe failure never blocks boot). Unit tests: `apps/api/test/tenancy-boot-check.test.ts` (14 checks). |
 | 1.19 | 2026-07-07 | Platform / Security | **Data-isolation boot check (4.2).** New `common/tenancy-boot-check.ts` runs at bootstrap (prod-only, best-effort): counts tenants and, when `TENANCY_MODE=single-company` but **>1 company** exists on the DB (where every tenant Admin has a global RLS bypass), logs a **loud error** by default and **refuses to boot** when `STRICT_TENANCY_BOOT=1`. A DB-read failure never blocks boot. env.validation already warns on config; this catches the actually-dangerous *state*. ToE: `cutover/tenancy-boot.ts` (12 checks — decision matrix + prod/dev/strict/best-effort). |
 | 1.0 | 2026-07-03 | Platform / Security | Initial tenancy-model doc: TENANCY_MODE modes, signup exposure, org_id grouping, rollout guidance, ToE (pg-smoke + new pg-core HTTP-stack checks), and the PGlite per-table-org-clause fidelity note. |
 | 1.1 | 2026-07-03 | Platform / Security | Signup hardening (ITGC-AC-18): public `POST /api/auth/signup` is now **fail-closed in production** (`PUBLIC_SIGNUP_ENABLED`, `403 SIGNUP_DISABLED` when off; dev/harnesses unaffected), and each signup gives the new company its **own org** (`org_id = tenant id` on the tenant + Admin) so it is isolated by default under multi-company. ToE: `apps/api/test/signup-gate.test.ts` (gate matrix) + `cutover/onboarding.ts` (org_id assertion). |
