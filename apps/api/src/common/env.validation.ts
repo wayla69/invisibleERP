@@ -38,6 +38,11 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     Object.keys(config).some((k) => k.startsWith('PSP_WEBHOOK_SECRET_') && has(config[k]));
   if (!hasPspSecret) missing.push('PSP_WEBHOOK_SECRET' as (typeof REQUIRED_IN_PROD)[number]);
 
+  // CORS_ORIGINS is required in prod (security review M-4). With credentials:true, a missing value would
+  // silently fall back to http://localhost:3000 (main.ts) — a fail-open config default in a
+  // security-relevant control. Fail closed instead so a misconfigured prod deploy crashes loudly.
+  if (!has(config.CORS_ORIGINS)) missing.push('CORS_ORIGINS' as (typeof REQUIRED_IN_PROD)[number]);
+
   if (missing.length) {
     throw new Error(
       `Refusing to boot: missing required production secrets: ${missing.join(', ')}. ` +
@@ -47,9 +52,6 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
 
   if (has(config.DATABASE_URL) && (config.DATABASE_URL as string).startsWith('postgres://')) {
     logger.warn('DATABASE_URL uses postgres:// — prefer postgresql:// (V1 parity note).');
-  }
-  if (!has(config.CORS_ORIGINS)) {
-    logger.warn('CORS_ORIGINS not set — defaulting to http://localhost:3000, which is wrong for prod.');
   }
   // Hybrid tenancy (0196) — TENANCY_MODE selects the Admin RLS-bypass scope. Default 'single-company'
   // (HQ sees ALL tenants — correct for one company with many branches). 'multi-company' scopes an Admin
