@@ -108,6 +108,9 @@ async function main() {
   const denied = await inj('POST', '/api/admin/tenants', owner, createBody);
   ok('Create-company blocked for a non-platform-admin (403 PLATFORM_ADMIN_REQUIRED)', denied.status === 403 && denied.json.error?.code === 'PLATFORM_ADMIN_REQUIRED', `${denied.status} ${denied.json.error?.code}`);
   process.env.PLATFORM_ADMIN_USERNAMES = 'owner1'; // now owner1 is a platform owner
+  // L-4: provisioning an admin whose username is a platform owner (would silently inherit the god bypass) is refused.
+  const reservedCreate = await inj('POST', '/api/admin/tenants', owner, { company_name: 'GodCo', tenant_code: 'godco1', admin_username: 'owner1', admin_password: 'godco12345', email: 'g@c.com' });
+  ok('Provisioning an admin whose username is a platform owner is refused (400 RESERVED_USERNAME) — L-4', reservedCreate.status === 400 && reservedCreate.json.error?.code === 'RESERVED_USERNAME', `${reservedCreate.status} ${reservedCreate.json.error?.code}`);
   const created = await inj('POST', '/api/admin/tenants', owner, createBody);
   ok('Platform-admin creates a new company via POST /api/admin/tenants (201)', created.status === 201 && !!created.json.tenant_id, `${created.status} tid=${created.json.tenant_id}`);
   const pcRows = (await pg.query(`SELECT (SELECT org_id FROM tenants WHERE id=${created.json.tenant_id}) AS t_org, (SELECT org_id FROM users WHERE username='platco_admin') AS u_org, (SELECT count(*)::int FROM fiscal_periods WHERE tenant_id=${created.json.tenant_id}) AS periods`)).rows as any[];
