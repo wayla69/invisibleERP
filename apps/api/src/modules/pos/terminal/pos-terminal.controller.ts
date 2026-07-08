@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { FastifyRequest } from 'fastify';
 import { Permissions, Public, NoTx, CurrentUser, type JwtUser } from '../../../common/decorators';
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
-import { verifyWebhookSignature } from '../../../common/crypto';
+import { verifyWebhookWithTimestamp } from '../../../common/crypto';
 import { PosTerminalService } from './pos-terminal.service';
 import { qint, qintOpt } from '../../../common/query';
 
@@ -48,9 +48,10 @@ export class PspWebhookController {
   webhook(
     @Req() req: FastifyRequest & { rawBody?: Buffer },
     @Headers('x-psp-signature') signature: string | undefined,
+    @Headers('x-psp-timestamp') timestamp: string | undefined,
     @Body(new ZodValidationPipe(WebhookBody)) b: z.infer<typeof WebhookBody>,
   ) {
-    this.verifySignature(b.provider, req.rawBody, signature);
+    this.verifySignature(b.provider, req.rawBody, signature, timestamp);
     return this.svc.webhook(b.provider, b.provider_ref, b.status);
   }
 
@@ -58,7 +59,7 @@ export class PspWebhookController {
   // verify the signature over the raw body. Fail closed when a secret IS configured and the signature is
   // missing/invalid. When NO secret is configured: reject in production (cannot authenticate the caller),
   // but allow in dev/test so mock/local flows work — mirroring the APP_ENC_KEY / JWT_SECRET gates.
-  private verifySignature(provider: string, rawBody: Buffer | undefined, signature: string | undefined): void {
+  private verifySignature(provider: string, rawBody: Buffer | undefined, signature: string | undefined, timestamp?: string): void {
     const secret = process.env[`PSP_WEBHOOK_SECRET_${provider.toUpperCase()}`] ?? process.env.PSP_WEBHOOK_SECRET;
     if (!secret) {
       const env = process.env.NODE_ENV;
@@ -68,7 +69,14 @@ export class PspWebhookController {
       this.logger.warn(`PSP webhook accepted UNVERIFIED for "${provider}" (no secret configured; dev/test only)`);
       return;
     }
-    if (!verifyWebhookSignature(secret, rawBody ?? Buffer.from(''), signature)) {
+    // Replay window (security review L-1): when the PSP sends x-psp-timestamp the signature must cover it and
+    // it must be fresh; a replayed callback goes stale and is refused. No timestamp → body-only (back-compat).
+    const tolerance = Number(process.env.PSP_WEBHOOK_TOLERANCE_SEC ?? 300);
+    const result = verifyWebhookWithTimestamp(secret, rawBody ?? Buffer.from(''), signature, timestamp, tolerance);
+    if (result === 'stale') {
+      throw new UnauthorizedException({ code: 'WEBHOOK_STALE', message: 'PSP webhook timestamp outside the allowed window (possible replay)', messageTh: 'เวลาของ webhook หมดอายุ (อาจเป็นการส่งซ้ำ)' });
+    }
+    if (result !== 'ok') {
       throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIGNATURE', message: 'Invalid PSP webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' });
     }
   }

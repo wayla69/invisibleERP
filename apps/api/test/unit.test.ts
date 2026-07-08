@@ -7,7 +7,7 @@ import { buildPromptPayPayload, crc16ccitt, isValidPromptPayTarget } from '../sr
 import { socialSecurity, annualPit, computePayslip } from '../src/modules/payroll/payroll-calc';
 import { buildEtaxInvoiceXml } from '../src/modules/tax/documents/etax-xml';
 import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax/documents/etax-email.service';
-import { hmacSha256Hex, verifyWebhookSignature } from '../src/common/crypto';
+import { hmacSha256Hex, verifyWebhookSignature, verifyWebhookWithTimestamp } from '../src/common/crypto';
 import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 describe('e-Tax by Email composer (ETDA, no CA)', () => {
@@ -168,6 +168,22 @@ describe('PSP webhook signature (C4 — HMAC-SHA256 over raw body)', () => {
   it('rejects a missing/garbage signature', () => {
     expect(verifyWebhookSignature(secret, body, undefined)).toBe(false);
     expect(verifyWebhookSignature(secret, body, 'not-hex!!')).toBe(false);
+  });
+
+  // security review L-1 — replay window via a signed timestamp.
+  it('accepts a fresh timestamped signature and rejects a stale one (replay)', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const tsSig = (ts: number) => hmacSha256Hex(secret, Buffer.concat([Buffer.from(`${ts}.`), body]));
+    // fresh
+    expect(verifyWebhookWithTimestamp(secret, body, tsSig(now), now, 300)).toBe('ok');
+    // stale (10 min old, tolerance 5 min) → refused even though the signature is valid for that timestamp
+    const old = now - 600;
+    expect(verifyWebhookWithTimestamp(secret, body, tsSig(old), old, 300)).toBe('stale');
+    // an attacker who freshens the timestamp but keeps the old signature fails the HMAC
+    expect(verifyWebhookWithTimestamp(secret, body, tsSig(old), now, 300)).toBe('bad');
+    // no timestamp → body-only back-compat path still works
+    expect(verifyWebhookWithTimestamp(secret, body, sig, undefined, 300)).toBe('ok');
+    expect(verifyWebhookWithTimestamp(secret, body, 'bad', undefined, 300)).toBe('bad');
   });
 });
 
