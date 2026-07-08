@@ -93,7 +93,10 @@ export class RealtimeBus<E extends BusEvent = BusEvent> {
 
   recent(tenantId?: number | null, limit = 50): E[] {
     this.ensureSubscribed();
-    const rows = tenantId == null ? this.buffer : this.buffer.filter((e) => e.tenant_id == null || e.tenant_id === tenantId);
+    // A concrete tenant sees ONLY its own events. The old `e.tenant_id == null || …` clause meant any
+    // event published with a null tenant_id was delivered to EVERY tenant (security review L-7 cross-tenant
+    // leak). Platform (null-tenant) events now reach only the god view (tenantId == null → whole buffer).
+    const rows = tenantId == null ? this.buffer : this.buffer.filter((e) => e.tenant_id === tenantId);
     return rows.slice(-limit).reverse();
   }
 }

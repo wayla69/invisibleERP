@@ -137,6 +137,11 @@ async function main() {
     JSON.stringify({ avail: liveT1.available, types: (liveT1.events ?? []).map((e: any) => e.type) }));
   const liveHq = biSvc.liveRecent(adminUser);
   ok('live feed: tenant isolation — HQ does not see t1\'s kpi_refresh', !(liveHq.events ?? []).some((e: any) => e.type === 'kpi_refresh' && e.tenant_id === mgrUser.tenantId), `hq_events=${(liveHq.events ?? []).length}`);
+  // L-7 (security review): a null-tenant (platform) event must NOT fan out to every tenant's feed.
+  biSvc.publishLive({ type: 'platform_notice_l7', tenant_id: null, msg: 'ping' });
+  const t1AfterNull = biSvc.liveRecent(mgrUser);
+  ok('live feed L-7: a null-tenant platform event does NOT leak into a tenant feed',
+    !(t1AfterNull.events ?? []).some((e: any) => e.type === 'platform_notice_l7'), `t1_has_notice=${(t1AfterNull.events ?? []).some((e: any) => e.type === 'platform_notice_l7')}`);
 
   // ── 11. getSnapshots retrieves the refreshed row ──
   const snaps = await biSvc.getSnapshots({ days: 1 }, mgrUser);

@@ -123,9 +123,21 @@ export class AuditInterceptor implements NestInterceptor {
   }
 }
 
+// Derive the client IP for the audit trail. The X-Forwarded-For chain is client-appendable at the LEFT, so
+// taking the first (leftmost) hop trusts a value the client controls — a spoofable audit IP (security review
+// L-12). Instead trust only the rightmost `TRUSTED_PROXY_HOPS` entries (the ones your own reverse proxies
+// prepend) and read the entry the OUTERMOST trusted proxy saw as the peer. Default 0 ⇒ trust no XFF and use
+// the direct socket peer (`req.ip`); set it to the number of proxies in front of the API (e.g. 1 behind a
+// single load balancer) so the real client IP is recovered without honoring a forged prefix.
 function clientIp(req: FastifyRequest): string | null {
+  const hops = Math.max(0, Math.floor(Number(process.env.TRUSTED_PROXY_HOPS ?? 0)) || 0);
+  const peer = (req as any).ip ?? null;
+  if (hops === 0) return peer; // no trusted proxy → a client-supplied XFF is not trustworthy
   const fwd = req.headers?.['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0]!.trim();
-  if (Array.isArray(fwd) && fwd.length) return String(fwd[0]).trim();
-  return (req as any).ip ?? null;
+  const chain = (typeof fwd === 'string' ? fwd.split(',') : Array.isArray(fwd) ? fwd.flatMap((v) => String(v).split(',')) : [])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!chain.length) return peer;
+  // The last `hops` entries were added by trusted proxies; the client-most trusted entry is at length-hops.
+  return chain[Math.max(0, chain.length - hops)] ?? peer;
 }
