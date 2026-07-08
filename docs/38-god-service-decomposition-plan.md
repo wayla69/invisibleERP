@@ -1,9 +1,14 @@
 # 38 — God-service decomposition (design for review · workstream 2.1)
 
-> **Status:** DESIGN — needs explicit sign-off before any code. This is a **refactor of financial-critical
-> services with zero intended behaviour change**, so the whole plan is built around *proving* nothing moved.
-> Nothing here changes a public API, a GL posting, or a control — it only relocates code behind unchanged
-> facades.
+> **Status:** DESIGN — the *extraction* still needs explicit sign-off before any code moves. This is a
+> **refactor of financial-critical services with zero intended behaviour change**, so the whole plan is
+> built around *proving* nothing moved. Nothing here changes a public API, a GL posting, or a control —
+> it only relocates code behind unchanged facades.
+>
+> **Step 1 (characterize) is DELIVERED** ahead of the sign-off: the golden-master harness
+> `tools/parity/src/goldenmaster.ts` (CI gate `parity/golden`) pins ~500 output paths across all four
+> target services against `tools/parity/golden/goldenmaster.json` — see §2bis. The safety net now exists;
+> the decision in §7 is only about whether/when to start extracting.
 
 ## 1. Targets (largest services, by line count)
 
@@ -29,6 +34,27 @@ Order for **every** extraction (never skip step 1):
    diff in any asserted number = stop and revert (the CLAUDE.md debug mantra: never bend the test to the
    refactor).
 4. **One sub-service per PR.** Small, reviewable, independently revertable.
+
+## 2bis. The golden-master harness (delivered)
+
+`tools/parity/src/goldenmaster.ts` (`pnpm --filter @ierp/parity golden`, `NODE_OPTIONS=--experimental-sqlite`;
+CI matrix job `parity/golden`) instantiates the real compiled services (`apps/api/dist`) standalone on a
+fresh PGlite, runs a deterministic seed world, and deep-compares the **entire canonicalized output** of:
+
+- **ledger** — `postEntry` (immediate + Draft/maker-checker + SoD self-approve rejection + idempotent dedupe +
+  UNBALANCED/INVALID_LINE guards), `createRecurring`/`runDueRecurring` (incl. same-day re-run), `createPrepaid`/
+  `runDuePrepaid`, `trialBalance` (touched accounts), `cashFlowStatement`/`cashFlowDirect`, `incomeStatement`,
+  `balanceSheet`;
+- **procurement** — PR→approve (incl. role rejection)→PO→approve→GR full-close + partial-receive;
+- **projects** — create, WBS tasks (with dependency), `logCost` billable/non-billable, milestone, closed-form
+  `evm` (BAC/PV/EV/AC/CPI/SPI/EAC), CPM `schedule`, `portfolioEvm`;
+- **bi** — `kpiBoard`, `salesCube`, `financeTrend` (the pilot's read core)
+
+against the pinned snapshot `tools/parity/golden/goldenmaster.json` (~500 leaf paths). Volatile values are
+masked before comparison (`<TS>`/`<STAMP>`/`<DATE>`/`<PERIOD>`), and all seeds are dated *relative* to the
+business day (Asia/Bangkok), so the snapshot is stable on any run date while every behavioural number stays
+locked. **Re-pin** (`UPDATE_GOLDEN=1 … golden`) is only legitimate for a conscious product change, committed
+in the same PR with the diff explained — during a decomposition PR, any drift means stop and revert (§2.3).
 
 ## 3. Per-service split (bounded contexts)
 
@@ -77,3 +103,4 @@ Sign-off on: (a) doing this at all now vs. deferring behind revenue/compliance; 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
 | 0.1 | 2026-07-07 | Platform / IT | Initial decomposition plan for review — characterization-first + facade-preserving recipe, per-service bounded contexts, pilot=bi → ledger last, per-PR guardrails, honest cost/benefit + a recommendation to defer behind revenue/compliance work. |
+| 0.2 | 2026-07-08 | Platform / IT | Step 1 delivered: golden-master characterization harness (`tools/parity/src/goldenmaster.ts` + pinned `golden/goldenmaster.json`, ~500 paths over ledger/procurement/projects/bi) added as CI gate `parity/golden` (§2bis). Extraction itself still awaits §7 sign-off. |

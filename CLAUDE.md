@@ -261,7 +261,11 @@ For every such change, review and update as needed:
 - Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`):
   `pnpm --filter @ierp/cutover compliance` (ICFR controls), `basics` (the finance/GL/EAM smoke — **the
   primary gate for AR/AP, GL, fixed-assets/EAM, leases, cash-flow, collections work; extend it for any such
-  change**), `e2e`, `ext`, `worldclass`, `taxdocs`, `restaurant`; `pnpm --filter @ierp/parity writeflow|analytics`. Keep these green.
+  change**), `e2e`, `ext`, `worldclass`, `taxdocs`, `restaurant`; `pnpm --filter @ierp/parity writeflow|analytics|golden`.
+  Keep these green. `golden` is the god-service **golden-master** (docs/38 §2bis): it deep-compares
+  ledger/procurement/projects/bi outputs to the pinned `tools/parity/golden/goldenmaster.json`. A conscious
+  behaviour change in those services that diffs it must re-pin (`UPDATE_GOLDEN=1 pnpm --filter @ierp/parity
+  golden`) and commit the golden diff in the same PR — never re-pin to paper over unintended drift.
 
 ## Key references
 - RCM / readiness / policies: `compliance/` (`Oshinei_ERP_SOX_RCM_v1.xlsx`, `build_rcm.py`,
