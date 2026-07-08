@@ -1,4 +1,5 @@
-import { Controller, Post, Get, Body, Param, Headers } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Headers, Req } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { Public, NoTx, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -47,8 +48,11 @@ export class EmailInboundController {
   inbound(
     @Param('tenantCode') tenantCode: string,
     @Headers('x-inbound-secret') secret: string | undefined,
+    @Headers('x-inbound-signature') signature: string | undefined,
+    @Headers('x-inbound-timestamp') timestamp: string | undefined,
+    @Req() req: FastifyRequest & { rawBody?: Buffer },
     @Body(new ZodValidationPipe(InboundBody)) b: InboundEmail,
   ) {
-    return this.svc.handleInbound(tenantCode, secret, b);
+    return this.svc.handleInbound(tenantCode, secret, b, { rawBody: req.rawBody, signature, timestamp });
   }
 }

@@ -9,6 +9,7 @@ import { buildEtaxInvoiceXml } from '../src/modules/tax/documents/etax-xml';
 import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax/documents/etax-email.service';
 import { hmacSha256Hex, verifyWebhookSignature, verifyWebhookWithTimestamp } from '../src/common/crypto';
 import { hitRateLimit } from '../src/common/rate-limit-store';
+import { verifyInboundWebhook } from '../src/common/webhook-auth';
 import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 describe('e-Tax by Email composer (ETDA, no CA)', () => {
@@ -208,6 +209,32 @@ describe('Shared rate-limit store — in-memory fixed window (L-8, no Redis conf
     await hitRateLimit(a, 1, 60_000, t);
     expect((await hitRateLimit(a, 1, 60_000, t + 1)).limited).toBe(true);  // a exhausted
     expect((await hitRateLimit(b, 1, 60_000, t + 1)).limited).toBe(false); // b independent
+  });
+});
+
+describe('Inbound webhook auth — additive HMAC over static secret (L-2)', () => {
+  const body = Buffer.from(JSON.stringify({ ext_event_id: 'e1', ext_order_id: 'o1', store_ref: 's1' }));
+  it('static-secret fallback: matches / mismatches / unconfigured', () => {
+    expect(verifyInboundWebhook({ staticSecret: 'sek', providedSecret: 'sek' })).toBe('ok');
+    expect(verifyInboundWebhook({ staticSecret: 'sek', providedSecret: 'nope' })).toBe('bad');
+    expect(verifyInboundWebhook({ staticSecret: 'sek', providedSecret: undefined })).toBe('bad');
+    expect(verifyInboundWebhook({})).toBe('unconfigured');
+  });
+  it('HMAC takes precedence when configured — a valid static secret alone no longer passes', () => {
+    const hmacSecret = 'whmac_1';
+    const sig = hmacSha256Hex(hmacSecret, body);
+    expect(verifyInboundWebhook({ rawBody: body, hmacSecret, signature: sig, staticSecret: 'sek', providedSecret: 'sek' })).toBe('ok');
+    // right static secret but NO/!bad HMAC signature → rejected (the whole point: a leaked static secret can't forge a body)
+    expect(verifyInboundWebhook({ rawBody: body, hmacSecret, signature: undefined, staticSecret: 'sek', providedSecret: 'sek' })).toBe('bad');
+    // tampered body under the same signature → bad
+    expect(verifyInboundWebhook({ rawBody: Buffer.concat([body, Buffer.from('x')]), hmacSecret, signature: sig })).toBe('bad');
+  });
+  it('HMAC + timestamp gives a replay window', () => {
+    const hmacSecret = 'whmac_2';
+    const now = Math.floor(Date.now() / 1000);
+    const tsSig = (ts: number) => hmacSha256Hex(hmacSecret, Buffer.concat([Buffer.from(`${ts}.`), body]));
+    expect(verifyInboundWebhook({ rawBody: body, hmacSecret, signature: tsSig(now), timestamp: now, toleranceSec: 300 })).toBe('ok');
+    expect(verifyInboundWebhook({ rawBody: body, hmacSecret, signature: tsSig(now - 600), timestamp: now - 600, toleranceSec: 300 })).toBe('stale');
   });
 });
 
