@@ -9,7 +9,7 @@ export const memberConsents = pgTable('member_consents', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   memberId: bigint('member_id', { mode: 'number' }).references(() => posMembers.id),
-  purpose: text('purpose').notNull(),        // marketing | profiling | line | sms | email
+  purpose: text('purpose').notNull(),        // marketing | profiling | line | sms | email | dining_profile
   channel: text('channel'),                  // optional sub-channel
   granted: boolean('granted').notNull().default(true),
   source: text('source'),                    // pos | portal | import | admin

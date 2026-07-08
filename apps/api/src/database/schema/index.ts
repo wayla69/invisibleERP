@@ -31,6 +31,7 @@ export * from './wallet-pass';
 export * from './loyalty-receipt-submissions';
 export * from './marketing-campaigns';
 export * from './member-consents';
+export * from './guest-profiles';
 export * from './loyalty-runs';
 export * from './loyalty-rewards';
 export * from './loyalty-gamification';

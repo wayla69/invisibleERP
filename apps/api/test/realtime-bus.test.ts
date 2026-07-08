@@ -52,9 +52,13 @@ describe('RealtimeBus — cross-instance delivery via transport', () => {
     const bus = new RealtimeBus('ierp:rt:test', t);
     bus.publish({ type: 'a', tenant_id: 1 });
     bus.publish({ type: 'b', tenant_id: 2 });
-    bus.publish({ type: 'c' }); // tenant-less → visible to all
+    bus.publish({ type: 'c' }); // tenant-less (platform) → god view ONLY (security review L-7)
     await new Promise((r) => setTimeout(r, 10));
-    expect(bus.recent(1).map((e) => e.type).sort()).toEqual(['a', 'c']);
+    // a concrete tenant sees ONLY its own events — a null-tenant event no longer fans out to every
+    // tenant (the pre-L-7 cross-tenant leak this test used to encode)
+    expect(bus.recent(1).map((e) => e.type)).toEqual(['a']);
+    // the god view (tenantId null/undefined) sees the whole buffer, platform events included
+    expect(bus.recent(null).map((e) => e.type).sort()).toEqual(['a', 'b', 'c']);
   });
 
   it('no transport (single node) → pure in-memory, unchanged behavior', () => {

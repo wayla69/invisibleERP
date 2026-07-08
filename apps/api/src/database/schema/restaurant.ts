@@ -184,6 +184,11 @@ export const tableReservations = pgTable('table_reservations', {
   tableId: bigint('table_id', { mode: 'number' }).references(() => diningTables.id), // optional assigned table
   reservedFor: timestamp('reserved_for', { withTimezone: true }), // booking time (null for walk-in waitlist)
   partySize: integer('party_size').notNull().default(2),
+  // fine-casual: one venue seats both buffet and à-la-carte parties — the desk books the mode up front
+  // (buffet may pre-pick a tier; the session's buffet clock still starts at the table, not here)
+  serviceMode: orderModeEnum('service_mode').notNull().default('a_la_carte'),
+  buffetPackageId: bigint('buffet_package_id', { mode: 'number' }).references(() => buffetPackages.id),
+  occasion: text('occasion'),                             // birthday / anniversary / business — service prep
   customerName: text('customer_name'),
   customerPhone: text('customer_phone'),
   memberId: bigint('member_id', { mode: 'number' }).references(() => posMembers.id), // optional loyalty link
