@@ -6,6 +6,7 @@ import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { tenants, users, userPermissions, messageLog } from '../../database/schema';
 import { safeEqualStr } from '../../common/crypto';
+import { verifyInboundWebhook } from '../../common/webhook-auth';
 import type { JwtUser } from '../../common/decorators';
 import { MAILER, type Mailer } from '../tax/documents/mailer';
 import { TenantMessagingService } from '../messaging/tenant-messaging.service';
@@ -120,11 +121,11 @@ export class EmailCaptureService {
   }
 
   // ── (2) Inbound webhook: a forwarded bill → AP-intake draft(s), attributed to the verified sender. ──
-  async handleInbound(tenantCode: string, secret: string | undefined, payload: InboundEmail) {
+  async handleInbound(tenantCode: string, secret: string | undefined, payload: InboundEmail, sig?: { rawBody?: Buffer | string; signature?: string; timestamp?: string }) {
     const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, tenantCode)).limit(1);
     if (!t) throw new UnauthorizedException({ code: 'UNKNOWN_TENANT', message: 'Unknown shop code', messageTh: 'ไม่พบรหัสร้าน' });
     const tenantId = Number(t.id);
-    this.assertSecret(await this.tenantMsg.resolveCreds(tenantId, 'email'), secret);
+    this.assertSecret(await this.tenantMsg.resolveCreds(tenantId, 'email'), secret, sig);
 
     const from = this.norm(payload?.from ?? '');
     if (!from) return { received: true, captured: 0, skipped: 'no_sender' };
@@ -169,15 +170,20 @@ export class EmailCaptureService {
     return { received: true, captured: intakes.length, intakes, skipped: intakes.length ? null : 'no_valid_attachment' };
   }
 
-  // Mirror the LINE webhook's auth stance: a configured shared secret must match; with none, reject in prod
-  // (cannot authenticate) but accept in dev/test so the feature is exercisable without provider creds.
-  private assertSecret(creds: Record<string, any> | null, provided: string | undefined) {
-    const secret = creds?.secret as string | undefined;
-    if (secret) {
-      if (!provided || !safeEqualStr(secret, provided)) throw new UnauthorizedException({ code: 'BAD_INBOUND_SECRET', message: 'Invalid inbound secret', messageTh: 'รหัสยืนยัน inbound ไม่ถูกต้อง' });
-      return;
+  // Mirror the LINE webhook's auth stance: a configured secret must match; with none, reject in prod (cannot
+  // authenticate) but accept in dev/test so the feature is exercisable without provider creds. Security review
+  // L-2: when the tenant configures an `hmac_secret` in its email creds, the inbound must carry a valid
+  // HMAC-over-body (x-inbound-signature, optional x-inbound-timestamp replay window) instead of the static
+  // secret; unset ⇒ the legacy static `secret` compare (backward-compatible).
+  private assertSecret(creds: Record<string, any> | null, provided: string | undefined, sig?: { rawBody?: Buffer | string; signature?: string; timestamp?: string }) {
+    const staticSecret = creds?.secret as string | undefined;
+    const hmacSecret = (creds?.hmac_secret ?? creds?.hmacSecret) as string | undefined;
+    const auth = verifyInboundWebhook({ rawBody: sig?.rawBody, staticSecret, providedSecret: provided, hmacSecret, signature: sig?.signature, timestamp: sig?.timestamp });
+    if (auth === 'stale') throw new UnauthorizedException({ code: 'WEBHOOK_STALE', message: 'Inbound timestamp outside the allowed window (possible replay)', messageTh: 'เวลาของ inbound หมดอายุ (อาจเป็นการส่งซ้ำ)' });
+    if (auth === 'bad') throw new UnauthorizedException({ code: 'BAD_INBOUND_SECRET', message: 'Invalid inbound secret', messageTh: 'รหัสยืนยัน inbound ไม่ถูกต้อง' });
+    if (auth === 'unconfigured') {
+      if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'INBOUND_UNVERIFIED', message: 'Email inbound secret not configured', messageTh: 'ยังไม่ได้ตั้งค่ารหัสยืนยัน inbound' });
+      this.logger.warn('email inbound accepted UNVERIFIED (no secret; dev/test only)');
     }
-    if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'INBOUND_UNVERIFIED', message: 'Email inbound secret not configured', messageTh: 'ยังไม่ได้ตั้งค่ารหัสยืนยัน inbound' });
-    this.logger.warn('email inbound accepted UNVERIFIED (no secret; dev/test only)');
   }
 }

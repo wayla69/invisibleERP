@@ -10,7 +10,7 @@ import { roundCurrency } from '../tax/money';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
-import { safeEqualStr } from '../../common/crypto';
+import { verifyInboundWebhook } from '../../common/webhook-auth';
 import { RealtimeScope } from './realtime.scope';
 import { DineInService } from './dine-in.service';
 import { mintChannelToken, verifyChannelToken } from './channel-token.util';
@@ -219,11 +219,16 @@ export class ChannelOrderService {
   // 3rd-party (Grab/LineMan) ingest — idempotent at the edge (event id) AND the order (ext order id).
   // Authenticated by a per-source shared secret (store_ref is a public, enumerable slug → NOT an auth factor):
   // fail-CLOSED in production (a missing secret config rejects); lenient only in dev/test.
-  async ingestThirdParty(source: string, body: any, secret?: string) {
+  async ingestThirdParty(source: string, body: any, secret?: string, sig?: { rawBody?: Buffer | string; signature?: string; timestamp?: string }) {
     if (!['grab', 'lineman'].includes(source)) throw new BadRequestException({ code: 'BAD_SOURCE', message: 'Unknown channel source', messageTh: 'ช่องทางไม่ถูกต้อง' });
-    const expected = process.env[`WEBHOOK_SECRET_${source.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_SECRET;
-    if (expected) { if (!secret || !safeEqualStr(secret, expected)) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
-    else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
+    // Authenticate (security review L-2): HMAC-over-body when WEBHOOK_HMAC_SECRET_<SOURCE> / CHANNEL_WEBHOOK_HMAC_SECRET
+    // is set, else the legacy static shared secret; fail-closed in prod when neither is configured.
+    const staticSecret = process.env[`WEBHOOK_SECRET_${source.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_SECRET;
+    const hmacSecret = process.env[`WEBHOOK_HMAC_SECRET_${source.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_HMAC_SECRET;
+    const auth = verifyInboundWebhook({ rawBody: sig?.rawBody, staticSecret, providedSecret: secret, hmacSecret, signature: sig?.signature, timestamp: sig?.timestamp });
+    if (auth === 'stale') throw new UnauthorizedException({ code: 'WEBHOOK_STALE', message: 'Webhook timestamp outside the allowed window (possible replay)', messageTh: 'เวลาของ webhook หมดอายุ (อาจเป็นการส่งซ้ำ)' });
+    if (auth === 'bad') throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' });
+    if (auth === 'unconfigured' && process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
     if (!body?.ext_event_id || !body?.ext_order_id || !body?.store_ref) throw new BadRequestException({ code: 'BAD_PAYLOAD', message: 'ext_event_id, ext_order_id, store_ref required', messageTh: 'ข้อมูล webhook ไม่ครบ' });
     const { tenantId } = await this.resolveStore(body.store_ref);
     return this.scope.run(tenantId, async () => {

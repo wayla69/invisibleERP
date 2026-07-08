@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Param, Query, Body, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, Headers, Req } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { Permissions, Public, NoTx, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -37,5 +38,14 @@ export class ChannelWebhookController {
   @Public()
   @NoTx()
   @Post(':platform/webhook')
-  webhook(@Param('platform') platform: string, @Headers('x-webhook-secret') secret: string | undefined, @Body(new ZodValidationPipe(WebhookPayload)) payload: z.infer<typeof WebhookPayload>) { return this.svc.ingestWebhook(platform, payload, secret); }
+  webhook(
+    @Param('platform') platform: string,
+    @Headers('x-webhook-secret') secret: string | undefined,
+    @Headers('x-webhook-signature') signature: string | undefined,
+    @Headers('x-webhook-timestamp') timestamp: string | undefined,
+    @Req() req: FastifyRequest & { rawBody?: Buffer },
+    @Body(new ZodValidationPipe(WebhookPayload)) payload: z.infer<typeof WebhookPayload>,
+  ) {
+    return this.svc.ingestWebhook(platform, payload, secret, { rawBody: req.rawBody, signature, timestamp });
+  }
 }
