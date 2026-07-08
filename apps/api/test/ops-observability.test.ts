@@ -30,8 +30,17 @@ describe('env.validation — observability recommended by default, enforceable o
   it('boots when mandated AND wired', () => {
     expect(() => validateEnv({ ...baseProd(), REQUIRE_OBSERVABILITY_BACKENDS: '1', SENTRY_DSN: 'https://x@sentry.io/1', OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel:4318' })).not.toThrow();
   });
-  it('is a no-op outside production', () => {
+  it('is a no-op outside production (development / test only)', () => {
     expect(() => validateEnv({ NODE_ENV: 'test' })).not.toThrow();
+    expect(() => validateEnv({ NODE_ENV: 'development' })).not.toThrow();
+  });
+  it('M-5: an unknown NODE_ENV is treated as production-strict (fail-closed)', () => {
+    // A misspelled / non-standard env must NOT silently skip the required-secret gate.
+    for (const env of ['staging', 'prod', 'Production', 'PRODUCTION']) {
+      expect(() => validateEnv({ NODE_ENV: env }), env).toThrow(/required production secrets/i);
+    }
+    // …and a fully-configured non-standard env still boots.
+    expect(() => validateEnv({ ...baseProd(), NODE_ENV: 'staging' })).not.toThrow();
   });
   it('still fails first on a missing core secret (observability gate is secondary)', () => {
     const { JWT_SECRET, ...noJwt } = baseProd();
