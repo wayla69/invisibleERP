@@ -53,13 +53,22 @@ async function printHtmlSlip(saleNo: string): Promise<void> {
   const html = await res.text();
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
+  // Sandbox the receipt (security review M-6): a slip needs NO scripting, so block script execution as
+  // defense-in-depth should an unescaped field ever reach this document. `allow-same-origin` keeps the
+  // parent able to drive `win.print()`; `allow-modals` permits the print dialog; the ABSENCE of
+  // `allow-scripts` makes any <script> in the slip inert. `srcdoc` replaces the document.write sink.
+  iframe.setAttribute('sandbox', 'allow-same-origin allow-modals');
   Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' });
+  iframe.srcdoc = html;
   document.body.appendChild(iframe);
+  await new Promise<void>((resolve) => {
+    iframe.addEventListener('load', () => resolve(), { once: true });
+    setTimeout(resolve, 1500); // fallback if the load event doesn't fire
+  });
   const win = iframe.contentWindow;
   if (!win) { iframe.remove(); throw new Error('เปิดหน้าต่างพิมพ์ไม่ได้'); }
-  win.document.open(); win.document.write(html); win.document.close();
   // Give the webfont/layout a moment, then print and clean up.
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, 250));
   win.focus(); win.print();
   setTimeout(() => iframe.remove(), 1500);
 }
