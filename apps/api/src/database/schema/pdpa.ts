@@ -35,6 +35,20 @@ export const pdpaErasures = pgTable('pdpa_erasures', {
 });
 export type PdpaErasure = typeof pdpaErasures.$inferSelect;
 
+// PII retention policy (PDPA-04, migration 0283) — per-tenant, OPT-IN automation of the retention schedule
+// in docs/ops/data-retention-policy.md. No row / enabled=false ⇒ the sweep does NOTHING for that tenant
+// (default-off). retain_months has a 12-month service-enforced floor so a typo can't mass-anonymize.
+export const pdpaRetentionPolicies = pgTable('pdpa_retention_policies', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  subjectType: text('subject_type').notNull(),        // 'member' (loyalty) — the only automated subject for now
+  retainMonths: bigint('retain_months', { mode: 'number' }).notNull(), // anonymize after this many months of inactivity
+  enabled: boolean('enabled').notNull().default(false),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export type PdpaRetentionPolicy = typeof pdpaRetentionPolicies.$inferSelect;
+
 // RoPA — Records of Processing Activities (PDPA มาตรา 39 / GDPR Art.30, PDPA-03, migration 0282). A maintained
 // inventory of how the company processes personal data: one row per processing activity with its purpose,
 // legal basis, data categories/subjects, recipients + sub-processors, retention, cross-border basis and

@@ -1982,6 +1982,13 @@
       "when": 2023820000244,
       "tag": "0282_ropa_activities",
       "breakpoints": true
+    },
+    {
+      "idx": 283,
+      "version": "7",
+      "when": 2023820000245,
+      "tag": "0283_pdpa_retention_policies",
+      "breakpoints": true
     }
   ]
 }

@@ -187,6 +187,15 @@ async function main() {
     prun.json.status === 'success' && !remaining.includes('ret-expired') && remaining.includes('ret-future'),
     JSON.stringify({ st: prun.json.status, sum: prun.json.summary, remaining }).slice(0, 170));
 
+  // ── 17b. pii_retention_sweep (PDPA-04): the scheduled job is WIRED (PdpaModule → BiService) and runs
+  //         opt-in only — with no enabled pdpa_retention_policies row it anonymizes nothing. The sweep logic
+  //         itself (policy floor, dry-run, aged-vs-recent, idempotency) is ToE'd in cutover/pdpa.ts. ──
+  const rsub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'PII retention sweep', report_type: 'pii_retention_sweep', frequency: 'monthly' });
+  const rrun = await inj('POST', `/api/bi/subscriptions/${rsub.json.id}/run`, admin, {});
+  ok('pii_retention_sweep is schedulable and a no-policy run sweeps nothing (opt-in, default-off)',
+    rsub.status === 201 && rrun.json.status === 'success' && (rrun.json.summary ?? '').includes('0 member(s)'),
+    JSON.stringify({ st: rrun.json.status, sum: rrun.json.summary }).slice(0, 170));
+
   // ── 18. async scheduler: run-async ENQUEUES due subscriptions to the background job queue (returns 202)
   //        instead of running them inline — heavy action jobs then execute on the worker off the request path. ──
   const asub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Async purge', report_type: 'data_retention_purge', frequency: 'daily' });

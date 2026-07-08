@@ -161,6 +161,37 @@ async function main() {
   const ropaCross = await inj('GET', `/api/pdpa/ropa/${ropaCreate.json.id}`, dpo2);
   ok('PDPA-03: RLS — other-tenant DPO cannot read the RoPA activity (404)', ropaCross.status === 404 || ropaCross.json?.error?.code === 'NOT_FOUND', `status=${ropaCross.status}`);
 
+  // ── PDPA-04: PII retention sweep — opt-in, default-OFF, idempotent, reuses the erasure redaction path ──
+  // Seed: an OLD member (last ledger activity ~4 years ago) and a RECENT member, both in T1.
+  const yearsAgo4 = new Date(Date.now() - 4 * 365 * 86400_000);
+  const [oldM] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-OLD1', name: 'Wichai Kao', phone: '0810009999', email: 'wichai@example.com', enrolledAt: yearsAgo4, lastUpdated: yearsAgo4 }).returning();
+  await db.insert(s.posMemberLedger).values({ tenantId: t1, memberId: Number(oldM.id), txnDate: yearsAgo4, txnType: 'Earn', points: '100', balanceAfter: '100', refDoc: 'SALE-OLD' });
+  await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-NEW1', name: 'Malee Mai', phone: '0810008888' });
+  // 1. Default-OFF: no policy exists → the sweep touches nothing.
+  const sweep0 = await inj('POST', '/api/pdpa/retention/sweep', dpo1, {});
+  ok('PDPA-04: no policy → sweep is a no-op (default-off)', sweep0.status === 201 && sweep0.json.policies === 0 && sweep0.json.swept_total === 0, JSON.stringify(sweep0.json));
+  // 2. A too-short retention window is rejected (guard against accidental mass-anonymization).
+  const polBad = await inj('PUT', '/api/pdpa/retention', dpo1, { subject_type: 'member', retain_months: 6, enabled: true });
+  ok('PDPA-04: retain_months < 12 → 400 RETENTION_TOO_SHORT', polBad.status === 400 && polBad.json.error?.code === 'RETENTION_TOO_SHORT', `${polBad.status} ${polBad.json.error?.code}`);
+  // 3. Enable a 36-month policy; dry-run reports the aged member as a candidate without touching it.
+  const polOk = await inj('PUT', '/api/pdpa/retention', dpo1, { subject_type: 'member', retain_months: 36, enabled: true });
+  ok('PDPA-04: policy saved (member, 36 months, enabled)', polOk.json.retain_months === 36 && polOk.json.enabled === true, JSON.stringify(polOk.json));
+  const dry = await inj('POST', '/api/pdpa/retention/sweep', dpo1, { dry_run: true });
+  const dryT1 = (dry.json.results ?? [])[0];
+  const oldStillThere: any = (await pg.query(`select name from pos_members where member_code = 'M-OLD1'`)).rows[0];
+  ok('PDPA-04: dry-run lists the aged member as a candidate and redacts NOTHING', dry.json.dry_run === true && dryT1?.candidates === 1 && (dryT1?.sample ?? []).includes('M-OLD1') && oldStillThere.name === 'Wichai Kao', JSON.stringify({ dry: dryT1, name: oldStillThere.name }));
+  // 4. Real run: the aged member is anonymized via the erasure path; the recent member is untouched.
+  const sweep1 = await inj('POST', '/api/pdpa/retention/sweep', dpo1, {});
+  const oldAfter: any = (await pg.query(`select name, phone, email, active from pos_members where member_code = 'M-OLD1'`)).rows[0];
+  const newAfter: any = (await pg.query(`select name, phone from pos_members where member_code = 'M-NEW1'`)).rows[0];
+  const ledgerRow: any = (await pg.query(`select pseudonym, dsar_id, erased_by from pdpa_erasures where subject_id = ${Number(oldM.id)}`)).rows[0];
+  ok('PDPA-04: sweep anonymizes the aged member (name=[erased], identifiers null, deactivated)', sweep1.json.swept_total === 1 && oldAfter.name === '[erased]' && oldAfter.phone == null && oldAfter.email == null && oldAfter.active === false, JSON.stringify({ swept: sweep1.json.swept_total, old: oldAfter }));
+  ok('PDPA-04: an erasure-ledger row is recorded (pseudonym, no DSAR, swept by the job)', !!ledgerRow && /^PDPA-ERASED-/.test(ledgerRow.pseudonym) && ledgerRow.dsar_id == null, JSON.stringify(ledgerRow));
+  ok('PDPA-04: the recently-active member is untouched', newAfter.name === 'Malee Mai' && newAfter.phone === '0810008888', JSON.stringify(newAfter));
+  // 5. Idempotent: a re-run sweeps nothing (the redacted member is no longer a candidate).
+  const sweep2 = await inj('POST', '/api/pdpa/retention/sweep', dpo1, {});
+  ok('PDPA-04: re-run sweeps 0 (idempotent — [erased] members are never candidates)', sweep2.json.swept_total === 0, JSON.stringify(sweep2.json));
+
   await app.close();
   console.log('\n── Step 8 — PDPA (DSAR + erasure + audit pseudonymisation) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

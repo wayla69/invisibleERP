@@ -40,6 +40,7 @@ import { JobQueueService } from '../jobs/job-queue.service';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
 import { BiLiveService } from './bi-live.service';
 import { BillingService } from '../billing/billing.service';
+import { PdpaService } from '../pdpa/pdpa.service';
 import { GovernanceService } from '../governance/governance.service';
 import { TaxJobsService } from '../tax/tax-jobs.service';
 import { captureOpsAlert } from '../../observability/instrumentation';
@@ -123,6 +124,7 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   // Stripe invoice item (idempotent per tenant+month). Connects the AI-COGS meter to actual collection.
   ai_overage_billing: { label: 'เรียกเก็บค่า AI ส่วนเกิน (รายเดือน)', labelEn: 'Bill AI usage overage (monthly)' },
   usage_overage_billing: { label: 'เรียกเก็บค่าใช้งานส่วนเกิน (e-Tax/POS รายเดือน)', labelEn: 'Bill usage overage (e-Tax/POS, monthly)' },
+  pii_retention_sweep: { label: 'ลบล้างข้อมูลส่วนบุคคลที่พ้นระยะเก็บรักษา (PDPA)', labelEn: 'Anonymize PII past retention (PDPA)' },
   // Action job (daily/weekly): each run pushes the tenant's member snapshot (identity + RFM + consent) to an
   // external CDP webhook in batches — idempotent (a full snapshot keyed by member_code) and consent-aware.
   cdp_export_sync: { label: 'ซิงก์ข้อมูลลูกค้าไป CDP', labelEn: 'Sync customer data to CDP' },
@@ -193,6 +195,9 @@ export class BiService implements OnModuleInit {
     // Monthly AI-overage billing action job (Wave 1). Optional so a partial harness still constructs; the
     // full app provides BillingModule, enabling the scheduled ai_overage_billing job.
     @Optional() private readonly billing?: BillingService,
+    // PII retention sweep (PDPA-04) — opt-in anonymization of aged loyalty-member PII. Optional so a
+    // partial harness still constructs; the full app provides PdpaModule.
+    @Optional() private readonly pdpa?: PdpaService,
     // full app provides GovernanceModule, enabling the scheduled governance_readiness reminder job.
     @Optional() private readonly governance?: GovernanceService,
     // Scheduled tax automation (docs/33 PR4). Optional so a partial harness still constructs; the full app
@@ -895,6 +900,12 @@ export class BiService implements OnModuleInit {
       if (!this.billing) throw new BadRequestException({ code: 'BILLING_UNAVAILABLE', message: 'Billing service not available', messageTh: 'ระบบเรียกเก็บเงินไม่พร้อมใช้งาน' });
       const r = await this.billing.runUsageOverageBilling(user, filters?.month); // idempotent per (tenant, meter, month)
       return { data: r, summary: `Usage overage billing ${r.month}: charged ${r.processed_count} meter-tenant(s), total ${r.total_amount} THB`, summaryTh: `เรียกเก็บค่าใช้งานส่วนเกิน ${r.month}: ${r.processed_count} รายการ รวม ${r.total_amount} บาท` };
+    }
+    if (reportType === 'pii_retention_sweep') {
+      if (!this.pdpa) throw new BadRequestException({ code: 'PDPA_UNAVAILABLE', message: 'PDPA service not available', messageTh: 'ระบบ PDPA ไม่พร้อมใช้งาน' });
+      // Opt-in per tenant (pdpa_retention_policies, enabled=true); idempotent — an already-anonymized member is never a candidate.
+      const r = await this.pdpa.runRetentionSweep(user);
+      return { data: r, summary: `PII retention sweep: ${r.swept_total} member(s) anonymized across ${r.policies} enabled polic(ies)`, summaryTh: `ลบล้างข้อมูลส่วนบุคคลพ้นระยะเก็บรักษา: ${r.swept_total} ราย จาก ${r.policies} นโยบายที่เปิดใช้` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }

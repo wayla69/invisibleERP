@@ -49,6 +49,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-035 | PDPA DSAR is tenant-isolated | PDPA-01 / ITGC-AC-03 | 08 §7, §9 |
 | UAT-SEC-055 | RoPA — create a processing activity with a validated legal basis | PDPA-03 | 08 §7 (8b), §9 (19a) |
 | UAT-SEC-056 | RoPA — update/retire + active filter + RLS isolation | PDPA-03 | 08 §7 (8b), §9 (19a) |
+| UAT-SEC-057 | PII retention sweep — default-off, 12-month floor, dry-run non-destructive | PDPA-04 | 08 §7 (8c), §9 (19b) |
+| UAT-SEC-058 | PII retention sweep — anonymizes aged members only, ledger row, idempotent, scheduled opt-in | PDPA-04 | 08 §7 (8c), §9 (19b) |
 | UAT-SEC-036 | Cashier PIN quick-login succeeds | ITGC-AC-17 | 08 §7, §9 |
 | UAT-SEC-037 | PosSupervisor PIN login + open shift (no duplicate) | ITGC-AC-17 / R08 | 08 §7, §9 |
 | UAT-SEC-038 | Self set/rotate own PIN (current-password step-up) | ITGC-AC-17 | 08 §7 |

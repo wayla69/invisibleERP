@@ -472,6 +472,27 @@ auditor will ask to see. Maintain one entry per processing activity:
 > Like DSARs, the RoPA register is **tenant-isolated** — you only see your own company's activities. An
 > invalid legal basis is rejected so every entry is complete and consistent.
 
+### Automatic retention (anonymize inactive members) — opt-in
+
+**API:** `/api/pdpa/retention` · **Required permission:** `users` (DPO / access-admin) · **Off by default**
+
+PDPA's data-minimization principle says you shouldn't keep personal data longer than needed. If you want the
+system to enforce that automatically for **loyalty members**:
+
+1. **Set a policy** (`PUT /api/pdpa/retention`): how many months of **inactivity** before a member's personal
+   details are anonymized (minimum **12 months** — a shorter window is rejected so a typo can't mass-anonymize),
+   and switch it **on**. With no policy (or switched off) nothing is ever swept.
+2. **Preview first** — run the sweep with **dry-run** (`POST /api/pdpa/retention/sweep` `{dry_run: true}`) to
+   see which members would be affected without touching anything.
+3. **Run or schedule it** — run on demand, or schedule the **"ลบล้างข้อมูลส่วนบุคคลที่พ้นระยะเก็บรักษา (PDPA)"**
+   report type monthly from the BI scheduler. Anonymization works exactly like a PDPA erasure request:
+   details are redacted, consents withdrawn, receipt photos deleted, and the audit trail masks the person from
+   then on — while their purchase/points history stays for the accounts.
+
+> A member is "inactive" from their **last points activity** (or last profile update). Already-anonymized
+> members are skipped, so re-running is safe. Each run handles up to 500 members per policy and continues on
+> the next run.
+
 ---
 
 ## 12. Webhooks (push events to other systems)
