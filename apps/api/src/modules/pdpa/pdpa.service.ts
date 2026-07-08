@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { dsarRequests, pdpaErasures, ropaActivities, posMembers, memberConsents, loyaltyReceiptSubmissions, employees, payslips } from '../../database/schema';
+import { dsarRequests, pdpaErasures, ropaActivities, pdpaRetentionPolicies, posMembers, memberConsents, loyaltyReceiptSubmissions, employees, payslips } from '../../database/schema';
 import { posMemberLedger } from '../../database/schema/loyalty-members';
 import { objectUrl, deleteObject } from '../../common/object-storage';
 import type { JwtUser } from '../../common/decorators';
@@ -108,6 +108,66 @@ export class PdpaService {
     if (dto.active !== undefined) patch.active = dto.active;
     await db.update(ropaActivities).set(patch).where(eq(ropaActivities.id, id));
     return this.getRopa(id, user);
+  }
+
+  // ───────────────────── PII retention sweep (PDPA-04) — opt-in, default-OFF ─────────────────────
+  // Automates the docs/ops/data-retention-policy.md schedule for loyalty-member PII: a tenant's DPO sets an
+  // inactivity window (retain_months, floor 12); the sweep anonymizes members whose latest activity (points
+  // ledger, else last_updated, else enrolled_at) is older, via the SAME redaction path as DSAR erasure
+  // (redactMember) — so the audit trail is pseudonymised at read time, never mutated, and statutory
+  // transactional facts (points ledger, balances) are kept. No policy / enabled=false ⇒ nothing is swept.
+  private shapeRetention(r: any) {
+    return { id: Number(r.id), subject_type: r.subjectType, retain_months: Number(r.retainMonths), enabled: r.enabled, updated_by: r.updatedBy, updated_at: r.updatedAt };
+  }
+  async getRetentionPolicies(_user: JwtUser) {
+    const rows = await this.db.select().from(pdpaRetentionPolicies).orderBy(desc(pdpaRetentionPolicies.id));
+    return { policies: rows.map((r: any) => this.shapeRetention(r)), count: rows.length };
+  }
+  async setRetentionPolicy(dto: { subject_type: string; retain_months: number; enabled: boolean }, user: JwtUser) {
+    const db = this.db;
+    if (dto.subject_type !== 'member') throw new BadRequestException({ code: 'UNSUPPORTED_SUBJECT', message: 'Automated retention currently covers loyalty members only', messageTh: 'รองรับเฉพาะสมาชิกสะสมแต้ม' });
+    if (!Number.isInteger(dto.retain_months) || dto.retain_months < 12) throw new BadRequestException({ code: 'RETENTION_TOO_SHORT', message: 'retain_months must be an integer ≥ 12 (guard against accidental mass-anonymization)', messageTh: 'ระยะเก็บรักษาต้องไม่น้อยกว่า 12 เดือน' });
+    // Manual upsert (not ON CONFLICT): the UNIQUE includes tenant_id, and NULL tenant_ids don't conflict in PG.
+    const tenantPred = user.tenantId != null ? eq(pdpaRetentionPolicies.tenantId, user.tenantId) : isNull(pdpaRetentionPolicies.tenantId);
+    const [existing] = await db.select().from(pdpaRetentionPolicies).where(and(tenantPred, eq(pdpaRetentionPolicies.subjectType, dto.subject_type))).limit(1);
+    if (existing) {
+      await db.update(pdpaRetentionPolicies).set({ retainMonths: dto.retain_months, enabled: dto.enabled, updatedBy: user.username, updatedAt: new Date() }).where(eq(pdpaRetentionPolicies.id, existing.id));
+      return this.shapeRetention({ ...existing, retainMonths: dto.retain_months, enabled: dto.enabled, updatedBy: user.username });
+    }
+    const [row] = await db.insert(pdpaRetentionPolicies).values({ tenantId: user.tenantId ?? null, subjectType: dto.subject_type, retainMonths: dto.retain_months, enabled: dto.enabled, updatedBy: user.username }).returning();
+    return this.shapeRetention(row);
+  }
+  // Run the sweep across every ENABLED policy visible to the caller (a tenant DPO sweeps only its own tenant
+  // by RLS; the BI scheduler's bypass user sweeps every opted-in tenant). Idempotent — an already-redacted
+  // member (name='[erased]') is never a candidate. Bounded to 500 members per policy per run (the next run
+  // continues). dry_run reports the candidates without touching anything.
+  async runRetentionSweep(user: JwtUser, dryRun = false) {
+    const db = this.db;
+    const policies = await db.select().from(pdpaRetentionPolicies).where(eq(pdpaRetentionPolicies.enabled, true));
+    const results: any[] = [];
+    let sweptTotal = 0;
+    for (const p of policies) {
+      const tenantPred = p.tenantId != null ? eq(posMembers.tenantId, p.tenantId) : isNull(posMembers.tenantId);
+      // Latest activity: newest points-ledger txn, else the member row's last_updated, else enrolled_at.
+      // All-NULL activity ⇒ the comparison is NULL ⇒ NOT swept (fail-safe: never sweep on missing data).
+      const candidates = await db.select().from(posMembers).where(and(
+        tenantPred,
+        sql`${posMembers.name} IS DISTINCT FROM '[erased]'`,
+        sql`COALESCE((SELECT max(${posMemberLedger.txnDate}) FROM ${posMemberLedger} WHERE ${posMemberLedger.memberId} = ${posMembers.id}), ${posMembers.lastUpdated}, ${posMembers.enrolledAt}) < (now() - make_interval(months => ${p.retainMonths}))`,
+      )).limit(500);
+      if (dryRun) {
+        results.push({ tenant_id: p.tenantId, subject_type: p.subjectType, retain_months: Number(p.retainMonths), candidates: candidates.length, sample: candidates.slice(0, 10).map((m: any) => m.memberCode) });
+        continue;
+      }
+      const swept: string[] = [];
+      for (const m of candidates) {
+        await this.redactMember(m, { dsarId: null, erasedBy: user.username ?? 'system:retention', tenantId: m.tenantId ?? p.tenantId ?? null });
+        swept.push(m.memberCode);
+      }
+      sweptTotal += swept.length;
+      results.push({ tenant_id: p.tenantId, subject_type: p.subjectType, retain_months: Number(p.retainMonths), swept: swept.length, member_codes: swept.slice(0, 50) });
+    }
+    return { dry_run: dryRun, policies: policies.length, swept_total: dryRun ? 0 : sweptTotal, results };
   }
 
   async listDsar(status: string | undefined, user: JwtUser) {
@@ -220,6 +280,18 @@ export class PdpaService {
     const m = await this.resolveMember(r.subjectRef);
     if (!m) throw new NotFoundException({ code: 'SUBJECT_NOT_FOUND', message: 'Subject not found', messageTh: 'ไม่พบเจ้าของข้อมูล' });
 
+    const pseudonym = await this.redactMember(m, { dsarId: id, erasedBy: user.username, tenantId: user.tenantId ?? null });
+    // 4. Close the DSAR.
+    await db.update(dsarRequests).set({ status: 'completed', handledBy: user.username, completedAt: new Date(), result: { erased: true, pseudonym, fields_redacted: ['name', 'phone', 'email', 'card_no', 'line_user_id', 'line_display_name', 'birthday', 'receipt_image', 'receipt_store_name', 'receipt_note'] } }).where(eq(dsarRequests.id, id));
+
+    return { id, status: 'completed', erased: true, pseudonym };
+  }
+
+  // The member-redaction core, shared by DSAR erasure (dsarId set) and the retention sweep (dsarId null).
+  // Byte-for-byte the same steps the DSAR path always did: redact the operational record, withdraw consents,
+  // redact receipt submissions (+ delete offloaded photo objects), record the pseudonym ledger row.
+  private async redactMember(m: any, opts: { dsarId: number | null; erasedBy: string; tenantId: number | null }) {
+    const db = this.db;
     // The PII strings to scrub from any audit-trail rendering (keep only non-empty).
     const erasedValues = [m.name, m.phone, m.email, m.lineUserId, m.lineDisplayName, m.cardNo].filter((v: any) => !!v && String(v).trim());
     const pseudonym = `PDPA-ERASED-${Number(m.id)}`;
@@ -242,13 +314,10 @@ export class PdpaService {
     await db.update(loyaltyReceiptSubmissions).set({ receiptImage: '[erased]', storeName: null, note: null }).where(eq(loyaltyReceiptSubmissions.memberId, Number(m.id)));
     // 3. Record the erasure ledger row (drives audit pseudonymisation).
     await db.insert(pdpaErasures).values({
-      tenantId: user.tenantId ?? null, subjectType: 'member', subjectId: Number(m.id),
-      pseudonym, erasedValues, dsarId: id, erasedBy: user.username,
+      tenantId: opts.tenantId, subjectType: 'member', subjectId: Number(m.id),
+      pseudonym, erasedValues, dsarId: opts.dsarId, erasedBy: opts.erasedBy,
     });
-    // 4. Close the DSAR.
-    await db.update(dsarRequests).set({ status: 'completed', handledBy: user.username, completedAt: new Date(), result: { erased: true, pseudonym, fields_redacted: ['name', 'phone', 'email', 'card_no', 'line_user_id', 'line_display_name', 'birthday', 'receipt_image', 'receipt_store_name', 'receipt_note'] } }).where(eq(dsarRequests.id, id));
-
-    return { id, status: 'completed', erased: true, pseudonym };
+    return pseudonym;
   }
 
   // Employee erasure (AUD-LGL-03): redact the master-record identifiers; PAYSLIPS AND PAYRUNS ARE KEPT —

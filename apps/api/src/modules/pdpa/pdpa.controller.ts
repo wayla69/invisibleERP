@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Body, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -20,6 +20,8 @@ const RopaBody = z.object({
   retention_period: z.string().nullable().optional(), cross_border: z.string().nullable().optional(), security_measures: z.string().nullable().optional(),
 });
 const RopaPatchBody = RopaBody.partial().extend({ active: z.boolean().optional() });
+const RetentionBody = z.object({ subject_type: z.literal('member'), retain_months: z.number().int().positive(), enabled: z.boolean() });
+const SweepBody = z.object({ dry_run: z.boolean().optional() });
 
 // PDPA (Thailand) data-protection-officer console. Gated by `users` — the same access-administration /
 // audit-review duty that owns the access review and audit viewer (a DPO/AccessAdmin function), so no new
@@ -65,4 +67,14 @@ export class PdpaController {
 
   @Post('ropa/:id')
   updateRopa(@Param('id') id: string, @Body(new ZodValidationPipe(RopaPatchBody)) b: z.infer<typeof RopaPatchBody>, @CurrentUser() u: JwtUser) { return this.pdpa.updateRopa(+id, b, u); }
+
+  // ── PII retention (PDPA-04) — opt-in per-tenant policy + the sweep (also schedulable via BI `pii_retention_sweep`) ──
+  @Get('retention')
+  retention(@CurrentUser() u: JwtUser) { return this.pdpa.getRetentionPolicies(u); }
+
+  @Put('retention')
+  setRetention(@Body(new ZodValidationPipe(RetentionBody)) b: z.infer<typeof RetentionBody>, @CurrentUser() u: JwtUser) { return this.pdpa.setRetentionPolicy(b, u); }
+
+  @Post('retention/sweep')
+  sweep(@Body(new ZodValidationPipe(SweepBody)) b: z.infer<typeof SweepBody>, @CurrentUser() u: JwtUser) { return this.pdpa.runRetentionSweep(u, b?.dry_run === true); }
 }
