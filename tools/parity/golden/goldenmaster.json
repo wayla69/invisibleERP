@@ -342,14 +342,48 @@
       "gr_no": "GR-<STAMP>",
       "lines": 1,
       "po_no": "PO-<STAMP>",
-      "po_status": "Closed"
+      "po_status": "Closed",
+      "summary": {
+        "claim_deadline": "<TS>",
+        "claim_window_hours": 24,
+        "lines": [
+          {
+            "is_weight": false,
+            "item_description": null,
+            "item_id": "GMX",
+            "order_qty": 10,
+            "over_qty": 0,
+            "received_now": 10,
+            "received_total": 10,
+            "shortage_qty": 0,
+            "uom": null
+          }
+        ]
+      }
     },
     "gr_partial_keeps_received": {
       "costed": false,
       "gr_no": "GR-<STAMP>",
       "lines": 1,
       "po_no": "PO-<STAMP>",
-      "po_status": "Received"
+      "po_status": "Received",
+      "summary": {
+        "claim_deadline": "<TS>",
+        "claim_window_hours": 24,
+        "lines": [
+          {
+            "is_weight": false,
+            "item_description": null,
+            "item_id": "GMX",
+            "order_qty": 10,
+            "over_qty": 0,
+            "received_now": 4,
+            "received_total": 4,
+            "shortage_qty": 6,
+            "uom": null
+          }
+        ]
+      }
     },
     "po_create": {
       "po_no": "PO-<STAMP>",

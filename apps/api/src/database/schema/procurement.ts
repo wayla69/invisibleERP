@@ -262,6 +262,9 @@ export const goodsReceipts = pgTable('goods_receipts', {
   fxRate: numeric('fx_rate', { precision: 14, scale: 6 }).notNull().default('1.000000'),
   // Project dimension (M0, docs/32) — inherited from the PO so a receipt carries its project. Nullable.
   projectId: bigint('project_id', { mode: 'number' }),
+  // Precise receipt timestamp (0288) — anchors the supplier-claim window (EXP-12): a claim must be opened
+  // within receiving_settings.claim_window_hours of this moment. gr_date alone is business-day-grained.
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byPo: index('idx_gr_pono').on(t.poNo) }));
 
 export const grItems = pgTable('gr_items', {
@@ -325,4 +328,18 @@ export const grClaims = pgTable('gr_claims', {
   resolvedBy: text('resolved_by'),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   remarks: text('remarks'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(), // 0288 — claim audit trail
 });
+
+// Per-tenant receiving tolerances (0288, EXP-12): over_receipt_weight_pct — a weight-UoM PO line may
+// over-receive up to this % of the ordered qty (default 5; every other UoM is hard-capped at ordered);
+// claim_window_hours — a supplier claim must be opened within this many hours of the GR (default 24).
+// One row per tenant (NULL tenant = single-company default), mirroring match_tolerance.
+export const receivingSettings = pgTable('receiving_settings', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  overReceiptWeightPct: numeric('over_receipt_weight_pct', { precision: 6, scale: 3 }).notNull().default('5'),
+  claimWindowHours: integer('claim_window_hours').notNull().default(24),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byTenant: index('idx_receiving_settings_tenant').on(t.tenantId) }));

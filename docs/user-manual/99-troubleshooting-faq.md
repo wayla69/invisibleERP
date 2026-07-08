@@ -70,6 +70,9 @@ your code below.
 | `INTAKE_AMOUNT_REQUIRED` | The scan didn't yield an invoice amount, so the bill can't be booked. | Re-scan or correct the document text, then post again. For an uploaded photo with AI not configured, map the PO manually and re-key the fields via the text box. |
 | `UNSUPPORTED_FILE_TYPE` | The uploaded invoice file isn't a supported type. | Upload a PNG/JPEG/WebP image or a PDF. |
 | `FILE_TOO_LARGE` | The uploaded invoice file exceeds the size cap (≈5 MB image / ≈9 MB PDF). | Re-export the scan at a lower resolution or split the PDF. |
+| `OVER_RECEIPT` (422) | You keyed a received quantity beyond what the PO ordered (weight items kg/g/ตัน get up to 5% headroom; everything else is capped at the ordered qty). | Recount and key the actual quantity. If the supplier genuinely delivered more, Procurement must amend/raise a PO for the excess first. See [Procurement — Receive goods](./03-procurement.md). |
+| `CLAIM_WINDOW_CLOSED` (422) | You tried to open a goods-receipt claim more than 24 hours (configurable) after the receipt — the claim window auto-closed. | The system will no longer take the claim; pursue it with the supplier commercially. Going forward, check deliveries and claim from the receiving summary on the spot. |
+| `PO_LINE_CLOSED` (422) | You tried to receive against a PO line that was **closed short** (the shortage decision at the dock). | The close is binding — a new delivery needs a new PO. |
 
 ### Finance & General Ledger
 

@@ -746,6 +746,10 @@ export class ProcurementService {
   async createGr(dto: CreateGrDto, user: JwtUser) { return this.grn.createGr(dto, user); }
   async receiveAllRemaining(poNo: string, user: JwtUser) { return this.grn.receiveAllRemaining(poNo, user); }
   async receiveItem(poNo: string, itemId: string, qty: number, user: JwtUser) { return this.grn.receiveItem(poNo, itemId, qty, user); }
+  async receiveLines(poNo: string, user: JwtUser) { return this.grn.receiveLines(poNo, user); }
+  async closePoShort(poNo: string, reason: string | undefined, user: JwtUser) { return this.grn.closePoShort(poNo, reason, user); }
+  async getReceivingSettings(user: JwtUser) { const s = await this.grn.getReceivingSettings(user.tenantId ?? null); return { over_receipt_weight_pct: s.overReceiptWeightPct, claim_window_hours: s.claimWindowHours }; }
+  async setReceivingSettings(dto: { over_receipt_weight_pct?: number; claim_window_hours?: number }, user: JwtUser) { return this.grn.setReceivingSettings(dto, user); }
 
   // Used by the admin endpoint to bulk-populate images for items without them.
   async populateItemImages(itemIds?: string[]) {
