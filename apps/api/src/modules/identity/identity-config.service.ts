@@ -59,6 +59,15 @@ export class IdentityConfigService {
     if (dto.oidc_redirect_uri && !/^https?:\/\//.test(dto.oidc_redirect_uri)) {
       throw new BadRequestException({ code: 'BAD_REDIRECT_URI', message: 'redirect_uri must be http(s)', messageTh: 'redirect_uri ต้องเป็น http(s)' });
     }
+    // SSRF (security review M-2): the server exchanges the auth code at `${oidc_issuer}/token` (sso.service
+    // exchangeCode). Require a well-formed https issuer at write time (cheap, DNS-free — no false failures on
+    // an offline/test host); the actual outbound-destination SSRF guard (assertPublicUrl: re-resolves DNS and
+    // blocks internal/metadata/RFC1918 targets) runs at send time in exchangeCode.
+    if (dto.oidc_issuer) {
+      let okIssuer = false;
+      try { okIssuer = new URL(dto.oidc_issuer).protocol === 'https:'; } catch { okIssuer = false; }
+      if (!okIssuer) throw new BadRequestException({ code: 'BAD_ISSUER', message: 'oidc_issuer must be a valid https:// URL', messageTh: 'oidc_issuer ต้องเป็น URL แบบ https ที่ถูกต้อง' });
+    }
     const db = this.db;
     const existing = await this.row(user.tenantId);
     const set: any = { updatedBy: user.username, updatedAt: new Date() };

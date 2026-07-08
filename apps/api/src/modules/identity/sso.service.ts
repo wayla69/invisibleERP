@@ -6,6 +6,7 @@ import { resolvePermissions, type Role } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { tenants, tenantIdentity, users, ssoLoginState } from '../../database/schema';
 import { decrypt } from '../../common/crypto';
+import { assertPublicUrl } from '../../common/net-guard';
 import { normalizeUsername } from '../../common/username';
 import { PasswordService } from '../auth/password.service';
 import { verifyHs256, type IdTokenClaims } from './jwt-hs256';
@@ -152,9 +153,14 @@ export class SsoService {
       client_id: cfg.oidcClientId ?? '', client_secret: secret,
       ...(codeVerifier ? { code_verifier: codeVerifier } : {}), // PKCE
     });
+    // SSRF guard (security review M-2): the issuer is tenant-admin-configured, so re-resolve its host and
+    // refuse any internal/metadata/RFC1918/loopback destination immediately BEFORE the outbound POST. Runs
+    // here (not inside the try) so a blocked target surfaces as SSRF_BLOCKED (400), not IDP_UNREACHABLE.
+    const tokenUrl = `${String(cfg.oidcIssuer ?? '').replace(/\/$/, '')}/token`;
+    await assertPublicUrl(tokenUrl, { allowHttp: false });
     let res: Response;
     try {
-      res = await fetch(`${String(cfg.oidcIssuer).replace(/\/$/, '')}/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
+      res = await fetch(tokenUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
     } catch {
       throw new ServiceUnavailableException({ code: 'IDP_UNREACHABLE', message: 'Could not reach the IdP token endpoint', messageTh: 'ติดต่อ IdP ไม่ได้' });
     }
