@@ -18,8 +18,8 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const reqStatusVariant = (s: string) => (s === 'Approved' ? 'success' : s === 'Rejected' ? 'destructive' : s === 'Settled' ? 'secondary' : 'warning');
 const REQ_STATUS_KEY: Record<string, string> = { PendingApproval: 'fin.pending', Approved: 'fin.approved', Rejected: 'fnx.petty.status_rejected', Settled: 'fnx.petty.status_settled' };
 
@@ -121,16 +121,16 @@ function RequestsTab() {
         <h3 className="text-base font-semibold">{t('fnx.petty.request_title')}</h3>
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="grid gap-1.5"><Label>{t('fnx.petty.f_fund')}</Label>
-            <select className={selectCls} value={fundCode} onChange={(e) => setFundCode(e.target.value)}>
+            <Select value={fundCode} onChange={(e) => setFundCode(e.target.value)}>
               <option value="">{t('fnx.petty.f_fund_select')}</option>
               {fundList.map((f: any) => <option key={f.fund_code} value={f.fund_code}>{t('fnx.petty.fund_option', { code: f.fund_code, balance: baht(f.balance) })}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="grid gap-1.5"><Label>{t('fnx.petty.f_kind')}</Label>
-            <select className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
+            <Select value={kind} onChange={(e) => setKind(e.target.value)}>
               <option value="expense">{t('fnx.petty.kind_expense_opt')}</option>
               <option value="advance">{t('fnx.petty.kind_advance_opt')}</option>
-            </select>
+            </Select>
           </div>
           <div className="grid gap-1.5"><Label>{t('fnx.petty.f_amount')}</Label><Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
           <div className="grid gap-1.5"><Label>{t('fnx.petty.f_payee')}</Label><Input value={payee} onChange={(e) => setPayee(e.target.value)} placeholder={t('fnx.petty.f_payee_ph')} /></div>

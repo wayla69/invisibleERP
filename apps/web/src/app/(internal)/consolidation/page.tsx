@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { useLang } from '@/lib/i18n';
+import { Select } from '@/components/form-controls';
 
 const currentPeriod = () => new Date().toISOString().slice(0, 7);
 
@@ -158,9 +159,7 @@ function RunsTab() {
     onError: (e: Error) => notifyError(e.message),
   });
 
-  const selectCls =
-    'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
-
+  
   return (
     <div className="space-y-5">
       <Card className="max-w-2xl gap-4">
@@ -171,9 +170,9 @@ function RunsTab() {
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-2">
               <Label htmlFor="consol-group">{t('fnx.consol.field_group')}</Label>
-              <select
+              <Select
                 id="consol-group"
-                className={selectCls}
+                className="w-auto"
                 value={gid ?? ''}
                 onChange={(e) => setGroupId(Number(e.target.value))}
               >
@@ -184,7 +183,7 @@ function RunsTab() {
                 ) : (
                   <option value="">{t('fnx.consol.opt_no_group')}</option>
                 )}
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="consol-period">{t('fnx.consol.field_period')}</Label>

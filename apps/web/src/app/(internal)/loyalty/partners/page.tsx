@@ -14,8 +14,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 interface Priv { id: number; name: string; kind: string; value: number; tier_min: number | null; stock: number | null; per_member_limit: number | null; active: boolean }
 interface Partner { id: number; partner_code: string; name: string; category: string | null; active: boolean; privileges: Priv[] }
 
@@ -53,17 +53,17 @@ export default function PartnersPage() {
             <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Handshake className="size-4" /> {t('ly.pt_add_partner')}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-1.5"><Label>{t('ly.pt_partner_name')}</Label><Input value={pName} onChange={(e) => setPName(e.target.value)} placeholder={t('ly.pt_partner_name_ph')} /></div>
-              <div className="grid gap-1.5"><Label>{t('ly.pt_category')}</Label><select className={selectCls} value={pCat} onChange={(e) => setPCat(e.target.value)}><option value="dining">{t('ly.pt_cat_dining')}</option><option value="retail">{t('ly.pt_cat_retail')}</option><option value="travel">{t('ly.pt_cat_travel')}</option><option value="wellness">{t('ly.pt_cat_wellness')}</option></select></div>
+              <div className="grid gap-1.5"><Label>{t('ly.pt_category')}</Label><Select className="w-auto" value={pCat} onChange={(e) => setPCat(e.target.value)}><option value="dining">{t('ly.pt_cat_dining')}</option><option value="retail">{t('ly.pt_cat_retail')}</option><option value="travel">{t('ly.pt_cat_travel')}</option><option value="wellness">{t('ly.pt_cat_wellness')}</option></Select></div>
               <Button onClick={() => { setMsg(''); addPartner.mutate(); }} disabled={!pName.trim() || addPartner.isPending}>{t('ly.pt_add_partner')}</Button>
             </CardContent>
           </Card>
           <Card className="gap-3">
             <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Plus className="size-4" /> {t('ly.pt_add_priv')}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-1.5"><Label>{t('ly.pt_partner')}</Label><select className={selectCls} value={pv.partner_id} onChange={(e) => set({ partner_id: +e.target.value })}><option value={0}>{t('ly.pt_select')}</option>{partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+              <div className="grid gap-1.5"><Label>{t('ly.pt_partner')}</Label><Select className="w-auto" value={pv.partner_id} onChange={(e) => set({ partner_id: +e.target.value })}><option value={0}>{t('ly.pt_select')}</option>{partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="grid gap-1.5 col-span-2"><Label>{t('ly.pt_priv_name')}</Label><Input value={pv.name} onChange={(e) => set({ name: e.target.value })} placeholder={t('ly.pt_priv_name_ph')} /></div>
-                <div className="grid gap-1.5"><Label>{t('ly.pt_kind')}</Label><select className={selectCls} value={pv.kind} onChange={(e) => set({ kind: e.target.value })}><option value="discount_percent">{t('ly.pt_k_disc_pct')}</option><option value="discount_amount">{t('ly.pt_k_disc_amt')}</option><option value="freebie">{t('ly.pt_k_freebie')}</option><option value="access">{t('ly.pt_k_access')}</option></select></div>
+                <div className="grid gap-1.5"><Label>{t('ly.pt_kind')}</Label><Select className="w-auto" value={pv.kind} onChange={(e) => set({ kind: e.target.value })}><option value="discount_percent">{t('ly.pt_k_disc_pct')}</option><option value="discount_amount">{t('ly.pt_k_disc_amt')}</option><option value="freebie">{t('ly.pt_k_freebie')}</option><option value="access">{t('ly.pt_k_access')}</option></Select></div>
                 <div className="grid gap-1.5"><Label>{t('ly.wh_col_value')}</Label><Input type="number" min="0" value={pv.value} onChange={(e) => set({ value: +e.target.value })} /></div>
                 <div className="grid gap-1.5"><Label>{t('ly.pt_tier_min')}</Label><Input type="number" min="0" value={pv.tier_min} onChange={(e) => set({ tier_min: e.target.value })} /></div>
                 <div className="grid gap-1.5"><Label>{t('ly.pt_stock')}</Label><Input type="number" min="0" value={pv.stock} onChange={(e) => set({ stock: e.target.value })} /></div>

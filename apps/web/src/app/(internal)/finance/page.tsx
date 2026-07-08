@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { statusVariant } from '@/components/ui';
 import { TrendAreaChart } from '@/components/charts';
+import { Select } from '@/components/form-controls';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -398,12 +399,12 @@ function PayablesTab() {
               <Field label={t('fin.f_amount_vat')} name="amount" type="number" step="0.01" form={apForm} set={setApForm} />
               <div className="grid gap-2">
                 <Label htmlFor="vat_treatment">{t('fin.f_vat')}</Label>
-                <select id="vat_treatment" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={apForm.vat_treatment} onChange={(e) => setApForm((f: any) => ({ ...f, vat_treatment: e.target.value }))}>
+                <Select id="vat_treatment" value={apForm.vat_treatment} onChange={(e) => setApForm((f: any) => ({ ...f, vat_treatment: e.target.value }))}>
                   <option value="standard">{t('fin.vat_standard')}</option>
                   <option value="exempt">{t('fin.vat_exempt')}</option>
                   <option value="zero">{t('fin.vat_zero')}</option>
                   <option value="reverse_charge">{t('fin.vat_reverse_charge')}</option>
-                </select>
+                </Select>
               </div>
             </div>
             <DialogFooter>
@@ -595,15 +596,15 @@ function CollectionsSection() {
           <div className="grid gap-4">
             <div className="grid gap-2">
               <Label htmlFor="dun-stage">{t('fin.dun_stage')}</Label>
-              <select id="dun-stage" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={form.stage} onChange={(e) => setForm((f: any) => ({ ...f, stage: e.target.value }))}>
+              <Select id="dun-stage" value={form.stage} onChange={(e) => setForm((f: any) => ({ ...f, stage: e.target.value }))}>
                 {DUNNING_STAGES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="dun-channel">{t('fin.dun_channel')}</Label>
-              <select id="dun-channel" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={form.channel} onChange={(e) => setForm((f: any) => ({ ...f, channel: e.target.value }))}>
+              <Select id="dun-channel" value={form.channel} onChange={(e) => setForm((f: any) => ({ ...f, channel: e.target.value }))}>
                 <option value="email">{t('fin.ch_email')}</option><option value="phone">{t('fin.ch_phone')}</option><option value="letter">{t('fin.ch_letter')}</option><option value="sms">{t('fin.ch_sms')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="dun-ptp">{t('fin.dun_ptp')}</Label>

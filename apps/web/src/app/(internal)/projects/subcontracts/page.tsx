@@ -16,8 +16,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring';
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // Subcontractor management (docs/35 P2, PROJ-16). A subcontract reserves BoQ budget; the subcontractor's
@@ -71,10 +71,10 @@ export default function SubcontractsPage() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <div className="grid gap-1.5"><Label>{t('cx.s_f_vendor')}</Label><Input value={f.vendor_name} onChange={(e) => setF({ ...f, vendor_name: e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('cx.s_f_boq')}</Label>
-                <select className={selectCls} value={f.boq_line_id} onChange={(e) => setF({ ...f, boq_line_id: e.target.value })}>
+                <Select value={f.boq_line_id} onChange={(e) => setF({ ...f, boq_line_id: e.target.value })}>
                   <option value="">{t('cx.opt_pick')}</option>
                   {(boq.data?.lines ?? []).map((l: any) => <option key={l.id} value={l.id}>{l.description ?? `#${l.line_no}`} · {baht(l.remaining ?? l.budget_amount)}</option>)}
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('cx.s_f_amount')}</Label><Input type="number" min="0" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('cx.s_f_retention')}</Label><Input type="number" min="0" value={f.retention_pct} onChange={(e) => setF({ ...f, retention_pct: e.target.value })} /></div>

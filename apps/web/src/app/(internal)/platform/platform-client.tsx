@@ -35,6 +35,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { Select } from '@/components/form-controls';
 
 interface Company {
   id: number;
@@ -156,10 +157,10 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                 <div className="flex items-end gap-2">
                   <div className="grid flex-1 gap-1">
                     <Label className="text-xs">{t('plt.drawer_change_plan')}</Label>
-                    <select className="h-9 rounded-md border border-input bg-transparent px-2 text-sm" value={plan} onChange={(e) => setPlan(e.target.value)}>
+                    <Select className="w-auto" value={plan} onChange={(e) => setPlan(e.target.value)}>
                       <option value="">{t('plt.drawer_choose')}</option>
                       {(plans.data?.plans ?? []).map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
-                    </select>
+                    </Select>
                   </div>
                   <Button size="sm" onClick={() => changePlan.mutate()} disabled={!plan || changePlan.isPending}>{t('plt.drawer_change_btn')}</Button>
                 </div>
@@ -444,9 +445,9 @@ export default function PlatformConsole({
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1"><Label>{t('plt.prov_tenant_code')}</Label><Input value={prov.tenant_code} onChange={(e) => setProv({ ...prov, tenant_code: e.target.value })} placeholder="OSHINEI" /></div>
             <div className="grid gap-1"><Label>{t('plt.prov_industry')}</Label>
-              <select className="h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={prov.industry} onChange={(e) => setProv({ ...prov, industry: e.target.value })}>
+              <Select className="w-auto" value={prov.industry} onChange={(e) => setProv({ ...prov, industry: e.target.value })}>
                 {INDUSTRIES.map((i) => <option key={i} value={i}>{i}</option>)}
-              </select>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -514,10 +515,10 @@ export default function PlatformConsole({
             <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/suspend`, { method: 'POST', body: JSON.stringify({}) }), t('plt.bulk_label_suspend'))}><Pause className="size-3.5" /> {t('plt.bulk_suspend')}</Button>
             <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/reactivate`, { method: 'POST', body: JSON.stringify({}) }), t('plt.bulk_label_reactivate'))}><Play className="size-3.5" /> {t('plt.bulk_reactivate')}</Button>
             <Button size="sm" variant="ghost" onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: 14 }) }), t('plt.bulk_label_extend_trial'))}><Clock className="size-3.5" /> {t('plt.bulk_extend_trial14')}</Button>
-            <select className="h-8 rounded-md border border-input bg-transparent px-2" value={bulkPlan} onChange={(e) => setBulkPlan(e.target.value)}>
+            <Select className="w-auto h-8" value={bulkPlan} onChange={(e) => setBulkPlan(e.target.value)}>
               <option value="">{t('plt.bulk_change_plan_ph')}</option>
               {(bulkPlans.data?.plans ?? []).map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
-            </select>
+            </Select>
             <Button size="sm" variant="ghost" disabled={!bulkPlan} onClick={() => runBulk((c) => api(`/api/admin/tenants/${c.id}/plan`, { method: 'POST', body: JSON.stringify({ plan_code: bulkPlan }) }), t('plt.bulk_label_change_plan'))}>{t('plt.bulk_apply')}</Button>
           </div>
           <button type="button" className="ml-auto text-muted-foreground hover:underline" onClick={clearSel}>{t('plt.bulk_clear')}</button>
@@ -575,25 +576,24 @@ export default function PlatformConsole({
     const q = auditText.toLowerCase();
     return `${r.actor ?? ''} ${r.action ?? ''}`.toLowerCase().includes(q);
   });
-  const selectCls = 'h-9 rounded-md border border-input bg-transparent px-2 text-sm';
-
+  
   const activityTab = (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
         <div className="grid gap-1">
           <Label className="text-xs">{t('plt.act_company')}</Label>
-          <select className={selectCls} value={auditCompany} onChange={(e) => setAuditCompany(e.target.value)}>
+          <Select className="w-auto" value={auditCompany} onChange={(e) => setAuditCompany(e.target.value)}>
             <option value="">{t('plt.act_all_companies')}</option>
             {comps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="grid gap-1">
           <Label className="text-xs">{t('plt.act_result')}</Label>
-          <select className={selectCls} value={auditStatus} onChange={(e) => setAuditStatus(e.target.value)}>
+          <Select className="w-auto" value={auditStatus} onChange={(e) => setAuditStatus(e.target.value)}>
             <option value="">{t('plt.act_all')}</option>
             <option value="success">{t('plt.act_success')}</option>
             <option value="fail">{t('plt.act_fail')}</option>
-          </select>
+          </Select>
         </div>
         <div className="grid flex-1 gap-1">
           <Label className="text-xs">{t('plt.act_search_label')}</Label>

@@ -17,8 +17,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface Reward { id: number; reward_code: string; name: string; type: string; point_cost: number; cash_value: number; coupon_kind: string | null; coupon_value: number; stock: number | null; per_member_limit: number | null; tier_min: number | null; active: boolean }
 
@@ -73,16 +73,16 @@ export default function RewardsPage() {
             <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
               <div className="grid gap-1.5 sm:col-span-2"><Label>{t('ly.rw_name')}</Label><Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder={t('ly.rw_name_ph')} required /></div>
               <div className="grid gap-1.5"><Label>{t('ly.col_type')}</Label>
-                <select className={selectCls} value={form.type} onChange={(e) => set({ type: e.target.value })}>
+                <Select className="w-auto" value={form.type} onChange={(e) => set({ type: e.target.value })}>
                   <option value="evoucher">e-Voucher</option><option value="discount">{t('ly.rw_t_discount')}</option><option value="product">{t('ly.rw_t_product')}</option><option value="privilege">{t('ly.rw_t_privilege')}</option>
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('ly.rw_point_cost')}</Label><Input type="number" min="1" value={form.point_cost} onChange={(e) => set({ point_cost: +e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('ly.rw_cash_value')}</Label><Input type="number" min="0" value={form.cash_value} onChange={(e) => set({ cash_value: +e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('ly.rw_coupon_kind')}</Label>
-                <select className={selectCls} value={form.coupon_kind} onChange={(e) => set({ coupon_kind: e.target.value })}>
+                <Select className="w-auto" value={form.coupon_kind} onChange={(e) => set({ coupon_kind: e.target.value })}>
                   <option value="amount">{t('ly.rw_ck_amount')}</option><option value="percent">{t('ly.rw_ck_percent')}</option><option value="free_item">{t('ly.pt_k_freebie')}</option>
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('ly.rw_coupon_value')}</Label><Input type="number" min="0" value={form.coupon_value} onChange={(e) => set({ coupon_value: +e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('ly.rw_stock')}</Label><Input type="number" min="0" value={form.stock} onChange={(e) => set({ stock: e.target.value })} /></div>

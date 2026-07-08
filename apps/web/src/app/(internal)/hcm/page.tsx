@@ -17,8 +17,8 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function HcmPage() {
@@ -66,17 +66,17 @@ function Timesheets() {
         {/* PROJ-04 — allocate to a project & task (optional). Billable project time posts to WIP on approval. */}
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid gap-1.5"><Label>{t('hr.project_optional')}</Label>
-            <select className={`${selectCls} w-56`} value={f.project_code} onChange={(e) => setF({ ...f, project_code: e.target.value, task_id: '' })}>
+            <Select className="w-56"  value={f.project_code} onChange={(e) => setF({ ...f, project_code: e.target.value, task_id: '' })}>
               <option value="">{t('hr.no_project')}</option>
               {(projQ.data?.projects ?? []).map((p: any) => <option key={p.project_code} value={p.project_code}>{p.project_code} · {p.name}</option>)}
-            </select>
+            </Select>
           </div>
           {!!f.project_code && (
             <div className="grid gap-1.5"><Label>{t('hr.task_wbs')}</Label>
-              <select className={`${selectCls} w-56`} value={f.task_id} onChange={(e) => setF({ ...f, task_id: e.target.value })}>
+              <Select className="w-56"  value={f.task_id} onChange={(e) => setF({ ...f, task_id: e.target.value })}>
                 <option value="">{t('hr.whole_project')}</option>
                 {(tasksQ.data?.tasks ?? []).map((tk: any) => <option key={tk.id} value={String(tk.id)}>{tk.name}</option>)}
-              </select>
+              </Select>
             </div>
           )}
           {!!f.project_code && (
@@ -114,11 +114,11 @@ function Leave() {
         <h3 className="text-base font-semibold">{t('hr.leave_request_title')}</h3>
         <div className="flex flex-wrap gap-3">
           <div className="grid gap-1.5"><Label>{t('hr.emp_code')}</Label><Input value={f.emp_code} onChange={(e) => setF({ ...f, emp_code: e.target.value })} className="w-36" /></div>
-          <div className="grid gap-1.5"><Label>{t('hr.type')}</Label><select className={selectCls} value={f.leave_type} onChange={(e) => setF({ ...f, leave_type: e.target.value })}><option value="annual">{t('hr.leave_annual')}</option><option value="sick">{t('hr.leave_sick')}</option><option value="personal">{t('hr.leave_personal')}</option><option value="unpaid">{t('hr.leave_unpaid')}</option></select></div>
+          <div className="grid gap-1.5"><Label>{t('hr.type')}</Label><Select value={f.leave_type} onChange={(e) => setF({ ...f, leave_type: e.target.value })}><option value="annual">{t('hr.leave_annual')}</option><option value="sick">{t('hr.leave_sick')}</option><option value="personal">{t('hr.leave_personal')}</option><option value="unpaid">{t('hr.leave_unpaid')}</option></Select></div>
           <div className="grid gap-1.5"><Label>{t('hr.from')}</Label><Input type="date" value={f.from_date} onChange={(e) => setF({ ...f, from_date: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('hr.to')}</Label><Input type="date" value={f.to_date} onChange={(e) => setF({ ...f, to_date: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('hr.days_count')}</Label><Input type="number" value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} className="w-24" /></div>
-          <div className="grid gap-1.5"><Label>{t('hr.paid_q')}</Label><select className={selectCls} value={f.paid} onChange={(e) => setF({ ...f, paid: e.target.value })}><option value="true">{t('hr.paid')}</option><option value="false">{t('hr.unpaid')}</option></select></div>
+          <div className="grid gap-1.5"><Label>{t('hr.paid_q')}</Label><Select value={f.paid} onChange={(e) => setF({ ...f, paid: e.target.value })}><option value="true">{t('hr.paid')}</option><option value="false">{t('hr.unpaid')}</option></Select></div>
         </div>
         <div className="flex items-center gap-3"><Button onClick={() => req.mutate()} disabled={!f.emp_code || !f.days || req.isPending}><Plane className="size-4" /> {t('hr.leave_submit_btn')}</Button></div>
       </Card>

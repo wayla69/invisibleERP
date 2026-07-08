@@ -19,8 +19,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { useLang } from '@/lib/i18n';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 function Field({ label, htmlFor, hint, className, children }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; className?: string; children: ReactNode }) {
   return (
@@ -72,9 +72,9 @@ function Terminals() {
               <Field label={t('px.payterm_terminal_code')} htmlFor="c-term"><Input id="c-term" placeholder={t('px.payterm_eg_term1')} value={c.terminal_code} onChange={(e) => setC({ ...c, terminal_code: e.target.value })} /></Field>
               <Field label={t('px.payterm_amount_baht')} htmlFor="c-amt"><Input id="c-amt" type="number" inputMode="decimal" placeholder="0" value={c.amount} onChange={(e) => setC({ ...c, amount: e.target.value })} /></Field>
               <Field label={t('px.payterm_type')} htmlFor="c-type">
-                <select id="c-type" className={selectCls} value={c.type} onChange={(e) => setC({ ...c, type: e.target.value })}>
+                <Select id="c-type"  value={c.type} onChange={(e) => setC({ ...c, type: e.target.value })}>
                   <option value="sale">{t('px.payterm_opt_sale')}</option><option value="preauth">{t('px.payterm_opt_preauth')}</option>
-                </select>
+                </Select>
               </Field>
               <Field label={t('px.payterm_sale_no_optional')} htmlFor="c-sale"><Input id="c-sale" placeholder="SALE-…" value={c.sale_no} onChange={(e) => setC({ ...c, sale_no: e.target.value })} /></Field>
             </div>

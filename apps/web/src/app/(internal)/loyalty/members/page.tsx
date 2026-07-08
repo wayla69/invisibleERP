@@ -15,8 +15,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const SEGMENTS = ['', 'Champions', 'Loyal', 'At Risk', 'Lost', 'New'];
 
 interface MemberRow { id: number; member_code: string; name: string | null; phone: string | null; card_no: string | null; tier: string | null; balance: number; lifetime: number; active: boolean; marketing_opt_in: boolean; segment: string | null }
@@ -65,9 +65,9 @@ export default function MembersPage() {
           </div>
           <div className="grid gap-2">
             <label className="text-sm font-medium" htmlFor="m-seg">{t('ly.seg_f_segment')}</label>
-            <select id="m-seg" className={selectCls} value={segment} onChange={(e) => setSegment(e.target.value)}>
+            <Select id="m-seg" className="w-auto" value={segment} onChange={(e) => setSegment(e.target.value)}>
               {SEGMENTS.map((s) => <option key={s} value={s}>{s || t('ly.all')}</option>)}
-            </select>
+            </Select>
           </div>
           <Button type="submit"><Search className="size-4" /> {t('ly.search')}</Button>
         </form>

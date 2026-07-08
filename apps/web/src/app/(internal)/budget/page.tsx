@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
 // ── API contract (apps/api/src/modules/budget — mounted at /api/ledger) ────────
 interface BudgetRow { fiscal_year: number; account_code: string; cost_center_code: string | null; period: string; amount: number; status?: string; requested_by?: string | null }
@@ -29,8 +30,6 @@ interface BvaResp {
 }
 interface Roll { budget: number; actual: number; variance: number; favorable: boolean }
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const thisYear = new Date().getFullYear();
 
 export default function BudgetPage() {
@@ -229,10 +228,10 @@ function SetBudgetTab() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="bg-mode">{t('pb.bud_mode')}</Label>
-              <select id="bg-mode" className={selectCls} value={mode} onChange={(e) => setMode(e.target.value)}>
+              <Select id="bg-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
                 <option value="annual">{t('pb.bud_mode_annual')}</option>
                 <option value="monthly">{t('pb.bud_mode_monthly')}</option>
-              </select>
+              </Select>
             </div>
             {mode === 'monthly' && (
               <div className="grid gap-2">

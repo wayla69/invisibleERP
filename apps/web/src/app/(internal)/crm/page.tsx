@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
 // GET /api/crm/branch-kpi → { date, today: {revenue, orders, avg_order_value, active_members},
 //   by_channel: { [channel]: { count, revenue } }, hourly_revenue: [{ hour, revenue }] }
@@ -122,7 +123,6 @@ function BranchKpi() {
   );
 }
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 // RFM segments computed server-side (crm.service.ts): Champions / Loyal / At Risk / Lost / New.
 const RFM_SEGMENTS = ['Champions', 'Loyal', 'At Risk', 'Lost', 'New'] as const;
@@ -175,21 +175,21 @@ function Messaging() {
           <div className="space-y-3 rounded-lg border p-3">
             <h3 className="text-sm font-semibold">{t('crm.send_to_segment')}</h3>
             <div className="flex flex-wrap gap-2">
-              <select className={selectCls} aria-label={t('crm.audience')} value={audience} onChange={(e) => setAudience(e.target.value)}>
+              <Select className="w-auto" aria-label={t('crm.audience')} value={audience} onChange={(e) => setAudience(e.target.value)}>
                 <option value="birthdays_today">{t('crm.birthdays_today')}</option>
                 <option value="segment">{t('crm.rfm_segment')}</option>
                 <option value="all">{t('crm.all_members')}</option>
-              </select>
+              </Select>
               {audience === 'segment' && (
-                <select className={selectCls} aria-label={t('crm.rfm_segment')} value={segment} onChange={(e) => setSegment(e.target.value)}>
+                <Select className="w-auto" aria-label={t('crm.rfm_segment')} value={segment} onChange={(e) => setSegment(e.target.value)}>
                   {RFM_SEGMENTS.map((s) => <option key={s} value={s}>{t(RFM_SEGMENT_KEYS[s])}</option>)}
-                </select>
+                </Select>
               )}
-              <select className={selectCls} aria-label={t('crm.send_channel')} value={channel} onChange={(e) => setChannel(e.target.value)}>
+              <Select className="w-auto" aria-label={t('crm.send_channel')} value={channel} onChange={(e) => setChannel(e.target.value)}>
                 <option value="sms">SMS</option>
                 <option value="line">LINE</option>
                 <option value="email">Email</option>
-              </select>
+              </Select>
             </div>
             <Input value={body} onChange={(e) => setBody(e.target.value)} aria-label={t('crm.message_to_customer')} placeholder={t('crm.message_placeholder')} />
             <Button disabled={!body.trim() || blast.isPending} onClick={() => blast.mutate()}><Send className="size-4" /> {blast.isPending ? t('crm.sending') : t('crm.send_message')}</Button>

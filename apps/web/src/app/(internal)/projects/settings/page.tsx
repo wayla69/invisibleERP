@@ -17,8 +17,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const today = () => new Date().toISOString().slice(0, 10);
 
 // PMO configuration — rate cards (P2), reusable WBS templates (B2), and cross-project resource utilization.
@@ -115,9 +115,9 @@ function Templates() {
           {items.map((it, i) => (
             <div key={i} className="grid items-end gap-2 rounded-lg border border-border/60 p-3 sm:grid-cols-7">
               <div className="grid gap-1.5"><Label className="text-xs">{t('pj.col_type')}</Label>
-                <select className={selectCls} value={it.item_type} onChange={(e) => setItem(i, { item_type: e.target.value as 'task' | 'milestone' })}>
+                <Select value={it.item_type} onChange={(e) => setItem(i, { item_type: e.target.value as 'task' | 'milestone' })}>
                   <option value="task">{t('pj.opt_task')}</option><option value="milestone">{t('pj.opt_milestone')}</option>
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5 sm:col-span-2"><Label className="text-xs">{t('pj.f_generic_name')}</Label><Input value={it.name} onChange={(e) => setItem(i, { name: e.target.value })} /></div>
               {it.item_type === 'task' ? (

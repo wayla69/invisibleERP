@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Select } from '@/components/form-controls';
 
 type Project = {
   project_code: string; name: string; customer_name: string | null; billing_type: string; status: string;
@@ -26,7 +27,6 @@ type Project = {
   non_billable_cost: number; total_cost: number; billed_pct: number | null; remaining_to_bill: number | null;
   budget_amount: number; budget_variance: number | null; budget_used_pct: number | null; over_budget: boolean;
 };
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function ProjectsPage() {
   const { t } = useLang();
@@ -95,23 +95,23 @@ export default function ProjectsPage() {
           <div className="grid gap-1.5"><Label>{t('pj.f_code')}</Label><Input value={f.project_code} onChange={(e) => setF({ ...f, project_code: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('fin.col_customer')}</Label><Input value={f.customer_name} onChange={(e) => setF({ ...f, customer_name: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('pj.billing_type')}</Label>
-            <select className={selectCls} value={f.billing_type} onChange={(e) => setF({ ...f, billing_type: e.target.value })}>
+            <Select value={f.billing_type} onChange={(e) => setF({ ...f, billing_type: e.target.value })}>
               <option value="TM">{t('pj.bt_tm')}</option>
               <option value="Fixed">{t('pj.bt_fixed')}</option>
-            </select>
+            </Select>
           </div>
           <div className="grid gap-1.5"><Label>{t('pj.f_contract_amount')}</Label><Input type="number" min="0" value={f.contract_amount} onChange={(e) => setF({ ...f, contract_amount: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('pj.f_template')}</Label>
-            <select className={selectCls} value={f.template} onChange={(e) => setF({ ...f, template: e.target.value })}>
+            <Select value={f.template} onChange={(e) => setF({ ...f, template: e.target.value })}>
               <option value="">{t('pj.opt_no_template')}</option>
               {(tplQ.data?.templates ?? []).map((tpl) => <option key={tpl.code} value={tpl.code}>{tpl.name} ({tpl.item_count})</option>)}
-            </select>
+            </Select>
           </div>
           <div className="grid gap-1.5"><Label>{t('pj.f_rev_method')}</Label>
-            <select className={selectCls} value={f.rev_method} onChange={(e) => setF({ ...f, rev_method: e.target.value })}>
+            <Select value={f.rev_method} onChange={(e) => setF({ ...f, rev_method: e.target.value })}>
               <option value="billing">{t('pj.rev_billing')}</option>
               <option value="poc">{t('pj.rev_poc')}</option>
-            </select>
+            </Select>
           </div>
           {f.rev_method === 'poc' && <div className="grid gap-1.5"><Label>{t('pj.f_estimated_cost')}</Label><Input type="number" min="0" value={f.estimated_cost} onChange={(e) => setF({ ...f, estimated_cost: e.target.value })} /></div>}
         </div>
@@ -182,10 +182,10 @@ export default function ProjectsPage() {
           <div className="grid gap-3">
             {dlg?.mode === 'cost' && (
               <div className="grid gap-1.5"><Label>{t('pj.f_type')}</Label>
-                <select className={selectCls} value={ctype} onChange={(e) => setCtype(e.target.value as 'time' | 'expense')}>
+                <Select value={ctype} onChange={(e) => setCtype(e.target.value as 'time' | 'expense')}>
                   <option value="time">{t('pj.type_time')}</option>
                   <option value="expense">{t('pj.type_expense')}</option>
-                </select>
+                </Select>
               </div>
             )}
             <div className="grid gap-1.5"><Label>{dlg?.mode === 'bill' && byPercent ? t('pj.f_percent_of_contract') : t('pj.f_amount')}</Label><Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={dlg?.mode === 'bill' && byPercent ? t('pj.ph_eg_30') : ''} /></div>

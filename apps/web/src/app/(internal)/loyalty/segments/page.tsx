@@ -19,8 +19,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 // Cosmetic labels — keys not in these maps render as-is, so a new server field never breaks the page.
 const FIELD_LABEL_KEYS: Record<string, string> = {
@@ -98,7 +98,7 @@ export default function SavedSegmentsPage() {
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5 sm:col-span-2"><Label>{t('ly.seg_name')}</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('ly.seg_name_ph')} /></div>
-              <div className="grid gap-1.5"><Label>{t('ly.seg_match_label')}</Label><select className={selectCls} value={matchMode} onChange={(e) => setMatchMode(e.target.value)}><option value="all">{t('ly.seg_all_and')}</option><option value="any">{t('ly.seg_any_or')}</option></select></div>
+              <div className="grid gap-1.5"><Label>{t('ly.seg_match_label')}</Label><Select className="w-auto" value={matchMode} onChange={(e) => setMatchMode(e.target.value)}><option value="all">{t('ly.seg_all_and')}</option><option value="any">{t('ly.seg_any_or')}</option></Select></div>
             </div>
             <div className="space-y-2">
               <Label>{t('ly.seg_rules_label')}</Label>
@@ -106,14 +106,14 @@ export default function SavedSegmentsPage() {
                 const kind = kindOf(r.field);
                 return (
                   <div key={i} className="flex flex-wrap items-center gap-2">
-                    <select className={selectCls} value={r.field} onChange={(e) => setRule(i, { field: e.target.value })} aria-label={t('ly.seg_aria_field', { n: i + 1 })}>
+                    <Select className="w-auto" value={r.field} onChange={(e) => setRule(i, { field: e.target.value })} aria-label={t('ly.seg_aria_field', { n: i + 1 })}>
                       {(catalog.data?.fields ?? []).map((f) => <option key={f.key} value={f.key}>{fieldLabel(f.key)}</option>)}
-                    </select>
-                    <select className={selectCls} value={r.op} onChange={(e) => setRule(i, { op: e.target.value })} aria-label={t('ly.seg_aria_op', { n: i + 1 })}>
+                    </Select>
+                    <Select className="w-auto" value={r.op} onChange={(e) => setRule(i, { op: e.target.value })} aria-label={t('ly.seg_aria_op', { n: i + 1 })}>
                       {OPS_BY_KIND[kind].map((op) => <option key={op} value={op}>{opLabel(op)}</option>)}
-                    </select>
+                    </Select>
                     {kind === 'bool' ? (
-                      <select className={selectCls} value={String(r.value)} onChange={(e) => setRule(i, { value: e.target.value })} aria-label={t('ly.seg_aria_value', { n: i + 1 })}><option value="true">{t('ly.yes')}</option><option value="false">{t('ly.no')}</option></select>
+                      <Select className="w-auto" value={String(r.value)} onChange={(e) => setRule(i, { value: e.target.value })} aria-label={t('ly.seg_aria_value', { n: i + 1 })}><option value="true">{t('ly.yes')}</option><option value="false">{t('ly.no')}</option></Select>
                     ) : (
                       <Input className="w-40" type={kind === 'num' ? 'number' : 'text'} value={r.value ?? ''} onChange={(e) => setRule(i, { value: e.target.value })} placeholder={kind === 'num' ? '0' : t('ly.seg_value_ph')} aria-label={t('ly.seg_aria_value', { n: i + 1 })} />
                     )}

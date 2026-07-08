@@ -26,10 +26,9 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
 type Account = { code: string; name: string; type: string };
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export function GlSchedulesClient() {
   const { t } = useLang();
@@ -108,11 +107,11 @@ function Recurring() {
             <FormField htmlFor="rc-name" label={t('fnx.gls.entry_name')} required error={showErrors ? nameErr : undefined}><Input id="rc-name" value={name} aria-invalid={showErrors && !!nameErr} onChange={(e) => setName(e.target.value)} placeholder={t('fnx.gls.entry_name_placeholder')} /></FormField>
             <div className="grid gap-1.5">
               <Label htmlFor="rc-freq">{t('fnx.gls.frequency')}</Label>
-              <select id="rc-freq" className={selectCls} value={frequency} onChange={(e) => setFrequency(e.target.value as 'daily' | 'weekly' | 'monthly')}>
+              <Select id="rc-freq"  value={frequency} onChange={(e) => setFrequency(e.target.value as 'daily' | 'weekly' | 'monthly')}>
                 <option value="daily">{t('fnx.gls.freq_daily')}</option>
                 <option value="weekly">{t('fnx.gls.freq_weekly')}</option>
                 <option value="monthly">{t('fnx.gls.freq_monthly')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid flex-1 gap-1.5"><Label htmlFor="rc-memo">{t('fnx.gls.memo')}</Label><Input id="rc-memo" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder={t('fnx.gls.memo_placeholder')} /></div>
           </div>
@@ -132,10 +131,10 @@ function Recurring() {
                 <Fragment key={i}>
                 <tr>
                   <td className="py-1 pr-2">
-                    <select className={selectCls} aria-invalid={!!err} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
+                    <Select aria-invalid={!!err} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
                       <option value="">{t('fnx.gls.select_account')}</option>
                       {accountsQ.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
-                    </select>
+                    </Select>
                   </td>
                   <td className="py-1 pr-2"><Input type="number" min="0" aria-invalid={!!err} value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
                   <td className="py-1 pr-2"><Input type="number" min="0" aria-invalid={!!err} value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>

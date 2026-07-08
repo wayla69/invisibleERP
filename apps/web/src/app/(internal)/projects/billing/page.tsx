@@ -16,8 +16,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring';
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // Progress billing / งวดงาน (docs/35 P1, PROJ-15). Value work by BoQ line, withhold retention, add output VAT,
@@ -64,10 +64,10 @@ export default function BillingPage() {
             <h3 className="text-base font-semibold">{t('cx.b_form', { code: active })}</h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="grid gap-1.5"><Label>{t('cx.b_f_boq')}</Label>
-                <select className={selectCls} value={f.boq_line_id} onChange={(e) => setF({ ...f, boq_line_id: e.target.value })}>
+                <Select value={f.boq_line_id} onChange={(e) => setF({ ...f, boq_line_id: e.target.value })}>
                   <option value="">{t('cx.opt_pick')}</option>
                   {(boq.data?.lines ?? []).map((l: any) => <option key={l.id} value={l.id}>{l.description ?? l.item_no ?? `#${l.line_no}`} · {baht(l.budget_amount)}</option>)}
-                </select>
+                </Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('cx.b_f_pct')}</Label><Input type="number" min="0" max="100" value={f.pct} onChange={(e) => setF({ ...f, pct: e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('cx.b_f_retention')}</Label><Input type="number" min="0" max="100" value={f.retention_pct} onChange={(e) => setF({ ...f, retention_pct: e.target.value })} /></div>

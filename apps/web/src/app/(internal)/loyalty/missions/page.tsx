@@ -17,8 +17,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select } from '@/components/form-controls';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface Mission { id: number; mission_code: string; name: string; type: string; goal: number; reward_kind: string; reward_points: number; reward_coupon_value: number; active: boolean }
 
@@ -66,11 +66,11 @@ export default function MissionsPage() {
             <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
               <div className="grid gap-1.5 sm:col-span-2"><Label>{t('ly.ms_name')}</Label><Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder={t('ly.ms_name_ph')} required /></div>
               <div className="grid gap-1.5"><Label>{t('ly.col_type')}</Label>
-                <select className={selectCls} value={form.type} onChange={(e) => set({ type: e.target.value })}><option value="stamp">{t('ly.ms_type_stamp')}</option><option value="quest">{t('ly.ms_type_quest')}</option></select>
+                <Select className="w-auto" value={form.type} onChange={(e) => set({ type: e.target.value })}><option value="stamp">{t('ly.ms_type_stamp')}</option><option value="quest">{t('ly.ms_type_quest')}</option></Select>
               </div>
               <div className="grid gap-1.5"><Label>{t('ly.ms_goal_label')}</Label><Input type="number" min="1" value={form.goal} onChange={(e) => set({ goal: +e.target.value })} /></div>
               <div className="grid gap-1.5"><Label>{t('ly.ms_reward')}</Label>
-                <select className={selectCls} value={form.reward_kind} onChange={(e) => set({ reward_kind: e.target.value })}><option value="points">{t('ly.ms_r_points')}</option><option value="coupon">{t('ly.ms_r_coupon')}</option></select>
+                <Select className="w-auto" value={form.reward_kind} onChange={(e) => set({ reward_kind: e.target.value })}><option value="points">{t('ly.ms_r_points')}</option><option value="coupon">{t('ly.ms_r_coupon')}</option></Select>
               </div>
               {form.reward_kind === 'points'
                 ? <div className="grid gap-1.5"><Label>{t('ly.ms_r_points')}</Label><Input type="number" min="0" value={form.reward_points} onChange={(e) => set({ reward_points: +e.target.value })} /></div>

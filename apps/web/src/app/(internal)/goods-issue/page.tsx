@@ -19,9 +19,8 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface Line { item_id: string; item_description?: string; uom?: string; qty: number }
 
@@ -110,10 +109,10 @@ function MoveForm({ kind }: { kind: 'issue' | 'transfer' }) {
         <div className="flex flex-wrap items-end gap-2">
           <div className="grid gap-1.5 min-w-[220px] flex-1">
             <Label htmlFor="gi-item">{t('iv.gi_item')}</Label>
-            <select id="gi-item" className={selectCls} value={itemId} onChange={(e) => setItemId(e.target.value)}>
+            <Select id="gi-item"  value={itemId} onChange={(e) => setItemId(e.target.value)}>
               <option value="">{t('iv.gi_select')}</option>
               {items.map((i) => <option key={i.Item_ID} value={i.Item_ID}>{i.Item_ID} — {i.Item_Description}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="gi-qty">{t('inv.col_qty')}</Label>

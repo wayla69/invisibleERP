@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Select } from '@/components/form-controls';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -31,8 +32,6 @@ interface Payslip { id: number; emp_code: string; gross: number; ot_pay: number;
 interface Timesheet { work_date: string; regular_hours: number; ot_hours: number; note: string | null }
 interface ExpenseClaim { id: number; claim_date: string | null; category: string | null; amount: number; description: string | null; status: string; ap_txn_no?: string | null }
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function EssPage() {
   const { t } = useLang();
@@ -163,12 +162,12 @@ function LeaveTab() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">
               <Label htmlFor="lv-type">{t('hr.leave_type_col')}</Label>
-              <select id="lv-type" className={selectCls} value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
+              <Select id="lv-type"  value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
                 <option value="annual">{t('hr.leave_annual')}</option>
                 <option value="sick">{t('hr.leave_sick')}</option>
                 <option value="personal">{t('hr.leave_personal')}</option>
                 <option value="unpaid">{t('hr.leave_unpaid')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="lv-from">{t('hr.from_date')}</Label>
@@ -184,10 +183,10 @@ function LeaveTab() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="lv-paid">{t('hr.paid')}</Label>
-              <select id="lv-paid" className={selectCls} value={paid} onChange={(e) => setPaid(e.target.value)}>
+              <Select id="lv-paid"  value={paid} onChange={(e) => setPaid(e.target.value)}>
                 <option value="true">{t('hr.paid_yes_long')}</option>
                 <option value="false">{t('hr.unpaid')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2 sm:col-span-2">
               <Label htmlFor="lv-reason">{t('hr.reason')}</Label>
@@ -276,12 +275,12 @@ function ExpenseTab() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="ex-cat">{t('hr.category')}</Label>
-              <select id="ex-cat" className={selectCls} value={category} onChange={(e) => setCategory(e.target.value)}>
+              <Select id="ex-cat"  value={category} onChange={(e) => setCategory(e.target.value)}>
                 <option value="travel">{t('hr.cat_travel')}</option>
                 <option value="meals">{t('hr.cat_meals')}</option>
                 <option value="supplies">{t('hr.cat_supplies')}</option>
                 <option value="other">{t('hr.cat_other')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="ex-amt">{t('hr.amount_baht')}</Label>

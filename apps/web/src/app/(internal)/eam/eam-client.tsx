@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { useLang } from '@/lib/i18n';
+import { Select } from '@/components/form-controls';
 
 // ── API contract (apps/api/src/modules/eam) ───────────────────────────────────
 interface WorkOrder {
@@ -36,8 +37,6 @@ interface Reliability {
   total_downtime_hours: number; mtbf_days: number | null; total_maintenance_cost: number;
 }
 
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function EamWorkspace({ initialWo }: { initialWo?: unknown }) {
   const { t } = useLang();
@@ -141,19 +140,19 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="wo-type">{t('mf.eam_wotype_label')}</Label>
-              <select id="wo-type" className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>
+              <Select id="wo-type"  value={type} onChange={(e) => setType(e.target.value)}>
                 <option value="corrective">{t('mf.eam_type_corrective')}</option>
                 <option value="preventive">{t('mf.eam_type_preventive')}</option>
                 <option value="inspection">{t('mf.eam_type_inspection')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="wo-pri">{t('mf.eam_priority_label')}</Label>
-              <select id="wo-pri" className={selectCls} value={priority} onChange={(e) => setPriority(e.target.value)}>
+              <Select id="wo-pri"  value={priority} onChange={(e) => setPriority(e.target.value)}>
                 <option value="low">{t('mf.eam_pri_low')}</option>
                 <option value="medium">{t('mf.eam_pri_medium')}</option>
                 <option value="high">{t('mf.eam_pri_high')}</option>
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="wo-sched">{t('mf.eam_sched_label')}</Label>
@@ -201,8 +200,7 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
                   r.status === 'completed' || r.status === 'cancelled' ? (
                     <span className="text-muted-foreground">—</span>
                   ) : (
-                    <select
-                      className={selectCls}
+                    <Select
                       value=""
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) => {
@@ -213,7 +211,7 @@ function WorkOrders({ initialData }: { initialData?: unknown }) {
                       <option value="in_progress">{t('mf.eam_status_inprogress')}</option>
                       <option value="completed">{t('mf.eam_done')}</option>
                       <option value="cancelled">{t('fin.cancel')}</option>
-                    </select>
+                    </Select>
                   ),
               },
             ]}
@@ -277,10 +275,10 @@ function WorkOrderLines({ woNo }: { woNo: string }) {
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid gap-2">
             <Label htmlFor="ln-kind">{t('mf.col_type')}</Label>
-            <select id="ln-kind" className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
+            <Select id="ln-kind"  value={kind} onChange={(e) => setKind(e.target.value)}>
               <option value="labor">{t('mf.eam_kind_labor')}</option>
               <option value="part">{t('mf.eam_kind_part')}</option>
-            </select>
+            </Select>
           </div>
           <div className="grid grow gap-2">
             <Label htmlFor="ln-desc">{t('mf.col_desc')}</Label>
