@@ -9,8 +9,9 @@ import { RetentionService } from '../retention/retention.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { ProjectsResourcingService } from './projects-resourcing.service';
+import { ProjectsWbsService } from './projects-wbs.service';
 import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, clampPct, depsCsv, peopleCsv, csvToList, clamp15, riskScore, ragFor, addDays } from './projects.helpers';
-import { shapeTask, shapeMilestone, shapeTemplateItem, shapeRisk, shapeHealth, shapeChangeOrder, shapeBaseline, shapeBoqLine } from './projects.shapes';
+import { shapeTask, shapeTemplateItem, shapeRisk, shapeHealth, shapeChangeOrder, shapeBaseline, shapeBoqLine } from './projects.shapes';
 
 
 export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string; rev_method?: 'billing' | 'poc'; estimated_cost?: number; budget_tolerance_pct?: number }
@@ -39,6 +40,7 @@ export interface RiskPatchDto { status?: 'open' | 'mitigating' | 'closed'; proba
 @Injectable()
 export class ProjectsService {
   private readonly resourcing: ProjectsResourcingService;
+  private readonly wbs: ProjectsWbsService;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
@@ -56,6 +58,7 @@ export class ProjectsService {
     // docs/38 projects PR-2: built in the ctor BODY (not DI) — the goldenmaster constructs this service
     // positionally with (db, ledger) only, so sub-services must come from the already-injected deps.
     this.resourcing = new ProjectsResourcingService(db, (code) => this.row(code));
+    this.wbs = new ProjectsWbsService(db, (code) => this.row(code), (code, dto, user) => this.bill(code, dto, user));
   }
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
@@ -265,156 +268,21 @@ export class ProjectsService {
     const [boq] = await db.select().from(projectBoq).where(eq(projectBoq.projectId, Number(p.id))).orderBy(desc(projectBoq.id)).limit(1);
     return {
       ...this.fmt(p, nonBillable),
-      pct_complete: this.taskRollup(tasks),
+      pct_complete: this.wbs.taskRollup(tasks),
       task_count: tasks.length,
       boq: boq ? { id: Number(boq.id), boq_no: boq.boqNo, status: boq.status, budget_total: n(boq.budgetTotal) } : null,
       entries: entries.map((e: any) => ({ entry_type: e.entryType, description: e.description, qty: n(e.qty), rate: n(e.rate), amount: n(e.amount), billable: e.billable !== false, entry_date: e.entryDate, entry_no: e.entryNo })),
     };
   }
 
-  // ── WBS tasks (P1) ───────────────────────────────────────────────────────
-  async addTask(code: string, dto: TaskDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const tenantId = p.tenantId ?? user.tenantId ?? null;
-    const [t] = await db.insert(projectTasks).values({
-      projectId: Number(p.id), tenantId, parentId: dto.parent_id ?? null, wbsCode: dto.wbs_code ?? null, name: dto.name,
-      status: dto.status ?? 'open', plannedStart: dto.planned_start ?? null, plannedEnd: dto.planned_end ?? null,
-      plannedHours: fx(dto.planned_hours ?? 0, 2), plannedCost: fx(dto.planned_cost ?? 0, 2),
-      pctComplete: fx(clampPct(dto.pct_complete ?? 0), 2), dependsOn: depsCsv(dto.depends_on), assignee: dto.assignee ?? null,
-      accountable: dto.accountable ?? null, responsible: peopleCsv(dto.responsible) ?? null, consulted: peopleCsv(dto.consulted) ?? null, informed: peopleCsv(dto.informed) ?? null,
-      createdBy: user.username,
-    }).returning({ id: projectTasks.id });
-    return this.listTasks(code);
-  }
 
-  async listTasks(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const rows = await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id))).orderBy(projectTasks.id);
-    return { project_code: code, pct_complete: this.taskRollup(rows), tasks: rows.map(shapeTask), count: rows.length };
-  }
 
-  async patchTask(taskId: number, dto: TaskPatchDto, user: JwtUser) {
-    const db = this.db;
-    const [t] = await db.select().from(projectTasks).where(eq(projectTasks.id, Number(taskId))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'TASK_NOT_FOUND', message: `Task ${taskId} not found`, messageTh: 'ไม่พบงาน' });
-    const set: any = {};
-    if (dto.name != null) set.name = dto.name;
-    if (dto.status != null) set.status = dto.status;
-    if (dto.planned_start != null) set.plannedStart = dto.planned_start;
-    if (dto.planned_end != null) set.plannedEnd = dto.planned_end;
-    if (dto.planned_hours != null) set.plannedHours = fx(dto.planned_hours, 2);
-    if (dto.planned_cost != null) set.plannedCost = fx(dto.planned_cost, 2);
-    if (dto.assignee != null) set.assignee = dto.assignee;
-    if (dto.accountable != null) set.accountable = dto.accountable || null;
-    if (dto.responsible != null) set.responsible = peopleCsv(dto.responsible);
-    if (dto.consulted != null) set.consulted = peopleCsv(dto.consulted);
-    if (dto.informed != null) set.informed = peopleCsv(dto.informed);
-    if (dto.depends_on != null) {
-      if (dto.depends_on.some((d) => Number(d) === Number(taskId))) throw new BadRequestException({ code: 'BAD_DEPENDENCY', message: 'A task cannot depend on itself', messageTh: 'งานขึ้นกับตัวเองไม่ได้' });
-      set.dependsOn = depsCsv(dto.depends_on);
-    }
-    // Marking a task done implies 100% complete unless an explicit pct is given.
-    if (dto.pct_complete != null) set.pctComplete = fx(clampPct(dto.pct_complete), 2);
-    else if (dto.status === 'done') set.pctComplete = fx(100, 2);
-    await db.update(projectTasks).set(set).where(eq(projectTasks.id, Number(taskId)));
-    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(t.projectId))).limit(1);
-    return this.listTasks(proj!.projectCode);
-  }
 
-  // Project overall % complete = planned-hours-weighted mean of task pct (simple mean if no planned hours).
-  // Cancelled tasks are excluded from the roll-up.
-  private taskRollup(rows: any[]) {
-    const active = rows.filter((t) => t.status !== 'cancelled');
-    if (!active.length) return 0;
-    const totalH = active.reduce((s, t) => s + n(t.plannedHours), 0);
-    if (totalH > 0) return clampPct(active.reduce((s, t) => s + n(t.plannedHours) * n(t.pctComplete), 0) / totalH);
-    return clampPct(active.reduce((s, t) => s + n(t.pctComplete), 0) / active.length);
-  }
 
-  // ── RACI accountability (B3) ─────────────────────────────────────────────
-  // "My tasks": the caller's still-open tasks across every project where they are the accountable owner or a
-  // responsible doer (matched on username). The personal work-queue that the RACI roles drive.
-  async myTasks(user: JwtUser) {
-    const db = this.db;
-    const me = String(user.username ?? '').trim();
-    const rows = (await db.select().from(projectTasks).where(sql`${projectTasks.status} not in ('done','cancelled')`)).map(shapeTask);
-    const projRows = await db.select().from(projects);
-    const pById = new Map<number, any>(projRows.map((p: any) => [Number(p.id), p]));
-    const mine = rows
-      .filter((t: any) => me && (String(t.accountable ?? '').trim() === me || t.responsible.includes(me)))
-      .map((t: any) => {
-        const p = pById.get(t.project_id);
-        return { ...t, project_code: p?.projectCode ?? null, project_name: p?.name ?? null, my_role: String(t.accountable ?? '').trim() === me ? 'accountable' : 'responsible' };
-      })
-      .sort((a: any, b: any) => String(a.planned_end ?? '9999-12-31').localeCompare(String(b.planned_end ?? '9999-12-31')));
-    return { user: me, tasks: mine, count: mine.length };
-  }
 
-  // The project's RACI accountability matrix: per-task A/R/C/I, a per-person role rollup, and the tasks that
-  // lack a single accountable owner (an accountability gap). SoD note: the accountable owner should not be the
-  // same person who later approves the task's cost/timesheet — surfaced here, enforced by the cost maker-checker.
-  async raci(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const rows = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id))).orderBy(projectTasks.id)).map(shapeTask);
-    const active = rows.filter((t: any) => t.status !== 'cancelled');
-    const people = new Map<string, { accountable: number; responsible: number; consulted: number; informed: number }>();
-    const bump = (name: string, key: 'accountable' | 'responsible' | 'consulted' | 'informed') => {
-      const k = String(name).trim(); if (!k) return;
-      const e = people.get(k) ?? { accountable: 0, responsible: 0, consulted: 0, informed: 0 };
-      e[key]++; people.set(k, e);
-    };
-    for (const t of active) {
-      if (t.accountable) bump(t.accountable, 'accountable');
-      for (const r of t.responsible) bump(r, 'responsible');
-      for (const c of t.consulted) bump(c, 'consulted');
-      for (const i of t.informed) bump(i, 'informed');
-    }
-    const missing_accountable = active.filter((t: any) => !t.accountable).map((t: any) => t.id);
-    return {
-      project_code: code,
-      tasks: active.map((t: any) => ({ id: t.id, name: t.name, accountable: t.accountable, responsible: t.responsible, consulted: t.consulted, informed: t.informed })),
-      people: [...people.entries()].map(([name, c]) => ({ name, ...c })).sort((a, b) => (b.accountable + b.responsible) - (a.accountable + a.responsible)),
-      missing_accountable, complete: missing_accountable.length === 0, count: active.length,
-    };
-  }
 
-  // ── Milestones (P1) ──────────────────────────────────────────────────────
-  async addMilestone(code: string, dto: MilestoneDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const tenantId = p.tenantId ?? user.tenantId ?? null;
-    if (dto.billing_percent != null && (dto.billing_percent <= 0 || dto.billing_percent > 100))
-      throw new BadRequestException({ code: 'BAD_PERCENT', message: 'billing_percent must be within (0,100]', messageTh: 'เปอร์เซ็นต์ต้องอยู่ระหว่าง 0-100' });
-    await db.insert(projectMilestones).values({
-      projectId: Number(p.id), tenantId, name: dto.name, dueDate: dto.due_date ?? null, owner: dto.owner ?? null,
-      status: 'pending', billingPercent: dto.billing_percent != null ? fx(dto.billing_percent, 2) : null, createdBy: user.username,
-    });
-    return this.listMilestones(code);
-  }
 
-  async listMilestones(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const rows = await db.select().from(projectMilestones).where(eq(projectMilestones.projectId, Number(p.id))).orderBy(projectMilestones.id);
-    return { project_code: code, milestones: rows.map(shapeMilestone), count: rows.length };
-  }
 
-  // Mark a milestone reached. If it carries a billing_percent, the same act raises the Fixed-price progress
-  // bill through the EXISTING authorized PRJ-BILL path (revenue recognition + WIP relief, contract cap) — PROJ-02.
-  async reachMilestone(milestoneId: number, user: JwtUser) {
-    const db = this.db;
-    const [m] = await db.select().from(projectMilestones).where(eq(projectMilestones.id, Number(milestoneId))).limit(1);
-    if (!m) throw new NotFoundException({ code: 'MILESTONE_NOT_FOUND', message: `Milestone ${milestoneId} not found`, messageTh: 'ไม่พบหมุดหมาย' });
-    if (m.status === 'reached') throw new BadRequestException({ code: 'MILESTONE_REACHED', message: 'Milestone already reached', messageTh: 'หมุดหมายถูกบรรลุแล้ว' });
-    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(m.projectId))).limit(1);
-    await db.update(projectMilestones).set({ status: 'reached', reachedAt: new Date() }).where(eq(projectMilestones.id, Number(milestoneId)));
-    let billing: any = null;
-    if (m.billingPercent != null && n(m.billingPercent) > 0) billing = await this.bill(proj!.projectCode, { percent: n(m.billingPercent) }, user);
-    return { milestone_id: Number(milestoneId), project_code: proj!.projectCode, status: 'reached', billing };
-  }
 
 
 
@@ -427,6 +295,16 @@ export class ProjectsService {
   // Computes BAC / PV / EV / AC → CPI / SPI + cost & schedule variance + EAC/ETC from the project's WBS tasks
   // (planned cost, % complete, planned_end schedule) and its actual cost incurred, and reconciles EV/AC against
   // the project's WIP actuals. `as_of` defaults to the business day; PV counts tasks scheduled to finish by then.
+  // ── docs/38 projects PR-3: WBS (tasks/milestones/RACI) lives in ProjectsWbsService; thin delegators. ──
+  async addTask(code: string, dto: TaskDto, user: JwtUser) { return this.wbs.addTask(code, dto, user); }
+  async listTasks(code: string) { return this.wbs.listTasks(code); }
+  async patchTask(taskId: number, dto: TaskPatchDto, user: JwtUser) { return this.wbs.patchTask(taskId, dto, user); }
+  async myTasks(user: JwtUser) { return this.wbs.myTasks(user); }
+  async raci(code: string) { return this.wbs.raci(code); }
+  async addMilestone(code: string, dto: MilestoneDto, user: JwtUser) { return this.wbs.addMilestone(code, dto, user); }
+  async listMilestones(code: string) { return this.wbs.listMilestones(code); }
+  async reachMilestone(milestoneId: number, user: JwtUser) { return this.wbs.reachMilestone(milestoneId, user); }
+
   // ── docs/38 projects PR-2: resourcing (PROJ-05) lives in ProjectsResourcingService; thin delegators. ──
   async addRateCard(dto: RateCardDto, user: JwtUser) { return this.resourcing.addRateCard(dto, user); }
   async listRateCards(user: JwtUser) { return this.resourcing.listRateCards(user); }
@@ -1377,7 +1255,7 @@ export class ProjectsService {
     const e = await this.evm(p.projectCode, date);
     const f = this.fmt(p);
     const tasks = await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)));
-    const pct = this.taskRollup(tasks);
+    const pct = this.wbs.taskRollup(tasks);
     const rag = (e.cpi == null && e.spi == null) ? 'no_data'
       : ((e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9)) ? 'red'
       : ((e.cpi != null && e.cpi < 1) || (e.spi != null && e.spi < 1)) ? 'amber' : 'green';
