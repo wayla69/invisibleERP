@@ -31,8 +31,12 @@ export class ApiKeyService {
     const scopes = (dto.scopes ?? []).join(',');
     // Optional TTL (0196) — bound a leaked key's lifetime. Omitted/≤0 → non-expiring (back-compat).
     const expiresAt = dto.ttl_days && dto.ttl_days > 0 ? new Date(Date.now() + dto.ttl_days * 86_400_000) : null;
+    // SoD (security review H-2): record the MINTING human on the key. At auth time the guard adopts this
+    // as the key principal's identity, so every maker-checker check sees the human — a person can no longer
+    // launder a self-approval through their own API key(s) (create-with-key-A / approve-with-key-B, or
+    // create-in-UI / approve-with-key). Issuance itself stays open to the access-admin (`users`) role.
     const [row] = await db.insert(apiKeys).values({
-      tenantId, name: dto.name, prefix, hashedKey, scopes, revoked: false, expiresAt,
+      tenantId, name: dto.name, prefix, hashedKey, scopes, revoked: false, expiresAt, createdBy: user.username,
     }).returning({ id: apiKeys.id, prefix: apiKeys.prefix, name: apiKeys.name });
     return { id: Number(row!.id), name: row!.name, prefix: row!.prefix, scopes: dto.scopes ?? [], expires_at: expiresAt, key: rawKey };
   }

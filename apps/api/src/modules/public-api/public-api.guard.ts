@@ -45,13 +45,15 @@ export class PublicApiGuard implements CanActivate {
 
     const req = ctx.switchToHttp().getRequest();
     const user: JwtUser | undefined = req.user;
-    // API-key only: a machine principal's username is `apikey:<prefix>` and carries `scopes`.
-    if (!user || !user.username?.startsWith('apikey:') || user.scopes == null) {
+    // API-key only: a machine principal is the ONLY principal that carries `scopes` (set by JwtAuthGuard
+    // for `ierp_` keys). Its `username` is now the minting human (H-2), so identify it by `scopes`/prefix,
+    // not the old `apikey:` username prefix.
+    if (!user || user.scopes == null || user.apiKeyPrefix == null) {
       throw new ForbiddenException({ code: 'API_KEY_REQUIRED', message: 'The public API requires an API key (Bearer ierp_…)', messageTh: 'API สาธารณะต้องใช้ API key (Bearer ierp_…)' });
     }
 
-    // Per-key fixed-window rate limit.
-    const rl = rateLimited(user.username, Date.now());
+    // Per-key fixed-window rate limit — keyed on the stable key prefix (not the shared minter identity).
+    const rl = rateLimited(user.apiKeyPrefix, Date.now());
     const res = ctx.switchToHttp().getResponse();
     try { res?.header?.('X-RateLimit-Limit', String(rl.max)); } catch { /* header best-effort */ }
     if (rl.limited) {

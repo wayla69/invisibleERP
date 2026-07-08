@@ -80,9 +80,14 @@ export class JwtAuthGuard implements CanActivate {
         const expanded = scopes.flatMap((s) => SCOPE_ALIASES[s] ?? [s]);
         permissions = expanded.length ? expanded : resolvePermissions(role as Parameters<typeof resolvePermissions>[0]);
       }
+      // SoD (security review H-2): the key acts AS its minting human for maker-checker/SoD identity, so a
+      // person can't launder a self-approval through their own key(s). Legacy keys (no created_by) keep the
+      // `apikey:<prefix>` machine identity. The prefix is carried separately (apiKeyPrefix) for the machine
+      // surface — the public-API `principal`, per-key rate limiting — and for audit traceability.
+      const principal: string = row.createdBy ?? `apikey:${row.prefix}`;
       // Carry the raw granted scopes alongside the expanded permissions — the public API
       // (/api/v1) gates on these scopes directly (a stable contract independent of internal perms).
-      req.user = { username: `apikey:${row.prefix}`, role, customerName: null, tenantId, permissions, scopes } satisfies JwtUser;
+      req.user = { username: principal, role, customerName: null, tenantId, permissions, scopes, apiKeyPrefix: row.prefix } satisfies JwtUser;
       return true;
     }
 
