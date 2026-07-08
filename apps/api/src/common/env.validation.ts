@@ -5,8 +5,10 @@
 // APP_ENC_KEY in crypto.ts, PSP secret in the webhook); this is the single front-door assertion that
 // makes a misconfigured prod deploy crash early and loudly.
 //
-// Only enforced when NODE_ENV==='production'. In development/test (and the PGlite harnesses, which run
-// as NODE_ENV==='test') it is a no-op that returns the config unchanged, so nothing here can break CI.
+// A no-op ONLY when NODE_ENV is exactly 'development' or 'test' (the PGlite harnesses run as 'test'), so
+// nothing here can break CI or local dev. Every OTHER value — 'production', but also a misspelled or
+// non-standard env like 'prod'/'staging' — runs the fail-closed gate (security review M-5), so a bad
+// NODE_ENV can't silently skip the required-secret checks.
 
 import { Logger } from '@nestjs/common';
 
@@ -26,7 +28,12 @@ function has(v: unknown): boolean {
 
 export function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
   const env = (config.NODE_ENV as string | undefined) ?? 'development';
-  if (env !== 'production') return config; // dev/test: no-op (keeps harnesses + local dev green)
+  // Fail-closed on an unknown NODE_ENV (security review M-5). Treat ANY value that isn't explicitly
+  // 'development' or 'test' as production-strict — so a misspelled or non-standard NODE_ENV ('prod',
+  // 'Production', 'staging', …) still runs the required-secret gate instead of silently skipping it and
+  // booting with insecure defaults. Only the two known-safe local values are a no-op (keeps harnesses,
+  // which run NODE_ENV=test, and local dev green). Unset defaults to 'development' above.
+  if (env === 'development' || env === 'test') return config;
 
   const logger = new Logger('EnvValidation');
   const missing = REQUIRED_IN_PROD.filter((k) => !has(config[k]));
