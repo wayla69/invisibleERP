@@ -1,11 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { sql, eq, and, desc, notInArray, gt, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules, tenantAccounts, glAuditLog, glPeriodBalances } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, tenantAccounts, glPeriodBalances } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
-import { ymd, n, fx } from '../../database/queries';
+import { ymd, n } from '../../database/queries';
 import { toMinor4, minorToNumber4 } from '../../common/money';
 import { assertTemplatesSubsetOf, isIndustryKey, COA_TEMPLATES, type IndustryKey, type CoaTemplateRow } from './coa-templates';
 
@@ -18,7 +18,10 @@ function resolveTenantId(explicit?: number | null): number | null {
   return currentTenantStore()?.tenantId ?? null;
 }
 
-import { LEADING, LEDGERS, COA, CASH_ACCOUNTS, type CfBucket, CF_CLASSIFY } from './ledger-constants';
+import { LEADING, LEDGERS, COA } from './ledger-constants';
+import { LedgerCashflowService } from './ledger-cashflow.service';
+import { LedgerRecurringService } from './ledger-recurring.service';
+import { LedgerPostingService } from './ledger-posting.service';
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null; branch_id?: number | null; project_id?: number | null; dept_id?: number | null }
 export interface PostEntryDto {
@@ -61,10 +64,21 @@ export interface PrepaidDto {
 
 @Injectable()
 export class LedgerService {
+  private readonly cashflow: LedgerCashflowService;
+  private readonly recurring: LedgerRecurringService;
+  private readonly posting: LedgerPostingService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
-  ) {}
+  ) {
+    // docs/38 ledger PR-1: built in the ctor BODY (not DI) — harnesses construct this facade positionally
+    // with (db, docNo), so sub-services must come from the injected deps. Shared read helpers stay here
+    // and are passed as callback ports.
+    this.cashflow = new LedgerCashflowService(db, (d, from, to, cc, lc, tid, ex) => this.aggregateByType(d, from, to, cc, lc, tid, ex), (code) => this.ledgerCond(code));
+    this.posting = new LedgerPostingService(db, docNo);
+    this.recurring = new LedgerRecurringService(db, docNo, (dto) => this.postEntry(dto));
+  }
 
   // ───────────────────── Chart of Accounts ─────────────────────
   // idempotent seed — onConflictDoNothing บน accounts.code (unique)
@@ -166,441 +180,26 @@ export class LedgerService {
     return sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${c})`;
   }
 
-  // ───────────────────── GL period-balance snapshot (docs/27 R1-2 / AUD-ARC-02) ─────────────────────
-  // Apply one posted entry's lines to gl_period_balances INSIDE the same transaction as the posting.
-  // Posting is the only balance-affecting event (Drafts are excluded from balances, Posted entries are
-  // DB-immutable per 0165, corrections are contra reversals that post normally), so the snapshot cannot
-  // drift from a mutation this service can see; GL-20 re-verifies it against the raw ledger at close.
-  private async bumpPeriodBalances(
-    tx: any,
-    hdr: { tenantId: number | null; ledgerCode: string | null; period: string | null },
-    lines: { account_code: string; debit?: unknown; credit?: unknown; cost_center?: string | null }[],
-  ): Promise<void> {
-    // Aggregate per (account, cost-center) first — an entry rarely has more than a handful of rows.
-    const agg = new Map<string, { account: string; cc: string; debit: number; credit: number }>();
-    for (const l of lines) {
-      const cc = (l.cost_center ?? '') as string;
-      const k = `${l.account_code}|${cc}`;
-      const cur = agg.get(k) ?? { account: l.account_code, cc, debit: 0, credit: 0 };
-      cur.debit += n(l.debit); cur.credit += n(l.credit);
-      agg.set(k, cur);
-    }
-    const ledgerCode = hdr.ledgerCode ?? '';
-    const period = hdr.period ?? '';
-    // Round-2 ARC NEW-2 (write amplification): ONE multi-row upsert per entry instead of one round-trip
-    // per (account, cost-center) group — bulk imports and reversals stop paying N sequential awaits, and
-    // the row locks for all touched balance rows are taken in a single statement. Safe for ON CONFLICT:
-    // `agg` already dedupes the conflict key, so no two VALUES rows can hit the same target row.
-    const rows = [...agg.values()];
-    if (!rows.length) return;
-    const values = rows.map((r) => sql`(${hdr.tenantId}, ${ledgerCode}, ${period}, ${r.cc}, ${r.account}, ${fx(r.debit, 4)}, ${fx(r.credit, 4)})`);
-    // ON CONFLICT targets the ux_gl_period_balances expression index (0218): atomic accumulate.
-    await tx.execute(sql`
-      INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
-      VALUES ${sql.join(values, sql`, `)}
-      ON CONFLICT (coalesce(tenant_id, 0), ledger_code, period, cost_center_code, account_code)
-      DO UPDATE SET debit = gl_period_balances.debit + excluded.debit, credit = gl_period_balances.credit + excluded.credit`);
-  }
+  // ── docs/38 ledger PR-3: posting core (GL-05 balanced-by-construction + period gates + snapshot bump) lives in LedgerPostingService. ──
+  async postEntry(dto: PostEntryDto, outerTx?: any) { return this.posting.postEntry(dto, outerTx); }
 
-  // ───────────────────── Post a balanced entry ─────────────────────
-  // BALANCED BY CONSTRUCTION — throw UNBALANCED if Σdebit !== Σcredit (round 4) or empty.
-  // `outerTx` lets a caller post this entry INSIDE its own transaction (e.g. a return reversing money +
-  // stock + GL atomically). When present, the header/lines insert on that tx and roll back with it;
-  // otherwise postEntry owns its own transaction as before.
-  async postEntry(dto: PostEntryDto, outerTx?: any) {
-    const db = (outerTx ?? this.db) as any;
-    const lines = dto.lines ?? [];
-    if (!lines.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No journal lines', messageTh: 'ไม่มีรายการบัญชี' });
+  // ── docs/38 ledger PR-2: recurring (GL-08) + prepaid (GL-09) live in LedgerRecurringService; thin delegators. ──
+  async createRecurring(dto: RecurringJournalDto, user: JwtUser) { return this.recurring.createRecurring(dto, user); }
+  async listRecurring(tenantId?: number) { return this.recurring.listRecurring(tenantId); }
+  async setRecurringActive(id: number, active: boolean) { return this.recurring.setRecurringActive(id, active); }
+  async runDueRecurring(user: JwtUser) { return this.recurring.runDueRecurring(user); }
+  async createPrepaid(dto: PrepaidDto, user: JwtUser) { return this.recurring.createPrepaid(dto, user); }
+  async listPrepaid(tenantId?: number) { return this.recurring.listPrepaid(tenantId); }
+  async runDuePrepaid(user: JwtUser) { return this.recurring.runDuePrepaid(user); }
 
-    // Drop all-zero lines BEFORE validation/balance so a zero-rated leg (e.g. POS Cr Tax Payable
-    // with vat=0) doesn't trip the per-line invariant. A sale with vat=0 still posts its other legs.
-    const nzLines = lines.filter((l) => !(n(l.debit) === 0 && n(l.credit) === 0));
-    if (!nzLines.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No non-zero journal lines', messageTh: 'ไม่มีรายการบัญชีที่มีมูลค่า' });
-
-    // Per-line invariant (service-level — applies to internal callers like POS, not just the Zod controller):
-    // each line is single-sided and non-negative.
-    for (const l of nzLines) {
-      const d = n(l.debit), c = n(l.credit);
-      if (d < 0 || c < 0) {
-        throw new BadRequestException({ code: 'INVALID_LINE', message: `Negative amount on ${l.account_code} (debit ${d}, credit ${c})`, messageTh: 'จำนวนเงินติดลบในรายการบัญชี' });
-      }
-      if (d > 0 && c > 0) {
-        throw new BadRequestException({ code: 'INVALID_LINE', message: `Line ${l.account_code} has both debit ${d} and credit ${c}`, messageTh: 'รายการบัญชีมีทั้งเดบิตและเครดิต' });
-      }
-    }
-
-    // Exact scale-4 balance check (docs/27 R1-4): accumulate in bigint minor units — float sums that are
-    // then rounded can drift across a rounding boundary and are not a ledger-grade invariant.
-    const totalDebitM = nzLines.reduce((a, l) => a + toMinor4(n(l.debit)), 0n);
-    const totalCreditM = nzLines.reduce((a, l) => a + toMinor4(n(l.credit)), 0n);
-    const totalDebit = minorToNumber4(totalDebitM);
-    const totalCredit = minorToNumber4(totalCreditM);
-    if (totalDebitM !== totalCreditM) {
-      throw new BadRequestException({
-        code: 'UNBALANCED',
-        message: `Entry not balanced: debit ${totalDebit} != credit ${totalCredit}`,
-        messageTh: 'รายการไม่สมดุล (เดบิตไม่เท่าเครดิต)',
-      });
-    }
-
-    // An entry belongs to its explicit tenant, else the poster's own tenant (ALS). Avoid NULL-tenant
-    // entries in a multi-tenant SaaS — they'd escape both RLS scoping and the per-tenant close calendar.
-    const entryTenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? null;
-    const entryDate = dto.date ?? ymd();
-    const period = entryDate.slice(0, 7); // 'YYYY-MM'
-    // Period guard: a CLOSED fiscal period (this entry's tenant calendar, per 0043) rejects new postings.
-    // A missing period row defaults OPEN (existing flows post into the current month without pre-seeding).
-    const [pp] = entryTenantId == null
-      ? [undefined]
-      : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods)
-          .where(and(eq(fiscalPeriods.code, period), eq(fiscalPeriods.tenantId, entryTenantId))).limit(1);
-    // WS2.1 hard gate (GL-15/GL-16): a LOCKED period rejects ALL postings regardless of allowClosedPeriod —
-    // the new irreversible hard close. The ONLY exception is the system year-end closing entry (source
-    // 'CLOSE'), which must still be able to post into the period it closes. lockPeriod() writes 'Locked'
-    // into fiscal_periods.status, so this is authoritative and strictly stronger than the soft 'Closed' gate.
-    if (pp && pp.status === 'Locked' && dto.source !== 'CLOSE') {
-      throw new BadRequestException({ code: 'PERIOD_LOCKED', message: `Period ${period} is locked (hard close)`, messageTh: `งวดบัญชี ${period} ถูกล็อก (ปิดงวดถาวร)` });
-    }
-    if (pp && pp.status === 'Closed' && !dto.allowClosedPeriod) {
-      // a year-end closing journal legitimately posts INTO the period it closes; everything else is blocked
-      throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${period} is closed`, messageTh: `งวดบัญชี ${period} ถูกปิดแล้ว` });
-    }
-    // Control-account guard (WS1.1): reject direct postings to control accounts unless
-    // the caller explicitly marks viaSubledger:true (only AR/AP/INV/FA service methods do this).
-    if (!dto.viaSubledger) {
-      const controlCodes = nzLines.map(l => l.account_code);
-      if (controlCodes.length) {
-        const controlAccounts = await db.select({ code: accounts.code, controlSubledger: accounts.controlSubledger })
-          .from(accounts)
-          .where(and(eq(accounts.isControl, true), inArray(accounts.code, controlCodes)));
-        if (controlAccounts.length > 0) {
-          const hitCode = controlAccounts[0].code;
-          const subledger = controlAccounts[0].controlSubledger;
-          throw new BadRequestException({
-            code: 'CONTROL_ACCOUNT',
-            message: `Account ${hitCode} is a ${subledger} control account; post via its sub-ledger only`,
-            messageTh: `บัญชี ${hitCode} เป็นบัญชีคุมลูกหนี้/เจ้าหนี้ ต้องโพสต์ผ่านระบบย่อยเท่านั้น`,
-          });
-        }
-      }
-    }
-    const currency = dto.currency ?? 'THB';
-    const entryNo = await this.docNo.nextDaily('JE');
-
-    const doInsert = async (tx: any) => {
-      // ON CONFLICT DO NOTHING backstops the pre-check (alreadyPosted): if a concurrent caller already
-      // posted this (tenant, source, source_ref, ledger), the header insert no-ops and `h` is undefined,
-      // so we skip the lines and report a dedupe instead of double-posting the GL. ux_je_idem enforces it.
-      const willPost = !dto.pendingApproval;
-      const [h] = await tx.insert(journalEntries).values({
-        entryNo, entryDate, period, memo: dto.memo ?? null,
-        source: dto.source ?? 'Manual', sourceRef: dto.sourceRef ?? null, ledgerCode: dto.ledgerCode ?? null,
-        tenantId: entryTenantId, currency, status: willPost ? 'Posted' : 'Draft', createdBy: dto.createdBy,
-        // GL-17: stamp the posting moment for entries that reach Posted immediately (Drafts get it on approve).
-        postedAt: willPost ? new Date() : null,
-        reversalOf: dto._reversalOf ?? null,
-      }).onConflictDoNothing().returning({ id: journalEntries.id });
-      if (!h) return null;
-      await tx.insert(journalLines).values(nzLines.map((l) => ({
-        entryId: Number(h.id), accountCode: l.account_code,
-        debit: fx(l.debit, 4), credit: fx(l.credit, 4),
-        currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: entryTenantId,
-        branchId: l.branch_id ?? null, projectId: l.project_id ?? null, departmentId: l.dept_id ?? null,
-      })));
-      // R1-2: a posting that lands Posted updates the period-balance snapshot in the SAME transaction.
-      if (willPost) await this.bumpPeriodBalances(tx, { tenantId: entryTenantId, ledgerCode: dto.ledgerCode ?? null, period }, nzLines);
-      // GL-17: record a POST audit-trail row for entries that land Posted (skip Drafts — APPROVE logs them).
-      if (willPost) {
-        await tx.insert(glAuditLog).values({
-          tenantId: entryTenantId, entryId: Number(h.id), action: 'POST', actor: dto.createdBy ?? null,
-          detail: { entry_no: entryNo, source: dto.source ?? 'Manual', reversal_of: dto._reversalOf ?? null },
-        });
-      }
-      return nzLines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
-    };
-    // Reuse the caller's tx when nested; else open our own.
-    const inserted = outerTx ? await doInsert(outerTx) : await this.db.transaction(doInsert);
-
-    // Lost the race to a concurrent identical posting → the entry already exists, do not double-count.
-    if (inserted === null) return { entry_no: null, balanced: true, deduped: true, lines: [] };
-    const status = dto.pendingApproval ? 'Draft' : 'Posted';
-    return { entry_no: entryNo, balanced: true, status, pending: !!dto.pendingApproval, lines: inserted };
-  }
-
-  // ───────────────────── Recurring / template journal entries (GL-08) ─────────────────────
-  // A balanced template + a cadence; the scheduled job posts each due template as a DRAFT JE (maker-checker,
-  // GL-05) and rolls the schedule forward. Validate the template balances UP FRONT so a malformed template
-  // can never be saved and then fail silently every night.
-  async createRecurring(dto: RecurringJournalDto, user: JwtUser) {
-    const db = this.db;
-    const lines = dto.lines ?? [];
-    if (!(FREQUENCIES as readonly string[]).includes(dto.frequency)) throw new BadRequestException({ code: 'BAD_FREQUENCY', message: `frequency must be one of ${FREQUENCIES.join('/')}`, messageTh: 'รอบเวลาไม่ถูกต้อง' });
-    const nz = lines.filter((l) => !(n(l.debit) === 0 && n(l.credit) === 0));
-    if (!nz.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No non-zero template lines', messageTh: 'ไม่มีรายการบัญชีที่มีมูลค่า' });
-    const tdM = nz.reduce((a, l) => a + toMinor4(n(l.debit)), 0n);
-    const tcM = nz.reduce((a, l) => a + toMinor4(n(l.credit)), 0n);
-    if (tdM !== tcM) throw new BadRequestException({ code: 'UNBALANCED', message: `Template not balanced: debit ${minorToNumber4(tdM)} != credit ${minorToNumber4(tcM)}`, messageTh: 'แม่แบบไม่สมดุล (เดบิตไม่เท่าเครดิต)' });
-    const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
-    const nextRun = dto.startDate ?? ymd();
-    const [r] = await db.insert(recurringJournals).values({
-      tenantId, name: dto.name, frequency: dto.frequency, memo: dto.memo ?? null,
-      ledgerCode: dto.ledgerCode ?? null, currency: dto.currency ?? 'THB', lines: nz, active: 'true',
-      nextRunDate: nextRun, createdBy: user.username,
-    }).returning({ id: recurringJournals.id });
-    return { id: Number(r!.id), name: dto.name, frequency: dto.frequency, next_run_date: nextRun, lines: nz };
-  }
-
-  async listRecurring(tenantId?: number) {
-    const db = this.db;
-    const where = tenantId != null ? eq(recurringJournals.tenantId, tenantId) : undefined;
-    const rows = await db.select().from(recurringJournals).where(where).orderBy(desc(recurringJournals.id));
-    return { recurring: rows.map((r: any) => ({
-      id: Number(r.id), name: r.name, frequency: r.frequency, memo: r.memo, ledger_code: r.ledgerCode,
-      currency: r.currency, lines: r.lines, active: r.active === 'true', next_run_date: r.nextRunDate,
-      last_run_date: r.lastRunDate, last_entry_no: r.lastEntryNo, created_by: r.createdBy,
-    })), count: rows.length };
-  }
-
-  async setRecurringActive(id: number, active: boolean) {
-    const db = this.db;
-    const [r] = await db.select({ id: recurringJournals.id }).from(recurringJournals).where(eq(recurringJournals.id, id)).limit(1);
-    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: `Recurring journal ${id} not found`, messageTh: 'ไม่พบรายการตั้งเวลา' });
-    await db.update(recurringJournals).set({ active: active ? 'true' : 'false' }).where(eq(recurringJournals.id, id));
-    return { id, active };
-  }
-
-  // Idempotent scheduled run: post every active template whose next_run_date has arrived as a DRAFT JE and
-  // roll the schedule forward. source_ref = `REC-<id>-<date>` so the ux_je_idem index dedupes a same-day
-  // re-run at the DB layer; next_run_date is also advanced on posting, so a re-run selects nothing new.
-  async runDueRecurring(user: JwtUser) {
-    const db = this.db;
-    const today = ymd();
-    const due = await db.select().from(recurringJournals)
-      .where(and(eq(recurringJournals.active, 'true'), sql`${recurringJournals.nextRunDate} <= ${today}`));
-    const posted: { entry_no: string | null; recurring_id: number; name: string }[] = [];
-    for (const r of due) {
-      const res = await this.postEntry({
-        date: today, source: 'Recurring', sourceRef: `REC-${Number(r.id)}-${today}`,
-        tenantId: r.tenantId ?? null, currency: r.currency ?? 'THB', memo: r.memo ?? r.name,
-        lines: r.lines as JournalLineDto[], createdBy: `${user?.username ?? 'system'} (recurring)`,
-        ledgerCode: r.ledgerCode ?? null, pendingApproval: true,
-      });
-      await db.update(recurringJournals).set({
-        lastRunDate: today, lastEntryNo: res.entry_no ?? r.lastEntryNo,
-        nextRunDate: addByFrequency(today, r.frequency),
-      }).where(eq(recurringJournals.id, r.id));
-      if (res.entry_no) posted.push({ entry_no: res.entry_no, recurring_id: Number(r.id), name: r.name });
-    }
-    return { as_of: today, scanned: due.length, posted: posted.length, entries: posted };
-  }
-
-  // ───────────────────── Prepaid amortization schedules (GL-09) ─────────────────────
-  // Register a prepaid asset (annual insurance, rent up front) once; the scheduled run amortizes a
-  // straight-line slice each period (Dr expense / Cr 1280), the last period taking the remainder so it
-  // fully clears. Posts directly (systematic, like depreciation) — idempotent per (schedule, period).
-  async createPrepaid(dto: PrepaidDto, user: JwtUser) {
-    const db = this.db;
-    const total = round2(dto.totalAmount);
-    if (!(total > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'total_amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
-    if (!Number.isInteger(dto.months) || dto.months < 1) throw new BadRequestException({ code: 'BAD_MONTHS', message: 'months must be a positive integer', messageTh: 'จำนวนงวดต้องเป็นจำนวนเต็มบวก' });
-    const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
-    const start = dto.startDate ?? ymd();
-    const scheduleNo = await this.docNo.nextDaily('PPD');
-    const prepaidAcct = dto.prepaidAccount ?? '1280';
-    // Optionally record the up-front prepayment (Dr 1280 prepaid / Cr 1000 cash) when not already on the books.
-    if (dto.capitalize) {
-      await this.postEntry({ date: start, source: 'PPD-CAP', sourceRef: scheduleNo, tenantId, memo: `Prepaid ${scheduleNo} — ${dto.name}`, createdBy: user.username, lines: [{ account_code: prepaidAcct, debit: total }, { account_code: '1000', credit: total }] });
-    }
-    const [r] = await db.insert(prepaidSchedules).values({
-      scheduleNo, tenantId, name: dto.name, totalAmount: String(total), months: dto.months, amortizedAmount: '0', periodsPosted: 0,
-      expenseAccount: dto.expenseAccount ?? '5100', prepaidAccount: prepaidAcct, startDate: start, nextRunDate: start, status: 'active', createdBy: user.username,
-    }).returning({ id: prepaidSchedules.id });
-    return { id: Number(r!.id), schedule_no: scheduleNo, name: dto.name, total_amount: total, months: dto.months, monthly_amount: round2(total / dto.months), next_run_date: start };
-  }
-
-  async listPrepaid(tenantId?: number) {
-    const db = this.db;
-    const where = tenantId != null ? eq(prepaidSchedules.tenantId, tenantId) : undefined;
-    const rows = await db.select().from(prepaidSchedules).where(where).orderBy(desc(prepaidSchedules.id));
-    return { schedules: rows.map((r: any) => ({ id: Number(r.id), schedule_no: r.scheduleNo, name: r.name, total_amount: n(r.totalAmount), months: Number(r.months), amortized_amount: n(r.amortizedAmount), remaining: round2(n(r.totalAmount) - n(r.amortizedAmount)), periods_posted: Number(r.periodsPosted), expense_account: r.expenseAccount, next_run_date: r.nextRunDate, status: r.status })), count: rows.length };
-  }
-
-  // Idempotent scheduled run: amortize one period of every active schedule whose next_run_date has arrived.
-  async runDuePrepaid(user: JwtUser) {
-    const db = this.db;
-    const today = ymd();
-    const due = await db.select().from(prepaidSchedules).where(and(eq(prepaidSchedules.status, 'active'), sql`${prepaidSchedules.nextRunDate} <= ${today}`));
-    const posted: { entry_no: string | null; schedule_no: string; amount: number }[] = [];
-    for (const r of due) {
-      const total = n(r.totalAmount), months = Number(r.months), already = Number(r.periodsPosted);
-      if (already >= months) { await db.update(prepaidSchedules).set({ status: 'complete' }).where(eq(prepaidSchedules.id, r.id)); continue; }
-      const isLast = already === months - 1;
-      const slice = isLast ? round2(total - n(r.amortizedAmount)) : round2(total / months);
-      const period = String(today).slice(0, 7);
-      const res = await this.postEntry({ date: today, source: 'PPD', sourceRef: `PPD-${Number(r.id)}-${period}`, tenantId: r.tenantId ?? null, memo: `Amortize prepaid ${r.scheduleNo} (${already + 1}/${months})`, createdBy: `${user?.username ?? 'system'} (prepaid)`, lines: [{ account_code: r.expenseAccount ?? '5100', debit: slice }, { account_code: r.prepaidAccount ?? '1280', credit: slice }] });
-      const newPosted = already + 1;
-      await db.update(prepaidSchedules).set({
-        amortizedAmount: String(round2(n(r.amortizedAmount) + (res.entry_no ? slice : 0))),
-        periodsPosted: newPosted, nextRunDate: addByFrequency(today, 'monthly'),
-        status: newPosted >= months ? 'complete' : 'active',
-      }).where(eq(prepaidSchedules.id, r.id));
-      if (res.entry_no) posted.push({ entry_no: res.entry_no, schedule_no: r.scheduleNo, amount: slice });
-    }
-    return { as_of: today, scanned: due.length, posted: posted.length, entries: posted };
-  }
-
-  // ───────────────────── Journal listing ─────────────────────
-  private async entriesList(limit: number, status?: 'Draft' | 'Posted' | 'Voided') {
-    const db = this.db;
-    const where = status ? eq(journalEntries.status, status) : undefined;
-    const heads = await db.select().from(journalEntries).where(where).orderBy(desc(journalEntries.id)).limit(limit);
-    if (!heads.length) return { entries: [], count: 0 };
-    // Batch every line for the page in ONE query (was a query per header → N+1), then group by entry.
-    const ids = heads.map((h: any) => Number(h.id));
-    const allLines = await db.select({
-      entryId: journalLines.entryId, account_code: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit, memo: journalLines.memo,
-    }).from(journalLines).where(inArray(journalLines.entryId, ids));
-    const byEntry = new Map<number, any[]>();
-    for (const l of allLines) {
-      const arr = byEntry.get(Number(l.entryId)) ?? [];
-      arr.push({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo });
-      byEntry.set(Number(l.entryId), arr);
-    }
-    const out = heads.map((h: any) => ({
-      entry_no: h.entryNo, entry_date: h.entryDate, period: h.period, source: h.source, source_ref: h.sourceRef,
-      memo: h.memo, currency: h.currency, status: h.status, created_by: h.createdBy, created_at: h.createdAt,
-      lines: byEntry.get(Number(h.id)) ?? [],
-    }));
-    return { entries: out, count: out.length };
-  }
-  async listJournal(limit: number) { return this.entriesList(limit); }
-  // GL-05: journal entries awaiting maker-checker approval (Draft).
-  async pendingJournal(limit: number) { return this.entriesList(limit, 'Draft'); }
-
-  // GL-05 maker-checker: approve a Draft JE → Posted. The approver MUST differ from the preparer
-  // (segregation of duties) regardless of permissions held — even an Admin cannot approve their own.
-  async approveEntry(entryNo: string, approver: JwtUser) {
-    const db = this.db;
-    const [e] = await db.select().from(journalEntries).where(eq(journalEntries.entryNo, entryNo)).limit(1);
-    if (!e) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal entry not found', messageTh: 'ไม่พบรายการบัญชี' });
-    if (e.status !== 'Draft') throw new BadRequestException({ code: 'NOT_PENDING', message: `Entry ${entryNo} is ${e.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
-    if (e.createdBy && e.createdBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a journal entry you prepared', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
-    // Re-check the period is still open at approval time (it may have closed since the draft was prepared).
-    const [pp] = e.tenantId == null ? [undefined]
-      : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.code, e.period!), eq(fiscalPeriods.tenantId, e.tenantId))).limit(1);
-    if (pp && pp.status === 'Closed') throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${e.period} is closed`, messageTh: `งวดบัญชี ${e.period} ถูกปิดแล้ว` });
-    // GL-17: a Draft → Posted transition is the moment of posting; stamp postedAt and log the APPROVE.
-    // R1-2: the transition + audit row + period-balance snapshot commit ATOMICALLY.
-    await db.transaction(async (tx: any) => {
-      await tx.update(journalEntries).set({ status: 'Posted', postedAt: new Date() }).where(eq(journalEntries.id, e.id));
-      await tx.insert(glAuditLog).values({
-        tenantId: e.tenantId ?? null, entryId: Number(e.id), action: 'APPROVE', actor: approver.username,
-        detail: { entry_no: entryNo, prepared_by: e.createdBy },
-      });
-      const drLines = await tx.select({ account_code: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit, cost_center: journalLines.costCenterCode })
-        .from(journalLines).where(eq(journalLines.entryId, Number(e.id)));
-      await this.bumpPeriodBalances(tx, { tenantId: e.tenantId ?? null, ledgerCode: e.ledgerCode ?? null, period: e.period ?? null }, drLines);
-    });
-    return { entry_no: entryNo, status: 'Posted', approved_by: approver.username, prepared_by: e.createdBy };
-  }
-
-  // GL-05: reject a Draft JE → Voided (with a reason appended to the memo).
-  async rejectEntry(entryNo: string, approver: JwtUser, reason?: string) {
-    const db = this.db;
-    const [e] = await db.select().from(journalEntries).where(eq(journalEntries.entryNo, entryNo)).limit(1);
-    if (!e) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal entry not found', messageTh: 'ไม่พบรายการบัญชี' });
-    if (e.status !== 'Draft') throw new BadRequestException({ code: 'NOT_PENDING', message: `Entry ${entryNo} is ${e.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
-    const memo = `${e.memo ?? ''} [REJECTED by ${approver.username}${reason ? `: ${reason}` : ''}]`.trim();
-    await db.update(journalEntries).set({ status: 'Voided', memo }).where(eq(journalEntries.id, e.id));
-    return { entry_no: entryNo, status: 'Voided', rejected_by: approver.username };
-  }
-
-  // ───────────────────── GL immutability + reversal (WS2.2, GL-17) ─────────────────────
-  // A Posted journal entry is IMMUTABLE — never edited or deleted (DB trigger in prod + this app guard).
-  // The ONLY correction is a contra REVERSAL: a new, immediately-Posted entry that swaps every line's
-  // debit/credit so original + reversal net to zero on every affected account. The original is flagged
-  // is_reversed (the one column the DB trigger permits changing on a posted entry). Every action is logged.
-  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string; requireDistinctApprover?: boolean }) {
-    const db = this.db;
-    const [orig] = await db.select().from(journalEntries).where(eq(journalEntries.id, dto.entryId)).limit(1);
-    if (!orig) throw new NotFoundException({ code: 'ENTRY_NOT_FOUND', message: `Journal entry ${dto.entryId} not found`, messageTh: `ไม่พบรายการบัญชี ${dto.entryId}` });
-    if (orig.status !== 'Posted') throw new BadRequestException({ code: 'NOT_POSTED', message: `Entry ${orig.entryNo} is ${orig.status}; only Posted entries can be reversed`, messageTh: 'กลับรายการได้เฉพาะรายการที่ผ่านรายการแล้ว' });
-    if (orig.isReversed) throw new BadRequestException({ code: 'ALREADY_REVERSED', message: `Entry ${orig.entryNo} has already been reversed`, messageTh: 'รายการนี้ถูกกลับรายการไปแล้ว' });
-    // GL-05 (audit G2): a Posted JE cleared GL-05 maker-checker, so a reversal must not silently undo that
-    // second-person check. On the MANUAL reversal path (requireDistinctApprover, set by the controller) the
-    // reverser must differ from the original preparer — the original preparer cannot unilaterally reverse
-    // their own (independently-approved) entry. System/internal callers (e.g. FX reval) do not set the flag.
-    if (dto.requireDistinctApprover && orig.createdBy && orig.createdBy === dto.reversedBy) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot reverse a journal entry you prepared', messageTh: 'ผู้บันทึกกลับรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
-
-    const lines = await db.select().from(journalLines).where(eq(journalLines.entryId, orig.id));
-    if (!lines.length) throw new BadRequestException({ code: 'NOT_POSTED', message: `Entry ${orig.entryNo} has no lines to reverse`, messageTh: 'ไม่มีรายการบัญชีให้กลับรายการ' });
-
-    // Swap Dr/Cr on every line; carry dimensions over. Post through the normal posting path so the period
-    // gates (PERIOD_LOCKED/PERIOD_CLOSED), balance invariant and idempotency all still apply.
-    const reversalLines: JournalLineDto[] = lines.map((l: any) => ({
-      account_code: l.accountCode,
-      debit: n(l.credit), credit: n(l.debit),
-      memo: `Reversal of ${orig.entryNo}${l.memo ? ` — ${l.memo}` : ''}`,
-      cost_center: l.costCenterCode ?? null,
-      branch_id: l.branchId ?? null, project_id: l.projectId ?? null, dept_id: l.departmentId ?? null,
-    }));
-    const date = dto.date ?? ymd();
-    const res = await this.postEntry({
-      date, source: 'REVERSAL', sourceRef: `REV-${Number(orig.id)}`,
-      tenantId: orig.tenantId ?? null, currency: orig.currency ?? 'THB',
-      memo: `Reversal of ${orig.entryNo}${dto.reason ? ` — ${dto.reason}` : ''}`,
-      lines: reversalLines, createdBy: dto.reversedBy, ledgerCode: orig.ledgerCode ?? null,
-      // a posted contra account leg may legitimately touch a control account (it mirrors the original)
-      viaSubledger: true, _reversalOf: Number(orig.id),
-    });
-
-    // Resolve the new entry's id (postEntry returns entry_no; could be a dedupe on a same-source re-run).
-    const [rev] = await db.select({ id: journalEntries.id }).from(journalEntries)
-      .where(eq(journalEntries.sourceRef, `REV-${Number(orig.id)}`)).orderBy(desc(journalEntries.id)).limit(1);
-    const reversalId = rev ? Number(rev.id) : null;
-
-    // Flag the original reversed — ONLY is_reversed changes, so the DB trigger permits this UPDATE.
-    await db.update(journalEntries).set({ isReversed: true }).where(eq(journalEntries.id, orig.id));
-    await db.insert(glAuditLog).values({
-      tenantId: orig.tenantId ?? null, entryId: Number(orig.id), action: 'REVERSE', actor: dto.reversedBy,
-      detail: { originalId: Number(orig.id), original_entry_no: orig.entryNo, reversalId, reversal_entry_no: res.entry_no, reason: dto.reason ?? null },
-    });
-    return { reversalId, originalId: Number(orig.id), reversal_entry_no: res.entry_no, original_entry_no: orig.entryNo };
-  }
-
-  // GL-17 app-level immutability guard (complements the prod DB trigger; harness-verifiable). There is no
-  // edit/delete endpoint for a posted JE — this method DEMONSTRATES the guard: it refuses to mutate a Posted
-  // entry, records a MUTATE_BLOCKED audit row, and signals the block. It returns a discriminated result
-  // (rather than throwing) so the audit row commits with the request tx; the controller renders the block
-  // as HTTP 400 GL_IMMUTABLE. A thrown exception would roll the whole request tx back and discard the audit
-  // row, because each request runs in a single tenant-scoped transaction (see TenantTxInterceptor).
-  async attemptVoidPosted(entryId: number, actor: string) {
-    const db = this.db;
-    const [e] = await db.select().from(journalEntries).where(eq(journalEntries.id, entryId)).limit(1);
-    if (!e) throw new NotFoundException({ code: 'ENTRY_NOT_FOUND', message: `Journal entry ${entryId} not found`, messageTh: `ไม่พบรายการบัญชี ${entryId}` });
-    if (e.status === 'Posted') {
-      await db.insert(glAuditLog).values({
-        tenantId: e.tenantId ?? null, entryId: Number(e.id), action: 'MUTATE_BLOCKED', actor,
-        detail: { entry_no: e.entryNo, attempted: 'void/delete', message: 'posted entry is immutable; correct via reversal' },
-      });
-      return { blocked: true as const, code: 'GL_IMMUTABLE' as const, entry_id: entryId, entry_no: e.entryNo, status: e.status, immutable: true,
-        message: `Posted journal entry ${e.entryNo} is immutable; correct it via a reversal`, messageTh: 'รายการที่ผ่านรายการแล้วแก้ไข/ลบไม่ได้ ต้องกลับรายการเท่านั้น' };
-    }
-    // Non-posted (Draft) entries are not GL-17-protected; nothing to block here.
-    return { blocked: false as const, entry_id: entryId, status: e.status, immutable: false };
-  }
-
-  // GL-17: the GL audit trail (optionally filtered to one entry), scoped to the caller's tenant by RLS.
-  async listGlAudit(entryId?: number, limit = 100) {
-    const db = this.db;
-    const where = entryId != null ? eq(glAuditLog.entryId, entryId) : undefined;
-    const rows = await db.select().from(glAuditLog).where(where).orderBy(desc(glAuditLog.id)).limit(limit);
-    return { audit: rows.map((r: any) => ({ id: Number(r.id), entry_id: r.entryId != null ? Number(r.entryId) : null, action: r.action, actor: r.actor, detail: r.detail, at: r.at })), count: rows.length };
-  }
+  // ── docs/38 ledger PR-3: journal listings, GL-05 approve/reject, GL-17 reversal/immutability/audit — LedgerPostingService delegators. ──
+  async listJournal(limit: number) { return this.posting.listJournal(limit); }
+  async pendingJournal(limit: number) { return this.posting.pendingJournal(limit); }
+  async approveEntry(entryNo: string, approver: JwtUser) { return this.posting.approveEntry(entryNo, approver); }
+  async rejectEntry(entryNo: string, approver: JwtUser, reason?: string) { return this.posting.rejectEntry(entryNo, approver, reason); }
+  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string; requireDistinctApprover?: boolean }) { return this.posting.reverseEntry(dto); }
+  async attemptVoidPosted(entryId: number, actor: string) { return this.posting.attemptVoidPosted(entryId, actor); }
+  async listGlAudit(entryId?: number, limit = 100) { return this.posting.listGlAudit(entryId, limit); }
 
   // ───────────────────── Trial Balance ─────────────────────
   // group journal_lines by account_code (joined to accounts) — Σdebit, Σcredit, balance
@@ -795,161 +394,10 @@ export class LedgerService {
     };
   }
 
-  // ───────────────────── Statement of Cash Flows (indirect method) ─────────────────────
-  // Reconstructs operating cash from net income + non-cash add-backs + working-capital movements, then
-  // investing & financing — all off the posted GL over [from,to]. Year-end CLOSE entries are excluded
-  // (they reclassify P&L into retained earnings and carry no cash). Reconciles to the change in the cash
-  // accounts (1000/1010/1020) by double-entry construction: Σ(every account's debit−credit)=0, so
-  // Σ(non-cash credit−debit) ≡ Σ(cash debit−credit) = net change in cash.
-  async cashFlowStatement(from: string, to: string, ledgerCode?: string | null) {
-    const db = this.db;
-    const rows = await this.aggregateByType(db, from, to, undefined, ledgerCode, undefined, ['CLOSE']);
-    const move = (r: any) => round4(n(r.credit) - n(r.debit)); // cash effect of a balance-sheet account's movement
-
-    // Net income over the window = Σ P&L (credit−debit). Equals the income statement on an unclosed window.
-    const netIncome = round4(rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense').reduce((a: number, r: any) => a + move(r), 0));
-
-    const addbacks: any[] = [], operating: any[] = [], investing: any[] = [], financing: any[] = [], unclassified: any[] = [];
-    for (const r of rows) {
-      const t = r.account_type;
-      if (t === 'Revenue' || t === 'Expense') continue;        // already captured in net income
-      if (CASH_ACCOUNTS.includes(r.account_code)) continue;    // the cash being explained
-      const amount = move(r);
-      if (Math.abs(amount) < 1e-9) continue;
-      const line = { account_code: r.account_code, account_name: r.account_name, amount };
-      const cls = CF_CLASSIFY[r.account_code];
-      const bucket = cls?.bucket ?? (t === 'Asset' ? 'operating' : t === 'Liability' ? 'operating' : t === 'Equity' ? 'financing' : 'operating');
-      const label = cls?.label ?? r.account_name ?? r.account_code;
-      const entry = { ...line, label };
-      if (bucket === 'addback') addbacks.push(entry);
-      else if (bucket === 'investing') investing.push(entry);
-      else if (bucket === 'financing') financing.push(entry);
-      else operating.push(entry);
-      if (!cls) unclassified.push(r.account_code); // surfaced for transparency (still bucketed by type)
-    }
-
-    const sum = (xs: any[]) => round4(xs.reduce((a, x) => a + x.amount, 0));
-    const netOperating = round4(netIncome + sum(addbacks) + sum(operating));
-    const netInvesting = sum(investing);
-    const netFinancing = sum(financing);
-    const netChange = round4(netOperating + netInvesting + netFinancing);
-
-    // Actual cash balances bracketing the window (full books incl. opening/close — CLOSE never hits cash).
-    const cashBeginning = await this.cashBalanceAsOf(prevDay(from), ledgerCode);
-    const cashEnding = await this.cashBalanceAsOf(to, ledgerCode);
-
-    return {
-      from, to, ledger: ledgerCode ?? LEADING, method: 'indirect',
-      operating: { net_income: netIncome, adjustments: addbacks, working_capital: operating, net: netOperating },
-      investing: { lines: investing, net: netInvesting },
-      financing: { lines: financing, net: netFinancing },
-      net_change_in_cash: netChange,
-      cash_beginning: cashBeginning,
-      cash_ending: cashEnding,
-      // Independent tie-out: the activity sections must equal the movement in the cash accounts.
-      reconciled: Math.abs(round4(cashEnding - cashBeginning) - netChange) < 0.01,
-      unclassified_accounts: [...new Set(unclassified)],
-    };
-  }
-
-  // Net debit balance of the cash accounts (1000/1010/1020) as of a date, in one ledger.
-  private async cashBalanceAsOf(asOf: string, ledgerCode?: string | null): Promise<number> {
-    const db = this.db;
-    const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
-    return round4(rows.filter((r: any) => CASH_ACCOUNTS.includes(r.account_code)).reduce((a: number, r: any) => a + (n(r.debit) - n(r.credit)), 0));
-  }
-
-  // ───────────────────── Statement of Cash Flows (DIRECT method) ─────────────────────
-  // Classifies actual cash movements by the nature of their contra account: receipts from customers,
-  // payments to suppliers/employees, tax remittances, investing, financing. Each cash journal line is
-  // attributed once (to its entry's dominant non-cash leg), so the statement reconciles to Δcash. CLOSE
-  // entries are excluded (no cash effect).
-  async cashFlowDirect(from: string, to: string, ledgerCode?: string | null) {
-    const db = this.db;
-    const lines = await db
-      .select({
-        entry_id: journalLines.entryId, account_code: journalLines.accountCode, account_type: accounts.type,
-        debit: journalLines.debit, credit: journalLines.credit,
-      })
-      .from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(and(eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, from), lte(journalEntries.entryDate, to), this.ledgerCond(ledgerCode), notInArray(journalEntries.source, ['CLOSE'])));
-
-    // Group lines by entry; attribute each entry's net cash movement to its dominant contra account.
-    const byEntry = new Map<number, any[]>();
-    for (const l of lines) { const k = Number(l.entry_id); (byEntry.get(k) ?? byEntry.set(k, []).get(k)!).push(l); }
-    const buckets: Record<string, number> = { receipts_from_customers: 0, payments_to_suppliers: 0, tax_and_payroll: 0, other_operating: 0, investing: 0, financing: 0 };
-    for (const legs of byEntry.values()) {
-      const cashLegs = legs.filter((l) => CASH_ACCOUNTS.includes(l.account_code));
-      if (!cashLegs.length) continue;
-      const cashNet = round4(cashLegs.reduce((a, l) => a + (n(l.debit) - n(l.credit)), 0));
-      if (Math.abs(cashNet) < 1e-9) continue;
-      const nonCash = legs.filter((l) => !CASH_ACCOUNTS.includes(l.account_code));
-      const dominant = nonCash.sort((a, b) => Math.abs(n(b.debit) - n(b.credit)) - Math.abs(n(a.debit) - n(a.credit)))[0];
-      buckets[cashContraCategory(dominant?.account_code, dominant?.account_type)]! += cashNet;
-    }
-    for (const k of Object.keys(buckets)) buckets[k] = round4(buckets[k]!);
-    const operatingNet = round4(buckets.receipts_from_customers! + buckets.payments_to_suppliers! + buckets.tax_and_payroll! + buckets.other_operating!);
-    const netChange = round4(operatingNet + buckets.investing! + buckets.financing!);
-    const cashBeginning = await this.cashBalanceAsOf(prevDay(from), ledgerCode);
-    const cashEnding = await this.cashBalanceAsOf(to, ledgerCode);
-    return {
-      from, to, ledger: ledgerCode ?? LEADING, method: 'direct',
-      operating: {
-        receipts_from_customers: buckets.receipts_from_customers,
-        payments_to_suppliers: buckets.payments_to_suppliers,
-        tax_and_payroll: buckets.tax_and_payroll,
-        other_operating: buckets.other_operating,
-        net: operatingNet,
-      },
-      investing: { net: buckets.investing },
-      financing: { net: buckets.financing },
-      net_change_in_cash: netChange,
-      cash_beginning: cashBeginning, cash_ending: cashEnding,
-      reconciled: Math.abs(round4(cashEnding - cashBeginning) - netChange) < 0.01,
-    };
-  }
-
-  // ───────────────────── Cash-flow FORECAST ─────────────────────
-  // Projects the cash balance forward from today over N weeks, using open AR (expected inflows by due date)
-  // and open AP (expected outflows by due date). Anything already past due lands in week 0 (due now).
-  async cashFlowForecast(weeks = 8, ledgerCode?: string | null) {
-    const db = this.db;
-    const today = ymd();
-    const opening = await this.cashBalanceAsOf(today, ledgerCode);
-    const ar = await db.select({ due: arInvoices.dueDate, out: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)` })
-      .from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
-    const ap = await db.select({ due: apTransactions.dueDate, out: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)` })
-      .from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
-
-    const weekIndex = (due: string | null): number => {
-      if (!due) return 0;
-      const d = Math.floor((Date.parse(due) - Date.parse(today)) / 86400000);
-      if (d <= 0) return 0;            // overdue / due now
-      const w = Math.floor(d / 7) + 1; // d in 1..7 → week 1
-      return Math.min(w, weeks);       // clamp beyond horizon into the last bucket
-    };
-    const inflow = new Array(weeks + 1).fill(0);
-    const outflow = new Array(weeks + 1).fill(0);
-    for (const r of ar) { const o = n(r.out); if (o > 0.0001) inflow[weekIndex(r.due)] += o; }
-    for (const r of ap) { const o = n(r.out); if (o > 0.0001) outflow[weekIndex(r.due)] += o; }
-
-    let running = opening;
-    const periods = [] as any[];
-    for (let w = 0; w <= weeks; w++) {
-      const inn = round4(inflow[w]), out = round4(outflow[w]);
-      running = round4(running + inn - out);
-      periods.push({ week: w, label: w === 0 ? 'due now / overdue' : `week +${w}`, inflow: inn, outflow: out, net: round4(inn - out), projected_balance: running });
-    }
-    return {
-      as_of: today, ledger: ledgerCode ?? LEADING, weeks, opening_cash: opening,
-      total_expected_inflow: round4(inflow.reduce((a, x) => a + x, 0)),
-      total_expected_outflow: round4(outflow.reduce((a, x) => a + x, 0)),
-      projected_closing_cash: running,
-      periods,
-    };
-  }
+  // ── docs/38 ledger PR-1: cash-flow statements/forecast (GL-07) live in LedgerCashflowService; thin delegators. ──
+  async cashFlowStatement(from: string, to: string, ledgerCode?: string | null) { return this.cashflow.cashFlowStatement(from, to, ledgerCode); }
+  async cashFlowDirect(from: string, to: string, ledgerCode?: string | null) { return this.cashflow.cashFlowDirect(from, to, ledgerCode); }
+  async cashFlowForecast(weeks = 8, ledgerCode?: string | null) { return this.cashflow.cashFlowForecast(weeks, ledgerCode); }
 
   // ───────────────────── GAAP adjustment posting ─────────────────────
   // Post a balanced entry to ONE ledger only (e.g. a tax-depreciation delta, an IFRS lease adjustment).
@@ -1231,32 +679,7 @@ export class LedgerService {
 
 function round4(x: number): number { return Math.round(x * 10000) / 10000; }
 
-// Recurring-journal cadence: the allowed frequencies and how each advances next_run_date.
-const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
-function addByFrequency(dateStr: string, frequency: string): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  if (frequency === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
-  else if (frequency === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
-  else d.setUTCDate(d.getUTCDate() + 1); // daily (default)
-  return d.toISOString().slice(0, 10);
-}
 
-// Direct-method cash-flow category from a cash entry's dominant contra account.
-function cashContraCategory(code: string | undefined, type: string | undefined): string {
-  const c = code ?? '';
-  if (c === '1100' || c === '1150' || type === 'Revenue') return 'receipts_from_customers'; // AR / sales
-  if (c === '2100' || c === '2350' || c === '2360' || c === '2370') return 'tax_and_payroll'; // VAT / SSO / WHT / PF payable
-  if (c === '1500') return 'investing';                                                       // fixed assets
-  if (c.startsWith('3') || type === 'Equity') return 'financing';                             // capital / dividends
-  if (c === '2000' || c === '2150' || c.startsWith('12') || type === 'Expense') return 'payments_to_suppliers'; // AP / inventory / expense / wages
-  return 'other_operating';
-}
-// Calendar day before an ISO date (YYYY-MM-DD) — the day the opening cash balance is struck.
-function prevDay(ymdStr: string): string {
-  const d = new Date(`${ymdStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
 function typeTotal(rows: any[], type: string, side: 'debit' | 'credit'): number {
   return rows.filter((r) => r.account_type === type).reduce((a, r) => a + n(r[side]), 0);
 }

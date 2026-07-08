@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { objectStoreConfigured, isObjectRef, putObject, objectUrl, deleteObject } from '../src/common/object-storage';
+import { objectStoreConfigured, isObjectRef, putObject, objectUrl, deleteObject, isSafeObjectKey } from '../src/common/object-storage';
 
 // Receipt-photo (and any large blob) object-storage offload. S3-compatible via authorized HTTP PUT/DELETE;
 // when unconfigured everything falls back to keeping the inline data URL (no behaviour change).
@@ -68,5 +68,20 @@ describe('object-storage — configured', () => {
     await deleteObject(DATA_URL); // inline → nothing to delete
     await deleteObject('[erased]');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // security review L-9 — path-traversal / host-redirect keys must never reach the store.
+  it('rejects an unsafe key on put/url/delete (no fetch, no traversal URL)', async () => {
+    for (const bad of ['../../etc/passwd', '/abs/path', 'a/../b', 'http://evil.com/x', 'a\\b', '']) {
+      expect(isSafeObjectKey(bad)).toBe(false);
+      expect(await putObject(bad, DATA_URL)).toBeNull();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    // a stored ref carrying a malformed key resolves to null and is never DELETEd
+    expect(objectUrl('objstore:../../secret')).toBeNull();
+    await deleteObject('objstore:../../secret');
+    expect(fetchMock).not.toHaveBeenCalled();
+    // sanity: a normal key still passes
+    expect(isSafeObjectKey('receipts/2026/abc.jpg')).toBe(true);
   });
 });

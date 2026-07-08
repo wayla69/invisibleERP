@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { useMe } from '@/lib/auth';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
+import { DataTable } from '@/components/data-table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -144,22 +145,23 @@ export default function CustomObjectsPage() {
                   {(records.data?.records ?? []).length === 0 ? (
                     <p className="text-sm text-muted-foreground">{t('mx.co_no_records')}</p>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead><tr className="border-b text-left text-muted-foreground">{fields.map((f) => <th key={f.field_key} className="px-2 py-1 font-medium">{f.label}</th>)}<th /></tr></thead>
-                        <tbody>
-                          {(records.data?.records ?? []).map((r) => (
-                            <tr key={r.record_id} className="border-b">
-                              {fields.map((f) => <td key={f.field_key} className="px-2 py-1">{String(r.values?.[f.field_key] ?? '')}</td>)}
-                              <td className="px-2 py-1 text-right">
-                                <Button size="sm" variant="ghost" onClick={() => { setEditId(r.record_id); setRec({ ...r.values }); }}>{t('mx.co_edit')}</Button>
-                                <Button size="sm" variant="ghost" disabled={delRec.isPending} onClick={() => delRec.mutate(r.record_id)}><Trash2 className="size-4 text-destructive" /></Button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <DataTable
+                      dense
+                      // Flatten each record's dynamic values onto the row so the built-in column sort
+                      // (which reads row[key]) works; record_id/values spread LAST so a field key can't shadow them.
+                      rows={(records.data?.records ?? []).map((r) => ({ ...r.values, record_id: r.record_id, values: r.values }))}
+                      rowKey={(r) => r.record_id}
+                      columns={[
+                        // Dynamic column spec — one column per user-defined field (the object's own schema).
+                        ...fields.map((f) => ({ key: f.field_key, label: f.label, sortable: true, render: (r: any) => String(r.values?.[f.field_key] ?? '') })),
+                        { key: '_actions', label: '', align: 'right' as const, render: (r: any) => (
+                          <>
+                            <Button size="sm" variant="ghost" onClick={() => { setEditId(r.record_id); setRec({ ...r.values }); }}>{t('mx.co_edit')}</Button>
+                            <Button size="sm" variant="ghost" disabled={delRec.isPending} onClick={() => delRec.mutate(r.record_id)}><Trash2 className="size-4 text-destructive" /></Button>
+                          </>
+                        ) },
+                      ]}
+                    />
                   )}
 
                   {fields.length > 0 && (

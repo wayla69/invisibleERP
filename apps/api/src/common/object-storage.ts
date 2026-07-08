@@ -11,6 +11,20 @@
 // retrievable URL and passes through anything else (an inline `data:` URL, `[erased]`, null) unchanged.
 const PREFIX = 'objstore:';
 
+// Path-safety guard (security review L-9). Object keys are server-generated today, but building the request
+// URL by concatenation (`${base()}/${key}`) means a key containing `..`, a leading `/`, a backslash, or a
+// scheme (`http:`) could traverse out of the bucket or redirect the PUT/DELETE to another host. Restrict the
+// key to safe relative path segments so a future caller that forwards user-influenced input can't do so.
+export function isSafeObjectKey(key: string): boolean {
+  if (typeof key !== 'string' || key.length === 0 || key.length > 1024) return false;
+  if (key.startsWith('/') || key.startsWith('\\')) return false;   // no absolute paths
+  if (/[\\]/.test(key)) return false;                               // no backslashes
+  if (/[a-z][a-z0-9+.-]*:\/\//i.test(key)) return false;            // no scheme:// (host redirect)
+  if (/[\x00-\x1f]/.test(key)) return false;                        // no control chars
+  // each segment must be a plain name; reject any `.`/`..` traversal segment
+  return key.split('/').every((seg) => seg.length > 0 && seg !== '.' && seg !== '..');
+}
+
 export function objectStoreConfigured(): boolean {
   return !!process.env.OBJECT_STORE_URL;
 }
@@ -26,7 +40,7 @@ function base(): string {
 // Upload a `data:<mime>;base64,<data>` URL to the store under `key`. Returns the `objstore:<key>` reference on
 // success, or null (unconfigured, bad input, or a transport error) so the caller can fall back to inline.
 export async function putObject(key: string, dataUrl: string): Promise<string | null> {
-  if (!objectStoreConfigured()) return null;
+  if (!objectStoreConfigured() || !isSafeObjectKey(key)) return null;
   const m = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl ?? '');
   if (!m) return null;
   const contentType = m[1];
@@ -47,6 +61,7 @@ export async function putObject(key: string, dataUrl: string): Promise<string | 
 export function objectUrl(ref: string | null | undefined): string | null {
   if (!isObjectRef(ref)) return ref ?? null;
   const key = (ref as string).slice(PREFIX.length);
+  if (!isSafeObjectKey(key)) return null; // never build a traversal/host-redirect URL from a malformed ref
   const pub = (process.env.OBJECT_STORE_PUBLIC_URL ?? process.env.OBJECT_STORE_URL ?? '').replace(/\/$/, '');
   return `${pub}/${key}`;
 }
@@ -55,6 +70,7 @@ export function objectUrl(ref: string | null | undefined): string | null {
 export async function deleteObject(ref: string | null | undefined): Promise<void> {
   if (!objectStoreConfigured() || !isObjectRef(ref)) return;
   const key = (ref as string).slice(PREFIX.length);
+  if (!isSafeObjectKey(key)) return; // never issue a DELETE against a traversal/host-redirect target
   try {
     await fetch(`${base()}/${key}`, { method: 'DELETE', headers: process.env.OBJECT_STORE_TOKEN ? { Authorization: `Bearer ${process.env.OBJECT_STORE_TOKEN}` } : {} });
   } catch { /* best-effort */ }

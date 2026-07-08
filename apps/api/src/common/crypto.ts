@@ -135,3 +135,25 @@ export function verifyWebhookSignature(secret: string, rawBody: Buffer | string,
   if (!/^[0-9a-fA-F]+$/.test(provided)) return false;
   return safeEqualHex(hmacSha256Hex(secret, rawBody), provided.toLowerCase());
 }
+
+// Replay-resistant webhook verification (security review L-1). When the caller supplies a `timestamp` (the
+// Stripe/Omse convention), the signature MUST cover `"<timestamp>.<rawBody>"` and the timestamp MUST be within
+// `toleranceSec` of now — so a captured-and-replayed callback is refused once its timestamp goes stale, and the
+// timestamp can't be freshened without invalidating the (secret-keyed) signature. With no timestamp it falls
+// back to the body-only HMAC, so existing senders are unaffected. Returns a reason for precise error mapping.
+export function verifyWebhookWithTimestamp(
+  secret: string,
+  rawBody: Buffer | string | undefined,
+  signature: string | undefined,
+  timestamp: string | number | undefined,
+  toleranceSec = 300,
+): 'ok' | 'stale' | 'bad' {
+  const body = rawBody == null ? Buffer.from('') : typeof rawBody === 'string' ? Buffer.from(rawBody) : rawBody;
+  if (timestamp !== undefined && timestamp !== null && String(timestamp) !== '') {
+    const ts = Number(timestamp);
+    if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > toleranceSec) return 'stale';
+    const signed = Buffer.concat([Buffer.from(`${String(timestamp)}.`), body]);
+    return verifyWebhookSignature(secret, signed, signature) ? 'ok' : 'bad';
+  }
+  return verifyWebhookSignature(secret, body, signature) ? 'ok' : 'bad';
+}

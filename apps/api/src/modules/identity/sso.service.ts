@@ -97,8 +97,11 @@ export class SsoService {
     } catch (e: any) {
       throw new UnauthorizedException({ code: 'BAD_ID_TOKEN', message: `id_token verification failed: ${e?.message ?? 'invalid'}`, messageTh: 'ตรวจสอบ id_token ไม่ผ่าน' });
     }
-    // Bind the id_token to THIS login: its nonce must equal the one we issued at authorize() (replay defence).
-    if (claims.nonce !== undefined && claims.nonce !== st.nonce)
+    // Bind the id_token to THIS login: its nonce MUST equal the one we issued at authorize() (replay defence).
+    // We always mint a nonce and send it in the authorize request (§ authorize), and a spec-compliant IdP MUST
+    // echo it into the id_token — so require an exact match and FAIL CLOSED when the claim is absent (security
+    // review L-10: the old `!== undefined` guard let an id_token that simply omitted the nonce skip the binding).
+    if (st.nonce && claims.nonce !== st.nonce)
       throw new UnauthorizedException({ code: 'BAD_NONCE', message: 'id_token nonce mismatch', messageTh: 'nonce ของ id_token ไม่ตรง' });
     // Claim checks: issuer, audience, expiry.
     if (found.cfg.oidcIssuer && claims.iss && String(claims.iss).replace(/\/$/, '') !== String(found.cfg.oidcIssuer).replace(/\/$/, ''))
