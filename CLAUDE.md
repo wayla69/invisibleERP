@@ -71,6 +71,15 @@ For every such change, review and update as needed:
    mergeable but a **non-required** check is red/pending — the stale `CodeQL` keeps it at `unstable` (never
    `clean`) yet does **not** block merge, so verify the *required* gates (`build`, `web-e2e`, harnesses)
    directly instead of waiting for `clean`.
+9. **A harness failure right after adding a derived/companion column is often a stale fixture, not a broken
+   lookup — check `db.insert(s.<table>).values(...)` sites before touching product code again.** Cutover
+   harnesses commonly seed rows with a raw Drizzle insert that bypasses the service layer (`enroll()`,
+   `create()`, …) which normally populates any value computed from another field (e.g. the `blindIndex()`
+   companion `_bidx` column added alongside an `encryptedText` PII column, migration 0284 — a raw-inserted
+   `pos_members` row got ciphertext for `phone` but a NULL `phone_bidx`, so every OTP-login/lookup/transfer
+   check that used to pass started failing). Diagnose by checking whether the failing row was created via the
+   real API/service path or a direct `db.insert()`; if the latter, `grep -rn "<table>\).values(" tools/cutover/src`
+   and add the same derived value to every fixture — that's the fix, not touching the lookup code you just wrote.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
