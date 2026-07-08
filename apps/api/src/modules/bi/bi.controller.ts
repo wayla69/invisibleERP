@@ -95,6 +95,14 @@ export class BiController {
   @HttpCode(202)
   runDueAsync(@CurrentUser() user: JwtUser) { return this.svc.runDueAsync(user); }
 
+  // 2.7 — the PLATFORM-WIDE due sweep (every tenant), for the nightly cron: run-async only ever saw the
+  // service account's own tenant, so other tenants' subscriptions never fired. Response is counts only —
+  // no cross-tenant row data. Each subscription executes RLS-scoped in its own tenant on the worker.
+  @Post('subscriptions/run-all-async')
+  @Permissions('exec')
+  @HttpCode(202)
+  runDueAllAsync(@CurrentUser() user: JwtUser) { return this.svc.runDueAllAsync(`sweep:${user.username}`); }
+
   @Post('subscriptions/:id/run')
   @Permissions('exec')
   @HttpCode(200)

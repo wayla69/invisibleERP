@@ -295,7 +295,15 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
   ceiling. Wire the load test as a **manual-dispatch CI job** (not a gate) so the number stays fresh.
 - BI scheduler: document + provision the external cron (Railway cron hitting the `runDue` endpoint
   with a service token) in `docs/deployment/`; add a `jobs` heartbeat check so a silent cron death
-  is alertable (ties into R2-1 alerting).
+  is alertable (ties into R2-1 alerting). **Heartbeat DELIVERED 2026-07-08** (with the 2.7 scheduler
+  work): every due-sweep stamps `scheduler_heartbeats`; the job worker's reap cycle raises a throttled
+  `scheduler_heartbeat_stale` ops alert when a heartbeat that exists goes stale (default 26h,
+  `SCHEDULER_STALE_HOURS`), and `GET /api/jobs/ops-metrics` exposes the posture for external monitors.
+  Also closes **AUD-ARC-07** (no internal trigger): the optional in-process tick (`SCHEDULER_TICK_MS`,
+  default OFF — external cron stays the default) makes the API self-triggering when enabled, and the
+  new platform-wide sweep (`POST /api/bi/subscriptions/run-all-async` / `runDueAllAsync`) fixes the
+  multi-company gap where the per-tenant `run-async` only ever swept the service account's own tenant.
+  Duplicate triggers are safe: the `report_subscription` handler re-checks dueness at execution time.
 
 ### R1-6 · Shared (Redis) read-cache adapter — closes the `/api/ops/metrics` `cache_provider` promise — **DELIVERED 2026-07-08**
 > The BI/finance read caches (`common/ttl-cache.ts`, 30s TTL) were per-process by design — fine on one
@@ -662,4 +670,5 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 4.3 | 2026-07-02 | ERP/Product | ts-debt tranche #4 (final): noUncheckedIndexedAccess ENABLED in tsconfig (strict 0); as-any 290→120 (residual = irreducible seams). Ratchet-lifetime: as-any 1465→120 (−92%), strict 248→0. AUD-ARC-05 closed |
 | 4.4 | 2026-07-02 | ERP/Product | Round-2 panel residue PR B: SoD-override reason+rules now persisted in the hash-chained audit_log meta via appendAuditMeta (AUD-SEC-04 closed fully; compliance ToE +1 = 121); staff tokens of hard-deleted users rejected (401 USER_NOT_FOUND); server-api forwards only auth/CSRF cookies, logs prefetch failures, refuses defaulted localhost BASE in prod; pii-redact masks non-scalars under sensitive keys and adds bank_account/sso_no/ssn |
 | 4.5 | 2026-07-02 | ERP/Product | Round-2 panel residue PR C: pgbouncer prepared-statement coupling auto-enforced (port-6432 detection → simple protocol; ARC NEW-1); gl_period_balances upsert batched to ONE multi-row statement per entry (write-amplification, ARC NEW-2); forecasting.service.ts sha256 diff-lock in the analytics parity harness (AI NEW-1, negative-tested); token-budget cap math extracted pure (resolveBudgetCaps) + 5 unit tests (AI NEW-2) |
+| 4.7 | 2026-07-08 | ERP/Product | R1-5 heartbeat + AUD-ARC-07 delivered (workstream 2.7): `scheduler_heartbeats` (0286) + stale alert on the worker reap cycle; cross-tenant `runDueAllAsync` sweep + `run-all-async` endpoint (cron updated) fixing the multi-tenant scheduling gap; optional `SCHEDULER_TICK_MS` in-process tick (default off); execution-time dueness re-check makes multi-trigger duplicates no-op; 0286 also drops the two legacy 0042 plain-cast RLS policies (`report_sub_isolation`/`bi_snapshot_isolation` — 22P02 on an empty tenant GUC; canonical `tenant_isolation` already covers both tables); async-jobs ToE 13→26 |
 | 4.6 | 2026-07-08 | ERP/Product | R1-6 delivered: shared (Redis) read-cache adapter behind `TtlCache` (`common/cache-remote.ts`, `CACHE_REDIS_URL`, default-inert, fail-open + throttled `cache_redis_degraded` alert); `/api/ops/metrics` `cache_provider` reports actual posture; contract tests `test/cache-adapter.test.ts` (fake-store two-replica model); env warn on `CACHE_PROVIDER=redis` without the URL |

@@ -3,7 +3,7 @@
 # frequency-due subscription (ar_collections_dunning, gl_recurring_journals, gl_prepaid_amortize,
 # lease_periodic_run, eam_pm_generate, ap_automatch_rerun, …) only fires when something calls the run
 # endpoint. This workflow is that something. It enqueues each DUE subscription to the background worker via
-# POST /api/bi/subscriptions/run-async (202) — off the request path, with the worker's retry/backoff.
+# POST /api/bi/subscriptions/run-all-async (202) — off the request path, with the worker's retry/backoff.
 # Nothing runs unless an admin has explicitly created a subscription, so this is inert until opted into.
 #
 # Configure at the REPOSITORY level (Settings → Secrets and variables → Actions) — NOT the gated
@@ -48,8 +48,8 @@ jobs:
           for i in $(seq 1 12); do code=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_API_URL/healthz" || true); [ "$code" = "200" ] && break; echo "  health=$code ($i)"; sleep 5; done
           [ "$code" = "200" ] || { echo "::error::API health check failed (last=$code)"; exit 1; }
           TOK="$SWEEP_API_KEY"   # app API key (ierp_…) used directly as the Bearer token — no login
-          echo "POST /api/bi/subscriptions/run-async"
-          resp=$(curl -s -w "\n%{http_code}" -X POST "$PROD_API_URL/api/bi/subscriptions/run-async" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{}')
+          echo "POST /api/bi/subscriptions/run-all-async"
+          resp=$(curl -s -w "\n%{http_code}" -X POST "$PROD_API_URL/api/bi/subscriptions/run-all-async" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{}')
           body=$(echo "$resp" | sed '$d'); httpcode=$(echo "$resp" | tail -n1)
           echo "  -> $httpcode"
           echo "$body" | jq '{due, enqueued, mode}' 2>/dev/null || echo "$body"

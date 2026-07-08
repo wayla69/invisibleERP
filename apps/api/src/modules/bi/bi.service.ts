@@ -39,6 +39,8 @@ import { ProcurementService } from '../procurement/procurement.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { JobQueueService } from '../jobs/job-queue.service';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
+import { SchedulerHeartbeatService } from '../jobs/scheduler-heartbeat.service';
+import { runInTenantContext } from '../../common/tenant-run';
 import { BiLiveService } from './bi-live.service';
 import { BillingService } from '../billing/billing.service';
 import { PdpaService } from '../pdpa/pdpa.service';
@@ -205,6 +207,8 @@ export class BiService implements OnModuleInit {
     // Scheduled tax automation (docs/33 PR4). Optional so a partial harness still constructs; the full app
     // provides TaxJobsModule, enabling the tax_wht_cert_batch / tax_*_draft / tax_remittance_reminder jobs.
     @Optional() private readonly taxJobs?: TaxJobsService,
+    // docs/27 R1-5 — due-sweep liveness stamp. Optional so partial harnesses still construct BiService.
+    @Optional() private readonly schedHeartbeat?: SchedulerHeartbeatService,
   ) {}
 
   // Register the background handler that runs one due subscription (report or heavy action job) off the
@@ -215,6 +219,13 @@ export class BiService implements OnModuleInit {
       const db = this.db;
       const [sub] = await db.select().from(reportSubscriptions).where(eq(reportSubscriptions.id, Number(payload.subscriptionId))).limit(1);
       if (!sub) return { skipped: 'subscription not found' };
+      // Multi-trigger safety (2.7): the external cron, a manual sweep and the in-process tick can all
+      // enqueue the same due subscription before its first run advances next_run_at — re-check dueness at
+      // EXECUTION time so a duplicate enqueue no-ops instead of double-delivering. ("Run now" bypasses the
+      // queue entirely, so this only ever skips schedule-driven duplicates.)
+      if (sub.lastRunAt && (!sub.nextRunAt || new Date(sub.nextRunAt as unknown as string).getTime() > Date.now())) {
+        return { skipped: 'not due', subscription_id: Number(sub.id) };
+      }
       const user = { username: ctx.actor ?? 'system:scheduler', role: ctx.bypass ? 'Admin' : 'Sales', tenantId: ctx.tenantId ?? sub.tenantId, permissions: [], customerName: null } as unknown as JwtUser;
       return this.executeSubscription(sub, user);
     });
@@ -235,7 +246,36 @@ export class BiService implements OnModuleInit {
       const jobId = await this.jobs.enqueue({ jobType: REPORT_SUBSCRIPTION_JOB, payload: { subscriptionId: Number(sub.id) }, tenantId: user.tenantId ?? null, actor: user.username, bypass: user.role === 'Admin' });
       enqueued.push(jobId);
     }
+    await this.schedHeartbeat?.beat('bi_scheduler', 'runDueAsync', { due: due.length });
     return { due: due.length, enqueued: enqueued.length, job_ids: enqueued, mode: 'queued' };
+  }
+
+  // 2.7 — the CROSS-TENANT due sweep. runDue/runDueAsync are scoped to the CALLER's tenant, so on a
+  // multi-company deploy the nightly cron (authenticated as one service account) only ever swept its own
+  // tenant — every other tenant's subscriptions silently never fired. This sweep runs under a bypass
+  // context, selects every active due subscription platform-wide, and enqueues each one under ITS OWN
+  // tenant (the worker executes it RLS-scoped there, exactly like a request from that tenant). Counts
+  // only in the response — no cross-tenant row data leaves this method. Inline fallback without the queue.
+  async runDueAllAsync(actor = 'system:scheduler') {
+    return runInTenantContext(this.db, { tenantId: null, bypass: true, actor }, async () => {
+      const db = this.db;
+      const now = Date.now();
+      const subs = await db.select().from(reportSubscriptions).where(eq(reportSubscriptions.isActive, true));
+      const due = subs.filter((s: any) => !s.lastRunAt || (s.nextRunAt && new Date(s.nextRunAt).getTime() <= now));
+      let enqueued = 0, ranInline = 0;
+      for (const sub of due) {
+        if (this.jobs) {
+          await this.jobs.enqueue({ jobType: REPORT_SUBSCRIPTION_JOB, payload: { subscriptionId: Number(sub.id) }, tenantId: sub.tenantId ?? null, actor, bypass: false });
+          enqueued++;
+        } else {
+          const user = { username: actor, role: 'Sales', tenantId: sub.tenantId, permissions: [], customerName: null } as unknown as JwtUser;
+          await this.executeSubscription(sub, user);
+          ranInline++;
+        }
+      }
+      await this.schedHeartbeat?.beat('bi_scheduler', 'runDueAllAsync', { due: due.length });
+      return { due: due.length, enqueued, ran_inline: ranInline, mode: this.jobs ? 'queued' : 'inline (queue unavailable)' };
+    });
   }
 
   // ── Read-through cache for the dashboard aggregates ─────────────────────────
@@ -1118,6 +1158,7 @@ export class BiService implements OnModuleInit {
     const due = subs.filter((s: any) => !s.lastRunAt || (s.nextRunAt && new Date(s.nextRunAt).getTime() <= now));
     const runs: any[] = [];
     for (const sub of due) runs.push(await this.executeSubscription(sub, user));
+    await this.schedHeartbeat?.beat('bi_scheduler', 'runDue', { due: due.length });
     return { due: due.length, ran_count: runs.length, delivered: runs.reduce((a, r) => a + (r.delivered ?? 0), 0), runs };
   }
 
