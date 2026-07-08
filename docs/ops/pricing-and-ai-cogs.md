@@ -55,6 +55,23 @@ included cap so `recordUsage()` meters the overage. Legacy `-1` ("unlimited") st
 - **Re-pricing without a deploy:** the rate is data-driven — per-plan `ai_overage_rate_thb_per_1k`, with an
   optional global env override `AI_OVERAGE_RATE_THB_PER_1K`. ToE: `tools/cutover/src/saas-metrics.ts`.
 
+## Usage meters beyond AI (1.5) — e-Tax documents & POS transactions
+
+The same meter→quota→overage machinery now covers two more high-volume, cost-bearing activities, so heavy
+users on a flat plan don't erode margin (full spec: `docs/36-monetization-packaging.md` §5b):
+
+| Meter | Included / mo (Standard · Pro) | Overage rate (Standard · Pro) | Recorded at |
+|---|---|---|---|
+| `etax_docs` (e-Tax invoices/receipts submitted) | 100 · 1,000 | ฿3 · ฿2 / doc | `EtaxService.submit` (accepted only) |
+| `pos_txns` (completed POS/dine-in sales) | 3,000 · 30,000 | ฿0.5 · ฿0.3 / txn | `PortalPosService.createSale` |
+
+Feature keys in `PLAN_SEED.features` (and backfilled by migration `0281`): `etax_docs_monthly` /
+`pos_txns_monthly` (included, −1 = unlimited) and `etax_overage_rate_thb_per_doc` /
+`pos_overage_rate_thb_per_txn`. Events land in `usage_events` (idempotent per `doc_no`/`sale_no`), and the
+**`usage_overage_billing`** monthly job (`BillingService.runUsageOverageBilling`) appends one Stripe item per
+(tenant, meter, month) — idempotent via `usage_overage_billing_runs`. Read views: `GET /api/billing/usage`
+(live snapshot per meter) and `/usage-overage/runs`. ToE: `saas-metrics` (+8).
+
 ## AI cost-of-goods (COGS) — the margin lever
 
 - **Model tiering** (`apps/api/src/common/ai-models.ts`) routes mechanical tasks (doc extraction, NL→query,

@@ -14,9 +14,10 @@ import { CostingModule } from '../costing/costing.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { PosFiscalModule } from '../pos/fiscal/pos-fiscal.module';
 import { PosScaleModule } from '../pos/scale/pos-scale.module';
+import { UsageModule } from '../usage/usage.module';
 
 @Module({
-  imports: [TaxModule, PaymentsModule, LedgerModule, MenuModule, CostingModule, PricingModule, PosFiscalModule, PosScaleModule],
+  imports: [TaxModule, PaymentsModule, LedgerModule, MenuModule, CostingModule, PricingModule, PosFiscalModule, PosScaleModule, UsageModule],
   controllers: [PortalController],
   providers: [PortalService, PortalPosService, OfflineSyncService, PortalMyErpService, PortalUsersService, PasswordService],
   exports: [PortalService],

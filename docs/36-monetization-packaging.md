@@ -94,11 +94,45 @@ plan that has `finance`. 1.1b resolves this with **token-less suites** gated by 
 - **1.8 (pending):** cutover harness `tools/cutover/src/billing.ts` — plan→suite→403 matrix + god-bypass +
   kill-switch modes end-to-end (this is where the UAT negative case is codified).
 
+## 5b. Usage metering → overage billing (1.5, DONE)
+
+Beyond seats/suites, two **usage meters** turn high-volume activity into revenue, mirroring the AI-token
+meter (AIG-03) — per-event capture, a monthly included quota on the plan, and an idempotent monthly charge:
+
+| Meter (`usage_events.meter`) | Counts | Recorded at | Idempotency key |
+|---|---|---|---|
+| `etax_docs` | e-Tax documents accepted by the RD/SP | `EtaxService.submit` (on `status='Accepted'`) | `doc_no` (TIV/ATV) |
+| `pos_txns` | Completed POS / dine-in sales | `PortalPosService.createSale` | `sale_no` (SALE-…) |
+
+- **Capture** — `UsageMeterService.record(tenantId, meter, eventKey)` (`modules/usage`) does a best-effort
+  AUTOCOMMIT `INSERT … ON CONFLICT (tenant_id, meter, event_key) DO NOTHING` (like `ai_token_usage`), so a
+  metered event survives a request-tx rollback and **re-processing the same document never double-counts**.
+  It is `@Optional()`-injected and swallows errors — a metering hiccup can never block the sale/submission.
+- **Quota + price** — each plan's `features` carries `etax_docs_monthly` / `pos_txns_monthly` (included, −1 =
+  unlimited) and `etax_overage_rate_thb_per_doc` / `pos_overage_rate_thb_per_txn`. Seeded in `PLAN_SEED`
+  (fresh DBs) **and** backfilled by migration `0281` (existing DBs). Defaults (tune after testing):
+
+  | Plan | e-Tax docs/mo | POS txns/mo | e-Tax overage | POS overage |
+  |---|---|---|---|---|
+  | Standard | 100 | 3,000 | ฿3/doc | ฿0.5/txn |
+  | Professional | 1,000 | 30,000 | ฿2/doc | ฿0.3/txn |
+  | Enterprise | unlimited | unlimited | — | — |
+
+- **Bill** — `BillingService.runUsageOverageBilling()` counts each meter's events in the month, subtracts the
+  quota, and appends **one Stripe invoice item per (tenant, meter, month)** — idempotent via the
+  `usage_overage_billing_runs` UNIQUE (the run row is reserved before charging; the Stripe idempotency key is a
+  second guard). Runs unattended via the BI scheduler (report type **`usage_overage_billing`**) or
+  `POST /api/billing/usage-overage/run`. Read views: `GET /api/billing/usage` (live snapshot per meter) and
+  `GET /api/billing/usage-overage/runs`.
+- **Verify** — `tools/cutover/src/saas-metrics.ts` (+8: e-Tax overage 1005→5 over quota = ฿10, POS within
+  quota = ฿0, dedup no double-count, run idempotency, ledger). No RLS (operator/job-scoped, like the AI meter).
+
 ## 6. Verify
 
 ```
 pnpm --filter @ierp/shared build
 node tools/ci/check-entitlements.mjs      # asserts every MODULE_KEY maps to exactly one suite
+NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # usage-metering + overage billing
 ```
 
 ## Revision history
@@ -107,6 +141,7 @@ node tools/ci/check-entitlements.mjs      # asserts every MODULE_KEY maps to exa
 |---------|------|--------|--------|
 | 0.1 | 2026-07-07 | Platform | Initial packaging spec — plan→suite→module entitlement map (`entitlements.ts`) + CI guard (`check-entitlements.mjs`). Map-only; no enforcement yet (PlanGuard rewire is 1.2). Documented `KNOWN_UNGATED` gap (manufacturing/PPM/HCM/real-estate need gating tokens — 1.1b). |
 | 0.2 | 2026-07-07 | Platform | 1.2 — `PlanGuard` rewired: suite gating behind `ENTITLEMENTS_ENFORCE`/`ENTITLEMENTS_SHADOW` (default off = legacy behaviour), per-tenant Admin bypass removed (god-only), fail-open on infra error / fail-closed on missing plan, `resolveEntitledSuites` grandfather fallback. No behaviour change until enabled; enable SHADOW → backfill (1.3) → ENFORCE. |
+| 0.7 | 2026-07-08 | Platform | 1.5 — **usage metering → overage billing** (see §5b). Two generic meters (`etax_docs`, `pos_txns`) in `usage_events` (migration `0281`), captured best-effort/autocommit at `EtaxService.submit` (accepted docs) + `PortalPosService.createSale` (idempotent per doc_no/sale_no) via the new `modules/usage` `UsageMeterService`. Monthly included quota + per-unit overage price added to `PLAN_SEED` **and** backfilled by `0281`. `BillingService.runUsageOverageBilling` charges one Stripe item per (tenant, meter, month), idempotent via `usage_overage_billing_runs` UNIQUE; scheduled BI report type `usage_overage_billing`; read views `GET /api/billing/usage` + `/usage-overage/runs`. No RLS (operator/job meter, like AI tokens). ToE `saas-metrics` +8 (22 total); `taxdocs`/`restaurant`/`sub-billing`/`tenant-idx`/`migration-parity` unregressed. Monetization infra — no ICFR control change. |
 | 0.6 | 2026-07-07 | Platform | 1.6 — mid-cycle **proration** on `changePlan`. `modules/billing/proration.ts` `computeProration()` returns the unused credit on the old plan + prorated charge on the new plan for the days left in the period (`net` >0 = charge, <0 = credit); `changePlan` now returns it. Informational (the Stripe proration-invoice-item is a follow-up). ToE `cutover/proration` (10/10). No behaviour change to the plan switch itself; onboarding 75/75 unregressed. |
 | 0.5 | 2026-07-07 | Platform | 1.4 (grace) — PastDue subscriptions get a `BILLING_GRACE_DAYS` (default 7) read-only grace window after `current_period_end`: reads pass, mutations → `403 SUBSCRIPTION_PASTDUE_READONLY`, and only past the window is all access blocked (`SUBSCRIPTION_INACTIVE`); `Canceled` blocks immediately (no grace). So enabling enforcement never abruptly locks a lapsed payer out of their own data. `evaluatePastDueGrace`/`billingGraceDays` pure helpers; plan-gating ToE +9 (34 total). *(In-app billing UI — the `/settings/billing` page + invoice/usage endpoints — remains as frontend work.)* |
 | 0.4 | 2026-07-07 | Platform | 1.1b — token-less premium suites (manufacturing/projects/hcm/realestate) + `@RequiresSuite` decorator honoured by PlanGuard; applied to 11 controllers; Enterprise-only by default; `KNOWN_UNGATED` emptied. plan-gating ToE extended (+6 checks). |
