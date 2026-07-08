@@ -31,8 +31,18 @@ For every such change, review and update as needed:
 
 ## 🐞 Debug mantra (follow in order)
 
-1. **Reproduce first.** Get a deterministic failing signal before changing anything. Read the actual
-   error/log — don't guess.
+1. **Reproduce first — in the exact mode/width the user hit.** Get a deterministic failing signal before
+   changing anything. Read the actual error/log — don't guess. For a **prod** UI bug you can't reach (the
+   sandbox proxy 403s `*.up.railway.app`, so `page.goto` a prod URL fails `ERR_TUNNEL_CONNECTION_FAILED`),
+   reproduce it **locally**: rebuild web with `NEXT_PUBLIC_API_URL=''` (relative → same-origin, so the
+   `connect-src 'self'` CSP lets you Playwright **route-mock `/api/**`** instead of it being blocked), set the
+   **`ierp_csrf` cookie** so `hasSession()` passes the *client-side* auth-gate (there's no server middleware —
+   AppShell redirects to `/login` only when the CSRF cookie is absent), mock `/api/auth/me`, and force UI state
+   via localStorage (`shop.view='list'`, `shop.cart=[…]`). Drive the real page with the pre-installed Chromium
+   at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. **Verify a responsive/CSS fix in EVERY view mode
+   AND state, not just the default** — the `/shop` overflow lived in *list* view + the *open* basket sheet, both
+   missed by a grid-only check; screenshot at phone/tablet/desktop and assert `document.scrollWidth ===
+   innerWidth` (no horizontal overflow) in each.
 2. **Is it even mine?** Before assuming your change broke it, check whether the failure **pre-exists on
    `main`** or is **environmental**. Verify on a clean baseline (`git worktree add /tmp/wt origin/main`)
    and use `git log -S"<string>"` / `git log -p <file>` to find *when/why* behaviour changed.
@@ -239,8 +249,30 @@ For every such change, review and update as needed:
   origin/main`, build, then **`git push --force-with-lease`** (the remote branch still holds the now-merged
   pre-squash commits, so a fast-forward is impossible — force-with-lease is correct and safe here). The auto
   classifier blocks force-push + `commit --amend` until the user explicitly authorizes; if the stop-hook flags
-  your tip as unverified, `git commit --amend --no-edit --reset-author` fixes the committer email
-  (`noreply@anthropic.com`). Open a NEW PR for the follow-up. Repo merge convention: **squash**.
+  **your own** tip commit as unverified, `git commit --amend --no-edit --reset-author` fixes the committer email
+  (`noreply@anthropic.com`). Open a NEW PR for the follow-up. Repo merge convention: **squash**. **After a clean
+  restart with NO new commits yet, the branch tip IS GitHub's squash-merge commit (`noreply@github.com`)** — the
+  stop-hook will flag it "unverified", but it is **not your work**; do **NOT** amend/rebase it (that only
+  diverges the branch from `main` for no reason). Only amend commits you actually authored.
+- **The service worker MUST be network-first for HTML (deploy-safe chunks).** `public/sw.js` originally cached
+  **HTML navigations** with stale-while-revalidate (`return cached || network`). After a deploy it then served
+  the **old cached HTML**, which references **old hashed chunk filenames** the new build has removed → the
+  browser 404s on those chunks → webpack throws `ChunkLoadError` → Next.js renders the generic **"Application
+  error: a client-side exception has occurred"** white screen — recurring on **every** deploy (re-hashed chunks
+  re-break any open tab, so re-deploying never "fixes" it). **Keep the fix:** HTML navigations = **network-first**
+  (cache only as an offline fallback); `/_next/static/*` (content-hashed, immutable) = **cache-first**; bump the
+  `CACHE` name so `activate` purges the stale-HTML cache. Belt-and-suspenders live in the root layout:
+  `components/chunk-reload-guard.tsx` (a `'use client'` guard — on a `ChunkLoadError` via window `error`/
+  `unhandledrejection` it clears caches, updates the SW and reloads **once**, sessionStorage-cooldown vs a reload
+  loop) + `app/global-error.tsx` (App Router global boundary, auto-recovers on ChunkLoadError). Both are
+  irreducibly client (baseline `use-client` 251→253). Immediate user workaround: a hard refresh clears a stuck tab.
+- **A horizontal overflow ANYWHERE on a mobile page shifts `position:fixed` elements off-screen.** On mobile the
+  *layout viewport* grows to the content width when the page overflows horizontally, so a `fixed inset-x-0`
+  bottom-sheet/bar (Radix `SheetContent side="bottom"`) is laid out relative to that wider layout and its left
+  edge scrolls off-screen (content clipped left). So a "fixed element is clipped" symptom usually traces to a
+  **page-level overflow SOURCE**, not the fixed element — find and fix the too-wide element (e.g. a flex row of
+  `shrink-0` controls wider than the viewport: make trailing buttons **icon-only on mobile**, label from `sm` up),
+  then the fixed sheet positions correctly. Bit the `/shop` list view + basket sheet (PR #509).
 
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
