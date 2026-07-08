@@ -8,21 +8,9 @@ import { CommitmentsService } from '../commitments/commitments.service';
 import { RetentionService } from '../retention/retention.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, clampPct, depsCsv, peopleCsv, csvToList, clamp15, riskScore, ragFor, addDays } from './projects.helpers';
+import { shapeTask, shapeMilestone, shapeResource, shapeTemplateItem, shapeRisk, shapeHealth, shapeChangeOrder, shapeBaseline, shapeBoqLine } from './projects.shapes';
 
-const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
-// Default value→FTE rate (PMO-5): the revenue one full-time-equivalent delivers per month. Used to convert
-// the probability-weighted pipeline VALUE into projected resourcing DEMAND (FTE). Overridable per request.
-const DEFAULT_REV_PER_FTE_MONTH = 200000;
-const r4 = (x: unknown) => Math.round((Number(x) || 0) * 10000) / 10000;
-const clampPct = (x: unknown) => Math.max(0, Math.min(100, r2(x)));
-const depsCsv = (ids?: number[]) => (ids && ids.length ? ids.map((i) => Number(i)).filter((i) => Number.isFinite(i)).join(',') : null);
-// People CSV (RACI lists) — trim, drop blanks/dupes; null when empty so an omitted field clears nothing.
-const peopleCsv = (xs?: string[]) => {
-  if (xs == null) return undefined; // not provided → leave column untouched
-  const u = [...new Set(xs.map((x) => String(x).trim()).filter(Boolean))];
-  return u.length ? u.join(',') : null;
-};
-const csvToList = (s: unknown) => (s ? String(s).split(',').map((x) => x.trim()).filter(Boolean) : []);
 
 export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string; rev_method?: 'billing' | 'poc'; estimated_cost?: number; budget_tolerance_pct?: number }
 export interface RecognizeDto { as_of?: string; estimated_cost?: number }
@@ -46,18 +34,6 @@ export interface RemeasureDto { remeasured_qty: number }
 export interface RiskDto { kind?: 'risk' | 'issue'; title: string; probability?: number; impact?: number; owner?: string; mitigation?: string; due_date?: string }
 export interface RiskPatchDto { status?: 'open' | 'mitigating' | 'closed'; probability?: number; impact?: number; owner?: string; mitigation?: string; due_date?: string; title?: string }
 
-// Risk scoring (1..25): a risk is probability × impact; an issue has already occurred (probability = 5/certain)
-// so it scores 5 × impact. RAG follows the score band — red ≥ 12 (HIGH), amber ≥ 6, else green.
-const clamp15 = (x: unknown) => Math.max(1, Math.min(5, Math.round(Number(x) || 1)));
-const riskScore = (kind: string, prob: number | null, impact: number) => (kind === 'issue' ? 5 : (prob ?? 1)) * impact;
-const ragFor = (score: number) => (score >= 12 ? 'red' : score >= 6 ? 'amber' : 'green');
-
-// Add whole days to a yyyy-mm-dd date string (UTC date arithmetic — date-only, no TZ drift).
-const addDays = (ymdStr: string, days: number) => {
-  const d = new Date(`${ymdStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + (Number(days) || 0));
-  return d.toISOString().slice(0, 10);
-};
 
 @Injectable()
 export class ProjectsService {
@@ -1621,39 +1597,4 @@ export class ProjectsService {
       prepared_by: r.preparedBy, prepared_at: r.preparedAt, approved_by: r.approvedBy, approved_at: r.approvedAt, rejection_reason: r.rejectionReason,
     };
   }
-}
-
-function shapeTask(t: any) {
-  return { id: Number(t.id), project_id: Number(t.projectId), parent_id: t.parentId != null ? Number(t.parentId) : null, wbs_code: t.wbsCode, name: t.name, status: t.status, planned_start: t.plannedStart, planned_end: t.plannedEnd, planned_hours: n(t.plannedHours), planned_cost: n(t.plannedCost), pct_complete: n(t.pctComplete), depends_on: t.dependsOn ? String(t.dependsOn).split(',').map((x: string) => Number(x)).filter((x: number) => Number.isFinite(x)) : [], assignee: t.assignee, accountable: t.accountable ?? null, responsible: csvToList(t.responsible), consulted: csvToList(t.consulted), informed: csvToList(t.informed), created_at: t.createdAt };
-}
-function shapeMilestone(m: any) {
-  return { id: Number(m.id), project_id: Number(m.projectId), name: m.name, due_date: m.dueDate, owner: m.owner, status: m.status, billing_percent: m.billingPercent != null ? n(m.billingPercent) : null, reached_at: m.reachedAt, created_at: m.createdAt };
-}
-function shapeResource(r: any) {
-  return { id: Number(r.id), project_id: Number(r.projectId), task_id: r.taskId != null ? Number(r.taskId) : null, resource_name: r.resourceName, role: r.role, alloc_pct: n(r.allocPct), period_start: r.periodStart, period_end: r.periodEnd, cost_rate: n(r.costRate), bill_rate: n(r.billRate), created_at: r.createdAt };
-}
-function shapeTemplateItem(it: any) {
-  return { id: Number(it.id), item_type: it.itemType, seq: Number(it.seq), name: it.name, parent_seq: it.parentSeq != null ? Number(it.parentSeq) : null, wbs_code: it.wbsCode, planned_hours: n(it.plannedHours), planned_cost: n(it.plannedCost), offset_start_days: Number(it.offsetStartDays ?? 0), offset_end_days: Number(it.offsetEndDays ?? 0), depends_on_seq: it.dependsOnSeq ? String(it.dependsOnSeq).split(',').map((x: string) => Number(x)).filter((x: number) => Number.isFinite(x)) : [], billing_percent: it.billingPercent != null ? n(it.billingPercent) : null, owner: it.owner, assignee: it.assignee };
-}
-function shapeRisk(r: any) {
-  return { id: Number(r.id), project_id: Number(r.projectId), kind: r.kind, title: r.title, status: r.status, probability: r.probability != null ? Number(r.probability) : null, impact: Number(r.impact), score: Number(r.score), rag: r.rag, owner: r.owner, mitigation: r.mitigation, due_date: r.dueDate, created_by: r.createdBy, created_at: r.createdAt, closed_at: r.closedAt };
-}
-function shapeHealth(h: any) {
-  return { snapshot_date: h.snapshotDate, rag: h.rag, cpi: h.cpi != null ? n(h.cpi) : null, spi: h.spi != null ? n(h.spi) : null, pct_complete: n(h.pctComplete), bac: n(h.bac), ev: n(h.ev), ac: n(h.ac), eac: n(h.eac), margin: n(h.margin), wip: n(h.wip), created_at: h.createdAt };
-}
-function shapeChangeOrder(c: any) {
-  return { id: Number(c.id), co_no: c.coNo, description: c.description, contract_delta: n(c.contractDelta), budget_delta: n(c.budgetDelta), estimated_cost_delta: n(c.estimatedCostDelta), reason: c.reason, status: c.status, requested_by: c.requestedBy, approved_by: c.approvedBy, created_at: c.createdAt, approved_at: c.approvedAt };
-}
-function shapeBaseline(b: any) {
-  return { id: Number(b.id), label: b.label, baseline_bac: n(b.baselineBac), baseline_duration_days: Number(b.baselineDurationDays), baseline_end: b.baselineEnd, reason: b.reason, status: b.status, created_by: b.createdBy, captured_at: b.capturedAt };
-}
-// BoQ line (M0, docs/32). remeasure_variance_qty = remeasured − budgeted (null until re-measured).
-function shapeBoqLine(l: any) {
-  const remeasured = l.remeasuredQty != null ? n(l.remeasuredQty) : null;
-  return {
-    id: Number(l.id), line_no: Number(l.lineNo), category: l.category, item_no: l.itemNo ?? null, task_id: l.taskId != null ? Number(l.taskId) : null,
-    wbs_code: l.wbsCode ?? null, description: l.description ?? null, uom: l.uom ?? null,
-    budget_qty: n(l.budgetQty), rate: n(l.rate), budget_amount: n(l.budgetAmount),
-    remeasured_qty: remeasured, remeasure_variance_qty: remeasured != null ? r2(remeasured - n(l.budgetQty)) : null,
-  };
 }
