@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { dsarRequests, pdpaErasures, posMembers, memberConsents, loyaltyReceiptSubmissions, employees, payslips } from '../../database/schema';
+import { dsarRequests, pdpaErasures, ropaActivities, posMembers, memberConsents, loyaltyReceiptSubmissions, employees, payslips } from '../../database/schema';
 import { posMemberLedger } from '../../database/schema/loyalty-members';
 import { objectUrl, deleteObject } from '../../common/object-storage';
 import type { JwtUser } from '../../common/decorators';
@@ -9,12 +9,26 @@ import type { JwtUser } from '../../common/decorators';
 const REQUEST_TYPES = ['access', 'rectification', 'erasure', 'portability', 'objection'] as const;
 const SUBJECT_TYPES = ['member', 'customer', 'employee', 'user'] as const;
 const DSAR_SLA_DAYS = 30; // PDPA statutory response window
+const ROPA_LEGAL_BASES = ['consent', 'contract', 'legal_obligation', 'legitimate_interest', 'vital_interest', 'public_task'] as const;
 
 export interface CreateDsarDto {
   subject_type: string;
   subject_ref: string;
   request_type: string;
   details?: string;
+}
+
+export interface CreateRopaDto {
+  name: string;
+  purpose: string;
+  legal_basis: string;
+  data_categories?: string[];
+  data_subjects?: string[];
+  recipients?: string[];
+  sub_processors?: string[];
+  retention_period?: string | null;
+  cross_border?: string | null;
+  security_measures?: string | null;
 }
 
 // PDPA (Thailand) compliance service: Data Subject Access Request lifecycle, subject-data export
@@ -37,6 +51,63 @@ export class PdpaService {
       requestedBy: user.username, dueDate: this.ymd(due),
     }).returning();
     return this.view(row);
+  }
+
+  // ───────────────────── RoPA — Records of Processing Activities (PDPA-03, มาตรา 39 / GDPR Art.30) ─────────────────────
+  private ropaView(r: any) {
+    return {
+      id: Number(r.id), name: r.name, purpose: r.purpose, legal_basis: r.legalBasis,
+      data_categories: r.dataCategories ?? [], data_subjects: r.dataSubjects ?? [], recipients: r.recipients ?? [],
+      sub_processors: r.subProcessors ?? [], retention_period: r.retentionPeriod ?? null, cross_border: r.crossBorder ?? null,
+      security_measures: r.securityMeasures ?? null, active: r.active, created_by: r.createdBy, updated_by: r.updatedBy,
+      created_at: r.createdAt, updated_at: r.updatedAt,
+    };
+  }
+  private validateRopa(dto: CreateRopaDto) {
+    if (!dto.name?.trim()) throw new BadRequestException({ code: 'NAME_REQUIRED', message: 'name is required', messageTh: 'ต้องระบุชื่อกิจกรรม' });
+    if (!dto.purpose?.trim()) throw new BadRequestException({ code: 'PURPOSE_REQUIRED', message: 'purpose is required', messageTh: 'ต้องระบุวัตถุประสงค์' });
+    if (!(ROPA_LEGAL_BASES as readonly string[]).includes(dto.legal_basis)) throw new BadRequestException({ code: 'BAD_LEGAL_BASIS', message: `legal_basis must be one of ${ROPA_LEGAL_BASES.join('/')}`, messageTh: 'ฐานทางกฎหมายไม่ถูกต้อง' });
+  }
+  async listRopa(user: JwtUser, activeOnly?: boolean) {
+    const db = this.db;
+    const where = activeOnly ? eq(ropaActivities.active, true) : undefined;
+    const rows = await db.select().from(ropaActivities).where(where).orderBy(desc(ropaActivities.id)).limit(500);
+    return { activities: rows.map((r: any) => this.ropaView(r)), count: rows.length };
+  }
+  async getRopa(id: number, _user: JwtUser) {
+    const [r] = await this.db.select().from(ropaActivities).where(eq(ropaActivities.id, id)).limit(1);
+    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'RoPA activity not found', messageTh: 'ไม่พบกิจกรรมการประมวลผล' });
+    return this.ropaView(r);
+  }
+  async createRopa(dto: CreateRopaDto, user: JwtUser) {
+    this.validateRopa(dto);
+    const [row] = await this.db.insert(ropaActivities).values({
+      tenantId: user.tenantId ?? null, name: dto.name.trim(), purpose: dto.purpose.trim(), legalBasis: dto.legal_basis,
+      dataCategories: dto.data_categories ?? [], dataSubjects: dto.data_subjects ?? [], recipients: dto.recipients ?? [],
+      subProcessors: dto.sub_processors ?? [], retentionPeriod: dto.retention_period ?? null, crossBorder: dto.cross_border ?? null,
+      securityMeasures: dto.security_measures ?? null, createdBy: user.username, updatedBy: user.username,
+    }).returning();
+    return this.ropaView(row);
+  }
+  async updateRopa(id: number, dto: Partial<CreateRopaDto> & { active?: boolean }, user: JwtUser) {
+    const db = this.db;
+    const [existing] = await db.select().from(ropaActivities).where(eq(ropaActivities.id, id)).limit(1);
+    if (!existing) throw new NotFoundException({ code: 'NOT_FOUND', message: 'RoPA activity not found', messageTh: 'ไม่พบกิจกรรมการประมวลผล' });
+    if (dto.legal_basis !== undefined && !(ROPA_LEGAL_BASES as readonly string[]).includes(dto.legal_basis)) throw new BadRequestException({ code: 'BAD_LEGAL_BASIS', message: `legal_basis must be one of ${ROPA_LEGAL_BASES.join('/')}`, messageTh: 'ฐานทางกฎหมายไม่ถูกต้อง' });
+    const patch: Record<string, unknown> = { updatedBy: user.username, updatedAt: new Date() };
+    if (dto.name !== undefined) patch.name = dto.name.trim();
+    if (dto.purpose !== undefined) patch.purpose = dto.purpose.trim();
+    if (dto.legal_basis !== undefined) patch.legalBasis = dto.legal_basis;
+    if (dto.data_categories !== undefined) patch.dataCategories = dto.data_categories;
+    if (dto.data_subjects !== undefined) patch.dataSubjects = dto.data_subjects;
+    if (dto.recipients !== undefined) patch.recipients = dto.recipients;
+    if (dto.sub_processors !== undefined) patch.subProcessors = dto.sub_processors;
+    if (dto.retention_period !== undefined) patch.retentionPeriod = dto.retention_period;
+    if (dto.cross_border !== undefined) patch.crossBorder = dto.cross_border;
+    if (dto.security_measures !== undefined) patch.securityMeasures = dto.security_measures;
+    if (dto.active !== undefined) patch.active = dto.active;
+    await db.update(ropaActivities).set(patch).where(eq(ropaActivities.id, id));
+    return this.getRopa(id, user);
   }
 
   async listDsar(status: string | undefined, user: JwtUser) {

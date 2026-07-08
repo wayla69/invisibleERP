@@ -47,6 +47,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-033 | PDPA erasure redacts PII + issues pseudonym | PDPA-02 | 08 §7, §9 |
 | UAT-SEC-034 | PDPA erasure pseudonymises the audit trail at read-time (stored row immutable) | PDPA-02 / ITGC-AC-16 | 08 §7, §9 |
 | UAT-SEC-035 | PDPA DSAR is tenant-isolated | PDPA-01 / ITGC-AC-03 | 08 §7, §9 |
+| UAT-SEC-055 | RoPA — create a processing activity with a validated legal basis | PDPA-03 | 08 §7 (8b), §9 (19a) |
+| UAT-SEC-056 | RoPA — update/retire + active filter + RLS isolation | PDPA-03 | 08 §7 (8b), §9 (19a) |
 | UAT-SEC-036 | Cashier PIN quick-login succeeds | ITGC-AC-17 | 08 §7, §9 |
 | UAT-SEC-037 | PosSupervisor PIN login + open shift (no duplicate) | ITGC-AC-17 / R08 | 08 §7, §9 |
 | UAT-SEC-038 | Self set/rotate own PIN (current-password step-up) | ITGC-AC-17 | 08 §7 |

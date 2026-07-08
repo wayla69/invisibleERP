@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, jsonb, timestamp, date } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, jsonb, timestamp, date, boolean } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // PDPA (Thailand) — DSAR workflow + erasure ledger (migration 0180). Tenant-scoped + RLS.
@@ -34,3 +34,28 @@ export const pdpaErasures = pgTable('pdpa_erasures', {
   erasedAt: timestamp('erased_at', { withTimezone: true }).notNull().defaultNow(),
 });
 export type PdpaErasure = typeof pdpaErasures.$inferSelect;
+
+// RoPA — Records of Processing Activities (PDPA มาตรา 39 / GDPR Art.30, PDPA-03, migration 0282). A maintained
+// inventory of how the company processes personal data: one row per processing activity with its purpose,
+// legal basis, data categories/subjects, recipients + sub-processors, retention, cross-border basis and
+// security measures. The register an auditor/DPA asks for. Tenant-scoped + RLS (like the DSAR tables).
+export const ropaActivities = pgTable('ropa_activities', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  name: text('name').notNull(),                       // e.g. 'Loyalty membership', 'Payroll'
+  purpose: text('purpose').notNull(),                 // why the data is processed
+  legalBasis: text('legal_basis').notNull(),          // consent | contract | legal_obligation | legitimate_interest | vital_interest | public_task
+  dataCategories: jsonb('data_categories').notNull().default([]), // ['name','phone','national_id',…]
+  dataSubjects: jsonb('data_subjects').notNull().default([]),     // ['customers','employees','members']
+  recipients: jsonb('recipients').notNull().default([]),          // internal/external recipients
+  subProcessors: jsonb('sub_processors').notNull().default([]),   // ['Stripe','Anthropic','Sentry']
+  retentionPeriod: text('retention_period'),          // e.g. '5 years after contract end'
+  crossBorder: text('cross_border'),                  // cross-border transfer basis (PDPA s.28-29 / GDPR Ch.V); null = domestic only
+  securityMeasures: text('security_measures'),        // encryption, access control, …
+  active: boolean('active').notNull().default(true),
+  createdBy: text('created_by'),
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export type RopaActivity = typeof ropaActivities.$inferSelect;

@@ -454,6 +454,24 @@ fulfil these on time.
 > You only ever see your **own company's** requests (tenant-isolated). Erasure cannot be
 > undone — confirm the subject's identity first.
 
+### RoPA — Records of Processing Activities (มาตรา 39 / GDPR Art.30)
+
+**API:** `/api/pdpa/ropa` · **Required permission:** `users` (DPO / access-admin).
+
+PDPA requires you to keep a **record of every way you process personal data** — the register a regulator or
+auditor will ask to see. Maintain one entry per processing activity:
+
+1. **Add an activity** with its **purpose**, **legal basis** (consent / contract / legal obligation /
+   legitimate interest / vital interest / public task), the **data categories** and **data subjects** involved,
+   who **receives** the data, your **sub-processors** (e.g. Anthropic, Stripe, Sentry), the **retention period**,
+   the **cross-border transfer basis** (if data leaves Thailand), and your **security measures**.
+2. **Keep it current** — edit an activity as processing changes; mark it **inactive** when a processing
+   activity ends (retired entries stay on record but drop out of the active register). Review the register
+   periodically.
+
+> Like DSARs, the RoPA register is **tenant-isolated** — you only see your own company's activities. An
+> invalid legal basis is rejected so every entry is complete and consistent.
+
 ---
 
 ## 12. Webhooks (push events to other systems)
