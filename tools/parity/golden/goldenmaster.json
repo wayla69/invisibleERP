@@ -1,0 +1,704 @@
+{
+  "bi": {
+    "finance_trend": {
+      "months": 1,
+      "trend": [
+        {
+          "expense": 800,
+          "gross_profit": 200,
+          "margin_pct": 20,
+          "period": "<PERIOD>",
+          "revenue": 1000
+        }
+      ]
+    },
+    "kpi_board": {
+      "as_of": "<DATE>",
+      "payables": {
+        "open_ap": 0
+      },
+      "pipeline": {
+        "open_count": 0,
+        "open_value": 0,
+        "weighted_value": 0
+      },
+      "receivables": {
+        "open_ar": 0,
+        "overdue_ar": 0,
+        "overdue_count": 0
+      },
+      "sales": {
+        "avg_order_mtd": 214,
+        "mtd": 214,
+        "mtd_orders": 1,
+        "ytd": 214
+      }
+    },
+    "sales_cube": {
+      "end": "<DATE>",
+      "period_type": "month",
+      "rows": [
+        {
+          "avg_order": 214,
+          "period": "<DATE>",
+          "total_orders": 1,
+          "total_sales": 214,
+          "total_tax": 14
+        }
+      ],
+      "start": "<DATE>",
+      "totals": {
+        "total_orders": 1,
+        "total_sales": 214
+      }
+    }
+  },
+  "ledger": {
+    "balance_sheet": {
+      "as_of": "<DATE>",
+      "assets": 770,
+      "balanced": true,
+      "equity": 0,
+      "ledger": "TFRS",
+      "liabilities": 70,
+      "liabilities_plus_equity": 770,
+      "lines": [
+        {
+          "account_code": "1000",
+          "account_name": "Cash",
+          "account_type": "Asset",
+          "balance": -330
+        },
+        {
+          "account_code": "1280",
+          "account_name": "Prepaid Expenses",
+          "account_type": "Asset",
+          "balance": 1100
+        },
+        {
+          "account_code": "2100",
+          "account_name": "Tax Payable",
+          "account_type": "Liability",
+          "balance": 70
+        }
+      ],
+      "net_income": 700,
+      "retained_earnings": 0
+    },
+    "cash_flow_direct": {
+      "cash_beginning": 0,
+      "cash_ending": -330,
+      "financing": {
+        "net": 0
+      },
+      "from": "<DATE>",
+      "investing": {
+        "net": 0
+      },
+      "ledger": "TFRS",
+      "method": "direct",
+      "net_change_in_cash": -330,
+      "operating": {
+        "net": -330,
+        "other_operating": 0,
+        "payments_to_suppliers": -1400,
+        "receipts_from_customers": 1070,
+        "tax_and_payroll": 0
+      },
+      "reconciled": true,
+      "to": "<DATE>"
+    },
+    "cash_flow_indirect": {
+      "cash_beginning": 0,
+      "cash_ending": -330,
+      "financing": {
+        "lines": [],
+        "net": 0
+      },
+      "from": "<DATE>",
+      "investing": {
+        "lines": [],
+        "net": 0
+      },
+      "ledger": "TFRS",
+      "method": "indirect",
+      "net_change_in_cash": -330,
+      "operating": {
+        "adjustments": [],
+        "net": -330,
+        "net_income": 700,
+        "working_capital": [
+          {
+            "account_code": "1280",
+            "account_name": "Prepaid Expenses",
+            "amount": -1100,
+            "label": "ค่าใช้จ่ายจ่ายล่วงหน้า (Prepaid expenses)"
+          },
+          {
+            "account_code": "2100",
+            "account_name": "Tax Payable",
+            "amount": 70,
+            "label": "ภาษีค้างจ่าย (Tax payable)"
+          }
+        ]
+      },
+      "reconciled": true,
+      "to": "<DATE>",
+      "unclassified_accounts": []
+    },
+    "checker_approves": {
+      "approved_by": "gm_checker",
+      "entry_no": "JE-<STAMP>",
+      "prepared_by": "gm_maker",
+      "status": "Posted"
+    },
+    "double_sided_line_blocked": "INVALID_LINE",
+    "income_statement": {
+      "cost_center": null,
+      "expense": 300,
+      "from": "<DATE>",
+      "ledger": "TFRS",
+      "lines": [
+        {
+          "account_code": "4000",
+          "account_name": "Sales Revenue",
+          "account_type": "Revenue",
+          "credit": 1000,
+          "debit": 0
+        },
+        {
+          "account_code": "5100",
+          "account_name": "Operating Expense",
+          "account_type": "Expense",
+          "credit": 0,
+          "debit": 300
+        }
+      ],
+      "net_income": 700,
+      "revenue": 1000,
+      "to": "<DATE>"
+    },
+    "post_draft": {
+      "balanced": true,
+      "entry_no": "JE-<STAMP>",
+      "lines": [
+        {
+          "account_code": "5100",
+          "credit": 0,
+          "debit": 200,
+          "memo": null
+        },
+        {
+          "account_code": "1000",
+          "credit": 200,
+          "debit": 0,
+          "memo": null
+        }
+      ],
+      "pending": true,
+      "status": "Draft"
+    },
+    "post_duplicate_dedupes": {
+      "balanced": true,
+      "deduped": true,
+      "entry_no": null,
+      "lines": []
+    },
+    "post_immediate": {
+      "balanced": true,
+      "entry_no": "JE-<STAMP>",
+      "lines": [
+        {
+          "account_code": "1000",
+          "credit": 0,
+          "debit": 1070,
+          "memo": null
+        },
+        {
+          "account_code": "4000",
+          "credit": 1000,
+          "debit": 0,
+          "memo": null
+        },
+        {
+          "account_code": "2100",
+          "credit": 70,
+          "debit": 0,
+          "memo": null
+        }
+      ],
+      "pending": false,
+      "status": "Posted"
+    },
+    "prepaid_create": {
+      "id": 1,
+      "monthly_amount": 100,
+      "months": 12,
+      "name": "Golden insurance",
+      "next_run_date": "<DATE>",
+      "schedule_no": "PPD-<STAMP>",
+      "total_amount": 1200
+    },
+    "prepaid_rerun_same_day": {
+      "as_of": "<DATE>",
+      "entries": [],
+      "posted": 0,
+      "scanned": 0
+    },
+    "prepaid_run_due": {
+      "as_of": "<DATE>",
+      "entries": [
+        {
+          "amount": 100,
+          "entry_no": "JE-<STAMP>",
+          "schedule_no": "PPD-<STAMP>"
+        }
+      ],
+      "posted": 1,
+      "scanned": 1
+    },
+    "recurring_create": {
+      "frequency": "monthly",
+      "id": 1,
+      "lines": [
+        {
+          "account_code": "5100",
+          "debit": 50
+        },
+        {
+          "account_code": "1000",
+          "credit": 50
+        }
+      ],
+      "name": "Golden rent",
+      "next_run_date": "<DATE>"
+    },
+    "recurring_rerun_same_day": {
+      "as_of": "<DATE>",
+      "entries": [],
+      "posted": 0,
+      "scanned": 0
+    },
+    "recurring_run_due": {
+      "as_of": "<DATE>",
+      "entries": [
+        {
+          "entry_no": "JE-<STAMP>",
+          "name": "Golden rent",
+          "recurring_id": 1
+        }
+      ],
+      "posted": 1,
+      "scanned": 1
+    },
+    "self_approve_blocked": "SOD_VIOLATION",
+    "trial_balance_touched": [
+      {
+        "account_code": "1000",
+        "account_name": "Cash",
+        "account_type": "Asset",
+        "balance": -330,
+        "credit": 1400,
+        "debit": 1070
+      },
+      {
+        "account_code": "1280",
+        "account_name": "Prepaid Expenses",
+        "account_type": "Asset",
+        "balance": 1100,
+        "credit": 100,
+        "debit": 1200
+      },
+      {
+        "account_code": "2100",
+        "account_name": "Tax Payable",
+        "account_type": "Liability",
+        "balance": -70,
+        "credit": 70,
+        "debit": 0
+      },
+      {
+        "account_code": "4000",
+        "account_name": "Sales Revenue",
+        "account_type": "Revenue",
+        "balance": -1000,
+        "credit": 1000,
+        "debit": 0
+      },
+      {
+        "account_code": "5100",
+        "account_name": "Operating Expense",
+        "account_type": "Expense",
+        "balance": 300,
+        "credit": 0,
+        "debit": 300
+      }
+    ],
+    "unbalanced_blocked": "UNBALANCED"
+  },
+  "procurement": {
+    "gr_full_closes_po": {
+      "costed": false,
+      "gr_no": "GR-<STAMP>",
+      "lines": 1,
+      "po_no": "PO-<STAMP>",
+      "po_status": "Closed"
+    },
+    "gr_partial_keeps_received": {
+      "costed": false,
+      "gr_no": "GR-<STAMP>",
+      "lines": 1,
+      "po_no": "PO-<STAMP>",
+      "po_status": "Received"
+    },
+    "po_create": {
+      "po_no": "PO-<STAMP>",
+      "status": "Pending",
+      "total_amount": 50
+    },
+    "pr_approve": {
+      "pr_no": "PR-<STAMP>",
+      "status": "Approved"
+    },
+    "pr_approve_forbidden_role": "FORBIDDEN",
+    "pr_create": {
+      "lines": 1,
+      "pr_no": "PR-<STAMP>",
+      "status": "Pending"
+    }
+  },
+  "projects": {
+    "cpm_schedule": {
+      "count": 2,
+      "critical_path": [
+        2
+      ],
+      "project_code": "PRJ-GM1",
+      "project_duration_days": 13,
+      "tasks": [
+        {
+          "accountable": null,
+          "assignee": null,
+          "consulted": [],
+          "created_at": "<TS>",
+          "depends_on": [],
+          "duration_days": 9,
+          "ef": 9,
+          "es": 0,
+          "id": 1,
+          "informed": [],
+          "lf": 13,
+          "ls": 4,
+          "name": "Design",
+          "on_critical_path": false,
+          "parent_id": null,
+          "pct_complete": 50,
+          "planned_cost": 6000,
+          "planned_end": "<DATE>",
+          "planned_hours": 40,
+          "planned_start": "<DATE>",
+          "project_id": 1,
+          "responsible": [],
+          "slack": 4,
+          "status": "open",
+          "wbs_code": null
+        },
+        {
+          "accountable": null,
+          "assignee": null,
+          "consulted": [],
+          "created_at": "<TS>",
+          "depends_on": [],
+          "duration_days": 13,
+          "ef": 13,
+          "es": 0,
+          "id": 2,
+          "informed": [],
+          "lf": 13,
+          "ls": 0,
+          "name": "Build",
+          "on_critical_path": true,
+          "parent_id": null,
+          "pct_complete": 25,
+          "planned_cost": 4000,
+          "planned_end": "<DATE>",
+          "planned_hours": 80,
+          "planned_start": "<DATE>",
+          "project_id": 1,
+          "responsible": [],
+          "slack": 0,
+          "status": "open",
+          "wbs_code": null
+        }
+      ]
+    },
+    "create": {
+      "billed_pct": null,
+      "billed_to_date": 0,
+      "billing_type": "TM",
+      "billings_in_excess": null,
+      "boq": null,
+      "budget_amount": 10000,
+      "budget_tolerance_pct": 0,
+      "budget_used_pct": 0,
+      "budget_variance": 10000,
+      "contract_amount": 20000,
+      "contract_asset": null,
+      "cost_to_date": 0,
+      "created_at": "<TS>",
+      "crm_opp_no": null,
+      "customer_name": null,
+      "customer_no": null,
+      "depends_on_projects": [],
+      "end_date": "<DATE>",
+      "entries": [],
+      "estimated_cost": 0,
+      "margin": 0,
+      "name": "Golden Build",
+      "non_billable_cost": 0,
+      "over_budget": false,
+      "pct_complete": 0,
+      "poc_pct": null,
+      "program_code": null,
+      "project_code": "PRJ-GM1",
+      "recognized_cost": 0,
+      "recognized_revenue": 0,
+      "remaining_to_bill": null,
+      "rev_method": "billing",
+      "start_date": "<DATE>",
+      "status": "Open",
+      "task_count": 0,
+      "total_cost": 0,
+      "wip": 0
+    },
+    "evm_closed_form": {
+      "ac": 1500,
+      "as_of": "<DATE>",
+      "bac": 10000,
+      "cost_variance": 2500,
+      "cpi": 2.6667,
+      "eac": 3749.97,
+      "etc": 2249.97,
+      "ev": 4000,
+      "project_code": "PRJ-GM1",
+      "pv": 6000,
+      "schedule_variance": -2000,
+      "spi": 0.6667,
+      "task_count": 2
+    },
+    "get_after_costs": {
+      "billed_pct": null,
+      "billed_to_date": 0,
+      "billing_type": "TM",
+      "billings_in_excess": null,
+      "boq": null,
+      "budget_amount": 10000,
+      "budget_tolerance_pct": 0,
+      "budget_used_pct": 15,
+      "budget_variance": 8500,
+      "contract_amount": 20000,
+      "contract_asset": null,
+      "cost_to_date": 1000,
+      "created_at": "<TS>",
+      "crm_opp_no": null,
+      "customer_name": null,
+      "customer_no": null,
+      "depends_on_projects": [],
+      "end_date": "<DATE>",
+      "entries": [
+        {
+          "amount": 500,
+          "billable": false,
+          "description": "Golden travel",
+          "entry_date": "<DATE>",
+          "entry_no": "JE-<STAMP>",
+          "entry_type": "expense",
+          "qty": 0,
+          "rate": 0
+        },
+        {
+          "amount": 1000,
+          "billable": true,
+          "description": "Golden hours",
+          "entry_date": "<DATE>",
+          "entry_no": "JE-<STAMP>",
+          "entry_type": "time",
+          "qty": 10,
+          "rate": 100
+        }
+      ],
+      "estimated_cost": 0,
+      "margin": -500,
+      "name": "Golden Build",
+      "non_billable_cost": 500,
+      "over_budget": false,
+      "pct_complete": 33.33,
+      "poc_pct": null,
+      "program_code": null,
+      "project_code": "PRJ-GM1",
+      "recognized_cost": 0,
+      "recognized_revenue": 0,
+      "remaining_to_bill": null,
+      "rev_method": "billing",
+      "start_date": "<DATE>",
+      "status": "Active",
+      "task_count": 2,
+      "total_cost": 1500,
+      "wip": 1000
+    },
+    "milestone_add": {
+      "count": 1,
+      "milestones": [
+        {
+          "billing_percent": 30,
+          "created_at": "<TS>",
+          "due_date": "<DATE>",
+          "id": 1,
+          "name": "Design sign-off",
+          "owner": null,
+          "project_id": 1,
+          "reached_at": null,
+          "status": "pending"
+        }
+      ],
+      "project_code": "PRJ-GM1"
+    },
+    "portfolio_rollup": {
+      "as_of": "<DATE>",
+      "at_risk": [
+        {
+          "cpi": 2.6667,
+          "name": "Golden Build",
+          "project_code": "PRJ-GM1",
+          "spi": 0.6667
+        }
+      ],
+      "capacity": {
+        "over_allocated_count": 0,
+        "top": []
+      },
+      "count": 1,
+      "financials": {
+        "billed": 0,
+        "contract": 20000,
+        "cost_to_date": 1000,
+        "margin": -500,
+        "wip": 1000
+      },
+      "funnel": {
+        "converted_count": 0,
+        "open_amount": 0,
+        "open_count": 0,
+        "won_amount": 0,
+        "won_count": 0
+      },
+      "health": {
+        "at_risk": 1,
+        "no_data": 0,
+        "on_track": 0
+      },
+      "projects": [
+        {
+          "ac": 1500,
+          "bac": 10000,
+          "billing_type": "TM",
+          "cpi": 2.6667,
+          "customer_name": null,
+          "eac": 3749.97,
+          "ev": 4000,
+          "margin": -500,
+          "name": "Golden Build",
+          "on_track": false,
+          "project_code": "PRJ-GM1",
+          "spi": 0.6667,
+          "status": "Active",
+          "wip": 1000
+        }
+      ],
+      "status_counts": {
+        "Active": 1
+      },
+      "totals": {
+        "ac": 1500,
+        "bac": 10000,
+        "cpi": 2.6667,
+        "eac": 3749.97,
+        "ev": 4000
+      }
+    },
+    "task_a": {
+      "count": 1,
+      "pct_complete": 50,
+      "project_code": "PRJ-GM1",
+      "tasks": [
+        {
+          "accountable": null,
+          "assignee": null,
+          "consulted": [],
+          "created_at": "<TS>",
+          "depends_on": [],
+          "id": 1,
+          "informed": [],
+          "name": "Design",
+          "parent_id": null,
+          "pct_complete": 50,
+          "planned_cost": 6000,
+          "planned_end": "<DATE>",
+          "planned_hours": 40,
+          "planned_start": "<DATE>",
+          "project_id": 1,
+          "responsible": [],
+          "status": "open",
+          "wbs_code": null
+        }
+      ]
+    },
+    "task_b": {
+      "count": 2,
+      "pct_complete": 33.33,
+      "project_code": "PRJ-GM1",
+      "tasks": [
+        {
+          "accountable": null,
+          "assignee": null,
+          "consulted": [],
+          "created_at": "<TS>",
+          "depends_on": [],
+          "id": 1,
+          "informed": [],
+          "name": "Design",
+          "parent_id": null,
+          "pct_complete": 50,
+          "planned_cost": 6000,
+          "planned_end": "<DATE>",
+          "planned_hours": 40,
+          "planned_start": "<DATE>",
+          "project_id": 1,
+          "responsible": [],
+          "status": "open",
+          "wbs_code": null
+        },
+        {
+          "accountable": null,
+          "assignee": null,
+          "consulted": [],
+          "created_at": "<TS>",
+          "depends_on": [],
+          "id": 2,
+          "informed": [],
+          "name": "Build",
+          "parent_id": null,
+          "pct_complete": 25,
+          "planned_cost": 4000,
+          "planned_end": "<DATE>",
+          "planned_hours": 80,
+          "planned_start": "<DATE>",
+          "project_id": 1,
+          "responsible": [],
+          "status": "open",
+          "wbs_code": null
+        }
+      ]
+    }
+  }
+}

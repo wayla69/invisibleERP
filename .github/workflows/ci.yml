@@ -68,6 +68,7 @@ jobs:
           # ── read/write parity (services vs expected, on PGlite) ──
           - { pkg: parity, script: writeflow }
           - { pkg: parity, script: analytics }
+          - { pkg: parity, script: golden }
           # ── end-to-end / platform foundations ──
           - { pkg: cutover, script: e2e }
           - { pkg: cutover, script: ext }
