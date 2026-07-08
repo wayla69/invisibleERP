@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CircleDollarSign, Package, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { baht, thaiDate } from '@/lib/format';
+import { baht, thaiDate, num } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -56,9 +56,9 @@ export default function BillingPage() {
       if (k === 'users') labels.push(Number(v) < 0 ? t('st.bill.users_unlimited') : t('st.bill.users_max', { count: String(v) }));
       else if (k === 'locations') labels.push(Number(v) < 0 ? t('st.bill.locations_unlimited') : t('st.bill.locations_count', { count: String(v) }));
       else if (k === 'ai_chat') labels.push(v ? t('st.bill.ai_included') : t('st.bill.ai_excluded'));
-      else if (k === 'ai_tokens_daily') { if (Number(v) > 0) labels.push(t('st.bill.ai_tokens_daily', { count: (Number(v) / 1000).toLocaleString() })); }
-      else if (k === 'etax_docs_monthly') { if (Number(v) !== 0) labels.push(Number(v) < 0 ? t('st.bill.feat_etax_unlimited') : t('st.bill.feat_etax_quota', { count: Number(v).toLocaleString() })); }
-      else if (k === 'pos_txns_monthly') { if (Number(v) !== 0) labels.push(Number(v) < 0 ? t('st.bill.feat_pos_unlimited') : t('st.bill.feat_pos_quota', { count: Number(v).toLocaleString() })); }
+      else if (k === 'ai_tokens_daily') { if (Number(v) > 0) labels.push(t('st.bill.ai_tokens_daily', { count: num(Number(v) / 1000) })); }
+      else if (k === 'etax_docs_monthly') { if (Number(v) !== 0) labels.push(Number(v) < 0 ? t('st.bill.feat_etax_unlimited') : t('st.bill.feat_etax_quota', { count: num(v) })); }
+      else if (k === 'pos_txns_monthly') { if (Number(v) !== 0) labels.push(Number(v) < 0 ? t('st.bill.feat_pos_unlimited') : t('st.bill.feat_pos_quota', { count: num(v) })); }
       else if (k === 'reports') labels.push(t('st.bill.reports', { value: String(v) }));
       else labels.push(String(v));
     }
@@ -92,9 +92,9 @@ export default function BillingPage() {
               <span className="ml-auto text-xs text-muted-foreground">{t('st.bill.reset_midnight')}</span>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label={t('st.bill.used_today')} value={t('st.bill.tokens_value', { count: Number(ai.today?.total_tokens ?? 0).toLocaleString() })} icon={Gauge} tone={ai.today?.over_budget ? 'warning' : 'primary'} />
-              <StatCard label={t('st.bill.plan_included')} value={t('st.bill.per_day_value', { count: Number(ai.daily_limit).toLocaleString() })} icon={Package} />
-              <StatCard label={t('st.bill.hard_ceiling')} value={t('st.bill.per_day_value', { count: Number(ai.daily_max).toLocaleString() })} icon={ShieldCheck} />
+              <StatCard label={t('st.bill.used_today')} value={t('st.bill.tokens_value', { count: num(ai.today?.total_tokens) })} icon={Gauge} tone={ai.today?.over_budget ? 'warning' : 'primary'} />
+              <StatCard label={t('st.bill.plan_included')} value={t('st.bill.per_day_value', { count: num(ai.daily_limit) })} icon={Package} />
+              <StatCard label={t('st.bill.hard_ceiling')} value={t('st.bill.per_day_value', { count: num(ai.daily_max) })} icon={ShieldCheck} />
               <StatCard
                 label={t('st.bill.overage_label', { rate: Number(ai.overage_rate_thb_per_1k) })}
                 value={baht(overageCharge)}
@@ -104,7 +104,7 @@ export default function BillingPage() {
             </div>
             {Number(ai.today?.overage_tokens ?? 0) > 0 && (
               <p className="text-xs text-muted-foreground">
-                {t('st.bill.overage_detail', { tokens: Number(ai.today.overage_tokens).toLocaleString(), rate: Number(ai.overage_rate_thb_per_1k) })}
+                {t('st.bill.overage_detail', { tokens: num(ai.today.overage_tokens), rate: Number(ai.overage_rate_thb_per_1k) })}
               </p>
             )}
           </Card>
@@ -121,16 +121,16 @@ export default function BillingPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               {usage.data.meters.map((m: any) => {
                 const label = m.meter === 'etax_docs' ? t('st.bill.meter_etax') : m.meter === 'pos_txns' ? t('st.bill.meter_pos') : m.meter;
-                const quota = Number(m.included) < 0 ? t('st.bill.unlimited') : Number(m.included).toLocaleString();
+                const quota = Number(m.included) < 0 ? t('st.bill.unlimited') : num(m.included);
                 return (
                   <div key={m.meter} className="rounded-lg border p-4">
                     <div className="flex items-center justify-between">
                       <strong className="text-sm">{label}</strong>
                       {Number(m.overage_units) > 0
-                        ? <Badge variant="warning">{t('st.bill.overage_units', { count: Number(m.overage_units).toLocaleString() })}</Badge>
+                        ? <Badge variant="warning">{t('st.bill.overage_units', { count: num(m.overage_units) })}</Badge>
                         : <Badge variant="success">{t('st.bill.within_quota')}</Badge>}
                     </div>
-                    <div className="mt-1 text-2xl font-bold tabular-nums">{Number(m.used).toLocaleString()} <span className="text-sm font-normal text-muted-foreground">/ {quota}</span></div>
+                    <div className="mt-1 text-2xl font-bold tabular-nums">{num(m.used)} <span className="text-sm font-normal text-muted-foreground">/ {quota}</span></div>
                     {Number(m.amount) > 0 && <p className="mt-1 text-xs text-muted-foreground">{t('st.bill.overage_amount', { amount: baht(m.amount), rate: String(m.rate_thb_per_unit) })}</p>}
                   </div>
                 );
@@ -156,8 +156,8 @@ export default function BillingPage() {
                 </thead>
                 <tbody>
                   {[
-                    ...(aiRuns.data?.runs ?? []).map((r: any) => ({ month: r.month, meter: 'AI', qty: `${Number(r.overage_tokens).toLocaleString()} tokens`, amount: r.amount, status: r.status })),
-                    ...(usageRuns.data?.runs ?? []).map((r: any) => ({ month: r.month, meter: r.meter === 'etax_docs' ? t('st.bill.meter_etax') : r.meter === 'pos_txns' ? t('st.bill.meter_pos') : r.meter, qty: Number(r.overage_units).toLocaleString(), amount: r.amount, status: r.status })),
+                    ...(aiRuns.data?.runs ?? []).map((r: any) => ({ month: r.month, meter: 'AI', qty: `${num(r.overage_tokens)} tokens`, amount: r.amount, status: r.status })),
+                    ...(usageRuns.data?.runs ?? []).map((r: any) => ({ month: r.month, meter: r.meter === 'etax_docs' ? t('st.bill.meter_etax') : r.meter === 'pos_txns' ? t('st.bill.meter_pos') : r.meter, qty: num(r.overage_units), amount: r.amount, status: r.status })),
                   ].sort((a, b) => String(b.month).localeCompare(String(a.month))).map((r, i) => (
                     <tr key={i} className="border-b last:border-0">
                       <td className="py-1.5 pr-3 tabular-nums">{r.month}</td>

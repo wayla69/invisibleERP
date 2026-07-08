@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { thaiDateTime } from '@/lib/format';
 
 interface ReportType { key: string; label: string; label_en: string }
 interface Catalog { report_types: ReportType[]; frequencies: string[] }
@@ -99,7 +100,7 @@ function Subscriptions() {
             { key: 'report_type', label: t('pb.col_type'), render: (r) => <code className="text-xs">{r.report_type}</code> },
             { key: 'frequency', label: t('pb.sr_col_freq'), render: (r) => <Badge variant="muted">{freqLabel(r.frequency)}</Badge> },
             { key: 'recipients', label: t('pb.sr_col_recipients'), render: (r) => (r.recipients ?? []).map((x) => x.email).filter(Boolean).join(', ') || '—' },
-            { key: 'next_run_at', label: t('pb.sr_col_next_run'), render: (r) => r.next_run_at ? new Date(r.next_run_at).toLocaleString('th-TH') : '—' },
+            { key: 'next_run_at', label: t('pb.sr_col_next_run'), render: (r) => thaiDateTime(r.next_run_at) },
             { key: 'run', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={runNow.isPending} onClick={() => runNow.mutate(r.id)} title={t('pb.sr_run_now')}><Play className="h-4 w-4" /></Button> },
             { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
@@ -119,7 +120,7 @@ function Runs() {
         rows={q.data?.runs ?? []}
         rowKey={(r) => r.id}
         columns={[
-          { key: 'ran_at', label: t('pb.sr_col_time'), render: (r) => r.ran_at ? new Date(r.ran_at).toLocaleString('th-TH') : '—' },
+          { key: 'ran_at', label: t('pb.sr_col_time'), render: (r) => thaiDateTime(r.ran_at) },
           { key: 'name', label: t('pb.sr_col_report') },
           { key: 'report_type', label: t('pb.col_type'), render: (r) => <code className="text-xs">{r.report_type}</code> },
           { key: 'recipients_count', label: t('pb.sr_col_sent_to'), align: 'right', render: (r) => r.recipients_count },

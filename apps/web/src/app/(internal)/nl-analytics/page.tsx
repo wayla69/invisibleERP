@@ -8,8 +8,9 @@ import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { num } from '@/lib/format';
 
-const money = (x: number) => (Number(x) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (x: number) => num(x, 2);
 type Res = { question: string; resolved: { dimension: string; date_from?: string; date_to?: string } | null; source: string; result: { dimension: string; rows: any[] } | null };
 
 // NL analytics (Platform Phase 17 — B3). Plain-language question → governed query over the semantic layer.
@@ -53,7 +54,7 @@ export default function NlAnalyticsPage() {
                   <tr key={i} className="border-b">
                     <td className="px-2 py-1"><div>{String(r.dim)}</div><div className="mt-0.5 h-1.5 rounded bg-primary/20"><div className="h-1.5 rounded bg-primary" style={{ width: `${Math.round((Number(r.sales_total) / maxSales) * 100)}%` }} /></div></td>
                     <td className="px-2 py-1 text-right tabular-nums">{money(r.sales_total)}</td>
-                    <td className="px-2 py-1 text-right tabular-nums">{Number(r.orders).toLocaleString()}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{num(r.orders)}</td>
                   </tr>
                 ))}</tbody>
               </table>

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Wallet, CreditCard, Receipt } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht } from '@/lib/format';
+import { baht, thaiDateTime } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -119,7 +119,7 @@ function Accounts() {
               rows={stmt.data.entries ?? []}
               rowKey={(r: any) => r.entry_no}
               columns={[
-                { key: 'created_at', label: t('px.payacct_col_time'), render: (r: any) => r.created_at ? new Date(r.created_at).toLocaleString('th-TH') : '—' },
+                { key: 'created_at', label: t('px.payacct_col_time'), render: (r: any) => thaiDateTime(r.created_at) },
                 { key: 'type', label: t('px.payacct_col_type'), render: (r: any) => <Badge variant={r.type === 'charge' ? 'warning' : 'success'}>{r.type}</Badge> },
                 { key: 'amount', label: t('inv.col_qty'), align: 'right', render: (r: any) => baht(r.amount) },
                 { key: 'currency', label: t('px.payacct_col_currency'), render: (r: any) => r.currency !== 'THB' ? `${r.currency}@${r.fx_rate}` : 'THB' },

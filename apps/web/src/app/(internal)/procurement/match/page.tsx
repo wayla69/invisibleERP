@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { CheckCheck, ListChecks, ShieldAlert, ShieldCheck, Save, Search, Unlock } from 'lucide-react';
 import { api } from '@/lib/api';
-import { num } from '@/lib/format';
+import { num, pct } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
@@ -27,7 +27,7 @@ const lineStatusVariant = (s: string) =>
     ? 'destructive'
     : 'secondary';
 
-const pct = (v: unknown) => `${Number(v ?? 0).toLocaleString('en-US', { maximumFractionDigits: 3 })}%`;
+const pctTol = (v: unknown) => pct(v, 3);
 
 export default function MatchPage() {
   const { t } = useLang();
@@ -236,8 +236,8 @@ function RunMatchTab() {
                   { key: 'gr_qty', label: t('iv.match_col_gr_qty'), align: 'right', render: (r: any) => <span className="tabular">{num(r.gr_qty)}</span> },
                   { key: 'inv_price', label: t('iv.match_col_inv_price'), align: 'right', render: (r: any) => <span className="tabular">{num(r.inv_price)}</span> },
                   { key: 'po_price', label: t('iv.match_col_po_price'), align: 'right', render: (r: any) => <span className="tabular">{num(r.po_price)}</span> },
-                  { key: 'qty_var_pct', label: t('iv.match_col_qty_var'), align: 'right', render: (r: any) => <span className="tabular">{pct(r.qty_var_pct)}</span> },
-                  { key: 'price_var_pct', label: t('iv.match_col_price_var'), align: 'right', render: (r: any) => <span className="tabular">{pct(r.price_var_pct)}</span> },
+                  { key: 'qty_var_pct', label: t('iv.match_col_qty_var'), align: 'right', render: (r: any) => <span className="tabular">{pctTol(r.qty_var_pct)}</span> },
+                  { key: 'price_var_pct', label: t('iv.match_col_price_var'), align: 'right', render: (r: any) => <span className="tabular">{pctTol(r.price_var_pct)}</span> },
                   { key: 'line_status', label: t('iv.match_col_line_result'), render: (r: any) => <Badge variant={lineStatusVariant(r.line_status)}>{r.line_status}</Badge> },
                 ]}
                 emptyState={{ icon: ListChecks, title: t('iv.match_no_lines') }}
@@ -302,9 +302,9 @@ function ToleranceTab() {
       <StateView q={q}>
         {tx && (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label={t('iv.match_tol_qty')} value={pct(tx.qtyPct)} tone="info" />
-            <StatCard label={t('iv.match_tol_price')} value={pct(tx.pricePct)} tone="info" />
-            <StatCard label={t('iv.match_tol_amt')} value={pct(tx.amountPct)} tone="info" />
+            <StatCard label={t('iv.match_tol_qty')} value={pctTol(tx.qtyPct)} tone="info" />
+            <StatCard label={t('iv.match_tol_price')} value={pctTol(tx.pricePct)} tone="info" />
+            <StatCard label={t('iv.match_tol_amt')} value={pctTol(tx.amountPct)} tone="info" />
             <StatCard label={t('iv.match_tol_abs')} value={num(tx.amountAbs)} tone="info" />
           </div>
         )}

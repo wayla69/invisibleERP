@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ReceiptText, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht } from '@/lib/format';
+import { baht, thaiDateTime } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -43,7 +43,7 @@ export default function CloseOfDayPage() {
 
   const columns: Column<XzReport>[] = [
     { key: 'id', label: '#', render: (r) => `Z-${r.id}` },
-    { key: 'generated_at', label: t('px.cod_time'), render: (r) => new Date(r.generated_at).toLocaleString('th-TH') },
+    { key: 'generated_at', label: t('px.cod_time'), render: (r) => thaiDateTime(r.generated_at) },
     { key: 'gross_sales', label: t('px.cod_gross'), align: 'right', render: (r) => baht(r.gross_sales) },
     { key: 'total_cash', label: t('px.cod_cash'), align: 'right', render: (r) => baht(r.total_cash) },
     { key: 'cash_counted', label: t('px.cod_counted'), align: 'right', render: (r) => baht(r.cash_counted) },

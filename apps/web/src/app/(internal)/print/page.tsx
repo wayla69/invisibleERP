@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { thaiDateTime } from '@/lib/format';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -124,7 +125,7 @@ export default function PrintPage() {
             { key: 'sale_no', label: t('px.print_col_ref'), render: (r) => r.sale_no ?? r.order_no ?? '—' },
             { key: 'format', label: t('px.print_col_format'), render: (r) => <Badge variant="muted" className="uppercase text-[10px]">{r.format}</Badge> },
             { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant[r.status] ?? 'muted'}>{r.status}{r.attempts > 1 ? ` (${r.attempts})` : ''}</Badge> },
-            { key: 'created_at', label: t('px.print_col_created'), render: (r) => r.created_at ? new Date(r.created_at).toLocaleString('th-TH') : '—' },
+            { key: 'created_at', label: t('px.print_col_created'), render: (r) => thaiDateTime(r.created_at) },
             { key: 'act', label: '', align: 'right', render: (r) => r.sale_no ? <Button size="sm" variant="ghost" onClick={() => openReceipt(r.sale_no!)}><RefreshCw className="h-4 w-4" /></Button> : null },
           ]}
           emptyState={{

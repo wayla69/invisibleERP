@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { thaiDateTime, num } from '@/lib/format';
 
 interface AuditRow {
   id: number; ts: string | null; actor: string | null; tenant_id: number | null; action: string | null;
@@ -69,7 +70,7 @@ export default function AuditPage() {
           rows={q.data?.rows ?? []}
           rowKey={(r) => r.id}
           columns={[
-            { key: 'ts', label: t('st.aud.col_time'), render: (r) => r.ts ? new Date(r.ts).toLocaleString('th-TH') : '—' },
+            { key: 'ts', label: t('st.aud.col_time'), render: (r) => thaiDateTime(r.ts) },
             { key: 'actor', label: t('st.aud.col_actor'), render: (r) => r.actor ?? <span className="text-muted-foreground">{t('st.aud.system')}</span> },
             { key: 'action', label: t('st.aud.col_action'), render: (r) => <code className="text-xs">{r.action}</code> },
             { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={r.status === 'success' ? 'success' : 'destructive'}>{r.status}</Badge> },
@@ -104,7 +105,7 @@ export default function AuditPage() {
           }
         />
         <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">
-          <span>{t('st.aud.pagination', { total: total.toLocaleString('th-TH'), page: page + 1, pages })}</span>
+          <span>{t('st.aud.pagination', { total: num(total), page: page + 1, pages })}</span>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('st.aud.prev')}</Button>
             <Button size="sm" variant="outline" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>{t('st.aud.next')}</Button>

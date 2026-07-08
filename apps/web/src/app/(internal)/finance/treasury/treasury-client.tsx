@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Wallet, TrendingDown, Landmark } from 'lucide-react';
 import { useLang } from '@/lib/i18n';
-import { baht } from '@/lib/format';
+import { baht, num } from '@/lib/format';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -148,9 +148,9 @@ export function TreasuryClient({ initialData }: { initialData: CashPosition | nu
                 {data.fx_exposure.map((e) => (
                   <tr key={e.currency} className="border-t border-border/50 [&>td]:py-1 [&>td]:text-right [&>td:first-child]:text-left">
                     <td className="font-medium">{e.currency}</td>
-                    <td className="tabular-nums">{e.receivable.toLocaleString()}</td>
-                    <td className="tabular-nums">{e.payable.toLocaleString()}</td>
-                    <td className={`tabular-nums font-medium ${e.net < 0 ? 'text-destructive' : 'text-success'}`}>{e.net.toLocaleString()}</td>
+                    <td className="tabular-nums">{num(e.receivable)}</td>
+                    <td className="tabular-nums">{num(e.payable)}</td>
+                    <td className={`tabular-nums font-medium ${e.net < 0 ? 'text-destructive' : 'text-success'}`}>{num(e.net)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BellRing, Plus, Trash2, Play, History } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { num } from '@/lib/format';
+import { num, thaiDateTime } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -130,7 +130,7 @@ function Events() {
         rows={q.data?.events ?? []}
         rowKey={(r) => r.id}
         columns={[
-          { key: 'fired_at', label: t('st.alert.col_time'), render: (r) => r.fired_at ? new Date(r.fired_at).toLocaleString('th-TH') : '—' },
+          { key: 'fired_at', label: t('st.alert.col_time'), render: (r) => thaiDateTime(r.fired_at) },
           { key: 'name', label: t('st.alert.col_rule') },
           { key: 'metric', label: t('st.alert.metric'), render: (r) => <code className="text-xs">{r.metric}</code> },
           { key: 'value', label: t('st.alert.col_value'), align: 'right', render: (r) => <span className="tabular">{num(r.value)} / {num(r.threshold)}</span> },

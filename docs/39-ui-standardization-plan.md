@@ -35,7 +35,7 @@
 | Batch | Scope | Status |
 |---|---|---|
 | 1 | Charter (this doc) + primitives: `ConfirmDialog`, `form-controls.tsx` (`Select` + canonical `selectCls`), `format.pct()` + migrate all 7 `window.confirm` sites (customers, suppliers, setup/items merges · tables remove · pos-control discard/void · settings nav-reset) | **DELIVERED** |
-| 2 | Formatting sweep: 26 `toLocaleString` + 7 `toFixed` files → `baht`/`num`/`thaiDate`/`pct` | planned |
+| 2 | Formatting sweep → `baht`/`num(v,digits?)`/`thaiDate`/**`thaiDateTime`** (new — audit/log timestamps keep their time)/`pct`. 27 files swept; **6 documented exceptions** stay: `command-center` `fmt()` + `treasury` `nn()` (coherent multi-unit local formatters) and their SVG chart coordinates, `demand` fraction-`pct`/MASE metrics, `tax-codes`/`bom`/`buffet` deliberate fixed-digit semantics | **DELIVERED** |
 | 3a-c | Raw `<select>`/`<input>`/`FormField` adoption, per area (finance+procurement · loyalty+projects · settings/platform+POS) | planned |
 | 4 | DataTable adoption for the 21 raw-`<table>` pages, per area, simplest first (`controls`, `developer`, `einvoice`, `loyalty`, `projects/portfolio` → finance analytics clients last) | planned |
 | 5 | `ModulePage` widening + toast-vs-`Msg` convention decision + breadcrumb decision | planned |
@@ -47,3 +47,4 @@ must stay byte-identical.
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-08 | Platform / IT | Charter + measured inventory + batch plan; batch 1 delivered (ConfirmDialog / form-controls / pct + all window.confirm sites migrated; master-io dedupes `selectCls`). |
+| 0.2 | 2026-07-08 | Platform / IT | Batch 2 delivered: formatting sweep (27 files → lib helpers; `thaiDateTime` + `num(v,digits?)` added; `pct` semantics locked to drop-trailing-zeros; local `baht`/`money`/`pct` duplicates removed in qr/track/query/nl-analytics/match/deferred-tax); 6 exceptions documented in §3. |
