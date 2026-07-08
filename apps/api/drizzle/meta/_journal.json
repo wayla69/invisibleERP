@@ -1961,6 +1961,13 @@
       "when": 2023820000241,
       "tag": "0279_tax_point_scaffold",
       "breakpoints": true
+    },
+    {
+      "idx": 280,
+      "version": "7",
+      "when": 2023820000242,
+      "tag": "0280_pp36_reverse_charge",
+      "breakpoints": true
     }
   ]
 }

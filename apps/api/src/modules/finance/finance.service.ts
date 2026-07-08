@@ -20,7 +20,7 @@ import { vendors as vendorsTbl } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
-export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; tax_code?: string; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
+export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero' | 'reverse_charge'; tax_code?: string; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
 export interface AdvanceDto { payee: string; amount: number; purpose?: string; expense_account?: string; tenant_id?: number | null; project_code?: string; boq_line_id?: number }
 export interface SettleAdvanceDto { settled_expense: number; returned_cash?: number; expense_account?: string }
 // project_code (M4, docs/32) — an advance can be raised against a project so site cash is managed on it.
@@ -607,26 +607,36 @@ export class FinanceService {
     // input VAT — a configured tax_code (docs/33 PR6) drives the rate + input-VAT GL account; else the flat
     // 7/107 default (exempt/zero-rated/non-VAT bills carry NO input VAT, else ภ.พ.30 overstates the credit).
     const treatment = dto.vat_treatment ?? 'standard';
-    const leg = await this.vatLegFromCode(tenantId, dto.tax_code, n(dto.amount), 'input');
+    // ภ.พ.36 (ม.83/6) — imported services from an offshore/non-VAT-registered supplier: the supplier charges NO
+    // Thai VAT, so the payer BOOKS THE BILL AT NET (gross = net, no vendor input-VAT leg) and SELF-ASSESSES 7%
+    // output VAT to remit via ภ.พ.36, taking the mirror amount as a recoverable input-VAT credit. The
+    // self-assessment posts Dr 1300 Input VAT / Cr 2120 PP36 VAT Payable (a wash on the P&L; the 2120 liability
+    // is the remittance obligation the ภ.พ.36 report reads, kept out of the ภ.พ.30/2100 set).
+    const reverseCharge = treatment === 'reverse_charge';
+    const leg = reverseCharge ? null : await this.vatLegFromCode(tenantId, dto.tax_code, n(dto.amount), 'input');
     const fallback = treatment === 'standard' ? this.vatSplit(n(dto.amount)) : { net: n(dto.amount), vat: 0 };
     const net = leg ? leg.net : fallback.net;
-    const vat = leg ? leg.vat : fallback.vat;
+    const vat = leg ? leg.vat : fallback.vat; // vendor input VAT on the bill (0 for reverse-charge — none exists)
     const apGross = leg ? leg.gross : n(dto.amount);
     const vatAccount = leg?.account ?? '2100';
+    const selfVat = reverseCharge ? round2(net * 0.07) : 0; // ภ.พ.36 self-assessed output VAT (= recoverable input VAT)
     const paid = n(dto.paid_amount);
     const status = paid >= apGross ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid';
     await db.insert(apTransactions).values({
       txnNo, tenantId, vendorId: dto.vendor_id ?? null, vendorName: dto.vendor_name ?? null, txnType: dto.txn_type ?? 'Invoice',
       invoiceNo: dto.invoice_no ?? null, invoiceDate: dto.invoice_date ?? null, dueDate: dto.due_date ?? null,
-      amount: String(apGross), vatAmount: fx(vat, 2), paidAmount: String(paid), status, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
+      amount: String(apGross), vatAmount: fx(vat, 2), reverseCharge, paidAmount: String(paid), status, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
     });
     // GL: record expense + input VAT + payable (Dr 5100/1200/override net / Dr <input-vat> vat / Cr 2000 gross). Zero VAT leg auto-drops.
+    // For reverse-charge, append the ภ.พ.36 self-assessment pair (Dr 1300 / Cr 2120) — the whole entry stays balanced.
     if (this.ledger && apGross > 0) {
       const expenseAccount = dto.expense_account ?? ((dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100');
+      const lines = [{ account_code: expenseAccount, debit: net }, { account_code: vatAccount, debit: vat }, { account_code: '2000', credit: apGross }];
+      if (selfVat > 0) { lines.push({ account_code: '1300', debit: selfVat }, { account_code: '2120', credit: selfVat }); }
       await this.ledger.postEntry({
         date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId,
-        memo: `AP bill ${txnNo}${dto.vendor_name ? ' ' + dto.vendor_name : ''}`, createdBy: user.username,
-        lines: [{ account_code: expenseAccount, debit: net }, { account_code: vatAccount, debit: vat }, { account_code: '2000', credit: apGross }],
+        memo: `AP bill ${txnNo}${dto.vendor_name ? ' ' + dto.vendor_name : ''}${reverseCharge ? ' (ภ.พ.36 reverse-charge)' : ''}`, createdBy: user.username,
+        lines,
       });
     }
     await this.statusLog.log('AP', txnNo, '', status, user.username);

@@ -6,7 +6,7 @@ import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { TaxReportsService } from './tax-reports.service';
 import { TaxReportsPdfService } from './tax-reports-pdf.service';
 
-const FileBody = z.object({ filing_type: z.enum(['PP30', 'PND3', 'PND53']), month: z.number().int().min(1).max(12), year: z.number().int().min(2000) });
+const FileBody = z.object({ filing_type: z.enum(['PP30', 'PND3', 'PND53', 'PP36']), month: z.number().int().min(1).max(12), year: z.number().int().min(2000) });
 const SubmitBody = z.object({ submission_ref: z.string().min(1) });
 
 function parseMY(month: string, year: string) {
@@ -31,6 +31,10 @@ export class TaxReportsController {
 
   @Get('pnd') @Permissions('exec', 'creditors')
   pnd(@Query('type') type: string, @Query('month') month: string, @Query('year') year: string) { const { m, y } = parseMY(month, year); return this.svc.pnd(type, m, y); }
+
+  // TAX-08 — ภ.พ.36 reverse-charge / self-assessed VAT on imported services (ม.83/6).
+  @Get('pp36') @Permissions('exec', 'creditors')
+  pp36(@Query('month') month: string, @Query('year') year: string) { const { m, y } = parseMY(month, year); return this.svc.pp36(m, y); }
 
   // TAX-03 — ภ.ง.ด.3/53 → GL 2361 tie-out (vendor WHT held vs withheld vs certificated).
   @Get('pnd-tieout') @Permissions('exec', 'creditors')

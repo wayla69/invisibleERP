@@ -38,6 +38,7 @@ const periodDate = (day: string) => `${curYear}-${pad2(curMonth)}-${day}`;
 const nextMonth = curMonth === 12 ? 1 : curMonth + 1;
 const nextMonthYear = curMonth === 12 ? curYear + 1 : curYear;
 const nextMonthDeadline = `${nextMonthYear}-${pad2(nextMonth)}-15`;
+const nextMonth7th = `${nextMonthYear}-${pad2(nextMonth)}-07`; // ภ.พ.36 / ภ.ง.ด. — 7th of the following month
 const periodTag = `${curYear}-${pad2(curMonth)}`;
 
 async function main() {
@@ -300,6 +301,27 @@ async function main() {
   const subP = await inj('POST', '/api/bi/subscriptions', t2mgr, { name: 'PP30 draft', report_type: 'tax_pp30_draft', frequency: 'monthly', filters: { month: curMonth, year: curYear } });
   const runP = await inj('POST', `/api/bi/subscriptions/${subP.json.id}/run`, t2mgr, {});
   ok('PR4: tax_pp30_draft runs and registers/refreshes the period PP30 filing', runP.status === 200 && runP.json.status === 'success' && /Draft filing PP30/.test(runP.json.summary ?? ''), runP.json.summary ?? JSON.stringify(runP.json).slice(0, 120));
+
+  // ── TAX-08: reverse-charge / self-assessed VAT on imported services (ม.83/6) ──
+  // An offshore supplier bills a ฿5,000 SaaS service with NO Thai VAT. Flagging the bill reverse_charge makes
+  // the payer self-assess 7% (฿350): the bill posts at net (no vendor input VAT), and Dr 1300 / Cr 2120 accrues
+  // the ภ.พ.36 remittance obligation. The pp36 report ties to the GL 2120 movement; the filing is due the 7th.
+  const rcBill = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: 'Foreign SaaS Co', txn_type: 'Service', invoice_no: 'PV-RC-1', invoice_date: periodDate('23'), amount: 5000, vat_treatment: 'reverse_charge' });
+  ok('TAX-08: reverse-charge AP bill created (AP-)', /^AP-/.test(rcBill.json.txn_no ?? ''), JSON.stringify(rcBill.json).slice(0, 70));
+  const pp36 = await inj('GET', `/api/tax-reports/pp36?month=${curMonth}&year=${curYear}`, admin);
+  ok('TAX-08: ภ.พ.36 self-assesses 7% on ฿5,000 → VAT ฿350, base ฿5,000', pp36.status === 200 && near(pp36.json.totals?.vat, 350) && near(pp36.json.totals?.base, 5000), `${pp36.status} ${JSON.stringify(pp36.json.totals)}`);
+  ok('TAX-08: ภ.พ.36 lists the imported-service bill (VAT ฿350)', pp36.json.rows?.some((r: any) => r.invoice_no === 'PV-RC-1' && near(r.vat, 350)), JSON.stringify(pp36.json.rows?.find((r: any) => r.invoice_no === 'PV-RC-1') ?? {}));
+  ok('TAX-08: ภ.พ.36 ties to GL 2120 self-assessed-VAT-payable movement (฿350)', pp36.json.reconciliation?.gl_account === '2120' && near(pp36.json.reconciliation?.gl_net_movement, 350) && pp36.json.reconciliation?.tied === true, JSON.stringify(pp36.json.reconciliation));
+  ok('TAX-08: ภ.พ.36 deadline = 7th of next month', pp36.json.deadline === nextMonth7th, `${pp36.json.deadline} vs ${nextMonth7th}`);
+  // A reverse-charge bill claims NO vendor input VAT on ภ.พ.30 (there is none — the ฿350 is credited via 1300 separately).
+  const ivRc = await inj('GET', `/api/tax-reports/input-vat?month=${curMonth}&year=${curYear}`, admin);
+  ok('TAX-08: reverse-charge bill carries 0 vendor input VAT on ภ.พ.30', ivRc.json.rows?.some((r: any) => r.invoice_no === 'PV-RC-1' && near(r.vat, 0)), JSON.stringify(ivRc.json.rows?.find((r: any) => r.invoice_no === 'PV-RC-1') ?? {}));
+  // File ภ.พ.36 → DRAFT snapshot remitting ฿350; remittance calendar lists PP36 due the 7th.
+  const filePp36 = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP36', month: curMonth, year: curYear });
+  ok('TAX-08: file ภ.พ.36 → DRAFT remitting ฿350', filePp36.json.status === 'DRAFT' && near(filePp36.json.output_vat, 350) && near(filePp36.json.net_vat, 350), JSON.stringify(filePp36.json).slice(0, 130));
+  const cal36 = await inj('GET', `/api/tax-reports/remittance-calendar?year=${curYear}`, admin);
+  const junePp36 = (cal36.json.calendar ?? []).find((c: any) => c.filing_type === 'PP36' && c.period_month === curMonth);
+  ok('TAX-08: remittance calendar lists ภ.พ.36 (DRAFT, deadline = 7th of next month)', junePp36?.status === 'DRAFT' && junePp36?.deadline === nextMonth7th, JSON.stringify(junePp36 ?? {}));
 
   // ── docs/33 PR6: vat_code → VAT posting (makes the tax_codes table live) ──
   // A VAT code with DISTINCT output/input accounts proves the routing moved off the shared 2100.
