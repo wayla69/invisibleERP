@@ -27,13 +27,21 @@ const statusVariant: Record<string, 'success' | 'warning' | 'destructive' | 'mut
   printed: 'success', queued: 'info', sent: 'warning', failed: 'destructive',
 };
 
-// Open the server-rendered receipt HTML in a new window (auth header → can't be a plain link).
+// Open the server-rendered receipt HTML in a new window (cookie-auth fetch → can't be a plain link).
+// Security review M-6: render it inside a fully-sandboxed, SCRIPT-FREE iframe (`<iframe sandbox>` with no
+// flags) rather than document.write-ing it into the window directly — a receipt needs no scripting, so any
+// unescaped field can't execute. The popup shell itself is a fixed, data-free skeleton.
 async function openReceipt(saleNo: string, lang?: string) {
   const qs = lang ? `?lang=${encodeURIComponent(lang)}` : '';
   const res = await fetch(`${BASE}/api/print/receipt/${encodeURIComponent(saleNo)}${qs}`, { credentials: 'include' });
   const html = await res.text();
   const w = window.open('', '_blank', 'width=420,height=640');
-  if (w) { w.document.open(); w.document.write(html); w.document.close(); }
+  if (!w) return;
+  w.document.open();
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Receipt</title><style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100vh}</style></head><body><iframe sandbox title="receipt"></iframe></body></html>');
+  w.document.close();
+  const frame = w.document.querySelector('iframe');
+  if (frame) frame.srcdoc = html; // sandboxed (no allow-scripts) → receipt renders, scripts inert
 }
 
 type SendChannel = 'email' | 'line' | 'sms';
