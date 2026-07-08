@@ -13,8 +13,8 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { registerEdge } from './common/edge';
-import { assertTenancyBootSafe, strictTenancyBoot } from './common/tenancy-boot-check';
-import { DRIZZLE, type DrizzleDb } from './database/database.module';
+import { assertTenancyBootSafe, assertRlsBackstop, allowSingleCompanyMultiTenant, allowRlsBypassBaseRole } from './common/tenancy-boot-check';
+import { DRIZZLE, PG_CLIENT, type DrizzleDb, type PgClient } from './database/database.module';
 import { tenants } from './database/schema';
 import { count } from 'drizzle-orm';
 import { LedgerService } from './modules/ledger/ledger.service';
@@ -54,20 +54,40 @@ async function bootstrap() {
     try { await seed(); } catch (e) { new Logger('Seed').warn(`seed skipped: ${(e as Error).message}`); }
   }
 
-  // Data-isolation boot check (4.2): refuse/warn if several companies run under single-company mode, where
-  // every tenant Admin would have a global RLS bypass. Best-effort read; only a strict-mode refusal throws.
+  // Data-isolation boot check (4.2 / H-4): refuse (default) if several companies run under single-company
+  // mode, where every tenant Admin would have a global RLS bypass. Best-effort read; only a `refuse` throws.
   try {
     const db = app.get<DrizzleDb>(DRIZZLE);
     await assertTenancyBootSafe({
       isProd: process.env.NODE_ENV === 'production',
       mode: process.env.TENANCY_MODE ?? 'single-company',
-      strict: strictTenancyBoot(),
+      allowOptOut: allowSingleCompanyMultiTenant(),
       countTenants: async () => { const r = await db.select({ n: count() }).from(tenants); return Number(r[0]?.n ?? 0); },
       logger: new Logger('TenancyBoot'),
     });
   } catch (e) {
     if (/Refusing to boot/.test((e as Error).message)) throw e;
     new Logger('TenancyBoot').warn(`tenancy boot check skipped: ${(e as Error).message}`);
+  }
+
+  // RLS-backstop boot check (H-3): refuse (default) if the base DB connection role bypasses RLS (superuser
+  // or BYPASSRLS), which leaves the @NoTx / SSE / raw / background-job surface with no DB-level tenant
+  // backstop. Best-effort probe; only a `refuse` throws. Fix: connect as a non-superuser owner role.
+  try {
+    const sql = app.get<PgClient>(PG_CLIENT);
+    await assertRlsBackstop({
+      isProd: process.env.NODE_ENV === 'production',
+      allowOptOut: allowRlsBypassBaseRole(),
+      probe: async () => {
+        const rows: any = await sql`select (current_setting('is_superuser') = 'on')::text as super, coalesce((select rolbypassrls from pg_roles where rolname = current_user), false)::text as bypass`;
+        const r = rows[0] ?? {};
+        return { isSuperuser: r.super === 'true', bypassRls: r.bypass === 'true' };
+      },
+      logger: new Logger('RlsBackstop'),
+    });
+  } catch (e) {
+    if (/Refusing to boot/.test((e as Error).message)) throw e;
+    new Logger('RlsBackstop').warn(`RLS backstop check skipped: ${(e as Error).message}`);
   }
 
   const port = Number(process.env.PORT ?? 8000);
