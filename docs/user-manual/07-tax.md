@@ -212,6 +212,7 @@ amounts due and the deadlines (ภ.พ.30 by the 15th, ภ.ง.ด. by the 7th).
 | **Output VAT** (ภาษีขาย) | Output VAT | Monthly list of VAT charged on sales |
 | **Input VAT** (ภาษีซื้อ) | Input VAT | Monthly list of VAT paid on purchases (excludes exempt / zero-rated) |
 | **PP30** (ภ.พ.30) | PP30 | The monthly VAT return: net of output − input |
+| **PP36** (ภ.พ.36) | PP36 | Self-assessed VAT on **imported services** (reverse charge, ม.83/6) |
 | **PND** (ภ.ง.ด.) | PND | Withholding tax report (PND1 salary, PND3 contractor, PND53 other) |
 
 ### To run a report
@@ -222,6 +223,27 @@ amounts due and the deadlines (ภ.พ.30 by the 15th, ภ.ง.ด. by the 7th).
 
 **Expected result:** The report lists each document, the tax amounts and the
 period totals.
+
+### Imported services — ภ.พ.36 (reverse charge, ม.83/6)
+
+When you pay a **foreign / non-VAT-registered supplier for a service** (e.g. an
+overseas SaaS subscription, a foreign consultant), the supplier's invoice has **no
+Thai VAT** — but the law requires **you** to self-assess 7% VAT and remit it to the
+Revenue Department on form **ภ.พ.36** by the **7th of the following month**. You may
+then claim that amount as input VAT.
+
+1. When you record the bill (**Finance → AP → New bill**), tick **"บริการนำเข้า / reverse charge (ภ.พ.36)"**.
+   The bill is booked at its net value (no VAT is added to what you owe the supplier),
+   and the system accrues the 7% you owe the RD to a dedicated account (2120).
+2. At month-end, open the **PP36** tab, choose the period, and review the list of
+   imported-service bills and the VAT to remit. The report shows a **reconciliation tie**
+   to the GL so you can confirm the figure before filing.
+3. **File it** from the Filing register (like ภ.พ.30) — it appears on the **remittance
+   calendar** with its 7th-of-next-month deadline.
+
+> **Control (TAX-08):** a reverse-charge bill claims **no** vendor VAT on ภ.พ.30 (there
+> is none); the self-assessed 7% is what you report on ภ.พ.36. If you do **not** tick the
+> box, the bill is treated as an ordinary domestic purchase.
 
 [screenshot: PP30 VAT return summary]
 

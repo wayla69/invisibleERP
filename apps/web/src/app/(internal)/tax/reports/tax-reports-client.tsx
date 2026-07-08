@@ -34,7 +34,7 @@ function PeriodPicker({
 }: {
   month: number; year: number;
   setMonth: (m: number) => void; setYear: (y: number) => void;
-  exportHref: string;
+  exportHref?: string;
 }) {
   const { t } = useLang();
   return (
@@ -61,11 +61,13 @@ function PeriodPicker({
           </SelectContent>
         </Select>
       </div>
-      <Button variant="outline" asChild>
-        <a href={`${BASE}${exportHref}`} target="_blank" rel="noopener noreferrer">
-          <Download className="size-4" /> {t('tax.download_pdf')}
-        </a>
-      </Button>
+      {exportHref && (
+        <Button variant="outline" asChild>
+          <a href={`${BASE}${exportHref}`} target="_blank" rel="noopener noreferrer">
+            <Download className="size-4" /> {t('tax.download_pdf')}
+          </a>
+        </Button>
+      )}
     </div>
   );
 }
@@ -112,6 +114,54 @@ function OutputVat({ initialData }: { initialData?: unknown }) {
                 description: t('tax.output_empty_desc'),
               }}
             />
+          </div>
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// ── ภ.พ.36 — reverse-charge / self-assessed VAT on imported services (ม.83/6) ──
+function Pp36() {
+  const { t } = useLang();
+  const [month, setMonth] = useState(6);
+  const [year, setYear] = useState(2026);
+  const q = useQuery<any>({
+    queryKey: ['pp36', month, year],
+    queryFn: () => api(`/api/tax-reports/pp36?month=${month}&year=${year}`),
+  });
+  return (
+    <div>
+      <PeriodPicker month={month} year={year} setMonth={setMonth} setYear={setYear} />
+      <StateView q={q}>
+        {q.data && (
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StatCard label={t('tax.count_items')} value={num(q.data.totals.count)} icon={Calendar} tone="primary" />
+              <StatCard label={t('tax.input_base')} value={baht(q.data.totals.base)} icon={TrendingDown} tone="info" />
+              <StatCard label={t('tax.pp36_vat')} value={baht(q.data.totals.vat)} icon={TrendingDown} tone="warning" />
+            </div>
+            <DataTable
+              rows={q.data.rows}
+              columns={[
+                { key: 'date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.date) },
+                { key: 'doc_no', label: t('dash.col_no') },
+                { key: 'invoice_no', label: t('tax.col_inv_no') },
+                { key: 'vendor_name', label: t('inv.col_supplier') },
+                { key: 'base', label: t('tax.col_base'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.base)}</span> },
+                { key: 'vat', label: 'VAT', align: 'right', render: (r: any) => <span className="tabular">{baht(r.vat)}</span> },
+              ]}
+              emptyState={{ icon: FileText, title: t('tax.pp36_empty_title'), description: t('tax.pp36_empty_desc') }}
+            />
+            <Card className="flex-row flex-wrap items-center gap-2 p-5 text-sm">
+              <Scale className="size-4 text-muted-foreground" />
+              {t('tax.recon_gl', { account: q.data.reconciliation.gl_account })}
+              <span className="tabular">{baht(q.data.reconciliation.gl_net_movement)}</span>{' '}
+              <Badge variant={q.data.reconciliation.tied ? 'success' : 'destructive'}>
+                {q.data.reconciliation.tied ? t('tax.tied') : t('tax.untied')}
+              </Badge>
+              <span className="ml-auto text-muted-foreground">{t('tax.deadline_label')} {q.data.deadline}</span>
+            </Card>
           </div>
         )}
       </StateView>
@@ -299,6 +349,7 @@ export default function TaxReportsWorkspace({ initialOutputVat }: { initialOutpu
           { key: 'output', label: t('tax.output_vat'), content: <OutputVat initialData={initialOutputVat} /> },
           { key: 'input', label: t('tax.input_vat'), content: <InputVat /> },
           { key: 'pp30', label: t('tax.pp30'), content: <Pp30 /> },
+          { key: 'pp36', label: t('tax.pp36'), content: <Pp36 /> },
           { key: 'filings', label: t('tax.tab_filings'), content: <Filings /> },
         ]}
       />

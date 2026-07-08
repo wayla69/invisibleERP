@@ -402,6 +402,7 @@ function PayablesTab() {
                   <option value="standard">{t('fin.vat_standard')}</option>
                   <option value="exempt">{t('fin.vat_exempt')}</option>
                   <option value="zero">{t('fin.vat_zero')}</option>
+                  <option value="reverse_charge">{t('fin.vat_reverse_charge')}</option>
                 </select>
               </div>
             </div>

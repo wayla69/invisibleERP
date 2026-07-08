@@ -143,6 +143,24 @@ async function main() {
   const rej = await inj('POST', `/api/pdpa/dsar/${rej0.json.id}/reject`, dpo1, { reason: 'not a data subject of this controller' });
   ok('reject DSAR → status rejected', rej.json.status === 'rejected', JSON.stringify(rej.json));
 
+  // ── PDPA-03: RoPA — Records of Processing Activities (มาตรา 39 / GDPR Art.30) ──
+  const ropaCreate = await inj('POST', '/api/pdpa/ropa', dpo1, {
+    name: 'Loyalty membership', purpose: 'Operate the loyalty programme + marketing', legal_basis: 'consent',
+    data_categories: ['name', 'phone', 'email'], data_subjects: ['members'], recipients: ['Marketing team'],
+    sub_processors: ['Anthropic', 'Stripe'], retention_period: '3 years after last activity', cross_border: 'SCCs — Anthropic (US)', security_measures: 'field encryption + RBAC',
+  });
+  ok('PDPA-03: create RoPA activity → id + legal basis captured', ropaCreate.status === 201 && ropaCreate.json.id > 0 && ropaCreate.json.legal_basis === 'consent' && (ropaCreate.json.sub_processors ?? []).includes('Anthropic'), JSON.stringify(ropaCreate.json).slice(0, 150));
+  const ropaBad = await inj('POST', '/api/pdpa/ropa', dpo1, { name: 'x', purpose: 'y', legal_basis: 'vibes' });
+  ok('PDPA-03: an invalid legal basis is rejected (400)', ropaBad.status === 400, `${ropaBad.status} ${ropaBad.json.error?.code}`);
+  const ropaList = await inj('GET', '/api/pdpa/ropa', dpo1);
+  ok('PDPA-03: RoPA register lists the activity', (ropaList.json.activities ?? []).some((a: any) => a.id === ropaCreate.json.id && a.name === 'Loyalty membership'), `n=${ropaList.json.count}`);
+  const ropaUpd = await inj('POST', `/api/pdpa/ropa/${ropaCreate.json.id}`, dpo1, { retention_period: '5 years', active: false });
+  ok('PDPA-03: update RoPA (retention + deactivate) persists', ropaUpd.status === 201 && ropaUpd.json.retention_period === '5 years' && ropaUpd.json.active === false, JSON.stringify(ropaUpd.json).slice(0, 120));
+  const ropaActive = await inj('GET', '/api/pdpa/ropa?active=1', dpo1);
+  ok('PDPA-03: active-only filter excludes the deactivated activity', !(ropaActive.json.activities ?? []).some((a: any) => a.id === ropaCreate.json.id), `n=${ropaActive.json.count}`);
+  const ropaCross = await inj('GET', `/api/pdpa/ropa/${ropaCreate.json.id}`, dpo2);
+  ok('PDPA-03: RLS — other-tenant DPO cannot read the RoPA activity (404)', ropaCross.status === 404 || ropaCross.json?.error?.code === 'NOT_FOUND', `status=${ropaCross.status}`);
+
   await app.close();
   console.log('\n── Step 8 — PDPA (DSAR + erasure + audit pseudonymisation) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

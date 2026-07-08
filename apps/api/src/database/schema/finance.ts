@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, timestamp, index, uniqueIndex, boolean } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 import { vendors } from './procurement';
@@ -110,6 +110,7 @@ export const apTransactions = pgTable('ap_transactions', {
   dueDate: date('due_date'),
   amount: numeric('amount', { precision: 14, scale: 2 }),
   vatAmount: numeric('vat_amount', { precision: 14, scale: 2 }), // input VAT (for รายงานภาษีซื้อ / ภ.พ.30)
+  reverseCharge: boolean('reverse_charge').default(false), // ม.83/6 — imported-service bill self-assessed via ภ.พ.36 (VAT not on the vendor bill; payer remits + credits it)
   fxRate: numeric('fx_rate', { precision: 18, scale: 8 }).default('1'), // booked rate for FX revaluation
   paidAmount: numeric('paid_amount', { precision: 14, scale: 2 }).default('0'),
   currency: text('currency').default('THB'),

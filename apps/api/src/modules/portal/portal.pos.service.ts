@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/common';
 import { sql, eq, ne, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { UsageMeterService } from '../usage/usage-meter.service';
 import {
   custPosSales, custPosItems, customerInventory, custStockLog, branchStock,
   loyaltyConfig, loyaltyPoints, loyaltyTxn, branches,
@@ -47,6 +48,7 @@ export class PortalPosService {
     @Optional() private readonly pricing?: PricingService,  // wiring: rule discounts at checkout (opt-in)
     @Optional() private readonly journal?: JournalService,  // wiring: append electronic journal per sale
     @Optional() private readonly locking?: LockingService,  // wiring: auto-86 recompute after stock decrement
+    @Optional() private readonly usage?: UsageMeterService,  // 1.5 — meter one billable POS transaction per sale
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
@@ -206,6 +208,8 @@ export class PortalPosService {
     const ju = { ...user, tenantId: t.id };
     if (this.journal) { try { await this.journal.append({ doc_type: 'SALE', doc_no: saleNo, payload: { subtotal, discount, vat, total, lines: lines.length, payment_method: dto.payment_method ?? 'Cash' } }, ju); } catch { /* journal best-effort */ } }
     if (this.locking) { try { await this.locking.recomputeAvailability(); } catch { /* auto-86 best-effort */ } }
+    // 1.5 — meter one billable POS transaction per completed sale (idempotent per sale_no; best-effort).
+    await this.usage?.record(t.id, 'pos_txns', saleNo);
 
     return { sale_no: saleNo, branch_id: branchId, subtotal, discount, pricing_discount: pricingDiscount, service_charge: serviceCharge, rounding_adjustment: roundingAdj, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
   }

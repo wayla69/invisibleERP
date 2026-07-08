@@ -151,6 +151,36 @@ export class TaxReportsService {
     };
   }
 
+  // ภ.พ.36 (TAX-08) — reverse-charge / self-assessed VAT on imported services (ประมวลรัษฎากร ม.83/6).
+  // A bill from an offshore/non-VAT-registered supplier carries no input VAT; the payer self-assesses 7%
+  // output VAT and remits it via ภ.พ.36 by the 7th of the following month. Sourced from AP bills flagged
+  // reverse_charge (createApTxn posts the self-assessment Dr 1300 / Cr 2120); tie the report to the GL 2120
+  // net credit movement so a manual JE touching 2120 outside the AP process is caught.
+  async pp36(month: number, year: number) {
+    const db = this.db; const { start, end, period } = this.win(month, year);
+    const rows = await db.select({
+      date: apTransactions.invoiceDate, doc_no: apTransactions.txnNo, invoice_no: apTransactions.invoiceNo,
+      vendor_name: apTransactions.vendorName, base: apTransactions.amount,
+    }).from(apTransactions)
+      .where(and(eq(apTransactions.reverseCharge, true), isNotNull(apTransactions.invoiceDate), gte(apTransactions.invoiceDate, start), lt(apTransactions.invoiceDate, end)))
+      .orderBy(asc(apTransactions.invoiceDate), asc(apTransactions.txnNo));
+    // The reverse-charge bill is booked at net (gross = net, no vendor VAT), so the self-assessed VAT is 7% of amount.
+    const out = rows.map((r: any) => ({ date: r.date, doc_no: r.doc_no, invoice_no: r.invoice_no, vendor_name: r.vendor_name, base: round2(n(r.base)), vat: round2(n(r.base) * 0.07) }));
+    const vatRemit = round2(out.reduce((a: number, r: any) => a + r.vat, 0));
+    // GL 2120 net credit movement (Posted) in the period — the self-assessed VAT payable accrued.
+    const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalLines.accountCode, '2120'), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
+    const gl2120 = round2(n(g?.v));
+    return {
+      report: 'pp36', month, year, period, rows: out,
+      totals: { base: round2(out.reduce((a: number, r: any) => a + r.base, 0)), vat: vatRemit, count: out.length },
+      reconciliation: { gl_account: '2120', gl_net_movement: gl2120, report_vat: vatRemit, tied: Math.abs(gl2120 - vatRemit) < 0.01 },
+      deadline: nextMonthDay(month, year, 7),
+      deadline_note: 'ยื่นแบบ ภ.พ.36 และนำส่งภาษีภายในวันที่ 7 ของเดือนถัดไป (ม.83/6)',
+    };
+  }
+
   // ───────────────────── Filing register (TAX-05) ─────────────────────
   private tenantId(): number | null { return currentTenantStore()?.tenantId ?? null; }
 
@@ -161,11 +191,14 @@ export class TaxReportsService {
     const db = this.db;
     const tenantId = this.tenantId();
     const ft = type.toUpperCase();
-    if (!['PP30', 'PND3', 'PND53'].includes(ft)) throw new BadRequestException({ code: 'BAD_FILING_TYPE', message: 'filing_type must be PP30/PND3/PND53', messageTh: 'ประเภทแบบต้องเป็น PP30/PND3/PND53' });
+    if (!['PP30', 'PND3', 'PND53', 'PP36'].includes(ft)) throw new BadRequestException({ code: 'BAD_FILING_TYPE', message: 'filing_type must be PP30/PND3/PND53/PP36', messageTh: 'ประเภทแบบต้องเป็น PP30/PND3/PND53/PP36' });
     let outputVat = 0, inputVat = 0, netVat = 0, taxWithheld = 0, deadline: string, snapshot: any;
     if (ft === 'PP30') {
       const r = await this.pp30(month, year);
       outputVat = r.form.output_vat; inputVat = r.form.input_vat; netVat = round2(r.form.vat_payable - r.form.vat_credit_carry_forward); deadline = r.deadline; snapshot = r;
+    } else if (ft === 'PP36') {
+      // ภ.พ.36 remits the self-assessed VAT — carry it as both output_vat and net_vat payable.
+      const r = await this.pp36(month, year); outputVat = r.totals.vat; netVat = r.totals.vat; deadline = r.deadline; snapshot = r;
     } else {
       const r = await this.pnd(ft, month, year); taxWithheld = r.totals.tax_withheld; deadline = r.deadline; snapshot = r;
     }
@@ -220,7 +253,7 @@ export class TaxReportsService {
     const byKey = new Map<string, any>(rows.map((r: any) => [`${r.filingType}|${r.periodMonth}`, r]));
     const out: any[] = [];
     for (let m = 1; m <= 12; m++) {
-      for (const [type, day] of [['PP30', 15], ['PND53', 7], ['PND3', 7]] as [string, number][]) {
+      for (const [type, day] of [['PP30', 15], ['PP36', 7], ['PND53', 7], ['PND3', 7]] as [string, number][]) {
         const f = byKey.get(`${type}|${m}`);
         out.push({
           filing_type: type, period_month: m, period_year: year, deadline: nextMonthDay(m, year, day),

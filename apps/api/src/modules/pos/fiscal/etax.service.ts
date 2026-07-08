@@ -1,7 +1,8 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { eq, and, ne, desc } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { DRIZZLE, PG_CLIENT, type DrizzleDb, type PgClient } from '../../../database/database.module';
+import { UsageMeterService } from '../../usage/usage-meter.service';
 import { etaxSubmissions, taxInvoices, taxInvoiceLines } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import type { JwtUser } from '../../../common/decorators';
@@ -27,6 +28,7 @@ export class EtaxService {
     // this is meant to fix. Write the failure row on the AUTOCOMMIT raw client instead (same pattern as
     // login_attempts / ai_token_usage) so it survives the enclosing rollback.
     @Inject(PG_CLIENT) private readonly rawSql: PgClient,
+    @Optional() private readonly usage?: UsageMeterService,
   ) {}
 
   // Build the e-Tax UBL DTO straight from the stored tax invoice (no cross-module DI → no cycle).
@@ -96,6 +98,8 @@ export class EtaxService {
       tenantId: user.tenantId ?? null, docNo, provider: prov, status: res.status, providerRef: res.providerRef,
       rdResponse: { ...res.rd, signed: doc.signed, xml_sha256: xmlDigest }, submittedBy: user.username, submittedAt: new Date(),
     });
+    // 1.5 — meter one billable e-Tax document per ACCEPTED submission (idempotent per doc_no; best-effort).
+    if (res.status === 'Accepted') await this.usage?.record(user.tenantId ?? null, 'etax_docs', docNo);
     return { doc_no: docNo, status: res.status, provider_ref: res.providerRef, provider: prov, signed: doc.signed };
   }
 

@@ -122,6 +122,7 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   // Action job (monthly): each run bills every tenant's metered AI overage for the just-closed month as a
   // Stripe invoice item (idempotent per tenant+month). Connects the AI-COGS meter to actual collection.
   ai_overage_billing: { label: 'เรียกเก็บค่า AI ส่วนเกิน (รายเดือน)', labelEn: 'Bill AI usage overage (monthly)' },
+  usage_overage_billing: { label: 'เรียกเก็บค่าใช้งานส่วนเกิน (e-Tax/POS รายเดือน)', labelEn: 'Bill usage overage (e-Tax/POS, monthly)' },
   // Action job (daily/weekly): each run pushes the tenant's member snapshot (identity + RFM + consent) to an
   // external CDP webhook in batches — idempotent (a full snapshot keyed by member_code) and consent-aware.
   cdp_export_sync: { label: 'ซิงก์ข้อมูลลูกค้าไป CDP', labelEn: 'Sync customer data to CDP' },
@@ -889,6 +890,11 @@ export class BiService implements OnModuleInit {
       if (!this.billing) throw new BadRequestException({ code: 'BILLING_UNAVAILABLE', message: 'Billing service not available', messageTh: 'ระบบเรียกเก็บเงินไม่พร้อมใช้งาน' });
       const r = await this.billing.runAiOverageBilling(user, filters?.month); // idempotent per (tenant, month)
       return { data: r, summary: `AI overage billing ${r.month}: charged ${r.processed_count} tenant(s), total ${r.total_amount} THB`, summaryTh: `เรียกเก็บค่า AI ส่วนเกิน ${r.month}: ${r.processed_count} ร้าน รวม ${r.total_amount} บาท` };
+    }
+    if (reportType === 'usage_overage_billing') {
+      if (!this.billing) throw new BadRequestException({ code: 'BILLING_UNAVAILABLE', message: 'Billing service not available', messageTh: 'ระบบเรียกเก็บเงินไม่พร้อมใช้งาน' });
+      const r = await this.billing.runUsageOverageBilling(user, filters?.month); // idempotent per (tenant, meter, month)
+      return { data: r, summary: `Usage overage billing ${r.month}: charged ${r.processed_count} meter-tenant(s), total ${r.total_amount} THB`, summaryTh: `เรียกเก็บค่าใช้งานส่วนเกิน ${r.month}: ${r.processed_count} รายการ รวม ${r.total_amount} บาท` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }

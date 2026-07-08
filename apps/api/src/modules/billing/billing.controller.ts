@@ -188,6 +188,28 @@ export class BillingController {
     return this.svc.runAiOverageBilling(u, month);
   }
 
+  // 1.5 — usage-metering (e-Tax docs + POS transactions): the tenant's live usage snapshot per meter
+  // (used / included quota / overage) for a month (default current Bangkok month).
+  @Get('billing/usage') @Permissions('users', 'exec')
+  async usage(@CurrentUser() u: JwtUser, @Query('month') month?: string) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    return this.svc.usageSummary(tenantId, month);
+  }
+
+  // Usage-overage charge history for the tenant (read view of usage_overage_billing_runs).
+  @Get('billing/usage-overage/runs') @Permissions('users', 'exec')
+  async usageOverageRuns(@CurrentUser() u: JwtUser, @Query('meter') meter?: string, @Query('month') month?: string) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    return this.svc.listUsageOverageRuns(tenantId, meter, month);
+  }
+
+  // Run the monthly usage-overage billing job (operator/HQ) across all meters, idempotent per
+  // (tenant, meter, month). Also runs unattended via the BI scheduler (report type 'usage_overage_billing').
+  @Post('billing/usage-overage/run') @Permissions('exec') @HttpCode(200)
+  async runUsageOverage(@CurrentUser() u: JwtUser, @Query('month') month?: string) {
+    return this.svc.runUsageOverageBilling(u, month);
+  }
+
   @Post('billing/checkout') @Permissions('users')
   async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string }, @CurrentUser() u: JwtUser) {
     const tenantId = await this.svc.resolveTenantId(u);

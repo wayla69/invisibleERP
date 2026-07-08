@@ -126,6 +126,37 @@ async function main() {
   delete process.env.AI_OVERAGE_RATE_THB_PER_1K;
   ok('Env rate override: AI_OVERAGE_RATE_THB_PER_1K=20 → 10,000 tokens = 200 THB', near(invEnv.amount, 200) && near(invEnv.overage_rate_thb_per_1k, 20), JSON.stringify(invEnv));
 
+  // ── USAGE METERING → overage billing (1.5): generic meters (e-Tax docs, POS txns) mirror AI tokens —
+  //    per-event rows in usage_events, monthly included quota + per-unit rate on the plan, idempotent
+  //    monthly Stripe charge per (tenant, meter, month). t1 = Active Pro (etax 1000/mo @2 THB, pos 30000/mo @0.3). ──
+  const uMonth = '2026-05';
+  // e-Tax: 1005 documents in May → 5 over the Pro 1000 quota → 5 × 2 = 10 THB.
+  await pg.query(`INSERT INTO usage_events (tenant_id, meter, event_key, period) SELECT ${t1}, 'etax_docs', 'TIV-'||g, '${uMonth}' FROM generate_series(1,1005) g`);
+  // POS: only 5 transactions → well within the 30000 quota → 0 overage.
+  await pg.query(`INSERT INTO usage_events (tenant_id, meter, event_key, period) SELECT ${t1}, 'pos_txns', 'SALE-'||g, '${uMonth}' FROM generate_series(1,5) g`);
+  const eInv = await billing.usageOverageInvoice(t1, 'etax_docs', uMonth);
+  ok('Usage/e-Tax invoice: used 1005, included 1000, overage 5 × 2 THB = 10 THB',
+    eInv.used === 1005 && eInv.included === 1000 && eInv.overage_units === 5 && near(eInv.amount, 10), JSON.stringify(eInv));
+  const pInv = await billing.usageOverageInvoice(t1, 'pos_txns', uMonth);
+  ok('Usage/POS invoice: used 5 within the 30000 quota → overage 0, amount 0', pInv.used === 5 && pInv.overage_units === 0 && near(pInv.amount, 0), JSON.stringify(pInv));
+  // Dedup: re-inserting an existing (tenant, meter, event_key) is a no-op (ON CONFLICT DO NOTHING) → count unchanged.
+  await pg.query(`INSERT INTO usage_events (tenant_id, meter, event_key, period) VALUES (${t1}, 'etax_docs', 'TIV-1', '${uMonth}') ON CONFLICT (tenant_id, meter, event_key) DO NOTHING`);
+  const eInv2 = await billing.usageOverageInvoice(t1, 'etax_docs', uMonth);
+  ok('Usage meter dedup: re-recording the same doc_no does not double-count (still 1005)', eInv2.used === 1005, JSON.stringify(eInv2));
+  const uSum = await billing.usageSummary(t1, uMonth);
+  ok('Usage summary: both meters present for t1 (etax overage 5, pos 0)', (uSum.meters ?? []).length === 2 && uSum.meters.some((m: any) => m.meter === 'etax_docs' && m.overage_units === 5) && uSum.meters.some((m: any) => m.meter === 'pos_txns' && m.overage_units === 0), JSON.stringify(uSum).slice(0, 200));
+  // Overage billing run: charges t1's e-Tax overage (10 THB) once; POS (0) is skipped. Mock path (no Stripe key).
+  const uRun1 = await inj('POST', `/api/billing/usage-overage/run?month=${uMonth}`, token);
+  const t1Etax = (uRun1.json.processed ?? []).find((p: any) => p.tenant_id === t1 && p.meter === 'etax_docs');
+  ok('Usage overage run: t1 e-Tax charged 10 THB (recorded), POS not charged (within quota)',
+    uRun1.status === 200 && !!t1Etax && near(t1Etax.amount, 10) && t1Etax.status === 'recorded' && !(uRun1.json.processed ?? []).some((p: any) => p.meter === 'pos_txns'), JSON.stringify(uRun1.json).slice(0, 240));
+  // Idempotency: re-run the same month bills nothing (UNIQUE(tenant, meter, month) guard).
+  const uRun2 = await inj('POST', `/api/billing/usage-overage/run?month=${uMonth}`, token);
+  ok('Usage overage idempotent: re-run same month charges 0', uRun2.status === 200 && uRun2.json.processed_count === 0, JSON.stringify(uRun2.json));
+  const uRows = (await pg.query(`SELECT meter, amount, status FROM usage_overage_billing_runs WHERE tenant_id=${t1} AND billing_month='${uMonth}'`)).rows as any[];
+  ok('Usage overage ledger: exactly one e-Tax row for (t1, 2026-05), amount 10, recorded',
+    uRows.length === 1 && uRows[0].meter === 'etax_docs' && near(uRows[0].amount, 10) && uRows[0].status === 'recorded', JSON.stringify(uRows));
+
   await app.close();
   console.log('\n── Step 9 — SaaS metrics (MRR / churn / DAU-MAU) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

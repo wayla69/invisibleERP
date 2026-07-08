@@ -2,7 +2,7 @@ import { Inject, Injectable, ConflictException, NotFoundException, BadRequestExc
 import { eq, sql, and, desc, gt, isNull } from 'drizzle-orm';
 import { randomBytes, createHash } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { plans, subscriptions, tenants, users, branches, auditLog, aiTokenUsage, aiOverageBillingRuns, signupInvites, signupRequests } from '../../database/schema';
+import { plans, subscriptions, tenants, users, branches, auditLog, aiTokenUsage, aiOverageBillingRuns, usageEvents, usageOverageBillingRuns, signupInvites, signupRequests } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
@@ -71,10 +71,10 @@ interface PlanSeed {
 // runs at startup) BACKFILLS every existing plan row — the grandfather step that must precede enabling
 // ENTITLEMENTS_ENFORCE. resolveEntitledSuites() still falls back to the code default if it is ever absent.
 const PLAN_SEED: PlanSeed[] = [
-  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.free, users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0 } },
-  { code: 'starter', name: 'Standard', priceMonthly: '1900', currency: 'THB', features: { suites: PLAN_SUITES.starter, users: 10, locations: 2, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0 } },
-  { code: 'pro', name: 'Professional', priceMonthly: '9900', currency: 'THB', features: { suites: PLAN_SUITES.pro, users: 50, locations: 10, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000, ai_tokens_daily_max: 500_000, ai_overage_rate_thb_per_1k: 12 } },
-  { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.enterprise, users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000, ai_tokens_daily_max: 5_000_000, ai_overage_rate_thb_per_1k: 8 } },
+  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.free, users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 0, pos_txns_monthly: 0, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
+  { code: 'starter', name: 'Standard', priceMonthly: '1900', currency: 'THB', features: { suites: PLAN_SUITES.starter, users: 10, locations: 2, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 100, pos_txns_monthly: 3000, etax_overage_rate_thb_per_doc: 3, pos_overage_rate_thb_per_txn: 0.5 } },
+  { code: 'pro', name: 'Professional', priceMonthly: '9900', currency: 'THB', features: { suites: PLAN_SUITES.pro, users: 50, locations: 10, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000, ai_tokens_daily_max: 500_000, ai_overage_rate_thb_per_1k: 12, etax_docs_monthly: 1000, pos_txns_monthly: 30_000, etax_overage_rate_thb_per_doc: 2, pos_overage_rate_thb_per_txn: 0.3 } },
+  { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.enterprise, users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000, ai_tokens_daily_max: 5_000_000, ai_overage_rate_thb_per_1k: 8, etax_docs_monthly: -1, pos_txns_monthly: -1, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
 ];
 
 const TRIAL_DAYS = 14;
@@ -652,6 +652,102 @@ export class BillingService {
         amount: Number(r.amount), currency: r.currency, status: r.status, stripe_invoice_item_id: r.stripeInvoiceItemId, processed_at: r.processedAt,
       })),
     };
+  }
+
+  // ───────────────────── Generic usage metering → overage billing (1.5) ─────────────────────
+  // The e-Tax-document and POS-transaction meters mirror AI tokens: per-event rows in usage_events, a monthly
+  // included quota + per-unit overage price on the plan, and an idempotent monthly Stripe charge.
+  static readonly USAGE_METERS: Record<string, { includedKey: string; rateKey: string; unit: string; label: string }> = {
+    etax_docs: { includedKey: 'etax_docs_monthly', rateKey: 'etax_overage_rate_thb_per_doc', unit: 'doc', label: 'e-Tax documents' },
+    pos_txns: { includedKey: 'pos_txns_monthly', rateKey: 'pos_overage_rate_thb_per_txn', unit: 'txn', label: 'POS transactions' },
+  };
+
+  // Overage invoice line for one meter for a billing month: count the tenant's metered events in the period,
+  // subtract the plan's included monthly quota (−1 = unlimited ⇒ no overage), price the excess at the per-unit
+  // rate. Returns a zero line when within quota, unlimited, or the plan has no rate.
+  async usageOverageInvoice(tenantId: number, meter: string, month?: string) {
+    const cfg = BillingService.USAGE_METERS[meter];
+    if (!cfg) throw new BadRequestException({ code: 'UNKNOWN_METER', message: `Unknown meter ${meter}`, messageTh: `ไม่รู้จักมิเตอร์ ${meter}` });
+    const db = this.db;
+    const ym = (month && /^\d{4}-\d{2}$/.test(month)) ? month : new Date().toISOString().slice(0, 7);
+    const [planRow] = await db.select({ features: plans.features, plan_code: subscriptions.planCode })
+      .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
+      .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
+      .orderBy(desc(subscriptions.createdAt)).limit(1);
+    const features: any = planRow?.features ?? {};
+    const included = Number(features[cfg.includedKey] ?? 0); // −1 = unlimited
+    const rate = Number(features[cfg.rateKey] ?? 0); // THB per unit
+    const [agg] = await db.select({ n: sql<number>`count(*)` }).from(usageEvents)
+      .where(and(eq(usageEvents.tenantId, tenantId), eq(usageEvents.meter, meter), eq(usageEvents.period, ym)));
+    const used = Number(agg?.n ?? 0);
+    const overageUnits = included < 0 ? 0 : Math.max(0, used - included);
+    const amount = Math.round(overageUnits * rate * 100) / 100;
+    return {
+      tenant_id: tenantId, meter, month: ym, plan_code: planRow?.plan_code ?? null,
+      used, included, overage_units: overageUnits, rate_thb_per_unit: rate, currency: 'THB', amount,
+      line_description: `${cfg.label} overage — ${overageUnits.toLocaleString()} ${cfg.unit} @ ${rate} THB/${cfg.unit} (${ym})`,
+    };
+  }
+
+  // Monthly usage-overage billing across every configured meter (scheduled action job). IDEMPOTENT per
+  // (tenant, meter, month) via the usage_overage_billing_runs UNIQUE — the run row is INSERTed first
+  // (ON CONFLICT DO NOTHING); only the winner calls Stripe. Mirrors runAiOverageBilling.
+  async runUsageOverageBilling(user: JwtUser, month?: string): Promise<{ month: string; processed_count: number; total_amount: number; processed: any[] }> {
+    const db = this.db;
+    const round2 = (x: number) => Math.round(x * 100) / 100;
+    let billingMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : '';
+    if (!billingMonth) {
+      const res = await db.execute(sql`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok')::date - INTERVAL '1 month', 'YYYY-MM') AS m`);
+      const rows = ((res as { rows?: { m?: string }[] }).rows ?? (res as { m?: string }[]));
+      billingMonth = String(rows[0]?.m ?? new Date().toISOString().slice(0, 7));
+    }
+    const subs = await db.select({ tenantId: subscriptions.tenantId, cust: subscriptions.stripeCustomerId, createdAt: subscriptions.createdAt })
+      .from(subscriptions).where(sql`${subscriptions.status} in ('Active','Trialing')`).orderBy(desc(subscriptions.createdAt));
+    const seen = new Set<number>();
+    const processed: Array<Record<string, unknown>> = [];
+    let total = 0;
+    for (const s of subs) {
+      const tenantId = Number(s.tenantId);
+      if (seen.has(tenantId)) continue;
+      seen.add(tenantId);
+      for (const meter of Object.keys(BillingService.USAGE_METERS)) {
+        const inv = await this.usageOverageInvoice(tenantId, meter, billingMonth);
+        if (inv.amount <= 0) continue;
+        const ins = await db.insert(usageOverageBillingRuns).values({
+          tenantId, meter, billingMonth, overageUnits: inv.overage_units, rateThbPerUnit: String(inv.rate_thb_per_unit),
+          amount: String(inv.amount), currency: inv.currency, status: 'pending', processedBy: user?.username ?? 'system:scheduler',
+        }).onConflictDoNothing({ target: [usageOverageBillingRuns.tenantId, usageOverageBillingRuns.meter, usageOverageBillingRuns.billingMonth] }).returning({ id: usageOverageBillingRuns.id });
+        if (!ins.length) continue; // already billed this (tenant, meter, month)
+        const runId = Number(ins[0]!.id);
+        const charge = await new StripeBilling().createOverageInvoiceItem(s.cust ?? null, inv.amount, inv.line_description, `usage-overage:${meter}:${tenantId}:${billingMonth}`);
+        const status = charge.mock ? 'recorded' : 'invoiced';
+        await db.update(usageOverageBillingRuns).set({ stripeInvoiceItemId: charge.id, status }).where(eq(usageOverageBillingRuns.id, runId));
+        total += inv.amount;
+        processed.push({ tenant_id: tenantId, meter, month: billingMonth, overage_units: inv.overage_units, amount: inv.amount, currency: inv.currency, stripe_invoice_item_id: charge.id, status });
+      }
+    }
+    return { month: billingMonth, processed_count: processed.length, total_amount: round2(total), processed };
+  }
+
+  // Read view of usage_overage_billing_runs for a tenant (most recent first).
+  async listUsageOverageRuns(tenantId: number, meter?: string, month?: string) {
+    const db = this.db;
+    const conds: any[] = [eq(usageOverageBillingRuns.tenantId, tenantId)];
+    if (meter && BillingService.USAGE_METERS[meter]) conds.push(eq(usageOverageBillingRuns.meter, meter));
+    if (month && /^\d{4}-\d{2}$/.test(month)) conds.push(eq(usageOverageBillingRuns.billingMonth, month));
+    const rows = await db.select().from(usageOverageBillingRuns).where(and(...conds)).orderBy(desc(usageOverageBillingRuns.billingMonth)).limit(72);
+    return {
+      runs: rows.map((r: any) => ({
+        meter: r.meter, month: r.billingMonth, overage_units: Number(r.overageUnits), rate_thb_per_unit: Number(r.rateThbPerUnit),
+        amount: Number(r.amount), currency: r.currency, status: r.status, stripe_invoice_item_id: r.stripeInvoiceItemId, processed_at: r.processedAt,
+      })),
+    };
+  }
+
+  // Current-month usage snapshot per meter (used/included/overage) — the tenant's live usage view.
+  async usageSummary(tenantId: number, month?: string) {
+    const meters = await Promise.all(Object.keys(BillingService.USAGE_METERS).map((m) => this.usageOverageInvoice(tenantId, m, month)));
+    return { tenant_id: tenantId, month: meters[0]?.month ?? new Date().toISOString().slice(0, 7), meters };
   }
 
   async changePlan(tenantId: number, planCode: string) {
