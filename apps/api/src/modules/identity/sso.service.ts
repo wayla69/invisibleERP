@@ -97,7 +97,7 @@ export class SsoService {
       throw new UnauthorizedException({ code: 'BAD_ID_TOKEN', message: `id_token verification failed: ${e?.message ?? 'invalid'}`, messageTh: 'ตรวจสอบ id_token ไม่ผ่าน' });
     }
     // Bind the id_token to THIS login: its nonce must equal the one we issued at authorize() (replay defence).
-    if ((claims as any).nonce !== undefined && (claims as any).nonce !== st.nonce)
+    if (claims.nonce !== undefined && claims.nonce !== st.nonce)
       throw new UnauthorizedException({ code: 'BAD_NONCE', message: 'id_token nonce mismatch', messageTh: 'nonce ของ id_token ไม่ตรง' });
     // Claim checks: issuer, audience, expiry.
     if (found.cfg.oidcIssuer && claims.iss && String(claims.iss).replace(/\/$/, '') !== String(found.cfg.oidcIssuer).replace(/\/$/, ''))
@@ -135,7 +135,7 @@ export class SsoService {
         uname = `${base}${i}`;
       }
       const hash = await this.passwords.hash('sso_' + randomBytes(16).toString('hex'));
-      await tx.insert(users).values({ username: uname, passwordHash: hash, role: defaultRole as any, tenantId, ssoSubject: subject, isActive: true, mustChangePassword: false });
+      await tx.insert(users).values({ username: uname, passwordHash: hash, role: defaultRole as (typeof users.$inferInsert)['role'], tenantId, ssoSubject: subject, isActive: true, mustChangePassword: false });
       return { username: uname, role: defaultRole };
     });
 

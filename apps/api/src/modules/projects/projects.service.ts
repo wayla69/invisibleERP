@@ -695,7 +695,7 @@ export class ProjectsService {
 
   // EVM S-curve: the planned-cost baseline accumulated by month (each task's planned cost lands in its
   // planned_end month), with the current EV/AC/PV snapshot overlaid — the classic planned-vs-actual S-curve.
-  async evmSeries(code: string, dto?: { months?: number }) {
+  async evmSeries(code: string, dto?: { months?: number; as_of?: string }) {
     const db = this.db;
     const p = await this.row(code);
     const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
@@ -709,7 +709,7 @@ export class ProjectsService {
       cumulative = r2(cumulative + planned);
       return { month, planned_cost: planned, cumulative_planned: cumulative };
     });
-    const current = await this.evm(code, dto && (dto as any).as_of);
+    const current = await this.evm(code, dto?.as_of);
     return { project_code: code, series, current, bac: current.bac };
   }
 
@@ -1569,7 +1569,7 @@ export class ProjectsService {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
     const db = this.db;
     const snap = await this.closeSnapshot();
-    const [existing] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
+    const [existing] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
     if (existing?.status === 'Approved') throw new BadRequestException({ code: 'ALREADY_APPROVED', message: `Project close review for ${period} is already approved`, messageTh: 'งวดนี้อนุมัติแล้ว' });
     const values: any = {
       tenantId: user.tenantId ?? null, period, status: 'Prepared',
@@ -1585,7 +1585,7 @@ export class ProjectsService {
   // sign-off IS the control.
   async approveCloseReview(period: string, user: JwtUser) {
     const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
+    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `Project close review for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการสอบทาน' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
     if (rp.preparedBy && rp.preparedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
@@ -1595,7 +1595,7 @@ export class ProjectsService {
 
   async rejectCloseReview(period: string, reason: string, user: JwtUser) {
     const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
+    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: 'Project close review has not been prepared', messageTh: 'ยังไม่ได้จัดทำ' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
     await db.update(projectCloseReviews).set({ status: 'Rejected', rejectionReason: reason ?? null }).where(eq(projectCloseReviews.id, rp.id));
@@ -1604,7 +1604,7 @@ export class ProjectsService {
 
   async getCloseReview(period: string, user: JwtUser) {
     const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
+    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
     if (!rp) return { period, status: 'None' };
     return this.shapeCloseReview(rp);
   }

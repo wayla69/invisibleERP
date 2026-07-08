@@ -1,3 +1,4 @@
+import { rowsOf } from '../../common/db-rows';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -63,8 +64,7 @@ export class JobQueueService {
         ORDER BY id
         FOR UPDATE SKIP LOCKED
         LIMIT 1`);
-      const rows = (picked as any).rows ?? picked;
-      const first = Array.isArray(rows) ? rows[0] : undefined;
+      const first = rowsOf<{ id: number | string }>(picked)[0];
       if (!first) return null;
       const id = Number(first.id);
       const [job] = await tx.update(backgroundJobs)
@@ -145,7 +145,7 @@ export class JobQueueService {
         count(*) FILTER (WHERE status = 'failed')  AS failed,
         count(*) FILTER (WHERE status = 'running' AND locked_at < ${cutoffIso}) AS stuck
         FROM background_jobs`);
-      const r = ((res?.rows ?? res) as any[])[0] ?? {};
+      const r = rowsOf(res)[0] ?? {};
       return { queued: Number(r.queued ?? 0), running: Number(r.running ?? 0), failed: Number(r.failed ?? 0), stuck: Number(r.stuck ?? 0) };
     });
   }
