@@ -156,7 +156,10 @@ Tabs: **ข้อมูลของฉัน** (My info) · **ขอลางา
 
 > **Control:** You can only *submit* a leave/expense request. **Approval is a
 > separate manager action** (permission `approvals`) and a manager cannot approve
-> their own claim — segregation of duties (SoD R07) is preserved.
+> their own claim — segregation of duties (SoD R07) is preserved. The same
+> maker-checker rule applies to **leave**: the person who submits a leave request
+> cannot approve it — a *different* approver must, otherwise the approval is
+> refused (`SOD_SELF_APPROVAL`).
 
 ### 5.3 Claim an expense
 1. Go to the **เบิกค่าใช้จ่าย** tab, enter the date, category, amount and

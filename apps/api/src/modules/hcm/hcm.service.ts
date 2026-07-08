@@ -106,6 +106,11 @@ export class HcmService {
     const [lr] = await db.select().from(leaveRequests).where(eq(leaveRequests.id, id)).limit(1);
     if (!lr) throw new NotFoundException({ code: 'LEAVE_NOT_FOUND', message: 'Leave request not found', messageTh: 'ไม่พบใบลา' });
     if (lr.status !== 'Pending') return { id, status: lr.status, already: true };
+    // Maker-checker (security review M-3): the requester cannot approve their own paid leave (mirrors
+    // approveTimesheet's SOD_SELF_APPROVAL). Without this, one holder of the shared exec/users/creditors
+    // permission could request leave and self-approve, bumping their own paid-leave balance.
+    if (lr.createdBy && lr.createdBy === user.username)
+      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own leave request', messageTh: 'ผู้ยื่นใบลาอนุมัติใบลาของตนเองไม่ได้' });
     await db.update(leaveRequests).set({ status: 'Approved' }).where(eq(leaveRequests.id, id));
     // bump leave-balance "used" for paid leave types
     if (lr.paid !== false) {
