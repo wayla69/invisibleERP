@@ -32,9 +32,21 @@ function isPrivateV4(ip: string): boolean {
 
 function isPrivateV6(ip: string): boolean {
   if (ip === '::1' || ip === '::') return true;     // loopback / unspecified
-  // IPv4-mapped (::ffff:a.b.c.d) — re-check the embedded v4
-  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateV4(mapped[1]!);
+  // IPv4-mapped / IPv4-compatible — the embedded v4 must be re-checked. Critically, the WHATWG URL
+  // parser serialises a mapped-address LITERAL into HEX (`::ffff:a9fe:a9fe`), NOT the dotted form, so a
+  // dotted-only match let `[::ffff:169.254.169.254]` (cloud metadata), `[::ffff:127.0.0.1]` (loopback)
+  // and every `[::ffff:10.x]`/RFC1918 literal through as "public" (SSRF bypass). Handle BOTH forms.
+  const dotted = ip.match(/^::(?:ffff:)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/); // ::ffff:a.b.c.d or ::a.b.c.d
+  if (dotted) return isPrivateV4(dotted[1]!);
+  const hex = ip.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/); // ::ffff:HHHH:HHHH (hex-serialised v4)
+  if (hex) {
+    const hi = parseInt(hex[1]!, 16), lo = parseInt(hex[2]!, 16);
+    return isPrivateV4(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`);
+  }
+  // Any other v4-embedding form we did not structurally parse (uncompressed mapped, NAT64 64:ff9b::/96,
+  // IPv4-compatible ::x) must FAIL CLOSED rather than fall through to the head-group check below, which
+  // reads an empty leading group for `::`-prefixed addresses and wrongly returns "public".
+  if (/^::ffff:/i.test(ip) || /^64:ff9b:/i.test(ip) || /^::\d/.test(ip)) return true;
   const head = ip.split(':')[0];
   const h = parseInt(head || '0', 16);
   if ((h & 0xfe00) === 0xfc00) return true;          // fc00::/7 unique-local

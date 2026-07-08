@@ -1,28 +1,17 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { RetentionService } from '../retention/retention.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { ProjectsResourcingService } from './projects-resourcing.service';
+import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, clampPct, depsCsv, peopleCsv, csvToList, clamp15, riskScore, ragFor, addDays } from './projects.helpers';
+import { shapeTask, shapeMilestone, shapeTemplateItem, shapeRisk, shapeHealth, shapeChangeOrder, shapeBaseline, shapeBoqLine } from './projects.shapes';
 
-const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
-// Default value→FTE rate (PMO-5): the revenue one full-time-equivalent delivers per month. Used to convert
-// the probability-weighted pipeline VALUE into projected resourcing DEMAND (FTE). Overridable per request.
-const DEFAULT_REV_PER_FTE_MONTH = 200000;
-const r4 = (x: unknown) => Math.round((Number(x) || 0) * 10000) / 10000;
-const clampPct = (x: unknown) => Math.max(0, Math.min(100, r2(x)));
-const depsCsv = (ids?: number[]) => (ids && ids.length ? ids.map((i) => Number(i)).filter((i) => Number.isFinite(i)).join(',') : null);
-// People CSV (RACI lists) — trim, drop blanks/dupes; null when empty so an omitted field clears nothing.
-const peopleCsv = (xs?: string[]) => {
-  if (xs == null) return undefined; // not provided → leave column untouched
-  const u = [...new Set(xs.map((x) => String(x).trim()).filter(Boolean))];
-  return u.length ? u.join(',') : null;
-};
-const csvToList = (s: unknown) => (s ? String(s).split(',').map((x) => x.trim()).filter(Boolean) : []);
 
 export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string; rev_method?: 'billing' | 'poc'; estimated_cost?: number; budget_tolerance_pct?: number }
 export interface RecognizeDto { as_of?: string; estimated_cost?: number }
@@ -46,21 +35,11 @@ export interface RemeasureDto { remeasured_qty: number }
 export interface RiskDto { kind?: 'risk' | 'issue'; title: string; probability?: number; impact?: number; owner?: string; mitigation?: string; due_date?: string }
 export interface RiskPatchDto { status?: 'open' | 'mitigating' | 'closed'; probability?: number; impact?: number; owner?: string; mitigation?: string; due_date?: string; title?: string }
 
-// Risk scoring (1..25): a risk is probability × impact; an issue has already occurred (probability = 5/certain)
-// so it scores 5 × impact. RAG follows the score band — red ≥ 12 (HIGH), amber ≥ 6, else green.
-const clamp15 = (x: unknown) => Math.max(1, Math.min(5, Math.round(Number(x) || 1)));
-const riskScore = (kind: string, prob: number | null, impact: number) => (kind === 'issue' ? 5 : (prob ?? 1)) * impact;
-const ragFor = (score: number) => (score >= 12 ? 'red' : score >= 6 ? 'amber' : 'green');
-
-// Add whole days to a yyyy-mm-dd date string (UTC date arithmetic — date-only, no TZ drift).
-const addDays = (ymdStr: string, days: number) => {
-  const d = new Date(`${ymdStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + (Number(days) || 0));
-  return d.toISOString().slice(0, 10);
-};
 
 @Injectable()
 export class ProjectsService {
+  private readonly resourcing: ProjectsResourcingService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly ledger: LedgerService,
@@ -73,7 +52,11 @@ export class ProjectsService {
     // docs/35 Depth-1 — the shared retention sub-ledger; when present, the action center surfaces retention
     // release tranches due for action (`retention_due`). @Optional so partial harnesses still build.
     @Optional() private readonly retention?: RetentionService,
-  ) {}
+  ) {
+    // docs/38 projects PR-2: built in the ctor BODY (not DI) — the goldenmaster constructs this service
+    // positionally with (db, ledger) only, so sub-services must come from the already-injected deps.
+    this.resourcing = new ProjectsResourcingService(db, (code) => this.row(code));
+  }
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
   // the underlying capture/log; the action-center page also polls, so a dropped event self-heals.
@@ -433,114 +416,25 @@ export class ProjectsService {
     return { milestone_id: Number(milestoneId), project_code: proj!.projectCode, status: 'reached', billing };
   }
 
-  // ── Resource rate card (P2) ──────────────────────────────────────────────
-  async addRateCard(dto: RateCardDto, user: JwtUser) {
-    const db = this.db;
-    await db.insert(resourceRates).values({
-      tenantId: user.tenantId ?? null, role: dto.role, costRate: fx(dto.cost_rate ?? 0, 2), billRate: fx(dto.bill_rate ?? 0, 2),
-      effectiveFrom: dto.effective_from ?? ymd(), effectiveTo: dto.effective_to ?? null, createdBy: user.username,
-    });
-    return this.listRateCards(user);
-  }
 
-  async listRateCards(_user: JwtUser) {
-    const db = this.db;
-    const rows = await db.select().from(resourceRates).orderBy(desc(resourceRates.id)).limit(300);
-    return { rate_cards: rows.map((r: any) => ({ id: Number(r.id), role: r.role, cost_rate: n(r.costRate), bill_rate: n(r.billRate), effective_from: r.effectiveFrom, effective_to: r.effectiveTo })), count: rows.length };
-  }
 
-  // Resolve the rate-card rates applicable to a role on a date: the latest effective_from that is on/before the
-  // date and whose effective_to is empty or on/after it. Returns zeros if the role has no rate card.
-  private async resolveRate(role: string | undefined, onDate: string, user: JwtUser) {
-    if (!role) return { costRate: 0, billRate: 0 };
-    const db = this.db;
-    const conds = [eq(resourceRates.role, role)];
-    if (user.tenantId != null) conds.push(eq(resourceRates.tenantId, user.tenantId));
-    const rows = await db.select().from(resourceRates).where(and(...conds));
-    const applicable = rows
-      .filter((r: any) => (!r.effectiveFrom || r.effectiveFrom <= onDate) && (!r.effectiveTo || r.effectiveTo >= onDate))
-      .sort((a: any, b: any) => String(b.effectiveFrom ?? '').localeCompare(String(a.effectiveFrom ?? '')));
-    const r = applicable[0];
-    return { costRate: r ? n(r.costRate) : 0, billRate: r ? n(r.billRate) : 0 };
-  }
 
-  // ── Project resource assignment + capacity (P2) ──────────────────────────
-  async assignResource(code: string, dto: ResourceDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const alloc = r2(dto.alloc_pct ?? 100);
-    if (alloc <= 0 || alloc > 100) throw new BadRequestException({ code: 'BAD_ALLOC', message: 'alloc_pct must be within (0,100]', messageTh: 'สัดส่วนการจัดสรรต้องอยู่ระหว่าง 0-100' });
-    const start = dto.period_start ?? ymd();
-    const rate = await this.resolveRate(dto.role, start, user);
-    await db.insert(projectResources).values({
-      projectId: Number(p.id), tenantId: p.tenantId ?? user.tenantId ?? null, taskId: dto.task_id ?? null,
-      resourceName: dto.resource_name, role: dto.role ?? null, allocPct: fx(alloc, 2), periodStart: start, periodEnd: dto.period_end ?? null,
-      costRate: fx(rate.costRate, 2), billRate: fx(rate.billRate, 2), createdBy: user.username,
-    });
-    return this.listResources(code);
-  }
 
-  async listResources(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const rows = await db.select().from(projectResources).where(eq(projectResources.projectId, Number(p.id))).orderBy(projectResources.id);
-    return { project_code: code, resources: rows.map(shapeResource), count: rows.length };
-  }
 
-  // Capacity/utilization (PROJ-05): total allocation per named resource across all of the caller's projects;
-  // >100% flags over-allocation (a resource booked beyond capacity).
-  async resourceUtilization(_user: JwtUser) {
-    const db = this.db;
-    const rows = await db.select().from(projectResources);
-    const by = new Map<string, number>();
-    for (const r of rows) by.set(r.resourceName, r2((by.get(r.resourceName) ?? 0) + n(r.allocPct)));
-    const utilization = [...by.entries()]
-      .map(([resource_name, total]) => ({ resource_name, allocated_pct: r2(total), over_allocated: total > 100 }))
-      .sort((a, b) => b.allocated_pct - a.allocated_pct);
-    return { utilization, over_allocated_count: utilization.filter((u) => u.over_allocated).length };
-  }
 
-  // Time-phased capacity calendar (PPM upgrade): the flat resourceUtilization rolls every assignment into one
-  // number; this buckets each assignment's alloc % into the MONTHS its [period_start, period_end] spans and
-  // compares the per-month demand to capacity (100%/resource/month), so a resource over-booked in a *specific*
-  // window is visible even when the lifetime average looks fine. Read-only; horizon = `months` from `from`.
-  async resourceCapacity(_user: JwtUser, dto?: { months?: number; from?: string }) {
-    const db = this.db;
-    const months = Math.max(1, Math.min(24, Math.round(dto?.months ?? 6)));
-    const start = (dto?.from && /^\d{4}-\d{2}$/.test(dto.from)) ? dto.from : ymd().slice(0, 7);
-    const addMonths = (period: string, k: number) => { const [y, m] = period.split('-').map(Number); const idx = y! * 12 + (m! - 1) + k; return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`; };
-    const horizon = Array.from({ length: months }, (_, i) => addMonths(start, i));
-    const rows = await db.select().from(projectResources);
-    // An assignment is active in month M when period_start ≤ M-end and (period_end is open or ≥ M-start). A
-    // null period_start means "from project inception" (active from the horizon's first month onward).
-    const activeIn = (r: any, month: string) => {
-      const mStart = `${month}-01`, mEnd = `${month}-31`;
-      const ps = r.periodStart ?? null, pe = r.periodEnd ?? null;
-      return (ps == null || ps <= mEnd) && (pe == null || pe >= mStart);
-    };
-    const byRes = new Map<string, Map<string, number>>();
-    for (const r of rows) {
-      const name = r.resourceName;
-      const m = byRes.get(name) ?? new Map<string, number>();
-      for (const month of horizon) if (activeIn(r, month)) m.set(month, r2((m.get(month) ?? 0) + n(r.allocPct)));
-      byRes.set(name, m);
-    }
-    const resources = [...byRes.entries()].map(([resource_name, m]) => {
-      const cells = horizon.map((month) => { const pct = r2(m.get(month) ?? 0); return { month, allocated_pct: pct, over_allocated: pct > 100 }; });
-      const peak = cells.reduce((mx, c) => Math.max(mx, c.allocated_pct), 0);
-      return { resource_name, months: cells, peak_pct: r2(peak), over_months: cells.filter((c) => c.over_allocated).length };
-    }).sort((a, b) => b.peak_pct - a.peak_pct);
-    const monthly = horizon.map((month) => {
-      const cells = resources.map((r) => r.months.find((c) => c.month === month)!);
-      return { month, total_demand_pct: r2(cells.reduce((s, c) => s + c.allocated_pct, 0)), resources_over: cells.filter((c) => c.over_allocated).length };
-    });
-    return { from: start, months, horizon, resources, monthly, over_allocated_count: resources.filter((r) => r.over_months > 0).length };
-  }
 
   // ── Earned-value management (P4, PROJ-06) ────────────────────────────────
   // Computes BAC / PV / EV / AC → CPI / SPI + cost & schedule variance + EAC/ETC from the project's WBS tasks
   // (planned cost, % complete, planned_end schedule) and its actual cost incurred, and reconciles EV/AC against
   // the project's WIP actuals. `as_of` defaults to the business day; PV counts tasks scheduled to finish by then.
+  // ── docs/38 projects PR-2: resourcing (PROJ-05) lives in ProjectsResourcingService; thin delegators. ──
+  async addRateCard(dto: RateCardDto, user: JwtUser) { return this.resourcing.addRateCard(dto, user); }
+  async listRateCards(user: JwtUser) { return this.resourcing.listRateCards(user); }
+  async assignResource(code: string, dto: ResourceDto, user: JwtUser) { return this.resourcing.assignResource(code, dto, user); }
+  async listResources(code: string) { return this.resourcing.listResources(code); }
+  async resourceUtilization(user: JwtUser) { return this.resourcing.resourceUtilization(user); }
+  async resourceCapacity(user: JwtUser, dto?: { months?: number; from?: string }) { return this.resourcing.resourceCapacity(user, dto); }
+
   async evm(code: string, asOf?: string) {
     const db = this.db;
     const p = await this.row(code);
@@ -1621,39 +1515,4 @@ export class ProjectsService {
       prepared_by: r.preparedBy, prepared_at: r.preparedAt, approved_by: r.approvedBy, approved_at: r.approvedAt, rejection_reason: r.rejectionReason,
     };
   }
-}
-
-function shapeTask(t: any) {
-  return { id: Number(t.id), project_id: Number(t.projectId), parent_id: t.parentId != null ? Number(t.parentId) : null, wbs_code: t.wbsCode, name: t.name, status: t.status, planned_start: t.plannedStart, planned_end: t.plannedEnd, planned_hours: n(t.plannedHours), planned_cost: n(t.plannedCost), pct_complete: n(t.pctComplete), depends_on: t.dependsOn ? String(t.dependsOn).split(',').map((x: string) => Number(x)).filter((x: number) => Number.isFinite(x)) : [], assignee: t.assignee, accountable: t.accountable ?? null, responsible: csvToList(t.responsible), consulted: csvToList(t.consulted), informed: csvToList(t.informed), created_at: t.createdAt };
-}
-function shapeMilestone(m: any) {
-  return { id: Number(m.id), project_id: Number(m.projectId), name: m.name, due_date: m.dueDate, owner: m.owner, status: m.status, billing_percent: m.billingPercent != null ? n(m.billingPercent) : null, reached_at: m.reachedAt, created_at: m.createdAt };
-}
-function shapeResource(r: any) {
-  return { id: Number(r.id), project_id: Number(r.projectId), task_id: r.taskId != null ? Number(r.taskId) : null, resource_name: r.resourceName, role: r.role, alloc_pct: n(r.allocPct), period_start: r.periodStart, period_end: r.periodEnd, cost_rate: n(r.costRate), bill_rate: n(r.billRate), created_at: r.createdAt };
-}
-function shapeTemplateItem(it: any) {
-  return { id: Number(it.id), item_type: it.itemType, seq: Number(it.seq), name: it.name, parent_seq: it.parentSeq != null ? Number(it.parentSeq) : null, wbs_code: it.wbsCode, planned_hours: n(it.plannedHours), planned_cost: n(it.plannedCost), offset_start_days: Number(it.offsetStartDays ?? 0), offset_end_days: Number(it.offsetEndDays ?? 0), depends_on_seq: it.dependsOnSeq ? String(it.dependsOnSeq).split(',').map((x: string) => Number(x)).filter((x: number) => Number.isFinite(x)) : [], billing_percent: it.billingPercent != null ? n(it.billingPercent) : null, owner: it.owner, assignee: it.assignee };
-}
-function shapeRisk(r: any) {
-  return { id: Number(r.id), project_id: Number(r.projectId), kind: r.kind, title: r.title, status: r.status, probability: r.probability != null ? Number(r.probability) : null, impact: Number(r.impact), score: Number(r.score), rag: r.rag, owner: r.owner, mitigation: r.mitigation, due_date: r.dueDate, created_by: r.createdBy, created_at: r.createdAt, closed_at: r.closedAt };
-}
-function shapeHealth(h: any) {
-  return { snapshot_date: h.snapshotDate, rag: h.rag, cpi: h.cpi != null ? n(h.cpi) : null, spi: h.spi != null ? n(h.spi) : null, pct_complete: n(h.pctComplete), bac: n(h.bac), ev: n(h.ev), ac: n(h.ac), eac: n(h.eac), margin: n(h.margin), wip: n(h.wip), created_at: h.createdAt };
-}
-function shapeChangeOrder(c: any) {
-  return { id: Number(c.id), co_no: c.coNo, description: c.description, contract_delta: n(c.contractDelta), budget_delta: n(c.budgetDelta), estimated_cost_delta: n(c.estimatedCostDelta), reason: c.reason, status: c.status, requested_by: c.requestedBy, approved_by: c.approvedBy, created_at: c.createdAt, approved_at: c.approvedAt };
-}
-function shapeBaseline(b: any) {
-  return { id: Number(b.id), label: b.label, baseline_bac: n(b.baselineBac), baseline_duration_days: Number(b.baselineDurationDays), baseline_end: b.baselineEnd, reason: b.reason, status: b.status, created_by: b.createdBy, captured_at: b.capturedAt };
-}
-// BoQ line (M0, docs/32). remeasure_variance_qty = remeasured − budgeted (null until re-measured).
-function shapeBoqLine(l: any) {
-  const remeasured = l.remeasuredQty != null ? n(l.remeasuredQty) : null;
-  return {
-    id: Number(l.id), line_no: Number(l.lineNo), category: l.category, item_no: l.itemNo ?? null, task_id: l.taskId != null ? Number(l.taskId) : null,
-    wbs_code: l.wbsCode ?? null, description: l.description ?? null, uom: l.uom ?? null,
-    budget_qty: n(l.budgetQty), rate: n(l.rate), budget_amount: n(l.budgetAmount),
-    remeasured_qty: remeasured, remeasure_variance_qty: remeasured != null ? r2(remeasured - n(l.budgetQty)) : null,
-  };
 }

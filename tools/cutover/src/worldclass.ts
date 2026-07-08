@@ -255,8 +255,10 @@ async function main() {
   const key = await inj('POST', '/api/platform/api-keys', admin, { name: 'ci', scopes: ['read'] });
   ok('Platform: API key issued (ierp_)', (key.status === 200 || key.status === 201) && /^ierp_/.test(key.json.key ?? ''), `${key.status}`);
   // the issued key must actually AUTHENTICATE a request (was dead code before 9.3) → Bearer ierp_...
+  // H-2 (security review): the key principal now ADOPTS its minter's identity for maker-checker/SoD, so
+  // /api/auth/me reports the minting human ('admin' here), not the old `apikey:<prefix>` machine string.
   const meViaKey = await inj('GET', '/api/auth/me', key.json.key);
-  ok('Platform: API key authenticates a request (Bearer ierp_)', meViaKey.status === 200 && String(meViaKey.json?.username ?? '').startsWith('apikey:'), `status=${meViaKey.status} ${JSON.stringify(meViaKey.json).slice(0, 70)}`);
+  ok('Platform: API key authenticates a request (Bearer ierp_), bound to its minter (H-2)', meViaKey.status === 200 && meViaKey.json?.username === 'admin', `status=${meViaKey.status} ${JSON.stringify(meViaKey.json).slice(0, 70)}`);
   const mfa = await inj('POST', '/api/platform/mfa/setup', admin, {});
   ok('Platform: MFA setup returns secret', (mfa.status === 200 || mfa.status === 201) && !!(mfa.json.secret ?? mfa.json.otpauth_url), `${mfa.status}`);
 

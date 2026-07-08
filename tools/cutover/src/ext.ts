@@ -356,6 +356,23 @@ async function main() {
   const mdQueue = await inj('GET', '/api/admin/master-data/import-approvals', token);
   ok('G5: the approvals queue lists pending sensitive imports (none left after approval)', Array.isArray(mdQueue.json.batches) && !mdQueue.json.batches.some((x: any) => x.req_no === vendSens.json.req_no), `n=${mdQueue.json.batches?.length}`);
 
+  // ── H-2 (security review): an API key ADOPTS its minter's identity for maker-checker. `api_keys.created_by`
+  //    records the human who issued the key, and the auth guard sets the key principal's username to that
+  //    human — so a key can't be used to self-approve the minter's own work, and can't be paired (create with
+  //    key A / approve with key B) to launder a self-approval. Proven against the sensitive-import SoD: WITHOUT
+  //    the binding the key's identity would be `apikey:<prefix>` (≠ the requester) and the self-approval would
+  //    wrongly SUCCEED — so this asserting 403 is a real regression guard on the binding. ──
+  const vendSens2 = await inj('POST', '/api/admin/master-data/vendors/import/checked', token, { format: 'csv', mode: 'append', csv: 'Vendor_Code,Name,Payment_Terms,Credit_Limit\nV-SENS2,Risky Two,NET60,300000' });
+  const kAdmin = (await inj('POST', '/api/platform/api-keys', token, { name: 'k-admin', scopes: ['exec', 'approvals'] })).json.key;   // key minted BY admin (the requester)
+  const kAdminSelf = await inj('POST', `/api/admin/master-data/import-approvals/${vendSens2.json.req_no}/approve`, kAdmin);
+  ok('H-2: a key minted by the requester cannot approve the requester’s own staged work → 403 SOD_VIOLATION (key adopts minter identity)',
+    kAdminSelf.status === 403 && kAdminSelf.json.error?.code === 'SOD_VIOLATION', `${kAdminSelf.status} ${kAdminSelf.json.error?.code}`);
+  const kOther = (await inj('POST', '/api/platform/api-keys', mdchk, { name: 'k-other', scopes: ['exec', 'approvals'] })).json.key;   // key minted BY mdchecker (a distinct human)
+  const kOtherAppr = await inj('POST', `/api/admin/master-data/import-approvals/${vendSens2.json.req_no}/approve`, kOther);
+  const vSens2 = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-SENS2')))[0];
+  ok('H-2: a key minted by a DISTINCT human is a valid distinct approver → Approved (V-SENS2 written)',
+    kOtherAppr.json.status === 'Approved' && kOtherAppr.json.approved_by === 'mdchecker' && Number(vSens2?.creditLimit) === 300000, `${JSON.stringify({ st: kOtherAppr.json.status, by: kOtherAppr.json.approved_by, cl: vSens2?.creditLimit })}`);
+
   // menu_items (POS catalog) — a new-company bulk load. Exercises the registry's def/enumVals support:
   // blank Type/Tax_Type cells fall back to the DB default (not an explicit null → NOT-NULL violation),
   // enum matching is case-insensitive, and re-import dedups on (tenant, sku) via uq_menu_sku.

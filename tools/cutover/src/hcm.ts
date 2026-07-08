@@ -63,11 +63,15 @@ async function main() {
   const code = e.json.emp_code;
   ok('Create employee w/ PF 5% + hourly 200', e.status < 300 && /^EMP/.test(code ?? ''), JSON.stringify({ s: e.status }));
 
-  // ── 2. attendance: 10 OT hours; 3. unpaid leave 2 days (approved) ──
+  // ── 2. attendance: 10 OT hours; 3. unpaid leave 2 days (approved by a DIFFERENT user) ──
+  // Leave approval is maker-checker (SOD_SELF_APPROVAL): the requester (admin) cannot approve their own
+  // leave, so a distinct approver releases it — mirrors the payroll-run and timesheet controls.
   await inj('POST', '/api/hcm/timesheets', admin, { emp_code: code, work_date: '2026-06-15', ot_hours: 10 });
   const lv = await inj('POST', '/api/hcm/leave', admin, { emp_code: code, leave_type: 'unpaid', from_date: '2026-06-20', to_date: '2026-06-21', days: 2, paid: false });
-  const appr = await inj('POST', `/api/hcm/leave/${lv.json.id}/approve`, admin);
-  ok('Log 10h OT + approve 2-day unpaid leave', appr.json.status === 'Approved', JSON.stringify({ st: appr.json.status }));
+  const selfAppr = await inj('POST', `/api/hcm/leave/${lv.json.id}/approve`, admin);
+  ok('Leave self-approval blocked (SoD)', selfAppr.status === 403 && selfAppr.json?.error?.code === 'SOD_SELF_APPROVAL', JSON.stringify({ s: selfAppr.status, code: selfAppr.json?.error?.code }));
+  const appr = await inj('POST', `/api/hcm/leave/${lv.json.id}/approve`, approver);
+  ok('Log 10h OT + approve 2-day unpaid leave (distinct approver)', appr.json.status === 'Approved', JSON.stringify({ st: appr.json.status }));
 
   // ── 4. run payroll: OT 3000, unpaid 2000, gross 31000, PF 1500, WHT 220.83, net 28529.17 ──
   const run = await inj('POST', '/api/payroll/runs?period=2026-06', admin);
