@@ -23,23 +23,11 @@ import { normalizeA4Template } from '../../common/a4-template';
 import { DocumentTemplatesService } from '../document-templates/document-templates.service';
 import { ImageFetchService } from './image-fetch.service';
 import type { JwtUser } from '../../common/decorators';
+import { n, shapeVendorRelationship, shapeVendorAddress, shapeVendorContact } from './procurement.shared';
+// Re-exported so existing `import type { CreatePrDto } from './procurement.service'` callers are unchanged.
+export type { CreatePrDto, CreatePoDto, CreateGrDto, UpsertSupplierPriceDto, ConvLine } from './procurement.shared';
+import type { CreatePrDto, CreatePoDto, CreateGrDto, UpsertSupplierPriceDto, ConvLine } from './procurement.shared';
 
-const n = (v: unknown) => Number(v ?? 0);
-
-// project_code / boq_line_id (M0, docs/32) — optionally raise a requisition/PO against a project's BoQ so
-// material spend is dimensioned to the project. Nullable throughout → non-project buys are unaffected.
-export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string; boq_line_id?: number }[]; remarks?: string; priority?: string; amount?: number; project_code?: string }
-export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; project_code?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean; boq_line_id?: number }[];
-  // M2 (docs/32) — internal flags set by the PMR auto-draft path (not exposed on the public PO create form):
-  // `draft` opens the PO as Draft (not Pending) and skips the approval workflow so procurement reviews it
-  // before committing; `authorized_over_budget` lets the BoQ-line reservation exceed the budget (the PMR
-  // approval IS the authorisation to overrun). project_id is passed through directly when known.
-  draft?: boolean; authorized_over_budget?: boolean; project_id?: number }
-export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
-export interface UpsertSupplierPriceDto { vendor_id: number; item_id: string; item_description?: string; uom?: string; currency?: string; unit_price: number; min_qty?: number; effective_from: string; effective_to?: string; notes?: string }
-// A single reconciled PR→PO line. pr_line_id links it back to the exact pr_items row (precise stamping in the
-// split path); set_preferred also records the chosen vendor as the item's default supplier (learn-as-you-buy).
-export interface ConvLine { pr_line_id?: number; item_id: string; item_description?: string; create_item?: boolean; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean; set_preferred?: boolean }
 
 @Injectable()
 export class ProcurementService {
@@ -1472,19 +1460,4 @@ export class ProcurementService {
     if (!del.length) throw new NotFoundException({ code: 'RELATION_NOT_FOUND', message: 'Relationship not found', messageTh: 'ไม่พบความสัมพันธ์นี้' });
     return { deleted: true };
   }
-}
-
-function shapeVendorRelationship(r: any, other: { vendor_id: number; name: string }, direction: 'outgoing' | 'incoming') {
-  return { id: Number(r.id), rel_type: r.relType, direction, party: other, note: r.note ?? null, created_by: r.createdBy, created_at: r.createdAt };
-}
-
-function shapeVendorAddress(a: any) {
-  return {
-    id: Number(a.id), address_type: a.addressType, address_line1: a.addressLine1 ?? null, address_line2: a.addressLine2 ?? null,
-    sub_district: a.subDistrict ?? null, district: a.district ?? null, province: a.province ?? null, postal_code: a.postalCode ?? null,
-    is_primary: a.isPrimary === true, created_by: a.createdBy, created_at: a.createdAt,
-  };
-}
-function shapeVendorContact(c: any) {
-  return { id: Number(c.id), name: c.name, title: c.title ?? null, phone: c.phone ?? null, email: c.email ?? null, notes: c.notes ?? null, is_primary: c.isPrimary === true, created_by: c.createdBy, created_at: c.createdAt };
 }
