@@ -73,6 +73,12 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   if (gods.length) {
     logger.warn(`PLATFORM_ADMIN_USERNAMES configures ${gods.length} platform owner(s) with a cross-tenant "god" bypass (${gods.join(', ')}). Treat as break-glass: MFA those Admin logins and prune unused entries. See docs/ops/tenancy-model.md §2bis.`);
   }
+  // Shared cache adapter (workstream 2.5): CACHE_REDIS_URL is the ONLY knob that activates the Redis
+  // read-through cache; the legacy CACHE_PROVIDER display knob alone does nothing. Warn on the mismatch
+  // so an operator can't believe a shared cache is live when every node is still per-process.
+  if (String(config.CACHE_PROVIDER ?? '').trim().toLowerCase() === 'redis' && !has(config.CACHE_REDIS_URL)) {
+    logger.warn('CACHE_PROVIDER=redis is set but CACHE_REDIS_URL is not — the cache stays per-process in-memory. Set CACHE_REDIS_URL to activate the shared Redis cache (common/cache-remote.ts).');
+  }
   // AI legal gate (panel #2) — in prod the AI assistant must not transmit tenant data to Anthropic until
   // the DPA is executed. Warn loudly when a key is present but the DPA has not been acknowledged.
   if (has(config.ANTHROPIC_API_KEY) && !has(config.AI_DPA_ACKNOWLEDGED)) {

@@ -1,16 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { remoteCacheEnabled } from '../../common/cache-remote';
 
-// E5 (Platform Phase 30) — cache interface. The DEFAULT is an in-memory TTL cache (single-node / CI). Set
-// CACHE_PROVIDER=redis to swap a Redis adapter behind this SAME interface — the EmbedderService precedent
-// (deterministic default, real provider by config). Provisioning managed Redis + read replicas is an
-// infra/ops task (lean-then-scale, Bangkok/Alibaba) — out of scope for the app layer.
+// E5 (Platform Phase 30) — cache interface. The DEFAULT is an in-memory TTL cache (single-node / CI). The
+// Redis adapter now exists (common/cache-remote.ts, behind the read-through TtlCache): set CACHE_REDIS_URL
+// to swap it in — the EmbedderService precedent (deterministic default, real provider by config).
+// `provider` reports the ACTUAL posture (redis only when the adapter is live), so /api/ops/metrics can't
+// claim a shared cache that isn't wired. Provisioning managed Redis is an infra/ops task.
 @Injectable()
 export class CacheService {
   private store = new Map<string, { v: unknown; exp: number }>();
   private hits = 0;
   private misses = 0;
 
-  get provider() { return process.env.CACHE_PROVIDER || 'memory'; }
+  get provider() { return remoteCacheEnabled() ? 'redis' : 'memory'; }
 
   set(key: string, value: unknown, ttlSec = 60): void {
     this.store.set(key, { v: value, exp: Date.now() + ttlSec * 1000 });

@@ -19,6 +19,8 @@ export default defineConfig({
         'src/common/pii-redact.ts',
         'src/common/crypto.ts',
         'src/common/money.ts',
+        'src/common/ttl-cache.ts', // 2.5 shared-cache adapter — contract-tested in test/cache-adapter.test.ts
+
         'src/database/encrypted-column.ts',
         'src/observability/runtime-metrics.ts',
       ],
