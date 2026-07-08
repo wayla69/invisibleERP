@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { StateView } from '@/components/state-view';
+import { DataTable } from '@/components/data-table';
 import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -143,33 +144,21 @@ export default function BillingPage() {
         {((usageRuns.data?.runs ?? []).length > 0 || (aiRuns.data?.runs ?? []).length > 0) && (
           <Card className="gap-3 p-5">
             <strong className="text-sm">{t('st.bill.charge_history')}</strong>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs text-muted-foreground">
-                    <th className="py-1.5 pr-3">{t('st.bill.col_month')}</th>
-                    <th className="py-1.5 pr-3">{t('st.bill.col_meter')}</th>
-                    <th className="py-1.5 pr-3 text-right">{t('st.bill.col_qty')}</th>
-                    <th className="py-1.5 pr-3 text-right">{t('fin.col_amount')}</th>
-                    <th className="py-1.5">{t('fin.col_status')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ...(aiRuns.data?.runs ?? []).map((r: any) => ({ month: r.month, meter: 'AI', qty: `${num(r.overage_tokens)} tokens`, amount: r.amount, status: r.status })),
-                    ...(usageRuns.data?.runs ?? []).map((r: any) => ({ month: r.month, meter: r.meter === 'etax_docs' ? t('st.bill.meter_etax') : r.meter === 'pos_txns' ? t('st.bill.meter_pos') : r.meter, qty: num(r.overage_units), amount: r.amount, status: r.status })),
-                  ].sort((a, b) => String(b.month).localeCompare(String(a.month))).map((r, i) => (
-                    <tr key={i} className="border-b last:border-0">
-                      <td className="py-1.5 pr-3 tabular-nums">{r.month}</td>
-                      <td className="py-1.5 pr-3">{r.meter}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{r.qty}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{baht(r.amount)}</td>
-                      <td className="py-1.5"><Badge variant={r.status === 'invoiced' ? 'success' : 'secondary'}>{r.status}</Badge></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              dense
+              rows={[
+                ...(aiRuns.data?.runs ?? []).map((r: any) => ({ month: r.month, meter: 'AI', qty: `${num(r.overage_tokens)} tokens`, amount: r.amount, status: r.status })),
+                ...(usageRuns.data?.runs ?? []).map((r: any) => ({ month: r.month, meter: r.meter === 'etax_docs' ? t('st.bill.meter_etax') : r.meter === 'pos_txns' ? t('st.bill.meter_pos') : r.meter, qty: num(r.overage_units), amount: r.amount, status: r.status })),
+              ].sort((a, b) => String(b.month).localeCompare(String(a.month)))}
+              rowKey={(r, i) => `${r.month}-${r.meter}-${i}`}
+              columns={[
+                { key: 'month', label: t('st.bill.col_month'), sortable: true, className: 'tabular-nums' },
+                { key: 'meter', label: t('st.bill.col_meter'), sortable: true },
+                { key: 'qty', label: t('st.bill.col_qty'), align: 'right', className: 'tabular-nums' },
+                { key: 'amount', label: t('fin.col_amount'), align: 'right', sortable: true, render: (r) => <span className="tabular-nums">{baht(r.amount)}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={r.status === 'invoiced' ? 'success' : 'secondary'}>{r.status}</Badge> },
+              ]}
+            />
           </Card>
         )}
 

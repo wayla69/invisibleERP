@@ -6,6 +6,7 @@ import { MessageSquare, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
+import { DataTable } from '@/components/data-table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { num } from '@/lib/format';
@@ -47,18 +48,23 @@ export default function NlAnalyticsPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">{t('pb.result')}</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto">
-            {rows.length === 0 ? <p className="text-sm text-muted-foreground">{t('pb.no_data')}</p> : (
-              <table className="w-full text-sm">
-                <thead><tr className="border-b text-left text-muted-foreground"><th className="px-2 py-1 font-medium">{res.result.dimension}</th><th className="px-2 py-1 text-right font-medium">{t('pb.col_sales')}</th><th className="px-2 py-1 text-right font-medium">{t('pb.nl_col_orders')}</th></tr></thead>
-                <tbody>{rows.map((r, i) => (
-                  <tr key={i} className="border-b">
-                    <td className="px-2 py-1"><div>{String(r.dim)}</div><div className="mt-0.5 h-1.5 rounded bg-primary/20"><div className="h-1.5 rounded bg-primary" style={{ width: `${Math.round((Number(r.sales_total) / maxSales) * 100)}%` }} /></div></td>
-                    <td className="px-2 py-1 text-right tabular-nums">{money(r.sales_total)}</td>
-                    <td className="px-2 py-1 text-right tabular-nums">{num(r.orders)}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            )}
+            <DataTable
+              dense
+              rows={rows}
+              rowKey={(_, i) => i}
+              emptyText={t('pb.no_data')}
+              columns={[
+                { key: 'dim', label: res.result.dimension, sortable: true, render: (r) => (
+                  <div>
+                    <div>{String(r.dim)}</div>
+                    {/* inline share-of-sales bar (kept from the hand-rolled grid) */}
+                    <div className="mt-0.5 h-1.5 rounded bg-primary/20"><div className="h-1.5 rounded bg-primary" style={{ width: `${Math.round((Number(r.sales_total) / maxSales) * 100)}%` }} /></div>
+                  </div>
+                ) },
+                { key: 'sales_total', label: t('pb.col_sales'), align: 'right', sortable: true, render: (r) => <span className="tabular-nums">{money(r.sales_total)}</span> },
+                { key: 'orders', label: t('pb.nl_col_orders'), align: 'right', sortable: true, render: (r) => <span className="tabular-nums">{num(r.orders)}</span> },
+              ]}
+            />
           </CardContent>
         </Card>
       )}
