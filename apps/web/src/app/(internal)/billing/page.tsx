@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { statusVariant } from '@/components/ui';
 
-type Plan = { code: string; name: string; price_monthly: number; features?: any };
+type Plan = { code: string; name: string; price_monthly: number; price_yearly?: number | null; features?: any };
 
 export default function BillingPage() {
   const { t } = useLang();
@@ -29,14 +29,15 @@ export default function BillingPage() {
   const usageRuns = useQuery<any>({ queryKey: ['usage-overage-runs'], queryFn: () => api('/api/billing/usage-overage/runs') });
   const aiRuns = useQuery<any>({ queryKey: ['ai-overage-runs'], queryFn: () => api('/api/billing/ai-overage/runs') });
   const [msg, setMsg] = useState('');
+  const [billInterval, setBillInterval] = useState<'monthly' | 'annual'>('monthly'); // 1.7 — annual billing toggle
 
   const change = useMutation({
-    mutationFn: (plan_code: string) => api('/api/billing/change-plan', { method: 'POST', body: JSON.stringify({ plan_code }) }),
-    onSuccess: (d: any, plan_code) => {
+    mutationFn: (args: { plan_code: string; interval: 'monthly' | 'annual' }) => api('/api/billing/change-plan', { method: 'POST', body: JSON.stringify(args) }),
+    onSuccess: (d: any, args) => {
       // 1.6 — surface the mid-cycle proration the API now returns (net > 0 = prorated charge, < 0 = credit).
       const net = Number(d?.proration?.net ?? 0);
       const prorate = net > 0.005 ? ` · ${t('st.bill.proration_charge', { amount: baht(net) })}` : net < -0.005 ? ` · ${t('st.bill.proration_credit', { amount: baht(-net) })}` : '';
-      setMsg(t('st.bill.plan_changed', { plan: plan_code }) + prorate);
+      setMsg(t('st.bill.plan_changed', { plan: args.plan_code }) + prorate);
       qc.invalidateQueries({ queryKey: ['subscription'] });
     },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
@@ -173,7 +174,13 @@ export default function BillingPage() {
         )}
 
         <div>
-          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('st.bill.choose_plan')}</h3>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">{t('st.bill.choose_plan')}</h3>
+            <div className="ml-auto inline-flex rounded-lg border p-0.5 text-xs">
+              <button type="button" className={cn('rounded-md px-3 py-1 font-medium', billInterval === 'monthly' && 'bg-primary text-primary-foreground')} onClick={() => setBillInterval('monthly')}>{t('st.bill.interval_monthly')}</button>
+              <button type="button" className={cn('rounded-md px-3 py-1 font-medium', billInterval === 'annual' && 'bg-primary text-primary-foreground')} onClick={() => setBillInterval('annual')}>{t('st.bill.interval_annual')}</button>
+            </div>
+          </div>
           <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           <StateView q={plans}>
             {plans.data && (
@@ -187,8 +194,10 @@ export default function BillingPage() {
                         {current && <Badge variant="success">{t('st.bill.current')}</Badge>}
                       </div>
                       <div className="text-2xl font-bold text-primary">
-                        {p.price_monthly > 0 ? baht(p.price_monthly) : t('st.bill.free')}
-                        {p.price_monthly > 0 && <span className="text-sm font-normal text-muted-foreground"> {t('st.bill.per_month')}</span>}
+                        {billInterval === 'annual' && p.price_yearly
+                          ? <>{baht(p.price_yearly)}<span className="text-sm font-normal text-muted-foreground"> {t('st.bill.per_year')}</span></>
+                          : <>{p.price_monthly > 0 ? baht(p.price_monthly) : t('st.bill.free')}{p.price_monthly > 0 && <span className="text-sm font-normal text-muted-foreground"> {t('st.bill.per_month')}</span>}</>}
+                        {billInterval === 'annual' && !p.price_yearly && p.price_monthly > 0 && <div className="text-xs font-normal text-muted-foreground">{t('st.bill.annual_not_offered')}</div>}
                       </div>
                       <ul className="min-h-[60px] list-disc pl-5 text-sm text-muted-foreground">
                         {featureList(p.features).map((f, i) => <li key={i}>{f}</li>)}
@@ -197,7 +206,7 @@ export default function BillingPage() {
                         className="w-full"
                         variant={current ? 'secondary' : 'default'}
                         disabled={current || change.isPending}
-                        onClick={() => change.mutate(p.code)}
+                        onClick={() => change.mutate({ plan_code: p.code, interval: billInterval === 'annual' && p.price_yearly ? 'annual' : 'monthly' })}
                       >
                         {current ? t('st.bill.in_use') : t('st.bill.choose_this')}
                       </Button>

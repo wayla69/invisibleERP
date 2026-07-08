@@ -46,6 +46,12 @@ async function main() {
   const clamp = computeProration({ oldPriceMonthly: 1900, newPriceMonthly: 9900, periodEnd: new Date(now + 90 * DAY), now });
   ok('far-future end clamps to period (fraction ≤ 1)', clamp.fraction <= 1 && near(clamp.days_remaining, 30));
 
+  // 1.7 — ANNUAL interval: an annual subscription prorates on a 365-day period. 100 of 365 days left,
+  // Standard ฿19,000/yr → Professional ฿99,000/yr.
+  const ann = computeProration({ oldPriceMonthly: 19000, newPriceMonthly: 99000, periodEnd: new Date(now + 100 * DAY), now, periodDays: 365 });
+  ok('annual basis: periodDays 365 honoured (days_remaining 100, fraction 100/365)', ann.period_days === 365 && near(ann.days_remaining, 100) && Math.abs(ann.fraction - 100 / 365) < 1e-4, JSON.stringify(ann));
+  ok('annual: net = 99000×(100/365) − 19000×(100/365) ≈ 21,917.81', near(ann.net, 27123.29 - 5205.48), `net=${ann.net}`);
+
   console.log('\n── Wave 2 · 1.6 — plan-change proration (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

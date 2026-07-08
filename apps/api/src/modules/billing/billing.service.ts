@@ -52,7 +52,9 @@ interface PlanSeed {
   code: string;
   name: string;
   priceMonthly: string;
+  priceYearly?: string | null; // 1.7 — NULL = not offered annually
   currency: string;
+  prices?: Record<string, { monthly?: number; yearly?: number }> | null; // 1.7 — per-currency price list (THB implied)
   features: Record<string, unknown>;
 }
 
@@ -72,8 +74,8 @@ interface PlanSeed {
 // ENTITLEMENTS_ENFORCE. resolveEntitledSuites() still falls back to the code default if it is ever absent.
 const PLAN_SEED: PlanSeed[] = [
   { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.free, users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 0, pos_txns_monthly: 0, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
-  { code: 'starter', name: 'Standard', priceMonthly: '1900', currency: 'THB', features: { suites: PLAN_SUITES.starter, users: 10, locations: 2, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 100, pos_txns_monthly: 3000, etax_overage_rate_thb_per_doc: 3, pos_overage_rate_thb_per_txn: 0.5 } },
-  { code: 'pro', name: 'Professional', priceMonthly: '9900', currency: 'THB', features: { suites: PLAN_SUITES.pro, users: 50, locations: 10, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000, ai_tokens_daily_max: 500_000, ai_overage_rate_thb_per_1k: 12, etax_docs_monthly: 1000, pos_txns_monthly: 30_000, etax_overage_rate_thb_per_doc: 2, pos_overage_rate_thb_per_txn: 0.3 } },
+  { code: 'starter', name: 'Standard', priceMonthly: '1900', priceYearly: '19000', currency: 'THB', prices: { USD: { monthly: 55, yearly: 550 } }, features: { suites: PLAN_SUITES.starter, users: 10, locations: 2, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 100, pos_txns_monthly: 3000, etax_overage_rate_thb_per_doc: 3, pos_overage_rate_thb_per_txn: 0.5 } },
+  { code: 'pro', name: 'Professional', priceMonthly: '9900', priceYearly: '99000', currency: 'THB', prices: { USD: { monthly: 285, yearly: 2850 } }, features: { suites: PLAN_SUITES.pro, users: 50, locations: 10, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000, ai_tokens_daily_max: 500_000, ai_overage_rate_thb_per_1k: 12, etax_docs_monthly: 1000, pos_txns_monthly: 30_000, etax_overage_rate_thb_per_doc: 2, pos_overage_rate_thb_per_txn: 0.3 } },
   { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.enterprise, users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000, ai_tokens_daily_max: 5_000_000, ai_overage_rate_thb_per_1k: 8, etax_docs_monthly: -1, pos_txns_monthly: -1, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
 ];
 
@@ -94,10 +96,10 @@ export class BillingService {
     let seeded = 0;
     for (const p of PLAN_SEED) {
       await db.insert(plans).values({
-        code: p.code, name: p.name, priceMonthly: p.priceMonthly, currency: p.currency, features: p.features, active: 'true',
+        code: p.code, name: p.name, priceMonthly: p.priceMonthly, priceYearly: p.priceYearly ?? null, currency: p.currency, prices: p.prices ?? null, features: p.features, active: 'true',
       }).onConflictDoUpdate({
         target: plans.code,
-        set: { name: p.name, priceMonthly: p.priceMonthly, currency: p.currency, features: p.features, active: 'true' },
+        set: { name: p.name, priceMonthly: p.priceMonthly, priceYearly: p.priceYearly ?? null, currency: p.currency, prices: p.prices ?? null, features: p.features, active: 'true' },
       });
       seeded++;
     }
@@ -108,11 +110,11 @@ export class BillingService {
   async listPlans() {
     const db = this.db;
     const rows = await db
-      .select({ code: plans.code, name: plans.name, price_monthly: plans.priceMonthly, currency: plans.currency, features: plans.features, active: plans.active })
+      .select({ code: plans.code, name: plans.name, price_monthly: plans.priceMonthly, price_yearly: plans.priceYearly, currency: plans.currency, prices: plans.prices, features: plans.features, active: plans.active })
       .from(plans)
       .where(sql`${plans.active}::text = 'true'`)
       .orderBy(sql`${plans.priceMonthly} asc`);
-    return { plans: rows.map((r: any) => ({ ...r, price_monthly: Number(r.price_monthly ?? 0) })) };
+    return { plans: rows.map((r: any) => ({ ...r, price_monthly: Number(r.price_monthly ?? 0), price_yearly: r.price_yearly != null ? Number(r.price_yearly) : null })) };
   }
 
   // ───────────────────── PUBLIC self-serve signup ─────────────────────
@@ -750,7 +752,7 @@ export class BillingService {
     return { tenant_id: tenantId, month: meters[0]?.month ?? new Date().toISOString().slice(0, 7), meters };
   }
 
-  async changePlan(tenantId: number, planCode: string) {
+  async changePlan(tenantId: number, planCode: string, interval?: 'monthly' | 'annual') {
     const db = this.db;
     const target = planCode.trim();
     const [plan] = await db.select().from(plans).where(eq(plans.code, target)).limit(1);
@@ -759,18 +761,27 @@ export class BillingService {
     const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(sql`${subscriptions.createdAt} desc`).limit(1);
     if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for tenant', messageTh: 'ไม่พบการสมัครสมาชิกของร้าน' });
 
-    // 1.6 — mid-cycle proration: unused credit on the OLD plan vs the prorated charge on the NEW plan for
-    // the days left in the period. Informational (surfaced for confirmation); Stripe proration is a follow-up.
-    const [oldPlan] = await db.select({ price: plans.priceMonthly }).from(plans).where(eq(plans.code, sub.planCode)).limit(1);
-    const proration = computeProration({
-      oldPriceMonthly: Number(oldPlan?.price ?? 0),
-      newPriceMonthly: Number(plan.priceMonthly ?? 0),
-      periodEnd: sub.currentPeriodEnd,
-      now: Date.now(),
-    });
+    // 1.6/1.7 — mid-cycle proration: unused credit on the OLD plan vs the prorated charge on the NEW plan
+    // for the days left in the period, computed on the SUBSCRIPTION'S CURRENT interval basis (30-day monthly
+    // / 365-day annual periods). Informational (surfaced for confirmation); Stripe proration is a follow-up.
+    // A change that ALSO switches the billing interval mixes two period bases — no honest single number
+    // exists, so proration is null with an explanatory note rather than a misleading figure.
+    const curInterval: 'monthly' | 'annual' = sub.billingInterval === 'annual' ? 'annual' : 'monthly';
+    const targetInterval: 'monthly' | 'annual' = interval ?? curInterval;
+    const [oldPlan] = await db.select({ price: plans.priceMonthly, priceYearly: plans.priceYearly, prices: plans.prices }).from(plans).where(eq(plans.code, sub.planCode)).limit(1);
+    let proration: ReturnType<typeof computeProration> | null = null;
+    let prorationNote: string | undefined;
+    if (targetInterval === curInterval) {
+      const periodDays = curInterval === 'annual' ? 365 : 30;
+      const oldAmount = curInterval === 'annual' ? Number(oldPlan?.priceYearly ?? 0) : Number(oldPlan?.price ?? 0);
+      const newAmount = curInterval === 'annual' ? Number(plan.priceYearly ?? 0) : Number(plan.priceMonthly ?? 0);
+      proration = computeProration({ oldPriceMonthly: oldAmount, newPriceMonthly: newAmount, periodEnd: sub.currentPeriodEnd, now: Date.now(), periodDays });
+    } else {
+      prorationNote = 'interval_change'; // switching monthly↔annual — applied at the next renewal, no mid-cycle number
+    }
 
-    await db.update(subscriptions).set({ planCode: target, status: 'Active' }).where(eq(subscriptions.id, sub.id));
-    return { tenant_id: tenantId, plan: target, status: 'Active', proration };
+    await db.update(subscriptions).set({ planCode: target, status: 'Active', billingInterval: targetInterval }).where(eq(subscriptions.id, sub.id));
+    return { tenant_id: tenantId, plan: target, status: 'Active', billing_interval: targetInterval, proration, ...(prorationNote ? { proration_note: prorationNote } : {}) };
   }
 
   // ───────────────────── Plan limit enforcement ─────────────────────
@@ -814,31 +825,53 @@ export class BillingService {
     }
   }
 
+  // 1.7 — resolve the amount to charge for (plan, interval, currency). THB prices come from
+  // price_monthly / price_yearly; any other currency from the plan's `prices` map. Fails closed:
+  // an interval/currency the plan does not offer is a 400, never a silent fallback to THB-monthly.
+  private resolvePlanPrice(plan: { priceMonthly: unknown; priceYearly: unknown; prices: unknown }, interval: 'monthly' | 'annual', currency: string): { amount: number; currency: string; interval: 'monthly' | 'annual' } {
+    const cur = (currency || 'THB').toUpperCase();
+    if (cur === 'THB') {
+      const amount = interval === 'annual' ? (plan.priceYearly != null ? Number(plan.priceYearly) : null) : Number(plan.priceMonthly ?? 0);
+      if (interval === 'annual' && (amount == null || amount <= 0)) throw new BadRequestException({ code: 'ANNUAL_NOT_OFFERED', message: 'This plan is not offered on annual billing', messageTh: 'แพ็กเกจนี้ไม่มีแบบรายปี' });
+      return { amount: Number(amount ?? 0), currency: 'THB', interval };
+    }
+    const priceMap = (plan.prices ?? {}) as Record<string, { monthly?: number; yearly?: number }>;
+    const entry = priceMap[cur];
+    const amount = interval === 'annual' ? entry?.yearly : entry?.monthly;
+    if (amount == null || amount <= 0) throw new BadRequestException({ code: 'CURRENCY_NOT_OFFERED', message: `This plan is not offered in ${cur}${entry ? ` on ${interval} billing` : ''}`, messageTh: `แพ็กเกจนี้ไม่มีราคาสกุล ${cur}` });
+    return { amount: Number(amount), currency: cur, interval };
+  }
+
   // ───────────────────── Stripe checkout ─────────────────────
   // Creates a Stripe Checkout session for the selected plan. Without STRIPE_SECRET_KEY it returns a mock
   // URL so the SaaS flow is fully testable offline (CI/dev). With a key, it creates (or reuses) the tenant's
   // Stripe customer and a real subscription Checkout session; activation happens via the webhook (see
-  // BillingWebhookService) when Stripe confirms payment.
-  async createCheckoutSession(tenantId: number, planCode: string) {
+  // BillingWebhookService) when Stripe confirms payment. 1.7 — interval ('monthly' default | 'annual') and
+  // currency ('THB' default) select the price via resolvePlanPrice (fail-closed) and are stamped on the
+  // subscription row as the billing intent.
+  async createCheckoutSession(tenantId: number, planCode: string, interval: 'monthly' | 'annual' = 'monthly', currency = 'THB') {
     const db = this.db;
     const target = planCode.trim();
     const [plan] = await db.select().from(plans).where(eq(plans.code, target)).limit(1);
     if (!plan) throw new BadRequestException({ code: 'BAD_REQUEST', message: `Unknown plan: ${target}`, messageTh: 'ไม่พบแพ็กเกจที่เลือก' });
     if (Number(plan.priceMonthly ?? 0) <= 0) throw new BadRequestException({ code: 'PLAN_NOT_PURCHASABLE', message: `Plan '${target}' has no monthly price to charge`, messageTh: 'แพ็กเกจนี้ไม่มีค่าบริการรายเดือนให้ชำระ' });
+    const price = this.resolvePlanPrice(plan, interval, currency);
     const [tenant] = await db.select({ id: tenants.id, code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!tenant) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tenant not found', messageTh: 'ไม่พบร้าน' });
     // Reuse the tenant's existing Stripe customer (from a prior checkout) if we have one.
-    const [sub] = await db.select({ cust: subscriptions.stripeCustomerId }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
+    const [sub] = await db.select({ id: subscriptions.id, cust: subscriptions.stripeCustomerId }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
     const result = await new StripeBilling().createCheckoutSession(
-      { code: plan.code, name: plan.name, priceMonthly: String(plan.priceMonthly ?? '0'), currency: plan.currency ?? 'THB' },
+      { code: plan.code, name: plan.name, amount: price.amount, currency: price.currency, interval: price.interval },
       { id: Number(tenant.id), code: tenant.code, existingCustomerId: sub?.cust ?? null },
     );
-    // Persist a freshly-created Stripe customer id so subsequent checkouts reuse it (best-effort; the
-    // webhook is the source of truth for subscription state).
-    if (result.customerId && sub && !sub.cust) {
-      await db.update(subscriptions).set({ stripeCustomerId: result.customerId }).where(eq(subscriptions.tenantId, tenantId));
+    // Persist the billing intent (interval/currency) + a freshly-created Stripe customer id so subsequent
+    // checkouts reuse it (best-effort; the webhook is the source of truth for subscription state).
+    if (sub) {
+      const patch: Record<string, unknown> = { billingInterval: price.interval, currency: price.currency };
+      if (result.customerId && !sub.cust) patch.stripeCustomerId = result.customerId;
+      await db.update(subscriptions).set(patch).where(eq(subscriptions.id, sub.id));
     }
-    return { url: result.url, mock: result.mock };
+    return { url: result.url, mock: result.mock, interval: price.interval, currency: price.currency, amount: price.amount };
   }
 
   // ───────────────────── Stripe webhook → subscription state machine ─────────────────────
@@ -919,7 +952,7 @@ export class StripeBilling {
   get enabled(): boolean { return !!this.secret; }
 
   async createCheckoutSession(
-    plan: { code: string; name: string; priceMonthly: string; currency: string },
+    plan: { code: string; name: string; amount: number; currency: string; interval: 'monthly' | 'annual' },
     tenant: { id: number; code: string; existingCustomerId?: string | null },
   ): Promise<{ url: string; mock: boolean; customerId?: string; sessionId?: string }> {
     if (!this.secret) {
@@ -940,13 +973,13 @@ export class StripeBilling {
           quantity: 1,
           price_data: {
             currency: (plan.currency ?? 'THB').toLowerCase(),
-            recurring: { interval: 'month' },
-            unit_amount: Math.round(Number(plan.priceMonthly) * 100), // smallest currency unit
+            recurring: { interval: plan.interval === 'annual' ? 'year' : 'month' }, // 1.7 — annual billing
+            unit_amount: Math.round(Number(plan.amount) * 100), // smallest currency unit
             product_data: { name: `Oshinei ERP — ${plan.name}` },
           },
         },
       ],
-      metadata: { tenant_id: String(tenant.id), plan_code: plan.code },
+      metadata: { tenant_id: String(tenant.id), plan_code: plan.code, billing_interval: plan.interval },
       success_url: process.env.STRIPE_SUCCESS_URL ?? `${appBase}/settings/billing?status=success`,
       cancel_url: process.env.STRIPE_CANCEL_URL ?? `${appBase}/settings/billing?status=cancel`,
     });

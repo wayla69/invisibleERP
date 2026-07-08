@@ -31,8 +31,8 @@ type InviteDto = z.infer<typeof InviteBody>;
 const RejectBody = z.object({ reason: z.string().max(500).optional() });
 type RejectDto = z.infer<typeof RejectBody>;
 
-const CheckoutBody = z.object({ plan_code: z.string().min(1) });
-const ChangePlanBody = z.object({ plan_code: z.string().min(1) });
+const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional() }); // 1.7 — annual billing + multi-currency
+const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
 const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
 
@@ -211,14 +211,14 @@ export class BillingController {
   }
 
   @Post('billing/checkout') @Permissions('users')
-  async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string }, @CurrentUser() u: JwtUser) {
+  async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string; interval?: 'monthly' | 'annual'; currency?: string }, @CurrentUser() u: JwtUser) {
     const tenantId = await this.svc.resolveTenantId(u);
-    return this.svc.createCheckoutSession(tenantId, b.plan_code);
+    return this.svc.createCheckoutSession(tenantId, b.plan_code, b.interval ?? 'monthly', b.currency ?? 'THB');
   }
 
   @Post('billing/change-plan') @Permissions('users')
-  async changePlan(@Body(new ZodValidationPipe(ChangePlanBody)) b: { plan_code: string }, @CurrentUser() u: JwtUser) {
+  async changePlan(@Body(new ZodValidationPipe(ChangePlanBody)) b: { plan_code: string; interval?: 'monthly' | 'annual' }, @CurrentUser() u: JwtUser) {
     const tenantId = await this.svc.resolveTenantId(u);
-    return this.svc.changePlan(tenantId, b.plan_code);
+    return this.svc.changePlan(tenantId, b.plan_code, b.interval);
   }
 }
