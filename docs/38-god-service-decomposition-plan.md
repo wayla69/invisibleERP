@@ -1,9 +1,10 @@
 # 38 — God-service decomposition (design for review · workstream 2.1)
 
-> **Status:** DESIGN — the *extraction* still needs explicit sign-off before any code moves. This is a
-> **refactor of financial-critical services with zero intended behaviour change**, so the whole plan is
-> built around *proving* nothing moved. Nothing here changes a public API, a GL posting, or a control —
-> it only relocates code behind unchanged facades.
+> **Status:** IN PROGRESS — sign-off received 2026-07-08 (Wave 4 decision A); the `bi` pilot is underway
+> (PR-1 landed, see §8-log in docs/07-backend.md). This is a **refactor of financial-critical services
+> with zero intended behaviour change**, so the whole plan is built around *proving* nothing moved.
+> Nothing here changes a public API, a GL posting, or a control — it only relocates code behind
+> unchanged facades.
 >
 > **Step 1 (characterize) is DELIVERED** ahead of the sign-off: the golden-master harness
 > `tools/parity/src/goldenmaster.ts` (CI gate `parity/golden`) pins ~500 output paths across all four
