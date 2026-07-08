@@ -732,6 +732,16 @@ async function main() {
   const cbBadAud = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), id_token: mkIdToken({ aud: 'someone-else' }) });
   ok('SSO: a wrong-audience id_token is rejected (401 BAD_AUDIENCE)', cbBadAud.status === 401 && cbBadAud.json.error?.code === 'BAD_AUDIENCE', `${cbBadAud.status} ${cbBadAud.json.error?.code}`);
 
+  // M-2 (security review): SSRF hardening of the tenant-configurable OIDC issuer (server exchanges the auth
+  // code at `${issuer}/token`). Write time rejects a non-https issuer; send time (exchangeCode) re-resolves
+  // the destination and refuses an internal/metadata/RFC1918 target before the outbound POST.
+  const badIssuer = await inj('PUT', '/api/platform/identity', cf2aa, { oidc_issuer: 'http://idp.cf2.example' });
+  ok('SSO: a non-https oidc_issuer is rejected at write time (400 BAD_ISSUER)', badIssuer.status === 400 && badIssuer.json.error?.code === 'BAD_ISSUER', `${badIssuer.status} ${badIssuer.json.error?.code}`);
+  await inj('PUT', '/api/platform/identity', cf2aa, { oidc_issuer: 'https://169.254.169.254' }); // passes the https write-time check…
+  const cbSsrf = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), code: 'authcode-x' }); // …but the code path re-resolves it
+  ok('SSO: exchangeCode refuses an internal issuer destination (400 SSRF_BLOCKED)', cbSsrf.status === 400 && cbSsrf.json.error?.code === 'SSRF_BLOCKED', `${cbSsrf.status} ${cbSsrf.json.error?.code}`);
+  await inj('PUT', '/api/platform/identity', cf2aa, { oidc_issuer: ISSUER }); // restore for any later use
+
   // SCIM: rotate a token, then provision/list/deactivate.
   const scimTok = (await inj('POST', '/api/platform/identity/scim-token', cf2aa)).json.token;
   ok('SCIM: a per-tenant bearer token is issued (scim_)', /^scim_/.test(scimTok ?? ''), `${String(scimTok).slice(0,12)}`);
