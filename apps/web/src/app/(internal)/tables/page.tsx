@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { StateView } from '@/components/state-view';
 import { Tabs, Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -251,10 +252,18 @@ function TablePanel({ t: tbl, onChange, onClose, onOrder }: { t: TableRow; onCha
   const checkout = useMutation({ mutationFn: () => api<{ tax_invoice_no: string }>(`/api/restaurant/orders/${tbl.order!.order_no}/checkout`, { method: 'POST', body: JSON.stringify({ method: 'Cash' }) }), onSuccess: (r) => { setMsg(t('px.tbl_checkout_success', { no: r.tax_invoice_no ?? '-' })); onChange(); }, onError: onErr });
   const clear = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${tbl.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }), onSuccess: () => { setMsg(t('px.tbl_table_cleared')); onClose(); onChange(); }, onError: onErr });
   const del = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${tbl.id}`, { method: 'DELETE' }), onSuccess: () => { onClose(); onChange(); }, onError: onErr });
-  const removeTable = () => { if (typeof window !== 'undefined' && !window.confirm(t('px.tbl_remove_confirm', { no: tbl.table_no }))) return; del.mutate(); };
+  const [removeAsk, setRemoveAsk] = useState(false);
+  const removeTable = () => setRemoveAsk(true);
 
   return (
     <Card className={cn('mt-4 gap-4 border-t-4 p-5', tone(tbl.status).bar)}>
+      <ConfirmDialog
+        open={removeAsk}
+        onOpenChange={setRemoveAsk}
+        title={t('px.tbl_remove_confirm', { no: tbl.table_no })}
+        busy={del.isPending}
+        onConfirm={() => { setRemoveAsk(false); del.mutate(); }}
+      />
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-2 text-lg font-semibold">{t('px.tbl_table_label', { no: tbl.table_no })} · <Badge variant={statusVariant(statusTh(t, tbl.status))}>{statusTh(t, tbl.status)}</Badge></h3>
         <div className="flex items-center gap-1">

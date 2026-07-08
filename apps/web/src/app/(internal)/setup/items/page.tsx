@@ -8,6 +8,7 @@ import { useMe } from '@/lib/auth';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -76,6 +77,7 @@ export default function ItemPostingSetupPage() {
   const me = useMe();
   const qc = useQueryClient();
   const [showDupes, setShowDupes] = useState(false);
+  const [mergeAsk, setMergeAsk] = useState<{ survivor: string; duplicate: string } | null>(null);
   const dupes = useQuery<{ groups: any[]; count: number }>({ queryKey: ['item-duplicates'], queryFn: () => api('/api/item-setup/items-duplicates'), enabled: showDupes });
   const merge = useMutation({
     mutationFn: ({ survivor, duplicate }: { survivor: string; duplicate: string }) => api<any>('/api/item-setup/items-merge', { method: 'POST', body: JSON.stringify({ survivor_item_id: survivor, duplicate_item_id: duplicate }) }),
@@ -127,7 +129,7 @@ export default function ItemPostingSetupPage() {
                             </div>
                           </div>
                           {me.data?.is_platform_owner && (
-                            <Button size="sm" variant="outline" disabled={merge.isPending} onClick={() => { if (window.confirm(t('mx.item_merge_confirm', { dup: d.item_id, keep: g.primary.item_id }))) merge.mutate({ survivor: g.primary.item_id, duplicate: d.item_id }); }}>
+                            <Button size="sm" variant="outline" disabled={merge.isPending} onClick={() => setMergeAsk({ survivor: g.primary.item_id, duplicate: d.item_id })}>
                               <GitMerge className="size-4" /> {t('mx.item_merge')}
                             </Button>
                           )}
@@ -140,6 +142,14 @@ export default function ItemPostingSetupPage() {
             )}
           </Card>
         )}
+        <ConfirmDialog
+          open={!!mergeAsk}
+          onOpenChange={(o) => !o && setMergeAsk(null)}
+          title={t('mx.item_merge')}
+          description={mergeAsk ? t('mx.item_merge_confirm', { dup: mergeAsk.duplicate, keep: mergeAsk.survivor }) : null}
+          busy={merge.isPending}
+          onConfirm={() => { if (mergeAsk) merge.mutate(mergeAsk); setMergeAsk(null); }}
+        />
 
         {form && (
           <Card className="max-w-4xl gap-4 p-5">

@@ -10,6 +10,7 @@ import { notifySuccess, notifyError } from '@/lib/notify';
 import { baht, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs, Msg } from '@/components/tabs';
@@ -109,6 +110,7 @@ function Held() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['held'], queryFn: () => api('/api/pos/held') });
+  const [discardAsk, setDiscardAsk] = useState<string | null>(null);
   const act = useMutation({ mutationFn: (v: { no: string; op: string }) => api(`/api/pos/held/${v.no}/${v.op}`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['held'] }), onError: (e: any) => notifyError(e.message) });
   return (
     <StateView q={q}>
@@ -122,11 +124,18 @@ function Held() {
             { key: 'customer_name', label: t('fin.col_customer'), render: (r: any) => r.customer_name || '—' },
             { key: 'created_by', label: t('px.ctrl_col_held_by') },
             { key: 'created_at', label: t('px.ctrl_col_time'), render: (r: any) => thaiDate(r.created_at) },
-            { key: 'act', label: '', sortable: false, render: (r: any) => <div className="flex gap-1"><Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>{t('px.ctrl_recall')}</Button><Button size="sm" variant="destructive" onClick={() => { if (window.confirm(t('px.ctrl_discard_confirm', { no: r.hold_no }))) act.mutate({ no: r.hold_no, op: 'discard' }); }}>{t('px.ctrl_discard')}</Button></div> },
+            { key: 'act', label: '', sortable: false, render: (r: any) => <div className="flex gap-1"><Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>{t('px.ctrl_recall')}</Button><Button size="sm" variant="destructive" onClick={() => setDiscardAsk(r.hold_no)}>{t('px.ctrl_discard')}</Button></div> },
           ]}
           emptyState={{ icon: PauseCircle, title: t('px.ctrl_held_empty_title'), description: t('px.ctrl_held_empty_desc') }}
         />
       )}
+      <ConfirmDialog
+        open={!!discardAsk}
+        onOpenChange={(o) => !o && setDiscardAsk(null)}
+        title={discardAsk ? t('px.ctrl_discard_confirm', { no: discardAsk }) : ''}
+        busy={act.isPending}
+        onConfirm={() => { if (discardAsk) act.mutate({ no: discardAsk, op: 'discard' }); setDiscardAsk(null); }}
+      />
     </StateView>
   );
 }
@@ -137,6 +146,7 @@ function Overrides() {
   const q = useQuery<any>({ queryKey: ['overrides'], queryFn: () => api('/api/pos/overrides') });
   const [f, setF] = useState({ action: 'discount', sale_no: '', amount: '', reason: '', approved_by: '' });
   const [msg, setMsg] = useState('');
+  const [voidAsk, setVoidAsk] = useState(false);
   const isVoid = f.action === 'void';
   const ACTION_LABELS: Record<string, string> = { void: t('px.ctrl_action_void'), discount: t('px.ctrl_action_discount'), price_override: t('px.ctrl_action_price_override'), no_sale: t('px.ctrl_action_no_sale'), return: t('px.ctrl_action_return') };
   const actionLabel = (v: string) => ACTION_LABELS[v] ?? v;
@@ -165,10 +175,18 @@ function Overrides() {
             // A void reverses a sale — require a reason + approver and confirm before recording.
             if (f.action === 'void') {
               if (!f.reason.trim() || !f.approved_by.trim()) { setMsg('❌ ' + t('px.ctrl_void_need_reason_approver')); return; }
-              if (!window.confirm(t('px.ctrl_void_confirm', { no: f.sale_no || t('px.ctrl_unspecified') }))) return;
+              setVoidAsk(true);
+              return;
             }
             create.mutate();
           }}>{create.isPending ? t('px.ctrl_saving') : t('fin.save')}</Button>
+          <ConfirmDialog
+            open={voidAsk}
+            onOpenChange={setVoidAsk}
+            title={t('px.ctrl_void_confirm', { no: f.sale_no || t('px.ctrl_unspecified') })}
+            busy={create.isPending}
+            onConfirm={() => { setVoidAsk(false); create.mutate(); }}
+          />
           {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
         </CardContent>
       </Card>

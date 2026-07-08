@@ -1,5 +1,8 @@
 import type { Lang } from '../messages';
 export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
+  // ── ConfirmDialog (shared component, docs/39) ──
+  'mx.cfm_confirm': { th: 'ยืนยัน', en: 'Confirm' },
+  'mx.cfm_cancel': { th: 'ยกเลิก', en: 'Cancel' },
   // ── QR camera scanner (shared component) ──
   'qr.scan_button': { th: 'สแกน QR', en: 'Scan QR' },
   'qr.scan_title': { th: 'สแกน QR ด้วยกล้อง', en: 'Scan QR with camera' },
