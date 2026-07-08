@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { baht } from '@/lib/format';
 
 // Public order tracker for TAKEAWAY / DELIVERY (channel) orders — no login. Polls the public
 // GET /api/order/t/:token endpoint and shows the fulfillment timeline + bill, with optional PromptPay pay.
@@ -19,7 +20,7 @@ interface Status {
 }
 interface Pay { payment_no: string; qr_image: string | null; total: number; mock_settle: boolean }
 
-const baht = (n: number) => `฿${Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 
 // the fulfillment lifecycle, in order; delivery adds the "out for delivery" stage.
 const STAGES = (deliver: boolean) => [

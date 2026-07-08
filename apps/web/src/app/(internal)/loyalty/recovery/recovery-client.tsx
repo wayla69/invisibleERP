@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { thaiDateTime } from '@/lib/format';
 
 type RecoveryCase = {
   id: number; member_id: number; member_code: string | null; member_name: string | null;
@@ -55,7 +56,7 @@ export default function RecoveryWorklist({ initial }: { initial?: unknown }) {
                 <span className="font-semibold">{t('ly.rec_score', { score: c.score ?? '' })}</span>
                 <Link href={`/loyalty/members/${c.member_id}`} className="text-primary underline">{c.member_code ?? `#${c.member_id}`}</Link>
                 <span className="text-sm text-muted-foreground">{c.member_name}</span>
-                <span className="ml-auto text-xs text-muted-foreground">{t('ly.rec_due')} {c.response_due_at ? new Date(c.response_due_at).toLocaleString('th-TH') : '—'}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{t('ly.rec_due')} {thaiDateTime(c.response_due_at)}</span>
               </div>
               {c.comment && <p className="mt-2 rounded bg-muted px-3 py-2 text-sm">“{c.comment}”</p>}
               {c.status === 'Open' && (

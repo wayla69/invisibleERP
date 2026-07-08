@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { baht } from '@/lib/format';
 
 // ── types (mirror the public QR endpoints) ──
 type Item = { item_id: number; name: string; qty: number; kds_status: string; status_th: string; amount: number; is_buffet: boolean; charge: boolean };
@@ -34,7 +35,7 @@ const ITEM_COLOR: Record<string, string> = {
   'พร้อมเสิร์ฟ': 'text-success',
   'เสิร์ฟแล้ว': 'text-success',
 };
-const baht = (v: number) => `฿${Number(v ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 
 export default function DinerPage() {
   const token = String(useParams().token ?? '');

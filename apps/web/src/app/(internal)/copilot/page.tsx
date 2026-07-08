@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useLang } from '@/lib/i18n';
+import { pct } from '@/lib/format';
 
 type Citation = { title: string; ord: number; content: string; score: number };
 type Answer = { answer: string; grounded: boolean; citations: Citation[]; source: string };
@@ -50,7 +51,7 @@ export default function CopilotPage() {
                 <ul className="space-y-2">
                   {res.citations.map((c, i) => (
                     <li key={i} className="rounded border p-2 text-xs">
-                      <span className="font-medium">[{c.title}#{c.ord}]</span> <span className="text-muted-foreground">({(c.score * 100).toFixed(0)}%)</span>
+                      <span className="font-medium">[{c.title}#{c.ord}]</span> <span className="text-muted-foreground">({pct(c.score * 100, 0)})</span>
                       <div className="mt-1 text-muted-foreground">{c.content}</div>
                     </li>
                   ))}

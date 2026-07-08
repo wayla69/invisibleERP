@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { baht } from '@/lib/format';
 
 interface Cfg { enabled: boolean; points_per_baht: number; baht_per_point: number; min_redeem: number; expiry_days: number; transfer_day_cap: number }
 interface Tier { id?: number; tier: string; min_lifetime: number; earn_mult: number; redeem_mult: number }
@@ -142,7 +143,7 @@ export default function LoyaltyConfig() {
           <p className="text-sm text-muted-foreground">{t('ly.cf_vip_desc')}</p>
           {(plansQ.data?.plans ?? []).map((pl) => (
             <div key={pl.id} className="rounded border p-2 text-sm">
-              <span className="font-medium">{pl.code}</span> — {pl.name} · {t('ly.lc_tier')} {pl.tier} · ฿{pl.price.toLocaleString()} / {pl.period_months} {t('ly.cf_months')} {!pl.active && t('ly.cf_closed')}
+              <span className="font-medium">{pl.code}</span> — {pl.name} · {t('ly.lc_tier')} {pl.tier} · {baht(pl.price)} / {pl.period_months} {t('ly.cf_months')} {!pl.active && t('ly.cf_closed')}
             </div>
           ))}
           <div className="grid grid-cols-5 items-end gap-2">

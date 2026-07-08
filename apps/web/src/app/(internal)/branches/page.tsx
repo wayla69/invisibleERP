@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Store, Building2, ShoppingCart, CircleDollarSign, PlusCircle, CalendarSearch } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { baht, thaiDate } from '@/lib/format';
+import { baht, thaiDate, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -186,7 +186,7 @@ function ConsolidatedTab() {
               columns={[
                 { key: 'code', label: t('hx.br.col_branch'), render: (r) => <span className="font-medium">{r.code}{r.is_hq ? ' (HQ)' : ''}</span> },
                 { key: 'name', label: t('hx.br.col_name_short') },
-                { key: 'orders', label: t('hx.br.col_orders'), align: 'right', render: (r) => <span className="tabular">{r.orders.toLocaleString()}</span> },
+                { key: 'orders', label: t('hx.br.col_orders'), align: 'right', render: (r) => <span className="tabular">{num(r.orders)}</span> },
                 { key: 'subtotal', label: t('hx.br.col_subtotal'), align: 'right', render: (r) => <span className="tabular">{baht(r.subtotal)}</span> },
                 { key: 'tax', label: 'VAT', align: 'right', render: (r) => <span className="tabular">{baht(r.tax)}</span> },
                 { key: 'total_sales', label: t('hx.br.col_total_sales'), align: 'right', render: (r) => <span className="tabular font-medium">{baht(r.total_sales)}</span> },

@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { num, baht, thaiDate } from '@/lib/format';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const CSRF_COOKIE = 'ierp_csrf';
@@ -286,14 +287,14 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
         </div>
         <div className="mt-5">
           <p className="text-xs opacity-80">แต้มสะสม</p>
-          <p className="text-3xl font-bold tabular-nums">{Number(me.balance ?? 0).toLocaleString()}</p>
+          <p className="text-3xl font-bold tabular-nums">{num(me.balance)}</p>
         </div>
         {/* V1 (docs/29): tier ladder strip — the member sees their ×earn and the road to the next rung */}
         {tier && (
           <div className="mt-4 rounded-lg bg-white/15 px-3 py-2 text-xs">
             <div className="flex justify-between">
               <span>ระดับ {tier.current_tier ?? me.tier}{(() => { const cur = (tier.tiers ?? []).find((t: any) => t.tier === (tier.current_tier ?? me.tier)); return cur && Number(cur.earn_mult) !== 1 ? ` · สะสม ×${Number(cur.earn_mult)}` : ''; })()}</span>
-              {tier.next_tier && <span>อีก {Number(tier.to_next).toLocaleString()} แต้ม → {tier.next_tier}</span>}
+              {tier.next_tier && <span>อีก {num(tier.to_next)} แต้ม → {tier.next_tier}</span>}
             </div>
             {tier.next_tier && (
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/25">
@@ -308,7 +309,7 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
         )}
       </div>
       <div className="flex justify-between px-1">
-        <p className="text-xs text-muted-foreground">แต้มสะสมตลอดชีพ {Number(me.lifetime ?? 0).toLocaleString()}</p>
+        <p className="text-xs text-muted-foreground">แต้มสะสมตลอดชีพ {num(me.lifetime)}</p>
         <div className="flex items-center gap-3">
           {/* V5 (docs/29): the card in the phone wallet — idempotent; mock install link until ops sets WALLET_* creds */}
           <button className="text-xs text-muted-foreground" disabled={busy}
@@ -323,7 +324,7 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
       {/* V1 (docs/29): expiring-points warning chip (reads the W1 look-ahead register) */}
       {expiring && Number(expiring.expiring_points) > 0 && (
         <p className="rounded-md bg-warning/10 px-3 py-2 text-center text-sm">
-          ⏳ แต้ม {Number(expiring.expiring_points).toLocaleString()} จะหมดอายุใน {expiring.days_left} วัน ({expiring.expire_by}) — ใช้ก่อนหมดนะ!
+          ⏳ แต้ม {num(expiring.expiring_points)} จะหมดอายุใน {expiring.days_left} วัน ({expiring.expire_by}) — ใช้ก่อนหมดนะ!
         </p>
       )}
 
@@ -333,7 +334,7 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
       {/* Rewards */}
       <Section icon={<Gift className="size-4" />} title="ของรางวัล — ใช้แต้มแลก">
         {rewards.length === 0 ? <Empty>ยังไม่มีของรางวัล</Empty> : rewards.map((r) => (
-          <Row key={r.id} title={r.name} sub={`${Number(r.point_cost).toLocaleString()} แต้ม${r.tier_min ? ` · ขั้นต่ำ ${r.tier_min}` : ''}`}>
+          <Row key={r.id} title={r.name} sub={`${num(r.point_cost)} แต้ม${r.tier_min ? ` · ขั้นต่ำ ${r.tier_min}` : ''}`}>
             <Button size="sm" variant="outline" disabled={busy || Number(me.balance) < Number(r.point_cost)} onClick={() => act(() => mapi(`/api/member/rewards/${r.id}/redeem`, { method: 'POST' }), '🎁 แลกสำเร็จ! ดูโค้ดในคูปองของฉัน')}>แลก</Button>
           </Row>
         ))}
@@ -343,7 +344,7 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
       {wheels.length > 0 && (
         <Section icon={<Disc3 className="size-4" />} title="วงล้อนำโชค — หมุนรับรางวัล">
           {wheels.map((w) => (
-            <Row key={w.id} title={w.name} sub={w.cost_points > 0 ? `${Number(w.cost_points).toLocaleString()} แต้ม/ครั้ง${w.daily_free_spins > 0 ? ` · ฟรี ${w.daily_free_spins}/วัน` : ''}` : (w.daily_free_spins > 0 ? `ฟรี ${w.daily_free_spins} ครั้ง/วัน` : 'ฟรี')}>
+            <Row key={w.id} title={w.name} sub={w.cost_points > 0 ? `${num(w.cost_points)} แต้ม/ครั้ง${w.daily_free_spins > 0 ? ` · ฟรี ${w.daily_free_spins}/วัน` : ''}` : (w.daily_free_spins > 0 ? `ฟรี ${w.daily_free_spins} ครั้ง/วัน` : 'ฟรี')}>
               <Button size="sm" disabled={busy || (w.cost_points > 0 && Number(me.balance) < w.cost_points)} onClick={() => spin(w)}>หมุน</Button>
             </Row>
           ))}
@@ -393,8 +394,8 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
         <Section icon={<ReceiptText className="size-4" />} title="ประวัติแต้ม">
           {history.slice(0, 10).map((h: any, i: number) => (
             <Row key={i}
-              title={`${h.txn_type === 'Earn' ? 'สะสม' : h.txn_type === 'Redeem' ? 'แลก' : h.txn_type === 'Transfer' ? (Number(h.points) < 0 ? 'โอนออก' : 'รับโอน') : h.txn_type === 'Expire' ? 'หมดอายุ' : h.txn_type} ${Number(h.points) > 0 ? '+' : ''}${Number(h.points).toLocaleString()} แต้ม`}
-              sub={`${h.ref_doc ?? ''} · คงเหลือ ${Number(h.balance_after).toLocaleString()}`}>
+              title={`${h.txn_type === 'Earn' ? 'สะสม' : h.txn_type === 'Redeem' ? 'แลก' : h.txn_type === 'Transfer' ? (Number(h.points) < 0 ? 'โอนออก' : 'รับโอน') : h.txn_type === 'Expire' ? 'หมดอายุ' : h.txn_type} ${Number(h.points) > 0 ? '+' : ''}${num(h.points)} แต้ม`}
+              sub={`${h.ref_doc ?? ''} · คงเหลือ ${num(h.balance_after)}`}>
               <span className="text-xs text-muted-foreground">{h.txn_date ? new Date(h.txn_date).toLocaleDateString('th-TH') : ''}</span>
             </Row>
           ))}
@@ -415,7 +416,7 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
       <Section icon={<ReceiptText className="size-4" />} title="อัปโหลดใบเสร็จ — ขอแต้ม">
         <ReceiptUploadForm onDone={(msg) => act(async () => {}, msg)} />
         {receipts.length === 0 ? <Empty>ยังไม่มีใบเสร็จที่ส่ง</Empty> : receipts.map((r) => (
-          <Row key={r.id} title={`฿${Number(r.purchase_amount).toLocaleString()}${r.store_name ? ` · ${r.store_name}` : ''}`} sub={`ส่งเมื่อ ${new Date(r.submitted_at).toLocaleDateString('th-TH')}`}>
+          <Row key={r.id} title={`${baht(r.purchase_amount)}${r.store_name ? ` · ${r.store_name}` : ''}`} sub={`ส่งเมื่อ ${thaiDate(r.submitted_at)}`}>
             <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'Rejected' ? 'destructive' : 'warning'}>
               {r.status === 'Approved' ? 'อนุมัติแล้ว' : r.status === 'Rejected' ? 'ปฏิเสธ' : 'รอตรวจสอบ'}
             </Badge>
@@ -441,7 +442,7 @@ function TransferForm({ busy, balance, onDone }: { busy: boolean; balance: numbe
     try {
       const r: any = await mapi('/api/member/points/transfer', { method: 'POST', body: JSON.stringify({ to_phone: phone.trim(), points: Number(points), note: note.trim() || undefined }) });
       setPhone(''); setPoints(''); setNote('');
-      onDone(`💝 ส่ง ${Number(r.points).toLocaleString()} แต้มแล้ว — คงเหลือ ${Number(r.from_balance).toLocaleString()} แต้ม`);
+      onDone(`💝 ส่ง ${num(r.points)} แต้มแล้ว — คงเหลือ ${num(r.from_balance)} แต้ม`);
     } catch (e: any) { setErr(e.message); } finally { setSending(false); }
   };
   const pts = Number(points);

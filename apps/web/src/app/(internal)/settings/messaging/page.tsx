@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { thaiDateTime } from '@/lib/format';
 
 type Channel = { channel: 'line' | 'sms' | 'email'; configured: boolean; enabled: boolean; resolved_provider: 'tenant' | 'env' | 'mock'; callback_token_set: boolean; last_send_at: string | null; last_status: string | null; last_provider: string | null; updated_at: string | null; updated_by: string | null;
   // LP-1 (docs/31) — LINE go-live readiness (line channel only)
@@ -89,7 +90,7 @@ function LineGoLivePanel({ ch }: { ch: Channel }) {
         </Badge>
         <span className="text-muted-foreground">
           {ch.last_webhook_at
-            ? `${t(WEBHOOK_STATUS_TH[ch.last_webhook_status ?? ''] ?? ch.last_webhook_status ?? '')} · ${new Date(ch.last_webhook_at).toLocaleString('th-TH')}`
+            ? `${t(WEBHOOK_STATUS_TH[ch.last_webhook_status ?? ''] ?? ch.last_webhook_status ?? '')} · ${thaiDateTime(ch.last_webhook_at)}`
             : t('st.msg.no_webhook_yet')}
         </span>
       </div>
@@ -129,7 +130,7 @@ function ChannelCard({ ch, onSaved }: { ch: Channel; onSaved: () => void }) {
           {ch.callback_token_set && <Badge variant="muted" className="text-[10px]">{t('st.msg.delivery_receipt')}</Badge>}
         </div>
         <span className="text-xs text-muted-foreground">
-          {ch.last_send_at ? t('st.msg.last_send', { status: ch.last_status ?? '—', provider: ch.last_provider ?? '—', when: new Date(ch.last_send_at).toLocaleString('th-TH') }) : t('st.msg.never_sent')}
+          {ch.last_send_at ? t('st.msg.last_send', { status: ch.last_status ?? '—', provider: ch.last_provider ?? '—', when: thaiDateTime(ch.last_send_at) }) : t('st.msg.never_sent')}
           {ch.updated_by ? ` · ${t('st.msg.edited_by', { by: ch.updated_by })}` : ''}
         </span>
       </div>

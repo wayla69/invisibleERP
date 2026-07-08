@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { thaiDateTime } from '@/lib/format';
 
 interface EventDef { key: string; label: string; label_en: string }
 interface Hook { id: number; url: string; events: string[]; active: boolean; createdBy: string | null; createdAt: string | null }
@@ -87,7 +88,7 @@ function Endpoints() {
             { key: 'url', label: 'URL', render: (r) => <code className="text-xs">{r.url}</code> },
             { key: 'events', label: t('st.wh.col_events'), render: (r) => (r.events?.length ? r.events.map((e) => <Badge key={e} variant="muted" className="mr-1">{e}</Badge>) : <Badge variant="info">{t('st.wh.all')}</Badge>) },
             { key: 'active', label: t('fin.col_status'), render: (r) => <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? t('st.wh.active') : t('st.wh.inactive')}</Badge> },
-            { key: 'createdAt', label: t('st.wh.col_created'), render: (r) => r.createdAt ? new Date(r.createdAt).toLocaleString('th-TH') : '—' },
+            { key: 'createdAt', label: t('st.wh.col_created'), render: (r) => thaiDateTime(r.createdAt) },
             { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
           emptyState={{ icon: Webhook, title: t('st.wh.empty_ep_title'), description: t('st.wh.empty_ep_desc') }}
@@ -114,7 +115,7 @@ function Deliveries() {
           rows={q.data?.deliveries ?? []}
           rowKey={(r) => r.id}
           columns={[
-            { key: 'created_at', label: t('st.wh.col_time'), render: (r) => r.created_at ? new Date(r.created_at).toLocaleString('th-TH') : '—' },
+            { key: 'created_at', label: t('st.wh.col_time'), render: (r) => thaiDateTime(r.created_at) },
             { key: 'event', label: t('st.wh.col_events'), render: (r) => <code className="text-xs">{r.event}</code> },
             { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={r.status === 'delivered' ? 'success' : r.status === 'failed' ? 'destructive' : 'muted'}>{r.status}</Badge> },
             { key: 'attempts', label: t('st.wh.col_attempts'), align: 'right', render: (r) => r.attempts },

@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Banknote, CheckCircle2, CircleDollarSign, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht, num } from '@/lib/format';
+import { baht, num, thaiDateTime } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
@@ -84,7 +84,7 @@ export default function PosTillPage() {
 
   const columns: Column<XzReport>[] = [
     { key: 'id', label: '#', render: (r) => `S-${r.till_session_id}` },
-    { key: 'generated_at', label: t('px.till_col_open_time'), render: (r) => new Date(r.generated_at).toLocaleString('th-TH') },
+    { key: 'generated_at', label: t('px.till_col_open_time'), render: (r) => thaiDateTime(r.generated_at) },
     { key: 'gross_sales', label: t('px.till_col_sales'), align: 'right', render: (r) => baht(r.gross_sales) },
     { key: 'total_cash', label: t('px.till_col_cash'), align: 'right', render: (r) => baht(r.total_cash) },
     { key: 'cash_counted', label: t('px.till_col_counted'), align: 'right', render: (r) => baht(r.cash_counted) },

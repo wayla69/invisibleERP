@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Cable, DollarSign, Scale, MonitorSmartphone } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { baht, num } from '@/lib/format';
+import { baht, num, thaiDateTime } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -74,7 +74,7 @@ function Devices() {
             { key: 'terminal', label: t('px.periph_col_terminal'), render: (r) => r.terminal ?? '—' },
             { key: 'printer_id', label: t('px.periph_col_printer_via'), render: (r) => r.printer_id ?? '—' },
             { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={r.status === 'active' ? 'success' : 'muted'}>{r.status}</Badge> },
-            { key: 'last_seen_at', label: t('px.periph_col_last_seen'), render: (r) => r.last_seen_at ? new Date(r.last_seen_at).toLocaleString('th-TH') : '—' },
+            { key: 'last_seen_at', label: t('px.periph_col_last_seen'), render: (r) => thaiDateTime(r.last_seen_at) },
           ]}
           emptyState={{
             icon: MonitorSmartphone,
@@ -117,7 +117,7 @@ function Drawer() {
           rows={evts.data?.events ?? []}
           rowKey={(r) => r.id}
           columns={[
-            { key: 'created_at', label: t('px.periph_col_time'), render: (r) => r.created_at ? new Date(r.created_at).toLocaleString('th-TH') : '—' },
+            { key: 'created_at', label: t('px.periph_col_time'), render: (r) => thaiDateTime(r.created_at) },
             { key: 'reason', label: t('px.periph_col_reason'), render: (r) => <Badge variant={r.reason === 'no_sale' ? 'warning' : 'muted'}>{r.reason}</Badge> },
             { key: 'terminal', label: t('px.periph_col_terminal'), render: (r) => r.terminal ?? '—' },
             { key: 'sale_no', label: t('px.periph_col_sale'), render: (r) => r.sale_no ?? '—' },

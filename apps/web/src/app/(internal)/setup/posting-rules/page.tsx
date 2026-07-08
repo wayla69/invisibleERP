@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { num } from '@/lib/format';
 
 // กฎการลงบัญชี — read + tenant-override editor over the account-determination engine (posting_rules).
 // Global defaults ship with the product; a tenant shadows a leg with its own account (docs/33 · GL-12/GL-21).
@@ -109,7 +110,7 @@ export default function PostingRulesPage() {
                       { key: 'role', label: t('st.spost_col_role2') },
                       { key: 'side', label: t('st.spost_col_side'), render: (r: any) => <Badge variant={r.side === 'DR' ? 'success' : 'warning'}>{r.side}</Badge> },
                       { key: 'accountCode', label: t('st.spost_col_account') },
-                      { key: 'amount', label: t('st.spost_col_amount'), align: 'right', render: (r: any) => Number(r.amount).toLocaleString() },
+                      { key: 'amount', label: t('st.spost_col_amount'), align: 'right', render: (r: any) => num(r.amount) },
                     ]}
                     emptyState={{ icon: Eye, title: t('st.spost_empty_preview_title'), description: t('st.spost_empty_preview_desc') }}
                   />

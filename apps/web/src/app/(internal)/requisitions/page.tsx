@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DataTable, type Column } from '@/components/data-table';
 import { PrForm } from '@/components/procurement-forms';
+import { baht } from '@/lib/format';
 
 type PrLine = { id: number; item_id: string; item_description: string | null; request_qty: number; uom: string | null; reason: string | null; po_no: string | null; line_status: string | null };
 type Pr = { pr_no: string; pr_date: string | null; requested_by: string | null; status: string; priority: string | null; approved_by: string | null; lines: PrLine[] };
@@ -510,7 +511,7 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
                       <span className="font-medium">{g.vendor_name || t('iv.req_unassigned_group')}</span>
                       {src && src !== 'manual' ? <Badge variant="muted" className="text-[10px]">{sourceLabel(src)}</Badge> : null}
                     </div>
-                    <div className="text-xs text-muted-foreground">{t('iv.req_group_total')} ฿{total.toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground">{t('iv.req_group_total')} {baht(total)}</div>
                   </div>
                   <VendorAssign onPick={(v) => assignVendor(ids, v)} />
                   <label className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">

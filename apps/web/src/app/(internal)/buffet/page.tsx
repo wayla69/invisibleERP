@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BarChart3, Plus, Timer, Users, Utensils } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht, num } from '@/lib/format';
+import { baht, num, pct } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -81,7 +81,7 @@ function Behaviour() {
                   <StatCard label={tr('mf.buf_covers')} value={num(t.covers)} icon={Users} tone="info" />
                   <StatCard label={tr('mf.buf_dishes_per_pax')} value={t.items_per_head.toFixed(2)} icon={Utensils} tone="default" hint={tr('mf.buf_total_dishes', { n: num(t.food_qty) })} />
                   <StatCard label={tr('mf.buf_avg_bill')} value={baht(t.avg_bill_per_session)} icon={BarChart3} tone="success" hint={tr('mf.buf_total_revenue', { amt: baht(t.revenue) })} />
-                  <StatCard label={tr('mf.buf_overtime')} value={`${t.overtime_rate_pct.toFixed(0)}%`} icon={Timer} tone={t.overtime_rate_pct > 0 ? 'warning' : 'default'} hint={tr('mf.buf_sessions_n', { n: num(t.overtime_sessions) })} />
+                  <StatCard label={tr('mf.buf_overtime')} value={pct(t.overtime_rate_pct, 0)} icon={Timer} tone={t.overtime_rate_pct > 0 ? 'warning' : 'default'} hint={tr('mf.buf_sessions_n', { n: num(t.overtime_sessions) })} />
                 </div>
                 <div>
                   <h4 className="mb-2 text-sm font-semibold text-muted-foreground">{tr('mf.buf_top_menu')}</h4>

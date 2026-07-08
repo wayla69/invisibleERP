@@ -11,13 +11,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { num } from '@/lib/format';
 
 type Measure = { key: string; label: string; label_en: string; unit: string };
 type Dimension = { key: string; label: string; label_en: string };
 type Model = { fact: string; label: string; measures: Measure[]; dimensions: Dimension[] };
 type RunResult = { dimension: string; measures: string[]; rows: any[] };
 
-const money = (x: number) => (Number(x) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (x: number) => num(x, 2);
 const sel = 'h-9 rounded-md border bg-transparent px-3 text-sm';
 
 export default function QueryStudioPage() {
@@ -78,7 +79,7 @@ export default function QueryStudioPage() {
                         <div className="mt-0.5 h-1.5 rounded bg-primary/20"><div className="h-1.5 rounded bg-primary" style={{ width: `${Math.round((Number(r.sales_total) / maxSales) * 100)}%` }} /></div>
                       </td>
                       <td className="px-2 py-1 text-right tabular-nums">{money(r.sales_total)}</td>
-                      <td className="px-2 py-1 text-right tabular-nums">{Number(r.orders).toLocaleString()}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{num(r.orders)}</td>
                       <td className="px-2 py-1 text-right tabular-nums">{money(r.avg_order)}</td>
                       <td className="px-2 py-1 text-right tabular-nums">{money(r.discount_total)}</td>
                       <td className="px-2 py-1 text-right tabular-nums">{money(r.tax_total)}</td>

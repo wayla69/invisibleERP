@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calculator, Landmark, Scale, Wallet } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht, thaiDate } from '@/lib/format';
+import { baht, thaiDate, pct } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { useLang } from '@/lib/i18n';
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
-const pct = (v: unknown) => `${(Number(v ?? 0) * 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
+const ratePct = (v: unknown) => pct(Number(v ?? 0) * 100, 2);
 
 function statusBadge(status: string, t: (key: string) => string) {
   return status === 'Posted'
@@ -86,7 +86,7 @@ function RunsList() {
             columns={[
               { key: 'period', label: t('fnx.dtax.col_period') },
               { key: 'as_of_date', label: t('fnx.dtax.col_asof'), render: (r: any) => thaiDate(r.as_of_date) },
-              { key: 'tax_rate', label: t('fnx.dtax.col_tax_rate'), align: 'right', render: (r: any) => <span className="tabular">{pct(r.tax_rate)}</span> },
+              { key: 'tax_rate', label: t('fnx.dtax.col_tax_rate'), align: 'right', render: (r: any) => <span className="tabular">{ratePct(r.tax_rate)}</span> },
               { key: 'dta', label: 'DTA', align: 'right', render: (r: any) => <span className="tabular">{baht(r.dta)}</span> },
               { key: 'dtl', label: 'DTL', align: 'right', render: (r: any) => <span className="tabular">{baht(r.dtl)}</span> },
               { key: 'net_deferred', label: t('fnx.dtax.col_net'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.net_deferred)}</span> },

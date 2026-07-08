@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { BarChart3, Clock, ShieldAlert, Users, TrendingUp, Soup } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht, num } from '@/lib/format';
+import { baht, num, pct } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
@@ -22,7 +22,7 @@ function bkkToday(): string {
   const d = new Date(Date.now() + 7 * 3600 * 1000);
   return d.toISOString().slice(0, 10);
 }
-const pct = (v: unknown) => `${Number(v ?? 0).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
+
 
 const QUADRANT: Record<string, 'success' | 'warning' | 'info' | 'muted'> = {
   Star: 'success', Plowhorse: 'warning', Puzzle: 'info', Dog: 'muted',
