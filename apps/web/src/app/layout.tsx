@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
 import { Inter, Sarabun } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
@@ -41,11 +42,14 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Per-request CSP nonce set by middleware (M-1). next-themes' anti-flash inline <script> must carry it or
+  // the strict production CSP would block it; passing `nonce` here stamps it onto that script.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
     <html lang="th" suppressHydrationWarning className={`${inter.variable} ${sarabun.variable}`}>
       <body className="font-sans antialiased">
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange nonce={nonce}>
           <ChunkReloadGuard />
           <PwaRegister />
           <Providers>{children}</Providers>
