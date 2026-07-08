@@ -8,6 +8,7 @@ import { socialSecurity, annualPit, computePayslip } from '../src/modules/payrol
 import { buildEtaxInvoiceXml } from '../src/modules/tax/documents/etax-xml';
 import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax/documents/etax-email.service';
 import { hmacSha256Hex, verifyWebhookSignature, verifyWebhookWithTimestamp } from '../src/common/crypto';
+import { hitRateLimit } from '../src/common/rate-limit-store';
 import { verifyInboundWebhook } from '../src/common/webhook-auth';
 import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
@@ -185,6 +186,29 @@ describe('PSP webhook signature (C4 — HMAC-SHA256 over raw body)', () => {
     // no timestamp → body-only back-compat path still works
     expect(verifyWebhookWithTimestamp(secret, body, sig, undefined, 300)).toBe('ok');
     expect(verifyWebhookWithTimestamp(secret, body, 'bad', undefined, 300)).toBe('bad');
+  });
+});
+
+describe('Shared rate-limit store — in-memory fixed window (L-8, no Redis configured)', () => {
+  it('allows up to max in a window, then limits; a fresh window resets', async () => {
+    const key = `k-${Math.random()}`;
+    const max = 3, win = 60_000, t0 = 1_000_000;
+    // 3 hits within budget
+    expect((await hitRateLimit(key, max, win, t0)).limited).toBe(false);
+    expect((await hitRateLimit(key, max, win, t0 + 1)).limited).toBe(false);
+    expect((await hitRateLimit(key, max, win, t0 + 2)).limited).toBe(false);
+    // 4th in the same window → limited, with a positive retry-after
+    const over = await hitRateLimit(key, max, win, t0 + 3);
+    expect(over.limited).toBe(true);
+    expect(over.retryAfter).toBeGreaterThan(0);
+    // next window → reset
+    expect((await hitRateLimit(key, max, win, t0 + win + 1)).limited).toBe(false);
+  });
+  it('keys are independent', async () => {
+    const a = `a-${Math.random()}`, b = `b-${Math.random()}`, t = 2_000_000;
+    await hitRateLimit(a, 1, 60_000, t);
+    expect((await hitRateLimit(a, 1, 60_000, t + 1)).limited).toBe(true);  // a exhausted
+    expect((await hitRateLimit(b, 1, 60_000, t + 1)).limited).toBe(false); // b independent
   });
 });
 

@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, SetMetadata, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY, type JwtUser } from '../../common/decorators';
+import { hitRateLimit } from '../../common/rate-limit-store';
 
 // Required public-API scopes for a handler, e.g. @Scopes('catalog:read').
 export const SCOPES_KEY = 'publicApiScopes';
@@ -16,20 +17,14 @@ export function scopeSatisfied(granted: string[], required: string): boolean {
   return false;
 }
 
-// Fixed-window, in-memory, per-key rate limiter. Per-process (mirrors the global @fastify/rate-limit
-// edge limiter) — a distributed deployment would need a shared backend. Window/limit are env-tunable.
-const buckets = new Map<string, { windowStart: number; count: number }>();
-function rateLimited(key: string, now: number): { limited: boolean; max: number; windowMs: number; retryAfter: number } {
+// Fixed-window, per-key rate limiter. Backed by the SHARED rate-limit store (security review L-8): Redis when
+// RATE_LIMIT_REDIS_URL/REALTIME_REDIS_URL is set so the limit holds across replicas, else per-process
+// in-memory (unchanged default). Window/limit are env-tunable.
+async function rateLimited(key: string, now: number): Promise<{ limited: boolean; max: number; windowMs: number; retryAfter: number }> {
   const max = Math.max(1, Number(process.env.PUBLIC_API_RATE_MAX ?? 120));
   const windowMs = Math.max(1000, Number(process.env.PUBLIC_API_RATE_WINDOW_MS ?? 60_000));
-  const b = buckets.get(key);
-  if (!b || now - b.windowStart >= windowMs) {
-    buckets.set(key, { windowStart: now, count: 1 });
-    return { limited: false, max, windowMs, retryAfter: 0 };
-  }
-  b.count += 1;
-  const limited = b.count > max;
-  return { limited, max, windowMs, retryAfter: Math.ceil((b.windowStart + windowMs - now) / 1000) };
+  const r = await hitRateLimit(key, max, windowMs, now);
+  return { limited: r.limited, max, windowMs, retryAfter: r.retryAfter };
 }
 
 // Public API gate: the surface is API-KEY ONLY (human JWTs are rejected), scope-checked, and
@@ -39,7 +34,7 @@ function rateLimited(key: string, now: number): { limited: boolean; max: number;
 export class PublicApiGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
-  canActivate(ctx: ExecutionContext): boolean {
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (isPublic) return true;
 
@@ -53,7 +48,7 @@ export class PublicApiGuard implements CanActivate {
     }
 
     // Per-key fixed-window rate limit — keyed on the stable key prefix (not the shared minter identity).
-    const rl = rateLimited(user.apiKeyPrefix, Date.now());
+    const rl = await rateLimited(user.apiKeyPrefix, Date.now());
     const res = ctx.switchToHttp().getResponse();
     try { res?.header?.('X-RateLimit-Limit', String(rl.max)); } catch { /* header best-effort */ }
     if (rl.limited) {
