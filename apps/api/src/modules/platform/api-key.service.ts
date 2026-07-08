@@ -1,6 +1,7 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { randomBytes, createHash } from 'node:crypto';
 import { eq, and, desc, sql } from 'drizzle-orm';
+import { resolvePermissions, type Role } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { apiKeys, users } from '../../database/schema';
 import { safeEqualHex } from '../../common/crypto';
@@ -9,6 +10,19 @@ import type { JwtUser } from '../../common/decorators';
 export interface IssueKeyDto { name: string; scopes?: string[]; ttl_days?: number }
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+
+// Mirror of common/guards.ts SCOPE_ALIASES — kept local to avoid an import cycle (guards.ts imports this
+// service). MUST stay in sync with that map so the cap below matches the auth-time expansion exactly.
+const SCOPE_ALIASES: Record<string, string[]> = {
+  read: ['dashboard', 'exec', 'cust_dash', 'cust_inventory'],
+  write: ['pos', 'order_mgt', 'warehouse', 'procurement'],
+};
+// The effective permissions a single granted scope expands to for a machine (Sales-role) principal —
+// mirrors JwtAuthGuard's expansion so capping here reflects the real grant a key would carry.
+function permsForScope(scope: string): string[] {
+  if (scope === '*' || scope === 'admin') return resolvePermissions('Sales' as Role);
+  return SCOPE_ALIASES[scope] ?? [scope];
+}
 
 @Injectable()
 export class ApiKeyService {
@@ -23,6 +37,20 @@ export class ApiKeyService {
 
   // ออกคีย์ใหม่ — คืน "คีย์เต็ม" เพียงครั้งเดียว (เก็บแค่ sha256)
   async issue(dto: IssueKeyDto, user: JwtUser) {
+    // SoD (security review H-2): a key is a bearer principal that inherits the requested scopes'
+    // permissions at auth time. Cap the requested scopes to what the MINTER actually holds so a narrow
+    // role (e.g. AccessAdmin, whose only power is `users`) cannot mint a broadly-scoped transacting key
+    // and escalate — nor split maker-checker across two independent key principals it could not wield
+    // interactively. Reject loudly rather than silently trimming, so the caller sees why.
+    const minterPerms = new Set(user.permissions ?? []);
+    const disallowed = (dto.scopes ?? []).filter((s) => !permsForScope(s).every((p) => minterPerms.has(p)));
+    if (disallowed.length) {
+      throw new ForbiddenException({
+        code: 'SCOPE_EXCEEDS_GRANT',
+        message: `Cannot issue an API key with scope(s) you do not hold: ${disallowed.join(', ')}`,
+        messageTh: `ออก API key ด้วยสิทธิ์ที่คุณไม่มีไม่ได้: ${disallowed.join(', ')}`,
+      });
+    }
     const db = this.db;
     const tenantId = await this.tenantOf(user);
     const rawKey = 'ierp_' + randomBytes(16).toString('hex'); // 'ierp_' + 32 hex chars
