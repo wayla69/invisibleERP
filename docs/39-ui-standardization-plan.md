@@ -38,7 +38,8 @@
 | 2 | Formatting sweep → `baht`/`num(v,digits?)`/`thaiDate`/**`thaiDateTime`** (new — audit/log timestamps keep their time)/`pct`. 27 files swept; **6 documented exceptions** stay: `command-center` `fmt()` + `treasury` `nn()` (coherent multi-unit local formatters) and their SVG chart coordinates, `demand` fraction-`pct`/MASE metrics, `tax-codes`/`bom`/`buffet` deliberate fixed-digit semantics | **DELIVERED** |
 | 3a | Shared `Select` adoption — all 4 finance-area inline-class files + **all 41 local-`selectCls` files** (15 drifted copies of one intent converged on the canonical style; layout preserved: no-`w-full` variants become `className="w-auto"` via twMerge). Raw `<select>` files 75 → **30** | **DELIVERED** |
 | 3b | Remaining 30 inline-class `<select>` files (per-site visual judgment) + raw `<input>`/`FormField` adoption | planned |
-| 4 | DataTable adoption for the 21 raw-`<table>` pages, per area, simplest first (`controls`, `developer`, `einvoice`, `loyalty`, `projects/portfolio` → finance analytics clients last) | planned |
+| 4 (slice 1) | DataTable adoption — `controls` findings, `developer` API keys (keeps the shared `Select` tier picker), `einvoice` submissions converted (sort + pagination + mobile cards for free). **Exceptions documented:** `loyalty` tier ladder (mini 4-row config table with inline editor — pagination/sort UI would be noise) and `projects/portfolio` (capacity **heatmap calendar**, not a list) stay hand-rolled by design. Raw-table pages 21 → 16 | **DELIVERED (slice 1)** |
+| 4 (rest) | Remaining 16 raw-table pages, per area (finance analytics clients last) | planned |
 | 5 | `ModulePage` widening + toast-vs-`Msg` convention decision + breadcrumb decision | planned |
 
 Interleaved with this track: the **docs/38 2.1 pilot (bi facade extraction)** — golden-master (496 paths)
@@ -49,4 +50,5 @@ must stay byte-identical.
 |---|---|---|---|
 | 0.1 | 2026-07-08 | Platform / IT | Charter + measured inventory + batch plan; batch 1 delivered (ConfirmDialog / form-controls / pct + all window.confirm sites migrated; master-io dedupes `selectCls`). |
 | 0.2 | 2026-07-08 | Platform / IT | Batch 2 delivered: formatting sweep (27 files → lib helpers; `thaiDateTime` + `num(v,digits?)` added; `pct` semantics locked to drop-trailing-zeros; local `baht`/`money`/`pct` duplicates removed in qr/track/query/nl-analytics/match/deferred-tax); 6 exceptions documented in §3. |
+| 0.4 | 2026-07-08 | Platform / IT | Batch 4 slice 1: DataTable adoption in controls/developer/einvoice; loyalty tier-ladder + portfolio heatmap documented as exceptions (not list surfaces). |
 | 0.3 | 2026-07-08 | Platform / IT | Batch 3a delivered: shared `Select` adopted in 45 files (~95 selects); all 41 local `selectCls` constants deleted (15 drifted variants converged); width semantics preserved (`w-auto` where the local style had no `w-full`); assets' style-sharing input imports the shared `selectCls`. |
