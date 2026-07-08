@@ -103,6 +103,7 @@ export class JwtAuthGuard implements CanActivate {
     const db = this.db;
     let dbRole: string | undefined; // live role from the users table (staff); overrides the token's role claim
     let dbOrgId: number | null = null; // live org_id (staff) for hybrid multi-company bypass scoping
+    let dbTenantId: number | null | undefined; // live tenant_id (staff); overrides the token's tenantId claim (L-3)
     const revoked = new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Session has been revoked — please sign in again', messageTh: 'เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบใหม่' });
     if (payload.jti) {
       const [rev] = await db.select({ j: revokedTokens.jti }).from(revokedTokens).where(and(eq(revokedTokens.jti, payload.jti), gt(revokedTokens.expiresAt, new Date()))).limit(1);
@@ -117,7 +118,7 @@ export class JwtAuthGuard implements CanActivate {
         if (m && m.active === false) throw new UnauthorizedException({ code: 'MEMBER_DEACTIVATED', message: 'This membership is no longer active', messageTh: 'สมาชิกนี้ถูกปิดใช้งาน' });
       }
     } else if (payload.sub) {
-      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, mcp: users.mustChangePassword, mfaEnabled: users.mfaEnabled, tenantSuspended: tenants.suspendedAt })
+      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, tenantId: users.tenantId, mcp: users.mustChangePassword, mfaEnabled: users.mfaEnabled, tenantSuspended: tenants.suspendedAt })
         .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).where(eq(users.username, payload.sub)).limit(1);
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
@@ -135,6 +136,11 @@ export class JwtAuthGuard implements CanActivate {
         // Hybrid tenancy (0196) — the org an Admin is scoped to under TENANCY_MODE=multi-company. Sourced
         // live from the DB (same row) so a forged org claim can't widen an Admin's bypass.
         dbOrgId = u.orgId != null ? Number(u.orgId) : null;
+        // ITGC-AC-18 / security review L-3 — trust the LIVE DB tenant_id, not the token claim (which was the
+        // only identity field still sourced from the JWT, asymmetric with role/orgId). A stale or forged
+        // tenantId claim can no longer point a staff session at another tenant. Rides this same per-request
+        // read (no extra round-trip). NULL = a global/HQ staff account (kept as null).
+        dbTenantId = u.tenantId != null ? Number(u.tenantId) : null;
         // ITGC-AC-07 / docs/27 R0-3 — must_change_password is a HARD gate, not a UI hint: a seeded or
         // admin-reset credential can reach nothing but the change-password/logout/me endpoints until the
         // password is rotated. Rides the same per-request row read (no extra round-trip).
@@ -162,7 +168,9 @@ export class JwtAuthGuard implements CanActivate {
       username: payload.sub,
       role: (dbRole ?? payload.role) as JwtUser['role'],
       customerName: payload.customerName ?? null,
-      tenantId: payload.tenantId ?? null,
+      // Staff: the live DB tenant_id (dbTenantId is set whenever the users row was read, incl. null for a
+      // global account). Members (no users row) keep their token's tenantId claim. (security review L-3)
+      tenantId: dbTenantId !== undefined ? dbTenantId : (payload.tenantId ?? null),
       orgId: dbOrgId,
       permissions: payload.permissions ?? [],
       memberId: payload.memberId ?? null, // loyalty member principal (role==='Member'); null for staff

@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
+import { DataTable } from '@/components/data-table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -68,26 +69,26 @@ export default function QueryStudioPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">{t('pb.query_result_by', { label: model.data?.dimensions.find((d) => d.key === result.dimension)?.label ?? result.dimension })}</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto">
-            {result.rows.length === 0 ? <p className="text-sm text-muted-foreground">{t('pb.query_no_data')}</p> : (
-              <table className="w-full text-sm">
-                <thead><tr className="border-b text-left text-muted-foreground"><th className="px-2 py-1 font-medium">{model.data?.dimensions.find((d) => d.key === result.dimension)?.label}</th>{measures.map((m) => <th key={m.key} className="px-2 py-1 text-right font-medium">{m.label}</th>)}</tr></thead>
-                <tbody>
-                  {result.rows.map((r, i) => (
-                    <tr key={i} className="border-b">
-                      <td className="px-2 py-1">
-                        <div>{String(r.dim)}</div>
-                        <div className="mt-0.5 h-1.5 rounded bg-primary/20"><div className="h-1.5 rounded bg-primary" style={{ width: `${Math.round((Number(r.sales_total) / maxSales) * 100)}%` }} /></div>
-                      </td>
-                      <td className="px-2 py-1 text-right tabular-nums">{money(r.sales_total)}</td>
-                      <td className="px-2 py-1 text-right tabular-nums">{num(r.orders)}</td>
-                      <td className="px-2 py-1 text-right tabular-nums">{money(r.avg_order)}</td>
-                      <td className="px-2 py-1 text-right tabular-nums">{money(r.discount_total)}</td>
-                      <td className="px-2 py-1 text-right tabular-nums">{money(r.tax_total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            <DataTable
+              dense
+              rows={result.rows}
+              rowKey={(_, i) => i}
+              emptyText={t('pb.query_no_data')}
+              columns={[
+                { key: 'dim', label: model.data?.dimensions.find((d) => d.key === result.dimension)?.label ?? result.dimension, sortable: true, render: (r) => (
+                  <div>
+                    <div>{String(r.dim)}</div>
+                    {/* inline share-of-sales bar (kept from the hand-rolled grid) */}
+                    <div className="mt-0.5 h-1.5 rounded bg-primary/20"><div className="h-1.5 rounded bg-primary" style={{ width: `${Math.round((Number(r.sales_total) / maxSales) * 100)}%` }} /></div>
+                  </div>
+                ) },
+                { key: 'sales_total', label: measures.find((m) => m.key === 'sales_total')?.label ?? 'sales_total', align: 'right', sortable: true, render: (r) => <span className="tabular-nums">{money(r.sales_total)}</span> },
+                { key: 'orders', label: measures.find((m) => m.key === 'orders')?.label ?? 'orders', align: 'right', sortable: true, render: (r) => <span className="tabular-nums">{num(r.orders)}</span> },
+                { key: 'avg_order', label: measures.find((m) => m.key === 'avg_order')?.label ?? 'avg_order', align: 'right', sortable: true, render: (r) => <span className="tabular-nums">{money(r.avg_order)}</span> },
+                { key: 'discount_total', label: measures.find((m) => m.key === 'discount_total')?.label ?? 'discount_total', align: 'right', sortable: true, render: (r) => <span className="tabular-nums">{money(r.discount_total)}</span> },
+                { key: 'tax_total', label: measures.find((m) => m.key === 'tax_total')?.label ?? 'tax_total', align: 'right', sortable: true, render: (r) => <span className="tabular-nums">{money(r.tax_total)}</span> },
+              ]}
+            />
           </CardContent>
         </Card>
       )}

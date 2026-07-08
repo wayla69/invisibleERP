@@ -715,21 +715,35 @@ async function main() {
   // C1: `state` is now single-use and server-persisted, so each callback must present a FRESH state minted by
   // authorize() (a forged/replayed/expired state is rejected — see the BAD_STATE check below).
   const mkIdToken = (over: any = {}) => signHs256({ iss: ISSUER, aud: CLIENT, sub: 'idp-user-1', email: 'alice@cf2.example', exp: Math.floor(Date.now() / 1000) + 3600, ...over }, SECRET);
-  const freshState = async (): Promise<string> => (await inj('GET', '/api/auth/sso/authorize?tenant=CF2', undefined)).json.state as string;
+  // A spec-compliant IdP echoes the authorize `nonce` into the id_token (security review L-10 requires it),
+  // so simulate that: parse the nonce out of the authorization_url and mint the token with it.
+  const freshLogin = async (): Promise<{ state: string; nonce: string }> => {
+    const r = await inj('GET', '/api/auth/sso/authorize?tenant=CF2', undefined);
+    return { state: r.json.state as string, nonce: new URL(String(r.json.authorization_url)).searchParams.get('nonce') as string };
+  };
   const cbForged = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.forged-never-issued', id_token: mkIdToken() });
   ok('SSO: a forged/unknown state is rejected (BAD_STATE — login-CSRF defence)', cbForged.status === 400 && cbForged.json.error?.code === 'BAD_STATE', `${cbForged.status} ${cbForged.json.error?.code}`);
-  const reuseState = await freshState();
-  const cb1 = await inj('POST', '/api/auth/sso/callback', undefined, { state: reuseState, id_token: mkIdToken() });
+  const login1 = await freshLogin();
+  const cb1 = await inj('POST', '/api/auth/sso/callback', undefined, { state: login1.state, id_token: mkIdToken({ nonce: login1.nonce }) });
   ok('SSO: callback verifies the id_token and mints a session (JIT-provisioned user)', cb1.status === 200 && !!cb1.json.token && cb1.json.role === 'Customer', `${cb1.status} ${JSON.stringify(cb1.json).slice(0,100)}`);
-  const cbReplay = await inj('POST', '/api/auth/sso/callback', undefined, { state: reuseState, id_token: mkIdToken() });
+  const cbReplay = await inj('POST', '/api/auth/sso/callback', undefined, { state: login1.state, id_token: mkIdToken({ nonce: login1.nonce }) });
   ok('SSO: a consumed state cannot be replayed (single-use — BAD_STATE)', cbReplay.status === 400 && cbReplay.json.error?.code === 'BAD_STATE', `${cbReplay.status} ${cbReplay.json.error?.code}`);
   const ssoMe = await inj('GET', '/api/auth/me', cb1.json.token);
   ok('SSO: the minted session works (auth/me) and is scoped to the SSO user', ssoMe.status === 200 && ssoMe.json.username === cb1.json.username, `${ssoMe.status} ${ssoMe.json.username}`);
-  const cb2 = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), id_token: mkIdToken() });
+  const login2 = await freshLogin();
+  const cb2 = await inj('POST', '/api/auth/sso/callback', undefined, { state: login2.state, id_token: mkIdToken({ nonce: login2.nonce }) });
   ok('SSO: a repeat login reuses the same user (idempotent JIT by sso_subject)', cb2.status === 200 && cb2.json.username === cb1.json.username, `${cb1.json.username} vs ${cb2.json.username}`);
-  const cbBadSig = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), id_token: mkIdToken() + 'x' });
+  // L-10: the nonce binding is now MANDATORY — an id_token that omits or mismatches the nonce is refused.
+  const loginNoNonce = await freshLogin();
+  const cbNoNonce = await inj('POST', '/api/auth/sso/callback', undefined, { state: loginNoNonce.state, id_token: mkIdToken() });
+  ok('SSO: an id_token that OMITS the nonce is rejected (401 BAD_NONCE) — L-10 fail-closed', cbNoNonce.status === 401 && cbNoNonce.json.error?.code === 'BAD_NONCE', `${cbNoNonce.status} ${cbNoNonce.json.error?.code}`);
+  const loginWrongNonce = await freshLogin();
+  const cbWrongNonce = await inj('POST', '/api/auth/sso/callback', undefined, { state: loginWrongNonce.state, id_token: mkIdToken({ nonce: 'deadbeefdeadbeef' }) });
+  ok('SSO: an id_token with a WRONG nonce is rejected (401 BAD_NONCE) — replay defence', cbWrongNonce.status === 401 && cbWrongNonce.json.error?.code === 'BAD_NONCE', `${cbWrongNonce.status} ${cbWrongNonce.json.error?.code}`);
+  const cbBadSig = await inj('POST', '/api/auth/sso/callback', undefined, { state: (await freshLogin()).state, id_token: mkIdToken() + 'x' });
   ok('SSO: a tampered id_token is rejected (401 BAD_ID_TOKEN)', cbBadSig.status === 401 && cbBadSig.json.error?.code === 'BAD_ID_TOKEN', `${cbBadSig.status} ${cbBadSig.json.error?.code}`);
-  const cbBadAud = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), id_token: mkIdToken({ aud: 'someone-else' }) });
+  const loginBadAud = await freshLogin();
+  const cbBadAud = await inj('POST', '/api/auth/sso/callback', undefined, { state: loginBadAud.state, id_token: mkIdToken({ aud: 'someone-else', nonce: loginBadAud.nonce }) });
   ok('SSO: a wrong-audience id_token is rejected (401 BAD_AUDIENCE)', cbBadAud.status === 401 && cbBadAud.json.error?.code === 'BAD_AUDIENCE', `${cbBadAud.status} ${cbBadAud.json.error?.code}`);
 
   // M-2 (security review): SSRF hardening of the tenant-configurable OIDC issuer (server exchanges the auth
@@ -738,7 +752,7 @@ async function main() {
   const badIssuer = await inj('PUT', '/api/platform/identity', cf2aa, { oidc_issuer: 'http://idp.cf2.example' });
   ok('SSO: a non-https oidc_issuer is rejected at write time (400 BAD_ISSUER)', badIssuer.status === 400 && badIssuer.json.error?.code === 'BAD_ISSUER', `${badIssuer.status} ${badIssuer.json.error?.code}`);
   await inj('PUT', '/api/platform/identity', cf2aa, { oidc_issuer: 'https://169.254.169.254' }); // passes the https write-time check…
-  const cbSsrf = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), code: 'authcode-x' }); // …but the code path re-resolves it
+  const cbSsrf = await inj('POST', '/api/auth/sso/callback', undefined, { state: (await freshLogin()).state, code: 'authcode-x' }); // …but the code path re-resolves it
   ok('SSO: exchangeCode refuses an internal issuer destination (400 SSRF_BLOCKED)', cbSsrf.status === 400 && cbSsrf.json.error?.code === 'SSRF_BLOCKED', `${cbSsrf.status} ${cbSsrf.json.error?.code}`);
   await inj('PUT', '/api/platform/identity', cf2aa, { oidc_issuer: ISSUER }); // restore for any later use
 

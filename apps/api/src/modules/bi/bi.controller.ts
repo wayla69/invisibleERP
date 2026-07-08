@@ -65,7 +65,9 @@ export class BiController {
   liveStream(@CurrentUser() user: JwtUser) {
     const src = this.svc.liveStream();
     if (!src) return of({ data: { type: 'unavailable' } });
-    return src.pipe(filter((e: any) => e.tenant_id == null || e.tenant_id === user.tenantId), map((data) => ({ data })));
+    // Deliver a tenant ONLY its own events; a null-tenant (platform) event reaches only a god session
+    // (tenantId == null), never every tenant (security review L-7). Mirrors realtime-bus.recent().
+    return src.pipe(filter((e: any) => user.tenantId == null || e.tenant_id === user.tenantId), map((data) => ({ data })));
   }
 
   // Buffered recent live feed (HTTP-testable companion to the SSE stream).

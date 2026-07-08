@@ -8,6 +8,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
 import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
+import { isPlatformAdmin } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
 import { logger } from '../../observability/logger';
 import type { JwtUser } from '../../common/decorators';
@@ -185,6 +186,9 @@ export class BillingService {
   async createSignupRequest(dto: SignupDto) {
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);
+    // never queue a request for a reserved platform-owner username (security review L-4; mirrors provisionTenant)
+    if (isPlatformAdmin(username))
+      throw new BadRequestException({ code: 'RESERVED_USERNAME', message: 'This username is reserved and cannot be used for a company admin', messageTh: 'ชื่อผู้ใช้นี้สงวนไว้ ไม่สามารถใช้เป็นผู้ดูแลบริษัทได้' });
     // fail fast on collisions with an existing LIVE tenant/user (the partial unique indexes block dup PENDING)
     const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, code)).limit(1);
     if (t) throw new ConflictException({ code: 'CONFLICT', message: 'Tenant code already taken', messageTh: 'รหัสร้านนี้ถูกใช้แล้ว' });
@@ -400,6 +404,13 @@ export class BillingService {
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);
     const planCode = dto.plan_code?.trim() || 'free';
+
+    // A provisioned Admin whose username is on PLATFORM_ADMIN_USERNAMES would silently gain the god
+    // cross-tenant bypass (isPlatformAdmin is membership-by-username alone). Refuse it — a platform owner
+    // is never provisioned through the tenant-signup path (security review L-4). Checked FIRST so the reason
+    // is RESERVED_USERNAME, not the generic "username taken".
+    if (isPlatformAdmin(username))
+      throw new BadRequestException({ code: 'RESERVED_USERNAME', message: 'This username is reserved and cannot be used for a company admin', messageTh: 'ชื่อผู้ใช้นี้สงวนไว้ ไม่สามารถใช้เป็นผู้ดูแลบริษัทได้' });
 
     // tenant code must be unique
     const [existsTenant] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, code)).limit(1);
