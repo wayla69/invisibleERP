@@ -28,6 +28,11 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'common.logout': { th: 'ออกจากระบบ', en: 'Log out', ms: 'Log keluar', vi: 'Đăng xuất', id: 'Keluar' },
   'common.settings': { th: 'ตั้งค่า', en: 'Settings', ms: 'Tetapan', vi: 'Cài đặt', id: 'Pengaturan' },
   'common.user_account': { th: 'บัญชีผู้ใช้', en: 'User account', ms: 'Akaun pengguna', vi: 'Tài khoản', id: 'Akun pengguna' },
+  // Shared doc-reference picker (DocSelect) — pending-list dropdowns replacing typed doc numbers.
+  'common.doc_select_ph': { th: 'เลือกเอกสาร…', en: 'Select a document…' },
+  'common.doc_none': { th: 'ไม่มีเอกสารให้เลือก', en: 'No documents to select' },
+  'common.doc_manual': { th: 'พิมพ์เลขเอกสารเอง…', en: 'Type a document no…' },
+  'common.doc_back_to_list': { th: 'กลับไปเลือกจากรายการ', en: 'Back to the list' },
   'ws.erp': { th: 'ระบบหลังร้าน (ERP)', en: 'Back office (ERP)', ms: 'Pejabat belakang (ERP)', vi: 'Văn phòng (ERP)', id: 'Kantor belakang (ERP)' },
   'ws.pos': { th: 'หน้าร้าน (POS)', en: 'Storefront (POS)', ms: 'Kedai (POS)', vi: 'Cửa hàng (POS)', id: 'Toko (POS)' },
 

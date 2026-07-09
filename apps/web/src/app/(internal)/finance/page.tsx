@@ -23,6 +23,7 @@ import {
 import { statusVariant } from '@/components/ui';
 import { TrendAreaChart } from '@/components/charts';
 import { Select } from '@/components/form-controls';
+import { DocSelect } from '@/components/doc-select';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -205,7 +206,22 @@ function ReceivablesTab() {
             <DialogContent>
               <DialogHeader><DialogTitle>{t('fin.receive_ar_title')}</DialogTitle></DialogHeader>
               <div className="grid gap-4">
-                <Field label={t('fin.f_invoice_no')} name="invoice_no" placeholder="INV-…" form={arForm} set={setArForm} />
+                <div className="grid gap-2">
+                  <Label htmlFor="ar-rcpt-inv">{t('fin.f_invoice_no')}</Label>
+                  <DocSelect
+                    id="ar-rcpt-inv"
+                    value={arForm.invoice_no}
+                    onValueChange={(v) => {
+                      const inv = (ar.data?.invoices ?? []).find((i: any) => i.Invoice_No === v);
+                      setArForm((f: any) => ({ ...f, invoice_no: v, amount: inv ? String(inv.Outstanding_Amount) : f.amount }));
+                    }}
+                    options={(ar.data?.invoices ?? []).filter((i: any) => Number(i.Outstanding_Amount) > 0).map((i: any) => ({ value: i.Invoice_No, label: [i.Customer_Name, baht(i.Outstanding_Amount)].filter(Boolean).join(' · ') || undefined }))}
+                    placeholder={t('common.doc_select_ph')}
+                    emptyText={t('common.doc_none')}
+                    allowManual
+                    manualPlaceholder="INV-…"
+                  />
+                </div>
                 <Field label={t('fin.f_amount')} name="amount" type="number" step="0.01" form={arForm} set={setArForm} />
                 <Field label={t('fin.f_method')} name="method" form={arForm} set={setArForm} />
                 <Field label={t('fin.f_ref')} name="ref_no" form={arForm} set={setArForm} />

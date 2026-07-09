@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DocSelect } from '@/components/doc-select';
 import { Select } from '@/components/form-controls';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -26,6 +27,9 @@ export default function BillingPage() {
   const { t } = useLang();
   const qc = useQueryClient();
   const [code, setCode] = useState('');
+  // Project register (GET /api/projects) — the project is picked from a dropdown, not typed.
+  const projList = useQuery<any>({ queryKey: ['projects-for-picker'], queryFn: () => api('/api/projects'), retry: false });
+  const projOptions = (projList.data?.projects ?? []).map((p: any) => ({ value: p.project_code, label: [p.name, p.status].filter(Boolean).join(' · ') || undefined }));
   const [active, setActive] = useState('');
   const claims = useQuery<any>({ queryKey: ['pbill', active], queryFn: () => api(`/api/progress-billing/project/${active}`), enabled: !!active });
   const boq = useQuery<any>({ queryKey: ['pbill-boq', active], queryFn: () => api(`/api/projects/${active}/boq`), enabled: !!active });
@@ -48,7 +52,7 @@ export default function BillingPage() {
     <div>
       <PageHeader title={t('cx.b_title')} description={t('cx.b_desc')} />
       <Card className="mb-5 flex flex-wrap items-end gap-3 p-5">
-        <div className="grid gap-1.5"><Label>{t('cx.f_project')}</Label><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="PRJ-…" /></div>
+        <div className="grid gap-1.5"><Label>{t('cx.f_project')}</Label><DocSelect className="w-64" value={code} onValueChange={(v) => { setCode(v); if (v) setActive(v); }} options={projOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="PRJ-…" /></div>
         <Button variant="outline" onClick={() => setActive(code.trim())} disabled={!code.trim()}><Search className="size-4" /> {t('cx.btn_openproject')}</Button>
       </Card>
 

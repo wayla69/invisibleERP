@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { statusVariant } from '@/components/ui';
 import { PoForm } from '@/components/procurement-forms';
+import { DocSelect } from '@/components/doc-select';
 
 const PO_LIST_KEY = ['proc-pos'];
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -85,6 +86,9 @@ function PoAttachmentsCard() {
   const qc = useQueryClient();
   const [docNo, setDocNo] = useState('');
   const [loadedFor, setLoadedFor] = useState('');
+  // Same PO list the table above renders (react-query dedupes the key) — pick the PO, don't type it.
+  const posQ = useQuery<any>({ queryKey: PO_LIST_KEY, queryFn: () => api('/api/inventory/purchase-orders?limit=50') });
+  const poOptions = (posQ.data?.purchase_orders ?? []).map((p: any) => ({ value: p.PO_No, label: p.Supplier_Name || undefined }));
   const [preview, setPreview] = useState<{ id: number; dataUrl: string } | null>(null);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -126,7 +130,7 @@ function PoAttachmentsCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Input className="w-56" placeholder={t('proc.attach_po_ph')} value={docNo} onChange={(e) => setDocNo(e.target.value)} />
+          <DocSelect className="w-56" value={docNo} onValueChange={(v) => { setDocNo(v); if (v) { setPreview(null); setLoadedFor(v.trim().toUpperCase()); } }} options={poOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder={t('proc.attach_po_ph')} />
           <Button size="sm" variant="outline" onClick={() => { setPreview(null); setLoadedFor(docNo.trim().toUpperCase()); }} disabled={!docNo.trim()}>{t('proc.attach_view')}</Button>
           <Button size="sm" onClick={() => fileRef.current?.click()} disabled={!loadedFor || upload.isPending}>{t('proc.attach_upload')}</Button>
           <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={onFile('invoice')} />

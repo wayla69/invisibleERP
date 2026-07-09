@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DocSelect } from '@/components/doc-select';
 
 // Tender / estimating → award (docs/35 P3, PROJ-17). Build a priced estimate, track win/loss, and on a win
 // award it — which seeds a project + a draft BoQ from the winning bid.
@@ -26,6 +27,9 @@ export default function TendersPage() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['tenders'], queryFn: () => api('/api/tenders') });
   const [f, setF] = useState({ title: '', customer_name: '', project_code: '', markup_pct: '20', description: '', qty: '', unit_cost: '' });
+  // Project register (GET /api/projects) — the project is picked from a dropdown, not typed.
+  const projList = useQuery<any>({ queryKey: ['projects-for-picker'], queryFn: () => api('/api/projects'), retry: false });
+  const projOptions = (projList.data?.projects ?? []).map((p: any) => ({ value: p.project_code, label: [p.name, p.status].filter(Boolean).join(' · ') || undefined }));
   const refresh = () => qc.invalidateQueries({ queryKey: ['tenders'] });
 
   const create = useMutation({
@@ -57,7 +61,7 @@ export default function TendersPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="grid gap-1.5"><Label>{t('cx.t_f_title')}</Label><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={t('cx.t_ph_title')} /></div>
           <div className="grid gap-1.5"><Label>{t('cx.t_f_customer')}</Label><Input value={f.customer_name} onChange={(e) => setF({ ...f, customer_name: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label>{t('cx.t_f_project')}</Label><Input value={f.project_code} onChange={(e) => setF({ ...f, project_code: e.target.value })} placeholder="PRJ-…" /></div>
+          <div className="grid gap-1.5"><Label>{t('cx.t_f_project')}</Label><DocSelect value={f.project_code} onValueChange={(v) => setF({ ...f, project_code: v })} options={projOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="PRJ-…" /></div>
           <div className="grid gap-1.5"><Label>{t('cx.t_f_markup')}</Label><Input type="number" min="0" value={f.markup_pct} onChange={(e) => setF({ ...f, markup_pct: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('cx.t_f_linedesc')}</Label><Input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder={t('cx.t_ph_line')} /></div>
           <div className="grid gap-1.5"><Label>{t('cx.t_f_qty')}</Label><Input type="number" min="0" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} /></div>

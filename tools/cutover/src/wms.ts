@@ -110,6 +110,11 @@ async function main() {
   await inj('POST', '/api/wms/putaway', wh1, { gr_no: 'GR-T1', bin_code: 'A-01-01', item_id: 'A', qty: 10 });
   ok('Putaway idempotent (same gr_no → stays 10, not 20)', (await binQty('A-01-01', 'A')) === 10, `qty=${await binQty('A-01-01', 'A')}`);
 
+  // 2b. wave-candidates pending list (doc-reference dropdown feed): both sales appear before waving
+  const candBefore = await inj('GET', '/api/wms/wave-candidates', wh1);
+  const candRefs = (candBefore.json.candidates ?? []).map((c: any) => c.source_ref);
+  ok('Wave-candidates lists un-waved sales (SALE-W1 + SALE-W2)', candBefore.status === 200 && candRefs.includes('SALE-W1') && candRefs.includes('SALE-W2'), JSON.stringify(candRefs));
+
   // 3. wave 2 orders
   const wave = await inj('POST', '/api/wms/waves', wh1, { orders: [{ source_type: 'POS', source_ref: 'SALE-W1' }, { source_type: 'POS', source_ref: 'SALE-W2' }] });
   const picks = (await pg.query(`SELECT pick_no, source_ref FROM pick_lists WHERE tenant_id=${t1} ORDER BY pick_no`)).rows as any[];
@@ -119,6 +124,12 @@ async function main() {
   const wave2 = await inj('POST', '/api/wms/waves', wh1, { orders: [{ source_type: 'POS', source_ref: 'SALE-W1' }, { source_type: 'POS', source_ref: 'SALE-W2' }] });
   const picks2 = (await pg.query(`SELECT count(*)::int n FROM pick_lists WHERE tenant_id=${t1}`)).rows as any[];
   ok('Re-wave idempotent (pick_source_uq → 0 new pick lists)', wave2.json.pick_count === 0 && picks2[0].n === 2, `new=${wave2.json.pick_count} total=${picks2[0].n}`);
+
+  // 4b. waved sales drop out of the candidates; picks pending list shows both Open picks
+  const candAfter = await inj('GET', '/api/wms/wave-candidates', wh1);
+  const candAfterRefs = (candAfter.json.candidates ?? []).map((c: any) => c.source_ref);
+  const openPicks = await inj('GET', '/api/wms/picks?status=Open', wh1);
+  ok('Waved sales leave wave-candidates; GET picks?status=Open lists both picks', !candAfterRefs.includes('SALE-W1') && !candAfterRefs.includes('SALE-W2') && (openPicks.json.picks ?? []).length === 2, JSON.stringify({ cand: candAfterRefs, picks: (openPicks.json.picks ?? []).length }));
 
   const pickW1 = picks.find((p) => p.source_ref === 'SALE-W1').pick_no;
   const pickW2 = picks.find((p) => p.source_ref === 'SALE-W2').pick_no;
@@ -135,6 +146,10 @@ async function main() {
   // 7. pack
   const pack = await inj('POST', `/api/wms/picks/${pickW1}/pack`, wh1);
   ok('Pack → shipment shell (Packed)', pack.status < 300 && !!pack.json.shipment_no && pack.json.status === 'Packed', JSON.stringify(pack.json));
+  // 7b. shipments pending list feeds the ship-tab dropdown (Packed only)
+  const packedList = await inj('GET', '/api/wms/shipments?status=Packed', wh1);
+  ok('GET shipments?status=Packed lists the packed shipment', packedList.status === 200 && (packedList.json.shipments ?? []).some((x: any) => x.shipment_no === pack.json.shipment_no), JSON.stringify(packedList.json.shipments ?? []));
+
   // 8. ship
   const ship = await inj('POST', `/api/wms/shipments/${pack.json.shipment_no}/ship`, wh1, { carrier: 'Kerry', tracking_no: 'KX123' });
   const shRow = (await pg.query(`SELECT tracking_no, status, shipped_at FROM shipments WHERE shipment_no='${pack.json.shipment_no}'`)).rows as any[];

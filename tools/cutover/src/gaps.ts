@@ -96,6 +96,12 @@ async function main() {
   ok('resolve GR claim', gr.json.status === 'Resolved');
 
   // ── Delivery ──
+  // Pending-list feed for the /delivery order dropdown: only open (Pending/Processing) SOs appear.
+  const hqRow = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
+  await db.insert(s.orders).values({ orderNo: 'SO-TEST-2', orderDate: ymd(), tenantId: hqRow.id, status: 'Pending', createdBy: 'admin' });
+  const oo = await inj('GET', '/api/delivery/open-orders', token);
+  const ooNos = (oo.json.orders ?? []).map((x: any) => x.order_no);
+  ok('open-orders lists Pending SO, not Shipped', oo.status === 200 && ooNos.includes('SO-TEST-2') && !ooNos.includes('SO-TEST-1'), JSON.stringify(ooNos));
   const dv = await inj('POST', '/api/delivery', token, { order_no: 'SO-TEST-1', driver: 'Somchai' });
   ok('create delivery from order → DO- (lines derived)', (dv.status === 200 || dv.status === 201) && /^DO-\d{8}-\d{3}$/.test(dv.json.do_no) && dv.json.lines === 1, `no=${dv.json.do_no} lines=${dv.json.lines}`);
   const dd = await inj('GET', `/api/delivery/${dv.json.do_no}`, token);

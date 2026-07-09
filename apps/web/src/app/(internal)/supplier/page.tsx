@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { DocSelect } from '@/components/doc-select';
 
 // ── API contract (apps/api/src/modules/supplier) — vendor self-service ─────────
 interface Po { po_no: string; po_date: string | null; status: string; total_amount: number; expected_date: string | null; acknowledged_at: string | null }
@@ -146,6 +147,9 @@ function InvoiceTab() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ invoices: Invoice[]; count: number }>({ queryKey: ['sup-inv'], queryFn: () => api('/api/supplier/invoices') });
+  // The vendor's own POs (same list as the PO tab) — the PO ref is picked, not typed.
+  const posQ = useQuery<{ purchase_orders: Po[] }>({ queryKey: ['sup-pos'], queryFn: () => api('/api/supplier/purchase-orders') });
+  const poOptions = (posQ.data?.purchase_orders ?? []).map((p) => ({ value: p.po_no, label: p.status || undefined }));
 
   const [poNo, setPoNo] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
@@ -194,7 +198,7 @@ function InvoiceTab() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2">
               <Label htmlFor="iv-po">{t('iv.sup_po_ref')}</Label>
-              <Input id="iv-po" value={poNo} onChange={(e) => setPoNo(e.target.value)} placeholder={t('iv.sup_po_ph')} />
+              <DocSelect id="iv-po" value={poNo} onValueChange={setPoNo} options={poOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder={t('iv.sup_po_ph')} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="iv-no">{t('iv.sup_inv_no')}</Label>

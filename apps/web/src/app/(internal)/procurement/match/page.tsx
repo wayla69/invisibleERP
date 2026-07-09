@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DocSelect } from '@/components/doc-select';
 
 const lineStatusVariant = (s: string) =>
   s === 'matched'
@@ -115,6 +116,15 @@ function RunMatchTab() {
   const [lookup, setLookup] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
 
+  // Pending lists: outstanding AP bills + open POs + already-run matches — pick, don't type.
+  // (The AP list GET needs the creditors duty; procurement-only users fall back to manual entry.)
+  const apOpen = useQuery<any>({ queryKey: ['match-ap-open'], queryFn: () => api('/api/finance/ap?status=Outstanding&limit=100'), retry: false });
+  const posQ = useQuery<any>({ queryKey: ['match-pos'], queryFn: () => api('/api/inventory/purchase-orders?limit=50') });
+  const ranQ = useQuery<any>({ queryKey: ['match-ran'], queryFn: () => api('/api/procurement/match?limit=200') });
+  const apOptions = (apOpen.data?.transactions ?? []).map((r: any) => ({ value: r.Transaction_ID, label: r.Creditor_Name || undefined }));
+  const poOptions = (posQ.data?.purchase_orders ?? []).map((p: any) => ({ value: p.PO_No, label: p.Supplier_Name || undefined }));
+  const ranOptions = (ranQ.data?.results ?? []).map((r: any) => ({ value: r.txn_no, label: r.match_status || undefined }));
+
   const result = useQuery<any>({
     queryKey: ['match', lookup],
     queryFn: () => api(`/api/procurement/match/${encodeURIComponent(lookup)}`),
@@ -132,6 +142,7 @@ function RunMatchTab() {
       notifySuccess(`${r.match_no} · ${r.txn_no}`);
       setLookup(r.txn_no);
       qc.invalidateQueries({ queryKey: ['match', r.txn_no] });
+      qc.invalidateQueries({ queryKey: ['match-ran'] });
     },
     onError: (e) => notifyError((e as Error).message),
   });
@@ -164,11 +175,11 @@ function RunMatchTab() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="m-txn">{t('iv.match_lbl_ap_txn')}</Label>
-                <Input id="m-txn" value={txnNo} onChange={(e) => setTxnNo(e.target.value)} placeholder="AP-0001" />
+                <DocSelect id="m-txn" value={txnNo} onValueChange={setTxnNo} options={apOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="AP-0001" />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="m-po">{t('iv.match_lbl_po')}</Label>
-                <Input id="m-po" value={poNo} onChange={(e) => setPoNo(e.target.value)} placeholder="PO-0001" />
+                <DocSelect id="m-po" value={poNo} onValueChange={setPoNo} options={poOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="PO-0001" />
               </div>
             </div>
             <Button disabled={run.isPending || !txnNo} onClick={() => run.mutate()}>
@@ -185,13 +196,7 @@ function RunMatchTab() {
             <div className="grid gap-2">
               <Label htmlFor="m-lookup">{t('iv.match_lbl_invoice_no')}</Label>
               <div className="flex gap-2">
-                <Input
-                  id="m-lookup"
-                  value={lookup}
-                  onChange={(e) => setLookup(e.target.value)}
-                  placeholder="AP-0001"
-                  onKeyDown={(e) => e.key === 'Enter' && result.refetch()}
-                />
+                <DocSelect id="m-lookup" value={lookup} onValueChange={setLookup} options={ranOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="AP-0001" />
                 <Button variant="outline" onClick={() => result.refetch()} disabled={!lookup}>
                   <Search className="size-4" /> {t('iv.match_search')}
                 </Button>

@@ -185,6 +185,7 @@ flowchart TD
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.28 | 2026-07-09 | Platform | **Delivery order picks its SO from a pending list (read-only addition, no control change).** New `GET /api/delivery/open-orders` (perm `delivery`, tenant-scoped via RLS) lists sales orders still open for fulfilment (status Pending/Processing, newest first, limit 100); the `/delivery` create form's order-no field is now a dropdown over it instead of a typed `SO-…`. Line derivation and the DO lifecycle are unchanged. ToE: `gaps` harness (Pending SO listed, Shipped SO excluded). Manual `01-sales-and-pos.md`; UAT `02-order-to-cash-uat.md` UAT-O2C-279. |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.1.1 DRAFT | 2026-06-22 | `<<author>>` | Note POS home dashboard + read-only shift-KPI access for POS operators (`pos_sell`/`pos_till`). |
 | 0.2 | 2026-06-23 | Platform | Security review W3 (REC-01 / GL-01): AR receipts accept an `idempotency_key` (migration 0068) so a retried request collects cash once — no double receipt / double-counted paid amount. Verified by the `match` harness idempotency case. |
