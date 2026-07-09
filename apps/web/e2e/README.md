@@ -21,3 +21,5 @@ pnpm --filter @ierp/web test:e2e
 > by the network egress allowlist. The specs still parse and list (`playwright test --list`); run them in
 > CI or locally where the browser can be installed, or allowlist `cdn.playwright.dev`. If a system Chrome is
 > available, you can instead run against it by adding `channel: 'chrome'` to the chromium project `use`.
+
+- `frontline-sweep.mobile.spec.ts` — phone-viewport NO-OVERFLOW sweep over the frontline ops screens (claims / delivery / wms / inventory), rows seeded with long Thai text; asserts the /shop overflow regression class (`scrollWidth <= clientWidth`) plus a content element per page. Mobile-iphone project only.
