@@ -54,21 +54,24 @@ export default defineConfig({
       //     (measured stmts 80.3 / branch 89.2 / funcs 79.5 / lines 80.3). NB when a new file joins the
       //     include list above (other than a docs/38 sub-service), add it to this brace-glob too.
       //  2. The docs/38 sub-services get PER-FILE floors: guard + write paths are unit-tested (2.4
-      //     slice 4) but the read/report paths stay harness-tested (basics/compliance/golden), so each
-      //     file's floor is pinned just below ITS measured coverage (2026-07-09) — a regression on any
-      //     one file fails the gate even if a sibling improves.
+      //     slices 4–5) but the heaviest read/report paths stay harness-tested (basics/compliance/
+      //     golden), so each file's floor is pinned just below ITS measured coverage (2026-07-09) —
+      //     a regression on any one file fails the gate even if a sibling improves. NB a per-file
+      //     floor re-pins to the NEW measured value whenever its suite expands: a % can legitimately
+      //     move down when the executed surface grows (projects-evm branches read 92.9% while only
+      //     20.5% of statements ran; slice 5 tripled the statements and the branch % settled at 79.7).
       //  3. The global floor covers the whole expanded set (this vitest version does NOT remove
-      //     glob-matched files from the global group) — measured 60.4/81.2/68.1/60.4 after the dilution
-      //     by the harness-tested read paths; it backstops files accidentally dropped from the globs.
+      //     glob-matched files from the global group) — measured 70.0/82.3/73.8/70.0 after slice 5;
+      //     it backstops files accidentally dropped from the globs.
       thresholds: {
-        statements: 58, branches: 79, functions: 66, lines: 58,
+        statements: 68, branches: 80, functions: 71, lines: 68,
         '{src/common/*.ts,src/modules/tax/**/*.ts,src/modules/payroll/payroll-calc.ts,src/modules/payments/promptpay-qr.ts,src/database/encrypted-column.ts,src/observability/runtime-metrics.ts}':
           { statements: 78, branches: 87, functions: 77, lines: 78 },
         'src/modules/ledger/ledger-posting.service.ts':      { statements: 77, branches: 83, functions: 48, lines: 77 }, // 79.5/85.8/50/79.5
-        'src/modules/ledger/ledger-recurring.service.ts':    { statements: 39, branches: 45, functions: 48, lines: 39 }, // 41.2/47.2/50/41.2
+        'src/modules/ledger/ledger-recurring.service.ts':    { statements: 85, branches: 77, functions: 78, lines: 85 }, // 87.4/79.4/80/87.4
         'src/modules/procurement/procurement-po.service.ts': { statements: 32, branches: 21, functions: 64, lines: 32 }, // 34.1/23.1/66.7/34.1
         'src/modules/procurement/procurement-pr.service.ts': { statements: 29, branches: 61, functions: 55, lines: 29 }, // 31.9/63.6/57.1/31.9
-        'src/modules/projects/projects-evm.service.ts':      { statements: 18, branches: 90, functions: 11, lines: 18 }, // 20.5/92.9/13.3/20.5
+        'src/modules/projects/projects-evm.service.ts':      { statements: 64, branches: 77, functions: 54, lines: 64 }, // 66.1/79.7/56.3/66.1
       },
     },
   },
