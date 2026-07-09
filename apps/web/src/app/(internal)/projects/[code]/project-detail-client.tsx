@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select } from '@/components/form-controls';
+import { Crumbs } from '@/components/crumbs';
 
 
 // CPI/SPI health: ≥1 on/under target (green), 0.9–1 watch (amber), <0.9 at risk (red).
@@ -744,7 +745,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
 
   return (
     <div>
-      <button onClick={() => router.push('/projects')} className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> {t('pj.all_projects')}</button>
+      <Crumbs items={[{ label: t('pj.all_projects'), href: '/projects' }, { label: p?.name ?? code }]} />
       <PageHeader
         title={<span className="flex items-center gap-2">{p?.name ?? code} {p && <Badge variant={statusVariant(p.status)}>{p.status}</Badge>}</span>}
         description={<span>{code}{p?.customer_name ? ` · ${p.customer_name}` : ''} · {p?.billing_type === 'Fixed' ? t('pj.bt_fixed') : t('pj.bt_tm')}{p?.contract_amount ? ` · ${t('pj.contract_amount_label', { amount: baht(p.contract_amount) })}` : ''}</span>}

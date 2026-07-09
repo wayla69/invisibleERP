@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Crumbs } from '@/components/crumbs';
 
 interface Member { id: number; member_code: string; name: string | null; phone: string | null; card_no: string | null; email: string | null; birthday: string | null; marketing_opt_in: boolean; balance: number; lifetime: number; tier: string | null; active: boolean }
 interface Profile { crm: null | { rfm_segment: string; total_orders: number; total_spend: number; rfm_recency: number; rfm_frequency: number; rfm_monetary: number; preferred_channel: string | null; avg_order_value: number; churn_risk: number | null; predicted_ltv: number | null; score_version: string | null } }
@@ -40,6 +41,7 @@ export default function Member360Page() {
 
   return (
     <div>
+      <Crumbs items={[{ label: t('ly.md_members_list'), href: '/loyalty/members' }, { label: member.data?.name || member.data?.member_code || String(id) }]} />
       <PageHeader
         title={member.data?.name || member.data?.member_code || t('ly.md_member_hash', { id })}
         description={t('ly.md_desc')}

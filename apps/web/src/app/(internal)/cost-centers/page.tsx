@@ -7,11 +7,10 @@ import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs } from '@/components/tabs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -33,12 +32,10 @@ export default function CostCentersPage() {
   const { t } = useLang();
   return (
     <div>
-      <PageHeader
+      <ModulePage
         title={t('fnx.cc.title')}
         description={t('fnx.cc.description')}
-      />
-      <Tabs
-        urlParam="tab"
+        tabUrlParam="tab"
         tabs={[
           { key: 'master', label: t('fnx.cc.tab_master'), content: <Master /> },
           { key: 'pl', label: t('fnx.cc.tab_pl'), content: <DimensionalPL /> },
