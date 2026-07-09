@@ -4,16 +4,17 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { memberDiningProfiles, memberCompanions, memberConsents, posMembers, dineInOrders, dineInOrderItems } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 
+// JSON-merge-patch style: an OMITTED field keeps its stored value; an explicit null clears it.
 export interface UpsertDiningProfileDto {
   consent?: boolean;              // explicit PDPA consent capture on (first) save — staff confirms with the guest
-  favorite_menus?: string[];
-  favorite_ingredients?: string[];
-  allergies?: string[];
-  dietary?: string;
-  seating_preference?: string;
-  typical_party_size?: number;
-  service_notes?: string;
-  extra?: Record<string, string>; // extensible key→value details (favourite wine, occasions, …)
+  favorite_menus?: string[] | null;
+  favorite_ingredients?: string[] | null;
+  allergies?: string[] | null;
+  dietary?: string | null;
+  seating_preference?: string | null;
+  typical_party_size?: number | null;
+  service_notes?: string | null;
+  extra?: Record<string, string> | null; // extensible key→value details (favourite wine, occasions, …)
 }
 export interface AddCompanionDto {
   name: string;
@@ -72,18 +73,23 @@ export class GuestProfileService {
     const db = this.db;
     await this.loadMember(memberId, user);
     await this.requireOrCaptureConsent(memberId, dto.consent === true, user);
-    const values = {
-      favoriteMenus: cleanList(dto.favorite_menus), favoriteIngredients: cleanList(dto.favorite_ingredients),
-      allergies: cleanList(dto.allergies), dietary: dto.dietary?.trim() || null,
-      seatingPreference: dto.seating_preference?.trim() || null,
-      typicalPartySize: dto.typical_party_size ?? null, serviceNotes: dto.service_notes?.trim() || null,
-      extra: dto.extra ?? null, updatedAt: new Date(),
-    };
+    // JSON-merge-patch semantics: an OMITTED field keeps its stored value — a client that edits one field
+    // can never silently wipe the rest (e.g. `extra` set via the API survives a web save that doesn't carry
+    // it). An explicit null clears the field.
+    const patch: Partial<typeof memberDiningProfiles.$inferInsert> = { updatedAt: new Date() };
+    if (dto.favorite_menus !== undefined) patch.favoriteMenus = cleanList(dto.favorite_menus);
+    if (dto.favorite_ingredients !== undefined) patch.favoriteIngredients = cleanList(dto.favorite_ingredients);
+    if (dto.allergies !== undefined) patch.allergies = cleanList(dto.allergies);
+    if (dto.dietary !== undefined) patch.dietary = dto.dietary?.trim() || null;
+    if (dto.seating_preference !== undefined) patch.seatingPreference = dto.seating_preference?.trim() || null;
+    if (dto.typical_party_size !== undefined) patch.typicalPartySize = dto.typical_party_size;
+    if (dto.service_notes !== undefined) patch.serviceNotes = dto.service_notes?.trim() || null;
+    if (dto.extra !== undefined) patch.extra = dto.extra && Object.keys(dto.extra).length ? dto.extra : null;
     const [existing] = await db.select({ id: memberDiningProfiles.id }).from(memberDiningProfiles).where(eq(memberDiningProfiles.memberId, memberId)).limit(1);
     if (existing) {
-      await db.update(memberDiningProfiles).set(values).where(eq(memberDiningProfiles.id, existing.id));
+      await db.update(memberDiningProfiles).set(patch).where(eq(memberDiningProfiles.id, existing.id));
     } else {
-      await db.insert(memberDiningProfiles).values({ tenantId: user.tenantId!, memberId, ...values, createdBy: user.username });
+      await db.insert(memberDiningProfiles).values({ tenantId: user.tenantId!, memberId, ...patch, createdBy: user.username });
     }
     return this.get(memberId, user);
   }
@@ -158,8 +164,8 @@ export class GuestProfileService {
   }
 }
 
-// normalize a free-text list: trim, drop empties, cap item length + count
-function cleanList(v: string[] | undefined): string[] | null {
+// normalize a free-text list: trim, drop empties, cap item length + count (null/empty → cleared)
+function cleanList(v: string[] | null | undefined): string[] | null {
   if (!v) return null;
   const out = v.map((s2) => String(s2).trim()).filter(Boolean).slice(0, 40).map((s2) => s2.slice(0, 120));
   return out.length ? out : null;

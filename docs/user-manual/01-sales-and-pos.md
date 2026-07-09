@@ -420,9 +420,13 @@ often they visit with how many guests.
 > marketing list (marketing consent is separate).
 
 - **Edit & save.** Fill the fields (comma-separate multiple entries), tick the
-  consent box on first save, then **บันทึกโปรไฟล์**.
-- **Companions.** Add name / relationship / notes with **เพิ่มผู้ร่วมโต๊ะ**;
-  removing one **hard-deletes** it.
+  consent box on first save, then **บันทึกโปรไฟล์**. Saving updates exactly the
+  fields on screen — details recorded elsewhere are never wiped by a save.
+- **Extended details (ข้อมูลเพิ่มเติม).** Free-form extras, one per line as
+  **หัวข้อ: ค่า** (e.g. `ไวน์ที่ชอบ: Pinot Noir`) — for anything the fixed
+  fields don't cover. Collect only what serves the guest (PDPA minimization).
+- **Companions.** Add name / relationship / **allergies** / preferences / notes
+  with **เพิ่มผู้ร่วมโต๊ะ**; removing one **hard-deletes** it.
 - **At service time.** Open the profile from the reservation row before the party
   arrives — allergies and seating preference first, then delight with the
   favourites.

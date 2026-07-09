@@ -36,6 +36,7 @@ interface GuestProfile {
   profile: {
     favorite_menus: string[]; favorite_ingredients: string[]; allergies: string[]; dietary: string | null;
     seating_preference: string | null; typical_party_size: number | null; service_notes: string | null;
+    extra: Record<string, string>;
   } | null;
   companions: Companion[];
   top_menus: { name: string; times: number }[];
@@ -48,6 +49,18 @@ const STATUS: Record<string, { tone: 'success' | 'warning' | 'info' | 'muted' | 
 };
 const KNOWN_ACTIONS = ['notify', 'seat', 'cancel', 'no-show'];
 const splitList = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
+// `extra` bag ↔ textarea, one "หัวข้อ: ค่า" per line (merge-patch: null clears server-side)
+const extraToText = (x: Record<string, string> | undefined | null) => Object.entries(x ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+const textToExtra = (s: string): Record<string, string> | null => {
+  const out: Record<string, string> = {};
+  for (const line of s.split('\n')) {
+    const i = line.indexOf(':');
+    if (i <= 0) continue;
+    const k = line.slice(0, i).trim().slice(0, 60), v = line.slice(i + 1).trim().slice(0, 300);
+    if (k && v) out[k] = v;
+  }
+  return Object.keys(out).length ? out : null;
+};
 
 export default function ReservationsPage() {
   const { t } = useLang();
@@ -224,36 +237,42 @@ function GuestProfileCard({ memberId, onClose }: { memberId: number; onClose: ()
   const refresh = () => qc.invalidateQueries({ queryKey: ['guest-profile', memberId] });
 
   const [consent, setConsent] = useState(false);
-  const [f, setF] = useState({ favorite_menus: '', favorite_ingredients: '', allergies: '', dietary: '', seating_preference: '', typical_party_size: '', service_notes: '' });
-  const [comp, setComp] = useState({ name: '', relationship: '', notes: '' });
+  const [f, setF] = useState({ favorite_menus: '', favorite_ingredients: '', allergies: '', dietary: '', seating_preference: '', typical_party_size: '', service_notes: '', extra: '' });
+  const [comp, setComp] = useState({ name: '', relationship: '', allergies: '', preferences: '', notes: '' });
   useEffect(() => {
     const p = g?.profile;
     setF({
       favorite_menus: (p?.favorite_menus ?? []).join(', '), favorite_ingredients: (p?.favorite_ingredients ?? []).join(', '),
       allergies: (p?.allergies ?? []).join(', '), dietary: p?.dietary ?? '', seating_preference: p?.seating_preference ?? '',
       typical_party_size: p?.typical_party_size != null ? String(p.typical_party_size) : '', service_notes: p?.service_notes ?? '',
+      extra: extraToText(p?.extra),
     });
     setConsent(false);
   }, [g?.profile, g?.consent_granted]);
   const sf = (k: string, v: string) => setF((x) => ({ ...x, [k]: v }));
 
   const save = useMutation({
+    // the PUT is JSON-merge-patch style server-side — send every editable field explicitly (null clears)
+    // so a save reflects exactly what's on screen, without wiping fields this form doesn't carry
     mutationFn: () => api(`/api/restaurant/guests/${memberId}/profile`, { method: 'PUT', body: JSON.stringify({
       consent: consent || undefined,
       favorite_menus: splitList(f.favorite_menus), favorite_ingredients: splitList(f.favorite_ingredients),
-      allergies: splitList(f.allergies), dietary: f.dietary || undefined,
-      seating_preference: f.seating_preference || undefined,
-      typical_party_size: f.typical_party_size ? Number(f.typical_party_size) : undefined,
-      service_notes: f.service_notes || undefined,
+      allergies: splitList(f.allergies), dietary: f.dietary.trim() || null,
+      seating_preference: f.seating_preference.trim() || null,
+      typical_party_size: f.typical_party_size ? Number(f.typical_party_size) : null,
+      service_notes: f.service_notes.trim() || null,
+      extra: textToExtra(f.extra),
     }) }),
     onSuccess: () => { notifySuccess(t('px.gp_saved')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const addComp = useMutation({
     mutationFn: () => api(`/api/restaurant/guests/${memberId}/companions`, { method: 'POST', body: JSON.stringify({
-      name: comp.name, relationship: comp.relationship || undefined, notes: comp.notes || undefined,
+      name: comp.name, relationship: comp.relationship || undefined,
+      allergies: splitList(comp.allergies).length ? splitList(comp.allergies) : undefined,
+      preferences: comp.preferences || undefined, notes: comp.notes || undefined,
     }) }),
-    onSuccess: () => { notifySuccess(t('px.gp_comp_added')); setComp({ name: '', relationship: '', notes: '' }); refresh(); },
+    onSuccess: () => { notifySuccess(t('px.gp_comp_added')); setComp({ name: '', relationship: '', allergies: '', preferences: '', notes: '' }); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const delComp = useMutation({
@@ -294,6 +313,9 @@ function GuestProfileCard({ memberId, onClose }: { memberId: number; onClose: ()
         <FormField label={t('px.gp_seating')}><Input value={f.seating_preference} onChange={(e) => sf('seating_preference', e.target.value)} /></FormField>
         <FormField label={t('px.gp_party')}><Input type="number" min={1} value={f.typical_party_size} onChange={(e) => sf('typical_party_size', e.target.value)} /></FormField>
         <FormField label={t('px.gp_notes')} className="sm:col-span-2 lg:col-span-3"><Input value={f.service_notes} onChange={(e) => sf('service_notes', e.target.value)} /></FormField>
+        <FormField label={t('px.gp_extra')} hint={t('px.gp_extra_hint')} className="sm:col-span-2 lg:col-span-3">
+          <textarea className="min-h-16 w-full rounded-md border bg-background px-2 py-1.5 text-sm" rows={2} value={f.extra} onChange={(e) => sf('extra', e.target.value)} />
+        </FormField>
       </div>
 
       {!g.consent_granted && (
@@ -315,16 +337,18 @@ function GuestProfileCard({ memberId, onClose }: { memberId: number; onClose: ()
                 <li key={c.id} className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-sm">
                   <span>
                     <span className="font-medium">{c.name}</span>
-                    <span className="text-muted-foreground">{[c.relationship, c.preferences, c.notes].filter(Boolean).map((x) => ` · ${x}`).join('')}</span>
+                    <span className="text-muted-foreground">{[c.relationship, c.allergies.length ? `${t('px.gp_allergies')}: ${c.allergies.join(', ')}` : null, c.preferences, c.notes].filter(Boolean).map((x) => ` · ${x}`).join('')}</span>
                   </span>
                   <Button size="sm" variant="ghost" disabled={delComp.isPending} onClick={() => delComp.mutate(c.id)} aria-label={t('px.gp_comp_removed')}><Trash2 className="h-3.5 w-3.5" /></Button>
                 </li>
               ))}
             </ul>
           )}
-          <div className="grid gap-2 sm:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <Input placeholder={t('px.gp_comp_name')} value={comp.name} onChange={(e) => setComp((x) => ({ ...x, name: e.target.value }))} />
             <Input placeholder={t('px.gp_comp_rel')} value={comp.relationship} onChange={(e) => setComp((x) => ({ ...x, relationship: e.target.value }))} />
+            <Input placeholder={t('px.gp_comp_allergies')} value={comp.allergies} onChange={(e) => setComp((x) => ({ ...x, allergies: e.target.value }))} />
+            <Input placeholder={t('px.gp_comp_prefs')} value={comp.preferences} onChange={(e) => setComp((x) => ({ ...x, preferences: e.target.value }))} />
             <Input placeholder={t('px.gp_comp_notes')} value={comp.notes} onChange={(e) => setComp((x) => ({ ...x, notes: e.target.value }))} />
             <Button size="sm" variant="outline" disabled={!comp.name || addComp.isPending} onClick={() => addComp.mutate()}>{t('px.gp_comp_add')}</Button>
           </div>
