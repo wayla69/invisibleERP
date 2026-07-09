@@ -48,8 +48,12 @@ Then point `DATABASE_URL` at `ierp_app`. Keep the intentionally-unscoped auth-gl
 scheduler heartbeats, etc.) as reviewed exceptions.
 
 **One-click provisioning (Railway):** the **`Ops — provision non-superuser DB role (H-3)`** workflow
-(`.github/workflows/ops-provision-app-role.yml`, manual dispatch, `production` Environment) runs the SQL
-above against the `Postgres` plugin (via its public url) — first revoking any legacy reverse-direction
+(`.github/workflows/ops-provision-app-role.yml`, manual dispatch, `production` Environment) **resolves the
+API's actual Postgres instance by matching the internal `DATABASE_URL` host to each service's
+`RAILWAY_PRIVATE_DOMAIN`** (the project carries several Postgres services — provisioning the one merely
+*named* "Postgres" hit an orphan copy and the API then failed auth with 28P01), sanity-checks it is the
+live DB (100+ applied drizzle migrations) and runs the SQL above via its public url — first revoking any
+legacy reverse-direction
 `ierp_app TO app_user` grant (this doc originally prescribed it; it both fails to enable `SET ROLE
 app_user` and blocks the correct grant with a membership-cycle error), grants `CREATE` on the schemas
 and **transfers ownership of all `public`/`drizzle` tables + sequences + views to `ierp_app`** — because
