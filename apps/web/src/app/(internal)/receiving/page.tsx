@@ -33,6 +33,22 @@ function isReceivable(status: string): boolean {
 // Quantities can be fractional (weight lines) — show up to 3 decimals without trailing noise.
 const fq = (x: number) => (Math.round(Number(x) * 1000) / 1000).toLocaleString('th-TH', { maximumFractionDigits: 3 });
 
+// One quantity figure with its label — a labelled chip on the phone; on sm+ the label can hide because the
+// desktop grid carries a column header instead. tabular-nums keeps the columns visually aligned.
+function QtyStat({ label, value, className = '', labelOnDesktop = false }: { label: string; value: string; className?: string; labelOnDesktop?: boolean }) {
+  // labelOnDesktop keeps the labelled-chip look at every size (summary dialog); without it the label and
+  // chip styling drop away on sm+ where the form grid's column header takes over.
+  const chip = labelOnDesktop
+    ? 'rounded-md bg-muted/60 px-2 py-1 text-center'
+    : 'rounded-md bg-muted/60 px-2 py-1 text-center sm:bg-transparent sm:px-0 sm:py-0 sm:text-right';
+  return (
+    <div className={`min-w-0 ${chip}`}>
+      <p className={`truncate text-[10px] leading-tight text-muted-foreground ${labelOnDesktop ? '' : 'sm:hidden'}`}>{label}</p>
+      <p className={`truncate text-sm font-semibold tabular-nums ${className}`}>{value}</p>
+    </div>
+  );
+}
+
 interface ReceiveLine {
   item_id: string; item_description: string | null; uom: string | null;
   order_qty: number; received_qty: number; remaining_qty: number; is_weight: boolean;
@@ -213,33 +229,48 @@ function PoReceiveForm({ pos = [], onDone }: { pos?: { PO_No: string; Supplier_N
               <Label>{t('iv.recv_lines_heading')}</Label>
               <p className="text-xs text-muted-foreground">{t('iv.recv_lines_hint')}</p>
               {allDone && <p className="text-sm text-muted-foreground">{t('iv.recv_no_outstanding')}</p>}
+              {/* column header (sm+ only) — the phone layout labels every figure inline instead */}
+              {lines.length > 0 && (
+                <div className="hidden items-center gap-x-3 px-3 text-[11px] font-medium text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1fr)_repeat(3,4.5rem)_10rem]">
+                  <span />
+                  <span className="text-right">{t('iv.recv_col_ordered')}</span>
+                  <span className="text-right">{t('iv.recv_col_received')}</span>
+                  <span className="text-right">{t('iv.recv_col_remaining')}</span>
+                  <span className="text-right">{t('iv.recv_col_count')}</span>
+                </div>
+              )}
               {lines.map((l) => {
                 const err = lineErr(l);
+                const done = maxFor(l) <= 0;
                 return (
-                  <div key={l.item_id} className="rounded-md border p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="min-w-0">
+                  <div key={l.item_id} className={`rounded-md border p-3 ${done ? 'bg-muted/40' : ''}`}>
+                    <div className="grid grid-cols-3 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,4.5rem)_10rem] sm:gap-x-3">
+                      <div className="col-span-3 min-w-0 sm:col-span-1">
                         <p className="truncate text-sm font-medium">{l.item_description || l.item_id}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="truncate text-xs text-muted-foreground">
                           {l.item_id}{l.uom ? ` · ${l.uom}` : ''}
                           {l.is_weight && <span className="ml-1 text-amber-600 dark:text-amber-500">· {t('iv.recv_weight_hint', { pct: fq(weightPct) })}</span>}
                         </p>
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span>{t('iv.recv_col_ordered')} <b className="text-foreground">{fq(l.order_qty)}</b></span>
-                        <span>{t('iv.recv_col_received')} <b className="text-foreground">{fq(l.received_qty)}</b></span>
-                        <span>{t('iv.recv_col_remaining')} <b className={l.remaining_qty > 0 ? 'text-foreground' : 'text-emerald-600'}>{fq(l.remaining_qty)}</b></span>
-                      </div>
-                      <div className="w-full sm:w-40">
-                        <Input
-                          type="number" min="0" step="any" inputMode="decimal"
-                          placeholder={t('iv.recv_count_ph')}
-                          aria-label={`${t('iv.recv_col_count')} ${l.item_id}`}
-                          value={counts[l.item_id] ?? ''}
-                          aria-invalid={showErrors && !!err}
-                          disabled={maxFor(l) <= 0}
-                          onChange={(e) => setCounts((c) => ({ ...c, [l.item_id]: e.target.value }))}
-                        />
+                      <QtyStat label={t('iv.recv_col_ordered')} value={fq(l.order_qty)} />
+                      <QtyStat label={t('iv.recv_col_received')} value={fq(l.received_qty)} />
+                      <QtyStat label={t('iv.recv_col_remaining')} value={fq(l.remaining_qty)} className={l.remaining_qty > 0 ? '' : 'text-emerald-600'} />
+                      <div className="col-span-3 sm:col-span-1">
+                        {done ? (
+                          <Badge variant="outline" className="w-full justify-center border-emerald-500 py-1.5 text-emerald-600 sm:w-auto sm:justify-end sm:border-0 sm:py-0">
+                            ✓ {t('iv.recv_line_done')}
+                          </Badge>
+                        ) : (
+                          <Input
+                            type="number" min="0" step="any" inputMode="decimal"
+                            className="h-11 text-base sm:h-9 sm:text-sm sm:text-right"
+                            placeholder={t('iv.recv_count_ph')}
+                            aria-label={`${t('iv.recv_col_count')} ${l.item_id}`}
+                            value={counts[l.item_id] ?? ''}
+                            aria-invalid={showErrors && !!err}
+                            onChange={(e) => setCounts((c) => ({ ...c, [l.item_id]: e.target.value }))}
+                          />
+                        )}
                       </div>
                     </div>
                     {showErrors && err && <p className="mt-1 text-xs text-destructive" role="alert">{err}</p>}
@@ -252,10 +283,15 @@ function PoReceiveForm({ pos = [], onDone }: { pos?: { PO_No: string; Supplier_N
         </StateView>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button disabled={mut.isPending || !poNo} onClick={submit}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <Button size="lg" className="w-full sm:w-auto" disabled={mut.isPending || !poNo} onClick={submit}>
           {mut.isPending ? t('proc.saving') : t('iv.recv_confirm_btn')}
         </Button>
+        {poNo && lines.length > 0 && (
+          <p className="text-center text-xs text-muted-foreground sm:text-left">
+            {t('iv.recv_entered_hint', { n: fq(entered.length), total: fq(lines.length) })}
+          </p>
+        )}
       </div>
 
       {result && <ReceiveSummaryDialog result={result} onClose={() => setResult(null)} onDone={onDone} />}
@@ -307,9 +343,9 @@ function ReceiveSummaryDialog({ result, onClose, onDone }: { result: GrResult; o
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/40">
             <p className="flex items-center gap-1 text-sm font-medium"><TriangleAlert className="size-4 text-amber-600" /> {t('iv.recv_short_title')}</p>
             <p className="mt-1 text-xs text-muted-foreground">{t('iv.recv_short_desc')}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={onClose}>{t('iv.recv_keep_open')}</Button>
-              <Button size="sm" variant="destructive" disabled={closeShort.isPending} onClick={() => closeShort.mutate()}>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <Button size="sm" variant="secondary" className="w-full sm:w-auto" onClick={onClose}>{t('iv.recv_keep_open')}</Button>
+              <Button size="sm" variant="destructive" className="w-full sm:w-auto" disabled={closeShort.isPending} onClick={() => closeShort.mutate()}>
                 {closeShort.isPending ? t('proc.saving') : t('iv.recv_close_po')}
               </Button>
             </div>
@@ -317,7 +353,7 @@ function ReceiveSummaryDialog({ result, onClose, onDone }: { result: GrResult; o
         )}
 
         <DialogFooter>
-          <Button onClick={onClose}>{t('iv.recv_done')}</Button>
+          <Button className="w-full sm:w-auto" onClick={onClose}>{t('iv.recv_done')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -328,29 +364,33 @@ function SummaryLineRow({ line, grNo, poNo }: { line: SummaryLine; grNo: string;
   const { t } = useLang();
   const [claiming, setClaiming] = useState(false);
   const [claimedNo, setClaimedNo] = useState<string | null>(null);
+  const statusBadge = line.shortage_qty > 0 ? (
+    <Badge variant="destructive">{t('iv.recv_sum_short', { n: fq(line.shortage_qty) })}</Badge>
+  ) : line.over_qty > 0 ? (
+    <Badge variant="outline" className="border-amber-500 text-amber-600">{t('iv.recv_sum_over', { n: fq(line.over_qty) })}</Badge>
+  ) : (
+    <Badge variant="outline" className="border-emerald-500 text-emerald-600">✓ {t('iv.recv_sum_complete')}</Badge>
+  );
   return (
     <div className="rounded-md border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* name + verdict on their own row, figures on the next, actions last — nothing competes for width */}
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{line.item_description || line.item_id}</p>
-          <p className="text-xs text-muted-foreground">{line.item_id}{line.uom ? ` · ${line.uom}` : ''}</p>
+          <p className="truncate text-xs text-muted-foreground">{line.item_id}{line.uom ? ` · ${line.uom}` : ''}</p>
         </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span>{t('iv.recv_col_ordered')} <b className="text-foreground">{fq(line.order_qty)}</b></span>
-          <span>{t('iv.recv_sum_received_now')} <b className="text-foreground">{fq(line.received_now)}</b></span>
-          <span>{t('iv.recv_sum_total')} <b className="text-foreground">{fq(line.received_total)}</b></span>
-          {line.shortage_qty > 0 ? (
-            <Badge variant="destructive">{t('iv.recv_sum_short', { n: fq(line.shortage_qty) })}</Badge>
-          ) : line.over_qty > 0 ? (
-            <Badge variant="outline" className="border-amber-500 text-amber-600">{t('iv.recv_sum_over', { n: fq(line.over_qty) })}</Badge>
-          ) : (
-            <Badge variant="outline" className="border-emerald-500 text-emerald-600">{t('iv.recv_sum_complete')}</Badge>
-          )}
-        </div>
+        <div className="shrink-0">{statusBadge}</div>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 sm:max-w-sm">
+        <QtyStat label={t('iv.recv_col_ordered')} value={fq(line.order_qty)} labelOnDesktop />
+        <QtyStat label={t('iv.recv_sum_received_now')} value={fq(line.received_now)} labelOnDesktop />
+        <QtyStat label={t('iv.recv_sum_total')} value={fq(line.received_total)} labelOnDesktop />
+      </div>
+      <div className="mt-2">
         {claimedNo ? (
           <Badge variant="secondary">{t('iv.recv_claim_created', { no: claimedNo })}</Badge>
         ) : (
-          <Button size="sm" variant={claiming ? 'secondary' : 'outline'} onClick={() => setClaiming((v) => !v)}>
+          <Button size="sm" variant={claiming ? 'secondary' : 'outline'} className="w-full sm:w-auto" onClick={() => setClaiming((v) => !v)}>
             <Camera className="size-4" /> {t('iv.recv_claim_btn')}
           </Button>
         )}

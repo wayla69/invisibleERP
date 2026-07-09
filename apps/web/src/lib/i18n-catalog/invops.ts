@@ -344,6 +344,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'iv.recv_err_over': { th: 'รับเกินจำนวนที่สั่งไม่ได้ (สูงสุด {max})', en: 'Cannot receive more than ordered (max {max})' },
   'iv.recv_weight_hint': { th: 'สินค้าชั่งน้ำหนัก — รับเกินได้ไม่เกิน {pct}%', en: 'Weight-based item — up to {pct}% over is allowed' },
   'iv.recv_err_none': { th: 'กรอกจำนวนรับจริงอย่างน้อย 1 รายการ', en: 'Enter a received quantity for at least one line' },
+  'iv.recv_entered_hint': { th: 'นับแล้ว {n} จาก {total} รายการ', en: 'Counted {n} of {total} lines' },
+  'iv.recv_line_done': { th: 'รับครบแล้ว', en: 'Fully received' },
   'iv.recv_no_outstanding': { th: 'ใบสั่งซื้อนี้รับครบทุกรายการแล้ว', en: 'Every line on this PO is fully received' },
   'iv.recv_confirm_btn': { th: 'ยืนยันการรับของ', en: 'Confirm receipt' },
   'iv.recv_sum_title': { th: 'สรุปการรับของ — {gr}', en: 'Receiving summary — {gr}' },
