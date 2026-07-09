@@ -5,6 +5,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import { rateLimitRedis } from './rate-limit-store';
 
 // Routes exempt from rate limiting (liveness/readiness probes must always pass).
 const ALLOW_LIST = new Set(['/health', '/healthz', '/health/ready', '/health/live']);
@@ -35,7 +36,11 @@ export async function registerEdge(app: NestFastifyApplication): Promise<void> {
     contentSecurityPolicy: { useDefaults: false, directives: { 'default-src': ["'none'"], 'frame-ancestors': ["'none'"] } },
   });
 
+  // Shared counter store when a Redis URL is configured, so the per-IP limit holds across replicas
+  // (security review L-8); unset ⇒ the plugin's default in-process store (unchanged single-node behaviour).
+  const redis = rateLimitRedis();
   await fastify.register(rateLimit, {
+    ...(redis ? { redis } : {}),
     // Per-request ceiling: stricter for auth/OTP, loose for the rest.
     max: (req: { url?: string }) => {
       const b = bucketOf(pathOf(req)!);

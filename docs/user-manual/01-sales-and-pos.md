@@ -367,8 +367,21 @@ and let the system **text the guest when their table is ready**.
 - **Book a table (จองล่วงหน้า).** Choose **จองล่วงหน้า**, fill in the guest's name,
   phone, party size and **time** (optionally a specific table), then **จองโต๊ะ**. If
   you pick a table it's held as **reserved** so no one else seats it.
+- **Pick the service mode (fine-casual).** Every booking/queue entry carries a
+  **บุฟเฟ่ต์ / A la carte** toggle so a house that serves both plans the floor up
+  front. On a **buffet** booking you may pre-pick the **แพ็กเกจบุฟเฟ่ต์** (tier) —
+  or leave it as **เลือกที่โต๊ะ**; the buffet timer still starts at the table as
+  usual. Picking a package on an à-la-carte booking (or a retired package) is
+  rejected with **`BAD_PACKAGE`**. Add an optional **โอกาสพิเศษ** (birthday /
+  anniversary / business) so the team can prepare. The **ที่นั่งค้างรับ** card
+  splits pending covers **per mode** so the kitchen sees buffet-station load vs
+  à-la-carte load at a glance.
 - **Add a walk-in (รับเข้าคิว).** Choose **รับเข้าคิว**, enter the name, phone, party
   size and an optional **estimated wait** (minutes), then **เข้าคิว**.
+- **Link a member & open the guest profile.** Type the phone and tap the
+  **member-lookup** button — a matching loyalty member is linked to the booking and
+  their **โปรไฟล์แขก (Guest Profile)** card opens (also available per row via
+  **โปรไฟล์**). See the next section.
 - **Tell the guest it's ready.** Tap **แจ้งโต๊ะพร้อม** — the guest gets a **LINE or SMS**
   "your table is ready" message (LINE if they're a linked member, otherwise SMS to
   the phone). The entry turns **พร้อมแล้ว**.
@@ -378,8 +391,41 @@ and let the system **text the guest when their table is ready**.
   close it — any table you were holding is freed back to **available**.
 
 The top cards show how many guests are **waiting**, how many tables are **booked**,
-and the total **covers** you still have to seat — a quick read on how busy the next
-hour will be.
+and the total **covers** you still have to seat (split buffet vs à la carte) — a
+quick read on how busy the next hour will be.
+
+### Guest dining profile (โปรไฟล์แขก) — Michelin-grade service, PDPA-first
+
+**Screen:** the **โปรไฟล์แขก** card on `/reservations` · **Required permission:**
+`pos` / `order_mgt` / `crm` · the guest must be a **loyalty member**.
+
+Remember what makes each regular feel at home: **เมนูโปรด** (favourite dishes),
+**วัตถุดิบที่ชอบ** (favourite ingredients), **แพ้อาหาร** (allergies), dietary
+restrictions, **ที่นั่งที่ชอบ**, the **จำนวนคนที่มาปกติ**, free-form **service
+notes** ("น้ำเปล่าไม่ใส่น้ำแข็ง"), and the **ผู้ร่วมโต๊ะประจำ** — the people they
+usually dine with, each with their own preferences and allergies. The card also
+shows **ทานบ่อย** (their most-ordered dishes computed from order history) and how
+often they visit with how many guests.
+
+> **PDPA — consent first, always.** The profile is preference/profiling data, so
+> the system will **neither show nor save anything** until the guest has granted
+> the **`dining_profile`** consent. The first save requires ticking the consent
+> checkbox after asking the guest — this is recorded in the consent ledger (who,
+> when, source POS). Saving without consent is refused (**`CONSENT_REQUIRED`**).
+> The guest can **withdraw** at any time (staff: member consents screen; or the
+> member's own self-service portal) — the data immediately disappears from every
+> screen. A PDPA **erasure request (DSAR)** or the retention sweep **permanently
+> deletes** the profile and companions, and a data-access request exports them to
+> the guest. Collect only what serves the guest — this is a service tool, not a
+> marketing list (marketing consent is separate).
+
+- **Edit & save.** Fill the fields (comma-separate multiple entries), tick the
+  consent box on first save, then **บันทึกโปรไฟล์**.
+- **Companions.** Add name / relationship / notes with **เพิ่มผู้ร่วมโต๊ะ**;
+  removing one **hard-deletes** it.
+- **At service time.** Open the profile from the reservation row before the party
+  arrives — allergies and seating preference first, then delight with the
+  favourites.
 
 **Day-parting (time-limited menus).** When adding a menu item in **เมนูอาหาร**
 you can set a **ช่วงเวลาขาย** (selling window) — a start/end time and which days

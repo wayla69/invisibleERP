@@ -55,6 +55,11 @@ async function main() {
   await db.insert(s.posMemberLedger).values({ tenantId: t1, memberId, txnType: 'Earn', points: '500', balanceAfter: '500', refDoc: 'SALE-1' });
   // A receipt-upload submission (LYL-17) — personal data (photo + freeform fields) the member submitted themselves.
   await db.insert(s.loyaltyReceiptSubmissions).values({ tenantId: t1, memberId, receiptImage: 'data:image/png;base64,AAAA', purchaseAmount: '200', storeName: 'ร้านทดสอบ', note: 'ซื้อของ', status: 'Approved' });
+  // A consented guest dining profile + companion (fine-casual guest CRM) — preference/profiling data that an
+  // access request must export and an erasure must HARD-DELETE.
+  await db.insert(s.memberConsents).values({ tenantId: t1, memberId, purpose: 'dining_profile', granted: true, grantedAt: new Date(), source: 'pos' });
+  await db.insert(s.memberDiningProfiles).values({ tenantId: t1, memberId, favoriteMenus: ['หอยเชลล์ย่าง'], allergies: ['กุ้ง'], serviceNotes: 'น้ำเปล่าไม่ใส่น้ำแข็ง' });
+  await db.insert(s.memberCompanions).values({ tenantId: t1, memberId, name: 'คุณเมย์', relationship: 'ภรรยา' });
   // An audit_log row whose meta carries the member's PII (to prove read-time pseudonymisation after erasure).
   await db.insert(s.auditLog).values({ actor: 'cashier1', tenantId: t1, action: 'POST /api/pos/orders', entity: 'order', entityId: 'SO-1', status: 'success', meta: { customer_phone: '0810001234', customer_name: 'Somchai Jaidee' } });
 
@@ -84,6 +89,7 @@ async function main() {
   ok('export bundles subject profile + consents + ledger', exp.json.status === 'completed' && prof?.name === 'Somchai Jaidee' && (exp.json.export?.consents?.length ?? 0) >= 1 && (exp.json.export?.points_ledger?.length ?? 0) >= 1, JSON.stringify({ st: exp.json.status, name: prof?.name }));
   const rcpt = exp.json.export?.receipt_submissions?.[0];
   ok('export also bundles the member\'s receipt-upload submissions (LYL-17)', (exp.json.export?.receipt_submissions?.length ?? 0) === 1 && rcpt?.receipt_image === 'data:image/png;base64,AAAA' && rcpt?.store_name === 'ร้านทดสอบ', JSON.stringify(rcpt));
+  ok('export also bundles the guest dining profile + companions', exp.json.export?.dining_profile?.allergies?.[0] === 'กุ้ง' && exp.json.export?.companions?.[0]?.name === 'คุณเมย์', JSON.stringify({ dp: exp.json.export?.dining_profile?.allergies, comp: exp.json.export?.companions?.length }));
 
   // 3. File + execute an erasure DSAR.
   const er = await inj('POST', '/api/pdpa/dsar', dpo1, { subject_type: 'member', subject_ref: 'M-0001', request_type: 'erasure' });
@@ -97,6 +103,9 @@ async function main() {
   ok('member PII redacted after erasure (name=[erased], phone null)', p2?.name === '[erased]' && !p2?.phone && !p2?.email, JSON.stringify({ name: p2?.name, phone: p2?.phone }));
   const rcpt2 = exp2.json.export?.receipt_submissions?.[0];
   ok('receipt submission redacted after erasure (image/store/note gone) but transactional facts kept', rcpt2?.receipt_image === '[erased]' && !rcpt2?.store_name && !rcpt2?.note && Number(rcpt2?.purchase_amount) === 200 && rcpt2?.status === 'Approved', JSON.stringify(rcpt2));
+  const dpCnt = Number(((await pg.query(`SELECT count(*)::int n FROM member_dining_profiles WHERE member_id=${memberId}`)).rows as any[])[0].n);
+  const compCnt = Number(((await pg.query(`SELECT count(*)::int n FROM member_companions WHERE member_id=${memberId}`)).rows as any[])[0].n);
+  ok('guest dining profile + companions HARD-DELETED by erasure (pure preference data)', dpCnt === 0 && compCnt === 0 && exp2.json.export?.dining_profile === null && (exp2.json.export?.companions?.length ?? 0) === 0, `profiles=${dpCnt} companions=${compCnt}`);
 
   // 5. The immutable audit trail now SHOWS the pseudonym instead of the erased PII (stored row untouched).
   const audit = await inj('GET', '/api/admin/audit?action=pos', dpo1);

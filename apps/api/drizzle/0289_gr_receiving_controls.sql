@@ -1,4 +1,4 @@
--- 0288_gr_receiving_controls — Blind-count goods receiving controls (EXP-12). (1) goods_receipts.created_at:
+-- 0289_gr_receiving_controls — Blind-count goods receiving controls (EXP-12). (1) goods_receipts.created_at:
 -- the precise receipt timestamp that anchors the supplier-claim window (a claim must be opened within N hours
 -- of the receipt — default 24 — after which the system refuses it). Backfilled from gr_date for historical
 -- rows. (2) receiving_settings: per-tenant receiving tolerances — over_receipt_weight_pct (a weight-UoM PO

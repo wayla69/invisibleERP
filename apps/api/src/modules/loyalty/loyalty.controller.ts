@@ -35,7 +35,7 @@ const ListQuery = z.object({
   offset: z.coerce.number().int().nonnegative().optional(),
 });
 const ConsentBody = z.object({
-  purpose: z.enum(['marketing', 'profiling', 'line', 'sms', 'email']),
+  purpose: z.enum(['marketing', 'profiling', 'line', 'sms', 'email', 'dining_profile']),
   granted: z.boolean(),
   channel: z.string().optional(),
   source: z.string().optional(),

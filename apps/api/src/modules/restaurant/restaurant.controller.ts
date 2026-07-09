@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -11,6 +11,7 @@ import { PrintService } from '../printing/print.service';
 import { PeripheralsService } from '../peripherals/peripherals.service';
 import { RestaurantOfflineSyncService, type RegisterOfflineSyncBatchDto } from './offline-sync.service';
 import { ReservationService, type CreateReservationDto, type ListReservationsDto } from './reservation.service';
+import { GuestProfileService, type UpsertDiningProfileDto, type AddCompanionDto } from './guest-profile.service';
 import { TipService, type DistributeTipsDto } from './tip.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
@@ -46,6 +47,29 @@ const CreateReservationBody = z.object({
   member_id: z.number().int().optional(),
   quoted_wait_min: z.number().int().nonnegative().optional(),
   notes: z.string().max(500).optional(),
+  service_mode: z.enum(['a_la_carte', 'buffet']).optional(),  // fine-casual: buffet + à la carte in one venue
+  buffet_package_id: z.number().int().optional(),
+  occasion: z.string().max(120).optional(),
+});
+// Guest dining profile (PDPA consent-gated — see GuestProfileService)
+const FreeList = z.array(z.string().max(120)).max(40);
+const UpsertDiningProfileBody = z.object({
+  consent: z.boolean().optional(),
+  favorite_menus: FreeList.optional(),
+  favorite_ingredients: FreeList.optional(),
+  allergies: FreeList.optional(),
+  dietary: z.string().max(120).optional(),
+  seating_preference: z.string().max(200).optional(),
+  typical_party_size: z.number().int().positive().max(200).optional(),
+  service_notes: z.string().max(1000).optional(),
+  extra: z.record(z.string().max(60), z.string().max(300)).optional(),
+});
+const AddCompanionBody = z.object({
+  name: z.string().min(1).max(120),
+  relationship: z.string().max(80).optional(),
+  allergies: FreeList.optional(),
+  preferences: z.string().max(500).optional(),
+  notes: z.string().max(500).optional(),
 });
 
 @Controller('api/restaurant')
@@ -61,6 +85,7 @@ export class RestaurantController {
     private readonly peripherals: PeripheralsService,
     private readonly offlineSync: RestaurantOfflineSyncService,
     private readonly reservations: ReservationService,
+    private readonly guests: GuestProfileService,
     private readonly tips: TipService,
   ) {}
 
@@ -90,6 +115,16 @@ export class RestaurantController {
   cancelReservation(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.reservations.cancel(+id, u); }
   @Post('reservations/:id/no-show')
   noShowReservation(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.reservations.noShow(+id, u); }
+
+  // ── Guest dining profile (Michelin-style guest CRM; PDPA consent-gated per member_consents 'dining_profile') ──
+  @Get('guests/:memberId/profile') @Permissions('pos', 'order_mgt', 'crm')
+  guestProfile(@Param('memberId') memberId: string, @CurrentUser() u: JwtUser) { return this.guests.get(+memberId, u); }
+  @Put('guests/:memberId/profile') @Permissions('pos', 'order_mgt', 'crm')
+  upsertGuestProfile(@Param('memberId') memberId: string, @Body(new ZodValidationPipe(UpsertDiningProfileBody)) b: UpsertDiningProfileDto, @CurrentUser() u: JwtUser) { return this.guests.upsert(+memberId, b, u); }
+  @Post('guests/:memberId/companions') @Permissions('pos', 'order_mgt', 'crm')
+  addGuestCompanion(@Param('memberId') memberId: string, @Body(new ZodValidationPipe(AddCompanionBody)) b: AddCompanionDto, @CurrentUser() u: JwtUser) { return this.guests.addCompanion(+memberId, b, u); }
+  @Delete('guests/:memberId/companions/:companionId') @Permissions('pos', 'order_mgt', 'crm')
+  removeGuestCompanion(@Param('memberId') memberId: string, @Param('companionId') companionId: string, @CurrentUser() u: JwtUser) { return this.guests.removeCompanion(+memberId, +companionId, u); }
 
   // Replay register sales captured offline. Idempotent on (tenant, client_uuid) — a re-sent batch
   // returns 'duplicate' for already-posted sales and never double-posts.

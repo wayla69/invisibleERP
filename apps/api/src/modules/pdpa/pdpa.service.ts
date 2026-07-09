@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { dsarRequests, pdpaErasures, ropaActivities, pdpaRetentionPolicies, posMembers, memberConsents, loyaltyReceiptSubmissions, employees, payslips } from '../../database/schema';
+import { dsarRequests, pdpaErasures, ropaActivities, pdpaRetentionPolicies, posMembers, memberConsents, loyaltyReceiptSubmissions, employees, payslips, memberDiningProfiles, memberCompanions } from '../../database/schema';
 import { posMemberLedger } from '../../database/schema/loyalty-members';
 import { objectUrl, deleteObject } from '../../common/object-storage';
 import type { JwtUser } from '../../common/decorators';
@@ -215,12 +215,18 @@ export class PdpaService {
     // Member-submitted receipt photos (LYL-17) are personal data the subject uploaded themselves — an access
     // request must return them, same as the points ledger.
     const receipts = await db.select().from(loyaltyReceiptSubmissions).where(eq(loyaltyReceiptSubmissions.memberId, Number(m.id))).limit(200);
+    // Consent-gated guest dining profile + companions (fine-casual guest CRM) — personal data the subject
+    // (or their host) provided; an access/portability request must return it like everything else we hold.
+    const [dining] = await db.select().from(memberDiningProfiles).where(eq(memberDiningProfiles.memberId, Number(m.id))).limit(1);
+    const companions = await db.select().from(memberCompanions).where(eq(memberCompanions.memberId, Number(m.id)));
     return {
       subject_type: 'member', found: true,
       profile: { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, email: m.email, line_user_id: m.lineUserId, birthday: m.birthday, tier: m.tier, balance: m.balance, marketing_opt_in: m.marketingOptIn, enrolled_at: m.enrolledAt },
       consents: consents.map((c: any) => ({ purpose: c.purpose, granted: c.granted, granted_at: c.grantedAt, withdrawn_at: c.withdrawnAt })),
       points_ledger: ledger.map((l: any) => ({ ts: l.txnDate, type: l.txnType, points: l.points, balance_after: l.balanceAfter })),
       receipt_submissions: receipts.map((r: any) => ({ id: Number(r.id), status: r.status, receipt_image: objectUrl(r.receiptImage), purchase_amount: r.purchaseAmount, store_name: r.storeName, purchase_date: r.purchaseDate, note: r.note, submitted_at: r.submittedAt, reviewed_at: r.reviewedAt })),
+      dining_profile: dining ? { favorite_menus: dining.favoriteMenus, favorite_ingredients: dining.favoriteIngredients, allergies: dining.allergies, dietary: dining.dietary, seating_preference: dining.seatingPreference, typical_party_size: dining.typicalPartySize, service_notes: dining.serviceNotes, extra: dining.extra, updated_at: dining.updatedAt } : null,
+      companions: companions.map((c: any) => ({ name: c.name, relationship: c.relationship, allergies: c.allergies, preferences: c.preferences, notes: c.notes })),
     };
   }
 
@@ -282,7 +288,7 @@ export class PdpaService {
 
     const pseudonym = await this.redactMember(m, { dsarId: id, erasedBy: user.username, tenantId: user.tenantId ?? null });
     // 4. Close the DSAR.
-    await db.update(dsarRequests).set({ status: 'completed', handledBy: user.username, completedAt: new Date(), result: { erased: true, pseudonym, fields_redacted: ['name', 'phone', 'email', 'card_no', 'line_user_id', 'line_display_name', 'birthday', 'receipt_image', 'receipt_store_name', 'receipt_note'] } }).where(eq(dsarRequests.id, id));
+    await db.update(dsarRequests).set({ status: 'completed', handledBy: user.username, completedAt: new Date(), result: { erased: true, pseudonym, fields_redacted: ['name', 'phone', 'email', 'card_no', 'line_user_id', 'line_display_name', 'birthday', 'receipt_image', 'receipt_store_name', 'receipt_note', 'dining_profile', 'companions'] } }).where(eq(dsarRequests.id, id));
 
     return { id, status: 'completed', erased: true, pseudonym };
   }
@@ -312,6 +318,10 @@ export class PdpaService {
     const imgs = await db.select({ img: loyaltyReceiptSubmissions.receiptImage }).from(loyaltyReceiptSubmissions).where(eq(loyaltyReceiptSubmissions.memberId, Number(m.id)));
     for (const row of imgs) await deleteObject(row.img);
     await db.update(loyaltyReceiptSubmissions).set({ receiptImage: '[erased]', storeName: null, note: null }).where(eq(loyaltyReceiptSubmissions.memberId, Number(m.id)));
+    // 2c. HARD-DELETE the guest dining profile + companions (fine-casual guest CRM) — pure consent-based
+    //    preference/profiling data with no accounting value, so full deletion (not redaction) is correct.
+    await db.delete(memberCompanions).where(eq(memberCompanions.memberId, Number(m.id)));
+    await db.delete(memberDiningProfiles).where(eq(memberDiningProfiles.memberId, Number(m.id)));
     // 3. Record the erasure ledger row (drives audit pseudonymisation).
     await db.insert(pdpaErasures).values({
       tenantId: opts.tenantId, subjectType: 'member', subjectId: Number(m.id),
