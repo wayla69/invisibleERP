@@ -159,6 +159,7 @@ async createPo(dto: CreatePoDto, user: JwtUser) {
 ## 7. Testing
 
 - **Unit** — services (business math: ROP, BOM cost, loyalty, aging, effective price) เทียบสูตรเดิมเป๊ะ
+- **Unit (2.4 — docs/38 sub-services):** guard-path suites over the decomposed plain classes — `test/ledger-posting.test.ts` (GL-05 balanced-by-construction incl. scale-4 bigint drift, PERIOD_LOCKED/CLOSED, WS1.1 control-account, SoD self-approve/self-reverse, GL-17 NOT_POSTED/ALREADY_REVERSED) and `test/procurement-po.test.ts` (Phase-16 screening port called-before-insert with 422 propagation, empty-PO and unknown-PO guards) — drizzle-shaped read fakes, no PGlite; write paths stay harness-tested (basics/compliance/golden).
 - **Integration** — endpoints + DB (testcontainers Postgres)
 - **Read-parity diff** (Phase 2 gate) — สคริปต์ยิง endpoint เดิม (FastAPI บน SQLite ที่ migrate แล้ว) vs V2 → เทียบ JSON; whitelist เฉพาะจุดที่จงใจแก้ (Dec P&L, auth, page-total)
 - **Contract** — Zod schema = source of truth ของ request/response + AI tool input

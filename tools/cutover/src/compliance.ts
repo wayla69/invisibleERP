@@ -71,6 +71,7 @@ async function main() {
     { username: 'payprep', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },            // PAY-03 payroll preparer (t1)
     { username: 'paychk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },             // PAY-03 payroll approver (t1, ≠ preparer)
     { username: 'whchk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq },              // INV-07 write-off approver (hq, ≠ admin)
+    { username: 'whrecv', passwordHash: await pw.hash('pw'), role: 'WarehouseOperator', tenantId: hq }, // EXP-12 receiver — wh_receive only (no procurement/exec)
     { username: 'staleadmin', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq },         // AC-02/03 live-role probe: Admin (HQ) later downgraded mid-token to verify RLS bypass follows the DB
   ]).onConflictDoNothing();
   // The Procurement role default is now SoD-clean (procurement/pr_raise only). These residual-risk
@@ -1122,6 +1123,61 @@ async function main() {
   ok('EXP-10: duplicate invoice number re-scanned → NOT auto-posted; explicit post → 409 DUPLICATE_INVOICE',
     exDup.json.auto_posted === false && exDup.json.dup_of != null && exDupPost.status === 409 && exDupPost.json.error?.code === 'DUPLICATE_INVOICE',
     JSON.stringify({ dup: exDup.json.dup_of, post: exDupPost.status }));
+
+  // ════════════════════════ EXP-12 — blind-count receiving: over-receipt gate · claim window · close-short ════════════════════════
+  // A receipt can never book more than was ordered (422 OVER_RECEIPT) — except a WEIGHT-basis line (kg),
+  // which may run over by the configurable tolerance (default 5%). A supplier claim must be opened within
+  // the claim window (24h of the GR) — after that the system refuses it. A short-shipped PO can be closed
+  // short, and the close is binding at line level (no further receipt).
+  const whrecv = await login('whrecv', 'pw'); // wh_receive only — the dock receiver (no procurement/exec)
+  await db.insert(s.items).values({ itemId: 'EXP12W', itemDescription: 'เนื้อวัว EXP-12 (ชั่งน้ำหนัก)', uom: 'kg', unitPrice: '500' }).onConflictDoNothing();
+  const rxPo = await inj('POST', '/api/procurement/pos', admin, { vendor_id: VEXP, items: [{ item_id: 'EXP3X', order_qty: 10, unit_price: 10 }, { item_id: 'EXP12W', order_qty: 10, unit_price: 500, uom: 'kg' }] });
+  const rxPoNo = rxPo.json.po_no as string;
+  await inj('PATCH', `/api/procurement/pos/${rxPoNo}/approve`, admin, { approve: true });
+  // receive-lines feeds the blind-count screen: ordered / received / outstanding per line + the tolerance
+  const rxLines = await inj('GET', `/api/procurement/pos/${rxPoNo}/receive-lines`, admin);
+  const rxLineX = rxLines.json.lines?.find((l: any) => l.item_id === 'EXP3X');
+  const rxLineW = rxLines.json.lines?.find((l: any) => l.item_id === 'EXP12W');
+  ok('EXP-12: receive-lines returns ordered/received/outstanding per PO line + weight flag + tolerance',
+    rxLineX?.order_qty === 10 && rxLineX?.remaining_qty === 10 && rxLineX?.is_weight === false && rxLineW?.is_weight === true && Number(rxLines.json.over_receipt_weight_pct) === 5,
+    JSON.stringify({ x: rxLineX, pct: rxLines.json.over_receipt_weight_pct }));
+  // over-receipt on a piece (EA) line is blocked outright
+  const rxOver = await inj('POST', '/api/procurement/grs', admin, { po_no: rxPoNo, items: [{ item_id: 'EXP3X', received_qty: 12 }] });
+  ok('EXP-12: receiving 12 on a 10-EA line is BLOCKED → 422 OVER_RECEIPT',
+    rxOver.status === 422 && rxOver.json.error?.code === 'OVER_RECEIPT', `${rxOver.status} ${rxOver.json.error?.code}`);
+  // a weight (kg) line accepts up to +5%… and refuses beyond it (aggregate per item — a 2nd GR counts too)
+  const rxWOk = await inj('POST', '/api/procurement/grs', admin, { po_no: rxPoNo, items: [{ item_id: 'EXP12W', received_qty: 10.4, uom: 'kg' }] });
+  const rxWOver = await inj('POST', '/api/procurement/grs', admin, { po_no: rxPoNo, items: [{ item_id: 'EXP12W', received_qty: 0.2, uom: 'kg' }] });
+  ok('EXP-12: weight (kg) line accepts +4% over (within the 5% tolerance); a further 0.2 beyond the cap → 422 OVER_RECEIPT',
+    (rxWOk.status === 200 || rxWOk.status === 201) && rxWOver.status === 422 && rxWOver.json.error?.code === 'OVER_RECEIPT',
+    JSON.stringify({ ok: rxWOk.status, over: rxWOver.status, code: rxWOver.json.error?.code }));
+  // partial receipt returns the ordered-vs-received summary (shortage surfaced immediately) + claim deadline
+  const rxGr = await inj('POST', '/api/procurement/grs', admin, { po_no: rxPoNo, items: [{ item_id: 'EXP3X', received_qty: 6 }] });
+  const rxSumX = rxGr.json.summary?.lines?.find((l: any) => l.item_id === 'EXP3X');
+  ok('EXP-12: GR response carries the ordered-vs-received summary (EXP3X short 4) + the claim deadline',
+    rxSumX?.order_qty === 10 && rxSumX?.received_total === 6 && rxSumX?.shortage_qty === 4 && !!rxGr.json.summary?.claim_deadline,
+    JSON.stringify(rxSumX));
+  // a claim inside the window opens (with its dock photo stored as a GRC attachment)…
+  const rxPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const rxClaim = await inj('POST', '/api/claims/gr', whrecv, { gr_no: rxGr.json.gr_no, po_no: rxPoNo, item_id: 'EXP3X', gr_qty: 6, claim_qty: 2, reason: 'ของช้ำเสียหาย', image_data_url: rxPng });
+  ok('EXP-12: claim inside the window opens (wh_receive) with photo evidence attached (GRC doc_attachment)',
+    rxClaim.status === 201 && rxClaim.json.claim_no?.startsWith('GRC') && rxClaim.json.image_attachment_id != null,
+    JSON.stringify({ st: rxClaim.status, no: rxClaim.json.claim_no, img: rxClaim.json.image_attachment_id }));
+  // …and the SAME claim after the window has lapsed is refused (window auto-closes; backdate the GR 25h)
+  await db.update(s.goodsReceipts).set({ createdAt: new Date(Date.now() - 25 * 3600_000) }).where(eq(s.goodsReceipts.grNo, rxGr.json.gr_no as string));
+  const rxLate = await inj('POST', '/api/claims/gr', whrecv, { gr_no: rxGr.json.gr_no, po_no: rxPoNo, item_id: 'EXP3X', claim_qty: 1, reason: 'สายเกินไป' });
+  ok('EXP-12: claim after the 24h window → 422 CLAIM_WINDOW_CLOSED (window auto-closes)',
+    rxLate.status === 422 && rxLate.json.error?.code === 'CLAIM_WINDOW_CLOSED', `${rxLate.status} ${rxLate.json.error?.code}`);
+  // shortage decision: close the PO short → status Closed, and the close binds at line level
+  const rxClose = await inj('POST', `/api/procurement/pos/${rxPoNo}/close-short`, whrecv, { reason: 'ผู้ขายยืนยันไม่ส่งเพิ่ม' });
+  const rxAfter = await inj('POST', '/api/procurement/grs', admin, { po_no: rxPoNo, items: [{ item_id: 'EXP3X', received_qty: 4 }] });
+  ok('EXP-12: close-short flips the PO Closed (short lines reported) and a further receipt → 422 PO_LINE_CLOSED',
+    rxClose.json.po_status === 'Closed' && rxClose.json.short_lines?.some((l: any) => l.item_id === 'EXP3X' && l.short_qty === 4) && rxAfter.status === 422 && rxAfter.json.error?.code === 'PO_LINE_CLOSED',
+    JSON.stringify({ close: rxClose.json.po_status, after: rxAfter.status, code: rxAfter.json.error?.code }));
+  // the receiving tolerance is config the receiver cannot loosen — mirrors EXP-04 (wh_receive → 403)
+  const rxTolBlocked = await inj('PUT', '/api/procurement/receiving-settings', whrecv, { over_receipt_weight_pct: 50 });
+  ok('EXP-12: a wh_receive-only user cannot change the receiving tolerance → 403 (procurement/exec only)',
+    rxTolBlocked.status === 403, `${rxTolBlocked.status} ${rxTolBlocked.json.error?.code}`);
 
   console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..21) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

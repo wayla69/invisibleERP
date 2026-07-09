@@ -433,13 +433,43 @@ duties **R04** — it protects the 3-way match.)
 
 1. Go to **รับสินค้า (GR)** (`/receiving`). The list shows POs awaiting receipt — use
    it to look up the PO number.
-2. In **Goods Receipt** (**รับสินค้า (GR)**), enter the PO number.
-3. Enter the **quantity received** for each line (it may differ from ordered).
-4. Record lot / expiry details if the item is batch-tracked.
-5. Submit.
+2. In **Goods Receipt** (**รับสินค้า (GR)**), pick the PO from the dropdown. The form
+   loads **every line on the PO** — item, ordered qty, already received, and what's
+   still outstanding — so you can check the physical delivery against the order.
+3. **Count the goods, then key the counted quantity** into each line that arrived.
+   The quantity is deliberately **not pre-filled**: a receipt requires an actual
+   count (this deters "confirm without counting"). Leave lines that didn't arrive
+   blank.
+4. Press **ยืนยันการรับของ**.
 
-**Expected result:** A GR is created, stock is increased, and the receipt is
-available for matching.
+**Expected result:** A GR is created, stock is increased, the receipt is available
+for matching — and a **summary dialog** compares ordered vs received per line so a
+shortage (ขาด) or overage (เกิน) is visible immediately.
+
+**You cannot receive more than was ordered.** A quantity beyond the outstanding
+amount is refused (error `OVER_RECEIPT`) — both in the form and by the server.
+The one exception is a **weight-based line** (uom kg / g / ตัน): weighed deliveries
+legitimately vary, so those may run over by up to **5%** of the ordered quantity
+(the percentage is configurable by procurement/exec under
+`/api/procurement/receiving-settings` — warehouse users can see it but not change it).
+
+**Problem goods? Claim from the summary — within 24 hours.** Each line in the
+post-receipt summary has a **แจ้งเคลม** button: enter the claim quantity and reason,
+and **take a photo of the goods on the spot** (the photo is stored as evidence on
+the claim). A claim tied to a GR must be opened **within 24 hours of the receipt**
+(the deadline is shown in the dialog; the window is configurable) — after that the
+system closes the claim window automatically and refuses it (`CLAIM_WINDOW_CLOSED`).
+Procurement follows the claim up with the supplier on `/claims`.
+
+**Something short-shipped? Decide at the dock.** When the summary shows a shortage,
+the dialog asks what to do:
+
+- **รอรับส่วนที่เหลือ (keep the PO open)** — the PO stays part-received and the
+  balance can be received later.
+- **ปิด PO (close short)** — the missing quantity is never coming; the PO closes,
+  any open project commitment is released, and the decision is **binding**: a later
+  receipt against the closed lines is refused (`PO_LINE_CLOSED`). A new delivery
+  needs a new PO.
 
 **One-tap รับครบ (receive all):** for a normal "everything arrived" delivery you don't
 need the form — every receivable PO in the list carries a **รับครบ** button that
@@ -448,13 +478,14 @@ and closes the PO once nothing is left. It only shows for Approved / part-receiv
 (never for Pending, Closed or Cancelled). The same action is available from LINE chat by
 typing `receive <PO no>` — see the [chat commands](#raise-a-pr-from-line-chat) above.
 
-> **Note — short / damaged delivery:** Raise a **goods-receipt claim** against
-> the supplier under **Claims** (`/claims` → GR Claims tab): pick the GR from the
-> **dropdown of recent receipts** (each shows its PO + vendor; choose **พิมพ์เลขเอกสารเอง…**
-> for an older GR), then enter the item, claim quantity and reason. Resolve or reject it once the supplier
-> responds. **From LINE chat** you can open one on the spot: `claim <PO/GR no>
-> <qty> [เหตุผล]` (e.g. `claim GR-20260101-001 2 ของแตก`) — procurement then
-> follows up on `/claims`.
+> **Note — short / damaged delivery:** the easiest path is the **แจ้งเคลม** button in
+> the post-receipt summary above (photo + reason, on the spot). A claim can also be
+> raised under **Claims** (`/claims` → GR Claims tab): pick the GR from the **dropdown
+> of recent receipts** (each shows its PO + vendor; choose **พิมพ์เลขเอกสารเอง…** to key
+> one), then enter the item, claim quantity and reason; resolve or reject it once the
+> supplier responds. **From LINE chat**: `claim <PO/GR no> <qty> [เหตุผล]`
+> (e.g. `claim GR-20260101-001 2 ของแตก`) — procurement then follows up on `/claims`.
+> **All paths enforce the same 24-hour claim window** counted from the goods receipt.
 
 **Receiving only part of a delivery:** if only some of the order arrived, enter the
 actual quantity per line in the GR form (leave the rest — the PO stays open for the

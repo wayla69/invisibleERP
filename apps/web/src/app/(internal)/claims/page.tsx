@@ -7,11 +7,10 @@ import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { DataTable } from '@/components/data-table';
 import { SearchInput } from '@/components/search-input';
 import { StateView } from '@/components/state-view';
-import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -47,8 +46,7 @@ export default function ClaimsPage() {
   const { t } = useLang();
   return (
     <div>
-      <PageHeader title={t('hx.cl.title')} description={t('hx.cl.desc')} />
-      <Tabs tabs={[{ key: 'sales', label: t('hx.cl.tab_sales'), content: <SalesClaims /> }, { key: 'gr', label: t('hx.cl.tab_gr'), content: <GrClaims /> }]} />
+      <ModulePage title={t('hx.cl.title')} description={t('hx.cl.desc')} tabs={[{ key: 'sales', label: t('hx.cl.tab_sales'), content: <SalesClaims /> }, { key: 'gr', label: t('hx.cl.tab_gr'), content: <GrClaims /> }]} />
     </div>
   );
 }

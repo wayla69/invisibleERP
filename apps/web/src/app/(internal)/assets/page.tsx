@@ -6,11 +6,10 @@ import { Boxes, CalendarRange, Check, ClipboardCheck, Coins, FolderTree, Landmar
 import { api, apiDownload } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -35,11 +34,9 @@ export default function AssetsPage() {
   const { t } = useLang();
   return (
     <div>
-      <PageHeader
+      <ModulePage
         title={t('mx.as_title')}
         description={t('mx.as_subtitle')}
-      />
-      <Tabs
         tabs={[
           { key: 'register', label: t('mx.as_tab_register'), content: <Register /> },
           { key: 'capitalize', label: t('mx.as_tab_capitalize'), content: <Capitalize /> },

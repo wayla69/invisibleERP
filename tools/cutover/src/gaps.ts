@@ -45,6 +45,10 @@ async function seed(db: any) {
   const [ol] = await db.insert(s.orderLines).values({ orderId: Number(o.id), itemId: 'A', itemDescription: 'Apple', orderQty: '10', stockUom: 'EA', unitPrice: '10', totalPrice: '100' }).returning({ id: s.orderLines.id });
   await db.insert(s.orderClaims).values({ orderLineId: Number(ol.id), claimedQty: '2', claimReason: 'Damaged', adminStatus: 'Waiting' });
 
+  // EXP-12: a GR claim must reference a REAL receipt inside the claim window (goods_receipts.created_at
+  // anchors the 24h cutoff), so seed the GR the claim below targets — a free-text gr_no now 404s.
+  await db.insert(s.goodsReceipts).values({ grNo: 'GR-1', grDate: ymd(), vendorName: 'V1', receivedBy: 'admin' });
+
   // AR overdue ~40d, AP overdue ~70d
   await db.insert(s.arInvoices).values({ invoiceNo: 'INV-TEST-1', invoiceDate: daysAgo(70), dueDate: daysAgo(40), tenantId: hq.id, amount: '100', paidAmount: '0', status: 'Unpaid' });
   await db.insert(s.apTransactions).values({ txnNo: 'AP-TEST-1', tenantId: hq.id, vendorName: 'V1', dueDate: daysAgo(70), amount: '200', paidAmount: '0', status: 'Unpaid' });

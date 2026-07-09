@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FormField } from '@/components/form-field';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 
 // Shared line-error affordance: a red hint under a line row (shown only after a submit attempt). Line-level
 // validation only kicks in once a line has an Item ID, so the trailing empty "add-a-line" row never nags.
@@ -192,106 +191,6 @@ export function PoForm({ onDone }: { onDone?: () => void }) {
         </Button>
         <Button disabled={mut.isPending} onClick={submit}>
           {mut.isPending ? t('proc.saving') : t('proc.create_po')}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// ── GR ──
-interface GrLine { item_id: string; received_qty: number; lot_no: string; expiry_date: string; unit_cost: number | ''; uom: string }
-const emptyGrLine = (): GrLine => ({ item_id: '', received_qty: 1, lot_no: '', expiry_date: '', unit_cost: '', uom: '' });
-
-export interface GrPoOption { PO_No: string; Supplier_Name?: string }
-
-export function GrForm({ pos = [], onDone }: { pos?: GrPoOption[]; onDone?: () => void }) {
-  const { t } = useLang();
-  const [poNo, setPoNo] = useState('');
-  const [remarks, setRemarks] = useState('');
-  const [lines, setLines] = useState<GrLine[]>([emptyGrLine()]);
-  const [showErrors, setShowErrors] = useState(false);
-  const setLine = (i: number, p: Partial<GrLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...p } : l)));
-
-  const poErr = !poNo.trim() ? t('proc.err_po_no') : null;
-  const lineErr = (l: GrLine) => {
-    if (!l.item_id.trim()) return null;
-    if (!posNum(l.received_qty)) return t('proc.err_recv_gt0');
-    if (l.unit_cost !== '' && !nonNeg(l.unit_cost)) return t('proc.err_cost_neg');
-    return null;
-  };
-  const submittable = lines.filter((l) => l.item_id.trim() && posNum(l.received_qty));
-  const formErr = submittable.length === 0 ? t('proc.err_need_line') : null;
-  const invalid = !!poErr || !!formErr || lines.some((l) => lineErr(l));
-
-  const mut = useMutation({
-    mutationFn: () => api<{ gr_no: string; po_no: string; po_status: string; lines: number }>('/api/procurement/grs', {
-      method: 'POST',
-      body: JSON.stringify({
-        po_no: poNo,
-        remarks: remarks || undefined,
-        items: submittable.map((l) => ({
-          item_id: l.item_id,
-          received_qty: Number(l.received_qty),
-          lot_no: l.lot_no || undefined,
-          expiry_date: l.expiry_date || undefined,
-          unit_cost: l.unit_cost === '' ? undefined : Number(l.unit_cost),
-          uom: l.uom || undefined,
-        })),
-      }),
-    }),
-    onSuccess: (d) => { notifySuccess(t('proc.gr_created', { no: d.gr_no }), t('proc.gr_created_desc', { po: d.po_no, status: d.po_status, n: d.lines })); onDone?.(); },
-    onError: (e: any) => notifyError(e?.message ?? t('proc.gr_failed')),
-  });
-
-  const submit = () => { setShowErrors(true); if (invalid) { notifyError(t('proc.fix_errors')); return; } mut.mutate(); };
-
-  return (
-    <div className="space-y-4">
-      <FormField htmlFor="gr-po" label={t('proc.gr_po_no')} required error={showErrors ? poErr : undefined} className="sm:max-w-sm">
-        <Select value={poNo || undefined} onValueChange={setPoNo}>
-          <SelectTrigger id="gr-po" className="w-full" aria-invalid={showErrors && !!poErr}>
-            <SelectValue placeholder={t('proc.gr_po_select_ph')} />
-          </SelectTrigger>
-          <SelectContent>
-            {pos.length === 0 ? (
-              <div className="px-2 py-1.5 text-sm text-muted-foreground">{t('proc.gr_po_none')}</div>
-            ) : (
-              pos.map((p) => (
-                <SelectItem key={p.PO_No} value={p.PO_No}>
-                  {p.PO_No}{p.Supplier_Name ? ` — ${p.Supplier_Name}` : ''}
-                </SelectItem>
-              ))
-            )}
-          </SelectContent>
-        </Select>
-      </FormField>
-      <FormField htmlFor="gr-remarks" label={t('proc.remarks')}>
-        <Input id="gr-remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder={t('proc.remarks_ph')} />
-      </FormField>
-      <div className="space-y-2">
-        <Label>{t('proc.gr_lines')}</Label>
-        {lines.map((l, i) => (
-          <div key={i} className="grid grid-cols-[1.5fr_1fr_1.3fr_1.3fr_1fr_1fr_auto] gap-2">
-            <Input placeholder="Item ID" value={l.item_id} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { item_id: e.target.value })} />
-            <Input type="number" min="0" placeholder={t('proc.received_ph')} value={l.received_qty} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { received_qty: +e.target.value })} />
-            <Input placeholder="Lot" value={l.lot_no} onChange={(e) => setLine(i, { lot_no: e.target.value })} />
-            <Input type="date" value={l.expiry_date} onChange={(e) => setLine(i, { expiry_date: e.target.value })} />
-            <Input type="number" min="0" step="0.01" placeholder={t('proc.cost_ph')} value={l.unit_cost} aria-invalid={showErrors && !!lineErr(l)} onChange={(e) => setLine(i, { unit_cost: e.target.value === '' ? '' : +e.target.value })} />
-            <Input placeholder={t('inv.col_uom')} value={l.uom} onChange={(e) => setLine(i, { uom: e.target.value })} />
-            <Button variant="destructive" size="icon" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
-              <X className="size-4" />
-            </Button>
-            <LineError show={showErrors} msg={lineErr(l)} />
-          </div>
-        ))}
-        {showErrors && formErr && <p className="text-xs text-destructive" role="alert">{formErr}</p>}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="secondary" onClick={() => setLines((ls) => [...ls, emptyGrLine()])}>
-          <Plus className="size-4" /> {t('proc.add_line')}
-        </Button>
-        <Button disabled={mut.isPending} onClick={submit}>
-          {mut.isPending ? t('proc.saving') : t('proc.create_gr')}
         </Button>
       </div>
     </div>
