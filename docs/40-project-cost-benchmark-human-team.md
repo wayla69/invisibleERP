@@ -29,8 +29,9 @@ All figures below are measured directly from this repository, not estimated.
 Scope characterization: a full multi-tenant ERP with financial controls (maker-checker,
 SoD, RLS tenant isolation), Thai localization, POS + restaurant operations, manufacturing
 (MRP/RCCP/APS), project management with EVM, HCM/payroll, IFRS-16 lease accounting, and
-audit-ready ISO-style documentation — i.e., enterprise software at the expensive end of
-the complexity spectrum.
+an ISO-style documentation set (process narratives, control matrix, UAT packs) built
+toward the audit-readiness roadmap in `compliance/` — i.e., enterprise software at the
+expensive end of the complexity spectrum.
 
 ## 3. Effort estimate — three independent methods
 
