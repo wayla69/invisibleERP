@@ -19,6 +19,7 @@ const PURE_MODULES = [
   'src/common/thai-address.ts',      // test/pure-utils.test.ts
   'src/common/bizdate.ts',           // test/pure-utils.test.ts
   'src/common/db-error.ts',          // test/pure-utils.test.ts
+  'src/common/net-guard.ts',         // test/net-guard.test.ts (2.4 slice 8 — SSRF guard, security H-1/L-6)
   'src/modules/tax/documents/wht-rates.ts', // test/tax-rules.test.ts (tax-point.ts already in the glob)
   'src/modules/payroll/payroll-calc.ts',    // already tested in test/unit.test.ts — now gated
   'src/modules/payments/promptpay-qr.ts',   // already tested in test/unit.test.ts — now gated
@@ -40,6 +41,8 @@ const SUB_SERVICE_FLOORS: Record<string, { statements: number; branches: number;
   'src/modules/ledger/ledger-recurring.service.ts':    { statements: 85, branches: 77, functions: 78, lines: 85 }, // 87.4/79.4/80/87.4
   'src/modules/procurement/procurement-po.service.ts': { statements: 97, branches: 67, functions: 98, lines: 97 }, // 99.3/69.4/100/99.3
   'src/modules/procurement/procurement-pr.service.ts': { statements: 95, branches: 65, functions: 98, lines: 95 }, // 97.8/67.9/100/97.8
+  'src/modules/procurement/procurement-grn.service.ts': { statements: 92, branches: 54, functions: 98, lines: 92 }, // 94.6/56.1/100/94.6 — branch % is low because the print/summary mapping is dense with `?? null` fallbacks (each a partial branch); the control gates themselves are fully exercised
+
   'src/modules/projects/projects-evm.service.ts':      { statements: 90, branches: 75, functions: 85, lines: 90 }, // 92.5/77.2/87.5/92.5
 };
 
@@ -68,10 +71,12 @@ export default defineConfig({
       //     (measured stmts 80.3 / branch 89.2 / funcs 79.5 / lines 80.3).
       //  2. SUB_SERVICE_FLOORS pin each docs/38 sub-service per file.
       //  3. The global floor covers the whole expanded set (this vitest version does NOT remove
-      //     glob-matched files from the global group) — measured 88.8/80.6/83.5/88.8 after slice 7;
-      //     it backstops files accidentally dropped from the globs.
+      //     glob-matched files from the global group) — measured 89.5/78.0/85.2/89.5 after slice 8
+      //     (branches moved 80.6→78.0 under the down-repin rule: the grn service joined the set and its
+      //     dense `?? null` mapping code grew the branch denominator); it backstops files accidentally
+      //     dropped from the globs.
       thresholds: {
-        statements: 86, branches: 80, functions: 81, lines: 86,
+        statements: 87, branches: 76, functions: 83, lines: 87,
         [`{${PURE_MODULES.join(',')}}`]: { statements: 78, branches: 87, functions: 77, lines: 78 },
         ...SUB_SERVICE_FLOORS,
       },
