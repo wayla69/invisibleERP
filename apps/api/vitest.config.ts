@@ -64,7 +64,7 @@ export default defineConfig({
       //     glob-matched files from the global group) — measured 82.3/81.4/76.8/82.3 after slice 6;
       //     it backstops files accidentally dropped from the globs.
       thresholds: {
-        statements: 80, branches: 79, functions: 74, lines: 80,
+        statements: 80, branches: 80, functions: 74, lines: 80,
         '{src/common/*.ts,src/modules/tax/**/*.ts,src/modules/payroll/payroll-calc.ts,src/modules/payments/promptpay-qr.ts,src/database/encrypted-column.ts,src/observability/runtime-metrics.ts}':
           { statements: 78, branches: 87, functions: 77, lines: 78 },
         'src/modules/ledger/ledger-posting.service.ts':      { statements: 77, branches: 83, functions: 48, lines: 77 }, // 79.5/85.8/50/79.5

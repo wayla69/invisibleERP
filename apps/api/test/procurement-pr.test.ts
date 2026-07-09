@@ -125,7 +125,10 @@ function prEnv(routes: any[][], opts: { lowItems?: any[]; inst?: any; cleared?: 
     }),
   };
   const db = {
-    select: () => chain(routes[Math.min(call++, routes.length - 1)] ?? []),
+    // STRICT routing: an unexpected extra read throws instead of silently reusing the last route — e.g. a
+    // split-convert regression that ignores pr_line_id and falls back to the item_id candidate lookup
+    // performs one extra select and FAILS here, instead of producing byte-identical captures.
+    select: () => { if (call >= routes.length) throw new Error(`unexpected select #${call + 1} — add a route`); return chain(routes[call++] ?? []); },
     transaction: async (cb: any) => cb(tx),
     insert: () => ({ values: (v: any) => { cap.inserts.push(v); return { onConflictDoNothing: () => Promise.resolve() }; } }),
     update: () => ({ set: (v: any) => ({ where: () => { cap.updates.push(v); return Promise.resolve(); } }) }),
@@ -212,6 +215,8 @@ describe('ProcurementPrService — listPrs scoping + item-name backfill', () => 
   });
 
   it('a plain pr_raise holder defaults to mine-only scoping (can_approve false)', async () => {
+    // NB the fake ignores WHERE, so this pins the can_approve/scopeMine DECISION, not the SQL row filter —
+    // the actual requested_by filtering is exercised end-to-end by the e2e/writeflow harnesses.
     const { svc } = prEnv([[HEAD], [LINE], []]);
     const r = await svc.listPrs({ username: 'req1', permissions: ['pr_raise'] } as any);
     expect(r.can_approve).toBe(false);
@@ -236,7 +241,7 @@ describe('ProcurementPrService — convertPrToPo write paths (legacy + split)', 
     expect(cap.inserts[0]).toMatchObject({ itemId: 'NEW1', itemDescription: 'ของใหม่' }); // brand-new code opened first
     expect(cap.pos[0]).toMatchObject({ vendor_id: 4, remarks: 'จาก PR-1' });
     expect(cap.pos[0].items).toHaveLength(2);
-    expect(cap.updates[0]).toEqual({ poNo: 'PO-1' });                    // blanket line stamp
+    expect(cap.updates[0]).toEqual({ poNo: 'PO-1' });                    // blanket line stamp (WHERE breadth rides the harnesses)
     expect(cap.updates[1]).toEqual({ status: 'Converted' });             // PR closes fully
     expect(cap.lineMsgs[0][0]).toBe('req1');                             // D2: requester told, not the converter
     expect(cap.lineMsgs[0][1]).toContain('PO-1');

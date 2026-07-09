@@ -87,7 +87,9 @@ function poEnv(routes: any[][], opts: { inst?: any; cleared?: boolean; noWorkflo
     }),
   };
   const db = {
-    select: () => chain(routes[Math.min(call++, routes.length - 1)] ?? []),
+    // STRICT routing: an unexpected extra read throws instead of silently reusing the last route, so a
+    // service refactor that adds/reorders a lookup FAILS the test rather than passing vacuously.
+    select: () => { if (call >= routes.length) throw new Error(`unexpected select #${call + 1} — add a route`); return chain(routes[call++] ?? []); },
     transaction: async (cb: any) => cb(tx),
     update: () => ({ set: (v: any) => ({ where: () => { cap.updates.push(v); return Promise.resolve(); } }) }),
   };
