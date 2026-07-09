@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, isNull, or } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { docAttachments, purchaseOrders, purchaseRequests } from '../../database/schema';
+import { docAttachments, purchaseOrders, purchaseRequests, goodsReceipts, grClaims } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 
 export interface AddAttachmentDto { doc_type: string; doc_no: string; data_url: string; kind?: string; filename?: string; note?: string; source?: string }
@@ -25,6 +25,12 @@ export class AttachmentsService {
     } else if (docType === 'PR') {
       const [pr] = await db.select({ id: purchaseRequests.id }).from(purchaseRequests).where(eq(purchaseRequests.prNo, docNo)).limit(1);
       if (!pr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PR not found', messageTh: 'ไม่พบ PR' });
+    } else if (docType === 'GR') {
+      const [gr] = await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.grNo, docNo)).limit(1);
+      if (!gr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'GR not found', messageTh: 'ไม่พบใบรับสินค้า' });
+    } else if (docType === 'GRC') {
+      const [c] = await db.select({ id: grClaims.id }).from(grClaims).where(eq(grClaims.claimNo, docNo)).limit(1);
+      if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Claim not found', messageTh: 'ไม่พบรายการเคลม' });
     } else {
       throw new BadRequestException({ code: 'BAD_DOC_TYPE', message: `Unsupported doc_type: ${docType}`, messageTh: 'ประเภทเอกสารไม่รองรับ' });
     }

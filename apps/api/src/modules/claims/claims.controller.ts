@@ -9,6 +9,7 @@ const GrClaimBody = z.object({
   gr_no: z.string().optional(), po_no: z.string().optional(), vendor_id: z.number().optional(),
   item_id: z.string().optional(), item_description: z.string().optional(), gr_qty: z.number().optional(), claim_qty: z.number().optional(),
   uom: z.string().optional(), reason: z.string().optional(),
+  image_data_url: z.string().optional(), // EXP-12 — photo evidence taken at the receiving dock
 });
 const ResolveBody = z.object({ status: z.enum(['Resolved', 'Rejected']), resolution: z.string().optional() });
 
@@ -24,9 +25,10 @@ export class ClaimsController {
     return this.svc.decideSalesClaim(+id, b.decision, b.reject_reason, u);
   }
 
-  // GR / supplier claims
-  @Post('gr') @Permissions('procurement') createGr(@Body(new ZodValidationPipe(GrClaimBody)) b: z.infer<typeof GrClaimBody>, @CurrentUser() u: JwtUser) { return this.svc.createGrClaim(b, u); }
-  @Get('gr') @Permissions('procurement') listGr(@Query('status') status?: string) { return this.svc.listGrClaims(status); }
+  // GR / supplier claims — the receiver (wh_receive/warehouse) opens a claim at the dock, within the
+  // EXP-12 claim window; procurement follows it up with the supplier.
+  @Post('gr') @Permissions('procurement', 'wh_receive', 'warehouse') createGr(@Body(new ZodValidationPipe(GrClaimBody)) b: z.infer<typeof GrClaimBody>, @CurrentUser() u: JwtUser) { return this.svc.createGrClaim(b, u); }
+  @Get('gr') @Permissions('procurement', 'wh_receive', 'warehouse') listGr(@Query('status') status?: string) { return this.svc.listGrClaims(status); }
   @Patch('gr/:claimNo') @Permissions('procurement')
   resolveGr(@Param('claimNo') no: string, @Body(new ZodValidationPipe(ResolveBody)) b: z.infer<typeof ResolveBody>, @CurrentUser() u: JwtUser) {
     return this.svc.resolveGrClaim(no, b.status, b.resolution, u);
