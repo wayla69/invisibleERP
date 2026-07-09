@@ -8,8 +8,10 @@
 #   1. Reads the superuser PUBLIC url from the `Postgres` plugin service (CI can't reach the
 #      `.railway.internal` host) and the API's resolved internal DATABASE_URL.
 #   2. Creates/updates role `ierp_app` (LOGIN NOSUPERUSER NOBYPASSRLS) with a fresh random password,
-#      grants per §1bis, membership BOTH ways with app_user (`SET LOCAL ROLE app_user` in the request
-#      tx requires ierp_app ∈ app_user), CREATE on the schemas, and transfers ownership of all
+#      grants per §1bis, app_user membership ONE way (`SET LOCAL ROLE app_user` in the request
+#      tx requires ierp_app ∈ app_user; the reverse grant is a cycle), CREATE on the schemas AND on the database (drizzle-kit's
+#      opening `CREATE SCHEMA IF NOT EXISTS` checks the database ACL even when the schema exists),
+#      and transfers ownership of all
 #      public/drizzle tables + sequences + views to ierp_app so boot-time `drizzle-kit migrate`
 #      (which runs as DATABASE_URL) can still ALTER existing objects. FORCE RLS keeps applying to the
 #      owner — that is the point.
@@ -100,6 +102,14 @@ jobs:
             IF EXISTS (SELECT FROM pg_namespace WHERE nspname='drizzle') THEN
               EXECUTE 'GRANT USAGE, CREATE ON SCHEMA drizzle TO ierp_app';
             END IF;
+          END \$\$;
+          -- CREATE on the DATABASE itself (run-3 lesson): drizzle-kit migrate ALWAYS opens with
+          -- CREATE SCHEMA IF NOT EXISTS "drizzle", and Postgres checks CREATE-on-database BEFORE the
+          -- IF NOT EXISTS shortcut — without this grant the pre-deploy migrate dies with 42501
+          -- "permission denied for database" even though the schema already exists (superusers never
+          -- hit it because they skip ACL checks entirely).
+          DO \$\$ BEGIN
+            EXECUTE format('GRANT CREATE ON DATABASE %I TO ierp_app', current_database());
           END \$\$;
           -- Ownership transfer: boot-time migrations run as DATABASE_URL (= ierp_app after this), and
           -- ALTER TABLE requires ownership. FORCE RLS still binds the owner, so no isolation is lost.

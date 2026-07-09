@@ -1,6 +1,6 @@
 # Ops — Multi-tenancy model & TENANCY_MODE (ITGC-AC-18)
 
-> **Status:** v1.18 · **Date:** 2026-07-05 · **Owner:** Platform / Security
+> **Status:** v1.22 · **Date:** 2026-07-09 · **Owner:** Platform / Security
 > How tenant data is isolated, what `TENANCY_MODE` does, and how to choose it for your deployment.
 
 ## 1. The two isolation layers
@@ -43,6 +43,12 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENC
 GRANT app_user TO ierp_app;   -- so `SET ROLE app_user` inside the request tx still works
                               -- (SET ROLE X requires the session role to be a MEMBER OF x —
                               -- the reverse direction creates a membership cycle Postgres rejects)
+GRANT CREATE ON DATABASE railway TO ierp_app;  -- substitute your DB name (current_database()).
+                              -- drizzle-kit migrate ALWAYS opens with CREATE SCHEMA IF NOT EXISTS
+                              -- "drizzle", and Postgres checks CREATE-on-database BEFORE the
+                              -- IF NOT EXISTS shortcut — without this the pre-deploy migrate fails
+                              -- with 42501 "permission denied for database" even on a fully
+                              -- migrated DB (superusers never see it; they skip ACL checks).
 ```
 Then point `DATABASE_URL` at `ierp_app`. Keep the intentionally-unscoped auth-global tables (`login_attempts`,
 scheduler heartbeats, etc.) as reviewed exceptions.
@@ -56,6 +62,8 @@ live DB (100+ applied drizzle migrations) and runs the SQL above via its public 
 legacy reverse-direction
 `ierp_app TO app_user` grant (this doc originally prescribed it; it both fails to enable `SET ROLE
 app_user` and blocks the correct grant with a membership-cycle error), grants `CREATE` on the schemas
+**and on the database itself** (drizzle-kit's opening `CREATE SCHEMA IF NOT EXISTS "drizzle"` checks the
+database ACL even when the schema already exists — missing it fails every pre-deploy migrate with 42501)
 and **transfers ownership of all `public`/`drizzle` tables + sequences + views to `ierp_app`** — because
 boot-time `drizzle-kit migrate` runs as `DATABASE_URL` and `ALTER TABLE` requires ownership (`FORCE` RLS
 still binds the owner, so no isolation is lost). It then verifies the role posture over a live login,
@@ -329,6 +337,7 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 ## 7. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.22 | 2026-07-09 | Platform / SRE | **§1bis provisioning: grant `CREATE` on the DATABASE (deploy-outage run-3 fix).** After run 3 provisioned the correct instance, the deploy still died in the pre-deploy `drizzle-kit migrate`: it always opens with `CREATE SCHEMA IF NOT EXISTS "drizzle"`, and Postgres checks CREATE-on-database *before* the IF-NOT-EXISTS shortcut, so `ierp_app` (schema grants only) failed with 42501 `permission denied for database railway` — invisible under the superuser, which skips ACL checks. `ops-provision-app-role.yml` now also runs `GRANT CREATE ON DATABASE current_database() TO ierp_app`; §1bis SQL updated to match. |
 | 1.21 | 2026-07-09 | Platform / SRE | **§1bis one-click provisioning + H-3 outage remediation.** New manual-dispatch workflow `ops-provision-app-role.yml`: creates/rotates `ierp_app` per §1bis (+ `GRANT app_user TO ierp_app` — the direction `SET LOCAL ROLE app_user` requires; + schema `CREATE`; + ownership transfer of `public`/`drizzle` tables/sequences/views so boot-time `drizzle-kit migrate` keeps working under FORCE RLS), verifies posture over a live login, repoints the API's `DATABASE_URL`, dispatches `deploy.yml`. Root cause documented: every prod deploy failed healthcheck since the 1.20 H-3 merge because Railway's default `DATABASE_URL` is the `postgres` superuser — the old pre-hardening replica kept serving. |
 | 1.20 | 2026-07-08 | Security review | **Fail-closed data-isolation boot checks (H-3 / H-4).** (H-4) The tenancy-mode check now **refuses to boot by default** in prod on the dangerous state (single-company + >1 company), instead of warn-only; opt out with `ALLOW_SINGLE_COMPANY_MULTI_TENANT=1`. The old `STRICT_TENANCY_BOOT` flag is removed (its fail-closed behaviour is now the default). (H-3) New `assertRlsBackstop` (§1bis): in prod the API **probes the base DB role and refuses to boot** if it is superuser / has `BYPASSRLS`, since RLS is not enforced on the base connection (`@NoTx`/SSE/raw/job paths); opt out with `ALLOW_RLS_BYPASS_BASE_ROLE=1`, fix by connecting as a non-superuser owner role (§1bis provisioning SQL). Both are prod-only, best-effort (a read/probe failure never blocks boot). Unit tests: `apps/api/test/tenancy-boot-check.test.ts` (14 checks). |
 | 1.19 | 2026-07-07 | Platform / Security | **Data-isolation boot check (4.2).** New `common/tenancy-boot-check.ts` runs at bootstrap (prod-only, best-effort): counts tenants and, when `TENANCY_MODE=single-company` but **>1 company** exists on the DB (where every tenant Admin has a global RLS bypass), logs a **loud error** by default and **refuses to boot** when `STRICT_TENANCY_BOOT=1`. A DB-read failure never blocks boot. env.validation already warns on config; this catches the actually-dangerous *state*. ToE: `cutover/tenancy-boot.ts` (12 checks — decision matrix + prod/dev/strict/best-effort). |
