@@ -25,7 +25,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
@@ -127,6 +127,23 @@ async function main() {
     const score = bench.filter((b) => b.pass).length;
     for (const b of bench) ok(`bench: ${b.name}`, b.pass, b.detail.slice(0, 120));
     ok(`scored agent benchmark = ${score}/${bench.length} (gate: 100%)`, score === bench.length, `score=${score}/${bench.length}`);
+
+    // ── Layer 4: PDPA per-tenant AI opt-out (common/ai-consent.ts) ─────────────────────────────────
+    // Flag override OFF → the assistant refuses BEFORE any LLM call (AI_TENANT_OPTED_OUT); restore ON →
+    // the same question flows again. Uses the same fake client — a refusal that still hit the LLM would
+    // score the wrong layer.
+    await db.insert(s.featureFlags).values({ tenantId: tid, flagKey: 'ai_external_processing', enabled: false });
+    let blockedCode = '';
+    try {
+      await tenantALS.run({ tx: db, tenantId: tid, bypass: true }, () => agent.chat('ยอดขายเดือนมิถุนายนเท่าไร', [], benchUser));
+    } catch (e: any) {
+      blockedCode = String((typeof e?.getResponse === 'function' ? e.getResponse() : e?.response)?.code ?? '');
+    }
+    ok('PDPA opt-out: flag off → chat raises AI_TENANT_OPTED_OUT (no LLM call)', blockedCode === 'AI_TENANT_OPTED_OUT', `code=${blockedCode}`);
+    await db.update(s.featureFlags).set({ enabled: true })
+      .where(and(eq(s.featureFlags.tenantId, tid), eq(s.featureFlags.flagKey, 'ai_external_processing')));
+    const resBack: any = await tenantALS.run({ tx: db, tenantId: tid, bypass: true }, () => agent.chat('ยอดขายเดือนมิถุนายนเท่าไร', [], benchUser));
+    ok('PDPA opt-out: flag restored → assistant answers again (2500)', /2500/.test(String(resBack?.reply ?? '').replace(/[,\s]/g, '')), String(resBack?.reply ?? '').slice(0, 80));
   } finally {
     setLlmClientForTests(null);
     if (!hadRealKey) delete process.env.ANTHROPIC_API_KEY;

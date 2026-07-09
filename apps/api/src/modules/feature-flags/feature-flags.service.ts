@@ -12,6 +12,11 @@ export interface FlagDef { key: string; label: string; description: string; tier
 
 const DEFAULT_FLAGS: FlagDef[] = [
   { key: 'labs_visible', label: 'แสดงส่วน Labs', description: 'เปิดให้เห็นโมดูลทดลอง (Labs) ในเมนู', tier: 'CORE', enabled: false },
+  // PDPA มาตรา 27/30 — per-tenant disclosure + opt-out for external AI processing (common/ai-consent.ts).
+  // Default ON (allowed); an admin turning it OFF stops every AI surface from transmitting this company's
+  // data to the external AI provider (assistant → AI_TENANT_OPTED_OUT; other surfaces degrade to their
+  // deterministic template/keyword/rules path). The description IS the disclosure shown in settings.
+  { key: 'ai_external_processing', label: 'AI ภายนอก: อนุญาตส่งข้อมูลให้ผู้ให้บริการ AI', description: 'เมื่อเปิด ฟีเจอร์ AI (ผู้ช่วย AI, ถาม-ตอบวิเคราะห์, อ่านเอกสารอัตโนมัติ, ร่างคำสั่งจากแชท) จะส่งข้อความและข้อมูลที่เกี่ยวข้องของบริษัทนี้ไปประมวลผลกับผู้ให้บริการ AI ภายนอก (Anthropic — ผู้ประมวลผลข้อมูลภายใต้ DPA ระดับแพลตฟอร์ม) ปิดสวิตช์นี้เพื่อไม่ส่งข้อมูลของบริษัทออกไป — ระบบจะใช้การประมวลผลภายในแบบไม่ใช้ AI แทน (สิทธิคัดค้านตาม PDPA มาตรา 27/30)', tier: 'CORE', enabled: true },
   { key: 'posting_determination', label: 'กำหนดบัญชีตามสินค้า (Item posting)', description: 'ให้บัญชี GL/VAT/WHT ของรายการอิงตามสินค้า → หมวด → ค่าปริยาย (docs/33, GL-21)', tier: 'CORE', enabled: false },
   { key: 'consolidation', label: 'การรวมงบ (Consolidation)', description: 'งบการเงินรวมหลายบริษัท', tier: 'LABS', enabled: false },
   { key: 'intercompany', label: 'ระหว่างบริษัท (Intercompany)', description: 'รายการและตัดยอดระหว่างบริษัทในเครือ', tier: 'LABS', enabled: false },

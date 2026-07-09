@@ -84,6 +84,22 @@ function Reconciliation({ bankAccountId, onClose }: { bankAccountId: number; onC
     },
     onError: (e: any) => notifyError(e.message),
   });
+  // File import: upload the bank's own CSV/XLSX export (Thai/English headers, BE dates) → same import
+  // pipeline as the JSON endpoint, auto-matching immediately.
+  const importFile = useMutation({
+    mutationFn: async (f: File) => {
+      const isXlsx = /\.xlsx$/i.test(f.name);
+      const body = isXlsx
+        ? { xlsx: btoa(String.fromCharCode(...new Uint8Array(await f.arrayBuffer()))), auto_match: true }
+        : { csv: await f.text(), auto_match: true };
+      return api<any>(`/api/bank/accounts/${bankAccountId}/statements/import-file`, { method: 'POST', body: JSON.stringify(body) });
+    },
+    onSuccess: (r) => {
+      notifySuccess(t('fnx.bank.toast_file_imported', { n: num(r.line_count), m: num(r.auto_match?.matched ?? 0) }));
+      refresh();
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
   // BANK-02: request a fee/interest adjustment on an unmatched statement line (posts a Draft JE — needs approval).
   const requestAdj = useMutation({
     mutationFn: ({ lineId, kind }: { lineId: number; kind: 'fee' | 'interest' }) => api<any>(`/api/bank/lines/${lineId}/adjustment`, { method: 'POST', body: JSON.stringify({ kind }) }),
@@ -119,6 +135,13 @@ function Reconciliation({ bankAccountId, onClose }: { bankAccountId: number; onC
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" disabled={autoMatch.isPending} onClick={() => autoMatch.mutate()}>
                 <RefreshCw className="size-4" /> {autoMatch.isPending ? t('fnx.bank.matching') : t('fnx.bank.automatch')}
+              </Button>
+              <Button size="sm" variant="outline" asChild disabled={importFile.isPending}>
+                <label className="cursor-pointer">
+                  <FileText className="size-4" /> {importFile.isPending ? t('fnx.bank.importing') : t('fnx.bank.import_file')}
+                  <input type="file" accept=".csv,.xlsx" className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile.mutate(f); e.target.value = ''; }} />
+                </label>
               </Button>
             </div>
 

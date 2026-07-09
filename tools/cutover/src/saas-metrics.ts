@@ -45,10 +45,10 @@ async function main() {
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  await app.get(BillingService).seedPlans(); // free/starter/pro/enterprise
+  await app.get(BillingService).seedPlans(); // free/starter/business/pro/enterprise
 
-  // Subscriptions: 2 Active Pro (9900) + 1 Active Starter (1900) → MRR 21700; 1 Canceled Pro (this month);
-  // 1 Trialing Free. (Prices per 1.3: Standard 1,900 / Professional 9,900.)
+  // Subscriptions: 2 Active Pro (9900) + 1 Active Starter (2900) → MRR 22700; 1 Canceled Pro (this month);
+  // 1 Trialing Free. (Prices per 1.9: Standard 2,900 / Professional 9,900.)
   await db.insert(s.subscriptions).values([
     { tenantId: t1, planCode: 'pro', status: 'Active' },
     { tenantId: t2, planCode: 'pro', status: 'Active' },
@@ -74,9 +74,9 @@ async function main() {
   const r = await inj('GET', '/api/billing/saas-metrics', token);
   const m = r.json;
 
-  ok('MRR = active Pro×2 (9900) + Starter (1900) = 21,700', near(m.revenue?.mrr, 21700), `mrr=${m.revenue?.mrr}`);
-  ok('ARR = MRR × 12 = 260,400', near(m.revenue?.arr, 260400), `arr=${m.revenue?.arr}`);
-  ok('ARPU = MRR / active (21700/3 = 7,233.33)', near(m.revenue?.arpu, 7233.33), `arpu=${m.revenue?.arpu}`);
+  ok('MRR = active Pro×2 (9900) + Starter (2900) = 22,700', near(m.revenue?.mrr, 22700), `mrr=${m.revenue?.mrr}`);
+  ok('ARR = MRR × 12 = 272,400', near(m.revenue?.arr, 272400), `arr=${m.revenue?.arr}`);
+  ok('ARPU = MRR / active (22700/3 = 7,566.67)', near(m.revenue?.arpu, 7566.67), `arpu=${m.revenue?.arpu}`);
   ok('subscription counts: 3 active, 1 trialing, 1 canceled', m.subscriptions?.active === 3 && m.subscriptions?.trialing === 1 && m.subscriptions?.canceled === 1, JSON.stringify(m.subscriptions));
   ok('churn: 1 canceled in last 30 days + rate computed', m.churn?.canceled_30d === 1 && m.churn?.churn_rate_30d_pct > 0, JSON.stringify(m.churn));
   ok('by-plan mix: Pro has 2 active = 19,800 MRR', (m.by_plan ?? []).find((p: any) => p.plan === 'pro')?.mrr === 19800, JSON.stringify((m.by_plan ?? []).find((p: any) => p.plan === 'pro')));
@@ -163,18 +163,18 @@ async function main() {
   const errCode = async (fn: () => Promise<unknown>) => { try { await fn(); return null; } catch (e: any) { return e?.response?.code ?? e?.code ?? String(e); } };
   const plansRes = await inj('GET', '/api/billing/plans', token);
   const starterPlan = (plansRes.json.plans ?? []).find((p: any) => p.code === 'starter');
-  ok('1.7: plans expose price_yearly (Standard ฿19,000 = 2 months free) + USD price list',
-    starterPlan?.price_yearly === 19000 && starterPlan?.prices?.USD?.monthly === 55 && starterPlan?.prices?.USD?.yearly === 550, JSON.stringify({ y: starterPlan?.price_yearly, usd: starterPlan?.prices?.USD }));
+  ok('1.7: plans expose price_yearly (Standard ฿29,000 = 2 months free) + USD price list',
+    starterPlan?.price_yearly === 29000 && starterPlan?.prices?.USD?.monthly === 85 && starterPlan?.prices?.USD?.yearly === 850, JSON.stringify({ y: starterPlan?.price_yearly, usd: starterPlan?.prices?.USD }));
   const annCk = await billing.createCheckoutSession(t1, 'pro', 'annual');
   const subRow: any = (await pg.query(`SELECT billing_interval, currency FROM subscriptions WHERE tenant_id=${t1} ORDER BY created_at DESC LIMIT 1`)).rows[0];
   ok('1.7: annual checkout (mock) charges ฿99,000/yr and stamps the billing intent on the sub',
     annCk.mock === true && annCk.interval === 'annual' && near(annCk.amount, 99000) && subRow.billing_interval === 'annual' && subRow.currency === 'THB', JSON.stringify({ ck: { i: annCk.interval, a: annCk.amount }, sub: subRow }));
   const usdCk = await billing.createCheckoutSession(t1, 'starter', 'monthly', 'USD');
-  ok('1.7: USD checkout resolves the per-currency price ($55/mo)', usdCk.currency === 'USD' && near(usdCk.amount, 55), JSON.stringify({ c: usdCk.currency, a: usdCk.amount }));
+  ok('1.7: USD checkout resolves the per-currency price ($85/mo)', usdCk.currency === 'USD' && near(usdCk.amount, 85), JSON.stringify({ c: usdCk.currency, a: usdCk.amount }));
   ok('1.7: an un-offered currency fails closed (CURRENCY_NOT_OFFERED)', (await errCode(() => billing.createCheckoutSession(t1, 'starter', 'monthly', 'JPY'))) === 'CURRENCY_NOT_OFFERED', 'JPY');
   await pg.query(`UPDATE plans SET price_yearly = NULL WHERE code = 'starter'`); // simulate a plan with no annual offer
   ok('1.7: a plan without an annual price fails closed (ANNUAL_NOT_OFFERED)', (await errCode(() => billing.createCheckoutSession(t1, 'starter', 'annual'))) === 'ANNUAL_NOT_OFFERED', 'starter yearly=null');
-  await pg.query(`UPDATE plans SET price_yearly = 19000 WHERE code = 'starter'`);
+  await pg.query(`UPDATE plans SET price_yearly = 29000 WHERE code = 'starter'`);
   // changePlan: re-stamp the sub to annual first (the USD checkout above set it monthly) — a same-interval
   // change prorates on the 365-day basis; an interval SWITCH returns proration null + note (no honest
   // single number across period bases).

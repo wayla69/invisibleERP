@@ -222,6 +222,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.labs.enable': { th: 'เปิด', en: 'Enable' },
   'st.labs.off': { th: 'ปิดอยู่', en: 'Off' },
   'st.labs.on': { th: 'เปิดอยู่', en: 'On' },
+  'st.labs.ai_privacy': { th: 'AI และความเป็นส่วนตัวข้อมูล (PDPA)', en: 'AI & data privacy (PDPA)' },
+  'st.labs.ai_privacy_note': { th: 'การเปิดเผยข้อมูลตาม PDPA: สวิตช์นี้ควบคุมว่าฟีเจอร์ AI ของบริษัทนี้จะส่งข้อมูลไปประมวลผลกับผู้ให้บริการภายนอกหรือไม่ — ปิดได้ทุกเมื่อ (สิทธิคัดค้าน มาตรา 27/30) แล้วระบบจะใช้การประมวลผลภายในแทน', en: 'PDPA disclosure: this switch controls whether AI features send this company\'s data to the external AI provider for processing — turn it off at any time (right to object, s.27/30) and the system falls back to internal processing' },
   'st.labs.saved': { th: 'บันทึกการตั้งค่าแล้ว', en: 'Settings saved' },
   'st.labs.section': { th: 'โมดูล Labs', en: 'Labs modules' },
   'st.labs.title': { th: 'โมดูลทดลอง (Labs)', en: 'Labs (experimental modules)' },

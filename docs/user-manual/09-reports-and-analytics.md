@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2** _(2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
 
 This chapter is for **managers, planners and executives** — and anyone who needs
 reports. It covers dashboards, Excel / PDF reports, AI-driven forecasting and
@@ -370,6 +370,13 @@ sales, finance and other modules.
 > falls back to the deterministic rules). In production the model is never called until
 > the Data Processing Addendum is acknowledged (`AI_DPA_ACKNOWLEDGED`); without a key the
 > copilot still works on its built-in Thai rules. Drafts execute only after your confirm tap.
+
+> **Company-level AI opt-out (PDPA):** an administrator can turn off **"AI ภายนอก: อนุญาตส่งข้อมูล
+> ให้ผู้ให้บริการ AI"** at **Settings › Labs & AI** (`/settings/labs`, requires `md_config`/`exec`).
+> While it is off, no AI feature sends this company's data to the external AI provider: the AI
+> assistant answers `AI_TENANT_OPTED_OUT`, and NL analytics / document reading / insights / the LINE
+> copilot silently use their built-in (non-AI) processing instead. The switch text on that page is
+> the PDPA disclosure of what is shared when it is on. Turning it back on restores AI immediately.
 
 [screenshot: AI assistant chat with quick prompts]
 

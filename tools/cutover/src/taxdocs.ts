@@ -230,6 +230,29 @@ async function main() {
   const badPnd = await inj('GET', `/api/tax-reports/pnd?type=PND99&month=${curMonth}&year=${curYear}`, admin);
   ok('PND: rejects invalid type (400)', badPnd.status === 400, `${badPnd.status}`);
 
+  // ── RD e-Filing attachment files (rd-efiling.ts) ──
+  // ภ.ง.ด.53 ใบแนบ .txt (utf8 inspect mode): 11 pipe-delimited fields per line, BE date, เงื่อนไข code.
+  const ef53 = await inj('GET', `/api/tax-reports/pnd/efiling?type=PND53&month=${curMonth}&year=${curYear}&enc=utf8`, admin);
+  const efLines = ef53.text.split('\r\n').filter(Boolean);
+  ok('e-Filing PND53: one row per cert line, 11 pipe fields each', ef53.status === 200 && efLines.length === 2 && efLines.every((l: string) => l.split('|').length === 11), `${efLines.length} lines: ${efLines[0]}`);
+  const f0 = (efLines[0] ?? '').split('|');
+  ok('e-Filing PND53: seq / 13-digit tax id / 5-digit branch / BE date / condition code populated',
+    f0[0] === '1' && /^\d{13}$/.test(f0[1] ?? '') && /^\d{5}$/.test(f0[2] ?? '') && /^\d{4}25\d{2}$/.test(f0[5] ?? '') && ['1', '2', '3'].includes(f0[10] ?? ''), efLines[0]);
+  ok('e-Filing PND53: rate as ร้อยละ (3.00, not the stored fraction) + amounts 2-decimal (tax 300.00)', f0[7] === '3.00' && f0[9] === '300.00', `rate=${f0[7]} tax=${f0[9]}`);
+  ok('e-Filing PND53: income type is the Thai label, not the internal code', /[ก-๛]/.test(f0[6] ?? ''), `type=${f0[6]}`);
+  // Default mode transcodes to TIS-620: single-byte Thai — the UTF-8-decoded payload must NOT contain
+  // Thai codepoints (they arrive as 0xA1–0xFB bytes), while the utf8 inspect mode above does.
+  const efTis = await inj('GET', `/api/tax-reports/pnd/efiling?type=PND53&month=${curMonth}&year=${curYear}`, admin);
+  ok('e-Filing PND53: default encoding TIS-620 (no UTF-8 Thai in raw bytes; utf8 mode has Thai)',
+    efTis.status === 200 && !/[ก-๛]/.test(efTis.text) && /[ก-๛]/.test(ef53.text), efTis.text.slice(0, 40));
+  // CSV working papers (UTF-8 BOM, Thai headers, totals row)
+  const ovCsv = await inj('GET', `/api/tax-reports/output-vat/csv?month=${curMonth}&year=${curYear}`, admin);
+  ok('CSV รายงานภาษีขาย: BOM + Thai header + totals row', ovCsv.status === 200 && ovCsv.text.charCodeAt(0) === 0xfeff && ovCsv.text.includes('เลขที่ใบกำกับภาษี') && ovCsv.text.includes('รวม ('), ovCsv.text.slice(0, 60));
+  const ivCsv = await inj('GET', `/api/tax-reports/input-vat/csv?month=${curMonth}&year=${curYear}`, admin);
+  ok('CSV รายงานภาษีซื้อ: header + filing-readiness note column', ivCsv.status === 200 && ivCsv.text.includes('เลขประจำตัวผู้เสียภาษีผู้ขาย') && ivCsv.text.includes('หมายเหตุ'), ivCsv.text.slice(0, 60));
+  const ppCsv = await inj('GET', `/api/tax-reports/pp30/csv?month=${curMonth}&year=${curYear}`, admin);
+  ok('CSV ภ.พ.30: form boxes + GL tie-out line present', ppCsv.status === 200 && ppCsv.text.includes('ภาษีขาย') && ppCsv.text.includes('กระทบยอด GL'), ppCsv.text.slice(0, 60));
+
   // ── TAX-05: filing register (DRAFT → SUBMITTED → ACCEPTED) + remittance calendar ──
   const fileP = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: curMonth, year: curYear });
   ok('TAX-05: file PP30 → DRAFT snapshot (output 38.5, input 70)', fileP.json.status === 'DRAFT' && near(fileP.json.output_vat, 38.5) && near(fileP.json.input_vat, 70), JSON.stringify(fileP.json).slice(0, 130));

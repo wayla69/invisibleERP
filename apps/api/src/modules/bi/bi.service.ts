@@ -1,6 +1,9 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { eq, and, sql, gte, lt, desc, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+// 'today' defaults are the Asia/Bangkok BUSINESS day (ymd) — a UTC date here differs between 17:00Z
+// and 00:00Z and silently drops the current business day's rows from every "…to today" window.
+import { ymd } from '../../database/queries';
 import { biDailySnapshots, reportSubscriptions } from '../../database/schema/bi';
 import { custPosSales, custPosItems } from '../../database/schema/sales';
 import { journalEntries, journalLines, accounts } from '../../database/schema/ledger';
@@ -161,7 +164,7 @@ export class BiService implements OnModuleInit {
   private async kpiBoardUncached(user: JwtUser) {
     const db = this.db;
     const tid = user.tenantId!;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd();
     const monthStart = today.slice(0, 7) + '-01';
     const yearStart = today.slice(0, 4) + '-01-01';
 
@@ -232,7 +235,7 @@ export class BiService implements OnModuleInit {
     const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 3;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd();
     const start = dto.start_date ?? this.monthsAgo(today, months);
     const end = dto.end_date ?? today;
     const period = dto.period ?? 'month';
@@ -280,7 +283,7 @@ export class BiService implements OnModuleInit {
     const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 6;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd();
     const start = this.monthsAgo(today, months);
     const ledgerFilter = dto.ledger_code
       ? sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${dto.ledger_code})`
@@ -333,7 +336,7 @@ export class BiService implements OnModuleInit {
     const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 6;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd();
     const start = this.monthsAgo(today, months);
 
     const rows = await db.select({
@@ -372,7 +375,7 @@ export class BiService implements OnModuleInit {
     const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 1;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd();
     const start = dto.start_date ?? this.monthsAgo(today, months);
     const end = dto.end_date ?? today;
     const limit = Math.min(dto.limit ?? 20, 100);
@@ -405,7 +408,7 @@ export class BiService implements OnModuleInit {
   async refreshSnapshot(dto: { date?: string }, user: JwtUser) {
     const db = this.db;
     const tid = user.tenantId!;
-    const date = dto.date ?? new Date().toISOString().slice(0, 10);
+    const date = dto.date ?? ymd();
 
     // A manual snapshot refresh is an explicit "recompute now" — drop any cached boards for this tenant so
     // the snapshot (and the next dashboard read) reflect the latest data, not a value up to 30s stale.
@@ -459,7 +462,7 @@ export class BiService implements OnModuleInit {
   async getSnapshots(dto: { start_date?: string; end_date?: string; days?: number }, user: JwtUser) {
     const db = this.db;
     const tid = user.tenantId!;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = ymd();
     const days = dto.days ?? 30;
     const start = dto.start_date ?? this.daysAgo(today, days);
     const end = dto.end_date ?? today;

@@ -14,7 +14,7 @@ are the only unit a plan can enforce today.
 Layering:
 
 ```
-PLAN (free / starter / pro / enterprise)
+PLAN (free / starter / business / pro / enterprise)
   └── SUITES  (core, finance, sales, inventory, procurement, masterdata,
                 planning, crm_loyalty, ai, multibranch, portal, selfservice)
         └── MODULE PERMISSION TOKENS (42; the live RBAC gating currency)
@@ -53,9 +53,16 @@ PLAN (free / starter / pro / enterprise)
 | Plan (code) | Commercial name | THB/mo | THB/yr (2 mo free) | USD/mo · USD/yr | Seats | Suites |
 |-------------|-----------------|--------|--------------------|------------------|-------|--------|
 | `free` | Free / trial-limited | 0 | — | — | 2 | core, portal, selfservice |
-| `starter` | **Standard** | 1,900 | 19,000 | $55 · $550 | 10 | core, finance, sales, inventory, masterdata, portal, selfservice |
-| `pro` | **Professional** | 9,900 | 99,000 | $285 · $2,850 | 50 | + procurement, planning, crm_loyalty, ai, multibranch |
+| `starter` | **Standard** | 2,900 | 29,000 | $85 · $850 | 10 | core, finance, sales, inventory, masterdata, portal, selfservice |
+| `business` | **Business** | 4,900 | 49,000 | $140 · $1,400 | 25 | + procurement, multibranch |
+| `pro` | **Professional** | 9,900 | 99,000 | $285 · $2,850 | 50 | + planning, crm_loyalty, ai |
 | `enterprise` | **Enterprise** | quote (custom) | quote | quote | ∞ | all suites (custom deals tune via `features.suites`) |
+
+**Ladder rationale (1.9):** the old Standard→Professional step was a 5.2× cliff (1,900 → 9,900) with no
+rung in between — customers parked at Standard. `business` (2,900 → 4,900 → 9,900 ≈ 1.7× per step) gives
+procurement + multi-branch to growing SMEs while planning/loyalty/AI stay the Professional differentiators.
+Standard moved 1,900 → 2,900 (new signups only — existing subscription rows keep their `plan_code` and are
+re-priced only at renewal per contract; `seedPlans()` upserts the plan row, it never touches subscriptions).
 
 **Annual + multi-currency (1.7, migration `0284`, DEFAULT-INERT):** `subscriptions.billing_interval`
 (default `monthly`) + `subscriptions.currency` (default `THB`) record the billing intent;
@@ -85,6 +92,34 @@ plan that has `finance`. 1.1b resolves this with **token-less suites** gated by 
   `ProjectsController`, `PmrController`, `HcmController`, `PayrollController`, `RealEstateController`.
 - Default packaging: these four suites are **Enterprise-only** (`PLAN_SUITES.enterprise`); sell to lower
   tiers as add-ons via a per-tenant `features.suites` override. `KNOWN_UNGATED` is now empty.
+
+### 4b. Premium-suite LIST prices (1.9 — published, no longer quote-only)
+
+Add-ons are sold onto **Business or Professional** via the per-tenant `features.suites` override (no code
+change per deal). Publishing list prices shortens the SME sales cycle — Thai SMEs don't call for a quote,
+they close the tab. Enterprise still bundles all four.
+
+| Add-on suite | THB/mo (list) | THB/yr (2 mo free) | Available on |
+|---|---|---|---|
+| `manufacturing` (MRP/QC/APS) | +6,000 | +60,000 | Business, Professional |
+| `projects` (PPM/EVM) | +4,500 | +45,000 | Business, Professional |
+| `hcm` (HR & Payroll) | +3,500 | +35,000 | Business, Professional |
+| `realestate` (Developer) | +6,000 | +60,000 | Professional |
+
+List prices are commercial policy (this doc + the sales deck) — billing applies them via the deal's
+`features.suites` + a negotiated `priceMonthly` on a custom plan row or invoice line; there is no
+self-serve add-on checkout yet (deliberate: add-on buyers need implementation anyway).
+
+### 4c. Implementation packages (one-time, sold with every paid plan)
+
+ERP is not self-serve. Every paid signup is offered a fixed-price onboarding package — this is the churn
+insurance, not upsell garnish:
+
+| Package | THB (one-time) | Scope |
+|---|---|---|
+| **Launch** | 30,000 | Remote: master-data import (the `masterdata` engine), COA review, 2× training sessions, go-live checklist |
+| **Standard** | 80,000 | + on-site day, opening-balance migration, per-cycle workflow walkthrough (P2P/O2C/R2R), UAT support |
+| **Enterprise** | 150,000+ | + multi-branch rollout plan, custom roles/SoD matrix review, e-Tax/bank-format setup, hypercare 30 days |
 
 ## 5. Enforcement status
 
@@ -149,6 +184,7 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # 
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.0 | 2026-07-09 | Platform | 1.9 — **pricing-ladder restructure**: new `business` mid-tier ฿4,900/mo (Standard + procurement + multibranch, 25 seats, metered quotas between Standard/Pro); Standard re-priced ฿1,900→฿2,900 ($85/$850); premium-suite **list prices published** (§4b — was quote-only); **implementation packages** defined (§4c, one-time ฿30k/฿80k/฿150k). `PLAN_SUITES.business` added in `entitlements.ts` (validated by `check-entitlements.mjs`); seeded via `PLAN_SEED` upsert — existing subscriptions untouched (`seedPlans()` never writes `subscriptions`). No control/RCM change (commercial policy + seed data). |
 | 0.1 | 2026-07-07 | Platform | Initial packaging spec — plan→suite→module entitlement map (`entitlements.ts`) + CI guard (`check-entitlements.mjs`). Map-only; no enforcement yet (PlanGuard rewire is 1.2). Documented `KNOWN_UNGATED` gap (manufacturing/PPM/HCM/real-estate need gating tokens — 1.1b). |
 | 0.2 | 2026-07-07 | Platform | 1.2 — `PlanGuard` rewired: suite gating behind `ENTITLEMENTS_ENFORCE`/`ENTITLEMENTS_SHADOW` (default off = legacy behaviour), per-tenant Admin bypass removed (god-only), fail-open on infra error / fail-closed on missing plan, `resolveEntitledSuites` grandfather fallback. No behaviour change until enabled; enable SHADOW → backfill (1.3) → ENFORCE. |
 | 0.9 | 2026-07-08 | Platform | 1.7 — **annual billing + multi-currency** (see §3). `plans.price_yearly` + per-currency `plans.prices`, `subscriptions.billing_interval`/`currency` (migration `0284`, default-inert), fail-closed `resolvePlanPrice` (`ANNUAL_NOT_OFFERED`/`CURRENCY_NOT_OFFERED`), Stripe `recurring.interval` year, interval-aware proration (365-day basis; interval switch → note, not a misleading number), `/billing` monthly/annual toggle. ToE: `proration` 12 (+2 annual basis), `saas-metrics` 29 (+7 flow incl. fail-closed + intent stamping). หมวด 1 (Monetization) now 100% complete. |

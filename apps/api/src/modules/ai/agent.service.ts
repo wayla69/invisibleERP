@@ -16,10 +16,11 @@ import { MenuEngineeringService } from '../analytics/menu-engineering.service';
 import { ProductionPlanService } from '../menu/production-plan.service';
 import { RecipeService } from '../menu/recipe.service';
 import { MarketingAutomationService } from '../marketing/marketing-automation.service';
-import { PG_CLIENT, type PgClient } from '../../database/database.module';
+import { PG_CLIENT, type PgClient, DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import type { JwtUser } from '../../common/decorators';
 import { redactPii, PII_REDACTION_ENABLED } from '../../common/pii-redact';
 import { modelFor, aiDpaBlocked, resolveBudgetCaps } from '../../common/ai-models';
+import { aiTenantOptedOut } from '../../common/ai-consent';
 
 // port จาก agents/base_agent.py + erp_agent.py
 const MAX_LOOP_TURNS = 15;
@@ -130,6 +131,7 @@ export class AgentService {
     @Optional() private readonly health?: FinancialHealthService,
     @Optional() private readonly marketing?: MarketingAutomationService,
     @Inject(PG_CLIENT) private readonly sql?: PgClient,
+    @Optional() @Inject(DRIZZLE) private readonly db?: DrizzleDb, // per-tenant AI opt-out lookup (ai-consent.ts)
   ) {}
 
   private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
@@ -205,6 +207,8 @@ export class AgentService {
   async chat(message: string, history: any[] = [], _user: JwtUser): Promise<{ reply: string; history: any[] }> {
     if (aiDpaBlocked())
       throw new ForbiddenException({ code: 'AI_DPA_REQUIRED', message: 'AI is disabled until the Anthropic Data Processing Addendum is acknowledged (set AI_DPA_ACKNOWLEDGED).', messageTh: 'ปิดใช้งาน AI จนกว่าจะยืนยันข้อตกลงประมวลผลข้อมูล (DPA)' });
+    if (await aiTenantOptedOut(this.db, _user?.tenantId))
+      throw new ForbiddenException({ code: 'AI_TENANT_OPTED_OUT', message: 'This company has opted out of external AI processing (Settings › Labs & AI).', messageTh: 'บริษัทนี้ปิดการส่งข้อมูลให้ผู้ให้บริการ AI ภายนอก (ตั้งค่า › Labs & AI)' });
     if (!this.apiKey)
       throw new ServiceUnavailableException({ code: 'AI_UNAVAILABLE', message: 'ANTHROPIC_API_KEY not set', messageTh: 'ยังไม่ได้ตั้งค่า AI (ANTHROPIC_API_KEY)' });
 
@@ -256,6 +260,12 @@ export class AgentService {
       const note = 'ปิดใช้งาน AI จนกว่าจะยืนยันข้อตกลงประมวลผลข้อมูล (DPA) ของผู้ให้บริการ AI — กรุณาติดต่อผู้ดูแลระบบ';
       yield { delta: note };
       yield { done: true, reply: note, error: 'AI_DPA_REQUIRED' };
+      return;
+    }
+    if (await aiTenantOptedOut(this.db, _user?.tenantId)) {
+      const note = 'บริษัทนี้ปิดการส่งข้อมูลให้ผู้ให้บริการ AI ภายนอก (ตั้งค่า › Labs & AI — สิทธิคัดค้านตาม PDPA)';
+      yield { delta: note };
+      yield { done: true, reply: note, error: 'AI_TENANT_OPTED_OUT' };
       return;
     }
     if (!this.apiKey) {

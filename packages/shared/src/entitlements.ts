@@ -113,6 +113,12 @@ export const PLAN_SUITES: Record<string, SuiteKey[]> = {
   free: ['core', 'portal', 'selfservice'],
   // Standard (current 'starter'): SME finance-first core.
   starter: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice'],
+  // Business (mid-tier, 1.9): Standard + procurement + multi-branch. Closes the 5× price jump between
+  // Standard and Professional; planning/loyalty/AI stay the Professional differentiators.
+  business: [
+    'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
+    'procurement', 'multibranch',
+  ],
   // Professional (current 'pro'): adds procurement, planning, loyalty, AI, multi-branch.
   pro: [
     'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',

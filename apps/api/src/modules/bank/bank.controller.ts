@@ -3,7 +3,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { z } from 'zod';
 import { BankService } from './bank.service';
-import { CreateBankAccountBody, ImportStatementBody, ManualMatchBody, AdjustmentBody, type CreateBankAccountDto, type ImportStatementDto, type AdjustmentDto } from './dto';
+import { CreateBankAccountBody, ImportStatementBody, ImportStatementFileBody, ManualMatchBody, AdjustmentBody, type CreateBankAccountDto, type ImportStatementDto, type ImportStatementFileDto, type AdjustmentDto } from './dto';
 
 const RejectBody = z.object({ reason: z.string().optional() });
 const CreateDepositBody = z.object({ bank_account_id: z.number().int(), movement_nos: z.array(z.string()).optional(), deposit_date: z.string().optional() });
@@ -29,6 +29,8 @@ export class BankController {
   @Post('accounts/:id/reject') @HttpCode(200) @Permissions('approvals', 'exec') rejectAccount(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.rejectBankAccount(+id, u); }
 
   @Post('accounts/:id/statements') importStatement(@Param('id') id: string, @Body(new ZodValidationPipe(ImportStatementBody)) b: ImportStatementDto, @CurrentUser() u: JwtUser) { return this.svc.importStatement(+id, b, u); }
+  // File import — the bank's own CSV/XLSX export (Thai/English headers, BE dates); same pipeline as above.
+  @Post('accounts/:id/statements/import-file') importStatementFile(@Param('id') id: string, @Body(new ZodValidationPipe(ImportStatementFileBody)) b: ImportStatementFileDto, @CurrentUser() u: JwtUser) { return this.svc.importStatementFile(+id, b, u); }
   @Post('accounts/:id/auto-match') autoMatch(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.autoMatch(+id, u); }
   @Get('accounts/:id/reconciliation') reconciliation(@Param('id') id: string, @Query('as_of') asOf: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.reconciliation(+id, asOf, u); }
 

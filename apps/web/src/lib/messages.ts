@@ -957,6 +957,8 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'tax.month': { th: 'เดือน', en: 'Month' },
   'tax.year': { th: 'ปี (ค.ศ.)', en: 'Year (A.D.)' },
   'tax.download_pdf': { th: 'ดาวน์โหลด PDF', en: 'Download PDF' },
+  'tax.download_csv': { th: 'ดาวน์โหลด CSV', en: 'Download CSV' },
+  'tax.download_efiling': { th: 'ไฟล์แนบยื่น (.txt)', en: 'e-Filing file (.txt)' },
   'tax.reports_title': { th: 'รายงานภาษี', en: 'Tax reports' },
   'tax.reports_subtitle': { th: 'รายงานภาษีขาย / ภาษีซื้อ และแบบ ภ.พ.30 / ภ.ง.ด. — เลือกเดือน/ปีเพื่อดูข้อมูลแต่ละรอบ และติดตามการยื่นแบบ', en: 'Output VAT / input VAT reports and P.P.30 / P.N.D. forms — choose a month/year to view each period and track filings' },
   'tax.output_vat': { th: 'ภาษีขาย (Output VAT)', en: 'Output VAT' },

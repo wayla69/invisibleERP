@@ -1,11 +1,10 @@
-import { Controller, Post, Get, Delete, Param, Req, Headers, Inject, Injectable, Logger, UnauthorizedException, NotFoundException } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Param, Req, Headers, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
-import { createHmac, randomInt } from 'node:crypto';
-import { eq, and, or, desc, ilike, isNotNull } from 'drizzle-orm';
-import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
+import { createHmac } from 'node:crypto';
+import { eq, and, or, desc, ilike } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenants, posMembers, messageLog, users, userPermissions, purchaseRequests, items, invBalances, lineChatStates } from '../../database/schema';
+import { tenants, posMembers, messageLog, users, purchaseRequests, items, invBalances, lineChatStates } from '../../database/schema';
 import { reportSubscriptions } from '../../database/schema/bi';
 import { safeEqualStr } from '../../common/crypto';
 import { isUniqueViolation } from '../../common/db-error';
@@ -20,14 +19,10 @@ import { PettyCashService } from '../petty-cash/petty-cash.service';
 import { EssService } from '../ess/ess.service';
 import { PmrService } from '../pmr/pmr.service';
 import { NlAnalyticsService } from '../nl-analytics/nl-analytics.service';
-import { llmClient } from '../../common/llm-client';
-import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 import { DIGEST_KPIS, DEFAULT_DIGEST_KPIS, allowedDigestKpis } from '../bi/digest-kpis';
-import { z } from 'zod';
-
-// LP-2 (docs/31) — a copilot DRAFT: which text-command handler to replay on confirm + its args.
-// pr: args = [full `pr …` command text] · expense/advance: [fund, amount, reason] · leave: [from, days, reason]
-type CopilotDraft = { kind: 'pr' | 'expense' | 'advance' | 'leave'; args: string[]; summary: string };
+import { CHAT_USAGE, confirmCard, helpCard } from './line-cards';
+import { LineCopilotService, DRAFT_LABEL, type CopilotDraft } from './line-copilot.service';
+import { LineLinkService } from './line-link.service';
 
 // LINE Messaging API webhook (follow / unfollow / message …). Public + no JWT: authenticity is the LINE
 // signature (`X-Line-Signature` = base64 HMAC-SHA256 of the RAW body under the tenant's Channel Secret).
@@ -48,6 +43,8 @@ export class LineWebhookService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly tenantMsg: TenantMessagingService,
     private readonly moduleRef: ModuleRef,
+    private readonly copilot: LineCopilotService, // draft parsing (rules + capped LLM) — line-copilot.service.ts
+    private readonly link: LineLinkService, // staff linking + chat identity + audit — line-link.service.ts
   ) {}
 
   // ProcurementService is resolved lazily from the root container instead of importing ProcurementModule:
@@ -168,9 +165,6 @@ export class LineWebhookService {
 
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
-  private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• บิล — เก็บบิล/ใบเสร็จส่งให้บัญชี (พิมพ์ บิล แล้วส่งรูปตามมา) · attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> [<รหัสสินค้า> <จำนวน>] — รับครบ/รับบางส่วน · claim <PO/GR> <จำนวน> [เหตุผล] — แจ้งของขาด/เสีย\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้) · subscribe lowstock — แจ้งเตือนของใกล้หมดทุกเช้า\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ) · spend [YYYY-MM] — สรุปยอดซื้อ\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
-
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
   private static readonly NOT_LINKED =
@@ -235,15 +229,15 @@ export class LineWebhookService {
     let replyFlex: any;
     let campaign = 'chat_pr';
     if (isLink) {
-      const res = await this.linkStaff(tenantId, lineUserId, arg1.toUpperCase());
+      const res = await this.link.linkStaff(tenantId, lineUserId, arg1.toUpperCase());
       reply = res.text; replyFlex = res.flex;
       campaign = 'chat_link';
     } else if (isHelp) {
-      reply = LineWebhookService.CHAT_USAGE; // altText / non-flex fallback
-      replyFlex = LineWebhookService.helpCard('เมนูคำสั่ง', 'พิมพ์คำสั่งด้านล่างได้เลย');
+      reply = CHAT_USAGE; // altText / non-flex fallback
+      replyFlex = helpCard('เมนูคำสั่ง', 'พิมพ์คำสั่งด้านล่างได้เลย');
       campaign = 'chat_help';
     } else {
-      const staff = await this.staffByLine(tenantId, lineUserId);
+      const staff = await this.link.staffByLine(tenantId, lineUserId);
       if (!staff) reply = LineWebhookService.NOT_LINKED;
       else if (isStatus) { reply = await this.prStatus(cmd === 'pr' ? parts[2]! : arg1); campaign = 'chat_pr_status'; }
       else if (isApprove || isReject) { reply = await this.chatDecision(staff, arg1, isApprove); campaign = 'chat_approve'; }
@@ -289,7 +283,7 @@ export class LineWebhookService {
     if (doc.startsWith('PMR-')) return this.chatDecidePmr(u, doc, approve);
     const prNo = doc;
     if (!prNo.startsWith('PR-')) return 'อนุมัติผ่านแชทได้เฉพาะคำขอซื้อ (PR-) หรือใบขอเบิกวัสดุ (PMR-)';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('procurement')) return 'บัญชีของคุณไม่มีสิทธิ์อนุมัติคำขอซื้อ (procurement)';
     const procurement = this.procurementSvc();
     if (!procurement) return 'ระบบคำขอซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
@@ -308,7 +302,7 @@ export class LineWebhookService {
   // M2 (docs/32) — approve/reject an over-budget PMR from chat. Requires procurement/exec; PmrService enforces
   // maker-checker (approver ≠ requester) and, on approval, auto-drafts the project-tagged PO.
   private async chatDecidePmr(u: any, pmrNo: string, approve: boolean): Promise<string> {
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.some((p) => ['procurement', 'exec'].includes(p))) return 'บัญชีของคุณไม่มีสิทธิ์อนุมัติใบขอเบิกวัสดุ (procurement/exec)';
     const pmr = this.pmrSvc();
     if (!pmr) return 'ระบบใบขอเบิกวัสดุยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
@@ -352,24 +346,6 @@ export class LineWebhookService {
   // short-lived confirm state (nonce) and replies a confirm card; tapping [ยืนยัน] posts {a:'confirm',
   // d, n} which consumes the state BEFORE acting (replay-safe) and runs the SAME chatDecision path as the
   // typed command — permission + engine maker-checker/SoD bind identically. No confirm = no action.
-  private confirmCard(action: 'approve' | 'reject', docNo: string, nonce: string): any {
-    return {
-      type: 'bubble',
-      body: {
-        type: 'box', layout: 'vertical', spacing: 'sm', contents: [
-          { type: 'text', text: action === 'approve' ? 'ยืนยันการอนุมัติ?' : 'ยืนยันการปฏิเสธ?', weight: 'bold', size: 'md' },
-          { type: 'text', text: docNo, weight: 'bold', size: 'lg' },
-          { type: 'text', text: 'กดยืนยันภายใน 5 นาที', size: 'xs', color: '#888888' },
-        ],
-      },
-      footer: {
-        type: 'box', layout: 'horizontal', contents: [
-          { type: 'button', style: action === 'approve' ? 'primary' : 'secondary', height: 'sm', action: { type: 'postback', label: 'ยืนยัน', data: JSON.stringify({ a: 'confirm', d: docNo, n: nonce }), displayText: `ยืนยัน ${docNo}` } },
-        ],
-      },
-    };
-  }
-
   private async onPostback(tenantId: number, token: string | undefined, ev: any): Promise<boolean> {
     const lineUserId = String(ev?.source?.userId ?? '');
     let data: any = null;
@@ -384,20 +360,20 @@ export class LineWebhookService {
       if (dup) return true;
     }
 
-    const staff = await this.staffByLine(tenantId, lineUserId);
+    const staff = await this.link.staffByLine(tenantId, lineUserId);
     let text: string;
     let flex: any;
     if (!staff) {
       text = LineWebhookService.NOT_LINKED;
     } else if (data.a === 'decide' && (data.x === 'approve' || data.x === 'reject') && typeof data.d === 'string') {
       const docNo = String(data.d).toUpperCase();
-      const nonce = this.genCode();
+      const nonce = this.link.genCode();
       const expiresAt = new Date(Date.now() + 5 * 60_000);
       await this.db.insert(lineChatStates)
         .values({ tenantId, lineUserId, kind: 'confirm', payload: { action: data.x, docNo, nonce }, expiresAt })
         .onConflictDoUpdate({ target: [lineChatStates.tenantId, lineChatStates.lineUserId], set: { kind: 'confirm', payload: { action: data.x, docNo, nonce }, expiresAt, createdAt: new Date() } });
       text = `ยืนยันการ${data.x === 'approve' ? 'อนุมัติ' : 'ปฏิเสธ'} ${docNo} — กดปุ่มยืนยันภายใน 5 นาที`;
-      flex = this.confirmCard(data.x, docNo, nonce);
+      flex = confirmCard(data.x, docNo, nonce);
     } else if (data.a === 'confirm' && typeof data.d === 'string' && typeof data.n === 'string') {
       const [state] = await this.db.select().from(lineChatStates)
         .where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId), eq(lineChatStates.kind, 'confirm'))).limit(1);
@@ -433,7 +409,7 @@ export class LineWebhookService {
   private async chatReceive(u: any, docNo: string, rest: string[] = []): Promise<string> {
     const poNo = docNo.toUpperCase();
     if (!poNo.startsWith('PO-')) return 'รับของผ่านแชทได้เฉพาะใบสั่งซื้อ (เลขที่ขึ้นต้น PO-)';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('wh_receive') && !perms.includes('warehouse') && !perms.includes('procurement')) {
       return 'บัญชีของคุณไม่มีสิทธิ์รับของ (ต้องมี wh_receive / warehouse / procurement)';
     }
@@ -465,7 +441,7 @@ export class LineWebhookService {
     if (!doc.startsWith('PO-') && !doc.startsWith('GR-')) return 'เปิดเคลมได้เฉพาะใบสั่งซื้อ/ใบรับของ (เลขที่ขึ้นต้น PO- หรือ GR-)';
     const qty = Number(qtyStr);
     if (!Number.isFinite(qty) || qty <= 0) return 'ระบุจำนวนที่เคลม เช่น claim GR-20260101-001 2 ของแตก';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('procurement') && !perms.includes('wh_receive') && !perms.includes('warehouse')) {
       return 'บัญชีของคุณไม่มีสิทธิ์เปิดเคลม (ต้องมี procurement / wh_receive)';
     }
@@ -487,7 +463,7 @@ export class LineWebhookService {
   private async chatLowStock(u: any): Promise<string> {
     const procurement = this.procurementSvc();
     if (!procurement) return 'ระบบจัดซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
     const { items: low, count } = await procurement.lowStock(jwtUser, { limit: 10 });
     if (!count) return 'สินค้าใกล้หมด: ไม่มี ✅ (ทุกอย่างสูงกว่าจุดสั่งซื้อ)';
@@ -501,7 +477,7 @@ export class LineWebhookService {
   private async chatReorder(u: any): Promise<string> {
     const procurement = this.procurementSvc();
     if (!procurement) return 'ระบบจัดซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('pr_raise') && !perms.includes('procurement') && !perms.includes('planner')) {
       return 'บัญชีของคุณไม่มีสิทธิ์เปิดคำขอซื้อ (ต้องมี pr_raise)';
     }
@@ -522,7 +498,7 @@ export class LineWebhookService {
   private async chatSpend(u: any, arg: string): Promise<string> {
     const procurement = this.procurementSvc();
     if (!procurement) return 'ระบบจัดซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!['procurement', 'planner', 'exec', 'dashboard'].some((p) => perms.includes(p))) {
       return 'บัญชีของคุณไม่มีสิทธิ์ดูยอดซื้อ (ต้องมี procurement / exec / dashboard)';
     }
@@ -555,7 +531,7 @@ export class LineWebhookService {
     const prNo = docNo.toUpperCase();
     const procurement = this.procurementSvc();
     if (!procurement) return 'ระบบคำขอซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
     try {
       await procurement.cancelPr(prNo, jwtUser);
@@ -581,7 +557,7 @@ export class LineWebhookService {
     const docType = no.startsWith('PO-') ? 'PO' : no.startsWith('PR-') ? 'PR' : null;
     if (!docType) return 'แนบได้กับใบสั่งซื้อ/คำขอซื้อ (เลขที่ขึ้นต้น PO- หรือ PR-)';
     const kind = ['invoice', 'receipt', 'other'].includes(kindArg) ? kindArg : kindArg === 'ใบเสร็จ' ? 'receipt' : 'invoice';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!LineWebhookService.ATTACH_PERMS.some((p) => perms.includes(p))) return 'บัญชีของคุณไม่มีสิทธิ์แนบเอกสาร (ต้องมี procurement / creditors / wh_receive)';
     const attachments = this.attachmentsSvc();
     if (!attachments) return 'ระบบแนบเอกสารยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
@@ -599,7 +575,7 @@ export class LineWebhookService {
   // (onChatImage) is fetched from the LINE content API and captured as a NeedsReview draft — never books a
   // bill or touches the GL (booking stays creditors, SoD/EXP-06).
   private async chatCaptureStart(tenantId: number, lineUserId: string, u: any): Promise<string> {
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!LineWebhookService.CAPTURE_PERMS.some((p) => perms.includes(p))) return 'บัญชีของคุณไม่มีสิทธิ์เก็บบิล (ต้องมี pr_raise)';
     if (!this.apIntakeSvc()) return 'ระบบเก็บบิลยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
     const expiresAt = new Date(Date.now() + LineWebhookService.ATTACH_TTL_MS);
@@ -619,7 +595,7 @@ export class LineWebhookService {
     const [state] = await this.db.select().from(lineChatStates)
       .where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId), or(eq(lineChatStates.kind, 'attach'), eq(lineChatStates.kind, 'capture')))).limit(1);
     if (!state || new Date(state.expiresAt).getTime() < Date.now()) return false; // no live attach/capture flow → not ours
-    const staff = await this.staffByLine(tenantId, lineUserId);
+    const staff = await this.link.staffByLine(tenantId, lineUserId);
     if (!staff) return false;
 
     // webhook-redelivery dedupe (same mechanism as text commands)
@@ -641,7 +617,7 @@ export class LineWebhookService {
       if ('error' in content) {
         reply = content.error === 'too-large' ? 'รูปใหญ่เกินไป (สูงสุด ~2MB) — ลองถ่ายใหม่หรือลดขนาด' : 'ดึงรูปจาก LINE ไม่สำเร็จ กรุณาส่งใหม่อีกครั้ง';
       } else {
-        const perms = await this.effectivePerms(staff);
+        const perms = await this.link.effectivePerms(staff);
         const jwtUser: JwtUser = { username: staff.username, role: staff.role, customerName: null, tenantId: staff.tenantId != null ? Number(staff.tenantId) : null, permissions: perms };
         try {
           const res = await attachments.add({ doc_type: p.docType, doc_no: p.docNo, data_url: content.dataUrl, kind: p.kind, filename: `line-${msgId}.jpg`, source: 'line' }, jwtUser);
@@ -671,7 +647,7 @@ export class LineWebhookService {
       if ('error' in content) {
         reply = content.error === 'too-large' ? 'รูปใหญ่เกินไป (สูงสุด ~2MB) — ลองถ่ายใหม่หรือลดขนาด' : 'ดึงรูปจาก LINE ไม่สำเร็จ กรุณาส่งใหม่อีกครั้ง';
       } else {
-        const perms = await this.effectivePerms(staff);
+        const perms = await this.link.effectivePerms(staff);
         const jwtUser: JwtUser = { username: staff.username, role: staff.role, customerName: null, tenantId: staff.tenantId != null ? Number(staff.tenantId) : null, permissions: perms };
         try {
           const r: any = await apIntake.capture({ file_name: `line-${msgId}.jpg`, data_url: content.dataUrl }, jwtUser);
@@ -698,7 +674,7 @@ export class LineWebhookService {
   private async chatPettyCash(u: any, kind: 'expense' | 'advance', fundCode: string, amountStr: string, purpose: string): Promise<string> {
     const amount = Number(amountStr);
     if (!Number.isFinite(amount) || amount <= 0) return `จำนวนเงินไม่ถูกต้อง — รูปแบบ: ${kind} <รหัสกองทุน> <จำนวนเงิน> [เหตุผล]`;
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('creditors') && !perms.includes('exec')) return 'บัญชีของคุณไม่มีสิทธิ์เบิกเงินสดย่อย (ต้องมี creditors หรือ exec)';
     const pettyCash = this.pettyCashSvc();
     if (!pettyCash) return 'ระบบเงินสดย่อยยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
@@ -720,7 +696,7 @@ export class LineWebhookService {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) return 'รูปแบบวันที่ไม่ถูกต้อง — leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล]';
     const days = Number(daysStr);
     if (!Number.isFinite(days) || days <= 0 || days > 60) return 'จำนวนวันลาไม่ถูกต้อง (1–60) — leave <จากวันที่> <จำนวนวัน> [เหตุผล]';
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('ess')) return 'บัญชีของคุณไม่มีสิทธิ์ลางานผ่านระบบ (ess)';
     const ess = this.essSvc();
     if (!ess) return 'ระบบลางานยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
@@ -753,37 +729,13 @@ export class LineWebhookService {
     return 'drop';
   }
 
-  // ── LC-3 governance: admin link registry (ITGC-AC — offboarding evidence) ─────────────────────────
-  async listLinks() {
-    const rows = await this.db.select({ username: users.username, role: users.role, tenantId: users.tenantId, lineUserId: users.lineUserId, isActive: users.isActive })
-      .from(users).where(isNotNull(users.lineUserId)).orderBy(users.username);
-    return {
-      links: rows.map((r: any) => ({
-        username: r.username, role: r.role, tenant_id: r.tenantId != null ? Number(r.tenantId) : null,
-        line_user_id_masked: `${String(r.lineUserId).slice(0, 5)}…`, active: r.isActive !== false,
-      })),
-      count: rows.length,
-    };
-  }
-
-  // Force-unlink for offboarding: clears the binding + any pending chat state, audit-logged. The chat
-  // channel dies immediately even if the account was left active by mistake.
-  async adminUnlink(username: string, actor: JwtUser) {
-    const [u] = await this.db.select({ id: users.id, lineUserId: users.lineUserId, tenantId: users.tenantId }).from(users).where(eq(users.username, username)).limit(1);
-    if (!u?.lineUserId) throw new NotFoundException({ code: 'NOT_LINKED', message: 'User has no linked LINE account', messageTh: 'ผู้ใช้นี้ไม่ได้เชื่อม LINE' });
-    await this.db.update(users).set({ lineUserId: null, lineLinkCode: null, lineLinkExpiresAt: null }).where(eq(users.id, u.id));
-    await this.db.delete(lineChatStates).where(eq(lineChatStates.lineUserId, String(u.lineUserId)));
-    await this.audit(u.tenantId != null ? Number(u.tenantId) : actor.tenantId ?? null, String(u.lineUserId), `[chat:admin-unlink] ${username} by ${actor.username}`);
-    return { username, unlinked: true };
-  }
-
   // ── LC-4 (docs/30) — `subscribe digest` / `unsubscribe digest`: opt in/out of the LINE morning
   // digest. Self-service, but permission-at-subscribe applies (the digest carries approval/PR/alert
   // counts → requires dashboard/fin_report/exec). The opt-in rides the tenant's single
   // `line_daily_digest` report subscription as a {line_user} recipient — the BI scheduler delivers it
   // daily; force-unlink (LC-3) silences it automatically because delivery resolves the link registry.
   private async chatDigest(tenantId: number, u: any, on: boolean, kpiList = ''): Promise<string> {
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (on && !perms.includes('dashboard') && !perms.includes('fin_report') && !perms.includes('exec')) {
       return 'บัญชีของคุณไม่มีสิทธิ์รับสรุปประจำวัน (ต้องมี dashboard / fin_report / exec)';
     }
@@ -821,7 +773,7 @@ export class LineWebhookService {
   // Gated on pr_raise, since the whole point is to reorder; the scheduler delivers it (with a one-tap
   // [สั่งเติมทั้งหมด] button) once per day and only when something is actually low. Force-unlink silences it.
   private async chatLowStockAlert(tenantId: number, u: any, on: boolean): Promise<string> {
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (on && !perms.includes('pr_raise') && !perms.includes('procurement') && !perms.includes('planner')) {
       return 'บัญชีของคุณไม่มีสิทธิ์รับแจ้งเตือนสินค้าใกล้หมด (ต้องมี pr_raise)';
     }
@@ -844,7 +796,7 @@ export class LineWebhookService {
   // Gated like `subscribe digest` — the baseline trio is permissionless, so the menu (not the KPI list)
   // carries the subscriber gate.
   private async chatDigestKpis(u: any): Promise<string> {
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('dashboard') && !perms.includes('fin_report') && !perms.includes('exec')) {
       return 'บัญชีของคุณไม่มีสิทธิ์รับสรุปประจำวัน (ต้องมี dashboard / fin_report / exec)';
     }
@@ -859,7 +811,7 @@ export class LineWebhookService {
   // Same permission gate as POST /api/nl/ask (exec/dashboard/masterdata) — chat is no data bypass. The
   // query engine is whitelist-only + RLS-scoped; NL never produces raw SQL.
   private async chatAsk(u: any, question: string): Promise<string> {
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('exec') && !perms.includes('dashboard') && !perms.includes('masterdata')) {
       return 'บัญชีของคุณไม่มีสิทธิ์ถามข้อมูลวิเคราะห์ (ต้องมี dashboard / exec / masterdata)';
     }
@@ -878,31 +830,16 @@ export class LineWebhookService {
     }
   }
 
-  // ── LC-5 (docs/30) + LP-2 (docs/31) — confirm-first Thai copilot: wake word `bot`/`บอท` + free text ──
-  // The model (or the deterministic key-less rules — same pattern as doc-ai/nl-analytics, so CI is
-  // deterministic) only DRAFTS a structured command. Nothing executes without the LC-1 [ยืนยัน] postback,
-  // and the confirmed draft replays the ordinary command path (same permission + SoD checks). Read-only
-  // intents (stock) answer immediately. Draft/exec replies are campaign-tagged chat_ai/chat_ai_confirm —
-  // the AI-origin audit marker. LP-2 widens drafts beyond PR to expense/advance (EXP-07/08 raise path)
-  // and leave (ESS path) — every kind replays the SAME text-command handler; the copilot adds zero
-  // execution code, and the LLM output is schema-validated (anything malformed → honest refusal).
-  private static readonly DRAFT_LABEL: Record<CopilotDraft['kind'], { btn: string; title: string }> = {
-    pr: { btn: 'ยืนยันสร้าง PR', title: 'ร่างคำขอซื้อ' },
-    expense: { btn: 'ยืนยันเบิกเงิน', title: 'ร่างคำขอเบิกเงินสดย่อย' },
-    advance: { btn: 'ยืนยันยืมเงิน', title: 'ร่างคำขอยืมเงินสดย่อย' },
-    leave: { btn: 'ยืนยันส่งใบลา', title: 'ร่างใบลา' },
-  };
-
   private async chatCopilot(tenantId: number, lineUserId: string, u: any, text: string): Promise<{ text: string; flex?: any }> {
     const t = text.trim();
-    if (!t) return { text: LineWebhookService.CHAT_USAGE };
+    if (!t) return { text: CHAT_USAGE };
     // read-only stock intent answers immediately (no confirm needed)
     const stockM = /(?:สต็อก|คงเหลือ|เหลือเท่าไหร่|เหลือกี่)\s*(?:ของ\s*)?([A-Za-z0-9-]+)/.exec(t);
     if (stockM) return { text: await this.chatStock(u, stockM[1]!) };
-    const draft = this.copilotRules(t) ?? (await this.copilotLlm(tenantId, t));
-    if (!draft) return { text: `ยังไม่เข้าใจคำขอ — ลองพิมพ์คำสั่งโดยตรง:\n${LineWebhookService.CHAT_USAGE}` };
-    const L = LineWebhookService.DRAFT_LABEL[draft.kind];
-    const nonce = this.genCode();
+    const draft = this.copilot.rules(t) ?? (await this.copilot.llm(tenantId, t, (cap) => void this.audit(tenantId, 'system', `[chat:ai-cap] copilot LLM daily cap ${cap} reached`)));
+    if (!draft) return { text: `ยังไม่เข้าใจคำขอ — ลองพิมพ์คำสั่งโดยตรง:\n${CHAT_USAGE}` };
+    const L = DRAFT_LABEL[draft.kind];
+    const nonce = this.link.genCode();
     const expiresAt = new Date(Date.now() + 5 * 60_000);
     const payload = { action: 'copilot-cmd', docNo: 'AI-DRAFT', kind: draft.kind, args: draft.args, nonce };
     await this.db.insert(lineChatStates)
@@ -924,92 +861,6 @@ export class LineWebhookService {
     };
   }
 
-  // Deterministic key-less draft rules (CI-stable; the LLM path refines when configured). Linear,
-  // anchored regexes over chat text capped at 2000 chars — no backtracking-prone nesting.
-  private copilotRules(t: string): CopilotDraft | null {
-    const pr = /(?:ขอซื้อ|อยากได้|สั่งซื้อ|ซื้อ)\s+([A-Za-z0-9-]+)\s+(?:จำนวน\s*)?(\d+(?:\.\d+)?)\s*(?:ชิ้น|อัน|กล่อง|รีม|แพ็ค)?\s*(.*)$/.exec(t);
-    if (pr && Number(pr[2]) > 0) return this.mkPrDraft(pr[1]!, pr[2]!, pr[3] ?? '');
-    // expense/advance — "เบิก <กองทุน> <จำนวน> [เหตุผล]" or "เบิก <จำนวน> [บาท] จาก <กองทุน> [เหตุผล]"
-    const expA = /^(?:ขอเบิก|เบิกเงิน|เบิก)\s+([A-Za-z][A-Za-z0-9-]*)\s+(\d+(?:\.\d+)?)\s*(?:บาท)?\s*(.*)$/.exec(t);
-    if (expA) return this.mkMoneyDraft('expense', expA[1]!, expA[2]!, expA[3] ?? '');
-    const expB = /^(?:ขอเบิก|เบิกเงิน|เบิก)\s+(\d+(?:\.\d+)?)\s*(?:บาท)?\s*จาก\s*([A-Za-z0-9-]+)\s*(.*)$/.exec(t);
-    if (expB) return this.mkMoneyDraft('expense', expB[2]!, expB[1]!, expB[3] ?? '');
-    const advA = /^(?:ขอยืมเงิน|ยืมเงิน|ขอยืม)\s+([A-Za-z][A-Za-z0-9-]*)\s+(\d+(?:\.\d+)?)\s*(?:บาท)?\s*(.*)$/.exec(t);
-    if (advA) return this.mkMoneyDraft('advance', advA[1]!, advA[2]!, advA[3] ?? '');
-    const advB = /^(?:ขอยืมเงิน|ยืมเงิน|ขอยืม)\s+(\d+(?:\.\d+)?)\s*(?:บาท)?\s*จาก\s*([A-Za-z0-9-]+)\s*(.*)$/.exec(t);
-    if (advB) return this.mkMoneyDraft('advance', advB[2]!, advB[1]!, advB[3] ?? '');
-    // leave — "ลา <YYYY-MM-DD> <วัน>" or "ลา <n> วัน ตั้งแต่ <YYYY-MM-DD>"
-    const lvA = /^(?:ขอ)?ลา(?:งาน|ป่วย|กิจ|พักร้อน)?\s+(?:วันที่\s*)?(\d{4}-\d{2}-\d{2})\s+(\d+)\s*(?:วัน)?\s*(.*)$/.exec(t);
-    if (lvA) return this.mkLeaveDraft(lvA[1]!, lvA[2]!, lvA[3] ?? '');
-    const lvB = /^(?:ขอ)?ลา(?:งาน|ป่วย|กิจ|พักร้อน)?\s+(\d+)\s*วัน\s*(?:ตั้งแต่|จาก|เริ่ม)?\s*(?:วันที่\s*)?(\d{4}-\d{2}-\d{2})\s*(.*)$/.exec(t);
-    if (lvB) return this.mkLeaveDraft(lvB[2]!, lvB[1]!, lvB[3] ?? '');
-    return null;
-  }
-
-  private mkPrDraft(itemId: string, qty: string, reason: string): CopilotDraft | null {
-    if (!(Number(qty) > 0)) return null;
-    const r = reason.trim();
-    return { kind: 'pr', args: [`pr ${itemId.toUpperCase()} ${qty}${r ? ` ${r}` : ''}`], summary: `${itemId.toUpperCase()} × ${qty}${r ? ` (${r})` : ''}` };
-  }
-  private mkMoneyDraft(kind: 'expense' | 'advance', fund: string, amount: string, reason: string): CopilotDraft | null {
-    if (!(Number(amount) > 0)) return null;
-    const r = reason.trim();
-    return { kind, args: [fund.toUpperCase(), amount, r], summary: `${fund.toUpperCase()} จำนวน ${amount} บาท${r ? ` (${r})` : ''}` };
-  }
-  private mkLeaveDraft(fromDate: string, days: string, reason: string): CopilotDraft | null {
-    const d = Number(days);
-    if (!(d > 0 && d <= 60)) return null;
-    const r = reason.trim();
-    return { kind: 'leave', args: [fromDate, days, r], summary: `ตั้งแต่ ${fromDate} จำนวน ${days} วัน${r ? ` (${r})` : ''}` };
-  }
-
-  // LP-2 — LLM refinement behind the same seam as doc-ai/nl-analytics: DPA-gated, chat-scoped model
-  // (`chat_copilot`), STRICT schema validation (a malformed/unknown answer drafts nothing), and a
-  // per-tenant daily call cap so a chatty OA can't burn the token budget.
-  private static readonly LLM_DRAFT_SCHEMA = z.discriminatedUnion('intent', [
-    z.object({ intent: z.literal('pr'), item_id: z.string().min(1).max(40), qty: z.number().positive(), reason: z.string().max(200).optional() }),
-    z.object({ intent: z.literal('expense'), fund: z.string().min(1).max(40), amount: z.number().positive(), reason: z.string().max(200).optional() }),
-    z.object({ intent: z.literal('advance'), fund: z.string().min(1).max(40), amount: z.number().positive(), reason: z.string().max(200).optional() }),
-    z.object({ intent: z.literal('leave'), from_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), days: z.number().int().positive().max(60), reason: z.string().max(200).optional() }),
-    z.object({ intent: z.literal('unknown') }),
-  ]);
-
-  private readonly llmDaily = new Map<number, { day: string; n: number }>();
-  private llmCapped(tenantId: number): boolean {
-    const cap = Number(process.env.LINE_COPILOT_DAILY_CAP ?? 200);
-    if (!(cap > 0)) return false;
-    const day = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10); // Bangkok business day
-    const e = this.llmDaily.get(tenantId);
-    if (!e || e.day !== day) { this.llmDaily.set(tenantId, { day, n: 1 }); return false; }
-    e.n++;
-    if (e.n === cap + 1) void this.audit(tenantId, 'system', `[chat:ai-cap] copilot LLM daily cap ${cap} reached`);
-    return e.n > cap;
-  }
-
-  private async copilotLlm(tenantId: number, t: string): Promise<CopilotDraft | null> {
-    if (aiDpaBlocked() || !process.env.ANTHROPIC_API_KEY) return null;
-    if (this.llmCapped(tenantId)) return null;
-    try {
-      const res: any = await llmClient(process.env.ANTHROPIC_API_KEY).create({
-        model: modelFor('chat_copilot'), max_tokens: 300,
-        system: 'You draft ERP commands from Thai/English staff chat. Return ONLY one JSON object: '
-          + '{"intent":"pr","item_id":string,"qty":number,"reason":string} | '
-          + '{"intent":"expense","fund":string,"amount":number,"reason":string} | '
-          + '{"intent":"advance","fund":string,"amount":number,"reason":string} | '
-          + '{"intent":"leave","from_date":"YYYY-MM-DD","days":number,"reason":string} | '
-          + '{"intent":"unknown"}. Draft only — never invent item/fund codes or dates that are not in the message; when unsure return unknown.',
-        messages: [{ role: 'user', content: t }],
-      });
-      const rawText = (res.content as Array<{ type: string; text?: string }>).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
-      const parsed = LineWebhookService.LLM_DRAFT_SCHEMA.safeParse(JSON.parse(rawText));
-      if (!parsed.success || parsed.data.intent === 'unknown') return null;
-      const d = parsed.data;
-      if (d.intent === 'pr') return this.mkPrDraft(d.item_id, String(d.qty), d.reason ?? '');
-      if (d.intent === 'expense' || d.intent === 'advance') return this.mkMoneyDraft(d.intent, d.fund, String(d.amount), d.reason ?? '');
-      return this.mkLeaveDraft(d.from_date, String(d.days), d.reason ?? '');
-    } catch { return null; } // malformed JSON / provider error → honest refusal upstream
-  }
-
   // stock <item id> — read-only on-hand lookup from inv_balances (tenant-scoped to the linked user's shop).
   private async chatStock(u: any, itemId: string): Promise<string> {
     const conds: any[] = [ilike(invBalances.itemId, itemId)]; // ilike w/o wildcards = case-insensitive equality
@@ -1021,120 +872,12 @@ export class LineWebhookService {
     return `สต็อก ${rows[0]!.itemId}${name}: รวม ${total}\n` + rows.map((r: any) => `• ${r.locationId}: ${Number(r.onHandQty ?? 0)}`).join('\n');
   }
 
-  // Bind the LINE account to the staff user holding this (unexpired) one-time code. The code was issued to
-  // an authenticated pr_raise holder on /requisitions, so possession of it proves the ERP identity; the
-  // user must belong to this OA's tenant (HQ users with no tenant may link on any of their shops' OAs).
-  private async linkStaff(tenantId: number, lineUserId: string, code: string): Promise<{ text: string; flex?: any }> {
-    const db = this.db;
-    const [u] = await db.select().from(users).where(eq(users.lineLinkCode, code)).limit(1);
-    const expired = !u?.lineLinkExpiresAt || new Date(u.lineLinkExpiresAt).getTime() < Date.now();
-    if (!u || u.isActive === false || expired || (u.tenantId != null && Number(u.tenantId) !== tenantId)) {
-      return { text: 'รหัสเชื่อมไม่ถูกต้องหรือหมดอายุ — สร้างรหัสใหม่ได้ที่หน้า "คำขอซื้อ (PR)" ในระบบ ERP' };
-    }
-    try {
-      await db.update(users).set({ lineUserId, lineLinkCode: null, lineLinkExpiresAt: null }).where(eq(users.id, u.id));
-    } catch (e: any) {
-      if (isUniqueViolation(e)) return { text: 'บัญชี LINE นี้ถูกเชื่อมกับผู้ใช้อื่นแล้ว — ยกเลิกการเชื่อมเดิมก่อนจากหน้า "คำขอซื้อ (PR)"' };
-      throw e;
-    }
-    await this.audit(tenantId, lineUserId, `[chat:link] ${u.username}`);
-    // altText MUST keep the phrase "เชื่อมบัญชีสำเร็จ" — notification previews + the line-crm assertion read it.
-    return {
-      text: `เชื่อมบัญชีสำเร็จ ✔ (${u.username}) — พิมพ์ "help" เพื่อดูคำสั่งทั้งหมด`,
-      flex: LineWebhookService.helpCard(`🎉 เชื่อมบัญชีสำเร็จ`, `ยินดีต้อนรับคุณ ${u.username}`),
-    };
-  }
-
-  // ── The command menu as a flex bubble (used by the link-welcome + the `help`/`เมนู` command). One data
-  // list drives both the flex card and CHAT_USAGE stays the plain-text altText/fallback. Grouped by cycle
-  // with an accent-coloured header per group + separators — readable on a phone instead of a text wall.
-  private static readonly CMD_GROUPS: Array<{ icon: string; title: string; color: string; items: Array<[string, string]> }> = [
-    { icon: '🛒', title: 'คำขอซื้อ (PR)', color: '#2563eb', items: [
-      ['pr <รหัสสินค้า> <จำนวน>', 'สร้างคำขอซื้อ — เหตุผลใส่หรือไม่ก็ได้ (หลายรายการคั่นด้วย ,)'],
-      ['status <เลขที่ PR>', 'เช็คสถานะ'],
-      ['my prs', 'คำขอล่าสุดของฉัน'],
-      ['cancel <เลขที่ PR>', 'ถอนคำขอ'],
-    ] },
-    { icon: '🔎', title: 'ค้นหา & สต็อก', color: '#0891b2', items: [
-      ['find <คำค้น>', 'ค้นหารหัสสินค้า'],
-      ['stock <รหัสสินค้า>', 'ดูยอดคงเหลือ'],
-      ['low', 'ดูสินค้าใกล้หมด (ต่ำกว่าจุดสั่งซื้อ)'],
-      ['reorder', 'เปิด PR เติมของใกล้หมดทั้งหมดในครั้งเดียว'],
-    ] },
-    { icon: '💸', title: 'การเงิน & เอกสาร', color: '#059669', items: [
-      ['expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล]', 'เบิกเงินสดย่อย'],
-      ['บิล → ส่งรูป', 'เก็บบิล/ใบเสร็จส่งให้บัญชีตรวจสอบ'],
-      ['attach <เลขที่ PO>', 'แนบรูปใบแจ้งหนี้/ใบเสร็จ'],
-      ['receive <เลขที่ PO>', 'รับของครบตาม PO'],
-      ['receive <PO> <รหัสสินค้า> <จำนวน>', 'รับบางส่วน (เฉพาะรายการ/จำนวนที่ระบุ)'],
-      ['claim <PO/GR> <จำนวน> [เหตุผล]', 'แจ้งของขาด/เสีย (เปิดเคลมกับผู้ขาย)'],
-    ] },
-    { icon: '📅', title: 'ลางาน', color: '#7c3aed', items: [
-      ['leave <YYYY-MM-DD> <จำนวนวัน> [เหตุผล]', 'ส่งใบลา'],
-    ] },
-    { icon: '📊', title: 'รายงาน & AI', color: '#d97706', items: [
-      ['subscribe digest [kpi,…]', 'รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)'],
-      ['subscribe lowstock', 'รับแจ้งเตือนสินค้าใกล้หมดทุกเช้า + ปุ่มสั่งเติม'],
-      ['ask <คำถาม>', 'ถามยอดขาย เช่น ask ยอดขายตามสาขา'],
-      ['spend [YYYY-MM]', 'สรุปยอดซื้อเดือนนี้ — ผู้ขาย/สินค้าสูงสุด'],
-      ['บอท <ข้อความ>', 'ให้ AI ช่วยร่าง (ยืนยันก่อนสร้างเสมอ)'],
-    ] },
-    { icon: '✅', title: 'อนุมัติ (เฉพาะทีมจัดซื้อ)', color: '#b45309', items: [
-      ['approve/reject <เลขที่ PR>', 'อนุมัติ/ปฏิเสธ'],
-    ] },
-  ];
-
-  private static helpCard(headerTitle: string, subtitle: string): any {
-    const groups = LineWebhookService.CMD_GROUPS.flatMap((g, gi) => [
-      ...(gi > 0 ? [{ type: 'separator', margin: 'md' }] : []),
-      { type: 'text', text: `${g.icon}  ${g.title}`, weight: 'bold', size: 'sm', color: g.color, margin: gi > 0 ? 'md' : 'none' },
-      ...g.items.map(([cmd, desc]) => ({
-        type: 'box', layout: 'vertical', spacing: 'none', margin: 'sm', contents: [
-          { type: 'text', text: cmd, size: 'sm', weight: 'bold', color: '#1f2937', wrap: true },
-          { type: 'text', text: desc, size: 'xs', color: '#9ca3af', wrap: true },
-        ],
-      })),
-    ]);
-    return {
-      type: 'bubble',
-      header: {
-        type: 'box', layout: 'vertical', paddingAll: 'lg', backgroundColor: '#f0f7ff', contents: [
-          { type: 'text', text: headerTitle, weight: 'bold', size: 'lg', color: '#1e3a8a', wrap: true },
-          { type: 'text', text: subtitle, size: 'xs', color: '#6b7280', margin: 'xs', wrap: true },
-        ],
-      },
-      body: { type: 'box', layout: 'vertical', spacing: 'none', paddingAll: 'lg', contents: groups },
-      footer: {
-        type: 'box', layout: 'vertical', paddingAll: 'md', contents: [
-          { type: 'text', text: 'ตัวอย่าง:  pr A4-PAPER 10  (ไม่ต้องใส่เหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2', size: 'xs', color: '#9ca3af', wrap: true },
-          { type: 'text', text: 'พิมพ์ "help" เพื่อเปิดเมนูนี้อีกครั้ง', size: 'xs', color: '#c0c4cc', margin: 'sm' },
-        ],
-      },
-    };
-  }
-
-  // Resolve the STAFF user linked to this LINE account (active + same tenant; HQ users pass on any tenant).
-  private async staffByLine(tenantId: number, lineUserId: string) {
-    const [u] = await this.db.select().from(users).where(eq(users.lineUserId, lineUserId)).limit(1);
-    if (!u || u.isActive === false) return null;
-    if (u.tenantId != null && Number(u.tenantId) !== tenantId) return null;
-    return u;
-  }
-
-  // Effective permissions = per-user override (if any) else role default, expanded — same precedence the
-  // login flow uses (resolvePermissions), so chat honours exactly what the web session would.
-  private async effectivePerms(u: { id: number; role: string }): Promise<string[]> {
-    const rows = await this.db.select({ perm: userPermissions.perm }).from(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
-    const overrides = rows.map((r: any) => r.perm as Permission);
-    return resolvePermissions(u.role as Role, overrides.length ? overrides : null);
-  }
-
   // `pr <item> <qty> [reason][, …]` → ProcurementService.createPr under the linked user's identity. The
   // pr_raise permission is enforced here (the chat has no JWT guard), and the PR routes into the same
   // approval workflow as a web-raised PR — the chat can RAISE, never approve.
   private async chatCreatePr(u: any, text: string): Promise<string> {
     const body = text.replace(/^(?:pr|ขอซื้อ)\s*/i, '').trim();
-    if (!body) return LineWebhookService.CHAT_USAGE;
+    if (!body) return CHAT_USAGE;
     const items: { item_id: string; request_qty: number; reason?: string }[] = [];
     for (const raw of body.split(/[,;\n]+/)) {
       const line = raw.trim();
@@ -1149,13 +892,13 @@ export class LineWebhookService {
       const qty = qi >= 0 ? Number(parts[qi]!) : NaN;
       const name = qi >= 1 ? parts.slice(0, qi).join(' ').trim() : '';
       if (qi < 1 || !name || !Number.isFinite(qty) || qty <= 0) {
-        return `อ่านรายการนี้ไม่ได้: "${line}" — พิมพ์ <ชื่อสินค้า> <จำนวน> เช่น  pr Iberico ham 2\n${LineWebhookService.CHAT_USAGE}`;
+        return `อ่านรายการนี้ไม่ได้: "${line}" — พิมพ์ <ชื่อสินค้า> <จำนวน> เช่น  pr Iberico ham 2\n${CHAT_USAGE}`;
       }
       items.push({ item_id: name, request_qty: qty, reason: parts.slice(qi + 1).join(' ') || undefined });
     }
-    if (!items.length) return LineWebhookService.CHAT_USAGE;
+    if (!items.length) return CHAT_USAGE;
 
-    const perms = await this.effectivePerms(u);
+    const perms = await this.link.effectivePerms(u);
     if (!perms.includes('pr_raise')) return 'บัญชีของคุณไม่มีสิทธิ์สร้างคำขอซื้อ (pr_raise)';
     const procurement = this.procurementSvc();
     if (!procurement) return 'ระบบคำขอซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
@@ -1192,54 +935,16 @@ export class LineWebhookService {
     } catch { /* audit best-effort */ }
   }
 
-  private async audit(tenantId: number | null, recipient: string, body: string) {
-    try {
-      await this.db.insert(messageLog).values({ tenantId, memberId: null, channel: 'line', recipient, body, campaign: 'chat_link_audit', status: 'received', provider: 'line', createdBy: 'system:line-chat' });
-    } catch { /* audit best-effort */ }
+  // Chat audit rows live in LineLinkService (shared with link/unlink); thin delegate keeps call sites.
+  private audit(tenantId: number | null, recipient: string, body: string) {
+    return this.link.audit(tenantId, recipient, body);
   }
 
-  // ── Link-code lifecycle (authenticated web endpoints) ─────────────────────
-
-  private static readonly CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L ambiguity
-  private genCode(): string {
-    let out = '';
-    // randomInt is CSPRNG-backed and rejection-sampled — no modulo bias over the 31-char alphabet
-    for (let i = 0; i < 6; i++) out += LineWebhookService.CODE_ALPHABET[randomInt(LineWebhookService.CODE_ALPHABET.length)];
-    return out;
-  }
-
-  // Issue a fresh one-time link code for the calling staff user (10-minute TTL; re-issuing replaces the
-  // previous code). The code is typed into the shop's LINE OA chat as `link <code>`.
-  async issueLinkCode(user: JwtUser) {
-    const db = this.db;
-    const [row] = await db.select({ id: users.id, lineUserId: users.lineUserId }).from(users).where(eq(users.username, user.username)).limit(1);
-    if (!row) throw new UnauthorizedException({ code: 'UNKNOWN_USER', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
-    const expiresAt = new Date(Date.now() + 10 * 60_000);
-    for (let i = 0; ; i++) {
-      const code = this.genCode();
-      try {
-        await db.update(users).set({ lineLinkCode: code, lineLinkExpiresAt: expiresAt }).where(eq(users.id, row.id));
-        return { code, expires_at: expiresAt.toISOString(), linked: !!row.lineUserId };
-      } catch (e: any) {
-        if (!isUniqueViolation(e) || i >= 4) throw e; // code collision → regenerate (astronomically rare)
-      }
-    }
-  }
-
-  async linkStatus(user: JwtUser) {
-    const [row] = await this.db.select({ lineUserId: users.lineUserId }).from(users).where(eq(users.username, user.username)).limit(1);
-    return { linked: !!row?.lineUserId };
-  }
-
-  async unlink(user: JwtUser) {
-    await this.db.update(users).set({ lineUserId: null, lineLinkCode: null, lineLinkExpiresAt: null }).where(eq(users.username, user.username));
-    return { linked: false };
-  }
 }
 
 @Controller('api/line')
 export class LineWebhookController {
-  constructor(private readonly svc: LineWebhookService) {}
+  constructor(private readonly svc: LineWebhookService, private readonly link: LineLinkService) {}
 
   @Public()
   @NoTx()
@@ -1255,18 +960,18 @@ export class LineWebhookController {
   // LINE-account linking for the chat-PR flow — mirrors the /requisitions permission set (pr_raise;
   // procurement/planner imply it). Authenticated: the code binds the CALLER's identity, nothing else.
   @Post('link-code') @Permissions('pr_raise', 'procurement', 'planner')
-  linkCode(@CurrentUser() u: JwtUser) { return this.svc.issueLinkCode(u); }
+  linkCode(@CurrentUser() u: JwtUser) { return this.link.issueLinkCode(u); }
 
   @Get('link') @Permissions('pr_raise', 'procurement', 'planner')
-  linkStatus(@CurrentUser() u: JwtUser) { return this.svc.linkStatus(u); }
+  linkStatus(@CurrentUser() u: JwtUser) { return this.link.linkStatus(u); }
 
   @Delete('link') @Permissions('pr_raise', 'procurement', 'planner')
-  unlink(@CurrentUser() u: JwtUser) { return this.svc.unlink(u); }
+  unlink(@CurrentUser() u: JwtUser) { return this.link.unlink(u); }
 
   // LC-3 governance — admin link registry + force-unlink (offboarding). Perm `users` (AccessAdmin).
   @Get('links') @Permissions('users')
-  listLinks() { return this.svc.listLinks(); }
+  listLinks() { return this.link.listLinks(); }
 
   @Delete('links/:username') @Permissions('users')
-  adminUnlink(@Param('username') username: string, @CurrentUser() u: JwtUser) { return this.svc.adminUnlink(username, u); }
+  adminUnlink(@Param('username') username: string, @CurrentUser() u: JwtUser) { return this.link.adminUnlink(username, u); }
 }
