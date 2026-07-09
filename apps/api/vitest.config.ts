@@ -20,6 +20,7 @@ const PURE_MODULES = [
   'src/common/bizdate.ts',           // test/pure-utils.test.ts
   'src/common/db-error.ts',          // test/pure-utils.test.ts
   'src/common/net-guard.ts',         // test/net-guard.test.ts (2.4 slice 8 — SSRF guard, security H-1/L-6)
+  'src/common/webhook-auth.ts',      // test/unit.test.ts (L-1/L-2 inbound HMAC — already tested, now gated)
   'src/modules/tax/documents/wht-rates.ts', // test/tax-rules.test.ts (tax-point.ts already in the glob)
   'src/modules/payroll/payroll-calc.ts',    // already tested in test/unit.test.ts — now gated
   'src/modules/payments/promptpay-qr.ts',   // already tested in test/unit.test.ts — now gated
@@ -43,6 +44,9 @@ const SUB_SERVICE_FLOORS: Record<string, { statements: number; branches: number;
   'src/modules/procurement/procurement-pr.service.ts': { statements: 95, branches: 67, functions: 98, lines: 95 }, // 97.8/69.1/100/97.8
   'src/modules/procurement/procurement-grn.service.ts': { statements: 92, branches: 65, functions: 98, lines: 92 }, // 94.6/67.1/100/94.6 — the print/summary mapping is dense with `?? null` fallbacks; the null-side tests cover most, the rest are off-PO edge forms
   'src/modules/projects/projects-evm.service.ts':      { statements: 98, branches: 75, functions: 98, lines: 98 }, // 100/77.4/100/100
+  // slice 10 — the EXP-12 claim window + the M1/PROJ-12 encumbrance primitive join the gate:
+  'src/modules/claims/claims.service.ts':              { statements: 96, branches: 80, functions: 98, lines: 96 }, // 99.0/82.8/100/99.0
+  'src/modules/commitments/commitments.service.ts':    { statements: 98, branches: 92, functions: 98, lines: 98 }, // 100/94.1/100/100
 };
 
 export default defineConfig({
