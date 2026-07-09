@@ -51,3 +51,12 @@ describe('money — minorToNumber4 output', () => {
     expect(minorToNumber4(0n)).toBe(0);
   });
 });
+
+describe('money — toMinor4 non-decimal fallbacks (slice 9)', () => {
+  it('scientific notation falls back through the float clamp; garbage degrades to 0n', () => {
+    expect(toMinor4('1e2')).toBe(1000000n);   // 100.0000 in minor-4
+    expect(toMinor4('-2.5e1')).toBe(-250000n);
+    expect(toMinor4('abc')).toBe(0n);
+    expect(toMinor4('Infinity')).toBe(0n);    // non-finite float → 0n, never throws
+  });
+});

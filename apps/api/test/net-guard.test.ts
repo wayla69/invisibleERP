@@ -1,4 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// Mock the resolver so the HOSTNAME paths (incl. the DNS-rebinding rule: EVERY resolved address must be
+// public) are unit-testable without real DNS. Literal-IP URLs never reach lookup (isIP short-circuits),
+// so the tests below this mock are unaffected.
+vi.mock('node:dns/promises', () => ({ lookup: vi.fn() }));
+import { lookup } from 'node:dns/promises';
 
 import { assertPublicUrl, isPrivateIp, isPublicUrl } from '../src/common/net-guard';
 
@@ -81,5 +87,30 @@ describe('net-guard — assertPublicUrl / isPublicUrl (literal-IP hosts)', () =>
   it('isPublicUrl is the non-throwing mirror (send path records blocked instead of 500ing)', async () => {
     expect(await isPublicUrl('https://8.8.8.8/hook')).toBe(true);
     expect(await isPublicUrl('https://192.168.1.10/hook')).toBe(false);
+  });
+});
+
+describe('net-guard — hostname resolution (mocked DNS; the rebinding rule)', () => {
+  const code = async (fn: () => Promise<unknown>) => {
+    try { await fn(); } catch (e: any) { return e?.response?.code ?? String(e); }
+    return 'NO_THROW';
+  };
+  const resolveTo = (ips: string[]) => vi.mocked(lookup).mockResolvedValueOnce(ips.map((address) => ({ address, family: 4 })) as any);
+
+  it('a hostname resolving only to public addresses passes', async () => {
+    resolveTo(['93.184.216.34']);
+    expect(await code(() => assertPublicUrl('https://example.com/hook'))).toBe('NO_THROW');
+  });
+
+  it('DNS-rebinding rule: if ANY resolved A/AAAA is private the whole host is refused', async () => {
+    resolveTo(['93.184.216.34', '10.0.0.1']); // one public + one internal → blocked
+    expect(await code(() => assertPublicUrl('https://rebind.example/hook'))).toBe('SSRF_BLOCKED');
+  });
+
+  it('a hostname that fails to resolve, or resolves to nothing, is refused (fail closed)', async () => {
+    vi.mocked(lookup).mockRejectedValueOnce(new Error('ENOTFOUND'));
+    expect(await code(() => assertPublicUrl('https://no-such-host.example/'))).toBe('SSRF_BLOCKED');
+    resolveTo([]);
+    expect(await code(() => assertPublicUrl('https://empty.example/'))).toBe('SSRF_BLOCKED');
   });
 });
