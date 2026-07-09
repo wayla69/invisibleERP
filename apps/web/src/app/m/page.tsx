@@ -6,7 +6,7 @@
 // CSRF token (`ierp_csrf`) echoed in X-CSRF-Token on mutations. The member only ever sees/acts on themselves
 // (the API derives the member from the cookie token — there is no member_id input).
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Gift, Trophy, Users, Star, LogOut, Sparkles, Ticket, Loader2, Disc3, Handshake, ReceiptText, Upload } from 'lucide-react';
+import { Gift, Trophy, Users, Star, LogOut, Sparkles, Ticket, Loader2, Disc3, Handshake, ReceiptText, Upload, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -220,12 +220,13 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
   const [tier, setTier] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [expiring, setExpiring] = useState<any>(null);
+  const [consents, setConsents] = useState<any[]>([]);
   const [err, setErr] = useState('');
   const [flash, setFlash] = useState('');
 
   const reload = useCallback(async () => {
     try {
-      const [m, r, ms, rf, w, wh, pv, rc, tj, hi, ex] = await Promise.all([
+      const [m, r, ms, rf, w, wh, pv, rc, tj, hi, ex, cs] = await Promise.all([
         mapi('/api/member/me'),
         mapi<{ rewards: any[] }>('/api/member/rewards'),
         mapi<{ missions: any[] }>('/api/member/missions'),
@@ -237,9 +238,10 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
         mapi('/api/member/tier').catch(() => null),
         mapi<{ history: any[] }>('/api/member/history').catch(() => ({ history: [] })),
         mapi('/api/member/points/expiring').catch(() => null),
+        mapi<{ consents: any[] }>('/api/member/consents').catch(() => ({ consents: [] })),
       ]);
       setMe(m); setRewards(r.rewards ?? []); setMissions(ms.missions ?? []); setRefs(rf.referrals ?? []); setWallet(w.coupons ?? []); setWheels(wh.wheels ?? []); setPrivileges(pv.privileges ?? []); setReceipts(rc.submissions ?? []);
-      setTier(tj); setHistory(hi?.history ?? []); setExpiring(ex);
+      setTier(tj); setHistory(hi?.history ?? []); setExpiring(ex); setConsents(cs?.consents ?? []);
     } catch (e: any) { if (/เซสชัน|401|token/i.test(e.message)) on401(); else setErr(e.message); }
   }, [on401]);
   useEffect(() => { reload(); }, [reload]);
@@ -423,9 +425,34 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
           </Row>
         ))}
       </Section>
+
+      {/* PDPA consents — the data subject manages their OWN per-purpose consents (LYL-10c, source='self').
+          Includes 'dining_profile' (the fine-dining guest preference profile the shop may keep for service). */}
+      <Section icon={<ShieldCheck className="size-4" />} title="ความยินยอม (PDPA)">
+        <p className="mb-1 text-xs text-muted-foreground">ให้หรือถอนความยินยอมได้ทุกเมื่อ — มีผลทันที ถอนแล้วร้านจะไม่แสดง/ใช้ข้อมูลส่วนนั้นอีก</p>
+        {CONSENT_PURPOSES.map((p) => {
+          const row = consents.find((c: any) => c.purpose === p.purpose);
+          const granted = row ? row.granted === true : p.purpose === 'marketing' ? me.marketing_opt_in !== false : false;
+          return (
+            <Row key={p.purpose} title={p.label} sub={p.sub}>
+              <Button size="sm" variant={granted ? 'outline' : 'default'} disabled={busy}
+                onClick={() => act(() => mapi('/api/member/consents', { method: 'PUT', body: JSON.stringify({ purpose: p.purpose, granted: !granted }) }), granted ? '🛡️ ถอนความยินยอมแล้ว — มีผลทันที' : '✅ บันทึกความยินยอมแล้ว ขอบคุณค่ะ/ครับ')}>
+                {granted ? 'ถอนความยินยอม' : 'ยินยอม'}
+              </Button>
+            </Row>
+          );
+        })}
+      </Section>
     </div>
   );
 }
+
+// PDPA per-purpose consent catalogue surfaced to the member (the ledger accepts any purpose; these are the
+// ones a guest can meaningfully self-manage).
+const CONSENT_PURPOSES: { purpose: string; label: string; sub: string }[] = [
+  { purpose: 'marketing', label: 'ข่าวสารและโปรโมชัน', sub: 'รับข้อความการตลาด/แคมเปญจากร้าน' },
+  { purpose: 'dining_profile', label: 'ข้อมูลความชอบในการรับประทาน', sub: 'เมนูโปรด วัตถุดิบ แพ้อาหาร ผู้ร่วมโต๊ะ — เพื่อการบริการที่ดีขึ้น' },
+];
 
 // V1 (docs/29) — P2P transfer form. The API enforces every guard (balance, same shop, no self, day cap);
 // this form just surfaces the messages verbatim. `busy` is shared with the page so a double-tap can't

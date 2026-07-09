@@ -255,6 +255,12 @@ consumer page, not the staff app; LINE LIFF is a future wrapper on the same logi
    > หรือ per-tenant ในตั้งค่า) ระบบใช้ **mock provider** — ลิงก์ติดตั้งเป็นลิงก์ทดสอบ ไม่มีอะไรออกนอกระบบ
    > ตั้งค่า creds เมื่อไหร่ โค้ดเดิมออกบัตรจริงทันที (แบบเดียวกับ SMS/LINE ก่อนมี credentials) —
 > ขั้นตอนตั้งค่าจริงทีละสเต็ป: `docs/ops/wallet-pass-certs-runbook.md`.
+   **ความยินยอม (PDPA):** ท้ายแอปมีการ์ด **ความยินยอม (PDPA)** — สมาชิกกด **ยินยอม / ถอนความยินยอม**
+   ได้เองทีละหัวข้อ: **ข่าวสารและโปรโมชัน** (การตลาด) และ **ข้อมูลความชอบในการรับประทาน**
+   (เมนูโปรด/วัตถุดิบ/แพ้อาหาร/ผู้ร่วมโต๊ะ ที่ร้านเก็บเพื่อการบริการระดับภัตตาคาร — ดูคู่มือ Sales & POS
+   §Guest dining profile) มีผล**ทันที**: ถอนแล้วร้านจะไม่เห็น/ไม่ใช้ข้อมูลส่วนนั้นอีก ทุกการเปลี่ยนแปลง
+   ถูกบันทึกในทะเบียนความยินยอม (`source='self'`) เมื่อร้านกด **ส่งคำขอความยินยอม** จากโปรไฟล์แขก
+   สมาชิกจะได้รับข้อความ (LINE/SMS) ลิงก์มาที่การ์ดนี้
 3. **Log out** — press **ออกจากระบบ** on the card. This ends the session on the server and clears the
    secure cookie, so the device can't be reused without logging in again.
 4. **Safety** — a member can only ever see and act on **their own** account; the app cannot reach any

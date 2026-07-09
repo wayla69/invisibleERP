@@ -23,6 +23,8 @@ export type TableRow = {
   pos_x: number; pos_y: number; width: number; height: number;
   session: { session_no: string; party_size: number; elapsed_min: number } | null;
   order: { order_no: string; status: string; total: number; waited_min: number } | null;
+  // consent-gated dining cautions of the currently seated guest (null when none / no consent)
+  guest_flags?: { member_id: number; name: string | null; allergies: string[]; dietary: string | null; seating_preference: string | null; service_notes: string | null } | null;
 };
 export type ZoneRow = { id: number; name: string; sort_order: number; color: string | null; pos_x: number; pos_y: number; width: number; height: number };
 

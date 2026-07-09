@@ -98,6 +98,15 @@ function Board({ tables, zones, q, onSelect, sel, onOrder }: { tables: TableRow[
         </div>
         <div className={cn('text-sm font-semibold', tone(row.status).text)}>{statusTh(t, row.status)}</div>
         {row.order && <div className="text-xs text-muted-foreground tabular">{baht(row.order.total)} · {t('px.tbl_waited', { min: row.order.waited_min })}</div>}
+        {/* consent-gated dining cautions of the seated guest — allergies first, loud and red */}
+        {row.guest_flags && (
+          <div className="mt-1 space-y-0.5 text-xs">
+            {row.guest_flags.allergies.length > 0 && <div className="font-semibold text-destructive">⚠️ {t('px.gp_allergies')}: {row.guest_flags.allergies.join(', ')}</div>}
+            {(row.guest_flags.dietary || row.guest_flags.service_notes) && (
+              <div className="text-muted-foreground">{[row.guest_flags.dietary, row.guest_flags.service_notes].filter(Boolean).join(' · ')}</div>
+            )}
+          </div>
+        )}
       </button>
       <div className="px-2.5 pb-2.5">
         <Button variant="outline" size="sm" className="w-full" onClick={() => onOrder(row.id)}>
