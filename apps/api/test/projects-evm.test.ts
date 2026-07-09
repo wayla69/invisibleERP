@@ -222,3 +222,113 @@ describe('ProjectsEvmService — captureBaseline re-baseline guard (PROJ-07)', (
     await expect(svc.captureBaseline('P-1', {} as any, { username: 'pm' } as any)).rejects.toMatchObject({ response: { code: 'BASELINE_REASON_REQUIRED' } });
   });
 });
+
+// ───────────────────── slice 7: health snapshots, baseline writes, programs ─────────────────────
+// A write-capable env: routed selects (strict — an unexpected extra read throws), captured
+// inserts/updates, and the four facade ports (rowOf/getOf/fmtOf/emit) observable.
+
+type EvmCap = { inserts: any[]; conflicts: any[]; updates: any[]; emits: any[] };
+
+function evmWriteSvc(routes: any[][], opts: { fmt?: any } = {}) {
+  const cap: EvmCap = { inserts: [], conflicts: [], updates: [], emits: [] };
+  let call = 0;
+  const chain = (rows: any[]) => {
+    const p: any = { from: () => p, where: () => p, limit: () => p, orderBy: () => p, then: (r: any, j: any) => Promise.resolve(rows).then(r, j) };
+    return p;
+  };
+  const db: any = {
+    select: () => { if (call >= routes.length) throw new Error(`unexpected select #${call + 1} — add a route`); return chain(routes[call++] ?? []); },
+    insert: () => ({ values: (v: any) => { cap.inserts.push(v); return { onConflictDoUpdate: (c: any) => { cap.conflicts.push(c); return Promise.resolve(); } }; } }),
+    update: () => ({ set: (v: any) => ({ where: () => { cap.updates.push(v); return Promise.resolve(); } }) }),
+  };
+  const rowOf = async () => PROJ;
+  const getOf = async () => ({ project_code: 'P-1', refreshed: true });
+  const fmtOf = () => opts.fmt ?? { margin: 42, wip: 7 };
+  const emit = (...a: any[]) => { cap.emits.push(a); };
+  const svc = new ProjectsEvmService(db, { taskRollup: (_tasks: any[]) => 55 } as any, rowOf as any, getOf as any, fmtOf as any, emit as any);
+  return { svc, cap };
+}
+
+const PROJ = { id: 1, projectCode: 'P-1', tenantId: 1, costToDate: '800', budgetAmount: '0', endDate: null };
+
+describe('ProjectsEvmService — captureHealth / snapProject (PPM health, PMO-1 red alert)', () => {
+  // one task: EV 500, PV 1000 → with AC 800: CPI 0.625 (<0.9) ⇒ RED
+  const RED_TASKS = [task(1, { plannedCost: '1000', pctComplete: 50, plannedEnd: '2026-01-01' })];
+
+  it('upserts a dated snapshot (idempotent per project+date) and a RED rag wakes the action center', async () => {
+    // routes: evm task scan → evm non-billable sum → rollup task scan
+    const { svc, cap } = evmWriteSvc([RED_TASKS, [{ v: '0' }], RED_TASKS]);
+    const r = await svc.captureHealth('P-1', { as_of: '2026-06-30' }, { username: 'pm' } as any);
+    expect(r).toMatchObject({ project_code: 'P-1', snapshot_date: '2026-06-30', rag: 'red', cpi: 0.625, spi: 0.5, margin: 42 });
+    expect(cap.inserts[0]).toMatchObject({
+      projectId: 1, tenantId: 1, snapshotDate: '2026-06-30', rag: 'red',
+      cpi: '0.6250', spi: '0.5000', pctComplete: '55.00', bac: '1000.00', ev: '500.00', ac: '800.00',
+      margin: '42.00', wip: '7.00', createdBy: 'pm',
+    });
+    expect(cap.conflicts).toHaveLength(1); // ON CONFLICT (project, date) DO UPDATE — re-capture refreshes
+    expect(cap.emits[0]).toEqual([1, 'project_red', 'high', 'P-1', { cpi: 0.625, spi: 0.5, snapshot_date: '2026-06-30' }]);
+  });
+
+  it('a healthy project snapshots GREEN and does NOT wake the action center', async () => {
+    const green = [task(1, { plannedCost: '1000', pctComplete: 100, plannedEnd: '2026-01-01' })];
+    const { svc, cap } = evmWriteSvc([green, [{ v: '0' }], green]); // AC 800 → CPI 1.25, SPI 1
+    const r = await svc.captureHealth('P-1', { as_of: '2026-06-30' }, { username: 'pm' } as any);
+    expect(r.rag).toBe('green');
+    expect(cap.emits).toHaveLength(0);
+  });
+});
+
+describe('ProjectsEvmService — healthHistory trajectory', () => {
+  it('maps the dated snapshots ascending with numeric indices', async () => {
+    const { svc } = evmWriteSvc([[
+      { snapshotDate: '2026-06-01', rag: 'amber', cpi: '0.9500', spi: '1.0000', pctComplete: '40.00', bac: '1000', ev: '400', ac: '420', eac: '1052.63', margin: '10', wip: '5', createdAt: 'T1' },
+    ]]);
+    const r = await svc.healthHistory('P-1');
+    expect(r.count).toBe(1);
+    expect(r.history[0]).toMatchObject({ snapshot_date: '2026-06-01', rag: 'amber', cpi: 0.95, spi: 1, bac: 1000 });
+  });
+});
+
+describe('ProjectsEvmService — captureBaseline write paths (PROJ-07)', () => {
+  const T = [task(1, { plannedCost: '1000', plannedHours: '8' })];
+  const ACTIVE = { id: 1, status: 'active', label: 'Baseline', baselineBac: '1000', baselineDurationDays: 1, baselineEnd: null, reason: null, createdBy: 'pm', capturedAt: 'T1' };
+
+  it('the FIRST baseline is free: snapshots current BAC + CP duration as active, zero variance', async () => {
+    // routes: currentPlan tasks → schedule tasks → active lookup (none) → [getBaseline] all-baselines → currentPlan tasks → schedule tasks
+    const { svc, cap } = evmWriteSvc([T, T, [], [ACTIVE], T, T]);
+    const r = await svc.captureBaseline('P-1', {} as any, { username: 'pm' } as any);
+    expect(cap.inserts[0]).toMatchObject({ projectId: 1, label: 'Baseline', baselineBac: '1000.00', baselineDurationDays: 1, status: 'active', createdBy: 'pm', reason: null });
+    expect(cap.updates).toHaveLength(0); // nothing to supersede
+    expect(r.baseline).toMatchObject({ label: 'Baseline', baseline_bac: 1000, status: 'active' });
+    expect(r.variance).toEqual({ bac_delta: 0, bac_pct: 0, duration_delta: 0 });
+  });
+
+  it('re-baselining WITH a reason supersedes the prior active baseline (history preserved)', async () => {
+    const { svc, cap } = evmWriteSvc([T, T, [{ ...ACTIVE, id: 3 }], [ACTIVE], T, T]);
+    await svc.captureBaseline('P-1', { reason: 'scope change' } as any, { username: 'pm2' } as any);
+    expect(cap.updates[0]).toEqual({ status: 'superseded' });
+    expect(cap.inserts[0]).toMatchObject({ label: 'Re-baseline', reason: 'scope change', status: 'active', createdBy: 'pm2' });
+  });
+});
+
+describe('ProjectsEvmService — setProgram (PMO-4 grouping + dependency guards)', () => {
+  it('a project cannot depend on itself (BAD_DEPENDENCY)', async () => {
+    const { svc, cap } = evmWriteSvc([]);
+    await expect(svc.setProgram('P-1', { depends_on_projects: ['P-1'] } as any, { username: 'pm' } as any))
+      .rejects.toMatchObject({ response: { code: 'BAD_DEPENDENCY' } });
+    expect(cap.updates).toHaveLength(0);
+  });
+
+  it('an unknown dependency project is DEP_PROJECT_NOT_FOUND', async () => {
+    const { svc } = evmWriteSvc([[]]); // existence lookup returns nothing
+    await expect(svc.setProgram('P-1', { depends_on_projects: ['P-404'] } as any, { username: 'pm' } as any))
+      .rejects.toMatchObject({ response: { code: 'DEP_PROJECT_NOT_FOUND' } });
+  });
+
+  it('stores the program code + deduped dependency CSV and returns the refreshed project', async () => {
+    const { svc, cap } = evmWriteSvc([[{ id: 2 }], [{ id: 3 }]]); // P-2, P-3 both exist
+    const r = await svc.setProgram('P-1', { program_code: ' PRG-1 ', depends_on_projects: ['P-2', 'P-2', 'P-3'] } as any, { username: 'pm' } as any);
+    expect(cap.updates[0]).toEqual({ programCode: 'PRG-1', dependsOnProjects: 'P-2,P-3' });
+    expect(r).toEqual({ project_code: 'P-1', refreshed: true });
+  });
+});

@@ -241,3 +241,102 @@ describe('LedgerPostingService — reverseEntry write path (GL-17 contra reversa
     expect(cap.dbAudits).toHaveLength(0);
   });
 });
+
+// ───────────────────── reject / immutability demo / listings (slice 7) ─────────────────────
+// STRICT routed env (an unexpected extra read throws — same convention as the procurement envs):
+// select() answers reads in call order; update/insert capture what the plain-db paths write.
+
+type PlainCap = { updates: any[]; inserts: any[] };
+
+function plainDb(routes: any[][]): { db: any; cap: PlainCap } {
+  const cap: PlainCap = { updates: [], inserts: [] };
+  let call = 0;
+  const chain = (rows: any[]) => {
+    const p: any = { from: () => p, where: () => p, limit: () => p, orderBy: () => p, then: (r: any, j: any) => Promise.resolve(rows).then(r, j) };
+    return p;
+  };
+  const db = {
+    select: () => { if (call >= routes.length) throw new Error(`unexpected select #${call + 1} — add a route`); return chain(routes[call++] ?? []); },
+    update: () => ({ set: (v: any) => ({ where: () => { cap.updates.push(v); return Promise.resolve(); } }) }),
+    insert: () => ({ values: (v: any) => { cap.inserts.push(v); return Promise.resolve(); } }),
+  };
+  return { db, cap };
+}
+
+describe('LedgerPostingService — rejectEntry (GL-05 reject → Voided)', () => {
+  it('voids the Draft and appends the reviewer + reason to the memo', async () => {
+    const { db, cap } = plainDb([[{ id: 5, entryNo: 'JE-5', status: 'Draft', memo: 'ค่าเช่า' }]]);
+    const svc = new LedgerPostingService(db, docNo);
+    const r = await svc.rejectEntry('JE-5', { username: 'bob' } as any, 'ผิดงวด');
+    expect(r).toEqual({ entry_no: 'JE-5', status: 'Voided', rejected_by: 'bob' });
+    expect(cap.updates[0]).toEqual({ status: 'Voided', memo: 'ค่าเช่า [REJECTED by bob: ผิดงวด]' });
+  });
+
+  it('a non-Draft entry cannot be rejected (NOT_PENDING) — nothing written', async () => {
+    const { db, cap } = plainDb([[{ id: 5, entryNo: 'JE-5', status: 'Posted' }]]);
+    const svc = new LedgerPostingService(db, docNo);
+    await expect(svc.rejectEntry('JE-5', { username: 'bob' } as any)).rejects.toMatchObject({ response: { code: 'NOT_PENDING' } });
+    expect(cap.updates).toHaveLength(0);
+  });
+});
+
+describe('LedgerPostingService — attemptVoidPosted (GL-17 app-level immutability demo)', () => {
+  it('a Posted entry is BLOCKED: discriminated result (not a throw, so the audit row commits) + MUTATE_BLOCKED audit', async () => {
+    const { db, cap } = plainDb([[{ id: 7, entryNo: 'JE-7', status: 'Posted', tenantId: 1 }]]);
+    const svc = new LedgerPostingService(db, docNo);
+    const r = await svc.attemptVoidPosted(7, 'ops1');
+    expect(r).toMatchObject({ blocked: true, code: 'GL_IMMUTABLE', entry_id: 7, entry_no: 'JE-7', immutable: true });
+    expect(cap.inserts[0]).toMatchObject({ action: 'MUTATE_BLOCKED', actor: 'ops1', entryId: 7, tenantId: 1 });
+    expect(cap.inserts[0].detail).toMatchObject({ attempted: 'void/delete' });
+    expect(cap.updates).toHaveLength(0); // the entry itself is never touched
+  });
+
+  it('a Draft is not GL-17-protected: blocked:false and NO audit row', async () => {
+    const { db, cap } = plainDb([[{ id: 8, entryNo: 'JE-8', status: 'Draft' }]]);
+    const svc = new LedgerPostingService(db, docNo);
+    const r = await svc.attemptVoidPosted(8, 'ops1');
+    expect(r).toMatchObject({ blocked: false, immutable: false, status: 'Draft' });
+    expect(cap.inserts).toHaveLength(0);
+  });
+});
+
+describe('LedgerPostingService — journal listings (batched lines, no N+1)', () => {
+  const HEADS = [
+    { id: 1, entryNo: 'JE-1', entryDate: '2026-07-01', period: '2026-07', source: 'Manual', sourceRef: null, memo: null, currency: 'THB', status: 'Posted', createdBy: 'a', createdAt: 'T1' },
+    { id: 2, entryNo: 'JE-2', entryDate: '2026-07-02', period: '2026-07', source: 'POS', sourceRef: 'S-1', memo: 'ขาย', currency: 'THB', status: 'Draft', createdBy: 'b', createdAt: 'T2' },
+  ];
+  const LINES = [
+    { entryId: 1, account_code: '5100', debit: '100', credit: '0', memo: null },
+    { entryId: 1, account_code: '1000', debit: '0', credit: '100', memo: null },
+    { entryId: 2, account_code: '1000', debit: '50', credit: '0', memo: 'cash' },
+  ];
+
+  it('listJournal fetches every page line in ONE batched query and groups them per header', async () => {
+    const { db } = plainDb([HEADS, LINES]); // strict: exactly 2 selects — a per-header line query would throw
+    const svc = new LedgerPostingService(db, docNo);
+    const r = await svc.listJournal(50);
+    expect(r.count).toBe(2);
+    expect(r.entries[0]).toMatchObject({ entry_no: 'JE-1', status: 'Posted' });
+    expect(r.entries[0].lines).toEqual([
+      { account_code: '5100', debit: 100, credit: 0, memo: null },
+      { account_code: '1000', debit: 0, credit: 100, memo: null },
+    ]);
+    expect(r.entries[1].lines).toEqual([{ account_code: '1000', debit: 50, credit: 0, memo: 'cash' }]);
+  });
+
+  it('an empty journal short-circuits without the lines query', async () => {
+    const { db } = plainDb([[]]); // ONE route only — the batched lines select must not run
+    const svc = new LedgerPostingService(db, docNo);
+    expect(await svc.pendingJournal(50)).toEqual({ entries: [], count: 0 });
+  });
+});
+
+describe('LedgerPostingService — listGlAudit (GL-17 audit trail)', () => {
+  it('maps the audit rows with numeric ids', async () => {
+    const { db } = plainDb([[{ id: '9', entryId: '5', action: 'POST', actor: 'a', detail: { entry_no: 'JE-5' }, at: 'T9' }]]);
+    const svc = new LedgerPostingService(db, docNo);
+    const r = await svc.listGlAudit(5, 10);
+    expect(r.count).toBe(1);
+    expect(r.audit[0]).toEqual({ id: 9, entry_id: 5, action: 'POST', actor: 'a', detail: { entry_no: 'JE-5' }, at: 'T9' });
+  });
+});
