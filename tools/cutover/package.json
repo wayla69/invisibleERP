@@ -121,7 +121,8 @@
     "ess": "tsx src/ess.ts",
     "supplier": "tsx src/supplier.ts",
     "demand-ml": "tsx src/demand-ml.ts",
-    "customers": "tsx src/customers.ts"
+    "customers": "tsx src/customers.ts",
+    "load": "tsx src/load-smoke.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.13",
