@@ -71,8 +71,23 @@ Publish the executed privacy policy and update the served summary page (`apps/we
 NASDAQ narrative to it (docs/27 Wave 6: customers, pricing, PMO). Tracked here only so this runbook is the
 single open-items list.
 
+## 10. Pilot-company test-data factory reset (suspend → reset → reactivate) — ITGC-AC-18
+
+**Owner:** Platform.
+**Action:** when the pilot company (e.g. **Amber**) finishes UAT and is ready to start real usage, in
+`/platform` → บริษัท: (a) **suspend** the company (its users are blocked from this moment — the reset
+button only appears on a suspended company), (b) open the company drawer → danger zone **ล้างข้อมูลบริษัท
+(Factory reset)** → type the company code → reset — test data is wiped (logins, plan, and the ITGC-AC-16
+audit chain are preserved; fiscal year + CoA re-seeded), then (c) **reactivate** the company and hand it
+back for real usage. No env var involved: the operation is permanent but only ever possible on a company
+that was deliberately taken offline first, so an actively-used company cannot be wiped in one click.
+**Verify:** after (b) the company's transaction lists are empty; after (c) its admin logs in and works
+normally; the reset appears in the company's audit trail + the god notification inbox.
+Model + gates: `docs/ops/tenancy-model.md` §2 (rev 1.19).
+
 ## Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 1.0 | 2026-07-02 | Platform | Initial runbook consolidating every open human/console item from docs/27 (legal execution, Anthropic DPA → `AI_DPA_ACKNOWLEDGED`, SOC 2 engagement + quarterly evidence, ELC operation, Railway PgBouncer/Redis, prod `db:backfill:pii`, loadtest §4 baseline, `SEED_ADMIN_PASSWORD`, Wave 6) with owner + exact action + verification each. |
+| 1.1 | 2026-07-09 | Platform | Added item 10 — pilot-company test-data factory reset from the Platform Console (**suspend → reset → reactivate**): wipes a pilot's UAT data before real usage while preserving logins/plan/audit-chain; only ever possible on a suspended company, so an active company cannot be wiped in one click. |

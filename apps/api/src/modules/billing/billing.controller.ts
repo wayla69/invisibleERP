@@ -31,6 +31,8 @@ type InviteDto = z.infer<typeof InviteBody>;
 const RejectBody = z.object({ reason: z.string().max(500).optional() });
 type RejectDto = z.infer<typeof RejectBody>;
 
+const FactoryResetBody = z.object({ confirm: z.string().min(1).max(100) });
+
 const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional() }); // 1.7 — annual billing + multi-currency
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
@@ -143,6 +145,16 @@ export class BillingController {
   @Post('admin/tenants/:id/reactivate') @PlatformAdmin() @HttpCode(200)
   reactivateTenant(@Param('id') id: string, @CurrentUser() u: JwtUser) {
     return this.svc.reactivateTenant(Number(id), u.username);
+  }
+
+  // Tenant factory-reset — wipes a pilot company's test data (identity/billing/audit preserved, fresh
+  // defaults re-seeded) so it can start real usage clean. Permanent lifecycle operation, triple-gated:
+  // god-only, the company must be SUSPENDED first (409 TENANT_NOT_SUSPENDED — the two-step that makes an
+  // actively-used company unwipeable: suspend → reset → reactivate), and the caller must type the company
+  // code (400 CONFIRM_MISMATCH). Audit-logged; the ITGC-AC-16 audit chain itself is never erased.
+  @Post('admin/tenants/:id/factory-reset') @PlatformAdmin() @HttpCode(200)
+  factoryResetTenant(@Param('id') id: string, @Body(new ZodValidationPipe(FactoryResetBody)) b: { confirm: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.factoryResetTenant(Number(id), u.username, b.confirm);
   }
 
   // PUBLIC plan catalogue

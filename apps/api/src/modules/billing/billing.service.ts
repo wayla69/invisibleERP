@@ -27,6 +27,17 @@ export function isSignupAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.NODE_ENV !== 'production';
 }
 
+// What a factory reset MUST NOT touch. Identity (logins keep working so the company restarts real usage
+// without re-provisioning), billing/plan state, the ITGC-AC-16 tamper-evident audit chain, and the
+// operator's usage/AI-spend billing evidence. Everything else with a tenant_id column is wiped.
+const FACTORY_RESET_PRESERVE = new Set([
+  'users', 'user_permissions', 'user_prefs',
+  'subscriptions',
+  'audit_log',
+  'ai_token_usage', 'ai_overage_billing_runs',
+  'usage_events', 'usage_overage_billing_runs',
+]);
+
 export interface SignupDto {
   company_name: string;
   tenant_code: string;
@@ -392,6 +403,67 @@ export class BillingService {
     logger.info({ event: 'tenant_reactivated', tenant_id: id, by }, 'company reactivated');
     await this.platformNotifs?.emit({ type: 'tenant_reactivated', title: `คืนสถานะบริษัท #${id}`, body: `โดย ${by}`, tenantId: id, refType: 'tenant', refId: String(id) });
     return { tenant_id: id, status: 'active' };
+  }
+
+  // ── Tenant factory-reset (god-only, SUSPENDED companies only) — wipes a pilot company's TEST DATA so it
+  // can start real usage clean, without re-provisioning logins. Permanent lifecycle operation, made safe by
+  // a mandatory two-step: the company must be SUSPENDED first (its users are already blocked), so an
+  // actively-used company can never be wiped in one click — suspend → reset → reactivate. Deletes the
+  // tenant's rows across every tenant-scoped table EXCEPT the preserve-set above, then re-seeds the
+  // fresh-tenant defaults (fiscal year + industry CoA) exactly like provisionTenant. FK-safe: fixpoint
+  // delete passes with a savepoint per table (children clear first naturally; blocked tables retry next
+  // pass). If a table can never clear — e.g. a future preserved-table FK into wiped data — the whole
+  // request tx ROLLS BACK: atomic, never a partial wipe. Requires typing the company code (confirm). ──
+  async factoryResetTenant(id: number, by: string, confirm: string) {
+    const [t] = await this.db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    if (!t.suspendedAt)
+      throw new ConflictException({ code: 'TENANT_NOT_SUSPENDED', message: 'Suspend the company first — factory reset only runs on a suspended company (suspend → reset → reactivate)', messageTh: 'ต้องระงับบริษัทก่อนจึงจะล้างข้อมูลได้ (ระงับ → ล้างข้อมูล → คืนสถานะ)' });
+    if ((confirm ?? '').trim() !== t.code)
+      throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type the company code exactly to confirm the reset', messageTh: `พิมพ์รหัสบริษัท "${t.code}" ให้ตรงเพื่อยืนยันการล้างข้อมูล` });
+
+    const db = this.db;
+    // Same runtime enumeration the RLS loop migrations use — every BASE TABLE carrying a tenant_id column
+    // is tenant-scoped by convention (platform tables name theirs about_tenant_id/created_tenant_id).
+    const enumRes: any = await db.execute(sql`
+      SELECT c.table_name FROM information_schema.columns c
+      JOIN information_schema.tables tb ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name
+      WHERE c.table_schema = 'public' AND c.column_name = 'tenant_id' AND tb.table_type = 'BASE TABLE'
+      ORDER BY c.table_name`);
+    const allTables: string[] = (enumRes.rows ?? enumRes).map((r: any) => String(r.table_name));
+    let remaining = allTables.filter((n) => !FACTORY_RESET_PRESERVE.has(n));
+    const targeted = remaining.length;
+    let rowsDeleted = 0;
+
+    while (remaining.length) {
+      const blocked: string[] = [];
+      for (const name of remaining) {
+        const ident = sql.raw(`"${name.replace(/"/g, '""')}"`); // identifier from information_schema, not user input
+        await db.execute(sql`SAVEPOINT factory_reset_tbl`);
+        try {
+          const r: any = await db.execute(sql`DELETE FROM ${ident} WHERE tenant_id = ${id}`);
+          await db.execute(sql`RELEASE SAVEPOINT factory_reset_tbl`);
+          rowsDeleted += Number(r?.rowCount ?? r?.affectedRows ?? 0);
+        } catch {
+          await db.execute(sql`ROLLBACK TO SAVEPOINT factory_reset_tbl`);
+          blocked.push(name);
+        }
+      }
+      if (blocked.length === remaining.length)
+        throw new ConflictException({ code: 'FACTORY_RESET_BLOCKED', message: `Reset blocked — tables still referenced: ${blocked.slice(0, 8).join(', ')}${blocked.length > 8 ? '…' : ''}`, messageTh: 'ล้างข้อมูลไม่สำเร็จ — มีตารางที่ยังถูกอ้างอิงจากข้อมูลที่ระบบต้องเก็บไว้' });
+      remaining = blocked;
+    }
+
+    // Re-seed the fresh-tenant defaults so the company is immediately usable (mirrors provisionTenant).
+    const industry = isIndustryKey((t as { industry?: string }).industry) ? (t as { industry?: string }).industry! : 'general';
+    if (this.ledger) {
+      await this.ledger.provisionFiscalYear(Number(ymd().slice(0, 4)), id);
+      await this.ledger.provisionTenantCoA(id, industry);
+    }
+
+    logger.warn({ event: 'tenant_factory_reset', tenant_id: id, by, tables: targeted, rows: rowsDeleted }, 'company factory reset');
+    await this.platformNotifs?.emit({ type: 'tenant_factory_reset', title: `ล้างข้อมูลบริษัท #${id} (${t.code})`, body: `โดย ${by} — ลบ ${rowsDeleted} แถวจาก ${targeted} ตาราง แล้วตั้งค่าเริ่มต้นใหม่`, tenantId: id, refType: 'tenant', refId: String(id) });
+    return { tenant_id: id, status: 'reset', tables_wiped: targeted, rows_deleted: rowsDeleted };
   }
 
   // Core provisioning — tenant + its OWN org + an Admin + a trialing subscription + fiscal year + industry
