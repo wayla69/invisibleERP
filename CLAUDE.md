@@ -81,9 +81,46 @@ For every such change, review and update as needed:
    mergeable but a **non-required** check is red/pending — the stale `CodeQL` keeps it at `unstable` (never
    `clean`) yet does **not** block merge, so verify the *required* gates (`build`, `web-e2e`, harnesses)
    directly instead of waiting for `clean`.
+9. **Landing a STACK of small independent PRs: the 2nd+ merge conflicts on shared aggregation files — keep
+   BOTH sides.** When several PRs each append to the same file (`apps/api/test/unit.test.ts` imports +
+   `describe` blocks; `.env.example`; a census/baseline), the first merges clean and every later one flips to
+   `mergeable_state: dirty` on that file as it lands. `.env.example` usually 3-way-merges cleanly (different
+   sections); `unit.test.ts` collides at **two** anchors — the shared import line AND the "insert a new
+   `describe` before X" point — so a single conflict hunk can hide a **second** one lower down. Resolve by
+   **keeping every import and every `describe` block** (the additions are orthogonal; dropping one silently
+   deletes a test), `grep -n '^<<<<<<<\|^>>>>>>>'` to confirm none remain, then `build` **and**
+   `vitest run test/unit.test.ts` before pushing — a committed conflict marker still passes `nest build`
+   (it doesn't compile the test file) and only fails at test run. Merge order: land the independent PRs
+   (single-file, e.g. `guards.ts`-only) first, then rebase the shared-file ones one at a time.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
+- **Security-review hardening (2026-07-08 third-party review — all 22 findings merged; don't regress the new
+  fail-closed defaults).** Report: `docs/security-review/security-review-2026-07-08.html`.
+  - **Web CSP is a per-request NONCE in `apps/web/src/middleware.ts`, NOT `next.config.mjs`** (M-1). Prod
+    `script-src 'self' 'nonce-<rand>' 'strict-dynamic' 'unsafe-inline'`; the root layout reads `x-nonce` from
+    `headers()` and passes it to `next-themes`. `CSP_REPORT_ONLY=1` = observe-only. Never move the CSP back to
+    the static header (it can't carry a nonce); any inline `<script>` a page needs must carry the nonce.
+  - **Tenant-isolation boot checks are FAIL-CLOSED by default (`common/tenancy-boot-check.ts`; H-3/H-4).** In
+    prod the API **refuses to boot** if (H-4) >1 tenant exists under `TENANCY_MODE=single-company`, or (H-3)
+    the base `DATABASE_URL` role is a superuser / has `BYPASSRLS`. **Prod runs a non-superuser `ierp_app` role
+    with NO opt-out**, so pointing `DATABASE_URL` at a superuser will now REFUSE TO BOOT. Opt-outs
+    `ALLOW_SINGLE_COMPANY_MULTI_TENANT` / `ALLOW_RLS_BYPASS_BASE_ROLE` exist but are OFF in prod (the old
+    `STRICT_TENANCY_BOOT` flag is removed — fail-closed is the default). Role SQL: `docs/ops/tenancy-model.md §1bis`.
+  - **Inbound-webhook auth: additive HMAC via `common/webhook-auth.ts`** (L-1/L-2). Setting
+    `WEBHOOK_HMAC_SECRET_<PLATFORM>` / `CHANNEL_WEBHOOK_HMAC_SECRET` (channel-adapter, restaurant channel,
+    email-capture) or sending the PSP `x-psp-timestamp` (window `PSP_WEBHOOK_TOLERANCE_SEC`, default 300)
+    makes an HMAC-over-**rawBody** REPLACE the static-secret check; unset = legacy static secret (back-compat).
+    Controllers pass `req.rawBody` → needs `rawBody:true` on the Nest app (set in `main.ts`; a harness that
+    `app.inject()`s a signed body must create the app with `{ rawBody: true }` too, else rawBody is empty).
+  - **API keys carry `created_by`; the guard adopts that human as the maker-checker principal** (H-2) — a key
+    can't launder a self-approval. The **guard sources `tenantId` LIVE from the DB** (L-3), like role/orgId.
+  - **Behind a proxy / multi-replica (L-8/L-12):** `TRUSTED_PROXY_HOPS` sets Fastify `trustProxy` + the
+    audit-IP trusted hop; `RATE_LIMIT_REDIS_URL` shares the edge + public-API limiters via
+    `common/rate-limit-store.ts`. Both default off = per-process / socket-peer (single-node unchanged).
+  - SSRF guard (`net-guard.ts`) now blocks hex IPv4-mapped IPv6 literals (H-1); `image-fetch` routes through
+    it (L-6); object-storage keys are `isSafeObjectKey`-validated (L-9); SSE/`realtime-bus.recent()` no longer
+    fan `tenant_id==null` events to all tenants (L-7); PII redaction masks international `+` phones (L-11).
 - **Business timezone = Asia/Bangkok (UTC+7).** `ymd()`/`bizYmdDash` date everything on the business day,
   not UTC. Seed/compare dates on that basis or you get off-by-one window drift (root cause of the
   `analytics` flake).
