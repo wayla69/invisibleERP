@@ -12,6 +12,7 @@ import { DataTable } from '@/components/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { statusVariant } from '@/components/ui';
+import { Crumbs } from '@/components/crumbs';
 
 // Program (cross-project) critical path (PMO-4): the member projects laid out as a higher-level CPM —
 // each row is a whole project (duration = its own critical path); the program critical path is highlighted.
@@ -25,6 +26,7 @@ export default function ProgramPage() {
 
   return (
     <div>
+      <Crumbs items={[{ label: t('pj.btn_portfolio'), href: '/projects/portfolio' }, { label: `${t('pj.program_word')} ${code}` }]} />
       <PageHeader
         title={<span className="flex items-center gap-2"><Network className="size-5" /> {t('pj.program_word')} {code}</span>}
         description={t('pj.program_page_desc')}

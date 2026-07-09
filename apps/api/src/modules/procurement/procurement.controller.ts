@@ -59,6 +59,9 @@ const CancelBody = z.object({ reason: z.string().min(1) });
 const DocEmailBody = z.object({ to_email: z.string().email().optional() });
 // D4 — receive a partial qty of one PO line.
 const ReceiveItemBody = z.object({ item_id: z.string().min(1), qty: z.number().positive() });
+// EXP-12 — close a part-received PO short (shortage never coming) / receiving tolerances.
+const CloseShortBody = z.object({ reason: z.string().max(500).optional() });
+const ReceivingSettingsBody = z.object({ over_receipt_weight_pct: z.number().min(0).max(100).optional(), claim_window_hours: z.number().int().positive().optional() });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
 // Direct-edit vendor master fields (master-data audit Phase 2) — excludes tax_id/credit_limit/bank details
 // (encrypted PII / sensitive-field / maker-checker territory — out of scope for a direct-edit endpoint).
@@ -215,6 +218,26 @@ export class ProcurementController {
   // Receive ALL outstanding qty on an approved PO in one shot (LINE chat `receive` + web "รับครบ").
   @Post('pos/:poNo/receive-all') @Permissions('wh_receive', 'warehouse', 'procurement')
   receiveAll(@Param('poNo') poNo: string, @CurrentUser() u: JwtUser) { return this.svc.receiveAllRemaining(poNo, u); }
+
+  // EXP-12 — the PO's lines for the receiving screen (ordered / already received / outstanding per line),
+  // so the receiver counts the actual delivery against the order (blind-count) instead of keying free lines.
+  @Get('pos/:poNo/receive-lines') @Permissions('wh_receive', 'warehouse', 'procurement')
+  receiveLines(@Param('poNo') poNo: string, @CurrentUser() u: JwtUser) { return this.svc.receiveLines(poNo, u); }
+
+  // EXP-12 — close a part-received PO short: the shortage is never coming; releases open commitments.
+  @Post('pos/:poNo/close-short') @Permissions('wh_receive', 'warehouse', 'procurement')
+  closePoShort(@Param('poNo') poNo: string, @Body(new ZodValidationPipe(CloseShortBody)) b: z.infer<typeof CloseShortBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.closePoShort(poNo, b.reason, u);
+  }
+
+  // EXP-12 — receiving tolerances (weight over-receipt % + claim window hours). Change is restricted to
+  // procurement/exec (the receiver can read but not loosen their own gate — mirrors EXP-04).
+  @Get('receiving-settings') @Permissions('wh_receive', 'warehouse', 'procurement', 'exec')
+  getReceivingSettings(@CurrentUser() u: JwtUser) { return this.svc.getReceivingSettings(u); }
+  @Put('receiving-settings') @Permissions('procurement', 'exec')
+  setReceivingSettings(@Body(new ZodValidationPipe(ReceivingSettingsBody)) b: z.infer<typeof ReceivingSettingsBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.setReceivingSettings(b, u);
+  }
 
   // D4 — receive a partial qty of ONE item on an approved PO (LINE chat `receive <PO> <item> <qty>`).
   @Post('pos/:poNo/receive-item') @Permissions('wh_receive', 'warehouse', 'procurement')

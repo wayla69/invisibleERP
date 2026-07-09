@@ -2031,6 +2031,13 @@
       "when": 2023820000252,
       "tag": "0289_dine_in_orders_member_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 290,
+      "version": "7",
+      "when": 2023820000253,
+      "tag": "0290_gr_receiving_controls",
+      "breakpoints": true
     }
   ]
 }

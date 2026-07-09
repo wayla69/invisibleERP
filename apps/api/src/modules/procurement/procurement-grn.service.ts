@@ -1,7 +1,7 @@
 import { BadRequestException, NotFoundException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
-import { purchaseOrders, poItems, goodsReceipts, grItems, stockMovements, lotLedger, items, vendors, tenants } from '../../database/schema';
+import { purchaseOrders, poItems, goodsReceipts, grItems, stockMovements, lotLedger, items, vendors, tenants, receivingSettings } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { CostingService } from '../costing/costing.service';
@@ -19,6 +19,12 @@ import type { JwtUser } from '../../common/decorators';
 // in the ProcurementService ctor BODY (the goldenmaster/writeflow harnesses construct the facade
 // positionally with 3 args, so sub-services must always exist regardless of construction path). The one
 // shared helper (notifyPoPrRequesters — D2 LINE notify) is injected as a callback port.
+// Weight-basis UoMs (EXP-12): a supplier delivering by weight legitimately varies a little, so only these
+// UoMs may over-receive — and only within receiving_settings.over_receipt_weight_pct of the ordered qty.
+// Every other UoM (pieces, boxes, …) is hard-capped at the ordered qty.
+const WEIGHT_UOMS = new Set(['kg', 'กก.', 'กก', 'กิโลกรัม', 'kilogram', 'g', 'กรัม', 'gram', 'ton', 'ตัน', 'tonne', 'lb', 'ปอนด์']);
+export const isWeightUom = (uom?: string | null): boolean => WEIGHT_UOMS.has(String(uom ?? '').trim().toLowerCase());
+
 export class ProcurementGrnService {
   constructor(
     private readonly db: DrizzleDb,
@@ -30,6 +36,60 @@ export class ProcurementGrnService {
     private readonly grPdf?: GrPdfService,
     private readonly docEmail?: DocEmailService,
   ) {}
+
+  // ── Receiving tolerances (EXP-12) ── tenant-scoped read with defaults, mirroring the 3-way-match
+  // tolerance pattern (never RLS+limit(1) — an Admin/HQ request bypasses RLS).
+  async getReceivingSettings(tenantId?: number | null): Promise<{ overReceiptWeightPct: number; claimWindowHours: number }> {
+    const db = this.db;
+    const [s] = tenantId != null
+      ? await db.select().from(receivingSettings).where(eq(receivingSettings.tenantId, tenantId)).limit(1)
+      : await db.select().from(receivingSettings).where(isNull(receivingSettings.tenantId)).limit(1);
+    return { overReceiptWeightPct: s ? n(s.overReceiptWeightPct) : 5, claimWindowHours: s ? Number(s.claimWindowHours) : 24 };
+  }
+
+  async setReceivingSettings(dto: { over_receipt_weight_pct?: number; claim_window_hours?: number }, user: JwtUser) {
+    const db = this.db;
+    if (dto.over_receipt_weight_pct != null && (dto.over_receipt_weight_pct < 0 || dto.over_receipt_weight_pct > 100)) {
+      throw new BadRequestException({ code: 'BAD_PCT', message: 'over_receipt_weight_pct must be 0–100', messageTh: 'เปอร์เซ็นต์รับเกินต้องอยู่ระหว่าง 0–100' });
+    }
+    if (dto.claim_window_hours != null && (!Number.isInteger(dto.claim_window_hours) || dto.claim_window_hours < 1)) {
+      throw new BadRequestException({ code: 'BAD_HOURS', message: 'claim_window_hours must be a positive integer', messageTh: 'ชั่วโมงแจ้งเคลมต้องเป็นจำนวนเต็มบวก' });
+    }
+    const [ex] = await db.select().from(receivingSettings).where(user.tenantId != null ? eq(receivingSettings.tenantId, user.tenantId) : isNull(receivingSettings.tenantId)).limit(1);
+    const cur = await this.getReceivingSettings(user.tenantId ?? null);
+    const vals = {
+      overReceiptWeightPct: String(dto.over_receipt_weight_pct ?? cur.overReceiptWeightPct),
+      claimWindowHours: dto.claim_window_hours ?? cur.claimWindowHours,
+      updatedBy: user.username, updatedAt: new Date(),
+    };
+    if (ex) await db.update(receivingSettings).set(vals).where(eq(receivingSettings.id, ex.id));
+    else await db.insert(receivingSettings).values({ tenantId: user.tenantId ?? null, ...vals });
+    const out = await this.getReceivingSettings(user.tenantId ?? null);
+    return { over_receipt_weight_pct: out.overReceiptWeightPct, claim_window_hours: out.claimWindowHours };
+  }
+
+  // PO lines for the receiving screen — what was ordered, what's already in, what's still outstanding —
+  // so the warehouse counts the actual delivery against the order instead of keying free-form lines.
+  async receiveLines(poNo: string, user: JwtUser) {
+    const db = this.db;
+    const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
+    if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
+    const poLines = await db.select().from(poItems).where(eq(poItems.poId, po.id));
+    const settings = await this.getReceivingSettings(user.tenantId ?? null);
+    return {
+      po_no: po.poNo, status: po.status, vendor_name: po.vendorName ?? null, po_date: po.poDate ?? null,
+      over_receipt_weight_pct: settings.overReceiptWeightPct, claim_window_hours: settings.claimWindowHours,
+      lines: poLines.map((l: any) => {
+        const ordered = n(l.orderQty); const received = n(l.receivedQty);
+        const closed = String(l.status) === 'Closed'; // closed short — nothing further receivable
+        return {
+          item_id: l.itemId, item_description: l.itemDescription ?? null, uom: l.uom ?? null,
+          order_qty: ordered, received_qty: received, remaining_qty: closed ? 0 : Math.max(ordered - received, 0),
+          is_weight: !closed && isWeightUom(l.uom), closed,
+        };
+      }),
+    };
+  }
 
   // Assemble the printable ใบรับสินค้า (Goods Receipt Note) — header + received lines + vendor + our-company.
   async getGrForPrint(grNo: string, user: JwtUser): Promise<GrPrintData> {
@@ -87,6 +147,33 @@ export class ProcurementGrnService {
     }
     const lines = (dto.items ?? []).filter((it) => n(it.received_qty) > 0);
     if (!lines.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No received qty', messageTh: 'ไม่มีจำนวนรับ' });
+
+    // EXP-12 over-receipt gate — receiving more than was ordered is blocked (fictitious/duplicate receipt,
+    // uncontrolled AP exposure). Exception: a weight-basis line (kg/g/ton) may run over by up to the
+    // configurable tolerance (default 5% of the ordered qty), because weighed deliveries legitimately vary.
+    // Checked per PO line over the AGGREGATE requested in this GR (two lots of one item can't sneak past).
+    const settings = await this.getReceivingSettings(user.tenantId ?? null);
+    const reqByItem = new Map<string, number>();
+    for (const it of lines) reqByItem.set(it.item_id, (reqByItem.get(it.item_id) ?? 0) + n(it.received_qty));
+    for (const [itemId, reqQty] of reqByItem) {
+      const [poi] = await db.select().from(poItems).where(and(eq(poItems.poId, po.id), eq(poItems.itemId, itemId))).limit(1);
+      if (!poi) continue; // an off-PO line has no ordered baseline — existing behaviour (kept for non-PO receipt flows)
+      // A line closed short (closePoShort) takes no further stock — the close decision is binding.
+      if (String(poi.status) === 'Closed') {
+        throw new UnprocessableEntityException({ code: 'PO_LINE_CLOSED', message: `Item ${itemId}: the PO line was closed short — no further receipt`, messageTh: `สินค้า ${itemId}: รายการนี้ถูกปิดรับแล้ว (ปิดของขาดส่ง) รับเพิ่มไม่ได้` });
+      }
+      const ordered = n(poi.orderQty);
+      const cap = isWeightUom(poi.uom) ? ordered * (1 + settings.overReceiptWeightPct / 100) : ordered;
+      if (n(poi.receivedQty) + reqQty > cap + 1e-9) {
+        const remaining = Math.max(ordered - n(poi.receivedQty), 0);
+        throw new UnprocessableEntityException({
+          code: 'OVER_RECEIPT',
+          message: `Item ${itemId}: receiving ${reqQty} exceeds the ordered quantity (ordered ${ordered}, already received ${n(poi.receivedQty)}${isWeightUom(poi.uom) ? `, weight tolerance ${settings.overReceiptWeightPct}%` : ''})`,
+          messageTh: `สินค้า ${itemId}: จำนวนรับ ${reqQty} เกินจำนวนที่สั่ง (สั่ง ${ordered} รับแล้ว ${n(poi.receivedQty)} คงเหลือ ${remaining}${isWeightUom(poi.uom) ? ` — สินค้าชั่งน้ำหนักรับเกินได้ไม่เกิน ${settings.overReceiptWeightPct}%` : ''})`,
+          item_id: itemId, order_qty: ordered, received_qty: n(poi.receivedQty), remaining_qty: remaining,
+        });
+      }
+    }
 
     const grNo = await this.docNo.nextDaily('GR');
     const today = ymd();
@@ -156,7 +243,51 @@ export class ProcurementGrnService {
     // D2 — close the loop: tell the requester(s) of any PR linked to this PO that their goods arrived.
     await this.notifyRequesters(dto.po_no, `📦 สินค้าตามใบสั่งซื้อ ${dto.po_no} (จากคำขอซื้อของคุณ) รับเข้าคลังแล้ว ${newStatus === 'Closed' ? '(รับครบ)' : '(รับบางส่วน)'} · ใบรับของ ${grNo}`);
 
-    return { gr_no: grNo, po_no: dto.po_no, po_status: newStatus, lines: lines.length, costed: costingLines.length > 0 };
+    // EXP-12 — ordered-vs-received summary so the receiver sees any shortage immediately, plus the claim
+    // cutoff (claims after the window are refused, so surface the deadline at receipt time).
+    const receivedNow = new Map<string, number>();
+    for (const it of lines) receivedNow.set(it.item_id, (receivedNow.get(it.item_id) ?? 0) + n(it.received_qty));
+    const claimDeadline = new Date(now.getTime() + settings.claimWindowHours * 3600_000);
+    const summary = {
+      claim_window_hours: settings.claimWindowHours,
+      claim_deadline: claimDeadline.toISOString(),
+      lines: allItems.map((l: any) => {
+        const ordered = n(l.orderQty); const total = n(l.receivedQty);
+        return {
+          item_id: l.itemId, item_description: l.itemDescription ?? null, uom: l.uom ?? null,
+          order_qty: ordered, received_now: receivedNow.get(String(l.itemId)) ?? 0, received_total: total,
+          shortage_qty: Math.max(ordered - total, 0), over_qty: Math.max(total - ordered, 0),
+          is_weight: isWeightUom(l.uom),
+        };
+      }),
+    };
+
+    return { gr_no: grNo, po_no: dto.po_no, po_status: newStatus, lines: lines.length, costed: costingLines.length > 0, summary };
+  }
+
+  // EXP-12 — close a part-received PO SHORT: the receiver decides the missing quantity is never coming
+  // (short shipment) and closes the order instead of leaving it open for a receipt that won't happen.
+  // Remaining project commitments are RELEASED (not consumed — the money was never spent). Audit-trailed.
+  async closePoShort(poNo: string, reason: string | undefined, user: JwtUser) {
+    const db = this.db;
+    const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
+    if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
+    if (!['Approved', 'Received'].includes(String(po.status))) {
+      throw new UnprocessableEntityException({ code: 'BAD_STATUS', message: `Cannot close a '${po.status}' PO short`, messageTh: `ปิดใบสั่งซื้อสถานะ '${po.status}' ไม่ได้` });
+    }
+    const allItems = await db.select().from(poItems).where(eq(poItems.poId, po.id));
+    const shortLines = allItems
+      .map((l: any) => ({ item_id: l.itemId, short_qty: n(l.orderQty) - n(l.receivedQty), uom: l.uom ?? null }))
+      .filter((x) => x.short_qty > 0);
+    if (!shortLines.length) throw new UnprocessableEntityException({ code: 'NOTHING_OUTSTANDING', message: 'PO already fully received', messageTh: 'รับของครบแล้ว ไม่มีรายการค้างรับ' });
+    await db.update(purchaseOrders).set({ status: 'Closed' }).where(eq(purchaseOrders.id, po.id));
+    // Bind the decision at line level too — a closed-short line takes no further stock (see the
+    // PO_LINE_CLOSED gate in createGr), so the close can't be undone by a later ordinary GR.
+    await db.update(poItems).set({ status: 'Closed' }).where(eq(poItems.poId, po.id));
+    if (this.commitments) await this.commitments.release(db, 'PO', poNo);
+    await this.statusLog.log('PO', poNo, po.status ?? '', 'Closed', user.username, `ปิดรับ (ของขาดส่ง)${reason ? `: ${reason}` : ''}`);
+    await this.notifyRequesters(poNo, `📦 ใบสั่งซื้อ ${poNo} ถูกปิดโดยไม่รับส่วนที่ขาดส่ง (${shortLines.length} รายการค้างรับ)`);
+    return { po_no: poNo, po_status: 'Closed', short_lines: shortLines };
   }
 
   // Receive ALL still-outstanding qty on an approved PO in one shot — the LINE chat `receive <PO>` path
@@ -168,6 +299,7 @@ export class ProcurementGrnService {
     if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
     const poLines = await db.select().from(poItems).where(eq(poItems.poId, po.id));
     const items = poLines
+      .filter((l: any) => String(l.status) !== 'Closed') // a closed-short line takes no further stock
       .map((l: any) => ({ item_id: String(l.itemId), received_qty: n(l.orderQty) - n(l.receivedQty), uom: l.uom ?? undefined }))
       .filter((x) => x.received_qty > 0);
     if (!items.length) throw new UnprocessableEntityException({ code: 'NOTHING_TO_RECEIVE', message: 'PO already fully received', messageTh: 'รับของครบแล้ว ไม่มีรายการค้างรับ' });
@@ -183,6 +315,7 @@ export class ProcurementGrnService {
     if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
     const [poi] = await db.select().from(poItems).where(and(eq(poItems.poId, po.id), eq(poItems.itemId, itemId))).limit(1);
     if (!poi) throw new UnprocessableEntityException({ code: 'ITEM_NOT_ON_PO', message: `Item ${itemId} is not on ${poNo}`, messageTh: `ไม่มีสินค้า ${itemId} ในใบสั่งซื้อ ${poNo}` });
+    if (String(poi.status) === 'Closed') throw new UnprocessableEntityException({ code: 'PO_LINE_CLOSED', message: `Item ${itemId}: the PO line was closed short — no further receipt`, messageTh: `สินค้า ${itemId}: รายการนี้ถูกปิดรับแล้ว (ปิดของขาดส่ง) รับเพิ่มไม่ได้` });
     const remaining = n(poi.orderQty) - n(poi.receivedQty);
     if (!(remaining > 0)) throw new UnprocessableEntityException({ code: 'NOTHING_TO_RECEIVE', message: `Item ${itemId} already fully received`, messageTh: `สินค้า ${itemId} รับครบแล้ว` });
     const recv = Math.min(n(qty), remaining); // cap at outstanding — no accidental over-receipt

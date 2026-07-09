@@ -17,9 +17,21 @@ const POS = {
   ],
 };
 
+// EXP-12 — the blind-count receive-lines payload for the approved PO: ordered/received/outstanding per
+// line, the counted qty NEVER pre-filled by the UI (the receiver must key an actual count).
+const RECEIVE_LINES = {
+  po_no: 'PO-E2E-APPR', status: 'Approved', vendor_name: 'ACME Foods', over_receipt_weight_pct: 5, claim_window_hours: 24,
+  lines: [
+    { item_id: 'RICE', item_description: 'ข้าวหอมมะลิ', uom: 'EA', order_qty: 10, received_qty: 0, remaining_qty: 10, is_weight: false, closed: false },
+    { item_id: 'BEEF', item_description: 'เนื้อวัว', uom: 'kg', order_qty: 5, received_qty: 0, remaining_qty: 5, is_weight: true, closed: false },
+  ],
+};
+
 async function boot(page: Page) {
   await page.addInitScript(() => { document.cookie = 'ierp_csrf=e2e; path=/'; });
   let receiveAllPo: string | null = null;
+  let grBody: any = null;
+  let closedShortPo: string | null = null;
   await page.route('**/api/**', async (route) => {
     const req = route.request();
     const url = req.url();
@@ -29,11 +41,30 @@ async function boot(page: Page) {
     if (url.includes('/api/user-prefs')) return json({ favourites: [], nav: {} });
     const m = url.match(/\/api\/procurement\/pos\/([^/]+)\/receive-all/);
     if (m) { receiveAllPo = decodeURIComponent(m[1]); return json({ gr_no: 'GR-E2E-001', po_no: receiveAllPo, po_status: 'Closed', lines: 2 }); }
+    const mc = url.match(/\/api\/procurement\/pos\/([^/]+)\/close-short/);
+    if (mc) { closedShortPo = decodeURIComponent(mc[1]); return json({ po_no: closedShortPo, po_status: 'Closed', short_lines: [{ item_id: 'RICE', short_qty: 4 }] }); }
+    if (url.includes('/receive-lines')) return json(RECEIVE_LINES);
+    if (url.includes('/api/procurement/grs') && req.method() === 'POST') {
+      grBody = req.postDataJSON();
+      // ordered-vs-received summary the server now returns with every GR (EXP-12)
+      return json({
+        gr_no: 'GR-E2E-002', po_no: grBody.po_no, po_status: 'Received', lines: grBody.items.length,
+        summary: {
+          claim_window_hours: 24, claim_deadline: new Date(Date.now() + 24 * 3600_000).toISOString(),
+          lines: [
+            { item_id: 'RICE', item_description: 'ข้าวหอมมะลิ', uom: 'EA', order_qty: 10, received_now: 6, received_total: 6, shortage_qty: 4, over_qty: 0, is_weight: false },
+            { item_id: 'BEEF', item_description: 'เนื้อวัว', uom: 'kg', order_qty: 5, received_now: 0, received_total: 0, shortage_qty: 5, over_qty: 0, is_weight: true },
+          ],
+        },
+      });
+    }
     if (url.includes('/api/procurement/grs')) return json({ grs: [], count: 0 }); // recent-GR list surface
     if (url.includes('/api/inventory/purchase-orders')) return json(POS);
     return json({});
   });
   (page as any).__getReceiveAllPo = () => receiveAllPo;
+  (page as any).__getGrBody = () => grBody;
+  (page as any).__getClosedShortPo = () => closedShortPo;
 }
 
 test('receiving: PO list renders + one-tap รับครบ posts receive-all for an approved PO only', async ({ page }) => {
@@ -74,4 +105,42 @@ test('receiving: GR form PO number is a dropdown of receivable POs, not free tex
 
   await options.first().click();
   await expect(poSelect).toContainText('PO-E2E-APPR');
+});
+
+// EXP-12 — blind-count receiving: picking the PO loads its lines (ordered/outstanding, count inputs
+// EMPTY), submitting the counted qty posts the GR, and the summary dialog shows the shortage with the
+// keep-open / close-short decision. Drives the REAL page against route-mocked APIs.
+test('receiving: PO lines load for a blind count → GR posts counted qty → summary shows shortage + close-short', async ({ page }) => {
+  await boot(page);
+  await page.goto('/receiving');
+
+  // pick the approved PO → its lines load from receive-lines
+  await page.locator('#gr-po').click();
+  await page.getByRole('option').first().click();
+  await expect(page.getByText('ข้าวหอมมะลิ')).toBeVisible();
+  await expect(page.getByText('เนื้อวัว')).toBeVisible();
+
+  // counted-qty inputs render EMPTY (blind count — never pre-filled)
+  const riceInput = page.getByLabel(/จำนวนรับจริง RICE/);
+  await expect(riceInput).toHaveValue('');
+
+  // key an actual count (6 of 10) and confirm
+  await riceInput.fill('6');
+  await page.getByRole('button', { name: 'ยืนยันการรับของ' }).click();
+
+  // the POST carried exactly the counted line
+  await expect.poll(() => (page as any).__getGrBody()).toMatchObject({ po_no: 'PO-E2E-APPR' });
+  const body = await (page as any).__getGrBody();
+  expect(body.items).toEqual([{ item_id: 'RICE', received_qty: 6, uom: 'EA' }]);
+
+  // summary dialog: ordered vs received with the shortage badge + the claim affordance + the decision
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('สรุปการรับของ — GR-E2E-002')).toBeVisible();
+  await expect(dialog.getByText('ขาด 4')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /แจ้งเคลม/ }).first()).toBeVisible();
+  await expect(dialog.getByText('มีของขาดส่ง')).toBeVisible();
+
+  // choose "close short" → POSTs close-short for this PO
+  await dialog.getByRole('button', { name: 'ปิด PO (ไม่รับส่วนที่ขาด)' }).click();
+  await expect.poll(() => (page as any).__getClosedShortPo()).toBe('PO-E2E-APPR');
 });
