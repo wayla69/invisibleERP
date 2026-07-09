@@ -7,10 +7,9 @@ import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { num, thaiDateTime } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,8 +27,7 @@ export default function AlertsPage() {
   const { t } = useLang();
   return (
     <div>
-      <PageHeader title={t('st.alert.title')} description={t('st.alert.subtitle')} />
-      <Tabs tabs={[
+      <ModulePage title={t('st.alert.title')} description={t('st.alert.subtitle')} tabs={[
         { key: 'rules', label: t('st.alert.tab_rules'), content: <Rules /> },
         { key: 'events', label: t('st.alert.tab_events'), content: <Events /> },
       ]} />

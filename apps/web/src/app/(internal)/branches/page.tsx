@@ -7,11 +7,10 @@ import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht, thaiDate, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -39,11 +38,9 @@ export default function BranchesPage() {
   const { t } = useLang();
   return (
     <div>
-      <PageHeader
+      <ModulePage
         title={t('hx.br.title')}
         description={t('hx.br.desc')}
-      />
-      <Tabs
         tabs={[
           { key: 'branches', label: t('hx.br.tab_branches'), content: <BranchesTab /> },
           { key: 'consolidated', label: t('hx.br.tab_consol'), content: <ConsolidatedTab /> },

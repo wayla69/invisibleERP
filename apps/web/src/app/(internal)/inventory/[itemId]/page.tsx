@@ -13,6 +13,7 @@ import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Crumbs } from '@/components/crumbs';
 
 export default function StockDetailPage() {
   const { t } = useLang();
@@ -21,6 +22,7 @@ export default function StockDetailPage() {
   const d = q.data;
   return (
     <div>
+      <Crumbs items={[{ label: t('inv.title'), href: '/inventory' }, { label: decodeURIComponent(itemId) }]} />
       <PageHeader
         title={decodeURIComponent(itemId)}
         description={t('inv.detail_subtitle')}
