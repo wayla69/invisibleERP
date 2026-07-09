@@ -139,6 +139,14 @@ fills the item field for you to confirm the quantity).
 
 **Expected result:** Received stock is placed and available to pick.
 
+> **Outbound tabs pick documents from pending lists — no typed numbers.** On `/wms`:
+> the **Wave** tab's order-ref field is a dropdown of orders **not yet waved**
+> (`GET /api/wms/wave-candidates` — POS/SO sales and open dine-in orders); the **Pack**
+> tab lists only **fully-picked** pick lists (`GET /api/wms/picks?status=Picked`); the
+> **Ship** tab lists only **packed** shipments (`GET /api/wms/shipments?status=Packed`).
+> Completing an action removes the document from its list automatically, so the dropdown
+> doubles as the team's to-do list. All three reads are tenant-scoped and read-only.
+
 ---
 
 ## 6. Goods issue & transfers

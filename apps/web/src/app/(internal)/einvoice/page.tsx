@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { useLang } from '@/lib/i18n';
 import { DataTable } from '@/components/data-table';
 import { selectCls } from '@/components/form-controls';
+import { DocSelect } from '@/components/doc-select';
 
 type Provider = { key: string; country: string; label: string };
 type Sub = { id: number; doc_ref: string; provider: string; status: string; ref: string };
@@ -23,9 +24,17 @@ export default function EInvoicePage() {
   const provs = useQuery<{ providers: Provider[] }>({ queryKey: ['einvoice-providers'], queryFn: () => api('/api/einvoice/providers') });
   const cfg = useQuery<{ provider: string }>({ queryKey: ['einvoice-config'], queryFn: () => api('/api/einvoice/config') });
   const subs = useQuery<{ submissions: Sub[] }>({ queryKey: ['einvoice-subs'], queryFn: () => api('/api/einvoice/submissions') });
-  const [docRef, setDocRef] = useState('INV-2026-0001');
-  const [total, setTotal] = useState('1500');
+  const [docRef, setDocRef] = useState('');
+  const [total, setTotal] = useState('');
   const [msg, setMsg] = useState('');
+  // Issued tax invoices — the doc ref is picked, not typed; picking one also prefills the total.
+  const taxInvs = useQuery<any>({ queryKey: ['einvoice-tax-invs'], queryFn: () => api('/api/tax-invoices'), retry: false });
+  const docOptions = (taxInvs.data?.invoices ?? []).map((i: any) => ({ value: i.doc_no, label: i.buyer?.name || undefined }));
+  const pickDoc = (v: string) => {
+    setDocRef(v);
+    const inv = (taxInvs.data?.invoices ?? []).find((i: any) => i.doc_no === v);
+    if (inv?.grand_total != null) setTotal(String(inv.grand_total));
+  };
   const setProv = useMutation({ mutationFn: (p: string) => api('/api/einvoice/config', { method: 'PUT', body: JSON.stringify({ provider: p }) }), onSuccess: () => cfg.refetch() });
   const submit = useMutation({
     mutationFn: () => api<{ status: string; ref: string }>('/api/einvoice/submit', { method: 'POST', body: JSON.stringify({ doc: { doc_ref: docRef, seller: 'My Co', buyer: 'Customer', total: Number(total) } }) }),
@@ -46,9 +55,9 @@ export default function EInvoicePage() {
                   {(provs.data?.providers ?? []).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
                 </select>
               </div>
-              <div className="grid gap-1"><Label>{t('mx.ei_doc_no')}</Label><Input value={docRef} onChange={(e) => setDocRef(e.target.value)} /></div>
+              <div className="grid gap-1"><Label>{t('mx.ei_doc_no')}</Label><DocSelect value={docRef} onValueChange={pickDoc} options={docOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="INV-2026-0001" /></div>
               <div className="grid gap-1"><Label>{t('mx.ei_total')}</Label><Input type="number" value={total} onChange={(e) => setTotal(e.target.value)} /></div>
-              <Button disabled={submit.isPending} onClick={() => submit.mutate()}>{submit.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} {t('mx.ei_send')}</Button>
+              <Button disabled={submit.isPending || !docRef.trim() || !total} onClick={() => submit.mutate()}>{submit.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} {t('mx.ei_send')}</Button>
               {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
             </StateView>
           </CardContent>

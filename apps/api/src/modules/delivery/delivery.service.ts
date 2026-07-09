@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { deliveryOrders, doItems, orders, orderLines, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -45,6 +45,16 @@ export class DeliveryService {
       await db.insert(doItems).values({ doId: Number(hdr!.id), orderNo: dto.order_no ?? null, itemId: l.item_id, itemDescription: l.item_description ?? null, qty: String(n(l.qty)), uom: l.uom ?? null, status: 'Pending' });
     }
     return { do_no: doNo, status: 'Pending', lines: lines.length };
+  }
+
+  // Pending list — sales orders still open for delivery; feeds the /delivery order-no dropdown so the
+  // user picks the SO instead of typing it. Read-only; RLS scopes rows to the caller's tenant.
+  async openOrders() {
+    const rows = await this.db
+      .select({ orderNo: orders.orderNo, orderDate: orders.orderDate, status: orders.status })
+      .from(orders).where(inArray(orders.status, ['Pending', 'Processing']))
+      .orderBy(desc(orders.id)).limit(100);
+    return { orders: rows.map((r: any) => ({ order_no: r.orderNo, order_date: r.orderDate, status: r.status })) };
   }
 
   async list(status?: string) {

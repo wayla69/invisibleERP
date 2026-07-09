@@ -21,6 +21,8 @@ export class DeliveryController {
 
   @Post() create(@Body(new ZodValidationPipe(CreateBody)) b: z.infer<typeof CreateBody>, @CurrentUser() u: JwtUser) { return this.svc.create(b, u); }
   @Get() list(@Query('status') status?: string) { return this.svc.list(status); }
+  // Pending SOs for the order-no dropdown. MUST stay above ':doNo' or that param route swallows it.
+  @Get('open-orders') openOrders() { return this.svc.openOrders(); }
   @Get(':doNo') detail(@Param('doNo') no: string) { return this.svc.detail(no); }
   @Patch(':doNo/status') status(@Param('doNo') no: string, @Body(new ZodValidationPipe(StatusBody)) b: z.infer<typeof StatusBody>, @CurrentUser() u: JwtUser) { return this.svc.updateStatus(no, b, u); }
 

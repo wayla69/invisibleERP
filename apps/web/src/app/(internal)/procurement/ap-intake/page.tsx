@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DocSelect } from '@/components/doc-select';
 
 type Candidate = { po_no: string; vendor_name: string | null; total_amount: number; score: number };
 type Intake = {
@@ -135,6 +136,9 @@ function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r:
   const { t } = useLang();
   const qc = useQueryClient();
   const [manualPo, setManualPo] = useState('');
+  // Full PO pending list for when the scored candidates above miss the right PO — pick, don't type.
+  const posQ = useQuery<any>({ queryKey: ['ap-intake-pos'], queryFn: () => api('/api/inventory/purchase-orders?limit=50'), enabled: r.status !== 'Posted' });
+  const poOptions = (posQ.data?.purchase_orders ?? []).map((p: any) => ({ value: p.PO_No, label: p.Supplier_Name || undefined }));
   const refresh = (x: Intake) => { onChanged(x); qc.invalidateQueries({ queryKey: ['ap-intake-list'] }); };
 
   const mapPo = useMutation({
@@ -193,7 +197,7 @@ function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r:
           <div className="flex flex-wrap items-end gap-2">
             <div className="grid gap-1">
               <Label htmlFor="ai-po">{t('iv.ap_manual_po')}</Label>
-              <Input id="ai-po" className="w-44" value={manualPo} onChange={(e) => setManualPo(e.target.value)} placeholder="PO-20260701-001" />
+              <DocSelect id="ai-po" className="w-56" value={manualPo} onValueChange={setManualPo} options={poOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="PO-20260701-001" />
             </div>
             <Button variant="outline" disabled={mapPo.isPending || !manualPo.trim()} onClick={() => mapPo.mutate(manualPo.trim())}><Link2 className="size-4" /> {t('iv.ap_match')}</Button>
             <Button disabled={post.isPending} onClick={() => post.mutate()}>

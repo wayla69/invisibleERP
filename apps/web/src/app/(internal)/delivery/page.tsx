@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Select } from '@/components/form-controls';
+import { DocSelect } from '@/components/doc-select';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -25,12 +26,15 @@ export default function DeliveryPage() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['deliveries'], queryFn: () => api('/api/delivery') });
+  // Pending list: open SOs — the order no is picked from a dropdown, not typed.
+  const openOrders = useQuery<any>({ queryKey: ['delivery-open-orders'], queryFn: () => api('/api/delivery/open-orders') });
+  const orderOptions = (openOrders.data?.orders ?? []).map((o: any) => ({ value: o.order_no, label: [o.status, o.order_date ? thaiDate(o.order_date) : null].filter(Boolean).join(' · ') || undefined }));
   const [f, setF] = useState({ order_no: '', driver: '', vehicle: '' });
   const [sel, setSel] = useState<string | null>(null);
   const detail = useQuery<any>({ queryKey: ['delivery', sel], queryFn: () => api(`/api/delivery/${sel}`), enabled: !!sel });
   const create = useMutation({
     mutationFn: () => api('/api/delivery', { method: 'POST', body: JSON.stringify({ order_no: f.order_no || undefined, driver: f.driver || undefined, vehicle: f.vehicle || undefined }) }),
-    onSuccess: (r: any) => { notifySuccess(t('hx.del.created', { no: r.do_no, lines: r.lines })); setF({ order_no: '', driver: '', vehicle: '' }); qc.invalidateQueries({ queryKey: ['deliveries'] }); },
+    onSuccess: (r: any) => { notifySuccess(t('hx.del.created', { no: r.do_no, lines: r.lines })); setF({ order_no: '', driver: '', vehicle: '' }); qc.invalidateQueries({ queryKey: ['deliveries'] }); qc.invalidateQueries({ queryKey: ['delivery-open-orders'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const setStatus = useMutation({
@@ -65,7 +69,7 @@ export default function DeliveryPage() {
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">{t('hx.del.create_title')}</h3>
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="grid gap-1.5"><Label htmlFor="do-order">{t('hx.del.order_no')}</Label><Input id="do-order" placeholder="SO-…" value={f.order_no} onChange={(e) => setF({ ...f, order_no: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="do-order">{t('hx.del.order_no')}</Label><DocSelect id="do-order" value={f.order_no} onValueChange={(v) => setF({ ...f, order_no: v })} options={orderOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} /></div>
           <div className="grid gap-1.5"><Label htmlFor="do-driver">{t('hx.del.driver')}</Label><Input id="do-driver" placeholder={t('hx.del.driver_ph')} value={f.driver} onChange={(e) => setF({ ...f, driver: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label htmlFor="do-vehicle">{t('hx.del.vehicle')}</Label><Input id="do-vehicle" placeholder={t('hx.del.vehicle_ph')} value={f.vehicle} onChange={(e) => setF({ ...f, vehicle: e.target.value })} /></div>
         </div>

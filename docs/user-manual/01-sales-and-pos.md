@@ -517,6 +517,10 @@ Orders move through these stages:
 
 **Screen:** `/delivery` · **Required permission:** `delivery`
 
+> **Creating a delivery order:** the **เลขที่ออเดอร์ (SO)** field is a **dropdown of open
+> sales orders** (status Pending/Processing, from `GET /api/delivery/open-orders`) — pick the
+> order to derive the delivery lines instead of typing `SO-…`.
+
 On the **การจัดส่ง** (`/delivery`) list, each delivery order (`DO-…`) has two actions in
 the **เอกสาร** column:
 

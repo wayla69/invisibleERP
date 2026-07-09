@@ -35,6 +35,13 @@ export class WmsController {
   putaway(@Body(new ZodValidationPipe(PutawayBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.putaway(b, u); }
   @Get('putaway/pending/:grNo') @Permissions('wh_receive', 'mobile')
   pendingPutaway(@Param('grNo') grNo: string, @CurrentUser() u: JwtUser) { return this.wms.pendingPutaway(grNo, u); }
+  // Pending-list reads — feed the /wms doc-reference dropdowns (wave/pack/ship pick a document, not type it).
+  @Get('picks') @Permissions('wh_custody', 'mobile')
+  listPicks(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.wms.listPicks(u, status); }
+  @Get('shipments') @Permissions('wh_custody', 'delivery')
+  listShipments(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.wms.listShipments(u, status); }
+  @Get('wave-candidates') @Permissions('wh_custody')
+  waveCandidates(@CurrentUser() u: JwtUser) { return this.wms.waveCandidates(u); }
   @Post('waves') @Permissions('wh_custody')
   wave(@Body(new ZodValidationPipe(WaveBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.createWave(b, u); }
   @Post('waves/:waveNo/ship') @Permissions('wh_custody', 'delivery')

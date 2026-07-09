@@ -38,7 +38,9 @@ for retail POS).
 
 1. Go to **Tax Invoices** (`/tax/invoices`) → **Full** tab.
 2. Click **Issue full invoice** (**ออกใบเต็มรูป**).
-3. Choose the source (an AR invoice or POS sale) and enter the **buyer's** name,
+3. Choose the source type (AR invoice or POS sale) and pick the document from the
+   **dropdown of recent sales / AR invoices** (choose **พิมพ์เลขเอกสารเอง…** for an older
+   document or if your role cannot read that list), then enter the **buyer's** name,
    tax ID and address. **Typing a name you've billed before shows a dropdown**
    of matching customers (with their tax ID/address) — pick one to fill in the
    whole buyer block instead of retyping it. A brand-new buyer is saved
@@ -113,7 +115,8 @@ re-issuing the original invoice.
 **Screen:** `/tax/invoices` → the **ออกใบลดหนี้ / ใบเพิ่มหนี้** card · **Required permission:** `ar` / `pos`.
 
 1. Pick **ใบลดหนี้** or **ใบเพิ่มหนี้**.
-2. Enter the **original tax invoice number** it references, the **reason** (required — ม.86/10(4)), the
+2. Pick the **original tax invoice** from the dropdown of issued full tax invoices
+   (buyer + amount shown; choose **พิมพ์เลขเอกสารเอง…** for an older number), the **reason** (required — ม.86/10(4)), the
    **adjustment value** (before VAT) and an optional line description.
 3. Press **ออกเอกสาร (รออนุมัติ)**.
 
@@ -145,6 +148,10 @@ From the tax-invoice detail you can submit electronically:
 
 > **Note:** Submission is idempotent — submitting the same document twice will not
 > create duplicates. Check the status (Pending → Accepted / Rejected) afterwards.
+
+> **Tip — the pluggable e-Invoicing screen (`/einvoice`):** its **doc-no** field is a
+> dropdown of your issued tax invoices — picking one also pre-fills the total (choose
+> **พิมพ์เลขเอกสารเอง…** to key another reference).
 
 ### Configuring the digital certificate & provider (administrator)
 

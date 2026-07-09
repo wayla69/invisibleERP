@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { eq, and, asc, sql } from 'drizzle-orm';
+import { eq, ne, and, asc, desc, notInArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { bins, binStock, pickWaves, pickLists, pickListLines, shipments, dineInOrders, dineInOrderItems, custPosSales, custPosItems, stockMovements, lotLedger } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -135,6 +135,51 @@ export class WmsService {
     await db.insert(stockMovements).values({ moveDate: new Date(), docNo: dto.gr_no ?? null, moveType: 'Transfer', itemId: dto.item_id, uom: dto.uom ?? null, qty: String(qty), fromLocation: 'Receiving', toLocation: `BIN:${dto.bin_code}`, refDoc: dto.gr_no ?? null, createdBy: user.username });
     if (dto.lot_no) await db.insert(lotLedger).values({ lotNo: dto.lot_no, itemId: dto.item_id, uom: dto.uom ?? null, locationId: dto.bin_code, grNo: dto.gr_no ?? null, qtyIn: String(qty), qtyOut: '0', balance: String(qty), expiryDate: dto.expiry_date ?? null, status: 'Active', moveDate: new Date(), refDoc: dto.gr_no ?? null, createdBy: user.username });
     return { bin_code: dto.bin_code, item_id: dto.item_id, qty: n(bs?.qty) };
+  }
+
+  // ── Pending lists — the /wms tabs pick documents from these dropdowns instead of typing numbers.
+  // Read-only; RLS scopes rows to the caller's tenant. ──
+  async listPicks(_user: JwtUser, status?: string) {
+    const rows = await this.db
+      .select({ pickNo: pickLists.pickNo, status: pickLists.status, sourceType: pickLists.sourceType, sourceRef: pickLists.sourceRef })
+      .from(pickLists).where(status ? eq(pickLists.status, status) : undefined)
+      .orderBy(desc(pickLists.id)).limit(100);
+    return { picks: rows.map((r: any) => ({ pick_no: r.pickNo, status: r.status, source_type: r.sourceType, source_ref: r.sourceRef })) };
+  }
+
+  async listShipments(_user: JwtUser, status?: string) {
+    const rows = await this.db
+      .select({ shipmentNo: shipments.shipmentNo, status: shipments.status, sourceRef: shipments.sourceRef, carrier: shipments.carrier, trackingNo: shipments.trackingNo })
+      .from(shipments).where(status ? eq(shipments.status, status) : undefined)
+      .orderBy(desc(shipments.id)).limit(100);
+    return { shipments: rows.map((r: any) => ({ shipment_no: r.shipmentNo, status: r.status, source_ref: r.sourceRef, carrier: r.carrier, tracking_no: r.trackingNo })) };
+  }
+
+  // Orders not yet waved (pick_lists is unique per (source_type, source_ref)) → wave-tab dropdown.
+  async waveCandidates(_user: JwtUser) {
+    const db = this.db;
+    const sales = await db
+      .select({ saleNo: custPosSales.saleNo, total: custPosSales.total, status: custPosSales.status })
+      .from(custPosSales)
+      .where(and(
+        ne(custPosSales.status, 'Voided'),
+        sql`not exists (select 1 from ${pickLists} where ${pickLists.sourceRef} = ${custPosSales.saleNo} and ${pickLists.sourceType} in ('POS', 'SO'))`,
+      ))
+      .orderBy(desc(custPosSales.id)).limit(50);
+    const dinein = await db
+      .select({ orderNo: dineInOrders.orderNo, status: dineInOrders.status })
+      .from(dineInOrders)
+      .where(and(
+        notInArray(dineInOrders.status, ['cancelled', 'closed']),
+        sql`not exists (select 1 from ${pickLists} where ${pickLists.sourceRef} = ${dineInOrders.orderNo} and ${pickLists.sourceType} = 'DINEIN')`,
+      ))
+      .orderBy(desc(dineInOrders.id)).limit(50);
+    return {
+      candidates: [
+        ...sales.map((s: any) => ({ source_type: 'POS' as const, source_ref: s.saleNo, info: `${s.status} ฿${n(s.total)}` })),
+        ...dinein.map((d: any) => ({ source_type: 'DINEIN' as const, source_ref: d.orderNo, info: String(d.status) })),
+      ],
+    };
   }
 
   // ── WAVE — batch N fulfillment orders into pick lists. Idempotent per (source_type, source_ref). ──

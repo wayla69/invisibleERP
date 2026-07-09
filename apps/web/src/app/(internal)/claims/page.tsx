@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { statusVariant } from '@/components/ui';
+import { DocSelect } from '@/components/doc-select';
 
 /** Shared find + status-filter toolbar for the claim lists. */
 function FilterBar({
@@ -130,6 +131,9 @@ function GrClaims() {
   const [f, setF] = useState({ gr_no: '', item_id: '', claim_qty: '', reason: '' });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  // Recent GRs — the claimed receipt is picked from a dropdown, not typed.
+  const grsQ = useQuery<any>({ queryKey: ['grs-for-claims'], queryFn: () => api('/api/procurement/grs?limit=100') });
+  const grOptions = (grsQ.data?.grs ?? []).map((g: any) => ({ value: g.gr_no, label: [g.po_no, g.vendor_name].filter(Boolean).join(' · ') || undefined }));
   const create = useMutation({
     mutationFn: () => api('/api/claims/gr', { method: 'POST', body: JSON.stringify({ gr_no: f.gr_no || undefined, item_id: f.item_id || undefined, claim_qty: f.claim_qty ? Number(f.claim_qty) : undefined, reason: f.reason || undefined }) }),
     onSuccess: (r: any) => { notifySuccess(t('hx.cl.created', { no: r.claim_no })); setF({ gr_no: '', item_id: '', claim_qty: '', reason: '' }); qc.invalidateQueries({ queryKey: ['gr-claims'] }); },
@@ -156,7 +160,7 @@ function GrClaims() {
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">{t('hx.cl.gr_form_title')}</h3>
         <div className="grid gap-2 sm:grid-cols-4">
-          <Input placeholder="GR No." aria-label={t('hx.cl.gr_no_aria')} value={f.gr_no} onChange={(e) => setF({ ...f, gr_no: e.target.value })} />
+          <DocSelect value={f.gr_no} onValueChange={(v) => setF({ ...f, gr_no: v })} options={grOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="GR No." />
           <Input placeholder={t('hx.cl.item_id')} aria-label={t('hx.cl.item_id')} value={f.item_id} onChange={(e) => setF({ ...f, item_id: e.target.value })} />
           <Input type="number" inputMode="numeric" placeholder={t('hx.cl.claim_qty')} aria-label={t('hx.cl.claim_qty')} value={f.claim_qty} onChange={(e) => setF({ ...f, claim_qty: e.target.value })} />
           <Input placeholder={t('hx.cl.reason')} aria-label={t('hx.cl.reason')} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />

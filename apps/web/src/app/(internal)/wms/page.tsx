@@ -15,6 +15,7 @@ import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
+import { DocSelect } from '@/components/doc-select';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -282,8 +283,15 @@ function PutawayTab() {
 // ───────────────────────── Wave ─────────────────────────
 function WaveTab() {
   const { t } = useLang();
+  const qc = useQueryClient();
   const [sourceType, setSourceType] = useState<'POS' | 'SO' | 'DINEIN'>('SO');
   const [sourceRef, setSourceRef] = useState('');
+  // Pending list: orders not yet waved — the ref is picked, not typed.
+  const cand = useQuery<any>({ queryKey: ['wms-wave-candidates'], queryFn: () => api('/api/wms/wave-candidates') });
+  const wantType = sourceType === 'DINEIN' ? 'DINEIN' : 'POS'; // SO resolves from the same sales spine as POS
+  const options = (cand.data?.candidates ?? [])
+    .filter((c: any) => c.source_type === wantType)
+    .map((c: any) => ({ value: c.source_ref, label: c.info || undefined }));
 
   const mut = useMutation({
     mutationFn: () =>
@@ -291,7 +299,12 @@ function WaveTab() {
         method: 'POST',
         body: JSON.stringify({ orders: [{ source_type: sourceType, source_ref: sourceRef }] }),
       }),
-    onSuccess: (r) => notifySuccess(`${r.wave_no} · ${t('iv.wms_wave_result', { picks: num(r.pick_count), lines: num(r.lines) })}`),
+    onSuccess: (r) => {
+      notifySuccess(`${r.wave_no} · ${t('iv.wms_wave_result', { picks: num(r.pick_count), lines: num(r.lines) })}`);
+      setSourceRef('');
+      qc.invalidateQueries({ queryKey: ['wms-wave-candidates'] });
+      qc.invalidateQueries({ queryKey: ['wms-picks'] });
+    },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -309,7 +322,7 @@ function WaveTab() {
               id="wv-type"
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               value={sourceType}
-              onChange={(e) => setSourceType(e.target.value as any)}
+              onChange={(e) => { setSourceType(e.target.value as any); setSourceRef(''); }}
             >
               <option value="SO">SO (Sales Order)</option>
               <option value="POS">POS</option>
@@ -318,7 +331,7 @@ function WaveTab() {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="wv-ref">{t('iv.wms_order_ref')}</Label>
-            <Input id="wv-ref" value={sourceRef} onChange={(e) => setSourceRef(e.target.value)} placeholder="SALE-0001" />
+            <DocSelect id="wv-ref" value={sourceRef} onValueChange={setSourceRef} options={options} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} />
           </div>
         </div>
         <Button disabled={mut.isPending || !sourceRef} onClick={() => mut.mutate()}>
@@ -332,11 +345,20 @@ function WaveTab() {
 // ───────────────────────── Pack ─────────────────────────
 function PackTab() {
   const { t } = useLang();
+  const qc = useQueryClient();
   const [pickNo, setPickNo] = useState('');
+  // Pending list: only fully-picked lists are packable (service rejects anything else).
+  const picks = useQuery<any>({ queryKey: ['wms-picks', 'Picked'], queryFn: () => api('/api/wms/picks?status=Picked') });
+  const options = (picks.data?.picks ?? []).map((p: any) => ({ value: p.pick_no, label: p.source_ref || undefined }));
 
   const mut = useMutation({
     mutationFn: () => api<{ shipment_no: string; status: string }>(`/api/wms/picks/${encodeURIComponent(pickNo)}/pack`, { method: 'POST' }),
-    onSuccess: (r) => notifySuccess(`${r.shipment_no} · ${r.status}`),
+    onSuccess: (r) => {
+      notifySuccess(`${r.shipment_no} · ${r.status}`);
+      setPickNo('');
+      qc.invalidateQueries({ queryKey: ['wms-picks'] });
+      qc.invalidateQueries({ queryKey: ['wms-shipments'] });
+    },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -349,7 +371,7 @@ function PackTab() {
         <p className="text-sm text-muted-foreground">{t('iv.wms_pack_desc')}</p>
         <div className="grid max-w-xs gap-2">
           <Label htmlFor="pk-no">{t('iv.wms_pick_no_label')}</Label>
-          <Input id="pk-no" value={pickNo} onChange={(e) => setPickNo(e.target.value)} placeholder="PICK-0001" />
+          <DocSelect id="pk-no" value={pickNo} onValueChange={setPickNo} options={options} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} />
         </div>
         <Button disabled={mut.isPending || !pickNo} onClick={() => mut.mutate()}>
           <PackageCheck className="size-4" /> {mut.isPending ? t('iv.wms_packing') : t('iv.wms_pack_btn')}
@@ -362,9 +384,13 @@ function PackTab() {
 // ───────────────────────── Ship ─────────────────────────
 function ShipTab() {
   const { t } = useLang();
+  const qc = useQueryClient();
   const [shipmentNo, setShipmentNo] = useState('');
   const [carrier, setCarrier] = useState('');
   const [trackingNo, setTrackingNo] = useState('');
+  // Pending list: only Packed shipments can be shipped.
+  const ships = useQuery<any>({ queryKey: ['wms-shipments', 'Packed'], queryFn: () => api('/api/wms/shipments?status=Packed') });
+  const options = (ships.data?.shipments ?? []).map((s: any) => ({ value: s.shipment_no, label: s.source_ref || undefined }));
 
   const mut = useMutation({
     mutationFn: () =>
@@ -372,7 +398,11 @@ function ShipTab() {
         method: 'POST',
         body: JSON.stringify({ carrier, tracking_no: trackingNo }),
       }),
-    onSuccess: (r) => notifySuccess(`${r.shipment_no} · ${r.tracking_no} · ${r.status}`),
+    onSuccess: (r) => {
+      notifySuccess(`${r.shipment_no} · ${r.tracking_no} · ${r.status}`);
+      setShipmentNo('');
+      qc.invalidateQueries({ queryKey: ['wms-shipments'] });
+    },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -385,7 +415,7 @@ function ShipTab() {
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="grid gap-2">
             <Label htmlFor="sh-no">{t('iv.wms_shipment_no_label')}</Label>
-            <Input id="sh-no" value={shipmentNo} onChange={(e) => setShipmentNo(e.target.value)} placeholder="SHP-0001" />
+            <DocSelect id="sh-no" value={shipmentNo} onValueChange={setShipmentNo} options={options} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="sh-carrier">{t('iv.wms_carrier_label')}</Label>

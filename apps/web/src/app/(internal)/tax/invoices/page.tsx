@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { DocSelect } from '@/components/doc-select';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -65,6 +66,16 @@ export default function TaxInvoicesPage() {
   // ── ออกใบกำกับภาษีเต็มรูป (ม.86/4) ──
   const [src, setSrc] = useState<'POS' | 'AR'>('POS');
   const [srcRef, setSrcRef] = useState('');
+  // Source-doc pending lists — the sale/invoice ref is picked, not typed (manual entry stays as the
+  // escape hatch for roles without the list permission or docs beyond the recent window).
+  const posSales = useQuery<any>({ queryKey: ['tax-src-pos'], queryFn: () => api('/api/pos/orders?limit=50'), enabled: src === 'POS', retry: false });
+  const arInvs = useQuery<any>({ queryKey: ['tax-src-ar'], queryFn: () => api('/api/finance/ar?limit=50'), enabled: src === 'AR', retry: false });
+  const srcOptions = src === 'POS'
+    ? (posSales.data?.orders ?? []).map((o: any) => ({ value: o.Sale_No, label: [o.Status, baht(o.Total)].filter(Boolean).join(' · ') || undefined }))
+    : (arInvs.data?.invoices ?? []).map((i: any) => ({ value: i.Invoice_No, label: [i.Customer_Name, baht(i.Amount)].filter(Boolean).join(' · ') || undefined }));
+  // Originals for a credit/debit note: issued full tax invoices (kept independent of the list-filter tabs).
+  const fullInvs = useQuery<any>({ queryKey: ['tax-invoices', 'full-for-note'], queryFn: () => api('/api/tax-invoices?type=full') });
+  const noteOrigOptions = (fullInvs.data?.invoices ?? []).map((i: any) => ({ value: i.doc_no, label: [i.buyer?.name, baht(i.grand_total)].filter(Boolean).join(' · ') || undefined }));
   const [buyerName, setBuyerName] = useState('');
   const [buyerTaxId, setBuyerTaxId] = useState('');
   const [buyerAddr, setBuyerAddr] = useState('');
@@ -188,17 +199,17 @@ export default function TaxInvoicesPage() {
             <div className="grid gap-2">
               <Label htmlFor="src">{t('tax.inv_source')}</Label>
               <div className="flex gap-2">
-                <Button type="button" variant={src === 'POS' ? 'default' : 'outline'} size="sm" onClick={() => setSrc('POS')}>
+                <Button type="button" variant={src === 'POS' ? 'default' : 'outline'} size="sm" onClick={() => { setSrc('POS'); setSrcRef(''); }}>
                   {t('tax.src_pos')}
                 </Button>
-                <Button type="button" variant={src === 'AR' ? 'default' : 'outline'} size="sm" onClick={() => setSrc('AR')}>
+                <Button type="button" variant={src === 'AR' ? 'default' : 'outline'} size="sm" onClick={() => { setSrc('AR'); setSrcRef(''); }}>
                   {t('tax.src_ar')}
                 </Button>
               </div>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="src-ref">{t('tax.inv_source_ref', { field: src === 'POS' ? 'sale_no' : 'invoice_no' })}</Label>
-              <Input id="src-ref" value={srcRef} onChange={(e) => setSrcRef(e.target.value)} placeholder={src === 'POS' ? t('tax.src_ref_ph_pos') : t('tax.src_ref_ph_ar')} />
+              <DocSelect id="src-ref" value={srcRef} onValueChange={setSrcRef} options={srcOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder={src === 'POS' ? t('tax.src_ref_ph_pos') : t('tax.src_ref_ph_ar')} />
             </div>
           </div>
           <div className="relative grid gap-2">
@@ -295,7 +306,7 @@ export default function TaxInvoicesPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="note-orig">{t('tax.note_original')}</Label>
-              <Input id="note-orig" value={noteOrig} onChange={(e) => setNoteOrig(e.target.value)} placeholder={t('tax.note_original_ph')} />
+              <DocSelect id="note-orig" value={noteOrig} onValueChange={setNoteOrig} options={noteOrigOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder={t('tax.note_original_ph')} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="note-amt">{t('tax.note_amount')}</Label>
