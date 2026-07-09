@@ -29,6 +29,9 @@ export default defineConfig({
         'src/modules/payroll/payroll-calc.ts',    // already tested in test/unit.test.ts — now gated
         'src/modules/payments/promptpay-qr.ts',   // already tested in test/unit.test.ts — now gated
 
+        // docs/38 sub-services: guard paths are unit-tested (test/ledger-posting.test.ts GL-05/GL-17,
+        // test/procurement-po.test.ts Phase-16 screening port) but the write paths are harness-tested
+        // (basics/compliance/golden) — join this gated set when the write paths get unit tests too.
         'src/database/encrypted-column.ts',
         'src/observability/runtime-metrics.ts',
       ],
