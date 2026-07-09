@@ -29,9 +29,16 @@ export default defineConfig({
         'src/modules/payroll/payroll-calc.ts',    // already tested in test/unit.test.ts — now gated
         'src/modules/payments/promptpay-qr.ts',   // already tested in test/unit.test.ts — now gated
 
-        // docs/38 sub-services: guard paths are unit-tested (test/ledger-posting.test.ts GL-05/GL-17,
-        // test/procurement-po.test.ts Phase-16 screening port) but the write paths are harness-tested
-        // (basics/compliance/golden) — join this gated set when the write paths get unit tests too.
+        // docs/38 sub-services (2.4 slice 4): guard paths AND write paths are now unit-tested with
+        // drizzle-shaped fakes — postEntry/approveEntry/reverseEntry in test/ledger-posting{,-write}.test.ts,
+        // recurring/prepaid in test/ledger-recurring.test.ts, PR/PO flows in test/procurement-{pr,po}.test.ts,
+        // EVM math in test/projects-evm.test.ts. The heavy read/report paths stay harness-tested
+        // (basics/compliance/golden), which is why the per-file floor sits below the pure modules above.
+        'src/modules/ledger/ledger-posting.service.ts',
+        'src/modules/ledger/ledger-recurring.service.ts',
+        'src/modules/procurement/procurement-po.service.ts',
+        'src/modules/procurement/procurement-pr.service.ts',
+        'src/modules/projects/projects-evm.service.ts',
         'src/database/encrypted-column.ts',
         'src/observability/runtime-metrics.ts',
       ],
@@ -42,10 +49,27 @@ export default defineConfig({
         // to the coverage set WITH unit tests, not before.
         '**/tax-jobs.service.ts',
       ],
-      // Floor locked just below the measured baseline (stmts 80.3 / branch 89.2 / funcs 79.5 / lines 80.3
-      // as of 2026-07-08, after the 2.4 pure-module suites). A change that drops coverage on these modules
-      // FAILS the gate. Ratchet UP over time.
-      thresholds: { statements: 78, branches: 87, functions: 77, lines: 78 },
+      // Three-tier ratchet (each floor locked just below its measured value; NEVER loosen, ratchet UP):
+      //  1. The legacy pure-module set keeps its own undiluted glob group at the 2026-07-08 floor
+      //     (measured stmts 80.3 / branch 89.2 / funcs 79.5 / lines 80.3). NB when a new file joins the
+      //     include list above (other than a docs/38 sub-service), add it to this brace-glob too.
+      //  2. The docs/38 sub-services get PER-FILE floors: guard + write paths are unit-tested (2.4
+      //     slice 4) but the read/report paths stay harness-tested (basics/compliance/golden), so each
+      //     file's floor is pinned just below ITS measured coverage (2026-07-09) — a regression on any
+      //     one file fails the gate even if a sibling improves.
+      //  3. The global floor covers the whole expanded set (this vitest version does NOT remove
+      //     glob-matched files from the global group) — measured 60.4/81.2/68.1/60.4 after the dilution
+      //     by the harness-tested read paths; it backstops files accidentally dropped from the globs.
+      thresholds: {
+        statements: 58, branches: 79, functions: 66, lines: 58,
+        '{src/common/*.ts,src/modules/tax/**/*.ts,src/modules/payroll/payroll-calc.ts,src/modules/payments/promptpay-qr.ts,src/database/encrypted-column.ts,src/observability/runtime-metrics.ts}':
+          { statements: 78, branches: 87, functions: 77, lines: 78 },
+        'src/modules/ledger/ledger-posting.service.ts':      { statements: 77, branches: 83, functions: 48, lines: 77 }, // 79.5/85.8/50/79.5
+        'src/modules/ledger/ledger-recurring.service.ts':    { statements: 39, branches: 45, functions: 48, lines: 39 }, // 41.2/47.2/50/41.2
+        'src/modules/procurement/procurement-po.service.ts': { statements: 32, branches: 21, functions: 64, lines: 32 }, // 34.1/23.1/66.7/34.1
+        'src/modules/procurement/procurement-pr.service.ts': { statements: 29, branches: 61, functions: 55, lines: 29 }, // 31.9/63.6/57.1/31.9
+        'src/modules/projects/projects-evm.service.ts':      { statements: 18, branches: 90, functions: 11, lines: 18 }, // 20.5/92.9/13.3/20.5
+      },
     },
   },
   // decorators (@Injectable/@Inject) need experimentalDecorators when esbuild transforms TS
