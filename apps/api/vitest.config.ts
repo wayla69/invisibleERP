@@ -61,16 +61,16 @@ export default defineConfig({
       //     move down when the executed surface grows (projects-evm branches read 92.9% while only
       //     20.5% of statements ran; slice 5 tripled the statements and the branch % settled at 79.7).
       //  3. The global floor covers the whole expanded set (this vitest version does NOT remove
-      //     glob-matched files from the global group) — measured 70.0/82.3/73.8/70.0 after slice 5;
+      //     glob-matched files from the global group) — measured 82.3/81.4/76.8/82.3 after slice 6;
       //     it backstops files accidentally dropped from the globs.
       thresholds: {
-        statements: 68, branches: 80, functions: 71, lines: 68,
+        statements: 80, branches: 79, functions: 74, lines: 80,
         '{src/common/*.ts,src/modules/tax/**/*.ts,src/modules/payroll/payroll-calc.ts,src/modules/payments/promptpay-qr.ts,src/database/encrypted-column.ts,src/observability/runtime-metrics.ts}':
           { statements: 78, branches: 87, functions: 77, lines: 78 },
         'src/modules/ledger/ledger-posting.service.ts':      { statements: 77, branches: 83, functions: 48, lines: 77 }, // 79.5/85.8/50/79.5
         'src/modules/ledger/ledger-recurring.service.ts':    { statements: 85, branches: 77, functions: 78, lines: 85 }, // 87.4/79.4/80/87.4
-        'src/modules/procurement/procurement-po.service.ts': { statements: 32, branches: 21, functions: 64, lines: 32 }, // 34.1/23.1/66.7/34.1
-        'src/modules/procurement/procurement-pr.service.ts': { statements: 29, branches: 61, functions: 55, lines: 29 }, // 31.9/63.6/57.1/31.9
+        'src/modules/procurement/procurement-po.service.ts': { statements: 97, branches: 67, functions: 98, lines: 97 }, // 99.3/69.4/100/99.3
+        'src/modules/procurement/procurement-pr.service.ts': { statements: 95, branches: 65, functions: 98, lines: 95 }, // 97.8/67.9/100/97.8
         'src/modules/projects/projects-evm.service.ts':      { statements: 64, branches: 77, functions: 54, lines: 64 }, // 66.1/79.7/56.3/66.1
       },
     },
