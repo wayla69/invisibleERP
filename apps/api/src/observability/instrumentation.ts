@@ -32,6 +32,22 @@ export function captureOpsAlert(event: string, detail: Record<string, unknown> =
   } catch { /* Sentry must never block the caller */ }
 }
 
+// Forward an unhandled request failure (any 5xx the global exception filter is about to return) to
+// Sentry with route context. Sentry-only — the filter already writes the server-side log line, so this
+// must NOT double-log. Never throws: error reporting must never break the error response itself.
+export function captureRequestException(err: unknown, ctx: { method?: string; path?: string; status?: number } = {}): void {
+  try {
+    if (!process.env.SENTRY_DSN) return;
+    Sentry.withScope((scope) => {
+      scope.setLevel('error');
+      if (ctx.method || ctx.path) scope.setTag('route', `${ctx.method ?? ''} ${ctx.path ?? ''}`.trim());
+      if (ctx.status !== undefined) scope.setTag('http_status', String(ctx.status));
+      if (err instanceof Error) Sentry.captureException(err);
+      else Sentry.captureMessage(String(err));
+    });
+  } catch { /* Sentry must never block the response path */ }
+}
+
 // Init OTel NodeSDK with OTLP/HTTP exporter + HTTP/PG instrumentations.
 // No-op (and never throws) if OTEL_EXPORTER_OTLP_ENDPOINT is unset.
 export function startTelemetry(): void {

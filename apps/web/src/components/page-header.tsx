@@ -21,7 +21,10 @@ export function PageHeader({
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
         {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {/* max-w-full + wrap (NOT shrink-0): a wide action cluster must wrap inside the viewport — a
+          shrink-0 block keeps its intrinsic width, and on a phone that widens the layout viewport and
+          shifts every position:fixed surface off-screen (the /shop overflow class, CLAUDE.md). */}
+      {actions && <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
