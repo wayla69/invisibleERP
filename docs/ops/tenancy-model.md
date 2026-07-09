@@ -45,6 +45,19 @@ GRANT ierp_app TO app_user;   -- so `SET ROLE app_user` inside the request tx st
 Then point `DATABASE_URL` at `ierp_app`. Keep the intentionally-unscoped auth-global tables (`login_attempts`,
 scheduler heartbeats, etc.) as reviewed exceptions.
 
+**One-click provisioning (Railway):** the **`Ops — provision non-superuser DB role (H-3)`** workflow
+(`.github/workflows/ops-provision-app-role.yml`, manual dispatch, `production` Environment) runs the SQL
+above against the `Postgres` plugin (via its public url), additionally grants **`app_user TO ierp_app`**
+(the membership direction `SET LOCAL ROLE app_user` actually requires), grants `CREATE` on the schemas
+and **transfers ownership of all `public`/`drizzle` tables + sequences + views to `ierp_app`** — because
+boot-time `drizzle-kit migrate` runs as `DATABASE_URL` and `ALTER TABLE` requires ownership (`FORCE` RLS
+still binds the owner, so no isolation is lost). It then verifies the role posture over a live login,
+repoints the API service's `DATABASE_URL` (password rotated every run, never logged), and dispatches
+`deploy.yml`. Known residual: future migrations that `CREATE EXTENSION` would still need a superuser —
+run those by hand. This workflow is the remediation for the production deploy outage that started with
+the 2026-07-08 H-3 merge (Railway's default `DATABASE_URL` is the `postgres` superuser → boot refusal →
+every deploy failed healthcheck while the pre-hardening replica kept serving).
+
 **Boot check.** In production the API now **probes the base role and refuses to boot** if it is superuser / has
 `BYPASSRLS` (`common/tenancy-boot-check.ts` → `assertRlsBackstop`). Set **`ALLOW_RLS_BYPASS_BASE_ROLE=1`** to boot
 with a loud warning instead while you migrate the role (NOT recommended in prod). Best-effort: a probe failure
@@ -295,6 +308,7 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 ## 7. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.21 | 2026-07-09 | Platform / SRE | **§1bis one-click provisioning + H-3 outage remediation.** New manual-dispatch workflow `ops-provision-app-role.yml`: creates/rotates `ierp_app` per §1bis (+ `GRANT app_user TO ierp_app` — the direction `SET LOCAL ROLE app_user` requires; + schema `CREATE`; + ownership transfer of `public`/`drizzle` tables/sequences/views so boot-time `drizzle-kit migrate` keeps working under FORCE RLS), verifies posture over a live login, repoints the API's `DATABASE_URL`, dispatches `deploy.yml`. Root cause documented: every prod deploy failed healthcheck since the 1.20 H-3 merge because Railway's default `DATABASE_URL` is the `postgres` superuser — the old pre-hardening replica kept serving. |
 | 1.20 | 2026-07-08 | Security review | **Fail-closed data-isolation boot checks (H-3 / H-4).** (H-4) The tenancy-mode check now **refuses to boot by default** in prod on the dangerous state (single-company + >1 company), instead of warn-only; opt out with `ALLOW_SINGLE_COMPANY_MULTI_TENANT=1`. The old `STRICT_TENANCY_BOOT` flag is removed (its fail-closed behaviour is now the default). (H-3) New `assertRlsBackstop` (§1bis): in prod the API **probes the base DB role and refuses to boot** if it is superuser / has `BYPASSRLS`, since RLS is not enforced on the base connection (`@NoTx`/SSE/raw/job paths); opt out with `ALLOW_RLS_BYPASS_BASE_ROLE=1`, fix by connecting as a non-superuser owner role (§1bis provisioning SQL). Both are prod-only, best-effort (a read/probe failure never blocks boot). Unit tests: `apps/api/test/tenancy-boot-check.test.ts` (14 checks). |
 | 1.19 | 2026-07-07 | Platform / Security | **Data-isolation boot check (4.2).** New `common/tenancy-boot-check.ts` runs at bootstrap (prod-only, best-effort): counts tenants and, when `TENANCY_MODE=single-company` but **>1 company** exists on the DB (where every tenant Admin has a global RLS bypass), logs a **loud error** by default and **refuses to boot** when `STRICT_TENANCY_BOOT=1`. A DB-read failure never blocks boot. env.validation already warns on config; this catches the actually-dangerous *state*. ToE: `cutover/tenancy-boot.ts` (12 checks — decision matrix + prod/dev/strict/best-effort). |
 | 1.0 | 2026-07-03 | Platform / Security | Initial tenancy-model doc: TENANCY_MODE modes, signup exposure, org_id grouping, rollout guidance, ToE (pg-smoke + new pg-core HTTP-stack checks), and the PGlite per-table-org-clause fidelity note. |

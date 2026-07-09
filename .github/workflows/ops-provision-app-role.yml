@@ -1,0 +1,115 @@
+# Ops utility (manual dispatch): provision the NON-SUPERUSER API role per docs/ops/tenancy-model.md
+# §1bis (security review H-3) and repoint the API's DATABASE_URL at it — the fix for the fail-closed
+# "RLS BACKSTOP MISSING" boot refusal that has blocked every production deploy since the 2026-07-08
+# hardening merge (Railway's Postgres plugin defaults DATABASE_URL to the `postgres` SUPERUSER, which
+# the API now refuses in prod). Idempotent — safe to re-run (rotates the ierp_app password each run).
+#
+# What it does, in order:
+#   1. Reads the superuser PUBLIC url from the `Postgres` plugin service (CI can't reach the
+#      `.railway.internal` host) and the API's resolved internal DATABASE_URL.
+#   2. Creates/updates role `ierp_app` (LOGIN NOSUPERUSER NOBYPASSRLS) with a fresh random password,
+#      grants per §1bis, membership BOTH ways with app_user (`SET LOCAL ROLE app_user` in the request
+#      tx requires ierp_app ∈ app_user), CREATE on the schemas, and transfers ownership of all
+#      public/drizzle tables + sequences + views to ierp_app so boot-time `drizzle-kit migrate`
+#      (which runs as DATABASE_URL) can still ALTER existing objects. FORCE RLS keeps applying to the
+#      owner — that is the point.
+#   3. Verifies ierp_app can log in over the public proxy and is NOT superuser/BYPASSRLS.
+#   4. Sets the API service's DATABASE_URL to the same internal host/db with ierp_app credentials
+#      (replacing the ${{Postgres.DATABASE_URL}} reference with a literal — intentional).
+#   5. Dispatches deploy.yml so the CURRENT main actually ships (a `railway redeploy` would only
+#      re-run the old image).
+# Secrets/urls/passwords are ::add-mask::ed — nothing sensitive reaches the log.
+name: Ops — provision non-superuser DB role (H-3)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write   # to dispatch deploy.yml after the role swap
+
+jobs:
+  provision-app-role:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN binding, same as deploy.yml
+    steps:
+      - name: Create ierp_app, transfer ownership, repoint DATABASE_URL, redeploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then echo "::error::RAILWAY_TOKEN not configured"; exit 1; fi
+
+          echo "Resolving connection urls…"
+          PUB=$(npx -y @railway/cli variables --service Postgres --kv | grep '^DATABASE_PUBLIC_URL=' | cut -d= -f2- | tr -d '\r')
+          if [ -z "$PUB" ]; then echo "::error::could not read DATABASE_PUBLIC_URL from the Postgres service"; exit 1; fi
+          echo "::add-mask::$PUB"
+          INT=$(npx -y @railway/cli variables --service invisibleERP --kv | grep '^DATABASE_URL=' | cut -d= -f2- | tr -d '\r')
+          if [ -z "$INT" ]; then echo "::error::could not read DATABASE_URL from the invisibleERP service"; exit 1; fi
+          echo "::add-mask::$INT"
+
+          PW=$(openssl rand -hex 24)
+          echo "::add-mask::$PW"
+
+          echo "Provisioning ierp_app (docs/ops/tenancy-model.md §1bis)…"
+          psql "$PUB" -v ON_ERROR_STOP=1 <<SQL
+          DO \$\$ BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='ierp_app') THEN
+              CREATE ROLE ierp_app LOGIN NOSUPERUSER NOBYPASSRLS;
+            END IF;
+          END \$\$;
+          ALTER ROLE ierp_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '${PW}';
+          GRANT USAGE, CREATE ON SCHEMA public TO ierp_app;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ierp_app;
+          GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ierp_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ierp_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ierp_app;
+          -- §1bis membership + the direction SET LOCAL ROLE app_user actually requires:
+          GRANT ierp_app TO app_user;
+          GRANT app_user TO ierp_app;
+          -- drizzle bookkeeping schema (drizzle-kit migrate writes __drizzle_migrations here at boot)
+          DO \$\$ BEGIN
+            IF EXISTS (SELECT FROM pg_namespace WHERE nspname='drizzle') THEN
+              EXECUTE 'GRANT USAGE, CREATE ON SCHEMA drizzle TO ierp_app';
+            END IF;
+          END \$\$;
+          -- Ownership transfer: boot-time migrations run as DATABASE_URL (= ierp_app after this), and
+          -- ALTER TABLE requires ownership. FORCE RLS still binds the owner, so no isolation is lost.
+          DO \$\$ DECLARE r record; BEGIN
+            FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname IN ('public','drizzle') LOOP
+              EXECUTE format('ALTER TABLE %I.%I OWNER TO ierp_app', r.schemaname, r.tablename);
+            END LOOP;
+            FOR r IN SELECT schemaname, sequencename FROM pg_sequences WHERE schemaname='public' LOOP
+              EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO ierp_app', r.schemaname, r.sequencename);
+            END LOOP;
+            FOR r IN SELECT schemaname, viewname FROM pg_views WHERE schemaname='public' LOOP
+              EXECUTE format('ALTER VIEW %I.%I OWNER TO ierp_app', r.schemaname, r.viewname);
+            END LOOP;
+          END \$\$;
+          SQL
+
+          echo "Verifying ierp_app login + non-superuser posture…"
+          NEW_PUB=$(python3 -c "
+          import sys, urllib.parse as u
+          p = u.urlsplit('$PUB')
+          netloc = 'ierp_app:$PW@' + p.hostname + (':' + str(p.port) if p.port else '')
+          print(u.urlunsplit((p.scheme, netloc, p.path, p.query, p.fragment)))")
+          echo "::add-mask::$NEW_PUB"
+          check=$(psql "$NEW_PUB" -tAc "SELECT rolsuper::text || '/' || rolbypassrls::text FROM pg_roles WHERE rolname = current_user;")
+          [ "$check" = "false/false" ] || { echo "::error::ierp_app posture check failed (rolsuper/rolbypassrls = $check)"; exit 1; }
+          psql "$NEW_PUB" -tAc "SELECT 1 FROM public.tenants LIMIT 1;" >/dev/null || { echo "::error::ierp_app cannot read a known table"; exit 1; }
+          echo "✅ ierp_app verified: LOGIN ok, NOSUPERUSER, NOBYPASSRLS, table access works"
+
+          echo "Repointing the API's DATABASE_URL at ierp_app (internal host unchanged)…"
+          NEW_INT=$(python3 -c "
+          import sys, urllib.parse as u
+          p = u.urlsplit('$INT')
+          netloc = 'ierp_app:$PW@' + p.hostname + (':' + str(p.port) if p.port else '')
+          print(u.urlunsplit((p.scheme, netloc, p.path, p.query, p.fragment)))")
+          echo "::add-mask::$NEW_INT"
+          npx -y @railway/cli variables --set "DATABASE_URL=$NEW_INT" --service invisibleERP --skip-deploys
+
+          echo "Dispatching deploy.yml so current main ships with the new role…"
+          gh workflow run deploy.yml --ref main --repo "$GITHUB_REPOSITORY"
+          echo "✅ role provisioned + DATABASE_URL repointed; deploy dispatched — watch the Deploy (production) run"
