@@ -159,6 +159,19 @@ async function main() {
   const compCnt = await cnt(`SELECT count(*)::int n FROM member_companions WHERE member_id=${memberId}`);
   ok('Companions: remove hard-deletes the row (PDPA data minimization)', compCnt === 0, `rows=${compCnt}`);
 
+  // ── 15b. merge-patch semantics: an omitted field keeps its stored value (a one-field save can't wipe
+  //         the rest — the old replace semantics silently nulled e.g. `extra` on every web save) ──
+  const partial = await inj('PUT', `/api/restaurant/guests/${memberId}/profile`, sales1, { favorite_menus: ['ทาร์ตไข่'] });
+  const p15b = partial.json.profile;
+  ok('Guest profile: partial PUT keeps omitted fields (allergies/dietary/extra survive)',
+    p15b?.favorite_menus?.length === 1 && p15b?.allergies?.[0] === 'กุ้ง' && p15b?.dietary === 'ไม่ทานเผ็ด' && p15b?.extra?.wine === 'Pinot Noir',
+    JSON.stringify({ fav: p15b?.favorite_menus, alg: p15b?.allergies, diet: p15b?.dietary, extra: p15b?.extra }));
+
+  // ── 15c. explicit null clears a field (and only that field) ──
+  const cleared = await inj('PUT', `/api/restaurant/guests/${memberId}/profile`, sales1, { dietary: null });
+  const p15c = cleared.json.profile;
+  ok('Guest profile: explicit null clears the field, others untouched', p15c?.dietary === null && p15c?.favorite_menus?.length === 1 && p15c?.extra?.wine === 'Pinot Noir', JSON.stringify({ diet: p15c?.dietary, fav: p15c?.favorite_menus, extra: p15c?.extra }));
+
   // ── 16. consent withdrawal hides everything again (data minimization on read) ──
   const withdraw = await inj('POST', `/api/loyalty/members/${memberId}/consents`, sales1, { purpose: 'dining_profile', granted: false });
   const gp2 = await inj('GET', `/api/restaurant/guests/${memberId}/profile`, sales1);

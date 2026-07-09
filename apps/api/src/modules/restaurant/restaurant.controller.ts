@@ -51,18 +51,19 @@ const CreateReservationBody = z.object({
   buffet_package_id: z.number().int().optional(),
   occasion: z.string().max(120).optional(),
 });
-// Guest dining profile (PDPA consent-gated — see GuestProfileService)
+// Guest dining profile (PDPA consent-gated — see GuestProfileService).
+// JSON-merge-patch style: omitted = keep the stored value, explicit null = clear.
 const FreeList = z.array(z.string().max(120)).max(40);
 const UpsertDiningProfileBody = z.object({
   consent: z.boolean().optional(),
-  favorite_menus: FreeList.optional(),
-  favorite_ingredients: FreeList.optional(),
-  allergies: FreeList.optional(),
-  dietary: z.string().max(120).optional(),
-  seating_preference: z.string().max(200).optional(),
-  typical_party_size: z.number().int().positive().max(200).optional(),
-  service_notes: z.string().max(1000).optional(),
-  extra: z.record(z.string().max(60), z.string().max(300)).optional(),
+  favorite_menus: FreeList.nullable().optional(),
+  favorite_ingredients: FreeList.nullable().optional(),
+  allergies: FreeList.nullable().optional(),
+  dietary: z.string().max(120).nullable().optional(),
+  seating_preference: z.string().max(200).nullable().optional(),
+  typical_party_size: z.number().int().positive().max(200).nullable().optional(),
+  service_notes: z.string().max(1000).nullable().optional(),
+  extra: z.record(z.string().max(60), z.string().max(300)).nullable().optional(),
 });
 const AddCompanionBody = z.object({
   name: z.string().min(1).max(120),
