@@ -1,8 +1,10 @@
-import { Inject, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { Inject, Injectable, Optional, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { memberDiningProfiles, memberCompanions, memberConsents, posMembers, dineInOrders, dineInOrderItems } from '../../database/schema';
+import { memberDiningProfiles, memberCompanions, memberConsents, posMembers, dineInOrders, dineInOrderItems, tableReservations } from '../../database/schema';
+import { stripTrailingSlashes } from '@ierp/shared';
 import type { JwtUser } from '../../common/decorators';
+import { MessagingService } from '../messaging/messaging.service';
 
 // JSON-merge-patch style: an OMITTED field keeps its stored value; an explicit null clears it.
 export interface UpsertDiningProfileDto {
@@ -38,7 +40,10 @@ export const DINING_PROFILE_PURPOSE = 'dining_profile';
 //     DSAR access/portability exports them (collectMember).
 @Injectable()
 export class GuestProfileService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly messaging?: MessagingService, // consent-request notice (best-effort)
+  ) {}
 
   async get(memberId: number, user: JwtUser) {
     const db = this.db;
@@ -104,6 +109,58 @@ export class GuestProfileService {
       preferences: dto.preferences?.trim() || null, notes: dto.notes?.trim() || null, createdBy: user.username,
     }).returning();
     return this.shapeCompanion(row);
+  }
+
+  // Ask the GUEST THEMSELVES for the 'dining_profile' consent — a stronger PDPA posture than the
+  // staff-attested checkbox: the message (LINE when linked, else SMS) deep-links to the member portal /m
+  // where the member self-manages consents (LYL-10c, source='self'). Transactional campaign
+  // 'consent_request' (a service notice, not marketing); delivery is audited in message_log.
+  async requestConsent(memberId: number, user: JwtUser) {
+    const m = await this.loadMember(memberId, user);
+    if (await this.hasConsent(memberId)) return { member_id: memberId, already_granted: true, requested: false };
+    if (!this.messaging) return { member_id: memberId, already_granted: false, requested: false, status: 'unavailable' };
+    const base = stripTrailingSlashes(process.env.WEB_BASE_URL);
+    const link = base ? ` จัดการได้ที่ ${base}/m (เมนู "ความยินยอม PDPA")` : ' จัดการได้ในแอปสมาชิกของร้าน (เมนู "ความยินยอม PDPA")';
+    const body = `🍽️ ${m.name ? 'คุณ' + m.name + ' ' : ''}ทางร้านขอความยินยอมบันทึกข้อมูลความชอบในการรับประทาน (เมนูโปรด/วัตถุดิบ/แพ้อาหาร) เพื่อการบริการที่ดียิ่งขึ้น ท่านให้หรือถอนความยินยอมได้ทุกเมื่อ${link}`;
+    const channel: 'line' | 'sms' = m.lineUserId ? 'line' : 'sms';
+    let delivered: any = null;
+    try { delivered = await this.messaging.send({ member_id: memberId, channel, body, campaign: 'consent_request' }, user); } catch { /* notice is best-effort */ }
+    return { member_id: memberId, already_granted: false, requested: true, status: delivered?.status ?? 'failed', channel: delivered?.channel ?? channel };
+  }
+
+  // Service-time flags for the floor + kitchen: for each table, the CONSENTED dining cautions of the guest
+  // currently seated there (latest 'seated' reservation with a linked member within the last 12h). Computed
+  // at read time — nothing is copied into orders/tickets, so consent withdrawal or erasure takes effect
+  // immediately and the PDPA erasure surface stays the two guest-CRM tables.
+  async serviceFlagsByTable(tableIds: number[], tenantId: number) {
+    const flags = new Map<number, { member_id: number; name: string | null; allergies: string[]; dietary: string | null; seating_preference: string | null; service_notes: string | null }>();
+    if (!tableIds.length) return flags;
+    const db = this.db;
+    const since = new Date(Date.now() - 12 * 3600_000);
+    const seated = await db.select({ tableId: tableReservations.tableId, memberId: tableReservations.memberId, seatedAt: tableReservations.seatedAt })
+      .from(tableReservations)
+      .where(and(eq(tableReservations.tenantId, tenantId), inArray(tableReservations.tableId, tableIds), eq(tableReservations.status, 'seated'), isNotNull(tableReservations.memberId), gte(tableReservations.seatedAt, since)))
+      .orderBy(desc(tableReservations.seatedAt));
+    const byTable = new Map<number, number>(); // table → latest seated member
+    for (const r of seated) if (r.tableId != null && r.memberId != null && !byTable.has(Number(r.tableId))) byTable.set(Number(r.tableId), Number(r.memberId));
+    const memberIds = [...new Set(byTable.values())];
+    if (!memberIds.length) return flags;
+    const consents = await db.select({ memberId: memberConsents.memberId }).from(memberConsents)
+      .where(and(inArray(memberConsents.memberId, memberIds), eq(memberConsents.purpose, DINING_PROFILE_PURPOSE), eq(memberConsents.granted, true)));
+    const consented = new Set(consents.map((c: any) => Number(c.memberId)));
+    if (!consented.size) return flags;
+    const profiles = await db.select().from(memberDiningProfiles).where(inArray(memberDiningProfiles.memberId, [...consented]));
+    const members = await db.select({ id: posMembers.id, name: posMembers.name }).from(posMembers).where(inArray(posMembers.id, [...consented]));
+    const nameById = new Map(members.map((m: any) => [Number(m.id), m.name]));
+    const profById = new Map(profiles.map((p: any) => [Number(p.memberId), p]));
+    for (const [tableId, memberId] of byTable) {
+      if (!consented.has(memberId)) continue;
+      const p: any = profById.get(memberId);
+      const allergies = (p?.allergies as string[] | null) ?? [];
+      if (!p || (!allergies.length && !p.dietary && !p.serviceNotes && !p.seatingPreference)) continue; // nothing actionable
+      flags.set(tableId, { member_id: memberId, name: nameById.get(memberId) ?? null, allergies, dietary: p.dietary, seating_preference: p.seatingPreference, service_notes: p.serviceNotes });
+    }
+    return flags;
   }
 
   // Hard delete — companion rows are third-party PII with no accounting value (PDPA data minimization).

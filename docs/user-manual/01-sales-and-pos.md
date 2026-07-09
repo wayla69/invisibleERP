@@ -386,7 +386,10 @@ and let the system **text the guest when their table is ready**.
   "your table is ready" message (LINE if they're a linked member, otherwise SMS to
   the phone). The entry turns **พร้อมแล้ว**.
 - **Seat them.** Tap **รับเข้านั่ง** — the assigned table becomes **occupied**; ring the
-  order on the register/table as usual.
+  order on the register/table as usual. For a **buffet booking with a pre-picked
+  package on an assigned table**, the system offers to **start the buffet right
+  away** (opens the table and starts the tier's clock) — decline to start it at
+  the table later as usual.
 - **No-show / left the queue.** Tap **ไม่มา** (reservation) or **ออกคิว** (walk-in) to
   close it — any table you were holding is freed back to **available**.
 
@@ -419,6 +422,11 @@ often they visit with how many guests.
 > the guest. Collect only what serves the guest — this is a service tool, not a
 > marketing list (marketing consent is separate).
 
+- **Ask the guest to consent themselves (recommended).** When the profile shows
+  *no consent yet*, tap **ส่งคำขอความยินยอม (LINE/SMS)** — the guest receives a
+  message linking to the **member app (`/m`) → ความยินยอม (PDPA)** where they
+  grant (or later withdraw) the consent **themselves**; this is the strongest
+  PDPA evidence. If they've already consented, nothing is sent.
 - **Edit & save.** Fill the fields (comma-separate multiple entries), tick the
   consent box on first save, then **บันทึกโปรไฟล์**. Saving updates exactly the
   fields on screen — details recorded elsewhere are never wiped by a save.
@@ -430,6 +438,13 @@ often they visit with how many guests.
 - **At service time.** Open the profile from the reservation row before the party
   arrives — allergies and seating preference first, then delight with the
   favourites.
+- **Automatic flags on the floor & in the kitchen.** While a consented guest's
+  party is seated (via their reservation), the **โต๊ะ** floor board shows a red
+  **⚠️ แพ้อาหาร** line on their table and every **KDS ticket** for that table
+  carries the same allergy/dietary flag — the kitchen sees "แพ้กุ้ง" on the
+  ticket itself. The flags are computed live from the consented profile and are
+  never copied onto the order: withdrawing consent (or a PDPA erasure) removes
+  them from every screen immediately.
 
 **Day-parting (time-limited menus).** When adding a menu item in **เมนูอาหาร**
 you can set a **ช่วงเวลาขาย** (selling window) — a start/end time and which days

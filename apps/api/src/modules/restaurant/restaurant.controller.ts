@@ -126,6 +126,9 @@ export class RestaurantController {
   addGuestCompanion(@Param('memberId') memberId: string, @Body(new ZodValidationPipe(AddCompanionBody)) b: AddCompanionDto, @CurrentUser() u: JwtUser) { return this.guests.addCompanion(+memberId, b, u); }
   @Delete('guests/:memberId/companions/:companionId') @Permissions('pos', 'order_mgt', 'crm')
   removeGuestCompanion(@Param('memberId') memberId: string, @Param('companionId') companionId: string, @CurrentUser() u: JwtUser) { return this.guests.removeCompanion(+memberId, +companionId, u); }
+  // Ask the guest themselves for the 'dining_profile' consent (LINE/SMS deep-link to the /m self-service)
+  @Post('guests/:memberId/consent-request') @Permissions('pos', 'order_mgt', 'crm')
+  requestGuestConsent(@Param('memberId') memberId: string, @CurrentUser() u: JwtUser) { return this.guests.requestConsent(+memberId, u); }
 
   // Replay register sales captured offline. Idempotent on (tenant, client_uuid) — a re-sent batch
   // returns 'duplicate' for already-posted sales and never double-posts.
