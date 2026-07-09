@@ -1,6 +1,7 @@
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { pgError, type PgErrorLike } from './db-error';
+import { captureRequestException } from '../observability/instrumentation';
 
 // Error envelope สม่ำเสมอ: { error: { code, message, messageTh? } }
 @Catch()
@@ -43,6 +44,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // raw internal messages can leak infra detail (internal hosts/IPs, file paths, library text).
       // The generic `body` ('Unexpected error') is returned instead.
       this.logger.error(exception.message, exception.stack);
+    }
+
+    // Every 5xx that reaches the client is an unhandled failure — forward it to Sentry (when
+    // SENTRY_DSN is configured) with route context so on-call sees it without tailing logs.
+    // 4xx are expected business outcomes and stay out of the error aggregator.
+    if (status >= 500) {
+      const req = host.switchToHttp().getRequest<FastifyRequest>();
+      // strip the query string: it can carry tokens/PII and the path is what identifies the route
+      const path = typeof req?.url === 'string' ? req.url.split('?')[0] : undefined;
+      captureRequestException(exception, { method: req?.method, path, status });
     }
 
     res.status(status).send({ error: body });

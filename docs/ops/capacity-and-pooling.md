@@ -1,6 +1,6 @@
 # Ops — Capacity & Connection Pooling (Tier 2)
 
-> **Status:** v1.0 · **Date:** 2026-06-30 · **Owner:** Platform / SRE
+> **Status:** v1.3 · **Date:** 2026-07-09 · **Owner:** Platform / SRE
 
 Closes the operational-maturity "capacity baseline" gap: a known connection-pool model, PgBouncer in
 front of Postgres, a saturation alert, and a runnable load test — so headroom is a number we track, not a
@@ -51,6 +51,14 @@ rps + p50/p95/p99. **Report-only** — absolute numbers depend on the backend (P
 Postgres + PgBouncer in staging) and the runner; it tracks **relative regression** and is the procedure to
 run against staging for a real capacity number (`LOAD_N` / `LOAD_C` to tune).
 
+For the **full closed-loop concurrency curve** (N sessions × the mixed authenticated read workload from
+the 2026-06-28 report §3, against real Postgres over real HTTP), use
+`tools/cutover/src/load-sessions.ts` — `LOAD_PG_URL=postgres://… pnpm --filter @ierp/cutover
+load:sessions` (knobs `LOAD_SESSIONS`/`LOAD_SECS`/`LOAD_WEB_CONCURRENCY`; `LOAD_API_DIST` points the
+tester at a different build for a same-box A/B). The target DB is dropped + re-migrated every run —
+disposable databases only. First run + post-decomposition results:
+`docs/ops/2026-07-09-load-retest-post-decomposition.md`.
+
 **Capacity baseline (fill in from a staging run):**
 
 | Date | Env | Endpoint | rps | p95 | Notes |
@@ -84,3 +92,4 @@ work when a profiled query needs them; the guard only enforces the leading-colum
 | 1.0 | 2026-06-30 | Platform / SRE | Pool model, PgBouncer config (transaction mode + `DB_SIMPLE`), saturation alert, load-test tool. |
 | 1.1 | 2026-07-02 | Platform / SRE | §5b read-path indexing policy: `0218` tenant-index backfill (132 tables) + `tenant-idx` CI guard (docs/27 R1-1 / AUD-ARC-01). |
 | 1.2 | 2026-07-02 | Platform / SRE | `loadtest` manual-dispatch workflow (docs/27 R1-5): one-click capacity run with LOAD_N/LOAD_C/pg_url inputs, 90-day result artifact; §5 provisioning follow-ups called out as console actions. |
+| 1.3 | 2026-07-09 | Platform / SRE | §4: `load:sessions` closed-loop concurrency harness (`tools/cutover/src/load-sessions.ts`) — the committed, repeatable version of the 2026-06-28 report's tester, with `LOAD_API_DIST` same-box A/B support. Post-decomposition re-test results: `docs/ops/2026-07-09-load-retest-post-decomposition.md` (decomposition ≤~5% p50 effect = noise; clustering still ≈2.3×). |

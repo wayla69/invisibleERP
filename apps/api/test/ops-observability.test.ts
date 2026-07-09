@@ -1,6 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { validateEnv } from '../src/common/env.validation';
 import { txStart, txEnd, runtimeMetrics, __resetRuntimeMetrics } from '../src/observability/runtime-metrics';
+
+vi.mock('@sentry/node', () => {
+  const scope = { setTag: vi.fn(), setLevel: vi.fn(), setExtras: vi.fn() };
+  return {
+    init: vi.fn(),
+    withScope: vi.fn((fn: (s: typeof scope) => void) => fn(scope)),
+    captureException: vi.fn(),
+    captureMessage: vi.fn(),
+    __scope: scope,
+  };
+});
+import * as Sentry from '@sentry/node';
+import { captureRequestException } from '../src/observability/instrumentation';
+import { AllExceptionsFilter } from '../src/common/all-exceptions.filter';
+import type { ArgumentsHost } from '@nestjs/common';
 
 // Operational maturity — external observability backends (Sentry/OTel) are RECOMMENDED by default (the API
 // always emits built-in signals) and can be MANDATED as a fail-closed boot gate via
@@ -45,6 +60,63 @@ describe('env.validation — observability recommended by default, enforceable o
   it('still fails first on a missing core secret (observability gate is secondary)', () => {
     const { JWT_SECRET, ...noJwt } = baseProd();
     expect(() => validateEnv(noJwt)).toThrow(/required production secrets/i);
+  });
+});
+
+// Unhandled 5xx → Sentry forwarding (docs/ops/observability-incident.md §1). The global exception
+// filter is the single choke point every unhandled request failure passes through — forwarding there
+// means Sentry sees EVERY 500, not only the paths that explicitly call captureOpsAlert.
+describe('captureRequestException + AllExceptionsFilter — unhandled 5xx reach Sentry', () => {
+  const savedDsn = process.env.SENTRY_DSN;
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    if (savedDsn === undefined) delete process.env.SENTRY_DSN; else process.env.SENTRY_DSN = savedDsn;
+  });
+
+  const mockHost = (req: { method: string; url: string }) => {
+    const send = vi.fn();
+    const res = { status: vi.fn(() => ({ send })) };
+    return {
+      host: { switchToHttp: () => ({ getResponse: () => res, getRequest: () => req }) } as unknown as ArgumentsHost,
+      res,
+    };
+  };
+
+  it('is a silent no-op when SENTRY_DSN is unset', () => {
+    delete process.env.SENTRY_DSN;
+    expect(() => captureRequestException(new Error('boom'), { method: 'GET', path: '/api/x', status: 500 })).not.toThrow();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it('captures with route + status tags when configured', () => {
+    process.env.SENTRY_DSN = 'https://x@sentry.io/1';
+    const err = new Error('boom');
+    captureRequestException(err, { method: 'GET', path: '/api/x', status: 500 });
+    expect(Sentry.captureException).toHaveBeenCalledWith(err);
+    const scope = (Sentry as unknown as { __scope: { setTag: ReturnType<typeof vi.fn> } }).__scope;
+    expect(scope.setTag).toHaveBeenCalledWith('route', 'GET /api/x');
+    expect(scope.setTag).toHaveBeenCalledWith('http_status', '500');
+  });
+
+  it('filter forwards an unhandled Error (500) to Sentry with the query string stripped', () => {
+    process.env.SENTRY_DSN = 'https://x@sentry.io/1';
+    const err = new Error('unexpected');
+    const { host, res } = mockHost({ method: 'POST', url: '/api/ledger/journal?token=secret' });
+    new AllExceptionsFilter().catch(err, host);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(Sentry.captureException).toHaveBeenCalledWith(err);
+    const scope = (Sentry as unknown as { __scope: { setTag: ReturnType<typeof vi.fn> } }).__scope;
+    expect(scope.setTag).toHaveBeenCalledWith('route', 'POST /api/ledger/journal');
+  });
+
+  it('filter does NOT forward expected 4xx business outcomes', async () => {
+    process.env.SENTRY_DSN = 'https://x@sentry.io/1';
+    const { NotFoundException } = await import('@nestjs/common');
+    const { host, res } = mockHost({ method: 'GET', url: '/api/items/9' });
+    new AllExceptionsFilter().catch(new NotFoundException(), host);
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
   });
 });
 
