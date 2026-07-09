@@ -1,0 +1,52 @@
+# Ops utility (manual dispatch): press the observability "button" (docs/ops/observability-incident.md
+# §1bis) — set SENTRY_DSN / OTEL_EXPORTER_OTLP_ENDPOINT on the invisibleERP API service and redeploy so
+# the SDKs (initialized first thing in main.ts) pick them up. Values come from GitHub Environment
+# secrets on `production` (SENTRY_DSN, OTEL_EXPORTER_OTLP_ENDPOINT) — NOT workflow inputs, so the DSN
+# never appears in run logs/UI. Set at least one secret before dispatching. Idempotent — safe to re-run
+# after rotating the DSN or moving the collector. Lives in CI because dev sandboxes cannot reach
+# Railway's API; uses the same RAILWAY_TOKEN binding as deploy.yml / ops-set-cors.yml.
+name: Ops — set observability backends (Sentry/OTel)
+
+on:
+  workflow_dispatch:
+    inputs:
+      enforce:
+        description: "Also set REQUIRE_OBSERVABILITY_BACKENDS=1 (boot fails closed if a backend is ever unset)"
+        type: boolean
+        default: false
+      traces_sample_rate:
+        description: "SENTRY_TRACES_SAMPLE_RATE (0..1, empty = leave unset/unchanged)"
+        type: string
+        default: ""
+
+jobs:
+  set-observability:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN + SENTRY_DSN/OTEL endpoint are environment secrets here
+    steps:
+      - name: Set observability env on the API service and redeploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          OTEL_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          ENFORCE: ${{ inputs.enforce }}
+          TRACES_RATE: ${{ inputs.traces_sample_rate }}
+        run: |
+          set -e
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then echo "::error::RAILWAY_TOKEN not configured on the production environment"; exit 1; fi
+          if [ -z "${SENTRY_DSN:-}" ] && [ -z "${OTEL_ENDPOINT:-}" ]; then
+            echo "::error::Neither SENTRY_DSN nor OTEL_EXPORTER_OTLP_ENDPOINT is set as a production-environment secret — add at least one (Settings → Environments → production → secrets), then re-run. See docs/ops/observability-incident.md §1bis."
+            exit 1
+          fi
+          args=""
+          [ -n "${SENTRY_DSN:-}" ]    && args="$args --set SENTRY_DSN=${SENTRY_DSN}"
+          [ -n "${OTEL_ENDPOINT:-}" ] && args="$args --set OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_ENDPOINT}"
+          [ -n "${TRACES_RATE:-}" ]   && args="$args --set SENTRY_TRACES_SAMPLE_RATE=${TRACES_RATE}"
+          [ "${ENFORCE}" = "true" ]   && args="$args --set REQUIRE_OBSERVABILITY_BACKENDS=1"
+          # shellcheck disable=SC2086 — word-splitting of the --set pairs is intended
+          npx -y @railway/cli variables $args --service invisibleERP --skip-deploys
+          npx -y @railway/cli redeploy --service invisibleERP -y
+          # Confirm which keys are now present (values never echoed).
+          echo "Now set on invisibleERP:"
+          npx -y @railway/cli variables --service invisibleERP --kv | grep -E '^(SENTRY_DSN|OTEL_EXPORTER_OTLP_ENDPOINT|SENTRY_TRACES_SAMPLE_RATE|REQUIRE_OBSERVABILITY_BACKENDS)=' | sed 's/=.*/=<set>/'
+          echo "Observability backends configured and API redeploy triggered ✅ — wire the alert rules per docs/ops/observability-incident.md §2."
