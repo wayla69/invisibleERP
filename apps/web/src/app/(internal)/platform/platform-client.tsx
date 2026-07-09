@@ -117,9 +117,9 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
     onSuccess: () => { notifySuccess(t('plt.drawer_trial_extended')); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
-  // Pre-go-live factory reset — the danger-zone section renders only while the server reports the temporary
-  // ALLOW_TENANT_FACTORY_RESET flag (factory_reset_enabled); the button stays disabled until the typed
-  // company code matches exactly, mirroring the server's CONFIRM_MISMATCH gate.
+  // Factory reset — the danger-zone section renders only for a SUSPENDED company (mirrors the server's
+  // TENANT_NOT_SUSPENDED gate: suspend → reset → reactivate, so an active company is unwipeable); the
+  // button stays disabled until the typed company code matches exactly (server: CONFIRM_MISMATCH).
   const factoryReset = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/factory-reset`, { method: 'POST', body: JSON.stringify({ confirm: resetConfirm.trim() }) }),
     onSuccess: (r: any) => { notifySuccess(t('plt.company_reset_done', { name: detail.data?.name ?? String(id), rows: num(r?.rows_deleted ?? 0) })); setResetConfirm(''); detail.refetch(); onChanged(); },
@@ -202,9 +202,8 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                 </Button>
               </div>
 
-              {/* Danger zone — pre-go-live factory reset. Hidden entirely unless the temporary
-                  ALLOW_TENANT_FACTORY_RESET flag is set on the API (it is removed again after go-live). */}
-              {d.factory_reset_enabled && (
+              {/* Danger zone — factory reset. Only offered on a suspended company (two-step safety). */}
+              {d.suspended && (
                 <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
                   <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
                     <AlertTriangle className="size-3.5" /> {t('plt.drawer_reset_title')}

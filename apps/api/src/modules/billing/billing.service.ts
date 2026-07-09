@@ -27,16 +27,6 @@ export function isSignupAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.NODE_ENV !== 'production';
 }
 
-// Tenant factory-reset gate (pre-go-live safety valve). The destructive
-// POST /api/admin/tenants/:id/factory-reset endpoint is DISABLED unless the operator explicitly sets
-// ALLOW_TENANT_FACTORY_RESET=1 — fail-closed by default, mirroring the tenancy boot checks (H-3/H-4).
-// The flag is a TEMPORARY go-live aid: it lets god wipe a pilot company's test data once the customer
-// confirms real usage; the go-live runbook's decommission step then removes the flag so the capability
-// disappears from prod entirely. Pure + env-injectable for unit testing.
-export function isFactoryResetEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.ALLOW_TENANT_FACTORY_RESET === '1';
-}
-
 // What a factory reset MUST NOT touch. Identity (logins keep working so the company restarts real usage
 // without re-provisioning), billing/plan state, the ITGC-AC-16 tamper-evident audit chain, and the
 // operator's usage/AI-spend billing evidence. Everything else with a tenant_id column is wiped.
@@ -381,8 +371,6 @@ export class BillingService {
       counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },
       ai_usage: { input_tokens: Number(ai?.input ?? 0), output_tokens: Number(ai?.output ?? 0), overage_tokens: Number(ai?.overage ?? 0) },
       recent_activity: recent.map((r) => ({ ts: r.ts, actor: r.actor, action: r.action, status: r.status })),
-      // Drives the Platform Console danger-zone visibility — true only while the temporary go-live flag is set.
-      factory_reset_enabled: isFactoryResetEnabled(),
     };
   }
 
@@ -417,18 +405,20 @@ export class BillingService {
     return { tenant_id: id, status: 'active' };
   }
 
-  // ── Tenant factory-reset (pre-go-live, god-only, OFF unless ALLOW_TENANT_FACTORY_RESET=1) — wipes a
-  // pilot company's TEST DATA so it can start real usage clean, without re-provisioning logins. Deletes the
+  // ── Tenant factory-reset (god-only, SUSPENDED companies only) — wipes a pilot company's TEST DATA so it
+  // can start real usage clean, without re-provisioning logins. Permanent lifecycle operation, made safe by
+  // a mandatory two-step: the company must be SUSPENDED first (its users are already blocked), so an
+  // actively-used company can never be wiped in one click — suspend → reset → reactivate. Deletes the
   // tenant's rows across every tenant-scoped table EXCEPT the preserve-set above, then re-seeds the
   // fresh-tenant defaults (fiscal year + industry CoA) exactly like provisionTenant. FK-safe: fixpoint
   // delete passes with a savepoint per table (children clear first naturally; blocked tables retry next
   // pass). If a table can never clear — e.g. a future preserved-table FK into wiped data — the whole
   // request tx ROLLS BACK: atomic, never a partial wipe. Requires typing the company code (confirm). ──
   async factoryResetTenant(id: number, by: string, confirm: string) {
-    if (!isFactoryResetEnabled())
-      throw new ForbiddenException({ code: 'FACTORY_RESET_DISABLED', message: 'Factory reset is not enabled on this deployment (set ALLOW_TENANT_FACTORY_RESET=1)', messageTh: 'ระบบนี้ปิดการล้างข้อมูลบริษัทไว้ (ต้องตั้งค่า ALLOW_TENANT_FACTORY_RESET=1)' });
     const [t] = await this.db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    if (!t.suspendedAt)
+      throw new ConflictException({ code: 'TENANT_NOT_SUSPENDED', message: 'Suspend the company first — factory reset only runs on a suspended company (suspend → reset → reactivate)', messageTh: 'ต้องระงับบริษัทก่อนจึงจะล้างข้อมูลได้ (ระงับ → ล้างข้อมูล → คืนสถานะ)' });
     if ((confirm ?? '').trim() !== t.code)
       throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type the company code exactly to confirm the reset', messageTh: `พิมพ์รหัสบริษัท "${t.code}" ให้ตรงเพื่อยืนยันการล้างข้อมูล` });
 

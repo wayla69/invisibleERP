@@ -147,11 +147,11 @@ export class BillingController {
     return this.svc.reactivateTenant(Number(id), u.username);
   }
 
-  // Tenant factory-reset (pre-go-live safety valve) — wipes a pilot company's test data (identity/billing/
-  // audit preserved, fresh defaults re-seeded) so it can start real usage clean. Triple-gated: god-only,
-  // OFF unless ALLOW_TENANT_FACTORY_RESET=1 (403 FACTORY_RESET_DISABLED), and the caller must type the
-  // company code (400 CONFIRM_MISMATCH). The flag is removed again after go-live (see the go-live runbook),
-  // which makes the endpoint and its console button disappear.
+  // Tenant factory-reset — wipes a pilot company's test data (identity/billing/audit preserved, fresh
+  // defaults re-seeded) so it can start real usage clean. Permanent lifecycle operation, triple-gated:
+  // god-only, the company must be SUSPENDED first (409 TENANT_NOT_SUSPENDED — the two-step that makes an
+  // actively-used company unwipeable: suspend → reset → reactivate), and the caller must type the company
+  // code (400 CONFIRM_MISMATCH). Audit-logged; the ITGC-AC-16 audit chain itself is never erased.
   @Post('admin/tenants/:id/factory-reset') @PlatformAdmin() @HttpCode(200)
   factoryResetTenant(@Param('id') id: string, @Body(new ZodValidationPipe(FactoryResetBody)) b: { confirm: string }, @CurrentUser() u: JwtUser) {
     return this.svc.factoryResetTenant(Number(id), u.username, b.confirm);

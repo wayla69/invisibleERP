@@ -262,10 +262,11 @@ async function main() {
   ok('A reactivated company Admin can access again (200)', after.status === 200, `${after.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
-  // ── 3g2. Tenant factory-reset (pre-go-live safety valve): god wipes a pilot company's test data.
-  //         Triple-gated — OFF unless ALLOW_TENANT_FACTORY_RESET=1 (403 FACTORY_RESET_DISABLED), god-only,
-  //         and the company code must be typed (400 CONFIRM_MISMATCH). The wipe deletes every tenant-scoped
-  //         row EXCEPT identity/billing/audit, re-seeds fiscal year + CoA, and never touches a sibling. ──
+  // ── 3g2. Tenant factory-reset: god wipes a pilot company's test data. Permanent lifecycle operation,
+  //         triple-gated — god-only, the company must be SUSPENDED first (409 TENANT_NOT_SUSPENDED — the
+  //         two-step that makes an active company unwipeable: suspend → reset → reactivate), and the
+  //         company code must be typed (400 CONFIRM_MISMATCH). The wipe deletes every tenant-scoped row
+  //         EXCEPT identity/billing/audit, re-seeds fiscal year + CoA, and never touches a sibling. ──
   // Seed test data into LifeCo: the starter-pack HQ branch + a manual JE (needs the provisioned periods).
   await inj('POST', '/api/tenant/starter-pack', lcTok, {});
   await inj('PATCH', '/api/tenant/profile', lcTok, { address_line1: '9 ถนนรอง', province: 'กรุงเทพมหานคร', postal_code: '10120' });
@@ -273,26 +274,22 @@ async function main() {
   const preCounts = (await pg.query(`SELECT (SELECT count(*)::int FROM branches WHERE tenant_id=${lcTid}) b, (SELECT count(*)::int FROM journal_entries WHERE tenant_id=${lcTid}) j`)).rows[0] as any;
   ok('Factory-reset setup: LifeCo holds test data (branch + JE)', preCounts.b >= 1 && preCounts.j >= 1, JSON.stringify(preCounts));
 
-  delete process.env.ALLOW_TENANT_FACTORY_RESET; // default = fail-closed
   process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
-  const frOff = await inj('POST', `/api/admin/tenants/${lcTid}/factory-reset`, owner, { confirm: 'lifeco1' });
-  ok('Factory reset with the flag UNSET → 403 FACTORY_RESET_DISABLED (fail-closed default)', frOff.status === 403 && frOff.json.error?.code === 'FACTORY_RESET_DISABLED', `${frOff.status} ${frOff.json.error?.code}`);
-  const detOff = await inj('GET', `/api/admin/tenants/${lcTid}`, owner);
-  ok('Tenant detail reports factory_reset_enabled=false while the flag is unset', detOff.json.factory_reset_enabled === false, `${detOff.json.factory_reset_enabled}`);
+  const frActive = await inj('POST', `/api/admin/tenants/${lcTid}/factory-reset`, owner, { confirm: 'lifeco1' });
+  ok('Factory reset on an ACTIVE (non-suspended) company → 409 TENANT_NOT_SUSPENDED (two-step safety)', frActive.status === 409 && frActive.json.error?.code === 'TENANT_NOT_SUSPENDED', `${frActive.status} ${frActive.json.error?.code}`);
 
-  process.env.ALLOW_TENANT_FACTORY_RESET = '1';
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // owner1 no longer god → guard must deny before anything runs
   const frNonGod = await inj('POST', `/api/admin/tenants/${lcTid}/factory-reset`, owner, { confirm: 'lifeco1' });
-  ok('Factory reset blocked for a non-platform-admin even with the flag on (403)', frNonGod.status === 403, `${frNonGod.status}`);
+  ok('Factory reset blocked for a non-platform-admin (403)', frNonGod.status === 403, `${frNonGod.status}`);
+
   process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+  await inj('POST', `/api/admin/tenants/${lcTid}/suspend`, owner, { reason: 'pre-reset (UAT done)' });
   const frBadConfirm = await inj('POST', `/api/admin/tenants/${lcTid}/factory-reset`, owner, { confirm: 'wrong-code' });
   ok('Factory reset with a wrong typed code → 400 CONFIRM_MISMATCH', frBadConfirm.status === 400 && frBadConfirm.json.error?.code === 'CONFIRM_MISMATCH', `${frBadConfirm.status} ${frBadConfirm.json.error?.code}`);
-  const detOn = await inj('GET', `/api/admin/tenants/${lcTid}`, owner);
-  ok('Tenant detail reports factory_reset_enabled=true while the flag is set', detOn.json.factory_reset_enabled === true, `${detOn.json.factory_reset_enabled}`);
 
   const otherBranchesBefore = Number((await pg.query(`SELECT count(*)::int n FROM branches WHERE tenant_id=${newTid}`)).rows[0]!.n);
   const fr = await inj('POST', `/api/admin/tenants/${lcTid}/factory-reset`, owner, { confirm: 'lifeco1' });
-  ok('Factory reset (god + flag + typed code) → 200 status=reset with rows_deleted>0', fr.status === 200 && fr.json.status === 'reset' && Number(fr.json.rows_deleted) > 0, `${fr.status} ${JSON.stringify(fr.json)}`);
+  ok('Factory reset (god + suspended + typed code) → 200 status=reset with rows_deleted>0', fr.status === 200 && fr.json.status === 'reset' && Number(fr.json.rows_deleted) > 0, `${fr.status} ${JSON.stringify(fr.json)}`);
   const post = (await pg.query(
     `SELECT (SELECT count(*)::int FROM branches WHERE tenant_id=${lcTid}) b,
             (SELECT count(*)::int FROM journal_entries WHERE tenant_id=${lcTid}) j,
@@ -304,9 +301,11 @@ async function main() {
   ok('Reset wiped LifeCo data (branches + JEs = 0) and re-seeded 12 fiscal periods', post.b === 0 && post.j === 0 && post.fp === 12, JSON.stringify(post));
   ok('Reset PRESERVED identity/billing/audit (users, subscription, audit_log rows survive)', post.u >= 1 && post.sub >= 1 && post.al >= 1, JSON.stringify({ u: post.u, sub: post.sub, al: post.al }));
   ok('Reset did NOT touch the sibling tenant (its branches unchanged)', post.ob === otherBranchesBefore, `before=${otherBranchesBefore} after=${post.ob}`);
+  const reactAfterReset = await inj('POST', `/api/admin/tenants/${lcTid}/reactivate`, owner, {});
+  ok('Reactivate after reset → active again (suspend → reset → reactivate completes)', reactAfterReset.status === 200 && reactAfterReset.json.status === 'active', `${reactAfterReset.status}`);
   const lcRelogin = await login('lifeco_admin', 'lifeco12345');
-  ok('The company Admin still logs in after the reset (identity preserved)', lcRelogin.status === 200 && !!lcRelogin.json.token, `${lcRelogin.status}`);
-  delete process.env.ALLOW_TENANT_FACTORY_RESET; // restore fail-closed
+  const lcAccess = await inj('GET', '/api/tenant/onboarding-status', lcRelogin.json.token);
+  ok('The company Admin logs in and works after reset+reactivate (identity preserved)', lcRelogin.status === 200 && !!lcRelogin.json.token && lcAccess.status === 200, `login=${lcRelogin.status} access=${lcAccess.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;
