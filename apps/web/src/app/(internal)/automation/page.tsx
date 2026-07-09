@@ -13,13 +13,13 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Msg } from '@/components/tabs';
+import { selectCls } from '@/components/form-controls';
 
 type EventDef = { key: string; label: string; label_en: string; fields: string[] };
 type Catalog = { events: EventDef[]; action_types: string[]; operators: string[] };
 type Rule = { id: number; name: string; event_type: string; condition: any; action: any; active: boolean };
 type Exec = { id: number; rule_id: number | null; event_type: string; status: string; detail: string; fired_at: string };
 
-const sel = 'h-9 rounded-md border bg-transparent px-3 text-sm';
 
 export default function AutomationPage() {
   const { t } = useLang();
@@ -71,21 +71,21 @@ export default function AutomationPage() {
             <div className="grid gap-2"><Label>{t('st.auto.rule_name')}</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={t('st.auto.rule_name_ph')} /></div>
             <div className="grid gap-2">
               <Label>{t('st.auto.on_event')}</Label>
-              <select className={sel} value={f.event_type} onChange={(e) => setF({ ...f, event_type: e.target.value })}>
+              <select className={selectCls} value={f.event_type} onChange={(e) => setF({ ...f, event_type: e.target.value })}>
                 {(cat.data?.events ?? []).map((e) => <option key={e.key} value={e.key}>{e.label} ({e.key})</option>)}
               </select>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               <div className="grid gap-1"><Label className="text-xs">{t('st.auto.cond_field')}</Label><Input value={f.condField} onChange={(e) => setF({ ...f, condField: e.target.value })} placeholder={t('st.auto.cond_field_ph')} /></div>
-              <div className="grid gap-1"><Label className="text-xs">{t('st.auto.operator')}</Label><select className={sel} value={f.condOp} onChange={(e) => setF({ ...f, condOp: e.target.value })}>{(cat.data?.operators ?? ['eq']).map((o) => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div className="grid gap-1"><Label className="text-xs">{t('st.auto.operator')}</Label><select className={selectCls} value={f.condOp} onChange={(e) => setF({ ...f, condOp: e.target.value })}>{(cat.data?.operators ?? ['eq']).map((o) => <option key={o} value={o}>{o}</option>)}</select></div>
               <div className="grid gap-1"><Label className="text-xs">{t('st.auto.value')}</Label><Input value={f.condValue} onChange={(e) => setF({ ...f, condValue: e.target.value })} placeholder="critical" /></div>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              <div className="grid gap-1"><Label>{t('st.auto.action')}</Label><select className={sel} value={f.actionType} onChange={(e) => setF({ ...f, actionType: e.target.value })}>{(cat.data?.action_types ?? ['notification']).map((a) => <option key={a} value={a}>{a}</option>)}</select></div>
+              <div className="grid gap-1"><Label>{t('st.auto.action')}</Label><select className={selectCls} value={f.actionType} onChange={(e) => setF({ ...f, actionType: e.target.value })}>{(cat.data?.action_types ?? ['notification']).map((a) => <option key={a} value={a}>{a}</option>)}</select></div>
               <div className="grid gap-1"><Label>{t('st.auto.message')}</Label><Input value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} placeholder={t('st.auto.message_ph')} /></div>
               {f.actionType === 'message' && <>
                 <div className="grid gap-1"><Label>{t('st.auto.send_to')}</Label><Input value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} placeholder={t('st.auto.send_to_ph')} /></div>
-                <div className="grid gap-1"><Label>{t('st.auto.channel')}</Label><select className={sel} value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })}>{['email', 'line', 'sms'].map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+                <div className="grid gap-1"><Label>{t('st.auto.channel')}</Label><select className={selectCls} value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })}>{['email', 'line', 'sms'].map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
               </>}
             </div>
             <Button disabled={!f.name.trim() || create.isPending} onClick={() => { setMsg(''); create.mutate(); }}>{create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} {t('st.auto.create_rule')}</Button>
@@ -95,7 +95,7 @@ export default function AutomationPage() {
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Play className="size-4 text-primary" /> {t('st.auto.test_rule')}</CardTitle></CardHeader>
           <CardContent className="grid gap-3">
-            <div className="grid gap-2"><Label>{t('st.auto.event')}</Label><select className={sel} value={test.event} onChange={(e) => setTest({ ...test, event: e.target.value })}>{(cat.data?.events ?? []).map((e) => <option key={e.key} value={e.key}>{e.key}</option>)}</select></div>
+            <div className="grid gap-2"><Label>{t('st.auto.event')}</Label><select className={selectCls} value={test.event} onChange={(e) => setTest({ ...test, event: e.target.value })}>{(cat.data?.events ?? []).map((e) => <option key={e.key} value={e.key}>{e.key}</option>)}</select></div>
             <div className="grid gap-2"><Label>payload (JSON)</Label><textarea rows={3} className="rounded-md border bg-transparent px-3 py-2 text-sm font-mono" value={test.payload} onChange={(e) => setTest({ ...test, payload: e.target.value })} /></div>
             <Button variant="outline" disabled={runTest.isPending} onClick={() => { setMsg(''); runTest.mutate(); }}><Play className="size-4" /> {t('st.auto.run_test')}</Button>
           </CardContent>

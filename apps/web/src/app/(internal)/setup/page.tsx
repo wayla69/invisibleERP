@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { selectCls } from '@/components/form-controls';
 
 interface Profile {
   code: string; name: string; legal_name: string | null; tax_id: string | null; branch_code: string | null;
@@ -143,7 +144,7 @@ export default function SetupPage() {
               <FormField htmlFor="vat_registered" label={t('mx.setup_vat_registered')}>
                 <select
                   id="vat_registered"
-                  className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                  className={selectCls}
                   value={form.vat_registered ? '1' : '0'}
                   onChange={(e) => setForm((f) => ({ ...f, vat_registered: e.target.value === '1' }))}
                 >
@@ -180,7 +181,7 @@ export default function SetupPage() {
               <FormField htmlFor="show_logo" label={t('mx.setup_show_logo')}>
                 <select
                   id="show_logo"
-                  className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                  className={selectCls}
                   value={(form.branding_prefs?.show_logo_on_receipt === false) ? '0' : '1'}
                   onChange={(e) => setForm((f) => ({ ...f, branding_prefs: { ...(f.branding_prefs ?? {}), show_logo_on_receipt: e.target.value === '1' } }))}
                 >

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Msg } from '@/components/tabs';
 import { useLang } from '@/lib/i18n';
+import { selectCls } from '@/components/form-controls';
 
 type CObject = { object_key: string; label: string; label_en?: string | null; icon?: string | null };
 type FieldDef = { field_key: string; label: string; data_type: string; options?: string[] | null; required?: boolean };
@@ -25,9 +26,8 @@ const DATA_TYPES = ['text', 'number', 'date', 'boolean', 'select'] as const;
 // One input rendered per field type.
 function FieldInput({ f, value, onChange }: { f: FieldDef; value: any; onChange: (v: any) => void }) {
   const { t } = useLang();
-  const cls = 'h-9 rounded-md border bg-transparent px-3 text-sm';
-  if (f.data_type === 'boolean') return <select className={cls} value={value ? '1' : '0'} onChange={(e) => onChange(e.target.value === '1')}><option value="0">{t('mx.co_no')}</option><option value="1">{t('mx.co_yes')}</option></select>;
-  if (f.data_type === 'select') return <select className={cls} value={value ?? ''} onChange={(e) => onChange(e.target.value)}><option value="">—</option>{(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}</select>;
+  if (f.data_type === 'boolean') return <select className={selectCls} value={value ? '1' : '0'} onChange={(e) => onChange(e.target.value === '1')}><option value="0">{t('mx.co_no')}</option><option value="1">{t('mx.co_yes')}</option></select>;
+  if (f.data_type === 'select') return <select className={selectCls} value={value ?? ''} onChange={(e) => onChange(e.target.value)}><option value="">—</option>{(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}</select>;
   if (f.data_type === 'number') return <Input type="number" value={value ?? ''} onChange={(e) => onChange(e.target.value)} />;
   if (f.data_type === 'date') return <Input type="date" value={value ?? ''} onChange={(e) => onChange(e.target.value)} />;
   return <Input value={value ?? ''} onChange={(e) => onChange(e.target.value)} />;
@@ -130,9 +130,9 @@ export default function CustomObjectsPage() {
                 </div>
                 <div className="grid items-end gap-2 border-t pt-3 sm:grid-cols-[1fr_auto_1fr_auto_auto]">
                   <div className="grid gap-1"><Label>{t('mx.co_field_name')}</Label><Input value={fld.label} onChange={(e) => setFld({ ...fld, label: e.target.value })} placeholder={t('mx.co_field_name_ph')} /></div>
-                  <div className="grid gap-1"><Label>{t('mx.co_type')}</Label><select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={fld.data_type} onChange={(e) => setFld({ ...fld, data_type: e.target.value })}>{DATA_TYPES.map((dt) => <option key={dt} value={dt}>{dt}</option>)}</select></div>
+                  <div className="grid gap-1"><Label>{t('mx.co_type')}</Label><select className={selectCls} value={fld.data_type} onChange={(e) => setFld({ ...fld, data_type: e.target.value })}>{DATA_TYPES.map((dt) => <option key={dt} value={dt}>{dt}</option>)}</select></div>
                   <div className="grid gap-1"><Label>{t('mx.co_options_label')}</Label><Input value={fld.options} disabled={fld.data_type !== 'select'} onChange={(e) => setFld({ ...fld, options: e.target.value })} placeholder="active, repair, retired" /></div>
-                  <div className="grid gap-1"><Label>{t('mx.co_required')}</Label><select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={fld.required ? '1' : '0'} onChange={(e) => setFld({ ...fld, required: e.target.value === '1' })}><option value="0">{t('mx.co_no')}</option><option value="1">{t('mx.co_yes')}</option></select></div>
+                  <div className="grid gap-1"><Label>{t('mx.co_required')}</Label><select className={selectCls} value={fld.required ? '1' : '0'} onChange={(e) => setFld({ ...fld, required: e.target.value === '1' })}><option value="0">{t('mx.co_no')}</option><option value="1">{t('mx.co_yes')}</option></select></div>
                   <Button size="sm" disabled={!fld.label.trim() || addField.isPending} onClick={() => { setMsg(''); addField.mutate(); }}><Plus className="size-4" /> {t('mx.co_add_field')}</Button>
                 </div>
               </CardContent>
