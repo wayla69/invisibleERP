@@ -20,6 +20,16 @@ const PayBody = z.object({ amount: z.number().positive() });
 export class RealEstateController {
   constructor(private readonly svc: RealEstateService) {}
 
+  // Pending-list reads — feed the /realestate open-by-code dropdowns (pick a RED-/REC- doc, not type it).
+  @Get('developments')
+  @Permissions('re_sales', 'exec', 'dashboard')
+  listDevs() { return this.svc.listDevelopments(); }
+
+  // MUST stay above 'contracts/:no' or the param route swallows it.
+  @Get('contracts')
+  @Permissions('re_sales', 're_contract_approve', 'exec')
+  listContracts() { return this.svc.listContracts(); }
+
   @Post('developments')
   @Permissions('re_sales', 'exec')
   createDev(@Body(new ZodValidationPipe(DevBody)) b: CreateDevDto, @CurrentUser() u: JwtUser) { return this.svc.createDevelopment(b, u); }

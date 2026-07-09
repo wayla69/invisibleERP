@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
 import { Select } from '@/components/form-controls';
+import { DocSelect } from '@/components/doc-select';
 
 
 export default function ProductionPage() {
@@ -90,6 +91,11 @@ function ShopFloor() {
   const { t } = useLang();
   const [woNo, setWoNo] = useState('');
   const [routing, setRouting] = useState('');
+  // Pending lists — the WO and routing are picked from dropdowns, not typed.
+  const wosQ = useQuery<any>({ queryKey: ['wos-for-picker'], queryFn: () => api('/api/manufacturing/work-orders'), retry: false });
+  const woOptions = (wosQ.data?.work_orders ?? []).map((w: any) => ({ value: w.wo_no, label: [w.product_name, w.status].filter(Boolean).join(' · ') || undefined }));
+  const routingsQ = useQuery<any>({ queryKey: ['routings-for-picker'], queryFn: () => api('/api/routings'), retry: false });
+  const routingOptions = (routingsQ.data?.routings ?? []).map((r: any) => ({ value: r.routing_code, label: r.name || r.product_item_id || undefined }));
   const q = useQuery<any>({ queryKey: ['wo-ops', woNo], queryFn: () => api(`/api/manufacturing/work-orders/${woNo}/operations`), enabled: false });
   const gen = useMutation({
     mutationFn: () => api(`/api/manufacturing/work-orders/${woNo}/routing/${routing}`, { method: 'POST', body: JSON.stringify({}) }),
@@ -103,9 +109,9 @@ function ShopFloor() {
     <div className="grid gap-5">
       <Card className="gap-3 p-5">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="grid gap-1.5"><Label>{t('mf.prod_wono_label')}</Label><Input value={woNo} onChange={(e) => setWoNo(e.target.value)} className="w-48" placeholder="WO-..." /></div>
+          <div className="grid gap-1.5"><Label>{t('mf.prod_wono_label')}</Label><DocSelect className="w-64" value={woNo} onValueChange={setWoNo} options={woOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="WO-..." /></div>
           <Button variant="outline" onClick={() => q.refetch()} disabled={!woNo}>{t('mf.prod_view_ops')}</Button>
-          <div className="grid gap-1.5"><Label>{t('mf.prod_gen_from_routing')}</Label><Input value={routing} onChange={(e) => setRouting(e.target.value)} className="w-40" placeholder="RT-..." /></div>
+          <div className="grid gap-1.5"><Label>{t('mf.prod_gen_from_routing')}</Label><DocSelect className="w-56" value={routing} onValueChange={setRouting} options={routingOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="RT-..." /></div>
           <Button onClick={() => gen.mutate()} disabled={!woNo || !routing}><Network className="size-4" /> {t('mf.prod_gen_ops')}</Button>
         </div>
       </Card>
@@ -138,6 +144,12 @@ function Quality() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['qa'], queryFn: () => api('/api/quality') });
   const [f, setF] = useState({ ref_type: 'WO', ref_doc: '', item_id: '', qty_inspected: '', qty_passed: '', disposition: 'Accept', unit_cost: '' });
+  // Ref-doc pending list — source switches with the WO/GR type toggle.
+  const qaWosQ = useQuery<any>({ queryKey: ['wos-for-picker'], queryFn: () => api('/api/manufacturing/work-orders'), retry: false, enabled: f.ref_type === 'WO' });
+  const qaGrsQ = useQuery<any>({ queryKey: ['grs-for-picker'], queryFn: () => api('/api/procurement/grs?limit=100'), retry: false, enabled: f.ref_type === 'GR' });
+  const refOptions = f.ref_type === 'WO'
+    ? (qaWosQ.data?.work_orders ?? []).map((w: any) => ({ value: w.wo_no, label: [w.product_name, w.status].filter(Boolean).join(' · ') || undefined }))
+    : (qaGrsQ.data?.grs ?? []).map((g: any) => ({ value: g.gr_no, label: [g.po_no, g.vendor_name].filter(Boolean).join(' · ') || undefined }));
   const ins = useMutation({
     mutationFn: () => api('/api/quality/inspect', { method: 'POST', body: JSON.stringify({ ref_type: f.ref_type, ref_doc: f.ref_doc || undefined, item_id: f.item_id || undefined, qty_inspected: Number(f.qty_inspected) || 0, qty_passed: Number(f.qty_passed) || 0, disposition: f.disposition, unit_cost: Number(f.unit_cost) || 0 }) }),
     onSuccess: (r: any) => { notifySuccess(r.scrap_value > 0 ? t('mf.qa_scrap_recorded', { amt: baht(r.scrap_value), entry: r.entry_no }) : t('mf.qa_recorded')); qc.invalidateQueries({ queryKey: ['qa'] }); },
@@ -148,8 +160,8 @@ function Quality() {
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">{t('mf.qa_form_title')}</h3>
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="grid gap-1.5"><Label>{t('mf.col_type')}</Label><Select value={f.ref_type} onChange={(e) => setF({ ...f, ref_type: e.target.value })}><option value="WO">{t('mf.qa_ref_wo')}</option><option value="GR">{t('mf.qa_ref_gr')}</option></Select></div>
-          <div className="grid gap-1.5"><Label>{t('mf.qa_ref_doc')}</Label><Input value={f.ref_doc} onChange={(e) => setF({ ...f, ref_doc: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('mf.col_type')}</Label><Select value={f.ref_type} onChange={(e) => setF({ ...f, ref_type: e.target.value, ref_doc: '' })}><option value="WO">{t('mf.qa_ref_wo')}</option><option value="GR">{t('mf.qa_ref_gr')}</option></Select></div>
+          <div className="grid gap-1.5"><Label>{t('mf.qa_ref_doc')}</Label><DocSelect value={f.ref_doc} onValueChange={(v) => setF({ ...f, ref_doc: v })} options={refOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual /></div>
           <div className="grid gap-1.5"><Label>{t('mf.col_product')}</Label><Input value={f.item_id} onChange={(e) => setF({ ...f, item_id: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('mf.qa_inspected_label')}</Label><Input type="number" value={f.qty_inspected} onChange={(e) => setF({ ...f, qty_inspected: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>{t('mf.qa_passed')}</Label><Input type="number" value={f.qty_passed} onChange={(e) => setF({ ...f, qty_passed: e.target.value })} /></div>

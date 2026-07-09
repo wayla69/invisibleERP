@@ -94,6 +94,12 @@ export class PaymentsController {
     return this.svc.currentTill(u);
   }
 
+  // Pending list — recent till sessions for the /pos/close-of-day Z-report dropdown (pick, don't type).
+  @Get('till/sessions') @Permissions('pos_till', 'pos_close', 'ar')
+  tillSessions(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.listTillSessions(u, status);
+  }
+
   @Post('till/close') @Permissions('pos_till', 'ar')
   closeTill(@Body(new ZodValidationPipe(CloseTillBody)) b: CloseTillDto, @CurrentUser() u: JwtUser) {
     return this.svc.closeTill(b, u);

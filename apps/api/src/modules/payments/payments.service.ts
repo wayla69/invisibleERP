@@ -351,6 +351,16 @@ export class PaymentService {
 
   // GET /api/payments/till/current — the caller's tenant's current open till (or null). Lets the POS
   // login flow decide whether to open a shift, so "เข้าสู่ระบบ / เปิดกะ" never opens a duplicate.
+  // Pending list — recent till sessions; feeds the /pos/close-of-day session dropdown so the Z-report
+  // signer picks the TILL-… session instead of typing it. Read-only; RLS scopes to the caller's tenant.
+  async listTillSessions(_user: JwtUser, status?: string) {
+    const rows = await this.db
+      .select({ sessionNo: tillSessions.sessionNo, status: tillSessions.status, openedBy: tillSessions.openedBy, openedAt: tillSessions.openedAt, closedAt: tillSessions.closedAt, varianceStatus: tillSessions.varianceStatus })
+      .from(tillSessions).where(status === 'Open' || status === 'Closed' ? eq(tillSessions.status, status) : undefined)
+      .orderBy(desc(tillSessions.id)).limit(100);
+    return { sessions: rows.map((r: any) => ({ session_no: r.sessionNo, status: r.status, opened_by: r.openedBy, opened_at: r.openedAt, closed_at: r.closedAt, variance_status: r.varianceStatus })) };
+  }
+
   async currentTill(user: JwtUser): Promise<{ open: { id: number; session_no: string } | null }> {
     if (user.tenantId == null) return { open: null };
     const t = await this.currentOpenTill(Number(user.tenantId));

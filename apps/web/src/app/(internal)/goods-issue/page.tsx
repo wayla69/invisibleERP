@@ -14,6 +14,7 @@ import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
+import { DocSelect } from '@/components/doc-select';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -50,6 +51,9 @@ function MoveForm({ kind }: { kind: 'issue' | 'transfer' }) {
   const [fromLoc, setFromLoc] = useState('WH-MAIN');
   const [toLoc, setToLoc] = useState('');
   const [refDoc, setRefDoc] = useState('');
+  // Optional ref-doc pending list (open WOs; warehouse-permission-safe). SO/other refs go via manual entry.
+  const wosQ = useQuery<any>({ queryKey: ['wos-for-picker'], queryFn: () => api('/api/manufacturing/work-orders'), retry: false });
+  const refOptions = (wosQ.data?.work_orders ?? []).map((w: any) => ({ value: w.wo_no, label: [w.product_name, w.status].filter(Boolean).join(' · ') || undefined }));
   const [lines, setLines] = useState<Line[]>([]);
   const [itemId, setItemId] = useState('');
   const [qty, setQty] = useState('');
@@ -96,7 +100,7 @@ function MoveForm({ kind }: { kind: 'issue' | 'transfer' }) {
           )}
           <div className="grid gap-1.5">
             <Label htmlFor="gi-ref">{t('iv.gi_ref')}</Label>
-            <Input id="gi-ref" value={refDoc} onChange={(e) => setRefDoc(e.target.value)} placeholder="WO / SO / …" />
+            <DocSelect id="gi-ref" value={refDoc} onValueChange={setRefDoc} options={refOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="WO / SO / …" />
           </div>
         </div>
         <div className="grid gap-1.5">

@@ -101,6 +101,9 @@ async function main() {
   ok('POS-07: signed Z snapshots totals (counted 900, variance -7) + denominations (500×1,100×4)', near(sign.json.cash_counted, 900) && near(sign.json.variance, -7) && sign.json.denominations?.find((d: any) => d.denomination === 100)?.count === 4, JSON.stringify(sign.json.denominations));
   const reSign = await inj('POST', `/api/payments/till/${till.json.session_no}/z-report/sign`, sales1, {});
   ok('POS-07: re-sign is idempotent (already=true, same hash)', reSign.json.already === true && reSign.json.content_hash === sign.json.content_hash, `${reSign.json.already} ${reSign.json.content_hash === sign.json.content_hash}`);
+  // Pending-list feed for the /pos/close-of-day session dropdown (doc-reference dropdowns).
+  const sessList = await inj('GET', '/api/payments/till/sessions?status=Closed', sales1);
+  ok('till/sessions pending list returns the closed TILL-… session_no', sessList.status === 200 && (sessList.json.sessions ?? []).some((x: any) => x.session_no === till.json.session_no && x.status === 'Closed'), JSON.stringify((sessList.json.sessions ?? []).slice(0, 2)));
   const xzList = await inj('GET', '/api/payments/xz-reports', sales1);
   ok('POS-07: xz-reports list includes the signed Z', (xzList.json.reports ?? []).some((r: any) => r.id === sign.json.id && r.report_type === 'Z'), `n=${xzList.json.count}`);
   const fetched = await inj('GET', `/api/payments/xz-reports/${sign.json.id}`, sales1);

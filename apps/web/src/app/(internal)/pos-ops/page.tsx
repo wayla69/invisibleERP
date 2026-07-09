@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DocSelect } from '@/components/doc-select';
 import { statusVariant } from '@/components/ui';
 
 /** Labelled form field — a label tied to its control, with an optional helper line. */
@@ -109,6 +110,10 @@ function HouseAccounts() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['house-account'], queryFn: () => api('/api/pos/house-account') });
   const [f, setF] = useState({ sale_no: '', amount: '', due_date: '' });
+  // Recent POS sales — the bill is picked from a dropdown, not typed (manual escape kept).
+  const salesQ = useQuery<any>({ queryKey: ['pos-sales-for-picker'], queryFn: () => api('/api/pos/orders?limit=50'), retry: false });
+  const saleOptions = (salesQ.data?.orders ?? []).map((o: any) => ({ value: o.Sale_No, label: [o.Status, baht(o.Total)].filter(Boolean).join(' · ') || undefined }));
+
   const charge = useMutation({ mutationFn: () => api('/api/pos/house-account', { method: 'POST', body: JSON.stringify({ sale_no: f.sale_no, amount: Number(f.amount), due_date: f.due_date || undefined }) }), onSuccess: () => { notifySuccess(t('px.ops_house_saved')); setF({ sale_no: '', amount: '', due_date: '' }); qc.invalidateQueries({ queryKey: ['house-account'] }); }, onError: (e: any) => notifyError(e.message) });
   return (
     <div className="space-y-4">
@@ -116,7 +121,7 @@ function HouseAccounts() {
         <CardHeader><CardTitle className="text-base">{t('px.ops_house_title')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label={t('px.ops_bill_no')} htmlFor="h-sale"><Input id="h-sale" placeholder="SALE-…" value={f.sale_no} onChange={(e) => setF({ ...f, sale_no: e.target.value })} /></Field>
+            <Field label={t('px.ops_bill_no')} htmlFor="h-sale"><DocSelect id="h-sale" value={f.sale_no} onValueChange={(v) => setF({ ...f, sale_no: v })} options={saleOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="SALE-…" /></Field>
             <Field label={t('px.ops_amount_baht')} htmlFor="h-amt"><Input id="h-amt" type="number" inputMode="decimal" placeholder="0" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
             <Field label={t('px.ops_due_date')} htmlFor="h-due"><Input id="h-due" type="date" value={f.due_date} onChange={(e) => setF({ ...f, due_date: e.target.value })} /></Field>
           </div>

@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { DocSelect } from '@/components/doc-select';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { useLang } from '@/lib/i18n';
@@ -30,6 +31,9 @@ export default function ManufacturingPage() {
   const qc = useQueryClient();
   const q = useQuery<{ work_orders: Wo[]; count: number }>({ queryKey: ['work-orders'], queryFn: () => api('/api/manufacturing/work-orders') });
   const [bomCode, setBomCode] = useState('');
+  // BOM master pending list — the BOM is picked from a dropdown, not typed.
+  const bomsQ = useQuery<any>({ queryKey: ['boms-for-picker'], queryFn: () => api('/api/bom/master'), retry: false });
+  const bomOptions = (bomsQ.data?.boms ?? []).map((b: any) => ({ value: b.bom_code ?? b.bomCode, label: b.product_name ?? b.productName ?? undefined }));
   const [qty, setQty] = useState('');
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['work-orders'] });
@@ -61,7 +65,7 @@ export default function ManufacturingPage() {
       <Card className="mb-5 gap-3 p-5">
         <h3 className="text-base font-semibold">{t('mf.mfg_create')}</h3>
         <div className="flex flex-wrap items-end gap-3">
-          <div className="grid gap-1.5"><Label>{t('mf.mfg_bom_label')}</Label><Input value={bomCode} onChange={(e) => setBomCode(e.target.value)} placeholder="BOM-CAKE" className="w-44" /></div>
+          <div className="grid gap-1.5"><Label>{t('mf.mfg_bom_label')}</Label><DocSelect className="w-64" value={bomCode} onValueChange={setBomCode} options={bomOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="BOM-CAKE" /></div>
           <div className="grid gap-1.5"><Label>{t('mf.mfg_qty_label')}</Label><Input type="number" min="0" value={qty} onChange={(e) => setQty(e.target.value)} className="w-32" /></div>
           <Button onClick={() => create.mutate()} disabled={!bomCode || !qty || create.isPending}><Plus className="size-4" /> {t('mf.create')}</Button>
         </div>

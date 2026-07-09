@@ -151,7 +151,8 @@ From the tax-invoice detail you can submit electronically:
 
 > **Tip — the pluggable e-Invoicing screen (`/einvoice`):** its **doc-no** field is a
 > dropdown of your issued tax invoices — picking one also pre-fills the total (choose
-> **พิมพ์เลขเอกสารเอง…** to key another reference).
+> **พิมพ์เลขเอกสารเอง…** to key another reference). The **POS fiscal screen's e-Tax submit box**
+> (`/pos-fiscal`) offers the same issued-invoice dropdown.
 
 ### Configuring the digital certificate & provider (administrator)
 

@@ -167,6 +167,7 @@ flowchart TD
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.2 | 2026-07-09 | Platform | **Doc-reference dropdowns on the manufacturing screens (UI-only, no control change).** `/production` shop-floor picks the WO from `GET /api/manufacturing/work-orders` and the routing from `GET /api/routings`; the quality-inspection ref-doc dropdown switches source with the WO/GR toggle (WO list vs `GET /api/procurement/grs`); `/manufacturing` create-WO picks the BOM from `GET /api/bom/master`; `/goods-issue`'s optional ref offers the open-WO list. All existing reads via the shared `doc-select.tsx` island with a manual-entry escape; MFG-01/02 and posting logic unchanged. UAT `04-inventory-uat.md` UAT-INV-073. |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | D3: added step 5a — multi-level MRP (`/api/mrp/run`) + planned-buy → PR (`/api/mrp/plan-to-pr`), circular-BOM guard; verified by the `mrp` harness. |
 | 0.3 | 2026-06-23 | Platform | D3 (cont.): extended step 5a — opt-in lot-sizing (min-order-qty / order-multiple / EOQ; item fields in migration 0066) and rough-cut capacity planning (`/api/mrp/capacity`); verified by the `mrp` harness. |

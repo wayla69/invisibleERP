@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { useLang } from '@/lib/i18n';
 import { Select } from '@/components/form-controls';
+import { DocSelect } from '@/components/doc-select';
 
 
 function Field({ label, htmlFor, hint, className, children }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; className?: string; children: ReactNode }) {
@@ -49,6 +50,9 @@ function Terminals() {
   const intents = useQuery<any>({ queryKey: ['intents'], queryFn: () => api('/api/payments/terminal/intents') });
   const [frm, setFrm] = useState({ terminal_code: '', name: '' });
   const [c, setC] = useState({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false });
+  // Recent POS sales — the bill is picked from a dropdown, not typed (manual escape kept).
+  const salesQ = useQuery<any>({ queryKey: ['pos-sales-for-picker'], queryFn: () => api('/api/pos/orders?limit=50'), retry: false });
+  const saleOptions = (salesQ.data?.orders ?? []).map((o: any) => ({ value: o.Sale_No, label: [o.Status, baht(o.Total)].filter(Boolean).join(' · ') || undefined }));
   const refresh = () => { qc.invalidateQueries({ queryKey: ['terminals'] }); qc.invalidateQueries({ queryKey: ['intents'] }); };
   const reg = useMutation({ mutationFn: () => api('/api/payments/terminal/register', { method: 'POST', body: JSON.stringify({ terminal_code: frm.terminal_code, name: frm.name || undefined }) }), onSuccess: () => { notifySuccess(t('px.payterm_terminal_added')); setFrm({ terminal_code: '', name: '' }); refresh(); }, onError: (e: any) => notifyError(e.message) });
   const charge = useMutation({ mutationFn: () => api('/api/payments/terminal/charge', { method: 'POST', body: JSON.stringify({ terminal_code: c.terminal_code || undefined, amount: Number(c.amount), type: c.type, sale_no: c.sale_no || undefined, record_tender: c.record_tender }) }), onSuccess: (r: any) => { notifySuccess(`${r.intent_no} → ${r.status}${r.payment_no ? ` · tender ${r.payment_no}` : ''}`); setC({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false }); refresh(); }, onError: (e: any) => notifyError(e.message) });
@@ -76,7 +80,7 @@ function Terminals() {
                   <option value="sale">{t('px.payterm_opt_sale')}</option><option value="preauth">{t('px.payterm_opt_preauth')}</option>
                 </Select>
               </Field>
-              <Field label={t('px.payterm_sale_no_optional')} htmlFor="c-sale"><Input id="c-sale" placeholder="SALE-…" value={c.sale_no} onChange={(e) => setC({ ...c, sale_no: e.target.value })} /></Field>
+              <Field label={t('px.payterm_sale_no_optional')} htmlFor="c-sale"><DocSelect id="c-sale" value={c.sale_no} onValueChange={(v) => setC({ ...c, sale_no: v })} options={saleOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="SALE-…" /></Field>
             </div>
             <label className="flex items-center gap-2 text-sm" title={t('px.payterm_record_tender_title')}>
               <input type="checkbox" className="size-4 accent-primary" checked={c.record_tender} onChange={(e) => setC({ ...c, record_tender: e.target.checked })} /> {t('px.payterm_record_tender')}

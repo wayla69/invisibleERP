@@ -49,6 +49,22 @@ export class RealEstateService {
     return c;
   }
 
+  // ── Pending lists — the /realestate open-by-code boxes pick from these dropdowns instead of typing
+  // RED-/REC- numbers. Read-only; RLS scopes rows to the caller's tenant. ──
+  async listDevelopments() {
+    const rows = await this.db
+      .select({ devCode: reProjects.devCode, name: reProjects.name, status: reProjects.status })
+      .from(reProjects).orderBy(desc(reProjects.id)).limit(100);
+    return { developments: rows.map((r: any) => ({ dev_code: r.devCode, name: r.name, status: r.status })) };
+  }
+
+  async listContracts() {
+    const rows = await this.db
+      .select({ contractNo: reContracts.contractNo, buyerName: reContracts.buyerName, status: reContracts.status, price: reContracts.price })
+      .from(reContracts).orderBy(desc(reContracts.id)).limit(100);
+    return { contracts: rows.map((r: any) => ({ contract_no: r.contractNo, buyer_name: r.buyerName, status: r.status, price: n(r.price) })) };
+  }
+
   // ── D1 — property master & unit inventory ──
   async createDevelopment(dto: CreateDevDto, user: JwtUser) {
     await this.db.insert(reProjects).values({ tenantId: user.tenantId ?? null, devCode: dto.dev_code, name: dto.name, location: dto.location ?? null, sbtRate: dto.sbt_rate != null ? String(dto.sbt_rate) : null, status: 'active', createdBy: user.username });
