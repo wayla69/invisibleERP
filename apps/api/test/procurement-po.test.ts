@@ -256,4 +256,17 @@ describe('ProcurementPoService — getPoForPrint (VAT estimate only for a VAT-re
     expect(r.vat_amount).toBe(0);
     expect(r.grand_total).toBe(25);
   });
+
+  it('null-side mapping: an HQ caller (no tenant) with a name-only vendor gets the generic buyer block', async () => {
+    const bare = { id: 1, poNo: 'PO-9', poDate: null, status: null, vendorId: null, vendorName: 'ร้านค้าปากซอย', currency: null, remarks: null, createdBy: null, approvedBy: null, approvedAt: null, expectedDate: null };
+    const line = { itemId: null, itemDescription: null, orderQty: '2', unitPrice: '10', amount: null, uom: null }; // amount null → qty×price fallback
+    // strict routes: po → lines only — NO vendor select (vendorId null), NO tenant select (tenantId null)
+    const { svc } = poEnv([[bare], [line]]);
+    const r = await svc.getPoForPrint('PO-9', { username: 'hq', tenantId: null } as any);
+    expect(r.buyer).toMatchObject({ name: 'บริษัทของฉัน', address: '-', tax_id: null, branch_label: 'สำนักงานใหญ่' });
+    expect(r.vendor.name).toBe('ร้านค้าปากซอย'); // falls back to the PO header's captured name
+    expect(r.lines[0].amount).toBe(20);
+    expect(r.vat_rate).toBe(0); // no tenant → never fabricate VAT
+    expect(r.currency).toBe('THB');
+  });
 });

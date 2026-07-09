@@ -137,6 +137,29 @@ describe('LedgerRecurringService — createRecurring/createPrepaid happy paths (
   });
 });
 
+describe('LedgerRecurringService — listing mappings (GL-08/GL-09 registers)', () => {
+  it('listRecurring maps a template row (active flag from the string column, both null-sides of last-run)', async () => {
+    const { db, post } = sweepEnv([{
+      id: 3, name: 'rent', frequency: 'monthly', memo: null, ledgerCode: null, currency: 'THB',
+      lines: TEMPLATE_LINES, active: 'true', nextRunDate: '2026-08-01', lastRunDate: null, lastEntryNo: null, createdBy: 'maker1',
+    }]);
+    const svc = new LedgerRecurringService(db as any, docNo, post);
+    const r = await svc.listRecurring(1);
+    expect(r.count).toBe(1);
+    expect(r.recurring[0]).toMatchObject({ id: 3, name: 'rent', active: true, next_run_date: '2026-08-01', last_run_date: null, last_entry_no: null });
+  });
+
+  it('listPrepaid derives the remaining balance (total − amortized) per schedule', async () => {
+    const { db, post } = sweepEnv([{
+      id: 5, scheduleNo: 'PPD-5', name: 'ins', totalAmount: '1200', months: 12, amortizedAmount: '300',
+      periodsPosted: 3, expenseAccount: '5100', nextRunDate: '2026-08-01', status: 'active',
+    }]);
+    const svc = new LedgerRecurringService(db as any, docNo, post);
+    const r = await svc.listPrepaid();
+    expect(r.schedules[0]).toMatchObject({ schedule_no: 'PPD-5', total_amount: 1200, amortized_amount: 300, remaining: 900, periods_posted: 3, status: 'active' });
+  });
+});
+
 describe('LedgerRecurringService — runDueRecurring sweep (GL-08, Draft + idempotent)', () => {
   const today = ymd();
   const rec = (id: number, frequency: string, extra: any = {}) => ({

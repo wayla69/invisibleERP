@@ -76,3 +76,35 @@ describe('wht-rates (ม.40 / 3 เตรส lookup + ภ.ง.ด. routing)', ()
     expect(incomeType('3tre-transport')?.rate.company).toBe(0.01);
   });
 });
+
+// ── TaxController (2.4 slice 8) — the one controller in the gated tax set with composition logic:
+// providers() samples each supported country's resolved provider to surface its label + rate.
+import { TaxController } from '../src/modules/tax/tax.controller';
+
+describe('TaxController — thin routing + the providers() composition', () => {
+  const svc = {
+    calcTax: (q: any) => ({ echoed: q }),
+    supportedCountries: () => ['TH', 'SG'],
+    resolveProvider: (c: string) => ({ calc: ({ net }: any) => ({ label: `VAT-${c}`, rate: c === 'TH' ? 0.07 : 0.09, net }) }),
+    currencies: () => [{ code: 'THB', decimals: 2 }],
+  };
+  const ctl = new TaxController(svc as any);
+
+  it('calc delegates the validated query to the service', () => {
+    expect(ctl.calc({ net: 100 } as any)).toEqual({ echoed: { net: 100 } });
+  });
+
+  it('providers samples each country at net=100 and surfaces label + rate', () => {
+    expect(ctl.providers()).toEqual({
+      countries: ['TH', 'SG'],
+      providers: [
+        { country: 'TH', label: 'VAT-TH', rate: 0.07 },
+        { country: 'SG', label: 'VAT-SG', rate: 0.09 },
+      ],
+    });
+  });
+
+  it('currencies wraps the ISO catalogue', () => {
+    expect(ctl.currencies()).toEqual({ currencies: [{ code: 'THB', decimals: 2 }] });
+  });
+});
