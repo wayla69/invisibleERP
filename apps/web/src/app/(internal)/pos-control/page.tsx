@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Select } from '@/components/form-controls';
+import { DocSelect } from '@/components/doc-select';
 
 
 const ACTION_OPTS: string[] = ['void', 'discount', 'price_override', 'no_sale', 'return'];
@@ -147,6 +148,9 @@ function Overrides() {
   const [f, setF] = useState({ action: 'discount', sale_no: '', amount: '', reason: '', approved_by: '' });
   const [msg, setMsg] = useState('');
   const [voidAsk, setVoidAsk] = useState(false);
+  // Recent POS sales — the bill is picked from a dropdown, not typed (manual escape kept).
+  const salesQ = useQuery<any>({ queryKey: ['pos-sales-for-picker'], queryFn: () => api('/api/pos/orders?limit=50'), retry: false });
+  const saleOptions = (salesQ.data?.orders ?? []).map((o: any) => ({ value: o.Sale_No, label: [o.Status, baht(o.Total)].filter(Boolean).join(' · ') || undefined }));
   const isVoid = f.action === 'void';
   const ACTION_LABELS: Record<string, string> = { void: t('px.ctrl_action_void'), discount: t('px.ctrl_action_discount'), price_override: t('px.ctrl_action_price_override'), no_sale: t('px.ctrl_action_no_sale'), return: t('px.ctrl_action_return') };
   const actionLabel = (v: string) => ACTION_LABELS[v] ?? v;
@@ -164,7 +168,7 @@ function Overrides() {
             <Field label={t('px.ctrl_type')} htmlFor="ov-action">
               <Select id="ov-action"  value={f.action} onChange={(e) => setF({ ...f, action: e.target.value })}>{ACTION_OPTS.map((v) => <option key={v} value={v}>{actionLabel(v)}</option>)}</Select>
             </Field>
-            <Field label={t('px.ctrl_bill_no')} htmlFor="ov-sale"><Input id="ov-sale" placeholder="SALE-…" value={f.sale_no} onChange={(e) => setF({ ...f, sale_no: e.target.value })} /></Field>
+            <Field label={t('px.ctrl_bill_no')} htmlFor="ov-sale"><DocSelect id="ov-sale" value={f.sale_no} onValueChange={(v) => setF({ ...f, sale_no: v })} options={saleOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="SALE-…" /></Field>
             <Field label={t('px.ctrl_amount_baht')} htmlFor="ov-amt"><Input id="ov-amt" type="number" inputMode="decimal" placeholder="0" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
             <Field label={<>{t('px.ctrl_reason')} {isVoid && <span className="text-destructive">*</span>}</>} htmlFor="ov-reason"><Input id="ov-reason" placeholder={t('px.ctrl_reason_ph')} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></Field>
             <Field label={<>{t('px.ctrl_approver')} {isVoid && <span className="text-destructive">*</span>}</>} htmlFor="ov-appr"><Input id="ov-appr" placeholder={t('px.ctrl_approver_ph')} value={f.approved_by} onChange={(e) => setF({ ...f, approved_by: e.target.value })} /></Field>

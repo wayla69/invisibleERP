@@ -12,6 +12,7 @@ import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DocSelect } from '@/components/doc-select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { thaiDateTime } from '@/lib/format';
@@ -68,6 +69,10 @@ export default function PrintPage() {
     onSuccess: () => { notifySuccess(t('px.print_reprint_ok', { saleNo })); qc.invalidateQueries({ queryKey: ['print-jobs'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
+  // Recent POS sales — the bill is picked from a dropdown, not typed (manual escape kept).
+  const salesQ = useQuery<any>({ queryKey: ['pos-sales-for-picker'], queryFn: () => api('/api/pos/orders?limit=50'), retry: false });
+  const saleOptions = (salesQ.data?.orders ?? []).map((o: any) => ({ value: o.Sale_No, label: o.Status || undefined }));
+
   const send = useMutation({
     mutationFn: (b: { sale_no: string; channel: SendChannel; to: string }) => api(`/api/print/receipt/${encodeURIComponent(b.sale_no)}/send`, { method: 'POST', body: JSON.stringify({ channel: b.channel, to: b.to }) }),
     onSuccess: () => notifySuccess(t('px.print_sent_ok', { channel: channelLabel(channel), to })),
@@ -84,7 +89,7 @@ export default function PrintPage() {
           <CardContent className="space-y-3">
             <div>
               <Label>{t('px.print_saleno_label')}</Label>
-              <Input value={saleNo} onChange={(e) => setSaleNo(e.target.value.trim())} placeholder="SALE-T1-…" />
+              <DocSelect value={saleNo} onValueChange={(v) => setSaleNo(v.trim())} options={saleOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="SALE-T1-…" />
             </div>
             <div>
               <Label>{t('px.print_lang_label')}</Label>

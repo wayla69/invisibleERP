@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/form-controls';
+import { DocSelect } from '@/components/doc-select';
 
 // Returns register (REV-07): tenant-wide view of POS returns/refunds for ops · finance · audit —
 // refund method, amount, restocked status, GL journal + credit-note links, with a per-return drill-down.
@@ -221,6 +222,12 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
     onError: (e: any) => setErr(e?.message ?? t('hx.common.error')),
   });
 
+  // Recent POS sales — the returned bill is picked from a dropdown, not typed (manual escape kept).
+  const salesQ = useQuery<any>({ queryKey: ['pos-sales-for-return'], queryFn: () => api('/api/pos/orders?limit=50'), retry: false });
+  const saleOptions = (salesQ.data?.orders ?? [])
+    .filter((o: any) => o.Status !== 'Voided')
+    .map((o: any) => ({ value: o.Sale_No, label: [o.Status, `฿${num(o.Total)}`].filter(Boolean).join(' · ') || undefined }));
+
   const doSearch = () => {
     const v = saleNo.trim();
     if (!v) return;
@@ -268,11 +275,14 @@ function CreateReturnDialog({ onClose, onDone }: { onClose: () => void; onDone: 
             <div className="space-y-1.5">
               <Label>{t('hx.ret.sale_no_label')}</Label>
               <div className="flex gap-2">
-                <Input
-                  placeholder="SALE-0001-xxxxxx"
+                <DocSelect
                   value={saleNo}
-                  onChange={(e) => setSaleNo(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') doSearch(); }}
+                  onValueChange={(v) => { setSaleNo(v); if (v) { setItems([]); setResult(null); setErr(''); setSearched(v.trim()); } }}
+                  options={saleOptions}
+                  placeholder={t('common.doc_select_ph')}
+                  emptyText={t('common.doc_none')}
+                  allowManual
+                  manualPlaceholder="SALE-0001-xxxxxx"
                 />
                 <Button variant="outline" onClick={doSearch} disabled={saleQ.isFetching}>
                   {saleQ.isFetching ? t('hx.ret.searching') : t('hx.ret.search_btn')}

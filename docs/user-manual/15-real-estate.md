@@ -39,8 +39,14 @@ liability moves to revenue) and the unit's construction **cost is relieved** —
 **cost** when adding it so the cost is matched at transfer. Scheduled jobs handle **booking expiry** and an
 **overdue‑installment** worklist automatically.
 
+> **Open by dropdown, not by typing:** on `/realestate` the **เปิดโครงการ (RED-…)** and
+> **ดูสัญญา (REC-…)** boxes are dropdowns fed by the new read-only lists
+> `GET /api/realestate/developments` and `GET /api/realestate/contracts` (name/buyer + status
+> shown; **พิมพ์เลขเอกสารเอง…** to key a code manually).
+
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 1.2 | 2026-07-09 | **Doc-reference dropdowns** — the open-development / view-contract boxes pick from new read-only pending lists `GET /api/realestate/developments` + `GET /api/realestate/contracts` (UI + read-only additions, controls RE-01..04 unchanged). ToE `projects` harness. |
 | 1.1 | 2026-07-05 | **Ownership transfer + revenue recognition** (docs/35 P5, RE-04) — authorised, fully-settled-only transfer recognises the sale revenue and relieves the unit cost; unit `cost` field added. Scheduled booking-expiry + overdue-installment jobs. |
 | 1.0 | 2026-07-05 | Initial — real-estate developer unit-sales (docs/35 P4): developments/units + availability grid (RE-01), booking, maker-checker sale contract (RE-02), installments (RE-03). Ownership transfer + a dedicated web workspace are a fast-follow. |

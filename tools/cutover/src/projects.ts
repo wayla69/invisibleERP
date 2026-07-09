@@ -864,6 +864,11 @@ async function main() {
   ok('RE-02: draft contract → price 900000 (1,000,000 − 100,000), balance 700000, draft (no GL)',
     rc1.status < 300 && rc1.json.status === 'draft' && near(rc1.json.price, 900000) && near(rc1.json.balance, 700000), JSON.stringify({ st: rc1.json.status, p: rc1.json.price }));
   const rc1No = rc1.json.contract_no;
+  // Pending-list feeds for the /realestate open-by-code dropdowns (doc-reference dropdowns).
+  const devList = await inj('GET', '/api/realestate/developments', admin);
+  ok('RE: developments pending list includes RED-1 (dev_code + name)', devList.status === 200 && (devList.json.developments ?? []).some((d: any) => d.dev_code === 'RED-1' && d.name === 'เดอะ คอนโด'), JSON.stringify(devList.json.developments ?? []));
+  const conList = await inj('GET', '/api/realestate/contracts', admin);
+  ok('RE: contracts pending list includes the draft REC- contract', conList.status === 200 && (conList.json.contracts ?? []).some((x: any) => x.contract_no === rc1No && x.status === 'draft'), JSON.stringify((conList.json.contracts ?? []).slice(0, 2)));
   const rc1Self = await inj('POST', `/api/realestate/contracts/${rc1No}/approve`, admin);
   ok('RE-02: drafter self-approves the contract → 400 SOD_SELF_APPROVAL', rc1Self.status === 400 && rc1Self.json.error?.code === 'SOD_SELF_APPROVAL', `${rc1Self.status} ${rc1Self.json.error?.code}`);
   const rc1Appr = await inj('POST', `/api/realestate/contracts/${rc1No}/approve`, mgr);

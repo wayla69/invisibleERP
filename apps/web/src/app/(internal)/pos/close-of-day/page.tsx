@@ -11,9 +11,9 @@ import { PageHeader } from '@/components/page-header';
 import { DataTable, type Column } from '@/components/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DocSelect } from '@/components/doc-select';
 
 type XzReport = {
   id: number; till_session_id: number; report_type: string; status: string; generated_by: string;
@@ -30,6 +30,10 @@ export default function CloseOfDayPage() {
     queryKey: ['xz-reports'],
     queryFn: () => api('/api/payments/xz-reports'),
   });
+
+  // Closed till sessions — the Z-report target is picked from a dropdown (new GET till/sessions), not typed.
+  const sessQ = useQuery<any>({ queryKey: ['till-sessions', 'Closed'], queryFn: () => api('/api/payments/till/sessions?status=Closed'), retry: false });
+  const sessOptions = (sessQ.data?.sessions ?? []).map((x: any) => ({ value: x.session_no, label: [x.opened_by, x.variance_status !== 'NotRequired' ? x.variance_status : null].filter(Boolean).join(' · ') || undefined }));
 
   const sign = useMutation({
     mutationFn: (s: string) => api(`/api/payments/till/${encodeURIComponent(s)}/z-report/sign`, { method: 'POST', body: JSON.stringify({}) }),
@@ -67,7 +71,7 @@ export default function CloseOfDayPage() {
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-1.5">
               <Label htmlFor="sess">{t('px.cod_sess_label')}</Label>
-              <Input id="sess" value={sessionNo} onChange={(e) => setSessionNo(e.target.value)} placeholder="TILL-20260626-001" className="w-64" />
+              <DocSelect id="sess" className="w-72" value={sessionNo} onValueChange={setSessionNo} options={sessOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="TILL-20260626-001" />
             </div>
             <Button disabled={!sessionNo || sign.isPending} onClick={() => sign.mutate(sessionNo)}>
               <ReceiptText className="mr-1.5 h-4 w-4" />{sign.isPending ? t('px.cod_signing') : t('px.cod_sign_btn')}

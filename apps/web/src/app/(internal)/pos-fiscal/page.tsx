@@ -12,6 +12,7 @@ import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
+import { DocSelect } from '@/components/doc-select';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -60,6 +61,10 @@ function Etax() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['etax'], queryFn: () => api('/api/tax/etax?limit=100') });
   const [docNo, setDocNo] = useState('');
+  // Issued tax invoices — the submit target is picked from a dropdown, not typed (manual escape kept;
+  // roles without the tax-invoice list permission fall back to manual entry).
+  const invsQ = useQuery<any>({ queryKey: ['etax-tax-invs'], queryFn: () => api('/api/tax-invoices'), retry: false });
+  const docOptions = (invsQ.data?.invoices ?? []).map((i: any) => ({ value: i.doc_no, label: [i.type, i.buyer?.name].filter(Boolean).join(' · ') || undefined }));
   const submit = useMutation({
     mutationFn: (doc: string) => api(`/api/tax/etax/submit/${doc}`, { method: 'POST', body: JSON.stringify({}) }),
     onSuccess: (r: any) => { notifySuccess(`${r.doc_no} → ${r.status}${r.idempotent ? ` (${t('px.fiscal_resubmit')})` : ''}`); qc.invalidateQueries({ queryKey: ['etax'] }); },
@@ -75,7 +80,7 @@ function Etax() {
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">{t('px.fiscal_etax_heading')}</h3>
         <div className="flex flex-wrap gap-2">
-          <Input className="max-w-[240px]" placeholder={t('px.fiscal_docno_ph')} value={docNo} onChange={(e) => setDocNo(e.target.value)} />
+          <DocSelect className="w-[260px]" value={docNo} onValueChange={setDocNo} options={docOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder={t('px.fiscal_docno_ph')} />
           <Button disabled={!docNo || submit.isPending} onClick={() => submit.mutate(docNo)}><Send className="size-4" /> {t('px.fiscal_submit')}</Button>
           <Button variant="outline" disabled={retryAll.isPending} onClick={() => retryAll.mutate()}><RefreshCw className="size-4" /> {t('px.fiscal_retry_all')}</Button>
         </div>

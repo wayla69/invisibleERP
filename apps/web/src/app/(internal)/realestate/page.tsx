@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DocSelect } from '@/components/doc-select';
 
 const unitTone: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = { available: 'default', reserved: 'outline', contracted: 'secondary', transferred: 'destructive' };
 
@@ -28,16 +29,21 @@ export default function RealEstatePage() {
   const [active, setActive] = useState('');
   const [contractNo, setContractNo] = useState('');
   const units = useQuery<any>({ queryKey: ['re-units', active], queryFn: () => api(`/api/realestate/developments/${active}/units`), enabled: !!active });
+  // Pending lists (new read-only GETs) — developments/contracts are picked from dropdowns, not typed.
+  const devsQ = useQuery<any>({ queryKey: ['re-devs'], queryFn: () => api('/api/realestate/developments'), retry: false });
+  const devOptions = (devsQ.data?.developments ?? []).map((d: any) => ({ value: d.dev_code, label: [d.name, d.status].filter(Boolean).join(' · ') || undefined }));
+  const contractsQ = useQuery<any>({ queryKey: ['re-contracts'], queryFn: () => api('/api/realestate/contracts'), retry: false });
+  const contractOptions = (contractsQ.data?.contracts ?? []).map((x: any) => ({ value: x.contract_no, label: [x.buyer_name, x.status].filter(Boolean).join(' · ') || undefined }));
   const contract = useQuery<any>({ queryKey: ['re-contract', contractNo], queryFn: () => api(`/api/realestate/contracts/${contractNo}`), enabled: !!contractNo });
   const [dev, setDev] = useState({ dev_code: '', name: '', location: '' });
   const [unit, setUnit] = useState({ unit_no: '', unit_type: 'condo', area_sqm: '', list_price: '', cost: '' });
   const refreshUnits = () => qc.invalidateQueries({ queryKey: ['re-units', active] });
   const refreshContract = () => qc.invalidateQueries({ queryKey: ['re-contract', contractNo] });
 
-  const createDev = useMutation({ mutationFn: () => api('/api/realestate/developments', { method: 'POST', body: JSON.stringify(dev) }), onSuccess: () => { notifySuccess(t('cx.re_toast_dev')); setActive(dev.dev_code); setDev({ dev_code: '', name: '', location: '' }); }, onError: (e: any) => notifyError(e.message) });
+  const createDev = useMutation({ mutationFn: () => api('/api/realestate/developments', { method: 'POST', body: JSON.stringify(dev) }), onSuccess: () => { notifySuccess(t('cx.re_toast_dev')); setActive(dev.dev_code); setDev({ dev_code: '', name: '', location: '' }); qc.invalidateQueries({ queryKey: ['re-devs'] }); }, onError: (e: any) => notifyError(e.message) });
   const addUnit = useMutation({ mutationFn: () => api(`/api/realestate/developments/${active}/units`, { method: 'POST', body: JSON.stringify({ unit_no: unit.unit_no, unit_type: unit.unit_type, area_sqm: Number(unit.area_sqm) || 0, list_price: Number(unit.list_price) || 0, cost: Number(unit.cost) || 0 }) }), onSuccess: () => { notifySuccess(t('cx.re_toast_unit')); setUnit({ unit_no: '', unit_type: 'condo', area_sqm: '', list_price: '', cost: '' }); refreshUnits(); }, onError: (e: any) => notifyError(e.message) });
   const book = useMutation({ mutationFn: (v: { unit_no: string; deposit: number }) => api('/api/realestate/bookings', { method: 'POST', body: JSON.stringify({ dev_code: active, unit_no: v.unit_no, deposit: v.deposit }) }), onSuccess: () => { notifySuccess(t('cx.re_toast_book')); refreshUnits(); }, onError: (e: any) => notifyError(e.message) });
-  const contractM = useMutation({ mutationFn: (v: { unit_no: string; discount: number; down: number; inst: number }) => api('/api/realestate/contracts', { method: 'POST', body: JSON.stringify({ dev_code: active, unit_no: v.unit_no, discount: v.discount, down_payment: v.down, installment_count: v.inst }) }), onSuccess: (d: any) => { notifySuccess(t('cx.re_toast_contract', { no: d.contract_no })); setContractNo(d.contract_no); refreshUnits(); }, onError: (e: any) => notifyError(e.message) });
+  const contractM = useMutation({ mutationFn: (v: { unit_no: string; discount: number; down: number; inst: number }) => api('/api/realestate/contracts', { method: 'POST', body: JSON.stringify({ dev_code: active, unit_no: v.unit_no, discount: v.discount, down_payment: v.down, installment_count: v.inst }) }), onSuccess: (d: any) => { notifySuccess(t('cx.re_toast_contract', { no: d.contract_no })); setContractNo(d.contract_no); refreshUnits(); qc.invalidateQueries({ queryKey: ['re-contracts'] }); }, onError: (e: any) => notifyError(e.message) });
   const approve = useMutation({ mutationFn: (no: string) => api(`/api/realestate/contracts/${no}/approve`, { method: 'POST' }), onSuccess: () => { notifySuccess(t('cx.re_toast_approve')); refreshContract(); refreshUnits(); }, onError: (e: any) => notifyError(e.message) });
   const pay = useMutation({ mutationFn: (v: { id: number; amount: number }) => api(`/api/realestate/installments/${v.id}/pay`, { method: 'POST', body: JSON.stringify({ amount: v.amount }) }), onSuccess: () => { notifySuccess(t('cx.re_toast_pay')); refreshContract(); }, onError: (e: any) => notifyError(e.message) });
   const transfer = useMutation({ mutationFn: (no: string) => api(`/api/realestate/contracts/${no}/transfer`, { method: 'POST' }), onSuccess: () => { notifySuccess(t('cx.re_toast_transfer')); refreshContract(); refreshUnits(); }, onError: (e: any) => notifyError(e.message) });
@@ -59,7 +65,7 @@ export default function RealEstatePage() {
           <div><Button onClick={() => createDev.mutate()} disabled={!dev.dev_code || !dev.name || createDev.isPending}><Plus className="size-4" /> {t('cx.re_btn_devcreate')}</Button></div>
         </Card>
         <Card className="flex flex-wrap items-end gap-3 p-5">
-          <div className="grid gap-1.5"><Label>{t('cx.re_open')}</Label><Input value={devCode} onChange={(e) => setDevCode(e.target.value)} placeholder="RED-…" /></div>
+          <div className="grid gap-1.5"><Label>{t('cx.re_open')}</Label><DocSelect className="w-64" value={devCode} onValueChange={(v) => { setDevCode(v); if (v) setActive(v.trim()); }} options={devOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="RED-…" /></div>
           <Button variant="outline" onClick={() => setActive(devCode.trim())} disabled={!devCode.trim()}><Search className="size-4" /> {t('cx.re_btn_open')}</Button>
         </Card>
       </div>
@@ -107,7 +113,7 @@ export default function RealEstatePage() {
 
           <Card className="mt-5 gap-3 p-5">
             <div className="flex flex-wrap items-end gap-3">
-              <div className="grid gap-1.5"><Label>{t('cx.re_contract_view')}</Label><Input value={contractNo} onChange={(e) => setContractNo(e.target.value)} placeholder="REC-…" /></div>
+              <div className="grid gap-1.5"><Label>{t('cx.re_contract_view')}</Label><DocSelect className="w-72" value={contractNo} onValueChange={setContractNo} options={contractOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="REC-…" /></div>
             </div>
             {c && (
               <div className="grid gap-3">
