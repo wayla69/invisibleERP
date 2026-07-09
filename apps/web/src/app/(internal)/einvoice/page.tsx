@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { useLang } from '@/lib/i18n';
 import { DataTable } from '@/components/data-table';
+import { selectCls } from '@/components/form-controls';
 
 type Provider = { key: string; country: string; label: string };
 type Sub = { id: number; doc_ref: string; provider: string; status: string; ref: string };
@@ -41,7 +42,7 @@ export default function EInvoicePage() {
           <CardContent className="space-y-3">
             <StateView q={provs}>
               <div className="grid gap-1"><Label>{t('mx.ei_provider')}</Label>
-                <select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={cfg.data?.provider ?? 'stub'} onChange={(e) => setProv.mutate(e.target.value)}>
+                <select className={selectCls} value={cfg.data?.provider ?? 'stub'} onChange={(e) => setProv.mutate(e.target.value)}>
                   {(provs.data?.providers ?? []).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
                 </select>
               </div>

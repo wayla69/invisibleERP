@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Msg } from '@/components/tabs';
+import { selectCls } from '@/components/form-controls';
+import { cn } from '@/lib/utils';
 
 type CObject = { object_key: string; label: string };
 type FieldDef = { field_key: string; label: string; data_type: string; required?: boolean };
@@ -85,7 +87,7 @@ export default function ObjectLayoutsPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Label htmlFor="obj" className="text-sm">{t('st.ol.object')}</Label>
-        <select id="obj" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={selKey} onChange={(e) => setSelKey(e.target.value)}>
+        <select id="obj" className={cn(selectCls, 'w-auto')} value={selKey} onChange={(e) => setSelKey(e.target.value)}>
           <option value="">{t('st.ol.select_ph')}</option>
           {(objects.data?.objects ?? []).map((o) => <option key={o.object_key} value={o.object_key}>{o.label} (/{o.object_key})</option>)}
         </select>

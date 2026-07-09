@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
+import { selectCls } from '@/components/form-controls';
 
 type Theme = { primary_hue: number; radius: string; brand_name: string; logo_url: string; tagline: string; primary_css: string; radius_css: string };
 const RADIUS: Record<string, string> = { sm: '0.375rem', md: '0.625rem', lg: '0.875rem' };
@@ -45,7 +46,7 @@ export default function ThemePage() {
                   <input type="range" min={0} max={360} value={t.primary_hue} onChange={(e) => upd('primary_hue', Number(e.target.value))} />
                 </div>
                 <div className="grid gap-1"><Label>{tr('mx.thm_radius')}</Label>
-                  <select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={t.radius} onChange={(e) => upd('radius', e.target.value)}>
+                  <select className={selectCls} value={t.radius} onChange={(e) => upd('radius', e.target.value)}>
                     <option value="sm">{tr('mx.thm_radius_sm')}</option><option value="md">{tr('mx.thm_radius_md')}</option><option value="lg">{tr('mx.thm_radius_lg')}</option>
                   </select>
                 </div>

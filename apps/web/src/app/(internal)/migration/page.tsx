@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
+import { selectCls } from '@/components/form-controls';
 
 type Sources = { sources: { key: string; label: string }[]; entities: { key: string; required: string[] }[] };
 type Result = { total: number; valid: number; errors: { row: number; missing: string[] }[] };
@@ -36,8 +37,8 @@ export default function MigrationPage() {
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Upload className="size-4 text-primary" /> {t('mx.mig_import_from')}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <div className="flex gap-3">
-              <div className="grid gap-1"><Label>{t('mx.mig_source')}</Label><select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={source} onChange={(e) => setSource(e.target.value)}>{(meta.data?.sources ?? []).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
-              <div className="grid gap-1"><Label>{t('mx.mig_type')}</Label><select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={entity} onChange={(e) => setEntity(e.target.value)}>{(meta.data?.entities ?? []).map((en) => <option key={en.key} value={en.key}>{en.key}</option>)}</select></div>
+              <div className="grid gap-1"><Label>{t('mx.mig_source')}</Label><select className={selectCls} value={source} onChange={(e) => setSource(e.target.value)}>{(meta.data?.sources ?? []).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
+              <div className="grid gap-1"><Label>{t('mx.mig_type')}</Label><select className={selectCls} value={entity} onChange={(e) => setEntity(e.target.value)}>{(meta.data?.entities ?? []).map((en) => <option key={en.key} value={en.key}>{en.key}</option>)}</select></div>
             </div>
             <div className="grid gap-1"><Label>{t('mx.mig_data_json')}</Label><textarea className="min-h-40 rounded-md border bg-transparent p-3 font-mono text-xs" value={text} onChange={(e) => setText(e.target.value)} /></div>
             <Button disabled={run.isPending} onClick={() => run.mutate()}>{run.isPending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} {t('mx.mig_validate')}</Button>

@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { selectCls } from '@/components/form-controls';
 
 const thisMonth = () => new Date().toISOString().slice(0, 7); // YYYY-MM
 
@@ -95,7 +96,7 @@ function Employees() {
           <div className="grid gap-1.5">
             <Label>{t('hr.sso_eligible')}</Label>
             <select
-              className="h-9 rounded-md border bg-transparent px-3 text-sm"
+              className={selectCls}
               value={f.sso_eligible ? '1' : '0'}
               onChange={(e) => setF({ ...f, sso_eligible: e.target.value === '1' })}
             >
