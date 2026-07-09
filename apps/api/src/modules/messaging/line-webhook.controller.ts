@@ -22,6 +22,7 @@ import { PmrService } from '../pmr/pmr.service';
 import { NlAnalyticsService } from '../nl-analytics/nl-analytics.service';
 import { llmClient } from '../../common/llm-client';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { aiTenantOptedOut } from '../../common/ai-consent';
 import { DIGEST_KPIS, DEFAULT_DIGEST_KPIS, allowedDigestKpis } from '../bi/digest-kpis';
 import { z } from 'zod';
 
@@ -988,6 +989,7 @@ export class LineWebhookService {
 
   private async copilotLlm(tenantId: number, t: string): Promise<CopilotDraft | null> {
     if (aiDpaBlocked() || !process.env.ANTHROPIC_API_KEY) return null;
+    if (await aiTenantOptedOut(this.db, tenantId)) return null; // PDPA opt-out → keyword parser only
     if (this.llmCapped(tenantId)) return null;
     try {
       const res: any = await llmClient(process.env.ANTHROPIC_API_KEY).create({

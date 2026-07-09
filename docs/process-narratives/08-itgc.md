@@ -122,6 +122,19 @@ trail stays byte-intact (read-time pseudonymisation), transactional facts (point
 `cutover/pdpa.ts` (default-off, floor, dry-run, aged-vs-recent, idempotency) + `cutover/bi.ts` (scheduled
 wiring, opt-in no-op).
 
+8d. **Per-tenant AI-processing disclosure + opt-out (PDPA มาตรา 27/30).** Layered UNDER the platform-level
+Anthropic DPA gate (`aiDpaBlocked()`): a company admin (`md_config`/`exec`) can turn OFF the
+`ai_external_processing` feature flag (Settings › Labs & AI — the flag's description **is** the PDPA
+disclosure of what data goes to the external AI provider) and from that moment **no AI surface transmits
+that tenant's data** to the provider. `common/ai-consent.ts` (`aiTenantOptedOut`) is consulted by every
+transmit site — the AI assistant chat/stream (raises **`AI_TENANT_OPTED_OUT`**), NL analytics (keyword
+mapping), config-assist (deterministic template), document AI (rule extraction; scanned docs queue for
+human review), analytics insights (rule-based narrative), the LINE chat copilot (keyword parser), and the
+semantic embedder (local embeddings). Default = allowed (no override row); infra error on the flag read
+falls back to the default — the platform DPA gate remains the fail-closed hard stop. Reinforces PDPA-01..04
+posture (right to object); *tenant preference, not an ICFR key control — no RCM change.* ToE:
+`cutover/ai-eval.ts` layer 4 (flag off → `AI_TENANT_OPTED_OUT` before any LLM call; flag restored → flows).
+
 9. **Outbound integration webhooks (egress).** An admin (`users`) registers tenant-scoped subscriber endpoints (`/api/platform/webhooks`) for business events (`po.approved`, `po.rejected`, `alert.fired`); the per-endpoint signing secret is generated server-side and **AES-256-GCM encrypted at rest** (returned in plaintext only once at registration) (**ITGC-AC-04**). Each delivery POSTs a payload **signed `HMAC-SHA256(secret, `${timestamp}.${body}`)`** in `X-IERP-Signature` with `X-IERP-Timestamp`/`X-IERP-Delivery` so a receiver can verify authenticity, reject stale calls (>300s) and dedupe — the same signing scheme as the inbound PSP/aggregator webhooks (step 4). Delivery is **bounded by a 10s timeout** (a hung subscriber can't block the request), every attempt is recorded in `webhook_deliveries` (status / status_code / attempts / error — an egress audit log) with a capped retry (`dispatch` re-runs failed deliveries; `redeliver` re-sends one), and endpoint visibility + the delivery log are **tenant-scoped** (an endpoint by RLS, its deliveries via the FK join). Best-effort and read-only with respect to the ledger — emitting an event **posts no GL** and a failed delivery never fails the business transaction. *Operational integration egress — no new RCM control.*
 
 10. **Federated identity — SSO (OIDC) + SCIM provisioning (Platform #4).** A tenant admin (`users`) connects its IdP via `GET/PUT /api/platform/identity`; the OIDC **client secret is AES-256-GCM encrypted** and the SCIM bearer token stored only as a `sha256` hash (**ITGC-AC-04**). **SSO** (`/api/auth/sso/authorize|callback`, `@Public`) verifies the IdP `id_token` (signature/issuer/audience/expiry) and **JIT-provisions** the user by `sso_subject`, minting the standard session JWT — an additional **authentication** path that still flows through the global guard and RLS (**ITGC-AC-01**). **SCIM 2.0** (`/scim/v2/Users`, per-tenant `scim_…` bearer via a guard mirroring the api-key path) lets the IdP **automate the joiner/mover/leaver lifecycle**: create and role-change run through the same `AdminUsersService` so the **SoD block (R01–R16) applies to federated provisioning too** (**ITGC-AC-09**), and **deprovisioning deactivates** (`users.is_active=false`) rather than deleting — a deactivated account cannot authenticate by password or SSO (`401 USER_DEACTIVATED`), and the row (and its audit history) is retained (**ITGC-AC-02**, joiner/mover/**leaver**). Config + provisioning are **tenant-scoped by RLS** (new `tenant_identity` table; migration `0088`). *Reinforces existing access controls — no new RCM control.*
@@ -248,6 +261,7 @@ flowchart TD
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.5 | 2026-07-09 | Platform | §8d — per-tenant AI-processing disclosure + opt-out (PDPA มาตรา 27/30): `ai_external_processing` feature flag (Settings › Labs & AI) consulted by `common/ai-consent.ts` at every AI transmit site (chat → `AI_TENANT_OPTED_OUT`; NL/config/doc-AI/insights/LINE-copilot/embedder degrade to deterministic paths). Layered under the platform DPA gate; no RCM change. ToE `cutover/ai-eval.ts` layer 4. |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | Phase A hardening: ITGC-OP-01 (scripted restore + drill), AC-12 (fail-closed secret validation + secrets policy), AC-13 (prod least-privilege DB role), CM-01/03/04 (ruleset, CODEOWNERS, approval-gated deploy, PR template), OP-03 (incident runbook + health probes) moved from gap/partial → implemented; AC-07 token hardening + OP-02 BCP remain open. Updated narrative steps + control matrix; references `docs/ops/*` and `tools/ops/*`. |
 | 0.3 | 2026-06-23 | Platform | Security review W1 (ITGC-AC-03): public aggregator + PSP webhooks now authenticate (shared-secret / HMAC, fail-closed in prod) and run RLS-scoped via `RealtimeScope.run(tenant)` instead of the anonymous bypass; closes unauthenticated cross-tenant order injection on `/api/channels/:platform/webhook`. Verified by `pos-p2` (secret enforcement) + `pos-p0` (PSP). |

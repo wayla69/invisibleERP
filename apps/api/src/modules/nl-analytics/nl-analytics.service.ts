@@ -1,8 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { llmClient } from '../../common/llm-client';
 import type { JwtUser } from '../../common/decorators';
 import { QueryService } from '../query/query.service';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { aiTenantOptedOut } from '../../common/ai-consent';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 
 // Natural-language analytics (Platform Phase 17 — B3). Turns a plain question into a governed query over the
 // A5 semantic layer and runs it. With an Anthropic key Claude maps NL → {dimension, date filters}; with NO
@@ -10,7 +12,7 @@ import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 // whitelist-only engine as A5 — NL never produces raw SQL. Read-only, no GL.
 @Injectable()
 export class NlAnalyticsService {
-  constructor(private readonly query: QueryService) {}
+  constructor(private readonly query: QueryService, @Optional() @Inject(DRIZZLE) private readonly db?: DrizzleDb) {} // db: per-tenant AI opt-out lookup
   private get apiKey() { return aiDpaBlocked() ? '' : (process.env.ANTHROPIC_API_KEY || ''); } // gated → keyword map
   private get model() { return modelFor('nl_query'); } // short NL→query parse → CHEAP tier (was Opus)
 
@@ -27,7 +29,7 @@ export class NlAnalyticsService {
     if (!q) return { question: q, resolved: null, source: 'none', result: null };
     let spec: any = this.keywordMap(q);
     let source = 'keyword';
-    if (this.apiKey) {
+    if (this.apiKey && !(await aiTenantOptedOut(this.db, user?.tenantId))) {
       try {
         const dims = this.query.dimensionKeys();
         const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside

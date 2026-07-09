@@ -1,6 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2** _(2026-07-09: added `AI_TENANT_OPTED_OUT`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -149,6 +149,7 @@ your code below.
 | Code | Meaning | What to do |
 |------|---------|-----------|
 | `AI_DPA_REQUIRED` | AI is turned off because the data-processing agreement with the AI provider has not been acknowledged on this deployment. | An administrator must complete and acknowledge the DPA, then set `AI_DPA_ACKNOWLEDGED`. Until then the assistant and AI-assisted tools fall back to non-AI behaviour. See [Administration](./11-administration.md). |
+| `AI_TENANT_OPTED_OUT` | Your company has opted out of external AI processing (PDPA right to object), so the AI assistant will not send data to the AI provider. | An administrator can re-enable it at **Settings › Labs & AI** (`/settings/labs`) — the toggle "AI ภายนอก: อนุญาตส่งข้อมูลให้ผู้ให้บริการ AI". Non-chat AI features keep working on their built-in non-AI logic while opted out. |
 | `AI_BUDGET_EXCEEDED` | You reached your plan's **daily AI token ceiling** (the hard cut-off, not the included allowance). | It resets at midnight (Bangkok time). On Pro/Enterprise, usage between the included daily allowance and the ceiling is allowed and billed as **metered overage** (see the AI-usage card on the Billing page for tokens used and the projected overage charge); the ceiling is the absolute stop. Upgrade for a higher allowance/ceiling. |
 | `AI_UNAVAILABLE` | The AI assistant is not configured (no API key). | Ask an administrator to configure the AI provider key. |
 

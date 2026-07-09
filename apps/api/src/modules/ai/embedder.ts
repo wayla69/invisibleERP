@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { aiDpaBlocked } from '../../common/ai-models';
+import { aiTenantOptedOut } from '../../common/ai-consent';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { captureOpsAlert } from '../../observability/instrumentation';
 
 // Pluggable text embedder for RAG (Phase D2). The DEFAULT is a deterministic, dependency-free local
@@ -20,6 +22,9 @@ export interface Embedded { vector: number[]; provider: string }
 
 @Injectable()
 export class EmbedderService {
+  // Tenant resolved from the request ALS inside aiTenantOptedOut — knowledge chunks are tenant data, so
+  // the per-tenant PDPA opt-out (ai-consent.ts) also covers embedding transmission, like the DPA gate.
+  constructor(@Optional() @Inject(DRIZZLE) private readonly db?: DrizzleDb) {}
   get provider() { return process.env.EMBED_PROVIDER || 'local'; }
 
   // Embed one text. SEMANTIC provider (docs/27 R4-1 / AUD-AI-01): EMBED_PROVIDER=voyage calls the Voyage
@@ -31,7 +36,7 @@ export class EmbedderService {
     // Explicit type guard (CodeQL js/type-confusion): a tampered/repeated HTTP param can arrive as an
     // array — never let a non-string reach slice/tokenize or the provider payload.
     const text = typeof textIn === 'string' ? textIn : '';
-    if (this.provider === 'voyage' && !aiDpaBlocked()) {
+    if (this.provider === 'voyage' && !aiDpaBlocked() && !(await aiTenantOptedOut(this.db))) {
       try {
         return { vector: await voyageEmbed(text), provider: 'voyage' };
       } catch (e) {

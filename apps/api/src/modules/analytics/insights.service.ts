@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { llmClient } from '../../common/llm-client';
 import type { Prediction } from './forecasting.service';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { aiTenantOptedOut } from '../../common/ai-consent';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 
 /**
  * LLM insights — port จาก analytics/llm_insights.py
@@ -9,6 +11,8 @@ import { modelFor, aiDpaBlocked } from '../../common/ai-models';
  */
 @Injectable()
 export class InsightsService {
+  // Tenant resolved from the request ALS inside aiTenantOptedOut (no user param on these call sites).
+  constructor(@Optional() @Inject(DRIZZLE) private readonly db?: DrizzleDb) {}
   private get apiKey() { return aiDpaBlocked() ? '' : (process.env.ANTHROPIC_API_KEY || ''); } // gated → rule-based
   private get model() { return modelFor('insight'); } // analytics narrative → REASONING tier (was Opus)
 
@@ -35,6 +39,7 @@ export class InsightsService {
 
   private async call(prompt: string, maxTokens: number, fallback: () => string): Promise<string> {
     try {
+      if (await aiTenantOptedOut(this.db)) return fallback(); // per-tenant PDPA opt-out → deterministic path
       const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
       const msg = await client.create({ model: this.model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] });
       const block = msg.content?.[0];

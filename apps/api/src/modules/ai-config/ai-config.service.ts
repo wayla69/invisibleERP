@@ -1,7 +1,9 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Optional, Inject } from '@nestjs/common';
 import { llmClient } from '../../common/llm-client';
 import type { JwtUser } from '../../common/decorators';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { aiTenantOptedOut } from '../../common/ai-consent';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 
 // AI configuration assistant (Platform Phase 18 — B4). Describe a Studio object in plain language → get a
 // PROPOSED config JSON for a human to review and apply through the normal Studio screen (it never
@@ -19,6 +21,7 @@ const slug = (s: string) => {
 
 @Injectable()
 export class AiConfigService {
+  constructor(@Optional() @Inject(DRIZZLE) private readonly db?: DrizzleDb) {} // per-tenant AI opt-out lookup
   private get apiKey() { return aiDpaBlocked() ? '' : (process.env.ANTHROPIC_API_KEY || ''); } // gated → template
   private get model() { return modelFor('config_suggest'); } // JSON config → REASONING tier (was Opus)
 
@@ -37,7 +40,8 @@ export class AiConfigService {
 
   async suggest(target: string, description: string, _user: JwtUser) {
     if (!TARGETS.includes(target as any)) throw new BadRequestException({ code: 'BAD_TARGET', message: `target must be one of ${TARGETS.join(', ')}`, messageTh: 'ประเภทคอนฟิกไม่ถูกต้อง' });
-    if (!this.apiKey) return { target, proposal: this.template(target, description), source: 'template', note: 'ตรวจทานก่อนนำไปใช้งานจริง' };
+    if (!this.apiKey || (await aiTenantOptedOut(this.db, _user?.tenantId)))
+      return { target, proposal: this.template(target, description), source: 'template', note: 'ตรวจทานก่อนนำไปใช้งานจริง' };
     try {
       const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
       const res: any = await client.create({

@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { llmClient } from '../../common/llm-client';
 import type { JwtUser } from '../../common/decorators';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { aiTenantOptedOut } from '../../common/ai-consent';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { pdfExtractText } from '../../common/pdf-text';
 import { parseInvoiceDataUrl } from '../../common/invoice-doc';
 
@@ -13,6 +15,7 @@ const EXTRACT_SYSTEM = 'You extract vendor-invoice fields. Return ONLY JSON: {ve
 // never creates an AP bill or touches the GL itself.
 @Injectable()
 export class DocAiService {
+  constructor(@Optional() @Inject(DRIZZLE) private readonly db?: DrizzleDb) {} // per-tenant AI opt-out lookup
   private get apiKey() { return aiDpaBlocked() ? '' : (process.env.ANTHROPIC_API_KEY || ''); } // gated → deterministic
   private get model() { return modelFor('doc_extract'); } // structured extraction → CHEAP tier (was Opus)
 
@@ -44,7 +47,7 @@ export class DocAiService {
   async extractInvoice(text: string, _user: JwtUser) {
     const t = (text ?? '').trim();
     if (!t) return { fields: this.emptyFields(), source: 'none' };
-    if (!this.apiKey) return { fields: this.ruleExtract(t), source: 'rules' };
+    if (!this.apiKey || (await aiTenantOptedOut(this.db, _user?.tenantId))) return { fields: this.ruleExtract(t), source: 'rules' };
     try {
       const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
       const res: any = await client.create({
@@ -71,7 +74,7 @@ export class DocAiService {
       const r = await this.extractInvoice(textLayer, user);
       return { ...r, text: textLayer };
     }
-    if (!this.apiKey) return { fields: this.emptyFields(), source: 'none', text: '' };
+    if (!this.apiKey || (await aiTenantOptedOut(this.db, user?.tenantId))) return { fields: this.emptyFields(), source: 'none', text: '' };
     try {
       const client = llmClient(this.apiKey);
       const block = isPdf
