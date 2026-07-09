@@ -5,6 +5,7 @@
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover channel-adapter
  */
 import 'reflect-metadata';
+import { createHmac } from 'node:crypto';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'chan-secret';
 process.env.NODE_ENV = 'test';
 process.env.CHANNEL_API_URL_GRAB = 'https://grab.test/partner';
@@ -61,7 +62,7 @@ async function main() {
   ]);
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { rawBody: true });
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
@@ -118,6 +119,16 @@ async function main() {
   // ── 7. inbound webhook with a bad secret → 401 (auth unchanged by the outbound work) ──
   const bad = await inj('POST', '/api/channels/grab/webhook', { headers: { 'x-webhook-secret': 'wrong' }, payload: { orderID: 'G-9', merchantID: 'GRAB-001', items: [] } });
   ok('inbound webhook bad secret → 401 BAD_WEBHOOK_SIG', bad.status === 401 && bad.json.error?.code === 'BAD_WEBHOOK_SIG', JSON.stringify({ s: bad.status }));
+
+  // ── 7b. security review L-2: an HMAC signing secret upgrades inbound auth to HMAC-over-body ──
+  process.env.WEBHOOK_HMAC_SECRET_GRAB = 'grab-hmac-key';
+  const hmacBody = { orderID: 'G-77', eventID: 'evt-77', merchantID: 'GRAB-001', items: [{ name: 'ผัดไทย', quantity: 1, price: 80 }] };
+  const goodSig = createHmac('sha256', 'grab-hmac-key').update(JSON.stringify(hmacBody)).digest('hex');
+  const staticOnly = await inj('POST', '/api/channels/grab/webhook', { headers: { 'x-webhook-secret': 'grab-inbound-secret' }, payload: hmacBody });
+  ok('L-2: with HMAC configured, a static-secret-only inbound is rejected (401 BAD_WEBHOOK_SIG)', staticOnly.status === 401 && staticOnly.json.error?.code === 'BAD_WEBHOOK_SIG', JSON.stringify({ s: staticOnly.status }));
+  const signed = await inj('POST', '/api/channels/grab/webhook', { headers: { 'x-webhook-signature': goodSig }, payload: hmacBody });
+  ok('L-2: a valid HMAC-over-body inbound is accepted (proves rawBody plumbing)', signed.status !== 401 && signed.json.error?.code !== 'BAD_WEBHOOK_SIG', JSON.stringify({ s: signed.status, c: signed.json?.error?.code }));
+  delete process.env.WEBHOOK_HMAC_SECRET_GRAB;
 
   console.log('\n── C6 — Delivery-aggregator outbound adapter framework (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

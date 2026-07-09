@@ -32,7 +32,12 @@ async function bootstrap() {
   // dropped"), which can swallow the real error of a failing boot, and the synchronous log storm slows
   // startup toward the deploy healthcheck window. Keep error/warn (EnvValidation fail-closed warnings
   // still surface); the structured pino ops logger writes to stdout independently and is unaffected.
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ routerOptions: { maxParamLength: 500 }, bodyLimit: 16 * 1024 * 1024 }), {
+  // trustProxy (security review L-8): behind a reverse proxy `req.ip` is otherwise the PROXY's address, so the
+  // per-IP edge rate-limiter buckets EVERY client together (one shared limit). Trust the configured number of
+  // proxy hops so Fastify derives the real client IP from X-Forwarded-For → correct per-client limiting. Default
+  // 0 ⇒ trustProxy off (direct-socket peer, unchanged). Shares the TRUSTED_PROXY_HOPS knob with the audit-IP fix.
+  const trustProxyHops = Math.max(0, Math.floor(Number(process.env.TRUSTED_PROXY_HOPS ?? 0)) || 0);
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ routerOptions: { maxParamLength: 500 }, bodyLimit: 16 * 1024 * 1024, trustProxy: trustProxyHops > 0 ? trustProxyHops : false }), {
     rawBody: true,
     logger: process.env.NODE_ENV === 'production' ? ['error', 'warn'] : undefined,
   });
