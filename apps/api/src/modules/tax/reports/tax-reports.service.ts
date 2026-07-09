@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes, vendors, reContracts } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import { PND_LABELS } from '../documents/wht-rates';
+import { pndEfilingText } from './rd-efiling';
 import { currentTenantStore } from '../../../common/tenant-context';
 import { NotFoundException } from '@nestjs/common';
 import type { JwtUser } from '../../../common/decorators';
@@ -108,16 +109,29 @@ export class TaxReportsService {
     const db = this.db; const { start, end, period } = this.win(month, year);
     const rows = await db.select({
       doc_no: whtCertificates.docNo, date_paid: whtCertificates.datePaid, payee_name: whtCertificates.payeeName, payee_tax_id: whtCertificates.payeeTaxId,
-      income_type: whtCertLines.incomeType, amount_paid: whtCertLines.amountPaid, rate: whtCertLines.rate, tax_withheld: whtCertLines.taxWithheld,
+      payee_branch_code: whtCertificates.payeeBranchCode, payee_address: whtCertificates.payeeAddress, wht_condition: whtCertificates.whtCondition,
+      income_type: whtCertLines.incomeType, description: whtCertLines.description, amount_paid: whtCertLines.amountPaid, rate: whtCertLines.rate, tax_withheld: whtCertLines.taxWithheld,
     }).from(whtCertLines).innerJoin(whtCertificates, eq(whtCertLines.whtCertId, whtCertificates.id))
       .where(and(eq(whtCertificates.pndType, type as typeof whtCertificates.$inferSelect.pndType), eq(whtCertificates.status, 'Issued'), gte(whtCertificates.datePaid, start), lt(whtCertificates.datePaid, end)))
       .orderBy(asc(whtCertificates.datePaid), asc(whtCertificates.docNo));
-    const out = rows.map((r: any) => ({ doc_no: r.doc_no, date_paid: r.date_paid, payee_name: r.payee_name, payee_tax_id: r.payee_tax_id, income_type: r.income_type, amount_paid: n(r.amount_paid), rate: n(r.rate), tax_withheld: n(r.tax_withheld) }));
+    const out = rows.map((r: any) => ({ doc_no: r.doc_no, date_paid: r.date_paid, payee_name: r.payee_name, payee_tax_id: r.payee_tax_id, payee_branch_code: r.payee_branch_code, payee_address: r.payee_address, wht_condition: r.wht_condition, income_type: r.income_type, description: r.description, amount_paid: n(r.amount_paid), rate: n(r.rate), tax_withheld: n(r.tax_withheld) }));
     return {
       report: 'pnd', pnd_type: type, pnd_label: (PND_LABELS as any)[type], month, year, period, rows: out,
       totals: { amount_paid: round2(out.reduce((a: number, r: any) => a + r.amount_paid, 0)), tax_withheld: round2(out.reduce((a: number, r: any) => a + r.tax_withheld, 0)), count: out.length },
       deadline: nextMonthDay(month, year, 7),
       deadline_note: 'ยื่นแบบ ภ.ง.ด. ภายในวันที่ 7 ของเดือนถัดไป',
+    };
+  }
+
+  // ภ.ง.ด.3/53 ใบแนบ — RD e-Filing transfer file (pipe-delimited; see rd-efiling.ts for the layout +
+  // the verify-against-current-RD-spec caveat). Same period/rows as pnd() — one text row per cert line.
+  async pndEfiling(type: string, month: number, year: number) {
+    const rep = await this.pnd(type, month, year);
+    return {
+      filename: `${type}_${rep.period.replace('-', '')}.txt`,
+      text: pndEfilingText(rep.rows as any),
+      count: rep.rows.length,
+      totals: rep.totals,
     };
   }
 

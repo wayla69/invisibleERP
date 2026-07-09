@@ -1,6 +1,6 @@
 # 07 · Tax
 
-**Status: DRAFT v0.3 · 2026-07-06** · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
+**Status: DRAFT v0.4 · 2026-07-09** · *v0.4 (2026-07-09): RD e-Filing downloads — ภ.ง.ด.3/53 ใบแนบ .txt on the filings tab + CSV working papers (ภาษีขาย/ภาษีซื้อ/ภ.พ.30) on each report tab; purchase-VAT CSV carries filing-readiness notes.* · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
 
 This chapter is for **accountants** and **finance** staff. It covers VAT, tax
 invoices (full and abbreviated), e-Tax submission, withholding tax (WHT)
@@ -208,6 +208,21 @@ Two companion jobs help you file on time: **จัดทำแบบ ภ.พ.30 
 (`tax_pp30_draft` / `tax_pnd_draft`) prepare the period's return as a **draft** (you still
 review and submit), and **แจ้งเตือนกำหนดนำส่งภาษี** (`tax_remittance_reminder`) sends the
 amounts due and the deadlines (ภ.พ.30 by the 15th, ภ.ง.ด. by the 7th).
+
+### Download the RD e-Filing files (ไฟล์สำหรับยื่นสรรพากร)
+
+On **ภาษี › รายงานภาษี** (`/tax/reports`):
+
+- Each report tab (ภาษีขาย / ภาษีซื้อ / ภ.พ.30) has a **ดาวน์โหลด CSV** button next to the PDF —
+  a UTF-8 CSV that opens correctly in Excel, used as the working paper filed alongside the online
+  ภ.พ.30 form. The purchase-VAT CSV marks rows that are **not filable as-is** (missing supplier Tax ID,
+  estimated VAT) in the หมายเหตุ column — clear these before filing.
+- On the **การยื่นแบบ & ปฏิทิน** tab, every ภ.ง.ด.3/53 period row has **ไฟล์แนบยื่น (.txt)** — the
+  pipe-delimited attachment file for the RD e-Filing transfer program (TIS-620 encoding, Buddhist-Era
+  dates, one row per certificate line, เงื่อนไข code 1/2/3).
+
+> ⚠️ Before your first live filing, upload one test month into the RD program and verify the column
+> mapping — the RD revises its transfer-program format periodically.
 
 ---
 

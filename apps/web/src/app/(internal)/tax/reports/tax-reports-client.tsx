@@ -30,11 +30,12 @@ const MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 // ── shared month/year control ──
 function PeriodPicker({
-  month, year, setMonth, setYear, exportHref,
+  month, year, setMonth, setYear, exportHref, csvHref,
 }: {
   month: number; year: number;
   setMonth: (m: number) => void; setYear: (y: number) => void;
   exportHref?: string;
+  csvHref?: string; // RD working-paper CSV (rd-efiling.ts)
 }) {
   const { t } = useLang();
   return (
@@ -68,6 +69,13 @@ function PeriodPicker({
           </a>
         </Button>
       )}
+      {csvHref && (
+        <Button variant="outline" asChild>
+          <a href={`${BASE}${csvHref}`} target="_blank" rel="noopener noreferrer">
+            <Download className="size-4" /> {t('tax.download_csv')}
+          </a>
+        </Button>
+      )}
     </div>
   );
 }
@@ -87,7 +95,8 @@ function OutputVat({ initialData }: { initialData?: unknown }) {
   return (
     <div>
       <PeriodPicker month={month} year={year} setMonth={setMonth} setYear={setYear}
-        exportHref={`/api/tax-reports/output-vat/export?month=${month}&year=${year}`} />
+        exportHref={`/api/tax-reports/output-vat/export?month=${month}&year=${year}`}
+        csvHref={`/api/tax-reports/output-vat/csv?month=${month}&year=${year}`} />
       <StateView q={q}>
         {q.data && (
           <div className="space-y-5">
@@ -181,7 +190,8 @@ function InputVat() {
   return (
     <div>
       <PeriodPicker month={month} year={year} setMonth={setMonth} setYear={setYear}
-        exportHref={`/api/tax-reports/input-vat/export?month=${month}&year=${year}`} />
+        exportHref={`/api/tax-reports/input-vat/export?month=${month}&year=${year}`}
+        csvHref={`/api/tax-reports/input-vat/csv?month=${month}&year=${year}`} />
       <StateView q={q}>
         {q.data && (
           <div className="space-y-5">
@@ -225,7 +235,8 @@ function Pp30() {
   return (
     <div>
       <PeriodPicker month={month} year={year} setMonth={setMonth} setYear={setYear}
-        exportHref={`/api/tax-reports/pp30/export?month=${month}&year=${year}`} />
+        exportHref={`/api/tax-reports/pp30/export?month=${month}&year=${year}`}
+        csvHref={`/api/tax-reports/pp30/csv?month=${month}&year=${year}`} />
       <StateView q={q}>
         {q.data && (
           <div className="space-y-5">
@@ -323,10 +334,20 @@ function Filings() {
               { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={filingVariant(r.status)}>{filingStatusLabel(r.status)}</Badge> },
               { key: 'submission_ref', label: t('tax.col_ref_no'), render: (r: any) => r.submission_ref ?? '—' },
               {
-                key: 'act', label: '', align: 'right', render: (r: any) =>
-                  r.status === 'NOT_FILED' ? <Button size="sm" variant="outline" disabled={file.isPending} onClick={() => file.mutate({ filing_type: r.filing_type, month: r.period_month })}>{t('tax.create_draft')}</Button>
-                  : r.status === 'DRAFT' ? <Button size="sm" variant="outline" disabled={submit.isPending} onClick={() => submit.mutate(r.filing_id)}>{t('tax.file_btn')}</Button>
-                  : null,
+                key: 'act', label: '', align: 'right', render: (r: any) => (
+                  <span className="inline-flex items-center gap-2">
+                    {(r.filing_type === 'PND3' || r.filing_type === 'PND53') && (
+                      <Button size="sm" variant="ghost" asChild>
+                        <a href={`${BASE}/api/tax-reports/pnd/efiling?type=${r.filing_type}&month=${r.period_month}&year=${r.period_year}`} target="_blank" rel="noopener noreferrer">
+                          <Download className="size-3.5" /> {t('tax.download_efiling')}
+                        </a>
+                      </Button>
+                    )}
+                    {r.status === 'NOT_FILED' ? <Button size="sm" variant="outline" disabled={file.isPending} onClick={() => file.mutate({ filing_type: r.filing_type, month: r.period_month })}>{t('tax.create_draft')}</Button>
+                    : r.status === 'DRAFT' ? <Button size="sm" variant="outline" disabled={submit.isPending} onClick={() => submit.mutate(r.filing_id)}>{t('tax.file_btn')}</Button>
+                    : null}
+                  </span>
+                ),
               },
             ]}
           />
