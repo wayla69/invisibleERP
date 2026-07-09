@@ -40,6 +40,12 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.drawer_tags_saved': { th: 'บันทึกแท็กแล้ว', en: 'Tags saved' },
   'plt.drawer_plan_changed': { th: 'เปลี่ยนแพ็กเกจแล้ว', en: 'Plan changed' },
   'plt.drawer_trial_extended': { th: 'ต่อระยะทดลองแล้ว', en: 'Trial extended' },
+  // Danger zone — pre-go-live factory reset (visible only while ALLOW_TENANT_FACTORY_RESET is set)
+  'plt.drawer_reset_title': { th: 'ล้างข้อมูลบริษัท (Factory reset)', en: 'Factory reset (wipe test data)' },
+  'plt.drawer_reset_desc': { th: 'ลบข้อมูลทดสอบทั้งหมดของบริษัทนี้และตั้งค่าเริ่มต้นใหม่ — เก็บผู้ใช้/สิทธิ์ แพ็กเกจ และบันทึกตรวจสอบไว้ ใช้ก่อนเริ่มใช้งานจริงเท่านั้น ปุ่มนี้จะหายไปเมื่อผู้ดูแลระบบปิดค่า ALLOW_TENANT_FACTORY_RESET หลัง go-live', en: 'Wipes ALL of this company\'s test data and re-seeds fresh defaults — users/permissions, the plan, and the audit log are preserved. Pre-go-live only; this section disappears once the operator removes ALLOW_TENANT_FACTORY_RESET after go-live.' },
+  'plt.drawer_reset_confirm_label': { th: 'พิมพ์รหัสบริษัท "{code}" เพื่อยืนยัน', en: 'Type the company code "{code}" to confirm' },
+  'plt.drawer_reset_btn': { th: 'ล้างข้อมูล', en: 'Reset' },
+  'plt.company_reset_done': { th: 'ล้างข้อมูล {name} แล้ว (ลบ {rows} แถว)', en: '{name} reset — {rows} rows deleted' },
 
   // ── Company table / list ──
   'plt.col_company': { th: 'บริษัท', en: 'Company' },

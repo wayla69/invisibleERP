@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, AlertTriangle, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, TrendingUp, UserPlus, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, Trash2, TrendingUp, UserPlus, Users } from 'lucide-react';
 
 import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
@@ -97,7 +97,9 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const [plan, setPlan] = useState('');
   const [days, setDays] = useState('14');
   const [tagsInput, setTagsInput] = useState('');
+  const [resetConfirm, setResetConfirm] = useState('');
   useEffect(() => { setTagsInput((detail.data?.tags ?? []).join(', ')); }, [detail.data]);
+  useEffect(() => { setResetConfirm(''); }, [id]);
 
   const saveTags = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean) }) }),
@@ -113,6 +115,14 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const extendTrial = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: Number(days) || 14 }) }),
     onSuccess: () => { notifySuccess(t('plt.drawer_trial_extended')); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  // Pre-go-live factory reset — the danger-zone section renders only while the server reports the temporary
+  // ALLOW_TENANT_FACTORY_RESET flag (factory_reset_enabled); the button stays disabled until the typed
+  // company code matches exactly, mirroring the server's CONFIRM_MISMATCH gate.
+  const factoryReset = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/factory-reset`, { method: 'POST', body: JSON.stringify({ confirm: resetConfirm.trim() }) }),
+    onSuccess: (r: any) => { notifySuccess(t('plt.company_reset_done', { name: detail.data?.name ?? String(id), rows: num(r?.rows_deleted ?? 0) })); setResetConfirm(''); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -191,6 +201,26 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                   <Users className="size-3.5" /> {t('plt.drawer_manage_users')}
                 </Button>
               </div>
+
+              {/* Danger zone — pre-go-live factory reset. Hidden entirely unless the temporary
+                  ALLOW_TENANT_FACTORY_RESET flag is set on the API (it is removed again after go-live). */}
+              {d.factory_reset_enabled && (
+                <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                    <AlertTriangle className="size-3.5" /> {t('plt.drawer_reset_title')}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t('plt.drawer_reset_desc')}</p>
+                  <div className="flex items-end gap-2">
+                    <div className="grid flex-1 gap-1">
+                      <Label className="text-xs">{t('plt.drawer_reset_confirm_label', { code: d.code })}</Label>
+                      <Input value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} placeholder={d.code} />
+                    </div>
+                    <Button size="sm" variant="destructive" onClick={() => factoryReset.mutate()} disabled={resetConfirm.trim() !== d.code || factoryReset.isPending}>
+                      <Trash2 className="size-3.5" /> {t('plt.drawer_reset_btn')}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* Recent activity */}
               <div>
