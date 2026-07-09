@@ -222,6 +222,15 @@ describe('ProcurementPrService — listPrs scoping + item-name backfill', () => 
     expect(r.can_approve).toBe(false);
     expect(r.prs).toHaveLength(1);
   });
+
+  it('a line that already carries its raise-time description keeps it (no master backfill) and maps its PO link', async () => {
+    const head = { ...HEAD, approvedBy: 'boss' };
+    const line = { ...LINE, itemDescription: 'ชื่อตอนเปิดใบ', poNo: 'PO-5', status: 'Converted', reason: 'ของหมด' };
+    const { svc } = prEnv([[head], [line], [[]].flat()]); // items lookup still runs (itemId present) but finds nothing
+    const r = await svc.listPrs({ username: 'plan1', permissions: ['planner'] } as any);
+    expect(r.prs[0].approved_by).toBe('boss');
+    expect(r.prs[0].lines[0]).toMatchObject({ item_description: 'ชื่อตอนเปิดใบ', po_no: 'PO-5', line_status: 'Converted', reason: 'ของหมด' });
+  });
 });
 
 describe('ProcurementPrService — convertPrToPo write paths (legacy + split)', () => {

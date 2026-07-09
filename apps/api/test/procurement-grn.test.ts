@@ -231,6 +231,17 @@ describe('ProcurementGrnService — GR note surfaces (print/list/email wiring)',
     expect(r.lines).toEqual([{ item_id: 'A', description: 'ปลา', received_qty: 40, uom: 'kg', unit_cost: 25, lot_no: 'L1' }]);
   });
 
+  it('null-side mapping: a GR with no vendor id skips the vendor lookup and every optional falls back', async () => {
+    const GR = { id: 6, grNo: 'GR-8', grDate: null, poNo: null, vendorId: null, vendorName: null, receivedBy: null, currency: null, remarks: null };
+    const LINE = { itemId: null, itemDescription: null, receivedQty: '5', uom: null, unitCost: null, lotNo: null };
+    // strict routes: gr → lines → tenant (tenantId 1) — NO vendor select (vendorId null)
+    const { svc } = grnEnv([[GR], [LINE], [{ legalName: 'บริษัท ทดสอบ' }]]);
+    const r = await svc.getGrForPrint('GR-8', { username: 'whrecv', tenantId: 1 } as any);
+    expect(r).toMatchObject({ gr_date: null, po_no: null, currency: 'THB' });
+    expect(r.vendor.name).toBe('-');
+    expect(r.lines[0]).toEqual({ item_id: null, description: null, received_qty: 5, uom: null, unit_cost: 0, lot_no: null });
+  });
+
   it('listGrs maps the register rows; the unwired renderer/email paths fail explicitly', async () => {
     const { svc } = grnEnv([[{ grNo: 'GR-7', grDate: '2026-07-01', poNo: 'PO-9', vendorName: 'V', currency: 'THB', receivedBy: 'whrecv' }]]);
     const r = await svc.listGrs(user, 10);
