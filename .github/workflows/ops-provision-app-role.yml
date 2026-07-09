@@ -42,12 +42,37 @@ jobs:
           if [ -z "${RAILWAY_TOKEN:-}" ]; then echo "::error::RAILWAY_TOKEN not configured"; exit 1; fi
 
           echo "Resolving connection urls…"
-          PUB=$(npx -y @railway/cli variables --service Postgres --kv | grep '^DATABASE_PUBLIC_URL=' | cut -d= -f2- | tr -d '\r')
-          if [ -z "$PUB" ]; then echo "::error::could not read DATABASE_PUBLIC_URL from the Postgres service"; exit 1; fi
-          echo "::add-mask::$PUB"
           INT=$(npx -y @railway/cli variables --service invisibleERP --kv | grep '^DATABASE_URL=' | cut -d= -f2- | tr -d '\r')
           if [ -z "$INT" ]; then echo "::error::could not read DATABASE_URL from the invisibleERP service"; exit 1; fi
           echo "::add-mask::$INT"
+          # The project carries MULTIPLE Postgres services (run-1 lesson: provisioning the one literally
+          # NAMED "Postgres" hit the wrong instance — the API booted with 28P01 auth failures because
+          # ierp_app never existed on ITS database). Resolve the API's ACTUAL instance by matching the
+          # internal DATABASE_URL host against each Postgres service's RAILWAY_PRIVATE_DOMAIN.
+          HOST=$(python3 -c "import urllib.parse as u; print(u.urlsplit('$INT').hostname)")
+          echo "API's internal DB host: $HOST"
+          gq() { curl -s --max-time 30 -X POST https://backboard.railway.app/graphql/v2 -H "Project-Access-Token: $RAILWAY_TOKEN" -H "Content-Type: application/json" -d "$1"; }
+          PT=$(gq '{"query":"query{projectToken{projectId environmentId}}"}')
+          PID=$(echo "$PT" | jq -r '.data.projectToken.projectId // empty')
+          EID=$(echo "$PT" | jq -r '.data.projectToken.environmentId // empty')
+          [ -n "$PID" ] || { echo "::error::Railway token introspection failed"; exit 1; }
+          PUB=""
+          while read -r SID SNAME; do
+            VARS=$(gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\")}\"}")
+            PRIV=$(echo "$VARS" | jq -r '.data.variables.RAILWAY_PRIVATE_DOMAIN // empty')
+            if [ "$PRIV" = "$HOST" ]; then
+              PUB=$(echo "$VARS" | jq -r '.data.variables.DATABASE_PUBLIC_URL // empty')
+              echo "matched instance: service \"$SNAME\" (private domain $PRIV)"
+              break
+            fi
+          done < <(gq "{\"query\":\"query{project(id:\\\"$PID\\\"){services{edges{node{id name}}}}}\"}" | jq -r '.data.project.services.edges[].node | .id+" "+.name')
+          if [ -z "$PUB" ]; then echo "::error::no service's RAILWAY_PRIVATE_DOMAIN matches the API's DB host $HOST (or it lacks DATABASE_PUBLIC_URL)"; exit 1; fi
+          echo "::add-mask::$PUB"
+          # Sanity: this must be the LIVE ERP database, not an orphan copy — assert the drizzle
+          # migrations bookkeeping exists and is populated before touching any role.
+          MIGS=$(psql "$PUB" -tAc "SELECT count(*) FROM drizzle.__drizzle_migrations;" 2>/dev/null || echo 0)
+          [ "${MIGS:-0}" -gt 100 ] || { echo "::error::instance sanity check failed — drizzle.__drizzle_migrations has ${MIGS:-0} rows (expected the live DB with 100+); refusing to provision"; exit 1; }
+          echo "instance sanity ok: $MIGS applied migrations"
 
           PW=$(openssl rand -hex 24)
           echo "::add-mask::$PW"
