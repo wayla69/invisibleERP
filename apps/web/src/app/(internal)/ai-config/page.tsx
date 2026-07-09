@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { selectCls } from '@/components/form-controls';
 
 const TARGETS = ['custom_object', 'alert', 'automation', 'document_template'];
 type Res = { target: string; proposal: any; source: string; note: string };
@@ -34,7 +35,7 @@ export default function AiConfigPage() {
         <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Wand2 className="size-4 text-primary" /> {t('st.aic.describe')}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-1"><Label>{t('st.aic.type')}</Label>
-            <select className="h-9 rounded-md border bg-transparent px-3 text-sm" value={target} onChange={(e) => setTarget(e.target.value)}>{TARGETS.map((k) => <option key={k} value={k}>{t(`st.aic.target_${k}`)}</option>)}</select>
+            <select className={selectCls} value={target} onChange={(e) => setTarget(e.target.value)}>{TARGETS.map((k) => <option key={k} value={k}>{t(`st.aic.target_${k}`)}</option>)}</select>
           </div>
           <div className="grid gap-1"><Label>{t('st.aic.description')}</Label>
             <textarea className="min-h-24 rounded-md border bg-transparent p-3 text-sm" placeholder={t('st.aic.desc_ph')} value={desc} onChange={(e) => setDesc(e.target.value)} />

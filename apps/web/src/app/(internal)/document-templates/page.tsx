@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Msg } from '@/components/tabs';
 import { useLang } from '@/lib/i18n';
+import { selectCls } from '@/components/form-controls';
+import { cn } from '@/lib/utils';
 
 type DocType = { key: string; label_th: string; label_en: string; status: string };
 type Tmpl = { id: number; doc_type: string; name: string; is_default: boolean; active: boolean; config: any };
@@ -69,7 +71,7 @@ const FISCAL_TYPES = ['tax_invoice_abbreviated', 'tax_invoice_full'];
 const YesNo = ({ id, value, onChange }: { id: string; value: boolean; onChange: (v: boolean) => void }) => {
   const { t } = useLang();
   return (
-    <select id={id} className="h-9 rounded-md border bg-transparent px-3 text-sm" value={value ? '1' : '0'} onChange={(e) => onChange(e.target.value === '1')}>
+    <select id={id} className={selectCls} value={value ? '1' : '0'} onChange={(e) => onChange(e.target.value === '1')}>
       <option value="1">{t('st.dt.show')}</option>
       <option value="0">{t('st.dt.hide')}</option>
     </select>
@@ -130,7 +132,7 @@ export default function DocumentTemplatesPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Label htmlFor="docType" className="text-sm">{t('st.dt.doc_type')}</Label>
-        <select id="docType" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={docType} onChange={(e) => { const nt = e.target.value; setDocType(nt); resetEditor(nt); }}>
+        <select id="docType" className={cn(selectCls, 'w-auto')} value={docType} onChange={(e) => { const nt = e.target.value; setDocType(nt); resetEditor(nt); }}>
           {(types.data?.doc_types ?? [{ key: 'receipt', label_th: 'ใบเสร็จรับเงิน', label_en: 'Receipt', status: 'live' }]).map((d) => (
             <option key={d.key} value={d.key}>{d.label_th} ({d.label_en}){d.status !== 'live' ? t('st.dt.coming_soon_suffix') : ''}</option>
           ))}

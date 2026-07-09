@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { num } from '@/lib/format';
+import { selectCls } from '@/components/form-controls';
 
 type Measure = { key: string; label: string; label_en: string; unit: string };
 type Dimension = { key: string; label: string; label_en: string };
@@ -20,7 +21,6 @@ type Model = { fact: string; label: string; measures: Measure[]; dimensions: Dim
 type RunResult = { dimension: string; measures: string[]; rows: any[] };
 
 const money = (x: number) => num(x, 2);
-const sel = 'h-9 rounded-md border bg-transparent px-3 text-sm';
 
 export default function QueryStudioPage() {
   const { t } = useLang();
@@ -52,7 +52,7 @@ export default function QueryStudioPage() {
             <div className="flex flex-wrap items-end gap-3">
               <div className="grid gap-1">
                 <Label>{t('pb.query_group_by')}</Label>
-                <select className={sel} value={dimension} onChange={(e) => setDimension(e.target.value)}>
+                <select className={selectCls} value={dimension} onChange={(e) => setDimension(e.target.value)}>
                   {(model.data?.dimensions ?? []).map((d) => <option key={d.key} value={d.key}>{d.label} ({d.label_en})</option>)}
                 </select>
               </div>
