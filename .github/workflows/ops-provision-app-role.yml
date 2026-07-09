@@ -65,8 +65,10 @@ jobs:
           GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ierp_app;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ierp_app;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ierp_app;
-          -- §1bis membership + the direction SET LOCAL ROLE app_user actually requires:
-          GRANT ierp_app TO app_user;
+          -- Membership: SET LOCAL ROLE app_user (tenant-tx) requires ierp_app ∈ app_user — ONE
+          -- direction only. The reverse grant creates a cycle Postgres rejects ("role app_user is a
+          -- member of role ierp_app"); revoke it first in case an earlier run/doc applied it.
+          REVOKE ierp_app FROM app_user;
           GRANT app_user TO ierp_app;
           -- drizzle bookkeeping schema (drizzle-kit migrate writes __drizzle_migrations here at boot)
           DO \$\$ BEGIN

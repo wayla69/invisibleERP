@@ -40,15 +40,18 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ierp_app;
 GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ierp_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ierp_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ierp_app;
-GRANT ierp_app TO app_user;   -- so `SET ROLE app_user` inside the request tx still works
+GRANT app_user TO ierp_app;   -- so `SET ROLE app_user` inside the request tx still works
+                              -- (SET ROLE X requires the session role to be a MEMBER OF x —
+                              -- the reverse direction creates a membership cycle Postgres rejects)
 ```
 Then point `DATABASE_URL` at `ierp_app`. Keep the intentionally-unscoped auth-global tables (`login_attempts`,
 scheduler heartbeats, etc.) as reviewed exceptions.
 
 **One-click provisioning (Railway):** the **`Ops — provision non-superuser DB role (H-3)`** workflow
 (`.github/workflows/ops-provision-app-role.yml`, manual dispatch, `production` Environment) runs the SQL
-above against the `Postgres` plugin (via its public url), additionally grants **`app_user TO ierp_app`**
-(the membership direction `SET LOCAL ROLE app_user` actually requires), grants `CREATE` on the schemas
+above against the `Postgres` plugin (via its public url) — first revoking any legacy reverse-direction
+`ierp_app TO app_user` grant (this doc originally prescribed it; it both fails to enable `SET ROLE
+app_user` and blocks the correct grant with a membership-cycle error), grants `CREATE` on the schemas
 and **transfers ownership of all `public`/`drizzle` tables + sequences + views to `ierp_app`** — because
 boot-time `drizzle-kit migrate` runs as `DATABASE_URL` and `ALTER TABLE` requires ownership (`FORCE` RLS
 still binds the owner, so no isolation is lost). It then verifies the role posture over a live login,
