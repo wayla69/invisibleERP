@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { eq, inArray, asc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { dineInOrderItems, kitchenStations, dineInOrders, diningTables } from '../../database/schema';
@@ -6,10 +6,14 @@ import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { StationBody } from './dto';
 import type { z } from 'zod';
+import { GuestProfileService } from './guest-profile.service';
 
 @Injectable()
 export class KdsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly guests?: GuestProfileService, // consent-gated allergy flags on tickets
+  ) {}
 
   // active kitchen items grouped by station, oldest-fired first (cook next), excl served/voided
   async feed(_user: JwtUser) {
@@ -20,13 +24,21 @@ export class KdsService {
       firedAt: dineInOrderItems.firedAt, estPrep: dineInOrderItems.estPrepMinutes,
       isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy, course: dineInOrderItems.course,
       stationId: kitchenStations.id, stationCode: kitchenStations.code, stationName: kitchenStations.name, stationSort: kitchenStations.sort, stationPrep: kitchenStations.defaultPrepMinutes,
-      orderNo: dineInOrders.orderNo, tableNo: diningTables.tableNo,
+      orderNo: dineInOrders.orderNo, tableNo: diningTables.tableNo, tableId: dineInOrders.tableId,
     }).from(dineInOrderItems)
       .innerJoin(kitchenStations, eq(dineInOrderItems.stationId, kitchenStations.id))
       .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
       .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
       .where(inArray(dineInOrderItems.kdsStatus, ['queued', 'preparing', 'ready'] as any))
       .orderBy(asc(kitchenStations.sort), asc(dineInOrderItems.course), asc(dineInOrderItems.firedAt));
+
+    // Consent-gated dining cautions of the guest seated at each ticket's table — the kitchen sees
+    // "แพ้กุ้ง" on the ticket itself. Computed at read time (never stored on the item), best-effort.
+    let guestFlags = new Map<number, any>();
+    try {
+      const tableIds = [...new Set(rows.map((r: any) => (r.tableId != null ? Number(r.tableId) : null)).filter((x: any): x is number => x != null))];
+      guestFlags = (await this.guests?.serviceFlagsByTable(tableIds, _user.tenantId as number)) ?? guestFlags;
+    } catch { /* the board must render regardless */ }
 
     const now = Date.now();
     const stations = new Map<number, any>();
@@ -41,6 +53,8 @@ export class KdsService {
         modifiers: r.modifiers ?? [], notes: r.notes, kds_status: r.kdsStatus, fired_at: r.firedAt,
         is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr', course: r.course ?? 1,
         elapsed_min: elapsedMin, prep_min: prep, remaining_min: Math.max(0, prep - elapsedMin),
+        guest_allergies: (r.tableId != null && guestFlags.get(Number(r.tableId))?.allergies) || [],
+        guest_dietary: (r.tableId != null ? guestFlags.get(Number(r.tableId))?.dietary : null) ?? null,
       });
     }
     return { stations: [...stations.values()], generated_at: new Date().toISOString() };

@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
-type KdsItem = { item_id: number; order_no: string; table_label: string | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; elapsed_min: number; prep_min: number; is_buffet?: boolean; from_diner?: boolean; course?: number };
+type KdsItem = { item_id: number; order_no: string; table_label: string | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; elapsed_min: number; prep_min: number; is_buffet?: boolean; from_diner?: boolean; course?: number; guest_allergies?: string[]; guest_dietary?: string | null };
 type Station = { station_id: number; station_code: string; station_name: string; items: KdsItem[] };
 
 const NEXT: Record<string, { action: string; label: string }> = {
@@ -86,6 +86,12 @@ export default function KdsPage() {
                         {(it.modifiers?.length > 0 || it.notes) && (
                           <div className="mt-0.5 text-xs font-medium text-warning-foreground dark:text-warning">
                             {(it.modifiers ?? []).map((m) => m.label).join(', ')}{it.notes ? ` · ${it.notes}` : ''}
+                          </div>
+                        )}
+                        {/* consent-gated guest dining cautions (computed live — never stored on the ticket) */}
+                        {((it.guest_allergies?.length ?? 0) > 0 || it.guest_dietary) && (
+                          <div className="mt-0.5 text-xs font-bold text-destructive">
+                            ⚠️ {(it.guest_allergies?.length ?? 0) > 0 ? `${t('px.gp_allergies')}: ${(it.guest_allergies ?? []).join(', ')}` : ''}{(it.guest_allergies?.length ?? 0) > 0 && it.guest_dietary ? ' · ' : ''}{it.guest_dietary ?? ''}
                           </div>
                         )}
                         {nxt && (

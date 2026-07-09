@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
 import { eq, and, asc, desc, gte, lte, inArray, ne, sql } from 'drizzle-orm';
@@ -8,6 +8,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { mintTableToken } from './qr-token.util';
+import { GuestProfileService } from './guest-profile.service';
 import type { CreateTableDto, UpdateTableDto, ZoneDto, ZoneUpdateDto } from './dto';
 
 const LIVE_SESSION: NonNullable<typeof tableSessions.$inferSelect.status>[] = ['open', 'bill_requested', 'paying'];
@@ -18,6 +19,7 @@ export class TableService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
+    @Optional() private readonly guests?: GuestProfileService, // consent-gated per-table dining cautions
   ) {}
 
   // ── zones / rooms (floor-plan groupings; a VIP room is just a zone with an accent colour) ──
@@ -222,10 +224,14 @@ export class TableService {
   }
 
   // staff status board: table + live session + its open order summary
-  async statusBoard(_user: JwtUser) {
+  async statusBoard(user: JwtUser) {
     const db = this.db;
     const tables = await db.select().from(diningTables).where(eq(diningTables.active, true)).orderBy(asc(diningTables.tableNo));
     const now = Date.now();
+    // Consent-gated dining cautions (allergies etc.) of the guest currently seated per table — read-time
+    // only, so a consent withdrawal disappears from the board at once. Best-effort (board must render).
+    let guestFlags = new Map<number, any>();
+    try { guestFlags = (await this.guests?.serviceFlagsByTable(tables.map((t: any) => Number(t.id)), user.tenantId as number)) ?? guestFlags; } catch { /* board renders without flags */ }
     const out = [];
     for (const t of tables) {
       const [sess] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, Number(t.id)), inArray(tableSessions.status, LIVE_SESSION))).orderBy(desc(tableSessions.id)).limit(1);
@@ -238,6 +244,7 @@ export class TableService {
         ...shapeTable(t),
         session: sess ? { session_no: sess.sessionNo, party_size: sess.partySize, opened_at: sess.openedAt, elapsed_min: sess.openedAt ? Math.floor((now - new Date(sess.openedAt).getTime()) / 60000) : 0 } : null,
         order,
+        guest_flags: guestFlags.get(Number(t.id)) ?? null,
       });
     }
     return { tables: out, generated_at: new Date().toISOString() };

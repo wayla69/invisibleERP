@@ -114,6 +114,19 @@ export default function ReservationsPage() {
     onSuccess: (_r, v) => { notifySuccess(KNOWN_ACTIONS.includes(v.action) ? t(`px.resv_act_${v.action}`) : t('px.resv_updated')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
+  // Seat, then — for a buffet booking with a pre-picked tier on an assigned table — offer to start the
+  // buffet clock right away (opens the table session + starts the tier via the existing endpoint).
+  const seatRow = async (r: Resv) => {
+    try { await act.mutateAsync({ id: r.id, action: 'seat' }); } catch { return; }
+    if (r.service_mode === 'buffet' && r.buffet_package_id && r.table_id
+      && window.confirm(t('px.resv_start_buffet_q', { pkg: r.buffet_package_name ?? '', n: r.party_size }))) {
+      try {
+        await api(`/api/restaurant/tables/${r.table_id}/buffet`, { method: 'POST', body: JSON.stringify({ package_id: r.buffet_package_id, pax: r.party_size }) });
+        notifySuccess(t('px.resv_buffet_started'));
+      } catch (e: any) { notifyError(e.message); }
+      refresh();
+    }
+  };
 
   const open = (r: Resv) => ['booked', 'waiting', 'ready'].includes(r.status);
 
@@ -213,7 +226,7 @@ export default function ReservationsPage() {
                 {open(r) && (
                   <>
                     {r.status !== 'ready' && <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'notify' })}>{t('px.resv_notify_btn')}</Button>}
-                    <Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'seat' })}>{t('px.resv_seat_btn')}</Button>
+                    <Button size="sm" disabled={act.isPending} onClick={() => seatRow(r)}>{t('px.resv_seat_btn')}</Button>
                     <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: r.kind === 'reservation' ? 'no-show' : 'cancel' })}>{r.kind === 'reservation' ? t('px.resv_noshow_btn') : t('px.resv_leave_btn')}</Button>
                   </>
                 )}
@@ -280,6 +293,12 @@ function GuestProfileCard({ memberId, onClose }: { memberId: number; onClose: ()
     onSuccess: () => { notifySuccess(t('px.gp_comp_removed')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
+  // Stronger PDPA posture: ask the guest to consent THEMSELVES — LINE/SMS deep-link to the /m self-service.
+  const askConsent = useMutation({
+    mutationFn: () => api(`/api/restaurant/guests/${memberId}/consent-request`, { method: 'POST' }),
+    onSuccess: (r: any) => notifySuccess(r.already_granted ? t('px.gp_consent_already') : t('px.gp_consent_requested', { ch: r.channel === 'line' ? 'LINE' : 'SMS' })),
+    onError: (e: any) => notifyError(e.message),
+  });
 
   if (!g) return null;
   return (
@@ -293,7 +312,10 @@ function GuestProfileCard({ memberId, onClose }: { memberId: number; onClose: ()
       </div>
 
       {!g.consent_granted && (
-        <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-sm">{t('px.gp_consent_missing')}</div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-sm">
+          <span>{t('px.gp_consent_missing')}</span>
+          <Button size="sm" variant="outline" disabled={askConsent.isPending} onClick={() => askConsent.mutate()}>{t('px.gp_consent_request_btn')}</Button>
+        </div>
       )}
       {g.consent_granted && g.visit_stats && g.visit_stats.visits > 0 && (
         <p className="mb-2 text-xs text-muted-foreground">{t('px.gp_visits', { n: num(g.visit_stats.visits), avg: g.visit_stats.avg_party_size != null ? String(g.visit_stats.avg_party_size) : '—' })}</p>

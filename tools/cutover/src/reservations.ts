@@ -181,6 +181,28 @@ async function main() {
   const t2gp = await inj('GET', `/api/restaurant/guests/${memberId}/profile`, sales2);
   ok('RLS: T2 cannot read a T1 guest profile (404 MEMBER_NOT_FOUND)', t2gp.status === 404 && t2gp.json.error?.code === 'MEMBER_NOT_FOUND', `${t2gp.status} ${t2gp.json.error?.code}`);
 
+  // ── 18. ask the GUEST for consent (LINE/SMS deep-link to /m self-service) — audited in message_log ──
+  const askC = await inj('POST', `/api/restaurant/guests/${memberId}/consent-request`, sales1);
+  const askMsgs = await cnt(`SELECT count(*)::int n FROM message_log WHERE campaign='consent_request' AND member_id=${memberId}`);
+  ok('Consent request: sent to the guest (SMS — no LINE identity) + message_log row', askC.json.requested === true && askC.json.channel === 'sms' && askMsgs === 1, JSON.stringify({ ...askC.json, msgs: askMsgs }));
+
+  // ── 19. service-time flags: with consent granted, the floor board carries the seated guest's cautions ──
+  await inj('POST', `/api/loyalty/members/${memberId}/consents`, sales1, { purpose: 'dining_profile', granted: true }); // guest re-consents (e.g. via /m)
+  const askC2 = await inj('POST', `/api/restaurant/guests/${memberId}/consent-request`, sales1);
+  ok('Consent request: already-granted short-circuits (nothing sent)', askC2.json.already_granted === true && askC2.json.requested === false, JSON.stringify(askC2.json));
+  const tbl3 = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'R3', seats: 4 });
+  const resv3 = await inj('POST', '/api/restaurant/reservations', sales1, { table_id: tbl3.json.id, reserved_for: '2026-07-04T19:00:00.000Z', party_size: 2, member_id: memberId });
+  await inj('POST', `/api/restaurant/reservations/${resv3.json.id}/seat`, sales1);
+  const board = await inj('GET', '/api/restaurant/tables/status', sales1);
+  const r3 = board.json.tables.find((tb: any) => tb.id === tbl3.json.id);
+  ok('Service flags: seated guest\'s allergies surface on the floor board (consent-gated)', r3?.guest_flags?.allergies?.[0] === 'กุ้ง' && r3?.guest_flags?.member_id === memberId, JSON.stringify(r3?.guest_flags));
+
+  // ── 20. withdrawal wipes the flags from the board at once (read-time gate — nothing was copied) ──
+  await inj('POST', `/api/loyalty/members/${memberId}/consents`, sales1, { purpose: 'dining_profile', granted: false });
+  const board2 = await inj('GET', '/api/restaurant/tables/status', sales1);
+  const r3b = board2.json.tables.find((tb: any) => tb.id === tbl3.json.id);
+  ok('Service flags: consent withdrawal removes them immediately', r3b?.guest_flags == null, JSON.stringify(r3b?.guest_flags ?? null));
+
   await app.close();
   await pg.close();
   console.log('\n── POS Table reservations + waitlist (จองโต๊ะ + รอคิว) ──');

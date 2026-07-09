@@ -14,7 +14,7 @@ type SendDto = { member_id?: number; to?: string; channel: MessageChannel; body:
 // cross-channel cap apply) unless the campaign's base name is on this transactional exempt list — OTPs,
 // receipts, operational notices and service follow-ups must go out whenever they happen. The campaign base
 // is the part before the first ':' (journey:code:step → 'journey'; dunning:stage → 'dunning').
-const TRANSACTIONAL_CAMPAIGNS = new Set(['otp', 'receipt', 'e-receipt', 'reservation_ready', 'report', 'alert', 'provider_test', 'dunning', 'delivery', 'nps']);
+const TRANSACTIONAL_CAMPAIGNS = new Set(['otp', 'receipt', 'e-receipt', 'reservation_ready', 'report', 'alert', 'provider_test', 'dunning', 'delivery', 'nps', 'consent_request']);
 export const isMarketingCampaign = (campaign?: string | null): boolean =>
   !TRANSACTIONAL_CAMPAIGNS.has(String(campaign ?? '').split(':')[0] || '');
 // Next moment a quiet-hours-deferred marketing send may go out: today's/tomorrow's quiet_end (BKK wall clock).
