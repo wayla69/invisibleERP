@@ -278,6 +278,33 @@ describe('ProjectsEvmService — captureHealth / snapProject (PPM health, PMO-1 
   });
 });
 
+describe('ProjectsEvmService — programs() portfolio rollup (PMO-4)', () => {
+  it('groups projects by program and reports each program duration + critical path', async () => {
+    const rows = [
+      { projectCode: 'A', name: 'a', status: 'active', programCode: 'PRG-1', dependsOnProjects: null },
+      { projectCode: 'B', name: 'b', status: 'active', programCode: 'PRG-1', dependsOnProjects: 'A' },
+    ];
+    // routes: program-code scan → programCriticalPath: members → A's schedule tasks → B's schedule tasks
+    const svc = evmSvc([rows, rows, [task(11, { plannedHours: '40' })], [task(21, { plannedHours: '24' })]],
+      { rowOf: async (code: string) => ({ id: code === 'A' ? 1 : 2 }) });
+    const r = await svc.programs({ username: 'pmo' } as any);
+    expect(r.count).toBe(1);
+    expect(r.programs[0]).toEqual({ program_code: 'PRG-1', member_count: 2, program_duration_days: 8, critical_path: ['A', 'B'] });
+  });
+});
+
+describe('ProjectsEvmService — captureAllHealth (scheduled BI action path)', () => {
+  it('snapshots every project and reports scanned/captured', async () => {
+    const T = [task(1, { plannedCost: '1000', pctComplete: 100, plannedEnd: '2026-01-01' })];
+    // routes: project scan → snapProject: evm tasks → nb sum → rollup tasks
+    const { svc, cap } = evmWriteSvc([[PROJ], T, [{ v: '0' }], T]);
+    const r = await svc.captureAllHealth({ username: 'scheduler' } as any);
+    expect(r).toMatchObject({ scanned: 1, captured: 1 });
+    expect(cap.inserts).toHaveLength(1);
+    expect(cap.inserts[0]).toMatchObject({ projectId: 1, createdBy: 'scheduler' });
+  });
+});
+
 describe('ProjectsEvmService — healthHistory trajectory', () => {
   it('maps the dated snapshots ascending with numeric indices', async () => {
     const { svc } = evmWriteSvc([[
