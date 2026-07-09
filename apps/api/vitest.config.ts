@@ -42,7 +42,7 @@ const SUB_SERVICE_FLOORS: Record<string, { statements: number; branches: number;
   'src/modules/procurement/procurement-po.service.ts': { statements: 98, branches: 82, functions: 98, lines: 98 }, // 100/84.9/100/100
   'src/modules/procurement/procurement-pr.service.ts': { statements: 95, branches: 67, functions: 98, lines: 95 }, // 97.8/69.1/100/97.8
   'src/modules/procurement/procurement-grn.service.ts': { statements: 92, branches: 65, functions: 98, lines: 92 }, // 94.6/67.1/100/94.6 — the print/summary mapping is dense with `?? null` fallbacks; the null-side tests cover most, the rest are off-PO edge forms
-  'src/modules/projects/projects-evm.service.ts':      { statements: 90, branches: 75, functions: 85, lines: 90 }, // 92.5/77.2/87.5/92.5
+  'src/modules/projects/projects-evm.service.ts':      { statements: 98, branches: 75, functions: 98, lines: 98 }, // 100/77.4/100/100
 };
 
 export default defineConfig({
@@ -66,16 +66,16 @@ export default defineConfig({
       // Three-tier ratchet (each floor locked just below its measured value; NEVER loosen — a floor may
       // only move down when its measured value itself fell below the old floor because the executed
       // surface grew, per the note above):
-      //  1. PURE_MODULES keep their undiluted glob group — measured 88.1/91.1/86.1/88.1 after the
-      //     slice-8 doc-number/net-guard/tax-controller suites (was 80.3/89.2/79.5/80.3 on 2026-07-08).
+      //  1. PURE_MODULES keep their undiluted glob group — measured 97.9/92.1/96.7/97.9 after the
+      //     slice-9 tax-engine/payroll-full/DNS-mock suites (every tax/payroll/net-guard file is at
+      //     100% statements; the residual is `?? null`-style partial branches).
       //  2. SUB_SERVICE_FLOORS pin each docs/38 sub-service per file.
       //  3. The global floor covers the whole expanded set (this vitest version does NOT remove
-      //     glob-matched files from the global group) — measured 93.1/81.4/89.8/93.1 after slice 8's
-      //     branch lift (null-side mapping tests flip the `?? null` partial branches the grn/po print
-      //     surfaces are dense with); it backstops files accidentally dropped from the globs.
+      //     glob-matched files from the global group) — measured 98.2/82.2/97.8/98.2 after slice 9;
+      //     it backstops files accidentally dropped from the globs.
       thresholds: {
-        statements: 91, branches: 79, functions: 87, lines: 91,
-        [`{${PURE_MODULES.join(',')}}`]: { statements: 86, branches: 89, functions: 84, lines: 86 },
+        statements: 96, branches: 80, functions: 96, lines: 96,
+        [`{${PURE_MODULES.join(',')}}`]: { statements: 96, branches: 90, functions: 95, lines: 96 },
         ...SUB_SERVICE_FLOORS,
       },
     },
