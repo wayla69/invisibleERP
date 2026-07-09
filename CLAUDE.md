@@ -92,6 +92,26 @@ For every such change, review and update as needed:
    `vitest run test/unit.test.ts` before pushing — a committed conflict marker still passes `nest build`
    (it doesn't compile the test file) and only fails at test run. Merge order: land the independent PRs
    (single-file, e.g. `guards.ts`-only) first, then rebase the shared-file ones one at a time.
+10. **Babysitting a PR to merge on an active main: expect the migration number to be stolen at EVERY main
+    merge, and a 405-on-merge means "main moved again" — loop, don't debug.** The EXP-12 PR got its number
+    taken **twice in one lifetime** (0288 → `0288_fine_casual_guest_profiles`, then 0289 →
+    `0289_dine_in_orders_member_idx`) — and both times the concurrent PR also used the identical journal
+    `when` (max+1), so the `_journal.json` conflict hides a second collision. The renumber cycle: `git mv`
+    the .sql to the next free number + fix its header comment, take **main's** journal and append yours with
+    `when` = **live max + 1**, then `grep -rn "02NN"` and bump every reference you authored (schema comments,
+    `build_rcm.py` control text → **regenerate the xlsx**, narrative, UAT/traceability, PR body). A merge
+    attempt that returns **405 "merge conflicts"** right after checks read green is not an error to diagnose —
+    `mergeable_state` was simply stale; fetch main, re-merge, renumber if needed, push, re-arm the check-in.
+    Shared-status-line files (`uat-traceability-matrix.md` header) collide on the version too — main keeps its
+    number, yours bumps to the next. Also: authorize-once babysit loops merge fine, but re-verify the branch
+    contains the live `origin/main` (`git merge-base --is-ancestor`) before every merge attempt.
+11. **Before pushing an API behaviour change, GREP EVERY harness for the touched endpoints — the ones you
+    know about aren't all of them.** Tightening `POST /api/claims/gr` (EXP-12 claim window: a `gr_no` must
+    reference a real receipt) broke the `gaps` harness in CI — it claimed against a free-text `GR-1` that
+    never existed, and `gaps` wasn't in the "obvious" procurement harness set. There are **~110** cutover
+    scripts; run `grep -ln "<endpoint1>\|<endpoint2>\|<tableName>" tools/cutover/src/*.ts tools/parity/src/*.ts`
+    and run every hit locally before pushing. Fix direction per mantra #4: the harness's fake fixture gets a
+    real seeded row (`goodsReceipts` insert) — never loosen the control to accept fictitious references.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -188,6 +208,19 @@ For every such change, review and update as needed:
   gated to the setup duties (`md_item`/`md_config`/`masterdata`/`exec`) and allow-listed to those keys so a
   narrow role gets the bulk surface without the coarse `masterdata` duty (SoD R13). Shared web island
   `components/master-io.tsx`. Coverage: `ext` harness. Narrative PN-17 §7.3b/3c.
+- **Blind-count goods receiving (EXP-12, migration 0290) — extend it, don't re-derive.** All receiving
+  control logic lives in `modules/procurement/procurement-grn.service.ts`: `receiveLines` (PO lines for
+  `/receiving`, counted qty NEVER pre-filled by design), the `createGr` **`OVER_RECEIPT`** gate (aggregate
+  per item; only a weight UoM — `isWeightUom`/`WEIGHT_UOMS`, kg/g/ton — may exceed the ordered qty, within
+  `receiving_settings.over_receipt_weight_pct`, default 5%), the GR-response `summary` (ordered vs received +
+  `claim_deadline`; part of the pinned **golden master** — changing `createGr`'s return re-pins it), and
+  `closePoShort` (releases commitments, sets `po_items.status='Closed'` → further receipt `PO_LINE_CLOSED`;
+  receive-all/receive-item skip closed lines). The claim window (`claim_window_hours`, default 24h, anchored
+  on `goods_receipts.created_at`) is enforced in `claims/claims.service.ts` `createGrClaim` →
+  `CLAIM_WINDOW_CLOSED`; dock photos go to `doc_attachments` docType `GRC` (`assertDocExists` knows
+  PO/PR/GR/GRC). Settings: `GET/PUT /api/procurement/receiving-settings` (change = `procurement`/`exec` only,
+  mirrors EXP-04). ToE: 8 EXP-12 checks in `cutover/compliance.ts` (user `whrecv` = wh_receive-only fixture);
+  the `gaps` harness seeds a real `GR-1`. Narrative PN-02 §7(5) rev 3.29; UAT-P2P-120..124.
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
   GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
   Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
@@ -326,7 +359,19 @@ For every such change, review and update as needed:
   a mobile card/bottom-bar layout that only renders below the `sm`/`lg` breakpoint is exercised without
   disturbing the desktop specs (`e2e/mobile-smoke.mobile.spec.ts` covers Requisitions/Shop/Approvals/POS
   Register). The card-vs-table recipe is `sm:hidden` card list + `hidden sm:block` table wrapper (see
-  `approvals/page.tsx`, `requisitions/page.tsx`).
+  `approvals/page.tsx`, `requisitions/page.tsx`). **Local-config gotchas (scratchpad config):** `testDir`
+  and `webServer` resolve relative to the CONFIG file, so a config outside the repo needs an **absolute
+  `testDir`** ('/…/apps/web/e2e') and **`webServer.cwd: '/…/apps/web'`** or you get "No tests found" /
+  "webServer was not able to start". A capture/spec that renders the app MUST call its `boot(page)` mock
+  first — a login-page snapshot in `test-results/**/error-context.md` ("waiting for locator" on an element
+  that never mounts) means the `ierp_csrf` cookie/route mocks were never installed. And a local run with
+  `testIgnore` cleared executes **every** `*.capture.spec.ts`, which can silently **regenerate committed
+  screenshots** (`docs/user-manual/img/*.png`) — check `git status` for unintended binary diffs before
+  committing. **Real-tap regression pattern for "ปุ่มซ้อนกัน/กดไม่ได้"** (`e2e/receiving.mobile.spec.ts`):
+  drive the flow with ordinary clicks at the phone project (Playwright actionability fails a click whose
+  target is covered by another element), assert `document.documentElement.scrollWidth ≤ clientWidth` after
+  EVERY stage (an overflow shifts fixed dialogs off-screen), and assert the open dialog's `boundingBox()`
+  stays inside the viewport — copy this recipe for any new touch-critical screen.
 - Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`):
   `pnpm --filter @ierp/cutover compliance` (ICFR controls), `basics` (the finance/GL/EAM smoke — **the
   primary gate for AR/AP, GL, fixed-assets/EAM, leases, cash-flow, collections work; extend it for any such
