@@ -18,9 +18,12 @@ The chat spine is **already built**; this plan adds no new business-cycle accoun
 channel over flows the modules already own:
 
 - **Webhook + identity** — `apps/api/src/modules/messaging/line-webhook.controller.ts`:
-  signature-verified per-tenant webhook, staff identity binding (`users.line_user_id`, one-time code,
-  migration `0227`), linear token command router, per-command `resolvePermissions` re-check,
-  LINE message-id dedupe (`message_log.provider_ref`), reply via `replyLine`.
+  signature-verified per-tenant webhook, linear token command router,
+  LINE message-id dedupe (`message_log.provider_ref`), reply via `replyLine`. *(2026-07-09
+  decomposition, zero behaviour change: staff identity binding — `users.line_user_id`, one-time code,
+  migration `0227` — plus the per-command `resolvePermissions` re-check now live in
+  `messaging/line-link.service.ts`; copilot draft parsing in `line-copilot.service.ts`; the flex
+  cards/usage text in `line-cards.ts`.)*
 - **Staff notifications** — `messaging/line-notify.service.ts` (`notifyUser`/`notifyRole`, campaign
   `wf_notify`) hooked into `WorkflowService.start`/`act` (queue entry + final decision). Best-effort by
   design — a failed push never blocks an approval.

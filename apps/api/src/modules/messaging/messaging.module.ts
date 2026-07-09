@@ -3,6 +3,8 @@ import { MessagingService } from './messaging.service';
 import { MessagingController } from './messaging.controller';
 import { TenantMessagingService } from './tenant-messaging.service';
 import { LineWebhookController, LineWebhookService } from './line-webhook.controller';
+import { LineCopilotService } from './line-copilot.service';
+import { LineLinkService } from './line-link.service';
 import { LineNotifyService } from './line-notify.service';
 import { DeliveryCallbackController, DeliveryCallbackService } from './delivery-callback.controller';
 import { SavedSegmentsService } from '../loyalty/saved-segments.service';
@@ -14,7 +16,7 @@ import { SavedSegmentsService } from '../loyalty/saved-segments.service';
 // DeliveryCallbackController receives provider delivery-status callbacks (token-guarded, tenant-scoped).
 @Module({
   controllers: [MessagingController, LineWebhookController, DeliveryCallbackController],
-  providers: [MessagingService, TenantMessagingService, LineWebhookService, LineNotifyService, DeliveryCallbackService, SavedSegmentsService],
+  providers: [MessagingService, TenantMessagingService, LineWebhookService, LineCopilotService, LineLinkService, LineNotifyService, DeliveryCallbackService, SavedSegmentsService],
   exports: [MessagingService, TenantMessagingService, LineNotifyService],
 })
 export class MessagingModule {}
