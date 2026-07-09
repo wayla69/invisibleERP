@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes, vendors, reContracts } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import { PND_LABELS } from '../documents/wht-rates';
-import { pndEfilingText } from './rd-efiling';
+import { pndEfilingText, type PndEfilingRow } from './rd-efiling';
 import { currentTenantStore } from '../../../common/tenant-context';
 import { NotFoundException } from '@nestjs/common';
 import type { JwtUser } from '../../../common/decorators';
@@ -129,7 +129,7 @@ export class TaxReportsService {
     const rep = await this.pnd(type, month, year);
     return {
       filename: `${type}_${rep.period.replace('-', '')}.txt`,
-      text: pndEfilingText(rep.rows as any),
+      text: pndEfilingText(rep.rows as PndEfilingRow[]),
       count: rep.rows.length,
       totals: rep.totals,
     };

@@ -7,7 +7,9 @@ import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
 import { roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
-import type { CreateBankAccountDto, ImportStatementDto, AdjustmentDto } from './dto';
+import type { CreateBankAccountDto, ImportStatementDto, AdjustmentDto, ImportStatementFileDto } from './dto';
+import { normalizeStatementRows, StatementParseError } from './statement-file';
+import { parseCsv, parseXlsx } from '../masterdata/masterdata.service';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 const days = (a: any, b: any) => Math.abs((new Date(String(a)).getTime() - new Date(String(b)).getTime()) / 86400000);
@@ -137,6 +139,28 @@ export class BankService {
     const [h] = await db.insert(bankStatements).values({ tenantId: acct.tenantId ?? null, statementNo, bankAccountId, statementDate: dto.statement_date, openingBal: fx(dto.opening_bal, 4), closingBal: fx(dto.closing_bal, 4), lineCount: dto.lines.length, createdBy: user.username }).returning({ id: bankStatements.id });
     await db.insert(bankStatementLines).values(dto.lines.map((l) => ({ tenantId: acct.tenantId ?? null, statementId: Number(h!.id), bankAccountId, lineDate: l.date, description: l.description ?? null, amount: fx(l.amount, 4), runningBalance: l.balance != null ? fx(l.balance, 4) : null, reconciled: 'false' })));
     return { statement_no: statementNo, line_count: dto.lines.length, opening_bal: n(dto.opening_bal), closing_bal: n(dto.closing_bal) };
+  }
+
+  // File-based statement import: parse the bank's own CSV/XLSX export (KBank/SCB/BBL Thai or English
+  // headers — see statement-file.ts) into the SAME importStatement pipeline, optionally auto-matching
+  // immediately. A parse problem is a 400 with the header list — never a silent partial import.
+  async importStatementFile(bankAccountId: number, dto: ImportStatementFileDto, user: JwtUser) {
+    let rows: Record<string, string>[];
+    try {
+      rows = dto.xlsx ? await parseXlsx(Buffer.from(dto.xlsx, 'base64')) : parseCsv(dto.csv ?? '');
+    } catch {
+      throw new BadRequestException({ code: 'BAD_FILE', message: 'The file could not be parsed as CSV/XLSX', messageTh: 'อ่านไฟล์ไม่ได้ (ต้องเป็น CSV หรือ XLSX)' });
+    }
+    let norm;
+    try {
+      norm = normalizeStatementRows(rows, { opening_bal: dto.opening_bal, closing_bal: dto.closing_bal, statement_date: dto.statement_date });
+    } catch (e) {
+      if (e instanceof StatementParseError) throw new BadRequestException({ code: e.code, message: e.message, messageTh: e.messageTh });
+      throw e;
+    }
+    const imported = await this.importStatement(bankAccountId, norm, user);
+    const match = dto.auto_match ? await this.autoMatch(bankAccountId, user) : null;
+    return { ...imported, skipped_rows: norm.skipped, detected_columns: norm.detected, auto_match: match ? { matched: match.matched, unmatched_statement: match.unmatched_statement.length, unmatched_book: match.unmatched_book.length } : null };
   }
 
   // auto-match unreconciled statement lines to unreconciled GL cash movements on the bank's gl account

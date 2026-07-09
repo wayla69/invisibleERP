@@ -129,6 +129,32 @@ async function main() {
   const adj2 = await inj('POST', `/api/bank/lines/${feeLineId}/adjustment`, admin, { kind: 'fee' });
   ok('Fee adjustment idempotent (already reconciled → 400)', adj2.status === 400, `${adj2.status} ${JSON.stringify(adj2.json).slice(0, 50)}`);
 
+  // ── File-based statement import (statement-file.ts): the bank's own CSV export ──
+  // Second account on 1020 keeps the numbers isolated from the 1010 flow above.
+  const acc2 = await inj('POST', '/api/bank/accounts', admin, { bank_name: 'ไทยพาณิชย์', account_no: '222-4-55555', gl_account_code: '1020', opening_balance: 0 });
+  const bank2Id = acc2.json.id;
+  await inj('POST', `/api/bank/accounts/${bank2Id}/approve`, approver);
+  await postJE(admin, { date: '2028-04-03', source: 'Manual', memo: 'sale in', lines: [{ account_code: '1020', debit: 5000 }, { account_code: '4000', credit: 5000 }] });
+  await postJE(admin, { date: '2028-04-04', source: 'Manual', memo: 'supplier out', lines: [{ account_code: '5100', debit: 1200 }, { account_code: '1020', credit: 1200 }] });
+  // KBank-style Thai headers, dd/mm/BE dates (03/04/2571 พ.ศ. = 2028-04-03 ค.ศ.), split ฝาก/ถอน columns,
+  // running balance, a trailing summary row the parser must SKIP (counted, not silent).
+  const thaiCsv = ['วันที่,รายการ,ถอนเงิน,ฝากเงิน,คงเหลือ',
+    '03/04/2571,รับโอน SMART,,"5,000.00","5,000.00"',
+    '04/04/2571,จ่ายผู้ขาย,"1,200.00",,"3,800.00"',
+    'รวม,,"1,200.00","5,000.00",'].join('\r\n');
+  const fimp = await inj('POST', `/api/bank/accounts/${bank2Id}/statements/import-file`, admin, { csv: thaiCsv, auto_match: true });
+  ok('File import: Thai-header CSV with BE dates parsed (2 lines, 1 summary row skipped)',
+    /^BANKSTMT-/.test(fimp.json.statement_no ?? '') && fimp.json.line_count === 2 && fimp.json.skipped_rows === 1, `${fimp.status} ${JSON.stringify(fimp.json).slice(0, 120)}`);
+  ok('File import: opening/closing derived from the running-balance column (0 → 3,800)',
+    near(fimp.json.opening_bal, 0) && near(fimp.json.closing_bal, 3800), JSON.stringify({ o: fimp.json.opening_bal, c: fimp.json.closing_bal }));
+  ok('File import: auto_match flag matched both lines against GL 1020 (BE→CE date conversion held)',
+    fimp.json.auto_match?.matched === 2 && fimp.json.auto_match?.unmatched_statement === 0, JSON.stringify(fimp.json.auto_match));
+  const r3 = await inj('GET', `/api/bank/accounts/${bank2Id}/reconciliation`, admin);
+  ok('File import: reconciliation ties (gl 3800 = statement 3800, difference 0)',
+    near(r3.json.gl_balance, 3800) && near(r3.json.statement_balance, 3800) && near(r3.json.difference, 0), JSON.stringify({ gl: r3.json.gl_balance, st: r3.json.statement_balance }));
+  const badFile = await inj('POST', `/api/bank/accounts/${bank2Id}/statements/import-file`, admin, { csv: 'ชื่อ,ที่อยู่\nกขค,กทม' });
+  ok('File import: a file with no date column fails closed (400 NO_DATE_COLUMN)', badFile.status === 400 && badFile.json.error?.code === 'NO_DATE_COLUMN', `${badFile.status} ${badFile.json.error?.code}`);
+
   // trial balance still balances
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
   ok('Trial balance balanced after bank postings', near(tb.debit ?? tb.total_debit, tb.credit ?? tb.total_credit), JSON.stringify(tb).slice(0, 60));
