@@ -20,6 +20,8 @@ export class ChannelAdapterController {
   constructor(private readonly svc: ChannelAdapterService) {}
 
   @Get('adapters') list() { return this.svc.listAdapters(); }
+  // POS-7 — current per-channel auto-86 state + the 86/un-86 transition audit trail.
+  @Get('auto-86') auto86(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listAuto86(u, qint('limit', limit, 50)); }
   @Post('adapters') upsert(@Body(new ZodValidationPipe(AdapterBody)) b: z.infer<typeof AdapterBody>, @CurrentUser() u: JwtUser) { return this.svc.upsertAdapter(b, u); }
   @Post(':platform/menu-sync') menuSync(@Param('platform') p: string, @CurrentUser() u: JwtUser) { return this.svc.menuSyncOut(p, u); }
   @Get('orders') orders(@Query('limit') limit?: string) { return this.svc.listChannelOrders(qint('limit', limit, 50)); }
