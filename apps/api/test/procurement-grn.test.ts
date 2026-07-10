@@ -39,6 +39,9 @@ function grnEnv(routes: any[][], opts: { withCommitments?: boolean } = {}) {
     opts.withCommitments ? {
       consume: async (_db: any, t: string, no: string) => { cap.consumes.push([t, no]); },
       release: async (_db: any, t: string, no: string) => { cap.releases.push([t, no]); },
+      // FIN-3 (BUD-02) GL-budget commitment release/consume on receipt (mirrors the project reserve/release).
+      glConsume: async (_db: any, t: string, no: string) => { cap.consumes.push(['gl', t, no]); },
+      glRelease: async (_db: any, t: string, no: string) => { cap.releases.push(['gl', t, no]); },
     } as any : undefined,
   );
   return { svc, cap };

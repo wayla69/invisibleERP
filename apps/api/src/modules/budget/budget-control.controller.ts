@@ -10,6 +10,11 @@ const ControlSettingsBody = z.object({
   default_expense_account: z.string().min(1).optional(),
 });
 
+// Fastify delivers a repeated query param (?account=a&account=b) as a string[]; every value below is used
+// as a scalar (SQL eq / .slice / .toUpperCase), so normalise to a single string and reject arrays outright
+// — prevents CodeQL "type confusion through parameter tampering" and any array reaching a string sink.
+const qstr = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? undefined : v);
+
 // FIN-3 (BUD-02) — budgetary control / encumbrance surface. The gate itself runs inside the PR/PO approval
 // path (procurement module → CommitmentsService.glGate); this controller is the read/config surface:
 // availability (for the approval-screen chip + the budget screen), the commitment audit list (override
@@ -23,9 +28,11 @@ export class BudgetControlController {
   // PR/PO approval chip: evaluates the doc's lines exactly as the gate will).
   @Get('availability') @Permissions('exec', 'planner', 'procurement', 'approvals', 'fin_report', 'gl_close')
   async availability(
-    @Query('account') account?: string, @Query('period') period?: string, @Query('cost_center') costCenter?: string,
-    @Query('doc_type') docType?: string, @Query('doc_no') docNo?: string, @CurrentUser() u?: JwtUser,
+    @Query('account') accountRaw?: string | string[], @Query('period') periodRaw?: string | string[], @Query('cost_center') costCenterRaw?: string | string[],
+    @Query('doc_type') docTypeRaw?: string | string[], @Query('doc_no') docNoRaw?: string | string[], @CurrentUser() u?: JwtUser,
   ) {
+    const account = qstr(accountRaw), period = qstr(periodRaw), costCenter = qstr(costCenterRaw);
+    const docType = qstr(docTypeRaw), docNo = qstr(docNoRaw);
     const tenantId = u?.tenantId ?? null;
     if (docType && docNo) {
       if (docType !== 'PR' && docType !== 'PO') throw new BadRequestException({ code: 'BAD_DOC_TYPE', message: 'doc_type must be PR or PO', messageTh: 'doc_type ต้องเป็น PR หรือ PO' });

@@ -108,6 +108,11 @@ function poEnv(routes: any[][], opts: { inst?: any; cleared?: boolean; noWorkflo
     {
       reserve: async (_tx: any, d: any) => { cap.reserves.push(d); },
       release: async (_db: any, t: string, no: string) => { cap.releases.push([t, no]); },
+      // FIN-3 (BUD-02) GL-budget gate: null gate = policy off (these unit tests don't exercise budget control).
+      glGateForDoc: async () => null,
+      glReserve: async () => {},
+      glConsume: async () => {},
+      glRelease: async (_db: any, t: string, no: string) => { cap.releases.push(['gl', t, no]); },
     } as any,
   );
   return { svc, cap };
