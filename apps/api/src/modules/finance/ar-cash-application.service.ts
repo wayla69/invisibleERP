@@ -8,7 +8,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
-// ───────────────────────────── AR cash application (REV-20, docs/41 FIN-1) ─────────────────────────────
+// ───────────────────────────── AR cash application (REV-21, docs/41 FIN-1) ─────────────────────────────
 // One customer receipt applied across MANY invoices (partial allowed); the remainder parks ON-ACCOUNT
 // (unapplied cash, GL 2220 Unapplied Customer Receipts) and is applied to invoices later. An Issued
 // AR-linked credit note (ใบลดหนี้, TAX-07) can be applied as a credit line in the same worksheet —

@@ -134,7 +134,7 @@ export class CollectionsService {
     const latest = new Map<string, any>();
     for (const l of logs) if (!latest.has(l.invoiceNo)) latest.set(l.invoiceNo, l);
 
-    // REV-20 — a customer's on-account (unapplied) cash: applied receipts already reduced each invoice's
+    // REV-21 — a customer's on-account (unapplied) cash: applied receipts already reduced each invoice's
     // outstanding, but parked cash means the collector should APPLY before dunning — surfaced per row.
     const uaRows = await db.select({ tenantId: arReceipts.tenantId, v: sql<string>`coalesce(sum(${arReceipts.unappliedAmount}),0)` })
       .from(arReceipts).groupBy(arReceipts.tenantId);
@@ -152,7 +152,7 @@ export class CollectionsService {
         return {
           invoice_no: r.invoice_no, tenant_id: r.tenant_id, party: r.party, due_date: r.due_date,
           amount: n(r.amount), outstanding, days_overdue: daysOverdue,
-          on_account: r.tenant_id != null ? (onAccountBy.get(Number(r.tenant_id)) ?? 0) : 0, // customer-level unapplied cash (REV-20)
+          on_account: r.tenant_id != null ? (onAccountBy.get(Number(r.tenant_id)) ?? 0) : 0, // customer-level unapplied cash (REV-21)
           current_stage: currentStage, last_action_date: last?.createdAt ?? null,
           promise_to_pay_date: last?.promiseToPayDate ?? null,
           recommended_stage: recommended, escalate: recIdx > curIdx,

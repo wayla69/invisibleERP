@@ -87,7 +87,7 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   // Construction/real-estate retention (docs/35 Phase 0) — the shared retention sub-ledger's GL anchors.
   { code: '1170', name: 'Retention Receivable', type: 'Asset' },              // ลูกหนี้เงินประกันผลงาน — retention withheld by the customer on a progress claim, collectible on release (Track A)
   { code: '2440', name: 'Retention Payable', type: 'Liability' },             // เจ้าหนี้เงินประกันผลงาน — retention we withhold from a subcontractor valuation, payable on release (Track B)
-  { code: '2220', name: 'Unapplied Customer Receipts', type: 'Liability' },   // เงินรับรอตัดชำระ — on-account AR cash awaiting application to invoices (REV-20); ties to Σ ar_receipts.unapplied_amount
+  { code: '2220', name: 'Unapplied Customer Receipts', type: 'Liability' },   // เงินรับรอตัดชำระ — on-account AR cash awaiting application to invoices (REV-21); ties to Σ ar_receipts.unapplied_amount
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -120,7 +120,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '2150': { bucket: 'operating', label: 'เจ้าหนี้ระหว่างบริษัท (Intercompany payable)' },
   '2200': { bucket: 'operating', label: 'เงินมัดจำลูกค้า/บัตรของขวัญ (Customer deposits)' },
   '2210': { bucket: 'operating', label: 'เงินรับล่วงหน้า (Customer deposits — prepaid)' },
-  '2220': { bucket: 'operating', label: 'เงินรับรอตัดชำระ (Unapplied customer receipts)' }, // REV-20 — on-account AR cash (working-capital liability)
+  '2220': { bucket: 'operating', label: 'เงินรับรอตัดชำระ (Unapplied customer receipts)' }, // REV-21 — on-account AR cash (working-capital liability)
   '2300': { bucket: 'operating', label: 'ทิปค้างจ่าย (Tips payable)' },
   '2350': { bucket: 'operating', label: 'ประกันสังคมค้างจ่าย (Social security payable)' },
   '2360': { bucket: 'operating', label: 'ภาษีหัก ณ ที่จ่ายเงินเดือนค้างจ่าย (Payroll WHT payable)' },

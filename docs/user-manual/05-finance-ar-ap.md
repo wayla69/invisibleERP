@@ -1,6 +1,6 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.8 · 2026-07-10** _(v0.8: AR cash application — apply **one customer payment across several invoices** from the new **ตัดรับชำระหลายใบแจ้งหนี้** worksheet on the รายรับ (AR) tab; the unallocated remainder parks **on-account** and can be applied later; big batches need a second approver; reversals need a reason. New control REV-20.)_
+**Status: DRAFT v0.8 · 2026-07-10** _(v0.8: AR cash application — apply **one customer payment across several invoices** from the new **ตัดรับชำระหลายใบแจ้งหนี้** worksheet on the รายรับ (AR) tab; the unallocated remainder parks **on-account** and can be applied later; big batches need a second approver; reversals need a reason. New control REV-21.)_
 
 *v0.7 (2026-07-09): bank-statement file import — upload the bank's CSV/XLSX export on `/bank`, Thai/English headers + BE dates auto-detected, auto-match on import.*
 

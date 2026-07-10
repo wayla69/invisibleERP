@@ -170,7 +170,7 @@ export class FinanceService {
       outstanding: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)`,
     }).from(arInvoices).leftJoin(tenants, eq(arInvoices.tenantId, tenants.id)).where(sql`${arInvoices.status}::text <> 'Paid'`);
     const aged = this.bucketize(rows.map((r: any) => ({ ref: r.ref, party: r.party, due_date: r.due_date, outstanding: n(r.outstanding) })));
-    // REV-20 — on-account (unapplied) customer cash is a CREDIT against the book: applied receipts already
+    // REV-21 — on-account (unapplied) customer cash is a CREDIT against the book: applied receipts already
     // reduced each invoice's outstanding above; the parked remainder is surfaced here so the aged gross and
     // the customer's net position never diverge silently.
     const [ua] = await db.select({ v: sql<string>`coalesce(sum(${arReceipts.unappliedAmount}),0)` }).from(arReceipts);
@@ -334,7 +334,7 @@ export class FinanceService {
     const invs = await db.select({ date: arInvoices.invoiceDate, ref: arInvoices.invoiceNo, amt: arInvoices.amount, cur: arInvoices.currency, fx: arInvoices.fxRate }).from(arInvoices).where(eq(arInvoices.tenantId, tenantId));
     const invByNo = new Map<string, { cur: string; fx: number }>(invs.map((i: any) => [i.ref, { cur: i.cur ?? 'THB', fx: n(i.fx) || 1 }]));
     const rcps = await db.select({ date: arReceipts.receiptDate, ref: arReceipts.receiptNo, amt: arReceipts.amount, inv: arReceipts.invoiceNo }).from(arReceipts).where(eq(arReceipts.tenantId, tenantId));
-    // REV-20 — an applied credit note reduces what the customer owes: each effective (applied, not
+    // REV-21 — an applied credit note reduces what the customer owes: each effective (applied, not
     // reversed) credit-note application is a statement credit dated on its application day, in the target
     // invoice's currency. Cash receipts already appear in full (incl. their on-account remainder), so a
     // multi-invoice/on-account receipt nets the statement exactly once.
@@ -872,10 +872,10 @@ export class FinanceService {
     // 9. REV-16 — large standalone refunds awaiting approval.
     for (const r of await db.select().from(refundRequests).where(eq(refundRequests.status, 'PendingApproval')))
       items.push({ type: 'refund', control: 'REV-16', ref: `RR-${Number(r.id)}`, label: `คืนเงิน ${r.paymentNo}`, amount: n(r.amount), requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
-    // 9b. REV-20 — large AR cash applications awaiting approval (grouped per worksheet batch; the cash is
+    // 9b. REV-21 — large AR cash applications awaiting approval (grouped per worksheet batch; the cash is
     // banked on-account, no invoice moves until a different user approves).
     for (const b of await db.select({ batchNo: arReceiptApplications.batchNo, requestedBy: sql<string>`max(${arReceiptApplications.appliedBy})`, total: sql<string>`coalesce(sum(${arReceiptApplications.appliedAmount}),0)`, oldest: sql<string>`min(${arReceiptApplications.appliedAt})` }).from(arReceiptApplications).where(eq(arReceiptApplications.status, 'PendingApproval')).groupBy(arReceiptApplications.batchNo))
-      items.push({ type: 'ar_cash_application', control: 'REV-20', ref: b.batchNo, label: `ตัดรับชำระลูกหนี้ ${b.batchNo}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
+      items.push({ type: 'ar_cash_application', control: 'REV-21', ref: b.batchNo, label: `ตัดรับชำระลูกหนี้ ${b.batchNo}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
     // 8. FX-04 — manual FX rates awaiting approval (PendingApproval, unusable until approved; not a JE).
     for (const r of await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')))
       items.push({ type: 'fx_rate', control: 'FX-04', ref: `${r.currency}@${r.rateDate}`, label: `อัตรา ${r.currency} = ${n(r.rate)} (${r.rateDate})`, amount: 0, requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });

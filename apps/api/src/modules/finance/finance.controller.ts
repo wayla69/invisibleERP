@@ -19,7 +19,7 @@ const WriteOffBody = z.object({ tenant_id: z.number().optional(), customer_name:
 // to_email optional — when omitted the service defaults the recipient to the counterparty's email on file
 // (master data: the customer for the AR invoice / statement / receipt).
 const DocEmailBody = z.object({ to_email: z.string().email().optional() });
-// AR cash application (REV-20) — one receipt across many invoices; remainder parks on-account.
+// AR cash application (REV-21) — one receipt across many invoices; remainder parks on-account.
 const CashAppLine = z.object({ invoice_no: z.string().min(1), amount: z.number().positive() });
 const CashApplicationBody = z.object({
   customer_no: z.union([z.string().min(1), z.number()]),
@@ -42,7 +42,7 @@ const AllowanceComputeBody = z.object({
 export class FinanceController {
   constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService, private readonly allowance: ArAllowanceService, private readonly cashApp: ArCashApplicationService) {}
 
-  // ── AR cash application (REV-20) — multi-invoice receipt application + on-account cash ──
+  // ── AR cash application (REV-21) — multi-invoice receipt application + on-account cash ──
   // Worksheet feed: open invoices (with pending-committed amounts), unapplied receipts, applicable credit notes.
   @Get('ar/open-items') @Permissions('ar', 'exec')
   arOpenItems(@Query('customer_no') customerNo: string) { return this.cashApp.openItems(customerNo); }

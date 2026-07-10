@@ -32,7 +32,7 @@ export const arReceipts = pgTable('ar_receipts', {
   refNo: text('ref_no'),
   remarks: text('remarks'),
   idempotencyKey: text('idempotency_key'), // client retry key — dedups a receipt per (tenant, key)
-  // REV-20 (migration 0294) — the on-account (unapplied) portion of the receipt. A cash-application
+  // REV-21 (migration 0294) — the on-account (unapplied) portion of the receipt. A cash-application
   // receipt parks its remainder here (GL 2220 Unapplied Customer Receipts) until applied to invoices
   // later; legacy single-invoice receipts are fully applied at creation (0).
   unappliedAmount: numeric('unapplied_amount', { precision: 14, scale: 2 }).default('0'),
@@ -40,7 +40,7 @@ export const arReceipts = pgTable('ar_receipts', {
   createdAt: timestamp('created_at', { withTimezone: true }),
 });
 
-// AR cash application (REV-20, migration 0294) — one row per (receipt | credit-note) × invoice
+// AR cash application (REV-21, migration 0294) — one row per (receipt | credit-note) × invoice
 // application, so ONE customer receipt can settle MANY invoices (partial allowed) and an Issued
 // AR-linked credit note can be applied as a credit line in the same worksheet. A worksheet post is a
 // BATCH (batch_no, APL-YYYYMMDD-NNN); each line carries its own application_no (`{batch}:L{n}`).
