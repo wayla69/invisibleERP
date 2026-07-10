@@ -5,11 +5,11 @@ on:
     branches: [main, master]
   pull_request:
 
-# One CI run is ~96 jobs (build + the harness matrix) against a 20-concurrent-job account limit, so
-# superseded runs must not pile up: per-ref group — a new push to a PR cancels that PR's older run
-# outright; on main, cancel-in-progress stays false so the in-flight run finishes, and GitHub keeps
-# only the newest *pending* run in the group (intermediate main pushes are auto-superseded — the tip
-# run covers them).
+# The account limit is ~20 concurrent jobs, so superseded runs must not pile up: per-ref group —
+# a new push to a PR cancels that PR's older run outright; on main, cancel-in-progress stays false
+# so the in-flight run finishes, and GitHub keeps only the newest *pending* run in the group
+# (intermediate main pushes are auto-superseded — the tip run covers them). With the harness matrix
+# sharded (below), one full run is ~18 jobs and fits a single concurrency wave.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -40,7 +40,7 @@ jobs:
         # docs/28 §4 / AUD-ARC-09 — baseline in tools/ci/use-client-baseline.json; new pages are server
         # components with client islands (see accounting/eam page.tsx + lib/server-api.ts).
         run: node tools/ci/check-use-client.mjs
-      # Hand the compiled output to the harness matrix so 50+ jobs don't each rebuild.
+      # Hand the compiled output to the harness shards so they don't each rebuild.
       - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
@@ -54,8 +54,15 @@ jobs:
   # The integration harnesses boot the real Nest app over PGlite (a real Postgres),
   # run the Drizzle migrations and assert behaviour — green means "it works", not
   # "it compiles". Previously only a handful ran inline; the rest existed but were
-  # never gated, so they could rot silently. This matrix runs each one as its own
-  # required check, in parallel, with per-harness visibility.
+  # never gated, so they could rot silently.
+  #
+  # SHARDED (2026-07-10): one job per harness meant ~96 jobs per run against the account's
+  # ~20-concurrent-job limit — each job also re-paid ~40s of checkout/pnpm/dist setup, and a busy
+  # day froze the Actions queue for hours. The matrix now runs DOMAIN SHARDS (~5-11 harnesses per
+  # job, balanced by measured runtime, ~4-9 min each), so a whole CI run is ~18 jobs and fits one
+  # concurrency wave. Per-harness visibility is preserved: each harness runs in its own collapsible
+  # log group, a failure doesn't stop the rest of the shard, and every failed harness is listed at
+  # the end. Add a NEW harness to its domain shard (or split a shard if it outgrows ~9 minutes).
   #
   # Harnesses reconciled with shipped features so they can be gated:
   #   - GL-05 maker-checker: a manual JE/GAAP-adjustment posts as Draft and only affects balances once
@@ -67,6 +74,7 @@ jobs:
   harnesses:
     needs: build
     runs-on: ubuntu-latest
+    name: harnesses (${{ matrix.shard }})
     env:
       NODE_OPTIONS: --experimental-sqlite
       JWT_SECRET: ci-harness-secret
@@ -74,105 +82,64 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── read/write parity (services vs expected, on PGlite) ──
-          - { pkg: parity, script: writeflow }
-          - { pkg: parity, script: analytics }
-          - { pkg: parity, script: golden }
+          # ── read/write parity (services vs expected, on PGlite) + tax / Thai compliance ──
+          - shard: parity-tax
+            run: >-
+              parity:writeflow parity:analytics parity:golden
+              cutover:taxdocs cutover:etax cutover:etax-email cutover:promptpay
           # ── end-to-end / platform foundations ──
-          - { pkg: cutover, script: e2e }
-          - { pkg: cutover, script: ext }
-          - { pkg: cutover, script: worldclass }
-          - { pkg: cutover, script: tenant-isolation }
-          - { pkg: cutover, script: tenant-idx }
-          - { pkg: cutover, script: migration-parity }
-          - { pkg: cutover, script: ai-eval }
-          - { pkg: cutover, script: module-qr }
-          - { pkg: cutover, script: gaps }
-          - { pkg: cutover, script: onboarding }
-          - { pkg: cutover, script: opening-balances }
+          - shard: platform-a
+            run: >-
+              cutover:e2e cutover:ext cutover:tenant-isolation cutover:tenant-idx
+              cutover:module-qr cutover:gaps
+          - shard: platform-b
+            run: >-
+              cutover:worldclass cutover:migration-parity cutover:ai-eval
+              cutover:onboarding cutover:opening-balances
           # ── COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability) ──
-          - { pkg: cutover, script: compliance }
-          - { pkg: cutover, script: cookie-auth }
-          - { pkg: cutover, script: async-jobs }
-          - { pkg: cutover, script: bi-cache }
-          - { pkg: cutover, script: pdf-render }
-          - { pkg: cutover, script: pdpa }
-          - { pkg: cutover, script: saas-metrics }
-          - { pkg: cutover, script: governance }
+          - shard: controls
+            run: >-
+              cutover:compliance cutover:cookie-auth cutover:async-jobs cutover:bi-cache
+              cutover:pdf-render cutover:pdpa cutover:saas-metrics cutover:governance
           # ── POS ──
-          - { pkg: cutover, script: pos-p0 }
-          - { pkg: cutover, script: pos-p1 }
-          - { pkg: cutover, script: pos-p2 }
-          - { pkg: cutover, script: pos-wiring }
-          - { pkg: cutover, script: pos-discount }
-          - { pkg: cutover, script: pricing }
-          - { pkg: cutover, script: splitbill }
-          - { pkg: cutover, script: cashreport }
-          - { pkg: cutover, script: returns }
+          - shard: pos
+            run: >-
+              cutover:pos-p0 cutover:pos-p1 cutover:pos-p2 cutover:pos-wiring
+              cutover:pos-discount cutover:pricing cutover:splitbill cutover:cashreport
+              cutover:returns
           # ── restaurant ──
-          - { pkg: cutover, script: restaurant }
-          - { pkg: cutover, script: restaurant-offline }
-          - { pkg: cutover, script: hub-snapshot }
-          - { pkg: cutover, script: reservations }
-          - { pkg: cutover, script: tips }
-          - { pkg: cutover, script: waste }
-          - { pkg: cutover, script: scheduling }
-          - { pkg: cutover, script: cash-banking }
-          - { pkg: cutover, script: refund-approval }
-          - { pkg: cutover, script: menu }
-          - { pkg: cutover, script: recipe }
-          # ── tax / Thai compliance ──
-          - { pkg: cutover, script: taxdocs }
-          - { pkg: cutover, script: etax }
-          - { pkg: cutover, script: etax-email }
-          - { pkg: cutover, script: promptpay }
+          - shard: restaurant
+            run: >-
+              cutover:restaurant cutover:restaurant-offline cutover:hub-snapshot
+              cutover:reservations cutover:tips cutover:waste cutover:scheduling
+              cutover:cash-banking cutover:refund-approval cutover:menu cutover:recipe
           # ── finance / accounting ──
-          - { pkg: cutover, script: revrec }
-          - { pkg: cutover, script: fxreval }
-          - { pkg: cutover, script: intercompany }
-          - { pkg: cutover, script: consolidation }
-          - { pkg: cutover, script: recon-profitability }
-          - { pkg: cutover, script: multiledger }
-          - { pkg: cutover, script: bankrec }
-          - { pkg: cutover, script: costcenter }
-          - { pkg: cutover, script: budget }
+          - shard: finance
+            run: >-
+              cutover:revrec cutover:fxreval cutover:intercompany cutover:consolidation
+              cutover:recon-profitability cutover:multiledger cutover:bankrec
+              cutover:costcenter cutover:budget
           # ── supply chain / inventory / manufacturing ──
-          - { pkg: cutover, script: stock-ops }
-          - { pkg: cutover, script: match }
-          - { pkg: cutover, script: costing }
-          - { pkg: cutover, script: wms }
-          - { pkg: cutover, script: scm17c }
-          - { pkg: cutover, script: manufacturing }
-          - { pkg: cutover, script: mfg-depth }
-          - { pkg: cutover, script: mrp }
+          - shard: scm-mfg
+            run: >-
+              cutover:stock-ops cutover:match cutover:costing cutover:wms cutover:scm17c
+              cutover:manufacturing cutover:mfg-depth cutover:mrp
           # ── CRM / billing / projects / loyalty ──
-          - { pkg: cutover, script: crm }
-          - { pkg: cutover, script: cpq }
-          - { pkg: cutover, script: cpq-gl }
-          - { pkg: cutover, script: sub-billing }
-          - { pkg: cutover, script: projects }
-          - { pkg: cutover, script: pipeline }
-          - { pkg: cutover, script: service }
-          - { pkg: cutover, script: loyalty }
-          - { pkg: cutover, script: coalition }
-          - { pkg: cutover, script: giftcards }
-          - { pkg: cutover, script: receipts }
-          # ── planning / analytics / channels / HR ──
-          - { pkg: cutover, script: epm-planning }
-          - { pkg: cutover, script: bi }
-          - { pkg: cutover, script: demand-ml }
-          - { pkg: cutover, script: customers }
-          - { pkg: cutover, script: branch }
-          - { pkg: cutover, script: channel }
-          - { pkg: cutover, script: offline-sync }
-          - { pkg: cutover, script: workflow }
-          - { pkg: cutover, script: ai-actions }
-          - { pkg: cutover, script: rag }
-          - { pkg: cutover, script: hcm }
-          - { pkg: cutover, script: ess }
-          - { pkg: cutover, script: supplier }
-          - { pkg: cutover, script: payroll }
-          - { pkg: cutover, script: portal-extra }
+          - shard: crm
+            run: >-
+              cutover:crm cutover:cpq cutover:cpq-gl cutover:sub-billing cutover:projects
+              cutover:pipeline cutover:service cutover:loyalty cutover:coalition
+              cutover:giftcards cutover:receipts
+          # ── planning / analytics / channels ──
+          - shard: analytics
+            run: >-
+              cutover:epm-planning cutover:bi cutover:demand-ml cutover:customers
+              cutover:branch cutover:channel cutover:offline-sync cutover:workflow
+          # ── AI / HR / portal ──
+          - shard: ai-hr
+            run: >-
+              cutover:ai-actions cutover:rag cutover:hcm cutover:ess cutover:supplier
+              cutover:payroll cutover:portal-extra
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager" (pnpm@11.8.0)
@@ -185,13 +152,29 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: dist
-      - name: ${{ matrix.pkg }} → ${{ matrix.script }}
-        run: pnpm --filter @ierp/${{ matrix.pkg }} ${{ matrix.script }}
-        env:
-          # docs/27 R3-3 — the compliance ToE run writes structured evidence for retention (below).
-          EVIDENCE_OUT: ${{ matrix.script == 'compliance' && format('{0}/compliance-evidence.json', github.workspace) || '' }}
+      - name: Run shard — each harness in its own log group; all run even if one fails
+        run: |
+          failed=""
+          for h in ${{ matrix.run }}; do
+            pkg="${h%%:*}"; script="${h#*:}"
+            echo "::group::${pkg} → ${script}"
+            # docs/27 R3-3 — the compliance ToE run writes structured evidence for retention (below).
+            ev=""
+            if [ "$script" = "compliance" ]; then ev="${GITHUB_WORKSPACE}/compliance-evidence.json"; fi
+            if EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script"; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error::harness FAILED: ${pkg} → ${script}"
+              failed="$failed ${pkg}:${script}"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "Failed harnesses:${failed}"
+            exit 1
+          fi
       - name: Retain compliance ToE evidence (docs/27 R3-3 — operating-evidence clock)
-        if: matrix.script == 'compliance' && always()
+        if: matrix.shard == 'controls' && always()
         uses: actions/upload-artifact@v4
         with:
           name: compliance-evidence-${{ github.sha }}
