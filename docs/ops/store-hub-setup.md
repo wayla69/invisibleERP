@@ -8,6 +8,9 @@
 > Phase 2b: buffet-tier and loyalty-redeem sales (visibly `skipped_unsupported` in `hub_push_log`, to
 > reconcile manually), till sessions/Z-reports, tip pools and stock movements. The register's own
 > browser-level offline outbox (Phase 0) keeps covering short cloud outages in cloud-pointed stores.
+> **Phase 2b/3 update:** buffet-tier sales now replay natively (cloud-master pricing), and the diner QR
+> self-order journey is proven end-to-end on the hub (§7). Still Phase 2c: loyalty-redeem sales,
+> till/Z-reports, hub-local stock ops, fiscal-chain verification.
 
 ## 1. What you need
 
@@ -98,9 +101,25 @@ docker compose --profile push run --rm hub-push     # or: pnpm --filter @ierp/ap
 - Cloud-side review: `GET /api/hub/reconciliation?from&to` (perm `branch`/`exec`) ties every hub op to
   its cloud sale + value — the BRANCH-04 detective tie-out.
 
+## 7. Diner QR self-order on the hub (Phase 3)
+
+Works out of the box once the hub is seeded — the printed table QRs from the cloud era keep working
+because the import preserves each table's `qr_token` verbatim:
+
+- Diner phone (on the store WiFi, hub origin per §4) scans the table QR → `/qr/start/:qrToken` opens a
+  session on the hub → menu / buffet tiers / ordering / KDS all run hub-local. Settled sales replay to
+  the cloud per §6 — **buffet-tier sales included** (the cloud re-prices the per-pax charge from its own
+  package master).
+- **Payments while offline — be honest with the till:** cash and a static PromptPay QR work; **card /
+  e-wallet capture and PromptPay payment *confirmation* need the internet** (the PSP webhook can't reach
+  the hub). Fallback: a payment terminal on mobile data, confirm manually.
+- New tables created ON the hub get their own QR and work immediately; they'll appear on the cloud only
+  as their sales replay (the table master itself re-seeds cloud→hub, not hub→cloud).
+
 ## Revision history
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 | 2026-07-10 | Platform | Initial runbook (docs/41 Phase 1: snapshot export/import + `hub/` compose + TLS/DNS recipe). |
 | 0.2 | 2026-07-10 | Platform | Phase 2a: §6 push-to-cloud operations (`hub-push` one-shot, cron guidance, `skipped_unsupported` review, reconciliation endpoint); scope note updated. |
+| 0.3 | 2026-07-10 | Platform | Phases 2b/3: buffet-tier replay noted in §6 scope; new §7 diner-QR-on-hub + offline-payments honesty. |

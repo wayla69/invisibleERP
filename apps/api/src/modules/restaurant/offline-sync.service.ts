@@ -2,9 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { posOfflineSync } from '../../database/schema';
+import { posOfflineSync, dineInOrders } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { DineInService } from './dine-in.service';
+import { BuffetService } from './buffet.service';
 
 // Offline-queued REGISTER (touch-POS) sales, replayed idempotently through the restaurant
 // order→checkout path. The touch register sells MENU items by `sku` (a different catalog + sale
@@ -28,6 +29,9 @@ export interface RegisterOfflineSaleOp {
   discount?: number;               // order-level FIXED discount amount (exclusive with discount_pct)
   tip?: number;                    // staff tip (THB) — liability 2300, outside subtotal/VAT
   service_charge_pct?: number;     // force-applied at party 1 (same shape as the register's manual SC)
+  // ── Phase 2b: buffet-tier sale — the per-pax charge is re-priced from THIS server's package master
+  //    (never the hub's number); `lines` may then be empty (buffet food itself bills ฿0). ──
+  buffet?: { package_code: string; pax: number; overtime_pax?: number };
 }
 export interface RegisterOfflineSyncBatchDto { sales: RegisterOfflineSaleOp[] }
 export interface SyncResult { client_uuid: string; status: 'synced' | 'duplicate' | 'failed'; sale_no: string | null; error: string | null }
@@ -37,6 +41,7 @@ export class RestaurantOfflineSyncService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly dineIn: DineInService,
+    private readonly buffet: BuffetService,
   ) {}
 
   async syncBatch(dto: RegisterOfflineSyncBatchDto, user: JwtUser) {
@@ -63,7 +68,12 @@ export class RestaurantOfflineSyncService {
         // 86-checks the menu items) then checkout. Offline register sales are quick (no table) — fire
         // is skipped (the kitchen was offline anyway). The sale books on the SYNC day; offline windows
         // are short (intra-shift), so same-day sync books on the same business day.
-        const order: any = await this.dineIn.createOrder({ items: op.lines as any }, user);
+        const order: any = await this.dineIn.createOrder({ items: (op.lines ?? []) as any }, user);
+        // buffet-tier replay (Phase 2b): per-pax charge (+ overtime) priced from THIS server's master
+        if (op.buffet) {
+          const [row] = await db.select({ id: dineInOrders.id }).from(dineInOrders).where(eq(dineInOrders.orderNo, order.order_no)).limit(1);
+          await this.buffet.applyReplayCharge(Number(row!.id), user.tenantId ?? null, op.buffet.package_code, Number(op.buffet.pax), Number(op.buffet.overtime_pax ?? 0), user);
+        }
         const sale: any = await this.dineIn.checkout(order.order_no, {
           method: op.method ?? 'Cash', discount_pct: op.discount_pct, discount: op.discount, tip: op.tip,
           // manual service charge replays exactly like the register applies it: forced at the given %.

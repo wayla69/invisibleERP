@@ -1,6 +1,6 @@
 # 41 — LAN-first Store Hub: full offline restaurant operation (POS + diner self-order) until the internet returns
 
-**Status: Phase 0 DELIVERED · Phase 1 DELIVERED (MVP) · Phase 2a DELIVERED (sales replay, BRANCH-04) · 2026-07-10** — Phases 2b–4 PLANNED.
+**Status: Phases 0–3 DELIVERED (0 register-hardening · 1 hub MVP · 2a sales replay/BRANCH-04 · 2b buffet replay · 3 diner QR on hub) · 2026-07-10** — Phase 2c (loyalty/till-Z/fiscal chain) + Phase 4 (fleet ops) PLANNED.
 
 ## 0. Problem & goal
 
@@ -102,25 +102,41 @@ Extend the proven idempotency contract from "quick-sale replay" to the full fina
 - **ToE:** `hub-snapshot` harness extended to **27 checks** — ring-on-hub → push → cloud sale + GL + TB
   balanced → push-log loss re-push all-duplicate → tamper `403` → skip visibility.
 
-**Phase 2b — remaining (PLANNED):**
+**Phase 2b — buffet replay (DELIVERED 2026-07-10; PN-24 rev 0.6, UAT-O2C-292):**
 
-- **Down (master data):** versioned snapshot pull (menu/prices/promotions/users/tax); BRANCH-02 extended —
-  the hub records `bundle_version` so a stale-price sale is detectable at ingest.
-- **Up (remaining docs):** till sessions/Z-reports, tip pools/distributions, stock movements; buffet +
-  loyalty sales (today surfaced as `skipped_unsupported`). Table/KDS state stays hub-local, never syncs.
-- **Numbering/fiscal:** the fiscal hash-chained journal (PN-20) seals per-hub and the cloud verifies the
-  chain at ingest.
-- **Docs:** DR/BCP (`docs/ops/dr-bcp-plan.md`) + user-manual updates as the surfaces widen.
+- A buffet-tier hub sale replays via `op.buffet {package_code, pax, overtime_pax}`; the cloud re-creates
+  the per-pax charge (`BuffetService.applyReplayCharge`) **priced from its own package master** — the
+  hub's number is never trusted; ฿0 buffet food lines are not replayed (no revenue). Batch signature
+  hardened to canonical (key-sorted) JSON — Zod's schema-ordered re-serialization broke the naive form
+  (caught by the harness, never shipped).
+- **Versioned master pull — dropped as superseded:** its control goal (detect a stale-price sale) is
+  already met more strongly by the ingest design — the cloud **re-prices every op from its own master**
+  and the BRANCH-04 reconciliation surfaces any hub↔cloud value drift. A version registry would add a
+  table + sync state for evidence the re-price already provides.
 
-## Phase 3 — diner self-order + KDS on the hub (PLANNED)
+**Phase 2c — remaining up-sync (PLANNED):**
 
-- `/qr/[token]` served by the hub; `publicApi` targets the hub origin. Table-session QR tokens must mint
-  offline → the hub holds the signing key / token table (synced down).
-- KDS, floor board, customer display: already SSE off the API's `RealtimeService` bus — they come along
-  free once the hub is the origin.
-- **Payments honesty:** cash + static PromptPay work offline; card/e-wallet capture and PromptPay
-  *confirmation* require the internet — the UI must say so, not pretend (fallback: payment terminal on
-  mobile data).
+- Loyalty-redeem sales (cross-system points state — today a visible `skipped_unsupported` queue), till
+  sessions/Z-reports + cash over/short (maker-checker interplay), tip pool distributions (policy today:
+  distribute on the CLOUD after sync — per-sale tips already accrue to 2300 at ingest), hub-local stock
+  ops (waste/receives; sale-driven BOM deductions already post at cloud ingest), fiscal hash-chain
+  verification at ingest (PN-20). DR/BCP + user-manual updates as surfaces widen.
+
+## Phase 3 — diner self-order + KDS on the hub (DELIVERED 2026-07-10)
+
+Proven rather than built — the P1 architecture already carried it, and the harness now locks it in
+(UAT-O2C-293; runbook §7):
+
+- **Diner QR works on the hub as-is:** the web app serves `/qr/[token]` relative to the hub origin
+  (single-origin build), the **imported table `qr_token`s** (id-stable from P1) resolve on the hub, and
+  the hub mints + verifies its own session tokens — no cloud round-trip anywhere in scan → session →
+  menu → tiers → order → KDS → settle. The settled sale then replays via Phase 2a/2b. Harness drives the
+  whole diner journey against the hub app, including a 2-pax buffet session.
+- KDS, floor board, customer display: SSE off the same API bus — came along free, as predicted.
+- **Payments honesty (runbook §7):** cash + static PromptPay work offline; card/e-wallet capture and
+  PromptPay *confirmation* require the internet (fallback: payment terminal on mobile data). One gotcha
+  found: Fastify's default `maxParamLength` (100) rejects the long diner session tokens — the hub runs
+  the same `main.ts` (which already sets 500), so only harness-local boots need care.
 
 ## Phase 4 — fleet operations (PLANNED)
 
@@ -134,7 +150,8 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 | 0 | 1 PR — DELIVERED | — |
 | 1 | 1 PR (snapshot export/import + `hub/` appliance + runbook) — DELIVERED | — |
 | 2a | 1 PR (sales replay + ingest + BRANCH-04 + reconciliation) — DELIVERED | 1 |
-| 2b | ~2 PRs (Z-reports/tips/stock up-sync; versioned master pull; fiscal chain) | 2a |
+| 2b + 3 | 1 PR (buffet replay + diner-QR-on-hub proof + payments honesty) — DELIVERED | 2a |
+| 2c | ~2 PRs (loyalty/till-Z/stock up-sync; fiscal chain) | 2a |
 | 3 | ~1–2 PRs (origin plumbing, token minting, payment UX) | 1, 2 |
 | 4 | ~2 PRs (console, update channel, ITGC docs) | 1 |
 
@@ -145,3 +162,4 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 | 0.1 | 2026-07-10 | Platform | Initial plan; Phase 0 delivered in the same PR (PN-24 rev 0.3, UAT-O2C-284..285, e2e `register-offline.spec.ts`). |
 | 0.2 | 2026-07-10 | Platform | Phase 1 (Store Hub MVP) delivered: `modules/hub` signed snapshot export, `db:hub:import` id-stable importer, `hub/` compose appliance + `docs/ops/store-hub-setup.md` runbook, CI harness `hub-snapshot` (20 checks). PN-24 rev 0.4; UAT-O2C-288..289. |
 | 0.3 | 2026-07-10 | Platform | Phase 2a (hub→cloud sales replay) delivered: `db:hub:push` + `hub_push_log` (0291), cloud `POST /api/hub/ingest` (HMAC) + `GET /api/hub/reconciliation`, op pass-through (discount/tip/SC), **new control BRANCH-04** (RCM 205), harness → 27 checks. PN-24 rev 0.5; UAT-O2C-290..291. |
+| 0.4 | 2026-07-10 | Platform | Phases 2b + 3 delivered: buffet-tier replay (`op.buffet`, cloud-master pricing, canonical-JSON signature) + diner QR self-order proven end-to-end ON the hub (harness → **40 checks**); versioned master pull dropped as superseded (re-price + BRANCH-04 drift); Phase 2c scoped (loyalty/till-Z/fiscal). PN-24 rev 0.6; UAT-O2C-292..293. |
