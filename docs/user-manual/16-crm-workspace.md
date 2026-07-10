@@ -82,6 +82,30 @@ Three ways leads arrive:
 
 ---
 
+## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
+
+Beyond the win/loss dashboard, three read-only analytics answer *why* deals move the way they do. Each looks
+back over a **time window** (`months`, default 6 — add e.g. `?months=3` to narrow it) and needs the `crm`,
+`exec` or `ar` permission.
+
+- **กรวยการขาย + ความเร็ว (Funnel + velocity)** — `GET /api/crm/pipeline/analytics/funnel`. The conversion
+  funnel **ลูกค้ามุ่งหวัง → ผ่านคุณสมบัติ → โอกาสการขาย → ปิดการขายได้** with the drop-off at each step, plus,
+  from the deal's stage history, **how long deals sit in each stage** (time-in-stage velocity), which stages
+  they reach, and the **average sales cycle** (days from creation to a win). Use it to find where deals stall.
+- **ผลตอบแทนตามแหล่งที่มา (Source ROI)** — `GET /api/crm/pipeline/analytics/source-roi`. Each **lead source**
+  (webinar, expo, web, referral, …) with the **won revenue**, win rate and average deal size it produced —
+  so marketing spend follows the channels that actually close. Deals with no originating lead show as `direct`.
+- **พยากรณ์การขาย + โควตา (Forecast + quota)** — `GET /api/crm/pipeline/analytics/forecast`. Open pipeline
+  split into **commit** (probability ≥ 70%), **best-case** (40–69%) and **pipeline** (< 40%) with a
+  risk-adjusted forecast total; **quota attainment per owner** (won-so-far vs a quota you pass in the report
+  filters — left blank if you don't track quotas here); and an **activity leaderboard** (who logged and
+  completed the most touches).
+
+All three are also **schedulable reports** on the report builder (report types `crm_funnel`,
+`crm_source_roi`, `crm_forecast`, alongside `crm_win_loss`) — subscribe to get them emailed/LINE'd on a cadence.
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -96,4 +120,5 @@ Three ways leads arrive:
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.1 | 2026-07-10 | **CRM-5 — analytics that answer "why"** (Module-Depth Uplift Wave 4): new §16.5 covering the funnel-conversion + time-in-stage velocity, source-ROI, and forecast-categories + quota + activity-leaderboard analytics (`/api/crm/pipeline/analytics/*`), each date-bounded and schedulable as the BI report types `crm_funnel` / `crm_source_roi` / `crm_forecast`. |
 | 1.0 | 2026-07-10 | **CRM-2 — first release of the unified CRM workspace** (docs/41): `/crm` kanban board + list toggle, saved filter views, deal page with unified timeline + next-step, account page, leads import wizard, web-to-lead capture; `/pipeline` and `/projects/crm` now redirect here; member CRM 360 moved to `/crm/members`. |
