@@ -312,6 +312,15 @@ requisitions; approval always happens in the ERP (and never by the requester —
 > [approval workflow](./10-approvals.md). You cannot approve a PR you raised
 > yourself (`SOD_VIOLATION`).
 
+> **Budget check at approval (BUD-02):** if your company has turned on the
+> budget-control policy (**/budget → ควบคุมงบ**), a **budget chip** appears next
+> to the Approve button — green **งบพอ** (with the remaining amount) or red
+> **เกินงบ**. Approving an over-budget PR then depends on the policy: *advise*
+> approves with a note, *warn* asks you to **confirm** the overage, and *block*
+> refuses (`BUDGET_EXCEEDED`) unless an **executive** enters an override reason
+> (recorded for audit). Raising a PR is never blocked — only approving it. The
+> PR's estimated cost uses the item master price.
+
 ---
 
 ## 2. Create a purchase order (PO)
@@ -396,10 +405,20 @@ file appears on the web card immediately.
 
 ### Approve (or cancel) a PO
 
-1. Open the PO.
+1. Open the PO — Pending POs on `/procurement` carry inline **Approve** /
+   **Reject** buttons (and the budget chip, see below).
 2. Click **Approve** to authorise it, or **Cancel** to void it.
 
 **Expected result:** Approved POs can be received; cancelled POs are closed.
+
+> **Budget check at approval (BUD-02):** with the budget-control policy on
+> (**/budget → ควบคุมงบ**), the PO row shows a **budget chip** (green งบพอ /
+> red เกินงบ) and approving an over-budget PO behaves per policy — *advise*
+> annotates, *warn* asks you to confirm, *block* refuses (`BUDGET_EXCEEDED`)
+> unless an **executive** provides an override reason (audited). The approval
+> **commits** the PO amount against the budget; the commitment is consumed when
+> the goods are fully received and released if the PO is cancelled or closed
+> short.
 
 [screenshot: PO form with vendor and line items]
 

@@ -15,7 +15,9 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { statusVariant } from '@/components/ui';
 import { PoForm } from '@/components/procurement-forms';
+import { BudgetChip, budgetRetryFields } from '@/components/budget-chip';
 import { DocSelect } from '@/components/doc-select';
+import { notifySuccess, notifyError } from '@/lib/notify';
 
 const PO_LIST_KEY = ['proc-pos'];
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -27,6 +29,22 @@ export default function ProcurementPage() {
   const { t } = useLang();
   const qc = useQueryClient();
   const pos = useQuery<any>({ queryKey: PO_LIST_KEY, queryFn: () => api('/api/inventory/purchase-orders?limit=50') });
+  // Approve/reject a Pending PO inline (server enforces the workflow engine's maker-checker/SoD). FIN-3
+  // (BUD-02): the budget gate's warn/block rejections become the confirm / exec-override interaction.
+  const decide = useMutation({
+    mutationFn: ({ poNo, approve, extra }: { poNo: string; approve: boolean; extra?: Record<string, unknown> }) =>
+      api(`/api/procurement/pos/${encodeURIComponent(poNo)}/approve`, { method: 'PATCH', body: JSON.stringify({ approve, ...(extra ?? {}) }) }),
+    onSuccess: (_r, v) => {
+      notifySuccess(v.approve ? t('proc.po_approved_ok') : t('proc.po_rejected_ok'));
+      qc.invalidateQueries({ queryKey: PO_LIST_KEY });
+      qc.invalidateQueries({ queryKey: ['budget-availability'] });
+    },
+    onError: (e: any, v) => {
+      const retry = budgetRetryFields(e, { confirm: t('pb.bctl_confirm_msg'), overridePrompt: t('pb.bctl_override_prompt') });
+      if (retry) decide.mutate({ ...v, extra: { ...(v.extra ?? {}), ...retry } });
+      else notifyError(e.message);
+    },
+  });
 
   return (
     <div>
@@ -57,6 +75,17 @@ export default function ProcurementPage() {
               { key: 'Supplier_Name', label: t('inv.col_supplier') },
               { key: 'Total_Amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => baht(r.Total_Amount) },
               { key: 'Status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
+              {
+                key: 'decide', label: t('proc.col_approve'), sortable: false,
+                render: (r: any) => r.Status === 'Pending' ? (
+                  <div className="flex items-center justify-end gap-1.5">
+                    {/* FIN-3 (BUD-02) — budget availability at the point of approval (hidden while off) */}
+                    <BudgetChip docType="PO" docNo={r.PO_No} />
+                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ poNo: r.PO_No, approve: true })}>{t('fin.approve')}</Button>
+                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => { const reason = window.prompt(t('proc.po_reject_reason')); if (reason != null) decide.mutate({ poNo: r.PO_No, approve: false, extra: { reason } }); }}>{t('appr.reject')}</Button>
+                  </div>
+                ) : null,
+              },
               {
                 key: 'pdf',
                 label: t('proc.col_print'),
