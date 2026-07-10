@@ -2127,14 +2127,56 @@
       "idx": 303,
       "version": "7",
       "when": 2023820000266,
-      "tag": "0303_stocktake_tenant_isolation",
+      "tag": "0303_consolidation_cta_translation",
       "breakpoints": true
     },
     {
       "idx": 304,
       "version": "7",
       "when": 2023820000267,
-      "tag": "0304_stocktake_posted_by",
+      "tag": "0304_offline_dinein_ops",
+      "breakpoints": true
+    },
+    {
+      "idx": 305,
+      "version": "7",
+      "when": 2023820000268,
+      "tag": "0305_waste_disposition",
+      "breakpoints": true
+    },
+    {
+      "idx": 306,
+      "version": "7",
+      "when": 2023820000269,
+      "tag": "0306_promptpay_store_recon",
+      "breakpoints": true
+    },
+    {
+      "idx": 307,
+      "version": "7",
+      "when": 2023820000270,
+      "tag": "0307_gl_allocation_cycles",
+      "breakpoints": true
+    },
+    {
+      "idx": 308,
+      "version": "7",
+      "when": 2023820000271,
+      "tag": "0308_crm_automation",
+      "breakpoints": true
+    },
+    {
+      "idx": 309,
+      "version": "7",
+      "when": 2023820000272,
+      "tag": "0309_stocktake_tenant_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 310,
+      "version": "7",
+      "when": 2023820000273,
+      "tag": "0310_stocktake_posted_by",
       "breakpoints": true
     }
   ]

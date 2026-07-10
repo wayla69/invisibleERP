@@ -130,7 +130,7 @@ export const lotLedger = pgTable('lot_ledger', {
 
 export const stockMovements = pgTable('stock_movements', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // 0303 (see stocktakes)
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // 0309 (see stocktakes)
   moveDate: timestamp('move_date', { withTimezone: true }),
   docNo: text('doc_no'),
   moveType: moveTypeEnum('move_type'),
@@ -150,7 +150,7 @@ export const stockMovements = pgTable('stock_movements', {
 
 export const stocktakes = pgTable('stocktakes', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  // 0303: added — the table used to have NO tenant column, so the RLS loop skipped it and every read
+  // 0309: added — the table used to have NO tenant column, so the RLS loop skipped it and every read
   // (list/detail) and the variance POST were global across tenants. Legacy rows keep NULL (unattributable).
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   stNo: text('st_no'),
@@ -162,7 +162,7 @@ export const stocktakes = pgTable('stocktakes', {
   physicalQty: numeric('physical_qty'),
   difference: numeric('difference'),
   countedBy: text('counted_by'),
-  postedBy: text('posted_by'),                                                   // 0304 — SoD R11 evidence: the independent poster
+  postedBy: text('posted_by'),                                                   // 0310 — SoD R11 evidence: the independent poster
   postedAt: timestamp('posted_at', { withTimezone: true }),
   status: stocktakeStatusEnum('status').default('Draft'),
   remarks: text('remarks'),

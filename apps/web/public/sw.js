@@ -5,10 +5,13 @@
      crash: cached old HTML references old hashed chunk filenames that the new deploy has removed → 404.
    - /_next/static/*   → CACHE-FIRST. These are content-hashed (immutable): a given URL never changes bytes,
      so caching forever is safe and they never go stale. Fresh HTML always points at chunks that exist.
+   - GET /api/menu     → stale-while-revalidate (POS-6: cache DATA, not HTML). The menu + prices are the one
+     read-only catalog the offline register needs to keep ringing; serving the last snapshot on a reload
+     mid-outage keeps the till sellable. Every OTHER /api/* (auth'd, mutable, writes) bypasses the SW.
    - other same-origin GETs → stale-while-revalidate (fast, self-healing).
-   Sales made offline are queued client-side (lib/offline.ts) and replayed to /api/portal/pos/offline-sync,
-   so we never cache or replay API writes here. */
-const CACHE = 'ierp-pos-v3'; // v3: purge shells that may hold redirect-poisoned entries (see guard below)
+   Sales made offline are queued client-side (lib/offline.ts, lib/register-offline.ts) and replayed to the
+   idempotent offline-sync endpoints, so we never cache or replay API writes here. */
+const CACHE = 'ierp-pos-v4'; // v4: add GET /api/menu data caching (POS-6); purge older shells on activate
 
 self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
@@ -27,7 +30,20 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;                  // never touch API writes
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;   // same-origin only
-  if (url.pathname.startsWith('/api/')) return;      // let API calls hit the network (offline-sync queues)
+  if (url.pathname.startsWith('/api/')) {
+    // POS-6: cache DATA (not HTML) — the read-only menu/prices GET is served stale-while-revalidate so a
+    // reload while offline still renders a sellable menu. All other /api/* bypass the SW (network only).
+    if (url.pathname === '/api/menu') {
+      event.respondWith(
+        caches.open(CACHE).then(async (cache) => {
+          const cached = await cache.match(req);
+          const network = fetch(req).then((res) => { if (res && res.status === 200 && !res.redirected) cache.put(req, res.clone()); return res; }).catch(() => cached);
+          return cached || network;
+        }),
+      );
+    }
+    return;
+  }
 
   const isNavigation = req.mode === 'navigate' || req.destination === 'document';
   const isHashedAsset = url.pathname.startsWith('/_next/static/');

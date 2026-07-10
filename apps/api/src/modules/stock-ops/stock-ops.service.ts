@@ -110,7 +110,7 @@ export class StockOpsService {
    * principal `hub-sync`, which would silently erase that evidence. So the document must NAME both
    * humans and the cloud REFUSES it when they are the same person (`STOCKTAKE_NOT_SEGREGATED`) — the
    * replay can never launder a self-approved count into the central ledger. Both names are persisted
-   * (`counted_by` / `posted_by`, 0304) so the segregation is evidenced on either ledger.
+   * (`counted_by` / `posted_by`, 0310) so the segregation is evidenced on either ledger.
    *
    * Idempotent on (tenant, st_no): a re-push returns the stored document and creates no second movement.
    * Variance movements are created exactly as a native post creates them.

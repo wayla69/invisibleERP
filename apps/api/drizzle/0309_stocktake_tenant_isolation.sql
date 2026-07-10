@@ -1,4 +1,4 @@
--- 0303 — Tenant isolation for stocktakes + stock_movements (ITGC-AC-18 / R11 fix).
+-- 0309 — Tenant isolation for stocktakes + stock_movements (ITGC-AC-18 / R11 fix).
 --
 -- FINDING: neither table carried a `tenant_id`, so the generic RLS loop never covered them and every
 -- read/write was GLOBAL:
