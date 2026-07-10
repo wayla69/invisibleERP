@@ -1520,7 +1520,102 @@ async function main() {
   const capWl = (await inj('GET', '/api/finance/ar/collections', admin)).json;
   ok('REV-21: collections worklist surfaces the customer\'s on-account cash (apply before dunning)', (capWl.rows ?? []).some((r: any) => r.invoice_no === 'INV-CA1' && near(r.on_account, 600)) && Number(capWl.on_account_total) >= 600, `oa_total=${capWl.on_account_total}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application ──');
+  // ───────────────────── FIN-4 — Statutory FS pack (report builder + SOCE + notes + DBD e-Filing) ─────────────────────
+  // The configurable financial-report builder (row-grouping + comparative columns) and the three audit-pack
+  // outputs it rides on. Read-only presentation over the audited GL — every rendered subtotal ties back to
+  // the canonical income-statement / balance-sheet, and the SOCE roll-forward ties to the balance sheet.
+  const fsFrom = '2000-01-01';
+  const fsTo = today;
+  const rowVal = (rows: any[], key: string) => rows.find((r: any) => r.key === key)?.current;
+
+  // (1) Define a CUSTOM P&L row-grouping: Revenue, Expenses, and a COMPUTED Net-profit subtotal (Rev − Exp).
+  const plDefRes = await inj('POST', '/api/reports/fs/definitions', admin, {
+    code: 'PL-CUSTOM', name: 'Custom P&L', statement_type: 'pl',
+    config: { groups: [
+      { key: 'rev', label: 'Revenue', labelTh: 'รายได้', normalSide: 'credit', types: ['Revenue'] },
+      { key: 'exp', label: 'Expenses', labelTh: 'ค่าใช้จ่าย', normalSide: 'debit', types: ['Expense'] },
+      { key: 'np', label: 'Net profit', labelTh: 'กำไรสุทธิ', sumOf: [{ key: 'rev', factor: 1 }, { key: 'exp', factor: -1 }] },
+    ] },
+  });
+  ok('FIN-4: create a custom P&L report definition (config-driven row-grouping builder)', plDefRes.status === 201 && plDefRes.json?.code === 'PL-CUSTOM', `st=${plDefRes.status}`);
+
+  const isWin = (await inj('GET', `/api/ledger/income-statement?from=${fsFrom}&to=${fsTo}`, admin)).json;
+  const plRender = (await inj('GET', `/api/reports/fs/render/PL-CUSTOM?as_of=${fsTo}&from=${fsFrom}`, admin)).json;
+  ok('FIN-4: rendered Revenue group ties to income-statement revenue', near(rowVal(plRender.rows, 'rev'), isWin.revenue), `r=${rowVal(plRender.rows, 'rev')} is=${isWin.revenue}`);
+  ok('FIN-4: rendered Expenses group ties to income-statement expense', near(rowVal(plRender.rows, 'exp'), isWin.expense), `e=${rowVal(plRender.rows, 'exp')} is=${isWin.expense}`);
+  ok('FIN-4: computed Net-profit subtotal (Rev − Exp) = income-statement net income',
+    near(rowVal(plRender.rows, 'np'), isWin.net_income) && plRender.rows.find((r: any) => r.key === 'np')?.is_subtotal === true,
+    `np=${rowVal(plRender.rows, 'np')} ni=${isWin.net_income}`);
+
+  // Comparative (prior-period / YoY) column — same builder, add the prior window.
+  const plCmp = (await inj('GET', `/api/reports/fs/render/PL-CUSTOM?as_of=${fsTo}&from=${fsFrom}&prior_as_of=${fsTo}&prior_from=${fsFrom}`, admin)).json;
+  ok('FIN-4: comparative column present + prior Net-profit populated', plCmp.comparative === true && typeof plCmp.rows.find((r: any) => r.key === 'np')?.prior === 'number', `cmp=${plCmp.comparative}`);
+
+  // (2) Custom BS builder — Assets / Liabilities / Equity groups tie to the balance sheet.
+  const bsWin = (await inj('GET', `/api/ledger/balance-sheet?as_of=${fsTo}`, admin)).json;
+  await inj('POST', '/api/reports/fs/definitions', admin, {
+    code: 'BS-CUSTOM', name: 'Custom BS', statement_type: 'bs',
+    config: { groups: [
+      { key: 'as', label: 'Assets', normalSide: 'debit', types: ['Asset'] },
+      { key: 'li', label: 'Liabilities', normalSide: 'credit', types: ['Liability'] },
+      { key: 'eq', label: 'Equity', normalSide: 'credit', types: ['Equity'] },
+    ] },
+  });
+  const bsRender = (await inj('GET', `/api/reports/fs/render/BS-CUSTOM?as_of=${fsTo}`, admin)).json;
+  ok('FIN-4: rendered Assets group ties to balance-sheet assets', near(rowVal(bsRender.rows, 'as'), bsWin.assets), `as=${rowVal(bsRender.rows, 'as')} bs=${bsWin.assets}`);
+  ok('FIN-4: rendered Equity group ties to balance-sheet equity', near(rowVal(bsRender.rows, 'eq'), bsWin.equity), `eq=${rowVal(bsRender.rows, 'eq')} bs=${bsWin.equity}`);
+
+  // (3) SOCE roll-forward — baseline, then a share issue + a dividend (both maker-checker approved), re-read.
+  const socePart = (soce: any, code: string) => soce.components.find((c: any) => c.account_code === code) ?? { opening: 0, movements: 0, profit: 0, closing: 0 };
+  const soce0 = (await inj('GET', `/api/reports/fs/changes-in-equity?from=${fsFrom}&to=${fsTo}`, admin)).json;
+  const shRes = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', memo: 'FIN-4 share issue', lines: [{ account_code: '1010', debit: 100000 }, { account_code: '3000', credit: 100000 }] });
+  await inj('POST', `/api/ledger/journal/${shRes.json?.entry_no}/approve`, mgr);
+  const dvRes = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', memo: 'FIN-4 dividend', lines: [{ account_code: '3100', debit: 40000 }, { account_code: '1010', credit: 40000 }] });
+  await inj('POST', `/api/ledger/journal/${dvRes.json?.entry_no}/approve`, mgr);
+  const soce1 = (await inj('GET', `/api/reports/fs/changes-in-equity?from=${fsFrom}&to=${fsTo}`, admin)).json;
+  ok('FIN-4: SOCE — share issue lifts the 3000 equity component movement by 100000', near(socePart(soce1, '3000').movements - socePart(soce0, '3000').movements, 100000), `Δ=${socePart(soce1, '3000').movements - socePart(soce0, '3000').movements}`);
+  ok('FIN-4: SOCE — dividend cuts the retained-earnings (3100) component movement by 40000', near(socePart(soce1, '3100').movements - socePart(soce0, '3100').movements, -40000), `Δ=${socePart(soce1, '3100').movements - socePart(soce0, '3100').movements}`);
+  ok('FIN-4: SOCE — every component rolls forward (opening + movements + profit = closing)', soce1.components.every((c: any) => near(c.opening + c.movements + c.profit, c.closing)), 'roll-forward');
+  ok('FIN-4: SOCE — profit for the period flows entirely to retained earnings (3100) and reconciles the roll-forward',
+    near(soce1.totals.profit, soce1.profit_for_period) && near(socePart(soce1, '3100').profit, soce1.profit_for_period) && Math.abs(soce1.profit_for_period) > 0,
+    `p=${soce1.profit_for_period} totalsProfit=${soce1.totals.profit} re=${socePart(soce1, '3100').profit}`);
+  ok('FIN-4: SOCE — total closing equity ties to the balance sheet (equity + net income)', soce1.ties_to_balance_sheet === true && near(soce1.totals.closing, soce1.balance_sheet_equity), `close=${soce1.totals.closing} bs=${soce1.balance_sheet_equity}`);
+
+  // (4) Note schedules — per-note account mapping + comparative + policy text.
+  await inj('POST', '/api/reports/fs/definitions', admin, {
+    code: 'NOTES-STD', name: 'FS Notes', statement_type: 'notes',
+    config: { notes: [
+      { number: '1', title: 'Cash and cash equivalents', titleTh: 'เงินสดและรายการเทียบเท่า', normalSide: 'debit', prefixes: ['10'], policyText: 'Cash at bank and in hand.' },
+      { number: '2', title: 'Equity', titleTh: 'ส่วนของผู้ถือหุ้น', normalSide: 'credit', types: ['Equity'] },
+    ] },
+  });
+  const bsWin2 = (await inj('GET', `/api/ledger/balance-sheet?as_of=${fsTo}`, admin)).json; // live BS after the SOCE postings
+  const notesRes = (await inj('GET', `/api/reports/fs/notes/NOTES-STD?as_of=${fsTo}&prior_as_of=${fsTo}&basis=bs`, admin)).json;
+  const note2 = notesRes.notes?.find((nn: any) => nn.number === '2');
+  ok('FIN-4: note schedule maps accounts + carries policy text + comparative total', notesRes.notes?.length === 2 && note2 && near(note2.total, bsWin2.equity) && typeof note2.prior_total === 'number' && notesRes.notes[0].policy_text != null, `eqNoteTotal=${note2?.total} bsEq=${bsWin2.equity}`);
+
+  // (5) DBD e-Filing export (Thai งบการเงิน — XBRL / S-form): current + prior year, balanced, XBRL emitted.
+  const fy = Number(today.slice(0, 4));
+  const bsYE = (await inj('GET', `/api/ledger/balance-sheet?as_of=${fy}-12-31`, admin)).json;
+  const dbd = (await inj('GET', `/api/reports/fs/dbd-export?fiscal_year=${fy}&taxpayer_name=HQ%20Co&taxpayer_id=0105500000001`, admin)).json;
+  ok('FIN-4: DBD export — 6 S-form facts, balanced (A = L + E incl. net profit), XBRL instance emitted',
+    dbd.format === 'DBD-XBRL' && Array.isArray(dbd.facts) && dbd.facts.length === 6 && dbd.balanced === true
+    && typeof dbd.xml === 'string' && dbd.xml.includes('<xbrl') && dbd.xml.includes('dbd:TotalAssets') && dbd.xml.includes('dbd:NetProfit'),
+    `bal=${dbd.balanced} facts=${dbd.facts?.length}`);
+  const faAssets = dbd.facts?.find((f: any) => f.concept === 'TotalAssets');
+  ok('FIN-4: DBD TotalAssets fact ties to the year-end balance sheet', near(faAssets?.current, bsYE.assets), `fa=${faAssets?.current} bs=${bsYE.assets}`);
+
+  // (6) Negative / control cases.
+  const rNotes = await inj('GET', `/api/reports/fs/render/NOTES-STD?as_of=${fsTo}`, admin);
+  ok('FIN-4: render rejects a non-renderable (notes) definition → 400 FS_NOT_RENDERABLE', rNotes.status === 400 && rNotes.json?.error?.code === 'FS_NOT_RENDERABLE', `${rNotes.status} ${rNotes.json?.error?.code}`);
+  const rNoAsOf = await inj('GET', '/api/reports/fs/render/PL-CUSTOM?from=2000-01-01', admin);
+  ok('FIN-4: render without as_of → 400 FS_ASOF_REQUIRED', rNoAsOf.status === 400 && rNoAsOf.json?.error?.code === 'FS_ASOF_REQUIRED', `${rNoAsOf.status} ${rNoAsOf.json?.error?.code}`);
+  const rMissing = await inj('GET', '/api/reports/fs/definitions/NOPE', admin);
+  ok('FIN-4: unknown definition → 404 FS_DEF_NOT_FOUND', rMissing.status === 404 && rMissing.json?.error?.code === 'FS_DEF_NOT_FOUND', `${rMissing.status} ${rMissing.json?.error?.code}`);
+  const rBadType = await inj('POST', '/api/reports/fs/definitions', admin, { code: 'X', name: 'X', statement_type: 'zzz', config: {} });
+  ok('FIN-4: upsert with an invalid statement_type is rejected (validation)', rBadType.status === 400, `${rBadType.status}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

@@ -175,6 +175,10 @@ your code below.
 | Code | Meaning | What to do |
 |------|---------|-----------|
 | `BI_BAD_PERIOD` (ช่วงเวลาไม่ถูกต้อง) | The sales-cube report was asked to group by a period grain other than `day`, `week`, or `month`. | Use one of `day`, `week`, or `month` for the period. Previously an unrecognised value silently returned monthly buckets; it is now rejected so the result always matches what you asked for. See [Reports & Analytics](./09-reports-and-analytics.md). |
+| `FS_DEF_NOT_FOUND` (ไม่พบรูปแบบรายงาน) | A statutory-FS layout code that does not exist was requested. | Check the code, or create it via `POST /api/reports/fs/definitions`. See [General Ledger → Statutory FS pack](./06-general-ledger.md). |
+| `FS_NOT_RENDERABLE` / `FS_NOT_NOTES` | `render` was called on a `soce`/`notes` layout, or `notes` on a non-notes layout. | Use the dedicated endpoint: `render` for `pl`/`bs`, `changes-in-equity` for SOCE, `notes/:code` for notes. |
+| `FS_ASOF_REQUIRED` / `FS_FROM_REQUIRED` / `FS_RANGE_REQUIRED` | A required date is missing (`as_of` for a statement, `from` for a P&L, `from`+`to` for SOCE). | Supply the missing query parameter. |
+| `FS_BAD_STATEMENT_TYPE` / `FS_BAD_FISCAL_YEAR` | An invalid `statement_type` (not `bs`/`pl`/`soce`/`notes`) or a missing/invalid `fiscal_year`. | Use a valid value. |
 
 ### Administration
 
