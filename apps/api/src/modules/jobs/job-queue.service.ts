@@ -82,7 +82,7 @@ export class JobQueueService {
   async markDone(id: number, result: unknown): Promise<void> {
     await runInTenantContext(this.db, { tenantId: null, bypass: true, actor: 'system:worker' }, async () => {
       await this.db.update(backgroundJobs)
-        .set({ status: 'done', result: (result ?? {}) as any, error: null, lockedAt: null, updatedAt: new Date() })
+        .set({ status: 'done', result: (result ?? {}) as Record<string, unknown>, error: null, lockedAt: null, updatedAt: new Date() })
         .where(eq(backgroundJobs.id, id));
     });
   }

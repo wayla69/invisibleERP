@@ -25,7 +25,7 @@ export class AtpService {
     // open PO scheduled receipts (purchase_orders is global; filter by item + expected within horizon)
     const rows = await db.select({ poNo: purchaseOrders.poNo, expected: purchaseOrders.expectedDate, orderQty: poItems.orderQty, recvQty: poItems.receivedQty })
       .from(poItems).innerJoin(purchaseOrders, eq(poItems.poId, purchaseOrders.id))
-      .where(and(eq(poItems.itemId, itemId), inArray(purchaseOrders.status, ['Approved', 'Received'] as any)))
+      .where(and(eq(poItems.itemId, itemId), inArray(purchaseOrders.status, ['Approved', 'Received'])))
       .orderBy(asc(purchaseOrders.expectedDate));
     const scheduled: any[] = [];
     let scheduledQty = 0;

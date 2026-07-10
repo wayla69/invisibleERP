@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, or, desc } from 'drizzle-orm';
+import { eq, and, or, desc, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { savedViews } from '../../database/schema/saved-views';
 import type { JwtUser } from '../../common/decorators';
@@ -16,9 +16,9 @@ export class SavedViewsService {
 
   async list(module: string | undefined, user: JwtUser) {
     const db = this.db;
-    const where = [eq(savedViews.owner, user.username), eq(savedViews.shared, true)] as any;
+    const where: SQL[] = [eq(savedViews.owner, user.username), eq(savedViews.shared, true)];
     const rows = await db.select().from(savedViews)
-      .where(and(module ? eq(savedViews.module, module) : (undefined as any), or(...where)))
+      .where(and(module ? eq(savedViews.module, module) : undefined, or(...where)))
       .orderBy(desc(savedViews.id));
     return { views: rows.map((v: any) => ({ ...this.fmt(v), mine: v.owner === user.username })) };
   }

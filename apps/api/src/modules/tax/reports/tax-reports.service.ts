@@ -116,7 +116,7 @@ export class TaxReportsService {
       .orderBy(asc(whtCertificates.datePaid), asc(whtCertificates.docNo));
     const out = rows.map((r: any) => ({ doc_no: r.doc_no, date_paid: r.date_paid, payee_name: r.payee_name, payee_tax_id: r.payee_tax_id, payee_branch_code: r.payee_branch_code, payee_address: r.payee_address, wht_condition: r.wht_condition, income_type: r.income_type, description: r.description, amount_paid: n(r.amount_paid), rate: n(r.rate), tax_withheld: n(r.tax_withheld) }));
     return {
-      report: 'pnd', pnd_type: type, pnd_label: (PND_LABELS as any)[type], month, year, period, rows: out,
+      report: 'pnd', pnd_type: type, pnd_label: (PND_LABELS as Record<string, string>)[type], month, year, period, rows: out,
       totals: { amount_paid: round2(out.reduce((a: number, r: any) => a + r.amount_paid, 0)), tax_withheld: round2(out.reduce((a: number, r: any) => a + r.tax_withheld, 0)), count: out.length },
       deadline: nextMonthDay(month, year, 7),
       deadline_note: 'ยื่นแบบ ภ.ง.ด. ภายในวันที่ 7 ของเดือนถัดไป',
@@ -152,7 +152,7 @@ export class TaxReportsService {
     const apWht = round2(n(a?.v));
     // (3) WHT certificated (50-ทวิ, PND3+PND53, Issued) in the period.
     const [c] = await db.select({ v: sql<string>`coalesce(sum(${whtCertificates.totalWht}),0)` })
-      .from(whtCertificates).where(and(inArray(whtCertificates.pndType, ['PND3', 'PND53'] as any), eq(whtCertificates.status, 'Issued'), gte(whtCertificates.datePaid, start), lt(whtCertificates.datePaid, end)));
+      .from(whtCertificates).where(and(inArray(whtCertificates.pndType, ['PND3', 'PND53']), eq(whtCertificates.status, 'Issued'), gte(whtCertificates.datePaid, start), lt(whtCertificates.datePaid, end)));
     const certWht = round2(n(c?.v));
     return {
       report: 'pnd_tieout', month, year, period, gl_account: '2361',

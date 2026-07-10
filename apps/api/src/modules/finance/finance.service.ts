@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
-import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
+import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects, nettingSettlements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -451,7 +451,7 @@ export class FinanceService {
 
   async listAdvances(tenantId?: number, status?: string) {
     const db = this.db;
-    const conds = [] as any[];
+    const conds: SQL[] = [];
     if (tenantId != null) conds.push(eq(employeeAdvances.tenantId, tenantId));
     if (status) conds.push(eq(employeeAdvances.status, status));
     const rows = await db.select().from(employeeAdvances).where(conds.length ? and(...conds) : undefined).orderBy(desc(employeeAdvances.id));
@@ -488,7 +488,7 @@ export class FinanceService {
     const db = this.db;
     // Each write-off has exactly one 5720 debit line, so an inner join on that line yields one row per write-off
     // with its amount directly (no correlated subquery).
-    const conds = [eq(journalEntries.source, 'AR-WRITEOFF'), eq(journalLines.accountCode, '5720')] as any[];
+    const conds: SQL[] = [eq(journalEntries.source, 'AR-WRITEOFF'), eq(journalLines.accountCode, '5720')];
     if (tenantId != null) conds.push(eq(journalEntries.tenantId, tenantId));
     const rows = await db.select({
       entryNo: journalEntries.entryNo, status: journalEntries.status, memo: journalEntries.memo,

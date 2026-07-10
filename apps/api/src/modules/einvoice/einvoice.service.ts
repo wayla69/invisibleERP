@@ -99,7 +99,7 @@ export class EInvoiceService {
     this.validate(doc);
     const db = this.db;
     const [exists] = await db.select().from(einvoiceSubmissions).where(eq(einvoiceSubmissions.docRef, doc.doc_ref)).limit(1);
-    if (exists) return { status: exists.status, ref: (exists.response as any)?.ref, qr: (exists.response as any)?.qr, provider: exists.provider, idempotent: true };
+    if (exists) return { status: exists.status, ref: (exists.response as { ref?: string; qr?: string } | null)?.ref, qr: (exists.response as { ref?: string; qr?: string } | null)?.qr, provider: exists.provider, idempotent: true };
     const [cfg] = await db.select({ p: einvoiceConfig.providerKey }).from(einvoiceConfig).limit(1);
     const provider = cfg?.p ?? 'stub';
     const ref = `EINV-${createHash('sha1').update(`${user.tenantId}:${doc.doc_ref}`).digest('hex').slice(0, 12).toUpperCase()}`;
@@ -116,6 +116,6 @@ export class EInvoiceService {
 
   async submissions(_user: JwtUser) {
     const rows = await this.db.select().from(einvoiceSubmissions);
-    return { submissions: rows.map((s: any) => ({ id: Number(s.id), doc_ref: s.docRef, provider: s.provider, status: s.status, ref: (s.response as any)?.ref, submitted_at: s.submittedAt })) };
+    return { submissions: rows.map((s: any) => ({ id: Number(s.id), doc_ref: s.docRef, provider: s.provider, status: s.status, ref: (s.response as { ref?: string } | null)?.ref, submitted_at: s.submittedAt })) };
   }
 }

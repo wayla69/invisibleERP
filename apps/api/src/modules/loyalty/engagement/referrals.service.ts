@@ -53,7 +53,7 @@ export class ReferralsService {
       const pe = pgError(e); // drizzle 0.45 nests the driver error (constraint/code) under .cause
       const con = String(pe?.constraint_name ?? pe?.constraint ?? '');
       const isUnique = isUniqueViolation(e);
-      const msg = String(pe?.message ?? (e as any)?.message ?? '');
+      const msg = String(pe?.message ?? (e as { message?: unknown })?.message ?? '');
       if (con === 'loyalty_referrals_referred_uq' || (!con && isUnique && !/code/i.test(msg))) {
         throw new ConflictException({ code: 'ALREADY_REFERRED', message: 'This member has already been referred', messageTh: 'สมาชิกนี้ถูกแนะนำไปแล้ว' });
       }

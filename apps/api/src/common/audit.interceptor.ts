@@ -50,7 +50,7 @@ export class AuditInterceptor implements NestInterceptor {
     if (!MUTATING.has(method)) return next.handle();
 
     const rid = (req.headers?.['x-request-id'] as string) || requestId();
-    const url = (req as any).originalUrl ?? req.url ?? '';
+    const url = (req as { originalUrl?: string }).originalUrl ?? req.url ?? '';
     const action = `${method} ${url}`;
     const ip = clientIp(req);
     // Snapshot identity NOW — by the time tap() fires, the request tx/ALS has already exited.
@@ -131,7 +131,7 @@ export class AuditInterceptor implements NestInterceptor {
 // single load balancer) so the real client IP is recovered without honoring a forged prefix.
 function clientIp(req: FastifyRequest): string | null {
   const hops = Math.max(0, Math.floor(Number(process.env.TRUSTED_PROXY_HOPS ?? 0)) || 0);
-  const peer = (req as any).ip ?? null;
+  const peer = req.ip ?? null;
   if (hops === 0) return peer; // no trusted proxy → a client-supplied XFF is not trustworthy
   const fwd = req.headers?.['x-forwarded-for'];
   const chain = (typeof fwd === 'string' ? fwd.split(',') : Array.isArray(fwd) ? fwd.flatMap((v) => String(v).split(',')) : [])
