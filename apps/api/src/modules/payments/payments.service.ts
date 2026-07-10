@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundRequests, xzReports, xzReportDenominations } from '../../database/schema';
+import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundRequests, xzReports, xzReportDenominations, posTipAdjustments } from '../../database/schema';
 import { createHash } from 'node:crypto';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -22,6 +22,15 @@ export const CASH_VARIANCE_THRESHOLD = 100;
 // (maker-checker, anti-fraud); below it the refund runs immediately. Flat threshold for now.
 const REFUND_APPROVAL_THRESHOLD = 1000;
 
+// POS-10 (tip-adjust-after-auth): the tip added after a card authorization may not exceed this fraction of
+// the authorized bill amount — the classic US-restaurant guardrail (the pre-auth carries a cushion so the
+// captured total stays within the hold). A tip above the ceiling is rejected (TIP_OVER_LIMIT); the policy %
+// is env-overridable (POS_TIP_ADJUST_MAX_PCT, e.g. 0.20) without touching the flow. Default 25%.
+export const TIP_ADJUST_MAX_PCT = ((): number => {
+  const v = Number(process.env.POS_TIP_ADJUST_MAX_PCT);
+  return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0.25;
+})();
+
 export interface RecordTenderDto {
   sale_no: string;
   tenant_id?: number;
@@ -33,7 +42,9 @@ export interface RecordTenderDto {
   token?: string;             // card token / wallet source from the terminal SDK — for a real PSP charge
   till_session_id?: number;
   idempotency_key?: string;   // C1: retries with the same key return the original tender, never re-charge
+  authorize?: boolean;        // POS-10: auth-only (place a hold, capture later) — the tip-adjust flow
 }
+export interface AdjustTipDto { tip: number; reason?: string }
 export interface RefundDto { payment_no: string; amount: number; reason?: string }
 export interface OpenTillDto { opening_float?: number }
 export interface CloseTillDto { session_no: string; closing_count: number; denominations?: Record<string, number> }
@@ -92,7 +103,11 @@ export class PaymentService {
 
     let result;
     try {
-      result = await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId, token: dto.token });
+      // POS-10: authorize=true places a hold only (→ Authorized) so staff can adjust the tip before capture;
+      // the default path authorizes AND captures in one shot (unchanged).
+      result = dto.authorize
+        ? await gateway.authorize(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId, token: dto.token })
+        : await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId, token: dto.token });
     } catch (e: any) {
       // A PSP decline (or unknown outcome) is a normal business result, not an exception to throw: if we
       // rethrew, the per-request transaction would roll back and the Failed row would vanish, leaving no
@@ -141,6 +156,98 @@ export class PaymentService {
     // Render the EMVCo payload to a scannable QR image so the POS can show it directly (data-URL PNG).
     const qrImage = r.ref && this.qr ? await this.qr.dataUrl(String(r.ref), 320) : null;
     return { promptpay_id: ppId, amount: n(amount), qr_payload: r.ref, qr_image: qrImage };
+  }
+
+  // ── POS-10: tip-adjust-after-auth (US-restaurant "auth now, add tip, capture later") ──
+
+  // POST /api/payments/:no/tip-adjust — set the tip on an AUTHORIZED (not-yet-captured) card tender.
+  // Two controls bound the adjustment (POS-10): (1) PRE-CAPTURE ONLY — a Captured/Settled/Voided/Refunded
+  // tender is immutable (TIP_ADJUST_CLOSED); the money has moved, the tip is locked. (2) POLICY CEILING —
+  // the tip may not exceed TIP_ADJUST_MAX_PCT of the authorized bill (TIP_OVER_LIMIT), the classic hold
+  // cushion. Every adjustment is written to the immutable pos_tip_adjustments log (old→new + the ceiling in
+  // force) so the charged tip always ties back to the slip. The tip is NOT captured here — it rides into
+  // 2300 Tips Payable at capture. Idempotent-safe (re-setting the same tip re-logs a zero-delta adjustment).
+  async adjustTip(paymentNo: string, dto: AdjustTipDto, user: JwtUser) {
+    const newTip = round2(n(dto.tip));
+    if (newTip < 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Tip cannot be negative', messageTh: 'ทิปต้องไม่ติดลบ' });
+    return await this.db.transaction(async (tx: any) => {
+      const [pay] = await tx.select().from(payments).where(eq(payments.paymentNo, paymentNo)).for('update').limit(1);
+      if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
+      if (String(pay.status ?? '') !== 'Authorized') {
+        throw new BadRequestException({ code: 'TIP_ADJUST_CLOSED', message: `Tip can only be adjusted before capture (payment is ${pay.status})`, messageTh: 'ปรับทิปได้เฉพาะก่อนเก็บเงิน (รายการนี้ปรับไม่ได้แล้ว)' });
+      }
+      const authAmount = round2(n(pay.amount));
+      const maxTip = roundCurrency(authAmount * TIP_ADJUST_MAX_PCT, 'THB');
+      if (newTip > maxTip + 1e-9) {
+        throw new BadRequestException({ code: 'TIP_OVER_LIMIT', message: `Tip ${newTip} exceeds the ${Math.round(TIP_ADJUST_MAX_PCT * 100)}% ceiling (${maxTip}) on the authorized amount ${authAmount}`, messageTh: `ทิปเกินเพดานที่กำหนด (${maxTip})` });
+      }
+      const oldTip = round2(n(pay.tip));
+      const delta = round2(newTip - oldTip);
+      await tx.insert(posTipAdjustments).values({
+        tenantId: pay.tenantId, paymentNo, oldTip: fx(oldTip, 4), newTip: fx(newTip, 4), delta: fx(delta, 4),
+        authAmount: fx(authAmount, 4), maxTip: fx(maxTip, 4), reason: dto.reason ?? null, adjustedBy: user.username,
+      });
+      await tx.update(payments).set({ tip: fx(newTip, 4) }).where(eq(payments.id, pay.id));
+      return { payment_no: paymentNo, status: pay.status, auth_amount: authAmount, tip: newTip, previous_tip: oldTip, delta, max_tip: maxTip, max_pct: TIP_ADJUST_MAX_PCT };
+    }).then(async (res) => {
+      if (this.audit) { try { await this.audit.record({ action: 'tip_adjust', entity: 'payment', entityId: paymentNo, meta: { old_tip: res.previous_tip, new_tip: res.tip, max_tip: res.max_tip } }, user); } catch { /* audit best-effort */ } }
+      return res;
+    });
+  }
+
+  // POST /api/payments/:no/capture — capture an AUTHORIZED card tender for bill + adjusted tip (POS-10).
+  // Settles the held authorization at the PSP for amount + tip, flips the tender to Captured, and posts the
+  // tip to 2300 Tips Payable (Dr 1000 / Cr 2300) so the existing tip-pool/distribution flow (TIP-01) pays it
+  // out unchanged — the bill's revenue/VAT are recognised at the sale checkout, so only the added tip posts
+  // here. Re-asserts the policy ceiling as a backstop. Idempotent: a second capture returns the captured row.
+  async capture(paymentNo: string, user: JwtUser) {
+    const [pay] = await this.db.select().from(payments).where(eq(payments.paymentNo, paymentNo)).limit(1);
+    if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
+    const status = String(pay.status ?? '');
+    if (status === 'Captured' || status === 'Settled') {
+      return { payment_no: paymentNo, status: 'Captured', amount: n(pay.amount), tip: n(pay.tip), captured_total: round2(n(pay.amount) + n(pay.tip)), already: true };
+    }
+    if (status !== 'Authorized') {
+      throw new BadRequestException({ code: 'CANNOT_CAPTURE', message: `Payment in status ${status} cannot be captured`, messageTh: 'รายการนี้เก็บเงินไม่ได้' });
+    }
+    const authAmount = round2(n(pay.amount));
+    const tip = round2(n(pay.tip));
+    const maxTip = roundCurrency(authAmount * TIP_ADJUST_MAX_PCT, 'THB');
+    if (tip > maxTip + 1e-9) throw new BadRequestException({ code: 'TIP_OVER_LIMIT', message: `Tip ${tip} exceeds the ${Math.round(TIP_ADJUST_MAX_PCT * 100)}% ceiling (${maxTip})`, messageTh: `ทิปเกินเพดานที่กำหนด (${maxTip})` });
+    const captureTotal = round2(authAmount + tip);
+    const { gateway } = resolveGateway(pay.gateway ?? undefined);
+
+    let result;
+    try {
+      result = await gateway.capture(String(pay.gatewayRef ?? ''), captureTotal, pay.currency ?? 'THB', { sale_no: pay.saleNo });
+    } catch (e: any) {
+      const code = e?.response?.code ?? e?.code ?? 'PSP_ERROR';
+      const message = e?.response?.message ?? e?.message ?? String(e);
+      throw new BadRequestException({ code, message: `Capture failed: ${message}`, messageTh: 'การเก็บเงินผิดพลาด' });
+    }
+
+    // Post the tip to 2300 Tips Payable on capture (Dr 1000 / Cr 2300), idempotent per payment. The bill's
+    // revenue/VAT/COGS were posted at the sale checkout — only the added tip is new money to book here.
+    let tipJournalNo: string | null = null;
+    if (tip > 0 && !(await this.ledger.alreadyPosted('POS_TIP', paymentNo, pay.tenantId ?? null))) {
+      const je: any = await this.ledger.postEntry({
+        source: 'POS_TIP', sourceRef: paymentNo, tenantId: pay.tenantId ?? null,
+        memo: `Card tip on capture ${paymentNo}`, createdBy: user.username,
+        lines: [{ account_code: '1000', debit: tip }, { account_code: '2300', credit: tip }],
+      });
+      tipJournalNo = je?.entry_no ?? null;
+    }
+    await this.db.update(payments).set({ status: 'Captured', gatewayRef: result.ref ?? pay.gatewayRef, capturedAt: new Date() }).where(eq(payments.id, pay.id));
+
+    if (this.audit) { try { await this.audit.record({ action: 'capture', entity: 'payment', entityId: paymentNo, meta: { amount: authAmount, tip, captured_total: captureTotal } }, user); } catch { /* audit best-effort */ } }
+    if (this.journal) { try { await this.journal.append({ doc_type: 'CAPTURE', doc_no: paymentNo, payload: { amount: authAmount, tip, captured_total: captureTotal } }, user); } catch { /* journal best-effort */ } }
+    return { payment_no: paymentNo, status: 'Captured', amount: authAmount, tip, captured_total: captureTotal, tip_journal_no: tipJournalNo };
+  }
+
+  // GET /api/payments/:no/tip-adjustments — the immutable adjustment audit trail for a tender (POS-10).
+  async listTipAdjustments(paymentNo: string, _user: JwtUser) {
+    const rows = await this.db.select().from(posTipAdjustments).where(eq(posTipAdjustments.paymentNo, paymentNo)).orderBy(desc(posTipAdjustments.createdAt), desc(posTipAdjustments.id));
+    return { payment_no: paymentNo, adjustments: rows.map((r: any) => ({ old_tip: n(r.oldTip), new_tip: n(r.newTip), delta: n(r.delta), auth_amount: n(r.authAmount), max_tip: n(r.maxTip), reason: r.reason, by: r.adjustedBy, at: r.createdAt })), count: rows.length };
   }
 
   // POST /api/payments/refunds — refund a captured payment.

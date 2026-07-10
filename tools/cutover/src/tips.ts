@@ -102,9 +102,44 @@ async function main() {
   const list = await inj('GET', '/api/restaurant/tips', sales1);
   ok('List: one distribution, 2 staff lines, outstanding 0', list.json.count === 1 && list.json.distributions[0].lines.length === 2 && near(list.json.gl_outstanding, 0), JSON.stringify({ c: list.json.count, o: list.json.gl_outstanding }));
 
+  // ── POS-10: tip-adjust-after-auth (auth → adjust tip pre-capture → capture bill+tip → 2300) ──
+  // 2300 is at 0 here (all prior tips distributed); the card-tip capture below re-accrues it in isolation.
+  const gl2300Before = await gl('2300');
+  // authorize a card tender for a 200 bill (mock gateway → Authorized, no capture yet)
+  const auth = await inj('POST', '/api/payments', cash1, { sale_no: 'S-TIP-10', method: 'Card', amount: 200, authorize: true });
+  const payNo = auth.json.payment_no as string;
+  ok('POS-10: card authorize → Authorized hold (no capture yet)', auth.json.status === 'Authorized' && /^PAY-/.test(payNo ?? ''), JSON.stringify({ s: auth.json.status, no: payNo }));
+
+  // over-limit tip rejected: 25% ceiling on 200 = 50; 60 exceeds it
+  const overTip = await inj('POST', `/api/payments/${payNo}/tip-adjust`, cash1, { tip: 60 });
+  ok('POS-10: tip over the 25% ceiling rejected (400 TIP_OVER_LIMIT)', overTip.status === 400 && overTip.json.error?.code === 'TIP_OVER_LIMIT', `${overTip.status} ${overTip.json.error?.code}`);
+
+  // adjust the tip within the window (40 ≤ 50), audited
+  const adj = await inj('POST', `/api/payments/${payNo}/tip-adjust`, cash1, { tip: 40, reason: 'slip' });
+  ok('POS-10: tip adjusted to 40 within window (max 50)', adj.status < 300 && near(adj.json.tip, 40) && near(adj.json.max_tip, 50), JSON.stringify({ tip: adj.json.tip, max: adj.json.max_tip }));
+  const audit = await inj('GET', `/api/payments/${payNo}/tip-adjustments`, cash1);
+  ok('POS-10: each adjustment written to the immutable audit log', audit.json.count === 1 && near(audit.json.adjustments[0].new_tip, 40) && near(audit.json.adjustments[0].delta, 40), JSON.stringify({ c: audit.json.count }));
+
+  // capture bill + tip → Captured; tip posts to 2300 (Dr 1000 / Cr 2300)
+  const cap = await inj('POST', `/api/payments/${payNo}/capture`, cash1);
+  ok('POS-10: capture settles bill+tip (240) → Captured', cap.status < 300 && cap.json.status === 'Captured' && near(cap.json.captured_total, 240) && near(cap.json.tip, 40), JSON.stringify({ s: cap.json.status, t: cap.json.captured_total }));
+  const gl2300After = await gl('2300');
+  ok('POS-10: card tip posts to 2300 Tips Payable on capture (+40)', near(gl2300After - gl2300Before, 40), `2300 Δ=${gl2300After - gl2300Before}`);
+
+  // the freshly-captured tip is now available to the tip pool (TIP-01 pays it out unchanged)
+  const poolTip = await inj('GET', `/api/restaurant/tips/pool?from=${period.from}&to=${period.to}`, sales1);
+  ok('POS-10: captured card tip flows into the tip pool (available 40)', near(poolTip.json.available, 40) && near(poolTip.json.gl_outstanding, 40), JSON.stringify(poolTip.json));
+
+  // post-capture adjustment rejected (immutable once captured)
+  const lateTip = await inj('POST', `/api/payments/${payNo}/tip-adjust`, cash1, { tip: 10 });
+  ok('POS-10: tip-adjust after capture rejected (400 TIP_ADJUST_CLOSED)', lateTip.status === 400 && lateTip.json.error?.code === 'TIP_ADJUST_CLOSED', `${lateTip.status} ${lateTip.json.error?.code}`);
+  // and a re-capture is idempotent (no double 2300 post)
+  const reCap = await inj('POST', `/api/payments/${payNo}/capture`, cash1);
+  ok('POS-10: re-capture idempotent (already Captured, no double post)', reCap.json.already === true && near(await gl('2300') - gl2300Before, 40), `2300 Δ=${await gl('2300') - gl2300Before}`);
+
   // ── trial balance balanced ──
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
-  ok('Trial balance balanced after tip distribution', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
+  ok('Trial balance balanced after tip distribution + card-tip capture', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
 
   await app.close();
   await pg.close();
