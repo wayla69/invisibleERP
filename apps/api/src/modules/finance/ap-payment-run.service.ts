@@ -1,18 +1,38 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { eq, and, ne, sql, lte, desc, asc, inArray, type SQL } from 'drizzle-orm';
+import { eq, and, ne, or, isNull, sql, lte, desc, asc, inArray, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { apTransactions, apPayments, apPaymentRuns, apPaymentRunLines, bankAccounts, vendors, tenants } from '../../database/schema';
+import { apTransactions, apPayments, apPaymentRuns, apPaymentRunLines, apDiscountTerms, bankAccounts, vendors, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { FinanceService } from './finance.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
+import { LedgerService } from '../ledger/ledger.service';
 import { TaxJobsService } from '../tax/tax-jobs.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
+
+// A resolved early-payment discount policy row (FIN-9, EXP-14).
+type DiscountPolicy = typeof apDiscountTerms.$inferSelect;
+// The projected/captured discount for one bill line: days paid early, the sliding-scale rate, the amount.
+interface DiscountCalc { policyId: number | null; daysEarly: number; rate: number; amount: number; account: string }
+const DISCOUNT_ZERO: DiscountCalc = { policyId: null, daysEarly: 0, rate: 0, amount: 0, account: '4600' };
+
+export interface DiscountTermDto {
+  vendor_id?: number | null;          // omit / null = global default policy
+  name: string;
+  discount_pct: number;               // nominal/max rate (0 < pct ≤ 0.30)
+  min_days_early?: number;            // must pay ≥ N days early to earn any discount (default 1)
+  full_discount_days?: number;        // days-early at/above which the full rate applies (default 20)
+  prorate?: boolean;                  // scale the rate by days_early/full_discount_days (default true)
+  discount_account?: string;          // GL income account credited (default 4600)
+  active_from?: string | null;
+  active_to?: string | null;
+}
 
 export interface ProposeRunDto {
   due_cutoff: string;                 // select open approved AP due on/before this date
@@ -47,6 +67,7 @@ export class ApPaymentRunService {
     // Optional so partially-wired harnesses stay constructible (pattern: FinanceService's optional deps).
     @Optional() private readonly determination?: AccountDeterminationService,
     @Optional() private readonly taxJobs?: TaxJobsService,
+    @Optional() private readonly ledger?: LedgerService, // posts the FIN-9 discount-income adjustment JE
   ) {}
 
   // ── Resolve + validate a WHT tax code exactly like a manual payment request (TAX-03 / docs/33 PR7) ──
@@ -75,6 +96,42 @@ export class ApPaymentRunService {
     return round2(round2(payAmount * baseRatio) * rate);
   }
 
+  // ── FIN-9 (EXP-14) — resolve the Active early-payment discount policy for a vendor at a pay-date ──
+  // A vendor-specific Active policy wins over the global default (vendor_id NULL); the validity window
+  // (active_from/active_to, inclusive) must cover the intended pay date. Returns null when none applies.
+  private async resolveDiscountPolicy(tenantId: number | null, vendorId: number | null | undefined, payDate: string): Promise<DiscountPolicy | null> {
+    const conds: SQL[] = [eq(apDiscountTerms.status, 'Active')];
+    if (tenantId != null) conds.push(eq(apDiscountTerms.tenantId, tenantId));
+    conds.push(vendorId != null ? (or(eq(apDiscountTerms.vendorId, vendorId), isNull(apDiscountTerms.vendorId)) as SQL) : isNull(apDiscountTerms.vendorId));
+    conds.push(or(isNull(apDiscountTerms.activeFrom), lte(apDiscountTerms.activeFrom, payDate)) as SQL);
+    conds.push(or(isNull(apDiscountTerms.activeTo), sql`${apDiscountTerms.activeTo} >= ${payDate}`) as SQL);
+    const rows = await this.db.select().from(apDiscountTerms).where(and(...conds))
+      // vendor-specific first (a NULL vendor = global default is the fallback), then most-recently approved.
+      // Portable NULLS-LAST across Postgres + PGlite via an explicit priority expression.
+      .orderBy(sql`case when ${apDiscountTerms.vendorId} is null then 1 else 0 end`, desc(apDiscountTerms.id));
+    return rows[0] ?? null;
+  }
+
+  // Sliding-scale discount for one line: days_early = due_date − pay_date; below min_days_early → nothing;
+  // prorated linearly up to the full rate at full_discount_days (or a flat rate once ≥ that, when prorate=off).
+  // The discount is capped so cash-out (amount − wht − discount) can never go negative.
+  private computeDiscount(policy: DiscountPolicy | null, grossAmount: number, dueDate: string | null, payDate: string, whtAmount = 0): DiscountCalc {
+    if (!policy || !dueDate) return DISCOUNT_ZERO;
+    const daysEarly = Math.floor((Date.parse(`${dueDate}T00:00:00Z`) - Date.parse(`${payDate}T00:00:00Z`)) / 86400000);
+    const minDays = Math.max(1, Number(policy.minDaysEarly ?? 1));
+    if (!(daysEarly >= minDays)) return { ...DISCOUNT_ZERO, daysEarly: Math.max(0, daysEarly), account: policy.discountAccount ?? '4600' };
+    const fullDays = Math.max(1, Number(policy.fullDiscountDays ?? 20));
+    const pct = n(policy.discountPct);
+    let rate: number;
+    if (policy.prorate) rate = round4(pct * Math.min(daysEarly / fullDays, 1));
+    else rate = daysEarly >= fullDays ? round4(pct) : 0;
+    let amount = round2(grossAmount * rate);
+    const maxDiscount = round2(grossAmount - whtAmount);
+    if (amount > maxDiscount) amount = maxDiscount > 0 ? maxDiscount : 0;
+    if (!(amount > 0)) return { ...DISCOUNT_ZERO, daysEarly, account: policy.discountAccount ?? '4600' };
+    return { policyId: Number(policy.id), daysEarly, rate, amount, account: policy.discountAccount ?? '4600' };
+  }
+
   private async loadRun(runNo: string) {
     const [run] = await this.db.select().from(apPaymentRuns).where(eq(apPaymentRuns.runNo, runNo)).limit(1);
     if (!run) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment run not found', messageTh: 'ไม่พบรอบจ่ายเงิน' });
@@ -85,11 +142,13 @@ export class ApPaymentRunService {
     const [agg] = await this.db.select({
       amt: sql<string>`coalesce(sum(${apPaymentRunLines.amount}),0)`,
       wht: sql<string>`coalesce(sum(coalesce(${apPaymentRunLines.whtAmount},0)),0)`,
+      disc: sql<string>`coalesce(sum(coalesce(${apPaymentRunLines.discountAmount},0)),0)`,
       net: sql<string>`coalesce(sum(coalesce(${apPaymentRunLines.netAmount},${apPaymentRunLines.amount})),0)`,
       cnt: sql<string>`count(*)`,
     }).from(apPaymentRunLines).where(eq(apPaymentRunLines.runId, runId));
     await this.db.update(apPaymentRuns).set({
       totalAmount: String(round2(n(agg?.amt))), totalWht: String(round2(n(agg?.wht))),
+      totalDiscount: String(round2(n(agg?.disc))),
       totalNet: String(round2(n(agg?.net))), lineCount: Number(agg?.cnt ?? 0),
     }).where(eq(apPaymentRuns.id, runId));
   }
@@ -125,6 +184,15 @@ export class ApPaymentRunService {
       : []);
 
     const wht = await this.resolveWht(tenantId, dto.wht_tax_code);
+    // FIN-9 — early-payment discount is computed against the intended pay date; cache the resolved policy
+    // per vendor (−1 = the global-default lookup) so we hit ap_discount_terms at most once per vendor.
+    const payDate = dto.pay_date ?? ymd();
+    const policyCache = new Map<number, DiscountPolicy | null>();
+    const policyFor = async (vendorId: number | null): Promise<DiscountPolicy | null> => {
+      const key = vendorId ?? -1;
+      if (!policyCache.has(key)) policyCache.set(key, await this.resolveDiscountPolicy(tenantId, vendorId, payDate));
+      return policyCache.get(key) ?? null;
+    };
     const lines: (typeof apPaymentRunLines.$inferInsert)[] = [];
     const skipped: { txn_no: string; reason: string }[] = [];
     for (const t of bills) {
@@ -137,13 +205,17 @@ export class ApPaymentRunService {
       // 3-way-match payment gate (EXP-09): a blocked PO invoice never enters the run.
       try { await this.matchSvc.assertPayable(t.txnNo); } catch { skipped.push({ txn_no: t.txnNo, reason: 'MATCH_BLOCKED' }); continue; }
       const whtAmount = this.estimateWht(outstanding, n(t.amount), n(t.vatAmount), wht.rate);
+      const disc = this.computeDiscount(await policyFor(t.vendorId ?? null), outstanding, t.dueDate ?? null, payDate, whtAmount);
       lines.push({
         runId: 0, tenantId: t.tenantId ?? tenantId, txnNo: t.txnNo, vendorId: t.vendorId ?? null, vendorName: t.vendorName ?? null,
         dueDate: t.dueDate ?? null, billAmount: String(n(t.amount)), amount: String(outstanding),
         whtTaxCode: wht.code, whtIncomeType: wht.rate != null ? wht.income : null,
         whtRate: wht.rate != null ? String(wht.rate) : null,
         whtAmount: wht.rate != null ? String(whtAmount) : null,
-        netAmount: String(round2(outstanding - whtAmount)), status: 'Selected',
+        daysEarly: disc.daysEarly, discountRate: disc.amount > 0 ? String(disc.rate) : null,
+        discountAmount: disc.amount > 0 ? String(disc.amount) : null,
+        discountAccount: disc.amount > 0 ? disc.account : null, discountPolicyId: disc.policyId,
+        netAmount: String(round2(outstanding - whtAmount - disc.amount)), status: 'Selected',
       });
     }
     if (!lines.length) throw new BadRequestException({ code: 'NO_ELIGIBLE_AP', message: 'No open approved AP bills match the selection', messageTh: 'ไม่มีบิลเจ้าหนี้ค้างจ่ายตามเงื่อนไขที่เลือก', skipped });
@@ -180,10 +252,16 @@ export class ApPaymentRunService {
       const clearWht = u.wht_tax_code === null && u.wht_rate == null;
       const wht = clearWht ? { code: null, rate: null, income: null } : await this.resolveWht(run.tenantId ?? null, u.wht_tax_code ?? line.whtTaxCode, u.wht_rate ?? (u.wht_tax_code ? null : n(line.whtRate) || null), u.wht_income_type ?? line.whtIncomeType);
       const whtAmount = this.estimateWht(amount, n(bill?.amount), n(bill?.vatAmount), wht.rate);
+      // FIN-9 — re-resolve the early-payment discount on the edited amount (policy + pay date unchanged).
+      const policy = await this.resolveDiscountPolicy(run.tenantId ?? null, line.vendorId != null ? Number(line.vendorId) : null, String(run.payDate ?? ymd()));
+      const disc = this.computeDiscount(policy, amount, line.dueDate ?? null, String(run.payDate ?? ymd()), whtAmount);
       await db.update(apPaymentRunLines).set({
         amount: String(amount), whtTaxCode: wht.code, whtIncomeType: wht.rate != null ? wht.income : null,
         whtRate: wht.rate != null ? String(wht.rate) : null, whtAmount: wht.rate != null ? String(whtAmount) : null,
-        netAmount: String(round2(amount - whtAmount)),
+        daysEarly: disc.daysEarly, discountRate: disc.amount > 0 ? String(disc.rate) : null,
+        discountAmount: disc.amount > 0 ? String(disc.amount) : null,
+        discountAccount: disc.amount > 0 ? disc.account : null, discountPolicyId: disc.policyId,
+        netAmount: String(round2(amount - whtAmount - disc.amount)),
       }).where(eq(apPaymentRunLines.id, Number(line.id)));
     }
     await this.recomputeTotals(Number(run.id));
@@ -262,9 +340,10 @@ export class ApPaymentRunService {
     // PROPOSER (maker), the approval to the independent EXECUTOR (checker ≠ proposer, enforced above and
     // re-enforced per payment by approveApPayment's own SoD check).
     const maker: JwtUser = { username: String(run.createdBy ?? executor.username), role: 'system', customerName: null, tenantId: run.tenantId ?? null, permissions: [] };
+    const apTenant = run.tenantId ?? null; // tenant for the FIN-9 discount-income adjustment JE (idempotency scope)
     const lines = await db.select().from(apPaymentRunLines).where(eq(apPaymentRunLines.runId, Number(run.id))).orderBy(asc(apPaymentRunLines.id));
-    let paid = 0, failed = 0, skippedPaid = 0;
-    const results: { line_id: number; txn_no: string; status: string; payment_no?: string; wht_amount?: number; error?: string }[] = [];
+    let paid = 0, failed = 0, skippedPaid = 0, totalDiscount = 0;
+    const results: { line_id: number; txn_no: string; status: string; payment_no?: string; wht_amount?: number; discount_amount?: number; error?: string }[] = [];
     for (const l of lines) {
       if (l.status === 'Paid') { skippedPaid++; results.push({ line_id: Number(l.id), txn_no: l.txnNo, status: 'Paid', payment_no: l.paymentNo ?? undefined }); continue; }
       try {
@@ -279,12 +358,29 @@ export class ApPaymentRunService {
           const ap = await this.finance.approveApPayment(paymentNo, executor);
           whtAmount = n(ap.wht_amount);
         }
+        // FIN-9 (EXP-14) — capture the early-payment discount locked on the line at approval. The manual
+        // path posted Dr 2000 (full) / Cr 2361 WHT / Cr 1000 (amount−wht) — clearing the whole payable. The
+        // discount ADJUSTMENT restores the cash we did NOT actually pay (Dr 1000) and books it as income
+        // (Cr discount_account) so cash-out nets to amount−wht−discount while the payable is fully settled.
+        // Idempotent per line via a distinct source/source_ref; a retried execute never double-books it.
+        const discountAmount = round2(n(l.discountAmount));
+        const discountAccount = l.discountAccount ?? '4600';
+        if (this.ledger && discountAmount > 0) {
+          const discRef = `${l.txnNo}:disc:${paymentNo}`;
+          if (!(await this.ledger.alreadyPosted('AP-DISC', discRef, apTenant))) {
+            await this.ledger.postEntry({
+              date: String(run.payDate ?? ymd()), source: 'AP-DISC', sourceRef: discRef, tenantId: apTenant,
+              memo: `Early-payment discount ${l.txnNo} (${paymentNo}) — ฿${discountAmount}`, createdBy: executor.username,
+              lines: [{ account_code: '1000', debit: discountAmount }, { account_code: discountAccount, credit: discountAmount }],
+            });
+          }
+        }
         await db.update(apPaymentRunLines).set({
           status: 'Paid', paymentNo, glRef: `${l.txnNo}:p:${paymentNo}`, failReason: null,
-          whtAmount: String(whtAmount), netAmount: String(round2(n(l.amount) - whtAmount)),
+          whtAmount: String(whtAmount), netAmount: String(round2(n(l.amount) - whtAmount - discountAmount)),
         }).where(eq(apPaymentRunLines.id, Number(l.id)));
-        paid++;
-        results.push({ line_id: Number(l.id), txn_no: l.txnNo, status: 'Paid', payment_no: paymentNo, wht_amount: whtAmount });
+        paid++; totalDiscount = round2(totalDiscount + discountAmount);
+        results.push({ line_id: Number(l.id), txn_no: l.txnNo, status: 'Paid', payment_no: paymentNo, wht_amount: whtAmount, discount_amount: discountAmount });
       } catch (e) {
         const err = e as { response?: { code?: string; error?: { code?: string } }; message?: string };
         const code = err?.response?.code ?? err?.response?.error?.code ?? err?.message ?? 'EXECUTE_FAILED';
@@ -304,7 +400,7 @@ export class ApPaymentRunService {
     if (this.taxJobs && (paid > 0)) {
       try { const r = await this.taxJobs.runWhtCertBatch(executor); whtCerts = { issued: r.issued ?? 0, skipped: r.skipped ?? 0 }; } catch { whtCerts = null; }
     }
-    return { run_no: runNo, status: allPaid ? 'Executed' : 'Approved', executed_by: executor.username, paid, failed, already_paid: skippedPaid, lines: results, wht_certs: whtCerts };
+    return { run_no: runNo, status: allPaid ? 'Executed' : 'Approved', executed_by: executor.username, paid, failed, already_paid: skippedPaid, discount_taken: totalDiscount, lines: results, wht_certs: whtCerts };
   }
 
   // ── Reads ──
@@ -329,11 +425,90 @@ export class ApPaymentRunService {
         due_date: l.dueDate, bill_amount: n(l.billAmount), amount: n(l.amount),
         wht_tax_code: l.whtTaxCode, wht_income_type: l.whtIncomeType, wht_rate: l.whtRate != null ? n(l.whtRate) : null,
         wht_amount: n(l.whtAmount), net_amount: n(l.netAmount), status: l.status,
+        days_early: l.daysEarly != null ? Number(l.daysEarly) : null, discount_rate: l.discountRate != null ? n(l.discountRate) : null,
+        discount_amount: n(l.discountAmount), discount_policy_id: l.discountPolicyId != null ? Number(l.discountPolicyId) : null,
         payment_no: l.paymentNo, fail_reason: l.failReason, cleared: !!l.cleared, cleared_at: l.clearedAt ?? null,
       })),
       cleared_count: clearedCount, paid_count: paidCount,
+      // FIN-9 — projected early-payment savings surfaced on the proposal (Σ line discounts still Selected/Paid).
+      projected_discount: round2(lines.reduce((a, l) => a + n(l.discountAmount), 0)),
       cleared_progress: paidCount > 0 ? round2(clearedCount / paidCount) : 0,
     };
+  }
+
+  // ══════════════════ FIN-9 (EXP-14) — early-payment discount policy (maker-checker change control) ══════════════════
+  // A sliding-scale prompt-payment discount schedule, per-vendor or global (vendor_id NULL). Created Draft by a
+  // 'creditors' maker; activated by a DIFFERENT approvals/gl_close checker (self-approval → SOD_VIOLATION).
+  // Only an Active policy is applied by a payment run; approving one supersedes the prior Active policy for the
+  // same vendor scope so at most one Active policy governs a vendor at a time.
+  async createDiscountTerm(dto: DiscountTermDto, user: JwtUser) {
+    const tenantId = user.tenantId ?? null;
+    const pct = round4(dto.discount_pct);
+    if (!(pct > 0 && pct <= 0.30)) throw new BadRequestException({ code: 'INVALID_DISCOUNT_PCT', message: 'discount_pct must be between 0 and 0.30', messageTh: 'อัตราส่วนลดต้องอยู่ระหว่าง 0 ถึง 0.30' });
+    const minDays = Math.max(1, Math.floor(Number(dto.min_days_early ?? 1)));
+    const fullDays = Math.max(minDays, Math.floor(Number(dto.full_discount_days ?? 20)));
+    if (dto.vendor_id != null) {
+      const [v] = await this.db.select({ id: vendors.id }).from(vendors).where(eq(vendors.id, Number(dto.vendor_id))).limit(1);
+      if (!v) throw new NotFoundException({ code: 'VENDOR_NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
+    }
+    const [row] = await this.db.insert(apDiscountTerms).values({
+      tenantId, vendorId: dto.vendor_id != null ? Number(dto.vendor_id) : null, name: dto.name,
+      discountPct: String(pct), minDaysEarly: minDays, fullDiscountDays: fullDays,
+      prorate: dto.prorate ?? true, discountAccount: dto.discount_account ?? '4600',
+      activeFrom: dto.active_from ?? null, activeTo: dto.active_to ?? null, status: 'Draft', createdBy: user.username,
+    }).returning({ id: apDiscountTerms.id });
+    await this.statusLog.log('APDISC', String(row!.id), '', 'Draft', user.username, `Discount policy '${dto.name}' ${pct * 100}%`);
+    return this.getDiscountTerm(Number(row!.id));
+  }
+
+  async approveDiscountTerm(id: number, approver: JwtUser) {
+    const db = this.db;
+    const [t] = await db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
+    if (t.status !== 'Draft') throw new BadRequestException({ code: 'NOT_DRAFT', message: `Policy ${id} is ${t.status}, not pending activation`, messageTh: 'นโยบายนี้ไม่ได้อยู่ในสถานะร่าง' });
+    if (t.createdBy && t.createdBy === approver.username) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot activate a discount policy you created', messageTh: 'ผู้จัดทำนโยบายส่วนลดอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
+    // Supersede the prior Active policy for the SAME vendor scope so only one Active policy governs a vendor.
+    const scope = t.vendorId != null ? eq(apDiscountTerms.vendorId, Number(t.vendorId)) : isNull(apDiscountTerms.vendorId);
+    const scopeConds: SQL[] = [eq(apDiscountTerms.status, 'Active'), scope, ne(apDiscountTerms.id, Number(id))];
+    if (t.tenantId != null) scopeConds.push(eq(apDiscountTerms.tenantId, Number(t.tenantId)));
+    await db.update(apDiscountTerms).set({ status: 'Inactive' }).where(and(...scopeConds));
+    await db.update(apDiscountTerms).set({ status: 'Active', approvedBy: approver.username, approvedAt: new Date() }).where(eq(apDiscountTerms.id, Number(id)));
+    await this.statusLog.log('APDISC', String(id), 'Draft', 'Active', approver.username);
+    return this.getDiscountTerm(Number(id));
+  }
+
+  async rejectDiscountTerm(id: number, approver: JwtUser, reason?: string) {
+    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
+    if (t.status !== 'Draft') throw new BadRequestException({ code: 'NOT_DRAFT', message: `Policy ${id} is ${t.status}, not pending activation`, messageTh: 'นโยบายนี้ไม่ได้อยู่ในสถานะร่าง' });
+    await this.db.update(apDiscountTerms).set({ status: 'Rejected', approvedBy: approver.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(apDiscountTerms.id, Number(id)));
+    await this.statusLog.log('APDISC', String(id), 'Draft', 'Rejected', approver.username, reason);
+    return this.getDiscountTerm(Number(id));
+  }
+
+  async deactivateDiscountTerm(id: number, user: JwtUser) {
+    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
+    if (t.status !== 'Active') throw new BadRequestException({ code: 'NOT_ACTIVE', message: `Policy ${id} is ${t.status}, not active`, messageTh: 'นโยบายนี้ไม่ได้เปิดใช้งานอยู่' });
+    await this.db.update(apDiscountTerms).set({ status: 'Inactive' }).where(eq(apDiscountTerms.id, Number(id)));
+    await this.statusLog.log('APDISC', String(id), 'Active', 'Inactive', user.username);
+    return this.getDiscountTerm(Number(id));
+  }
+
+  async getDiscountTerm(id: number) {
+    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
+    return shapeDiscountTerm(t);
+  }
+
+  async listDiscountTerms(user: JwtUser, status?: string) {
+    const conds: SQL[] = [];
+    if (user.tenantId != null) conds.push(eq(apDiscountTerms.tenantId, user.tenantId));
+    if (status) conds.push(eq(apDiscountTerms.status, status));
+    const rows = await this.db.select().from(apDiscountTerms).where(conds.length ? and(...conds) : undefined).orderBy(desc(apDiscountTerms.id)).limit(200);
+    return { terms: rows.map(shapeDiscountTerm), count: rows.length };
   }
 
   // ── Thai bank bulk-transfer file (generic CSV + named presets) / minimal ISO 20022 pain.001 XML.
@@ -403,10 +578,19 @@ function shapeRun(r: typeof apPaymentRuns.$inferSelect) {
   return {
     run_no: r.runNo, status: r.status, pay_date: r.payDate, due_cutoff: r.dueCutoff,
     bank_account_id: r.bankAccountId != null ? Number(r.bankAccountId) : null,
-    total_amount: n(r.totalAmount), total_wht: n(r.totalWht), total_net: n(r.totalNet), line_count: Number(r.lineCount ?? 0),
+    total_amount: n(r.totalAmount), total_wht: n(r.totalWht), total_discount: n(r.totalDiscount), total_net: n(r.totalNet), line_count: Number(r.lineCount ?? 0),
     created_by: r.createdBy, created_at: r.createdAt, approved_by: r.approvedBy, approved_at: r.approvedAt,
     executed_by: r.executedBy, executed_at: r.executedAt, reject_reason: r.rejectReason,
     file_format: r.fileFormat, file_hash: r.fileHash, file_generated_at: r.fileGeneratedAt, remarks: r.remarks,
+  };
+}
+
+function shapeDiscountTerm(t: typeof apDiscountTerms.$inferSelect) {
+  return {
+    id: Number(t.id), vendor_id: t.vendorId != null ? Number(t.vendorId) : null, name: t.name,
+    discount_pct: n(t.discountPct), min_days_early: Number(t.minDaysEarly ?? 1), full_discount_days: Number(t.fullDiscountDays ?? 20),
+    prorate: !!t.prorate, discount_account: t.discountAccount, active_from: t.activeFrom, active_to: t.activeTo,
+    status: t.status, created_by: t.createdBy, created_at: t.createdAt, approved_by: t.approvedBy, approved_at: t.approvedAt, reject_reason: t.rejectReason,
   };
 }
 
