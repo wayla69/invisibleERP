@@ -19,6 +19,8 @@ import { statusVariant } from '@/components/ui';
 import { QrScanButton } from '@/components/qr-scanner';
 import { submitScan, useOnline, useScanOutbox } from '@/lib/scan-outbox';
 import { useLang } from '@/lib/i18n';
+import { useMe, hasPerm } from '@/lib/auth';
+import { MasterIo } from '@/components/master-io';
 import { Select, selectCls } from '@/components/form-controls';
 
 
@@ -55,6 +57,7 @@ export default function AssetsPage() {
 function Register() {
   const { t } = useLang();
   const qc = useQueryClient();
+  const { data: me } = useMe();
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const q = useQuery<any>({
@@ -125,6 +128,15 @@ function Register() {
       {selected && <ScheduleDrill assetNo={selected} onClose={() => setSelected(null)} />}
       {selected && <RevaluationPanel assetNo={selected} onChange={() => qc.invalidateQueries({ queryKey: ['assets'] })} />}
       {selected && q.data && <DisposalPanel asset={(q.data.assets ?? []).find((a: any) => a.asset_no === selected)} onChange={() => qc.invalidateQueries({ queryKey: ['assets'] })} />}
+
+      {/* Bulk import/export of the fixed-asset register — reuses the master-data registry engine (entity
+          `assets`); gated to the coarse `masterdata` setup duty the /api/admin/master-data endpoints require. */}
+      {hasPerm(me, 'masterdata') && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-muted-foreground">{t('mdio.section_title')}</h3>
+          <MasterIo entityKey="assets" base="admin" onImported={() => qc.invalidateQueries({ queryKey: ['assets'] })} />
+        </div>
+      )}
     </div>
   );
 }

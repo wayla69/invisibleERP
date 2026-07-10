@@ -1,6 +1,9 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.8 · 2026-07-10** · *v0.8: dimension filters (โครงการ/แผนก/สาขา/ศูนย์ต้นทุน) on the
+**Status: DRAFT v0.9 · 2026-07-10** · *v0.9 (2026-07-10): the **Fixed asset register** (`/assets` → Register
+tab) gains a **Bulk import / export (Excel/CSV)** section — download the register, a blank template, or
+upload assets in bulk (registry entity `assets`); gated to the `masterdata` setup duty (see §6 → Bulk
+import/export).* · *v0.8: dimension filters (โครงการ/แผนก/สาขา/ศูนย์ต้นทุน) on the
 trial balance, account ledger and income statement (§3 "Filter by dimension"); dropdowns fed by
 `GET /api/ledger/dimensions`.*
 
@@ -791,6 +794,15 @@ approval below).
 
 **Expected result:** The asset is registered and the purchase posts to the ledger
 (Dr Fixed Assets / Cr Cash).
+
+### Bulk import/export (Excel/CSV)
+
+At the bottom of the **Register** tab a **Bulk import / export (Excel/CSV)** section lets you
+**export** the whole asset register, download a blank **template**, and **import** many assets at
+once (validate-then-commit, with a per-row error preview and an optional skip-errors mode). It reuses
+the shared master-data import engine (registry entity `assets`) and is shown only to users holding the
+`masterdata` setup duty. Required columns: `Asset_No`, `Name`, `Acquire_Date`, `Acquire_Cost`,
+`Useful_Life_Months`.
 
 ### Register an asset from a goods receipt (Procure-to-Capitalize)
 
