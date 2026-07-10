@@ -50,6 +50,8 @@ your code below.
 | `SOD_VIOLATION` (account merge) | You tried to **merge away an account you created yourself** while it still has contacts/deals to reassign. | A different user performs the merge (maker-checker — one person can't mint a shadow account and fold its pipeline into another record). |
 | `MERGE_CONFLICT` (409) | The merge hit a record both accounts own with the same key. | Resolve the collision on one side, then re-run the merge. |
 | `ACCOUNT_NOT_FOUND` | The `ACC-…` account number doesn't exist (in your tenant). | Check the number via `GET /api/crm/accounts?search=`. |
+| `TENANT_REQUIRED` (web-to-lead, 400) | Your website's contact form posted to `POST /api/crm/web-to-lead` without a `tenant_code` on a multi-company install (CRM-2). | Ask the administrator to add the company's `tenant_code` to the embedded form. Single-company installs need none. |
+| `MISSING_COLUMNS` / `ต้องระบุ 'Name'` (lead import) | The lead import file has no `Name` column, or a row's name is blank (CRM-2). | Download the template from the import dialog; `Name` is the only required column. Blank-name rows are skipped (the rest import) — the validation report lists them per row. |
 | `TASK_NOT_FOUND` | You tried to update a project **WBS task** that doesn't exist. | Check the task id; add the task to the project first. |
 | `MILESTONE_NOT_FOUND` | You tried to mark a project **milestone** reached that doesn't exist. | Check the milestone id; add the milestone to the project first. |
 | `MILESTONE_REACHED` | The milestone was already marked reached. | No action — it's already reached. A billing milestone bills once; it can't be re-reached (that would double-bill). |

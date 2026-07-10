@@ -151,9 +151,11 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
     const msg = body?.error?.messageTh ?? body?.error?.message ?? `HTTP ${res.status}`;
     // Preserve the machine-readable error `code` and HTTP status on the thrown Error so callers can branch
     // on a specific failure (e.g. map COA_ADMIN_ONLY to a tailored toast) instead of matching message text.
-    const err = new Error(msg) as Error & { code?: string; status?: number };
+    // `details` carries the endpoint-defined payload (e.g. DUPLICATE_SUSPECT's match list — CRM merge dialog).
+    const err = new Error(msg) as Error & { code?: string; status?: number; details?: unknown };
     err.code = body?.error?.code;
     err.status = res.status;
+    err.details = body?.error?.details;
     throw err;
   }
   return body as T;

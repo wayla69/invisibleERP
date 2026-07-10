@@ -1,13 +1,16 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, or, desc, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { crmLeads, crmOpportunities, crmActivities, crmAccounts, crmContacts, crmStageHistory, customerMaster } from '../../../database/schema';
 import { pipelineStages } from '../../../database/schema/pipeline';
+import { quotes } from '../../../database/schema/cpq';
+import { tenants } from '../../../database/schema/tenants';
 import { docCountersTenant } from '../../../database/schema/system';
 import { users } from '../../../database/schema/users';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { n, fx } from '../../../database/queries';
 import { normalizeName, normalizeKey } from '../../../common/text-similarity';
+import { parseCsv, parseXlsx, type ImportError } from '../../masterdata/masterdata.service';
 import type { JwtUser } from './../../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -224,7 +227,61 @@ export class CrmPipelineService {
     const db = this.db;
     const where = stage ? eq(crmOpportunities.stage, stage) : undefined;
     const rows = await db.select().from(crmOpportunities).where(where).orderBy(desc(crmOpportunities.id)).limit(300);
-    return { opportunities: rows.map(shapeOpp), count: rows.length };
+    // CRM-2 board enrichment (additive): resolve the linked account's display name/number and when the deal
+    // entered its CURRENT stage (max crm_stage_history.changed_at) so the kanban can show age-in-stage.
+    const accIds = [...new Set(rows.map((o: any) => o.accountId).filter((x: any) => x != null).map(Number))];
+    const accRows = accIds.length
+      ? await db.select({ id: crmAccounts.id, accountNo: crmAccounts.accountNo, name: crmAccounts.name }).from(crmAccounts).where(inArray(crmAccounts.id, accIds))
+      : [];
+    const accById = new Map(accRows.map((a: any) => [Number(a.id), a]));
+    const oppIds = rows.map((o: any) => Number(o.id));
+    const histRows = oppIds.length
+      ? await db.select({ oppId: crmStageHistory.opportunityId, at: sql<string>`max(${crmStageHistory.changedAt})` })
+          .from(crmStageHistory).where(inArray(crmStageHistory.opportunityId, oppIds)).groupBy(crmStageHistory.opportunityId)
+      : [];
+    const enteredAt = new Map(histRows.map((h: any) => [Number(h.oppId), h.at]));
+    const opportunities = rows.map((o: any) => {
+      const acc = o.accountId != null ? accById.get(Number(o.accountId)) : undefined;
+      return {
+        ...shapeOpp(o),
+        account_no: acc?.accountNo ?? null,
+        account_name: acc?.name ?? o.accountName ?? null,
+        stage_entered_at: enteredAt.get(Number(o.id)) ?? o.createdAt,
+      };
+    });
+    return { opportunities, count: rows.length };
+  }
+
+  // Deal detail (CRM-2 workspace): the opportunity + its linked account/primary contact, the append-only
+  // stage-history trail, its activities (incl. the originating lead's, when converted), the CPQ quotes
+  // linked on quotes.crm_opportunity_id, and the nearest undone task (the "next step").
+  async getOpportunity(oppNo: string, user: JwtUser) {
+    const db = this.db;
+    const o = await this.oppByNo(oppNo, user);
+    const [account] = o.accountId != null
+      ? await db.select().from(crmAccounts).where(eq(crmAccounts.id, Number(o.accountId))).limit(1)
+      : [undefined];
+    const [contact] = o.primaryContactId != null
+      ? await db.select().from(crmContacts).where(eq(crmContacts.id, Number(o.primaryContactId))).limit(1)
+      : [undefined];
+    const histRows = await db.select().from(crmStageHistory).where(eq(crmStageHistory.opportunityId, Number(o.id))).orderBy(crmStageHistory.id);
+    const actConds = [and(eq(crmActivities.entityType, 'opportunity'), eq(crmActivities.entityNo, oppNo))];
+    if (o.leadNo) actConds.push(and(eq(crmActivities.entityType, 'lead'), eq(crmActivities.entityNo, o.leadNo)));
+    const actRows = await db.select().from(crmActivities).where(actConds.length > 1 ? or(...actConds) : actConds[0]).orderBy(desc(crmActivities.id)).limit(300);
+    const quoteRows = await db.select().from(quotes).where(eq(quotes.crmOpportunityId, Number(o.id))).orderBy(desc(quotes.id)).limit(100);
+    const activities = actRows.map(shapeActivity);
+    const nextTask = activities
+      .filter((a) => a.type === 'task' && !a.done)
+      .sort((a, b) => String(a.due_date ?? '9999-12-31').localeCompare(String(b.due_date ?? '9999-12-31')))[0] ?? null;
+    return {
+      ...shapeOpp(o),
+      account: account ? { account_no: account.accountNo, name: account.name, customer_no: account.customerNo ?? null, industry: account.industry ?? null, phone: account.phone ?? null, email: account.email ?? null } : null,
+      primary_contact: contact ? { id: Number(contact.id), name: contact.name, email: contact.email ?? null, phone: contact.phone ?? null, role: contact.role } : null,
+      history: histRows.map((h: any) => ({ id: Number(h.id), from_stage: h.fromStage, to_stage: h.toStage, changed_by: h.changedBy, changed_at: h.changedAt })),
+      activities,
+      quotes: quoteRows.map((q: any) => ({ id: Number(q.id), quote_no: q.quoteNo, status: q.status, total: n(q.total), issued_date: q.issuedDate ?? null, expires_date: q.expiresDate ?? null, created_at: q.createdAt })),
+      next_task: nextTask,
+    };
   }
 
   private async oppByNo(oppNo: string, user: JwtUser) {
@@ -239,7 +296,7 @@ export class CrmPipelineService {
   // Move an opportunity through the stage machine. won/lost are terminal; lost requires a reason; the
   // default probability tracks the stage row (pipeline_stages.default_probability — the seeded defaults
   // mirror the legacy weights: prospecting 10 → qualification 25 → proposal 50 → negotiation 75).
-  async setStage(oppNo: string, stage: string, dto: { lost_reason?: string; probability?: number }, user: JwtUser) {
+  async setStage(oppNo: string, stage: string, dto: { lost_reason?: string; win_reason?: string; probability?: number }, user: JwtUser) {
     const db = this.db;
     const stages = await this.listStages(user);
     const target = this.resolveStage(stages, stage);
@@ -250,7 +307,11 @@ export class CrmPipelineService {
     const status = this.statusOf(target);
     if (status === 'Lost' && !dto.lost_reason) throw new BadRequestException({ code: 'LOST_REASON_REQUIRED', message: 'A lost reason is required', messageTh: 'ต้องระบุเหตุผลที่เสียโอกาส' });
     const set: any = { stage: legacyName, stageId: target.id ?? null, status, probability: dto.probability ?? target.defaultProbability ?? o.probability };
-    if (status !== 'Open') { set.closedAt = new Date(); if (status === 'Lost') set.lostReason = dto.lost_reason ?? null; }
+    if (status !== 'Open') {
+      set.closedAt = new Date();
+      if (status === 'Lost') set.lostReason = dto.lost_reason ?? null;
+      if (status === 'Won' && dto.win_reason) set.winReason = dto.win_reason; // CRM-2: optional win note on the governed route
+    }
     await db.update(crmOpportunities).set(set).where(eq(crmOpportunities.id, Number(o.id)));
     await this.recordStage(o.tenantId != null ? Number(o.tenantId) : null, Number(o.id), o.stage, legacyName, user.username);
     return { opp_no: oppNo, stage: legacyName, probability: set.probability };
@@ -337,7 +398,88 @@ export class CrmPipelineService {
     if (entityType) conds.push(eq(crmActivities.entityType, entityType));
     if (entityNo) conds.push(eq(crmActivities.entityNo, entityNo));
     const rows = await db.select().from(crmActivities).where(conds.length ? and(...conds) : undefined).orderBy(desc(crmActivities.id)).limit(300);
-    return { activities: rows.map((a: any) => ({ id: Number(a.id), entity_type: a.entityType, entity_no: a.entityNo, type: a.type, subject: a.subject, notes: a.notes, due_date: a.dueDate, done: a.done === true, owner: a.owner, created_at: a.createdAt })), count: rows.length };
+    return { activities: rows.map(shapeActivity), count: rows.length };
+  }
+
+  // Mark an activity done/undone (CRM-2 workspace: complete the "next step" task from the deal timeline).
+  async setActivityDone(id: number, done: boolean, user: JwtUser) {
+    const db = this.db;
+    const conds = [eq(crmActivities.id, id)];
+    if (user.tenantId != null) conds.push(eq(crmActivities.tenantId, user.tenantId));
+    const [a] = await db.select().from(crmActivities).where(and(...conds)).limit(1);
+    if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Activity not found', messageTh: 'ไม่พบกิจกรรมนี้' });
+    const [row] = await db.update(crmActivities).set({ done }).where(eq(crmActivities.id, id)).returning();
+    return shapeActivity(row);
+  }
+
+  // ── Lead capture (CRM-2) ───────────────────────────────────────────────
+
+  // Public website-form capture → a 'web' lead. Tenant resolution: an explicit tenant_code wins; a
+  // single-tenant install needs none. The caller is anonymous (no JWT) — the edge rate limiter gives this
+  // path its own strict per-IP bucket (see common/edge.ts), and the controller silently drops honeypot hits
+  // before this method runs. Responds { ok: true } only (no lead number leaks to the public caller).
+  async webToLead(dto: { name: string; company?: string; email?: string; phone?: string; message?: string; source?: string; tenant_code?: string }) {
+    const db = this.db;
+    let tenantId: number | null = null;
+    if (dto.tenant_code) {
+      const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, dto.tenant_code)).limit(1);
+      if (!t) throw new BadRequestException({ code: 'TENANT_NOT_FOUND', message: 'Unknown tenant code', messageTh: 'ไม่พบรหัสบริษัทนี้' });
+      tenantId = Number(t.id);
+    } else {
+      const ts = await db.select({ id: tenants.id }).from(tenants).limit(2);
+      if (ts.length === 1) tenantId = Number(ts[0]!.id);
+      else throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'tenant_code is required on a multi-tenant install', messageTh: 'ต้องระบุ tenant_code' });
+    }
+    const leadNo = await this.docNo.nextDaily('LEAD');
+    await db.insert(crmLeads).values({
+      tenantId, leadNo, name: dto.name.trim().slice(0, 200), company: dto.company?.trim().slice(0, 200) || null,
+      email: dto.email?.trim().slice(0, 200) || null, phone: dto.phone?.trim().slice(0, 60) || null,
+      source: dto.source?.trim().slice(0, 60) || 'web', status: 'new',
+      notes: dto.message?.trim().slice(0, 2000) || null, createdBy: 'web-to-lead',
+    });
+    return { ok: true };
+  }
+
+  // Bulk lead import (CRM-2 wizard) — accepts csv / base64 xlsx / pre-parsed rows (the masterdata engine's
+  // parsers, reused). Header contract: Name (required) + Company/Email/Phone/Source/Owner/Notes. dry_run
+  // validates and reports per-row errors without writing; the commit skips invalid rows and numbers each
+  // created lead through the normal LEAD- counter.
+  static readonly LEAD_IMPORT_HEADERS = ['Name', 'Company', 'Email', 'Phone', 'Source', 'Owner', 'Notes'] as const;
+
+  async importLeads(input: { format?: 'rows' | 'csv' | 'xlsx'; csv?: string; xlsx?: string; rows?: Record<string, any>[]; dry_run?: boolean }, user: JwtUser) {
+    const rows: Record<string, any>[] = input.format === 'xlsx'
+      ? await parseXlsx(Buffer.from(input.xlsx ?? '', 'base64'))
+      : input.format === 'csv' ? parseCsv(input.csv ?? '') : (input.rows ?? []);
+    if (!rows.length) throw new BadRequestException({ code: 'NO_ROWS', message: 'No rows to import', messageTh: 'ไม่มีข้อมูลให้นำเข้า' });
+    if (!Object.keys(rows[0] ?? {}).includes('Name')) {
+      throw new BadRequestException({ code: 'MISSING_COLUMNS', message: `Missing required column: Name`, messageTh: 'ขาดคอลัมน์ที่จำเป็น: Name' });
+    }
+    const errors: ImportError[] = [];
+    const prepared: { rowNo: number; value: Record<string, any> }[] = [];
+    rows.forEach((raw, i) => {
+      const rowNo = i + 1;
+      const name = String(raw['Name'] ?? '').trim();
+      if (!name) { errors.push({ row: rowNo, column: 'Name', code: 'REQUIRED_EMPTY', message: `'Name' is required`, messageTh: `ต้องระบุ 'Name'` }); return; }
+      const pick = (h: string, max: number) => { const v = String(raw[h] ?? '').trim(); return v ? v.slice(0, max) : null; };
+      prepared.push({ rowNo, value: {
+        name: name.slice(0, 200), company: pick('Company', 200), email: pick('Email', 200), phone: pick('Phone', 60),
+        source: pick('Source', 60) ?? 'import', owner: pick('Owner', 60) ?? user.username, notes: pick('Notes', 2000),
+      } });
+    });
+    if (input.dry_run) return { entity: 'crm_leads', dry_run: true, total: rows.length, valid: prepared.length, invalid: errors.length, errors };
+    const db = this.db;
+    // Allocate the LEAD- numbers up-front (the counter bump is atomic on its own row), then insert the
+    // batch in one transaction so a mid-batch failure rolls the rows back together.
+    const numbered: { leadNo: string; value: Record<string, any> }[] = [];
+    for (const p of prepared) numbered.push({ leadNo: await this.docNo.nextDaily('LEAD'), value: p.value });
+    let imported = 0;
+    await db.transaction(async (tx: any) => {
+      for (const p of numbered) {
+        await tx.insert(crmLeads).values({ tenantId: user.tenantId ?? null, leadNo: p.leadNo, ...p.value, status: 'new', createdBy: user.username });
+        imported++;
+      }
+    });
+    return { entity: 'crm_leads', dry_run: false, total: rows.length, imported, skipped: rows.length - imported, errors };
   }
 
   // ── /api/pipeline adapter (Batch 2A routes preserved; ONE write path — this spine) ──────────────────
@@ -496,6 +638,9 @@ export class CrmPipelineService {
   }
 }
 
+function shapeActivity(a: any) {
+  return { id: Number(a.id), entity_type: a.entityType, entity_no: a.entityNo, type: a.type, subject: a.subject, notes: a.notes, due_date: a.dueDate, done: a.done === true, owner: a.owner, created_at: a.createdAt };
+}
 function shapeLead(l: any) {
   return { lead_no: l.leadNo, name: l.name, company: l.company, email: l.email, phone: l.phone, source: l.source, status: l.status, owner: l.owner, customer_no: l.customerNo, lost_reason: l.lostReason, notes: l.notes, created_at: l.createdAt };
 }
