@@ -67,6 +67,47 @@ Three ways leads arrive:
    multi-company install the form must send your company's `tenant_code`. The endpoint is rate-limited per
    visitor and carries a hidden anti-spam (honeypot) field — bot submissions are dropped silently.
 
+### Lead scoring (คะแนนลีด) — CRM-4
+
+Every lead carries an **explainable grade A–D** (`GET /api/crm/pipeline/leads/<LEAD-…>/score`). The score
+combines the **source** (referral/partner rank highest, a purchased list lowest), **size** (a company name ⇒
+a bigger B2B opportunity), **contactability** (has an email + a phone) and **engagement recency** (how
+recently the lead was touched). Open a lead to see the per-factor **breakdown** — so you can tell *why* a
+lead is an A (chase it today) or a D. The formula is versioned (`v1`); re-score after new activity with
+**คำนวณคะแนนใหม่ (Re-score)** (`POST …/score`).
+
+## 16.3b Follow-up discipline (วินัยการติดตาม) — CRM-4
+
+Leads and deals must not go cold. The **follow-up center** (`GET /api/crm/pipeline/follow-up`) is one
+severity-ranked worklist of what needs attention now:
+
+- **ลีดเกิน SLA (SLA breach):** a **new** lead that has had **no activity logged** for longer than the
+  response SLA (default **24 hours**). This is detective control **REV-22** — leads must be touched in time.
+  Log any activity (a call/email/note) and the breach clears.
+- **งานเลยกำหนด (overdue task):** an open follow-up **task** whose due date has passed.
+- **ดีลค้าง (rotting deal):** an **open** deal with no activity for longer than the rotting window
+  (default **7 days**).
+
+**Round-robin assignment:** when owners are configured, each new lead is auto-assigned to the next owner in
+rotation (or press **มอบหมาย (Assign)**, `POST …/leads/:no/assign`, to rotate/override).
+
+**Settings (`GET/PUT …/follow-up/settings`)** — a sales manager (`crm`/`exec`) sets `sla_hours`,
+`rotting_days` and the `round_robin_owners` list. Schedule the **สรุปการติดตามงานขายประจำวัน (CRM follow-up
+digest)** BI report to run the sweep daily: it posts a summary notification and fires `lead.stagnant` into
+the automation rules so you can auto-escalate a stale lead.
+
+**Automation from the pipeline:** the pipeline emits `lead.created`, `lead.stagnant`, `opp.stage_changed`,
+`deal.won` and `deal.lost` events — build no-code rules (Settings → Automation) to notify a channel, send a
+LINE message or enrol a journey when they fire.
+
+## 16.3c Send email / LINE from a deal (ส่งอีเมล/LINE จากดีล) — CRM-4
+
+From a deal you can message the customer directly (`POST …/opportunities/:oppNo/comms`). Choose the channel
+(**email / LINE / SMS**), write a subject/body and use **merge fields** — `{{contact.name}}`, `{{opp.name}}`,
+`{{opp.amount}}`, `{{account.name}}`, `{{owner}}` (list at `GET …/comms/merge-fields`) — which are filled
+from the deal before sending. The send is **logged as a timeline activity** so the whole thread stays on the
+deal (and the Customer-360). If the contact has no address for the chosen channel, pass an explicit `to`.
+
 ## 16.4 Accounts & contacts (บัญชีลูกค้า & ผู้ติดต่อ)
 
 - **บัญชีลูกค้า (Accounts):** the company records behind your deals. Search, create, and click through to
@@ -81,6 +122,27 @@ Three ways leads arrive:
 
 ---
 
+## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
+
+Beyond the win/loss dashboard, three read-only analytics answer *why* deals move the way they do. Each looks
+back over a **time window** (`months`, default 6 — add e.g. `?months=3` to narrow it) and needs the `crm`,
+`exec` or `ar` permission.
+
+- **กรวยการขาย + ความเร็ว (Funnel + velocity)** — `GET /api/crm/pipeline/analytics/funnel`. The conversion
+  funnel **ลูกค้ามุ่งหวัง → ผ่านคุณสมบัติ → โอกาสการขาย → ปิดการขายได้** with the drop-off at each step, plus,
+  from the deal's stage history, **how long deals sit in each stage** (time-in-stage velocity), which stages
+  they reach, and the **average sales cycle** (days from creation to a win). Use it to find where deals stall.
+- **ผลตอบแทนตามแหล่งที่มา (Source ROI)** — `GET /api/crm/pipeline/analytics/source-roi`. Each **lead source**
+  (webinar, expo, web, referral, …) with the **won revenue**, win rate and average deal size it produced —
+  so marketing spend follows the channels that actually close. Deals with no originating lead show as `direct`.
+- **พยากรณ์การขาย + โควตา (Forecast + quota)** — `GET /api/crm/pipeline/analytics/forecast`. Open pipeline
+  split into **commit** (probability ≥ 70%), **best-case** (40–69%) and **pipeline** (< 40%) with a
+  risk-adjusted forecast total; **quota attainment per owner** (won-so-far vs a quota you pass in the report
+  filters — left blank if you don't track quotas here); and an **activity leaderboard** (who logged and
+  completed the most touches).
+
+All three are also **schedulable reports** on the report builder (report types `crm_funnel`,
+`crm_source_roi`, `crm_forecast`, alongside `crm_win_loss`) — subscribe to get them emailed/LINE'd on a cadence.
 ## 16.5 Customer 360 — see the money before you call (ลูกค้า 360)
 
 On every account page a **Customer 360 panel** sits under the header so you have the whole relationship —
@@ -113,11 +175,15 @@ contact to a member (§16.4) to light it up.
 | `DUPLICATE_SUSPECT` | The new account/contact matches an existing record | Review the matches in the dialog; open the existing record, or force-create a genuinely different party. |
 | `TENANT_REQUIRED` | Website form posted without a company code (multi-company installs) | Ask the administrator to add `tenant_code` to the embedded form. |
 | `MISSING_COLUMNS` / `ต้องระบุ 'Name'` | Lead import file without the `Name` column / a row with a blank name | Use the template; fix or accept that the row is skipped. |
+| `NO_ROUND_ROBIN` | **Assign** pressed with no round-robin owners configured and no owner given | Set `round_robin_owners` in follow-up settings, or pass an owner. |
+| `NO_RECIPIENT` | Comms send where the contact has no address for that channel | Enter a `to` address, or set the contact's email/LINE id/phone. |
 | `ACCOUNT_NOT_FOUND` | Opening Customer 360 for an account number that doesn't exist in your company | Check the `ACC-…` number, or open the account from the Accounts tab. |
 
 ## Revision history
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.2 | 2026-07-10 | **CRM-4 — sales automation** (docs/41): lead scoring (grade A–D, explainable/versioned breakdown), the follow-up center (SLA-breach / overdue-task / rotting-deal worklist, detective control **REV-22**) + round-robin assignment + the daily follow-up digest, pipeline events into the automation rules engine, and send email/LINE from a deal with merge fields (logged as an activity). |
+| 1.1 | 2026-07-10 | **CRM-5 — analytics that answer "why"** (Module-Depth Uplift Wave 4): new §16.5 covering the funnel-conversion + time-in-stage velocity, source-ROI, and forecast-categories + quota + activity-leaderboard analytics (`/api/crm/pipeline/analytics/*`), each date-bounded and schedulable as the BI report types `crm_funnel` / `crm_source_roi` / `crm_forecast`. |
 | 1.0 | 2026-07-10 | **CRM-2 — first release of the unified CRM workspace** (docs/41): `/crm` kanban board + list toggle, saved filter views, deal page with unified timeline + next-step, account page, leads import wizard, web-to-lead capture; `/pipeline` and `/projects/crm` now redirect here; member CRM 360 moved to `/crm/members`. |
 | 1.1 | 2026-07-10 | **CRM-3 — Customer 360 panel on the account page** (docs/42): new §16.5. The account page now shows a read-only *see-the-money-before-you-call* panel that joins the company AR/credit position + last payments, the account's open deals + CPQ quotes, and the linked member's loyalty (tier/points/RFM/NPS/recovery) in one view (`GET /api/crm/customer-360/:accountNo`). Added the `ACCOUNT_NOT_FOUND` error row. |
