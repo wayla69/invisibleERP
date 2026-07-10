@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DataTable, type Column } from '@/components/data-table';
 import { PrForm } from '@/components/procurement-forms';
+import { BudgetChip, budgetRetryFields } from '@/components/budget-chip';
 import { baht } from '@/lib/format';
 
 type PrLine = { id: number; item_id: string; item_description: string | null; request_qty: number; uom: string | null; reason: string | null; po_no: string | null; line_status: string | null };
@@ -160,15 +161,17 @@ function PrLineItem({ l }: { l: PrLine }) {
 
 // Approve/reject/convert/cancel — identical decision for the phone-card list and the desktop table row.
 function PrActions({ pr, canApprove, decide, cancel, onConvert }: {
-  pr: Pr; canApprove: boolean; decide: ReturnType<typeof useMutation<any, any, { prNo: string; approve: boolean }>>;
+  pr: Pr; canApprove: boolean; decide: ReturnType<typeof useMutation<any, any, { prNo: string; approve: boolean; extra?: Record<string, unknown> }>>;
   cancel: ReturnType<typeof useMutation<any, any, string>>; onConvert: (pr: Pr) => void;
 }) {
   const { t } = useLang();
   const isPending = pr.status === 'Pending';
   return (
-    <div className="flex flex-wrap justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-2">
       {canApprove && isPending && (
         <>
+          {/* FIN-3 (BUD-02) — budget availability at the point of approval (hidden while the policy is off) */}
+          <BudgetChip docType="PR" docNo={pr.pr_no} />
           <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: true })}>{t('fin.approve')}</Button>
           <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>{t('iv.req_reject')}</Button>
         </>
@@ -192,9 +195,15 @@ function PrListCard() {
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ['prs'] });
   const decide = useMutation({
-    mutationFn: ({ prNo, approve }: { prNo: string; approve: boolean }) => api(`/api/procurement/prs/${prNo}/approve`, { method: 'PATCH', body: JSON.stringify({ approve }) }),
-    onSuccess: (_r, v) => { notifySuccess(v.approve ? t('iv.req_toast_approved') : t('iv.req_toast_rejected')); refresh(); },
-    onError: (e: any) => notifyError(e.message),
+    mutationFn: ({ prNo, approve, extra }: { prNo: string; approve: boolean; extra?: Record<string, unknown> }) =>
+      api(`/api/procurement/prs/${prNo}/approve`, { method: 'PATCH', body: JSON.stringify({ approve, ...(extra ?? {}) }) }),
+    onSuccess: (_r, v) => { notifySuccess(v.approve ? t('iv.req_toast_approved') : t('iv.req_toast_rejected')); qc.invalidateQueries({ queryKey: ['budget-availability'] }); refresh(); },
+    onError: (e: any, v) => {
+      // FIN-3 (BUD-02) — the budget gate's warn/block rejections become the confirm/override interaction.
+      const retry = budgetRetryFields(e, { confirm: t('pb.bctl_confirm_msg'), overridePrompt: t('pb.bctl_override_prompt') });
+      if (retry) decide.mutate({ ...v, extra: { ...(v.extra ?? {}), ...retry } });
+      else notifyError(e.message);
+    },
   });
   const cancel = useMutation({
     mutationFn: (prNo: string) => api(`/api/procurement/prs/${prNo}/cancel`, { method: 'PATCH' }),

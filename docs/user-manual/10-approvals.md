@@ -39,6 +39,16 @@ route to an **approver** before they take effect. The rules decide:
 authorised, the journal entry posts). On reject, it is returned / voided with your
 reason recorded.
 
+> **Budget check on PR/PO approvals (BUD-02):** if your company enabled the
+> budget-control policy (**/budget → ควบคุมงบ**), approving a purchase
+> requisition or purchase order also checks the **available budget** (approved
+> budget − actuals − open commitments). The PR/PO screens show a budget chip
+> next to the decision; over-budget approvals may require a **confirmation**
+> (warn policy) or an **executive override with a recorded reason** (block
+> policy, error `BUDGET_EXCEEDED`). See
+> [Procurement](./03-procurement.md) and the
+> [troubleshooting FAQ](./99-troubleshooting-faq.md) for the exact codes.
+
 [screenshot: My Approvals inbox with Approve / Reject]
 
 ---

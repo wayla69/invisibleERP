@@ -55,7 +55,7 @@ export class ProcurementService {
     // facade positionally with (db, docNo, statusLog), so sub-services must come from the injected deps.
     this.grn = new ProcurementGrnService(db, docNo, statusLog, (poNo, msg) => this.notifyPoPrRequesters(poNo, msg), costing, commitments, grPdf, docEmail);
     this.po = new ProcurementPoService(db, docNo, statusLog, (vid, vname) => this.assertSupplierAllowed(vid, vname), (code) => this.resolveProjectId(code), (poNo, msg) => this.notifyPoPrRequesters(poNo, msg), workflow, webhooks, commitments, docTemplates);
-    this.pr = new ProcurementPrService(db, docNo, statusLog, (code) => this.resolveProjectId(code), (u) => this.lowStock(u), (itemId, dto, u) => this.setPreferredVendor(itemId, dto, u), (dto, u) => this.po.createPo(dto, u), workflow, lineNotify);
+    this.pr = new ProcurementPrService(db, docNo, statusLog, (code) => this.resolveProjectId(code), (u) => this.lowStock(u), (itemId, dto, u) => this.setPreferredVendor(itemId, dto, u), (dto, u) => this.po.createPo(dto, u), workflow, lineNotify, commitments);
   }
 
   // D2 — best-effort LINE push to the requester(s) of every PR linked to a PO (pr_items.po_no), closing
@@ -88,7 +88,7 @@ export class ProcurementService {
 
   // ── docs/38 procurement PR-4: requisitions live in ProcurementPrService; thin delegators. ──
   async createPr(dto: CreatePrDto, user: JwtUser) { return this.pr.createPr(dto, user); }
-  async approvePr(prNo: string, approve: boolean, user: JwtUser) { return this.pr.approvePr(prNo, approve, user); }
+  async approvePr(prNo: string, approve: boolean, user: JwtUser, budgetOpts?: { confirmOverBudget?: boolean; overrideBudget?: boolean; overrideReason?: string }) { return this.pr.approvePr(prNo, approve, user, budgetOpts); }
   async cancelPr(prNo: string, user: JwtUser) { return this.pr.cancelPr(prNo, user); }
   async listPrs(user: JwtUser, opts?: { limit?: number; mine?: boolean }) { return this.pr.listPrs(user, opts); }
   async reorderPr(user: JwtUser) { return this.pr.reorderPr(user); }
@@ -726,7 +726,7 @@ export class ProcurementService {
 
   // ── docs/38 procurement PR-3: PO lifecycle lives in ProcurementPoService; thin delegators. ──
   async createPo(dto: CreatePoDto, user: JwtUser) { return this.po.createPo(dto, user); }
-  async approvePo(poNo: string, approve: boolean, reason: string | undefined, user: JwtUser) { return this.po.approvePo(poNo, approve, reason, user); }
+  async approvePo(poNo: string, approve: boolean, reason: string | undefined, user: JwtUser, budgetOpts?: { confirmOverBudget?: boolean; overrideBudget?: boolean; overrideReason?: string }) { return this.po.approvePo(poNo, approve, reason, user, budgetOpts); }
   async cancelPo(poNo: string, reason: string, user: JwtUser) { return this.po.cancelPo(poNo, reason, user); }
   async getPoForPrint(poNo: string, user: JwtUser): Promise<import('./po-pdf.service').PoPrintData> { return this.po.getPoForPrint(poNo, user); }
 

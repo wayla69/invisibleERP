@@ -87,6 +87,10 @@ your code below.
 | `OVER_RECEIPT` (422) | You keyed a received quantity beyond what the PO ordered (weight items kg/g/ตัน get up to 5% headroom; everything else is capped at the ordered qty). | Recount and key the actual quantity. If the supplier genuinely delivered more, Procurement must amend/raise a PO for the excess first. See [Procurement — Receive goods](./03-procurement.md). |
 | `CLAIM_WINDOW_CLOSED` (422) | You tried to open a goods-receipt claim more than 24 hours (configurable) after the receipt — the claim window auto-closed. | The system will no longer take the claim; pursue it with the supplier commercially. Going forward, check deliveries and claim from the receiving summary on the spot. |
 | `PO_LINE_CLOSED` (422) | You tried to receive against a PO line that was **closed short** (the shortage decision at the dock). | The close is binding — a new delivery needs a new PO. |
+| `BUDGET_CONFIRM_REQUIRED` (422) | The PR/PO you are approving exceeds the available budget and the company policy is **warn** (BUD-02). | Review the budget chip / availability detail; if the overage is intended, approve again and **confirm** when prompted (the web does this for you), or reject the document. |
+| `BUDGET_EXCEEDED` (422) | The PR/PO you are approving exceeds the available budget and the company policy is **block** (BUD-02). | Only an **executive** (exec) can approve over budget, and must give a reason (recorded for audit). Otherwise reduce/postpone the purchase or get the budget increased (budget changes are maker-checker, BUD-01). |
+| `BUDGET_OVERRIDE_DENIED` (403) | You tried the over-budget override but don't hold the **exec** duty. | Ask an executive to approve — the override is deliberately a different duty from the ordinary approver. |
+| `BUDGET_OVERRIDE_REASON_REQUIRED` (400) | An exec override was sent without a reason. | Enter the business justification when prompted — it is stored on the budget-commitment audit row. |
 
 ### Tax documents
 

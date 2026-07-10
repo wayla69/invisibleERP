@@ -27,7 +27,12 @@ const GrBody = z.object({
   po_no: z.string().min(1), remarks: z.string().optional(),
   items: z.array(z.object({ item_id: z.string().min(1), received_qty: z.number().positive(), lot_no: z.string().optional(), expiry_date: z.string().optional(), unit_cost: z.number().optional(), uom: z.string().optional() })).min(1),
 });
-const ApproveBody = z.object({ approve: z.boolean().default(true), reason: z.string().optional() });
+// FIN-3 (BUD-02): confirm_over_budget acknowledges a 'warn'-policy overage; override_budget +
+// override_reason is the exec over-budget authorisation under the 'block' policy (audited).
+const ApproveBody = z.object({
+  approve: z.boolean().default(true), reason: z.string().optional(),
+  confirm_over_budget: z.boolean().optional(), override_budget: z.boolean().optional(), override_reason: z.string().optional(),
+});
 // PR → PO conversion: each line is reconciled to a real item (existing code, or create_item:true to open a
 // new one) + priced. pr_line_id links a line back to the exact pr_items row (precise stamping in the split
 // path); set_preferred also records the chosen vendor as the item's default supplier.
@@ -139,8 +144,8 @@ export class ProcurementController {
   }
 
   @Patch('prs/:prNo/approve') @Permissions('procurement')
-  approvePr(@Param('prNo') prNo: string, @Body(new ZodValidationPipe(ApproveBody)) b: { approve: boolean }, @CurrentUser() u: JwtUser) {
-    return this.svc.approvePr(prNo, b.approve, u);
+  approvePr(@Param('prNo') prNo: string, @Body(new ZodValidationPipe(ApproveBody)) b: z.infer<typeof ApproveBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.approvePr(prNo, b.approve, u, { confirmOverBudget: b.confirm_over_budget, overrideBudget: b.override_budget, overrideReason: b.override_reason });
   }
 
   // Requester withdraws their own still-Pending PR (own-doc only; Admin may cancel any) — 0228.
@@ -320,8 +325,8 @@ export class ProcurementController {
   createPo(@Body(new ZodValidationPipe(PoBody)) b: CreatePoDto, @CurrentUser() u: JwtUser) { return this.svc.createPo(b, u); }
 
   @Patch('pos/:poNo/approve') @Permissions('procurement')
-  approvePo(@Param('poNo') poNo: string, @Body(new ZodValidationPipe(ApproveBody)) b: { approve: boolean; reason?: string }, @CurrentUser() u: JwtUser) {
-    return this.svc.approvePo(poNo, b.approve, b.reason, u);
+  approvePo(@Param('poNo') poNo: string, @Body(new ZodValidationPipe(ApproveBody)) b: z.infer<typeof ApproveBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.approvePo(poNo, b.approve, b.reason, u, { confirmOverBudget: b.confirm_over_budget, overrideBudget: b.override_budget, overrideReason: b.override_reason });
   }
 
   @Patch('pos/:poNo/cancel') @Permissions('procurement')
