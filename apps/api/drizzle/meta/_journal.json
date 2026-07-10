@@ -2192,6 +2192,13 @@
       "when": 2023820000275,
       "tag": "0314_ap_dynamic_discount",
       "breakpoints": true
+    },
+    {
+      "idx": 315,
+      "version": "7",
+      "when": 2023820000276,
+      "tag": "0315_member_ledger_idempotency",
+      "breakpoints": true
     }
   ]
 }

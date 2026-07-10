@@ -1049,6 +1049,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-LOY-025 | Receipt upload — submit → staff approve → points granted via earnInTx | LYL-17 | 19 §7 (27), control 27 |
 | UAT-LOY-026 | Receipt upload — reject leaves the balance untouched; re-review blocked | LYL-17 | 19 §7 (27), control 27 |
 | UAT-LOY-027 | Receipt upload — duplicate member/date/amount claim blocked | LYL-17 | 19 §7 (27), control 27 |
+| UAT-LOY-073 | Points ledger replay guard (same doc never earns/redeems twice) | LYL-22 | 19 rev 3.99 (`loyalty.ts`) |
 
 ## Coverage summary
 
