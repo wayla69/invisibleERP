@@ -91,14 +91,14 @@ Extend the proven idempotency contract from "quick-sale replay" to the full fina
   tip, service-charge pct — with a **deterministic** `client_uuid` (`hub:{tenant}:{hub_sale_no}`), so any
   re-push (crash, double cron, even a **lost push-log**) lands `duplicate`: exactly-once by construction.
   Unsupported shapes (buffet tier, loyalty redemption, no order link) are logged **`skipped_unsupported`
-  with a reason** in `hub_push_log` (migration `0292`) — a visible exception queue, never a silent drop.
+  with a reason** in `hub_push_log` (migration `0293`) — a visible exception queue, never a silent drop.
 - **Ingest (cloud):** `POST /api/hub/ingest` — `@Public` machine-to-machine, HMAC-SHA256 over
   `{tenant_id, sent_at, sales}` with `HUB_SYNC_SECRET`, verified timing-safe, fail-closed when unset.
   Replays through the SAME idempotent register offline-sync path (`RegisterOfflineSaleOp` extended with
   additive `discount`/`tip`/`service_charge_pct`): the cloud re-prices authoritatively and **GL posts on
   the cloud ledger** (book of record; the hub's own ledger is operational only).
 - **Reconciliation:** `GET /api/hub/reconciliation` (`branch`/`exec`) ties hub ops ↔ cloud sale values
-  per device/period. RCM 203→204 (BRANCH-04 Implemented).
+  per device/period. RCM 204→205 (BRANCH-04 Implemented).
 - **ToE:** `hub-snapshot` harness extended to **27 checks** — ring-on-hub → push → cloud sale + GL + TB
   balanced → push-log loss re-push all-duplicate → tamper `403` → skip visibility.
 
@@ -144,4 +144,4 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 |---|---|---|---|
 | 0.1 | 2026-07-10 | Platform | Initial plan; Phase 0 delivered in the same PR (PN-24 rev 0.3, UAT-O2C-284..285, e2e `register-offline.spec.ts`). |
 | 0.2 | 2026-07-10 | Platform | Phase 1 (Store Hub MVP) delivered: `modules/hub` signed snapshot export, `db:hub:import` id-stable importer, `hub/` compose appliance + `docs/ops/store-hub-setup.md` runbook, CI harness `hub-snapshot` (20 checks). PN-24 rev 0.4; UAT-O2C-288..289. |
-| 0.3 | 2026-07-10 | Platform | Phase 2a (hub→cloud sales replay) delivered: `db:hub:push` + `hub_push_log` (0291), cloud `POST /api/hub/ingest` (HMAC) + `GET /api/hub/reconciliation`, op pass-through (discount/tip/SC), **new control BRANCH-04** (RCM 204), harness → 27 checks. PN-24 rev 0.5; UAT-O2C-290..291. |
+| 0.3 | 2026-07-10 | Platform | Phase 2a (hub→cloud sales replay) delivered: `db:hub:push` + `hub_push_log` (0291), cloud `POST /api/hub/ingest` (HMAC) + `GET /api/hub/reconciliation`, op pass-through (discount/tip/SC), **new control BRANCH-04** (RCM 205), harness → 27 checks. PN-24 rev 0.5; UAT-O2C-290..291. |

@@ -131,3 +131,5 @@ export * from './governance';
 export * from './journeys';
 export * from './gl-period-balances';
 export * from './doc-attachments';
+
+export * from './vouchers';
