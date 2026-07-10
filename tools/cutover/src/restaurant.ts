@@ -413,6 +413,21 @@ async function main() {
   const fcBad = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=5`, sales1);
   ok('Course firing: firing an empty course rejected (400 NO_COURSE_ITEMS)', fcBad.status === 400 && fcBad.json.error?.code === 'NO_COURSE_ITEMS', `${fcBad.status} ${fcBad.json.error?.code}`);
 
+  // ── POS-9: seat-level ordering (order per seat + fire per seat + reassign seat + roll-up) ──
+  const stTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A19', seats: 4 });
+  const stOpen = await inj('POST', `/api/restaurant/tables/${stTbl.json.id}/open`, sales1, {});
+  const stOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: stTbl.json.id, session_id: stOpen.json.session_id, items: [{ name: 'ต้มยำ', qty: 1, unit_price: 120, station_code: 'hot', seat: 1 }, { name: 'ผัดไทย', qty: 1, unit_price: 80, station_code: 'hot', seat: 2 }, { name: 'น้ำเปล่า', qty: 2, unit_price: 15, station_code: 'drinks' }] });
+  const stSeat1 = stOrd.json.items?.find((i: any) => i.name === 'ต้มยำ'); const stSeat2 = stOrd.json.items?.find((i: any) => i.name === 'ผัดไทย'); const stShared = stOrd.json.items?.find((i: any) => i.name === 'น้ำเปล่า');
+  ok('Seat: lines carry their seat (null = shared)', stSeat1?.seat === 1 && stSeat2?.seat === 2 && stShared?.seat === null, JSON.stringify((stOrd.json.items ?? []).map((i: any) => [i.name, i.seat])));
+  ok('Seat: per-seat roll-up (seat1=120, seat2=80, shared=30)', (stOrd.json.seats ?? []).some((s: any) => s.seat === 1 && near(s.subtotal, 120)) && (stOrd.json.seats ?? []).some((s: any) => s.seat === 2 && near(s.subtotal, 80)) && (stOrd.json.seats ?? []).some((s: any) => s.seat === null && near(s.subtotal, 30)), JSON.stringify(stOrd.json.seats));
+  const stFire1 = await inj('POST', `/api/restaurant/orders/${stOrd.json.order_no}/fire?seat=1`, sales1);
+  const sf1 = stFire1.json.items?.find((i: any) => i.name === 'ต้มยำ'); const sf2 = stFire1.json.items?.find((i: any) => i.name === 'ผัดไทย');
+  ok('Seat: fire seat 1 queues only seat 1 (seat 2 + shared held)', sf1?.kds_status === 'queued' && sf2?.kds_status === 'new' && stFire1.json.items?.find((i: any) => i.name === 'น้ำเปล่า')?.kds_status === 'new', `s1=${sf1?.kds_status} s2=${sf2?.kds_status}`);
+  const stFireBad = await inj('POST', `/api/restaurant/orders/${stOrd.json.order_no}/fire?seat=9`, sales1);
+  ok('Seat: firing an empty seat rejected (400 NO_SEAT_ITEMS)', stFireBad.status === 400 && stFireBad.json.error?.code === 'NO_SEAT_ITEMS', `${stFireBad.status} ${stFireBad.json.error?.code}`);
+  const stAssign = await inj('POST', `/api/restaurant/orders/${stOrd.json.order_no}/seats/assign`, sales1, { item_ids: [stShared.item_id], seat: 2 });
+  ok('Seat: reassign a shared line onto a seat (POST seats/assign)', stAssign.status < 300 && stAssign.json.items?.find((i: any) => i.name === 'น้ำเปล่า')?.seat === 2, `${stAssign.status} ${JSON.stringify(stAssign.json.seats)}`);
+
   // ── POS-4: KDS depth — prep-time SLA aging + expo (order-ready pass) + station load + bump/recall counts ──
   const kdTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'K1', seats: 4 });
   const kdOpen = await inj('POST', `/api/restaurant/tables/${kdTbl.json.id}/open`, sales1, {});

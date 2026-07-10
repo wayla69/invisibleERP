@@ -521,6 +521,21 @@ course number and tap **ส่งคอร์ส** to fire just that course — 
 until you fire them. The KDS shows each ticket's course and lists them in course
 order, so the kitchen cooks in the right sequence.
 
+**Seats (who ordered what).** Alongside the course you can set a **ที่นั่ง (seat)**
+number for the dishes you add — the guest at the table who ordered them (leave it
+blank for a shared dish). Each line then carries its seat, so you can:
+- **Order per seat** — ring seat 1's dishes, switch the ที่นั่ง box to 2, ring
+  seat 2's, and so on;
+- **Fire per seat** — the kitchen can send out one guest at a time (the fire action
+  accepts a seat as well as a course);
+- **Split the bill by who ordered** — at settlement pick **แยกตามที่นั่ง** (split
+  by seat) and each seat's items become its own check (its own sale, receipt and
+  GL entry), reusing the same split engine. Every line must have a seat first — if
+  one is still shared you'll be asked to assign it (**SEAT_UNASSIGNED**). This is
+  the fair way to split when each guest pays for what they had, rather than by an
+  equal share. The order page also shows a per-seat subtotal so you can see each
+  guest's running total.
+
 **Live across every screen.** The KDS and the **โต๊ะ (tables)** board update in
 **real time** — when one terminal advances a dish (เริ่มทำ → เสร็จ → เสิร์ฟ) or a
 table is seated/cleared, every other screen reflects it at once, without waiting for
