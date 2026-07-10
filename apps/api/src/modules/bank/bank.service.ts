@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, asc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts, cashMovements, bankDeposits } from '../../database/schema';
+import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts, cashMovements, bankDeposits, apPaymentRuns, apPaymentRunLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
@@ -179,6 +179,8 @@ export class BankService {
     const usedJl = new Set<number>(matchedRows.map((r: any) => Number(r.jl)));
     const stmtLines = await db.select().from(bankStatementLines).where(and(eq(bankStatementLines.bankAccountId, bankAccountId), eq(bankStatementLines.reconciled, 'false'))).orderBy(asc(bankStatementLines.lineDate));
     let matched = 0;
+    const clearedGlRefs: string[] = []; // EXP-13 — PAY-AP journal lines matched to the statement clear their run lines
+    const unmatchedStmt: typeof stmtLines = [];
     for (const sl of stmtLines) {
       const target = round4(n(sl.amount));
       const cand = bookLines.find((b: any) => !usedJl.has(Number(b.id)) && Math.abs(round4(n(b.debit) - n(b.credit)) - target) < 0.01 && days(b.entryDate, sl.lineDate) <= TOLERANCE_DAYS);
@@ -187,10 +189,44 @@ export class BankService {
         const payNo = (cand.source === 'Payment' || cand.source === 'POS') ? cand.sourceRef : null;
         await db.update(bankStatementLines).set({ reconciled: 'true', matchedJournalLineId: Number(cand.id), matchedPaymentNo: payNo }).where(eq(bankStatementLines.id, sl.id));
         matched++;
+        if (cand.source === 'PAY-AP' && cand.sourceRef) clearedGlRefs.push(String(cand.sourceRef));
+      } else {
+        unmatchedStmt.push(sl);
+      }
+    }
+    // ── EXP-13 clearing — mark executed payment-run lines confirmed by the bank statement ──
+    // (1) Line-level: a statement line matched to a PAY-AP journal (sourceRef = the payment's gl_ref).
+    let runLinesCleared = 0;
+    if (clearedGlRefs.length) {
+      const rows = await db.update(apPaymentRunLines).set({ cleared: true, clearedAt: new Date() })
+        .where(and(inArray(apPaymentRunLines.glRef, clearedGlRefs), eq(apPaymentRunLines.cleared, false)))
+        .returning({ id: apPaymentRunLines.id });
+      runLinesCleared += rows.length;
+    }
+    // (2) Run-total level: banks often debit one BULK amount for the whole transfer file. A still-unmatched
+    // statement line whose |amount| equals an EXECUTED run's net total (this bank account) clears every
+    // Paid line of that run and reconciles the statement line against the run number.
+    if (unmatchedStmt.length) {
+      const conds = [eq(apPaymentRuns.bankAccountId, bankAccountId), eq(apPaymentRuns.status, 'Executed')];
+      if (acct.tenantId != null) conds.push(eq(apPaymentRuns.tenantId, acct.tenantId));
+      const runs = await db.select().from(apPaymentRuns).where(and(...conds)).orderBy(desc(apPaymentRuns.id)).limit(100);
+      const usedRuns = new Set<number>();
+      for (const sl of unmatchedStmt) {
+        const target = round4(Math.abs(n(sl.amount)));
+        const run = runs.find((r: any) => !usedRuns.has(Number(r.id)) && Math.abs(round4(n(r.totalNet)) - target) < 0.01 && (!r.executedAt || days(r.executedAt, sl.lineDate) <= TOLERANCE_DAYS));
+        if (!run) continue;
+        const rows = await db.update(apPaymentRunLines).set({ cleared: true, clearedAt: new Date() })
+          .where(and(eq(apPaymentRunLines.runId, Number(run.id)), eq(apPaymentRunLines.status, 'Paid'), eq(apPaymentRunLines.cleared, false)))
+          .returning({ id: apPaymentRunLines.id });
+        if (!rows.length) continue; // fully cleared already — leave the statement line for another candidate
+        usedRuns.add(Number(run.id));
+        runLinesCleared += rows.length;
+        await db.update(bankStatementLines).set({ reconciled: 'true', matchedPaymentNo: run.runNo }).where(eq(bankStatementLines.id, sl.id));
+        matched++;
       }
     }
     const recon = await this.reconciliation(bankAccountId, undefined, user);
-    return { matched, unmatched_statement: recon.unmatched_statement, unmatched_book: recon.unmatched_book };
+    return { matched, run_lines_cleared: runLinesCleared, unmatched_statement: recon.unmatched_statement, unmatched_book: recon.unmatched_book };
   }
 
   async manualMatch(statementLineId: number, journalLineId: number, _user: JwtUser) {

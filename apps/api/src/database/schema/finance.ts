@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp, index, uniqueIndex, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, timestamp, index, uniqueIndex, boolean, integer } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 import { vendors } from './procurement';
@@ -147,4 +147,65 @@ export const apPayments = pgTable('ap_payments', {
   byTxn: index('idx_ap_payments_txn').on(t.txnNo),
   byStatus: index('idx_ap_payments_status').on(t.tenantId, t.status),
   uxIdem: uniqueIndex('ux_ap_payments_idem').on(sql`coalesce(${t.tenantId}, 0)`, t.idempotencyKey).where(sql`${t.idempotencyKey} IS NOT NULL`),
+}));
+
+// AP payment run (FIN-2, EXP-13, migration 0295) — a BATCH disbursement proposal over the one-by-one
+// AP-PAY maker-checker. A `creditors` holder PROPOSES a run (open approved AP selected by due-date cutoff;
+// every line re-passes the 3-way-match gate, EXP-09), edits lines only while Draft, then submits for
+// approval; a DIFFERENT user (approvals/gl_close) APPROVES it (SoD, mirrors EXP-06), and EXECUTION posts
+// each line through the EXISTING requestApPayment→approveApPayment path (same GL + WHT postings as a
+// manual payment; idempotent per line). The Thai bank bulk-transfer file is generated from the run and its
+// SHA-256 is pinned on the run + status-logged for the audit trail. Bank-statement auto-match clears lines.
+export const apPaymentRuns = pgTable('ap_payment_runs', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  runNo: text('run_no').notNull().unique(), // APRUN-YYYYMMDD-NNN
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  status: text('status').notNull().default('Draft'), // Draft | PendingApproval | Approved | Executed | Rejected | Cancelled
+  payDate: date('pay_date'),                 // intended value date (bank-file header)
+  dueCutoff: date('due_cutoff'),             // selection cutoff — open AP due on/before this date
+  bankAccountId: bigint('bank_account_id', { mode: 'number' }), // source house-bank (bank_accounts.id; file only — GL stays the manual path's)
+  totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).default('0'), // Σ gross line amounts
+  totalWht: numeric('total_wht', { precision: 14, scale: 2 }).default('0'),       // Σ estimated WHT
+  totalNet: numeric('total_net', { precision: 14, scale: 2 }).default('0'),       // Σ net cash out (bank-file total)
+  lineCount: integer('line_count').default(0),
+  createdBy: text('created_by'),             // proposer (maker)
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  approvedBy: text('approved_by'),           // checker — must differ from createdBy (SOD_VIOLATION)
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+  executedBy: text('executed_by'),
+  executedAt: timestamp('executed_at', { withTimezone: true }),
+  fileFormat: text('file_format'),           // generic | scb | kbank | bbl | iso20022 (last generated)
+  fileHash: text('file_hash'),               // SHA-256 of the last generated bank file (audit evidence)
+  fileGeneratedAt: timestamp('file_generated_at', { withTimezone: true }),
+  remarks: text('remarks'),
+}, (t) => ({ byStatus: index('idx_ap_payment_runs_status').on(t.tenantId, t.status) }));
+
+export const apPaymentRunLines = pgTable('ap_payment_run_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  runId: bigint('run_id', { mode: 'number' }).notNull(), // → ap_payment_runs.id
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  txnNo: text('txn_no').notNull(),          // → ap_transactions.txn_no
+  vendorId: bigint('vendor_id', { mode: 'number' }),
+  vendorName: text('vendor_name'),
+  dueDate: date('due_date'),                // bill due date at propose time
+  billAmount: numeric('bill_amount', { precision: 14, scale: 2 }), // bill gross at propose time
+  amount: numeric('amount', { precision: 14, scale: 2 }).notNull(), // amount to pay (defaults to outstanding)
+  // WHT summary (TAX-03 reuse) — resolved at propose/edit via the same tax_code resolution as a manual
+  // payment; the AUTHORITATIVE amount is recomputed by approveApPayment at execution and copied back here.
+  whtTaxCode: text('wht_tax_code'),
+  whtIncomeType: text('wht_income_type'),
+  whtRate: numeric('wht_rate', { precision: 6, scale: 4 }),
+  whtAmount: numeric('wht_amount', { precision: 14, scale: 2 }),
+  netAmount: numeric('net_amount', { precision: 14, scale: 2 }), // amount − wht (cash out; bank-file detail)
+  status: text('status').notNull().default('Selected'), // Selected | Paid | Failed
+  paymentNo: text('payment_no'),            // APP- minted at execution (existing AP payment path)
+  glRef: text('gl_ref'),                    // PAY-AP source_ref of the posted disbursement (clearing key)
+  failReason: text('fail_reason'),
+  cleared: boolean('cleared').default(false), // bank-statement auto-match confirmed the outflow
+  clearedAt: timestamp('cleared_at', { withTimezone: true }),
+}, (t) => ({
+  byRun: index('idx_ap_payment_run_lines_run').on(t.tenantId, t.runId),
+  byGlRef: index('idx_ap_payment_run_lines_glref').on(t.glRef),
 }));

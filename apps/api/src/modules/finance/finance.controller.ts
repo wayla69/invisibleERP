@@ -6,6 +6,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto, type AdvanceDto, type SettleAdvanceDto } from './finance.service';
 import { FinancialHealthService } from './financial-health.service';
 import { ArAllowanceService, type ComputeAllowanceDto } from './ar-allowance.service';
+import { ApPaymentRunService, type ProposeRunDto, type EditRunLinesDto } from './ap-payment-run.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
@@ -18,6 +19,28 @@ const WriteOffBody = z.object({ tenant_id: z.number().optional(), customer_name:
 // to_email optional — when omitted the service defaults the recipient to the counterparty's email on file
 // (master data: the customer for the AR invoice / statement / receipt).
 const DocEmailBody = z.object({ to_email: z.string().email().optional() });
+// AP payment run (EXP-13): propose (due-date selection) → edit while Draft → submit → approve/reject
+// (distinct approver) → execute (existing per-payment path) → bank bulk-transfer file.
+const ProposeRunBody = z.object({
+  due_cutoff: z.string().min(1),
+  pay_date: z.string().optional(),
+  bank_account_id: z.number().int().positive(),
+  vendor_ids: z.array(z.number().int().positive()).optional(),
+  vendor_name: z.string().optional(),
+  early_pay_window_days: z.number().int().min(0).max(60).optional(),
+  wht_tax_code: z.string().optional(),
+  remarks: z.string().optional(),
+});
+const EditRunLinesBody = z.object({
+  remove_line_ids: z.array(z.number().int().positive()).optional(),
+  update: z.array(z.object({
+    line_id: z.number().int().positive(),
+    amount: z.number().positive().optional(),
+    wht_tax_code: z.string().nullable().optional(),
+    wht_rate: z.number().min(0).max(0.30).nullable().optional(),
+    wht_income_type: z.string().nullable().optional(),
+  })).optional(),
+});
 const AllowanceComputeBody = z.object({
   as_of_date: z.string().optional(),
   method: z.enum(['aging', 'percentage']).optional(),
@@ -28,7 +51,7 @@ const AllowanceComputeBody = z.object({
 
 @Controller('api/finance')
 export class FinanceController {
-  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService, private readonly allowance: ArAllowanceService) {}
+  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService, private readonly allowance: ArAllowanceService, private readonly payRuns: ApPaymentRunService) {}
 
   // REV-18 — AR Allowance for Doubtful Accounts (ECL). Compute an aging-driven provision (maker), then a
   // DIFFERENT user posts the delta to GL (Dr 5720 / Cr 1190).
@@ -185,4 +208,49 @@ export class FinanceController {
   // Reject a pending payment (checker).
   @Post('ap/payments/:paymentNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
   rejectApPayment(@Param('paymentNo') paymentNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectApPayment(paymentNo, u, b.reason); }
+
+  // ── AP payment run + Thai bank payment file (EXP-13) ──
+  // MAKER (`creditors`) proposes a batch of open approved AP by due-date cutoff (every line re-passes the
+  // 3-way-match gate, EXP-09), edits lines only while Draft, then submits; a DIFFERENT user with the same
+  // approval authority as a manual AP payment (`approvals`/`gl_close`) approves (self-approval →
+  // SOD_VIOLATION) and executes — each line posts through the EXISTING requestApPayment→approveApPayment
+  // path (identical GL + WHT postings; idempotent per line). The bank bulk-transfer file's SHA-256 is
+  // pinned on the run + status-logged; bank-statement auto-match clears the lines (see BankService).
+  @Post('ap/payment-runs/propose') @Permissions('creditors')
+  proposePaymentRun(@Body(new ZodValidationPipe(ProposeRunBody)) b: ProposeRunDto, @CurrentUser() u: JwtUser) { return this.payRuns.propose(b, u); }
+
+  @Get('ap/payment-runs') @Permissions('creditors', 'approvals', 'gl_close', 'exec')
+  listPaymentRuns(@Query('status') status: string | undefined, @Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.payRuns.list(u, status || undefined, limit ? qint('limit', limit, 50) : 50); }
+
+  @Get('ap/payment-runs/:runNo') @Permissions('creditors', 'approvals', 'gl_close', 'exec')
+  getPaymentRun(@Param('runNo') runNo: string) { return this.payRuns.get(runNo); }
+
+  @Patch('ap/payment-runs/:runNo/lines') @Permissions('creditors')
+  editPaymentRunLines(@Param('runNo') runNo: string, @Body(new ZodValidationPipe(EditRunLinesBody)) b: EditRunLinesDto, @CurrentUser() u: JwtUser) { return this.payRuns.editLines(runNo, b, u); }
+
+  @Post('ap/payment-runs/:runNo/submit') @HttpCode(200) @Permissions('creditors')
+  submitPaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.payRuns.submit(runNo, u); }
+
+  @Post('ap/payment-runs/:runNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  approvePaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.payRuns.approve(runNo, u); }
+
+  @Post('ap/payment-runs/:runNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  rejectPaymentRun(@Param('runNo') runNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.payRuns.reject(runNo, u, b.reason); }
+
+  @Post('ap/payment-runs/:runNo/cancel') @HttpCode(200) @Permissions('creditors', 'exec')
+  cancelPaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.payRuns.cancel(runNo, u); }
+
+  @Post('ap/payment-runs/:runNo/execute') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  executePaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.payRuns.execute(runNo, u); }
+
+  // Thai bank bulk-transfer file (generic CSV + scb|kbank|bbl presets, or minimal ISO 20022 pain.001 XML).
+  // The file's SHA-256 is recorded on the run and status-logged (audit evidence).
+  @Get('ap/payment-runs/:runNo/bank-file') @Permissions('creditors', 'approvals', 'gl_close', 'exec')
+  async paymentRunBankFile(@Param('runNo') runNo: string, @Query('format') format: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const f = await this.payRuns.bankFile(runNo, format, u);
+    reply.header('Content-Type', f.contentType)
+      .header('Content-Disposition', `attachment; filename="${f.filename}"`)
+      .header('X-Content-Sha256', f.sha256)
+      .send(f.body);
+  }
 }

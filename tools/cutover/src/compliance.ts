@@ -33,6 +33,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
@@ -228,6 +229,130 @@ async function main() {
   const adminReq = await inj('PATCH', `/api/finance/ap/transactions/${adminBill.json.txn_no}/pay`, admin, { amount: 100 });
   const adminApprove = await inj('POST', `/api/finance/ap/payments/${adminReq.json.payment_no}/approve`, admin);
   ok('AP-PAY: maker-checker binds even Admin (no self-approve override)', adminApprove.status === 403 && adminApprove.json.error?.code === 'SOD_VIOLATION', `${adminApprove.status} ${adminApprove.json.error?.code}`);
+
+  // ════════════════════════ EXP-13 — AP payment run + bank file (maker-checker · match gate · idempotent execute · hash-pinned file · clearing) ════════════════════════
+  // A batch disbursement run: propose by due-date cutoff (creditors) → distinct approver (SOD) → execute
+  // through the EXISTING per-payment path (same GL + WHT postings, idempotent per line) → bank bulk-transfer
+  // file (SHA-256 pinned) → bank-statement auto-match clears the lines.
+  const bizToday = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10); // business day (UTC+7)
+  // Fixtures: vendor with bank details (file beneficiary), vendor without (fail-closed negative),
+  // an Approved house-bank on GL 1000 (created by execu, approved by fincon — G9 maker-checker).
+  const [rv1] = await db.insert(s.vendors).values({ tenantId: t1, vendorCode: 'RUNV1', name: 'บจก. รันเพย์ ซัพพลาย', bankName: 'ธนาคารกสิกรไทย', bankAccount: '0123456789' }).returning({ id: s.vendors.id });
+  const [rv2] = await db.insert(s.vendors).values({ tenantId: t1, vendorCode: 'RUNV2', name: 'บจก. ไร้บัญชี' }).returning({ id: s.vendors.id });
+  const bankReq = await inj('POST', '/api/bank/accounts', execu, { bank_name: 'KBank', account_no: '012-3-45678-9', gl_account_code: '1000', currency: 'THB', opening_balance: 0 });
+  const bankId = Number(bankReq.json.id);
+  await inj('POST', `/api/bank/accounts/${bankId}/approve`, fincon);
+  // Bills: B1 (no WHT), B2 (WHT set on the line), B3 blocked by a failed 3-way match, B4 (vendor w/o bank).
+  const b1 = await inj('POST', '/api/finance/ap/transactions', apdual, { vendor_id: Number(rv1.id), vendor_name: 'บจก. รันเพย์ ซัพพลาย', amount: 1070.11, due_date: bizToday });
+  const b2 = await inj('POST', '/api/finance/ap/transactions', apdual, { vendor_id: Number(rv1.id), vendor_name: 'บจก. รันเพย์ ซัพพลาย', amount: 535, due_date: bizToday });
+  const b3 = await inj('POST', '/api/finance/ap/transactions', apdual, { vendor_id: Number(rv1.id), vendor_name: 'บจก. รันเพย์ ซัพพลาย', amount: 999, due_date: bizToday });
+  const b4 = await inj('POST', '/api/finance/ap/transactions', apdual, { vendor_id: Number(rv2.id), vendor_name: 'บจก. ไร้บัญชี', amount: 250, due_date: bizToday });
+  await db.insert(s.invoiceMatchResults).values({ tenantId: t1, matchNo: 'MAT-EXP13', txnNo: b3.json.txn_no, poNo: 'PO-EXP13', matchStatus: 'price_variance', payable: false, override: false, matchedBy: 'glacct' });
+
+  // 1. Propose (maker): B1+B2 selected (B4 filtered out by vendor filter later; B3 skipped MATCH_BLOCKED).
+  const r1 = await inj('POST', '/api/finance/ap/payment-runs/propose', apdual, { due_cutoff: bizToday, bank_account_id: bankId, vendor_ids: [Number(rv1.id)] });
+  const runNo = r1.json.run_no as string;
+  ok('EXP-13: propose selects open approved AP by due-date cutoff; a match-BLOCKED invoice is skipped',
+    (r1.status === 200 || r1.status === 201) && r1.json.status === 'Draft' && r1.json.line_count === 2
+      && (r1.json.skipped ?? []).some((x: any) => x.txn_no === b3.json.txn_no && x.reason === 'MATCH_BLOCKED'),
+    `${r1.status} lines=${r1.json.line_count} skipped=${JSON.stringify(r1.json.skipped)}`);
+
+  // 2. Edit while Draft: put 3% WHT on B2's line (same resolution + formula as a manual payment).
+  const l2 = (r1.json.lines ?? []).find((l: any) => l.txn_no === b2.json.txn_no);
+  const edit = await inj('PATCH', `/api/finance/ap/payment-runs/${runNo}/lines`, apdual, { update: [{ line_id: l2.line_id, wht_rate: 0.03, wht_income_type: 'ค่าบริการ' }] });
+  const l2e = (edit.json.lines ?? []).find((l: any) => l.txn_no === b2.json.txn_no);
+  ok('EXP-13: Draft line edit sets WHT on the pre-VAT base (535 gross → base 500 → WHT 15, net 520)',
+    edit.status === 200 && l2e?.wht_amount === 15 && l2e?.net_amount === 520 && edit.json.total_net === 1590.11,
+    `wht=${l2e?.wht_amount} net=${l2e?.net_amount} total_net=${edit.json.total_net}`);
+
+  // 3. Submit → PendingApproval; lines are LOCKED (edit → 400 NOT_DRAFT).
+  await inj('POST', `/api/finance/ap/payment-runs/${runNo}/submit`, apdual);
+  const editLocked = await inj('PATCH', `/api/finance/ap/payment-runs/${runNo}/lines`, apdual, { remove_line_ids: [l2.line_id] });
+  ok('EXP-13: lines are editable only while Draft (post-submit edit → 400 NOT_DRAFT)', editLocked.status === 400 && editLocked.json.error?.code === 'NOT_DRAFT', `${editLocked.status} ${editLocked.json.error?.code}`);
+
+  // 4. Proposer self-approval blocked (holder of BOTH creditors + approvals) → 403 SOD_VIOLATION.
+  const runSelfApprove = await inj('POST', `/api/finance/ap/payment-runs/${runNo}/approve`, apdual);
+  ok('EXP-13: proposer cannot approve their own run → 403 SOD_VIOLATION', runSelfApprove.status === 403 && runSelfApprove.json.error?.code === 'SOD_VIOLATION', `${runSelfApprove.status} ${runSelfApprove.json.error?.code}`);
+
+  // 5. A DIFFERENT approver approves; the proposer STILL cannot execute (cash release is a checker act).
+  const runApprove = await inj('POST', `/api/finance/ap/payment-runs/${runNo}/approve`, fincon);
+  const selfExec = await inj('POST', `/api/finance/ap/payment-runs/${runNo}/execute`, apdual);
+  ok('EXP-13: independent approver approves; proposer execute → 403 SOD_VIOLATION',
+    runApprove.status === 200 && runApprove.json.status === 'Approved' && selfExec.status === 403 && selfExec.json.error?.code === 'SOD_VIOLATION',
+    `${runApprove.json.status} exec=${selfExec.status} ${selfExec.json.error?.code}`);
+
+  // 6. Execute (checker) — each line rides the EXISTING requestApPayment→approveApPayment path:
+  //    bills settle, WHT 2361 credited per line, cash out net, TB stays balanced.
+  const runPeriod = bizToday.slice(0, 7);
+  const wht2361Before = await tbCredit(runPeriod, '2361');
+  const exec1 = await inj('POST', `/api/finance/ap/payment-runs/${runNo}/execute`, fincon);
+  const wht2361After = await tbCredit(runPeriod, '2361');
+  const b1After = await apPaid(b1.json.txn_no);
+  const b2After = await apPaid(b2.json.txn_no);
+  const tbAll = await inj('GET', `/api/ledger/trial-balance?period=${runPeriod}`, admin);
+  const drSum = (tbAll.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.debit), 0);
+  const crSum = (tbAll.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.credit), 0);
+  ok('EXP-13: execute posts through the manual path — bills Paid, WHT 2361 credited (15), TB balanced',
+    exec1.status === 200 && exec1.json.status === 'Executed' && exec1.json.paid === 2 && exec1.json.failed === 0
+      && b1After === 1070.11 && b2After === 535 && Math.abs(wht2361After - wht2361Before - 15) < 0.01
+      && Math.abs(drSum - crSum) < 0.01,
+    `paid=${exec1.json.paid} b1=${b1After} b2=${b2After} d2361=${(wht2361After - wht2361Before).toFixed(2)} tbΔ=${(drSum - crSum).toFixed(2)}`);
+
+  // 7. Double-execute is a NO-OP (idempotent per line): no second PAY-AP posting, paid amounts unchanged.
+  const exec2 = await inj('POST', `/api/finance/ap/payment-runs/${runNo}/execute`, fincon);
+  const payApJes = await db.select().from(s.journalEntries).where(eq(s.journalEntries.source, 'PAY-AP'));
+  const runJes = payApJes.filter((j: any) => String(j.sourceRef ?? '').startsWith(b1.json.txn_no + ':p:') || String(j.sourceRef ?? '').startsWith(b2.json.txn_no + ':p:'));
+  ok('EXP-13: re-execute is idempotent — no duplicate disbursement (2 PAY-AP entries stay 2)',
+    exec2.status === 200 && exec2.json.idempotent === true && runJes.length === 2 && (await apPaid(b1.json.txn_no)) === 1070.11,
+    `idem=${exec2.json.idempotent} payap=${runJes.length}`);
+
+  // 8. Bank bulk-transfer file (kbank preset): H/D/T records, SHA-256 pinned on the run + status-logged.
+  const fileRes = await app.inject({ method: 'GET', url: `/api/finance/ap/payment-runs/${runNo}/bank-file?format=kbank`, headers: { authorization: `Bearer ${fincon}` } });
+  const fileBody = fileRes.body;
+  const fileSha = createHash('sha256').update(fileBody, 'utf8').digest('hex');
+  const runAfterFile = await inj('GET', `/api/finance/ap/payment-runs/${runNo}`, fincon);
+  const shaLog = await db.select().from(s.docStatusLog).where(eq(s.docStatusLog.docNo, runNo));
+  ok('EXP-13: bank file has header/detail/trailer + beneficiary account; SHA-256 pinned on the run and status-logged',
+    fileRes.statusCode === 200 && fileBody.startsWith(`H,${runNo},`) && fileBody.includes('0123456789') && fileBody.includes('T,2,1590.11')
+      && runAfterFile.json.file_hash === fileSha && runAfterFile.json.file_format === 'kbank'
+      && shaLog.some((x: any) => String(x.remarks ?? '').includes(`sha256=${fileSha}`)),
+    `st=${fileRes.statusCode} hash_ok=${runAfterFile.json.file_hash === fileSha}`);
+
+  // 9. ISO 20022 pain.001 (optional format) is well-formed with the control sum.
+  const isoRes = await app.inject({ method: 'GET', url: `/api/finance/ap/payment-runs/${runNo}/bank-file?format=iso20022`, headers: { authorization: `Bearer ${fincon}` } });
+  ok('EXP-13: ISO 20022 pain.001 export carries the control sum + per-line EndToEndId',
+    isoRes.statusCode === 200 && isoRes.body.startsWith('<?xml') && isoRes.body.includes('<CtrlSum>1590.11</CtrlSum>') && isoRes.body.includes(`<EndToEndId>${b1.json.txn_no}</EndToEndId>`),
+    `st=${isoRes.statusCode}`);
+
+  // 10. Clearing — (a) a statement line matching ONE payment (PAY-AP journal) clears that run line;
+  //     (b) a BULK debit equal to the run's net total clears the remaining lines (run-total match).
+  await inj('POST', `/api/bank/accounts/${bankId}/statements`, execu, { statement_date: bizToday, opening_bal: 0, closing_bal: -520, lines: [{ date: bizToday, description: 'AP transfer B2', amount: -520 }] });
+  const am1 = await inj('POST', `/api/bank/accounts/${bankId}/auto-match`, execu);
+  const runC1 = await inj('GET', `/api/finance/ap/payment-runs/${runNo}`, fincon);
+  const l2c = (runC1.json.lines ?? []).find((l: any) => l.txn_no === b2.json.txn_no);
+  const l1c = (runC1.json.lines ?? []).find((l: any) => l.txn_no === b1.json.txn_no);
+  ok('EXP-13: statement auto-match on a single payment clears that run line (others stay open)',
+    (am1.status === 200 || am1.status === 201) && l2c?.cleared === true && l1c?.cleared === false && runC1.json.cleared_count === 1,
+    `cleared=${runC1.json.cleared_count} l2=${l2c?.cleared} l1=${l1c?.cleared}`);
+  await inj('POST', `/api/bank/accounts/${bankId}/statements`, execu, { statement_date: bizToday, opening_bal: -520, closing_bal: -2110.11, lines: [{ date: bizToday, description: 'BULK APRUN', amount: -1590.11 }] });
+  const am2 = await inj('POST', `/api/bank/accounts/${bankId}/auto-match`, execu);
+  const runC2 = await inj('GET', `/api/finance/ap/payment-runs/${runNo}`, fincon);
+  ok('EXP-13: a bulk bank debit equal to the run total clears the remaining lines (run-total match)',
+    (am2.status === 200 || am2.status === 201) && (am2.json.run_lines_cleared ?? 0) >= 1 && runC2.json.cleared_count === 2 && runC2.json.cleared_progress === 1,
+    `cleared=${runC2.json.cleared_count} run_lines_cleared=${am2.json.run_lines_cleared}`);
+
+  // 11. Fail-closed bank file: a vendor with NO bank account on file → 400 VENDOR_BANK_MISSING.
+  const r2 = await inj('POST', '/api/finance/ap/payment-runs/propose', apdual, { due_cutoff: bizToday, bank_account_id: bankId, vendor_ids: [Number(rv2.id)] });
+  await inj('POST', `/api/finance/ap/payment-runs/${r2.json.run_no}/submit`, apdual);
+  await inj('POST', `/api/finance/ap/payment-runs/${r2.json.run_no}/approve`, fincon);
+  const noBank = await inj('GET', `/api/finance/ap/payment-runs/${r2.json.run_no}/bank-file?format=generic`, fincon);
+  ok('EXP-13: bank file FAILS CLOSED on a missing vendor bank account → 400 VENDOR_BANK_MISSING',
+    noBank.status === 400 && noBank.json.error?.code === 'VENDOR_BANK_MISSING', `${noBank.status} ${noBank.json.error?.code}`);
+
+  // 12. Exhausted selection: paid bills, blocked bills and bills already in an open run are all refused.
+  const r3 = await inj('POST', '/api/finance/ap/payment-runs/propose', apdual, { due_cutoff: bizToday, bank_account_id: bankId });
+  ok('EXP-13: nothing eligible (paid / blocked / already-in-open-run) → 400 NO_ELIGIBLE_AP',
+    r3.status === 400 && r3.json.error?.code === 'NO_ELIGIBLE_AP', `${r3.status} ${r3.json.error?.code}`);
 
   // ════════════════════════ PAY-03 — Payroll run maker-checker (SoD) ════════════════════════
   // A payroll run posts its GL entry as a DRAFT; a DIFFERENT user must approve before it hits balances —

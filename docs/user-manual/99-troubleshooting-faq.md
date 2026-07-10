@@ -87,6 +87,12 @@ your code below.
 | `OVER_RECEIPT` (422) | You keyed a received quantity beyond what the PO ordered (weight items kg/g/ตัน get up to 5% headroom; everything else is capped at the ordered qty). | Recount and key the actual quantity. If the supplier genuinely delivered more, Procurement must amend/raise a PO for the excess first. See [Procurement — Receive goods](./03-procurement.md). |
 | `CLAIM_WINDOW_CLOSED` (422) | You tried to open a goods-receipt claim more than 24 hours (configurable) after the receipt — the claim window auto-closed. | The system will no longer take the claim; pursue it with the supplier commercially. Going forward, check deliveries and claim from the receiving summary on the spot. |
 | `PO_LINE_CLOSED` (422) | You tried to receive against a PO line that was **closed short** (the shortage decision at the dock). | The close is binding — a new delivery needs a new PO. |
+| `NO_ELIGIBLE_AP` (400) | Your payment-run proposal found no payable bill for the cutoff — everything is paid, blocked by the 3-way match, or already in another open run. | Check the `skipped` reasons shown, widen the due-date cutoff, or resolve the blocked matches first. See [Finance — B2b payment runs](./05-finance-ar-ap.md). |
+| `NOT_DRAFT` (400) | You tried to edit a payment run's lines after it was submitted. | Lines lock at submission. Have the approver reject (or cancel) the run, then propose a corrected one. |
+| `SOD_VIOLATION` (payment run) | You tried to approve **or execute** a payment run you proposed yourself. | A **different** person with `approvals`/`gl_close` must approve and execute the run (control EXP-13) — even an Admin can't self-approve. |
+| `RUN_NOT_APPROVED` (400) | You asked for the bank transfer file on a run that isn't approved yet. | Get the run approved first — the bank file only ever reflects an approved run. |
+| `VENDOR_BANK_MISSING` (400) | A vendor in the run has no bank account recorded, so the bulk-transfer file can't name the beneficiary. | Record the vendor's bank name + account on the vendor master (the change needs a second person's approval, control EXP-11), then download the file again. |
+| `UNSUPPORTED_FILE_FORMAT` (400) | The bank-file format you asked for isn't recognised. | Use `generic`, `scb`, `kbank`, `bbl` or `iso20022`. |
 
 ### Tax documents
 
