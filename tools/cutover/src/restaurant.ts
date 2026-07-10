@@ -656,6 +656,20 @@ async function main() {
     me2By['ME-C']?.quadrant === 'Star' && me2By['ME-D']?.quadrant === 'Plowhorse' && !me2By['ME-A'],
     `${me2.status} ${JSON.stringify({ n: me2.json.summary?.items, thr: me2.json.thresholds, C: me2By['ME-C']?.quadrant, D: me2By['ME-D']?.quadrant })}`);
 
+  // ── PN-20: the restaurant sale is in the fiscal hash chain (RD tamper-evidence) ──
+  // The restaurant path used to append NOTHING: dine-in / diner-QR / register sales — the bulk of a
+  // restaurant's revenue — were absent from the chain the portal POS + refund/void paths already wrote.
+  {
+    const jrows = (await pg.query(`SELECT seq, doc_type, doc_no, prev_hash, hash FROM pos_journal WHERE doc_no='${co.json.sale_no}' AND doc_type='SALE'`)).rows as any[];
+    ok('Fiscal chain: the dine-in sale appended a SALE row (doc_no = sale_no)', jrows.length === 1 && !!jrows[0].hash, JSON.stringify(jrows[0] ?? {}));
+    const ver = await inj('GET', '/api/pos/journal/verify', sales1);
+    ok('Fiscal chain: verify() ok after restaurant sales', ver.json?.ok === true, JSON.stringify(ver.json ?? {}).slice(0, 90));
+    // tamper: mutate a payload → every later hash breaks; verify() names the first broken seq
+    await pg.query(`UPDATE pos_journal SET payload = jsonb_set(payload, '{total}', '999999') WHERE doc_no='${co.json.sale_no}' AND doc_type='SALE'`);
+    const bad = await inj('GET', '/api/pos/journal/verify', sales1);
+    ok('Fiscal chain: a tampered payload is detected (ok=false + broken_at)', bad.json?.ok === false && Number(bad.json?.broken_at) > 0, JSON.stringify(bad.json ?? {}).slice(0, 90));
+  }
+
   await app.close();
   await pg.close();
 
