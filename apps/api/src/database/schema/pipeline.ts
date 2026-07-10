@@ -2,7 +2,7 @@ import { pgTable, bigserial, bigint, text, numeric, integer, boolean, date, time
 import { tenants } from './tenants';
 
 // ── Batch 2A: Sales Pipeline ───────────────────────────────────────────────────
-// CRM-1 unification (migration 0293): pipeline_stages stays the LIVE tenant-configurable stage master
+// CRM-1 unification (migration 0294): pipeline_stages stays the LIVE tenant-configurable stage master
 // (crm_opportunities.stage_id now points here). `opportunities` + `opportunity_activities` are READ-LEGACY
 // ONLY — their rows were data-migrated into crm_opportunities / crm_activities (legacy_opportunity_id /
 // legacy_activity_id preserve provenance) and no service writes them anymore. Do not add new write paths.

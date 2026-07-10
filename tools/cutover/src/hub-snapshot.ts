@@ -1,11 +1,15 @@
 /**
- * Store-hub snapshot round-trip (LAN-first Phase 1, docs/41 — extends BRANCH-02/BRANCH-03):
- * a "cloud" AppModule exports the signed hub snapshot (fail-closed secret, credential gating,
- * FoH-only users, tenant isolation) → a SECOND fresh PGlite ("the hub box") imports it
+ * Store-hub round-trip (LAN-first, docs/41 — BRANCH-02 extension + BRANCH-04):
+ * Phase 1 — a "cloud" AppModule exports the signed hub snapshot (fail-closed secret, credential
+ * gating, FoH-only users, tenant isolation) → a SECOND fresh PGlite ("the hub box") imports it
  * (signature verify, tamper reject, id-stable, idempotent re-import) → a "hub" AppModule boots
  * over the imported DB and the front-of-house actually WORKS there: staff password + PIN login,
  * menu reads, floor-plan tables with their original ids/qr_tokens, local inserts past the
  * imported id range.
+ * Phase 2a (BRANCH-04) — sales rung ON the hub replay to the cloud: pushHubSales → HMAC-signed
+ * batch → POST /api/hub/ingest → cloud sale + GL (TB balanced); log-loss re-push is all-duplicate
+ * (deterministic client_uuid = exactly-once); tampered batch 403s; an unsupported sale surfaces
+ * as skipped_unsupported with its reason; GET /api/hub/reconciliation ties values.
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover hub-snapshot
  */
 import 'reflect-metadata';
@@ -24,7 +28,9 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
+import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
 import { importHubSnapshot } from '../../../apps/api/dist/database/hub-import';
+import { pushHubSales, signHubBatch } from '../../../apps/api/dist/database/hub-push';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -51,6 +57,7 @@ async function bootApp(db: any) {
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
+  await app.get(LedgerService).seedChartOfAccounts(); // checkout posts GL on both cloud and hub
   const inj = async (m: string, url: string, token?: string, payload?: any, headers: Record<string, string> = {}) => {
     const res = await app.inject({ method: m as any, url, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, payload });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
@@ -156,6 +163,51 @@ async function main() {
   const newItem = await hApp.inj('POST', '/api/menu/items', hAdmTok, { sku: 'LOCAL1', name: 'เมนูเพิ่มบนฮับ', price: 60 });
   const maxImported = Math.max(...(fd.data.menu_items as any[]).map((m: any) => Number(m.id)));
   ok('Hub: local insert gets a fresh id past the imported range', (newItem.status === 200 || newItem.status === 201) && Number(newItem.json?.id) > maxImported, JSON.stringify({ got: newItem.json?.id, maxImported }));
+
+  // ═══ Phase 2a — hub → cloud sales replay (BRANCH-04) ═══
+  // ring two sales ON THE HUB via the real order→checkout path (GL posts on the hub's own ledger)
+  const ring = async (items: any[], checkout: any) => {
+    const o = await hApp.inj('POST', '/api/restaurant/orders', hAdmTok, { items });
+    const sale = await hApp.inj('POST', `/api/restaurant/orders/${o.json.order_no}/checkout`, hAdmTok, { method: 'Cash', ...checkout });
+    return sale.json;
+  };
+  const hs1 = await ring([{ sku: 'GP01', qty: 1 }], {});                                  // 100 + VAT
+  const hs2 = await ring([{ sku: 'TY02', qty: 2 }], { discount_pct: 10, tip: 20 });        // discount + tip pass-through
+  ok('Hub: two sales rung on the hub ledger', !!hs1.sale_no && !!hs2.sale_no && Number(hs2.total_with_tip ?? hs2.total) > 0, JSON.stringify({ hs1: hs1.sale_no, hs2: hs2.sale_no }));
+  // an unsupported shape: a hub sale with no order linkage (portal/split path) must be SKIPPED VISIBLY
+  await hub.db.insert(s.custPosSales).values({ saleNo: 'SALE-HUB-MANUAL', tenantId: t1, subtotal: '50', total: '53.5', taxAmount: '3.5', status: 'Completed' as any });
+
+  // the pusher signs with the shared secret and delivers to the CLOUD's public HMAC ingest endpoint
+  const send = async (batch: any) => {
+    const res = await cApp.inj('POST', '/api/hub/ingest', undefined, batch);
+    if (res.status !== 200 && res.status !== 201) throw new Error(res.json?.error?.code ?? String(res.status));
+    return res.json;
+  };
+  const push1 = await pushHubSales(hub.db, t1, { secret: SECRET, send });
+  ok('Push: 2 pushed, unsupported sale skipped (visible), none failed', push1.pushed === 2 && push1.skipped === 1 && push1.failed === 0, JSON.stringify(push1));
+
+  const logRows = (await hub.pg.query(`SELECT hub_sale_no, status, cloud_sale_no, skip_reason FROM hub_push_log ORDER BY id`)).rows as any[];
+  ok('hub_push_log: pushed rows map hub→cloud sale_no; skip carries its reason', logRows.filter((r) => r.status === 'pushed' && /^SALE-/.test(r.cloud_sale_no ?? '')).length === 2 && logRows.some((r) => r.status === 'skipped_unsupported' && /NO_ORDER_LINK/.test(r.skip_reason ?? '')), JSON.stringify(logRows));
+
+  // cloud side: sales exist with hub-matching value, GL balanced, reconciliation ties out
+  const recon = await cApp.inj('GET', '/api/hub/reconciliation', t1admin);
+  // tie on sale `total` (revenue + VAT + SC) — tip is a 2300 liability outside the sale total on both sides
+  const hubTotal = Number(hs1.total) + Number(hs2.total);
+  ok('Cloud reconciliation: 2 synced ops, value ties to the hub-side totals', recon.json?.summary?.synced === 2 && Math.abs(Number(recon.json?.summary?.cloud_total) - hubTotal) < 0.02, JSON.stringify({ status: recon.status, summary: recon.json?.summary, hubTotal }));
+  const tb1 = await cApp.inj('GET', '/api/ledger/trial-balance', t1admin);
+  ok('Cloud trial balance balanced after ingest', tb1.json?.totals?.balanced === true, JSON.stringify(tb1.json?.totals ?? {}));
+
+  // exactly-once: a full re-push (deterministic client_uuid) yields only duplicates — no new sales, no new GL
+  const cloudSales1 = Number((await cApp.inj('GET', '/api/hub/reconciliation', t1admin)).json?.summary?.ops);
+  await hub.pg.query(`DELETE FROM hub_push_log WHERE status IN ('pushed','duplicate')`); // simulate a lost log / crash-replay
+  const push2 = await pushHubSales(hub.db, t1, { secret: SECRET, send });
+  const recon2 = await cApp.inj('GET', '/api/hub/reconciliation', t1admin);
+  ok('Re-push after log loss: all duplicate, zero new cloud ops (exactly-once)', push2.duplicate === 2 && push2.pushed === 0 && Number(recon2.json?.summary?.ops) === cloudSales1, JSON.stringify({ push2, ops: recon2.json?.summary?.ops }));
+
+  // authenticity: a tampered batch (bad signature) is rejected before any replay
+  const badBatch = { tenant_id: t1, sent_at: new Date().toISOString(), sales: [{ client_uuid: 'hub:evil', captured_at: new Date().toISOString(), lines: [{ sku: 'GP01', qty: 1 }] }], signature: signHubBatch(t1, 'other', [], SECRET) };
+  const badRes = await cApp.inj('POST', '/api/hub/ingest', undefined, badBatch);
+  ok('Ingest rejects a bad signature (403 HUB_SYNC_BAD_SIGNATURE)', badRes.status === 403 && badRes.json?.error?.code === 'HUB_SYNC_BAD_SIGNATURE', JSON.stringify(badRes.json?.error ?? badRes.status));
 
   await cApp.app.close();
   await hApp.app.close();

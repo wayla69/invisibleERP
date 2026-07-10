@@ -17,7 +17,7 @@
 //   TOTP secrets, SSO subjects and staff LINE/e-mail capture identities never leave the cloud.
 import { Inject, Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, and, like, gte, lte, sql } from 'drizzle-orm';
 import { requiresMfa, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
@@ -25,8 +25,12 @@ import {
   menuCategories, menuItems, modifierGroups, modifierOptions, menuItemModifierGroups,
   buffetPackages, buffetPackageItems,
   kitchenStations, floorZones, diningTables,
+  posOfflineSync, custPosSales,
 } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
+import { RestaurantOfflineSyncService, type RegisterOfflineSaleOp } from '../restaurant/offline-sync.service';
+// single source of the batch-signature projection — the hub pusher signs with the same function
+import { signHubBatch } from '../../database/hub-push';
 
 export const HUB_SNAPSHOT_FORMAT = 'ierp-hub-snapshot';
 export const HUB_SNAPSHOT_VERSION = 1;
@@ -38,7 +42,10 @@ export function signHubPayload(payloadJson: string, secret: string): string {
 
 @Injectable()
 export class HubSyncService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly offlineSync: RestaurantOfflineSyncService,
+  ) {}
 
   private tenantId(user: JwtUser): number {
     if (user.tenantId == null) {
@@ -148,5 +155,62 @@ export class HubSyncService {
       },
       signature,
     };
+  }
+
+  // ── Phase 2a: hub → cloud sales ingest (machine-to-machine, HMAC-authenticated) ────────────────
+  // @Public route (no JWT — the hub never stores a cloud user credential): authenticity comes from the
+  // HMAC over (tenant_id, sent_at, sales) with the shared HUB_SYNC_SECRET, verified timing-safe. The
+  // batch then replays through the SAME idempotent register offline-sync path (dedup on
+  // (tenant, client_uuid) in pos_offline_sync; server re-prices; GL posts on THIS ledger — the cloud
+  // ledger stays the book of record). A replayed/stolen batch can therefore only ever produce
+  // 'duplicate' results — it cannot double-post or alter data. Control BRANCH-04.
+  async ingest(body: { tenant_id: number; sent_at: string; sales: RegisterOfflineSaleOp[]; signature: string }) {
+    const secret = this.secret();
+    const want = signHubBatch(Number(body.tenant_id), String(body.sent_at), body.sales ?? [], secret);
+    const a = Buffer.from(String(body.signature ?? ''), 'utf8');
+    const b = Buffer.from(want, 'utf8');
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      throw new ForbiddenException({ code: 'HUB_SYNC_BAD_SIGNATURE', message: 'Batch signature does not verify', messageTh: 'ลายเซ็นชุดข้อมูลไม่ถูกต้อง — ตรวจสอบ HUB_SYNC_SECRET' });
+    }
+    const [tenant] = await this.db.select().from(tenants).where(eq(tenants.id, Number(body.tenant_id)));
+    if (!tenant) throw new BadRequestException({ code: 'NO_TENANT', message: 'Unknown tenant' });
+    // Pre-auth request ⇒ RLS bypass is already on (same as login/signup); every service in the replay
+    // path threads THIS explicit tenant, so rows land tenant-scoped exactly like a JWT request's would.
+    const hubUser = { username: 'hub-sync', role: 'Sales', tenantId: Number(body.tenant_id), permissions: [] } as unknown as JwtUser;
+    return this.offlineSync.syncBatch({ sales: body.sales ?? [] }, hubUser);
+  }
+
+  // ── Phase 2a: reconciliation report (BRANCH-04 detective tie-out) ───────────────────────────────
+  // Every hub-ingested op for the caller's tenant (client_uuid prefix 'hub:'), joined to the cloud sale
+  // it minted — so the reviewer ties hub-captured count/value to the central ledger and chases failures.
+  async reconciliation(user: JwtUser, from?: string, to?: string) {
+    const t = this.tenantId(user);
+    const conds = [eq(posOfflineSync.tenantId, t), like(posOfflineSync.clientUuid, 'hub:%')];
+    if (from) conds.push(gte(posOfflineSync.capturedAt, new Date(`${from}T00:00:00+07:00`)));
+    if (to) conds.push(lte(posOfflineSync.capturedAt, new Date(`${to}T23:59:59.999+07:00`)));
+    // typed LEFT JOIN (not a raw scalar subquery — drizzle renders an embedded column ref inside a
+    // sql`(SELECT …)` fragment UNQUALIFIED, so it binds to the inner table and matches every row: 21000)
+    const rows = await this.db
+      .select({
+        client_uuid: posOfflineSync.clientUuid, status: posOfflineSync.status, device_id: posOfflineSync.deviceId,
+        cloud_sale_no: posOfflineSync.saleNo, captured_at: posOfflineSync.capturedAt, synced_at: posOfflineSync.syncedAt,
+        error_code: posOfflineSync.errorCode, attempts: posOfflineSync.attempts,
+        cloud_total: custPosSales.total,
+      })
+      .from(posOfflineSync)
+      .leftJoin(custPosSales, eq(custPosSales.saleNo, posOfflineSync.saleNo))
+      .where(and(...conds));
+    const out = rows.map((r: any) => ({
+      ...r,
+      hub_sale_no: String(r.client_uuid).split(':')[2] ?? null, // hub:{tenant}:{hub_sale_no}
+      cloud_total: r.cloud_total != null ? Number(r.cloud_total) : null,
+    }));
+    const summary = {
+      ops: out.length,
+      synced: out.filter((r) => r.status === 'synced').length,
+      failed: out.filter((r) => r.status === 'failed').length,
+      cloud_total: Math.round(out.reduce((s, r) => s + (r.cloud_total ?? 0), 0) * 100) / 100,
+    };
+    return { from: from ?? null, to: to ?? null, rows: out, summary };
   }
 }
