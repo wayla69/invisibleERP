@@ -24,6 +24,10 @@ export interface RegisterOfflineSaleOp {
   lines: RegisterOfflineLine[];
   method?: string;
   discount_pct?: number;
+  // ── hub→cloud replay fidelity (docs/41 Phase 2a; additive — register clients don't send these) ──
+  discount?: number;               // order-level FIXED discount amount (exclusive with discount_pct)
+  tip?: number;                    // staff tip (THB) — liability 2300, outside subtotal/VAT
+  service_charge_pct?: number;     // force-applied at party 1 (same shape as the register's manual SC)
 }
 export interface RegisterOfflineSyncBatchDto { sales: RegisterOfflineSaleOp[] }
 export interface SyncResult { client_uuid: string; status: 'synced' | 'duplicate' | 'failed'; sale_no: string | null; error: string | null }
@@ -60,7 +64,11 @@ export class RestaurantOfflineSyncService {
         // is skipped (the kitchen was offline anyway). The sale books on the SYNC day; offline windows
         // are short (intra-shift), so same-day sync books on the same business day.
         const order: any = await this.dineIn.createOrder({ items: op.lines as any }, user);
-        const sale: any = await this.dineIn.checkout(order.order_no, { method: op.method ?? 'Cash', discount_pct: op.discount_pct } as any, user);
+        const sale: any = await this.dineIn.checkout(order.order_no, {
+          method: op.method ?? 'Cash', discount_pct: op.discount_pct, discount: op.discount, tip: op.tip,
+          // manual service charge replays exactly like the register applies it: forced at the given %.
+          ...(op.service_charge_pct ? { apply_pricing_rules: true, service_charge_pct: op.service_charge_pct, party_size: 1, service_min_party: 1 } : {}),
+        } as any, user);
         await db.insert(posOfflineSync).values({
           tenantId, clientUuid: op.client_uuid, deviceId: op.device_id ?? null, status: 'synced',
           saleNo: sale.sale_no, capturedAt: new Date(op.captured_at), clientSeq: op.client_seq ?? null,

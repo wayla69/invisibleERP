@@ -34,6 +34,6 @@ import { PosScaleModule } from '../pos/scale/pos-scale.module';
   imports: [TaxModule, PaymentsModule, LedgerModule, TaxDocsModule, MenuModule, MarketingModule, CampaignsModule, LoyaltyModule, GiftCardsModule, PricingModule, PrintingModule, PeripheralsModule, PosScaleModule, MessagingModule],
   controllers: [RestaurantController, QrController, ChannelController],
   providers: [DineInService, KdsService, TableService, QrService, BuffetService, ChannelOrderService, RealtimeScope, RestaurantOfflineSyncService, ReservationService, GuestProfileService, TipService],
-  exports: [DineInService, TableService],
+  exports: [DineInService, TableService, RestaurantOfflineSyncService],
 })
 export class RestaurantModule {}
