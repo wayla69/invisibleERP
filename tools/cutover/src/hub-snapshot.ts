@@ -315,6 +315,20 @@ async function main() {
   const fleetT2 = await cApp.inj('GET', '/api/hub/fleet', await cApp.login('sales2', 'pw2'));
   ok('Fleet is tenant-isolated (T2 sees no T1 hub)', (fleetT2.json?.hubs ?? []).length === 0, JSON.stringify(fleetT2.json?.summary ?? fleetT2.status));
 
+  // ═══ Phase 4c — the heartbeat is the version channel ═══
+  process.env.APP_VERSION = '2.5.0';
+  const hbBehind = await sendHubHeartbeat(hub.db, t1, { secret: SECRET, hubId: 'store-1', appVersion: '2.4.9', sendHeartbeat });
+  ok('Version: a hub BEHIND the cloud is told an upgrade is available', hbBehind.advice?.version_status === 'behind' && hbBehind.advice?.upgrade_available === true && hbBehind.advice?.cloud_version === '2.5.0', JSON.stringify(hbBehind.advice));
+  const hbAhead = await sendHubHeartbeat(hub.db, t1, { secret: SECRET, hubId: 'store-1', appVersion: '2.6.0', sendHeartbeat });
+  ok('Version: a hub AHEAD of the cloud is flagged (upgrade the cloud first)', hbAhead.advice?.version_status === 'ahead' && hbAhead.advice?.upgrade_available === false, JSON.stringify(hbAhead.advice));
+  const fleetAhead = await cApp.inj('GET', '/api/hub/fleet', t1admin);
+  ok('Fleet: an ahead-of-cloud hub needs attention and is counted', fleetAhead.json?.summary?.ahead_of_cloud === 1 && fleetAhead.json?.hubs?.[0]?.needs_attention === true && fleetAhead.json?.cloud_version === '2.5.0', JSON.stringify(fleetAhead.json?.summary));
+  const hbSame = await sendHubHeartbeat(hub.db, t1, { secret: SECRET, hubId: 'store-1', appVersion: '2.5.0', sendHeartbeat });
+  ok('Version: a hub on the cloud version is current (no upgrade noise)', hbSame.advice?.version_status === 'current' && hbSame.advice?.upgrade_available === false, JSON.stringify(hbSame.advice));
+  const hbUnknown = await sendHubHeartbeat(hub.db, t1, { secret: SECRET, hubId: 'store-1', sendHeartbeat }); // no app_version
+  ok('Version: an unversioned hub is "unknown", never spuriously flagged', hbUnknown.advice?.version_status === 'unknown' && hbUnknown.advice?.upgrade_available === false, JSON.stringify(hbUnknown.advice));
+  delete process.env.APP_VERSION;
+
   await cApp.app.close();
   await hApp.app.close();
 
