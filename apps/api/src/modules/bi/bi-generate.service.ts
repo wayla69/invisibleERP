@@ -113,6 +113,11 @@ export class BiGenerateService {
       const r = await this.crmMembers.refreshAllProfiles(user); // idempotent: a pure profile upsert per member
       return { data: r, summary: `RFM refresh: profiled ${r.profiled} members, ${r.segment_changes} segment change(s)`, summaryTh: `รีเฟรช RFM: ${r.profiled} สมาชิก เปลี่ยนกลุ่ม ${r.segment_changes} ราย` };
     }
+    if (reportType === 'crm_followup_digest') {
+      if (!this.crm) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM pipeline service not available', messageTh: 'ระบบไปป์ไลน์ CRM ไม่พร้อมใช้งาน' });
+      const r = await this.crm.runFollowUpSweep(user); // read-only: fires lead.stagnant + a rail notification
+      return { data: r, summary: `Follow-up digest: ${r.total} item(s) — ${r.sla_breaches} SLA-breached lead(s), ${r.overdue_activities} overdue task(s), ${r.rotting_deals} rotting deal(s)`, summaryTh: `สรุปการติดตาม: ${r.total} รายการ — ลีดเกิน SLA ${r.sla_breaches} · งานเลยกำหนด ${r.overdue_activities} · ดีลค้าง ${r.rotting_deals}` };
+    }
     if (reportType === 'cdp_export_sync') {
       if (!this.crmMembers) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM service not available', messageTh: 'ระบบ CRM ไม่พร้อมใช้งาน' });
       const target = cdpConfigured() ? 'cdp' : 'mock';

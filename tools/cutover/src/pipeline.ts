@@ -260,6 +260,59 @@ async function main() {
   const tpl = await inj('GET', '/api/crm/pipeline/leads/import/template', sales1);
   ok('Lead import template lists the header contract (Name required)', tpl.status === 200 && tpl.json.headers?.[0] === 'Name' && tpl.json.required?.includes('Name'), JSON.stringify(tpl.json));
 
+  // ── CRM-4 — automation: scoring, pipeline events, follow-up SLA, comms (migration 0307, control REV-22) ──
+
+  // 31. Lead scoring (explainable, versioned): a referral B2B lead with email+phone grades A
+  const hotLead = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Hot Prospect', company: 'BigCo', email: 'buyer@bigco.example', phone: '0891112222', source: 'referral' });
+  ok('Create lead returns an A-grade score (referral + company + email + phone → 100)', hotLead.status === 201 && hotLead.json.grade === 'A' && hotLead.json.score >= 70, JSON.stringify({ grade: hotLead.json.grade, score: hotLead.json.score }));
+  const scoreRead = await inj('GET', `/api/crm/pipeline/leads/${hotLead.json.lead_no}/score`, sales1);
+  ok('Lead score is versioned (v1) + carries an explainable per-factor breakdown', scoreRead.status === 200 && scoreRead.json.version === 'v1' && Array.isArray(scoreRead.json.breakdown) && scoreRead.json.breakdown.some((b: any) => b.factor === 'source' && b.points === 40), JSON.stringify(scoreRead.json.breakdown));
+  const coldLead = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'ไม่ทราบชื่อ', source: 'cold' });
+  ok('A cold, contactless lead grades D (low score)', coldLead.json.grade === 'D', JSON.stringify({ grade: coldLead.json.grade, score: coldLead.json.score }));
+
+  // 32. Pipeline event → automation engine: a rule on deal.won fires when a deal closes Won
+  await inj('POST', '/api/automation/rules', sales1, { name: 'แจ้งเมื่อปิดการขาย', event_type: 'deal.won', action: { type: 'notification', message: 'ปิดการขายสำเร็จ' } });
+  const evOpp = await inj('POST', '/api/pipeline/opportunities', sales1, { name: 'Event Deal', expected_value: 300000 });
+  await inj('POST', `/api/pipeline/opportunities/${evOpp.json.id}/close`, sales1, { outcome: 'Won', reason: 'good fit' });
+  const execs = await inj('GET', '/api/automation/executions', sales1);
+  ok('deal.won emitted into the automation engine → rule executed', execs.status === 200 && execs.json.executions?.some((e: any) => e.event_type === 'deal.won' && e.status === 'executed'), JSON.stringify(execs.json.executions?.slice(0, 3)));
+  const cat = await inj('GET', '/api/automation/events', sales1);
+  ok('Automation catalog exposes the CRM-4 pipeline events', cat.status === 200 && ['lead.created', 'lead.stagnant', 'opp.stage_changed', 'deal.won', 'deal.lost'].every((k) => cat.json.events?.some((e: any) => e.key === k)), '');
+
+  // 33. Follow-up SLA breach detection: an aged, untouched 'new' lead surfaces; logging an activity clears it
+  const slaLead = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Aging Lead', email: 'aging@x.example', source: 'web' });
+  await db.update(s.crmLeads).set({ createdAt: new Date(Date.now() - 48 * 3600_000) }).where(eq(s.crmLeads.leadNo, slaLead.json.lead_no));
+  const foll1 = await inj('GET', '/api/crm/pipeline/follow-up', sales1);
+  const breach = foll1.json.items?.find((i: any) => i.kind === 'lead_sla_breach' && i.ref === slaLead.json.lead_no);
+  ok('Follow-up center flags an aged untouched lead as an SLA breach (REV-22)', foll1.status === 200 && !!breach && breach.severity === 'high', JSON.stringify({ total: foll1.json.summary?.total, breach: breach?.ref }));
+  await inj('POST', '/api/crm/pipeline/activities', sales1, { entity_type: 'lead', entity_no: slaLead.json.lead_no, type: 'call', subject: 'reached out' });
+  const foll2 = await inj('GET', '/api/crm/pipeline/follow-up', sales1);
+  ok('Logging an activity clears the SLA breach (the lead is now touched)', !foll2.json.items?.some((i: any) => i.kind === 'lead_sla_breach' && i.ref === slaLead.json.lead_no), '');
+
+  // 34. Follow-up settings + round-robin assignment per pipeline
+  const setSettings = await inj('PUT', '/api/crm/pipeline/follow-up/settings', sales1, { sla_hours: 12, rotting_days: 5, round_robin_owners: ['sales1', 'sales2'] });
+  ok('Follow-up settings persisted (SLA + rotting + round-robin owners)', setSettings.status === 200 && setSettings.json.sla_hours === 12 && setSettings.json.round_robin_owners?.length === 2, JSON.stringify(setSettings.json));
+  const rr1 = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'RR One', source: 'web' });
+  const rr2 = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'RR Two', source: 'web' });
+  ok('Round-robin assigns new leads across the configured owners', rr1.json.owner !== rr2.json.owner && ['sales1', 'sales2'].includes(rr1.json.owner) && ['sales1', 'sales2'].includes(rr2.json.owner), JSON.stringify({ a: rr1.json.owner, b: rr2.json.owner }));
+
+  // 35. Daily follow-up digest sweep → counts + emits lead.stagnant into the automation engine
+  const digLead = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Digest Lead', source: 'web' });
+  await db.update(s.crmLeads).set({ createdAt: new Date(Date.now() - 72 * 3600_000) }).where(eq(s.crmLeads.leadNo, digLead.json.lead_no));
+  await inj('POST', '/api/automation/rules', sales1, { name: 'escalate stagnant', event_type: 'lead.stagnant', action: { type: 'log' } });
+  const sweep = await inj('POST', '/api/crm/pipeline/follow-up/run', sales1);
+  ok('Follow-up digest sweep reports SLA breaches', sweep.status === 200 && sweep.json.sla_breaches >= 1, JSON.stringify(sweep.json));
+  const stagExecs = await inj('GET', '/api/automation/executions', sales1);
+  ok('lead.stagnant emitted into the automation engine by the sweep', stagExecs.json.executions?.some((e: any) => e.event_type === 'lead.stagnant'), '');
+
+  // 36. Sales comms from a deal: merge fields resolved, sent via messaging, logged as a timeline activity
+  const mf = await inj('GET', '/api/crm/pipeline/comms/merge-fields', sales1);
+  ok('Comms merge-field catalog lists the deal fields', mf.status === 200 && mf.json.fields?.includes('contact.name') && mf.json.fields?.includes('opp.name'), JSON.stringify(mf.json.fields));
+  const commsOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Comms Deal', account_no: accA.json.account_no, primary_contact_id: con1.json.id, amount: 45000 });
+  const comms = await inj('POST', `/api/crm/pipeline/opportunities/${commsOpp.json.opp_no}/comms`, sales1, { channel: 'email', subject: 'สวัสดี {{contact.name}}', body: 'ดีล {{opp.name}} มูลค่า {{opp.amount}} บาท' });
+  ok('Comms send resolves merge fields (contact.name + opp.name) and returns the rendered body', comms.status === 200 && comms.json.subject?.includes('สมหญิง') && comms.json.body?.includes('Comms Deal') && !comms.json.body?.includes('{{'), JSON.stringify({ subject: comms.json.subject, body: comms.json.body }));
+  const commsDetail = await inj('GET', `/api/crm/pipeline/opportunities/${commsOpp.json.opp_no}`, sales1);
+  ok('Comms send is logged as a timeline activity on the deal', commsDetail.json.activities?.some((a: any) => a.type === 'email' && String(a.subject ?? '').includes('สวัสดี')), JSON.stringify(commsDetail.json.activities?.map((a: any) => a.subject)));
   // ── CRM-3 — Customer 360: the finance-joined pre-call screen (docs/42) ────────────────────────────
   // "CRM ไม่เห็นเงิน": one read joins the CRM-1 account to the money. Seed a loyalty member with a paid
   // order (→ RFM profile), the company's overdue AR invoice + a receipt for T1 (AR/credit position + last
