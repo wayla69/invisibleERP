@@ -64,6 +64,13 @@ export interface HubTillDoc {
   sale_nos: string[];
 }
 
+// Phase 2c-2 — waste envelope (BRANCH-06). Kitchen waste posts Dr 5810 / Cr 1200 on the HUB's ledger;
+// without this the cloud never sees the expense or the inventory relief, and shrinkage is invisible to HQ.
+export interface HubWasteDoc {
+  waste_no: string; item_id: string; qty: number; reason_code: string;
+  unit_cost?: number; uom?: string; notes?: string;
+}
+
 // Phase 4a — heartbeat payload (liveness + replay backlog; the cloud stamps last_seen + clock skew).
 export interface HubHeartbeatDoc {
   hub_id: string; app_version?: string; last_push_at?: string | null;
@@ -248,6 +255,55 @@ export async function pushHubTills(
   return summary;
 }
 
+export interface HubWastePushSummary { collected: number; pushed: number; duplicate: number; failed: number }
+
+/**
+ * Phase 2c-2 — push kitchen WASTE documents to the cloud (control BRANCH-06). The hub's `waste_no` is
+ * reused verbatim as the document identity on both ledgers, so a re-push is a `duplicate` (the cloud
+ * returns the stored row and neither decrements stock nor posts GL again). Run after the sales.
+ */
+export async function pushHubWaste(
+  db: any,
+  tenantId: number,
+  deps: { secret: string; sendWaste: (body: { tenant_id: number; sent_at: string; waste: HubWasteDoc; signature: string }) => Promise<any>; sentAt?: string },
+): Promise<HubWastePushSummary> {
+  const rows: any[] = await db.execute(sql`
+    SELECT w.waste_no, w.item_id, w.qty, w.reason_code, w.unit_cost, w.uom, w.notes
+    FROM waste_log w
+    LEFT JOIN hub_push_log l ON l.tenant_id = w.tenant_id AND l.hub_sale_no = w.waste_no AND l.status <> 'failed'
+    WHERE w.tenant_id = ${tenantId} AND l.id IS NULL
+    ORDER BY w.id`).then((r: any) => r.rows ?? r);
+
+  const summary: HubWastePushSummary = { collected: rows.length, pushed: 0, duplicate: 0, failed: 0 };
+  if (!rows.length) return summary;
+
+  const logRow = async (row: Record<string, any>) => {
+    await db.insert(hubPushLog).values({ tenantId, docType: 'waste', attempts: 1, ...row })
+      .onConflictDoUpdate({ target: [hubPushLog.tenantId, hubPushLog.hubSaleNo], set: { ...row, docType: 'waste', attempts: sql`${hubPushLog.attempts} + 1`, pushedAt: new Date() } });
+  };
+
+  for (const w of rows) {
+    const wasteNo = String(w.waste_no);
+    const clientUuid = `hub:${tenantId}:${wasteNo}`;
+    const waste: HubWasteDoc = {
+      waste_no: wasteNo, item_id: String(w.item_id), qty: num(w.qty), reason_code: String(w.reason_code),
+      unit_cost: num(w.unit_cost), uom: w.uom ?? undefined, notes: w.notes ?? undefined,
+    };
+    const sentAt = deps.sentAt ?? new Date().toISOString();
+    const body = { tenant_id: tenantId, sent_at: sentAt, waste, signature: signHubDoc({ tenant_id: tenantId, sent_at: sentAt, waste }, deps.secret) };
+    try {
+      const res = await deps.sendWaste(body);
+      const dup = res?.duplicate === true;
+      summary[dup ? 'duplicate' : 'pushed']++;
+      await logRow({ hubSaleNo: wasteNo, clientUuid, status: dup ? 'duplicate' : 'pushed', hubTotal: String(num(w.unit_cost * 0 + num(w.qty) * num(w.unit_cost)).toFixed(2)), errorCode: null, errorMessage: null });
+    } catch (e: any) {
+      summary.failed++;
+      await logRow({ hubSaleNo: wasteNo, clientUuid, status: 'failed', errorCode: String(e?.code ?? e?.message ?? 'WASTE_PUSH_FAILED'), errorMessage: String(e?.message ?? e) });
+    }
+  }
+  return summary;
+}
+
 /** Phase 4a — report liveness + replay backlog to the cloud (fleet visibility). */
 export async function sendHubHeartbeat(
   db: any,
@@ -310,6 +366,9 @@ async function main() {
     console.log(`✅ hub push — sales collected ${sum.collected}: pushed ${sum.pushed}, duplicate ${sum.duplicate}, failed ${sum.failed}, skipped ${sum.skipped}`);
     if (sum.skipped) console.log('   ⚠ skipped sales are recorded in hub_push_log (status skipped_unsupported) — review per BRANCH-04');
 
+    const waste = await pushHubWaste(db, tenantId, { secret, sendWaste: (b) => post('/api/hub/ingest-waste', b) });
+    if (waste.collected) console.log(`✅ hub push — waste collected ${waste.collected}: pushed ${waste.pushed}, duplicate ${waste.duplicate}, failed ${waste.failed}`);
+
     const tills = await pushHubTills(db, tenantId, { secret, sendTill: (b) => post('/api/hub/ingest-till', b) });
     if (tills.collected) {
       console.log(`✅ hub push — tills collected ${tills.collected}: pushed ${tills.pushed}, duplicate ${tills.duplicate}, blocked ${tills.blocked}, failed ${tills.failed}`);
@@ -328,7 +387,7 @@ async function main() {
       console.log(`⚠ THIS HUB IS AHEAD OF THE CLOUD (hub ${process.env.APP_VERSION} > cloud ${advice.cloud_version}). Upgrade the CLOUD first — a hub ahead can send fields the cloud rejects.`);
     }
 
-    process.exit(sum.failed || tills.failed ? 1 : 0);
+    process.exit(sum.failed || tills.failed || waste.failed ? 1 : 0);
   } finally {
     await client.end({ timeout: 5 });
   }

@@ -30,10 +30,11 @@ import {
 import type { JwtUser } from '../../common/decorators';
 import { RestaurantOfflineSyncService, type RegisterOfflineSaleOp } from '../restaurant/offline-sync.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { WasteService, type WasteReason } from '../inventory/waste.service';
 import { CASH_VARIANCE_THRESHOLD } from '../payments/payments.service';
 import { roundCurrency } from '../tax/money';
 // single source of the signature projection — the hub pusher signs with the same functions
-import { signHubBatch, signHubDoc, type HubTillDoc, type HubHeartbeatDoc } from '../../database/hub-push';
+import { signHubBatch, signHubDoc, type HubTillDoc, type HubHeartbeatDoc, type HubWasteDoc } from '../../database/hub-push';
 
 export const HUB_SNAPSHOT_FORMAT = 'ierp-hub-snapshot';
 export const HUB_SNAPSHOT_VERSION = 1;
@@ -79,6 +80,7 @@ export class HubSyncService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly offlineSync: RestaurantOfflineSyncService,
     private readonly ledger: LedgerService,
+    private readonly waste: WasteService,
   ) {}
 
   /** timing-safe HMAC compare — every hub-originated request authenticates this way. */
@@ -330,6 +332,34 @@ export class HubSyncService {
       cash_sales: cashSales, expected_cash: expectedCash, closing_count: num(doc.closing_count),
       variance, variance_status: varianceStatus, variance_journal_no: varianceJournalNo, sales_matched: cloudSaleNos.length,
     };
+  }
+
+  // ── Phase 2c-2: hub → cloud WASTE ingest (control BRANCH-06) ──────────────────────────────────
+  // Kitchen waste posts Dr 5810 Scrap/Waste Loss / Cr 1200 Inventory on the HUB's ledger. Without this
+  // the cloud never sees the expense or the inventory relief, so central COGS is understated and the
+  // shrinkage signal — the one an HQ controller most wants — is invisible.
+  //
+  // The hub's `waste_no` IS the document identity on both ledgers: replaying it returns the stored row
+  // (`duplicate: true`) and neither decrements stock nor posts GL again. The cloud re-runs the same
+  // WasteService guards it applies to a native entry (positive qty, known reason, and the INV-07
+  // perpetual-item guard — a perpetual item must go through the approved write-off, so such a document
+  // fails loudly and stays visible in hub_push_log rather than silently relieving inventory twice).
+  //
+  // Valuation note: `unit_cost` is the hub kitchen's ingredient cost. Unlike a sale, the cloud has no
+  // independent cost basis for a non-perpetual ingredient to re-derive it from, so the hub's figure is
+  // accepted and carried into the GL — documented in PN-24 §7 6f rather than silently assumed.
+  async ingestWaste(body: { tenant_id: number; sent_at: string; waste: HubWasteDoc; signature: string }) {
+    const secret = this.secret();
+    this.assertSignature(body.signature, signHubDoc({ tenant_id: Number(body.tenant_id), sent_at: String(body.sent_at), waste: body.waste }, secret));
+    const t = Number(body.tenant_id);
+    await this.assertTenant(t);
+    const hubUser = { username: 'hub-sync', role: 'Sales', tenantId: t, permissions: [] } as unknown as JwtUser;
+    const w = body.waste;
+    const res: any = await this.waste.logWaste({
+      item_id: w.item_id, qty: Number(w.qty), reason_code: w.reason_code as WasteReason,
+      unit_cost: w.unit_cost, uom: w.uom, notes: w.notes,
+    }, hubUser, { wasteNo: w.waste_no });
+    return { ...res, duplicate: res.duplicate === true };
   }
 
   // ── Phase 4a: hub heartbeat (liveness + backlog) ───────────────────────────────────────────────
