@@ -171,7 +171,7 @@ apply; each PSP carries its own SOC 2 / PCI-DSS report.
 |---|---|---|---|
 | CC8.1 Authorises and documents infrastructure/software changes | `.github/CODEOWNERS` + PR template (ticket + control-impact + docs-sync) + required reviews | ITGC-CM-01/03/04 | ✅ Implemented |
 | CC8.1 Tests changes before deployment | 83-check CI suite; mandatory passing gate before merge | ITGC-CM-01/SD-03 | ✅ Implemented |
-| CC8.1 Approves deployment | `deploy.yml` gated on GitHub `production` environment (deployer ≠ author) | ITGC-CM-03 | ✅ Designed — **[setup]** configure environment reviewers |
+| CC8.1 Approves deployment | `deploy.yml` gated on GitHub `production` environment (deployer ≠ author) + an automated deploy-time `deployer≠author` assertion (`tools/ci/check-deploy-sod.mjs`, `--selftest`) as re-performable evidence | ITGC-CM-03 | ✅ Implemented (automated evidence) — **[setup]** configure environment reviewers for the hard-approval gate |
 | CC8.1 Emergency change procedure | `change-management.md` emergency procedure + break-glass log | ITGC-CM-05 | ✅ Designed |
 | CC8.1 Migration controls | Drizzle migrations hand-journaled; `migrations-journaled` CI gate catches duplicates | ITGC-CM-02 | ✅ Implemented |
 

@@ -46,6 +46,10 @@ async function main() {
     !(await throws(() => assertTenancyBootSafe({ isProd: true, mode: 'single-company', allowOptOut: false, countTenants: async () => { throw new Error('db down'); }, logger: nolog }))));
 
   // ── H-3: RLS-backstop decision matrix (fail-closed by default) ──
+  // NB: this backstop doubles as automated least-privilege evidence for ITGC-AC-13 (named DB users /
+  // least privilege). assertRlsBackstop probes pg_roles in prod and REFUSES boot when the app's base
+  // connection role is a superuser or has BYPASSRLS — i.e. it enforces that the app connects as a
+  // non-superuser, non-owner role, exactly the AC-13 "app uses non-superuser role" control assertion.
   ok('base role: non-super, non-bypass → ok', evaluateRlsBackstop({ isSuperuser: false, bypassRls: false, allowOptOut: false }).level === 'ok');
   ok('base role: SUPERUSER, DEFAULT → refuse', evaluateRlsBackstop({ isSuperuser: true, bypassRls: false, allowOptOut: false }).level === 'refuse');
   ok('base role: BYPASSRLS, DEFAULT → refuse', evaluateRlsBackstop({ isSuperuser: false, bypassRls: true, allowOptOut: false }).level === 'refuse');
