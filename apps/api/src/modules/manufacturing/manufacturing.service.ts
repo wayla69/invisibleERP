@@ -75,7 +75,7 @@ export class ManufacturingService {
     const now = new Date();
     for (const c of comps)
       await db.insert(stockMovements).values({
-        moveDate: now, docNo: woNo, moveType: 'Issue', itemId: c.itemId, itemDescription: c.itemDescription,
+        tenantId, moveDate: now, docNo: woNo, moveType: 'Issue', itemId: c.itemId, itemDescription: c.itemDescription,
         uom: c.uom, qty: fx(-n(c.qtyRequired), 3), refDoc: woNo, remarks: 'WO component issue', createdBy: user.username,
       });
 
@@ -112,7 +112,7 @@ export class ManufacturingService {
     const variance = r2(total - fgValue);
     const now = new Date();
     await db.insert(stockMovements).values({
-      moveDate: now, docNo: woNo, moveType: 'Stock In', itemId: wo.productItemId, itemDescription: wo.productName,
+      tenantId, moveDate: now, docNo: woNo, moveType: 'Stock In', itemId: wo.productItemId, itemDescription: wo.productName,
       uom: wo.uom, qty: fx(produced, 3), refDoc: woNo, remarks: 'WO finished goods receipt', createdBy: user.username,
     });
 
