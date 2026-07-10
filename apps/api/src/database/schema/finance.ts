@@ -185,7 +185,7 @@ export const apPayments = pgTable('ap_payments', {
   uxIdem: uniqueIndex('ux_ap_payments_idem').on(sql`coalesce(${t.tenantId}, 0)`, t.idempotencyKey).where(sql`${t.idempotencyKey} IS NOT NULL`),
 }));
 
-// AP payment run (FIN-2, EXP-13, migration 0296) — a BATCH disbursement proposal over the one-by-one
+// AP payment run (FIN-2, EXP-13, migration 0297) — a BATCH disbursement proposal over the one-by-one
 // AP-PAY maker-checker. A `creditors` holder PROPOSES a run (open approved AP selected by due-date cutoff;
 // every line re-passes the 3-way-match gate, EXP-09), edits lines only while Draft, then submits for
 // approval; a DIFFERENT user (approvals/gl_close) APPROVES it (SoD, mirrors EXP-06), and EXECUTION posts

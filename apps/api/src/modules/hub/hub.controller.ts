@@ -22,6 +22,33 @@ const IngestSale = z.object({
 const IngestBody = z.object({ tenant_id: z.number().int().positive(), sent_at: z.string().min(1), sales: z.array(IngestSale), signature: z.string().min(1) });
 type IngestDto = z.infer<typeof IngestBody>;
 
+// Phase 2c — till/Z envelope. The cloud recomputes `expected_cash` from the replayed sales, so the hub
+// deliberately does NOT send its own expected figure: only the physical count it cannot derive.
+const IngestTillBody = z.object({
+  tenant_id: z.number().int().positive(), sent_at: z.string().min(1), signature: z.string().min(1),
+  till: z.object({
+    session_no: z.string().min(1), opened_by: z.string().optional(), closed_by: z.string().optional(),
+    opened_at: z.string().min(1), closed_at: z.string().min(1),
+    opening_float: z.number().nonnegative(), closing_count: z.number().nonnegative(),
+    paid_in: z.number().nonnegative().optional(), paid_out: z.number().nonnegative().optional(),
+    drops: z.number().nonnegative().optional(), cash_refunds: z.number().nonnegative().optional(),
+    denominations: z.record(z.string(), z.number()).nullable().optional(),
+    sale_nos: z.array(z.string()),
+  }),
+});
+type IngestTillDto = z.infer<typeof IngestTillBody>;
+
+// Phase 4a — heartbeat.
+const HeartbeatBody = z.object({
+  tenant_id: z.number().int().positive(), sent_at: z.string().min(1), signature: z.string().min(1),
+  hub: z.object({
+    hub_id: z.string().min(1), app_version: z.string().optional(), last_push_at: z.string().nullable().optional(),
+    pending_sales: z.number().int().nonnegative().optional(), pending_tills: z.number().int().nonnegative().optional(),
+    failed_docs: z.number().int().nonnegative().optional(), skipped_docs: z.number().int().nonnegative().optional(),
+  }),
+});
+type HeartbeatDto = z.infer<typeof HeartbeatBody>;
+
 @Controller('api/hub')
 export class HubController {
   constructor(private readonly svc: HubSyncService) {}
@@ -46,5 +73,23 @@ export class HubController {
   @Get('reconciliation') @Permissions('branch', 'exec')
   reconciliation(@CurrentUser() user: JwtUser, @Query('from') from?: string, @Query('to') to?: string) {
     return this.svc.reconciliation(user, from, to);
+  }
+
+  // Phase 2c — till/Z-report ingest (BRANCH-05). Same HMAC auth; the cloud recomputes expected cash.
+  @Public() @Post('ingest-till')
+  ingestTill(@Body(new ZodValidationPipe(IngestTillBody)) body: IngestTillDto) {
+    return this.svc.ingestTill(body);
+  }
+
+  // Phase 4a — hub liveness + backlog.
+  @Public() @Post('heartbeat')
+  heartbeat(@Body(new ZodValidationPipe(HeartbeatBody)) body: HeartbeatDto) {
+    return this.svc.heartbeat(body);
+  }
+
+  @Get('fleet') @Permissions('branch', 'exec')
+  fleet(@CurrentUser() user: JwtUser, @Query('stale_minutes') staleMinutes?: string) {
+    const m = Number(staleMinutes);
+    return this.svc.fleet(user, Number.isFinite(m) && m > 0 ? m : 15);
   }
 }

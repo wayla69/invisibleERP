@@ -23,6 +23,11 @@ name: Ops — provision synthetic-probe user
 
 on:
   workflow_dispatch:
+    inputs:
+      unforce_auth_tables:
+        description: 'EMERGENCY: ALTER TABLE users/pos_members NO FORCE ROW LEVEL SECURITY so the base owner role (ierp_app) can read them for authentication before the guard RLS-bypass fix (PR #602) deploys. Reversible; the fix deploy re-applies FORCE and the code handles it.'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,6 +41,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           WEB_URL: ${{ vars.PROD_WEB_URL || 'https://invisibleposerp-production.up.railway.app' }}
+          UNFORCE_AUTH_TABLES: ${{ inputs.unforce_auth_tables }}
         run: |
           set -euo pipefail
           [ -n "${RAILWAY_TOKEN:-}" ] || { echo "::error::RAILWAY_TOKEN not configured"; exit 1; }
@@ -61,6 +67,23 @@ jobs:
           MIGS=$(psql "$PUB" -tAc "SELECT count(*) FROM drizzle.__drizzle_migrations;" 2>/dev/null || echo 0)
           [ "${MIGS:-0}" -gt 100 ] || { echo "::error::instance sanity check failed (${MIGS:-0} migrations) — refusing"; exit 1; }
           echo "instance sanity ok: $MIGS applied migrations"
+
+          # ── EMERGENCY mitigation (2026-07-10 login bounce): the JwtAuthGuard reads users/pos_members to
+          # authenticate BEFORE the per-request tenant tx exists, i.e. as the base owner role ierp_app with
+          # no app.* GUCs. Those tables are under FORCE ROW LEVEL SECURITY, which applies to the owner too,
+          # so the identity read returns 0 rows → USER_NOT_FOUND → login bounce. Dropping FORCE lets the
+          # OWNER bypass RLS on just these two tables (auth reads work) while the per-request queries — which
+          # run as app_user, NOT the owner — are still fully RLS-scoped (verified: app_user isolation holds
+          # regardless of FORCE). Reversible: the guard RLS-bypass fix (PR #602) re-applies FORCE via the
+          # migration loop and bypasses in code, so no manual revert is needed after that deploys.
+          if [ "${UNFORCE_AUTH_TABLES:-false}" = "true" ]; then
+            echo "EMERGENCY: dropping FORCE RLS on users + pos_members (owner-role auth reads)…"
+            psql "$PUB" -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER TABLE users NO FORCE ROW LEVEL SECURITY;
+          ALTER TABLE pos_members NO FORCE ROW LEVEL SECURITY;
+          SQL
+            echo "done — FORCE now: $(psql "$PUB" -tAc "SELECT relname||'='||relforcerowsecurity FROM pg_class WHERE relname IN ('users','pos_members') AND relnamespace='public'::regnamespace" | tr '\n' ' ')"
+          fi
 
           PW=$(openssl rand -hex 18)
           echo "::add-mask::$PW"
@@ -92,4 +115,42 @@ jobs:
           rm -f /tmp/login.json
           { [ "$CODE" = 200 ] && [ -n "$TOK" ]; } || { echo "::error::probe login verification failed (HTTP $CODE)"; exit 1; }
           echo "✅ synthetic-probe provisioned + credentials stored + live login verified (HTTP 200, role ExecutiveViewer)"
+
+          # ── RLS diagnostics (read-only; 2026-07-10 login-bounce diagnosis): the guard's pre-transaction
+          # read of `users` runs as the base ierp_app role with no app.* settings — show exactly what that
+          # role can see, plus the live policy bodies and any role/db-level default settings. Schema-level
+          # info only (policy expressions, counts) — no row data.
+          echo "── users/tenants RLS state ──"
+          psql "$PUB" -tA <<'SQL'
+          SELECT relname || ': rls=' || relrowsecurity || ' force=' || relforcerowsecurity FROM pg_class WHERE relname IN ('users','tenants') AND relnamespace='public'::regnamespace;
+          SELECT c.relname || ' policy ' || p.polname || ' USING ' || coalesce(pg_get_expr(p.polqual, p.polrelid), '-') FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid WHERE c.relname IN ('users','tenants');
+          SELECT 'default-setting ' || coalesce(r.rolname, '(database)') || ': ' || array_to_string(s.setconfig, ' | ') FROM pg_db_role_setting s LEFT JOIN pg_roles r ON r.oid = s.setrole;
+          SQL
+          echo "── visibility as ierp_app (the guard's exact context: no app.* settings) ──"
+          psql "$PUB" -tA -c "SET ROLE ierp_app; SELECT 'users rows visible: ' || count(*) FROM users;" || true
+          psql "$PUB" -tA -c "SET ROLE ierp_app; SELECT 'probe row visible: ' || count(*) FROM users WHERE username='synthetic-probe';" || true
+
+          # ── Cookie ROUND-TRIP matrix (2026-07-10 login-bounce diagnosis): the login POST returning 200
+          # proves nothing about the SESSION — the July-10 class of failure is the httpOnly cookie not
+          # surviving the next authenticated request. Compare the same cookie-jar round-trip through the
+          # WEB same-origin proxy vs DIRECT to the API origin: web=401+direct=200 ⇒ the proxy hop drops or
+          # mangles the Cookie header; both 401 ⇒ the API rejects the fresh token itself (body code says
+          # whether the token is MISSING or INVALID). Statuses + error codes only — never bodies/tokens.
+          API_DOM=$(npx -y @railway/cli variables --service invisibleERP --kv | grep '^RAILWAY_PUBLIC_DOMAIN=' | cut -d= -f2- | tr -d '\r')
+          roundtrip() { # $1 = base URL, $2 = label
+            local jar=/tmp/rt.jar body code msg
+            rm -f "$jar"
+            code=$(curl -s -c "$jar" -o /dev/null -w "%{http_code}" --max-time 20 -X POST "$1/api/login" -H 'Content-Type: application/json' -d "{\"username\":\"synthetic-probe\",\"password\":\"$PW\"}")
+            body=$(curl -s -b "$jar" --max-time 20 "$1/api/auth/me" -o /tmp/me.json -w "%{http_code}")
+            msg=$(jq -r '.error.message // .username // empty' /tmp/me.json 2>/dev/null | head -c 60)
+            local njar; njar=$(grep -c 'ierp_' "$jar" 2>/dev/null || echo 0)
+            echo "  $2: login=$code cookies_in_jar=$njar /api/auth/me=$body ($msg)"
+            rm -f "$jar" /tmp/me.json
+            [ "$body" = 200 ]
+          }
+          ok=0
+          roundtrip "$WEB_URL" "via WEB proxy " || ok=1
+          [ -n "$API_DOM" ] && { roundtrip "https://$API_DOM" "direct to API " || true; }
+          if [ "$ok" != 0 ]; then echo "::error::cookie round-trip through the web proxy FAILED — the session does not survive the authenticated hop (see matrix above)"; exit 1; fi
+          echo "✅ cookie round-trip verified through the web proxy — the browser probe path is fully green."
           echo "The browser-probe job of 'Ops — synthetic prod probe' is now ARMED (next scheduled run, or dispatch it now)."

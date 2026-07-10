@@ -1,6 +1,6 @@
 # 41 — LAN-first Store Hub: full offline restaurant operation (POS + diner self-order) until the internet returns
 
-**Status: Phases 0–3 DELIVERED (0 register-hardening · 1 hub MVP · 2a sales replay/BRANCH-04 · 2b buffet replay · 3 diner QR on hub) · 2026-07-10** — Phase 2c (loyalty/till-Z/fiscal chain) + Phase 4 (fleet ops) PLANNED.
+**Status: Phases 0–3 + 2c-1 + 4a DELIVERED · 2026-07-10** (0 register-hardening · 1 hub MVP · 2a sales replay/BRANCH-04 · 2b buffet replay · 3 diner QR on hub · **2c-1 till/Z up-sync + 4a fleet heartbeat/BRANCH-05**) — remaining: 2c-2 (loyalty sales, stock ops, fiscal chain) + 4b (auto-update, backups).
 
 ## 0. Problem & goal
 
@@ -114,13 +114,31 @@ Extend the proven idempotency contract from "quick-sale replay" to the full fina
   and the BRANCH-04 reconciliation surfaces any hub↔cloud value drift. A version registry would add a
   table + sync state for evidence the re-price already provides.
 
-**Phase 2c — remaining up-sync (PLANNED):**
+**Phase 2c-1 — cash sessions / Z-reports (DELIVERED 2026-07-10; PN-24 rev 0.7 §7 6d, control BRANCH-05, UAT-O2C-308..309):**
 
-- Loyalty-redeem sales (cross-system points state — today a visible `skipped_unsupported` queue), till
-  sessions/Z-reports + cash over/short (maker-checker interplay), tip pool distributions (policy today:
-  distribute on the CLOUD after sync — per-sale tips already accrue to 2300 at ingest), hub-local stock
-  ops (waste/receives; sale-driven BOM deductions already post at cloud ingest), fiscal hash-chain
-  verification at ingest (PN-20). DR/BCP + user-manual updates as surfaces widen.
+- `POST /api/hub/ingest-till`: the hub sends the session envelope (float, **physical count**, movements,
+  denominations) + the **sale numbers rung in the session** — never its own expected-cash figure. The
+  cloud resolves every sale through the BRANCH-04 ledger and **refuses** the session
+  (`TILL_SALES_NOT_SYNCED`) unless all replayed — a variance is never certified over a partial revenue
+  population. Expected cash is recomputed from the **cloud's** ledger; the over/short posts to 5830 on
+  the *shared* REV-13 materiality line (material ⇒ Draft JE + `PendingApproval`, GL-05 maker-checker).
+  Idempotent on `session_no`.
+- **Two product facts documented, not papered over** (PN-24 §7 6d): restaurant checkout writes no
+  `payments` tender (so the native `aggregateTill` misses restaurant cash) and stores
+  `payment_method='Dine-in'` while debiting **1000** for the full settled amount **+ tip**. Hub sessions
+  therefore reconcile against the sale ledger — exactly what account 1000 received. Closing that
+  asymmetry in the *native* till path is Phase 2c-2 work.
+- Bug found + fixed en route: `hub-push` read a non-existent `dine_in_orders.created_at`, silently
+  stamping every replayed sale's `captured_at` with the **push** time (an offline day's sales would book
+  on the sync day). Now `paid_at` / `opened_at`.
+
+**Phase 2c-2 — remaining up-sync (PLANNED):**
+
+- Loyalty-redeem sales (cross-system points state — today a visible `skipped_unsupported` queue), tip
+  pool distributions (policy today: distribute on the CLOUD after sync — per-sale tips already accrue to
+  2300 at ingest), hub-local stock ops (waste/receives; sale-driven BOM deductions already post at cloud
+  ingest), fiscal hash-chain verification at ingest (PN-20), and the native-till tender asymmetry above.
+  DR/BCP + user-manual updates as surfaces widen.
 
 ## Phase 3 — diner self-order + KDS on the hub (DELIVERED 2026-07-10)
 
@@ -138,7 +156,15 @@ Proven rather than built — the P1 architecture already carried it, and the har
   found: Fastify's default `maxParamLength` (100) rejects the long diner session tokens — the hub runs
   the same `main.ts` (which already sets 500), so only harness-local boots need care.
 
-## Phase 4 — fleet operations (PLANNED)
+## Phase 4a — fleet heartbeat (DELIVERED 2026-07-10; PN-24 rev 0.7 §7 6e, UAT-O2C-310)
+
+Every push run sends a signed heartbeat: `hub_id`, app version, **un-replayed backlog** (sales/tills),
+`failed`/`skipped_unsupported` counts, `last_push_at`. The cloud stamps `last_seen_at` and derives the
+hub's **clock skew** from its `sent_at` (a drifting clock mis-buckets the business day — measured, not
+assumed). `GET /api/hub/fleet` (`branch`/`exec`, RLS-scoped) flags `stale` + `needs_attention`, so a box
+that quietly stops replaying — sitting on un-banked cash — is visible. Table `hub_heartbeats` (0296).
+
+## Phase 4b — remaining fleet operations (PLANNED)
 
 Hub heartbeat + version into the `/platform` console (god view), staged auto-update channel, on-hub DB
 backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC controls.
@@ -151,7 +177,8 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 | 1 | 1 PR (snapshot export/import + `hub/` appliance + runbook) — DELIVERED | — |
 | 2a | 1 PR (sales replay + ingest + BRANCH-04 + reconciliation) — DELIVERED | 1 |
 | 2b + 3 | 1 PR (buffet replay + diner-QR-on-hub proof + payments honesty) — DELIVERED | 2a |
-| 2c | ~2 PRs (loyalty/till-Z/stock up-sync; fiscal chain) | 2a |
+| 2c-1 + 4a | 1 PR (till/Z up-sync + BRANCH-05 + fleet heartbeat) — DELIVERED | 2a |
+| 2c-2 | ~2 PRs (loyalty sales, stock ops, fiscal chain, native-till tender fix) | 2c-1 |
 | 3 | ~1–2 PRs (origin plumbing, token minting, payment UX) | 1, 2 |
 | 4 | ~2 PRs (console, update channel, ITGC docs) | 1 |
 
@@ -162,4 +189,5 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 | 0.1 | 2026-07-10 | Platform | Initial plan; Phase 0 delivered in the same PR (PN-24 rev 0.3, UAT-O2C-284..285, e2e `register-offline.spec.ts`). |
 | 0.2 | 2026-07-10 | Platform | Phase 1 (Store Hub MVP) delivered: `modules/hub` signed snapshot export, `db:hub:import` id-stable importer, `hub/` compose appliance + `docs/ops/store-hub-setup.md` runbook, CI harness `hub-snapshot` (20 checks). PN-24 rev 0.4; UAT-O2C-288..289. |
 | 0.3 | 2026-07-10 | Platform | Phase 2a (hub→cloud sales replay) delivered: `db:hub:push` + `hub_push_log` (0291), cloud `POST /api/hub/ingest` (HMAC) + `GET /api/hub/reconciliation`, op pass-through (discount/tip/SC), **new control BRANCH-04** (RCM 205), harness → 27 checks. PN-24 rev 0.5; UAT-O2C-290..291. |
+| 0.5 | 2026-07-10 | Platform | Phases 2c-1 + 4a delivered: hub till/Z-report up-sync (cloud-recomputed expected cash, `TILL_SALES_NOT_SYNCED` completeness gate, 5830 over/short on the shared REV-13 materiality line) + fleet heartbeat/`GET /api/hub/fleet`; **new control BRANCH-05** (RCM 207), migration 0296, harness → **53 checks**. Documents the native-till tender asymmetry; fixes the `captured_at` = push-time bug. PN-24 rev 0.7; UAT-O2C-308..310. |
 | 0.4 | 2026-07-10 | Platform | Phases 2b + 3 delivered: buffet-tier replay (`op.buffet`, cloud-master pricing, canonical-JSON signature) + diner QR self-order proven end-to-end ON the hub (harness → **40 checks**); versioned master pull dropped as superseded (re-price + BRANCH-04 drift); Phase 2c scoped (loyalty/till-Z/fiscal). PN-24 rev 0.6; UAT-O2C-292..293. |
