@@ -142,6 +142,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-289 | Hub import round-trip — tamper-reject, id-stable, idempotent; FoH works on the hub | BRANCH-02 (extension) · ITGC-AC-17 | 24 §7 step 6b, rev 0.4 (`hub-snapshot.ts`) |
 | UAT-O2C-290 | Hub→cloud sales replay — exactly-once, cloud GL, tamper-rejected, skips visible | BRANCH-04 | 24 §7 step 6c, rev 0.5 (`hub-snapshot.ts`) |
 | UAT-O2C-291 | Hub ingest fail-closed + replay fidelity (discount/tip/service charge) | BRANCH-04 | 24 §7 step 6c, rev 0.5 (`hub-snapshot.ts`) |
+| UAT-O2C-292 | Buffet-tier hub sale replays, re-priced from the cloud package master | BRANCH-04 | 24 §7 step 6c, rev 0.6 (`hub-snapshot.ts`) |
+| UAT-O2C-293 | Diner QR self-order end-to-end ON the hub; replay on reconnect | BRANCH-04 · REST-08 | 24 §7 step 6c, rev 0.6 (`hub-snapshot.ts`) |
 | UAT-O2C-026 | Cashier-speed quick-tender & change (UI) | Feature (cashier speed) | 01 §0 |
 | UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
 | UAT-O2C-028 | Diner pulls QR menu | REST-08 | 20 §7 |
