@@ -2199,7 +2199,6 @@
       "when": 2023820000276,
       "tag": "0315_member_ledger_idempotency",
       "breakpoints": true
-<<<<<<< HEAD
     },
     {
       "idx": 316,
@@ -2207,8 +2206,6 @@
       "when": 2023820000277,
       "tag": "0316_stocktake_tenant_isolation",
       "breakpoints": true
-=======
->>>>>>> origin/main
     }
   ]
 }
