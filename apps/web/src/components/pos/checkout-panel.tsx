@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, CheckCircle2, CreditCard, Delete, Printer, QrCode, Send, ArrowLeftRight } from 'lucide-react';
+import { ArrowLeft, Banknote, CheckCircle2, CreditCard, Delete, MessageCircle, Printer, QrCode, Send, ArrowLeftRight } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -36,7 +36,8 @@ export function CheckoutPanel({
   lines: CartLine[];
   onSettle: (p: { method: Method; discountPct: number; cashReceived?: number }) => Promise<SettleResult>;
   onReprint: (saleNo: string) => Promise<void>;
-  onSendReceipt: (saleNo: string, channel: 'email' | 'line', to: string) => Promise<void>;
+  // email/sms need a typed recipient; 'line' resolves the member from the sale server-side (no `to`).
+  onSendReceipt: (saleNo: string, channel: 'email' | 'sms' | 'line', to?: string) => Promise<void>;
   onClose: () => void;
   onFinish: () => void;
   serviceChargePct?: number; // mirrors the register's service-charge so the tendered total matches the cart
@@ -48,6 +49,7 @@ export function CheckoutPanel({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SettleResult | null>(null);
   const [sendTo, setSendTo] = useState('');
+  const [lineBusy, setLineBusy] = useState(false);
 
   const tot = useMemo(() => cartTotals(lines, discountPct, serviceChargePct), [lines, discountPct, serviceChargePct]);
   const cashNum = cash === '' ? null : Number(cash);
@@ -106,18 +108,36 @@ export function CheckoutPanel({
                 <Button onClick={onFinish}>{t('px.chk_next_sale')}</Button>
               </div>
 
-              <div className="mt-1 flex items-center gap-2 border-t pt-3">
-                <Input placeholder={t('px.chk_recipient_ph')} value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
+              <div className="mt-1 space-y-2 border-t pt-3">
+                {/* LINE e-receipt (POS-2): member resolved from the sale server-side — no input needed.
+                    LINE_NOT_LINKED surfaces here when the sale has no LINE-linked member. */}
                 <Button
                   variant="outline"
-                  size="sm"
-                  disabled={!sendTo}
-                  onClick={() => onSendReceipt(result.sale_no, sendTo.includes('@') ? 'email' : 'line', sendTo)
-                    .then(() => notifySuccess(t('px.chk_sent_ok')))
-                    .catch((e) => notifyError((e as Error).message))}
+                  className="w-full"
+                  disabled={lineBusy}
+                  onClick={() => {
+                    setLineBusy(true);
+                    onSendReceipt(result.sale_no, 'line')
+                      .then(() => notifySuccess(t('px.chk_sent_ok')))
+                      .catch((e) => notifyError((e as Error).message))
+                      .finally(() => setLineBusy(false));
+                  }}
                 >
-                  <Send className="size-4" /> {t('px.chk_send')}
+                  <MessageCircle className="size-4" /> {t('px.chk_send_line')}
                 </Button>
+                <div className="flex items-center gap-2">
+                  <Input placeholder={t('px.chk_recipient_ph')} value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!sendTo}
+                    onClick={() => onSendReceipt(result.sale_no, sendTo.includes('@') ? 'email' : 'sms', sendTo)
+                      .then(() => notifySuccess(t('px.chk_sent_ok')))
+                      .catch((e) => notifyError((e as Error).message))}
+                  >
+                    <Send className="size-4" /> {t('px.chk_send')}
+                  </Button>
+                </div>
               </div>
             </>
           )}
