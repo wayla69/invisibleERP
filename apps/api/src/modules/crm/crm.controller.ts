@@ -19,6 +19,14 @@ export class CrmController {
     return this.crm.profile(memberId, user);
   }
 
+  // GET /api/crm/customer-360/:accountNo — CRM-3 Customer 360: joins a CRM-1 account to the money
+  // (AR/credit + statement + deals + quotes + loyalty + NPS/recovery) in ONE read. Read-only aggregator.
+  @Get('customer-360/:accountNo')
+  @Permissions('crm', 'exec', 'ar')
+  customer360(@Param('accountNo') accountNo: string, @CurrentUser() user: JwtUser) {
+    return this.crm.customer360(accountNo, user);
+  }
+
   // POST /api/crm/profiles/refresh — bulk RFM re-profiling for the whole active member base (Phase F2).
   // On-demand counterpart of the scheduled `crm_profile_refresh` BI job — e.g. force-fresh before a big send.
   @Post('profiles/refresh')

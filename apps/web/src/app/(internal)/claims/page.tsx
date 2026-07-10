@@ -17,6 +17,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { statusVariant } from '@/components/ui';
 import { DocSelect } from '@/components/doc-select';
+import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 
 /** Shared find + status-filter toolbar for the claim lists. */
 function FilterBar({
@@ -75,16 +76,35 @@ function SalesClaims() {
     });
   }, [claims, search, statusFilter]);
 
+  // Batch approve/reject waiting sales claims. Reject applies one shared reason to all selected.
+  const batch = useBatchActions<any>({
+    items: filtered,
+    keyOf: (r) => String(r.id),
+    eligible: (r) => r.admin_status === 'Waiting',
+    run: (r, action, reason) => api(`/api/claims/sales/${r.id}`, { method: 'PATCH', body: JSON.stringify({ decision: action, reject_reason: reason }) }),
+    onDone: () => qc.invalidateQueries({ queryKey: ['sales-claims'] }),
+  });
+
   return (
     <div className="space-y-3">
       <StateView q={q}>
         {q.data && (
           <div className="space-y-3">
             <FilterBar search={search} onSearch={setSearch} statuses={statuses} statusFilter={statusFilter} onStatus={setStatusFilter} placeholder={t('hx.cl.search_sales_ph')} count={t('hx.common.count_items', { n: num(filtered.length) })} />
+            <BatchBar
+              eligibleCount={batch.eligibleCount}
+              selectedCount={batch.selectedCount}
+              running={batch.running}
+              onSelectAll={batch.selectAll}
+              onApprove={() => batch.runBatch('approve')}
+              onReject={() => batch.runBatch('reject')}
+              onClear={batch.clear}
+            />
             <DataTable
               rows={filtered}
               rowKey={(r: any) => r.id}
               columns={[
+                batchColumn<any>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (r) => String(r.id) }),
                 { key: 'order_no', label: t('hx.cl.col_order') },
                 { key: 'item_description', label: t('hx.cl.col_item') },
                 { key: 'claimed_qty', label: t('hx.common.qty'), align: 'right', render: (r: any) => num(r.claimed_qty) },

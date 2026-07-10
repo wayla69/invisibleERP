@@ -2,10 +2,10 @@
 
 // CRM-2 — account (company) island: header + contacts + open deals + a light activity timeline across the
 // account's deals. Edit account basics via PATCH; add a contact under this account (duplicate-governed).
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Building2, Pencil, Plus, Target, Users, History } from 'lucide-react';
+import { ArrowLeft, Building2, Pencil, Plus, Target, Users, History, Wallet, FileText, Star, AlertTriangle, Truck } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -103,6 +103,9 @@ export default function AccountClient({ accountNo, initial }: { accountNo: strin
               </div>
               {a.notes && <p className="text-sm text-muted-foreground">{a.notes}</p>}
             </Card>
+
+            {/* CRM-3 — Customer 360: the money joined onto the account (AR/credit + quotes + loyalty) */}
+            <Customer360Card accountNo={accountNo} />
 
             <div className="grid gap-5 lg:grid-cols-2">
               {/* deals */}
@@ -232,5 +235,139 @@ export default function AccountClient({ accountNo, initial }: { accountNo: strin
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ── CRM-3 Customer 360 ────────────────────────────────────────────────────────────────────────────
+// A read-only "see the money before you call" panel on the account page: the company's AR/credit
+// position + statement, this account's CPQ quotes and open-deal value, and the linked loyalty member's
+// standing (RFM/points/NPS/recovery). Sources GET /api/crm/customer-360/:accountNo. Rendered inside the
+// already-'use client' account island, so it needs no directive of its own (inherits the boundary).
+interface C360Payment { date: string | null; ref: string; amount: number; currency: string }
+interface C360Finance {
+  company_level: boolean; open_balance: number; overdue: number; max_overdue_days: number;
+  credit_limit: number; available_credit: number | null; credit_term: string | null;
+  on_hold: boolean; hold_reason: string | null; over_limit: boolean; serious_overdue: boolean;
+  last_payments: C360Payment[];
+}
+interface C360Quote { quote_no: string; status: string; total: number; currency: string; expires_date: string | null }
+interface C360Loyalty {
+  member: { id: number; name: string; tier: string | null; lifetime: number } | null;
+  crm: { rfm_segment: string | null; churn_risk: number | null } | null;
+  nps: { detractor: boolean } | null;
+  recovery_case: { status: string } | null;
+  recent_orders: { order_no: string }[];
+}
+interface C360SalesOrder { order_no: string; status: string; estimated_delivery: string | null }
+interface Customer360 {
+  deals: { open_count: number; open_value: number; weighted_value: number };
+  quotes: C360Quote[];
+  finance: C360Finance | null;
+  loyalty: C360Loyalty | null;
+  sales_orders: { recent: C360SalesOrder[] };
+}
+
+function Customer360Card({ accountNo }: { accountNo: string }) {
+  const { t } = useLang();
+  const q = useQuery<Customer360>({
+    queryKey: ['crm-customer-360', accountNo],
+    queryFn: () => api(`/api/crm/customer-360/${encodeURIComponent(accountNo)}`),
+  });
+  const d = q.data;
+  const fin = d?.finance;
+  const loy = d?.loyalty;
+  const stat = (label: string, value: ReactNode, tone?: 'danger' | 'muted') => (
+    <div className="grid gap-0.5">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`text-sm font-semibold tabular ${tone === 'danger' ? 'text-destructive' : ''}`}>{value}</span>
+    </div>
+  );
+  return (
+    <Card className="gap-3 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-base font-semibold"><Wallet className="size-4" /> {t('crmx.c360_title')}</h3>
+        {fin && (fin.on_hold ? <Badge variant="destructive">{t('crmx.c360_on_hold')}</Badge> : <Badge variant="success">{t('crmx.c360_credit_ok')}</Badge>)}
+      </div>
+      <StateView q={q}>
+        {d && (
+          <div className="grid gap-4">
+            {/* money — company AR/credit */}
+            {fin ? (
+              <div>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
+                  {stat(t('crmx.c360_ar_balance'), baht(fin.open_balance))}
+                  {stat(t('crmx.c360_overdue'), baht(fin.overdue), fin.overdue > 0 ? 'danger' : undefined)}
+                  {stat(t('crmx.c360_max_overdue'), fin.max_overdue_days > 0 ? t('crmx.c360_days', { n: fin.max_overdue_days }) : '—', fin.serious_overdue ? 'danger' : undefined)}
+                  {stat(t('crmx.c360_credit_limit'), fin.credit_limit > 0 ? baht(fin.credit_limit) : '—')}
+                  {stat(t('crmx.c360_available_credit'), fin.available_credit != null ? baht(fin.available_credit) : '—', fin.over_limit ? 'danger' : undefined)}
+                  {stat(t('crmx.c360_deals_open'), `${baht(d.deals.open_value)} · ${d.deals.open_count}`)}
+                </div>
+                {fin.hold_reason && <p className="mt-2 text-xs text-destructive">{fin.hold_reason}</p>}
+                <p className="mt-2 text-xs text-muted-foreground">{t('crmx.c360_company_note')}</p>
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 lg:grid-cols-3">
+              {/* last payments */}
+              <div className="grid gap-1.5">
+                <span className="flex items-center gap-1.5 text-sm font-medium"><Wallet className="size-3.5 text-muted-foreground" /> {t('crmx.c360_last_payments')}</span>
+                {fin && fin.last_payments.length ? fin.last_payments.map((p, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{p.date ? thaiDate(p.date) : '—'} · {p.ref}</span>
+                    <span className="tabular font-medium">{baht(p.amount)}</span>
+                  </div>
+                )) : <span className="text-xs text-muted-foreground">{t('crmx.c360_no_payments')}</span>}
+              </div>
+
+              {/* quotes */}
+              <div className="grid gap-1.5">
+                <span className="flex items-center gap-1.5 text-sm font-medium"><FileText className="size-3.5 text-muted-foreground" /> {t('crmx.c360_quotes_title', { n: d.quotes.length })}</span>
+                {d.quotes.length ? d.quotes.slice(0, 5).map((qt) => (
+                  <div key={qt.quote_no} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{qt.quote_no}</span>
+                    <span className="flex items-center gap-1.5"><Badge variant={statusVariant(qt.status)}>{qt.status}</Badge> <span className="tabular font-medium">{baht(qt.total)}</span></span>
+                  </div>
+                )) : <span className="text-xs text-muted-foreground">{t('crmx.c360_no_quotes')}</span>}
+              </div>
+
+              {/* loyalty */}
+              <div className="grid gap-1.5">
+                <span className="flex items-center gap-1.5 text-sm font-medium"><Star className="size-3.5 text-muted-foreground" /> {t('crmx.c360_loyalty_title')}</span>
+                {loy && loy.member ? (
+                  <div className="grid gap-1 text-xs">
+                    <div className="flex items-center justify-between"><span className="text-muted-foreground">{loy.member.name}</span>{loy.member.tier && <Badge variant="secondary">{loy.member.tier}</Badge>}</div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
+                      <span>{t('crmx.c360_points')}: <span className="tabular font-medium text-foreground">{loy.member.lifetime}</span></span>
+                      {loy.crm?.rfm_segment && <span>{t('crmx.c360_segment')}: <span className="font-medium text-foreground">{loy.crm.rfm_segment}</span></span>}
+                      {loy.crm?.churn_risk != null && <span>{t('crmx.c360_churn')}: <span className="tabular font-medium text-foreground">{loy.crm.churn_risk}</span></span>}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {loy.nps?.detractor && <Badge variant="destructive"><AlertTriangle className="size-3" /> {t('crmx.c360_nps_detractor')}</Badge>}
+                      {loy.recovery_case && <Badge variant="warning">{t('crmx.c360_recovery_open')}</Badge>}
+                    </div>
+                  </div>
+                ) : <span className="text-xs text-muted-foreground">{t('crmx.c360_no_loyalty')}</span>}
+              </div>
+            </div>
+
+            {/* recent company sales orders / deliveries */}
+            <div className="grid gap-1.5">
+              <span className="flex items-center gap-1.5 text-sm font-medium"><Truck className="size-3.5 text-muted-foreground" /> {t('crmx.c360_sales_orders')}</span>
+              {d.sales_orders.recent.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {d.sales_orders.recent.map((o) => (
+                    <span key={o.order_no} className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs">
+                      <span className="text-muted-foreground">{o.order_no}</span>
+                      <Badge variant={statusVariant(o.status)}>{o.status}</Badge>
+                      {o.estimated_delivery && <span className="text-muted-foreground">{thaiDate(o.estimated_delivery)}</span>}
+                    </span>
+                  ))}
+                </div>
+              ) : <span className="text-xs text-muted-foreground">{t('crmx.c360_no_sales_orders')}</span>}
+            </div>
+          </div>
+        )}
+      </StateView>
+    </Card>
   );
 }
