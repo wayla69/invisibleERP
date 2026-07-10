@@ -157,6 +157,7 @@ async function main() {
           expiryDate: ymd(new Date(grDate.getTime() + between(7, 120) * 86400000)), unitCost: String(l.unitPrice),
         })));
         await tx.insert(schema.stockMovements).values(recvLines.map((l) => ({
+          tenantId: T,
           moveDate: grDate, docNo: grNo, moveType: 'GR' as const, itemId: l.itemId, itemDescription: l.itemDescription,
           uom: l.uom, qty: String(l.recv), fromLocation: 'Supplier', toLocation: 'WH-MAIN', refDoc: poNo,
           remarks: vendor.name, createdBy: TAG,
@@ -172,7 +173,7 @@ async function main() {
     await tx.insert(schema.stocktakes).values(stItems.map((c) => {
       const sysQty = onHand.get(c.itemId!) ?? between(500, 20000);
       const phys = Math.max(0, Math.round(sysQty * (0.93 + rnd() * 0.1))); // ±small shrinkage
-      return { stNo, stDate: stDay, itemId: c.itemId, itemDescription: c.itemName, uom: c.uom ?? 'กรัม',
+      return { tenantId: T, stNo, stDate: stDay, itemId: c.itemId, itemDescription: c.itemName, uom: c.uom ?? 'กรัม',
         systemQty: String(sysQty), physicalQty: String(phys), difference: String(phys - sysQty),
         countedBy: TAG, status: 'Posted' as const, remarks: 'นับสต๊อกประจำเดือน' };
     }));
