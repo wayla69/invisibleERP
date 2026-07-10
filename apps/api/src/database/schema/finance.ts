@@ -279,6 +279,7 @@ export const apPaymentRuns = pgTable('ap_payment_runs', {
   totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).default('0'), // Σ gross line amounts
   totalWht: numeric('total_wht', { precision: 14, scale: 2 }).default('0'),       // Σ estimated WHT
   totalNet: numeric('total_net', { precision: 14, scale: 2 }).default('0'),       // Σ net cash out (bank-file total)
+  totalDiscount: numeric('total_discount', { precision: 14, scale: 2 }).default('0'), // Σ early-payment discount taken (FIN-9, EXP-14) — reduces cash out, credited to discount income 4600
   lineCount: integer('line_count').default(0),
   createdBy: text('created_by'),             // proposer (maker)
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -310,7 +311,14 @@ export const apPaymentRunLines = pgTable('ap_payment_run_lines', {
   whtIncomeType: text('wht_income_type'),
   whtRate: numeric('wht_rate', { precision: 6, scale: 4 }),
   whtAmount: numeric('wht_amount', { precision: 14, scale: 2 }),
-  netAmount: numeric('net_amount', { precision: 14, scale: 2 }), // amount − wht (cash out; bank-file detail)
+  netAmount: numeric('net_amount', { precision: 14, scale: 2 }), // amount − wht − discount (cash out; bank-file detail)
+  // Early-payment (dynamic) discount summary (FIN-9, EXP-14) — computed at propose/edit against an Active
+  // ap_discount_terms policy for the vendor (days-early = due_date − run.pay_date) and honoured at execution.
+  daysEarly: integer('days_early'),                                          // due_date − pay_date at propose (>0 = paying early)
+  discountRate: numeric('discount_rate', { precision: 6, scale: 4 }),        // resolved sliding-scale rate applied
+  discountAmount: numeric('discount_amount', { precision: 14, scale: 2 }),   // amount × rate — discount taken (Cr 4600), reduces cash
+  discountAccount: text('discount_account'),                                 // resolved discount-income account (policy default 4600)
+  discountPolicyId: bigint('discount_policy_id', { mode: 'number' }),        // → ap_discount_terms.id applied
   status: text('status').notNull().default('Selected'), // Selected | Paid | Failed
   paymentNo: text('payment_no'),            // APP- minted at execution (existing AP payment path)
   glRef: text('gl_ref'),                    // PAY-AP source_ref of the posted disbursement (clearing key)
@@ -320,4 +328,32 @@ export const apPaymentRunLines = pgTable('ap_payment_run_lines', {
 }, (t) => ({
   byRun: index('idx_ap_payment_run_lines_run').on(t.tenantId, t.runId),
   byGlRef: index('idx_ap_payment_run_lines_glref').on(t.glRef),
+}));
+
+// Dynamic / early-payment discount policy (FIN-9, control EXP-14). A sliding-scale prompt-payment discount
+// schedule offered on open approved AP bills — per-vendor (vendor_id set) or a global default (vendor_id NULL).
+// Maker-checker CHANGE CONTROL: created Draft by 'creditors', activated by a DIFFERENT approvals/gl_close
+// user (self-approval → SOD_VIOLATION); only an Active policy is applied by a payment run, and approving one
+// supersedes the prior Active policy for the same vendor scope. The AP payment run computes the discount at
+// propose/edit and captures it as income (Cr discount_account) at execution, reducing the cash disbursed.
+export const apDiscountTerms = pgTable('ap_discount_terms', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  vendorId: bigint('vendor_id', { mode: 'number' }),          // → vendors.id; NULL = global default policy
+  name: text('name').notNull(),
+  discountPct: numeric('discount_pct', { precision: 6, scale: 4 }).notNull(), // nominal/max rate (e.g. 0.0200 = 2%)
+  minDaysEarly: integer('min_days_early').notNull().default(1),   // must pay ≥ N days before due to earn ANY discount
+  fullDiscountDays: integer('full_discount_days').notNull().default(20), // days-early at/above which the full rate applies
+  prorate: boolean('prorate').notNull().default(true),           // true = rate scales with days_early/fullDiscountDays; false = flat rate once ≥ fullDiscountDays
+  discountAccount: text('discount_account').notNull().default('4600'), // GL income account credited with the discount
+  activeFrom: date('active_from'),                               // optional validity window (inclusive)
+  activeTo: date('active_to'),
+  status: text('status').notNull().default('Draft'),            // Draft | Active | Inactive | Rejected
+  createdBy: text('created_by'),                                // maker (creditors)
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),                              // checker ≠ maker (approvals/gl_close)
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+}, (t) => ({
+  byScope: index('idx_ap_discount_terms_scope').on(t.tenantId, t.status, t.vendorId),
 }));
