@@ -81,6 +81,28 @@ const PrepaidBody = z.object({
 });
 type PrepaidBodyT = z.infer<typeof PrepaidBody>;
 
+// FIN-7b — GL allocation cycle (GL-23). Source pool split to targets by ratio / driver / statistical key.
+const AllocationBody = z.object({
+  name: z.string().min(1),
+  method: z.enum(['ratio', 'driver', 'statistical']),
+  frequency: z.enum(['daily', 'weekly', 'monthly']),
+  pool_amount: z.number().positive(),
+  source_account: z.string().min(1),
+  source_cost_center: z.string().optional(),
+  ledger_code: z.string().optional(),
+  currency: z.string().optional(),
+  memo: z.string().optional(),
+  tenant_id: z.number().optional(),
+  start_date: z.string().optional(),
+  targets: z.array(z.object({
+    target_account: z.string().optional(),
+    cost_center: z.string().optional(),
+    basis: z.number().nonnegative(),
+    memo: z.string().optional(),
+  })).min(1),
+});
+type AllocationBodyT = z.infer<typeof AllocationBody>;
+
 @Controller('api/ledger')
 @Permissions('exec', 'creditors', 'ar')
 export class LedgerController {
@@ -275,6 +297,35 @@ export class LedgerController {
   @HttpCode(200)
   @Permissions('gl_post', 'exec')
   runPrepaid(@CurrentUser() u: JwtUser) { return this.svc.runDuePrepaid(u); }
+
+  // ── GL allocation cycles (GL-23, FIN-7b) ──
+  @Post('allocation')
+  @Permissions('gl_post', 'exec')
+  createAllocation(@Body(new ZodValidationPipe(AllocationBody)) b: AllocationBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.createAllocationCycle({
+      name: b.name, method: b.method, frequency: b.frequency, poolAmount: b.pool_amount,
+      sourceAccount: b.source_account, sourceCostCenter: b.source_cost_center ?? null,
+      ledgerCode: b.ledger_code ?? null, currency: b.currency, memo: b.memo,
+      tenantId: hqTenant(u, b.tenant_id) ?? null, startDate: b.start_date,
+      targets: b.targets.map((t) => ({ target_account: t.target_account ?? null, cost_center: t.cost_center ?? null, basis: t.basis, memo: t.memo })),
+    }, u);
+  }
+
+  @Get('allocation')
+  @Permissions('gl_post', 'gl_close', 'exec')
+  listAllocation(@Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listAllocationCycles(hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
+
+  // Activate / pause a cycle without deleting it (keeps the audit + history).
+  @Post('allocation/:id/active')
+  @HttpCode(200)
+  @Permissions('gl_post', 'exec')
+  setAllocationActive(@Param('id') id: string, @Body(new ZodValidationPipe(ActiveBody)) b: z.infer<typeof ActiveBody>) { return this.svc.setAllocationCycleActive(parseInt(id, 10), b.active); }
+
+  // Post every due cycle now (cron-callable; also rides the scheduler as `gl_allocation_run`).
+  @Post('allocation/run')
+  @HttpCode(200)
+  @Permissions('gl_post', 'exec')
+  runAllocation(@CurrentUser() u: JwtUser) { return this.svc.runDueAllocations(u); }
 
   // ── fiscal periods + year-end close ──
   // Periods are per-tenant (0043). Operations default to the caller's own tenant; HQ/Admin may target a

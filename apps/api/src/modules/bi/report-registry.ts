@@ -50,6 +50,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   purchase_spend: { label: 'สรุปยอดซื้อประจำเดือน', labelEn: 'Monthly purchase spend' },
   // Likewise: each run amortizes one period of every due prepaid schedule (Dr expense / Cr 1280, idempotent).
   gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
+  // FIN-7b (GL-23): each run posts one balanced Draft JE per due allocation cycle (Cr pool / Dr targets by
+  // ratio·driver·statistical key, maker-checker, idempotent per period).
+  gl_allocation_run: { label: 'ปันส่วนต้นทุนตามรอบ', labelEn: 'Run due GL allocation cycles' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
   apply_scheduled_master_changes: { label: 'ปรับข้อมูลหลักตามวันที่มีผล', labelEn: 'Apply date-effective master changes' },

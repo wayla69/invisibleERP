@@ -177,6 +177,59 @@ export const prepaidSchedules = pgTable(
   (t) => ({ byDue: index('idx_prepaid_due').on(t.status, t.nextRunDate) }),
 );
 
+// GL allocation cycles (GL-23, migration 0307). A periodic cost-allocation cycle distributes a source
+// POOL (an amount out of a source account / cost-center) to a set of targets by fixed ratio, a measured
+// driver, or a statistical key (headcount / sqm). Each due run posts ONE balanced JE — Cr the source pool,
+// Dr each target its proportional share (last target absorbs the rounding remainder) — as a DRAFT through
+// the normal maker-checker flow (GL-05), riding the recurring rail (GL-08 pattern). Idempotent per period
+// via the (tenant,source,source_ref,ledger) JE key + next_run_date advance.
+export const allocationCycles = pgTable(
+  'allocation_cycles',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    cycleNo: text('cycle_no').notNull().unique(), // ALC-YYYYMMDD-NNN
+    name: text('name').notNull(),
+    method: text('method').notNull().default('ratio'), // 'ratio' | 'driver' | 'statistical'
+    frequency: text('frequency').notNull(), // 'daily' | 'weekly' | 'monthly'
+    poolAmount: numeric('pool_amount', { precision: 18, scale: 4 }).notNull(), // amount distributed each run
+    sourceAccount: text('source_account').notNull(), // credited (relieved) each run
+    sourceCostCenter: text('source_cost_center'), // optional dimension on the source credit leg
+    ledgerCode: text('ledger_code'), // NULL = shared across all ledgers
+    currency: text('currency').default('THB'),
+    memo: text('memo'),
+    active: text('active').default('true'),
+    nextRunDate: date('next_run_date'),
+    lastRunDate: date('last_run_date'),
+    lastEntryNo: text('last_entry_no'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  // Leading (tenant_id, …) index for the RLS tenant predicate (R1-1) + the due scan.
+  (t) => ({ byTenantDue: index('idx_alloc_cycles_tenant_due').on(t.tenantId, t.nextRunDate) }),
+);
+
+// Allocation targets — the child rows of a cycle. Each target receives pool × (basis / Σbasis); `basis` is
+// the fixed ratio (ratio method) or the driver / statistical-key value (driver / statistical method — the
+// engine distributes proportionally either way). target_account defaults to the cycle's source_account for
+// a pure cost-center reallocation (same account, different cost center).
+export const allocationTargets = pgTable(
+  'allocation_targets',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    cycleId: bigint('cycle_id', { mode: 'number' }).notNull().references(() => allocationCycles.id),
+    targetAccount: text('target_account'), // NULL = cycle.source_account (pure cost-center reallocation)
+    costCenter: text('cost_center'), // consuming cost-center dimension on the debit leg
+    basis: numeric('basis', { precision: 18, scale: 4 }).notNull().default('0'), // weight / driver / stat key
+    memo: text('memo'),
+    sortOrder: bigint('sort_order', { mode: 'number' }).default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  // Leading (tenant_id, …) index (R1-1) that also serves the by-cycle child fetch.
+  (t) => ({ byTenantCycle: index('idx_alloc_targets_tenant_cycle').on(t.tenantId, t.cycleId) }),
+);
+
 // Per-tenant Chart-of-Accounts overlay (0139). The canonical `accounts` table is the GLOBAL, immutable
 // posting universe (the engine hard-references its codes); this table curates a PER-TENANT VIEW over it:
 // which canonical accounts a tenant sees as "active", and how they are named/grouped on that tenant's

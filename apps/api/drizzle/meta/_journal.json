@@ -2150,6 +2150,13 @@
       "when": 2023820000269,
       "tag": "0306_promptpay_store_recon",
       "breakpoints": true
+    },
+    {
+      "idx": 307,
+      "version": "7",
+      "when": 2023820000270,
+      "tag": "0307_gl_allocation_cycles",
+      "breakpoints": true
     }
   ]
 }
