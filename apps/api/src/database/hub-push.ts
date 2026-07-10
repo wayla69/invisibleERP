@@ -85,10 +85,19 @@ export async function pushHubSales(
   deps: { secret: string; send: (batch: HubIngestBatch) => Promise<HubIngestResponse>; sentAt?: string },
 ): Promise<HubPushSummary> {
   // candidates: completed hub sales with no terminal push-log row ('failed' rows are retried)
+  // `cust_pos_sales.payment_method` is the literal 'Dine-in' for restaurant sales — the TENDER row
+  // carries the real method (Cash/Card/PromptPay/…). Replaying with the sale header's value would
+  // stamp every cloud tender 'Dine-in', breaking the cash-vs-card split the till reconciliation needs.
   const candidates: any[] = await db.execute(sql`
-    SELECT s.sale_no, s.total, s.subtotal, s.discount, s.tip, s.service_charge, s.payment_method, s.points_used
+    SELECT s.sale_no, s.total, s.subtotal, s.discount, s.tip, s.service_charge, s.points_used,
+           coalesce(p.method, s.payment_method) AS tender_method
     FROM cust_pos_sales s
     LEFT JOIN hub_push_log l ON l.tenant_id = s.tenant_id AND l.hub_sale_no = s.sale_no AND l.status <> 'failed'
+    LEFT JOIN LATERAL (
+      SELECT method FROM payments
+      WHERE sale_no = s.sale_no AND status IN ('Captured','Refunded')
+      ORDER BY id LIMIT 1
+    ) p ON true
     WHERE s.tenant_id = ${tenantId} AND s.status = 'Completed' AND l.id IS NULL
     ORDER BY s.id`).then((r: any) => r.rows ?? r);
 
@@ -142,7 +151,7 @@ export async function pushHubSales(
       captured_at: new Date(order.paidAt ?? order.openedAt ?? Date.now()).toISOString(),
       lines: skuLines.map((l) => ({ sku: String(l.itemId), qty: num(l.qty), modifier_option_ids: modifierIds(l.modifiers), notes: l.notes ?? undefined })),
       ...(buffet ? { buffet } : {}),
-      method: s.payment_method ?? 'Cash',
+      method: s.tender_method && s.tender_method !== 'Dine-in' ? String(s.tender_method) : 'Cash',
       ...(discount > 0 ? { discount } : {}),
       ...(tip > 0 ? { tip } : {}),
       // checkout computes SC as pct × (subtotal − discount); invert that so the cloud re-derives the
