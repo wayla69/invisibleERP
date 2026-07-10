@@ -9,7 +9,7 @@ import { ChannelOrderService } from './channel-order.service';
 import { BuffetService } from './buffet.service';
 import { PrintService } from '../printing/print.service';
 import { PeripheralsService } from '../peripherals/peripherals.service';
-import { RestaurantOfflineSyncService, type RegisterOfflineSyncBatchDto } from './offline-sync.service';
+import { RestaurantOfflineSyncService, type RegisterOfflineSyncBatchDto, type DineInOfflineSyncBatchDto } from './offline-sync.service';
 import { ReservationService, type CreateReservationDto, type ListReservationsDto } from './reservation.service';
 import { GuestProfileService, type UpsertDiningProfileDto, type AddCompanionDto } from './guest-profile.service';
 import { TipService, type DistributeTipsDto } from './tip.service';
@@ -29,6 +29,16 @@ const FulfillmentBody = z.object({ action: z.enum(['accepted', 'preparing', 'rea
 const OfflineLineBody = z.object({ sku: z.string().optional(), menu_item_id: z.number().int().optional(), qty: z.number().positive(), modifier_option_ids: z.array(z.number().int()).optional(), notes: z.string().optional() }).refine((it) => it.sku != null || it.menu_item_id != null, { message: 'menu item (sku or menu_item_id) required' });
 const OfflineSaleBody = z.object({ client_uuid: z.string().min(1).max(200), device_id: z.string().max(120).optional(), client_seq: z.number().int().optional(), captured_at: z.string().min(1), lines: z.array(OfflineLineBody).min(1).max(100), method: z.string().optional(), discount_pct: z.number().min(0).max(100).optional() });
 const OfflineSyncBody = z.object({ sales: z.array(OfflineSaleBody).min(1).max(200) });
+// POS-6 offline DINE-IN ops: open table / add items / fire captured while offline (settlement stays online).
+const DineInOfflineLineBody = z.object({ sku: z.string().optional(), menu_item_id: z.number().int().optional(), qty: z.number().positive(), modifier_option_ids: z.array(z.number().int()).optional(), notes: z.string().max(500).optional(), course: z.number().int().min(1).max(9).optional() }).refine((it) => it.sku != null || it.menu_item_id != null, { message: 'menu item (sku or menu_item_id) required' });
+const DineInOfflineOpBody = z.object({
+  client_uuid: z.string().min(1).max(200), order_uuid: z.string().min(1).max(200), op: z.enum(['open', 'add', 'fire']),
+  device_id: z.string().max(120).optional(), client_seq: z.number().int().optional(), captured_at: z.string().min(1),
+  table_id: z.number().int().positive().optional(), guest_count: z.number().int().positive().optional(),
+  fulfillment_type: z.enum(['dine_in', 'takeaway', 'delivery', 'pickup']).optional(),
+  lines: z.array(DineInOfflineLineBody).max(100).optional(), course: z.number().int().min(1).max(9).optional(),
+}).refine((o) => o.op !== 'open' || (o.lines?.length ?? 0) > 0, { message: 'an open op requires at least one line' });
+const DineInOfflineSyncBody = z.object({ ops: z.array(DineInOfflineOpBody).min(1).max(200) });
 // Reservations + walk-in waitlist
 const DistributeTipsBody = z.object({
   from: z.string().min(8), to: z.string().min(8),
@@ -135,6 +145,13 @@ export class RestaurantController {
   @Post('offline-sync')
   offlineSyncBatch(@Body(new ZodValidationPipe(OfflineSyncBody)) b: RegisterOfflineSyncBatchDto, @CurrentUser() u: JwtUser) {
     return this.offlineSync.syncBatch(b, u);
+  }
+
+  // POS-6: replay dine-in mutations (open table / add items / fire) captured offline. Idempotent on
+  // (tenant, client_uuid); settlement stays ONLINE (the cashier settles the replayed order via checkout).
+  @Post('offline-sync/dinein')
+  offlineSyncDineIn(@Body(new ZodValidationPipe(DineInOfflineSyncBody)) b: DineInOfflineSyncBatchDto, @CurrentUser() u: JwtUser) {
+    return this.offlineSync.syncDineInBatch(b, u);
   }
 
   // ── floor-plan / tables ──

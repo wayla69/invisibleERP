@@ -122,6 +122,52 @@ async function main() {
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Register offline: trial balance balanced', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
 
+  // ── POS-6: offline DINE-IN ops (open table / add items / fire), settlement stays online ──
+  const dineinSync = (token: string, ops: any[]) => inj('POST', '/api/restaurant/offline-sync/dinein', token, { ops });
+  const dop = (client_uuid: string, order_uuid: string, op: string, extra: any = {}) => ({ client_uuid, order_uuid, op, device_id: 'T01', captured_at: '2026-05-10T09:00:00.000Z', ...extra });
+  const orderItems = (orderNo: string) => cnt(`SELECT count(*)::int n FROM dine_in_order_items di JOIN dine_in_orders o ON di.order_id=o.id WHERE o.order_no='${orderNo}'`);
+  const queuedItems = (orderNo: string) => cnt(`SELECT count(*)::int n FROM dine_in_order_items di JOIN dine_in_orders o ON di.order_id=o.id WHERE o.order_no='${orderNo}' AND di.kds_status='queued'`);
+
+  // 9. open + fire → order created + fired (kitchen gets it); no GL yet (settlement is online).
+  const ou1 = `ord-${uuid()}`; const o1o = `op-${uuid()}`, o1f = `op-${uuid()}`;
+  const bd1 = await dineinSync(sales1, [
+    dop(o1o, ou1, 'open', { client_seq: 1, table_id: undefined, guest_count: 2, lines: [{ sku: 'GP01', qty: 2 }] }),
+    dop(o1f, ou1, 'fire', { client_seq: 2 }),
+  ]);
+  const openNo = (bd1.json.results ?? []).find((r: any) => r.op === 'open')?.order_no as string;
+  const ord1 = (await pg.query(`SELECT status, fired_at FROM dine_in_orders WHERE order_no='${openNo}'`)).rows as any[];
+  ok('Offline dine-in: open+fire → order created + line fired (queued), no sale/GL', bd1.json.summary?.synced === 2 && !!openNo && (await queuedItems(openNo)) === 1 && !!ord1[0]?.fired_at, `sum=${JSON.stringify(bd1.json.summary)} order=${openNo} queued=${await queuedItems(openNo)}`);
+
+  // 10. replay the SAME batch → both duplicate; NO new order, NO double-fire (idempotent on client_uuid).
+  const ordersBefore = await cnt(`SELECT count(*)::int n FROM dine_in_orders WHERE tenant_id=${t1}`);
+  const bd2 = await dineinSync(sales1, [
+    dop(o1o, ou1, 'open', { client_seq: 1, guest_count: 2, lines: [{ sku: 'GP01', qty: 2 }] }),
+    dop(o1f, ou1, 'fire', { client_seq: 2 }),
+  ]);
+  const ordersAfter = await cnt(`SELECT count(*)::int n FROM dine_in_orders WHERE tenant_id=${t1}`);
+  ok('Offline dine-in: replay → both duplicate, no new order / no double-fire', bd2.json.summary?.duplicate === 2 && ordersAfter === ordersBefore && (await orderItems(openNo)) === 1, `dup=${bd2.json.summary?.duplicate} before=${ordersBefore} after=${ordersAfter} items=${await orderItems(openNo)}`);
+
+  // 11. add op resolves to the open order by order_uuid and appends a line (1 → 2 line rows).
+  const bd3 = await dineinSync(sales1, [dop(`op-${uuid()}`, ou1, 'add', { client_seq: 3, lines: [{ sku: 'GP01', qty: 1 }] })]);
+  ok('Offline dine-in: add op resolves to the open order (+1 line = 2 rows)', (bd3.json.results ?? [])[0]?.status === 'synced' && (bd3.json.results ?? [])[0]?.order_no === openNo && (await orderItems(openNo)) === 2, `${JSON.stringify((bd3.json.results ?? [])[0])} items=${await orderItems(openNo)}`);
+
+  // 12. add whose open op never synced (unknown order_uuid) → failed OFFLINE_ORDER_NOT_SYNCED (retryable).
+  const bd4 = await dineinSync(sales1, [dop(`op-${uuid()}`, `ord-${uuid()}`, 'add', { client_seq: 1, lines: [{ sku: 'GP01', qty: 1 }] })]);
+  ok('Offline dine-in: add with no synced open → failed OFFLINE_ORDER_NOT_SYNCED', (bd4.json.results ?? [])[0]?.status === 'failed' && (bd4.json.results ?? [])[0]?.error === 'OFFLINE_ORDER_NOT_SYNCED', JSON.stringify((bd4.json.results ?? [])[0]));
+
+  // 13. one batch, ops out of sequence → server sorts by client_seq so open applies before add/fire (all synced).
+  const ou3 = `ord-${uuid()}`;
+  const bd5 = await dineinSync(sales1, [
+    dop(`op-${uuid()}`, ou3, 'fire', { client_seq: 3 }),
+    dop(`op-${uuid()}`, ou3, 'add', { client_seq: 2, lines: [{ sku: 'GP01', qty: 1 }] }),
+    dop(`op-${uuid()}`, ou3, 'open', { client_seq: 1, lines: [{ sku: 'GP01', qty: 1 }] }),
+  ]);
+  ok('Offline dine-in: out-of-order batch replays open→add→fire by client_seq (all synced)', bd5.json.summary?.synced === 3, JSON.stringify(bd5.json.summary));
+
+  // 14. tenant-scoped resolution: T2 cannot resolve T1's order_uuid → failed (RLS/tenant isolation).
+  const bd6 = await dineinSync(sales2, [dop(`op-${uuid()}`, ou1, 'add', { client_seq: 1, lines: [{ sku: 'GP01', qty: 1 }] })]);
+  ok('Offline dine-in: tenant-scoped resolution — T2 cannot resolve T1 order_uuid', (bd6.json.results ?? [])[0]?.status === 'failed', JSON.stringify((bd6.json.results ?? [])[0]));
+
   console.log('\n── POS Touch-register offline sync (ขายออฟไลน์ที่หน้าร้าน + ซิงค์) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
