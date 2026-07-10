@@ -100,6 +100,7 @@ import { HcmModule } from './modules/hcm/hcm.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { ChannelAdapterModule } from './modules/channel-adapter/channel-adapter.module';
 import { BranchModule } from './modules/branch/branch.module';
+import { HubModule } from './modules/hub/hub.module';
 import { EssModule } from './modules/ess/ess.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
 import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
@@ -232,6 +233,7 @@ import { MailModule } from './modules/mail/mail.module';
     PricingModule,
     ChannelAdapterModule,
     BranchModule,
+    HubModule,
     EssModule,
     SupplierModule,
     DemandMlModule,

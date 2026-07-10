@@ -265,7 +265,7 @@ export default function RegisterPage() {
           serviceChargePct={serviceChargePct}
           onSettle={settle}
           onReprint={(saleNo) => tm.printReceipt(saleNo)}
-          onSendReceipt={(saleNo, channel, to) => api(`/api/pos/sales/${encodeURIComponent(saleNo)}/receipt/send`, { method: 'POST', body: JSON.stringify({ channel, to }) }).then(() => undefined)}
+          onSendReceipt={(saleNo, channel, to) => api(`/api/pos/sales/${encodeURIComponent(saleNo)}/receipt/send`, { method: 'POST', body: JSON.stringify({ channel, ...(to ? { to } : {}) }) }).then(() => undefined)}
           onClose={() => setCheckout(false)}
           onFinish={finishSale}
         />

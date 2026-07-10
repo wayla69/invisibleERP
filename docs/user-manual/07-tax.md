@@ -1,6 +1,6 @@
 # 07 · Tax
 
-**Status: DRAFT v0.4 · 2026-07-09** · *v0.4 (2026-07-09): RD e-Filing downloads — ภ.ง.ด.3/53 ใบแนบ .txt on the filings tab + CSV working papers (ภาษีขาย/ภาษีซื้อ/ภ.พ.30) on each report tab; purchase-VAT CSV carries filing-readiness notes.* · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
+**Status: DRAFT v0.5 · 2026-07-10** · *v0.5 (2026-07-10): **convert an abbreviated slip to a full tax invoice** (ม.86/4 on buyer request) — new card on `/tax/invoices`; buyer Tax ID required + validated, amounts copied from the slip (never recomputed), one full invoice per slip (control **TAX-10**).* · *v0.4 (2026-07-09): RD e-Filing downloads — ภ.ง.ด.3/53 ใบแนบ .txt on the filings tab + CSV working papers (ภาษีขาย/ภาษีซื้อ/ภ.พ.30) on each report tab; purchase-VAT CSV carries filing-readiness notes.* · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
 
 This chapter is for **accountants** and **finance** staff. It covers VAT, tax
 invoices (full and abbreviated), e-Tax submission, withholding tax (WHT)
@@ -65,6 +65,31 @@ method (or blank checkboxes if none was recorded).
 2. Select the POS sale and issue — no buyer details are required.
 
 **Expected result:** An abbreviated tax invoice is issued for the retail sale.
+
+### Convert an abbreviated slip into a full tax invoice (ม.86/4 on buyer request)
+
+A VAT-registered customer may ask the counter to turn their abbreviated slip into a **full tax invoice**
+so they can claim the input VAT. Do **not** re-key the sale or issue a new invoice by hand — use the
+conversion, which copies the slip's amounts exactly and keeps the VAT counted once.
+
+**Screen:** `/tax/invoices` → the **แปลงใบกำกับอย่างย่อเป็นเต็มรูป (ม.86/4)** card ·
+**Required permission:** `cust_pos` / `pos` / `ar` (the same people who issue tax documents).
+
+1. Pick the customer's **abbreviated invoice (ATV-…)** from the dropdown (or type the number from the slip).
+2. Enter the buyer's details: **name**, **13-digit Tax ID** (required — it is checksum-validated),
+   **branch code** (5 digits; leave blank for `00000` = สำนักงานใหญ่) and **address**.
+3. Press **ออกใบกำกับภาษีเต็มรูป**, then open the **PDF** to print/hand over.
+
+**Expected result:** a full tax invoice (`TIV-…`) is issued with the **same value, VAT and lines as the
+slip** (nothing is recomputed) and the same issue date; the slip flips to status **Replaced** (its number
+is kept — never reused) and the ภ.พ.30 sales-VAT report now shows the full invoice **instead of** the slip,
+so the sale is counted **once**.
+
+> **One full invoice per slip (control TAX-10).** Converting the same slip again returns the **same** full
+> invoice — a second document is never created (enforced in the database). A **voided** slip cannot be
+> converted (`ABB_VOIDED`), only an abbreviated invoice can (`NOT_ABBREVIATED` otherwise), and a wrong
+> buyer Tax ID is rejected (`INVALID_BUYER_TAXID`). Every conversion is written to the tamper-evident
+> audit log with both document numbers and the buyer's Tax ID.
 
 ### View, download or void
 

@@ -16,6 +16,7 @@
     "db:create-god": "tsx src/database/create-god-user.ts",
     "db:reset-password": "tsx src/database/reset-admin-password.ts",
     "db:sync-catalog": "tsx src/database/sync-catalog.ts",
+    "db:hub:import": "tsx src/database/hub-import.ts",
     "db:backfill:pii": "tsx src/database/backfill-encrypt-pii.ts",
     "db:seed:demo": "tsx src/database/seed-demo.ts",
     "db:seed:demo:images": "tsx src/database/seed-demo-images.ts",

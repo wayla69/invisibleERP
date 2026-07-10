@@ -555,6 +555,13 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'acct.col_credit': { th: 'เครดิต', en: 'Credit' },
   'acct.col_balance': { th: 'ยอดคงเหลือ', en: 'Balance' },
 
+  // FIN-7a — dimension filter (TB / GL detail / P&L)
+  'acct.dim_project': { th: 'โครงการ', en: 'Project' },
+  'acct.dim_dept': { th: 'แผนก', en: 'Department' },
+  'acct.dim_branch': { th: 'สาขา', en: 'Branch' },
+  'acct.dim_cc': { th: 'ศูนย์ต้นทุน', en: 'Cost centre' },
+  'acct.dim_all': { th: 'ทั้งหมด', en: 'All' },
+
   // Journal
   'acct.je_draft_saved': { th: 'บันทึกเป็นฉบับร่าง — รออนุมัติจากผู้อื่น (maker-checker): {no}', en: 'Saved as draft — awaiting another approver (maker-checker): {no}' },
   'acct.je_fix_before_save': { th: 'กรุณาแก้ไขรายการให้ถูกต้องและสมดุลก่อนบันทึก', en: 'Please correct the entry and make it balance before saving' },
@@ -933,6 +940,17 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'tax.note_maker_checker': { th: 'เอกสารจะออกเป็นสถานะ "รออนุมัติ" — ผู้อื่น (คนละคนกับผู้ออก) ต้องอนุมัติจึงจะลง GL และมีผลต่อภาษีขาย', en: 'Issued as “PendingApproval” — a different user must approve before it posts to the GL and affects output VAT.' },
   'tax.note_approve': { th: 'อนุมัติ', en: 'Approve' },
   'tax.note_approved': { th: 'อนุมัติเอกสารแล้ว — ลง GL และภาษีขายเรียบร้อย', en: 'Note approved — posted to GL and output VAT.' },
+  // ABB → full conversion (ม.86/4 on buyer request; POS-1, TAX-10)
+  'tax.convert_card': { th: 'แปลงใบกำกับอย่างย่อเป็นเต็มรูป (ม.86/4)', en: 'Convert an abbreviated invoice to full form (s.86/4)' },
+  'tax.convert_abb_doc': { th: 'ใบกำกับภาษีอย่างย่อ (ATV)', en: 'Abbreviated tax invoice (ATV)' },
+  'tax.convert_abb_ph': { th: 'ATV-…', en: 'ATV-…' },
+  'tax.convert_branch_code': { th: 'รหัสสาขาผู้ซื้อ (5 หลัก)', en: 'Buyer branch code (5 digits)' },
+  'tax.convert_taxid_ph': { th: 'เลข 13 หลัก (จำเป็น)', en: '13 digits (required)' },
+  'tax.convert_btn': { th: 'ออกใบกำกับภาษีเต็มรูป', en: 'Issue full tax invoice' },
+  'tax.converted': { th: 'ออกใบกำกับภาษีเต็มรูปแทนใบย่อแล้ว: {doc}', en: 'Full tax invoice issued for the slip: {doc}' },
+  'tax.converted_already': { th: 'ใบย่อนี้ถูกแปลงแล้ว — ใช้ฉบับเดิม {doc}', en: 'This slip was already converted — existing invoice {doc}' },
+  'tax.convert_note': { th: 'ลูกค้าขอใบกำกับภาษีเต็มรูปจากสลิปย่อได้ — ระบบคัดลอกมูลค่า/ภาษีจากใบย่อเดิม (ไม่คำนวณใหม่) ใบย่อจะเปลี่ยนสถานะเป็น Replaced และภาษีขายนับเพียงครั้งเดียว (หนึ่งใบย่อออกเต็มรูปได้ฉบับเดียว)', en: 'A customer may request a full tax invoice for an abbreviated slip — amounts/VAT are copied from the slip (never recomputed), the slip becomes Replaced, and output VAT is counted once (one full invoice per slip)' },
+  'tax.convert_open_pdf': { th: 'เปิด PDF ใบกำกับภาษีเต็มรูป', en: 'Open the full tax invoice PDF' },
   'tax.dl_etax_xml': { th: 'ดาวน์โหลด e-Tax XML (UBL 2.1)', en: 'Download e-Tax XML (UBL 2.1)' },
   'tax.send_etax_email_title': { th: 'ส่ง e-Tax ทางอีเมล (ประทับเวลา ETDA)', en: 'Send e-Tax by email (ETDA timestamp)' },
   'tax.inv_empty_filter_title': { th: 'ไม่พบใบกำกับภาษีที่ตรงกับตัวกรอง', en: 'No tax invoices match the filter' },

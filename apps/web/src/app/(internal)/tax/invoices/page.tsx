@@ -156,6 +156,32 @@ export default function TaxInvoicesPage() {
     onError: (e: any) => notifyError(e.message),
   });
   const canIssueNote = !!noteOrig && !!noteReason && Number(noteAmt) > 0 && !issueNote.isPending;
+
+  // ── แปลงใบกำกับอย่างย่อ → เต็มรูป (ม.86/4 ตามคำขอผู้ซื้อ; TAX-10) ──
+  const [cvDoc, setCvDoc] = useState('');
+  const [cvName, setCvName] = useState('');
+  const [cvTaxId, setCvTaxId] = useState('');
+  const [cvBranch, setCvBranch] = useState('');
+  const [cvAddr, setCvAddr] = useState('');
+  const [cvResult, setCvResult] = useState<string | null>(null);
+  const abbInvs = useQuery<{ invoices: Invoice[] }>({ queryKey: ['tax-invoices', 'abb-for-convert'], queryFn: () => api('/api/tax-invoices?type=abbreviated') });
+  const cvOptions = (abbInvs.data?.invoices ?? []).filter((i) => i.status === 'Issued')
+    .map((i) => ({ value: i.doc_no, label: [thaiDate(i.issue_date), baht(i.grand_total)].filter(Boolean).join(' · ') || undefined }));
+  const convert = useMutation({
+    mutationFn: () =>
+      api<{ doc_no: string; already_converted?: boolean }>(`/api/tax-invoices/abbreviated/${cvDoc}/convert-full`, {
+        method: 'POST',
+        body: JSON.stringify({ buyer: { name: cvName, tax_id: cvTaxId.replace(/\D/g, ''), branch_code: cvBranch || undefined, address: cvAddr } }),
+      }),
+    onSuccess: (r) => {
+      notifySuccess(t(r.already_converted ? 'tax.converted_already' : 'tax.converted', { doc: r.doc_no }));
+      setCvResult(r.doc_no);
+      setCvDoc(''); setCvName(''); setCvTaxId(''); setCvBranch(''); setCvAddr('');
+      qc.invalidateQueries({ queryKey: ['tax-invoices'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const canConvert = !!cvDoc && !!cvName && /^\d{13}$/.test(cvTaxId.replace(/\D/g, '')) && !!cvAddr && (!cvBranch || /^\d{5}$/.test(cvBranch)) && !convert.isPending;
   // maker-checker approval of a PendingApproval credit/debit note (a DIFFERENT user)
   const approveNote = useMutation({
     mutationFn: (docNo: string) => api(`/api/tax-invoices/${docNo}/approve-note`, { method: 'POST' }),
@@ -325,6 +351,53 @@ export default function TaxInvoicesPage() {
             <Plus className="size-4" /> {issueNote.isPending ? t('tax.issuing') : t('tax.note_issue_btn')}
           </Button>
           <p className="text-xs text-muted-foreground">{t('tax.note_maker_checker')}</p>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6 max-w-2xl gap-4">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Receipt className="size-4" /> {t('tax.convert_card')}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="cv-doc">{t('tax.convert_abb_doc')}</Label>
+            <DocSelect id="cv-doc" value={cvDoc} onValueChange={setCvDoc} options={cvOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder={t('tax.convert_abb_ph')} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="cv-name">{t('tax.inv_buyer_name')}</Label>
+              <Input id="cv-name" value={cvName} onChange={(e) => setCvName(e.target.value)} placeholder={t('tax.inv_buyer_name_ph')} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="cv-taxid">{t('tax.taxid_13')}</Label>
+              <Input id="cv-taxid" value={cvTaxId} onChange={(e) => setCvTaxId(e.target.value)} placeholder={t('tax.convert_taxid_ph')} />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="cv-branch">{t('tax.convert_branch_code')}</Label>
+              <Input id="cv-branch" value={cvBranch} onChange={(e) => setCvBranch(e.target.value)} placeholder="00000" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="cv-addr">{t('tax.inv_buyer_addr')}</Label>
+              <Input id="cv-addr" value={cvAddr} onChange={(e) => setCvAddr(e.target.value)} placeholder={t('tax.inv_buyer_addr_ph')} />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button disabled={!canConvert} onClick={() => convert.mutate()}>
+              <Receipt className="size-4" /> {convert.isPending ? t('tax.issuing') : t('tax.convert_btn')}
+            </Button>
+            {cvResult && (
+              <Button variant="outline" size="sm" asChild>
+                <a href={`${BASE}/api/tax-invoices/${cvResult}/pdf`} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="size-4" /> {t('tax.convert_open_pdf')} — {cvResult}
+                </a>
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">{t('tax.convert_note')}</p>
         </CardContent>
       </Card>
 

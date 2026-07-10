@@ -9,7 +9,7 @@ import { buildEtaxInvoiceXml } from './etax-xml';
 import { getSigningMaterial, signEtaxXml } from './etax-sign';
 import { embedEtaxXmlInPdf } from './pdfa3';
 import { EtaxEmailService } from './etax-email.service';
-import { IssueFullBody, type IssueFullDto } from './dto';
+import { IssueFullBody, type IssueFullDto, ConvertAbbBody, type ConvertAbbDto } from './dto';
 import { normalizeA4Template, type A4TemplateConfig } from '../../../common/a4-template';
 import { DocumentTemplatesService } from '../../document-templates/document-templates.service';
 
@@ -52,6 +52,13 @@ export class TaxDocsController {
   @Post('abbreviated/from-sale/:saleNo') @Permissions('cust_pos', 'pos')
   issueAbbreviated(@Param('saleNo') saleNo: string, @CurrentUser() u: JwtUser) {
     return this.svc.issueAbbreviatedFromSale(saleNo, u);
+  }
+
+  // แปลงใบกำกับภาษีอย่างย่อ → เต็มรูป (ม.86/4 ตามคำขอผู้ซื้อ; POS-1, TAX-10). Counter-side like ABB
+  // issuance (cust_pos), plus the full-invoice issuers (ar/pos). Idempotent — one full invoice per ABB.
+  @Post('abbreviated/:docNo/convert-full') @Permissions('cust_pos', 'pos', 'ar')
+  convertAbbreviated(@Param('docNo') docNo: string, @Body(new ZodValidationPipe(ConvertAbbBody)) b: ConvertAbbDto, @CurrentUser() u: JwtUser) {
+    return this.svc.convertAbbreviatedToFull(docNo, b, u);
   }
 
   @Get() @Permissions('ar', 'pos', 'cust_pos')
