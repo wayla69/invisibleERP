@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileText, Receipt, Coins, Ban, Plus, ExternalLink, FileCode, Mail, SearchX } from 'lucide-react';
-import { api } from '@/lib/api';
+import { FileText, Receipt, Coins, Ban, Plus, ExternalLink, FileCode, Mail, SearchX, Download } from 'lucide-react';
+import { api, apiDownload } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -19,7 +19,6 @@ import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DocSelect } from '@/components/doc-select';
-import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -139,7 +138,57 @@ export default function TaxInvoicesPage() {
     onSuccess: (r) => notifySuccess(t('tax.inv_email_sent', { cc: r.cc })),
     onError: (e: any) => notifyError(e.message),
   });
-  const openEmail = (docNo: string) => { setEmailDoc(docNo); setEmailTo(''); };
+  const openEmail = (docNo: string) => { setEmailDoc(docNo); setEmailDocs(null); setEmailTo(''); };
+
+  // ── Bulk actions on the register (multi-select) — each loops the doc's OWN per-row endpoint, so the
+  // per-document controls (SoD on note approval, e-Tax email logging) still fire exactly as one-by-one. ──
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const isSel = (docNo: string) => sel.has(docNo);
+  const toggleSel = (docNo: string) =>
+    setSel((s) => {
+      const n = new Set(s);
+      n.has(docNo) ? n.delete(docNo) : n.add(docNo);
+      return n;
+    });
+  const clearSel = () => setSel(new Set());
+  const selectAllRows = () => setSel(new Set(invoices.map((r) => r.doc_no)));
+  const selectedDocs = invoices.filter((r) => sel.has(r.doc_no)).map((r) => r.doc_no);
+  const selPending = invoices.filter((r) => sel.has(r.doc_no) && r.status === 'PendingApproval').map((r) => r.doc_no);
+
+  // Download every selected doc's PDF sequentially (a blob-anchor per file; parallel blobs can be dropped).
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const downloadSelectedPdfs = async () => {
+    if (!selectedDocs.length) return;
+    setPdfBusy(true);
+    let ok = 0;
+    let fail = 0;
+    for (const d of selectedDocs) {
+      try {
+        await apiDownload(`/api/tax-invoices/${d}/pdf`, `${d}.pdf`);
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setPdfBusy(false);
+    (fail ? notifyError : notifySuccess)(t('taxbulk.pdf_done', { ok: String(ok), fail: String(fail) }));
+  };
+
+  // Bulk e-Tax email — one recipient prompted once in the dialog, applied to every selected doc.
+  const [emailDocs, setEmailDocs] = useState<string[] | null>(null);
+  const [bulkEmailBusy, setBulkEmailBusy] = useState(false);
+  const runBulkEmail = async () => {
+    if (!emailDocs?.length) return;
+    setBulkEmailBusy(true);
+    const results = await Promise.allSettled(
+      emailDocs.map((d) => api(`/api/tax-invoices/${d}/send-etax-email`, { method: 'POST', body: JSON.stringify({ to_email: emailTo }) })),
+    );
+    setBulkEmailBusy(false);
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    (ok < results.length ? notifyError : notifySuccess)(t('taxbulk.email_done', { ok: String(ok), fail: String(results.length - ok) }));
+    setEmailDocs(null); setEmailTo(''); clearSel();
+  };
+  const openBulkEmail = () => { setEmailDocs(selectedDocs); setEmailDoc(null); setEmailTo(''); };
 
   // ── ออกใบลดหนี้ (ม.86/10) / ใบเพิ่มหนี้ (ม.86/9) ──
   const [noteKind, setNoteKind] = useState<'credit_note' | 'debit_note'>('credit_note');
@@ -192,13 +241,17 @@ export default function TaxInvoicesPage() {
 
   // Batch approve — clears several PendingApproval credit/debit notes at once (approve-only; a rejection
   // is a void, handled separately). Each note fires its own /approve-note endpoint (SoD per note).
-  const batch = useBatchActions<Invoice>({
-    items: invoices,
-    keyOf: (r) => r.doc_no,
-    eligible: (r) => r.status === 'PendingApproval',
-    run: (r) => api(`/api/tax-invoices/${r.doc_no}/approve-note`, { method: 'POST' }),
-    onDone: () => qc.invalidateQueries({ queryKey: ['tax-invoices'] }),
-  });
+  const [approveBusy, setApproveBusy] = useState(false);
+  const approveSelected = async () => {
+    if (!selPending.length) return;
+    setApproveBusy(true);
+    const results = await Promise.allSettled(selPending.map((d) => api(`/api/tax-invoices/${d}/approve-note`, { method: 'POST' })));
+    setApproveBusy(false);
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    (ok < results.length ? notifyError : notifySuccess)(t('taxbulk.approve_done', { ok: String(ok), fail: String(results.length - ok) }));
+    clearSel();
+    qc.invalidateQueries({ queryKey: ['tax-invoices'] });
+  };
 
   return (
     <div>
@@ -426,19 +479,41 @@ export default function TaxInvoicesPage() {
                 tone="default"
               />
             </div>
-            <BatchBar
-              eligibleCount={batch.eligibleCount}
-              selectedCount={batch.selectedCount}
-              running={batch.running}
-              onSelectAll={batch.selectAll}
-              onApprove={() => batch.runBatch('approve')}
-              onClear={batch.clear}
-              showReject={false}
-            />
+            {invoices.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2 text-sm">
+                <Button size="sm" variant="ghost" onClick={selectAllRows}>
+                  {t('taxbulk.select_all')} ({invoices.length})
+                </Button>
+                {sel.size > 0 && (
+                  <>
+                    <span className="font-medium">{t('taxbulk.selected_n', { n: String(sel.size) })}</span>
+                    <Button size="sm" variant="outline" disabled={pdfBusy} onClick={downloadSelectedPdfs}>
+                      <Download className="size-4" /> {t('taxbulk.download_pdfs')}
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={bulkEmailBusy} onClick={openBulkEmail}>
+                      <Mail className="size-4" /> {t('taxbulk.email_selected')}
+                    </Button>
+                    {selPending.length > 0 && (
+                      <Button size="sm" disabled={approveBusy} onClick={approveSelected}>
+                        {t('taxbulk.approve_selected', { n: String(selPending.length) })}
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={clearSel}>{t('taxbulk.clear')}</Button>
+                  </>
+                )}
+              </div>
+            )}
             <DataTable
               rows={invoices}
               columns={[
-                batchColumn<Invoice>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (r) => r.doc_no }),
+                {
+                  key: '_sel',
+                  label: '',
+                  sortable: false,
+                  render: (r: Invoice) => (
+                    <input type="checkbox" aria-label={`select ${r.doc_no}`} checked={isSel(r.doc_no)} onChange={() => toggleSel(r.doc_no)} />
+                  ),
+                },
                 { key: 'doc_no', label: t('tax.col_doc_no') },
                 { key: 'issue_date', label: t('dash.col_date'), render: (r: Invoice) => thaiDate(r.issue_date) },
                 { key: 'type', label: t('tax.col_type'), render: (r: Invoice) => typeLabel(r.type) },
@@ -519,12 +594,14 @@ export default function TaxInvoicesPage() {
         )}
       </StateView>
 
-      <Dialog open={!!emailDoc} onOpenChange={(o) => !o && setEmailDoc(null)}>
+      <Dialog open={!!emailDoc || !!emailDocs} onOpenChange={(o) => { if (!o) { setEmailDoc(null); setEmailDocs(null); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t('tax.email_dialog_title', { doc: emailDoc ?? '' })}</DialogTitle>
+            <DialogTitle>
+              {emailDocs ? t('taxbulk.email_dialog_title', { n: String(emailDocs.length) }) : t('tax.email_dialog_title', { doc: emailDoc ?? '' })}
+            </DialogTitle>
             <DialogDescription>
-              {t('tax.email_dialog_desc')}
+              {emailDocs ? t('taxbulk.email_dialog_desc') : t('tax.email_dialog_desc')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
@@ -532,10 +609,16 @@ export default function TaxInvoicesPage() {
             <Input id="email-to" type="email" placeholder={t('tax.buyer_email_ph')} value={emailTo} onChange={(e) => setEmailTo(e.target.value)} />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEmailDoc(null)}>{t('tax.close')}</Button>
-            <Button onClick={() => sendEmail.mutate()} disabled={!emailTo.includes('@') || sendEmail.isPending}>
-              <Mail className="size-4" /> {t('tax.send_email')}
-            </Button>
+            <Button variant="outline" onClick={() => { setEmailDoc(null); setEmailDocs(null); }}>{t('tax.close')}</Button>
+            {emailDocs ? (
+              <Button onClick={runBulkEmail} disabled={!emailTo.includes('@') || bulkEmailBusy}>
+                <Mail className="size-4" /> {t('taxbulk.email_selected')}
+              </Button>
+            ) : (
+              <Button onClick={() => sendEmail.mutate()} disabled={!emailTo.includes('@') || sendEmail.isPending}>
+                <Mail className="size-4" /> {t('tax.send_email')}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
