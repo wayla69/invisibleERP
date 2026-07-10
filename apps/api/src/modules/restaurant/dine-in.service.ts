@@ -16,6 +16,7 @@ import { RecipeService } from '../menu/recipe.service';
 import { MemberService } from '../loyalty/member.service';
 import { GiftCardService } from '../giftcards/gift-card.service';
 import { PromoEngineService } from '../marketing/promo-engine.service';
+import { VouchersService, type VoucherCheckoutPreview } from '../campaigns/vouchers.service';
 import { PricingService } from '../pricing/pricing.service';
 import { promotions, promoRedemptions } from '../../database/schema';
 import { roundCurrency } from '../tax/money';
@@ -36,6 +37,7 @@ export class DineInService {
     private readonly taxInvoice: TaxInvoiceService,
     private readonly menu: MenuService,
     private readonly promo: PromoEngineService,
+    private readonly vouchers: VouchersService,
     private readonly recipe: RecipeService,
     private readonly member: MemberService,
     private readonly gift: GiftCardService,
@@ -266,9 +268,11 @@ export class DineInService {
     }
     const saleNo = await this.mintSaleNo(o.tenantId);
     const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, {
-      orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts, memberId: dto.member_id, pointsRedeem, tip: dto.tip, giftCardNo: dto.gift_card_no, giftCardAmount: dto.gift_card_amount,
+      orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, voucherCode: dto.voucher_code, lineDiscounts: dto.line_discounts, memberId: dto.member_id, pointsRedeem, tip: dto.tip, giftCardNo: dto.gift_card_no, giftCardAmount: dto.gift_card_amount,
       applyPricingRules: dto.apply_pricing_rules,
-      pricing: dto.apply_pricing_rules ? { channel: dto.channel ?? 'dine_in', location: dto.location, partySize: dto.party_size ?? o.guestCount ?? 0, serviceChargePct: dto.service_charge_pct, serviceMinParty: dto.service_min_party, rounding: dto.rounding } : undefined,
+      // pricing.channel also gates a channel-scoped voucher (POS-3) — thread it even when rules are off
+      // (every other pricing.* consumer is gated on applyPricingRules, so this changes nothing else).
+      pricing: dto.apply_pricing_rules ? { channel: dto.channel ?? 'dine_in', location: dto.location, partySize: dto.party_size ?? o.guestCount ?? 0, serviceChargePct: dto.service_charge_pct, serviceMinParty: dto.service_min_party, rounding: dto.rounding } : { channel: dto.channel ?? 'dine_in' },
     });
     // tender the SALE-MONEY cash (= total − gift draw-down on the bill); gift is already settled as the 2200
     // draw, not a drawer payment. payments.amount excludes tip (tip rides separately) so the Z-report's
@@ -284,7 +288,7 @@ export class DineInService {
 
   // shared: insert cust_pos_sales + items + GL from a dine-in order, applying line/order/promo discounts.
   // VAT is on the discounted base (Thai rule). opts is optional → no-discount path matches the old behavior.
-  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number; memberId?: number; pointsRedeem?: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number }; tip?: number; giftCardNo?: string; giftCardAmount?: number; applyPricingRules?: boolean; pricing?: { channel?: string; location?: string; partySize?: number; serviceChargePct?: number; serviceMinParty?: number; surchargePct?: number; rounding?: number; at?: string } }) {
+  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; voucherCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number; memberId?: number; pointsRedeem?: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number }; tip?: number; giftCardNo?: string; giftCardAmount?: number; applyPricingRules?: boolean; pricing?: { channel?: string; location?: string; partySize?: number; serviceChargePct?: number; serviceMinParty?: number; surchargePct?: number; rounding?: number; at?: string } }) {
     const db = this.db;
     const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, Number(o.id)), ne(dineInOrderItems.kdsStatus, 'voided')));
@@ -332,6 +336,16 @@ export class DineInService {
       pe = await this.promo.applyPromo({ code: opts.promoCode, subtotalNet, itemIds: items.map((i: any) => String(i.itemId ?? i.name)), tenantId: o.tenantId ?? null });
       orderDisc = Math.max(orderDisc, pe.discount); // promo takes over as the order discount
     }
+    // POS-3: voucher/coupon code (campaign voucher OR loyalty member-coupon — one redemption surface).
+    // Validation throws coded errors (VOUCHER_EXPIRED / VOUCHER_MIN_SPEND / VOUCHER_ALREADY_REDEEMED /
+    // COUPON_EXPIRED / ALREADY_USED …) BEFORE any sale row exists. Like a promo it competes for the
+    // order-discount slot (best wins, no stacking); the code is CONSUMED only when its discount actually
+    // applies (a losing voucher is left intact — a single-use code must never be burned for nothing).
+    let vres: VoucherCheckoutPreview | null = null; let voucherApplied = false;
+    if (opts?.voucherCode) {
+      vres = await this.vouchers.previewForCheckout(db, o.tenantId ?? null, opts.voucherCode, subtotalNet, { channel: opts?.pricing?.channel ?? 'dine_in', memberId: opts?.memberId });
+      if (vres.discount > 0 && vres.discount >= orderDisc) { orderDisc = vres.discount; voucherApplied = true; }
+    }
     orderDisc = roundCurrency(Math.min(orderDisc, subtotalNet), 'THB');
     const effTotalPct = grossSum > 0 ? (lineDiscTotal + orderDisc) / grossSum * 100 : 0;
     if (effTotalPct > maxPct + 0.001) throw new BadRequestException({ code: 'DISCOUNT_OVER_LIMIT', message: `Total discount ${r2(effTotalPct)}% exceeds limit ${maxPct}%`, messageTh: 'ส่วนลดเกินเพดานที่อนุญาต' });
@@ -377,6 +391,11 @@ export class DineInService {
       status: 'Completed', notes: `Dine-in ${o.orderNo}`, createdBy: user.username,
     }).returning({ id: custPosSales.id });
     await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h!.id), ...r })));
+    // POS-3: consume the applied voucher/coupon ATOMICALLY inside the sale tx — a guarded UPDATE
+    // (WHERE state='issued' / status='active') so a concurrent second redemption gets 0 rows → 409 and
+    // this sale rolls back with it. sale_ref/used_ref records the redeeming sale. Refund/return policy:
+    // consistent with promo usage, a returned sale does NOT auto-release the code (see PN-19 §7 item 34).
+    if (vres && voucherApplied) await this.vouchers.redeemAtCheckout(db, vres, saleNo, user.username);
     // recipe/BOM: deduct ingredients per sold menu line (allows negative, logs Consume); accumulate COGS if post_cogs
     let recipeCogs = 0;
     for (const l of items) { const ded = await this.recipe.applyDeduction(db, o.tenantId, String(l.itemId ?? ''), n(l.qty), saleNo, user); recipeCogs = roundCurrency(recipeCogs + ded.cost, 'THB'); }
@@ -419,7 +438,7 @@ export class DineInService {
       if (pointsEarned > 0) await db.update(custPosSales).set({ pointsEarned: String(pointsEarned) }).where(eq(custPosSales.id, h!.id));
       if (actualRedeemPoints > 0) await this.member.redeemInTx(db, o.tenantId, opts.memberId, actualRedeemPoints, pointsDisc, saleNo, user.username);
     }
-    return { subtotal: subtotalNet, discount: roundCurrency(orderDisc + pointsDisc, 'THB'), vat, total, tip, total_with_tip: cashDue, gift_applied: giftApplied, cash_due: cashLeg, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal, points_used: actualRedeemPoints, points_earned: pointsEarned, service_charge: serviceCharge, rounding_adjustment: roundingAdj, applied_rules: Array.from(new Set(appliedRules)) };
+    return { subtotal: subtotalNet, discount: roundCurrency(orderDisc + pointsDisc, 'THB'), vat, total, tip, total_with_tip: cashDue, gift_applied: giftApplied, cash_due: cashLeg, journal_no: journalNo, promo_code: pe?.promoCode ?? null, voucher_code: vres?.code ?? null, voucher_applied: voucherApplied, voucher_discount: voucherApplied ? vres!.discount : 0, line_discount_total: lineDiscTotal, points_used: actualRedeemPoints, points_earned: pointsEarned, service_charge: serviceCharge, rounding_adjustment: roundingAdj, applied_rules: Array.from(new Set(appliedRules)) };
   }
 
   // mark order paid + close table/session + idempotent abbreviated tax invoice
