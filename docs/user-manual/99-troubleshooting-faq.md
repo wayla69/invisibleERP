@@ -1,6 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.3** _(2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_ _(2026-07-09: added `AI_TENANT_OPTED_OUT`)_
+**Status: DRAFT v0.4** _(2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_ _(2026-07-09: added `AI_TENANT_OPTED_OUT`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -32,6 +32,15 @@ your code below.
 | `CREDIT_LIMIT` (เกินวงเงินเครดิต) | The order would exceed the customer's credit limit. | Reduce the order, collect payment on overdue invoices, or have a credit manager raise the limit. |
 | `CREDIT_OVERDUE` (ลูกค้ามีหนี้ค้างชำระเกินกำหนด) | The customer has an invoice **90+ days past due** (in default), so new credit orders are blocked even within their limit. | Collect/settle the overdue invoice (or arrange a promise-to-pay) before placing new credit orders; take payment now for a cash sale. |
 | `OVER_RETURN` | Returning more than was originally sold. | Check the original sale quantities; return only up to what was bought. |
+| `VOUCHER_NOT_FOUND` (ไม่พบคูปอง) | The voucher/coupon code entered at checkout doesn't exist (in this shop). | Re-check the code (codes are per shop); confirm it came from this shop's voucher campaign or the member's wallet. |
+| `VOUCHER_NOT_ACTIVE` (แคมเปญคูปองยังไม่เปิดใช้งาน) | The code's campaign hasn't been **approved** yet (or was rejected/ended). | A **different** user than the creator must approve the campaign on `/loyalty/campaigns` (maker-checker, REV-20) before its codes redeem. |
+| `VOUCHER_EXPIRED` / `VOUCHER_NOT_STARTED` (คูปองหมดอายุ / ยังไม่เริ่ม) | Today is outside the voucher campaign's validity window. | Honour only in-window vouchers; marketing can create a fresh campaign if extending. |
+| `VOUCHER_MIN_SPEND` (ยอดซื้อขั้นต่ำ) | The bill is under the campaign's minimum spend. | Add items to reach the minimum, or settle without the voucher. |
+| `VOUCHER_ALREADY_REDEEMED` / `ALREADY_USED` (โค้ด/คูปองถูกใช้แล้ว) | The code was already redeemed — single-use is enforced atomically (two tills racing: exactly one wins). | The code is spent; a customer disputing it can be shown the redemption report (bill no. + time). |
+| `VOUCHER_VOID` (โค้ดถูกยกเลิก) | The code was voided by staff. | See the void reason on the campaign's codes list; issue a new code if warranted. |
+| `VOUCHER_EXHAUSTED` (คูปองแคมเปญถูกใช้ครบจำนวน) | The campaign-wide redemption cap is reached. | Marketing can extend only via a new approved campaign. |
+| `COUPON_KIND_UNSUPPORTED` (คูปองประเภทนี้ใช้เป็นส่วนลดบิลไม่ได้) | A `free_item` wallet coupon was entered as a bill discount. | Redeem free-item coupons via the rewards counter flow (`POST /api/loyalty/coupons/:code/redeem`), not as a checkout discount. |
+| `COUPON_NOT_OWNER` (คูปองนี้เป็นของสมาชิกท่านอื่น) | The wallet coupon belongs to a different member than the one on the sale. | Use the coupon-owner's membership on the sale, or remove the member from the bill. |
 | `BAD_PACKAGE` (แพ็กเกจบุฟเฟ่ต์ไม่ถูกต้อง) | A reservation pre-picked a buffet package that doesn't exist / is retired, or a package was set on an **à-la-carte** booking. | Switch the booking's service mode to **บุฟเฟ่ต์** before picking a tier, or pick an active package (or leave it as *เลือกที่โต๊ะ*). |
 | `CONSENT_REQUIRED` (ยังไม่ได้รับความยินยอม PDPA) | You tried to save a **guest dining profile** (or companion) for a member who hasn't granted the `dining_profile` consent. | Ask the guest for consent and tick the consent checkbox on the profile card — it's recorded in the consent ledger. Without consent the system stores nothing (PDPA). See [Sales & POS → Guest dining profile](./01-sales-and-pos.md). |
 | `OPP_NOT_WON` | You tried to turn a sales opportunity into a project before it was **won** (it's still open, or it was lost). | Move the opportunity to **won** in the CRM pipeline first (`PATCH /api/crm/pipeline/opportunities/{no}/stage {stage:"won"}`), then convert it via **Convert to project**. |

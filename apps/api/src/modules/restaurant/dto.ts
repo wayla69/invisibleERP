@@ -73,6 +73,7 @@ export const CheckoutBody = z.object({
   discount: z.number().nonnegative().optional(),        // order-level FIXED amount (legacy)
   discount_pct: z.number().min(0).max(100).optional(),  // order-level PERCENT
   promo_code: z.string().optional(),
+  voucher_code: z.string().optional(),                  // POS-3: campaign voucher OR loyalty member-coupon code (one redemption surface)
   line_discounts: z.record(z.string(), z.object({ discount_pct: z.number().min(0).max(100).optional(), discount_amt: z.number().nonnegative().optional() })).optional(), // { "<orderItemId>": {...} }
   member_id: z.number().int().positive().optional(),    // loyalty member earning/redeeming on this sale
   redeem_points: z.number().int().nonnegative().optional(),

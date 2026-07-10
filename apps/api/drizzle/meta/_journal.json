@@ -2047,6 +2047,13 @@
       "breakpoints": true
     },
     {
+      "idx": 292,
+      "version": "7",
+      "when": 2023820000255,
+      "tag": "0292_voucher_campaigns",
+      "breakpoints": true
+    },
+    {
       "idx": 293,
       "version": "7",
       "when": 2023820000256,

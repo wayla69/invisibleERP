@@ -156,6 +156,57 @@ async function main() {
   const dsmall = await checkout((await order([{ sku: 'ITEMD', qty: 1 }])).order_no, { apply_pricing_rules: true, party_size: 2, service_charge_pct: 10, service_min_party: 6 });
   ok('Service charge skipped for small party (party 2 < 6)', near(dsmall.json.service_charge, 0), `sc=${dsmall.json.service_charge}`);
 
+  // ── 9. POS-3 voucher campaigns — maker-checker activation, bulk gen, atomic single redemption ──
+  // (REV-20 ToE: create/approve SoD, codes inert until Active, redeem once ok / twice blocked, expired
+  //  rejected, min-spend rejected, void audited, member-coupon wallet redeems at the SAME surface)
+  const vCamp = await inj('POST', '/api/vouchers/campaigns', sales1, { name: 'คูปองเปิดร้าน 10%', kind: 'percent', value: 10, min_spend: 100 });
+  ok('V: voucher campaign staged PendingApproval (maker)', vCamp.json?.status === 'PendingApproval' && vCamp.json?.pending === true, JSON.stringify({ s: vCamp.json?.status }));
+  const vGen = await inj('POST', `/api/vouchers/campaigns/${vCamp.json.id}/codes`, sales1, { count: 3, prefix: 'OPEN' });
+  ok('V: bulk-generated 3 crypto-random codes', vGen.json?.generated === 3 && (vGen.json?.codes ?? []).every((c: string) => c.startsWith('OPEN-')), JSON.stringify(vGen.json?.codes));
+  const [vc1, vc2, vc3] = vGen.json.codes as string[];
+  const vPend = await checkout((await order([{ sku: 'ITEMA', qty: 2 }])).order_no, { voucher_code: vc1 });
+  ok('V: code does NOT redeem while campaign pending → VOUCHER_NOT_ACTIVE', vPend.status === 400 && vPend.json?.error?.code === 'VOUCHER_NOT_ACTIVE', `${vPend.status} ${vPend.json?.error?.code}`);
+  const vSelf = await inj('POST', `/api/vouchers/campaigns/${vCamp.json.id}/approve`, sales1);
+  ok('V: creator cannot self-approve → 403 SOD_VIOLATION', vSelf.status === 403 && vSelf.json?.error?.code === 'SOD_VIOLATION', `${vSelf.status} ${vSelf.json?.error?.code}`);
+  const vAppr = await inj('POST', `/api/vouchers/campaigns/${vCamp.json.id}/approve`, admin);
+  ok('V: a DISTINCT user activates the campaign', (vAppr.status === 200 || vAppr.status === 201) && vAppr.json?.status === 'Active' && vAppr.json?.approved_by === 'admin', `${vAppr.status} ${vAppr.json?.status}`);
+  const vVal = await inj('POST', '/api/vouchers/validate', sales1, { code: vc1, subtotal: 200 });
+  ok('V: validate previews the discount (10% of 200 = 20)', vVal.json?.valid === true && near(vVal.json?.discount, 20), JSON.stringify(vVal.json));
+  const vOk = await checkout((await order([{ sku: 'ITEMA', qty: 2 }])).order_no, { voucher_code: vc1 });
+  ok('V: redeem at checkout — 10% off 200 → total 192.60, voucher_applied', near(vOk.json.discount, 20) && near(vOk.json.total, 192.60) && vOk.json.voucher_applied === true && vOk.json.voucher_code === vc1, `${vOk.status} disc=${vOk.json.discount} tot=${vOk.json.total}`);
+  const vgl = await glFor(vOk.json.sale_no);
+  ok('V: GL balanced, Cr 4000 = 180 (discounted base)', balanced(vgl) && near(leg(vgl, '4000', 'credit'), 180), JSON.stringify(vgl).slice(0, 160));
+  const vRow = (await pg.query(`SELECT state, sale_ref, redeemed_by FROM voucher_codes WHERE code='${vc1}'`)).rows[0] as any;
+  ok('V: code marked redeemed with sale_ref + redeemed_by', vRow?.state === 'redeemed' && vRow?.sale_ref === vOk.json.sale_no && vRow?.redeemed_by === 'sales1', JSON.stringify(vRow));
+  const vTwice = await checkout((await order([{ sku: 'ITEMA', qty: 2 }])).order_no, { voucher_code: vc1 });
+  ok('V: the SAME code again → blocked VOUCHER_ALREADY_REDEEMED (no double redemption)', vTwice.status === 409 && vTwice.json?.error?.code === 'VOUCHER_ALREADY_REDEEMED', `${vTwice.status} ${vTwice.json?.error?.code}`);
+  const vMin = await checkout((await order([{ sku: 'ITEMB', qty: 1 }])).order_no, { voucher_code: vc2 });
+  ok('V: under-minimum sale (50 < min 100) → VOUCHER_MIN_SPEND', vMin.status === 400 && vMin.json?.error?.code === 'VOUCHER_MIN_SPEND', `${vMin.status} ${vMin.json?.error?.code}`);
+  const vVoid = await inj('POST', `/api/vouchers/codes/${vc3}/void`, sales1, { reason: 'พิมพ์ผิด' });
+  ok('V: void an issued code (audited: voided_by + reason)', vVoid.json?.state === 'void' && vVoid.json?.voided_by === 'sales1', JSON.stringify(vVoid.json));
+  const vUseVoid = await checkout((await order([{ sku: 'ITEMA', qty: 2 }])).order_no, { voucher_code: vc3 });
+  ok('V: a voided code cannot redeem → VOUCHER_VOID', vUseVoid.status === 409 && vUseVoid.json?.error?.code === 'VOUCHER_VOID', `${vUseVoid.status} ${vUseVoid.json?.error?.code}`);
+  // expired campaign: approved but valid_to on a past Bangkok day → its codes are rejected
+  const yest = new Date(Date.now() + 7 * 3600 * 1000 - 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const vExpC = await inj('POST', '/api/vouchers/campaigns', sales1, { name: 'หมดอายุแล้ว', kind: 'amount', value: 30, valid_to: yest });
+  await inj('POST', `/api/vouchers/campaigns/${vExpC.json.id}/approve`, admin);
+  const vExpG = await inj('POST', `/api/vouchers/campaigns/${vExpC.json.id}/codes`, sales1, { count: 1 });
+  const vExp = await checkout((await order([{ sku: 'ITEMA', qty: 2 }])).order_no, { voucher_code: vExpG.json.codes[0] });
+  ok('V: expired campaign code → VOUCHER_EXPIRED', vExp.status === 400 && vExp.json?.error?.code === 'VOUCHER_EXPIRED', `${vExp.status} ${vExp.json?.error?.code}`);
+  // codes CSV export (existing text/csv download pattern)
+  const vCsv = await app.inject({ method: 'GET', url: `/api/vouchers/campaigns/${vCamp.json.id}/codes.csv`, headers: { authorization: `Bearer ${sales1}` } });
+  ok('V: codes CSV export streams text/csv with the codes', vCsv.statusCode === 200 && String(vCsv.headers['content-type']).includes('text/csv') && vCsv.body.includes(vc2!), `${vCsv.statusCode} ${vCsv.headers['content-type']}`);
+  // loyalty member-coupon wallet redeems through the SAME checkout surface (POS-3 item 4)
+  const vMem = await inj('POST', '/api/loyalty/members', sales1, { name: 'คูปองวอลเล็ต', phone: '0810009901' });
+  const vCpn = await inj('POST', '/api/loyalty/coupons/issue', sales1, { member_id: vMem.json.member_id ?? vMem.json.id, kind: 'amount', value: 25 });
+  const cpnCode = vCpn.json.code as string;
+  const vCpnVal = await inj('POST', '/api/vouchers/validate', sales1, { code: cpnCode, subtotal: 200 });
+  ok('V: wallet coupon validates at the same surface (amount 25)', vCpnVal.json?.valid === true && vCpnVal.json?.source === 'coupon' && near(vCpnVal.json?.discount, 25), JSON.stringify(vCpnVal.json));
+  const vCpnOk = await checkout((await order([{ sku: 'ITEMA', qty: 2 }])).order_no, { voucher_code: cpnCode });
+  ok('V: wallet coupon redeems at checkout (200−25 → total 187.25)', near(vCpnOk.json.discount, 25) && near(vCpnOk.json.total, 187.25) && vCpnOk.json.voucher_applied === true, `disc=${vCpnOk.json.discount} tot=${vCpnOk.json.total}`);
+  const vCpnTwice = await checkout((await order([{ sku: 'ITEMA', qty: 2 }])).order_no, { voucher_code: cpnCode });
+  ok('V: the used wallet coupon again → ALREADY_USED', vCpnTwice.status === 409 && vCpnTwice.json?.error?.code === 'ALREADY_USED', `${vCpnTwice.status} ${vCpnTwice.json?.error?.code}`);
+
   await app.close();
   await pg.close();
 
