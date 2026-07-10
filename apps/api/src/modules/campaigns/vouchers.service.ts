@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { eq, and, desc, isNull, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { voucherCampaigns, voucherCodes, memberCoupons } from '../../database/schema';
@@ -11,7 +11,7 @@ import type { JwtUser } from '../../common/decorators';
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 // unambiguous code alphabet (no 0/O/1/I) — codes are read out / typed at the till
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const randomCode = (len = 8) => Array.from(randomBytes(len)).map((b) => ALPHABET[b % ALPHABET.length]).join('');
+const randomCode = (len = 8) => Array.from({ length: len }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
 
 // What the checkout redemption path needs to apply + atomically consume one code. `source` distinguishes
 // a campaign voucher code from a loyalty member-coupon (both redeem through the SAME surface — POS-3).
