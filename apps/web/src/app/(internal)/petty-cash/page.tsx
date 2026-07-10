@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/form-controls';
+import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 
 const reqStatusVariant = (s: string) => (s === 'Approved' ? 'success' : s === 'Rejected' ? 'destructive' : s === 'Settled' ? 'secondary' : 'warning');
 const REQ_STATUS_KEY: Record<string, string> = { PendingApproval: 'fin.pending', Approved: 'fin.approved', Rejected: 'fnx.petty.status_rejected', Settled: 'fnx.petty.status_settled' };
@@ -178,6 +179,15 @@ function ApprovalsTab() {
     onError: (e: any) => notifyError(e.message),
   });
   const pending: any[] = q.data?.requests ?? [];
+  const batch = useBatchActions<any>({
+    items: pending,
+    keyOf: (r) => String(r.req_no),
+    run: (r, action, reason) =>
+      action === 'approve'
+        ? api(`/api/finance/petty-cash/requests/${r.req_no}/approve`, { method: 'POST' })
+        : api(`/api/finance/petty-cash/requests/${r.req_no}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    onDone: refresh,
+  });
   return (
     <div className="space-y-4">
       <StatCard label={t('fnx.petty.pending_stat')} value={num(pending.length)} icon={HandCoins} tone={pending.length ? 'warning' : 'success'} className="max-w-xs" />
@@ -185,10 +195,21 @@ function ApprovalsTab() {
         <p className="text-xs text-muted-foreground">{t('fnx.petty.approvals_note')}</p>
         <StateView q={q}>
           {q.data && (
+            <>
+            <BatchBar
+              eligibleCount={batch.eligibleCount}
+              selectedCount={batch.selectedCount}
+              running={batch.running}
+              onSelectAll={batch.selectAll}
+              onApprove={() => batch.runBatch('approve')}
+              onReject={() => batch.runBatch('reject')}
+              onClear={batch.clear}
+            />
             <DataTable
               rows={pending}
               emptyState={{ icon: HandCoins, title: t('fnx.petty.pending_empty_title') }}
               columns={[
+                batchColumn<any>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (r) => String(r.req_no) }),
                 { key: 'req_no', label: t('dash.col_no') },
                 { key: 'kind', label: t('fnx.petty.col_kind'), render: (r: any) => (r.kind === 'advance' ? t('fnx.petty.kind_advance') : t('fnx.petty.kind_expense')) },
                 { key: 'payee', label: t('fnx.petty.col_payee'), render: (r: any) => r.payee ?? '—' },
@@ -203,6 +224,7 @@ function ApprovalsTab() {
                 ) },
               ]}
             />
+            </>
           )}
         </StateView>
       </Card>

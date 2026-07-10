@@ -1,4 +1,4 @@
--- 0301_fs_report_definitions — FIN-4 Statutory FS pack. A tenant-defined financial-statement layout: the
+-- 0302_fs_report_definitions — FIN-4 Statutory FS pack. A tenant-defined financial-statement layout: the
 -- reusable row-grouping ("financial report builder") that the notes / SOCE / DBD e-Filing exports ride on.
 -- statement_type selects which base figures the renderer pulls (bs = cumulative as-of balances; pl = period
 -- figures; notes = per-note account mapping + policy-note text). config is the JSON layout (groups / notes /

@@ -185,6 +185,8 @@ export class RestaurantController {
 
   // ── KDS ──
   @Get('kds/feed') feed(@CurrentUser() u: JwtUser) { return this.kds.feed(u); }
+  @Get('kds/expo') kdsExpo(@CurrentUser() u: JwtUser) { return this.kds.expo(u); }            // order-ready pass (POS-4)
+  @Get('kds/load') kdsLoad(@CurrentUser() u: JwtUser) { return this.kds.stationLoad(u); }     // per-station load + bump/recall counts (POS-4)
   @Patch('kds/items/:id') itemAction(@Param('id') id: string, @Body(new ZodValidationPipe(KdsActionBody)) b: KdsActionDto, @CurrentUser() u: JwtUser) { return this.dineIn.itemTransition(+id, b.action, b.reason, u); }
   @Get('kds/stations') stations(@CurrentUser() u: JwtUser) { return this.kds.listStations(u); }
 
