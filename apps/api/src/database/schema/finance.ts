@@ -72,6 +72,82 @@ export const arReceiptApplications = pgTable('ar_receipt_applications', {
   byBatch: index('idx_ar_apply_batch').on(t.tenantId, t.batchNo),
 }));
 
+// AR/AP netting & contra settlement (docs/41 FIN-8, REV-23, migration 0309) — a counterparty that is BOTH
+// a customer (AR) and a vendor (AP) can have its open AR offset against its open AP with a single contra JE
+// (Dr 2000 AP / Cr 1100 AR) that clears both sub-ledgers up to the netted amount, leaving the residual open.
+//
+// netting_agreements — the counterparty mapping + agreement/threshold. One row links a customer tenant (AR)
+// to a vendor (AP) for our company (tenant_id = the netting company, RLS). netting_enabled gates whether
+// netting is permitted; threshold (nullable) is a per-counterparty cap on the net amount of any one
+// settlement. customer_tenant_id / vendor_id are FK columns (NOT the RLS tenant_id) so the generic RLS loop
+// skips them.
+export const nettingAgreements = pgTable('netting_agreements', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // RLS — our (netting) company
+  customerTenantId: bigint('customer_tenant_id', { mode: 'number' }).references(() => tenants.id).notNull(), // the AR customer
+  vendorId: bigint('vendor_id', { mode: 'number' }).references(() => vendors.id).notNull(),                  // the AP vendor
+  vendorName: text('vendor_name'),          // denorm — AP bills match by name OR id
+  counterpartyName: text('counterparty_name'),
+  currency: text('currency').default('THB'),
+  nettingEnabled: boolean('netting_enabled').notNull().default(true),
+  threshold: numeric('threshold', { precision: 14, scale: 2 }), // null = no per-settlement cap
+  notes: text('notes'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uxCounterparty: uniqueIndex('ux_netting_agreement').on(sql`coalesce(${t.tenantId}, 0)`, t.customerTenantId, t.vendorId),
+  byCustomer: index('idx_netting_agreement_customer').on(t.tenantId, t.customerTenantId),
+  byVendor: index('idx_netting_agreement_vendor').on(t.tenantId, t.vendorId),
+}));
+
+// netting_settlements — the maker-checker workflow header + netting-statement head. A settlement is PROPOSED
+// (PendingApproval; no GL, no sub-ledger movement), then APPROVED by a DIFFERENT user (SoD) — only then does
+// the contra JE post and both sub-ledgers clear. net_amount = min(open AR, open AP) [capped by threshold /
+// requested amount].
+export const nettingSettlements = pgTable('netting_settlements', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  settlementNo: text('settlement_no').notNull().unique(), // NET-YYYYMMDD-NNN
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // RLS — our company
+  agreementId: bigint('agreement_id', { mode: 'number' }).references(() => nettingAgreements.id),
+  customerTenantId: bigint('customer_tenant_id', { mode: 'number' }),
+  vendorId: bigint('vendor_id', { mode: 'number' }),
+  vendorName: text('vendor_name'),
+  counterpartyName: text('counterparty_name'),
+  currency: text('currency').default('THB'),
+  arOpen: numeric('ar_open', { precision: 14, scale: 2 }),   // snapshot of open AR at settlement
+  apOpen: numeric('ap_open', { precision: 14, scale: 2 }),   // snapshot of open AP at settlement
+  netAmount: numeric('net_amount', { precision: 14, scale: 2 }).notNull(), // the offset (Dr 2000 / Cr 1100)
+  threshold: numeric('threshold', { precision: 14, scale: 2 }), // snapshot of the agreement cap
+  reason: text('reason').notNull(),
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected
+  proposedBy: text('proposed_by'),
+  proposedAt: timestamp('proposed_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),                             // checker — must differ from proposedBy
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+  jeEntryNo: text('je_entry_no'),                              // the contra JE posted at approval
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byStatus: index('idx_netting_settlement_status').on(t.tenantId, t.status),
+}));
+
+// netting_settlement_lines — the netting statement detail: which AR invoices + AP bills were offset and by
+// how much. side='AR' (ar_invoices.invoice_no) | 'AP' (ap_transactions.txn_no).
+export const nettingSettlementLines = pgTable('netting_settlement_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  settlementId: bigint('settlement_id', { mode: 'number' }).notNull(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // RLS
+  side: text('side').notNull(),          // AR | AP
+  docNo: text('doc_no').notNull(),       // ar_invoices.invoice_no | ap_transactions.txn_no
+  docOpen: numeric('doc_open', { precision: 14, scale: 2 }),      // open balance at settlement
+  appliedAmount: numeric('applied_amount', { precision: 14, scale: 2 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  bySettlement: index('idx_netting_line_settlement').on(t.tenantId, t.settlementId),
+}));
+
 // AR collections / dunning log — one row per dunning action taken on an open invoice. The collections
 // worklist derives current stage from the latest row; the history is the audit trail for the control.
 export const arDunningLog = pgTable('ar_dunning_log', {
