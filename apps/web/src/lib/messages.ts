@@ -555,6 +555,13 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'acct.col_credit': { th: 'เครดิต', en: 'Credit' },
   'acct.col_balance': { th: 'ยอดคงเหลือ', en: 'Balance' },
 
+  // FIN-7a — dimension filter (TB / GL detail / P&L)
+  'acct.dim_project': { th: 'โครงการ', en: 'Project' },
+  'acct.dim_dept': { th: 'แผนก', en: 'Department' },
+  'acct.dim_branch': { th: 'สาขา', en: 'Branch' },
+  'acct.dim_cc': { th: 'ศูนย์ต้นทุน', en: 'Cost centre' },
+  'acct.dim_all': { th: 'ทั้งหมด', en: 'All' },
+
   // Journal
   'acct.je_draft_saved': { th: 'บันทึกเป็นฉบับร่าง — รออนุมัติจากผู้อื่น (maker-checker): {no}', en: 'Saved as draft — awaiting another approver (maker-checker): {no}' },
   'acct.je_fix_before_save': { th: 'กรุณาแก้ไขรายการให้ถูกต้องและสมดุลก่อนบันทึก', en: 'Please correct the entry and make it balance before saving' },
