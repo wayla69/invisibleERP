@@ -1,6 +1,6 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.8 · 2026-07-10** _(v0.8: AR cash application — apply **one customer payment across several invoices** from the new **ตัดรับชำระหลายใบแจ้งหนี้** worksheet on the รายรับ (AR) tab; the unallocated remainder parks **on-account** and can be applied later; big batches need a second approver; reversals need a reason. New control REV-21.)_
+**Status: DRAFT v0.9 · 2026-07-10** _(v0.9: **AR/AP netting** — offset a counterparty that is both a customer and a supplier with a single **contra settlement** (§B5); a netting agreement + per-counterparty threshold authorises it, and a *different* person must approve. New control REV-23. · v0.8: AR cash application — apply **one customer payment across several invoices** from the **ตัดรับชำระหลายใบแจ้งหนี้** worksheet; remainder parks **on-account**; big batches need a second approver; reversals need a reason. New control REV-21.)_
 
 *v0.7 (2026-07-09): bank-statement file import — upload the bank's CSV/XLSX export on `/bank`, Thai/English headers + BE dates auto-detected, auto-match on import.*
 
@@ -525,6 +525,44 @@ range**, and export CSV (`GET /api/finance/ap/statement?vendor=&from=&to=`).
 **closing balance** — reconcile it to the supplier's own statement before you pay.
 Like the customer statement it is **multi-currency**: base THB by default, or add
 **`?currency=USD`** for that currency's documents in their own units.
+
+---
+
+### B5. Net a customer against a supplier (AR/AP netting / contra settlement)
+
+**Screen:** netting (`/finance` → netting) · **Required permission:** `creditors` or `exec`
+to set up and propose; `approvals` or `gl_close` to approve.
+
+When a trading partner is **both a customer (they owe you, AR) and a supplier (you owe them,
+AP)**, you don't have to pay them in full while chasing their invoice — you can **offset** the two
+and settle only the difference. This is *netting* (contra settlement).
+
+**Step 1 — set up a netting agreement (once per counterparty).** A netting agreement authorises
+the offset and records the **customer ↔ supplier** link. Create it with
+`POST /api/finance/netting/agreements` (`customer_no`, `vendor`, optional **threshold** = the most
+that may be netted in one settlement, and `enabled`). Without an enabled agreement a settlement is
+refused (`NETTING_NOT_AGREED` / `NETTING_DISABLED`).
+
+**Step 2 — preview.** `GET /api/finance/netting/preview?customer_no=&vendor=` shows the
+counterparty's **open AR**, **open AP** and the **proposed net** (= the smaller of the two, capped
+by the threshold), plus the residual that will stay open on each side.
+
+**Step 3 — propose (maker).** `POST /api/finance/netting/settlements` (`customer_no`, `vendor`,
+optional `amount`, and a **required reason**) parks the settlement **awaiting approval** — **no
+money and no ledger movement yet**. It appears in the pending-approvals monitor. Guards:
+`REASON_REQUIRED` (a reason is mandatory), `NETTING_EXCEEDS_THRESHOLD` (the net is above the agreed
+cap), `NOTHING_TO_NET` (there must be open AR **and** open AP).
+
+**Step 4 — approve (a different person).** A **different** user approves
+(`POST …/netting/settlements/:no/approve`) — you **cannot approve your own** proposal
+(`SOD_VIOLATION`). On approval a single **contra journal entry** posts (**Dr Accounts Payable /
+Cr Accounts Receivable** for the net amount), the net clears **both** sub-ledgers **oldest invoice/
+bill first**, and any **residual stays open** on the larger side. `POST …/reject` cancels with no
+effect.
+
+**Expected result:** the counterparty's open AR and AP both fall by the netted amount, one contra
+JE explains it, and the **netting statement** (`GET …/netting/settlements/:no`) lists exactly which
+invoices and bills were offset — your evidence for the file.
 
 ---
 
