@@ -124,6 +124,25 @@ async function main() {
   const set7 = await inj('POST', `/api/pos/orders/${o7.order_no}/split/settle`, sales1, { method: 'by_items', assignments: [{ item_id: o7.items[0].item_id, check: 1 }] });
   ok('Split by-item: unassigned item → 400 SPLIT_INCOMPLETE', set7.status === 400 && set7.json.error?.code === 'SPLIT_INCOMPLETE', `${set7.status} ${set7.json.error?.code}`);
 
+  // ── by-seat split (POS-9): the check number IS the seat — seat1(net100)→check1, seat2(net200)→check2 ──
+  const o9 = await makeOrder(sales1, [{ name: 'A', qty: 1, unit_price: 100, station_code: 'hot', seat: 1 }, { name: 'B', qty: 1, unit_price: 200, station_code: 'hot', seat: 2 }]);
+  const pv9 = await inj('POST', `/api/pos/orders/${o9.order_no}/split/preview`, sales1, { method: 'by_seat' });
+  const pt9 = (pv9.json.checks ?? []).map((c: any) => ({ check: c.check, total: c.total }));
+  ok('Split by-seat preview: 2 checks keyed by seat (1→107, 2→214)', pt9.length === 2 && pt9.some((c: any) => c.check === 1 && near(c.total, 107)) && pt9.some((c: any) => c.check === 2 && near(c.total, 214)), JSON.stringify(pt9));
+  const set9 = await inj('POST', `/api/pos/orders/${o9.order_no}/split/settle`, sales1, { method: 'by_seat' });
+  const c9 = set9.json.checks ?? [];
+  ok('Split by-seat settle: seat1=107, seat2=214, 2 distinct sales + ATV + JE, order paid', c9.length === 2 && near(c9[0].total, 107) && near(c9[1].total, 214) && new Set(c9.map((c: any) => c.sale_no)).size === 2 && c9.every((c: any) => /^ATV-/.test(c.tax_invoice_no) && /^JE-/.test(c.journal_no)) && set9.json.order_status === 'paid', JSON.stringify(c9.map((c: any) => c.total)));
+  const seatSplitRows = (await pg.query(`SELECT check_seq FROM pos_check_splits WHERE order_no='${o9.order_no}' ORDER BY check_seq`)).rows as any[];
+  ok('Split by-seat: pos_check_splits.check_seq records the seat number (1,2)', seatSplitRows.length === 2 && Number(seatSplitRows[0].check_seq) === 1 && Number(seatSplitRows[1].check_seq) === 2, JSON.stringify(seatSplitRows));
+
+  // ── by-seat: an unseated (shared) line blocks the split until it is assigned ──
+  const o10 = await makeOrder(sales1, [{ name: 'A', qty: 1, unit_price: 100, station_code: 'hot', seat: 1 }, { name: 'shared', qty: 1, unit_price: 50, station_code: 'hot' }]);
+  const set10 = await inj('POST', `/api/pos/orders/${o10.order_no}/split/settle`, sales1, { method: 'by_seat' });
+  ok('Split by-seat: unseated line → 400 SEAT_UNASSIGNED', set10.status === 400 && set10.json.error?.code === 'SEAT_UNASSIGNED', `${set10.status} ${set10.json.error?.code}`);
+  const asg10 = await inj('POST', `/api/restaurant/orders/${o10.order_no}/seats/assign`, sales1, { item_ids: [o10.items.find((i: any) => i.name === 'shared').item_id], seat: 1 });
+  const set10b = await inj('POST', `/api/pos/orders/${o10.order_no}/split/settle`, sales1, { method: 'by_seat' });
+  ok('Split by-seat: after assigning the shared line to seat 1 → one check of 160.5', asg10.status < 300 && (set10b.json.checks ?? []).length === 1 && near(set10b.json.checks?.[0]?.total, 160.5), `${set10b.status} ${JSON.stringify((set10b.json.checks ?? []).map((c: any) => c.total))}`);
+
   // ── RLS: T2 staff cannot split/settle T1's order ──
   const o8 = await makeOrder(sales1, [kapow(1)]);
   const cross = await inj('POST', `/api/pos/orders/${o8.order_no}/split/preview`, sales2, { method: 'equal', ways: 2 });

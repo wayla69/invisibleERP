@@ -16,6 +16,7 @@ const ItemInput = z.object({
   notes: z.string().optional(),
   est_prep_minutes: z.number().int().positive().optional(),
   course: z.number().int().min(1).max(9).optional(),   // KDS course (default 1) — for course-by-course firing
+  seat: z.number().int().min(1).max(99).optional(),    // seat-level ordering (POS-9): which guest seat ordered this line
 }).refine((it) => it.sku != null || it.menu_item_id != null || (it.name != null && it.unit_price != null), {
   message: 'provide sku/menu_item_id (menu) or name+unit_price (custom item)',
 });
@@ -115,6 +116,12 @@ export const TransferItemsBody = z.object({ item_ids: z.array(z.number().int().p
 
 // merge another table's tab into this one (combined bill)
 export const MergeTablesBody = z.object({ from_table_id: z.number().int().positive() });
+
+// POS-9: (re)assign selected (non-voided) line items to a guest seat (null = shared/table).
+export const AssignSeatBody = z.object({
+  item_ids: z.array(z.number().int().positive()).min(1).max(100),
+  seat: z.number().int().min(1).max(99).nullable(),
+});
 
 export const ZoneBody = z.object({
   name: z.string().min(1), sort_order: z.number().int().optional(),
