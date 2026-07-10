@@ -451,6 +451,56 @@ cash-disbursement entry posts to the ledger. On rejection nothing posts.
 > **Note — separation of duties:** Whoever **raises a purchase** should not also
 > **pay** the supplier (rules R02/R03). The system enforces this.
 
+### B2b. Pay many suppliers at once — a payment run + bank transfer file
+
+When bills pile up, you don't have to pay them one at a time. A **payment run**
+(control **EXP-13**) selects every open bill due by a cutoff date, gets one
+independent approval, pays every line through the normal payment flow, and gives
+you a **bank bulk-transfer file** to upload to your bank.
+
+**Step 1 — propose the run (Accounting / AP Clerk, `creditors`, on `/disbursements`):**
+1. In **รอบจ่ายเงินเจ้าหนี้ (Payment runs)** on `/disbursements`, pick the
+   **due-date cutoff** (ครบกำหนดภายในวันที่), the **pay date**, and the **source bank
+   account** (the approved house-bank the transfer will be debited from). Optionally
+   set a default **WHT tax code** for the batch.
+2. Click **สร้างรอบจ่าย (Propose run)**. The system selects every open approved bill
+   due on/before the cutoff. A bill blocked by the 3-way match, already fully
+   requested, or already sitting in another open run is **skipped** (the response
+   says why).
+3. Review the lines. While the run is a **Draft** you can remove lines or adjust an
+   amount / the WHT per line (**นำออก** on the line). After submitting, lines are
+   locked (`NOT_DRAFT`).
+4. Click **ส่งขออนุมัติ (Submit)**.
+
+**Step 2 — approve (Finance, `approvals` or `gl_close`):** a **different** person
+reviews the run and clicks **อนุมัติรอบจ่าย (Approve run)** (or **ปฏิเสธ**). You cannot
+approve a run you proposed (`SOD_VIOLATION`) — even as Admin.
+
+**Step 3 — execute:** click **สั่งจ่าย (Execute)**. Every line is paid through the
+**same** payment path as a manual payment — the bill settles, withholding tax posts
+to the ledger (2361) and a 50-ทวิ certificate is issued automatically per WHT line.
+The proposer cannot execute either. Executing twice is safe: already-paid lines are
+skipped (**idempotent**), and if a line fails the run stays re-executable for the
+failed lines only.
+
+**Step 4 — download the bank file:** choose a format — **generic CSV**, the
+**SCB / KBank / BBL** bulk-upload presets, or **ISO 20022 (pain.001)** XML — and click
+**ดาวน์โหลดไฟล์ธนาคาร**. The beneficiary account comes from the **vendor master**; if a
+vendor has no bank account on file the file is refused (`VENDOR_BANK_MISSING`) —
+record it first (bank-detail changes need a second person's approval). The file's
+**SHA-256 fingerprint** is recorded on the run and in the audit log, so the file you
+hand to the bank is provably the approved run's file.
+
+> **Note — the bank presets are configurable templates.** The SCB/KBank/BBL column
+> orders follow the common Thai bulk-upload shape; confirm against your bank's
+> current template before first live use (your implementer can adjust the preset).
+
+**Step 5 — clearing:** when the bank statement is imported and auto-matched
+(`/bank`), each run line is marked **ตัดยอดแล้ว (cleared)** — whether the bank debited
+each payment individually or one bulk amount for the whole file. The run page shows
+the cleared progress, so you can see at a glance that the approved money actually
+left the bank.
+
 ### B3. AP aging
 
 1. On the **รายจ่าย (AP)** tab, scroll to **วิเคราะห์อายุเจ้าหนี้ (AP Aging)** (with an
