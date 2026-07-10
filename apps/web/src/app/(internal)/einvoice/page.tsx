@@ -17,6 +17,17 @@ import { DocSelect } from '@/components/doc-select';
 
 type Provider = { key: string; country: string; label: string };
 type Sub = { id: number; doc_ref: string; provider: string; status: string; ref: string };
+type SubmitResult = { status: string; ref: string; detail?: string; sandbox?: boolean; qr?: string | null };
+
+// Status pill: an EXTERNAL provider with no live transport records `pending` (document prepared, not
+// transmitted); the sandbox `stub` shows `accepted (sandbox)` so it's never mistaken for a real filing.
+function StatusPill({ status, sandbox }: { status: string; sandbox?: boolean }) {
+  const tone = status === 'accepted' && !sandbox ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+    : status === 'pending' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+    : status === 'rejected' ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
+    : 'bg-muted text-muted-foreground';
+  return <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${tone}`}>{status}{sandbox ? ' (sandbox)' : ''}</span>;
+}
 
 // C3 (Phase 22) — pluggable e-invoicing. Submit via the configured provider (stub default); no GL.
 export default function EInvoicePage() {
@@ -37,8 +48,8 @@ export default function EInvoicePage() {
   };
   const setProv = useMutation({ mutationFn: (p: string) => api('/api/einvoice/config', { method: 'PUT', body: JSON.stringify({ provider: p }) }), onSuccess: () => cfg.refetch() });
   const submit = useMutation({
-    mutationFn: () => api<{ status: string; ref: string }>('/api/einvoice/submit', { method: 'POST', body: JSON.stringify({ doc: { doc_ref: docRef, seller: 'My Co', buyer: 'Customer', total: Number(total) } }) }),
-    onSuccess: (r) => { setMsg(`${r.status} — ${r.ref}`); subs.refetch(); },
+    mutationFn: () => api<SubmitResult>('/api/einvoice/submit', { method: 'POST', body: JSON.stringify({ doc: { doc_ref: docRef, seller: 'My Co', buyer: 'Customer', total: Number(total) } }) }),
+    onSuccess: (r) => { setMsg(`${r.status}${r.sandbox ? ' (sandbox)' : ''} — ${r.ref}${r.detail ? ` · ${r.detail}` : ''}`); subs.refetch(); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 
@@ -54,6 +65,7 @@ export default function EInvoicePage() {
                 <select className={selectCls} value={cfg.data?.provider ?? 'stub'} onChange={(e) => setProv.mutate(e.target.value)}>
                   {(provs.data?.providers ?? []).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
                 </select>
+                <p className="text-xs text-muted-foreground">{t('mx.ei_transport_note')}</p>
               </div>
               <div className="grid gap-1"><Label>{t('mx.ei_doc_no')}</Label><DocSelect value={docRef} onValueChange={pickDoc} options={docOptions} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} allowManual manualPlaceholder="INV-2026-0001" /></div>
               <div className="grid gap-1"><Label>{t('mx.ei_total')}</Label><Input type="number" value={total} onChange={(e) => setTotal(e.target.value)} /></div>
@@ -73,7 +85,7 @@ export default function EInvoicePage() {
                 columns={[
                   { key: 'doc_ref', label: t('dash.col_no') },
                   { key: 'ref', label: 'Ref', render: (r) => <span className="font-mono text-xs">{r.ref}</span> },
-                  { key: 'status', label: t('fin.col_status') },
+                  { key: 'status', label: t('fin.col_status'), render: (r) => <StatusPill status={r.status} sandbox={(r as any).sandbox} /> },
                 ]}
               />
             </StateView>

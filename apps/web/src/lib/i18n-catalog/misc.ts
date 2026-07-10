@@ -302,6 +302,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.ei_submit_doc': { th: 'ส่งเอกสาร', en: 'Submit document' },
   'mx.ei_title': { th: 'ใบกำกับภาษีอิเล็กทรอนิกส์ (e-Invoicing)', en: 'e-Invoicing' },
   'mx.ei_total': { th: 'ยอดรวม', en: 'Total' },
+  'mx.ei_transport_note': { th: 'ผู้ให้บริการจริง (RD / MyInvois / Peppol) จะ “เตรียมเอกสาร” และขึ้นสถานะ pending จนกว่าจะเชื่อมต่อช่องทางส่งจริง (ต้องมี credential ของหน่วยงาน) — ยังไม่ส่งจริง; ตัวเลือก stub เป็นแซนด์บ็อกซ์สำหรับทดสอบเท่านั้น', en: 'A real provider (RD / MyInvois / Peppol) PREPARES the document and marks it pending until a live transport is wired (authority credentials required) — nothing is transmitted yet; the stub option is a sandbox for testing only' },
   'mx.lc_active_pack': { th: 'ชุดที่ใช้อยู่:', en: 'Active pack:' },
   'mx.lc_applied': { th: 'ใช้ชุด {country} แล้ว (ภาษา {locale})', en: 'Applied the {country} pack (language {locale})' },
   'mx.lc_apply_this': { th: 'ใช้ชุดนี้', en: 'Apply this pack' },
