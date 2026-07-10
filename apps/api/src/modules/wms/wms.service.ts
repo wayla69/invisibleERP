@@ -132,7 +132,7 @@ export class WmsService {
     }
     const [bs] = await db.insert(binStock).values({ tenantId, binId: Number(bin.id), itemId: dto.item_id, lotNo: lot, qty: String(qty), uom: dto.uom ?? null, expiryDate: dto.expiry_date ?? null })
       .onConflictDoUpdate({ target: [binStock.tenantId, binStock.binId, binStock.itemId, binStock.lotNo], set: { qty: sql`${binStock.qty} + ${qty}`, lastUpdated: new Date() } }).returning({ qty: binStock.qty });
-    await db.insert(stockMovements).values({ moveDate: new Date(), docNo: dto.gr_no ?? null, moveType: 'Transfer', itemId: dto.item_id, uom: dto.uom ?? null, qty: String(qty), fromLocation: 'Receiving', toLocation: `BIN:${dto.bin_code}`, refDoc: dto.gr_no ?? null, createdBy: user.username });
+    await db.insert(stockMovements).values({ tenantId, moveDate: new Date(), docNo: dto.gr_no ?? null, moveType: 'Transfer', itemId: dto.item_id, uom: dto.uom ?? null, qty: String(qty), fromLocation: 'Receiving', toLocation: `BIN:${dto.bin_code}`, refDoc: dto.gr_no ?? null, createdBy: user.username });
     if (dto.lot_no) await db.insert(lotLedger).values({ lotNo: dto.lot_no, itemId: dto.item_id, uom: dto.uom ?? null, locationId: dto.bin_code, grNo: dto.gr_no ?? null, qtyIn: String(qty), qtyOut: '0', balance: String(qty), expiryDate: dto.expiry_date ?? null, status: 'Active', moveDate: new Date(), refDoc: dto.gr_no ?? null, createdBy: user.username });
     return { bin_code: dto.bin_code, item_id: dto.item_id, qty: n(bs?.qty) };
   }
@@ -238,7 +238,7 @@ export class WmsService {
         const [bs] = bin ? await tx.select().from(binStock).where(and(eq(binStock.binId, Number(bin.id)), eq(binStock.itemId, line.itemId), eq(binStock.lotNo, lot || ''))).for('update').limit(1) : [null];
         if (!bs || n(bs.qty) < want) { await tx.update(pickListLines).set({ status: 'Short', pickedQty: String(n(bs?.qty)) }).where(eq(pickListLines.id, line.id)); throw new UnprocessableEntityException({ code: 'PICK_SHORT', message: `Insufficient bin stock for ${line.itemId} (have ${n(bs?.qty)}, need ${want})`, messageTh: 'สต็อกในช่องไม่พอ' }); }
         await tx.update(binStock).set({ qty: String(n(bs.qty) - want), lastUpdated: new Date() }).where(eq(binStock.id, bs.id));
-        await tx.insert(stockMovements).values({ moveDate: new Date(), docNo: pickNo, moveType: 'Issue', itemId: line.itemId, uom: line.uom ?? null, qty: String(-want), fromLocation: `BIN:${bin.binCode ?? ''}`, toLocation: 'Shipping', refDoc: p.sourceRef, createdBy: user.username });
+        await tx.insert(stockMovements).values({ tenantId, moveDate: new Date(), docNo: pickNo, moveType: 'Issue', itemId: line.itemId, uom: line.uom ?? null, qty: String(-want), fromLocation: `BIN:${bin.binCode ?? ''}`, toLocation: 'Shipping', refDoc: p.sourceRef, createdBy: user.username });
         if (line.lotNo) await tx.insert(lotLedger).values({ lotNo: line.lotNo, itemId: line.itemId, qtyIn: '0', qtyOut: String(want), balance: String(n(bs.qty) - want), status: 'Active', moveDate: new Date(), refDoc: pickNo, createdBy: user.username });
         await tx.update(pickListLines).set({ pickedQty: String(want), status: 'Picked' }).where(eq(pickListLines.id, line.id));
         picked += want;

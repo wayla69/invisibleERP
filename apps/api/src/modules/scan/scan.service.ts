@@ -88,6 +88,7 @@ export class ScanService {
       for (const l of lines) {
         const qty = n(l.qty);
         await tx.insert(stockMovements).values({
+          tenantId: user.tenantId ?? null,
           moveDate: now, docNo: sessionNo, moveType, itemId: l.itemId, itemDescription: l.itemDescription, uom: l.uom,
           qty: String(moveType === 'Issue' ? -Math.abs(qty) : Math.abs(qty)), fromLocation: s.locationId ?? null, toLocation: s.locationId ?? null,
           refDoc: s.docRef ?? sessionNo, remarks: `Scan session ${s.sessionType}`, createdBy: user.username,
