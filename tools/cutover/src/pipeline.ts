@@ -302,6 +302,64 @@ async function main() {
   const c360Missing = await inj('GET', '/api/crm/customer-360/ACC-DOES-NOT-EXIST', sales1);
   ok('Customer 360: unknown account → 404 ACCOUNT_NOT_FOUND', c360Missing.status === 404 && c360Missing.json.error?.code === 'ACCOUNT_NOT_FOUND', `${c360Missing.status} ${c360Missing.json.error?.code}`);
 
+  // ── CRM-5 — analytics that answer "why" (funnel/velocity, source ROI, forecast, date-bounded win/loss) ──
+
+  // Seed a clean lead→qualify→convert→won path with a KNOWN source so the funnel + source-ROI have signal.
+  const seedLead = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Funnel Lead', company: 'Funnel Co', email: 'funnel@lead.example', source: 'webinar' });
+  const seedLeadNo = seedLead.json.lead_no;
+  await inj('POST', `/api/crm/pipeline/leads/${seedLeadNo}/qualify`, sales1);
+  const conv = await inj('POST', `/api/crm/pipeline/leads/${seedLeadNo}/convert`, sales1, { opportunity_name: 'Funnel Deal', amount: 300000 });
+  const convOppNo = conv.json.opp_no;
+  // Walk it through stages (writes crm_stage_history rows for velocity) then win it.
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${convOppNo}/stage`, sales1, { stage: 'qualification' });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${convOppNo}/stage`, sales1, { stage: 'proposal' });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${convOppNo}/stage`, sales1, { stage: 'won', win_reason: 'best fit' });
+
+  // 31. Funnel conversion: lead → qualified → opportunity → won, with end-to-end conversion %.
+  const funnel = await inj('GET', '/api/crm/pipeline/analytics/funnel', sales1);
+  const fStages = (funnel.json.funnel ?? []).map((s: any) => s.stage);
+  const wonRow = funnel.json.funnel?.find((s: any) => s.stage === 'won');
+  ok('Funnel: 4-stage lead→qualified→opportunities→won with won count ≥ 1',
+    funnel.status === 200 && fStages.join(',') === 'leads,qualified,opportunities,won' && Number(wonRow?.count) >= 1 && funnel.json.overall_conversion_pct > 0,
+    JSON.stringify({ funnel: funnel.json.funnel, conv: funnel.json.overall_conversion_pct }));
+
+  // 32. Velocity / stage-duration derived from crm_stage_history (progression + avg days in stage present).
+  ok('Velocity: stage_progression + time-in-stage from crm_stage_history',
+    Array.isArray(funnel.json.stage_progression) && funnel.json.stage_progression.length >= 1
+      && Array.isArray(funnel.json.velocity)
+      && funnel.json.stage_progression.some((p: any) => p.stage === 'qualification' && p.opportunities_reached >= 1)
+      && 'avg_sales_cycle_days' in funnel.json,
+    JSON.stringify({ progression: funnel.json.stage_progression, velocity: funnel.json.velocity }));
+
+  // 33. Source ROI: lead source → won revenue. The 'webinar' source carries the 300000 won deal.
+  const roi = await inj('GET', '/api/crm/pipeline/analytics/source-roi', sales1);
+  const webinar = roi.json.sources?.find((s: any) => s.source === 'webinar');
+  ok('Source ROI: webinar source → won revenue 300000, win_rate 100%',
+    roi.status === 200 && webinar && near(webinar.won_amount, 300000) && webinar.won === 1 && webinar.win_rate_pct === 100,
+    JSON.stringify({ webinar, total_won: roi.json.total_won }));
+
+  // 34. Forecast categories (commit/best-case/pipeline) + quota attainment + activity leaderboard shapes.
+  const fcast = await inj('GET', '/api/crm/pipeline/analytics/forecast', sales1);
+  ok('Forecast: commit/best-case/pipeline buckets + weighted forecast_amount + quota_attainment array',
+    fcast.status === 200 && fcast.json.categories?.commit && fcast.json.categories?.best_case && fcast.json.categories?.pipeline
+      && typeof fcast.json.forecast_amount === 'number'
+      && Array.isArray(fcast.json.quota_attainment) && fcast.json.quota_attainment.some((q: any) => q.owner === 'sales1' && q.won_amount > 0)
+      && Array.isArray(fcast.json.activity_leaderboard),
+    JSON.stringify({ categories: fcast.json.categories, quota: fcast.json.quota_attainment }));
+
+  // 35. Win/loss is now date-bounded server-side: window_months echoed; a tiny window still returns a summary.
+  const wl = await inj('GET', '/api/crm/pipeline/win-loss?months=1', sales1);
+  ok('Win/loss date-bounded (months window echoed, summary present)',
+    wl.status === 200 && wl.json.window_months === 1 && !!wl.json.summary && Array.isArray(wl.json.by_owner),
+    JSON.stringify({ window: wl.json.window_months, has_summary: !!wl.json.summary }));
+
+  // 36. The 3 CRM-5 report types are registered in the BI registry (scheduler picker).
+  const rtypes = await inj('GET', '/api/bi/report-types', admin);
+  const keys = (rtypes.json.report_types ?? []).map((r: any) => r.key);
+  ok('BI registry exposes crm_funnel + crm_source_roi + crm_forecast report types',
+    rtypes.status === 200 && ['crm_funnel', 'crm_source_roi', 'crm_forecast'].every((k) => keys.includes(k)),
+    JSON.stringify(keys.filter((k: string) => k.startsWith('crm_'))));
+
   await app.close();
 }
 

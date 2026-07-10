@@ -12,6 +12,13 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   project_evm: { label: 'มูลค่าที่ได้รับของพอร์ตโครงการ (EVM)', labelEn: 'Portfolio earned value (EVM)' },
   // CRM win/loss: win rate, loss reasons, by-owner, monthly trend. Read-only.
   crm_win_loss: { label: 'วิเคราะห์ Win/Loss', labelEn: 'CRM win/loss analytics' },
+  // CRM-5 analytics ("why") — read-only aggregators on the CRM spine, all date-bounded server-side.
+  // Funnel conversion (lead→qualified→won) + stage-to-stage progression + time-in-stage velocity (crm_stage_history).
+  crm_funnel: { label: 'วิเคราะห์กรวยการขาย + ความเร็ว', labelEn: 'CRM funnel conversion + velocity' },
+  // Lead source → won revenue (win rate + average deal size per channel).
+  crm_source_roi: { label: 'ผลตอบแทนตามแหล่งที่มา (Source ROI)', labelEn: 'CRM source ROI (won revenue by source)' },
+  // Forecast categories (commit/best-case/pipeline) + quota attainment per owner + activity leaderboard.
+  crm_forecast: { label: 'พยากรณ์การขาย + โควตา', labelEn: 'CRM forecast categories + quota attainment' },
   // Likewise: each run re-profiles the tenant's whole active member base (RFM) so segments stay fresh (F2).
   crm_profile_refresh: { label: 'รีเฟรชโปรไฟล์ลูกค้า (RFM)', labelEn: 'CRM profile refresh (RFM)' },
   // Likewise: each run advances every ACTIVE lifecycle journey — segment-entry sweeps + due steps (G1).
