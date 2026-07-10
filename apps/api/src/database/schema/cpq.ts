@@ -53,7 +53,7 @@ export const quotes = pgTable('quotes', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   quoteNo: text('quote_no').notNull().unique(),
-  // CRM-1 unification (0293): crm_opportunity_id is the LIVE opportunity link (→ crm_opportunities);
+  // CRM-1 unification (0294): crm_opportunity_id is the LIVE opportunity link (→ crm_opportunities);
   // opportunity_id is read-legacy (→ the retired Batch 2A `opportunities` table) — existing rows were
   // repointed (crm_opportunity_id backfilled via legacy_opportunity_id) and no new row writes it.
   opportunityId: bigint('opportunity_id', { mode: 'number' }).references(() => opportunities.id),

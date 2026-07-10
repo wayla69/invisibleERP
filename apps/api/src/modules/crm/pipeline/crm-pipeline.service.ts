@@ -38,7 +38,7 @@ const LEGACY_BY_STAGE_NAME: Record<string, string> = Object.fromEntries(
 
 type StageRow = { id: number | null; name: string; sequence: number; defaultProbability: number; isWon: boolean | null; isLost: boolean | null; isActive?: boolean | null; tenantId?: number | null };
 
-// CRM sales pipeline (REV-17) — the ONE opportunity spine after the CRM-1 unification (migration 0293):
+// CRM sales pipeline (REV-17) — the ONE opportunity spine after the CRM-1 unification (migration 0294):
 // leads → opportunities (stage machine over the tenant-configurable pipeline_stages, every transition
 // audited in crm_stage_history) → activities, on the customer-of-record. Lost is terminal and requires a
 // reason (crm route); won is terminal and weights to 100%. The legacy /api/pipeline routes are thin

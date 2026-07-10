@@ -113,7 +113,7 @@ async function main() {
   const proposalRow = fc2.json.by_stage?.find((r: any) => r.stage === 'Proposal');
   ok('Forecast: Proposal stage weighted = 50000 (50% of 100000)', proposalRow && near(proposalRow.weighted_value, 50000), JSON.stringify(proposalRow));
 
-  // ── CRM-1 unification (migration 0293) — ONE opportunity spine, both routes ────────────────────────
+  // ── CRM-1 unification (migration 0294) — ONE opportunity spine, both routes ────────────────────────
 
   // 13. Unified read: an opp created via the legacy /api/pipeline route is visible via the crm route
   const crmList = await inj('GET', '/api/crm/pipeline/opportunities', sales1);
@@ -175,7 +175,7 @@ async function main() {
   ok('CPQ quote against a dangling opp id → 404 OPP_NOT_FOUND', qBad.status === 404 && qBad.json.error?.code === 'OPP_NOT_FOUND', `${qBad.status} ${qBad.json.error?.code}`);
 
   // 22. Legacy data-migration replay: seed rows in the RETIRED Batch 2A tables and re-run the (idempotent)
-  //     0293 migration — the legacy opportunity + its activity + its CPQ quote must fold into the spine.
+  //     0294 migration — the legacy opportunity + its activity + its CPQ quote must fold into the spine.
   const t1Stages = await db.select().from(s.pipelineStages).where(eq(s.pipelineStages.tenantId, t1));
   const proposalStage = t1Stages.find((st: any) => st.name === 'Proposal');
   const [legOpp] = await db.insert(s.opportunities).values({
@@ -185,7 +185,7 @@ async function main() {
   }).returning();
   await db.insert(s.opportunityActivities).values({ oppId: Number(legOpp!.id), activityType: 'meeting', subject: 'Legacy kickoff', createdBy: 'sales1' });
   await db.insert(s.quotes).values({ tenantId: t1, quoteNo: 'QT-LEG-1', opportunityId: Number(legOpp!.id), customerName: 'Legacy Corp', status: 'Draft', subtotal: '0', discountTotal: '0', total: '0', createdBy: 'sales1' });
-  await pg.exec(readFileSync(join(MIGRATIONS_DIR, '0293_crm_unification.sql'), 'utf8').replace(/-->\s*statement-breakpoint/g, ''));
+  await pg.exec(readFileSync(join(MIGRATIONS_DIR, '0294_crm_unification.sql'), 'utf8').replace(/-->\s*statement-breakpoint/g, ''));
   const migList = await inj('GET', '/api/pipeline/opportunities', sales1);
   const migOpp = migList.json.opportunities?.find((o: any) => o.opp_no === 'OPP-LEG-1');
   ok('Migrated legacy opp visible via /api/pipeline (expected_value mapped)', migOpp && near(migOpp.expected_value, 75000) && migOpp.status === 'Open', JSON.stringify(migOpp));

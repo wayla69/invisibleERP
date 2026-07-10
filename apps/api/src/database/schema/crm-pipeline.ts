@@ -1,5 +1,5 @@
 // CRM sales pipeline (REV-17): leads → opportunities (stage machine) → activities, on the customer-of-record.
-// Tenant-scoped (RLS via migration 0152). CRM-1 unification (migration 0293): crm_opportunities is the ONE
+// Tenant-scoped (RLS via migration 0152). CRM-1 unification (migration 0294): crm_opportunities is the ONE
 // opportunity spine — stages resolve from the tenant-configurable pipeline_stages (stage_id; the legacy
 // lowercase `stage` string stays in sync for back-compat), accounts/contacts are first-class
 // (crm_accounts/crm_contacts), every stage transition is audited in crm_stage_history, and the Batch 2A
@@ -86,14 +86,14 @@ export const crmOpportunities = pgTable('crm_opportunities', {
   customerNo: text('customer_no'),                     // → customer_master
   name: text('name').notNull(),
   stage: text('stage').notNull().default('prospecting'), // legacy string, kept in sync with stage_id (prospecting | qualification | proposal | negotiation | won | lost | <custom stage name>)
-  stageId: bigint('stage_id', { mode: 'number' }).references(() => pipelineStages.id), // tenant-configurable stage (0293)
+  stageId: bigint('stage_id', { mode: 'number' }).references(() => pipelineStages.id), // tenant-configurable stage (0294)
   status: text('status').notNull().default('Open'),    // Open | Won | Lost (derived from the stage machine)
   amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
   currency: text('currency').default('THB'),
   probability: integer('probability').notNull().default(10), // 0..100 (forecast weight)
   expectedCloseDate: date('expected_close_date'),
   owner: text('owner'),                                // legacy free-text owner (kept for back-compat)
-  ownerUserId: bigint('owner_user_id', { mode: 'number' }).references(() => users.id), // real user reference (0293)
+  ownerUserId: bigint('owner_user_id', { mode: 'number' }).references(() => users.id), // real user reference (0294)
   accountId: bigint('account_id', { mode: 'number' }).references(() => crmAccounts.id),
   primaryContactId: bigint('primary_contact_id', { mode: 'number' }).references(() => crmContacts.id),
   accountName: text('account_name'),                   // legacy free-text account (Batch 2A carry-over)
@@ -101,7 +101,7 @@ export const crmOpportunities = pgTable('crm_opportunities', {
   winReason: text('win_reason'),
   notes: text('notes'),
   leadNo: text('lead_no'),                             // provenance
-  legacyOpportunityId: bigint('legacy_opportunity_id', { mode: 'number' }), // provenance: old `opportunities.id` (0293 data-migration)
+  legacyOpportunityId: bigint('legacy_opportunity_id', { mode: 'number' }), // provenance: old `opportunities.id` (0294 data-migration)
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
@@ -137,8 +137,8 @@ export const crmActivities = pgTable('crm_activities', {
   dueDate: date('due_date'),
   done: boolean('done').notNull().default(false),
   owner: text('owner'),
-  source: text('source'),                              // NULL = crm route; 'pipeline' = /api/pipeline route or 0293 data-migration
-  legacyActivityId: bigint('legacy_activity_id', { mode: 'number' }), // provenance: old opportunity_activities.id (0293)
+  source: text('source'),                              // NULL = crm route; 'pipeline' = /api/pipeline route or 0294 data-migration
+  legacyActivityId: bigint('legacy_activity_id', { mode: 'number' }), // provenance: old opportunity_activities.id (0294)
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byEntity: index('idx_crm_activity_entity').on(t.tenantId, t.entityType, t.entityNo) }));

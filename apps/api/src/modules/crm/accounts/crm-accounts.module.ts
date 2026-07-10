@@ -9,7 +9,7 @@ import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { isUniqueViolation } from '../../../common/db-error';
 import { normalizeName, normalizeKey } from '../../../common/text-similarity';
 
-// ── CRM accounts & contacts (CRM-1 unification, migration 0293) ────────────────────────────────────
+// ── CRM accounts & contacts (CRM-1 unification, migration 0294) ────────────────────────────────────
 // The CRM-side party model: crm_accounts (company — becomes the customer-of-record link once transacting,
 // customer_no → customer_master) and crm_contacts (people under an account, role-tagged, optional
 // pos_members loyalty join). Duplicate-governed: create runs normalized email/phone/tax-id/company-name

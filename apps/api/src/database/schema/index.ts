@@ -47,6 +47,7 @@ export * from './signup-requests';
 export * from './platform-notifications';
 export * from './tax-docs';
 export * from './restaurant';
+export * from './hub';
 export * from './assets';
 export * from './petty-cash';
 export * from './customer-master';

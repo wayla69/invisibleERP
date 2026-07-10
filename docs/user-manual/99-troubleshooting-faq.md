@@ -1,6 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.4** _(2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_ _(2026-07-09: added `AI_TENANT_OPTED_OUT`)_
+**Status: DRAFT v0.5** _(2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -83,6 +83,12 @@ your code below.
 
 | Code | Meaning | What to do |
 |------|---------|-----------|
+| `OVER_APPLIED` (ยอดตัดชำระเกินยอดคงค้าง) | A cash-application line is more than the invoice still owes — allocations already **awaiting approval** count too. | Reduce the line to the invoice's *available* amount shown on the worksheet. See [Finance AR/AP §A2b](./05-finance-ar-ap.md). |
+| `APPLY_EXCEEDS_RECEIPT` (ยอดตัดชำระรวมเกินเงินรับ) | The invoice allocations add up to more than the receipt amount. | Lower the allocations or raise the receipt amount; leave the rest unallocated — it parks **on-account**. |
+| `CUSTOMER_MISMATCH` (เอกสารของลูกค้ารายอื่น) | You tried to apply money (or a credit note) to **another customer's** invoice. | Load the right customer's worksheet; cross-customer application is always rejected. |
+| `INSUFFICIENT_UNAPPLIED` (เงินรับรอตัดชำระไม่พอ) | You tried to apply more than the receipt's remaining **on-account** balance (pending batches count). | Check the receipt's *available* on-account amount on the worksheet and re-key. |
+| `CN_OVER_APPLIED` / `CN_NOT_ISSUED` / `CN_NOT_AR_LINKED` | The credit note's remaining value is exhausted / the note isn't approved (Issued) yet / the note was issued over a POS sale, not an AR invoice. | Use the remaining value shown; have the note approved first; a POS credit note can't be applied to AR invoices. |
+| `REASON_REQUIRED` / `ALREADY_REVERSED` (ยกเลิกตัดชำระ) | You tried to reverse a cash application without a reason — or one that was already reversed. | Enter the reversal reason (it is recorded permanently); an application can only be reversed once. |
 | `MATCH_BLOCKED` | The supplier invoice failed the 3-way match (PO ↔ GR ↔ invoice), so it can't be paid. | Investigate the variance (quantity / price). Fix the document, or have an authorised user **override** the match with a reason. See [Procurement](./03-procurement.md). |
 | `AP_PREPAID_BLOCKED` | You tried to create a supplier bill that is already paid. | Create the bill **Unpaid**, then request the payment so a second person can approve it (control EXP-06). |
 | `AP_OVERPAY` (ยอดจ่ายเกินยอดคงค้าง) | The payment amount exceeds the bill's outstanding balance (including requests already awaiting approval). | Reduce the amount to the remaining balance. |

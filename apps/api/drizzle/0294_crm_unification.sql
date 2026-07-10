@@ -1,4 +1,4 @@
--- 0293_crm_unification — CRM-1 (docs/41 module-depth uplift): unify the two disconnected opportunity models.
+-- 0294_crm_unification — CRM-1 (docs/41 module-depth uplift): unify the two disconnected opportunity models.
 -- crm_opportunities (REV-17 spine) becomes the ONE opportunity table: it gains stage_id → the tenant-
 -- configurable pipeline_stages (the legacy lowercase `stage` string stays in sync for back-compat), a
 -- derived status (Open|Won|Lost), real account/contact/owner references, and provenance columns; the Batch
