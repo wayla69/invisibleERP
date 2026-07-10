@@ -24,11 +24,29 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # need the deployed commit's git author (git log -1 %ae) for the SoD check below
       - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+      # ITGC-CM-03 — deployer ≠ author (automated ToE / detective evidence).
+      # The CONTROL OF RECORD is the `production` Environment's required-reviewer approval (a human other
+      # than the author must approve before this job runs). This step is the machine-checkable EVIDENCE for
+      # it: it compares GITHUB_ACTOR (who triggered the deploy) against the deployed commit's git author and
+      # fails on a self-deploy (same identity). REPORT-ONLY by default (continue-on-error) — a hard fail here
+      # is deliberately avoided because the actor-vs-author identity comparison has legitimate edge cases
+      # (squash-merge committer identities, bot/web-flow authors, a workflow_dispatch re-deploy of an older
+      # commit) that could otherwise block a valid prod deploy, while the Environment reviewer gate already
+      # enforces SoD. Set the repo/environment variable DEPLOY_SOD_ENFORCE=1 to promote it to a HARD gate
+      # once the identity conventions are confirmed stable.
+      - name: Deploy SoD check (ITGC-CM-03, deployer ≠ author)
+        continue-on-error: ${{ vars.DEPLOY_SOD_ENFORCE != '1' }}
+        env:
+          DEPLOY_ACTOR: ${{ github.actor }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: COMMIT_AUTHOR="$(git log -1 --format='%ae')" node tools/ci/check-deploy-sod.mjs
       - run: pnpm install --frozen-lockfile
       # Build + typecheck as a last gate before shipping (CI already ran on the PR).
       - run: pnpm --filter @ierp/shared build && pnpm -r typecheck && pnpm -r build
