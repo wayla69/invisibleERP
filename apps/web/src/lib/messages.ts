@@ -920,6 +920,10 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'proc.po_list': { th: 'ใบสั่งซื้อ', en: 'Purchase orders' },
   'proc.po_empty_desc': { th: 'สร้าง PO ในแบบฟอร์มด้านบนเพื่อเริ่มต้นการจัดซื้อ', en: 'Create a PO in the form above to start purchasing' },
   'proc.col_print': { th: 'พิมพ์', en: 'Print' },
+  'proc.col_approve': { th: 'อนุมัติ', en: 'Approve' },
+  'proc.po_approved_ok': { th: 'อนุมัติใบสั่งซื้อแล้ว', en: 'Purchase order approved' },
+  'proc.po_rejected_ok': { th: 'ปฏิเสธใบสั่งซื้อแล้ว', en: 'Purchase order rejected' },
+  'proc.po_reject_reason': { th: 'เหตุผลที่ปฏิเสธใบสั่งซื้อ', en: 'Reason for rejecting the PO' },
   'proc.print_po': { th: 'พิมพ์ใบสั่งซื้อ (PDF)', en: 'Print purchase order (PDF)' },
   // Shared document print/email actions (quotation, delivery note, AR invoice, …)
   'doc.print_col': { th: 'เอกสาร', en: 'Document' },

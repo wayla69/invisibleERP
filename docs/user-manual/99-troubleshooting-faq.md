@@ -106,6 +106,10 @@ your code below.
 | `RUN_NOT_APPROVED` (400) | You asked for the bank transfer file on a run that isn't approved yet. | Get the run approved first — the bank file only ever reflects an approved run. |
 | `VENDOR_BANK_MISSING` (400) | A vendor in the run has no bank account recorded, so the bulk-transfer file can't name the beneficiary. | Record the vendor's bank name + account on the vendor master (the change needs a second person's approval, control EXP-11), then download the file again. |
 | `UNSUPPORTED_FILE_FORMAT` (400) | The bank-file format you asked for isn't recognised. | Use `generic`, `scb`, `kbank`, `bbl` or `iso20022`. |
+| `BUDGET_CONFIRM_REQUIRED` (422) | The PR/PO you are approving exceeds the available budget and the company policy is **warn** (BUD-02). | Review the budget chip / availability detail; if the overage is intended, approve again and **confirm** when prompted (the web does this for you), or reject the document. |
+| `BUDGET_EXCEEDED` (422) | The PR/PO you are approving exceeds the available budget and the company policy is **block** (BUD-02). | Only an **executive** (exec) can approve over budget, and must give a reason (recorded for audit). Otherwise reduce/postpone the purchase or get the budget increased (budget changes are maker-checker, BUD-01). |
+| `BUDGET_OVERRIDE_DENIED` (403) | You tried the over-budget override but don't hold the **exec** duty. | Ask an executive to approve — the override is deliberately a different duty from the ordinary approver. |
+| `BUDGET_OVERRIDE_REASON_REQUIRED` (400) | An exec override was sent without a reason. | Enter the business justification when prompted — it is stored on the budget-commitment audit row. |
 
 ### Tax documents
 

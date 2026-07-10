@@ -234,6 +234,9 @@ export class ProcurementGrnService {
     // M1 (PROJ-12) — once a project PO is fully received, its BoQ-line commitments become consumed (open →
     // consumed; still counts against the budget — the spend is now actual, no longer just an open encumbrance).
     if (this.commitments && fullyReceived) await this.commitments.consume(db, 'PO', dto.po_no);
+    // FIN-3 (BUD-02) — a fully-received PO's GL-budget commitment is CONSUMED: the spend is (or will shortly
+    // be) in the GL as an actual, so the open encumbrance drops out of availability instead of double-counting.
+    if (this.commitments && fullyReceived) await this.commitments.glConsume(db, 'PO', dto.po_no);
     await this.statusLog.log('GR', grNo, '', 'Open', user.username);
     await this.statusLog.log('PO', dto.po_no, po.status ?? '', newStatus, user.username, `GR ${grNo}`);
 
@@ -285,6 +288,9 @@ export class ProcurementGrnService {
     // PO_LINE_CLOSED gate in createGr), so the close can't be undone by a later ordinary GR.
     await db.update(poItems).set({ status: 'Closed' }).where(eq(poItems.poId, po.id));
     if (this.commitments) await this.commitments.release(db, 'PO', poNo);
+    // FIN-3 (BUD-02) — a closed-short PO releases its GL-budget commitment: the received part is already in
+    // the GL as an actual; the never-coming remainder frees its encumbrance (money was never spent).
+    if (this.commitments) await this.commitments.glRelease(db, 'PO', poNo);
     await this.statusLog.log('PO', poNo, po.status ?? '', 'Closed', user.username, `ปิดรับ (ของขาดส่ง)${reason ? `: ${reason}` : ''}`);
     await this.notifyRequesters(poNo, `📦 ใบสั่งซื้อ ${poNo} ถูกปิดโดยไม่รับส่วนที่ขาดส่ง (${shortLines.length} รายการค้างรับ)`);
     return { po_no: poNo, po_status: 'Closed', short_lines: shortLines };

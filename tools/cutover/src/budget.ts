@@ -159,6 +159,82 @@ async function main() {
   const revList = await inj('GET', '/api/ledger/budget-reviews?fiscal_year=2032', admin);
   ok('ELC-06: review history lists the sign-off', revList.json.count >= 1 && (revList.json.reviews ?? []).some((r: any) => r.reviewed_by === 'admin'), JSON.stringify({ n: revList.json.count }));
 
+  // ── BUD-02 (FIN-3): budgetary control / encumbrance gate on PR/PO approval ─────────────────────────────
+  // The gate keys on the CURRENT business month (Asia/Bangkok) — compute it the same way the API does.
+  const period = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date()).slice(0, 7);
+  const fy = Number(period.slice(0, 4));
+  await db.insert(s.vendors).values({ name: 'BC Vendor' }).onConflictDoNothing();
+  await db.insert(s.items).values({ itemId: 'BC-ITEM', itemDescription: 'Budget-gated item', uom: 'ea', unitPrice: '100', cogsAccount: '5100' }).onConflictDoNothing();
+  // buyer = procurement duty WITHOUT exec — can approve POs but must NOT be able to override the block.
+  await db.insert(s.users).values([{ username: 'buyer', passwordHash: await pw.hash('pw3'), role: 'Planner', tenantId: hq }]).onConflictDoNothing();
+  const buyerId = Number((await db.select().from(s.users).where(eq(s.users.username, 'buyer')))[0].id);
+  await db.insert(s.userPermissions).values(['procurement', 'pr_raise', 'dashboard'].map((perm) => ({ userId: buyerId, perm }))).onConflictDoNothing();
+  const buyer = await login('buyer', 'pw3');
+  const mkPo = async (qty: number) => (await inj('POST', '/api/procurement/pos', admin, { vendor_name: 'BC Vendor', items: [{ item_id: 'BC-ITEM', order_qty: qty, unit_price: 100 }] })).json.po_no as string;
+  const apPo = (poNo: string, who: string, extra: any = {}) => inj('PATCH', `/api/procurement/pos/${poNo}/approve`, who, { approve: true, ...extra });
+
+  const ctl0 = await inj('GET', '/api/budget/control-settings', admin);
+  ok('BUD-02: budget-control policy defaults to OFF (report-only — pre-FIN-3 behaviour)', ctl0.json.policy === 'off', JSON.stringify(ctl0.json));
+  const poOff = await mkPo(2);
+  const apOff = await apPo(poOff, admin);
+  ok('BUD-02: with policy OFF the approve response is unchanged (no budget annotation, no commitment)', apOff.status === 200 && apOff.json.status === 'Approved' && apOff.json.budget === undefined, JSON.stringify(apOff.json));
+
+  const ctlDenied = await inj('PUT', '/api/budget/control-settings', buyer, { policy: 'advise' });
+  ok('BUD-02: policy change is restricted (procurement-only user → 403, mirrors EXP-04 change control)', ctlDenied.status === 403, `${ctlDenied.status}`);
+  const ctl1 = await inj('PUT', '/api/budget/control-settings', admin, { policy: 'advise' });
+  ok('BUD-02: exec sets policy=advise', ctl1.json.policy === 'advise' && ctl1.json.updated_by === 'admin', JSON.stringify(ctl1.json));
+  await setBudget({ fiscal_year: fy, account_code: '5100', mode: 'monthly', period, amount: 1000 });
+
+  const poA = await mkPo(3); // 300 vs budget 1000 → within
+  const apA = await apPo(poA, admin);
+  ok('BUD-02 advise: within budget → Approved with the availability annotation', apA.json.status === 'Approved' && apA.json.budget?.policy === 'advise' && apA.json.budget?.exceeded === false, JSON.stringify(apA.json.budget));
+  const avA = await inj('GET', `/api/budget/availability?account=5100&period=${period}`, admin);
+  ok('BUD-02: the approval ENCUMBERS the budget (open commitment 300 → available 700)', near(avA.json.open_commitments, 300) && near(avA.json.available, 700), JSON.stringify(avA.json));
+
+  const poB = await mkPo(8); // 800 > available 700
+  const apB = await apPo(poB, admin);
+  ok('BUD-02 advise: an over-budget approval still passes but is FLAGGED exceeded', apB.json.status === 'Approved' && apB.json.budget?.exceeded === true, JSON.stringify(apB.json.budget));
+
+  await inj('PUT', '/api/budget/control-settings', admin, { policy: 'warn' });
+  const poC = await mkPo(1); // available is now negative → exceeded
+  const apC1 = await apPo(poC, admin);
+  ok('BUD-02 warn: over budget without confirmation → 422 BUDGET_CONFIRM_REQUIRED', apC1.status === 422 && apC1.json.error?.code === 'BUDGET_CONFIRM_REQUIRED', `${apC1.status} ${apC1.json.error?.code}`);
+  const apC2 = await apPo(poC, admin, { confirm_over_budget: true });
+  ok('BUD-02 warn: the approver CONFIRMS the overage → Approved', apC2.json.status === 'Approved' && apC2.json.budget?.exceeded === true, JSON.stringify(apC2.json.budget));
+
+  await inj('PUT', '/api/budget/control-settings', admin, { policy: 'block' });
+  const poD = await mkPo(1);
+  const apD1 = await apPo(poD, admin);
+  ok('BUD-02 block: over budget → 422 BUDGET_EXCEEDED', apD1.status === 422 && apD1.json.error?.code === 'BUDGET_EXCEEDED', `${apD1.status} ${apD1.json.error?.code}`);
+  const apD2 = await apPo(poD, buyer, { override_budget: true, override_reason: 'need it' });
+  ok('BUD-02 block: override by a NON-exec approver → 403 BUDGET_OVERRIDE_DENIED (distinct duty)', apD2.status === 403 && apD2.json.error?.code === 'BUDGET_OVERRIDE_DENIED', `${apD2.status} ${apD2.json.error?.code}`);
+  const apD3 = await apPo(poD, admin, { override_budget: true });
+  ok('BUD-02 block: exec override without a reason → 400 BUDGET_OVERRIDE_REASON_REQUIRED', apD3.status === 400 && apD3.json.error?.code === 'BUDGET_OVERRIDE_REASON_REQUIRED', `${apD3.status} ${apD3.json.error?.code}`);
+  const apD4 = await apPo(poD, admin, { override_budget: true, override_reason: 'ด่วน — เครื่องเสียหน้างาน' });
+  ok('BUD-02 block: exec override WITH a reason → Approved (overridden flagged)', apD4.json.status === 'Approved' && apD4.json.budget?.overridden === true, JSON.stringify(apD4.json.budget));
+  const audD = await inj('GET', `/api/budget/commitments?doc_no=${poD}`, admin);
+  const audRow = (audD.json.commitments ?? [])[0];
+  ok('BUD-02: the override is AUDITED on the commitment (over_budget + override_by + reason)', audRow?.over_budget === true && audRow?.override_by === 'admin' && String(audRow?.override_reason ?? '').includes('ด่วน'), JSON.stringify(audRow));
+
+  const avBefore = await inj('GET', `/api/budget/availability?account=5100&period=${period}`, admin);
+  const rcv = await inj('POST', `/api/procurement/pos/${poA}/receive-all`, admin);
+  const avAfter = await inj('GET', `/api/budget/availability?account=5100&period=${period}`, admin);
+  ok('BUD-02: a FULLY RECEIVED PO\'s commitment is consumed (drops out of open commitments)', rcv.status === 201 || rcv.status === 200 ? near(avAfter.json.open_commitments, Number(avBefore.json.open_commitments) - 300) : false, `rcv=${rcv.status} before=${avBefore.json.open_commitments} after=${avAfter.json.open_commitments}`);
+
+  // PR path: the requester ASKS freely (createPr is ungated); the gate binds at approval, priced from the
+  // item master; the approved PR's estimate stays encumbered until it converts to POs.
+  const prR = await inj('POST', '/api/procurement/prs', buyer, { items: [{ item_id: 'BC-ITEM', request_qty: 5 }] });
+  ok('BUD-02: raising a PR is never blocked by the gate (asking ≠ authorising)', prR.status === 201 || prR.status === 200, `${prR.status}`);
+  const prNo = prR.json.pr_no as string;
+  const apPr1 = await inj('PATCH', `/api/procurement/prs/${prNo}/approve`, admin, { approve: true });
+  ok('BUD-02 block: PR approval over budget → 422 BUDGET_EXCEEDED (estimate = qty × item-master price)', apPr1.status === 422 && apPr1.json.error?.code === 'BUDGET_EXCEEDED', `${apPr1.status} ${apPr1.json.error?.code}`);
+  const apPr2 = await inj('PATCH', `/api/procurement/prs/${prNo}/approve`, admin, { approve: true, override_budget: true, override_reason: 'อนุมัติเกินงบตามมติผู้บริหาร' });
+  const avPr = await inj('GET', `/api/budget/availability?account=5100&period=${period}`, admin);
+  ok('BUD-02: an approved PR encumbers its ESTIMATE (open commitments +500)', apPr2.json.status === 'Approved' && near(avPr.json.open_commitments, Number(avAfter.json.open_commitments) + 500), `${apPr2.json.status} open=${avPr.json.open_commitments}`);
+  const conv = await inj('POST', `/api/procurement/prs/${prNo}/to-po`, admin, { vendor_name: 'BC Vendor', lines: [{ item_id: 'BC-ITEM', order_qty: 5, unit_price: 100 }] });
+  const avConv = await inj('GET', `/api/budget/availability?account=5100&period=${period}`, admin);
+  ok('BUD-02: converting the PR to a PO RELEASES the PR commitment (the PO carries it from ITS approval)', (conv.status === 200 || conv.status === 201) && near(avConv.json.open_commitments, Number(avPr.json.open_commitments) - 500), `conv=${conv.status} open=${avConv.json.open_commitments}`);
+
   await app.close();
   await pg.close();
 

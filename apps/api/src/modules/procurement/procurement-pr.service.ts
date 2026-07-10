@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
 import { LineNotifyService } from '../messaging/line-notify.service';
+import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd } from '../../database/queries';
 import { n, type CreatePrDto, type CreatePoDto, type ConvLine } from './procurement.shared';
 import type { JwtUser } from '../../common/decorators';
@@ -29,6 +30,7 @@ export class ProcurementPrService {
     private readonly createPo: (dto: CreatePoDto, user: JwtUser) => Promise<{ po_no: string; status: string; total_amount: number }>,
     private readonly workflow?: WorkflowService,
     private readonly lineNotify?: LineNotifyService,
+    private readonly commitments?: CommitmentsService, // FIN-3 (BUD-02) — GL-budget gate + PR encumbrance
   ) {}
 
   // ── PR ──────────────────────────────────────────────────────────────
@@ -53,26 +55,44 @@ export class ProcurementPrService {
     return { pr_no: prNo, status: 'Pending', lines: dto.items.length };
   }
 
-  async approvePr(prNo: string, approve: boolean, user: JwtUser) {
+  async approvePr(prNo: string, approve: boolean, user: JwtUser, budgetOpts?: { confirmOverBudget?: boolean; overrideBudget?: boolean; overrideReason?: string }) {
     const db = this.db;
     const [pr] = await db.select().from(purchaseRequests).where(eq(purchaseRequests.prNo, prNo)).limit(1);
     if (!pr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PR not found', messageTh: 'ไม่พบ PR' });
+    // FIN-3 (BUD-02) — budgetary-control gate at PR approval (requesters are never blocked from ASKING —
+    // createPr is ungated by design; the control binds where spend is authorised). PR lines carry no prices,
+    // so the estimate comes from the item master; the approved PR's estimate is encumbered as an open
+    // commitment until it converts to POs (which then carry the real commitment). glGate returns null when
+    // the tenant policy is 'off' (default) and throws BUDGET_EXCEEDED / BUDGET_CONFIRM_REQUIRED per policy.
+    let budgetGate: Awaited<ReturnType<CommitmentsService['glGate']>> = null;
+    if (approve && this.commitments && pr.status !== 'Approved') {
+      budgetGate = await this.commitments.glGateForDoc('PR', prNo, {
+        tenantId: user.tenantId ?? null, user,
+        confirm: budgetOpts?.confirmOverBudget, override: budgetOpts?.overrideBudget, overrideReason: budgetOpts?.overrideReason,
+      });
+    }
     // if a workflow is configured (a live instance exists), route the decision through the engine —
     // maker-checker + multi-level + SoD all enforced there. Otherwise fall back to the legacy Admin-only flip.
     const inst = this.workflow ? await this.workflow.pendingInstanceFor('PR', prNo) : null;
+    let newStatus: string;
     if (inst) {
       await this.workflow!.act(Number(inst.id), { decision: approve ? 'approve' : 'reject' }, user);
       const cleared = await this.workflow!.canTransition('PR', prNo);
-      const newStatus = approve ? (cleared ? 'Approved' : 'Pending') : 'Rejected'; // 'Pending' = more steps remain
+      newStatus = approve ? (cleared ? 'Approved' : 'Pending') : 'Rejected'; // 'Pending' = more steps remain
       await db.update(purchaseRequests).set({ status: newStatus, approvedBy: user.username, approvedAt: new Date() }).where(eq(purchaseRequests.id, pr.id));
       if (newStatus !== pr.status) await this.statusLog.log('PR', prNo, pr.status ?? '', newStatus, user.username);
-      return { pr_no: prNo, status: newStatus };
+    } else {
+      if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
+      newStatus = approve ? 'Approved' : 'Rejected';
+      await db.update(purchaseRequests).set({ status: newStatus, approvedBy: user.username, approvedAt: new Date() }).where(eq(purchaseRequests.id, pr.id));
+      await this.statusLog.log('PR', prNo, pr.status ?? '', newStatus, user.username);
     }
-    if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
-    const newStatus = approve ? 'Approved' : 'Rejected';
-    await db.update(purchaseRequests).set({ status: newStatus, approvedBy: user.username, approvedAt: new Date() }).where(eq(purchaseRequests.id, pr.id));
-    await this.statusLog.log('PR', prNo, pr.status ?? '', newStatus, user.username);
-    return { pr_no: prNo, status: newStatus };
+    // BUD-02 — the final approval encumbers the PR's estimated spend; an authorised overage is audited.
+    if (budgetGate && newStatus === 'Approved') {
+      await this.commitments!.glReserve(db, budgetGate, { docType: 'PR', docNo: prNo, tenantId: user.tenantId ?? null, user });
+      if (budgetGate.overridden) await this.statusLog.log('PR', prNo, 'Pending', 'Approved', user.username, `BUDGET_OVERRIDE (BUD-02): ${budgetGate.override_reason}`);
+    }
+    return { pr_no: prNo, status: newStatus, ...(budgetGate ? { budget: { policy: budgetGate.policy, exceeded: budgetGate.exceeded, overridden: budgetGate.overridden, checks: budgetGate.checks } } : {}) };
   }
 
   // Requester withdraws their own still-Pending PR (0228 — also reachable from the LINE chat `cancel`
@@ -233,6 +253,9 @@ export class ProcurementPrService {
     }
     await db.update(purchaseRequests).set({ status: newStatus }).where(eq(purchaseRequests.id, head.id));
     if (newStatus !== head.status) await this.statusLog.log('PR', pr, head.status ?? '', newStatus, user.username);
+    // FIN-3 (BUD-02) — the PO(s) raised above now carry the real commitment (recorded at PO approval), so
+    // the PR's estimate-based commitment is released at first conversion (no-op when the gate was off).
+    if (this.commitments) await this.commitments.glRelease(db, 'PR', pr);
     // D2 — tell the requester their requisition is now on purchase order(s) (best-effort LINE push).
     if (head.requestedBy && head.requestedBy !== user.username) {
       const poList = createdPos.map((p) => p.po_no).join(', ');

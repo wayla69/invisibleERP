@@ -86,31 +86,50 @@ export class ProcurementPoService {
     return { po_no: poNo, status: isDraft ? 'Draft' : 'Pending', total_amount: total };
   }
 
-  async approvePo(poNo: string, approve: boolean, reason: string | undefined, user: JwtUser) {
+  async approvePo(poNo: string, approve: boolean, reason: string | undefined, user: JwtUser, budgetOpts?: { confirmOverBudget?: boolean; overrideBudget?: boolean; overrideReason?: string }) {
     const db = this.db;
     const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
     if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบ PO' });
+    // FIN-3 (BUD-02) — budgetary-control gate: when the tenant's budget-control policy is on
+    // (advise|warn|block), an APPROVE decision is checked against the available budget (approved budget YTD −
+    // GL actuals − open commitments, per resolved budget account). glGate returns null when the policy is
+    // 'off' (the default — response byte-identical to pre-FIN-3) and throws BUDGET_EXCEEDED /
+    // BUDGET_CONFIRM_REQUIRED per policy BEFORE any state changes. Project/BoQ-tagged lines are excluded
+    // (PROJ-12/13 already encumber them); is_capital lines are excluded (CAPEX ≠ opex budget).
+    let budgetGate: Awaited<ReturnType<CommitmentsService['glGate']>> = null;
+    if (approve && this.commitments && po.status !== 'Approved') {
+      budgetGate = await this.commitments.glGateForDoc('PO', poNo, {
+        tenantId: user.tenantId ?? null, user,
+        confirm: budgetOpts?.confirmOverBudget, override: budgetOpts?.overrideBudget, overrideReason: budgetOpts?.overrideReason,
+      });
+    }
     // route through the approval engine when a workflow is configured (maker-checker + multi-level + SoD +
     // dimension routing all enforced there); otherwise fall back to the legacy Admin-only flip.
     const inst = this.workflow ? await this.workflow.pendingInstanceFor('PO', poNo) : null;
+    let newStatus: 'Pending' | 'Approved' | 'Cancelled';
     if (inst) {
       await this.workflow!.act(Number(inst.id), { decision: approve ? 'approve' : 'reject' }, user);
       const cleared = await this.workflow!.canTransition('PO', poNo);
-      const newStatus = approve ? (cleared ? 'Approved' : 'Pending') : 'Cancelled';
+      newStatus = approve ? (cleared ? 'Approved' : 'Pending') : 'Cancelled';
       await db.update(purchaseOrders).set({ status: newStatus, approvedBy: user.username, approvedAt: new Date(), remarks: approve ? po.remarks : `Rejected: ${reason ?? ''}` }).where(eq(purchaseOrders.id, po.id));
       if (newStatus !== po.status) await this.statusLog.log('PO', poNo, po.status ?? '', newStatus, user.username);
-      await this.emitPo(newStatus, poNo, po, reason, user);
-      return { po_no: poNo, status: newStatus };
+    } else {
+      if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
+      newStatus = approve ? 'Approved' : 'Cancelled';
+      await db.update(purchaseOrders).set({
+        status: newStatus, approvedBy: user.username, approvedAt: new Date(),
+        remarks: approve ? po.remarks : `Rejected: ${reason ?? ''}`,
+      }).where(eq(purchaseOrders.id, po.id));
+      await this.statusLog.log('PO', poNo, po.status ?? '', newStatus, user.username);
     }
-    if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
-    const newStatus = approve ? 'Approved' : 'Cancelled';
-    await db.update(purchaseOrders).set({
-      status: newStatus, approvedBy: user.username, approvedAt: new Date(),
-      remarks: approve ? po.remarks : `Rejected: ${reason ?? ''}`,
-    }).where(eq(purchaseOrders.id, po.id));
-    await this.statusLog.log('PO', poNo, po.status ?? '', newStatus, user.username);
+    // BUD-02 — the final approval RECORDS the commitment (encumbers the budget); an authorised over-budget
+    // approval is audited on the commitment row (override_by/override_reason) + the doc status log.
+    if (budgetGate && newStatus === 'Approved') {
+      await this.commitments!.glReserve(db, budgetGate, { docType: 'PO', docNo: poNo, tenantId: user.tenantId ?? null, user });
+      if (budgetGate.overridden) await this.statusLog.log('PO', poNo, 'Pending', 'Approved', user.username, `BUDGET_OVERRIDE (BUD-02): ${budgetGate.override_reason}`);
+    }
     await this.emitPo(newStatus, poNo, po, reason, user);
-    return { po_no: poNo, status: newStatus };
+    return { po_no: poNo, status: newStatus, ...(budgetGate ? { budget: { policy: budgetGate.policy, exceeded: budgetGate.exceeded, overridden: budgetGate.overridden, checks: budgetGate.checks } } : {}) };
   }
 
   // Fan out the PO approval/rejection to outbound webhooks (best-effort; only on a terminal decision).
@@ -135,6 +154,8 @@ export class ProcurementPoService {
     await this.statusLog.log('PO', poNo, po.status ?? '', 'Cancelled', user.username, reason);
     // M1 (PROJ-12) — a cancelled PO releases the BoQ-line budget it encumbered (frees it for other draws).
     if (this.commitments) await this.commitments.release(db, 'PO', poNo);
+    // FIN-3 (BUD-02) — likewise the GL-budget commitment (no-op when the gate was off at approval).
+    if (this.commitments) await this.commitments.glRelease(db, 'PO', poNo);
     return { po_no: poNo, status: 'Cancelled' };
   }
 

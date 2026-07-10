@@ -44,6 +44,7 @@ export default function BudgetPage() {
         tabs={[
           { key: 'bva', label: t('pb.bud_tab_bva'), content: <BvaTab /> },
           { key: 'set', label: t('pb.bud_tab_set'), content: <SetBudgetTab /> },
+          { key: 'ctl', label: t('pb.bctl_tab'), content: <ControlTab /> },
         ]}
       />
     </div>
@@ -156,6 +157,120 @@ function BvaTab() {
           </>
         )}
       </StateView>
+    </div>
+  );
+}
+
+// FIN-3 (BUD-02) — budgetary control / encumbrance: per-tenant policy (off | advise | warn | block) for the
+// PR/PO approval gate, an availability lookup (budget YTD − actuals − open commitments), and the commitment
+// audit list (override evidence). Policy change is restricted server-side to exec/gl_close (change control).
+function ControlTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const settingsQ = useQuery<{ policy: string; default_expense_account: string; updated_by: string | null; updated_at: string | null }>({
+    queryKey: ['budget-ctl-settings'], queryFn: () => api('/api/budget/control-settings'),
+  });
+  const [policy, setPolicy] = useState('');
+  const [defAcc, setDefAcc] = useState('');
+  const save = useMutation({
+    mutationFn: () => api('/api/budget/control-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ policy: policy || settingsQ.data?.policy, default_expense_account: defAcc || undefined }),
+    }),
+    onSuccess: () => { notifySuccess(t('pb.bctl_saved')); qc.invalidateQueries({ queryKey: ['budget-ctl-settings'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const [account, setAccount] = useState('');
+  const [period, setPeriod] = useState('');
+  const [availQuery, setAvailQuery] = useState<{ account: string; period: string } | null>(null);
+  const availQ = useQuery<{ has_budget: boolean; budget_ytd: number; actual_ytd: number; open_commitments: number; available: number; period: string }>({
+    queryKey: ['budget-avail', availQuery?.account, availQuery?.period],
+    queryFn: () => api(`/api/budget/availability?account=${encodeURIComponent(availQuery!.account)}${availQuery!.period ? `&period=${availQuery!.period}` : ''}`),
+    enabled: !!availQuery,
+  });
+  const commitsQ = useQuery<{ commitments: any[]; count: number }>({
+    queryKey: ['budget-commitments'], queryFn: () => api('/api/budget/commitments'),
+  });
+
+  const cur = settingsQ.data;
+  return (
+    <div className="space-y-5">
+      <Card className="max-w-3xl gap-4">
+        <CardHeader><CardTitle className="text-base">{t('pb.bctl_title')}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">{t('pb.bctl_desc')}</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="bctl-policy">{t('pb.bctl_policy')}</Label>
+              <Select id="bctl-policy" value={policy || cur?.policy || 'off'} onChange={(e) => setPolicy(e.target.value)}>
+                <option value="off">{t('pb.bctl_policy_off')}</option>
+                <option value="advise">{t('pb.bctl_policy_advise')}</option>
+                <option value="warn">{t('pb.bctl_policy_warn')}</option>
+                <option value="block">{t('pb.bctl_policy_block')}</option>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="bctl-acc">{t('pb.bctl_default_account')}</Label>
+              <Input id="bctl-acc" value={defAcc || cur?.default_expense_account || ''} onChange={(e) => setDefAcc(e.target.value)} placeholder="5000" />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button disabled={save.isPending || settingsQ.isLoading} onClick={() => save.mutate()}>{t('pb.bctl_save')}</Button>
+            {cur?.updated_by && <span className="text-xs text-muted-foreground">{t('pb.bctl_updated_by')} {cur.updated_by}</span>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-3xl gap-4">
+        <CardHeader><CardTitle className="text-base">{t('pb.bctl_avail_title')}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="grid gap-2">
+              <Label htmlFor="bctl-avail-acc">{t('pb.col_account_code')}</Label>
+              <Input id="bctl-avail-acc" value={account} onChange={(e) => setAccount(e.target.value)} placeholder={t('pb.bud_ph_account')} className="max-w-[140px]" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="bctl-avail-period">{t('pb.col_period')}</Label>
+              <Input id="bctl-avail-period" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="2026-07" className="max-w-[140px]" />
+            </div>
+            <Button variant="outline" disabled={!account.trim()} onClick={() => setAvailQuery({ account: account.trim(), period: /^\d{4}-\d{2}$/.test(period) ? period : '' })}>
+              <Search className="size-4" /> {t('pb.bctl_check')}
+            </Button>
+          </div>
+          {availQuery && availQ.data && (
+            availQ.data.has_budget ? (
+              <div className="grid gap-4 sm:grid-cols-4">
+                <StatCard label={t('pb.bctl_avail_budget')} value={baht(availQ.data.budget_ytd)} />
+                <StatCard label={t('pb.bctl_avail_actual')} value={baht(availQ.data.actual_ytd)} />
+                <StatCard label={t('pb.bctl_avail_committed')} value={baht(availQ.data.open_commitments)} />
+                <StatCard label={t('pb.bctl_avail_available')} value={baht(availQ.data.available)} tone={availQ.data.available >= 0 ? 'success' : 'danger'} />
+              </div>
+            ) : <p className="text-sm text-muted-foreground">{t('pb.bctl_avail_no_budget')}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <div>
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('pb.bctl_commit_title')}</h3>
+        <StateView q={commitsQ}>
+          {commitsQ.data && (
+            <DataTable
+              rows={commitsQ.data.commitments}
+              rowKey={(r: any) => String(r.id)}
+              emptyState={{ icon: Goal, title: t('pb.bctl_commit_empty_title'), description: t('pb.bctl_commit_empty_desc') }}
+              columns={[
+                { key: 'source_doc_no', label: t('pb.bctl_col_source'), render: (r: any) => <span className="font-medium">{r.source_doc_no}</span> },
+                { key: 'account_code', label: t('pb.col_account_code') },
+                { key: 'period', label: t('pb.col_period') },
+                { key: 'amount', label: t('pb.col_amount_money'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.status === 'open' ? 'warning' : r.status === 'consumed' ? 'success' : 'secondary'}>{r.status}</Badge> },
+                { key: 'override_by', label: t('pb.bctl_col_override'), render: (r: any) => r.override_by ? <span title={r.override_reason ?? ''} className="text-destructive">{r.override_by}</span> : '—' },
+              ]}
+            />
+          )}
+        </StateView>
+      </div>
     </div>
   );
 }
