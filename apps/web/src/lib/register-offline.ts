@@ -31,6 +31,27 @@ export interface RegisterSyncResult { client_uuid: string; status: 'synced' | 'd
 const DB_NAME = 'ierp-register-offline';
 const STORE = 'outbox';
 
+// ── offline menu snapshot ─────────────────────────────────────────────────────────────────────
+// The service worker deliberately never caches /api/* (auth'd + mutable), so a page reload while
+// the network is down used to lose the menu and brick the till even though the outbox still
+// worked. Keep the last good /api/menu payload in localStorage and serve it when the live fetch
+// fails — the register can then reboot/refresh mid-outage and keep ringing quick sales.
+const MENU_CACHE_KEY = 'ierp_register_menu_v1';
+
+export async function fetchMenuOfflineFirst<T>(fetchLive: () => Promise<T>): Promise<T> {
+  try {
+    const fresh = await fetchLive();
+    try { localStorage.setItem(MENU_CACHE_KEY, JSON.stringify(fresh)); } catch { /* quota/unavailable — live data still served */ }
+    return fresh;
+  } catch (e) {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(MENU_CACHE_KEY) : null;
+    if (raw) {
+      try { return JSON.parse(raw) as T; } catch { /* corrupt snapshot — fall through to the live error */ }
+    }
+    throw e;
+  }
+}
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
