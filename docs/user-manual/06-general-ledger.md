@@ -1,6 +1,8 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.7 · 2026-07-05**
+**Status: DRAFT v0.8 · 2026-07-10** · *v0.8: dimension filters (โครงการ/แผนก/สาขา/ศูนย์ต้นทุน) on the
+trial balance, account ledger and income statement (§3 "Filter by dimension"); dropdowns fed by
+`GET /api/ledger/dimensions`.*
 
 This chapter is for **accountants** — *GlAccountant*, *FinancialController* and
 *Admin*. It covers the chart of accounts, manual journal entries with
@@ -438,6 +440,18 @@ centre or ledger if needed), and view or export it.
 **Expected result:** The statement is produced from all **posted** entries (drafts
 are excluded).
 
+### Filter by dimension (โครงการ / แผนก / สาขา / ศูนย์ต้นทุน)
+
+The **Trial Balance**, **Account Ledger** and **Income Statement** can be sliced by the accounting
+dimensions carried on each journal line. Pick a **โครงการ (project)**, **แผนก (department)**, **สาขา
+(branch)** and/or **ศูนย์ต้นทุน (cost centre)** from the dropdowns above the report — the dropdowns
+list only values actually in use in the ledger (`GET /api/ledger/dimensions`). The report then shows
+**only the journal lines tagged with that dimension** (API: `?project_id=&dept_id=&branch_id=`
+alongside the existing `?cost_center=`); a filtered trial balance still balances within its slice.
+Leave every dropdown on **ทั้งหมด (All)** for the normal, unfiltered report — its figures are
+unchanged. Lines posted **without** a dimension tag do not appear in any dimension slice (for cost
+centres the *unassigned* slice remains available via `cost_center=__UNASSIGNED__`).
+
 ### Account ledger (GL detail — แยกประเภทรายบัญชี)
 
 **Screen:** บัญชีแยกประเภท (`/accounting`) → **แยกประเภทรายบัญชี** tab · **Required permission:**
@@ -448,7 +462,9 @@ pick an **account** and a **date range** (`GET /api/ledger/account-ledger?accoun
 lists the **opening balance** (everything posted before the *from* date), then every posted line in
 date order — date, entry no., source, memo, debit, credit — with a **running balance**, and the
 **closing balance**. The closing balance equals that account's trial-balance balance (Σ debit − credit),
-so the drill-down always reconciles to the trial balance.
+so the drill-down always reconciles to the trial balance. The **โครงการ / แผนก / สาขา** dropdowns narrow
+the drill-down to one dimension slice (`?project_id=&dept_id=&branch_id=`) — opening, lines and closing
+then belong to that slice alone and tie to the dimension-filtered trial balance.
 
 ### Sub-ledger tie-out (กระทบยอดบัญชีย่อย — GL-14)
 
@@ -476,7 +492,9 @@ Reports* menu. It has three tabs (deep-linkable via `?tab=`):
   per account with section subtotals, the current-period profit/loss shown under equity, and an
   Assets = Liabilities + Equity **balance check**.
 - **งบกำไรขาดทุน (Income Statement)** — pick a **from / to** range (or *ตั้งแต่ต้นปี*); revenue and
-  expense lines with subtotals and net profit. **แยกตามสาขา** switches to a per-branch breakdown.
+  expense lines with subtotals and net profit. **แยกตามสาขา** switches to a per-branch breakdown, and
+  the **โครงการ / แผนก / สาขา / ศูนย์ต้นทุน** dropdowns slice the statement to one dimension
+  (see *Filter by dimension* above).
 - **งบกระแสเงินสด (Cash Flow)** — toggle **ทางอ้อม (indirect)** / **ทางตรง (direct)** / **พยากรณ์
   (8-week forecast from open AR/AP)**.
 

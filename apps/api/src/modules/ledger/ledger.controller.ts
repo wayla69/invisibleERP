@@ -3,7 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { qint } from '../../common/query';
+import { qint, qintOpt } from '../../common/query';
 import { LedgerService } from './ledger.service';
 
 // Only HQ/Admin may target ANOTHER tenant's books via an explicit tenant_id. Everyone else is pinned to
@@ -117,16 +117,28 @@ export class LedgerController {
     return this.svc.gaapComparison(from, to, base || undefined, compare || undefined);
   }
 
+  // FIN-7a: `project_id`/`dept_id`/`branch_id` are ADDITIVE dimension filters (alongside the existing
+  // `cost_center`) — when present the TB aggregates from journal lines (the dimensions live there, not in
+  // the cost-center-keyed gl_period_balances snapshot); absent = the original snapshot path, unchanged.
   @Get('trial-balance')
-  trialBalance(@Query('period') period?: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.trialBalance(period, costCenter, ledger || undefined); }
+  trialBalance(@Query('period') period?: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string, @Query('project_id') projectId?: string, @Query('dept_id') deptId?: string, @Query('branch_id') branchId?: string) {
+    return this.svc.trialBalance(period, costCenter, ledger || undefined, { projectId: qintOpt('project_id', projectId), deptId: qintOpt('dept_id', deptId), branchId: qintOpt('branch_id', branchId) });
+  }
 
   // GL detail / account ledger — every posted line for ONE account with a running balance (drill-down
-  // behind the trial balance). `account` required; `from`/`to`/`ledger` optional.
+  // behind the trial balance). `account` required; `from`/`to`/`ledger` optional; FIN-7a: optional
+  // `project_id`/`dept_id`/`branch_id` narrow opening + lines to that dimension slice.
   @Get('account-ledger')
   @Permissions('exec', 'creditors', 'ar', 'gl_post', 'gl_close', 'fin_report')
-  accountLedger(@Query('account') account: string, @Query('from') from?: string, @Query('to') to?: string, @Query('ledger') ledger?: string) {
-    return this.svc.accountLedger(account, from || undefined, to || undefined, ledger || undefined);
+  accountLedger(@Query('account') account: string, @Query('from') from?: string, @Query('to') to?: string, @Query('ledger') ledger?: string, @Query('project_id') projectId?: string, @Query('dept_id') deptId?: string, @Query('branch_id') branchId?: string) {
+    return this.svc.accountLedger(account, from || undefined, to || undefined, ledger || undefined, { projectId: qintOpt('project_id', projectId), deptId: qintOpt('dept_id', deptId), branchId: qintOpt('branch_id', branchId) });
   }
+
+  // FIN-7a: distinct in-use dimension values (cost centers, branches, projects, departments with labels)
+  // for the report filter dropdowns. Read-only; RLS scopes the tenant. Same read set as account-ledger.
+  @Get('dimensions')
+  @Permissions('exec', 'creditors', 'ar', 'gl_post', 'gl_close', 'fin_report')
+  dimensions() { return this.svc.listDimensions(); }
 
   @Get('journal')
   journal(@Query('limit') limit?: string) { return this.svc.listJournal(qint('limit', limit, 50)); }
@@ -195,8 +207,12 @@ export class LedgerController {
     return this.svc.listGlAudit(entryId ? parseInt(entryId, 10) : undefined, qint('limit', limit, 100));
   }
 
+  // FIN-7a: optional `project_id`/`dept_id`/`branch_id` slice the P&L on the journal-line dimensions
+  // (additive alongside `cost_center`; absent = unchanged full statement).
   @Get('income-statement')
-  incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.incomeStatement(from, to, costCenter, ledger || undefined); }
+  incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string, @Query('project_id') projectId?: string, @Query('dept_id') deptId?: string, @Query('branch_id') branchId?: string) {
+    return this.svc.incomeStatement(from, to, costCenter, ledger || undefined, undefined, { projectId: qintOpt('project_id', projectId), deptId: qintOpt('dept_id', deptId), branchId: qintOpt('branch_id', branchId) });
+  }
 
   @Get('income-statement/by-branch')
   @Permissions('exec', 'fin_report', 'creditors', 'ar')
