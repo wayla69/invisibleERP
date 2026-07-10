@@ -23,6 +23,11 @@ name: Ops — provision synthetic-probe user
 
 on:
   workflow_dispatch:
+    inputs:
+      unforce_auth_tables:
+        description: 'EMERGENCY: ALTER TABLE users/pos_members NO FORCE ROW LEVEL SECURITY so the base owner role (ierp_app) can read them for authentication before the guard RLS-bypass fix (PR #602) deploys. Reversible; the fix deploy re-applies FORCE and the code handles it.'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,6 +41,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           WEB_URL: ${{ vars.PROD_WEB_URL || 'https://invisibleposerp-production.up.railway.app' }}
+          UNFORCE_AUTH_TABLES: ${{ inputs.unforce_auth_tables }}
         run: |
           set -euo pipefail
           [ -n "${RAILWAY_TOKEN:-}" ] || { echo "::error::RAILWAY_TOKEN not configured"; exit 1; }
@@ -61,6 +67,23 @@ jobs:
           MIGS=$(psql "$PUB" -tAc "SELECT count(*) FROM drizzle.__drizzle_migrations;" 2>/dev/null || echo 0)
           [ "${MIGS:-0}" -gt 100 ] || { echo "::error::instance sanity check failed (${MIGS:-0} migrations) — refusing"; exit 1; }
           echo "instance sanity ok: $MIGS applied migrations"
+
+          # ── EMERGENCY mitigation (2026-07-10 login bounce): the JwtAuthGuard reads users/pos_members to
+          # authenticate BEFORE the per-request tenant tx exists, i.e. as the base owner role ierp_app with
+          # no app.* GUCs. Those tables are under FORCE ROW LEVEL SECURITY, which applies to the owner too,
+          # so the identity read returns 0 rows → USER_NOT_FOUND → login bounce. Dropping FORCE lets the
+          # OWNER bypass RLS on just these two tables (auth reads work) while the per-request queries — which
+          # run as app_user, NOT the owner — are still fully RLS-scoped (verified: app_user isolation holds
+          # regardless of FORCE). Reversible: the guard RLS-bypass fix (PR #602) re-applies FORCE via the
+          # migration loop and bypasses in code, so no manual revert is needed after that deploys.
+          if [ "${UNFORCE_AUTH_TABLES:-false}" = "true" ]; then
+            echo "EMERGENCY: dropping FORCE RLS on users + pos_members (owner-role auth reads)…"
+            psql "$PUB" -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER TABLE users NO FORCE ROW LEVEL SECURITY;
+          ALTER TABLE pos_members NO FORCE ROW LEVEL SECURITY;
+          SQL
+            echo "done — FORCE now: $(psql "$PUB" -tAc "SELECT relname||'='||relforcerowsecurity FROM pg_class WHERE relname IN ('users','pos_members') AND relnamespace='public'::regnamespace" | tr '\n' ' ')"
+          fi
 
           PW=$(openssl rand -hex 18)
           echo "::add-mask::$PW"
