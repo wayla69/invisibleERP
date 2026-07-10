@@ -61,6 +61,14 @@ export class CrmPipelineController {
   // Win/loss analytics (loss reasons, by owner, monthly trend) for the pipeline dashboard.
   @Get('win-loss') winLoss(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.winLoss(u, { months: months ? Number(months) : undefined }); }
 
+  // CRM-5 "why" analytics — read-only aggregators, all date-bounded server-side (months, default 6, 1..24).
+  // Funnel conversion (lead→qualified→won) + stage-to-stage progression + time-in-stage velocity.
+  @Get('analytics/funnel') funnel(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.funnel(u, { months: months ? Number(months) : undefined }); }
+  // Lead source → won revenue (win rate + average deal size per channel).
+  @Get('analytics/source-roi') sourceRoi(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.sourceRoi(u, { months: months ? Number(months) : undefined }); }
+  // Forecast categories (commit/best-case/pipeline) + quota attainment per owner + activity leaderboard.
+  @Get('analytics/forecast') forecast(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.forecast(u, { months: months ? Number(months) : undefined }); }
+
   // Activities
   @Post('activities') logActivity(@Body(new ZodValidationPipe(ActivityBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.logActivity(b, u); }
   @Get('activities') listActivities(@Query('entity_type') et: string | undefined, @Query('entity_no') en: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listActivities(et, en, u); }

@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { eq, and, isNotNull, desc, sql, gt, gte, lt, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, promoAudienceRules } from '../../database/schema/crm';
@@ -8,8 +8,16 @@ import { auditLog } from '../../database/schema';
 import { dineInOrders } from '../../database/schema/restaurant';
 import { npsResponses, recoveryCases } from '../../database/schema/nps';
 import { promotions } from '../../database/schema/marketing';
+import { crmAccounts, crmOpportunities } from '../../database/schema/crm-pipeline';
+import { quotes } from '../../database/schema/cpq';
+import { orders } from '../../database/schema/sales';
 import { n } from '../../database/queries';
+import { CrmAccountsService } from './accounts/crm-accounts.module';
+import { FinanceService } from '../finance/finance.service';
+import { CollectionsService } from '../finance/collections.service';
 import type { JwtUser } from '../../common/decorators';
+
+const round2 = (x: number) => Math.round(x * 100) / 100;
 
 // Predictive scoring (Growth Engine G3, docs/25) — EXPLAINABLE versioned weighted formula, deliberately
 // not a trained model (SOX posture: coefficients are code-reviewed + documented in
@@ -45,7 +53,14 @@ function rfmScore(recencyDays: number, freq: number, monetary: number) {
 
 @Injectable()
 export class CrmService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    // CRM-3 Customer 360 (docs/42) — reuse the existing account/finance services rather than re-deriving.
+    // @Optional so partial harnesses that construct CrmService without the finance graph still boot.
+    @Optional() private readonly accounts?: CrmAccountsService,
+    @Optional() private readonly finance?: FinanceService,
+    @Optional() private readonly collections?: CollectionsService,
+  ) {}
 
   // Compute and upsert the customer_profile for one member.
   // Aggregates from dine_in_orders (channel/online/kiosk) where member_id is set.
@@ -186,6 +201,83 @@ export class CrmService {
       } : null,
       recent_orders: recent.map((o: any) => ({ order_no: o.orderNo, total: n(o.total), channel: o.channel, opened_at: o.openedAt })),
     };
+  }
+
+  // CRM-3 Customer 360 (docs/42) — the single pre-call screen that JOINS a CRM-1 account to the money.
+  // Read-only aggregator keyed on account_no: reuses CrmAccountsService (account + contacts + deals +
+  // activities), the member-360 profile() (loyalty + NPS + recovery + recent orders, via a member-linked
+  // contact), CollectionsService.creditStatus + FinanceService.customerStatement (AR open balance/aging +
+  // credit holds + statement + last payments) and the CPQ quotes tied to the account's opportunities — so
+  // a salesperson sees receivables, credit holds, open deals, quotes and loyalty in ONE payload
+  // ("CRM ไม่เห็นเงิน" — the CRM can now see the money). Reuses services; never posts anything.
+  // NB: AR / credit / sales-orders are tenant-scoped in the single-company model (there is no per-customer
+  // AR sub-ledger), so they are surfaced as the COMPANY position and clearly labelled company_level=true.
+  async customer360(accountNo: string, user: JwtUser) {
+    const db = this.db;
+    if (!this.accounts) throw new BadRequestException({ code: 'UNAVAILABLE', message: 'Customer 360 is unavailable in this deployment', messageTh: 'ฟีเจอร์ลูกค้า 360 ไม่พร้อมใช้งาน' });
+
+    // 1. Account core — reuses CRM-2's account page (account fields + contacts + opportunities + activities).
+    const { contacts, opportunities, opportunity_count, recent_activities, ...account } = await this.accounts.get(accountNo, user);
+    const opps = opportunities ?? [];
+
+    // 2. Deals — open vs closed, with pipeline value + probability-weighted forecast value.
+    const openDeals = opps.filter((o: any) => o.status === 'Open');
+    const deals = {
+      count: opps.length,
+      open_count: openDeals.length,
+      open_value: round2(openDeals.reduce((a: number, o: any) => a + Number(o.amount ?? 0), 0)),
+      weighted_value: round2(openDeals.reduce((a: number, o: any) => a + Number(o.amount ?? 0) * Number(o.probability ?? 0) / 100, 0)),
+      open: openDeals,
+    };
+
+    // 3. Quotes — CPQ quotes tied to this account's opportunities (via crm_opportunity_id).
+    const accConds = [eq(crmAccounts.accountNo, accountNo)];
+    if (user.tenantId != null) accConds.push(eq(crmAccounts.tenantId, user.tenantId));
+    const [acc] = await db.select({ id: crmAccounts.id }).from(crmAccounts).where(and(...accConds)).limit(1);
+    const oppIdRows = acc ? await db.select({ id: crmOpportunities.id }).from(crmOpportunities).where(eq(crmOpportunities.accountId, Number(acc.id))) : [];
+    const oppIds = oppIdRows.map((o: any) => Number(o.id));
+    const quoteRows = oppIds.length
+      ? await db.select({ quoteNo: quotes.quoteNo, status: quotes.status, total: quotes.total, currency: quotes.currency, issuedDate: quotes.issuedDate, expiresDate: quotes.expiresDate, createdAt: quotes.createdAt })
+          .from(quotes).where(inArray(quotes.crmOpportunityId, oppIds)).orderBy(desc(quotes.id)).limit(50)
+      : [];
+    const quoteList = quoteRows.map((q: any) => ({ quote_no: q.quoteNo, status: q.status, total: n(q.total), currency: q.currency ?? 'THB', issued_date: q.issuedDate, expires_date: q.expiresDate, created_at: q.createdAt }));
+
+    // 4. Loyalty — first member-linked contact → reuse the member 360 (loyalty + NPS + recovery + orders).
+    const linkedMemberIds = (contacts ?? []).map((c: any) => c.member_id).filter((id: any): id is number => id != null);
+    let loyalty: Awaited<ReturnType<CrmService['profile']>> | null = null;
+    if (linkedMemberIds.length) {
+      try { loyalty = await this.profile(linkedMemberIds[0]!, user); } catch { loyalty = null; }
+    }
+
+    // 5. Finance — the COMPANY AR position + statement summary + last payments (tenant-level; see note above).
+    let finance: any = null;
+    if (user.tenantId != null && this.collections) {
+      const credit = await this.collections.creditStatus(user.tenantId);
+      let statement: any = null;
+      let lastPayments: any[] = [];
+      if (this.finance) {
+        const st = await this.finance.customerStatement(user.tenantId);
+        statement = { opening_balance: st.opening_balance, closing_balance: st.closing_balance, total_charges: st.total_charges, total_payments: st.total_payments, reporting_currency: st.reporting_currency };
+        lastPayments = (st.lines ?? []).filter((l: any) => l.type === 'receipt').slice(-5).reverse()
+          .map((l: any) => ({ date: l.date, ref: l.ref, amount: l.payment, currency: l.doc_currency }));
+      }
+      finance = {
+        company_level: true, // tenant-scoped AR/credit — no per-customer sub-ledger in this model
+        open_balance: credit.exposure, overdue: credit.overdue, max_overdue_days: credit.max_overdue_days,
+        credit_limit: credit.credit_limit, available_credit: credit.available_credit, credit_term: credit.credit_term,
+        on_hold: credit.on_hold, hold_reason: credit.hold_reason, over_limit: credit.over_limit, serious_overdue: credit.serious_overdue,
+        statement, last_payments: lastPayments,
+      };
+    }
+
+    // 6. Sales orders & deliveries — recent COMPANY sales orders with fulfilment status (tenant-level).
+    const soRows = user.tenantId != null
+      ? await db.select({ orderNo: orders.orderNo, status: orders.status, orderDate: orders.orderDate, estimatedDelivery: orders.estimatedDelivery, currency: orders.currency })
+          .from(orders).where(eq(orders.tenantId, user.tenantId)).orderBy(desc(orders.id)).limit(5)
+      : [];
+    const salesOrders = { company_level: true, recent: soRows.map((o: any) => ({ order_no: o.orderNo, status: o.status, order_date: o.orderDate, estimated_delivery: o.estimatedDelivery, currency: o.currency ?? 'THB' })) };
+
+    return { account, contacts: contacts ?? [], opportunity_count, recent_activities: recent_activities ?? [], deals, quotes: quoteList, loyalty, finance, sales_orders: salesOrders };
   }
 
   // CDP / data-integration export — a bulk, tenant-scoped snapshot of the member base (identity + RFM traits
