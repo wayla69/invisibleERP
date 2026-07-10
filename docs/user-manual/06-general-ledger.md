@@ -986,7 +986,7 @@ nothing and carries no control of its own.
 
 ---
 
-## Consolidation — eliminations & segment reporting (controls CON-03 / CON-04)
+## Consolidation — eliminations & segment reporting (controls CON-03 / CON-04 / CON-05)
 
 **Who:** Group / Financial Controller. All consolidation actions are **HQ (Admin) only**
 (`CONSOL_HQ_ONLY` for any other tenant). The run uses the `approvals` permission; group,
@@ -1017,6 +1017,32 @@ Optional: define configurable elimination rules (`POST /api/consolidation/rules`
 
 **Expected result:** consolidated TB = Σ entity TBs − IC eliminations, balanced (Σ Dr = Σ Cr);
 1150/2150 net to ~0; the run shows `balanced: true`.
+
+### Foreign-currency translation — CTA / OCI (CON-05, IAS 21 / TAS 21)
+
+When a member entity's **currency is not THB**, the run translates it at **two** rates instead of one:
+
+- its **income statement** (revenue / expense) at the **period average** rate, and
+- its **balance sheet** at the **closing** (period-end) rate.
+
+The difference between the two is the **cumulative translation adjustment (CTA)**, which the run
+parks in a **CTA / OCI translation-reserve** equity line — **account 3400**, line type `FX_CTA`.
+This is standard IFRS/TFRS practice (an auditor expects to see it); a THB entity produces no CTA.
+Each run line shows the `fx_rate` and `rate_type` (`average` / `closing` / `cta`) it used, and the
+run response includes `cta_total`. Rates come from the **Approved** FX rates only (see FX-04); to
+get an average rate, enter one or more approved rates dated within the period month.
+
+**Expected result:** P&L accounts are translated at the average rate, balance-sheet accounts at the
+closing rate, the 3400 CTA/OCI line equals the translation difference, and the consolidated TB still
+balances (`balanced: true`).
+
+### Consolidated statement of cash flows (CON-05, IAS 7)
+
+`GET /api/consolidation/runs/{runId}/cash-flow` produces a **group-level, post-elimination** cash-flow
+statement (indirect method) from the consolidated run: **operating** (net income + add-backs +
+working-capital movements), **investing**, **financing**, and a dedicated **effect of exchange-rate
+changes on cash** section (the CTA). It **reconciles** to the change in the consolidated cash accounts
+(`reconciled: true`). HQ (Admin) only, `exec`.
 
 ### Segment report (CON-04, IFRS 8)
 
