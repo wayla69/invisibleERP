@@ -135,6 +135,7 @@ export const dineInOrderItems = pgTable('dine_in_order_items', {
   startedAt: timestamp('started_at', { withTimezone: true }),
   readyAt: timestamp('ready_at', { withTimezone: true }),
   servedAt: timestamp('served_at', { withTimezone: true }),
+  recallCount: integer('recall_count').notNull().default(0), // KDS bump/recall: times this line was recalled off the pass — feeds the all-day recall count per station (POS-4)
   voidedAt: timestamp('voided_at', { withTimezone: true }),
   voidReason: text('void_reason'),
   createdBy: text('created_by'),
