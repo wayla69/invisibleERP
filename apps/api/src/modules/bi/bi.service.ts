@@ -9,7 +9,9 @@ import { custPosSales, custPosItems } from '../../database/schema/sales';
 import { journalEntries, journalLines, accounts } from '../../database/schema/ledger';
 import { arInvoices } from '../../database/schema/finance';
 import { apTransactions } from '../../database/schema/finance';
-import { opportunities, pipelineStages } from '../../database/schema/pipeline';
+// CRM-1 unification (0293): the pipeline KPIs read the unified spine (crm_opportunities — status/amount/
+// probability), not the retired Batch 2A `opportunities` table.
+import { crmOpportunities } from '../../database/schema/crm-pipeline';
 import { n, fx } from '../../database/queries';
 import { TtlCache } from '../../common/ttl-cache';
 import { MessagingService } from '../messaging/messaging.service';
@@ -195,14 +197,13 @@ export class BiService implements OnModuleInit {
       total: sql<string>`coalesce(sum(${arInvoices.amount} - ${arInvoices.paidAmount}),0)`,
     }).from(arInvoices).where(and(eq(arInvoices.tenantId, tid), eq(arInvoices.status, 'Unpaid'), lt(arInvoices.dueDate, today)));
 
-    // Open pipeline
+    // Open pipeline (unified spine; the row probability tracks the stage's default)
     const [pipeline] = await db.select({
-      total: sql<string>`coalesce(sum(${opportunities.expectedValue}),0)`,
-      weighted: sql<string>`coalesce(sum(${opportunities.expectedValue} * ${pipelineStages.defaultProbability} / 100.0),0)`,
+      total: sql<string>`coalesce(sum(${crmOpportunities.amount}),0)`,
+      weighted: sql<string>`coalesce(sum(${crmOpportunities.amount} * ${crmOpportunities.probability} / 100.0),0)`,
       count: sql<string>`count(*)`,
-    }).from(opportunities)
-      .innerJoin(pipelineStages, eq(opportunities.stageId, pipelineStages.id))
-      .where(and(eq(opportunities.tenantId, tid), eq(opportunities.status, 'Open')));
+    }).from(crmOpportunities)
+      .where(and(eq(crmOpportunities.tenantId, tid), eq(crmOpportunities.status, 'Open')));
 
     return {
       as_of: today,
@@ -340,14 +341,14 @@ export class BiService implements OnModuleInit {
     const start = this.monthsAgo(today, months);
 
     const rows = await db.select({
-      month: sql<string>`to_char(date_trunc('month', ${opportunities.createdAt}), 'YYYY-MM')`,
-      status: opportunities.status,
+      month: sql<string>`to_char(date_trunc('month', ${crmOpportunities.createdAt}), 'YYYY-MM')`,
+      status: crmOpportunities.status,
       count: sql<string>`count(*)`,
-      value: sql<string>`coalesce(sum(${opportunities.expectedValue}),0)`,
-    }).from(opportunities)
-      .where(and(eq(opportunities.tenantId, tid), gte(opportunities.createdAt, new Date(start + 'T00:00:00Z'))))
-      .groupBy(sql`date_trunc('month', ${opportunities.createdAt})`, opportunities.status)
-      .orderBy(sql`date_trunc('month', ${opportunities.createdAt})`);
+      value: sql<string>`coalesce(sum(${crmOpportunities.amount}),0)`,
+    }).from(crmOpportunities)
+      .where(and(eq(crmOpportunities.tenantId, tid), gte(crmOpportunities.createdAt, new Date(start + 'T00:00:00Z'))))
+      .groupBy(sql`date_trunc('month', ${crmOpportunities.createdAt})`, crmOpportunities.status)
+      .orderBy(sql`date_trunc('month', ${crmOpportunities.createdAt})`);
 
     const byMonth: Record<string, any> = {};
     for (const r of rows) {
