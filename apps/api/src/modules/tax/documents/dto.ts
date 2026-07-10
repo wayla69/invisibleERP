@@ -35,6 +35,20 @@ export const IssueAbbreviatedBody = z.object({
 });
 export type IssueAbbreviatedDto = z.infer<typeof IssueAbbreviatedBody>;
 
+// ── ABB → full conversion (ม.86/4 on buyer request; POS-1, TAX-10) ──
+// The buyer block is MANDATORY here (that is the point of asking for the full invoice): name + address
+// per ม.86/4(3), and — unlike IssueFullBody where it is optional — the 13-digit Tax ID is required, since
+// the buyer converts precisely to claim input VAT. branch_code is 5 digits, defaulted to 00000 (สำนักงานใหญ่).
+export const ConvertAbbBody = z.object({
+  buyer: z.object({
+    name: z.string().min(1),
+    tax_id: z.string().min(1),
+    branch_code: z.string().regex(/^\d{5}$/, 'branch_code must be 5 digits').optional(),
+    address: z.string().min(1),
+  }),
+});
+export type ConvertAbbDto = z.infer<typeof ConvertAbbBody>;
+
 // ── WHT 50 ทวิ (หนังสือรับรองการหักภาษี ณ ที่จ่าย) ──
 const WhtLine = z.object({
   income_type: z.string().min(1),         // '40(2)'|'40(5)'|'3tre-service'|... (see wht-rates.ts)
