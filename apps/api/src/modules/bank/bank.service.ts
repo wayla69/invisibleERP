@@ -10,10 +10,9 @@ import type { JwtUser } from '../../common/decorators';
 import type { CreateBankAccountDto, ImportStatementDto, AdjustmentDto, ImportStatementFileDto } from './dto';
 import { normalizeStatementRows, StatementParseError } from './statement-file';
 import { parseCsv, parseXlsx } from '../masterdata/masterdata.service';
-
-const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
-const days = (a: any, b: any) => Math.abs((new Date(String(a)).getTime() - new Date(String(b)).getTime()) / 86400000);
-const TOLERANCE_DAYS = 5;
+// Shared reconciliation auto-match engine (amount / date-window scoring) — the SAME matcher the PromptPay
+// store-level reconciliation (POS-8) reuses, so both score identically. Do not fork a second matcher.
+import { round4, daysApart as days, amountDateMatch, TOLERANCE_DAYS } from './match-engine';
 
 @Injectable()
 export class BankService {
@@ -183,7 +182,7 @@ export class BankService {
     const unmatchedStmt: typeof stmtLines = [];
     for (const sl of stmtLines) {
       const target = round4(n(sl.amount));
-      const cand = bookLines.find((b: any) => !usedJl.has(Number(b.id)) && Math.abs(round4(n(b.debit) - n(b.credit)) - target) < 0.01 && days(b.entryDate, sl.lineDate) <= TOLERANCE_DAYS);
+      const cand = bookLines.find((b: any) => !usedJl.has(Number(b.id)) && amountDateMatch(n(b.debit) - n(b.credit), b.entryDate, target, sl.lineDate));
       if (cand) {
         usedJl.add(Number(cand.id));
         const payNo = (cand.source === 'Payment' || cand.source === 'POS') ? cand.sourceRef : null;
@@ -213,7 +212,7 @@ export class BankService {
       const usedRuns = new Set<number>();
       for (const sl of unmatchedStmt) {
         const target = round4(Math.abs(n(sl.amount)));
-        const run = runs.find((r: any) => !usedRuns.has(Number(r.id)) && Math.abs(round4(n(r.totalNet)) - target) < 0.01 && (!r.executedAt || days(r.executedAt, sl.lineDate) <= TOLERANCE_DAYS));
+        const run = runs.find((r: any) => !usedRuns.has(Number(r.id)) && Math.abs(round4(n(r.totalNet)) - target) < 0.01 && (!r.executedAt || days(r.executedAt, sl.lineDate) <= TOLERANCE_DAYS));  // run-total clear keeps its own executedAt window
         if (!run) continue;
         const rows = await db.update(apPaymentRunLines).set({ cleared: true, clearedAt: new Date() })
           .where(and(eq(apPaymentRunLines.runId, Number(run.id)), eq(apPaymentRunLines.status, 'Paid'), eq(apPaymentRunLines.cleared, false)))
