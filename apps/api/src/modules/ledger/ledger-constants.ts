@@ -23,6 +23,7 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '5000', name: 'COGS', type: 'Expense' },
   { code: '5100', name: 'Operating Expense', type: 'Expense' },
   { code: '1500', name: 'Fixed Assets', type: 'Asset' },
+  { code: '1520', name: 'Construction in Progress', type: 'Asset' }, // สินทรัพย์ระหว่างก่อสร้าง (CIP/AUC) — accumulates cost until settled to 1500 (FA-13)
   { code: '1590', name: 'Accumulated Depreciation', type: 'Asset' }, // contra-asset (normal credit bal)
   { code: '5200', name: 'Depreciation Expense', type: 'Expense' },
   { code: '1510', name: 'Gain/Loss on Disposal', type: 'Revenue' }, // gain=credit, loss=debit
@@ -138,6 +139,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '1690': { bucket: 'addback', label: 'ค่าเสื่อมสะสม–สินทรัพย์สิทธิการใช้ (Accumulated ROU depreciation)' },
   // Investing — property, plant & equipment + right-of-use assets (gross)
   '1500': { bucket: 'investing', label: 'ซื้อ/จำหน่ายสินทรัพย์ถาวร (Purchase/disposal of fixed assets)' },
+  '1520': { bucket: 'investing', label: 'สินทรัพย์ระหว่างก่อสร้าง (Construction in progress / AUC)' }, // FA-13 — CIP cost accumulation, an investing outflow
   '1600': { bucket: 'investing', label: 'สินทรัพย์สิทธิการใช้ (Right-of-use assets)' },
   // Financing — owners' equity, dividends, lease liabilities
   '2600': { bucket: 'financing', label: 'หนี้สินตามสัญญาเช่า (Lease liabilities)' },

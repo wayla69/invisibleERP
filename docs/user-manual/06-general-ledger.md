@@ -781,6 +781,55 @@ Only **one** revaluation can be pending per asset at a time.
 > 3100) automatically — it isn't recognised again in profit or loss. The disposal
 > response reports the amount recycled.
 
+### Parallel tax depreciation book (FIN-6)
+
+Thai tax lets you depreciate an asset **faster** than the accounting (book) rate —
+a shorter tax life plus a **first-year initial allowance**. You can keep this
+**separate tax basis** on the asset without any manual GAAP adjustment:
+
+1. When you acquire an asset, optionally set the tax parameters — **tax useful life
+   (months)**, **tax salvage value**, **tax initial-allowance %**. The asset then
+   keeps a parallel **tax book** alongside the accounting book.
+2. Run **tax depreciation** for a period (`POST /api/assets/tax-depreciation/run`,
+   `YYYY-MM`). This is a **memo calculation** — it posts **nothing** to the ledger
+   (tax depreciation isn't a bookkeeping entry). It applies the initial allowance in
+   the first period, then straight-line over the tax life. Re-running the same period
+   is safe (idempotent).
+
+**Why it matters:** the difference between the book and tax net book value is a
+**temporary difference**. The **Deferred tax** run (§ TAX / see *07-tax.md*) now reads
+each asset's **actual tax NBV** and posts the resulting deferred-tax charge/benefit
+(**Dr Deferred Tax Expense 5950 / Cr Deferred Tax Asset 1700**, or the reverse) — so
+book-vs-tax depreciation flows straight into deferred tax instead of a hand-keyed
+adjustment. Assets with no tax book fall back to the documented approximation.
+
+### Construction-in-progress (CIP / AUC)
+
+An asset you build over time (a warehouse, a fit-out) accumulates cost before it is
+ready for use. Keep it in a **construction-in-progress** record so it is **not
+depreciated** until finished:
+
+1. **Open a CIP** (`POST /api/assets/cip`): name, optional category/location. It starts
+   with zero cost.
+2. **Add cost lines** (`…/cip/:cipNo/cost`) as they arrive — from a goods receipt, a
+   project, or manual entry. Each posts **Dr Construction in Progress 1520 / Cr Accounts
+   Payable 2000** (or **Cr Cash 1000**) and rolls up the accumulated cost. Only an **Open**
+   CIP accepts cost (else `CIP_NOT_OPEN`).
+3. **Settle (capitalize)** when complete (`…/cip/:cipNo/settle`): give the finished
+   asset's **useful life** (or a category) and a **mandatory reason**. A CIP with no
+   cost can't be settled (`CIP_NO_COST`). The request posts **nothing** yet.
+
+#### Approval (required before it counts) — two people
+
+Settlement uses **maker-checker** (deciding *when* construction is "complete" and at
+what value it enters service moves PPE and starts depreciation). A **different** person
+approves (`…/cip/:cipNo/settle/approve`) — only then is the fixed asset created and the
+**reclassification entry posts: Dr Fixed Assets 1500 / Cr Construction in Progress 1520**
+(moving the accumulated cost out of CIP), and depreciation begins. **You cannot approve
+your own settlement** (`SOD_VIOLATION`, binds **everyone, including Admin**). **Reject**
+re-opens the CIP for more cost or a corrected request. The created asset shows its
+**source CIP** on the register.
+
 > **Note — QR asset tags & scanning:** Print **QR labels** from the **QR Tags** tab
 > (single tag or the full A4 sheet) and use **scan-update** to record an asset's
 > location or assigned holder during a physical asset count. On the QR Tags tab's
