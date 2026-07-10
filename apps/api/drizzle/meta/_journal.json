@@ -2218,7 +2218,14 @@
       "idx": 317,
       "version": "7",
       "when": 2023820000282,
-      "tag": "0317_stocktake_posted_by",
+      "tag": "0317_pos_tip_adjust",
+      "breakpoints": true
+    },
+    {
+      "idx": 318,
+      "version": "7",
+      "when": 2023820000283,
+      "tag": "0318_stocktake_posted_by",
       "breakpoints": true
     }
   ]
