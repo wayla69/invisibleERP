@@ -344,6 +344,9 @@ export class ApPaymentRunService {
   async bankFile(runNo: string, format: string | undefined, user: JwtUser): Promise<{ filename: string; contentType: string; body: string; sha256: string }> {
     const db = this.db;
     const run = await this.loadRun(runNo);
+    // Use the run's canonical, DB-sourced run_no (APRUN-YYYYMMDD-NNN) everywhere below — never the raw
+    // path param — so no request-controlled value is reflected into the filename/headers or the file body.
+    const canonicalRunNo = run.runNo;
     if (run.status !== 'Approved' && run.status !== 'Executed') {
       throw new BadRequestException({ code: 'RUN_NOT_APPROVED', message: `Bank file is available only for an approved/executed run (run is ${run.status})`, messageTh: 'สร้างไฟล์ธนาคารได้เฉพาะรอบจ่ายที่อนุมัติแล้ว' });
     }
@@ -382,17 +385,17 @@ export class ApPaymentRunService {
 
     let body: string; let contentType = 'text/csv; charset=utf-8'; let ext = 'csv';
     if (fmt === 'iso20022') {
-      body = pain001Xml({ runNo, payDate, debitAcct, debitName: payer?.legalName ?? payer?.name ?? '', details, total });
+      body = pain001Xml({ runNo: canonicalRunNo, payDate, debitAcct, debitName: payer?.legalName ?? payer?.name ?? '', details, total });
       contentType = 'application/xml; charset=utf-8'; ext = 'xml';
     } else {
-      body = thaiBulkCsv(fmt, { runNo, payDate, debitAcct, debitBank: bank?.bankName ?? '', debitName: payer?.legalName ?? payer?.name ?? '', details, total });
+      body = thaiBulkCsv(fmt, { runNo: canonicalRunNo, payDate, debitAcct, debitBank: bank?.bankName ?? '', debitName: payer?.legalName ?? payer?.name ?? '', details, total });
     }
     const sha256 = createHash('sha256').update(body, 'utf8').digest('hex');
     await db.update(apPaymentRuns).set({ fileFormat: fmt, fileHash: sha256, fileGeneratedAt: new Date() }).where(eq(apPaymentRuns.id, Number(run.id)));
     // Audit event — the hash of the exact bytes handed to the bank (EXP-13 evidence; GETs skip the
     // mutating-request audit interceptor, so the status log carries it).
-    await this.statusLog.log('APRUN', runNo, String(run.status), String(run.status), user.username, `bank-file ${fmt} sha256=${sha256}`);
-    return { filename: `${runNo}-${fmt}.${ext}`, contentType, body, sha256 };
+    await this.statusLog.log('APRUN', canonicalRunNo, String(run.status), String(run.status), user.username, `bank-file ${fmt} sha256=${sha256}`);
+    return { filename: `${canonicalRunNo}-${fmt}.${ext}`, contentType, body, sha256 };
   }
 }
 
