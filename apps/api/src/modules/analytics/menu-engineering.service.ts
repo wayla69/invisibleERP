@@ -35,13 +35,16 @@ export class MenuEngineeringService {
   ) {}
 
   // ── Menu-engineering matrix: popularity (mix-share, 70% rule) × profitability (unit contribution
-  //    margin vs menu average) → Star / Plowhorse / Puzzle / Dog, with an action per quadrant. ──
-  async menuEngineering(user: JwtUser, opts?: { from?: string; to?: string }) {
+  //    margin vs the qty-WEIGHTED average CM — classic Kasavana–Smith ACM = total CM ÷ total units sold)
+  //    → Star / Plowhorse / Puzzle / Dog, with an action per quadrant. Optional branch_id narrows the
+  //    sales mix to one outlet (cust_pos_sales.branch_id; dine-in checkouts land there too). ──
+  async menuEngineering(user: JwtUser, opts?: { from?: string; to?: string; branch_id?: number }) {
     const db = this.db;
     const to = opts?.to ?? ymd();
     const from = opts?.from ?? to;
+    const branchId = opts?.branch_id;
 
-    // sold qty + net revenue per menu item over the window (completed sales only)
+    // sold qty + net revenue per menu item over the window (completed sales only; typed builders — no raw user input in SQL)
     const rows = await db
       .select({
         itemId: custPosItems.itemId,
@@ -51,7 +54,11 @@ export class MenuEngineeringService {
       })
       .from(custPosItems)
       .innerJoin(custPosSales, eq(custPosItems.saleId, custPosSales.id))
-      .where(and(gte(custPosSales.saleDate, from), lte(custPosSales.saleDate, to), sql`${custPosSales.status}::text = 'Completed'`))
+      .where(and(
+        gte(custPosSales.saleDate, from), lte(custPosSales.saleDate, to),
+        sql`${custPosSales.status}::text = 'Completed'`,
+        ...(branchId != null ? [eq(custPosSales.branchId, branchId)] : []),
+      ))
       .groupBy(custPosItems.itemId, custPosItems.itemDescription);
 
     // per-sku cost/margin from the recipe-based food-cost layer (single source of truth)
@@ -74,7 +81,9 @@ export class MenuEngineeringService {
     const totalQty = costed.reduce((a: number, s: any) => a + s.qty, 0);
     const numItems = costed.length;
     const popThreshold = numItems > 0 ? (1 / numItems) * POP_RULE : 0; // 70% rule
-    const avgUnitMargin = numItems > 0 ? costed.reduce((a: number, s: any) => a + (s.unit_margin ?? 0), 0) / numItems : 0;
+    // Profitability threshold = qty-WEIGHTED average contribution margin (Σ CM×qty ÷ Σ qty) — the classic
+    // Kasavana–Smith ACM, so one slow premium dish can't drag the bar up for the whole menu.
+    const avgUnitMargin = totalQty > 0 ? costed.reduce((a: number, s: any) => a + (s.unit_margin ?? 0) * s.qty, 0) / totalQty : 0;
 
     const ACTION: Record<string, { quadrant: string; quadrant_th: string; action: string; action_th: string }> = {
       star: { quadrant: 'Star', quadrant_th: 'ดาวเด่น', action: 'Keep & feature prominently; protect quality and price.', action_th: 'คงไว้และโปรโมต รักษาคุณภาพและราคา' },
@@ -95,7 +104,8 @@ export class MenuEngineeringService {
 
     const countBy = (q: string) => items.filter((i: any) => i.quadrant === q).length;
     return {
-      from, to,
+      from, to, branch_id: branchId ?? null,
+      // avg_unit_margin = the qty-weighted average CM the hi/lo margin split was made against
       thresholds: { popularity_rule_pct: POP_RULE * 100, popularity_share_threshold: r4(popThreshold), avg_unit_margin: r2(avgUnitMargin) },
       summary: {
         items: items.length,
