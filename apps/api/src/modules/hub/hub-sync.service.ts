@@ -31,10 +31,11 @@ import type { JwtUser } from '../../common/decorators';
 import { RestaurantOfflineSyncService, type RegisterOfflineSaleOp } from '../restaurant/offline-sync.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { WasteService, type WasteReason } from '../inventory/waste.service';
+import { StockOpsService } from '../stock-ops/stock-ops.service';
 import { CASH_VARIANCE_THRESHOLD } from '../payments/payments.service';
 import { roundCurrency } from '../tax/money';
 // single source of the signature projection — the hub pusher signs with the same functions
-import { signHubBatch, signHubDoc, type HubTillDoc, type HubHeartbeatDoc, type HubWasteDoc } from '../../database/hub-push';
+import { signHubBatch, signHubDoc, type HubTillDoc, type HubHeartbeatDoc, type HubWasteDoc, type HubStocktakeDoc } from '../../database/hub-push';
 
 export const HUB_SNAPSHOT_FORMAT = 'ierp-hub-snapshot';
 export const HUB_SNAPSHOT_VERSION = 1;
@@ -81,6 +82,7 @@ export class HubSyncService {
     private readonly offlineSync: RestaurantOfflineSyncService,
     private readonly ledger: LedgerService,
     private readonly waste: WasteService,
+    private readonly stockOps: StockOpsService,
   ) {}
 
   /** timing-safe HMAC compare — every hub-originated request authenticates this way. */
@@ -360,6 +362,18 @@ export class HubSyncService {
       unit_cost: w.unit_cost, uom: w.uom, notes: w.notes,
     }, hubUser, { wasteNo: w.waste_no });
     return { ...res, duplicate: res.duplicate === true };
+  }
+
+  // ── Phase 2c-2: hub → cloud STOCKTAKE ingest (control BRANCH-07) ───────────────────────────────
+  // The hub ran the R11 maker-checker with two real humans; the cloud posts as the machine principal
+  // `hub-sync`, which would erase that evidence. The document therefore NAMES both, and the cloud
+  // refuses it when they are the same person — a replay can never launder a self-approved count.
+  async ingestStocktake(body: { tenant_id: number; sent_at: string; stocktake: HubStocktakeDoc; signature: string }) {
+    const secret = this.secret();
+    this.assertSignature(body.signature, signHubDoc({ tenant_id: Number(body.tenant_id), sent_at: String(body.sent_at), stocktake: body.stocktake }, secret));
+    const t = Number(body.tenant_id);
+    await this.assertTenant(t);
+    return this.stockOps.ingestHubStocktake(body.stocktake, t);
   }
 
   // ── Phase 4a: hub heartbeat (liveness + backlog) ───────────────────────────────────────────────

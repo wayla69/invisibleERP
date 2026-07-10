@@ -71,6 +71,14 @@ export interface HubWasteDoc {
   unit_cost?: number; uom?: string; notes?: string;
 }
 
+// Phase 2c-2 — stocktake envelope (BRANCH-07). A POSTED count sheet with BOTH humans named: the cloud
+// refuses the document unless counted_by and posted_by differ, so SoD R11 survives the machine replay.
+export interface HubStocktakeLine { item_id: string; item_description?: string; uom?: string; system_qty: number; physical_qty: number }
+export interface HubStocktakeDoc {
+  st_no: string; st_date: string; counted_by: string; posted_by: string; remarks?: string;
+  lines: HubStocktakeLine[];
+}
+
 // Phase 4a — heartbeat payload (liveness + replay backlog; the cloud stamps last_seen + clock skew).
 export interface HubHeartbeatDoc {
   hub_id: string; app_version?: string; last_push_at?: string | null;
@@ -301,6 +309,61 @@ export async function pushHubWaste(
       await logRow({ hubSaleNo: wasteNo, clientUuid, status: 'failed', errorCode: String(e?.code ?? e?.message ?? 'WASTE_PUSH_FAILED'), errorMessage: String(e?.message ?? e) });
     }
   }
+
+  return summary;
+}
+
+export interface HubStocktakePushSummary { collected: number; pushed: number; duplicate: number; blocked: number; failed: number }
+
+/**
+ * Phase 2c-2 — push POSTED stocktakes (BRANCH-07). Draft sheets are NOT pushed: a count only becomes
+ * evidence once an independent reviewer has posted its variance (SoD R11), and the cloud re-checks that
+ * the two names differ. A sheet whose poster equals its counter is BLOCKED, not silently accepted.
+ */
+export async function pushHubStocktakes(
+  db: any,
+  tenantId: number,
+  deps: { secret: string; sendStocktake: (body: { tenant_id: number; sent_at: string; stocktake: HubStocktakeDoc; signature: string }) => Promise<any>; sentAt?: string },
+): Promise<HubStocktakePushSummary> {
+  const rows: any[] = await db.execute(sql`
+    SELECT st_no, min(st_date) AS st_date, min(counted_by) AS counted_by, min(posted_by) AS posted_by, min(remarks) AS remarks
+    FROM stocktakes s
+    WHERE s.tenant_id = ${tenantId} AND s.status = 'Posted'
+      AND NOT EXISTS (SELECT 1 FROM hub_push_log l WHERE l.tenant_id = s.tenant_id AND l.hub_sale_no = s.st_no AND l.status <> 'failed')
+    GROUP BY st_no ORDER BY st_no`).then((r: any) => r.rows ?? r);
+
+  const summary: HubStocktakePushSummary = { collected: rows.length, pushed: 0, duplicate: 0, blocked: 0, failed: 0 };
+  if (!rows.length) return summary;
+
+  const logRow = async (row: Record<string, any>) => {
+    await db.insert(hubPushLog).values({ tenantId, docType: 'stocktake', attempts: 1, ...row })
+      .onConflictDoUpdate({ target: [hubPushLog.tenantId, hubPushLog.hubSaleNo], set: { ...row, docType: 'stocktake', attempts: sql`${hubPushLog.attempts} + 1`, pushedAt: new Date() } });
+  };
+
+  for (const st of rows) {
+    const stNo = String(st.st_no);
+    const clientUuid = `hub:${tenantId}:${stNo}`;
+    const lineRows: any[] = await db.execute(sql`
+      SELECT item_id, item_description, uom, system_qty, physical_qty FROM stocktakes
+      WHERE tenant_id = ${tenantId} AND st_no = ${stNo} ORDER BY id`).then((r: any) => r.rows ?? r);
+    const stocktake: HubStocktakeDoc = {
+      st_no: stNo, st_date: String(st.st_date), counted_by: String(st.counted_by ?? ''), posted_by: String(st.posted_by ?? ''),
+      remarks: st.remarks ?? undefined,
+      lines: lineRows.map((l) => ({ item_id: String(l.item_id), item_description: l.item_description ?? undefined, uom: l.uom ?? undefined, system_qty: num(l.system_qty), physical_qty: num(l.physical_qty) })),
+    };
+    const sentAt = deps.sentAt ?? new Date().toISOString();
+    const body = { tenant_id: tenantId, sent_at: sentAt, stocktake, signature: signHubDoc({ tenant_id: tenantId, sent_at: sentAt, stocktake }, deps.secret) };
+    try {
+      const res = await deps.sendStocktake(body);
+      const dup = res?.duplicate === true;
+      summary[dup ? 'duplicate' : 'pushed']++;
+      await logRow({ hubSaleNo: stNo, clientUuid, status: dup ? 'duplicate' : 'pushed', errorCode: null, errorMessage: null });
+    } catch (e: any) {
+      const code = String(e?.code ?? e?.message ?? 'STOCKTAKE_PUSH_FAILED');
+      if (code.includes('SOD') || code.includes('STOCKTAKE_NOT_SEGREGATED')) summary.blocked++; else summary.failed++;
+      await logRow({ hubSaleNo: stNo, clientUuid, status: 'failed', errorCode: code, errorMessage: String(e?.message ?? e) });
+    }
+  }
   return summary;
 }
 
@@ -368,6 +431,11 @@ async function main() {
 
     const waste = await pushHubWaste(db, tenantId, { secret, sendWaste: (b) => post('/api/hub/ingest-waste', b) });
     if (waste.collected) console.log(`✅ hub push — waste collected ${waste.collected}: pushed ${waste.pushed}, duplicate ${waste.duplicate}, failed ${waste.failed}`);
+    const counts = await pushHubStocktakes(db, tenantId, { secret, sendStocktake: (b) => post('/api/hub/ingest-stocktake', b) });
+    if (counts.collected) {
+      console.log(`✅ hub push — stocktakes collected ${counts.collected}: pushed ${counts.pushed}, duplicate ${counts.duplicate}, blocked ${counts.blocked}, failed ${counts.failed}`);
+      if (counts.blocked) console.log('   ⚠ blocked: the counter also posted the sheet — SoD R11 requires an independent reviewer (fix on the hub, then re-run)');
+    }
 
     const tills = await pushHubTills(db, tenantId, { secret, sendTill: (b) => post('/api/hub/ingest-till', b) });
     if (tills.collected) {
@@ -387,7 +455,7 @@ async function main() {
       console.log(`⚠ THIS HUB IS AHEAD OF THE CLOUD (hub ${process.env.APP_VERSION} > cloud ${advice.cloud_version}). Upgrade the CLOUD first — a hub ahead can send fields the cloud rejects.`);
     }
 
-    process.exit(sum.failed || tills.failed || waste.failed ? 1 : 0);
+    process.exit(sum.failed || tills.failed || waste.failed || counts.failed ? 1 : 0);
   } finally {
     await client.end({ timeout: 5 });
   }

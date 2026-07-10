@@ -48,6 +48,16 @@ const IngestWasteBody = z.object({
   }),
 });
 type IngestWasteDto = z.infer<typeof IngestWasteBody>;
+// Phase 2c-2 — stocktake envelope (BRANCH-07). Both humans must be named; the cloud rejects a self-post.
+const IngestStocktakeBody = z.object({
+  tenant_id: z.number().int().positive(), sent_at: z.string().min(1), signature: z.string().min(1),
+  stocktake: z.object({
+    st_no: z.string().min(1), st_date: z.string().min(1), counted_by: z.string().min(1), posted_by: z.string().min(1),
+    remarks: z.string().optional(),
+    lines: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), uom: z.string().optional(), system_qty: z.number(), physical_qty: z.number() })).min(1),
+  }),
+});
+type IngestStocktakeDto = z.infer<typeof IngestStocktakeBody>;
 
 // Phase 4a — heartbeat.
 const HeartbeatBody = z.object({
@@ -96,6 +106,12 @@ export class HubController {
   @Public() @Post('ingest-waste')
   ingestWaste(@Body(new ZodValidationPipe(IngestWasteBody)) body: IngestWasteDto) {
     return this.svc.ingestWaste(body);
+  }
+
+  // Phase 2c-2 — posted count-sheet ingest (BRANCH-07). Idempotent on the hub's st_no.
+  @Public() @Post('ingest-stocktake')
+  ingestStocktake(@Body(new ZodValidationPipe(IngestStocktakeBody)) body: IngestStocktakeDto) {
+    return this.svc.ingestStocktake(body);
   }
 
   // Phase 4a — hub liveness + backlog.
