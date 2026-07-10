@@ -90,6 +90,10 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '1170', name: 'Retention Receivable', type: 'Asset' },              // ลูกหนี้เงินประกันผลงาน — retention withheld by the customer on a progress claim, collectible on release (Track A)
   { code: '2440', name: 'Retention Payable', type: 'Liability' },             // เจ้าหนี้เงินประกันผลงาน — retention we withhold from a subcontractor valuation, payable on release (Track B)
   { code: '2220', name: 'Unapplied Customer Receipts', type: 'Liability' },   // เงินรับรอตัดชำระ — on-account AR cash awaiting application to invoices (REV-21); ties to Σ ar_receipts.unapplied_amount
+  // Lessor-side lease accounting (IFRS 16 / TFRS 16 lessor) — control LSE-02 (FIN-10).
+  { code: '1610', name: 'Net Investment in Lease (Lease Receivable)', type: 'Asset' }, // เงินลงทุนสุทธิในสัญญาเช่า/ลูกหนี้ตามสัญญาเช่า — finance-lease receivable (lessor); ties to Σ lessor_leases.receivable_balance
+  { code: '4600', name: 'Finance Lease Interest Income', type: 'Revenue' },   // ดอกเบี้ยรับตามสัญญาเช่าการเงิน — interest income unwound on the net investment (lessor finance lease)
+  { code: '4610', name: 'Operating Lease Rental Income', type: 'Revenue' },   // รายได้ค่าเช่าตามสัญญาเช่าดำเนินงาน — straight-line rental income (lessor operating lease)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -142,6 +146,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '1500': { bucket: 'investing', label: 'ซื้อ/จำหน่ายสินทรัพย์ถาวร (Purchase/disposal of fixed assets)' },
   '1520': { bucket: 'investing', label: 'สินทรัพย์ระหว่างก่อสร้าง (Construction in progress / AUC)' }, // FA-13 — CIP cost accumulation, an investing outflow
   '1600': { bucket: 'investing', label: 'สินทรัพย์สิทธิการใช้ (Right-of-use assets)' },
+  '1610': { bucket: 'investing', label: 'เงินลงทุนสุทธิในสัญญาเช่าการเงิน (Net investment in finance leases)' }, // FIN-10 lessor — collections of the net investment (principal) are investing flows
   // Financing — owners' equity, dividends, lease liabilities
   '2600': { bucket: 'financing', label: 'หนี้สินตามสัญญาเช่า (Lease liabilities)' },
   '3000': { bucket: 'financing', label: 'ส่วนทุน/เงินลงทุนจากเจ้าของ (Owner capital contributions)' },

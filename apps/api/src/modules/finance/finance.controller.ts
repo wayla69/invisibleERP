@@ -8,6 +8,7 @@ import { FinancialHealthService } from './financial-health.service';
 import { ArAllowanceService, type ComputeAllowanceDto } from './ar-allowance.service';
 import { ArCashApplicationService, type CashApplicationDto, type ApplyOnAccountDto } from './ar-cash-application.service';
 import { ApPaymentRunService, type ProposeRunDto, type EditRunLinesDto, type DiscountTermDto } from './ap-payment-run.service';
+import { ArApNettingService, type NettingAgreementDto, type ProposeNettingDto } from './arap-netting.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
@@ -65,6 +66,22 @@ const DiscountTermBody = z.object({
   active_from: z.string().nullable().optional(),
   active_to: z.string().nullable().optional(),
 });
+// AR/AP netting & contra settlement (REV-23, docs/41 FIN-8) — a counterparty netting agreement + a
+// maker-checker contra settlement that offsets open AR against open AP (Dr 2000 / Cr 1100).
+const NettingAgreementBody = z.object({
+  customer_no: z.union([z.string().min(1), z.number()]),
+  vendor: z.union([z.string().min(1), z.number()]),
+  enabled: z.boolean().optional(),
+  threshold: z.number().nonnegative().nullable().optional(),
+  currency: z.string().optional(),
+  notes: z.string().optional(),
+});
+const ProposeNettingBody = z.object({
+  customer_no: z.union([z.string().min(1), z.number()]),
+  vendor: z.union([z.string().min(1), z.number()]),
+  amount: z.number().positive().optional(),
+  reason: z.string().min(1),
+});
 const AllowanceComputeBody = z.object({
   as_of_date: z.string().optional(),
   method: z.enum(['aging', 'percentage']).optional(),
@@ -75,7 +92,40 @@ const AllowanceComputeBody = z.object({
 
 @Controller('api/finance')
 export class FinanceController {
-  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService, private readonly allowance: ArAllowanceService, private readonly cashApp: ArCashApplicationService, private readonly payRuns: ApPaymentRunService) {}
+  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService, private readonly allowance: ArAllowanceService, private readonly cashApp: ArCashApplicationService, private readonly payRuns: ApPaymentRunService, private readonly netting: ArApNettingService) {}
+
+  // ── AR/AP netting & contra settlement (REV-23, docs/41 FIN-8) ──
+  // A counterparty that is BOTH a customer (AR) and a vendor (AP): a netting agreement authorises offsetting
+  // its open AR against its open AP; a maker-checker contra settlement (propose → a DIFFERENT user approves)
+  // posts a single Dr 2000 / Cr 1100 JE clearing both sub-ledgers up to the netted amount.
+  @Post('netting/agreements') @HttpCode(200) @Permissions('creditors', 'exec')
+  upsertNettingAgreement(@Body(new ZodValidationPipe(NettingAgreementBody)) b: NettingAgreementDto, @CurrentUser() u: JwtUser) { return this.netting.upsertAgreement(b, u); }
+
+  @Get('netting/agreements') @Permissions('creditors', 'ar', 'exec')
+  listNettingAgreements(@CurrentUser() u: JwtUser) { return this.netting.listAgreements(u); }
+
+  // Preview the open AR/AP positions + proposed net for a counterparty (before proposing a settlement).
+  @Get('netting/preview') @Permissions('creditors', 'ar', 'exec')
+  nettingPreview(@Query('customer_no') customerNo: string, @Query('vendor') vendor: string, @CurrentUser() u: JwtUser) { return this.netting.preview(customerNo, vendor, u); }
+
+  // Register / pending queue (declared before the :no routes for clarity).
+  @Get('netting/settlements') @Permissions('creditors', 'ar', 'exec', 'approvals')
+  listNettingSettlements(@Query('status') status?: string, @Query('limit') limit?: string, @CurrentUser() u?: JwtUser) { return this.netting.listSettlements({ status: status || undefined, limit: limit ? Number(limit) : undefined }, u); }
+
+  // Propose a contra settlement (maker) — parks PendingApproval; no GL / sub-ledger movement yet.
+  @Post('netting/settlements') @Permissions('creditors', 'exec')
+  proposeNetting(@Body(new ZodValidationPipe(ProposeNettingBody)) b: ProposeNettingDto, @CurrentUser() u: JwtUser) { return this.netting.propose(b, u); }
+
+  // The netting statement (header + offset lines).
+  @Get('netting/settlements/:settlementNo') @Permissions('creditors', 'ar', 'exec', 'approvals')
+  getNettingSettlement(@Param('settlementNo') settlementNo: string) { return this.netting.getSettlement(settlementNo); }
+
+  // Checker approves (approver ≠ proposer enforced in the service, even for Admin) → contra JE + clears both sub-ledgers.
+  @Post('netting/settlements/:settlementNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  approveNetting(@Param('settlementNo') settlementNo: string, @CurrentUser() u: JwtUser) { return this.netting.approve(settlementNo, u); }
+
+  @Post('netting/settlements/:settlementNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  rejectNetting(@Param('settlementNo') settlementNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.netting.reject(settlementNo, u, b.reason); }
 
   // ── AR cash application (REV-21) — multi-invoice receipt application + on-account cash ──
   // Worksheet feed: open invoices (with pending-committed amounts), unapplied receipts, applicable credit notes.

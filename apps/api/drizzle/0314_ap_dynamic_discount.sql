@@ -1,4 +1,4 @@
--- 0309_ap_dynamic_discount — Dynamic / early-payment discounting on the AP payment run (FIN-9, control EXP-14).
+-- 0314_ap_dynamic_discount — Dynamic / early-payment discounting on the AP payment run (FIN-9, control EXP-14).
 -- Extends the FIN-2 AP payment run (0296/0297, EXP-13) with a maker-checked sliding-scale prompt-payment
 -- discount policy (ap_discount_terms — per-vendor or global). When a run pays an approved bill early, the
 -- discount is captured as income (Cr 4600 Early-Payment Discount Income) and the cash disbursed is reduced.
