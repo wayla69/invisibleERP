@@ -213,12 +213,28 @@ When ingredients are thrown away — spoiled, expired, damaged, over-prepped —
 it so you can see **how much food cost you're losing and why**.
 
 1. Enter the **item code**, **quantity**, and pick a **reason** (เน่าเสีย / หมดอายุ /
-   ชำรุด / ทำเกิน / เตรียมผิด / อื่น ๆ).
-2. Optionally enter the **cost per unit**. If you do, the loss is **posted to the
+   ชำรุด / ทำเกิน / เตรียมผิด / ยกเลิกจานที่ปรุงแล้ว / อื่น ๆ) — *why* it was wasted.
+2. Pick a **disposition** — *what happened to it*: ทิ้ง (discard), หมัก (compost),
+   บริจาค (donate), อาหารพนักงาน (staff meal), นำกลับมาใช้ (rework), or คืนผู้ขาย
+   (return to supplier). Defaults to **discard**.
+3. Optionally enter the **cost per unit**. If you do, the loss is **posted to the
    accounts** (Dr 5810 ของเสีย / Cr 1200 สินค้าคงคลัง); if you leave it blank, it's
    recorded for tracking only.
-3. **บันทึก** — the ingredient stock drops and the entry appears in the list, with a
-   **by-reason breakdown** at the top showing where your waste cost is going.
+4. **บันทึก** — the ingredient stock drops and the entry appears in the list, with a
+   **by-reason** and **by-disposition** breakdown at the top showing where your waste
+   cost is going. Filter the list by disposition to answer "how much did we donate?".
+
+> **Voided a dish that was already cooked?** Use **ยกเลิกจานที่ปรุงแล้ว (void-fire)**:
+> enter the **menu SKU** and how many dishes were voided, and the system writes off
+> *all* the recipe ingredients in one go (one accounting entry Dr 5810 / Cr 1200),
+> tagging the voided ticket number — so a cancelled fired order doesn't silently lose
+> its ingredient cost.
+
+> **Usage variance (theoretical vs actual).** The **ส่วนต่างการใช้วัตถุดิบ** report
+> compares what the recipes *say* should have been used (recipe COGS) against what
+> actually left stock (recipe use **+** logged waste), per ingredient and valued at
+> cost. A high waste % (flagged **High** ≥10% / **Medium** ≥5%) tells a manager which
+> ingredient the kitchen is losing money on. (Control **INV-15**.)
 
 > **Note:** This is for **ingredients/consumables**. For **stock-controlled
 > products** (those on the perpetual valued ledger), use the proper **write-off**

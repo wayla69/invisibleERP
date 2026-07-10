@@ -52,6 +52,11 @@ export const consolidationRunLines = pgTable('consolidation_run_lines', {
   entityTenantId: bigint('entity_tenant_id', { mode: 'number' }),
   accountCode: text('account_code').notNull(),
   amountThb: numeric('amount_thb', { precision: 18, scale: 4 }).notNull().default('0'),
+  // FIN-5 (0301): dual-rate translation audit — the FX rate that translated this line and its basis.
+  // rateType: 'average' (P&L, at period average rate) | 'closing' (balance-sheet, at closing rate) |
+  //           'cta' (the OCI/CTA translation-reserve plug) | null (base-currency THB, no translation).
+  fxRate: numeric('fx_rate', { precision: 18, scale: 8 }),
+  rateType: text('rate_type'),
   notes: text('notes'),
 }, (t) => ({
   byRun: index('idx_crl_run').on(t.runId, t.accountCode),
