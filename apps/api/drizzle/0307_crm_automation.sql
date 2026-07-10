@@ -1,4 +1,4 @@
--- 0301_crm_automation — CRM-4 automation: lead scoring + follow-up discipline (docs/41 CRM-4, new control REV-22).
+-- 0307_crm_automation — CRM-4 automation: lead scoring + follow-up discipline (docs/41 CRM-4, new control REV-22).
 -- Two tenant-scoped tables back the CRM-4 automation surface:
 --  (1) crm_lead_scores — ONE explainable, versioned rules-based score per (tenant, lead). The grade (A–D)
 --      and its per-factor breakdown are stored so lead prioritisation is auditable (SOX posture; mirrors the

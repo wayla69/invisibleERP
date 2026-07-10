@@ -145,7 +145,7 @@ export const crmActivities = pgTable('crm_activities', {
 
 // CRM-4 automation — explainable, versioned rules-based lead score (grade A–D). ONE row per (tenant, lead),
 // upserted by CrmPipelineService.scoreLead; `breakdown` carries the per-factor contributions so the grade is
-// auditable (SOX posture, mirrors the customer_profiles churn/LTV formula). RLS-scoped (migration 0301).
+// auditable (SOX posture, mirrors the customer_profiles churn/LTV formula). RLS-scoped (migration 0307).
 export const crmLeadScores = pgTable('crm_lead_scores', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
@@ -162,7 +162,7 @@ export const crmLeadScores = pgTable('crm_lead_scores', {
 
 // CRM-4 follow-up discipline config — ONE row per tenant. sla_hours: a new lead must be touched within N
 // hours (detective control REV-22). rotting_days: an open deal with no activity for N days is "rotting".
-// round_robin_owners: owners a new lead is auto-assigned across (rr_cursor = next index). RLS (migration 0301).
+// round_robin_owners: owners a new lead is auto-assigned across (rr_cursor = next index). RLS (migration 0307).
 export const crmFollowupSettings = pgTable('crm_followup_settings', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
