@@ -13,7 +13,7 @@
 | Revision date | 2026-06-22 |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | BRANCH-01, BRANCH-02, BRANCH-03; cross-ref REV-01, GL-01, REC-01; SoD rule R07 |
+| Related RCM controls | BRANCH-01, BRANCH-02, BRANCH-03, BRANCH-04; cross-ref REV-01, GL-01, REC-01; SoD rule R07 |
 | Related policy | `<<Branch Operations Policy>>`, `<<Offline POS / Business Continuity Procedure>>`, `<<Segregation-of-Duties Policy>>` |
 
 ## 2. Purpose
@@ -104,6 +104,23 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
    current, integrity-protected master data reaches a disconnected terminal; sync-up reconciliation of
    hub-captured sales is the Phase-2 scope of BRANCH-03.*
 
+6c. **Hub → cloud sales replay (machine-to-machine; docs/41 Phase 2a).** Sales rung ON a store hub post
+   GL on the hub's own (operational) ledger; the CLOUD ledger stays the book of record, fed by an
+   exactly-once replay. The hub pusher (`db:hub:push`, `database/hub-push.ts`; compose one-shot
+   `hub-push`) reconstructs each hub sale from its originating order (lines + modifiers, discount/tip/
+   service-charge from the sale header), signs the batch **HMAC-SHA256** with `HUB_SYNC_SECRET`, and
+   POSTs to the cloud's public `POST /api/hub/ingest` — verified timing-safe (bad signature ⇒
+   `403 HUB_SYNC_BAD_SIGNATURE`; secret unset ⇒ fail-closed) and replayed through the SAME idempotent
+   register offline-sync path of step 6. The `client_uuid` is **deterministic**
+   (`hub:{tenant}:{hub_sale_no}`), so any re-push — crash mid-run, double cron, replayed batch, even a
+   lost hub push-log — lands as `duplicate`, never a second sale/GL. Every outcome is recorded in the
+   hub-side `hub_push_log` (migration `0291`); a sale the pusher cannot faithfully replay (buffet tier,
+   loyalty redemption, no order linkage) is logged **`skipped_unsupported` with its reason** — a visible
+   exception queue for review, never a silent drop. `GET /api/hub/reconciliation` (perm `branch`/`exec`)
+   ties hub-ingested ops and their cloud sale values back per device/period. *Control: **BRANCH-04** —
+   hub-captured sales reach the central ledger exactly once, authentically, with unsupported shapes
+   surfaced; value ties hub↔cloud (cross-ref BRANCH-03, REC-01).*
+
 7. **GL boundary.** No GL is posted by the branch module itself; branch operations are organisational and reporting overlays. Revenue and tax are posted when the underlying sale finalises in the POS/order processes; the consolidated roll-up is an IPE that must tie to that posted revenue.
 
 ## 8. Process Flow
@@ -180,3 +197,4 @@ flowchart TD
 | 0.2 | 2026-06-26 | Platform | **Touch-register offline selling (BRANCH-03).** The main register (`/pos/register`) now sells QUICK (no-table) cash sales while offline: the sale is queued in IndexedDB (`lib/register-offline.ts`) and replayed on reconnect to a new idempotent endpoint `POST /api/restaurant/offline-sync` (`RestaurantOfflineSyncService`) that re-runs the restaurant order→checkout path — dedup on `(tenant, client_uuid)` via the shared `pos_offline_sync` ledger, so a re-sent batch returns `duplicate` and never double-posts the sale/GL. Dine-in (table) sales stay online-only (kitchen/fire). Register shows an online/offline + pending-sync badge and auto-flushes on reconnect. No migration (reuses `pos_offline_sync`); no new control (extends BRANCH-03). ToE: `restaurant-offline` harness (8 — idempotent replay, partial-failure isolation, tenant-scoped dedup, GL VAT) + `register-offline` Playwright e2e (offline sale → queued → auto-sync). §7 step 6 updated. |
 | 0.3 | 2026-07-10 | Platform | **Offline register hardening (LAN-first Phase 0, docs/41 — BRANCH-03 unchanged).** §7 step 6 — terminal-side capture now survives (a) a **reload/reboot mid-outage**: the menu is snapshotted to localStorage (`fetchMenuOfflineFirst`, `lib/register-offline.ts`) and served when `/api/menu` is unreachable (the SW never caches `/api/*`; the menu query runs under TanStack `networkMode:'always'` so it isn't paused while offline); and (b) the **"router up, internet down" false-online state**: a quick sale whose order-creation call fails at the network level (no HTTP status on the thrown error; `lib/api.ts` now stamps `status` on the session-expired error so a 401 is never mistaken for a dead link) falls back to the same IndexedDB queue automatically — HTTP rejections still surface and are never queued, and only the FIRST (pre-persistence) call falls back, so the worst case is an orphan open order, never a double-posted sale. The app-shell service worker no longer caches redirect-followed responses (an expired session bouncing to `/login` could poison the register's cached shell; cache bumped v3). e2e `register-offline.spec.ts` (3 scenarios); UAT-O2C-284..285; user manual 01 §offline. |
 | 0.4 | 2026-07-10 | Platform | **Store-hub snapshot export/import (docs/41 Phase 1 — extends BRANCH-02, no new numbered control).** New §7 step 6b: signed hub-snapshot export `GET /api/hub/snapshot` (`modules/hub`, fail-closed on `HUB_SYNC_SECRET`, HMAC-SHA256, credential export additionally gated on `X-Hub-Sync-Key`; FoH-only users via the `requiresMfa` line, TOTP/SSO never exported) + hub-side importer `db:hub:import` (`database/hub-import.ts` — signature verify before any write, id-stable upsert, table-status reset, sequence bump, idempotent) + the `hub/` docker-compose appliance and runbook `docs/ops/store-hub-setup.md`. ToE: new CI harness `tools/cutover/src/hub-snapshot.ts` (20 checks — fail-closed/perm/tenant-isolation/credential gating/tamper-reject/round-trip: cashier password+PIN login, menu + floor plan served, local insert past imported ids, on a second freshly-migrated PGlite). UAT-O2C-288..289. Phase-2 (hub→cloud financial replay) tracked in docs/41. |
+| 0.5 | 2026-07-10 | Platform | **Hub→cloud sales replay + reconciliation (docs/41 Phase 2a — NEW control BRANCH-04, RCM 202→203).** New §7 step 6c: hub pusher `db:hub:push` (`database/hub-push.ts`; deterministic `client_uuid` = `hub:{tenant}:{hub_sale_no}` ⇒ exactly-once even after a lost push-log; unsupported shapes logged `skipped_unsupported` WITH reason — visible, never silent) → cloud `POST /api/hub/ingest` (`@Public` + HMAC-SHA256 timing-safe over `{tenant_id,sent_at,sales}`, fail-closed on `HUB_SYNC_SECRET`) → replays via the step-6 register offline-sync path (server re-prices; GL posts on the CLOUD ledger — book of record; the hub's own ledger is operational only). `RegisterOfflineSaleOp` gains additive `discount`/`tip`/`service_charge_pct` pass-through for replay fidelity. New table `hub_push_log` (migration `0291`, canonical RLS); `GET /api/hub/reconciliation` (`branch`/`exec`) ties hub ops ↔ cloud sale values. ToE: `hub-snapshot` harness extended to 27 checks (ring-on-hub → push → cloud GL + TB balanced → log-loss re-push all-duplicate → tamper 403 → skip visibility). UAT-O2C-290..291. |

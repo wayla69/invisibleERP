@@ -139,6 +139,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-287 | LINE e-receipt negatives — `LINE_NOT_LINKED` / forged link `BAD_TOKEN` / prod `LINE_NOT_CONFIGURED` | REST-10 unchanged (delivery-channel feature — no new control) | 20 §7 (11), rev 3.12 (`receipts.ts`) |
 | UAT-O2C-288 | Hub snapshot export — fail-closed / signed / credential-gated / FoH-only / tenant-scoped | BRANCH-02 (extension) | 24 §7 step 6b, rev 0.4 (`hub-snapshot.ts`) |
 | UAT-O2C-289 | Hub import round-trip — tamper-reject, id-stable, idempotent; FoH works on the hub | BRANCH-02 (extension) · ITGC-AC-17 | 24 §7 step 6b, rev 0.4 (`hub-snapshot.ts`) |
+| UAT-O2C-290 | Hub→cloud sales replay — exactly-once, cloud GL, tamper-rejected, skips visible | BRANCH-04 | 24 §7 step 6c, rev 0.5 (`hub-snapshot.ts`) |
+| UAT-O2C-291 | Hub ingest fail-closed + replay fidelity (discount/tip/service charge) | BRANCH-04 | 24 §7 step 6c, rev 0.5 (`hub-snapshot.ts`) |
 | UAT-O2C-026 | Cashier-speed quick-tender & change (UI) | Feature (cashier speed) | 01 §0 |
 | UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
 | UAT-O2C-028 | Diner pulls QR menu | REST-08 | 20 §7 |
