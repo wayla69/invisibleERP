@@ -70,6 +70,7 @@ export * from './wms';
 export * from './crm';
 export * from './planning';
 export * from './consolidation';
+export * from './fs-reports';
 export * from './reconciliation';
 export * from './pipeline';
 export * from './cpq';

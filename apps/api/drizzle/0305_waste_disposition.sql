@@ -1,4 +1,4 @@
--- 0301_waste_disposition — Waste ledger: reason/disposition taxonomy + void-fired-item capture (POS-5a, INV-15).
+-- 0305_waste_disposition — Waste ledger: reason/disposition taxonomy + void-fired-item capture (POS-5a, INV-15).
 -- Extends the existing waste_log (migration 0149, control INV-10) — this is NOT a parallel ledger.
 --  (1) `disposition` — WHAT happened to the wasted stock (discard | compost | donate | staff_meal |
 --      rework | return_supplier), distinct from `reason_code` (WHY it was wasted). FA-style reason coding.

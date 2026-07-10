@@ -502,6 +502,38 @@ A **multi-GAAP ledger** selector (TFRS / TAX / IFRS) in the header re-runs every
 the chosen ledger, and **ส่งออก CSV** exports the balance sheet or income statement. All figures are
 read straight from **posted** GL entries (drafts and year-end CLOSE reclassifications excluded).
 
+### Statutory financial-statement pack (notes · changes in equity · DBD e-Filing)
+
+**API:** `GET/POST/DELETE /api/reports/fs/*` · **Required permission:** `fin_report` or `exec`
+to read; `gl_close` or `exec` to maintain layout definitions.
+
+Beyond the primary statements above, the **statutory FS pack** produces the *audit pack* a Thai
+company files. Everything here is **read-only** and pulled from the same posted GL the primary
+statements use, so the pack can never disagree with your audited books.
+
+- **Financial-report builder (your own row-groups).** Define a named **layout** of subtotals /
+  row groups for a P&L or balance sheet: each group either selects accounts (by explicit code,
+  code prefix, or account type) or computes a subtotal from other groups (e.g. *Net profit =
+  Revenue − Expenses*). `POST /api/reports/fs/definitions`, then
+  `GET /api/reports/fs/render/:code?as_of=&from=`. Add `prior_as_of` (and `prior_from` for a
+  P&L) and every row gains a **comparative (prior-year / budget) column** beside the current one.
+- **Statement of changes in equity (SOCE).** `GET /api/reports/fs/changes-in-equity?from=&to=` —
+  a roll-forward per equity component: **opening + movements** (share issues, dividends) **+
+  profit for the period** (to retained earnings) **= closing**. The response's
+  `ties_to_balance_sheet` flag confirms the total closing equity reconciles to the balance sheet.
+- **Note schedules.** For a `notes`-type layout, `GET /api/reports/fs/notes/:code?as_of=&prior_as_of=`
+  maps accounts to each note, totals them, adds a comparative column, and renders your
+  **accounting-policy text** blocks.
+- **DBD e-Filing export (งบการเงิน — XBRL / S-form).** `GET /api/reports/fs/dbd-export?fiscal_year=&taxpayer_name=&taxpayer_id=`
+  packages the annual FS (current + prior year) as the standard S-form concepts (สินทรัพย์รวม /
+  หนี้สินรวม / ส่วนของผู้ถือหุ้น / รายได้รวม / ค่าใช้จ่ายรวม / กำไรสุทธิ) plus a ready-to-file **XBRL
+  instance**, with an `Assets = Liabilities + Equity` `balanced` self-check.
+
+**Error codes:** `FS_DEF_NOT_FOUND` (unknown layout), `FS_NOT_RENDERABLE` (render called on a
+`soce`/`notes` layout — use the dedicated endpoint), `FS_NOT_NOTES` (notes called on a non-notes
+layout), `FS_ASOF_REQUIRED` / `FS_FROM_REQUIRED` / `FS_RANGE_REQUIRED` (missing dates),
+`FS_BAD_STATEMENT_TYPE` / `FS_BAD_FISCAL_YEAR` (bad input).
+
 ### Statement of Cash Flows (indirect method)
 
 The cash flow statement is the **third primary financial statement** (alongside the
@@ -986,7 +1018,7 @@ nothing and carries no control of its own.
 
 ---
 
-## Consolidation — eliminations & segment reporting (controls CON-03 / CON-04)
+## Consolidation — eliminations & segment reporting (controls CON-03 / CON-04 / CON-05)
 
 **Who:** Group / Financial Controller. All consolidation actions are **HQ (Admin) only**
 (`CONSOL_HQ_ONLY` for any other tenant). The run uses the `approvals` permission; group,
@@ -1017,6 +1049,32 @@ Optional: define configurable elimination rules (`POST /api/consolidation/rules`
 
 **Expected result:** consolidated TB = Σ entity TBs − IC eliminations, balanced (Σ Dr = Σ Cr);
 1150/2150 net to ~0; the run shows `balanced: true`.
+
+### Foreign-currency translation — CTA / OCI (CON-05, IAS 21 / TAS 21)
+
+When a member entity's **currency is not THB**, the run translates it at **two** rates instead of one:
+
+- its **income statement** (revenue / expense) at the **period average** rate, and
+- its **balance sheet** at the **closing** (period-end) rate.
+
+The difference between the two is the **cumulative translation adjustment (CTA)**, which the run
+parks in a **CTA / OCI translation-reserve** equity line — **account 3400**, line type `FX_CTA`.
+This is standard IFRS/TFRS practice (an auditor expects to see it); a THB entity produces no CTA.
+Each run line shows the `fx_rate` and `rate_type` (`average` / `closing` / `cta`) it used, and the
+run response includes `cta_total`. Rates come from the **Approved** FX rates only (see FX-04); to
+get an average rate, enter one or more approved rates dated within the period month.
+
+**Expected result:** P&L accounts are translated at the average rate, balance-sheet accounts at the
+closing rate, the 3400 CTA/OCI line equals the translation difference, and the consolidated TB still
+balances (`balanced: true`).
+
+### Consolidated statement of cash flows (CON-05, IAS 7)
+
+`GET /api/consolidation/runs/{runId}/cash-flow` produces a **group-level, post-elimination** cash-flow
+statement (indirect method) from the consolidated run: **operating** (net income + add-backs +
+working-capital movements), **investing**, **financing**, and a dedicated **effect of exchange-rate
+changes on cash** section (the CTA). It **reconciles** to the change in the consolidated cash accounts
+(`reconciled: true`). HQ (Admin) only, `exec`.
 
 ### Segment report (CON-04, IFRS 8)
 

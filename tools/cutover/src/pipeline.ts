@@ -260,6 +260,106 @@ async function main() {
   const tpl = await inj('GET', '/api/crm/pipeline/leads/import/template', sales1);
   ok('Lead import template lists the header contract (Name required)', tpl.status === 200 && tpl.json.headers?.[0] === 'Name' && tpl.json.required?.includes('Name'), JSON.stringify(tpl.json));
 
+  // ── CRM-3 — Customer 360: the finance-joined pre-call screen (docs/42) ────────────────────────────
+  // "CRM ไม่เห็นเงิน": one read joins the CRM-1 account to the money. Seed a loyalty member with a paid
+  // order (→ RFM profile), the company's overdue AR invoice + a receipt for T1 (AR/credit position + last
+  // payment), then a CRM account whose contact links that member and that carries an open deal + a CPQ
+  // quote. GET /api/crm/customer-360/:accountNo must fold ALL of it into ONE payload.
+  await db.update(s.tenants).set({ creditLimit: '50000' }).where(eq(s.tenants.id, t1));
+  const [mem360] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-360', name: 'ลูกค้า 360', phone: '0899990360', lifetime: '1200', tier: 'Gold', active: true }).returning();
+  const mem360Id = Number(mem360!.id);
+  await db.insert(s.dineInOrders).values({ tenantId: t1, orderNo: 'DIN-360-1', channel: 'web', memberId: mem360Id, total: '850', saleNo: 'S-360-1', openedAt: new Date() });
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-360-1', tenantId: t1, invoiceDate: '2026-01-01', dueDate: '2026-02-01', amount: '10000', paidAmount: '3000', status: 'Unpaid', currency: 'THB', createdAt: new Date() });
+  await db.insert(s.arReceipts).values({ receiptNo: 'RCP-360-1', tenantId: t1, invoiceNo: 'INV-360-1', amount: '3000', receiptDate: '2026-01-20', createdAt: new Date() });
+
+  const acc360 = await inj('POST', '/api/crm/accounts', sales1, { name: 'บริษัท 360 องศา จำกัด', email: 'ceo@360.example' });
+  await inj('POST', `/api/crm/profile/${mem360Id}/refresh`, sales1); // compute the RFM profile (the order was db-seeded)
+  await inj('POST', '/api/crm/contacts', sales1, { account_no: acc360.json.account_no, name: 'ผู้ซื้อ 360', email: 'buyer@360.example', role: 'decision_maker', member_id: mem360Id });
+  const deal360 = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'ดีล 360', amount: 120000, probability: 40, account_no: acc360.json.account_no });
+  const [oppRow360] = await db.select({ id: s.crmOpportunities.id }).from(s.crmOpportunities).where(eq(s.crmOpportunities.oppNo, deal360.json.opp_no)).limit(1);
+  await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'บริษัท 360', opportunity_id: Number(oppRow360!.id), lines: [{ description: 'Implementation', qty: 1, unit_price: 120000 }] });
+
+  const c360 = await inj('GET', `/api/crm/customer-360/${acc360.json.account_no}`, sales1);
+  ok('Customer 360: account joined to the money — AR open balance + overdue + credit limit (company position)',
+    c360.status === 200 && near(c360.json.finance?.open_balance, 7000) && near(c360.json.finance?.overdue, 7000)
+      && near(c360.json.finance?.credit_limit, 50000) && c360.json.finance?.serious_overdue === true && c360.json.finance?.company_level === true,
+    JSON.stringify(c360.json.finance && { bal: c360.json.finance.open_balance, overdue: c360.json.finance.overdue, limit: c360.json.finance.credit_limit }));
+  ok('Customer 360: last payment folded in from the statement (RCP-360-1 / ฿3,000)',
+    c360.json.finance?.last_payments?.[0]?.ref === 'RCP-360-1' && near(c360.json.finance?.last_payments?.[0]?.amount, 3000),
+    JSON.stringify(c360.json.finance?.last_payments));
+  ok('Customer 360: open deal value + probability-weighted forecast',
+    c360.json.deals?.open_count >= 1 && near(c360.json.deals?.open_value, 120000) && near(c360.json.deals?.weighted_value, 48000),
+    JSON.stringify(c360.json.deals && { open: c360.json.deals.open_count, val: c360.json.deals.open_value, wt: c360.json.deals.weighted_value }));
+  ok('Customer 360: the account\'s CPQ quote joined (via crm_opportunity_id)',
+    Array.isArray(c360.json.quotes) && c360.json.quotes.some((q: any) => near(q.total, 120000)),
+    JSON.stringify(c360.json.quotes));
+  ok('Customer 360: loyalty joined through the member-linked contact (RFM + tier + points)',
+    c360.json.loyalty?.member?.id === mem360Id && c360.json.loyalty?.member?.tier === 'Gold'
+      && c360.json.loyalty?.crm?.rfm_segment === 'New' && c360.json.loyalty?.recent_orders?.length === 1,
+    JSON.stringify(c360.json.loyalty && { id: c360.json.loyalty.member?.id, seg: c360.json.loyalty.crm?.rfm_segment }));
+
+  // RLS: a T-scoped manager on ANOTHER account cannot read the 360 for an account they don't own's tenant
+  const c360Missing = await inj('GET', '/api/crm/customer-360/ACC-DOES-NOT-EXIST', sales1);
+  ok('Customer 360: unknown account → 404 ACCOUNT_NOT_FOUND', c360Missing.status === 404 && c360Missing.json.error?.code === 'ACCOUNT_NOT_FOUND', `${c360Missing.status} ${c360Missing.json.error?.code}`);
+
+  // ── CRM-5 — analytics that answer "why" (funnel/velocity, source ROI, forecast, date-bounded win/loss) ──
+
+  // Seed a clean lead→qualify→convert→won path with a KNOWN source so the funnel + source-ROI have signal.
+  const seedLead = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Funnel Lead', company: 'Funnel Co', email: 'funnel@lead.example', source: 'webinar' });
+  const seedLeadNo = seedLead.json.lead_no;
+  await inj('POST', `/api/crm/pipeline/leads/${seedLeadNo}/qualify`, sales1);
+  const conv = await inj('POST', `/api/crm/pipeline/leads/${seedLeadNo}/convert`, sales1, { opportunity_name: 'Funnel Deal', amount: 300000 });
+  const convOppNo = conv.json.opp_no;
+  // Walk it through stages (writes crm_stage_history rows for velocity) then win it.
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${convOppNo}/stage`, sales1, { stage: 'qualification' });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${convOppNo}/stage`, sales1, { stage: 'proposal' });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${convOppNo}/stage`, sales1, { stage: 'won', win_reason: 'best fit' });
+
+  // 31. Funnel conversion: lead → qualified → opportunity → won, with end-to-end conversion %.
+  const funnel = await inj('GET', '/api/crm/pipeline/analytics/funnel', sales1);
+  const fStages = (funnel.json.funnel ?? []).map((s: any) => s.stage);
+  const wonRow = funnel.json.funnel?.find((s: any) => s.stage === 'won');
+  ok('Funnel: 4-stage lead→qualified→opportunities→won with won count ≥ 1',
+    funnel.status === 200 && fStages.join(',') === 'leads,qualified,opportunities,won' && Number(wonRow?.count) >= 1 && funnel.json.overall_conversion_pct > 0,
+    JSON.stringify({ funnel: funnel.json.funnel, conv: funnel.json.overall_conversion_pct }));
+
+  // 32. Velocity / stage-duration derived from crm_stage_history (progression + avg days in stage present).
+  ok('Velocity: stage_progression + time-in-stage from crm_stage_history',
+    Array.isArray(funnel.json.stage_progression) && funnel.json.stage_progression.length >= 1
+      && Array.isArray(funnel.json.velocity)
+      && funnel.json.stage_progression.some((p: any) => p.stage === 'qualification' && p.opportunities_reached >= 1)
+      && 'avg_sales_cycle_days' in funnel.json,
+    JSON.stringify({ progression: funnel.json.stage_progression, velocity: funnel.json.velocity }));
+
+  // 33. Source ROI: lead source → won revenue. The 'webinar' source carries the 300000 won deal.
+  const roi = await inj('GET', '/api/crm/pipeline/analytics/source-roi', sales1);
+  const webinar = roi.json.sources?.find((s: any) => s.source === 'webinar');
+  ok('Source ROI: webinar source → won revenue 300000, win_rate 100%',
+    roi.status === 200 && webinar && near(webinar.won_amount, 300000) && webinar.won === 1 && webinar.win_rate_pct === 100,
+    JSON.stringify({ webinar, total_won: roi.json.total_won }));
+
+  // 34. Forecast categories (commit/best-case/pipeline) + quota attainment + activity leaderboard shapes.
+  const fcast = await inj('GET', '/api/crm/pipeline/analytics/forecast', sales1);
+  ok('Forecast: commit/best-case/pipeline buckets + weighted forecast_amount + quota_attainment array',
+    fcast.status === 200 && fcast.json.categories?.commit && fcast.json.categories?.best_case && fcast.json.categories?.pipeline
+      && typeof fcast.json.forecast_amount === 'number'
+      && Array.isArray(fcast.json.quota_attainment) && fcast.json.quota_attainment.some((q: any) => q.owner === 'sales1' && q.won_amount > 0)
+      && Array.isArray(fcast.json.activity_leaderboard),
+    JSON.stringify({ categories: fcast.json.categories, quota: fcast.json.quota_attainment }));
+
+  // 35. Win/loss is now date-bounded server-side: window_months echoed; a tiny window still returns a summary.
+  const wl = await inj('GET', '/api/crm/pipeline/win-loss?months=1', sales1);
+  ok('Win/loss date-bounded (months window echoed, summary present)',
+    wl.status === 200 && wl.json.window_months === 1 && !!wl.json.summary && Array.isArray(wl.json.by_owner),
+    JSON.stringify({ window: wl.json.window_months, has_summary: !!wl.json.summary }));
+
+  // 36. The 3 CRM-5 report types are registered in the BI registry (scheduler picker).
+  const rtypes = await inj('GET', '/api/bi/report-types', admin);
+  const keys = (rtypes.json.report_types ?? []).map((r: any) => r.key);
+  ok('BI registry exposes crm_funnel + crm_source_roi + crm_forecast report types',
+    rtypes.status === 200 && ['crm_funnel', 'crm_source_roi', 'crm_forecast'].every((k) => keys.includes(k)),
+    JSON.stringify(keys.filter((k: string) => k.startsWith('crm_'))));
+
   await app.close();
 }
 

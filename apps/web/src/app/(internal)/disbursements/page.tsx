@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 
 // Treasury / finance disbursement surface (perm: approvals | gl_close). The CHECKER side of the AP
 // maker-checker: accounting (creditors) books the bill and requests payment on /finance; finance
@@ -36,6 +37,17 @@ export default function DisbursementsPage() {
     mutationFn: (no: string) => api(`/api/finance/ap/payments/${no}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'rejected by approver' }) }),
     onSuccess: (r: any) => { notifySuccess(t('disb.rejected', { no: r.payment_no })); refresh(); },
     onError: (e: any) => notifyError(e.message),
+  });
+
+  // Batch approve/reject the single-bill queue — loops the same per-payment endpoints (SoD per item).
+  const batch = useBatchActions<any>({
+    items: pending.data?.payments ?? [],
+    keyOf: (r) => String(r.payment_no),
+    run: (r, action, reason) =>
+      action === 'approve'
+        ? api(`/api/finance/ap/payments/${r.payment_no}/approve`, { method: 'POST' })
+        : api(`/api/finance/ap/payments/${r.payment_no}/reject`, { method: 'POST', body: JSON.stringify({ reason: reason || 'rejected by approver' }) }),
+    onDone: refresh,
   });
 
   // ── AP payment runs (EXP-13) ──
@@ -78,11 +90,22 @@ export default function DisbursementsPage() {
 
       <StateView q={pending}>
         {pending.data ? (
+          <>
+          <BatchBar
+            eligibleCount={batch.eligibleCount}
+            selectedCount={batch.selectedCount}
+            running={batch.running}
+            onSelectAll={batch.selectAll}
+            onApprove={() => batch.runBatch('approve')}
+            onReject={() => batch.runBatch('reject')}
+            onClear={batch.clear}
+          />
           <DataTable
             rows={pending.data.payments}
             rowKey={(r: any) => r.payment_no}
             emptyState={{ icon: CheckCheck, title: t('disb.empty_title'), description: t('disb.empty_desc') }}
             columns={[
+              batchColumn<any>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (r) => String(r.payment_no) }),
               { key: 'payment_no', label: t('disb.col_request_no') },
               { key: 'txn_no', label: t('disb.col_ap_bill') },
               { key: 'vendor_name', label: t('fin.col_creditor') },
@@ -99,6 +122,7 @@ export default function DisbursementsPage() {
               } },
             ]}
           />
+          </>
         ) : (
           <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">{t('disb.no_perm')}</CardContent></Card>
         )}
