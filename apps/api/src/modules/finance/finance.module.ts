@@ -5,6 +5,7 @@ import { ArInvoicePdfService } from './ar-invoice-pdf.service';
 import { FinanceDocsPdfService } from './finance-docs-pdf.service';
 import { FinancialHealthService } from './financial-health.service';
 import { ArAllowanceService } from './ar-allowance.service';
+import { ArCashApplicationService } from './ar-cash-application.service';
 import { CollectionsController } from './collections.controller';
 import { CollectionsService } from './collections.service';
 import { FinanceMetricsController } from './finance-metrics.controller';
@@ -19,7 +20,7 @@ import { BudgetModule } from '../budget/budget.module';
 @Module({
   imports: [LedgerModule, TaxModule, MatchModule, MessagingModule, CommitmentsModule, BudgetModule],
   controllers: [FinanceController, CollectionsController, FinanceMetricsController],
-  providers: [FinanceService, ArInvoicePdfService, FinanceDocsPdfService, FinancialHealthService, ArAllowanceService, CollectionsService, FinanceMetricsService],
-  exports: [FinanceService, FinancialHealthService, ArAllowanceService, CollectionsService, FinanceMetricsService],
+  providers: [FinanceService, ArInvoicePdfService, FinanceDocsPdfService, FinancialHealthService, ArAllowanceService, ArCashApplicationService, CollectionsService, FinanceMetricsService],
+  exports: [FinanceService, FinancialHealthService, ArAllowanceService, ArCashApplicationService, CollectionsService, FinanceMetricsService],
 })
 export class FinanceModule {}

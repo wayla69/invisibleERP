@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -169,7 +169,13 @@ export class FinanceService {
       ref: arInvoices.invoiceNo, party: tenants.code, due_date: arInvoices.dueDate,
       outstanding: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)`,
     }).from(arInvoices).leftJoin(tenants, eq(arInvoices.tenantId, tenants.id)).where(sql`${arInvoices.status}::text <> 'Paid'`);
-    return this.bucketize(rows.map((r: any) => ({ ref: r.ref, party: r.party, due_date: r.due_date, outstanding: n(r.outstanding) })));
+    const aged = this.bucketize(rows.map((r: any) => ({ ref: r.ref, party: r.party, due_date: r.due_date, outstanding: n(r.outstanding) })));
+    // REV-20 — on-account (unapplied) customer cash is a CREDIT against the book: applied receipts already
+    // reduced each invoice's outstanding above; the parked remainder is surfaced here so the aged gross and
+    // the customer's net position never diverge silently.
+    const [ua] = await db.select({ v: sql<string>`coalesce(sum(${arReceipts.unappliedAmount}),0)` }).from(arReceipts);
+    const onAccount = round2(n(ua?.v));
+    return { ...aged, on_account: onAccount, net_total: round2(aged.total - onAccount) };
   }
 
   async apAging() {
@@ -281,7 +287,7 @@ export class FinanceService {
   // Recent AR receipts (for the finance list surface — print/email each ใบสำคัญรับเงิน). RLS-scoped.
   async listArReceipts(_user: JwtUser, limit = 50) {
     const rows = await this.db.select().from(arReceipts).orderBy(desc(arReceipts.id)).limit(Math.min(Math.max(limit, 1), 100));
-    return { receipts: rows.map((r: any) => ({ receipt_no: r.receiptNo, receipt_date: r.receiptDate ?? null, invoice_no: r.invoiceNo ?? null, amount: n(r.amount), method: r.method ?? 'Transfer', ref_no: r.refNo ?? null })), count: rows.length };
+    return { receipts: rows.map((r: any) => ({ receipt_no: r.receiptNo, receipt_date: r.receiptDate ?? null, invoice_no: r.invoiceNo ?? null, amount: n(r.amount), unapplied: n(r.unappliedAmount), method: r.method ?? 'Transfer', ref_no: r.refNo ?? null })), count: rows.length };
   }
 
   // ── ใบสำคัญรับเงิน (AR receipt voucher) — print/email over an ar_receipts row ──
@@ -328,9 +334,21 @@ export class FinanceService {
     const invs = await db.select({ date: arInvoices.invoiceDate, ref: arInvoices.invoiceNo, amt: arInvoices.amount, cur: arInvoices.currency, fx: arInvoices.fxRate }).from(arInvoices).where(eq(arInvoices.tenantId, tenantId));
     const invByNo = new Map<string, { cur: string; fx: number }>(invs.map((i: any) => [i.ref, { cur: i.cur ?? 'THB', fx: n(i.fx) || 1 }]));
     const rcps = await db.select({ date: arReceipts.receiptDate, ref: arReceipts.receiptNo, amt: arReceipts.amount, inv: arReceipts.invoiceNo }).from(arReceipts).where(eq(arReceipts.tenantId, tenantId));
+    // REV-20 — an applied credit note reduces what the customer owes: each effective (applied, not
+    // reversed) credit-note application is a statement credit dated on its application day, in the target
+    // invoice's currency. Cash receipts already appear in full (incl. their on-account remainder), so a
+    // multi-invoice/on-account receipt nets the statement exactly once.
+    const cnApps = await db.select({
+      date: sql<string>`${arReceiptApplications.appliedAt}::date`, ref: arReceiptApplications.receiptNo,
+      inv: arReceiptApplications.invoiceNo, amt: arReceiptApplications.appliedAmount,
+    }).from(arReceiptApplications).where(and(
+      eq(arReceiptApplications.tenantId, tenantId), eq(arReceiptApplications.sourceType, 'credit_note'),
+      eq(arReceiptApplications.status, 'applied'), eq(arReceiptApplications.reversed, false),
+    ));
     const events = [
       ...invs.map((i: any) => ({ date: i.date, type: 'invoice', ref: i.ref, cur: i.cur ?? 'THB', fx: n(i.fx) || 1, charge: n(i.amt), payment: 0 })),
       ...rcps.map((rc: any) => { const k = invByNo.get(rc.inv) ?? { cur: 'THB', fx: 1 }; return { date: rc.date, type: 'receipt', ref: rc.ref, cur: k.cur, fx: k.fx, charge: 0, payment: n(rc.amt) }; }),
+      ...cnApps.map((c: any) => { const k = invByNo.get(c.inv) ?? { cur: 'THB', fx: 1 }; return { date: c.date, type: 'credit_note', ref: c.ref, cur: k.cur, fx: k.fx, charge: 0, payment: n(c.amt) }; }),
     ];
     return this.buildStatement('customer', String(tenantId), events, lo, hi, currency);
   }
@@ -854,6 +872,10 @@ export class FinanceService {
     // 9. REV-16 — large standalone refunds awaiting approval.
     for (const r of await db.select().from(refundRequests).where(eq(refundRequests.status, 'PendingApproval')))
       items.push({ type: 'refund', control: 'REV-16', ref: `RR-${Number(r.id)}`, label: `คืนเงิน ${r.paymentNo}`, amount: n(r.amount), requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
+    // 9b. REV-20 — large AR cash applications awaiting approval (grouped per worksheet batch; the cash is
+    // banked on-account, no invoice moves until a different user approves).
+    for (const b of await db.select({ batchNo: arReceiptApplications.batchNo, requestedBy: sql<string>`max(${arReceiptApplications.appliedBy})`, total: sql<string>`coalesce(sum(${arReceiptApplications.appliedAmount}),0)`, oldest: sql<string>`min(${arReceiptApplications.appliedAt})` }).from(arReceiptApplications).where(eq(arReceiptApplications.status, 'PendingApproval')).groupBy(arReceiptApplications.batchNo))
+      items.push({ type: 'ar_cash_application', control: 'REV-20', ref: b.batchNo, label: `ตัดรับชำระลูกหนี้ ${b.batchNo}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
     // 8. FX-04 — manual FX rates awaiting approval (PendingApproval, unusable until approved; not a JE).
     for (const r of await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')))
       items.push({ type: 'fx_rate', control: 'FX-04', ref: `${r.currency}@${r.rateDate}`, label: `อัตรา ${r.currency} = ${n(r.rate)} (${r.rateDate})`, amount: 0, requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });

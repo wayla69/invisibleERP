@@ -1,6 +1,8 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.7 · 2026-07-09** _(v0.7: bank-statement file import — upload the bank's CSV/XLSX export on `/bank`, Thai/English headers + BE dates auto-detected, auto-match on import)_
+**Status: DRAFT v0.8 · 2026-07-10** _(v0.8: AR cash application — apply **one customer payment across several invoices** from the new **ตัดรับชำระหลายใบแจ้งหนี้** worksheet on the รายรับ (AR) tab; the unallocated remainder parks **on-account** and can be applied later; big batches need a second approver; reversals need a reason. New control REV-20.)_
+
+*v0.7 (2026-07-09): bank-statement file import — upload the bank's CSV/XLSX export on `/bank`, Thai/English headers + BE dates auto-detected, auto-match on import.*
 
 *v0.6 (2026-07-06): Part C — documented **where the G9 bank-account approval queue lives in
 the app**: a **"Bank accounts pending approval"** card on the **Bank** screen (`/bank`), where a
@@ -162,6 +164,54 @@ moves **Unpaid → Partial → Paid**, and the cash / AR entries post to the led
 > cash-receipt voucher — distinct from the POS sales receipt.)
 
 [screenshot: AR receipt dialog]
+
+### A2b. Apply one payment across several invoices (ตัดรับชำระหลายใบแจ้งหนี้ / cash application)
+
+Customers often pay **one bank transfer for several invoices** — or pay more (a deposit) or
+less than any single invoice. Use the **ตัดรับชำระหลายใบแจ้งหนี้ (Cash application)** worksheet on
+the **รายรับ (AR)** tab (requires the `ar` permission; approving a large batch requires
+`approvals`/`gl_close`):
+
+1. Enter the **customer** (code or ID) and click **โหลดรายการค้าง** — you'll see their **open
+   invoices** (with what's still applicable per invoice), any **on-account receipts** (money
+   received earlier that hasn't been matched to invoices yet), and any **applicable credit
+   notes** (ใบลดหนี้).
+2. Enter the **receipt amount** (the money that actually arrived), then either key the amount
+   to apply on each invoice or press **แนะนำอัตโนมัติ (Auto-suggest)** — it fills an **exact
+   match** if one invoice equals the amount, otherwise it pays the **oldest due first**
+   (the last invoice may be partial).
+3. Any part of the receipt you *don't* allocate is shown as **พักเป็น on-account** — it is kept
+   as **เงินรับรอตัดชำระ** on the receipt (and on GL account 2220), not lost.
+4. Click **บันทึกตัดชำระ**.
+
+**Expected result:** one receipt (`RCP-…`) settles all the allocated invoices (each moves
+Unpaid → Partial → Paid) and the remainder appears under **เงินรับรอตัดชำระ (on-account)**.
+Later, press **ตัดชำระ** on that on-account receipt to apply the parked money to invoices —
+same worksheet, no new cash.
+
+**Credit notes:** an **issued, AR-linked ใบลดหนี้** shows in the worksheet and can be applied to
+an open invoice like a payment line (it reduces what the customer owes; nothing posts to the
+ledger — the note already posted when it was approved). A credit note issued over a POS sale
+(no AR invoice) cannot be applied here.
+
+**Controls to know about:**
+
+- You cannot allocate **more than the receipt** (`APPLY_EXCEEDS_RECEIPT`), **more than an
+  invoice still owes** — pending allocations count (`OVER_APPLIED`) — or to **another
+  customer's invoice** (`CUSTOMER_MISMATCH`). A credit note can't be over-used
+  (`CN_OVER_APPLIED`).
+- A batch of **THB 100,000 or more** does **not** move any invoice yet: the money banks
+  on-account and the batch waits in **ชุดตัดชำระรออนุมัติ** for a **different** user to approve
+  (approving your own batch → `SOD_VIOLATION`). It also appears on the `/approvals` monitor.
+- **Undoing an application** (the **ยกเลิกตัดชำระ** action in รายการตัดชำระล่าสุด) always asks for a
+  **reason** and is recorded permanently (who / when / why); the money returns on-account
+  and the invoice reopens.
+
+> **Where it shows up:** the customer **statement** lists applied credit notes as credit lines;
+> **AR aging** shows the total **on-account** money next to the aged gross; the **collections
+> worklist** shows a customer's on-account cash so you apply it **before** dunning them.
+
+[screenshot: cash application worksheet]
 
 ### A3. AR aging
 

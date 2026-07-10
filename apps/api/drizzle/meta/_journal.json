@@ -2038,6 +2038,13 @@
       "when": 2023820000253,
       "tag": "0290_gr_receiving_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "7",
+      "when": 2023820000257,
+      "tag": "0294_ar_cash_application",
+      "breakpoints": true
     }
   ]
 }
