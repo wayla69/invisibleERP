@@ -2101,6 +2101,13 @@
       "when": 2023820000262,
       "tag": "0299_stocktake_tenant_isolation",
       "breakpoints": true
+    },
+    {
+      "idx": 300,
+      "version": "7",
+      "when": 2023820000263,
+      "tag": "0300_stocktake_posted_by",
+      "breakpoints": true
     }
   ]
 }

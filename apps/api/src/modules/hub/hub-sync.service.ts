@@ -30,10 +30,11 @@ import {
 import type { JwtUser } from '../../common/decorators';
 import { RestaurantOfflineSyncService, type RegisterOfflineSaleOp } from '../restaurant/offline-sync.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { StockOpsService } from '../stock-ops/stock-ops.service';
 import { CASH_VARIANCE_THRESHOLD } from '../payments/payments.service';
 import { roundCurrency } from '../tax/money';
 // single source of the signature projection — the hub pusher signs with the same functions
-import { signHubBatch, signHubDoc, type HubTillDoc, type HubHeartbeatDoc } from '../../database/hub-push';
+import { signHubBatch, signHubDoc, type HubTillDoc, type HubHeartbeatDoc, type HubStocktakeDoc } from '../../database/hub-push';
 
 export const HUB_SNAPSHOT_FORMAT = 'ierp-hub-snapshot';
 export const HUB_SNAPSHOT_VERSION = 1;
@@ -49,6 +50,7 @@ export class HubSyncService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly offlineSync: RestaurantOfflineSyncService,
     private readonly ledger: LedgerService,
+    private readonly stockOps: StockOpsService,
   ) {}
 
   /** timing-safe HMAC compare — every hub-originated request authenticates this way. */
@@ -300,6 +302,18 @@ export class HubSyncService {
       cash_sales: cashSales, expected_cash: expectedCash, closing_count: num(doc.closing_count),
       variance, variance_status: varianceStatus, variance_journal_no: varianceJournalNo, sales_matched: cloudSaleNos.length,
     };
+  }
+
+  // ── Phase 2c-2: hub → cloud STOCKTAKE ingest (control BRANCH-07) ───────────────────────────────
+  // The hub ran the R11 maker-checker with two real humans; the cloud posts as the machine principal
+  // `hub-sync`, which would erase that evidence. The document therefore NAMES both, and the cloud
+  // refuses it when they are the same person — a replay can never launder a self-approved count.
+  async ingestStocktake(body: { tenant_id: number; sent_at: string; stocktake: HubStocktakeDoc; signature: string }) {
+    const secret = this.secret();
+    this.assertSignature(body.signature, signHubDoc({ tenant_id: Number(body.tenant_id), sent_at: String(body.sent_at), stocktake: body.stocktake }, secret));
+    const t = Number(body.tenant_id);
+    await this.assertTenant(t);
+    return this.stockOps.ingestHubStocktake(body.stocktake, t);
   }
 
   // ── Phase 4a: hub heartbeat (liveness + backlog) ───────────────────────────────────────────────
