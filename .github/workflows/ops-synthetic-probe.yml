@@ -10,8 +10,10 @@
 #   browser-probe — headless-Chromium real login via tools/ops/synthetic-login-probe.mjs: cookies
 #                   stored → attached on the next /api call → session survives a reload. This is the
 #                   ONLY check that catches the SameSite-class regression (curl ignores cookie policy).
-#                   Arms itself when the PROBE_USERNAME / PROBE_PASSWORD repo secrets exist (create a
-#                   dedicated LOW-PRIVILEGE account for it); politely skips otherwise.
+#                   Credentials: PROBE_USERNAME / PROBE_PASSWORD repo secrets if set, else the Railway
+#                   variables of the same names on the invisibleERP service (provisioned + rotated by
+#                   ops-provision-probe-user.yml — GitHub Actions cannot write repo secrets, so Railway
+#                   is the automation-reachable credential store). Politely skips if neither exists.
 #   env-manifest  — diffs each Railway service's live variable NAMES (values never read into the log)
 #                   against docs/ops/railway-env-manifest.json; a missing expected name fails loudly —
 #                   the one-click detection the July-10 hunt lacked.
@@ -66,15 +68,32 @@ jobs:
 
   browser-probe:
     runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN binding — used only to READ the stored probe credentials
     steps:
       - uses: actions/checkout@v4
-      - name: Check probe credentials
+      - name: Resolve probe credentials (repo secrets → Railway variables fallback)
         id: creds
         env:
           PROBE_USERNAME: ${{ secrets.PROBE_USERNAME }}
+          PROBE_PASSWORD: ${{ secrets.PROBE_PASSWORD }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          if [ -n "${PROBE_USERNAME:-}" ]; then echo "armed=true" >> "$GITHUB_OUTPUT";
-          else echo "armed=false" >> "$GITHUB_OUTPUT"; echo "::notice::PROBE_USERNAME/PROBE_PASSWORD secrets not set — browser login probe skipped. Create a LOW-PRIVILEGE probe user and set the secrets to arm the SameSite-regression detector."; fi
+          set -euo pipefail
+          if [ -n "${PROBE_USERNAME:-}" ] && [ -n "${PROBE_PASSWORD:-}" ]; then
+            echo "using repo-secret probe credentials"
+          elif [ -n "${RAILWAY_TOKEN:-}" ]; then
+            KV=$(npx -y @railway/cli variables --service invisibleERP --kv 2>/dev/null || true)
+            PROBE_USERNAME=$(echo "$KV" | grep '^PROBE_USERNAME=' | cut -d= -f2- | tr -d '\r' || true)
+            PROBE_PASSWORD=$(echo "$KV" | grep '^PROBE_PASSWORD=' | cut -d= -f2- | tr -d '\r' || true)
+            [ -n "$PROBE_PASSWORD" ] && { echo "::add-mask::$PROBE_PASSWORD"; echo "using Railway-stored probe credentials"; }
+          fi
+          if [ -n "${PROBE_USERNAME:-}" ] && [ -n "${PROBE_PASSWORD:-}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+            { echo "PROBE_USERNAME=$PROBE_USERNAME"; echo "PROBE_PASSWORD=$PROBE_PASSWORD"; } >> "$GITHUB_ENV"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::no probe credentials (repo secrets PROBE_USERNAME/PROBE_PASSWORD or Railway vars via ops-provision-probe-user.yml) — browser login probe skipped."
+          fi
       - uses: actions/setup-node@v4
         if: steps.creds.outputs.armed == 'true'
         with:
@@ -86,9 +105,6 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Real-browser login probe (cookie-policy end-to-end)
         if: steps.creds.outputs.armed == 'true'
-        env:
-          PROBE_USERNAME: ${{ secrets.PROBE_USERNAME }}
-          PROBE_PASSWORD: ${{ secrets.PROBE_PASSWORD }}
         run: node tools/ops/synthetic-login-probe.mjs
 
   env-manifest:

@@ -62,9 +62,11 @@ the active deployment was healthy throughout the report window.
   CI. **(DONE 2026-07-10)** `ops-synthetic-probe.yml` adds scheduled HTTP probes (login page, proxied
   `/api/config`, wrong-password 401 shape, `/proxy-health`) plus a **real-browser Playwright login probe**
   (`tools/ops/synthetic-login-probe.mjs`: login → cookies stored → attached on `/api/auth/me` → session
-  survives reload — the exact step July-10 broke; curl can't see cookie policy). The browser probe arms
-  itself when the `PROBE_USERNAME`/`PROBE_PASSWORD` repo secrets are set (create a low-privilege probe
-  user).
+  survives reload — the exact step July-10 broke; curl can't see cookie policy). The browser probe reads its
+  credentials from the `PROBE_USERNAME`/`PROBE_PASSWORD` repo secrets, or (fallback) the Railway
+  variables of the same names — provisioned and rotated fully automatically by
+  `ops-provision-probe-user.yml` (upserts the low-privilege `synthetic-probe` user, role
+  ExecutiveViewer, and verifies a live login through the web proxy).
 - **The cutover itself is now automated and self-verifying. (DONE 2026-07-10)** `ops-proxy-cutover.yml`
   (manual dispatch): `verify` (read-only go/no-go matrix) → `cutover` (pre-checks the private target via
   `/proxy-health`, flips `API_PROXY_TARGET`, polls green, **auto-rolls back** to the public URL on
