@@ -55,7 +55,10 @@ export const wasteLog = pgTable('waste_log', {
   itemDescription: text('item_description'),
   qty: numeric('qty', { precision: 18, scale: 4 }).notNull(),
   uom: text('uom'),
-  reasonCode: text('reason_code').notNull(),           // damage | expiry | spoilage | overproduction | prep_error | other
+  reasonCode: text('reason_code').notNull(),           // damage | expiry | spoilage | overproduction | prep_error | void_fire | other
+  disposition: text('disposition'),                     // POS-5a — WHAT happened to it: discard | compost | donate | staff_meal | rework | return_supplier
+  source: text('source'),                               // POS-5a — HOW captured: manual | void_fire | spoilage
+  refDoc: text('ref_doc'),                               // POS-5a — originating doc (e.g. the voided ticket/sale no)
   unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),
   totalCost: numeric('total_cost', { precision: 18, scale: 4 }).notNull().default('0'),
   notes: text('notes'),
@@ -64,6 +67,7 @@ export const wasteLog = pgTable('waste_log', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
   byPeriod: index('idx_waste_log_period').on(t.tenantId, t.reasonCode),
+  byDisposition: index('idx_waste_log_disposition').on(t.tenantId, t.disposition),
 }));
 
 // Per-branch on-hand ledger (Phase — branch-aware replenishment). Runs ALONGSIDE customer_inventory:

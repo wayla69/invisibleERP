@@ -9,7 +9,7 @@ import { ymd, n } from '../../database/queries';
 import { toMinor4, minorToNumber4 } from '../../common/money';
 import type { AllocationCycleDto, PostEntryDto, JournalLineDto } from './ledger.service';
 
-// GL allocation engine (GL-23, migration 0301). A periodic cost-allocation cycle distributes a source POOL
+// GL allocation engine (GL-23, migration 0307). A periodic cost-allocation cycle distributes a source POOL
 // (a fixed amount out of a source account / cost-center) to a set of targets by fixed RATIO, a measured
 // DRIVER, or a STATISTICAL KEY (headcount / sqm). The three methods share one engine — a proportional split
 // by each target's `basis` weight; the method only documents where that weight comes from (an explicit

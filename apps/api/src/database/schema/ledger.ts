@@ -177,7 +177,7 @@ export const prepaidSchedules = pgTable(
   (t) => ({ byDue: index('idx_prepaid_due').on(t.status, t.nextRunDate) }),
 );
 
-// GL allocation cycles (GL-23, migration 0301). A periodic cost-allocation cycle distributes a source
+// GL allocation cycles (GL-23, migration 0307). A periodic cost-allocation cycle distributes a source
 // POOL (an amount out of a source account / cost-center) to a set of targets by fixed ratio, a measured
 // driver, or a statistical key (headcount / sqm). Each due run posts ONE balanced JE — Cr the source pool,
 // Dr each target its proportional share (last target absorbs the rounding remainder) — as a DRAFT through

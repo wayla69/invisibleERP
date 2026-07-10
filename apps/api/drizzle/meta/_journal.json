@@ -2113,7 +2113,49 @@
       "idx": 301,
       "version": "7",
       "when": 2023820000264,
-      "tag": "0301_gl_allocation_cycles",
+      "tag": "0301_kds_recall_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 302,
+      "version": "7",
+      "when": 2023820000265,
+      "tag": "0302_fs_report_definitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 303,
+      "version": "7",
+      "when": 2023820000266,
+      "tag": "0303_consolidation_cta_translation",
+      "breakpoints": true
+    },
+    {
+      "idx": 304,
+      "version": "7",
+      "when": 2023820000267,
+      "tag": "0304_offline_dinein_ops",
+      "breakpoints": true
+    },
+    {
+      "idx": 305,
+      "version": "7",
+      "when": 2023820000268,
+      "tag": "0305_waste_disposition",
+      "breakpoints": true
+    },
+    {
+      "idx": 306,
+      "version": "7",
+      "when": 2023820000269,
+      "tag": "0306_promptpay_store_recon",
+      "breakpoints": true
+    },
+    {
+      "idx": 307,
+      "version": "7",
+      "when": 2023820000270,
+      "tag": "0307_gl_allocation_cycles",
       "breakpoints": true
     }
   ]

@@ -1,6 +1,7 @@
 // CRM-2 — account (company) page server shell. Prefetches the composed account payload (header +
 // contacts + deals + recent activities across its deals); rendering + interactivity in account-client.tsx.
-// (The full finance-joined Customer-360 is CRM-3 — no AR joins here.)
+// CRM-3 adds the finance-joined Customer-360 panel (AR/credit + quotes + loyalty), which the client island
+// fetches from GET /api/crm/customer-360/:accountNo.
 import { serverApi } from '@/lib/server-api';
 import AccountClient from './account-client';
 

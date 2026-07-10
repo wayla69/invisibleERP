@@ -1,4 +1,4 @@
--- 0301_gl_allocation_cycles — GL allocation engine (FIN-7b, GL-23). Periodic cost-allocation cycles that
+-- 0307_gl_allocation_cycles — GL allocation engine (FIN-7b, GL-23). Periodic cost-allocation cycles that
 -- distribute a source POOL (an amount out of a source account / cost-center) to a set of targets by fixed
 -- ratio, a measured driver, or a statistical key (headcount / sqm). Each due run posts ONE balanced JE
 -- (Cr the source pool; Dr each target its proportional share, last target absorbing the rounding remainder)
