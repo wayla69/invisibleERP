@@ -93,6 +93,20 @@ jobs:
           { [ "$CODE" = 200 ] && [ -n "$TOK" ]; } || { echo "::error::probe login verification failed (HTTP $CODE)"; exit 1; }
           echo "✅ synthetic-probe provisioned + credentials stored + live login verified (HTTP 200, role ExecutiveViewer)"
 
+          # ── RLS diagnostics (read-only; 2026-07-10 login-bounce diagnosis): the guard's pre-transaction
+          # read of `users` runs as the base ierp_app role with no app.* settings — show exactly what that
+          # role can see, plus the live policy bodies and any role/db-level default settings. Schema-level
+          # info only (policy expressions, counts) — no row data.
+          echo "── users/tenants RLS state ──"
+          psql "$PUB" -tA <<'SQL'
+          SELECT relname || ': rls=' || relrowsecurity || ' force=' || relforcerowsecurity FROM pg_class WHERE relname IN ('users','tenants') AND relnamespace='public'::regnamespace;
+          SELECT c.relname || ' policy ' || p.polname || ' USING ' || coalesce(pg_get_expr(p.polqual, p.polrelid), '-') FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid WHERE c.relname IN ('users','tenants');
+          SELECT 'default-setting ' || coalesce(r.rolname, '(database)') || ': ' || array_to_string(s.setconfig, ' | ') FROM pg_db_role_setting s LEFT JOIN pg_roles r ON r.oid = s.setrole;
+          SQL
+          echo "── visibility as ierp_app (the guard's exact context: no app.* settings) ──"
+          psql "$PUB" -tA -c "SET ROLE ierp_app; SELECT 'users rows visible: ' || count(*) FROM users;" || true
+          psql "$PUB" -tA -c "SET ROLE ierp_app; SELECT 'probe row visible: ' || count(*) FROM users WHERE username='synthetic-probe';" || true
+
           # ── Cookie ROUND-TRIP matrix (2026-07-10 login-bounce diagnosis): the login POST returning 200
           # proves nothing about the SESSION — the July-10 class of failure is the httpOnly cookie not
           # surviving the next authenticated request. Compare the same cookie-jar round-trip through the
