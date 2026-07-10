@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DocSelect } from '@/components/doc-select';
+import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -187,6 +188,16 @@ export default function TaxInvoicesPage() {
     mutationFn: (docNo: string) => api(`/api/tax-invoices/${docNo}/approve-note`, { method: 'POST' }),
     onSuccess: () => { notifySuccess(t('tax.note_approved')); qc.invalidateQueries({ queryKey: ['tax-invoices'] }); },
     onError: (e: any) => notifyError(e.message),
+  });
+
+  // Batch approve — clears several PendingApproval credit/debit notes at once (approve-only; a rejection
+  // is a void, handled separately). Each note fires its own /approve-note endpoint (SoD per note).
+  const batch = useBatchActions<Invoice>({
+    items: invoices,
+    keyOf: (r) => r.doc_no,
+    eligible: (r) => r.status === 'PendingApproval',
+    run: (r) => api(`/api/tax-invoices/${r.doc_no}/approve-note`, { method: 'POST' }),
+    onDone: () => qc.invalidateQueries({ queryKey: ['tax-invoices'] }),
   });
 
   return (
@@ -415,9 +426,19 @@ export default function TaxInvoicesPage() {
                 tone="default"
               />
             </div>
+            <BatchBar
+              eligibleCount={batch.eligibleCount}
+              selectedCount={batch.selectedCount}
+              running={batch.running}
+              onSelectAll={batch.selectAll}
+              onApprove={() => batch.runBatch('approve')}
+              onClear={batch.clear}
+              showReject={false}
+            />
             <DataTable
               rows={invoices}
               columns={[
+                batchColumn<Invoice>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (r) => r.doc_no }),
                 { key: 'doc_no', label: t('tax.col_doc_no') },
                 { key: 'issue_date', label: t('dash.col_date'), render: (r: Invoice) => thaiDate(r.issue_date) },
                 { key: 'type', label: t('tax.col_type'), render: (r: Invoice) => typeLabel(r.type) },
