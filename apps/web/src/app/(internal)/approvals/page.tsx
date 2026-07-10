@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardCheck, Clock, AlarmClock, Coins } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -35,22 +36,66 @@ export default function ApprovalsPage() {
   const overdueDays = d?.overdue_days ?? 3;
   const refresh = () => qc.invalidateQueries({ queryKey: ['pending-approvals'] });
 
-  // REV-13: a material till-close cash over/short is the one pending type with no dedicated module
-  // screen, so the manager approves/rejects it inline here (SoD is enforced server-side: the approver
-  // must differ from the cashier who closed → SOD_VIOLATION).
-  // inline approve/reject for the pending types that have no dedicated module screen: a material till
-  // variance (REV-13, ref=sessionNo) and a large refund (REV-16, ref=RR-<id>).
-  const endpoint = (it: Item, action: 'approve' | 'reject') =>
-    it.type === 'refund'
-      ? `/api/payments/refund-requests/${it.ref.replace('RR-', '')}/${action}`
-      : `/api/payments/till/variance/${it.ref}/${action}`;
+  // Each pending type's single-item approve/reject REST endpoint. Batching is a pure UX convenience:
+  // every call still hits the item's OWN maker-checker route, so its control + SoD (approver ≠ requester)
+  // are enforced server-side exactly as a one-by-one approval — this screen adds no new authority.
+  // fx_rate + budget approve by a composite body key (not a single path segment) → not batch-selectable
+  // here; they are cleared on their own module screens.
+  const BATCHABLE: Record<string, (ref: string, a: 'approve' | 'reject') => string> = {
+    journal:             (r, a) => `/api/ledger/journal/${encodeURIComponent(r)}/${a}`,
+    bank_adjustment:     (r, a) => `/api/ledger/journal/${encodeURIComponent(r)}/${a}`,
+    ap_payment:          (r, a) => `/api/finance/ap/payments/${encodeURIComponent(r)}/${a}`,
+    payroll:             (r, a) => `/api/payroll/runs/${encodeURIComponent(r)}/${a}`,
+    asset_revaluation:   (r, a) => `/api/assets/${encodeURIComponent(r)}/revalue/${a}`,
+    asset_disposal:      (r, a) => `/api/assets/${encodeURIComponent(r)}/dispose/${a}`,
+    inventory_writeoff:  (r, a) => `/api/inventory/writeoffs/${r.replace('WO-', '')}/${a}`,
+    petty_cash:          (r, a) => `/api/finance/petty-cash/requests/${encodeURIComponent(r)}/${a}`,
+    till_variance:       (r, a) => `/api/payments/till/variance/${encodeURIComponent(r)}/${a}`,
+    refund:              (r, a) => `/api/payments/refund-requests/${r.replace('RR-', '')}/${a}`,
+    ar_cash_application: (r, a) => `/api/finance/ar/cash-application/${encodeURIComponent(r)}/${a}`,
+  };
+  const isBatchable = (it: Item) => it.type in BATCHABLE;
+  const keyOf = (it: Item) => `${it.type}:${it.ref}`;
+
+  // Selection + batch runner — approve/reject many at once. Each item fires its own endpoint
+  // (Promise.allSettled), so a per-item SoD failure (approver = requester) only fails THAT item; the rest
+  // still go through. A summary reports how many succeeded and the first error if any.
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [running, setRunning] = useState(false);
+  const toggle = (it: Item) => setSel((s) => { const n = new Set(s); const k = keyOf(it); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const clearSel = () => setSel(new Set());
+  const selectAll = () => setSel(new Set((d?.items ?? []).filter(isBatchable).map(keyOf)));
+
+  async function runBatch(action: 'approve' | 'reject') {
+    const chosen = (d?.items ?? []).filter((it) => isBatchable(it) && sel.has(keyOf(it)));
+    if (!chosen.length) return;
+    let reason: string | undefined;
+    if (action === 'reject') {
+      const r = window.prompt(t('appr.batch_confirm_reject', { n: String(chosen.length) }));
+      if (r === null) return; // cancelled
+      reason = r || undefined;
+    }
+    setRunning(true);
+    const results = await Promise.allSettled(chosen.map((it) =>
+      api<any>(BATCHABLE[it.type]!(it.ref, action), { method: 'POST', ...(action === 'reject' ? { body: JSON.stringify({ reason }) } : {}) }),
+    ));
+    setRunning(false);
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    const fails = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+    const failNote = fails.length ? t('appr.batch_fail_note', { fail: String(fails.length), firstError: String(fails[0]!.reason?.message ?? 'error').slice(0, 60) }) : '';
+    (fails.length ? notifyError : notifySuccess)(t('appr.batch_done', { ok: String(ok), failNote }));
+    clearSel();
+    refresh();
+  }
+
+  // Per-row single actions (kept for the mobile cards' inline buttons on the always-actionable types).
   const approve = useMutation({
-    mutationFn: (it: Item) => api<any>(endpoint(it, 'approve'), { method: 'POST' }),
+    mutationFn: (it: Item) => api<any>(BATCHABLE[it.type]!(it.ref, 'approve'), { method: 'POST' }),
     onSuccess: () => { notifySuccess(t('appr.approved_ok')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
-    mutationFn: (it: Item) => api<any>(endpoint(it, 'reject'), { method: 'POST', body: JSON.stringify({ reason: window.prompt(t('appr.reject_reason_prompt')) || undefined }) }),
+    mutationFn: (it: Item) => api<any>(BATCHABLE[it.type]!(it.ref, 'reject'), { method: 'POST', body: JSON.stringify({ reason: window.prompt(t('appr.reject_reason_prompt')) || undefined }) }),
     onSuccess: () => { notifySuccess(t('appr.rejected_ok')); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
@@ -74,6 +119,26 @@ export default function ApprovalsPage() {
     >
       {d && (
         <>
+          {/* Batch action bar — select several items and approve/reject them in one action. Each still
+              goes through its own maker-checker endpoint (SoD per item), so this is convenience, not new
+              authority. Shown once at least one batchable item is selected. */}
+          {(() => {
+            const batchCount = d.items.filter(isBatchable).length;
+            return batchCount > 0 ? (
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2 text-sm">
+                <Button size="sm" variant="ghost" onClick={selectAll}>{t('appr.select_all')} ({batchCount})</Button>
+                {sel.size > 0 && (
+                  <>
+                    <span className="font-medium">{t('appr.selected_n', { n: String(sel.size) })}</span>
+                    <Button size="sm" disabled={running} onClick={() => runBatch('approve')}>{t('appr.approve_selected')}</Button>
+                    <Button size="sm" variant="outline" disabled={running} onClick={() => runBatch('reject')}>{t('appr.reject_selected')}</Button>
+                    <Button size="sm" variant="ghost" disabled={running} onClick={clearSel}>{t('appr.clear_sel')}</Button>
+                  </>
+                )}
+              </div>
+            ) : null;
+          })()}
+
           {/* Phone/narrow: one card per pending item instead of a 9-column table that a phone can only
               horizontally scroll. A red left edge flags an overdue item so the queue still scans at a
               glance, and the inline approve/reject actions (till variance / refund) sit as full-width
@@ -92,9 +157,14 @@ export default function ApprovalsPage() {
                 return (
                   <div key={`${r.control}-${r.ref}-${i}`} className={cn('rounded-lg border border-l-4 bg-card p-3 text-sm', overdue ? 'border-l-destructive' : 'border-l-muted-foreground/30')}>
                     <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="font-medium">{typeLabel(r.type)}</p>
-                        <p className="font-mono text-xs text-muted-foreground">{r.ref}</p>
+                      <div className="flex min-w-0 items-start gap-2">
+                        {isBatchable(r) && (
+                          <input type="checkbox" className="mt-1 size-4 shrink-0" aria-label={`select ${r.ref}`} checked={sel.has(keyOf(r))} onChange={() => toggle(r)} />
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-medium">{typeLabel(r.type)}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{r.ref}</p>
+                        </div>
                       </div>
                       <div className="shrink-0 text-right">
                         <p className="tabular font-semibold">฿{num(r.amount)}</p>
@@ -130,6 +200,9 @@ export default function ApprovalsPage() {
               rowKey={(r, i) => `${r.control}-${r.ref}-${i}`}
               emptyState={{ icon: ClipboardCheck, title: t('appr.empty_title'), description: t('appr.empty_desc') }}
               columns={[
+                { key: 'sel', label: '', sortable: false, render: (r) => isBatchable(r)
+                  ? <input type="checkbox" aria-label={`select ${r.ref}`} checked={sel.has(keyOf(r))} onChange={() => toggle(r)} />
+                  : <span className="text-xs text-muted-foreground" title={t('appr.not_batchable')}>—</span> },
                 { key: 'control', label: t('appr.col_control'), render: (r) => <Badge variant="outline" className="font-mono">{r.control}</Badge> },
                 { key: 'type', label: t('appr.col_type'), render: (r) => typeLabel(r.type) },
                 { key: 'ref', label: t('appr.col_ref'), render: (r) => <span className="font-mono text-sm">{r.ref}</span> },

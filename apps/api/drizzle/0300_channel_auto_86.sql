@@ -1,4 +1,4 @@
--- 0299_channel_auto_86 — Auto-86 (out-of-stock) push to delivery aggregators (POS-7, INV-14).
+-- 0300_channel_auto_86 — Auto-86 (out-of-stock) push to delivery aggregators (POS-7, INV-14).
 -- When the reactive auto-86 (LockingService.recomputeAvailability) flips a recipe-backed dish
 -- unavailable because an ingredient depleted — or available again on restock — that transition is
 -- pushed to every connected aggregator (Grab / LINE MAN / Foodpanda / Robinhood) via the existing

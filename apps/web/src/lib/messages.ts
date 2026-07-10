@@ -796,6 +796,16 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'appr.exc_none': { th: 'ไม่มีรายการในช่วงนี้', en: 'No items in this period' },
   'appr.rejected_ok': { th: 'ปฏิเสธแล้ว', en: 'Rejected' },
   'appr.reject_reason_prompt': { th: 'เหตุผลที่ปฏิเสธ (ไม่บังคับ)', en: 'Reason for rejection (optional)' },
+  // ── Batch approvals (multi-select — approve/reject many at once) ───────────
+  'appr.select_all': { th: 'เลือกทั้งหมด', en: 'Select all' },
+  'appr.selected_n': { th: 'เลือก {n} รายการ', en: '{n} selected' },
+  'appr.approve_selected': { th: 'อนุมัติที่เลือก', en: 'Approve selected' },
+  'appr.reject_selected': { th: 'ปฏิเสธที่เลือก', en: 'Reject selected' },
+  'appr.clear_sel': { th: 'ล้างที่เลือก', en: 'Clear' },
+  'appr.batch_done': { th: 'สำเร็จ {ok} รายการ{failNote}', en: '{ok} succeeded{failNote}' },
+  'appr.batch_fail_note': { th: ' · ล้มเหลว {fail} ({firstError})', en: ' · {fail} failed ({firstError})' },
+  'appr.batch_confirm_reject': { th: 'ปฏิเสธ {n} รายการที่เลือก? ใส่เหตุผล (ใช้กับทุกรายการ):', en: 'Reject {n} selected item(s)? Reason (applied to all):' },
+  'appr.not_batchable': { th: 'อนุมัติในหน้าโมดูลของรายการนี้', en: 'Approve on this item’s module screen' },
 
   // ── Inventory (stock / suppliers / POs / item detail) ─────────────────────
   'inv.title': { th: 'สินค้าคงคลัง', en: 'Inventory' },
