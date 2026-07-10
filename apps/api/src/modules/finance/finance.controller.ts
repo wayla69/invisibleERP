@@ -7,7 +7,7 @@ import { FinanceService, type ReceiptDto, type ApTxnDto, type AdvanceDto, type S
 import { FinancialHealthService } from './financial-health.service';
 import { ArAllowanceService, type ComputeAllowanceDto } from './ar-allowance.service';
 import { ArCashApplicationService, type CashApplicationDto, type ApplyOnAccountDto } from './ar-cash-application.service';
-import { ApPaymentRunService, type ProposeRunDto, type EditRunLinesDto } from './ap-payment-run.service';
+import { ApPaymentRunService, type ProposeRunDto, type EditRunLinesDto, type DiscountTermDto } from './ap-payment-run.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
@@ -52,6 +52,18 @@ const EditRunLinesBody = z.object({
     wht_rate: z.number().min(0).max(0.30).nullable().optional(),
     wht_income_type: z.string().nullable().optional(),
   })).optional(),
+});
+// FIN-9 (EXP-14) — early-payment discount policy (maker-checker change control).
+const DiscountTermBody = z.object({
+  vendor_id: z.number().int().positive().nullable().optional(),
+  name: z.string().min(1),
+  discount_pct: z.number().positive().max(0.30),
+  min_days_early: z.number().int().min(1).optional(),
+  full_discount_days: z.number().int().min(1).optional(),
+  prorate: z.boolean().optional(),
+  discount_account: z.string().optional(),
+  active_from: z.string().nullable().optional(),
+  active_to: z.string().nullable().optional(),
 });
 const AllowanceComputeBody = z.object({
   as_of_date: z.string().optional(),
@@ -302,4 +314,25 @@ export class FinanceController {
       .header('X-Content-Sha256', f.sha256)
       .send(f.body);
   }
+
+  // ── FIN-9 (EXP-14) — early-payment (dynamic) discount policy: a 'creditors' maker proposes a Draft policy,
+  // a DIFFERENT approvals/gl_close checker activates it (self-activation → SOD_VIOLATION). Only an Active
+  // policy is applied by a payment run; approving one supersedes the prior Active policy for the same vendor.
+  @Get('ap/discount-terms') @Permissions('creditors', 'approvals', 'gl_close', 'exec')
+  listDiscountTerms(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.payRuns.listDiscountTerms(u, status || undefined); }
+
+  @Post('ap/discount-terms') @Permissions('creditors')
+  createDiscountTerm(@Body(new ZodValidationPipe(DiscountTermBody)) b: DiscountTermDto, @CurrentUser() u: JwtUser) { return this.payRuns.createDiscountTerm(b, u); }
+
+  @Get('ap/discount-terms/:id') @Permissions('creditors', 'approvals', 'gl_close', 'exec')
+  getDiscountTerm(@Param('id') id: string) { return this.payRuns.getDiscountTerm(qint('id', id, 0)); }
+
+  @Post('ap/discount-terms/:id/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  approveDiscountTerm(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.payRuns.approveDiscountTerm(qint('id', id, 0), u); }
+
+  @Post('ap/discount-terms/:id/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  rejectDiscountTerm(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.payRuns.rejectDiscountTerm(qint('id', id, 0), u, b.reason); }
+
+  @Post('ap/discount-terms/:id/deactivate') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  deactivateDiscountTerm(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.payRuns.deactivateDiscountTerm(qint('id', id, 0), u); }
 }

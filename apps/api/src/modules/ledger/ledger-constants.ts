@@ -60,6 +60,7 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '4900', name: 'Rounding Adjustment', type: 'Revenue' },            // ปัดเศษสตางค์ — rounded up=credit (gain), down=debit (loss)
   { code: '2210', name: 'Customer Deposits — Prepaid', type: 'Liability' },  // มัดจำ/เงินรับล่วงหน้า (booking/tab) — recognised to revenue on apply
   { code: '4500', name: 'Card Surcharge Income', type: 'Revenue' },          // รายได้ค่าธรรมเนียมบัตร — VATable card surcharge
+  { code: '4600', name: 'Early-Payment Discount Income', type: 'Revenue' },   // ส่วนลดรับจากการจ่ายก่อนกำหนด — cash/prompt-payment discount captured on an early AP payment run (FIN-9, EXP-14); gross-method purchase discount recognised as other income (a P&L revenue account → flows through net income in the indirect SCF; NOT a CF_CLASSIFY balance-sheet bucket)
   { code: '5410', name: 'FX Gain/Loss (Realized)', type: 'Expense' },        // กำไร/ขาดทุนอัตราแลกเปลี่ยนที่เกิดขึ้นจริง — loss=debit, gain=credit (settlement)
   { code: '2250', name: 'Loyalty Points Liability', type: 'Liability' },      // หนี้สินแต้มสะสม — TFRS 15 contract liability for outstanding loyalty points (control acct)
   { code: '5700', name: 'Loyalty Points Expense', type: 'Expense' },          // ค่าใช้จ่ายแต้มสะสม — provision for loyalty points granted (offsets 2250)
