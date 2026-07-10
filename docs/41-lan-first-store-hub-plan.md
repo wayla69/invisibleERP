@@ -1,6 +1,6 @@
 # 41 — LAN-first Store Hub: full offline restaurant operation (POS + diner self-order) until the internet returns
 
-**Status: Phase 0 DELIVERED · 2026-07-10** — Phases 1–4 PLANNED.
+**Status: Phase 0 DELIVERED · Phase 1 DELIVERED (MVP) · 2026-07-10** — Phases 2–4 PLANNED.
 
 ## 0. Problem & goal
 
@@ -52,21 +52,33 @@ previously didn't. See PN-24 rev 0.3, user manual 01 §offline, UAT-O2C-284..285
 ToE: `apps/web/e2e/register-offline.spec.ts` (3 scenarios — offline queue+auto-sync, offline reload from
 snapshot, false-online fallback + manual flush).
 
-## Phase 1 — Store Hub MVP (PLANNED)
+## Phase 1 — Store Hub MVP (DELIVERED 2026-07-10)
 
 Package the existing stack as an in-store appliance; all in-store devices use it as their origin.
+Shipped (PN-24 rev 0.4 §7 step 6b, UAT-O2C-288..289, runbook `docs/ops/store-hub-setup.md`):
 
-- **Packaging:** Docker compose (Postgres + API + Next standalone) for durable installs; a single-process
-  PGlite mode for tiny/pilot installs (mirrors how the cutover harnesses boot `AppModule` today). Target:
-  any mini-PC; the till PC itself can host for a pilot.
-- **Scope:** one tenant, one branch per hub. Seeded from the cloud with a signed snapshot (menu +
-  modifiers + tables/zones + buffet tiers + users/PINs + tax config) — extend the BRANCH-02 master-bundle.
-- **The secure-context problem (the part everyone underestimates):** PWA/service worker + phone camera
-  (QR scan) require HTTPS. Plan: per-store public DNS name (`storeN.pos.<domain>`) resolving to the hub's
-  LAN IP, real certificate via DNS-01 issuance, renewed while the internet is up; hub runs a local DNS
-  responder so names keep resolving during an outage. Table QR encodes WiFi-join + the hub URL.
-- **Auth on the hub:** same JWT/cookie model; user/PIN store synced down so cashier PIN quick-login
-  (ITGC-AC-17) works with no cloud round-trip.
+- **Signed snapshot export** — `GET /api/hub/snapshot` (`modules/hub`): tenant identity + tax config,
+  full menu catalog (categories/items/modifiers/buffet tiers), floor plan (stations/zones/tables incl.
+  stable `qr_token`), and PIN-eligible **front-of-house users only** (the `requiresMfa` line; TOTP/SSO
+  secrets never leave the cloud). Fail-closed on `HUB_SYNC_SECRET`; HMAC-SHA256-signed; credential
+  export additionally gated on `X-Hub-Sync-Key`. Extends BRANCH-02.
+- **Hub importer** — `db:hub:import` (`database/hub-import.ts`): verifies the signature before any
+  write (tamper ⇒ `BAD_SIGNATURE`), id-stable upsert (printed table QRs keep working; Phase-2 sync
+  references the same rows), resets runtime table status, bumps serials past the imported range,
+  idempotent re-import, optional local `hubadmin` (no cloud credential ever copied down).
+- **Appliance packaging** — `hub/docker-compose.yml` (+`.env.example`): Postgres 16 + the SAME api/web
+  images the cloud runs (migrate-on-boot), one-shot `hub-seed` service, single-origin web (relative
+  `/api` + `API_PROXY_TARGET` rewrite — no per-store rebuild, first-party cookies).
+- **Secure-context recipe** (runbook §4): per-store public DNS name → LAN IP, DNS-01 cert (Caddy),
+  local DNS fallback for outages, WiFi-join + hub-URL table QR.
+- **ToE** — CI harness `tools/cutover/src/hub-snapshot.ts` (20 checks): fail-closed / perm gate /
+  tenant isolation / credential gating / tamper-reject / full round-trip onto a second freshly-migrated
+  PGlite where cashier password + **PIN login**, `/api/menu`, the floor plan, and post-import id
+  sequencing all work.
+
+Deferred within Phase 1 (unblocked, not needed for the pilot): single-process PGlite mode for the
+production server (harness-only today — `DatabaseModule` has no PGlite branch), auto-fetch of the
+snapshot by URL, and hub heartbeat (Phase 4).
 
 ## Phase 2 — hub ⇄ cloud sync (PLANNED)
 
@@ -104,8 +116,8 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 
 | Phase | Size | Depends on |
 |---|---|---|
-| 0 | 1 PR (this one) | — |
-| 1 | ~2–3 PRs (packaging, snapshot seed, TLS/DNS recipe) | — |
+| 0 | 1 PR — DELIVERED | — |
+| 1 | 1 PR (snapshot export/import + `hub/` appliance + runbook) — DELIVERED | — |
 | 2 | ~3–4 PRs (sync engine, controls, harness) | 1 |
 | 3 | ~1–2 PRs (origin plumbing, token minting, payment UX) | 1, 2 |
 | 4 | ~2 PRs (console, update channel, ITGC docs) | 1 |
@@ -115,3 +127,4 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 | 2026-07-10 | Platform | Initial plan; Phase 0 delivered in the same PR (PN-24 rev 0.3, UAT-O2C-284..285, e2e `register-offline.spec.ts`). |
+| 0.2 | 2026-07-10 | Platform | Phase 1 (Store Hub MVP) delivered: `modules/hub` signed snapshot export, `db:hub:import` id-stable importer, `hub/` compose appliance + `docs/ops/store-hub-setup.md` runbook, CI harness `hub-snapshot` (20 checks). PN-24 rev 0.4; UAT-O2C-288..289. |
