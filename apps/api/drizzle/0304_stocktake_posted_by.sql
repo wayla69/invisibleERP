@@ -1,4 +1,4 @@
--- 0300 — Record WHO posted a stocktake variance (SoD R11 evidence, needed by the hub replay).
+-- 0304 — Record WHO posted a stocktake variance (SoD R11 evidence, needed by the hub replay).
 --
 -- `postStocktake` enforces that the poster differs from the counter (SOD_SELF_APPROVAL) but stored only
 -- the counter, so after the fact the segregation could not be *evidenced* from the document — and a

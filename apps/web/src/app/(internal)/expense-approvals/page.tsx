@@ -12,6 +12,7 @@ import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 
 // ── API contract (apps/api/src/modules/ess) ───────────────────────────────────
 interface PendingClaim {
@@ -46,6 +47,14 @@ export default function ExpenseApprovalsPage() {
   const rows = q.data?.pending ?? [];
   const total = rows.reduce((s, r) => s + (r.amount || 0), 0);
 
+  // Batch approve/reject — loops the same per-claim /decide endpoint; SoD enforced per item server-side.
+  const batch = useBatchActions<PendingClaim>({
+    items: rows,
+    keyOf: (r) => String(r.id),
+    run: (r, action) => api(`/api/ess/expenses/${r.id}/decide`, { method: 'POST', body: JSON.stringify({ approve: action === 'approve' }) }),
+    onDone: () => qc.invalidateQueries({ queryKey: ['ess-pending-expenses'] }),
+  });
+
   return (
     <div>
       <PageHeader
@@ -65,11 +74,22 @@ export default function ExpenseApprovalsPage() {
 
         <StateView q={q}>
           {q.data && (
+            <>
+            <BatchBar
+              eligibleCount={batch.eligibleCount}
+              selectedCount={batch.selectedCount}
+              running={batch.running}
+              onSelectAll={batch.selectAll}
+              onApprove={() => batch.runBatch('approve')}
+              onReject={() => batch.runBatch('reject')}
+              onClear={batch.clear}
+            />
             <DataTable
               rows={rows}
               rowKey={(r) => r.id}
               emptyState={{ icon: Receipt, title: t('hx.exp.empty_title'), description: t('hx.exp.empty_desc') }}
               columns={[
+                batchColumn<PendingClaim>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (r) => String(r.id) }),
                 { key: 'employee_name', label: t('hx.exp.col_employee'), render: (r) => <span className="font-medium">{r.employee_name ?? r.emp_code ?? '—'}</span> },
                 { key: 'emp_code', label: t('hx.exp.col_code'), render: (r) => r.emp_code ?? '—' },
                 { key: 'claim_date', label: t('dash.col_date'), render: (r) => thaiDate(r.claim_date) },
@@ -103,6 +123,7 @@ export default function ExpenseApprovalsPage() {
                 },
               ]}
             />
+            </>
           )}
         </StateView>
       </div>
