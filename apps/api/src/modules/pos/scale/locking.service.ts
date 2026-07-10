@@ -4,12 +4,19 @@ import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { diningTables, menuRecipes, menuRecipeLines, menuItems, customerInventory } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import { RealtimeService } from './realtime.service';
+import { ChannelAdapterService } from '../../channel-adapter/channel-adapter.service';
 
 // P2a — optimistic concurrency for multi-terminal: a stale `rev` loses with 409 (two servers can't
 // silently clobber the same table), plus auto-86 that flips a dish unavailable when an ingredient is short.
 @Injectable()
 export class LockingService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, @Optional() private readonly realtime?: RealtimeService) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly realtime?: RealtimeService,
+    // POS-7 — optional so partial harnesses can still construct LockingService; when present, local 86/un-86
+    // transitions are mirrored to the connected delivery aggregators (idempotent + audited).
+    @Optional() private readonly channelSync?: ChannelAdapterService,
+  ) {}
 
   // Guarded table-status write: only succeeds if the caller's rev matches → otherwise 409 STALE_WRITE.
   async setTableStatus(tableId: number, status: string, expectedRev: number) {
@@ -33,6 +40,7 @@ export class LockingService {
     const db = this.db;
     const recipes = await db.select().from(menuRecipes).where(eq(menuRecipes.active, true));
     const changed: { sku: string; is_available: boolean }[] = [];
+    let tenantId: number | null = null;
     for (const r of recipes) {
       const lines = await db.select().from(menuRecipeLines).where(eq(menuRecipeLines.recipeId, r.id));
       let available = true;
@@ -45,9 +53,16 @@ export class LockingService {
       if (mi && mi.isAvailable !== available) {
         await db.update(menuItems).set({ isAvailable: available, updatedAt: new Date() }).where(eq(menuItems.id, r.menuItemId));
         changed.push({ sku: mi.sku, is_available: available });
+        if (mi.tenantId != null) tenantId = Number(mi.tenantId);
       }
     }
-    return { changed, count: changed.length };
+    // POS-7 — mirror the deplete (86) / restock (un-86) transitions to the connected aggregators. Idempotent
+    // + audited in the channel-adapter; best-effort so a partner outage never poisons the sale recompute.
+    let channels: Awaited<ReturnType<ChannelAdapterService['syncAuto86']>> | undefined;
+    if (this.channelSync && changed.length) {
+      try { channels = await this.channelSync.syncAuto86(tenantId, changed); } catch { /* aggregator sync best-effort */ }
+    }
+    return { changed, count: changed.length, channels: channels ?? null };
   }
 
   async availability() {

@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, integer, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, boolean, jsonb, timestamp, unique } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 import { employees } from './payroll';
 
@@ -11,6 +11,40 @@ export const channelAdapters = pgTable('channel_adapters', {
   enabled: boolean('enabled').default(true),
   autoAccept: boolean('auto_accept').default(true),
   config: jsonb('config'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// POS-7 — Auto-86 aggregator sync state. The CURRENT per-(tenant,platform,sku) availability we have
+// pushed to a delivery aggregator (Grab / LINE MAN / Foodpanda / Robinhood). Idempotency lives here: a
+// transition is pushed only when `available` differs from the stored state, so a no-op recompute never
+// spams the partner API. Written by LockingService.recomputeAvailability → ChannelAdapterService.syncAuto86.
+export const channelItemAvailability = pgTable('channel_item_availability', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  platform: text('platform').notNull(),
+  sku: text('sku').notNull(),
+  available: boolean('available').notNull().default(true),  // false = 86'd on the aggregator
+  reason: text('reason'),
+  lastPushOk: boolean('last_push_ok'),
+  lastPushRef: text('last_push_ref'),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uq: unique('uq_channel_item_avail').on(t.tenantId, t.platform, t.sku) }));
+
+// POS-7 — Auto-86 transition audit. Append-only record of every 86 / un-86 actually pushed to an
+// aggregator (with the push outcome + actor), so an auditor can prove the store never kept offering an
+// item its kitchen could not cook.
+export const channelItem86Log = pgTable('channel_item_86_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  platform: text('platform').notNull(),
+  sku: text('sku').notNull(),
+  action: text('action').notNull(),                          // '86' | 'un-86'
+  reason: text('reason'),
+  pushOk: boolean('push_ok'),
+  pushRef: text('push_ref'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

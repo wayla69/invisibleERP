@@ -15,6 +15,7 @@ import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 
 export default function ReceiptApprovalsPage() {
   const { t } = useLang();
@@ -34,6 +35,18 @@ export default function ReceiptApprovalsPage() {
   });
 
   const pending: any[] = q.data?.submissions ?? [];
+
+  // Batch approve/reject — loops the same per-receipt endpoints; grant/deny stays server-side per item.
+  const batch = useBatchActions<any>({
+    items: pending,
+    keyOf: (r) => String(r.id),
+    run: (r, action, reason) =>
+      action === 'approve'
+        ? api(`/api/loyalty/receipts/${r.id}/approve`, { method: 'POST' })
+        : api(`/api/loyalty/receipts/${r.id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    onDone: refresh,
+  });
+
   return (
     <div>
       <PageHeader title={t('ly.ra_title')} description={t('ly.ra_desc')} />
@@ -43,10 +56,21 @@ export default function ReceiptApprovalsPage() {
           <p className="text-xs text-muted-foreground">{t('ly.ra_sod_note')}</p>
           <StateView q={q}>
             {q.data && (
+              <>
+              <BatchBar
+                eligibleCount={batch.eligibleCount}
+                selectedCount={batch.selectedCount}
+                running={batch.running}
+                onSelectAll={batch.selectAll}
+                onApprove={() => batch.runBatch('approve')}
+                onReject={() => batch.runBatch('reject')}
+                onClear={batch.clear}
+              />
               <DataTable
                 rows={pending}
                 emptyState={{ icon: ReceiptText, title: t('ly.ra_empty') }}
                 columns={[
+                  batchColumn<any>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (r) => String(r.id) }),
                   { key: 'receipt_image', label: t('ly.ra_col_image'), render: (r: any) => <img src={r.receipt_image} alt={t('ly.ra_receipt_alt')} className="h-24 w-auto rounded border object-contain" /> },
                   { key: 'member_id', label: t('ly.col_member'), render: (r: any) => `#${r.member_id}` },
                   { key: 'store_name', label: t('ly.col_store'), render: (r: any) => r.store_name ?? '—' },
@@ -62,6 +86,7 @@ export default function ReceiptApprovalsPage() {
                   ) },
                 ]}
               />
+              </>
             )}
           </StateView>
         </Card>

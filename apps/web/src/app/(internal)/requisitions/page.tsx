@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DataTable, type Column } from '@/components/data-table';
+import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 import { PrForm } from '@/components/procurement-forms';
 import { BudgetChip, budgetRetryFields } from '@/components/budget-chip';
 import { baht } from '@/lib/format';
@@ -212,6 +213,14 @@ function PrListCard() {
   });
 
   const prs = q.data?.prs ?? [];
+  // Batch approve/reject pending PRs (only when the viewer can approve; engine still blocks self-approval).
+  const batch = useBatchActions<Pr>({
+    items: prs,
+    keyOf: (pr) => pr.pr_no,
+    eligible: (pr) => !!q.data?.can_approve && pr.status === 'Pending',
+    run: (pr, action) => api(`/api/procurement/prs/${pr.pr_no}/approve`, { method: 'PATCH', body: JSON.stringify({ approve: action === 'approve' }) }),
+    onDone: refresh,
+  });
   return (
     <Card className="mt-4 gap-4">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -221,6 +230,15 @@ function PrListCard() {
         </Button>
       </CardHeader>
       <CardContent>
+        <BatchBar
+          eligibleCount={batch.eligibleCount}
+          selectedCount={batch.selectedCount}
+          running={batch.running}
+          onSelectAll={batch.selectAll}
+          onApprove={() => batch.runBatch('approve')}
+          onReject={() => batch.runBatch('reject')}
+          onClear={batch.clear}
+        />
         {/* Phone/narrow: one card per PR instead of a 5-column table — a real <table> squeezed into a
             phone width forces every column (esp. the multi-line item list) to wrap into a tall, cramped
             sliver, and the header row just scrolls away with the rows since nothing pins it. Stacking
@@ -240,9 +258,12 @@ function PrListCard() {
               return (
                 <div key={pr.pr_no} className={cn('rounded-lg border border-l-4 p-3 text-sm', STATUS_ACCENT[pr.status] ?? 'border-l-muted-foreground/30')}>
                   <div className="flex items-start justify-between gap-2">
-                    <div>
+                    <div className="flex items-start gap-2">
+                      {batch.isEligible(pr) && <input type="checkbox" className="mt-1 size-4 shrink-0" aria-label={`select ${pr.pr_no}`} checked={batch.isSel(pr)} onChange={() => batch.toggle(pr)} />}
+                      <div>
                       <p className="font-medium">{pr.pr_no}</p>
                       <p className="text-xs text-muted-foreground">{pr.pr_date ?? ''} · {pr.requested_by ?? '-'}</p>
+                    </div>
                     </div>
                     <div className="text-right">
                       <Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>
@@ -276,6 +297,7 @@ function PrListCard() {
               description: `${t('iv.req_empty_before')} pr <${t('iv.req_ph_item')}> <${t('iv.req_ph_qty')}> ${t('iv.req_empty_after')}`,
             }}
             columns={[
+              batchColumn<Pr>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (pr) => pr.pr_no }),
               {
                 key: 'pr_no', label: t('iv.req_col_no_date'), sortable: true,
                 render: (pr) => <span className="whitespace-nowrap font-medium">{pr.pr_no}<div className="text-xs font-normal text-muted-foreground">{pr.pr_date ?? ''}</div></span>,
