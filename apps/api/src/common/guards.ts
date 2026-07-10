@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, Inject, UnauthorizedExceptio
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { timingSafeEqual } from 'node:crypto';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, gt, sql } from 'drizzle-orm';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, PLATFORM_ADMIN_KEY, isPlatformAdmin, type JwtUser } from './decorators';
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
@@ -38,6 +38,21 @@ export class JwtAuthGuard implements CanActivate {
     private readonly apiKeys: ApiKeyService,
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
   ) {}
+
+  // Auth-infra identity reads run BEFORE the per-request tenant transaction (guards precede
+  // interceptors), so they hit the base connection with NO app.* GUCs set. `users`/`pos_members` carry a
+  // tenant_id and are therefore under FORCE row-level security — and once the base connection role became
+  // the non-superuser table OWNER (H-3 hardening), FORCE applies to it too, so this pre-tenant lookup
+  // returned ZERO rows and every valid session looked like a deleted account (USER_NOT_FOUND → 401 →
+  // login bounce; root cause of the 2026-07-10 incident). Run these reads in a short transaction that
+  // sets app.bypass_rls: identity resolution legitimately predates tenant context. Normal per-request
+  // queries are unaffected — they still SET ROLE app_user and enforce tenant RLS.
+  private async authRead<T>(run: (tx: DrizzleDb) => Promise<T>): Promise<T> {
+    return this.db.transaction(async (tx: any) => {
+      await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
+      return run(tx);
+    });
+  }
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [ctx.getHandler(), ctx.getClass()]);
@@ -100,13 +115,12 @@ export class JwtAuthGuard implements CanActivate {
     }
     // ITGC-AC-15 — session revocation: a logged-out token (jti denylist), a deactivated account, or a token
     // issued before a "revoke all sessions" watermark is rejected even though the signature is still valid.
-    const db = this.db;
     let dbRole: string | undefined; // live role from the users table (staff); overrides the token's role claim
     let dbOrgId: number | null = null; // live org_id (staff) for hybrid multi-company bypass scoping
     let dbTenantId: number | null | undefined; // live tenant_id (staff); overrides the token's tenantId claim (L-3)
     const revoked = new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Session has been revoked — please sign in again', messageTh: 'เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบใหม่' });
     if (payload.jti) {
-      const [rev] = await db.select({ j: revokedTokens.jti }).from(revokedTokens).where(and(eq(revokedTokens.jti, payload.jti), gt(revokedTokens.expiresAt, new Date()))).limit(1);
+      const [rev] = await this.authRead((tx) => tx.select({ j: revokedTokens.jti }).from(revokedTokens).where(and(eq(revokedTokens.jti, payload.jti), gt(revokedTokens.expiresAt, new Date()))).limit(1));
       if (rev) throw revoked;
     }
     if (payload.sub && typeof payload.sub === 'string' && payload.sub.startsWith('member:')) {
@@ -114,12 +128,12 @@ export class JwtAuthGuard implements CanActivate {
       // deactivated/deprovisioned member's token stops working at once — not after its 7-day expiry.
       const memberId = payload.memberId ?? Number(payload.sub.slice('member:'.length));
       if (Number.isFinite(memberId)) {
-        const [m] = await db.select({ active: posMembers.active }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
+        const [m] = await this.authRead((tx) => tx.select({ active: posMembers.active }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1));
         if (m && m.active === false) throw new UnauthorizedException({ code: 'MEMBER_DEACTIVATED', message: 'This membership is no longer active', messageTh: 'สมาชิกนี้ถูกปิดใช้งาน' });
       }
     } else if (payload.sub) {
-      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, tenantId: users.tenantId, mcp: users.mustChangePassword, mfaEnabled: users.mfaEnabled, tenantSuspended: tenants.suspendedAt })
-        .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).where(eq(users.username, payload.sub)).limit(1);
+      const [u] = await this.authRead((tx) => tx.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, tenantId: users.tenantId, mcp: users.mustChangePassword, mfaEnabled: users.mfaEnabled, tenantSuspended: tenants.suspendedAt })
+        .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).where(eq(users.username, payload.sub)).limit(1));
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
         // #5 tenant lifecycle — a suspended company's users are blocked. Platform owners are exempt so they
