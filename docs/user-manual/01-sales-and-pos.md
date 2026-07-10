@@ -505,6 +505,29 @@ from a guest's phone show a **ลูกค้าสั่ง** badge, and buffet
 **บุฟเฟต์** badge, so the kitchen can tell them apart at a glance. Marking an item
 **พร้อมเสิร์ฟ / เสิร์ฟแล้ว** is what updates the guest's screen.
 
+**Prep-time colour (SLA).** Every card is coloured by how long it has waited
+against its prep target: **green** on time, **amber** when it is slipping (past the
+target), **red** when it is well over (1.5× the target). The target comes from the
+menu item's prep minutes, or the station's default. This lets the line cook see at a
+glance which dish to pick up next.
+
+**Recall (เรียกคืน).** If a dish was marked ready or served too early — or needs
+re-firing — tap the **เรียกคืน** (undo) button on the card to pull it back onto the
+board as *queued*. Each recall is counted per station (see **ภาระสถานี** below) so
+re-fires are visible, not silent.
+
+**Three KDS views** (switch with the tabs at the top of **จอครัว**):
+- **จอครัว (Board)** — the classic station board above.
+- **จุดส่งอาหาร (Expo)** — the **order-ready pass**: dishes grouped **by table/order**
+  so the expeditor runs a whole order together. A ticket shows **พร้อมเสิร์ฟทั้งออเดอร์**
+  (order ready) once nothing is still cooking, otherwise **ยังทำอยู่ N**; ready orders
+  float to the top, then the longest-waiting.
+- **ภาระสถานี (Station load)** — per-station workload: how many dishes are **ค้าง**
+  (active) and **เกินเวลา** (overdue), the oldest/average wait, an **all-day** count
+  of each dish still to cook, and today's **เสิร์ฟวันนี้** (bumped) and **เรียกคืนวันนี้**
+  (recalls) totals — for balancing cooks across stations. On a phone this view stacks
+  as cards; on a tablet/desktop it is a table.
+
 > **Prices are protected.** Guests can only order real menu items; the system
 > always prices them from the catalog, so a guest can never change a price. A
 > sold-out item shows **หมด** and can't be added (**ITEM_UNAVAILABLE**). If a
