@@ -117,6 +117,11 @@ materiality threshold parks the session for a manager to approve — same rule a
 > session stays blocked, look at the `skipped_unsupported` / `failed` rows in `hub_push_log` for the
 > sales in that window, resolve them (e.g. enter a loyalty-redeem sale centrally), then re-run the push.
 
+**Kitchen waste rides the same run (Phase 2c-2, BRANCH-06).** Waste logged on the hub posts Dr 5810 /
+Cr 1200 locally and replays to the cloud with the same  number — idempotent, so a re-push never
+double-relieves inventory. A perpetual-tracked item is refused (INV-07: use the approved write-off) and
+stays visible in  for review.
+
 **Fleet visibility (Phase 4a).** Every push run also sends a signed heartbeat. `GET /api/hub/fleet`
 (perm `branch`/`exec`) lists your hubs with `stale` (no heartbeat in the window), the un-replayed
 backlog, failed/skipped counts and the measured clock skew — so a box that quietly stops replaying is

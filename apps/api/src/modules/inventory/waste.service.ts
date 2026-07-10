@@ -34,9 +34,19 @@ export class WasteService {
     private readonly ledger: LedgerService,
   ) {}
 
-  async logWaste(dto: LogWasteDto, user: JwtUser) {
+  /**
+   * @param opts.wasteNo  Reuse an EXISTING document number instead of minting one — used by the
+   *   store-hub replay (`POST /api/hub/ingest-waste`, BRANCH-06) so the hub's `WASTE-…` number is the
+   *   same on both ledgers. Idempotent: a waste_no already present for the tenant returns the stored
+   *   row untouched (`duplicate: true`), so a re-push can never decrement stock or post GL twice.
+   */
+  async logWaste(dto: LogWasteDto, user: JwtUser, opts?: { wasteNo?: string }) {
     const db = this.db;
     const tenantId = user.tenantId ?? null;
+    if (opts?.wasteNo) {
+      const [seen] = await db.select().from(wasteLog).where(and(eq(wasteLog.tenantId, tenantId!), eq(wasteLog.wasteNo, opts.wasteNo))).limit(1);
+      if (seen) return { waste_no: seen.wasteNo, item_id: seen.itemId, qty: n(seen.qty), reason_code: seen.reasonCode, total_cost: n(seen.totalCost), journal_no: seen.journalNo, stock_after: null, duplicate: true as const };
+    }
     if (n(dto.qty) <= 0) throw new BadRequestException({ code: 'BAD_QTY', message: 'qty must be positive', messageTh: 'จำนวนต้องมากกว่าศูนย์' });
     if (!WASTE_REASONS.includes(dto.reason_code)) throw new BadRequestException({ code: 'BAD_REASON', message: 'invalid reason_code', messageTh: 'เหตุผลไม่ถูกต้อง' });
     // Guard: a perpetual-tracked item (valued sub-ledger) must use the INV-07 write-off, never the waste log,
@@ -47,7 +57,7 @@ export class WasteService {
     const qty = round2(n(dto.qty));
     const unitCost = roundCurrency(Math.max(0, n(dto.unit_cost)), 'THB');
     const totalCost = roundCurrency(qty * unitCost, 'THB');
-    const wasteNo = await this.docNo.nextDaily('WASTE');
+    const wasteNo = opts?.wasteNo ?? await this.docNo.nextDaily('WASTE');
 
     return await db.transaction(async (tx: any) => {
       // decrement the ingredient stock under a row lock (mirrors recipe applyDeduction; allows negative + logs).

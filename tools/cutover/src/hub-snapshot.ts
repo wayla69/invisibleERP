@@ -30,7 +30,7 @@ import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exception
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
 import { importHubSnapshot } from '../../../apps/api/dist/database/hub-import';
-import { pushHubSales, pushHubTills, sendHubHeartbeat, signHubBatch } from '../../../apps/api/dist/database/hub-push';
+import { pushHubSales, pushHubTills, pushHubWaste, sendHubHeartbeat, signHubBatch } from '../../../apps/api/dist/database/hub-push';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -298,6 +298,27 @@ async function main() {
   // and a forced re-send of the same session returns duplicate (no second JE)
   const again = await sendTill({ tenant_id: t1, sent_at: new Date().toISOString(), till: { session_no: 'TILL-HUB-1', opened_at: new Date().toISOString(), closed_at: new Date().toISOString(), opening_float: 0, closing_count: 0, sale_nos: [] }, signature: 'deadbeef' }).catch((e: any) => ({ err: e.code }));
   ok('Forced re-send with a bad signature is rejected (not silently duplicated)', (again as any).err === 'HUB_SYNC_BAD_SIGNATURE', JSON.stringify(again));
+
+  // ═══ Phase 2c-2 — kitchen waste replays to the cloud (BRANCH-06) ═══
+  const sendWaste = async (body: any) => {
+    const res = await cApp.inj('POST', '/api/hub/ingest-waste', undefined, body);
+    if (res.status !== 200 && res.status !== 201) { const e: any = new Error(res.json?.error?.code ?? String(res.status)); e.code = res.json?.error?.code; throw e; }
+    return res.json;
+  };
+  const wLog = await hApp.inj('POST', '/api/inventory/waste', hAdmTok, { item_id: 'ING-BASIL', qty: 2, reason_code: 'spoilage', unit_cost: 25 });
+  ok('Hub: kitchen logs waste (Dr 5810 / Cr 1200 on the hub ledger)', /^WASTE-/.test(wLog.json?.waste_no ?? '') && Math.abs(Number(wLog.json?.total_cost) - 50) < 0.01, JSON.stringify(wLog.json ?? wLog.status).slice(0, 120));
+  const wPush = await pushHubWaste(hub.db, t1, { secret: SECRET, sendWaste });
+  ok('Push: the waste document replays (1 pushed, 0 failed)', wPush.pushed === 1 && wPush.failed === 0, JSON.stringify(wPush));
+  const cloudWaste = (await cloud.pg.query(`SELECT waste_no, qty, total_cost, journal_no FROM waste_log`)).rows as any[];
+  ok('Cloud: same waste_no, qty and cost; GL posted', cloudWaste.length === 1 && cloudWaste[0].waste_no === wLog.json.waste_no && Math.abs(Number(cloudWaste[0].total_cost) - 50) < 0.01 && /^JE-/.test(cloudWaste[0].journal_no ?? ''), JSON.stringify(cloudWaste));
+  const w5810 = (await cloud.pg.query(`SELECT coalesce(sum(debit),0) d FROM journal_lines jl JOIN journal_entries je ON je.id=jl.entry_id WHERE jl.account_code='5810'`)).rows[0] as any;
+  ok('Cloud: 5810 Scrap/Waste debited ฿50 (central COGS no longer understated)', Math.abs(Number(w5810?.d) - 50) < 0.01, JSON.stringify(w5810));
+  const wDup = await pushHubWaste(hub.db, t1, { secret: SECRET, sendWaste });
+  ok('Waste re-push collects nothing (idempotent by waste_no)', wDup.collected === 0, JSON.stringify(wDup));
+  const wForce = await sendWaste({ tenant_id: t1, sent_at: new Date().toISOString(), waste: { waste_no: wLog.json.waste_no, item_id: 'ING-BASIL', qty: 2, reason_code: 'spoilage', unit_cost: 25 }, signature: 'deadbeef' }).catch((e: any) => ({ err: e.code }));
+  ok('Forced waste re-send with a bad signature is rejected', (wForce as any).err === 'HUB_SYNC_BAD_SIGNATURE', JSON.stringify(wForce));
+  const tbW = await cApp.inj('GET', '/api/ledger/trial-balance', t1admin);
+  ok('Cloud trial balance balanced after waste ingest', tbW.json?.totals?.balanced === true, JSON.stringify(tbW.json?.totals ?? {}));
 
   // ═══ Phase 4a — hub heartbeat + fleet view ═══
   const sendHeartbeat = async (body: any) => {

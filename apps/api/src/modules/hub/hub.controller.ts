@@ -38,6 +38,17 @@ const IngestTillBody = z.object({
 });
 type IngestTillDto = z.infer<typeof IngestTillBody>;
 
+// Phase 2c-2 — waste envelope (BRANCH-06).
+const IngestWasteBody = z.object({
+  tenant_id: z.number().int().positive(), sent_at: z.string().min(1), signature: z.string().min(1),
+  waste: z.object({
+    waste_no: z.string().min(1), item_id: z.string().min(1), qty: z.number().positive(),
+    reason_code: z.string().min(1), unit_cost: z.number().nonnegative().optional(),
+    uom: z.string().optional(), notes: z.string().optional(),
+  }),
+});
+type IngestWasteDto = z.infer<typeof IngestWasteBody>;
+
 // Phase 4a — heartbeat.
 const HeartbeatBody = z.object({
   tenant_id: z.number().int().positive(), sent_at: z.string().min(1), signature: z.string().min(1),
@@ -79,6 +90,12 @@ export class HubController {
   @Public() @Post('ingest-till')
   ingestTill(@Body(new ZodValidationPipe(IngestTillBody)) body: IngestTillDto) {
     return this.svc.ingestTill(body);
+  }
+
+  // Phase 2c-2 — kitchen waste ingest (BRANCH-06). Idempotent on the hub's waste_no.
+  @Public() @Post('ingest-waste')
+  ingestWaste(@Body(new ZodValidationPipe(IngestWasteBody)) body: IngestWasteDto) {
+    return this.svc.ingestWaste(body);
   }
 
   // Phase 4a — hub liveness + backlog.

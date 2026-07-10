@@ -14,6 +14,6 @@ import { LedgerModule } from '../ledger/ledger.module';
   imports: [QrModule, LedgerModule],
   controllers: [InventoryController, InventoryQrController, InventoryLedgerController, WasteController],
   providers: [InventoryService, InventoryLedgerService, WasteService, InventoryRepository],
-  exports: [InventoryService, InventoryLedgerService],
+  exports: [InventoryService, InventoryLedgerService, WasteService],
 })
 export class InventoryModule {}

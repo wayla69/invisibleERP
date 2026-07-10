@@ -347,6 +347,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-197 | AR allowance: no double-post; register | REV-18 | 01 §7 (8d) |
+| UAT-O2C-319 | Hub kitchen waste replays exactly once (5810/1200, INV-07 guard preserved) | BRANCH-06 | 24 §7 step 6f, rev 0.9 (`hub-snapshot.ts`) |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
