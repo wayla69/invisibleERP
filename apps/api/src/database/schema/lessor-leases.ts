@@ -45,5 +45,10 @@ export const lessorLeases = pgTable(
     approvedBy: text('approved_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ byDue: index('idx_lessor_lease_due').on(t.status, t.nextRunDate) }),
+  (t) => ({
+    byDue: index('idx_lessor_lease_due').on(t.status, t.nextRunDate),
+    // Tenant-leading index (cutover/tenant-idx gate, R1-1 / AUD-ARC-01): RLS puts a tenant_id predicate on
+    // every query, so a tenant-scoped table needs an index whose LEADING column is tenant_id. Added in 0319.
+    byTenant: index('idx_lessor_leases_tenant').on(t.tenantId, t.status),
+  }),
 );

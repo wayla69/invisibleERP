@@ -1,0 +1,11 @@
+-- 0319 — Tenant-leading index for lessor_leases (R1-1 / AUD-ARC-01 fix).
+--
+-- FINDING: lessor_leases (added in 0309 by FIN-10 / LSE-02) carries a `tenant_id` column but its only
+-- index was idx_lessor_lease_due on (status, next_run_date) — no index whose LEADING column is tenant_id.
+-- The cutover/tenant-idx gate flags this: RLS puts a tenant_id predicate on every query against a
+-- tenant-scoped table, so each such table MUST have a tenant-leading index or every read seq-scans.
+--
+-- Fix: add the missing tenant-leading index. Idempotent (IF NOT EXISTS); PGlite + Postgres alike. No RLS
+-- change (the canonical org-scoped tenant_isolation policy already covers lessor_leases via the generic
+-- loop); no data change.
+CREATE INDEX IF NOT EXISTS idx_lessor_leases_tenant ON lessor_leases (tenant_id, status);
