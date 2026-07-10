@@ -164,7 +164,32 @@ The working CRM sales pipeline (control **REV-17**), two tabs:
   **won** shows a **เป็นโครงการ (convert to project)** button — it seeds a project's contract from the deal value
   (control **CRM-WL**) and jumps to the new workspace. Converting the same deal twice is idempotent.
 - **ลีด (Leads)** — add a lead, **คัดกรอง (qualify)** it, **แปลงเป็นโอกาสการขาย (convert)** it into an opportunity
-  (creating a customer-of-record), or mark it **ปิด/เสีย (lost)**.
+  (creating a customer-of-record **and a CRM account + primary contact** — CRM-1), or mark it **ปิด/เสีย (lost)**.
+
+**One pipeline, two screens (CRM-1 unification).** This screen and the stage-board at `/pipeline` now work the
+SAME deal list: an opportunity created on either appears on both (one spine, `crm_opportunities`; stages come
+from the tenant-configurable stage master — the six defaults are seeded automatically). *Won/lost are terminal
+everywhere* — moving a closed deal on any screen is refused (`OPP_CLOSED`). Every stage change is recorded in
+an audit trail you can read per deal (`GET /api/crm/pipeline/opportunities/{OPP-…}/history` — who moved it,
+from → to, when).
+
+## CRM accounts & contacts — duplicate governance (API; CRM-1)
+The CRM party model behind the pipeline (the dedicated web screen is a follow-up work item; the API is live now):
+- **บัญชีลูกค้า (Accounts)** — `POST/GET /api/crm/accounts`, `GET/PATCH /api/crm/accounts/{ACC-…}` (perms
+  `crm`/`exec`/`ar`): the company record (name, เลขผู้เสียภาษี, industry, size, a real owner user, and a
+  `customer_no` link — an account becomes the customer-of-record once it transacts).
+- **ผู้ติดต่อ (Contacts)** — `POST/GET /api/crm/contacts`, `PATCH /api/crm/contacts/{id}`: people under an
+  account with a role tag (decision_maker / billing / technical / other), optional LINE id and a loyalty
+  member link.
+- **กันข้อมูลซ้ำ (duplicate detection)** — creating an account/contact that matches an existing record on the
+  normalized tax id / email / phone / company name (legal suffixes like "จำกัด"/"Co., Ltd." are ignored) is
+  refused **409 `DUPLICATE_SUSPECT`**; the response lists the suspected matches (`error.details.matches`).
+  After reviewing, resubmit with `force: true` only if it genuinely is a different party.
+- **รวมรายการซ้ำ (merge)** — `POST /api/crm/accounts/{survivor}/merge {duplicate_account_no}` (perms
+  `crm`/`exec`/`masterdata`) moves the duplicate's contacts and deals onto the survivor, fills the survivor's
+  blank fields from the duplicate, and retires the duplicate (status `merged`, fully traceable — nothing is
+  deleted). **Maker-checker:** if the duplicate has contacts/deals to move, the person who created the
+  duplicate cannot perform the merge (403 `SOD_VIOLATION`) — a second person must.
 
 ## Win/Loss pipeline dashboard (`/projects/pipeline`)
 Win rate, weighted forecast, won and lost value; a **pipeline-by-stage** funnel; **loss reasons**; a
@@ -271,6 +296,7 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.24 | 2026-07-10 | **CRM-1 — one pipeline, duplicate-governed accounts/contacts (migration 0294).** `/projects/crm` and `/pipeline` now work the SAME deal list (unified `crm_opportunities` spine; tenant-configurable stages; won/lost terminal everywhere → `OPP_CLOSED`; per-deal stage-change audit trail). Lead conversion also creates/links a CRM account + primary contact. New API section **CRM accounts & contacts**: `/api/crm/accounts` + `/api/crm/contacts` with create-time duplicate detection (**409 `DUPLICATE_SUSPECT`** + `force` override) and a maker-checked survivor **merge** (`SOD_VIOLATION` when the duplicate's creator tries to merge away children). CPQ quotes now validate their opportunity link (`OPP_NOT_FOUND`). Troubleshooting rows added in 99. |
 | 2.23 | 2026-07-09 | **Project picked from a dropdown on the construction screens (UI-only).** **วางบิลงวดงาน** (`/projects/billing`), **ผู้รับเหมาช่วง** (`/projects/subcontracts`) and the tender form (`/projects/tenders`) no longer ask you to type `PRJ-…`: the project field is a dropdown of the project register (`GET /api/projects` — name + status shown; picking it opens the project immediately; choose **พิมพ์เลขเอกสารเอง…** to key a code). No endpoint/control change. |
 | 2.22 | 2026-07-05 | **Printable documents — งวดงาน tax invoice + subcontract certificate** (docs/35 P1/P2). Each certified/raised item now has a **Print / open PDF** button (🖨). On **วางบิลงวดงาน** (`/projects/billing`) every claim row prints the **ใบวางบิลงวดงาน / ใบกำกับภาษี** (progress-claim tax invoice) — BoQ-line movement, retention, VAT, จำนวนเงินที่เรียกเก็บ, and the amount in Thai words. On **ผู้รับเหมาช่วง** (`/projects/subcontracts`) a raised valuation prints the **ใบรับรองผลงานผู้รับเหมาช่วง** (subcontract valuation certificate) — scope, retention, back-charge, WHT (ภ.ง.ด.53), input VAT, จำนวนเงินที่ต้องจ่าย, and the amount in words. Both can also be emailed to the customer/subcontractor as a PDF attachment (`POST /api/progress-billing/{claimNo}/send-email`, `POST /api/subcontracts/valuations/{valNo}/send-email`); the document renders as a web page when the PDF engine is unavailable. Presentation-only — no change to the accounting. |
 | 2.21 | 2026-07-05 | **Subcontractor input VAT** (docs/35 P5/Depth) — a subcontract now takes a **VAT %** as well as the WHT %; the certified valuation books the subcontractor's VAT as **recoverable input VAT (ภาษีซื้อ)**, so the payable is *service − WHT + VAT*. (Real-estate **ownership transfer** — the revenue-recognition step — is documented in user-manual 15.) |
