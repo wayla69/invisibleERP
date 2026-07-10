@@ -68,6 +68,9 @@ if this is your first time logging in.
 | 11 | [Administration](./11-administration.md) | Admin, AccessAdmin, MasterDataAdmin |
 | 12 | [Platform Customization](./12-platform-customization.md) | Admin, AccessAdmin, MasterDataAdmin, Executives |
 | 13 | [Members & Points CRM](./13-loyalty-crm.md) | Sales, Marketing, Loyalty Admin, Managers |
+| 14 | [Project Management](./14-project-management.md) | Planner, Project Managers, Executives |
+| 15 | [Real Estate](./15-real-estate.md) | RE Sales, Executives |
+| 16 | [CRM Workspace (deal board, leads, accounts)](./16-crm-workspace.md) | Sales, CRM Manager, Marketing, Executives |
 | 99 | [Troubleshooting & FAQ](./99-troubleshooting-faq.md) | Everyone |
 
 ---

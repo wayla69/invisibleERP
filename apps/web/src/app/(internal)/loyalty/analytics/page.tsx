@@ -113,7 +113,7 @@ export default function LoyaltyAnalyticsPage() {
               <CardContent className="space-y-2">
                 <StateView q={seg}>
                   {seg.data && seg.data.segments.map((s) => (
-                    <Link key={s.segment} href={`/crm?segment=${encodeURIComponent(s.segment)}`} className="flex items-center gap-3 rounded-md px-1 py-0.5 hover:bg-muted/50" title={t('ly.an_seg_link_title')}>
+                    <Link key={s.segment} href={`/crm/members?segment=${encodeURIComponent(s.segment)}`} className="flex items-center gap-3 rounded-md px-1 py-0.5 hover:bg-muted/50" title={t('ly.an_seg_link_title')}>
                       <span className="w-20 shrink-0 text-sm">{s.segment}</span>
                       <div className="h-3 flex-1 rounded-full bg-muted"><div className={`h-3 rounded-full ${SEG_TONE[s.segment] ?? 'bg-primary'}`} style={{ width: `${(s.members / maxSeg) * 100}%` }} /></div>
                       <span className="w-10 shrink-0 text-right text-sm tabular-nums">{num(s.members)}</span>
