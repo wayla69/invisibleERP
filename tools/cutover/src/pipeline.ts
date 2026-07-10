@@ -197,6 +197,69 @@ async function main() {
   const migQuote = quoteList.json.quotes?.find((q: any) => q.quote_no === 'QT-LEG-1');
   ok('CPQ quote repointed to the migrated opportunity (crm_opportunity_id backfilled)', migQuote && migQuote.opportunity_id === migOpp?.id, JSON.stringify({ quote_opp: migQuote?.opportunity_id, crm_id: migOpp?.id }));
 
+  // ── CRM-2 — the modern CRM workspace (docs/41): deal detail, web-to-lead, CSV import ─────────────
+
+  // 23. Deal detail endpoint composes account + stage history + activities + linked CPQ quotes
+  const dealOppNo = opp3.json.opp_no; // 'Open Deal' from check 12, carries the CPQ quote of check 21
+  await inj('POST', '/api/crm/pipeline/activities', sales1, { entity_type: 'opportunity', entity_no: dealOppNo, type: 'task', subject: 'ส่งใบเสนอราคา', due_date: '2026-08-01' });
+  const detail = await inj('GET', `/api/crm/pipeline/opportunities/${dealOppNo}`, sales1);
+  ok('Deal detail: opp + history + activities + linked quotes in ONE payload',
+    detail.status === 200 && detail.json.opp_no === dealOppNo
+      && (detail.json.history?.length ?? 0) >= 1
+      && detail.json.activities?.some((a: any) => a.subject === 'ส่งใบเสนอราคา')
+      && detail.json.quotes?.length === 1 && detail.json.quotes[0].total > 0,
+    JSON.stringify({ history: detail.json.history?.length, acts: detail.json.activities?.length, quotes: detail.json.quotes?.length }));
+  ok('Deal detail: next_task = the nearest undone task (next-step highlight)',
+    detail.json.next_task?.subject === 'ส่งใบเสนอราคา' && detail.json.next_task?.done === false, JSON.stringify(detail.json.next_task));
+
+  // 24. Board enrichment: list rows expose account_name + stage_entered_at (age-in-stage)
+  const enriched = (await inj('GET', '/api/crm/pipeline/opportunities', sales1)).json.opportunities?.find((o: any) => o.opp_no === accOpp.json.opp_no);
+  ok('Board list enriched with account_name + stage_entered_at', !!enriched && !!enriched.account_name && !!enriched.stage_entered_at, JSON.stringify({ account_name: enriched?.account_name, entered: enriched?.stage_entered_at }));
+
+  // 25. Governed won-close via PATCH stage now records the optional win_reason
+  const winMove = await inj('PATCH', `/api/crm/pipeline/opportunities/${dealOppNo}/stage`, sales1, { stage: 'won', win_reason: 'ราคาดีที่สุด' });
+  const wonDetail = await inj('GET', `/api/crm/pipeline/opportunities/${dealOppNo}`, sales1);
+  ok('PATCH stage → won stores win_reason (CRM-2 board close dialog)', winMove.status === 200 && wonDetail.json.status === 'Won' && wonDetail.json.win_reason === 'ราคาดีที่สุด', JSON.stringify({ status: wonDetail.json.status, win_reason: wonDetail.json.win_reason }));
+
+  // 26. Public web-to-lead: anonymous POST creates a 'web' lead (no auth header at all)
+  const w2l = await inj('POST', '/api/crm/web-to-lead', undefined, { name: 'คุณเว็บ ลูกค้าใหม่', company: 'Website Co', email: 'web@lead.example', message: 'สนใจสินค้า', tenant_code: 'T1' });
+  const webLead = (await inj('GET', '/api/crm/pipeline/leads', sales1)).json.leads?.find((l: any) => l.email === 'web@lead.example');
+  ok('Web-to-lead (public, no JWT) → { ok: true } + lead created with source=web',
+    w2l.status === 200 && w2l.json.ok === true && !!webLead && webLead.source === 'web' && webLead.status === 'new',
+    JSON.stringify({ status: w2l.status, body: w2l.json, lead: webLead?.lead_no, source: webLead?.source }));
+
+  // 27. Honeypot: a filled `website` field is dropped SILENTLY with the identical { ok: true } shape
+  const honey = await inj('POST', '/api/crm/web-to-lead', undefined, { name: 'Bot Bot', email: 'bot@spam.example', website: 'http://spam.example', tenant_code: 'T1' });
+  const botLead = (await inj('GET', '/api/crm/pipeline/leads', sales1)).json.leads?.find((l: any) => l.email === 'bot@spam.example');
+  ok('Web-to-lead honeypot → 200 { ok: true } but NO lead created', honey.status === 200 && honey.json.ok === true && !botLead, JSON.stringify({ status: honey.status, body: honey.json, created: !!botLead }));
+
+  // 28. Multi-tenant install without tenant_code → 400 TENANT_REQUIRED (never a cross-tenant guess)
+  const noTenant = await inj('POST', '/api/crm/web-to-lead', undefined, { name: 'ไม่มี tenant' });
+  ok('Web-to-lead without tenant_code on a multi-tenant DB → 400 TENANT_REQUIRED', noTenant.status === 400 && noTenant.json.error?.code === 'TENANT_REQUIRED', `${noTenant.status} ${noTenant.json.error?.code}`);
+
+  // 29. Rate-limit shape: the public path rides its OWN strict edge bucket (not the loose global one)
+  const { rateLimitBucketOf } = await import('../../../apps/api/dist/common/edge');
+  ok('Edge rate limiter: /api/crm/web-to-lead is on the dedicated strict bucket',
+    rateLimitBucketOf('/api/crm/web-to-lead') === 'lead' && rateLimitBucketOf('/api/crm/pipeline/leads') === 'api' && rateLimitBucketOf('/api/login') === 'auth',
+    `bucket=${rateLimitBucketOf('/api/crm/web-to-lead')}`);
+
+  // 30. CSV lead import: dry-run validation report, then commit (invalid row skipped, LEAD- numbered)
+  const csv = 'Name,Company,Email,Phone,Source\nสมชาย นำเข้า,Import Co,somchai@imp.example,0812345678,expo\n,NoName Co,,,\nสมหญิง นำเข้า,,somying@imp.example,,expo';
+  const dry = await inj('POST', '/api/crm/pipeline/leads/import', sales1, { format: 'csv', csv, dry_run: true });
+  ok('Lead import dry-run → 3 rows, 2 valid, 1 invalid (Name required), nothing written',
+    dry.status === 200 && dry.json.dry_run === true && dry.json.total === 3 && dry.json.valid === 2 && dry.json.invalid === 1
+      && dry.json.errors?.[0]?.code === 'REQUIRED_EMPTY'
+      && !(await inj('GET', '/api/crm/pipeline/leads', sales1)).json.leads?.some((l: any) => l.email === 'somchai@imp.example'),
+    JSON.stringify(dry.json));
+  const imp = await inj('POST', '/api/crm/pipeline/leads/import', sales1, { format: 'csv', csv });
+  const impLeads = (await inj('GET', '/api/crm/pipeline/leads', sales1)).json.leads?.filter((l: any) => l.source === 'expo');
+  ok('Lead import commit → imported 2 / skipped 1; leads LEAD-numbered with source from the file',
+    imp.status === 200 && imp.json.imported === 2 && imp.json.skipped === 1
+      && impLeads?.length === 2 && impLeads.every((l: any) => /^LEAD-/.test(l.lead_no) && l.status === 'new'),
+    JSON.stringify({ result: imp.json, leads: impLeads?.map((l: any) => l.lead_no) }));
+  const tpl = await inj('GET', '/api/crm/pipeline/leads/import/template', sales1);
+  ok('Lead import template lists the header contract (Name required)', tpl.status === 200 && tpl.json.headers?.[0] === 'Name' && tpl.json.required?.includes('Name'), JSON.stringify(tpl.json));
+
   await app.close();
 }
 
