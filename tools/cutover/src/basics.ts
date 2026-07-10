@@ -1666,6 +1666,80 @@ async function main() {
   const capWl = (await inj('GET', '/api/finance/ar/collections', admin)).json;
   ok('REV-21: collections worklist surfaces the customer\'s on-account cash (apply before dunning)', (capWl.rows ?? []).some((r: any) => r.invoice_no === 'INV-CA1' && near(r.on_account, 600)) && Number(capWl.on_account_total) >= 600, `oa_total=${capWl.on_account_total}`);
 
+  // ───────────────────── AR/AP netting & contra settlement (REV-23, docs/41 FIN-8) ─────────────────────
+  // A counterparty that is BOTH a customer (AR) and a vendor (AP): a netting agreement authorises offsetting
+  // its open AR against its open AP; a maker-checker contra settlement posts a single Dr 2000 / Cr 1100 JE
+  // that clears both sub-ledgers up to the netted amount, leaving the residual open.
+  const [netCust] = await db.insert(s.tenants).values({ code: 'NETCO', name: 'Netting Counterparty' }).returning({ id: s.tenants.id });
+  const netCid = Number(netCust.id);
+  const [netVend] = await db.insert(s.vendors).values({ name: 'NETCO Vendor', tenantId: hq, isCreditor: true }).returning({ id: s.vendors.id });
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-NET1', invoiceDate: daysAgo(40), dueDate: daysAgo(35), tenantId: netCid, amount: '800', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+    { invoiceNo: 'INV-NET2', invoiceDate: daysAgo(20), dueDate: daysAgo(15), tenantId: netCid, amount: '500', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+  ]);
+  await db.insert(s.apTransactions).values([
+    { txnNo: 'AP-NET1', invoiceNo: 'BILL-NET1', invoiceDate: daysAgo(38), dueDate: daysAgo(30), tenantId: hq, vendorName: 'NETCO Vendor', amount: '300', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+    { txnNo: 'AP-NET2', invoiceNo: 'BILL-NET2', invoiceDate: daysAgo(18), dueDate: daysAgo(10), tenantId: hq, vendorName: 'NETCO Vendor', amount: '600', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+  ]);
+  // Agreement management (maker) + preview.
+  const netAgr = await inj('POST', '/api/finance/netting/agreements', admin, { customer_no: 'NETCO', vendor: 'NETCO Vendor', notes: 'ข้อตกลงหักกลบ' });
+  ok('FIN-8/REV-23: create a counterparty netting agreement', netAgr.status === 200 && typeof netAgr.json?.agreement_id === 'number' && netAgr.json?.enabled === true, JSON.stringify(netAgr.json));
+  const netPrev = (await inj('GET', '/api/finance/netting/preview?customer_no=NETCO&vendor=NETCO%20Vendor', admin)).json;
+  ok('FIN-8/REV-23: preview shows open AR 1300 vs open AP 900 → proposed net 900, residual AR 400 / AP 0',
+    near(netPrev.ar?.open_total, 1300) && near(netPrev.ap?.open_total, 900) && near(netPrev.proposed_net, 900) && near(netPrev.residual_ar, 400) && near(netPrev.residual_ap, 0), JSON.stringify({ ar: netPrev.ar?.open_total, ap: netPrev.ap?.open_total, net: netPrev.proposed_net }));
+
+  // Reason is mandatory (mirrors the REV-21 reversal / bad-debt write-off maker-checker).
+  const netNoReason = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETCO', vendor: 'NETCO Vendor', reason: '   ' });
+  ok('FIN-8/REV-23: propose without a reason → 400 REASON_REQUIRED', netNoReason.status === 400 && netNoReason.json?.error?.code === 'REASON_REQUIRED', `${netNoReason.status} ${netNoReason.json?.error?.code}`);
+
+  // Propose the contra settlement (maker) — parks PendingApproval; NO GL / sub-ledger movement yet.
+  const net2000Before = await tbBalance('2000'), net1100Before = await tbBalance('1100');
+  const netProp = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETCO', vendor: 'NETCO Vendor', reason: 'หักกลบลูกหนี้กับเจ้าหนี้รายเดียวกัน' });
+  const netInv1Parked = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-NET1')))[0];
+  ok('FIN-8/REV-23: propose parks PendingApproval (net 900) — no GL, no sub-ledger movement yet',
+    netProp.status === 201 && netProp.json?.pending === true && near(netProp.json?.net_amount, 900) && /^NET-/.test(netProp.json?.settlement_no ?? '')
+    && near(netInv1Parked?.paidAmount, 0) && near(await tbBalance('2000'), net2000Before) && near(await tbBalance('1100'), net1100Before), JSON.stringify(netProp.json).slice(0, 140));
+  const netNo = netProp.json?.settlement_no;
+  const netGov = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
+  ok('FIN-8/REV-23: the pending settlement surfaces in the GOV-01 monitor (type ar_ap_netting)', (netGov.items ?? []).some((i: any) => i.type === 'ar_ap_netting' && i.control === 'REV-23' && i.ref === netNo && near(i.amount, 900)), `types=${JSON.stringify(netGov.by_type ?? {})}`);
+  const netSelf = await inj('POST', `/api/finance/netting/settlements/${netNo}/approve`, admin);
+  ok('FIN-8/REV-23: proposer self-approval blocked → 403 SOD_VIOLATION (binds even Admin)', netSelf.status === 403 && netSelf.json?.error?.code === 'SOD_VIOLATION', `${netSelf.status} ${netSelf.json?.error?.code}`);
+
+  // A DIFFERENT user approves → contra JE (Dr 2000 / Cr 1100 900) + both sub-ledgers clear; residual open.
+  const netAppr = await inj('POST', `/api/finance/netting/settlements/${netNo}/approve`, mgr);
+  const netInv1 = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-NET1')))[0];
+  const netInv2 = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-NET2')))[0];
+  const netAp1 = (await db.select().from(s.apTransactions).where(eq(s.apTransactions.txnNo, 'AP-NET1')))[0];
+  const netAp2 = (await db.select().from(s.apTransactions).where(eq(s.apTransactions.txnNo, 'AP-NET2')))[0];
+  ok('FIN-8/REV-23: a different user approves → contra JE posts Dr 2000 +900 / Cr 1100 −900',
+    netAppr.status === 200 && near(netAppr.json?.net_amount, 900) && /^JE-/.test(netAppr.json?.je_entry_no ?? '')
+    && near(await tbBalance('2000'), net2000Before + 900) && near(await tbBalance('1100'), net1100Before - 900), `st=${netAppr.status} je=${netAppr.json?.je_entry_no} 2000=${await tbBalance('2000')}`);
+  ok('FIN-8/REV-23: netting clears BOTH sub-ledgers up to the net — AP fully paid, AR residual stays open (INV-NET2 open 400)',
+    netAp1?.status === 'Paid' && netAp2?.status === 'Paid' && netInv1?.status === 'Paid' && netInv2?.status === 'Partial' && near(netInv2?.paidAmount, 100), `ap1=${netAp1?.status} ap2=${netAp2?.status} inv1=${netInv1?.status} inv2=${netInv2?.status}/${netInv2?.paidAmount}`);
+  const netStmt = (await inj('GET', `/api/finance/netting/settlements/${netNo}`, admin)).json;
+  ok('FIN-8/REV-23: the netting statement records exactly what was offset (AR 800+100, AP 300+600 = 900)',
+    netStmt.status === 'Approved' && near(netStmt.net_amount, 900) && (netStmt.ar_lines ?? []).reduce((a: number, l: any) => a + l.applied, 0) === 900 && (netStmt.ap_lines ?? []).reduce((a: number, l: any) => a + l.applied, 0) === 900 && (netStmt.ar_lines ?? []).some((l: any) => l.invoice_no === 'INV-NET1' && near(l.applied, 800)), JSON.stringify({ ar: netStmt.ar_lines, ap: netStmt.ap_lines }).slice(0, 160));
+
+  // Control negatives: no agreement / disabled agreement / over the per-counterparty threshold / nothing to net.
+  const [netNaC] = await db.insert(s.tenants).values({ code: 'NETNA', name: 'No-Agreement Counterparty' }).returning({ id: s.tenants.id });
+  await db.insert(s.vendors).values({ name: 'NETNA Vendor', tenantId: hq, isCreditor: true });
+  await db.insert(s.arInvoices).values([{ invoiceNo: 'INV-NETNA', invoiceDate: daysAgo(10), dueDate: daysAgo(5), tenantId: Number(netNaC.id), amount: '500', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }]);
+  await db.insert(s.apTransactions).values([{ txnNo: 'AP-NETNA', invoiceNo: 'BILL-NETNA', invoiceDate: daysAgo(10), dueDate: daysAgo(5), tenantId: hq, vendorName: 'NETNA Vendor', amount: '400', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }]);
+  const netNoAgr = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', reason: 'x' });
+  ok('FIN-8/REV-23: propose without a netting agreement → 400 NETTING_NOT_AGREED', netNoAgr.status === 400 && netNoAgr.json?.error?.code === 'NETTING_NOT_AGREED', `${netNoAgr.status} ${netNoAgr.json?.error?.code}`);
+  await inj('POST', '/api/finance/netting/agreements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', enabled: false });
+  const netDis = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', reason: 'x' });
+  ok('FIN-8/REV-23: propose against a disabled agreement → 400 NETTING_DISABLED', netDis.status === 400 && netDis.json?.error?.code === 'NETTING_DISABLED', `${netDis.status} ${netDis.json?.error?.code}`);
+  await inj('POST', '/api/finance/netting/agreements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', enabled: true, threshold: 100 });
+  const netOverThr = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', reason: 'x' });
+  ok('FIN-8/REV-23: net above the per-counterparty threshold → 400 NETTING_EXCEEDS_THRESHOLD', netOverThr.status === 400 && netOverThr.json?.error?.code === 'NETTING_EXCEEDS_THRESHOLD', `${netOverThr.status} ${netOverThr.json?.error?.code}`);
+  const [netOneC] = await db.insert(s.tenants).values({ code: 'NETONE', name: 'AR-only Counterparty' }).returning({ id: s.tenants.id });
+  await db.insert(s.vendors).values({ name: 'NETONE Vendor', tenantId: hq, isCreditor: true });
+  await db.insert(s.arInvoices).values([{ invoiceNo: 'INV-NETONE', invoiceDate: daysAgo(10), dueDate: daysAgo(5), tenantId: Number(netOneC.id), amount: '200', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }]);
+  await inj('POST', '/api/finance/netting/agreements', admin, { customer_no: 'NETONE', vendor: 'NETONE Vendor' });
+  const netNothing = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETONE', vendor: 'NETONE Vendor', reason: 'x' });
+  ok('FIN-8/REV-23: no open AP to offset → 400 NOTHING_TO_NET', netNothing.status === 400 && netNothing.json?.error?.code === 'NOTHING_TO_NET', `${netNothing.status} ${netNothing.json?.error?.code}`);
+
   // ───────────────────── FIN-4 — Statutory FS pack (report builder + SOCE + notes + DBD e-Filing) ─────────────────────
   // The configurable financial-report builder (row-grouping + comparative columns) and the three audit-pack
   // outputs it rides on. Read-only presentation over the audited GL — every rendered subtotal ties back to
