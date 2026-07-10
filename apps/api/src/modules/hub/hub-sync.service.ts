@@ -17,7 +17,7 @@
 //   TOTP secrets, SSO subjects and staff LINE/e-mail capture identities never leave the cloud.
 import { Inject, Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { eq, and, like, gte, lte, sql } from 'drizzle-orm';
+import { eq, and, like, gte, lte, inArray, sql } from 'drizzle-orm';
 import { requiresMfa, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
@@ -25,12 +25,15 @@ import {
   menuCategories, menuItems, modifierGroups, modifierOptions, menuItemModifierGroups,
   buffetPackages, buffetPackageItems,
   kitchenStations, floorZones, diningTables,
-  posOfflineSync, custPosSales,
+  posOfflineSync, custPosSales, tillSessions, hubHeartbeats,
 } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { RestaurantOfflineSyncService, type RegisterOfflineSaleOp } from '../restaurant/offline-sync.service';
-// single source of the batch-signature projection — the hub pusher signs with the same function
-import { signHubBatch } from '../../database/hub-push';
+import { LedgerService } from '../ledger/ledger.service';
+import { CASH_VARIANCE_THRESHOLD } from '../payments/payments.service';
+import { roundCurrency } from '../tax/money';
+// single source of the signature projection — the hub pusher signs with the same functions
+import { signHubBatch, signHubDoc, type HubTillDoc, type HubHeartbeatDoc } from '../../database/hub-push';
 
 export const HUB_SNAPSHOT_FORMAT = 'ierp-hub-snapshot';
 export const HUB_SNAPSHOT_VERSION = 1;
@@ -45,7 +48,22 @@ export class HubSyncService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly offlineSync: RestaurantOfflineSyncService,
+    private readonly ledger: LedgerService,
   ) {}
+
+  /** timing-safe HMAC compare — every hub-originated request authenticates this way. */
+  private assertSignature(given: string | undefined, want: string) {
+    const a = Buffer.from(String(given ?? ''), 'utf8');
+    const b = Buffer.from(want, 'utf8');
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      throw new ForbiddenException({ code: 'HUB_SYNC_BAD_SIGNATURE', message: 'Batch signature does not verify', messageTh: 'ลายเซ็นชุดข้อมูลไม่ถูกต้อง — ตรวจสอบ HUB_SYNC_SECRET' });
+    }
+  }
+
+  private async assertTenant(tenantId: number) {
+    const [tenant] = await this.db.select().from(tenants).where(eq(tenants.id, Number(tenantId)));
+    if (!tenant) throw new BadRequestException({ code: 'NO_TENANT', message: 'Unknown tenant' });
+  }
 
   private tenantId(user: JwtUser): number {
     if (user.tenantId == null) {
@@ -166,18 +184,165 @@ export class HubSyncService {
   // 'duplicate' results — it cannot double-post or alter data. Control BRANCH-04.
   async ingest(body: { tenant_id: number; sent_at: string; sales: RegisterOfflineSaleOp[]; signature: string }) {
     const secret = this.secret();
-    const want = signHubBatch(Number(body.tenant_id), String(body.sent_at), body.sales ?? [], secret);
-    const a = Buffer.from(String(body.signature ?? ''), 'utf8');
-    const b = Buffer.from(want, 'utf8');
-    if (a.length !== b.length || !timingSafeEqual(a, b)) {
-      throw new ForbiddenException({ code: 'HUB_SYNC_BAD_SIGNATURE', message: 'Batch signature does not verify', messageTh: 'ลายเซ็นชุดข้อมูลไม่ถูกต้อง — ตรวจสอบ HUB_SYNC_SECRET' });
-    }
-    const [tenant] = await this.db.select().from(tenants).where(eq(tenants.id, Number(body.tenant_id)));
-    if (!tenant) throw new BadRequestException({ code: 'NO_TENANT', message: 'Unknown tenant' });
+    this.assertSignature(body.signature, signHubBatch(Number(body.tenant_id), String(body.sent_at), body.sales ?? [], secret));
+    await this.assertTenant(Number(body.tenant_id));
     // Pre-auth request ⇒ RLS bypass is already on (same as login/signup); every service in the replay
     // path threads THIS explicit tenant, so rows land tenant-scoped exactly like a JWT request's would.
     const hubUser = { username: 'hub-sync', role: 'Sales', tenantId: Number(body.tenant_id), permissions: [] } as unknown as JwtUser;
     return this.offlineSync.syncBatch({ sales: body.sales ?? [] }, hubUser);
+  }
+
+  // ── Phase 2c: hub → cloud TILL (cash session / Z-report) ingest ────────────────────────────────
+  // Control BRANCH-05. The hub sends the session envelope + the hub sale numbers rung during it; the
+  // ONLY figure the cloud cannot derive is the physical `closing_count`.
+  //
+  //   expected = opening_float + Σ(CLOUD total of the cash sales in the session) + paid_in − paid_out
+  //              − drops − cash_refunds
+  //
+  // The cloud therefore never trusts the hub's own expected-cash number, and — because it resolves each
+  // hub sale through the BRANCH-04 dedup ledger — a session whose sales have NOT all replayed is
+  // REFUSED (`TILL_SALES_NOT_SYNCED`, listing the missing ones) instead of certifying a variance
+  // computed over an incomplete revenue population. Idempotent on `session_no` (re-push ⇒ duplicate).
+  // Over/short posts to 5830 on the same materiality line as a native close (REV-13); a material
+  // variance posts a DRAFT JE and parks the session `PendingApproval` for a different user to approve.
+  //
+  // NB (documented in PN-24 §7 6d): restaurant checkout does not write `payments` tenders, so the
+  // NATIVE `aggregateTill` (which sums tenders) misses restaurant cash. Hub sessions are reconciled
+  // against the SALE ledger instead — the authoritative revenue population for a hub.
+  async ingestTill(body: { tenant_id: number; sent_at: string; till: HubTillDoc; signature: string }) {
+    const secret = this.secret();
+    this.assertSignature(body.signature, signHubDoc({ tenant_id: Number(body.tenant_id), sent_at: String(body.sent_at), till: body.till }, secret));
+    const t = Number(body.tenant_id);
+    await this.assertTenant(t);
+    const doc = body.till;
+    const db = this.db;
+
+    const [existing] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, doc.session_no)).limit(1);
+    if (existing) {
+      return { session_no: doc.session_no, status: 'duplicate' as const, variance: Number(existing.variance ?? 0), variance_status: existing.varianceStatus ?? null, variance_journal_no: existing.varianceJournalNo ?? null };
+    }
+
+    // resolve each hub sale_no → the cloud sale it replayed into (BRANCH-04 dedup ledger)
+    const saleNos = doc.sale_nos ?? [];
+    const uuids = saleNos.map((s) => `hub:${t}:${s}`);
+    const mapped = uuids.length
+      ? await db.select({ clientUuid: posOfflineSync.clientUuid, saleNo: posOfflineSync.saleNo })
+          .from(posOfflineSync)
+          .where(and(eq(posOfflineSync.tenantId, t), inArray(posOfflineSync.clientUuid, uuids), sql`${posOfflineSync.saleNo} is not null`))
+      : [];
+    const foundHubNos = new Set(mapped.map((m: any) => String(m.clientUuid).split(':')[2]));
+    const missing = saleNos.filter((s) => !foundHubNos.has(s));
+    if (missing.length) {
+      throw new BadRequestException({
+        code: 'TILL_SALES_NOT_SYNCED',
+        message: `Push the session's sales first — ${missing.length} not replayed`,
+        messageTh: `ยังซิงค์บิลในรอบนี้ไม่ครบ (${missing.length} รายการ) — ต้องส่งบิลให้ครบก่อนปิดรอบ`,
+        missing,
+      });
+    }
+
+    // Drawer takings, valued from the CLOUD's own sale rows (never the hub's numbers).
+    // NB the restaurant settlement path debits 1000 Cash for the FULL settled amount of every tender
+    // (`cust_pos_sales.payment_method` stores 'Dine-in', not the tender type — see PN-24 §7 6d), and the
+    // tip rides into the drawer on top of `total` (credited to 2300). So the drawer expectation is
+    // Σ(total + tip) over the session's sales — exactly what the GL says entered account 1000.
+    const cloudSaleNos = mapped.map((m: any) => String(m.saleNo));
+    const saleRows = cloudSaleNos.length
+      ? await db.select({ total: custPosSales.total, tip: custPosSales.tip })
+          .from(custPosSales)
+          .where(and(eq(custPosSales.tenantId, t), inArray(custPosSales.saleNo, cloudSaleNos)))
+      : [];
+    const cashSales = roundCurrency(saleRows.reduce((s: number, r: any) => s + Number(r.total ?? 0) + Number(r.tip ?? 0), 0), 'THB');
+
+    const num = (v: unknown) => Number(v ?? 0);
+    const expectedCash = roundCurrency(
+      num(doc.opening_float) + cashSales + num(doc.paid_in) - num(doc.paid_out) - num(doc.drops) - num(doc.cash_refunds), 'THB',
+    );
+    const variance = roundCurrency(num(doc.closing_count) - expectedCash, 'THB');
+
+    let varianceJournalNo: string | null = null;
+    let varianceStatus: 'NotRequired' | 'PendingApproval' = 'NotRequired';
+    if (Math.abs(variance) >= 0.005 && !(await this.ledger.alreadyPosted('TILL_CLOSE', doc.session_no, t))) {
+      const material = Math.abs(variance) > CASH_VARIANCE_THRESHOLD;
+      const v = Math.abs(variance);
+      const lines = variance < 0
+        ? [{ account_code: '5830', debit: v }, { account_code: '1000', credit: v }]
+        : [{ account_code: '1000', debit: v }, { account_code: '5830', credit: v }];
+      const je: any = await this.ledger.postEntry({
+        source: 'TILL_CLOSE', sourceRef: doc.session_no, tenantId: t,
+        memo: `Hub till close variance ${doc.session_no} (${variance < 0 ? 'short' : 'over'} ${v})`,
+        createdBy: 'hub-sync', pendingApproval: material, lines,
+      });
+      varianceJournalNo = je?.entry_no ?? null;
+      varianceStatus = material ? 'PendingApproval' : 'NotRequired';
+    }
+
+    await db.insert(tillSessions).values({
+      sessionNo: doc.session_no, tenantId: t,
+      openedBy: doc.opened_by ?? 'hub', openedAt: new Date(doc.opened_at),
+      openingFloat: String(num(doc.opening_float)),
+      closedBy: doc.closed_by ?? 'hub', closedAt: new Date(doc.closed_at),
+      closingCount: String(num(doc.closing_count)), expectedCash: String(expectedCash), variance: String(variance),
+      denominations: doc.denominations ?? null, status: 'Closed',
+      varianceJournalNo, varianceStatus,
+    });
+
+    return {
+      session_no: doc.session_no, status: 'ingested' as const,
+      cash_sales: cashSales, expected_cash: expectedCash, closing_count: num(doc.closing_count),
+      variance, variance_status: varianceStatus, variance_journal_no: varianceJournalNo, sales_matched: cloudSaleNos.length,
+    };
+  }
+
+  // ── Phase 4a: hub heartbeat (liveness + backlog) ───────────────────────────────────────────────
+  // Signed like every hub call. The CLOUD stamps `last_seen_at` and derives `clock_skew_sec` from the
+  // hub's own `sent_at` — a drifting hub clock mis-buckets the business day, so it is measured, not
+  // assumed. Upsert per (tenant, hub_id).
+  async heartbeat(body: { tenant_id: number; sent_at: string; hub: HubHeartbeatDoc; signature: string }) {
+    const secret = this.secret();
+    this.assertSignature(body.signature, signHubDoc({ tenant_id: Number(body.tenant_id), sent_at: String(body.sent_at), hub: body.hub }, secret));
+    const t = Number(body.tenant_id);
+    await this.assertTenant(t);
+    const now = new Date();
+    const skew = Math.round((new Date(body.sent_at).getTime() - now.getTime()) / 1000);
+    const row = {
+      tenantId: t, hubId: body.hub.hub_id, appVersion: body.hub.app_version ?? null,
+      lastSeenAt: now, lastPushAt: body.hub.last_push_at ? new Date(body.hub.last_push_at) : null,
+      pendingSales: Number(body.hub.pending_sales ?? 0), pendingTills: Number(body.hub.pending_tills ?? 0),
+      failedDocs: Number(body.hub.failed_docs ?? 0), skippedDocs: Number(body.hub.skipped_docs ?? 0),
+      clockSkewSec: Number.isFinite(skew) ? skew : null,
+    };
+    await this.db.insert(hubHeartbeats).values(row)
+      .onConflictDoUpdate({ target: [hubHeartbeats.tenantId, hubHeartbeats.hubId], set: row });
+    return { ok: true as const, hub_id: body.hub.hub_id, clock_skew_sec: row.clockSkewSec };
+  }
+
+  // Fleet view: the tenant's hubs with a derived `stale` flag (no heartbeat within the window) and the
+  // backlog that a silent hub is sitting on. `attention` = stale, or failed/skipped docs, or big skew.
+  async fleet(user: JwtUser, staleMinutes = 15) {
+    const t = this.tenantId(user);
+    const rows = await this.db.select().from(hubHeartbeats).where(eq(hubHeartbeats.tenantId, t));
+    const now = Date.now();
+    const hubs = rows.map((h: any) => {
+      const seenMinAgo = Math.round((now - new Date(h.lastSeenAt).getTime()) / 60000);
+      const stale = seenMinAgo > staleMinutes;
+      return {
+        hub_id: h.hubId, app_version: h.appVersion, last_seen_at: h.lastSeenAt, seen_minutes_ago: seenMinAgo,
+        last_push_at: h.lastPushAt, pending_sales: h.pendingSales, pending_tills: h.pendingTills,
+        failed_docs: h.failedDocs, skipped_docs: h.skippedDocs, clock_skew_sec: h.clockSkewSec,
+        stale, needs_attention: stale || h.failedDocs > 0 || h.skippedDocs > 0 || Math.abs(h.clockSkewSec ?? 0) > 120,
+      };
+    });
+    return {
+      stale_minutes: staleMinutes,
+      hubs,
+      summary: {
+        hubs: hubs.length,
+        stale: hubs.filter((h) => h.stale).length,
+        needs_attention: hubs.filter((h) => h.needs_attention).length,
+        pending_docs: hubs.reduce((s, h) => s + h.pending_sales + h.pending_tills, 0),
+      },
+    };
   }
 
   // ── Phase 2a: reconciliation report (BRANCH-04 detective tie-out) ───────────────────────────────

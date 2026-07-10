@@ -13,7 +13,7 @@
 | Revision date | 2026-06-22 |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | BRANCH-01, BRANCH-02, BRANCH-03, BRANCH-04; cross-ref REV-01, GL-01, REC-01; SoD rule R07 |
+| Related RCM controls | BRANCH-01, BRANCH-02, BRANCH-03, BRANCH-04, BRANCH-05; cross-ref REV-01, REV-13, GL-01, GL-05, REC-01; SoD rule R07 |
 | Related policy | `<<Branch Operations Policy>>`, `<<Offline POS / Business Continuity Procedure>>`, `<<Segregation-of-Duties Policy>>` |
 
 ## 2. Purpose
@@ -125,6 +125,37 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
    hub-captured sales reach the central ledger exactly once, authentically, with unsupported shapes
    surfaced; value ties hub↔cloud (cross-ref BRANCH-03, REC-01).*
 
+6d. **Hub cash session (till / Z-report) up-sync (docs/41 Phase 2c).** The hub pushes each **closed**
+   till session — opening float, the **physical closing count**, cash movements, denominations — plus
+   the **hub sale numbers rung during the session** (membership by settlement time, `paid_at`), signed
+   with the same HMAC, to `POST /api/hub/ingest-till`. It deliberately does **not** send its own
+   expected-cash figure. The cloud resolves every listed sale through the step-6c dedup ledger and
+   **refuses the session** (`400 TILL_SALES_NOT_SYNCED`, listing the missing sales) unless all have
+   replayed — a variance is never certified over an incomplete revenue population. It then computes
+   `expected = opening_float + Σ(cloud total + tip of the session's sales) + paid_in − paid_out − drops
+   − cash_refunds` from its **own** ledger, derives `variance = counted − expected`, and posts the
+   over/short to **5830** on the *same* materiality line as a native close (**REV-13**,
+   `CASH_VARIANCE_THRESHOLD`): a material variance posts a **Draft** JE and parks the session
+   `PendingApproval` for a different user (GL-05 maker-checker); a sub-threshold variance posts
+   immediately. Idempotent on `session_no` (a re-push returns `duplicate`; never a second JE).
+   *Control: **BRANCH-05**.*
+
+   *Two product facts this design rests on (verified, not assumed):* the restaurant settlement path
+   writes **no `payments` tender row** — so the native `aggregateTill` (which sums tenders) does not
+   see restaurant cash — and it stores `cust_pos_sales.payment_method = 'Dine-in'` while **debiting
+   1000 Cash for the full settled amount of every tender** (tip included, credited to 2300). A hub
+   session is therefore reconciled against the **sale ledger**, which is exactly what account 1000
+   received. Closing this asymmetry in the native till path is tracked in docs/41 Phase 2c.
+
+6e. **Hub fleet heartbeat (docs/41 Phase 4a).** Each hub reports a signed heartbeat
+   (`POST /api/hub/heartbeat`): `hub_id`, app version, the **un-replayed backlog** (pending sales /
+   tills), `failed`/`skipped_unsupported` counts and its `last_push_at`; the cloud stamps `last_seen_at`
+   and derives **clock skew** from the hub's `sent_at` (a drifting hub clock mis-buckets the business
+   day, so it is measured, not assumed). `GET /api/hub/fleet` (perm `branch`/`exec`, RLS-scoped) lists
+   the tenant's hubs with `stale` (no heartbeat in the window) and `needs_attention` (stale, or failed/
+   skipped docs, or |skew| > 120s) — so a silent box quietly hoarding un-replayed cash is visible.
+   Table `hub_heartbeats` (migration `0296`, canonical RLS). *Control: BRANCH-05 (detective layer).*
+
 7. **GL boundary.** No GL is posted by the branch module itself; branch operations are organisational and reporting overlays. Revenue and tax are posted when the underlying sale finalises in the POS/order processes; the consolidated roll-up is an IPE that must tie to that posted revenue.
 
 ## 8. Process Flow
@@ -202,4 +233,5 @@ flowchart TD
 | 0.3 | 2026-07-10 | Platform | **Offline register hardening (LAN-first Phase 0, docs/41 — BRANCH-03 unchanged).** §7 step 6 — terminal-side capture now survives (a) a **reload/reboot mid-outage**: the menu is snapshotted to localStorage (`fetchMenuOfflineFirst`, `lib/register-offline.ts`) and served when `/api/menu` is unreachable (the SW never caches `/api/*`; the menu query runs under TanStack `networkMode:'always'` so it isn't paused while offline); and (b) the **"router up, internet down" false-online state**: a quick sale whose order-creation call fails at the network level (no HTTP status on the thrown error; `lib/api.ts` now stamps `status` on the session-expired error so a 401 is never mistaken for a dead link) falls back to the same IndexedDB queue automatically — HTTP rejections still surface and are never queued, and only the FIRST (pre-persistence) call falls back, so the worst case is an orphan open order, never a double-posted sale. The app-shell service worker no longer caches redirect-followed responses (an expired session bouncing to `/login` could poison the register's cached shell; cache bumped v3). e2e `register-offline.spec.ts` (3 scenarios); UAT-O2C-284..285; user manual 01 §offline. |
 | 0.4 | 2026-07-10 | Platform | **Store-hub snapshot export/import (docs/41 Phase 1 — extends BRANCH-02, no new numbered control).** New §7 step 6b: signed hub-snapshot export `GET /api/hub/snapshot` (`modules/hub`, fail-closed on `HUB_SYNC_SECRET`, HMAC-SHA256, credential export additionally gated on `X-Hub-Sync-Key`; FoH-only users via the `requiresMfa` line, TOTP/SSO never exported) + hub-side importer `db:hub:import` (`database/hub-import.ts` — signature verify before any write, id-stable upsert, table-status reset, sequence bump, idempotent) + the `hub/` docker-compose appliance and runbook `docs/ops/store-hub-setup.md`. ToE: new CI harness `tools/cutover/src/hub-snapshot.ts` (20 checks — fail-closed/perm/tenant-isolation/credential gating/tamper-reject/round-trip: cashier password+PIN login, menu + floor plan served, local insert past imported ids, on a second freshly-migrated PGlite). UAT-O2C-288..289. Phase-2 (hub→cloud financial replay) tracked in docs/41. |
 | 0.5 | 2026-07-10 | Platform | **Hub→cloud sales replay + reconciliation (docs/41 Phase 2a — NEW control BRANCH-04, RCM 204→205).** New §7 step 6c: hub pusher `db:hub:push` (`database/hub-push.ts`; deterministic `client_uuid` = `hub:{tenant}:{hub_sale_no}` ⇒ exactly-once even after a lost push-log; unsupported shapes logged `skipped_unsupported` WITH reason — visible, never silent) → cloud `POST /api/hub/ingest` (`@Public` + HMAC-SHA256 timing-safe over `{tenant_id,sent_at,sales}`, fail-closed on `HUB_SYNC_SECRET`) → replays via the step-6 register offline-sync path (server re-prices; GL posts on the CLOUD ledger — book of record; the hub's own ledger is operational only). `RegisterOfflineSaleOp` gains additive `discount`/`tip`/`service_charge_pct` pass-through for replay fidelity. New table `hub_push_log` (migration `0293`, canonical RLS); `GET /api/hub/reconciliation` (`branch`/`exec`) ties hub ops ↔ cloud sale values. ToE: `hub-snapshot` harness extended to 27 checks (ring-on-hub → push → cloud GL + TB balanced → log-loss re-push all-duplicate → tamper 403 → skip visibility). UAT-O2C-290..291. |
-| 0.6 | 2026-07-10 | Platform | **Buffet replay + diner QR on the hub (docs/41 Phase 2b/3 — BRANCH-04 widened, no new control).** §7 step 6c: a buffet-tier hub sale now replays via `op.buffet {package_code, pax, overtime_pax}` — the cloud re-creates the per-pax charge via `BuffetService.applyReplayCharge`, **priced from the cloud package master**; ฿0 food lines not replayed; batch signature hardened to **canonical (key-sorted) JSON** (a Zod-reordered body previously broke verification — found by the harness). Diner QR self-order proven end-to-end ON the hub (imported `qr_token` → public session → menu/tiers → order → KDS → settle → replay); payments honesty documented (runbook §7). Loyalty-redeem sales + till/Z + fiscal chain remain the visible `skipped_unsupported` / Phase-2c scope. ToE: harness → **40 checks**; UAT-O2C-292..293. |
+| 0.6 | 2026-07-10 | Platform | **Buffet replay + diner QR on the hub (docs/41 Phase 2b/3 — BRANCH-04 widened, no new control).** §7 step 6c: a buffet-tier hub sale now replays via `op.buffet {package_code, pax, overtime_pax}` — the cloud re-creates the per-pax charge via `BuffetService.applyReplayCharge`, **priced from the cloud package master**; ฿0 food lines not replayed; batch signature hardened to **canonical (key-sorted) JSON** (a Zod-reordered body previously broke verification — found by the harness). Diner QR self-order proven end-to-end ON the hub (imported `qr_token` → public session → menu/tiers → order → KDS → settle → replay); payments honesty documented (runbook §7). Loyalty-redeem sales + till/Z + fiscal chain remain the visible `skipped_unsupported` / Phase-2c scope. ToE: harness → **40 checks**; UAT-O2C-306..307. |
+| 0.7 | 2026-07-10 | Platform | **Hub cash-session up-sync + fleet heartbeat (docs/41 Phases 2c/4a — NEW control BRANCH-05, RCM 206→207).** New §7 steps **6d** (till/Z ingest `POST /api/hub/ingest-till`: completeness gate `TILL_SALES_NOT_SYNCED`, cloud-side expected-cash re-computation, 5830 over/short on the shared REV-13 materiality line with GL-05 maker-checker parking, idempotent on `session_no`) and **6e** (`POST /api/hub/heartbeat` + `GET /api/hub/fleet`: liveness, un-replayed backlog, measured clock skew; table `hub_heartbeats`, migration `0296`, which also adds `hub_push_log.doc_type`). Documents two verified product facts the design rests on: restaurant checkout writes **no `payments` tender** (so the native `aggregateTill` misses restaurant cash) and stores `payment_method='Dine-in'` while debiting **1000** for the full settled amount **+ tip**. Fixed en route: `hub-push` read a non-existent `dine_in_orders.created_at`, silently stamping every replayed sale’s `captured_at` with the PUSH time (now `paid_at`/`opened_at`). ToE: harness → **53 checks**; UAT-O2C-308..310. |

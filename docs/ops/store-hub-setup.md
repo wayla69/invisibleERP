@@ -101,6 +101,22 @@ docker compose --profile push run --rm hub-push     # or: pnpm --filter @ierp/ap
 - Cloud-side review: `GET /api/hub/reconciliation?from&to` (perm `branch`/`exec`) ties every hub op to
   its cloud sale + value — the BRANCH-04 detective tie-out.
 
+**Cash sessions (Z-reports) ride the same run (Phase 2c, BRANCH-05).** After the sales, `hub-push`
+sends each **closed** till session with its physical count and the sale numbers it covers. The cloud
+recomputes expected cash from its own ledger and posts the 5830 over/short (a variance above the
+materiality threshold parks the session for a manager to approve — same rule as an online close).
+
+> **A session is BLOCKED (`TILL_SALES_NOT_SYNCED`) while any of its sales is still un-replayed** —
+> deliberately: a variance certified over a partial revenue population is worse than a late one. If a
+> session stays blocked, look at the `skipped_unsupported` / `failed` rows in `hub_push_log` for the
+> sales in that window, resolve them (e.g. enter a loyalty-redeem sale centrally), then re-run the push.
+
+**Fleet visibility (Phase 4a).** Every push run also sends a signed heartbeat. `GET /api/hub/fleet`
+(perm `branch`/`exec`) lists your hubs with `stale` (no heartbeat in the window), the un-replayed
+backlog, failed/skipped counts and the measured clock skew — so a box that quietly stops replaying is
+visible. Set `HUB_ID` in `.env` to name the box; keep the push on a cron (5 min) so the heartbeat is
+fresh even on a quiet day.
+
 ## 7. Diner QR self-order on the hub (Phase 3)
 
 Works out of the box once the hub is seeded — the printed table QRs from the cloud era keep working
@@ -123,3 +139,4 @@ because the import preserves each table's `qr_token` verbatim:
 | 0.1 | 2026-07-10 | Platform | Initial runbook (docs/41 Phase 1: snapshot export/import + `hub/` compose + TLS/DNS recipe). |
 | 0.2 | 2026-07-10 | Platform | Phase 2a: §6 push-to-cloud operations (`hub-push` one-shot, cron guidance, `skipped_unsupported` review, reconciliation endpoint); scope note updated. |
 | 0.3 | 2026-07-10 | Platform | Phases 2b/3: buffet-tier replay noted in §6 scope; new §7 diner-QR-on-hub + offline-payments honesty. |
+| 0.4 | 2026-07-10 | Platform | Phases 2c/4a: §6 gains cash-session (Z-report) up-sync incl. the deliberate `TILL_SALES_NOT_SYNCED` block, and fleet visibility via the signed heartbeat + `GET /api/hub/fleet` (`HUB_ID`). |
