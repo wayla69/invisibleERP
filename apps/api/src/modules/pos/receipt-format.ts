@@ -89,6 +89,53 @@ export function receiptHtml(m: ReceiptModel): string {
 </body></html>`;
 }
 
+// ── LINE flex e-receipt bubble (POS-2) ──
+// A condensed receipt card pushed to the member's LINE: shop name, doc no + date, up to MAX_FLEX_LINES
+// items, totals (subtotal / VAT / grand total) and a "ดูใบเสร็จ" button that opens the full HTML receipt
+// via the opaque public token link (omitted when WEB_BASE_URL is unset — LINE URI actions need an
+// absolute URL). Pure presentation — the flex JSON is passed opaquely to the LINE Messaging API.
+const MAX_FLEX_LINES = 5;
+export function receiptFlexBubble(m: ReceiptModel, url?: string | null): any {
+  const row = (label: string, value: string, opts?: { bold?: boolean; muted?: boolean }) => ({
+    type: 'box', layout: 'horizontal', contents: [
+      { type: 'text', text: label, size: 'sm', color: opts?.muted ? '#888888' : '#555555', flex: 5, wrap: true, ...(opts?.bold ? { weight: 'bold' } : {}) },
+      { type: 'text', text: value, size: 'sm', color: '#111111', align: 'end', flex: 3, ...(opts?.bold ? { weight: 'bold' } : {}) },
+    ],
+  });
+  const items: any[] = m.lines.slice(0, MAX_FLEX_LINES).map((l) => row(`${l.name} ×${qtyf(l.qty)}`, money(l.amount)));
+  if (m.lines.length > MAX_FLEX_LINES) {
+    items.push({ type: 'text', text: `…และอีก ${m.lines.length - MAX_FLEX_LINES} รายการ`, size: 'xs', color: '#888888' });
+  }
+  const totals: any[] = [
+    row('รวมย่อย', money(m.subtotal)),
+    ...(m.discount > 0 ? [row('ส่วนลด', '-' + money(m.discount))] : []),
+    ...(m.service_charge > 0 ? [row('ค่าบริการ', money(m.service_charge))] : []),
+    row('ภาษีมูลค่าเพิ่ม 7%', money(m.vat)),
+    row('รวมทั้งสิ้น', money(m.total), { bold: true }),
+  ];
+  return {
+    type: 'bubble',
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+        { type: 'text', text: m.shop.name, weight: 'bold', size: 'md', wrap: true },
+        { type: 'text', text: 'ใบเสร็จรับเงิน (e-Receipt)', size: 'xs', color: '#888888' },
+        { type: 'text', text: `${m.sale_no} · ${m.date}`, size: 'xs', color: '#888888' },
+        { type: 'separator', margin: 'md' },
+        ...items,
+        { type: 'separator', margin: 'md' },
+        ...totals,
+      ],
+    },
+    ...(url ? {
+      footer: {
+        type: 'box', layout: 'vertical', contents: [
+          { type: 'button', style: 'primary', height: 'sm', action: { type: 'uri', label: 'ดูใบเสร็จฉบับเต็ม', uri: url } },
+        ],
+      },
+    } : {}),
+  };
+}
+
 // ── ESC/POS-friendly plain text (42-col) ──
 export function receiptEscPos(m: ReceiptModel): string {
   const W = 42;
