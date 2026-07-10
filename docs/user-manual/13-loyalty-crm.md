@@ -467,7 +467,8 @@ claim points by uploading a photo of the receipt.
 
 **Staff (`/loyalty/receipt-approvals`, requires `crm_points_adjust` — or `loyalty`/`exec`):**
 1. Review the queue of pending submissions — the receipt photo, claimed amount, and an estimated points preview
-   are shown together.
+   are shown together. On a phone the queue renders as one **card per submission** (thumbnail, member, amount,
+   points estimate, batch checkbox and inline approve/reject) instead of the wide desktop table.
 2. Press **อนุมัติ (Approve)** to grant the points (posted the same way as a POS sale — no separate step needed),
    or **ปฏิเสธ (Reject)** with an optional reason. Both are final — a reviewed submission cannot be reviewed again.
 

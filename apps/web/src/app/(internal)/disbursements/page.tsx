@@ -100,6 +100,41 @@ export default function DisbursementsPage() {
             onReject={() => batch.runBatch('reject')}
             onClear={batch.clear}
           />
+          {/* Phone/narrow: one card per pending payment instead of a 6-column table. Batch checkbox +
+              inline approve/reject as full-width thumb targets. */}
+          <div className="space-y-3 sm:hidden">
+            {pending.data.payments.length === 0 ? (
+              <div className="rounded-xl border bg-card p-8 text-center">
+                <CheckCheck className="mx-auto size-8 text-muted-foreground opacity-40" />
+                <p className="mt-2 text-sm font-medium">{t('disb.empty_title')}</p>
+                <p className="text-sm text-muted-foreground">{t('disb.empty_desc')}</p>
+              </div>
+            ) : (
+              pending.data.payments.map((r: any) => {
+                const busy = (approve.isPending && approve.variables === r.payment_no) || (reject.isPending && reject.variables === r.payment_no);
+                return (
+                  <div key={r.payment_no} className="rounded-lg border bg-card p-3 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <input type="checkbox" className="mt-1 size-4 shrink-0" aria-label={`select ${r.payment_no}`} checked={batch.isSel(r)} onChange={() => batch.toggle(r)} />
+                        <div className="min-w-0">
+                          <p className="font-medium">{r.vendor_name}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{r.payment_no}{r.txn_no ? ` · ${r.txn_no}` : ''}</p>
+                        </div>
+                      </div>
+                      <p className="tabular shrink-0 font-semibold">{baht(r.amount)}</p>
+                    </div>
+                    {r.requested_by ? <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">{t('disb.col_requested_by')}: {r.requested_by}</p> : null}
+                    <div className="mt-2 flex gap-2 border-t pt-2">
+                      <Button size="sm" className="flex-1" disabled={busy} onClick={() => approve.mutate(r.payment_no)}>{t('disb.approve_pay')}</Button>
+                      <Button size="sm" variant="outline" className="flex-1" disabled={busy} onClick={() => reject.mutate(r.payment_no)}>{t('disb.reject')}</Button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="hidden sm:block">
           <DataTable
             rows={pending.data.payments}
             rowKey={(r: any) => r.payment_no}
@@ -122,6 +157,7 @@ export default function DisbursementsPage() {
               } },
             ]}
           />
+          </div>
           </>
         ) : (
           <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">{t('disb.no_perm')}</CardContent></Card>

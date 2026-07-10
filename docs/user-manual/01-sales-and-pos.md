@@ -1017,6 +1017,10 @@ settled short is caught instead of being assumed good.
 
 **Expected result:** The claim status changes to *Approved* or *Rejected*.
 
+> **On a phone.** The Sales Claims list shows one **card per claim** (order, item, qty,
+> status, and the approve / reject-reason / reject controls) instead of the wide desktop
+> table, so you can clear waiting claims from a phone without sideways scrolling.
+
 > **Finding a claim.** Each claim list (sales and supplier/GR) has a **search** box
 > (order / GR number, item or reason) and **status filter chips** to narrow a long
 > list before you act. They reflow for mobile.
