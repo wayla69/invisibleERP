@@ -1,6 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.2** _(2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`)_
+**Status: DRAFT v0.4** _(2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_ _(2026-07-09: added `AI_TENANT_OPTED_OUT`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -66,6 +66,9 @@ your code below.
 | `EMPTY_CHANGE_ORDER` | A **change order** was raised with no contract/budget/EAC change. | Enter a non-zero delta on at least one of contract value, budget, or estimated cost. |
 | `SOD_SELF_APPROVAL` (change order) | You tried to **approve a change order you requested**. | A different person approves it (maker-checker). Approval applies the contract/budget change and re-baselines the project. |
 | `CHANGE_ORDER_DECIDED` | You tried to approve/reject a change order that's already **approved or rejected**. | It's already decided; raise a new change order for any further variation. |
+| `LINE_NOT_LINKED` (400) | You clicked **ส่งใบเสร็จเข้า LINE สมาชิก** but the sale has **no loyalty member**, or the member has **not linked their LINE account**. | Attach the member at checkout (member_id) and have the customer link LINE via the shop's Official Account / member portal, then resend. Or use the email/SMS box instead. See [Sales & POS](./01-sales-and-pos.md). |
+| `LINE_NOT_CONFIGURED` (400) | LINE e-receipt was requested but the shop's **LINE Messaging API channel token** is not configured (production refuses to fake-send). | An administrator sets the tenant LINE credentials (Settings › ช่องทางข้อความ) or the `LINE_CHANNEL_TOKEN` environment variable. |
+| `BAD_TOKEN` (401, receipt link) | A **ดูใบเสร็จฉบับเต็ม** link was altered or is invalid. | Resend the LINE e-receipt to mint a fresh link — the link is a signed one-off token, not a guessable URL. |
 | `SOD_SELF_POST` | The same person who **computed** an AR allowance (provision for doubtful accounts) tried to **post** it. | A different reviewer (`gl_post` / `exec`) posts the allowance — the computer can't post their own. See [Finance — AR & AP → Allowance](./05-finance-ar-ap.md). |
 | `ALLOWANCE_POSTED` / `ALREADY_POSTED` | You tried to (re)post an AR allowance that is already posted. | A given allowance posts once; to revise, **compute a fresh allowance** for a later `as_of_date`. |
 

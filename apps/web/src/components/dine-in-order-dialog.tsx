@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { Flame, Minus, Plus, Trash2, Utensils, Wallet } from 'lucide-react';
+import { Flame, MessageCircle, Minus, Plus, Trash2, Utensils, Wallet } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -44,6 +44,7 @@ export function DineInOrderDialog({
   const [discount, setDiscount] = useState('');
   const [tip, setTip] = useState('');
   const [msg, setMsg] = useState('');
+  const [paidSale, setPaidSale] = useState<string | null>(null); // settled sale — enables the LINE e-receipt action
 
   const menu = useQuery<Menu>({ queryKey: ['menu'], queryFn: () => api('/api/menu') });
 
@@ -115,7 +116,15 @@ export function DineInOrderDialog({
         }),
       },
     ),
-    onSuccess: (r) => { setMsg(`✅ ${t('px.dine_paid', { sale: r.sale_no, total: baht(r.total) })}`); onChange(); onClose(); },
+    // Stay open after settling so the cashier can push the LINE e-receipt (POS-2); ปิด closes when done.
+    onSuccess: (r) => { setMsg(`✅ ${t('px.dine_paid', { sale: r.sale_no, total: baht(r.total) })}`); setPaidSale(r.sale_no); onChange(); },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+
+  // POS-2 — LINE e-receipt for the member on the sale (server resolves the member; LINE_NOT_LINKED when none).
+  const sendLine = useMutation({
+    mutationFn: () => api(`/api/pos/sales/${encodeURIComponent(paidSale!)}/receipt/send`, { method: 'POST', body: JSON.stringify({ channel: 'line' }) }),
+    onSuccess: () => setMsg(`✅ ${t('px.chk_sent_ok')}`),
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 
@@ -234,9 +243,15 @@ export function DineInOrderDialog({
                   </div>
                 </div>
 
-                <Button type="button" className={cn('w-full')} disabled={checkout.isPending} onClick={() => { setMsg(''); checkout.mutate(); }}>
-                  <Wallet className="size-4" /> {t('px.dine_checkout_cash')}
-                </Button>
+                {paidSale ? (
+                  <Button type="button" variant="outline" className={cn('w-full')} disabled={sendLine.isPending} onClick={() => sendLine.mutate()}>
+                    <MessageCircle className="size-4" /> {t('px.chk_send_line')}
+                  </Button>
+                ) : (
+                  <Button type="button" className={cn('w-full')} disabled={checkout.isPending} onClick={() => { setMsg(''); checkout.mutate(); }}>
+                    <Wallet className="size-4" /> {t('px.dine_checkout_cash')}
+                  </Button>
+                )}
               </div>
             )}
           </div>

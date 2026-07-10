@@ -10,7 +10,7 @@ import { useLang } from '@/lib/i18n';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useTerminal } from '@/lib/terminal';
 import { useOnline } from '@/lib/offline';
-import { enqueueRegisterSale, useRegisterOutbox } from '@/lib/register-offline';
+import { enqueueRegisterSale, fetchMenuOfflineFirst, useRegisterOutbox } from '@/lib/register-offline';
 import { StateView } from '@/components/state-view';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,7 +37,10 @@ export default function RegisterPage() {
   const online = useOnline();
   // Register offline outbox: queued quick sales replay to /api/restaurant/offline-sync on reconnect.
   const outbox = useRegisterOutbox();
-  const menu = useQuery<MenuResp>({ queryKey: ['menu'], queryFn: () => api('/api/menu') });
+  // Menu is offline-first: the fetch runs even while the browser reports offline (networkMode
+  // 'always' — TanStack Query would otherwise pause it and spin forever) and falls back to the
+  // last good localStorage snapshot, so a reload mid-outage still renders a sellable menu.
+  const menu = useQuery<MenuResp>({ queryKey: ['menu'], networkMode: 'always', queryFn: () => fetchMenuOfflineFirst(() => api('/api/menu')) });
   const prefsQ = useQuery<UserPrefs>({ queryKey: ['user-prefs'], queryFn: () => api('/api/user-prefs') });
   const favIds = useMemo(() => new Set<number>(prefsQ.data?.pos_fav ?? []), [prefsQ.data]);
   const favMut = useMutation({
@@ -114,7 +117,7 @@ export default function RegisterPage() {
 
     // ── offline path: queue a QUICK (no-table) cash-ish sale and replay it on reconnect. Dine-in needs
     //    the kitchen/online path (fire + table state), so it is blocked offline with a clear message. ──
-    if (!online) {
+    const queueOffline = async (): Promise<SettleResult> => {
       if (mode === 'dinein') throw new Error(t('px.reg_err_offline_dinein'));
       // POS-3: a voucher must be validated + atomically redeemed server-side — not redeemable offline.
       if (voucherCode) throw new Error(t('px.reg_err_offline_voucher'));
@@ -125,12 +128,25 @@ export default function RegisterPage() {
       tm.pushDisplay({ message: t('px.reg_disp_offline_saved'), total: offlineTotal, amount_due: cashReceived ?? undefined, change });
       if (method === 'Cash') void tm.kickDrawer({ saleNo: 'OFFLINE', amount: offlineTotal, reason: 'sale' });
       return { sale_no: t('px.reg_offline_pending'), total: offlineTotal, change, offline: true };
-    }
+    };
+    if (!online) return queueOffline();
 
-    const created = await api<{ order_no: string }>('/api/restaurant/orders', {
-      method: 'POST',
-      body: JSON.stringify({ table_id: tableId ?? undefined, items, guest_count: pax, fulfillment_type: orderType }),
-    });
+    let created: { order_no: string };
+    try {
+      created = await api<{ order_no: string }>('/api/restaurant/orders', {
+        method: 'POST',
+        body: JSON.stringify({ table_id: tableId ?? undefined, items, guest_count: pax, fulfillment_type: orderType }),
+      });
+    } catch (e) {
+      // `navigator.onLine` can report online while the link is actually dead (router up, ISP down).
+      // A NETWORK-level failure — the thrown Error carries no HTTP `status` — on this FIRST call is
+      // safe to queue: nothing financial persisted server-side (worst case a timed-out create leaves
+      // an orphan OPEN order — never a posted sale, and the replay itself dedups on client_uuid).
+      // HTTP errors (validation, 86'd item, expired session) and any failure past this point (the
+      // order now exists server-side) surface to the cashier exactly as before.
+      if ((e as Error & { status?: number }).status === undefined) return queueOffline();
+      throw e;
+    }
     const orderNo = created.order_no;
     // fire to kitchen for table service AND for to-go cooked orders (takeaway/delivery)
     if (mode === 'dinein' || orderType !== 'dine_in') {
@@ -251,7 +267,7 @@ export default function RegisterPage() {
           serviceChargePct={serviceChargePct}
           onSettle={settle}
           onReprint={(saleNo) => tm.printReceipt(saleNo)}
-          onSendReceipt={(saleNo, channel, to) => api(`/api/pos/sales/${encodeURIComponent(saleNo)}/receipt/send`, { method: 'POST', body: JSON.stringify({ channel, to }) }).then(() => undefined)}
+          onSendReceipt={(saleNo, channel, to) => api(`/api/pos/sales/${encodeURIComponent(saleNo)}/receipt/send`, { method: 'POST', body: JSON.stringify({ channel, ...(to ? { to } : {}) }) }).then(() => undefined)}
           onClose={() => setCheckout(false)}
           onFinish={finishSale}
         />
