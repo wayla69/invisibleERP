@@ -22,14 +22,28 @@
 // harness proves the full hub→cloud round-trip on two PGlites.
 import { createHmac } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { custPosSales, dineInOrders, dineInOrderItems, hubPushLog, tenants } from './schema';
+import { buffetPackages, custPosSales, dineInOrders, dineInOrderItems, hubPushLog, tenants } from './schema';
+
+// pseudo item_ids the buffet flow writes for the per-pax charge + overtime surcharge lines
+const BUFFET_CHARGE_REF = '__buffet_charge__';
+const BUFFET_OVERTIME_REF = '__buffet_overtime__';
 
 export interface HubIngestBatch { tenant_id: number; sent_at: string; sales: any[]; signature: string }
 export interface HubIngestResponse { results: { client_uuid: string; status: 'synced' | 'duplicate' | 'failed'; sale_no: string | null; error: string | null }[]; summary: Record<string, number> }
 export interface HubPushSummary { collected: number; pushed: number; duplicate: number; failed: number; skipped: number }
 
+// Canonical JSON (recursively key-sorted) so the signature survives any re-serialization on the way —
+// the cloud verifies AFTER Zod validation, which rebuilds objects in schema-declaration key order.
+function canonicalJson(v: any): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).filter((k) => v[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v);
+}
+
 export function signHubBatch(tenantId: number, sentAt: string, sales: unknown[], secret: string): string {
-  return createHmac('sha256', secret).update(JSON.stringify({ tenant_id: tenantId, sent_at: sentAt, sales })).digest('hex');
+  return createHmac('sha256', secret).update(canonicalJson({ tenant_id: tenantId, sent_at: sentAt, sales })).digest('hex');
 }
 
 const num = (v: any) => (v == null ? 0 : Number(v));
@@ -76,9 +90,22 @@ export async function pushHubSales(
     if (!order) { await skip('NO_ORDER_LINK — not a restaurant order→checkout sale (portal/split path)'); continue; }
     const items: any[] = await db.select().from(dineInOrderItems)
       .where(and(eq(dineInOrderItems.orderId, Number(order.id)), isNull(dineInOrderItems.voidedAt)));
-    if (items.some((l) => l.isBuffet || l.buffetPackageId != null)) { await skip('BUFFET_SALE — per-pax tier pricing does not replay through the a-la-carte path'); continue; }
-    if (items.some((l) => !l.itemId)) { await skip('LINE_WITHOUT_SKU — custom/unlinked line cannot be re-priced by the cloud'); continue; }
-    if (!items.length) { await skip('NO_LINES'); continue; }
+
+    // buffet-tier sale (Phase 2b): replay as a package_code + pax op — the CLOUD re-prices the charge
+    // from its own package master. ฿0 buffet food lines carry no revenue and are not replayed.
+    let buffet: { package_code: string; pax: number; overtime_pax?: number } | undefined;
+    const chargeLine = items.find((l) => l.itemId === BUFFET_CHARGE_REF);
+    const overtimeLine = items.find((l) => l.itemId === BUFFET_OVERTIME_REF);
+    if (items.some((l) => l.isBuffet || l.buffetPackageId != null)) {
+      if (!chargeLine?.buffetPackageId) { await skip('BUFFET_WITHOUT_CHARGE_LINE — no per-pax charge to replay'); continue; }
+      const [pkg] = await db.select().from(buffetPackages).where(eq(buffetPackages.id, Number(chargeLine.buffetPackageId))).limit(1);
+      if (!pkg) { await skip('BUFFET_PACKAGE_MISSING_ON_HUB — cannot resolve the tier code'); continue; }
+      buffet = { package_code: String(pkg.code), pax: num(chargeLine.qty), ...(overtimeLine ? { overtime_pax: num(overtimeLine.qty) } : {}) };
+    }
+    // regular priced lines: everything that is not buffet food (฿0) and not a charge/overtime pseudo line
+    const skuLines = items.filter((l) => !l.isBuffet && l.buffetPackageId == null);
+    if (skuLines.some((l) => !l.itemId)) { await skip('LINE_WITHOUT_SKU — custom/unlinked line cannot be re-priced by the cloud'); continue; }
+    if (!skuLines.length && !buffet) { await skip('NO_LINES'); continue; }
 
     const subtotal = num(s.subtotal), discount = num(s.discount), sc = num(s.service_charge), tip = num(s.tip);
     const netBase = subtotal - discount;
@@ -86,7 +113,8 @@ export async function pushHubSales(
       client_uuid: clientUuid,
       device_id: 'HUB',
       captured_at: (order.createdAt instanceof Date ? order.createdAt : new Date(order.createdAt ?? Date.now())).toISOString(),
-      lines: items.map((l) => ({ sku: String(l.itemId), qty: num(l.qty), modifier_option_ids: modifierIds(l.modifiers), notes: l.notes ?? undefined })),
+      lines: skuLines.map((l) => ({ sku: String(l.itemId), qty: num(l.qty), modifier_option_ids: modifierIds(l.modifiers), notes: l.notes ?? undefined })),
+      ...(buffet ? { buffet } : {}),
       method: s.payment_method ?? 'Cash',
       ...(discount > 0 ? { discount } : {}),
       ...(tip > 0 ? { tip } : {}),
