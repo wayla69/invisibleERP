@@ -14,6 +14,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   crm_win_loss: { label: 'วิเคราะห์ Win/Loss', labelEn: 'CRM win/loss analytics' },
   // Likewise: each run re-profiles the tenant's whole active member base (RFM) so segments stay fresh (F2).
   crm_profile_refresh: { label: 'รีเฟรชโปรไฟล์ลูกค้า (RFM)', labelEn: 'CRM profile refresh (RFM)' },
+  // CRM-4 (docs/41) — schedulable daily follow-up digest: SLA-breached leads + overdue tasks + rotting deals
+  // (detective control REV-22). Fires lead.stagnant into the automation engine + drops a rail notification.
+  crm_followup_digest: { label: 'สรุปการติดตามงานขายประจำวัน', labelEn: 'CRM follow-up digest' },
   // Likewise: each run advances every ACTIVE lifecycle journey — segment-entry sweeps + due steps (G1).
   journey_runner: { label: 'รันเจอร์นีย์ลูกค้า (Journeys)', labelEn: 'Run lifecycle journeys' },
   // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.

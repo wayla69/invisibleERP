@@ -19,6 +19,14 @@ const EVENTS = [
   { key: 'loyalty.points_expiring', label: 'แต้มใกล้หมดอายุ', label_en: 'Loyalty points expiring soon', fields: ['member_id', 'expiring_points', 'days_left', 'expire_by'] },
   // W3 (docs/27): fired when an NPS answer scores ≤ 6 — wire to a service-recovery journey/notification.
   { key: 'loyalty.nps_detractor', label: 'ลูกค้าให้คะแนน NPS ต่ำ', label_en: 'NPS detractor response (≤6)', fields: ['member_id', 'score', 'comment', 'sale_ref'] },
+  // CRM-4 (docs/41) — sales-pipeline events emitted by CrmPipelineService. Reusable by the same no-code
+  // rules infra: e.g. lead.created → auto-assign notification, opp.stage_changed → LINE nudge, deal.won →
+  // celebration + handoff, lead.stagnant → SLA-breach escalation (follow-up discipline, control REV-22).
+  { key: 'lead.created', label: 'สร้างลีดใหม่', label_en: 'Lead created', fields: ['lead_no', 'name', 'company', 'source', 'owner', 'grade'] },
+  { key: 'lead.stagnant', label: 'ลีดค้างเกิน SLA', label_en: 'Lead stagnant (SLA breach)', fields: ['lead_no', 'name', 'owner', 'source', 'hours_since_created', 'sla_hours'] },
+  { key: 'opp.stage_changed', label: 'โอกาสการขายเปลี่ยนขั้น', label_en: 'Opportunity stage changed', fields: ['opp_no', 'from_stage', 'to_stage', 'owner', 'amount', 'status'] },
+  { key: 'deal.won', label: 'ปิดการขายสำเร็จ', label_en: 'Deal won', fields: ['opp_no', 'amount', 'owner', 'win_reason'] },
+  { key: 'deal.lost', label: 'เสียโอกาสการขาย', label_en: 'Deal lost', fields: ['opp_no', 'amount', 'owner', 'lost_reason'] },
 ] as const;
 const EVENT_KEYS = EVENTS.map((e) => e.key) as readonly string[];
 const ACTION_TYPES = ['notification', 'message', 'log', 'enroll_journey'] as const;

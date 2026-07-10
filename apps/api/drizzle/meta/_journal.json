@@ -2108,6 +2108,13 @@
       "when": 2023820000263,
       "tag": "0300_channel_auto_86",
       "breakpoints": true
+    },
+    {
+      "idx": 301,
+      "version": "7",
+      "when": 2023820000264,
+      "tag": "0301_crm_automation",
+      "breakpoints": true
     }
   ]
 }
