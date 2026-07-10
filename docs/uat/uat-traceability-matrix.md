@@ -547,6 +547,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-071 | WMS wave-candidates pending list (un-waved orders appear; waved drop out) | Read-only feed (no new control) | 03 §7, rev 0.7 (`wms.ts`) |
 | UAT-INV-072 | WMS picks/shipments status lists → Pack (Picked) & Ship (Packed) dropdowns | Read-only feed (no new control) | 03 §7, rev 0.7 (`wms.ts`) |
 | UAT-INV-073 | Manufacturing/goods-issue doc-reference dropdowns (WO/routing/BOM/quality-ref over existing GETs) | Usability (no new control) | 15 §7, rev 0.2 (manual UI) |
+| UAT-INV-074 | Stocktake/stock-movement tenant isolation (cross-tenant read + post blocked) | ITGC-AC-18 · R11 | 03 rev 9.99 (`stock-ops.ts`) |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 

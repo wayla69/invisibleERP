@@ -30,9 +30,15 @@ async function seed(db: any) {
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k, grp: grpOf(k) }))).onConflictDoNothing();
   for (const [role, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
     await db.insert(s.rolePermissions).values((perms as string[]).map((perm) => ({ role: role as any, perm }))).onConflictDoNothing();
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง' }, { code: 'T2', name: 'ร้านสอง' }]).onConflictDoNothing();
   const hq = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
-  await db.insert(s.users).values({ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
+  const tOf = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
+  const [t1, t2] = [await tOf('T1'), await tOf('T2')];
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id },
+    { username: 'wh1', passwordHash: await pw.hash('pw1'), role: 'Warehouse', tenantId: t1 },
+    { username: 'wh2', passwordHash: await pw.hash('pw2'), role: 'Warehouse', tenantId: t2 },
+  ]).onConflictDoNothing();
   await db.insert(s.items).values([
     { itemId: 'A', itemDescription: 'Apple', uom: 'EA', unitPrice: '10' },
     { itemId: 'B', itemDescription: 'Banana', uom: 'EA', unitPrice: '10' },
@@ -132,6 +138,27 @@ async function main() {
   // INV-06 reconciliation: B's sub-ledger value (920) ties to the GL inventory account (valued sources).
   const recB = (await inj('GET', '/api/inventory/reconciliation', token)).json;
   ok('perpetual sub-ledger ties to GL inventory account after the stock-ops bridge (reconciled 920)', Math.abs(Number(recB.sub_ledger_value) - 920) < 0.01 && Math.abs(Number(recB.gl_inventory) - 920) < 0.01 && recB.reconciled === true, `sub=${recB.sub_ledger_value} gl=${recB.gl_inventory} rec=${recB.reconciled}`);
+
+  // ── 0299: stocktakes / stock_movements were NOT tenant-scoped ──
+  // Before this fix a tenant could LIST every other tenant's count sheets, READ one by document number,
+  // and POST its variance movements. tenant_id + explicit scoping + the canonical RLS policy close it.
+  {
+    const login2 = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
+    const w1 = await login2('wh1', 'pw1');
+    const w2 = await login2('wh2', 'pw2');
+    const stT1 = await inj('POST', '/api/stocktake', w1, { remarks: 'T1 count', lines: [{ item_id: 'SEC-1', uom: 'EA', system_qty: 10, physical_qty: 8 }] });
+    ok('Isolation: T1 creates a stocktake', /^ST-/.test(stT1.json?.st_no ?? ''), JSON.stringify(stT1.json ?? stT1.status));
+    const listT2 = await inj('GET', '/api/stocktake', w2);
+    ok('Isolation: T2 does NOT see T1 count sheets in the list', !(listT2.json?.stocktakes ?? []).some((x: any) => x.st_no === stT1.json.st_no), JSON.stringify(listT2.json?.count));
+    const detailT2 = await inj('GET', `/api/stocktake/${stT1.json.st_no}`, w2);
+    ok("Isolation: T2 cannot read T1's stocktake by document number (404)", detailT2.status === 404, String(detailT2.status));
+    const postT2 = await inj('POST', `/api/stocktake/${stT1.json.st_no}/post`, w2);
+    ok("Isolation: T2 cannot POST T1's variance movements (404)", postT2.status === 404, String(postT2.status));
+    const listT1 = await inj('GET', '/api/stocktake', w1);
+    ok('Isolation: T1 still sees its own sheet', (listT1.json?.stocktakes ?? []).some((x: any) => x.st_no === stT1.json.st_no), JSON.stringify(listT1.json?.count));
+    const movT2 = await inj('GET', '/api/inventory/movements', w2);
+    ok('Isolation: movement history is tenant-scoped', (movT2.json?.movements ?? []).length === 0, JSON.stringify((movT2.json?.movements ?? []).length));
+  }
 
   await app.close();
   await pg.close();

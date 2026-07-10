@@ -30,9 +30,18 @@ export class StockOpsService {
   ) {}
 
   // ── Stocktake ────────────────────────────────────────────────────────────
+  // 0299: stocktakes/stock_movements gained a tenant_id. RLS now scopes them, but every query threads an
+  // explicit tenant too — a write path must never depend on RLS alone (and an HQ/god bypass session would
+  // otherwise read or post across tenants by document number).
+  private tid(user: JwtUser): number {
+    if (user.tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'User is not bound to a tenant', messageTh: 'ผู้ใช้ไม่ได้ผูกกับร้าน/บริษัท' });
+    return Number(user.tenantId);
+  }
+
   async createStocktake(dto: { counted_by?: string; remarks?: string; lines: StocktakeLine[] }, user: JwtUser) {
     if (!dto.lines?.length) throw new BadRequestException({ code: 'NO_LINES', message: 'No count lines', messageTh: 'ไม่มีรายการนับ' });
     const db = this.db;
+    const tenantId = this.tid(user);
     const stNo = await this.docNo.nextDaily('ST');
     const stDate = ymd();
     const counter = dto.counted_by || user.username;
@@ -40,7 +49,7 @@ export class StockOpsService {
       const sys = n(l.system_qty);
       const phys = n(l.physical_qty);
       return {
-        stNo, stDate, itemId: l.item_id, itemDescription: l.item_description ?? null, uom: l.uom ?? null,
+        tenantId, stNo, stDate, itemId: l.item_id, itemDescription: l.item_description ?? null, uom: l.uom ?? null,
         systemQty: String(sys), physicalQty: String(phys), difference: String(round2(phys - sys)),
         countedBy: counter, status: 'Draft' as const, remarks: dto.remarks ?? null,
       };
@@ -54,8 +63,9 @@ export class StockOpsService {
   // (Stock In if counted high, Stock Out if counted low). Idempotent: re-posting is a no-op.
   async postStocktake(stNo: string, user: JwtUser) {
     const db = this.db;
+    const tenantId = this.tid(user);
     const res = await db.transaction(async (tx: any) => {
-      const lines = await tx.select().from(stocktakes).where(eq(stocktakes.stNo, stNo));
+      const lines = await tx.select().from(stocktakes).where(and(eq(stocktakes.tenantId, tenantId), eq(stocktakes.stNo, stNo)));
       if (!lines.length) throw new NotFoundException({ code: 'NOT_FOUND', message: `Stocktake ${stNo} not found`, messageTh: 'ไม่พบใบนับสต๊อก' });
       if (lines.every((l: any) => l.status === 'Posted')) return { already: true, lines, movements: 0 };
       // INV-04 — variance review maker-checker (SoD R11): the person who COUNTED may not post/approve their
@@ -70,7 +80,7 @@ export class StockOpsService {
       for (const l of lines) {
         const diff = n(l.difference);
         if (diff !== 0) {
-          await tx.insert(stockMovements).values({
+          await tx.insert(stockMovements).values({ tenantId,
             moveDate: now, docNo: stNo, moveType: diff > 0 ? 'Stock In' : 'Stock Out',
             itemId: l.itemId, itemDescription: l.itemDescription, uom: l.uom, qty: String(Math.abs(diff)),
             fromLocation: diff > 0 ? 'Count Adj' : 'Warehouse', toLocation: diff > 0 ? 'Warehouse' : 'Count Adj',
@@ -79,7 +89,7 @@ export class StockOpsService {
           movements++;
         }
       }
-      await tx.update(stocktakes).set({ status: 'Posted' }).where(eq(stocktakes.stNo, stNo));
+      await tx.update(stocktakes).set({ status: 'Posted' }).where(and(eq(stocktakes.tenantId, tenantId), eq(stocktakes.stNo, stNo)));
       return { already: false, lines, movements };
     });
     if (res.already) return { st_no: stNo, status: 'Posted', already: true };
@@ -93,9 +103,11 @@ export class StockOpsService {
     return { st_no: stNo, status: 'Posted', variance_movements: res.movements, valued_lines: valued };
   }
 
-  async listStocktakes(limit = 50) {
+  async listStocktakes(limit = 50, user?: JwtUser) {
     const db = this.db;
-    const rows = await db.select().from(stocktakes).orderBy(desc(stocktakes.id)).limit(2000);
+    const rows = user
+      ? await db.select().from(stocktakes).where(eq(stocktakes.tenantId, this.tid(user))).orderBy(desc(stocktakes.id)).limit(2000)
+      : await db.select().from(stocktakes).orderBy(desc(stocktakes.id)).limit(2000);
     // group by st_no (doc-level summary)
     const byDoc = new Map<string, any>();
     for (const r of rows) {
@@ -108,9 +120,9 @@ export class StockOpsService {
     return { stocktakes: [...byDoc.values()].slice(0, limit), count: byDoc.size };
   }
 
-  async getStocktake(stNo: string) {
+  async getStocktake(stNo: string, user: JwtUser) {
     const db = this.db;
-    const rows = await db.select().from(stocktakes).where(eq(stocktakes.stNo, stNo));
+    const rows = await db.select().from(stocktakes).where(and(eq(stocktakes.tenantId, this.tid(user)), eq(stocktakes.stNo, stNo)));
     if (!rows.length) throw new NotFoundException({ code: 'NOT_FOUND', message: `Stocktake ${stNo} not found`, messageTh: 'ไม่พบใบนับสต๊อก' });
     return {
       st_no: stNo, st_date: rows[0]!.stDate, counted_by: rows[0]!.countedBy, status: rows[0]!.status,
@@ -122,11 +134,12 @@ export class StockOpsService {
   async goodsIssue(dto: { ref_doc?: string; from_location?: string; remarks?: string; lines: IssueLine[] }, user: JwtUser) {
     if (!dto.lines?.length) throw new BadRequestException({ code: 'NO_LINES', message: 'No items', messageTh: 'ไม่มีรายการ' });
     const db = this.db;
+    const tenantId = this.tid(user);
     const docNo = await this.docNo.nextDaily('MI');
     const now = new Date();
     for (const l of dto.lines) {
       // Issue stored as a negative qty (consistent with WMS pick) — audit only, snapshot unchanged.
-      await db.insert(stockMovements).values({
+      await db.insert(stockMovements).values({ tenantId,
         moveDate: now, docNo, moveType: 'Issue', itemId: l.item_id, itemDescription: l.item_description ?? null,
         uom: l.uom ?? null, qty: String(-Math.abs(n(l.qty))), fromLocation: dto.from_location ?? 'Warehouse',
         toLocation: 'Issued', refDoc: dto.ref_doc ?? null, remarks: dto.remarks ?? null, createdBy: user.username,
@@ -145,10 +158,11 @@ export class StockOpsService {
     if (!dto.lines?.length) throw new BadRequestException({ code: 'NO_LINES', message: 'No items', messageTh: 'ไม่มีรายการ' });
     if (dto.from_location === dto.to_location) throw new BadRequestException({ code: 'SAME_LOCATION', message: 'From and To must differ', messageTh: 'ต้นทาง/ปลายทางต้องต่างกัน' });
     const db = this.db;
+    const tenantId = this.tid(user);
     const docNo = this.docNo.nextStamped('TRF');
     const now = new Date();
     for (const l of dto.lines) {
-      await db.insert(stockMovements).values({
+      await db.insert(stockMovements).values({ tenantId,
         moveDate: now, docNo, moveType: 'Transfer', itemId: l.item_id, itemDescription: l.item_description ?? null,
         uom: l.uom ?? null, qty: String(Math.abs(n(l.qty))), fromLocation: dto.from_location, toLocation: dto.to_location,
         refDoc: dto.ref_doc ?? null, remarks: dto.remarks ?? null, createdBy: user.username,
@@ -163,9 +177,12 @@ export class StockOpsService {
     return { doc_no: docNo, move_type: 'Transfer', lines: dto.lines.length, valued_lines: valued };
   }
 
-  async listMovements(q: { move_type?: string; limit?: number }) {
+  async listMovements(q: { move_type?: string; limit?: number }, user?: JwtUser) {
     const db = this.db;
-    const where = q.move_type ? eq(stockMovements.moveType, q.move_type as NonNullable<typeof stockMovements.$inferSelect.moveType>) : undefined;
+    const conds: any[] = [];
+    if (user) conds.push(eq(stockMovements.tenantId, this.tid(user)));
+    if (q.move_type) conds.push(eq(stockMovements.moveType, q.move_type as NonNullable<typeof stockMovements.$inferSelect.moveType>));
+    const where = conds.length ? and(...conds) : undefined;
     const rows = await db.select().from(stockMovements).where(where).orderBy(desc(stockMovements.id)).limit(q.limit ?? 100);
     return {
       movements: rows.map((r: any) => ({
