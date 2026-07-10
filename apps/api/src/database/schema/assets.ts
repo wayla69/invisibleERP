@@ -45,6 +45,21 @@ export const fixedAssets = pgTable('fixed_assets', {
   // capitalised from. NULL for assets acquired directly (cash purchase via POST /api/assets).
   sourceGrNo: text('source_gr_no'),
   sourcePoNo: text('source_po_no'),
+  // CIP/AUC traceability (FA-13): the construction-in-progress asset this fixed asset was settled from.
+  sourceCipNo: text('source_cip_no'),
+  // ── Parallel TAX depreciation book (FIN-6a) ─────────────────────────────────────────────────────────
+  // A second, memo-only depreciation basis kept alongside the GAAP `accumulated_depreciation`/`net_book_value`
+  // book — it posts NO GL (tax depreciation is not a bookkeeping entry) and exists solely to feed the
+  // book-vs-tax TEMPORARY difference into the deferred-tax module (TAX-06). Thai tax typically depreciates
+  // FASTER than book (shorter caps + a first-year INITIAL ALLOWANCE), so tax NBV < book NBV ⇒ a taxable temp
+  // diff ⇒ DTL. NULL tax_net_book_value ⇒ no tax book maintained for this asset (deferred-tax falls back to
+  // the documented TAX_DEP_FACTOR approximation, pre-FIN-6 behaviour).
+  taxUsefulLifeMonths: integer('tax_useful_life_months'),                                        // tax life (may be shorter than book)
+  taxSalvageValue: numeric('tax_salvage_value', { precision: 18, scale: 4 }),                    // residual for tax (defaults to book salvage)
+  taxInitialAllowancePct: numeric('tax_initial_allowance_pct', { precision: 9, scale: 4 }),      // Thai first-year special allowance % of depreciable base
+  taxAccumulatedDepreciation: numeric('tax_accumulated_depreciation', { precision: 18, scale: 4 }),
+  taxNetBookValue: numeric('tax_net_book_value', { precision: 18, scale: 4 }),                   // NULL ⇒ no tax book (factor fallback)
+  taxLastDepreciatedPeriod: text('tax_last_depreciated_period'),
   // Physical-tracking fields (for QR asset tags + scan-to-locate). Accounting
   // status stays in `status`; these track where the asset physically is / who holds it.
   location: text('location'),
@@ -203,6 +218,59 @@ export const assetAuditScans = pgTable('asset_audit_scans', {
   scannedAt: timestamp('scanned_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqScanUuid: unique('uq_asset_audit_scan_uuid').on(t.tenantId, t.auditNo, t.clientUuid), byAudit: index('idx_asset_audit_scan_audit').on(t.auditNo) }));
 
+// ── CIP / AUC — Construction-in-Progress / Assets-under-Construction (FA-13) ─────────────────────────
+// A CIP asset accumulates cost lines (GR / manual / project) into the CIP GL account (1520) while the asset
+// is being built. It is NOT depreciated. When complete it is SETTLED / capitalised into a normal fixed asset
+// under a maker-checker gate: the preparer raises a settlement REQUEST (with a mandatory reason) that posts
+// NOTHING; a DIFFERENT user approves before the fixed_assets row + reclassification JE (Dr 1500 / Cr 1520)
+// are created. tenant-scoped → covered by the RLS DO-loop re-run in migration 0303.
+export const cipAssets = pgTable('cip_assets', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  cipNo: text('cip_no').notNull(),                  // CIP-YYYYMMDD-NNN
+  name: text('name').notNull(),
+  categoryId: bigint('category_id', { mode: 'number' }).references(() => assetCategories.id),
+  status: text('status').notNull().default('Open'), // Open | PendingSettlement | Capitalized | Cancelled
+  accumulatedCost: numeric('accumulated_cost', { precision: 18, scale: 4 }).notNull().default('0'),
+  location: text('location'),
+  department: text('department'),
+  notes: text('notes'),
+  // Settlement request (maker-checker): the params the CIP capitalises into, deferred until approval.
+  settleName: text('settle_name'),
+  settleCategoryId: bigint('settle_category_id', { mode: 'number' }),
+  settleUsefulLifeMonths: integer('settle_useful_life_months'),
+  settleSalvageValue: numeric('settle_salvage_value', { precision: 18, scale: 4 }),
+  settleTaxUsefulLifeMonths: integer('settle_tax_useful_life_months'),
+  settleTaxInitialAllowancePct: numeric('settle_tax_initial_allowance_pct', { precision: 9, scale: 4 }),
+  settleReason: text('settle_reason'),              // mandatory audit reason for the capitalisation
+  settledAssetNo: text('settled_asset_no'),         // the fixed asset created on approval
+  settleJournalNo: text('settle_journal_no'),
+  requestedBy: text('requested_by'),                // maker
+  requestedAt: timestamp('requested_at', { withTimezone: true }),
+  approvedBy: text('approved_by'),                  // checker — must differ from requestedBy
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uqCipNo: unique('uq_cip_no').on(t.tenantId, t.cipNo), byStatus: index('idx_cip_status').on(t.tenantId, t.status) }));
+
+export const cipCostLines = pgTable('cip_cost_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  cipId: bigint('cip_id', { mode: 'number' }).notNull().references(() => cipAssets.id),
+  cipNo: text('cip_no').notNull(),
+  sourceType: text('source_type').notNull().default('manual'), // manual | gr | project
+  sourceRef: text('source_ref'),                    // GR no / project code / free text
+  description: text('description'),
+  amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
+  costDate: date('cost_date'),
+  paySource: text('pay_source').notNull().default('credit'), // credit (Cr 2000 AP) | cash (Cr 1000)
+  glRef: text('gl_ref'),
+  addedBy: text('added_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byCip: index('idx_cip_cost_cip').on(t.tenantId, t.cipNo) }));
+
 export type FixedAsset = typeof fixedAssets.$inferSelect;
 export type AssetCategory = typeof assetCategories.$inferSelect;
 export type DepreciationRun = typeof depreciationRuns.$inferSelect;
+export type CipAsset = typeof cipAssets.$inferSelect;

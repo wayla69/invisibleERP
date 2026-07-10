@@ -51,16 +51,20 @@ async function main() {
     { code: 'CUST', name: 'Credit Customer', creditLimit: '2500', email: 'ar@cust.example', phone: '0810000000' },
     { code: 'CUST2', name: 'Defaulting Customer', creditLimit: '100000', email: 'ar@cust2.example' }, // under limit but 90+ overdue
     { code: 'CUST3', name: 'Good Customer', creditLimit: '100000', phone: '0820000000' },             // under limit, only mildly overdue
+    { code: 'FATAX', name: 'FA Tax Book Co' },  // FIN-6a — parallel tax-book + deferred-tax isolation tenant
   ]).onConflictDoNothing();
   const tid = async (code: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, code)))[0].id);
   const hq = await tid('HQ');
   const cust = await tid('CUST');
   const cust2 = await tid('CUST2');
   const cust3 = await tid('CUST3');
+  const fatax = await tid('FATAX');
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'emp1', passwordHash: await pw.hash('emp123'), role: 'Admin', tenantId: hq }, // claimant (ESS)
     { username: 'mgr', passwordHash: await pw.hash('mgr123'), role: 'Admin', tenantId: hq },   // approver (≠ claimant)
+    { username: 'faadmin', passwordHash: await pw.hash('fa123'), role: 'Admin', tenantId: fatax }, // FIN-6a maker (FATAX)
+    { username: 'famgr', passwordHash: await pw.hash('fa123'), role: 'Admin', tenantId: fatax },   // FIN-6a checker (FATAX, ≠ maker)
   ]).onConflictDoNothing();
   // Employee linked to the emp1 user (ESS self-service) + two assets for EAM maintenance.
   await db.insert(s.employees).values([{ tenantId: hq, empCode: 'EMP1', name: 'Test Employee', userName: 'emp1', monthlySalary: '30000' }]).onConflictDoNothing();
@@ -739,6 +743,64 @@ async function main() {
     JSON.stringify({ location: newFa?.location, department: newFa?.department, serial_no: newFa?.serial_no }));
   const regDup = await inj('POST', '/api/assets/registrations', admin, { gr_no: grCap.json?.gr_no, gr_item_id: grItemId, name: 'dup', useful_life_months: 36 });
   ok('Capitalize: the same GR line cannot be capitalised twice (ALREADY_REGISTERED)', regDup.status === 400 && regDup.json?.error?.code === 'ALREADY_REGISTERED', `st=${regDup.status} code=${regDup.json?.error?.code}`);
+
+  // ───────────────── FIN-6a: parallel TAX depreciation book → deferred tax (FATAX tenant) ─────────────────
+  // A single asset with a Thai-tax book: cost 120000, book life 60m, TAX life 24m + 40% first-year INITIAL
+  // ALLOWANCE. Tax depreciates FAR faster than book, so tax NBV < book NBV → a taxable temp diff → DTL that
+  // flows straight into deferred tax (TAX-06) instead of a manual GAAP adjustment. Isolated in FATAX so the
+  // book/tax/deferred figures are exact (no other assets or AR allowance).
+  const faAdmin = (await inj('POST', '/api/login', undefined, { username: 'faadmin', password: 'fa123' })).json.token;
+  const faMgr = (await inj('POST', '/api/login', undefined, { username: 'famgr', password: 'fa123' })).json.token;
+  const acqTax = await inj('POST', '/api/assets', faAdmin, { name: 'CNC machine', acquire_date: '2026-01-01', acquire_cost: 120000, useful_life_months: 60, acquire_source: 'credit', tax_useful_life_months: 24, tax_initial_allowance_pct: 40 });
+  ok('FIN-6a: acquire seeds the parallel tax book (tax NBV = cost at acquisition)', acqTax.status === 201 && /^FA-/.test(acqTax.json?.asset_no ?? ''), `st=${acqTax.status} asset=${acqTax.json?.asset_no}`);
+  const faTaxAssetNo = acqTax.json?.asset_no;
+  const faReg = (await inj('GET', '/api/assets', faAdmin)).json;
+  const faAsset = (faReg.assets ?? []).find((a: any) => a.asset_no === faTaxAssetNo);
+  ok('FIN-6a: register exposes the tax book (tax_net_book_value 120000, tax_useful_life_months 24)', near(faAsset?.tax_net_book_value, 120000) && faAsset?.tax_useful_life_months === 24 && near(faAsset?.tax_initial_allowance_pct, 40), `tnbv=${faAsset?.tax_net_book_value} tlife=${faAsset?.tax_useful_life_months}`);
+  // Book depreciation for 2026-01 (Dr 5200 / Cr 1590): 120000/60 = 2000 → book NBV 118000.
+  await inj('POST', '/api/assets/depreciation/run', faAdmin, { period: '2026-01' });
+  // Tax depreciation for 2026-01 (NO GL): initial allowance 40% × 120000 = 48000 + 120000/24 = 5000 → 53000; tax NBV 67000.
+  const taxRun = await inj('POST', '/api/assets/tax-depreciation/run', faAdmin, { period: '2026-01' });
+  const taxLine = (taxRun.json?.assets ?? []).find((x: any) => x.asset_no === faTaxAssetNo);
+  ok('FIN-6a: tax-depreciation run applies the initial allowance + accelerated life (53000; tax NBV 67000; NO GL)', taxRun.status === 201 && near(taxLine?.tax_depreciation, 53000) && near(taxLine?.initial_allowance, 48000) && near(taxLine?.tax_nbv_after, 67000), `dep=${taxLine?.tax_depreciation} ia=${taxLine?.initial_allowance} nbv=${taxLine?.tax_nbv_after}`);
+  const taxRerun = await inj('POST', '/api/assets/tax-depreciation/run', faAdmin, { period: '2026-01' });
+  ok('FIN-6a: tax-depreciation run is idempotent per period (re-run → 0 assets)', taxRerun.status === 201 && taxRerun.json?.asset_count === 0, `count=${taxRerun.json?.asset_count}`);
+  // Deferred tax now reads the REAL tax book: book NBV 118000 − tax NBV 67000 = 51000 taxable temp diff → DTL 51000 × 20% = 10200.
+  // (Contrast: the pre-FIN-6 factor fallback would have given only ~200 — the actual tax book is what feeds the difference.)
+  const faDt = await inj('POST', '/api/ledger/deferred-tax/run', faAdmin, { period: '2026-01', as_of_date: '2026-01-31', tenant_id: fatax });
+  ok('FIN-6a: deferred tax consumes the actual tax NBV → DTL 10200, net deferred −10200 (not the factor approximation)', faDt.status === 200 && near(faDt.json?.dtl, 10200) && near(faDt.json?.net_deferred, -10200) && near(faDt.json?.delta_posted, -10200), `dtl=${faDt.json?.dtl} net=${faDt.json?.net_deferred}`);
+  const faDtPost = await inj('POST', `/api/ledger/deferred-tax/${faDt.json?.id}/post`, faMgr);
+  ok('FIN-6a: a different user posts the deferred-tax charge (Dr 5950 / Cr 1700, Δ −10200)', faDtPost.status === 200 && near(faDtPost.json?.delta_posted, -10200) && /^JE-/.test(faDtPost.json?.entry_no ?? ''), `st=${faDtPost.status} delta=${faDtPost.json?.delta_posted} je=${faDtPost.json?.entry_no}`);
+
+  // ───────────────── FA-13: CIP / AUC — accumulate cost → settle to a fixed asset (maker-checker) ─────────────────
+  // A construction-in-progress asset accumulates cost lines into 1520 CIP (NOT depreciated) and is capitalised
+  // to a normal fixed asset (Dr 1500 / Cr 1520) only after a DIFFERENT user approves a settlement request.
+  const cip1500Before = await tbBalance('1500');
+  const cip1520Before = await tbBalance('1520');
+  const cip2000CrBefore = await tbCredit2('2000');
+  const openCip = await inj('POST', '/api/assets/cip', admin, { name: 'New warehouse build', location: 'Site B', department: 'Ops' });
+  ok('CIP: open a construction-in-progress asset (status Open, cost 0)', openCip.status === 201 && /^CIP-/.test(openCip.json?.cip_no ?? '') && openCip.json?.status === 'Open', `st=${openCip.status} no=${openCip.json?.cip_no}`);
+  const cipNo = openCip.json?.cip_no;
+  const cost1 = await inj('POST', `/api/assets/cip/${cipNo}/cost`, admin, { amount: 30000, source_type: 'gr', source_ref: 'GR-CIP-1', description: 'Foundation', pay_source: 'credit' });
+  ok('CIP: add cost line 1 (30000, credit) posts Dr 1520 / Cr 2000; accumulated 30000', cost1.status === 201 && near(cost1.json?.accumulated_cost, 30000) && /^JE-/.test(cost1.json?.journal_no ?? ''), `acc=${cost1.json?.accumulated_cost} je=${cost1.json?.journal_no}`);
+  const cost2 = await inj('POST', `/api/assets/cip/${cipNo}/cost`, admin, { amount: 20000, source_type: 'manual', description: 'Steelwork', pay_source: 'cash' });
+  ok('CIP: add cost line 2 (20000, cash) posts Dr 1520 / Cr 1000; accumulated 50000', cost2.status === 201 && near(cost2.json?.accumulated_cost, 50000), `acc=${cost2.json?.accumulated_cost}`);
+  ok('CIP: accumulated cost sits in 1520 (balance +50000), NOT yet in 1500', near(await tbBalance('1520'), cip1520Before + 50000) && near(await tbBalance('1500'), cip1500Before) && near(await tbCredit2('2000'), cip2000CrBefore + 30000), `b1520=${await tbBalance('1520')} b1500=${await tbBalance('1500')}`);
+  // Settlement request (maker) — reason mandatory; posts nothing.
+  const settleReq = await inj('POST', `/api/assets/cip/${cipNo}/settle`, admin, { name: 'Warehouse B', useful_life_months: 240, reason: 'Construction complete, ready for use', tax_useful_life_months: 120 });
+  ok('CIP: settlement request → PendingSettlement, NO GL yet (1500 unchanged)', settleReq.status === 201 && settleReq.json?.status === 'PendingSettlement' && near(await tbBalance('1500'), cip1500Before), `st=${settleReq.json?.status} b1500=${await tbBalance('1500')}`);
+  const settleSelf = await inj('POST', `/api/assets/cip/${cipNo}/settle/approve`, admin);
+  ok('CIP: preparer self-approval blocked → 403 SOD_VIOLATION (FA-13)', settleSelf.status === 403 && settleSelf.json?.error?.code === 'SOD_VIOLATION', `${settleSelf.status} ${settleSelf.json?.error?.code}`);
+  const settleAppr = await inj('POST', `/api/assets/cip/${cipNo}/settle/approve`, mgr);
+  ok('CIP: a different user approves → asset created, reclass posts (Dr 1500 +50000 / Cr 1520 -50000)', settleAppr.status === 201 && /^FA-/.test(settleAppr.json?.asset_no ?? '') && near(settleAppr.json?.capitalized_cost, 50000) && near(await tbBalance('1500'), cip1500Before + 50000) && near(await tbBalance('1520'), cip1520Before), `asset=${settleAppr.json?.asset_no} b1500=${await tbBalance('1500')} b1520=${await tbBalance('1520')}`);
+  const cipReg = (await inj('GET', '/api/assets', admin)).json;
+  const cipFa = (cipReg.assets ?? []).find((x: any) => x.asset_no === settleAppr.json?.asset_no);
+  ok('CIP: settled asset is on the register with source CIP traceability + its own tax book', cipFa?.source_cip_no === cipNo && near(cipFa?.acquire_cost, 50000) && near(cipFa?.tax_net_book_value, 50000), `cip=${cipFa?.source_cip_no} cost=${cipFa?.acquire_cost} tnbv=${cipFa?.tax_net_book_value}`);
+  const cipAdd = await inj('POST', `/api/assets/cip/${cipNo}/cost`, admin, { amount: 1000 });
+  ok('CIP: a capitalized CIP rejects further cost (CIP_NOT_OPEN)', cipAdd.status === 400 && cipAdd.json?.error?.code === 'CIP_NOT_OPEN', `${cipAdd.status} ${cipAdd.json?.error?.code}`);
+  const emptyCip = await inj('POST', '/api/assets/cip', admin, { name: 'Empty project' });
+  const emptySettle = await inj('POST', `/api/assets/cip/${emptyCip.json?.cip_no}/settle`, admin, { useful_life_months: 60, reason: 'test' });
+  ok('CIP: a CIP with no accumulated cost cannot be settled (CIP_NO_COST)', emptySettle.status === 400 && emptySettle.json?.error?.code === 'CIP_NO_COST', `${emptySettle.status} ${emptySettle.json?.error?.code}`);
 
   // ───────────────────── Perpetual inventory valuation sub-ledger (INV-01..04) ─────────────────────
   // Run in a dedicated tenant so the inventory control account (1200) is isolated from the cash-flow seed.
@@ -1520,7 +1582,102 @@ async function main() {
   const capWl = (await inj('GET', '/api/finance/ar/collections', admin)).json;
   ok('REV-21: collections worklist surfaces the customer\'s on-account cash (apply before dunning)', (capWl.rows ?? []).some((r: any) => r.invoice_no === 'INV-CA1' && near(r.on_account, 600)) && Number(capWl.on_account_total) >= 600, `oa_total=${capWl.on_account_total}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application ──');
+  // ───────────────────── FIN-4 — Statutory FS pack (report builder + SOCE + notes + DBD e-Filing) ─────────────────────
+  // The configurable financial-report builder (row-grouping + comparative columns) and the three audit-pack
+  // outputs it rides on. Read-only presentation over the audited GL — every rendered subtotal ties back to
+  // the canonical income-statement / balance-sheet, and the SOCE roll-forward ties to the balance sheet.
+  const fsFrom = '2000-01-01';
+  const fsTo = today;
+  const rowVal = (rows: any[], key: string) => rows.find((r: any) => r.key === key)?.current;
+
+  // (1) Define a CUSTOM P&L row-grouping: Revenue, Expenses, and a COMPUTED Net-profit subtotal (Rev − Exp).
+  const plDefRes = await inj('POST', '/api/reports/fs/definitions', admin, {
+    code: 'PL-CUSTOM', name: 'Custom P&L', statement_type: 'pl',
+    config: { groups: [
+      { key: 'rev', label: 'Revenue', labelTh: 'รายได้', normalSide: 'credit', types: ['Revenue'] },
+      { key: 'exp', label: 'Expenses', labelTh: 'ค่าใช้จ่าย', normalSide: 'debit', types: ['Expense'] },
+      { key: 'np', label: 'Net profit', labelTh: 'กำไรสุทธิ', sumOf: [{ key: 'rev', factor: 1 }, { key: 'exp', factor: -1 }] },
+    ] },
+  });
+  ok('FIN-4: create a custom P&L report definition (config-driven row-grouping builder)', plDefRes.status === 201 && plDefRes.json?.code === 'PL-CUSTOM', `st=${plDefRes.status}`);
+
+  const isWin = (await inj('GET', `/api/ledger/income-statement?from=${fsFrom}&to=${fsTo}`, admin)).json;
+  const plRender = (await inj('GET', `/api/reports/fs/render/PL-CUSTOM?as_of=${fsTo}&from=${fsFrom}`, admin)).json;
+  ok('FIN-4: rendered Revenue group ties to income-statement revenue', near(rowVal(plRender.rows, 'rev'), isWin.revenue), `r=${rowVal(plRender.rows, 'rev')} is=${isWin.revenue}`);
+  ok('FIN-4: rendered Expenses group ties to income-statement expense', near(rowVal(plRender.rows, 'exp'), isWin.expense), `e=${rowVal(plRender.rows, 'exp')} is=${isWin.expense}`);
+  ok('FIN-4: computed Net-profit subtotal (Rev − Exp) = income-statement net income',
+    near(rowVal(plRender.rows, 'np'), isWin.net_income) && plRender.rows.find((r: any) => r.key === 'np')?.is_subtotal === true,
+    `np=${rowVal(plRender.rows, 'np')} ni=${isWin.net_income}`);
+
+  // Comparative (prior-period / YoY) column — same builder, add the prior window.
+  const plCmp = (await inj('GET', `/api/reports/fs/render/PL-CUSTOM?as_of=${fsTo}&from=${fsFrom}&prior_as_of=${fsTo}&prior_from=${fsFrom}`, admin)).json;
+  ok('FIN-4: comparative column present + prior Net-profit populated', plCmp.comparative === true && typeof plCmp.rows.find((r: any) => r.key === 'np')?.prior === 'number', `cmp=${plCmp.comparative}`);
+
+  // (2) Custom BS builder — Assets / Liabilities / Equity groups tie to the balance sheet.
+  const bsWin = (await inj('GET', `/api/ledger/balance-sheet?as_of=${fsTo}`, admin)).json;
+  await inj('POST', '/api/reports/fs/definitions', admin, {
+    code: 'BS-CUSTOM', name: 'Custom BS', statement_type: 'bs',
+    config: { groups: [
+      { key: 'as', label: 'Assets', normalSide: 'debit', types: ['Asset'] },
+      { key: 'li', label: 'Liabilities', normalSide: 'credit', types: ['Liability'] },
+      { key: 'eq', label: 'Equity', normalSide: 'credit', types: ['Equity'] },
+    ] },
+  });
+  const bsRender = (await inj('GET', `/api/reports/fs/render/BS-CUSTOM?as_of=${fsTo}`, admin)).json;
+  ok('FIN-4: rendered Assets group ties to balance-sheet assets', near(rowVal(bsRender.rows, 'as'), bsWin.assets), `as=${rowVal(bsRender.rows, 'as')} bs=${bsWin.assets}`);
+  ok('FIN-4: rendered Equity group ties to balance-sheet equity', near(rowVal(bsRender.rows, 'eq'), bsWin.equity), `eq=${rowVal(bsRender.rows, 'eq')} bs=${bsWin.equity}`);
+
+  // (3) SOCE roll-forward — baseline, then a share issue + a dividend (both maker-checker approved), re-read.
+  const socePart = (soce: any, code: string) => soce.components.find((c: any) => c.account_code === code) ?? { opening: 0, movements: 0, profit: 0, closing: 0 };
+  const soce0 = (await inj('GET', `/api/reports/fs/changes-in-equity?from=${fsFrom}&to=${fsTo}`, admin)).json;
+  const shRes = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', memo: 'FIN-4 share issue', lines: [{ account_code: '1010', debit: 100000 }, { account_code: '3000', credit: 100000 }] });
+  await inj('POST', `/api/ledger/journal/${shRes.json?.entry_no}/approve`, mgr);
+  const dvRes = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', memo: 'FIN-4 dividend', lines: [{ account_code: '3100', debit: 40000 }, { account_code: '1010', credit: 40000 }] });
+  await inj('POST', `/api/ledger/journal/${dvRes.json?.entry_no}/approve`, mgr);
+  const soce1 = (await inj('GET', `/api/reports/fs/changes-in-equity?from=${fsFrom}&to=${fsTo}`, admin)).json;
+  ok('FIN-4: SOCE — share issue lifts the 3000 equity component movement by 100000', near(socePart(soce1, '3000').movements - socePart(soce0, '3000').movements, 100000), `Δ=${socePart(soce1, '3000').movements - socePart(soce0, '3000').movements}`);
+  ok('FIN-4: SOCE — dividend cuts the retained-earnings (3100) component movement by 40000', near(socePart(soce1, '3100').movements - socePart(soce0, '3100').movements, -40000), `Δ=${socePart(soce1, '3100').movements - socePart(soce0, '3100').movements}`);
+  ok('FIN-4: SOCE — every component rolls forward (opening + movements + profit = closing)', soce1.components.every((c: any) => near(c.opening + c.movements + c.profit, c.closing)), 'roll-forward');
+  ok('FIN-4: SOCE — profit for the period flows entirely to retained earnings (3100) and reconciles the roll-forward',
+    near(soce1.totals.profit, soce1.profit_for_period) && near(socePart(soce1, '3100').profit, soce1.profit_for_period) && Math.abs(soce1.profit_for_period) > 0,
+    `p=${soce1.profit_for_period} totalsProfit=${soce1.totals.profit} re=${socePart(soce1, '3100').profit}`);
+  ok('FIN-4: SOCE — total closing equity ties to the balance sheet (equity + net income)', soce1.ties_to_balance_sheet === true && near(soce1.totals.closing, soce1.balance_sheet_equity), `close=${soce1.totals.closing} bs=${soce1.balance_sheet_equity}`);
+
+  // (4) Note schedules — per-note account mapping + comparative + policy text.
+  await inj('POST', '/api/reports/fs/definitions', admin, {
+    code: 'NOTES-STD', name: 'FS Notes', statement_type: 'notes',
+    config: { notes: [
+      { number: '1', title: 'Cash and cash equivalents', titleTh: 'เงินสดและรายการเทียบเท่า', normalSide: 'debit', prefixes: ['10'], policyText: 'Cash at bank and in hand.' },
+      { number: '2', title: 'Equity', titleTh: 'ส่วนของผู้ถือหุ้น', normalSide: 'credit', types: ['Equity'] },
+    ] },
+  });
+  const bsWin2 = (await inj('GET', `/api/ledger/balance-sheet?as_of=${fsTo}`, admin)).json; // live BS after the SOCE postings
+  const notesRes = (await inj('GET', `/api/reports/fs/notes/NOTES-STD?as_of=${fsTo}&prior_as_of=${fsTo}&basis=bs`, admin)).json;
+  const note2 = notesRes.notes?.find((nn: any) => nn.number === '2');
+  ok('FIN-4: note schedule maps accounts + carries policy text + comparative total', notesRes.notes?.length === 2 && note2 && near(note2.total, bsWin2.equity) && typeof note2.prior_total === 'number' && notesRes.notes[0].policy_text != null, `eqNoteTotal=${note2?.total} bsEq=${bsWin2.equity}`);
+
+  // (5) DBD e-Filing export (Thai งบการเงิน — XBRL / S-form): current + prior year, balanced, XBRL emitted.
+  const fy = Number(today.slice(0, 4));
+  const bsYE = (await inj('GET', `/api/ledger/balance-sheet?as_of=${fy}-12-31`, admin)).json;
+  const dbd = (await inj('GET', `/api/reports/fs/dbd-export?fiscal_year=${fy}&taxpayer_name=HQ%20Co&taxpayer_id=0105500000001`, admin)).json;
+  ok('FIN-4: DBD export — 6 S-form facts, balanced (A = L + E incl. net profit), XBRL instance emitted',
+    dbd.format === 'DBD-XBRL' && Array.isArray(dbd.facts) && dbd.facts.length === 6 && dbd.balanced === true
+    && typeof dbd.xml === 'string' && dbd.xml.includes('<xbrl') && dbd.xml.includes('dbd:TotalAssets') && dbd.xml.includes('dbd:NetProfit'),
+    `bal=${dbd.balanced} facts=${dbd.facts?.length}`);
+  const faAssets = dbd.facts?.find((f: any) => f.concept === 'TotalAssets');
+  ok('FIN-4: DBD TotalAssets fact ties to the year-end balance sheet', near(faAssets?.current, bsYE.assets), `fa=${faAssets?.current} bs=${bsYE.assets}`);
+
+  // (6) Negative / control cases.
+  const rNotes = await inj('GET', `/api/reports/fs/render/NOTES-STD?as_of=${fsTo}`, admin);
+  ok('FIN-4: render rejects a non-renderable (notes) definition → 400 FS_NOT_RENDERABLE', rNotes.status === 400 && rNotes.json?.error?.code === 'FS_NOT_RENDERABLE', `${rNotes.status} ${rNotes.json?.error?.code}`);
+  const rNoAsOf = await inj('GET', '/api/reports/fs/render/PL-CUSTOM?from=2000-01-01', admin);
+  ok('FIN-4: render without as_of → 400 FS_ASOF_REQUIRED', rNoAsOf.status === 400 && rNoAsOf.json?.error?.code === 'FS_ASOF_REQUIRED', `${rNoAsOf.status} ${rNoAsOf.json?.error?.code}`);
+  const rMissing = await inj('GET', '/api/reports/fs/definitions/NOPE', admin);
+  ok('FIN-4: unknown definition → 404 FS_DEF_NOT_FOUND', rMissing.status === 404 && rMissing.json?.error?.code === 'FS_DEF_NOT_FOUND', `${rMissing.status} ${rMissing.json?.error?.code}`);
+  const rBadType = await inj('POST', '/api/reports/fs/definitions', admin, { code: 'X', name: 'X', statement_type: 'zzz', config: {} });
+  ok('FIN-4: upsert with an invalid statement_type is rejected (validation)', rBadType.status === 400, `${rBadType.status}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

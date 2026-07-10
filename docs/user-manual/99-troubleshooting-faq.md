@@ -140,6 +140,8 @@ your code below.
 | `OVER_FLOAT` | Establishing a petty-cash fund with an opening amount, replenishing one, **or approving that funding**, would push the fund above its float limit (วงเงิน). | Reduce the amount to within the remaining float (or raise the fund's float limit). Note fund establishment + replenishment are **maker-checked** (EXP-08): the request is checked at raise time and again on approval, and a **second** person approves before any cash posts. |
 | `INSUFFICIENT_FLOAT` | A petty-cash **expense / advance draw** exceeds the fund's available balance. | Fund or replenish the fund first (this itself needs an independent approval), or reduce the draw. See [Finance — AR & AP → Petty cash funds](./05-finance-ar-ap.md). |
 | `NO_CHANGE` | An asset revaluation was entered at the **current** net book value (nothing to post). | Enter a different value, or cancel. See [General Ledger → Fixed assets](./06-general-ledger.md). |
+| `CIP_NOT_OPEN` | You tried to add cost to (or settle) a **construction-in-progress** asset that is no longer Open — it is already pending settlement or has been capitalized. | Open a new CIP for further cost, or act on the pending settlement. See [General Ledger → Construction-in-progress (CIP/AUC)](./06-general-ledger.md). |
+| `CIP_NO_COST` | You tried to **settle (capitalize)** a construction-in-progress asset that has no accumulated cost. | Add cost lines first, then request settlement. See [General Ledger → Construction-in-progress (CIP/AUC)](./06-general-ledger.md). |
 | `BAD_VALUE` / `BAD_AMOUNT` / `BAD_MONTHS` / `BAD_TERM` | A prepaid / lease / advance / revaluation was created with an invalid number (negative amount, zero/negative term or months). | Enter a positive amount and a positive whole number of months / term. |
 | `SOD_VIOLATION` | Self-approval blocked — you can't approve your own document (e.g. your own journal entry, an AP payment you requested, **or a price/promotion rule you created or edited**). | A **different** authorised person must approve/activate it. For a pricing rule this is a user with the **exec** or **approvals** duty on the `/pricing` screen. See [Sales & POS → Approving a price/promotion rule](./01-sales-and-pos.md). |
 | `NOT_PENDING` | You tried to approve/reject a JE or AP payment that is no longer pending (already approved/rejected). | Refresh the queue; the item was already actioned. |
@@ -175,6 +177,10 @@ your code below.
 | Code | Meaning | What to do |
 |------|---------|-----------|
 | `BI_BAD_PERIOD` (ช่วงเวลาไม่ถูกต้อง) | The sales-cube report was asked to group by a period grain other than `day`, `week`, or `month`. | Use one of `day`, `week`, or `month` for the period. Previously an unrecognised value silently returned monthly buckets; it is now rejected so the result always matches what you asked for. See [Reports & Analytics](./09-reports-and-analytics.md). |
+| `FS_DEF_NOT_FOUND` (ไม่พบรูปแบบรายงาน) | A statutory-FS layout code that does not exist was requested. | Check the code, or create it via `POST /api/reports/fs/definitions`. See [General Ledger → Statutory FS pack](./06-general-ledger.md). |
+| `FS_NOT_RENDERABLE` / `FS_NOT_NOTES` | `render` was called on a `soce`/`notes` layout, or `notes` on a non-notes layout. | Use the dedicated endpoint: `render` for `pl`/`bs`, `changes-in-equity` for SOCE, `notes/:code` for notes. |
+| `FS_ASOF_REQUIRED` / `FS_FROM_REQUIRED` / `FS_RANGE_REQUIRED` | A required date is missing (`as_of` for a statement, `from` for a P&L, `from`+`to` for SOCE). | Supply the missing query parameter. |
+| `FS_BAD_STATEMENT_TYPE` / `FS_BAD_FISCAL_YEAR` | An invalid `statement_type` (not `bs`/`pl`/`soce`/`notes`) or a missing/invalid `fiscal_year`. | Use a valid value. |
 
 ### Administration
 
