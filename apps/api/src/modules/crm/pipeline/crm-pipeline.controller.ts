@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Query, Body, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Param, Query, Body, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Public, Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
@@ -18,6 +18,21 @@ const LeadImportBody = z.object({
   xlsx: z.string().max(13_000_000).optional(),
   dry_run: z.boolean().optional(),
 });
+// CRM-4 automation bodies.
+const AssignBody = z.object({ owner: z.string().max(60).optional() });
+const FollowupSettingsBody = z.object({
+  sla_hours: z.number().int().min(1).max(720).optional(),
+  rotting_days: z.number().int().min(1).max(365).optional(),
+  round_robin_owners: z.array(z.string().max(60)).max(50).optional(),
+});
+const CommsBody = z.object({
+  channel: z.enum(['email', 'line', 'sms']),
+  to: z.string().max(200).optional(),
+  subject: z.string().max(300).optional(),
+  body: z.string().min(1).max(5000),
+  contact_id: z.number().int().optional(),
+});
+
 // Public website form (CRM-2). `website` is the HONEYPOT field — humans never see it (hidden input); a
 // filled value means a bot, which the controller drops silently with the same { ok: true } response shape.
 const WebToLeadBody = z.object({
@@ -38,6 +53,12 @@ export class CrmPipelineController {
   @Post('leads/:leadNo/qualify') @HttpCode(200) qualify(@Param('leadNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.qualifyLead(no, u); }
   @Post('leads/:leadNo/convert') convert(@Param('leadNo') no: string, @Body(new ZodValidationPipe(ConvertBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.convertLead(no, b, u); }
   @Post('leads/:leadNo/lose') @HttpCode(200) lose(@Param('leadNo') no: string, @Body(new ZodValidationPipe(ReasonBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.loseLead(no, b?.reason, u); }
+
+  // CRM-4 lead scoring (explainable, versioned grade A–D). GET reads (scores on first read); POST re-scores.
+  @Get('leads/:leadNo/score') leadScore(@Param('leadNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.getLeadScore(no, u); }
+  @Post('leads/:leadNo/score') @HttpCode(200) rescoreLead(@Param('leadNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.scoreLead(no, u); }
+  // CRM-4 round-robin (re)assignment — explicit owner wins, else rotate the configured owners.
+  @Post('leads/:leadNo/assign') @HttpCode(200) assignLead(@Param('leadNo') no: string, @Body(new ZodValidationPipe(AssignBody)) b: { owner?: string }, @CurrentUser() u: JwtUser) { return this.svc.assignLead(no, b, u); }
 
   // Bulk lead import (CRM-2 wizard) — csv / base64 xlsx / rows; dry_run validates without writing.
   @Post('leads/import') @HttpCode(200) importLeads(@Body(new ZodValidationPipe(LeadImportBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.importLeads(b, u); }
@@ -61,10 +82,31 @@ export class CrmPipelineController {
   // Win/loss analytics (loss reasons, by owner, monthly trend) for the pipeline dashboard.
   @Get('win-loss') winLoss(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.winLoss(u, { months: months ? Number(months) : undefined }); }
 
+  // CRM-5 "why" analytics — read-only aggregators, all date-bounded server-side (months, default 6, 1..24).
+  // Funnel conversion (lead→qualified→won) + stage-to-stage progression + time-in-stage velocity.
+  @Get('analytics/funnel') funnel(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.funnel(u, { months: months ? Number(months) : undefined }); }
+  // Lead source → won revenue (win rate + average deal size per channel).
+  @Get('analytics/source-roi') sourceRoi(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.sourceRoi(u, { months: months ? Number(months) : undefined }); }
+  // Forecast categories (commit/best-case/pipeline) + quota attainment per owner + activity leaderboard.
+  @Get('analytics/forecast') forecast(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.forecast(u, { months: months ? Number(months) : undefined }); }
+
   // Activities
   @Post('activities') logActivity(@Body(new ZodValidationPipe(ActivityBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.logActivity(b, u); }
   @Get('activities') listActivities(@Query('entity_type') et: string | undefined, @Query('entity_no') en: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listActivities(et, en, u); }
   @Patch('activities/:id/done') @HttpCode(200) setActivityDone(@Param('id') id: string, @Body(new ZodValidationPipe(ActivityDoneBody)) b: { done: boolean }, @CurrentUser() u: JwtUser) { return this.svc.setActivityDone(+id, b.done, u); }
+
+  // CRM-4 follow-up discipline — the detective-control worklist (REV-22) + config + digest sweep.
+  @Get('follow-up') followUp(@Query('sla_hours') sla: string | undefined, @Query('rotting_days') rot: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.followUpCenter(u, { sla_hours: sla != null ? Number(sla) : undefined, rotting_days: rot != null ? Number(rot) : undefined });
+  }
+  @Post('follow-up/run') @HttpCode(200) runFollowUp(@CurrentUser() u: JwtUser) { return this.svc.runFollowUpSweep(u); }
+  @Get('follow-up/settings') followUpSettings(@CurrentUser() u: JwtUser) { return this.svc.getFollowupSettings(u); }
+  // Changing SLA / rotting thresholds / round-robin owners is a supervisor duty (crm/exec only).
+  @Put('follow-up/settings') @Permissions('crm', 'exec') putFollowUpSettings(@Body(new ZodValidationPipe(FollowupSettingsBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.putFollowupSettings(b, u); }
+
+  // CRM-4 sales comms from the deal timeline (email / LINE / SMS via messaging, merge fields).
+  @Get('comms/merge-fields') mergeFields() { return this.svc.mergeFields(); }
+  @Post('opportunities/:oppNo/comms') @HttpCode(200) sendComms(@Param('oppNo') no: string, @Body(new ZodValidationPipe(CommsBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.sendComms(no, b, u); }
 }
 
 // Public website lead capture (CRM-2). No JWT — the anonymous visitor posts the embedded contact form.

@@ -64,6 +64,13 @@ export class ConsolidationController {
     return this.svc.getRunLines(runId, user);
   }
 
+  // ── FIN-5: consolidated statement of cash flows (indirect, post-elimination) ──
+  @Get('runs/:runId/cash-flow')
+  @Permissions('exec')
+  consolCashFlow(@Param('runId', ParseIntPipe) runId: number, @CurrentUser() user: JwtUser) {
+    return this.svc.consolidatedCashFlow(runId, user);
+  }
+
   // ── WS3.3: maker-checker post (CON-03) ──
   @Post('runs/:runId/post')
   @Permissions('approvals')

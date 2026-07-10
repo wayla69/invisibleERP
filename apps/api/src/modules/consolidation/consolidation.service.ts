@@ -8,9 +8,16 @@ import { icTransactions } from '../../database/schema/intercompany';
 import { icReconPeriods } from '../../database/schema/ic-recon';
 import { fxRates } from '../../database/schema/fx';
 import { n, fx } from '../../database/queries';
+import { CASH_ACCOUNTS, CF_CLASSIFY } from '../ledger/ledger-constants';
 import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
+
+// FIN-5 — CTA/OCI translation reserve equity account (parks the average-vs-closing translation difference).
+const CTA_ACCOUNT = '3400';
+// P&L accounts (revenue 4xxx, expense 5xxx) translate at the period AVERAGE rate; everything else (the
+// balance sheet) at the CLOSING rate. The dual-rate difference is the cumulative translation adjustment.
+const isPnl = (code: string) => code.startsWith('4') || code.startsWith('5');
 
 @Injectable()
 export class ConsolidationService {
@@ -128,41 +135,72 @@ export class ConsolidationService {
       .groupBy(journalEntries.tenantId, journalLines.accountCode);
     const glByTenant = new Map<number, { accountCode: string; net: string }[]>();
     for (const r of glAll) { const k = Number(r.tenantId); const a = glByTenant.get(k) ?? []; a.push({ accountCode: r.accountCode, net: r.net }); glByTenant.set(k, a); }
-    // Prefetch the latest FX rate (≤ period end) for every distinct non-THB entity currency in one query.
-    const periodEnd = `${period}-28`; // safe last-day proxy
+    // ── FIN-5: dual-rate translation (IAS 21 / TAS 21) ──
+    // Prefetch, per distinct non-THB entity currency, BOTH a CLOSING rate (latest approved rate ≤ period end,
+    // for the balance sheet) and an AVERAGE rate (mean of approved rates within the period month, for the P&L).
+    const periodEnd = `${period}-28`;   // safe last-day proxy (closing-rate cutoff — unchanged behaviour)
+    const monthStart = `${period}-01`;
+    const monthEnd = `${period}-31`;    // lexical upper bound over YYYY-MM-DD (captures the whole month)
     const currencies = [...new Set(entities.map((e: any) => e.entityCurrency ?? 'THB').filter((c: string) => c !== 'THB'))] as string[];
-    const fxMap = new Map<string, number>();
+    const closingMap = new Map<string, number>();
+    const avgMap = new Map<string, number>();
     if (currencies.length) {
-      const fxRows = await db.select({ currency: fxRates.currency, rate: fxRates.rate })
-        .from(fxRates).where(and(inArray(fxRates.currency, currencies), eq(fxRates.status, 'Approved'), sql`${fxRates.rateDate} <= ${periodEnd}`))
+      const fxRows = await db.select({ currency: fxRates.currency, rateDate: fxRates.rateDate, rate: fxRates.rate })
+        .from(fxRates).where(and(inArray(fxRates.currency, currencies), eq(fxRates.status, 'Approved'), sql`${fxRates.rateDate} <= ${monthEnd}`))
         .orderBy(sql`${fxRates.rateDate} DESC`);
-      for (const r of fxRows) if (!fxMap.has(r.currency)) fxMap.set(r.currency, n(r.rate)); // first per currency = latest (DESC)
+      const avgAccum = new Map<string, { sum: number; count: number }>();
+      for (const r of fxRows) {
+        const d = String(r.rateDate);
+        // closing = latest approved rate on/before the period-end cutoff (first hit per currency, rows are DESC)
+        if (d <= periodEnd && !closingMap.has(r.currency)) closingMap.set(r.currency, n(r.rate));
+        // average = mean of the approved rates dated within the period month
+        if (d >= monthStart && d <= monthEnd) {
+          const a = avgAccum.get(r.currency) ?? { sum: 0, count: 0 };
+          a.sum += n(r.rate); a.count += 1; avgAccum.set(r.currency, a);
+        }
+      }
+      for (const [c, a] of avgAccum) if (a.count) avgMap.set(c, round4(a.sum / a.count));
     }
 
-    // ── Step 1: Collect each entity's GL net by account ──
+    // ── Step 1: Collect each entity's GL net by account, translating P&L at average / BS at closing (FIN-5) ──
     for (const ent of entities) {
       const entityTenantId = Number(ent.entityTenantId);
       const ownerPct = n(ent.ownershipPct) / 100; // e.g. 0.8 for 80%
       const entCurrency = ent.entityCurrency ?? 'THB';
+      const isThb = entCurrency === 'THB';
       const glRows = glByTenant.get(entityTenantId) ?? [];
-      const fxRate = entCurrency === 'THB' ? 1 : (fxMap.get(entCurrency) ?? 1);
+      const closingRate = isThb ? 1 : (closingMap.get(entCurrency) ?? 1);
+      // No in-month average rate ⇒ fall back to the closing rate (degenerate: no CTA arises).
+      const averageRate = isThb ? 1 : (avgMap.get(entCurrency) ?? closingRate);
 
       // P&L net income calculation for NCI:  netIncome = -(SUM of P&L account nets)
       // P&L accounts are 4xxx (revenue, normal credit) and 5xxx (expense, normal debit).
       // net = debit - credit, so revenue net < 0, expense net > 0.
       // Net income = -SUM(net_4xxx) - SUM(net_5xxx) ... but revenue is negative and expense is positive:
       // netIncome = -(net_4xxx + net_5xxx) where 4xxx negative and 5xxx positive
-      // = -( (-revenue) + expense ) = revenue - expense ✓
+      // = -( (-revenue) + expense ) = revenue - expense ✓ — evaluated at the AVERAGE rate.
       let plNetSum = 0;
+      // Sum of every translated entity line; under dual-rate translation this no longer nets to zero — the
+      // residual is the cumulative translation adjustment (CTA), parked in the OCI reserve below.
+      let entityTranslated = 0;
 
       for (const row of glRows) {
         const rawNet = n(row.net);
-        const translatedNet = round4(rawNet * fxRate);
-        runLineValues.push({ runId, lineType: 'Entity', entityTenantId, accountCode: row.accountCode, amountThb: fx(translatedNet, 4) });
+        const pnl = isPnl(row.accountCode);
+        const rate = pnl ? averageRate : closingRate;
+        const translatedNet = round4(rawNet * rate);
+        entityTranslated = round4(entityTranslated + translatedNet);
+        runLineValues.push({ runId, lineType: 'Entity', entityTenantId, accountCode: row.accountCode, amountThb: fx(translatedNet, 4), fxRate: fx(rate, 8), rateType: isThb ? null : (pnl ? 'average' : 'closing') });
 
-        if (row.accountCode.startsWith('4') || row.accountCode.startsWith('5')) {
-          plNetSum += rawNet * fxRate;
-        }
+        if (pnl) plNetSum += rawNet * averageRate;
+      }
+
+      // ── CTA / OCI: the average-rate-P&L vs closing-rate-BS translation difference (IAS 21) ──
+      // Adding CTA = −(Σ translated entity lines) makes each foreign entity's translated trial balance
+      // balance again; for a THB (base-currency) entity the residual is 0, so no CTA line is produced.
+      if (Math.abs(entityTranslated) > 1e-6) {
+        const cta = round4(-entityTranslated);
+        runLineValues.push({ runId, lineType: 'FX_CTA', entityTenantId, accountCode: CTA_ACCOUNT, amountThb: fx(cta, 4), rateType: 'cta', notes: `CTA (avg-rate P&L vs closing-rate BS) entity ${entityTenantId}` });
       }
 
       // ── NCI for entities not 100% owned ──
@@ -205,10 +243,12 @@ export class ConsolidationService {
     for (const l of lines) totals[l.accountCode] = round4((totals[l.accountCode] ?? 0) + n(l.amountThb));
 
     // ── CON-03: elimination integrity — the consolidated TB must still balance ──
-    // Each line amount is a signed net (debit − credit). By double-entry, every entity's lines net to 0
-    // and each elimination pair (−amt on 1150, +amt on 2150) nets to 0, so the combined+eliminated TB must
-    // sum to ~0. The NCI line is a single-sided presentation reclass within equity (not a posting), so it is
-    // EXCLUDED from the balance check. If the remaining lines don't net to zero, eliminations are unbalanced.
+    // Each line amount is a signed net (debit − credit). Under dual-rate translation an entity's raw lines no
+    // longer net to 0, but each entity's FX_CTA plug restores balance (Entity + FX_CTA net to 0 per entity),
+    // and each elimination pair (−amt on 1150, +amt on 2150) nets to 0 — so the combined+eliminated+CTA TB
+    // must sum to ~0. The NCI line is a single-sided presentation reclass within equity (not a posting), so it
+    // is EXCLUDED from the balance check. If the remaining lines don't net to zero, translation/eliminations
+    // are unbalanced.
     const tbSum = round4(lines.filter((l: any) => l.lineType !== 'NCI').reduce((a: number, l: any) => a + n(l.amountThb), 0));
     // Eliminations alone must net to zero (reciprocal IC cancels).
     const elimSum = round4(lines.filter((l: any) => l.lineType === 'Elimination').reduce((a: number, l: any) => a + n(l.amountThb), 0));
@@ -224,10 +264,13 @@ export class ConsolidationService {
     // Mark run Final (computed + balanced); maker-checker post happens via postConsolidation.
     await db.update(consolidationRuns).set({ status: 'Final', balanced }).where(eq(consolidationRuns.id, runId));
 
+    // FIN-5: total cumulative translation adjustment parked in OCI (3400) this run.
+    const ctaTotal = round4(lines.filter((l: any) => l.lineType === 'FX_CTA').reduce((a: number, l: any) => a + n(l.amountThb), 0));
+
     return {
       run_id: runId, group_id: groupId, period, status: 'Final', balanced,
       entity_count: entities.length, ic_eliminations: icRows.length,
-      tb_net: tbSum, elimination_net: elimSum,
+      tb_net: tbSum, elimination_net: elimSum, cta_total: ctaTotal,
       consolidated_accounts: Object.entries(totals).map(([account_code, net_thb]) => ({ account_code, net_thb })),
     };
   }
@@ -264,7 +307,76 @@ export class ConsolidationService {
     const lines = await db.select().from(consolidationRunLines).where(eq(consolidationRunLines.runId, runId));
     return {
       run_id: runId,
-      lines: lines.map((l: any) => ({ id: Number(l.id), line_type: l.lineType, entity_tenant_id: l.entityTenantId ? Number(l.entityTenantId) : null, account_code: l.accountCode, amount_thb: n(l.amountThb), notes: l.notes })),
+      lines: lines.map((l: any) => ({ id: Number(l.id), line_type: l.lineType, entity_tenant_id: l.entityTenantId ? Number(l.entityTenantId) : null, account_code: l.accountCode, amount_thb: n(l.amountThb), fx_rate: l.fxRate != null ? n(l.fxRate) : null, rate_type: l.rateType, notes: l.notes })),
+    };
+  }
+
+  // ── FIN-5: consolidated statement of cash flows (indirect method, POST-elimination) ──
+  // Derives a group-level SCF from the consolidated run lines (which are the period's translated + eliminated
+  // movement per account). NCI lines are excluded (a single-sided equity presentation reclass — the sub's full
+  // net income is already in the P&L rows); the remaining lines (Entity + Elimination + FX_CTA) net to zero by
+  // double-entry, so the statement reconciles to the movement in the consolidated cash accounts. The CTA is
+  // shown as a dedicated "effect of exchange-rate changes on cash" reconciling section (IAS 7 ¶28).
+  async consolidatedCashFlow(runId: number, user: JwtUser) {
+    this.hqOnly(user);
+    const db = this.db;
+    const [run] = await db.select().from(consolidationRuns).where(eq(consolidationRuns.id, runId)).limit(1);
+    if (!run) throw new NotFoundException({ code: 'CONSOL_RUN_NOT_FOUND', message: `Consolidation run ${runId} not found` });
+    const rawLines = await db.select().from(consolidationRunLines).where(eq(consolidationRunLines.runId, runId));
+
+    // Consolidated period movement per account (exclude NCI — see above).
+    const netByAcct: Record<string, number> = {};
+    for (const l of rawLines) {
+      if (l.lineType === 'NCI') continue;
+      netByAcct[l.accountCode] = round4((netByAcct[l.accountCode] ?? 0) + n(l.amountThb));
+    }
+    const codes = Object.keys(netByAcct);
+    const acctRows = codes.length ? await db.select({ code: accounts.code, type: accounts.type, name: accounts.name }).from(accounts).where(inArray(accounts.code, codes)) : [];
+    const meta = new Map<string, { type: string; name: string }>();
+    for (const a of acctRows) meta.set(a.code, { type: String(a.type), name: a.name });
+
+    const move = (net: number) => round4(-net); // cash effect of a BS movement = credit − debit = −net
+
+    // Net income = −(Σ P&L net) (P&L already at average rate).
+    let netIncome = 0;
+    for (const [code, net] of Object.entries(netByAcct)) if (isPnl(code)) netIncome = round4(netIncome - net);
+
+    const addbacks: any[] = [], operating: any[] = [], investing: any[] = [], financing: any[] = [], fxEffect: any[] = [];
+    let cashMovement = 0;
+    for (const [code, net] of Object.entries(netByAcct)) {
+      if (isPnl(code)) continue;                                   // captured in net income
+      if (CASH_ACCOUNTS.includes(code)) { cashMovement = round4(cashMovement + net); continue; } // the cash explained
+      const amount = move(net);
+      if (Math.abs(amount) < 1e-9) continue;
+      const m = meta.get(code);
+      const line = { account_code: code, label: CF_CLASSIFY[code]?.label ?? m?.name ?? code, amount };
+      if (code === CTA_ACCOUNT) { fxEffect.push(line); continue; } // OCI translation reserve → FX-on-cash effect
+      const cls = CF_CLASSIFY[code];
+      const bucket = cls?.bucket ?? (m?.type === 'Equity' ? 'financing' : 'operating');
+      if (bucket === 'addback') addbacks.push(line);
+      else if (bucket === 'investing') investing.push(line);
+      else if (bucket === 'financing') financing.push(line);
+      else operating.push(line);
+    }
+
+    const sum = (xs: any[]) => round4(xs.reduce((a, x) => a + x.amount, 0));
+    const netOperating = round4(netIncome + sum(addbacks) + sum(operating));
+    const netInvesting = sum(investing);
+    const netFinancing = sum(financing);
+    const fxOnCash = sum(fxEffect);
+    const netChange = round4(netOperating + netInvesting + netFinancing + fxOnCash);
+    const cashNet = round4(cashMovement); // Δ consolidated cash = Σ cash-account (debit − credit)
+
+    return {
+      run_id: runId, group_id: Number(run.groupId), period: run.period, method: 'indirect', post_elimination: true,
+      operating: { net_income: netIncome, adjustments: addbacks, working_capital: operating, net: netOperating },
+      investing: { lines: investing, net: netInvesting },
+      financing: { lines: financing, net: netFinancing },
+      fx_effect: { lines: fxEffect, net: fxOnCash },
+      net_change_in_cash: netChange,
+      consolidated_cash_movement: cashNet,
+      // Independent tie-out: the classified activity sections must equal the movement in the cash accounts.
+      reconciled: Math.abs(round4(netChange - cashNet)) < 0.01,
     };
   }
 

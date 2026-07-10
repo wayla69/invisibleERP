@@ -30,6 +30,9 @@ export interface RegisterSyncResult { client_uuid: string; status: 'synced' | 'd
 
 const DB_NAME = 'ierp-register-offline';
 const STORE = 'outbox';
+const DINEIN_STORE = 'dinein';   // POS-6: offline dine-in ops (open/add/fire), keyed on client_uuid
+const DB_VERSION = 2;
+const SEQ_KEY = 'ierp_register_seq';  // per-device monotonic counter → replay ops in capture order
 
 // ── offline menu snapshot ─────────────────────────────────────────────────────────────────────
 // The service worker deliberately never caches /api/* (auth'd + mutable), so a page reload while
@@ -54,26 +57,39 @@ export async function fetchMenuOfflineFirst<T>(fetchLive: () => Promise<T>): Pro
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'client_uuid' });
+      if (!db.objectStoreNames.contains(DINEIN_STORE)) db.createObjectStore(DINEIN_STORE, { keyPath: 'client_uuid' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+function txStore<T>(storeName: string, mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   return openDb().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
-        const store = db.transaction(STORE, mode).objectStore(STORE);
+        const store = db.transaction(storeName, mode).objectStore(storeName);
         const req = fn(store);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       }),
   );
+}
+
+function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  return txStore(STORE, mode, fn);
+}
+
+// per-device monotonic sequence so open→add→fire replay in capture order (the server sorts by client_seq).
+function nextSeq(): number {
+  if (typeof window === 'undefined' || !window.localStorage) return Date.now();
+  const s = Number(localStorage.getItem(SEQ_KEY) || '0') + 1;
+  try { localStorage.setItem(SEQ_KEY, String(s)); } catch { /* quota */ }
+  return s;
 }
 
 /** Queue a register sale for later sync. Returns the client_uuid used as the idempotency key. */
@@ -111,11 +127,80 @@ export async function syncRegister(): Promise<RegisterSyncResult[]> {
   return results;
 }
 
-/** Pending-count + a flush(), with auto-sync on reconnect. Drives the register's offline badge. */
+// ── POS-6: offline DINE-IN outbox (open table / add items / fire) ───────────────────────────────
+// Dine-in was online-only (kitchen/fire). Offline we now capture the order lifecycle — open + fire (and
+// optionally add) — as idempotent ops keyed by a client `order_uuid` that links them, and replay to
+// `POST /api/restaurant/offline-sync/dinein` on reconnect. SETTLEMENT stays ONLINE: the replay creates
+// and fires the order; the cashier settles it through the normal (online) checkout once reconnected.
+export interface DineInOfflineOp {
+  client_uuid: string;          // per-op idempotency key
+  order_uuid: string;           // client offline-order key linking open→add→fire
+  op: 'open' | 'add' | 'fire';
+  captured_at: string;
+  device_id?: string;
+  client_seq?: number;
+  table_id?: number;
+  guest_count?: number;
+  fulfillment_type?: string;
+  lines?: RegisterOfflineLine[];
+  course?: number;
+}
+export interface DineInSyncResult { client_uuid: string; op: string; status: 'synced' | 'duplicate' | 'failed'; order_no: string | null; error: string | null }
+
+export function pendingDineIn(): Promise<DineInOfflineOp[]> {
+  return txStore<DineInOfflineOp[]>(DINEIN_STORE, 'readonly', (s) => s.getAll() as IDBRequest<DineInOfflineOp[]>);
+}
+function removeDineIn(client_uuid: string): Promise<void> {
+  return txStore(DINEIN_STORE, 'readwrite', (s) => s.delete(client_uuid)).then(() => undefined);
+}
+
+/**
+ * Queue a dine-in order captured offline: an `open` op (table + items) and, when `fire` is set, a linked
+ * `fire` op so the kitchen gets it on reconnect. All ops share one `order_uuid`. Returns that key.
+ */
+export async function enqueueOfflineDineInOrder(input: {
+  table_id?: number; guest_count?: number; fulfillment_type?: string; lines: RegisterOfflineLine[]; fire?: boolean; device_id?: string;
+}): Promise<string> {
+  const order_uuid = crypto.randomUUID();
+  const captured_at = new Date().toISOString();
+  const openOp: DineInOfflineOp = {
+    client_uuid: crypto.randomUUID(), order_uuid, op: 'open', captured_at, device_id: input.device_id, client_seq: nextSeq(),
+    table_id: input.table_id, guest_count: input.guest_count, fulfillment_type: input.fulfillment_type, lines: input.lines,
+  };
+  await txStore(DINEIN_STORE, 'readwrite', (s) => s.put(openOp));
+  if (input.fire) {
+    const fireOp: DineInOfflineOp = { client_uuid: crypto.randomUUID(), order_uuid, op: 'fire', captured_at, device_id: input.device_id, client_seq: nextSeq() };
+    await txStore(DINEIN_STORE, 'readwrite', (s) => s.put(fireOp));
+  }
+  return order_uuid;
+}
+
+export async function pendingDineInCount(): Promise<number> {
+  return (await pendingDineIn()).length;
+}
+
+/** Replay the dine-in outbox. Synced + duplicate ops are removed; failed ops stay queued for the next try. */
+export async function syncDineIn(): Promise<DineInSyncResult[]> {
+  const ops = await pendingDineIn();
+  if (!ops.length) return [];
+  const res = await api<{ results: DineInSyncResult[] }>('/api/restaurant/offline-sync/dinein', {
+    method: 'POST',
+    body: JSON.stringify({ ops }),
+  });
+  const results = res.results ?? [];
+  for (const r of results) if (r.status === 'synced' || r.status === 'duplicate') await removeDineIn(r.client_uuid);
+  return results;
+}
+
+/** Pending-count (quick sales + dine-in ops) + a flush(), with auto-sync on reconnect. Drives the register's offline badge. */
 export function useRegisterOutbox(): { count: number; refresh: () => void; flush: () => Promise<RegisterSyncResult[]> } {
   const [count, setCount] = useState(0);
-  const refresh = useCallback(() => { void pendingCount().then(setCount).catch(() => { /* IndexedDB unavailable */ }); }, []);
+  const refresh = useCallback(() => {
+    void Promise.all([pendingCount(), pendingDineInCount()]).then(([a, b]) => setCount(a + b)).catch(() => { /* IndexedDB unavailable */ });
+  }, []);
   const flush = useCallback(async () => {
+    // replay dine-in ops first (kitchen/order lifecycle), then quick sales; both idempotent server-side.
+    await syncDineIn().catch(() => { /* stay queued */ });
     const r = await syncRegister();
     refresh();
     return r;

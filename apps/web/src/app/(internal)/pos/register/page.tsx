@@ -10,7 +10,7 @@ import { useLang } from '@/lib/i18n';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useTerminal } from '@/lib/terminal';
 import { useOnline } from '@/lib/offline';
-import { enqueueRegisterSale, fetchMenuOfflineFirst, useRegisterOutbox } from '@/lib/register-offline';
+import { enqueueRegisterSale, enqueueOfflineDineInOrder, fetchMenuOfflineFirst, useRegisterOutbox } from '@/lib/register-offline';
 import { StateView } from '@/components/state-view';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -115,13 +115,20 @@ export default function RegisterPage() {
   const settle = useCallback(async ({ method, discountPct, cashReceived, voucherCode }: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string }): Promise<SettleResult> => {
     const items = lines.map((l) => ({ sku: l.sku, qty: l.qty, modifier_option_ids: l.modifier_option_ids, notes: l.notes }));
 
-    // ── offline path: queue a QUICK (no-table) cash-ish sale and replay it on reconnect. Dine-in needs
-    //    the kitchen/online path (fire + table state), so it is blocked offline with a clear message. ──
+    // ── offline path: queue a QUICK (no-table) cash sale, or — for dine-in (POS-6) — capture the order
+    //    open + fire so the kitchen still gets it; replay both idempotently on reconnect. SETTLEMENT stays
+    //    ONLINE (the cashier settles the replayed dine-in order via the normal checkout once reconnected). ──
     const queueOffline = async (): Promise<SettleResult> => {
-      if (mode === 'dinein') throw new Error(t('px.reg_err_offline_dinein'));
+      const offlineTotal = cartTotals(lines, discountPct).total;
+      if (mode === 'dinein') {
+        // POS-6: queue open(table+items)+fire; the bill is settled online later, not offline.
+        await enqueueOfflineDineInOrder({ table_id: tableId ?? undefined, guest_count: pax, fulfillment_type: orderType, lines: items, fire: true, device_id: tm.terminalCode });
+        outbox.refresh();
+        tm.pushDisplay({ message: t('px.reg_disp_offline_dinein_sent'), total: offlineTotal });
+        return { sale_no: t('px.reg_offline_dinein_pending'), total: offlineTotal, offline: true };
+      }
       // POS-3: a voucher must be validated + atomically redeemed server-side — not redeemable offline.
       if (voucherCode) throw new Error(t('px.reg_err_offline_voucher'));
-      const offlineTotal = cartTotals(lines, discountPct).total;
       const change = cashReceived != null ? Math.round((cashReceived - offlineTotal) * 100) / 100 : undefined;
       await enqueueRegisterSale({ lines: items, method, discount_pct: discountPct || undefined, captured_at: new Date().toISOString(), device_id: tm.terminalCode, total: offlineTotal });
       outbox.refresh();

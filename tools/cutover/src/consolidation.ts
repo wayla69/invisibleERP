@@ -241,6 +241,58 @@ async function main() {
   const rules = await inj('GET', `/api/consolidation/rules?group_id=${groupId}`, admin);
   ok('CON-03 list elimination rules → ≥1', rules.json.rules?.length >= 1, `count=${rules.json.rules?.length}`);
 
+  // ── FIN-5: CTA / OCI + average-rate translation + consolidated cash flow ──
+  // A foreign (USD) subsidiary T3 whose books balance in USD: Dr Cash 1000, Cr Revenue 1000 (period 2026-03).
+  // FX rates for USD: 2026-03-15 = 30 (in-month → average basis), 2026-03-28 = 32 (closing). Both are in the
+  // month, so average = (30+32)/2 = 31; closing = 32 (latest ≤ period-end proxy 2026-03-28).
+  await db.insert(s.tenants).values([{ code: 'T3', name: 'Sub 3 (USD)' }]).onConflictDoNothing();
+  const t3 = await tid('T3');
+  await db.insert(s.fxRates).values([
+    { currency: 'USD', rateDate: '2026-03-15', rate: '30', status: 'Approved', source: 'manual' },
+    { currency: 'USD', rateDate: '2026-03-28', rate: '32', status: 'Approved', source: 'manual' },
+  ]).onConflictDoNothing();
+  await db.insert(s.journalEntries).values({ entryNo: 'JE-T3-001', entryDate: '2026-03-10', period: '2026-03', memo: 'T3 Mar (USD)', source: 'Manual', tenantId: t3, status: 'Posted' }).onConflictDoNothing();
+  const [jeT3] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, 'JE-T3-001'));
+  await db.insert(s.journalLines).values([
+    { entryId: Number(jeT3.id), accountCode: '1000', debit: '1000', credit: '0', tenantId: t3 },
+    { entryId: Number(jeT3.id), accountCode: '4000', debit: '0', credit: '1000', tenantId: t3 },
+  ]).onConflictDoNothing();
+
+  const grpFx = await inj('POST', '/api/consolidation/groups', admin, { name: 'FX Group 2026', fiscal_year: 2026 });
+  const fxGroupId = grpFx.json.id;
+  await inj('POST', `/api/consolidation/groups/${fxGroupId}/entities`, admin, { entity_tenant_id: t3, ownership_pct: 100, entity_currency: 'USD' });
+  // IC reconciliation sign-off (no IC → 0 = 0, eliminates) then approve by a different user.
+  await inj('POST', `/api/ic-reconciliation/groups/${fxGroupId}/prepare`, admin, { period: '2026-03' });
+  await inj('POST', `/api/ic-reconciliation/groups/${fxGroupId}/approve`, admin2, { period: '2026-03' });
+
+  const fxRun = await inj('POST', `/api/consolidation/groups/${fxGroupId}/run`, admin, { period: '2026-03' });
+  ok('FIN-5 dual-rate run → Final + balanced', fxRun.status === 200 && fxRun.json.status === 'Final' && fxRun.json.balanced === true, JSON.stringify(fxRun.json).slice(0, 200));
+  // Translation: Cash 1000 @closing 32 = 32000; Revenue 4000 @avg 31 = −31000; entityTranslated = 1000 → CTA = −1000.
+  ok('FIN-5 CTA total parked in OCI ≈ −1000', near(fxRun.json.cta_total, -1000), `cta_total=${fxRun.json.cta_total}`);
+  const cashAcct = fxRun.json.consolidated_accounts.find((a: any) => a.account_code === '1000');
+  ok('FIN-5 cash 1000 translated at closing rate = 32000', near(cashAcct?.net_thb, 32000), `net=${cashAcct?.net_thb}`);
+  const revAcct = fxRun.json.consolidated_accounts.find((a: any) => a.account_code === '4000');
+  ok('FIN-5 revenue 4000 translated at average rate = −31000', near(revAcct?.net_thb, -31000), `net=${revAcct?.net_thb}`);
+  const ctaAcct = fxRun.json.consolidated_accounts.find((a: any) => a.account_code === '3400');
+  ok('FIN-5 CTA/OCI reserve line 3400 = −1000', near(ctaAcct?.net_thb, -1000), `net=${ctaAcct?.net_thb}`);
+
+  // Run lines carry the rate + basis used per line.
+  const fxLines = await inj('GET', `/api/consolidation/runs/${fxRun.json.run_id}/lines`, admin);
+  const revLine = fxLines.json.lines.find((l: any) => l.line_type === 'Entity' && l.account_code === '4000');
+  const cashLine = fxLines.json.lines.find((l: any) => l.line_type === 'Entity' && l.account_code === '1000');
+  const ctaLine = fxLines.json.lines.find((l: any) => l.line_type === 'FX_CTA');
+  ok('FIN-5 P&L line tagged average rate 31', revLine?.rate_type === 'average' && near(revLine?.fx_rate, 31), JSON.stringify(revLine));
+  ok('FIN-5 BS line tagged closing rate 32', cashLine?.rate_type === 'closing' && near(cashLine?.fx_rate, 32), JSON.stringify(cashLine));
+  ok('FIN-5 FX_CTA line on 3400 tagged cta', ctaLine?.account_code === '3400' && ctaLine?.rate_type === 'cta' && near(ctaLine?.amount_thb, -1000), JSON.stringify(ctaLine));
+
+  // Consolidated statement of cash flows (indirect, post-elimination): net income 31000, FX effect 1000,
+  // Δ cash 32000 — and it reconciles (activity sections tie to the movement in the cash accounts).
+  const scf = await inj('GET', `/api/consolidation/runs/${fxRun.json.run_id}/cash-flow`, admin);
+  ok('FIN-5 consolidated SCF reconciles', scf.status === 200 && scf.json.reconciled === true, JSON.stringify(scf.json).slice(0, 220));
+  ok('FIN-5 consolidated SCF net income = 31000', near(scf.json.operating?.net_income, 31000), `ni=${scf.json.operating?.net_income}`);
+  ok('FIN-5 consolidated SCF fx-effect on cash = 1000', near(scf.json.fx_effect?.net, 1000), `fx=${scf.json.fx_effect?.net}`);
+  ok('FIN-5 consolidated SCF Δcash = 32000', near(scf.json.net_change_in_cash, 32000) && near(scf.json.consolidated_cash_movement, 32000), `Δ=${scf.json.net_change_in_cash}`);
+
   await app.close();
 }
 
