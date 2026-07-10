@@ -261,9 +261,13 @@ async function main() {
     return res.json;
   };
   // a hub till session that COVERS the already-replayed sales, counted short by exactly ฿40
-  // drawer takings = Σ(total + tip) over the session's sales (the restaurant path debits 1000 for every tender)
-  const hubSaleTotals = (await hub.pg.query(`SELECT s.total, s.tip FROM cust_pos_sales s JOIN dine_in_orders o ON o.sale_no = s.sale_no WHERE s.status='Completed'`)).rows as any[];
-  const cashTotal = Math.round(hubSaleTotals.reduce((s, r) => s + Number(r.total) + Number(r.tip ?? 0), 0) * 100) / 100;
+  // a CARD sale inside the same session — its money never enters the drawer, so it must be EXCLUDED
+  const cardSale = await ring([{ sku: 'GP01', qty: 1 }], { method: 'Card' });
+  const pushCard = await pushHubSales(hub.db, t1, { secret: SECRET, send }); // replay it before the till closes
+  ok('Hub: a card sale is rung in the same session and replays', !!cardSale.sale_no && pushCard.pushed === 1, JSON.stringify({ sale: cardSale.sale_no, pushCard }));
+  // drawer takings = Σ(cash tender amount + tip) — the TENDER says what entered the drawer, not the sale
+  const hubCash = (await hub.pg.query(`SELECT amount, tip FROM payments WHERE method='Cash' AND status IN ('Captured','Refunded')`)).rows as any[];
+  const cashTotal = Math.round(hubCash.reduce((s, r) => s + Number(r.amount) + Number(r.tip ?? 0), 0) * 100) / 100;
   const OPEN_FLOAT = 1000;
   await hub.pg.query(`INSERT INTO till_sessions (session_no, tenant_id, opened_by, opened_at, opening_float, closed_by, closed_at, closing_count, status)
     VALUES ('TILL-HUB-1', ${t1}, 'cashier1', now() - interval '3 hours', ${OPEN_FLOAT}, 'cashier1', now(), ${OPEN_FLOAT + cashTotal - 40}, 'Closed')`);
@@ -280,7 +284,9 @@ async function main() {
   ok('Till pushed once its sales are all on the cloud', tillPush.pushed === 1 && tillPush.blocked === 0 && tillPush.failed === 0, JSON.stringify(tillPush));
 
   const cloudTill = (await cloud.pg.query(`SELECT expected_cash, closing_count, variance, variance_status, variance_journal_no FROM till_sessions WHERE session_no='TILL-HUB-1'`)).rows[0] as any;
-  ok('Cloud recomputed expected cash from ITS OWN sale ledger (float + drawer takings)', Math.abs(Number(cloudTill?.expected_cash) - (OPEN_FLOAT + cashTotal)) < 0.02, JSON.stringify({ got: cloudTill?.expected_cash, want: OPEN_FLOAT + cashTotal }));
+  ok('Cloud recomputed expected cash from ITS OWN cash TENDERS (float + cash + tips)', Math.abs(Number(cloudTill?.expected_cash) - (OPEN_FLOAT + cashTotal)) < 0.02, JSON.stringify({ got: cloudTill?.expected_cash, want: OPEN_FLOAT + cashTotal }));
+  const cardTotal = Number((await cloud.pg.query(`SELECT coalesce(sum(amount),0) v FROM payments WHERE method='Card'`)).rows[0]?.v ?? 0);
+  ok('Card sale in the session does NOT inflate the drawer expectation', cardTotal > 0 && Number(cloudTill?.expected_cash) < OPEN_FLOAT + cashTotal + cardTotal - 0.01, JSON.stringify({ expected: cloudTill?.expected_cash, cardTotal }));
   ok('Immaterial short (฿40 < ฿100) posts 5830 immediately, no approval needed', Math.abs(Number(cloudTill?.variance) + 40) < 0.02 && cloudTill?.variance_status === 'NotRequired' && /^JE-/.test(cloudTill?.variance_journal_no ?? ''), JSON.stringify(cloudTill));
   const os = (await cloud.pg.query(`SELECT sum(debit)::numeric d FROM journal_lines jl JOIN journal_entries je ON je.id=jl.entry_id WHERE jl.account_code='5830' AND je.status='Posted'`)).rows[0] as any;
   ok('Cash Over/Short 5830 debited by the short amount', Math.abs(Number(os?.d ?? 0) - 40) < 0.02, JSON.stringify(os));

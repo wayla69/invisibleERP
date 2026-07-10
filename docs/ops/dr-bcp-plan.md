@@ -1,6 +1,6 @@
 # Disaster Recovery & Business Continuity Plan (ITGC-OP-02)
 
-> **Status:** v1.2 · **Date:** 2026-06-30 · **Owner:** CTO / Platform-SRE · **Review cadence:** annual + after any DR test
+> **Status:** v1.3 · **Date:** 2026-07-10 · **Owner:** CTO / Platform-SRE · **Review cadence:** annual + after any DR test
 > Builds on the backup/restore procedure (`tools/ops/BACKUP-RUNBOOK.md`, ITGC-OP-01). This plan adds the
 > scenario playbooks, roles, communications, business-continuity (degraded-mode) posture, and the **DR test
 > schedule** — the items OP-02 was missing.
@@ -32,10 +32,23 @@ not just to local disk.
    tender / cash; AI fails closed (`AI_DPA_REQUIRED` / `AI_UNAVAILABLE`) without blocking core ERP; queue
    webhooks for replay. No data loss.
 
+6. **Store-hub box loss / failure** (LAN-first stores, `docs/41` / `docs/ops/store-hub-setup.md`) — the hub
+   holds the store's operational state *and any sale not yet replayed to the cloud*. **RPO = the push
+   interval** (cron every 5 min) for revenue, and the nightly verified dump (`hub-backup`) for the rest.
+   Playbook: rebuild the box, `docker compose up -d --build`, restore the latest dump (`pg_restore`), then
+   `hub-push` — the deterministic `client_uuid` makes the replay idempotent, so re-pushing a restored dump
+   **cannot double-post** (BRANCH-04). If the dump predates un-replayed sales, that revenue exists only on
+   the lost disk: quantify it from `GET /api/hub/fleet` (last reported backlog) and re-enter centrally.
+   While a hub is down the store can point tills at the cloud (browser offline outbox, Phase 0) and sell
+   quick sales; dine-in/diner-QR need the hub or the internet.
+
 ## 3. Business continuity (degraded-mode operations)
 
 - **POS keeps selling offline** — the restaurant/register offline path buffers sales locally and syncs on
   reconnect (so a backend/region outage doesn't stop the till). Reconcile on recovery.
+- **A LAN-first store keeps its whole front-of-house running** on its hub through an internet outage
+  (diner QR, KDS, register, buffet, cash sessions); sales + Z-reports replay exactly-once on reconnect
+  (BRANCH-04/BRANCH-05). Card/e-wallet capture and PromptPay confirmation still need the internet.
 - **Read-mostly fallback** — if the primary DB is degraded, serve from the latest restore in read-mostly
   mode while the primary is rebuilt.
 - **Manual control continuity** — maker-checker/SoD and the audit trail remain the controls of record; any
@@ -83,3 +96,4 @@ Maintain the status-page + paging routing; PDPA breach notification (controller 
 | 1.0 | 2026-06-30 | CTO / Platform-SRE | Initial DR/BCP plan — RTO/RPO tiers, scenario playbooks, BCP degraded-mode, roles/comms, DR test schedule + checklist (OP-02 Gap → Implemented). |
 | 1.1 | 2026-06-30 | Platform / SRE | Added the **automated DR game-day** (CI `DR Game-day` workflow + `cutover/dr-gameday`) and recorded the **first executed test (PASS: RTO 2.6 s, RPO 0)**. |
 | 1.2 | 2026-07-08 | Platform / SRE | **Game-day cadence: annual → MONTHLY** (`dr-gameday.yml` cron) so the automated end-to-end restore test doubles as the monthly restore-drill evidence OP-01/OP-02 commit to on GitHub-hosted deploys (each run uploads its measured-RTO/RPO report, retention 90d; archive to `dr-test-reports/`). RCM OP-02 evidence refs updated. |
+| 1.3 | 2026-07-10 | Platform | **Store-hub (LAN-first) DR** — new scenario 6 (hub box loss: RPO = the push interval; restore + idempotent re-push cannot double-post per BRANCH-04; quantify un-replayed revenue from the fleet backlog) and a BCP line for a hub keeping the whole front-of-house running through an internet outage. Runbook: `docs/ops/store-hub-setup.md` (verified nightly `hub-backup`, §8 update procedure). |
