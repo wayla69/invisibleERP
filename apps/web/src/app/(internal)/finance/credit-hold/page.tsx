@@ -19,6 +19,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useBatchActions, BatchBar } from '@/components/batch-actions';
 
 interface CreditPosition {
   tenant_id: number;
@@ -112,6 +113,15 @@ export default function CreditHoldPage() {
     onError: (e: any) => notifyError(e?.message ?? t('fnx.credhold.err_limit')),
   });
   const pendingLimitRows = pendingLimits.data?.requests ?? [];
+  const batch = useBatchActions<(typeof pendingLimitRows)[number]>({
+    items: pendingLimitRows,
+    keyOf: (r) => r.req_no,
+    run: (r, action) =>
+      action === 'approve'
+        ? api(`/api/finance/ar/credit-limit/${r.req_no}/approve`, { method: 'POST' })
+        : api(`/api/finance/ar/credit-limit/${r.req_no}/reject`, { method: 'POST', body: JSON.stringify({}) }),
+    onDone: () => { qc.invalidateQueries({ queryKey: ['credit-limit-pending'] }); refresh(); },
+  });
 
   const data = positions.data;
   const totalExposure = (data?.positions ?? []).reduce((a, p) => a + p.exposure, 0);
@@ -134,8 +144,18 @@ export default function CreditHoldPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             <p className="text-sm text-muted-foreground">{t('fnx.credhold.pending_desc')}</p>
+            <BatchBar
+              eligibleCount={batch.eligibleCount}
+              selectedCount={batch.selectedCount}
+              running={batch.running}
+              onSelectAll={batch.selectAll}
+              onApprove={() => batch.runBatch('approve')}
+              onReject={() => batch.runBatch('reject')}
+              onClear={batch.clear}
+            />
             {pendingLimitRows.map((r) => (
               <div key={r.req_no} className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 p-2.5 text-sm">
+                <input type="checkbox" aria-label={`select ${r.req_no}`} checked={batch.isSel(r)} onChange={() => batch.toggle(r)} />
                 <span className="font-medium">{r.customer}</span>
                 <span className="text-muted-foreground">{baht(r.old_limit)} → <span className="font-medium text-foreground">{baht(r.new_limit)}</span></span>
                 {r.reason && <span className="text-xs text-muted-foreground">· {r.reason}</span>}

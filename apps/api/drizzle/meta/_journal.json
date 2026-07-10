@@ -2113,7 +2113,21 @@
       "idx": 301,
       "version": "7",
       "when": 2023820000264,
-      "tag": "0301_consolidation_cta_translation",
+      "tag": "0301_kds_recall_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 302,
+      "version": "7",
+      "when": 2023820000265,
+      "tag": "0302_fs_report_definitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 303,
+      "version": "7",
+      "when": 2023820000266,
+      "tag": "0303_consolidation_cta_translation",
       "breakpoints": true
     }
   ]

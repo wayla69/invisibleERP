@@ -1,4 +1,4 @@
--- 0301_consolidation_cta_translation — FIN-5: CTA/OCI reserve + average-rate translation (consolidation).
+-- 0303_consolidation_cta_translation — FIN-5: CTA/OCI reserve + average-rate translation (consolidation).
 -- Group consolidation historically translated every foreign entity at a single closing rate, so the
 -- translated trial balance always netted to zero and no cumulative-translation-adjustment (CTA) ever arose —
 -- a defect an IFRS/TFRS (TAS 21 / IAS 21) reviewer flags immediately. FIN-5 introduces dual-rate translation:
