@@ -2122,6 +2122,13 @@
       "when": 2023820000265,
       "tag": "0302_fs_report_definitions",
       "breakpoints": true
+    },
+    {
+      "idx": 303,
+      "version": "7",
+      "when": 2023820000266,
+      "tag": "0303_consolidation_cta_translation",
+      "breakpoints": true
     }
   ]
 }
