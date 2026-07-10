@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLang } from '@/lib/i18n';
 
 // Business-day (Asia/Bangkok) today, as YYYY-MM-DD.
@@ -65,7 +66,7 @@ export default function RestaurantAnalyticsPage() {
       />
       <Tabs
         tabs={[
-          { key: 'menu', label: 'Menu engineering', content: <MenuEngineering url={`/api/analytics/menu-engineering?${win}`} /> },
+          { key: 'menu', label: 'Menu engineering', content: <MenuEngineering win={win} /> },
           { key: 'daypart', label: t('mf.ra_tab_daypart'), content: <Daypart url={`/api/analytics/daypart?${win}`} /> },
           { key: 'voids', label: t('mf.ra_tab_voids'), content: <Voids url={`/api/analytics/voids-discounts?${win}`} /> },
           { key: 'staff', label: t('mf.ra_tab_staff'), content: <Staff url={`/api/analytics/staff-performance?${win}`} /> },
@@ -77,12 +78,33 @@ export default function RestaurantAnalyticsPage() {
   );
 
   // ── Menu engineering matrix ──
-  function MenuEngineering({ url }: { url: string }) {
-    const q = useReport<any>('me', url);
+  function MenuEngineering({ win }: { win: string }) {
+    const [branch, setBranch] = useState('all');
+    // branch picker (needs the branch/exec duty — hidden if the list isn't readable or there are no branches)
+    const branches = useQuery<any>({ queryKey: ['branches'], queryFn: () => api('/api/branches'), retry: false, staleTime: 5 * 60_000 });
+    const url = `/api/analytics/menu-engineering?${win}${branch !== 'all' ? `&branch_id=${branch}` : ''}`;
+    const q = useQuery<any>({ queryKey: ['me', win, branch], queryFn: () => api<any>(url) });
+    const thr = q.data?.thresholds;
     return (
       <StateView q={q}>
         {q.data && (
           <>
+            {(branches.data?.branches ?? []).length > 0 && (
+              <div className="mb-3 flex items-end gap-2">
+                <div className="grid gap-1">
+                  <Label className="text-xs">{t('mf.ra_branch')}</Label>
+                  <Select value={branch} onValueChange={setBranch}>
+                    <SelectTrigger className="h-9 w-56"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t('mf.ra_branch_all')}</SelectItem>
+                      {(branches.data?.branches ?? []).map((b: any) => (
+                        <SelectItem key={b.id} value={String(b.id)}>{b.code} — {b.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
             <Grid>
               <StatCard label={t('mf.ra_items_sold')} value={num(q.data.summary.items)} icon={BarChart3} />
               <StatCard label={t('mf.ra_units_sold')} value={num(q.data.summary.units_sold)} />
@@ -92,6 +114,11 @@ export default function RestaurantAnalyticsPage() {
               <StatCard label="❓ Puzzle / 🐶 Dog" value={`${num(q.data.summary.puzzles)} / ${num(q.data.summary.dogs)}`} tone="info" />
             </Grid>
             <Section title={t('mf.ra_me_section')}>
+              {thr && (
+                <p className="text-xs text-muted-foreground">
+                  {t('mf.ra_me_thresholds', { pop: pct(Number(thr.popularity_share_threshold) * 100), acm: baht(thr.avg_unit_margin) })}
+                </p>
+              )}
               <DataTable
                 rows={q.data.items}
                 rowKey={(r: any) => r.item_id}
