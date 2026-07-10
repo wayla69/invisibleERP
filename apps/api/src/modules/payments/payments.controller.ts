@@ -10,6 +10,7 @@ import {
   type OpenTillDto,
   type CloseTillDto,
   type CashMovementDto,
+  type AdjustTipDto,
 } from './payments.service';
 
 const TenderBody = z.object({
@@ -26,7 +27,10 @@ const TenderBody = z.object({
   // C1: a stable client token (e.g. a per-tender UUID). Retries with the same key return the original
   // tender instead of charging again. Optional so legacy/keyless callers keep working.
   idempotency_key: z.string().min(8).max(200).optional(),
+  // POS-10: auth-only (place a hold, capture later) — enables the tip-adjust-after-auth flow.
+  authorize: z.boolean().optional(),
 });
+const AdjustTipBody = z.object({ tip: z.number().nonnegative(), reason: z.string().max(500).optional() });
 const RefundBody = z.object({ payment_no: z.string().min(1), amount: z.number().positive(), reason: z.string().optional() });
 const OpenTillBody = z.object({ opening_float: z.number().nonnegative().optional() });
 const CloseTillBody = z.object({ session_no: z.string().min(1), closing_count: z.number().nonnegative(), denominations: z.record(z.string(), z.number()).optional() });
@@ -44,6 +48,24 @@ export class PaymentsController {
   @Post() @Permissions('pos_sell', 'cust_pos', 'ar')
   tender(@Body(new ZodValidationPipe(TenderBody)) b: RecordTenderDto, @CurrentUser() u: JwtUser) {
     return this.svc.recordTender(b, u);
+  }
+
+  // POS-10 — tip-adjust-after-auth. Staff set the tip the guest wrote on the slip on an AUTHORIZED tender
+  // (pre-capture, up to the policy % ceiling — every adjustment audited), then capture bill + tip. A selling
+  // duty (pos_sell) drives it; the ceiling + pre-capture + audit-log are the controls, not maker-checker.
+  @Post(':no/tip-adjust') @Permissions('pos_sell', 'ar')
+  adjustTip(@Param('no') no: string, @Body(new ZodValidationPipe(AdjustTipBody)) b: AdjustTipDto, @CurrentUser() u: JwtUser) {
+    return this.svc.adjustTip(no, b, u);
+  }
+
+  @Post(':no/capture') @Permissions('pos_sell', 'ar')
+  capture(@Param('no') no: string, @CurrentUser() u: JwtUser) {
+    return this.svc.capture(no, u);
+  }
+
+  @Get(':no/tip-adjustments') @Permissions('pos_sell', 'pos_refund', 'exec', 'ar')
+  tipAdjustments(@Param('no') no: string, @CurrentUser() u: JwtUser) {
+    return this.svc.listTipAdjustments(no, u);
   }
 
   @Post('refunds') @Permissions('pos_refund', 'ar')

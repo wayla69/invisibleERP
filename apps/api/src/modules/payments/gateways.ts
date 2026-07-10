@@ -17,6 +17,21 @@ export interface PaymentGateway {
     method: string,
     meta?: Record<string, unknown>,
   ): Promise<GatewayResult>;
+  // POS-10 — the "authorize now, capture later" split for tip-adjust-after-auth. `authorize` places a hold
+  // for the bill amount (→ Authorized, no funds captured); `capture` later settles the hold for the final
+  // total (bill + adjusted tip) against the prior auth's ref (→ Captured). Same PSP surface, no new processor.
+  authorize(
+    amount: number,
+    currency: string,
+    method: string,
+    meta?: Record<string, unknown>,
+  ): Promise<GatewayResult>;
+  capture(
+    ref: string,
+    amount: number,
+    currency: string,
+    meta?: Record<string, unknown>,
+  ): Promise<GatewayResult>;
 }
 
 const rnd = () => Math.random().toString(36).slice(2, 12);
@@ -25,6 +40,12 @@ const rnd = () => Math.random().toString(36).slice(2, 12);
 export class MockGateway implements PaymentGateway {
   async authorizeAndCapture(): Promise<GatewayResult> {
     return { ref: 'mock_' + rnd(), status: 'Captured' };
+  }
+  async authorize(): Promise<GatewayResult> {
+    return { ref: 'mockauth_' + rnd(), status: 'Authorized' };
+  }
+  async capture(ref: string): Promise<GatewayResult> {
+    return { ref, status: 'Captured' };
   }
 }
 
@@ -38,6 +59,14 @@ export class PromptPayGateway implements PaymentGateway {
     const ppId = (meta?.promptpay_id ?? meta?.promptPayId) as string | undefined;
     const ref = ppId ? buildPromptPayPayload(ppId, amount) : 'promptpay_' + amount;
     return { ref, status: 'Pending' };
+  }
+  // PromptPay is a pull QR — there is no card auth hold to place or capture, so the split maps onto the
+  // same async QR flow (Pending → settled out-of-band by the payer). Card tip-adjust uses a card gateway.
+  async authorize(amount: number, currency: string, method: string, meta?: Record<string, unknown>): Promise<GatewayResult> {
+    return this.authorizeAndCapture(amount, currency, method, meta);
+  }
+  async capture(ref: string): Promise<GatewayResult> {
+    return { ref, status: 'Captured' };
   }
 }
 
@@ -57,6 +86,34 @@ export class StripeGateway implements PaymentGateway {
     });
     const pi: any = await res.json().catch(() => ({}));
     if (!res.ok || pi.error) throw new BadRequestException({ code: 'PSP_ERROR', message: pi.error?.message ?? `Stripe error ${res.status}`, messageTh: 'การชำระเงินผิดพลาด' });
+    return { ref: pi.id, status: mapStripe(pi.status) };
+  }
+
+  // POS-10 — auth-only: a manual-capture PaymentIntent holds the bill amount (→ requires_capture ⇒ Authorized).
+  async authorize(amount: number, currency: string, _method: string, meta?: Record<string, unknown>): Promise<GatewayResult> {
+    if (!this.secretKey) return { ref: 'stripe_unconfigured', status: 'Failed' };
+    const token = (meta?.token ?? meta?.payment_method) as string | undefined;
+    if (!token) return { ref: `stripe_pending_${meta?.sale_no ?? amount}`, status: 'Pending' };
+    const res = await fetch('https://api.stripe.com/v1/payment_intents', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.secretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ amount: String(minorUnits(amount, currency)), currency: (currency || 'THB').toLowerCase(), payment_method: token, confirm: 'true', capture_method: 'manual', 'automatic_payment_methods[enabled]': 'true', 'automatic_payment_methods[allow_redirects]': 'never' }),
+    });
+    const pi: any = await res.json().catch(() => ({}));
+    if (!res.ok || pi.error) throw new BadRequestException({ code: 'PSP_ERROR', message: pi.error?.message ?? `Stripe error ${res.status}`, messageTh: 'การชำระเงินผิดพลาด' });
+    return { ref: pi.id, status: mapStripe(pi.status) };
+  }
+
+  // Capture the (possibly higher — bill + tip) amount against the held PaymentIntent.
+  async capture(ref: string, amount: number, currency: string): Promise<GatewayResult> {
+    if (!this.secretKey) return { ref, status: 'Failed' };
+    const res = await fetch(`https://api.stripe.com/v1/payment_intents/${encodeURIComponent(ref)}/capture`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.secretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ amount_to_capture: String(minorUnits(amount, currency)) }),
+    });
+    const pi: any = await res.json().catch(() => ({}));
+    if (!res.ok || pi.error) throw new BadRequestException({ code: 'PSP_ERROR', message: pi.error?.message ?? `Stripe capture error ${res.status}`, messageTh: 'การเก็บเงินผิดพลาด' });
     return { ref: pi.id, status: mapStripe(pi.status) };
   }
 }
@@ -84,6 +141,21 @@ export class OpnGateway implements PaymentGateway {
     // tenders capture immediately; the PSP itself returns Pending for an async wallet/QR source.
     const { ref, status } = await this.omise.charge({ amount, currency: currency || 'THB', type: 'sale', token, intentNo: String(meta?.sale_no ?? '') });
     return { ref, status };
+  }
+
+  // POS-10 — auth-only: a preauth charge (capture:false) holds the bill amount (→ Authorized). No token ⇒
+  // no hold to place, so stay Pending (never fabricate an authorization for money that hasn't been reserved).
+  async authorize(amount: number, currency: string, _method: string, meta?: Record<string, unknown>): Promise<GatewayResult> {
+    const token = (meta?.token ?? meta?.source) as string | undefined;
+    if (!token) return { ref: `opn_pending_${meta?.sale_no ?? amount}`, status: 'Pending' };
+    const { ref, status } = await this.omise.charge({ amount, currency: currency || 'THB', type: 'preauth', token, intentNo: String(meta?.sale_no ?? '') });
+    return { ref, status };
+  }
+
+  // Capture the held charge for the final (bill + tip) amount.
+  async capture(ref: string, amount: number): Promise<GatewayResult> {
+    await this.omise.capture(ref, amount);
+    return { ref, status: 'Captured' };
   }
 }
 

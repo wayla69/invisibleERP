@@ -126,5 +126,26 @@ export const xzReportDenominations = pgTable('xz_report_denominations', {
   total: numeric('total', { precision: 18, scale: 4 }).notNull().default('0'),
 });
 
+// POS-10 — Tip-adjust-after-auth audit log. The US-restaurant "authorize now, add the tip, capture later"
+// card flow: a card is AUTHORIZED for the bill at checkout, staff ADJUST the tip the guest wrote on the slip
+// before capture, then capture amount + tip. Every adjustment is written here (old→new tip + the auth amount
+// and policy ceiling in force) so the tip a guest was charged is always tied back to the slip — an immutable
+// trail, never updated in place. Tenant-scoped (RLS + tenant-leading index; migration 0309).
+export const posTipAdjustments = pgTable('pos_tip_adjustments', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  paymentNo: text('payment_no').notNull(),          // the PAY- tender being adjusted
+  oldTip: numeric('old_tip', { precision: 18, scale: 4 }).notNull().default('0'),
+  newTip: numeric('new_tip', { precision: 18, scale: 4 }).notNull().default('0'),
+  delta: numeric('delta', { precision: 18, scale: 4 }).notNull().default('0'),
+  authAmount: numeric('auth_amount', { precision: 18, scale: 4 }).notNull().default('0'),  // the authorized bill
+  maxTip: numeric('max_tip', { precision: 18, scale: 4 }).notNull().default('0'),          // policy ceiling in force
+  reason: text('reason'),
+  adjustedBy: text('adjusted_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byPayment: index('idx_pos_tip_adjustments_tenant_payment').on(t.tenantId, t.paymentNo),
+}));
+
 export type Payment = typeof payments.$inferSelect;
 export type XzReport = typeof xzReports.$inferSelect;
