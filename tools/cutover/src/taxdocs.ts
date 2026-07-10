@@ -448,6 +448,51 @@ async function main() {
   const cmRow2 = (cmSearch2.json.customers ?? [])[0];
   ok('customer_master: re-issuing for the same buyer REFRESHES the address, no duplicate row', cmSearch2.status === 200 && cmSearch2.json.count === 1 && cmRow2?.address === 'ที่อยู่ใหม่ (ย้ายสำนักงาน) กรุงเทพฯ', JSON.stringify({ count: cmSearch2.json.count, address: cmRow2?.address }));
 
+  // ── POS-1 / TAX-10: ABB → full tax-invoice conversion at the counter (ม.86/4 on buyer request) ──
+  // A fresh sale so the conversion's period math is self-contained; the block asserts the single-count
+  // invariant (output VAT unchanged: the Replaced ABB drops out, the full invoice lands in its place).
+  await seedSale('S-T1-CONV', t1, 300, 21, 321, 'D');
+  const cvAbb = await inj('POST', '/api/tax-invoices/abbreviated/from-sale/S-T1-CONV', cust1);
+  ok('TAX-10 setup: ABB issued for the conversion sale', /^ATV-/.test(cvAbb.json.doc_no ?? ''), `${cvAbb.status} ${cvAbb.json.doc_no}`);
+  const ovPreCv = (await inj('GET', `/api/tax-reports/output-vat?month=${curMonth}&year=${curYear}`, admin)).json.totals.vat;
+  const cvBuyer = { name: 'บริษัท ผู้ซื้อขอเต็มรูป จำกัด', tax_id: T2_TAX, branch_code: '00001', address: '55 ถนนเพชรบุรี กรุงเทพฯ' };
+  const cv = await inj('POST', `/api/tax-invoices/abbreviated/${cvAbb.json.doc_no}/convert-full`, cust1, { buyer: cvBuyer });
+  ok('TAX-10: ABB converts to a FULL tax invoice (TIV-, VAT separated, buyer block captured)',
+    /^TIV-\d{6}-\d{4}$/.test(cv.json.doc_no ?? '') && cv.json.type === 'full' && cv.json.is_vat_inclusive === false
+    && cv.json.buyer?.tax_id === T2_TAX && cv.json.buyer?.name === cvBuyer.name && cv.json.already_converted === false,
+    `${cv.status} ${JSON.stringify(cv.json).slice(0, 110)}`);
+  ok('TAX-10: amounts/VAT copied VERBATIM from the ABB (300 / 21 / 321 — never recomputed)',
+    near(cv.json.subtotal, 300) && near(cv.json.vat_amount, 21) && near(cv.json.grand_total, 321), JSON.stringify({ s: cv.json.subtotal, v: cv.json.vat_amount, g: cv.json.grand_total }));
+  ok('TAX-10: linkage recorded (full.replaces_doc_no = the ABB) + same issue date/source', cv.json.replaces_doc_no === cvAbb.json.doc_no && cv.json.issue_date === cvAbb.json.issue_date && cv.json.source_ref === 'S-T1-CONV', JSON.stringify({ rep: cv.json.replaces_doc_no, d: cv.json.issue_date }));
+  const cvAbbAfter = await inj('GET', `/api/tax-invoices/${cvAbb.json.doc_no}`, cust1);
+  ok('TAX-10: the ABB is superseded (status Replaced, number retained — never reused)', cvAbbAfter.json.status === 'Replaced', cvAbbAfter.json.status);
+  const ovPostCv = (await inj('GET', `/api/tax-reports/output-vat?month=${curMonth}&year=${curYear}`, admin)).json;
+  ok('TAX-10: output VAT counts the supply EXACTLY once (total unchanged by the conversion)', near(ovPostCv.totals.vat, ovPreCv), `pre=${ovPreCv} post=${ovPostCv.totals.vat}`);
+  ok('TAX-10: ภ.พ.30 report carries the full invoice, not the superseded ABB', ovPostCv.rows.some((r: any) => r.doc_no === cv.json.doc_no) && !ovPostCv.rows.some((r: any) => r.doc_no === cvAbb.json.doc_no));
+  // Idempotent: re-converting returns the SAME full invoice — no second document (one full per ABB).
+  const cvDup = await inj('POST', `/api/tax-invoices/abbreviated/${cvAbb.json.doc_no}/convert-full`, cust1, { buyer: { ...cvBuyer, name: 'คนละชื่อ (ต้องถูกเมิน)' } });
+  ok('TAX-10: double-convert blocked — re-call returns the SAME full invoice (idempotent)', cvDup.json.doc_no === cv.json.doc_no && cvDup.json.already_converted === true && cvDup.json.buyer?.name === cvBuyer.name, `${cvDup.status} ${cvDup.json.doc_no}`);
+  const cvFulls = await inj('GET', '/api/tax-invoices?type=full', cust1);
+  ok('TAX-10: exactly ONE full invoice references the ABB', (cvFulls.json.invoices ?? []).filter((i: any) => i.replaces_doc_no === cvAbb.json.doc_no).length === 1);
+  // Negative: bad buyer Tax ID (checksum) → INVALID_BUYER_TAXID; missing Tax ID → schema-rejected.
+  await seedSale('S-T1-CONV2', t1, 80, 5.6, 85.6, 'E');
+  const cvAbb2 = await inj('POST', '/api/tax-invoices/abbreviated/from-sale/S-T1-CONV2', cust1);
+  const cvBadTax = await inj('POST', `/api/tax-invoices/abbreviated/${cvAbb2.json.doc_no}/convert-full`, cust1, { buyer: { name: 'ผู้ซื้อ', tax_id: '1234567890123', address: 'ที่อยู่' } });
+  ok('TAX-10: invalid buyer Tax ID (bad checksum) rejected → INVALID_BUYER_TAXID 400', cvBadTax.status === 400 && cvBadTax.json.error?.code === 'INVALID_BUYER_TAXID', `${cvBadTax.status} ${cvBadTax.json.error?.code}`);
+  const cvNoTax = await inj('POST', `/api/tax-invoices/abbreviated/${cvAbb2.json.doc_no}/convert-full`, cust1, { buyer: { name: 'ผู้ซื้อ', address: 'ที่อยู่' } });
+  ok('TAX-10: missing buyer Tax ID rejected (required for conversion) → 400', cvNoTax.status === 400, `${cvNoTax.status} ${cvNoTax.json.error?.code}`);
+  // Negative: a voided ABB cannot be converted; a non-ABB document cannot be converted; RLS cross-tenant 404.
+  await inj('PATCH', `/api/tax-invoices/${cvAbb2.json.doc_no}/void`, sales1, { reason: 'ยกเลิกทดสอบ' });
+  const cvVoided = await inj('POST', `/api/tax-invoices/abbreviated/${cvAbb2.json.doc_no}/convert-full`, cust1, { buyer: cvBuyer });
+  ok('TAX-10: a VOIDED ABB cannot be converted → ABB_VOIDED 400', cvVoided.status === 400 && cvVoided.json.error?.code === 'ABB_VOIDED', `${cvVoided.status} ${cvVoided.json.error?.code}`);
+  const cvNotAbb = await inj('POST', `/api/tax-invoices/abbreviated/${full.json.doc_no}/convert-full`, sales1, { buyer: cvBuyer });
+  ok('TAX-10: a non-ABB document cannot be converted → NOT_ABBREVIATED 400', cvNotAbb.status === 400 && cvNotAbb.json.error?.code === 'NOT_ABBREVIATED', `${cvNotAbb.status} ${cvNotAbb.json.error?.code}`);
+  const cvCross = await inj('POST', `/api/tax-invoices/abbreviated/${cvAbb.json.doc_no}/convert-full`, cust2, { buyer: cvBuyer });
+  ok('TAX-10: cross-tenant conversion attempt → 404 (RLS-filtered)', cvCross.status === 404, `${cvCross.status}`);
+  // The converted document flows into the existing full-invoice print path (ม.86/4 layout + buyer block).
+  const cvPdf = await inj('GET', `/api/tax-invoices/${cv.json.doc_no}/pdf`, cust1);
+  ok('TAX-10: converted invoice prints as a FULL ม.86/4 document with the buyer block', cvPdf.status === 200 && cvPdf.text.includes('ใบกำกับภาษี') && cvPdf.text.includes(cvBuyer.name), `${cvPdf.status}`);
+
   await app.close();
   await pg.close();
 

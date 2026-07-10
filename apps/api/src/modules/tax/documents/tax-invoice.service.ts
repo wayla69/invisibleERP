@@ -7,8 +7,10 @@ import { TaxService } from '../tax.service';
 import { LedgerService } from '../../ledger/ledger.service';
 import { n, fx, ymd } from '../../../database/queries';
 import type { JwtUser } from '../../../common/decorators';
+import { appendAuditMeta } from '../../../common/tenant-context';
+import { isUniqueViolation } from '../../../common/db-error';
 import { sellerSnapshot, isValidTaxId } from './tax-docs.snapshot';
-import type { IssueFullDto } from './dto';
+import type { IssueFullDto, ConvertAbbDto } from './dto';
 import { EtaxService } from '../../pos/fiscal/etax.service';
 import { CustomerMasterService } from '../../customers/customers.module';
 
@@ -150,6 +152,101 @@ export class TaxInvoiceService {
     // wiring (best-effort): keep the customer directory reusable so the buyer doesn't need retyping next time
     if (this.customerMaster) { try { await this.customerMaster.upsertFromInvoiceBuyer(dto.buyer, tenantId, user.username); } catch { /* directory update best-effort */ } }
     return this.getByDocNo(user, docNo);
+  }
+
+  // ── ABB → full conversion (ม.86/4 on buyer request; POS-1, TAX-10) ──
+  // Thai retail legal expectation: a VAT-registered buyer may ask the seller to convert an abbreviated
+  // slip (ม.86/6) into a FULL tax invoice (ม.86/4) so they can claim the input VAT. The conversion:
+  //  - captures the buyer block (name + validated 13-digit Tax ID + 5-digit branch, default 00000 + address),
+  //  - COPIES the ABB's amounts/VAT/lines verbatim (same supply — never recomputed),
+  //  - keeps the ABB's issue date + tax point (the VAT stays in the original filing period; only the
+  //    document FORM changes, like a ใบแทน per ม.86/12 practice),
+  //  - links full.replaces_doc_no = ABB doc_no and flips the ABB to status 'Replaced', so the ภ.พ.30
+  //    output-VAT report (status='Issued') counts the supply EXACTLY once,
+  //  - is idempotent: converting an already-converted ABB returns the SAME full invoice (one full per ABB,
+  //    DB-enforced by the partial unique index uq_tiv_converted_from, migration 0291).
+  async convertAbbreviatedToFull(abbDocNo: string, dto: ConvertAbbDto, user: JwtUser) {
+    const db = this.db;
+    const [abb] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, abbDocNo)).limit(1);
+    if (!abb) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Abbreviated tax invoice not found', messageTh: 'ไม่พบใบกำกับภาษีอย่างย่อ' });
+    if (abb.type !== 'abbreviated') {
+      throw new BadRequestException({ code: 'NOT_ABBREVIATED', message: `Document is ${abb.type}, not an abbreviated tax invoice`, messageTh: 'เอกสารนี้ไม่ใช่ใบกำกับภาษีอย่างย่อ' });
+    }
+    const tenantId = Number(abb.tenantId);
+
+    // Idempotent: one full invoice per ABB — a re-call returns the existing conversion unchanged.
+    const findExisting = async () => {
+      const [row] = await db.select().from(taxInvoices)
+        .where(and(eq(taxInvoices.tenantId, tenantId), eq(taxInvoices.type, 'full'), eq(taxInvoices.replacesDocNo, abbDocNo))).limit(1);
+      return row;
+    };
+    const existing = await findExisting();
+    if (existing) return { ...(await this.withLines(existing)), already_converted: true };
+
+    if (abb.status === 'Voided') {
+      throw new BadRequestException({ code: 'ABB_VOIDED', message: 'A voided abbreviated tax invoice cannot be converted', messageTh: 'ใบกำกับภาษีอย่างย่อที่ถูกยกเลิกแล้ว แปลงเป็นเต็มรูปไม่ได้' });
+    }
+    if (abb.status !== 'Issued') {
+      throw new BadRequestException({ code: 'ABB_NOT_CONVERTIBLE', message: `Abbreviated invoice is ${abb.status}, not Issued`, messageTh: 'ใบกำกับภาษีอย่างย่อไม่อยู่ในสถานะที่แปลงได้' });
+    }
+    // Buyer block mandatory (ม.86/4(3)); the Tax ID is REQUIRED here (the reason a buyer converts) and
+    // checksum-validated; branch code defaults to 00000 = สำนักงานใหญ่ (5-digit format enforced by zod).
+    if (!dto.buyer?.name || !dto.buyer?.address) {
+      throw new BadRequestException({ code: 'BUYER_REQUIRED', message: 'Full tax invoice requires buyer name + address', messageTh: 'ใบกำกับภาษีเต็มรูปต้องมีชื่อและที่อยู่ผู้ซื้อ' });
+    }
+    if (!isValidTaxId(dto.buyer.tax_id)) {
+      throw new BadRequestException({ code: 'INVALID_BUYER_TAXID', message: 'Buyer Tax ID must be a valid 13-digit number', messageTh: 'เลขประจำตัวผู้เสียภาษีผู้ซื้อไม่ถูกต้อง (ต้อง 13 หลัก)' });
+    }
+    const branchCode = dto.buyer.branch_code ?? '00000';
+
+    const lines = await db.select().from(taxInvoiceLines).where(eq(taxInvoiceLines.taxInvoiceId, Number(abb.id))).orderBy(taxInvoiceLines.lineNo);
+    // Receipt-style Paid By — derived from the POS sale exactly like issueFull (presentation, not ม.86/4).
+    let payment: { paid_by: 'transfer' | 'cash' | 'cheque' | 'other'; paid_by_other: string | null } | null = null;
+    if (abb.sourceType === 'POS') {
+      const [sale] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, abb.sourceRef)).limit(1);
+      if (sale) payment = classifyPaidBy(sale.paymentMethod);
+    }
+
+    const docNo = await this.docNo.nextMonthlyTenant('TIV', tenantId);
+    try {
+      const [head] = await db.insert(taxInvoices).values({
+        tenantId, docNo, type: 'full',
+        // Same supply, same tax point: the full invoice carries the ABB's dates so the VAT stays in the
+        // original ภ.พ.30 period (the report drops the Replaced ABB and picks this row up instead).
+        issueDate: abb.issueDate, taxPointDate: abb.taxPointDate ?? abb.issueDate, supplyType: abb.supplyType,
+        sourceType: abb.sourceType, sourceRef: abb.sourceRef,
+        // Seller block: reuse the ABB's frozen ม.86/4 snapshot — the converted document describes the
+        // same historical supply, so it must not re-derive from the (possibly edited) tenant row.
+        sellerName: abb.sellerName, sellerTaxId: abb.sellerTaxId, sellerBranchCode: abb.sellerBranchCode,
+        sellerBranchLabel: abb.sellerBranchLabel, sellerAddress: abb.sellerAddress,
+        buyerName: dto.buyer.name, buyerTaxId: dto.buyer.tax_id, buyerBranchCode: branchCode, buyerAddress: dto.buyer.address,
+        // Amounts/VAT copied VERBATIM from the ABB — never recomputed (the slip already fixed them).
+        currency: abb.currency, subtotal: abb.subtotal, discount: abb.discount, vatRate: abb.vatRate,
+        vatAmount: abb.vatAmount, grandTotal: abb.grandTotal, isVatInclusive: false,
+        replacesDocNo: abbDocNo, createdBy: user.username,
+        paidBy: payment?.paid_by ?? null, paidByOther: payment?.paid_by_other ?? null,
+      }).returning({ id: taxInvoices.id });
+      await this.insertLines(Number(head!.id), tenantId, lines.map((l: any, i: number) => ({
+        lineNo: i + 1, itemId: l.itemId, description: l.description, qty: l.qty != null ? n(l.qty) : null,
+        uom: l.uom, unitPrice: l.unitPrice != null ? n(l.unitPrice) : null, discount: n(l.discount), amount: n(l.amount),
+      })));
+    } catch (e) {
+      // Concurrency backstop: uq_tiv_converted_from (0291) — the other converter won; return its invoice.
+      if (isUniqueViolation(e)) {
+        const winner = await findExisting();
+        if (winner) return { ...(await this.withLines(winner)), already_converted: true };
+      }
+      throw e;
+    }
+    // Supersede the ABB (status drives the output-VAT single-count; the number is retained, never reused).
+    await db.update(taxInvoices).set({ status: 'Replaced' }).where(eq(taxInvoices.id, abb.id));
+    // Durable audit evidence on this request's hash-chained audit_log row (TAX-10).
+    appendAuditMeta({ tax_abb_convert: { abb_doc_no: abbDocNo, full_doc_no: docNo, buyer_tax_id: dto.buyer.tax_id, buyer_branch_code: branchCode } });
+    // Same downstream wiring as issueFull: e-Tax submission (best-effort, failure recorded+retried inside
+    // submit) and the reusable customer directory.
+    if (this.etax) { try { await this.etax.submit(docNo, undefined, user); } catch { /* recorded + alerted inside submit(); retried by the BI sweep */ } }
+    if (this.customerMaster) { try { await this.customerMaster.upsertFromInvoiceBuyer({ ...dto.buyer, branch_code: branchCode }, tenantId, user.username); } catch { /* directory update best-effort */ } }
+    return { ...(await this.getByDocNo(user, docNo)), already_converted: false };
   }
 
   private async insertLines(taxInvoiceId: number, tenantId: number, lines: any[]) {
@@ -316,6 +413,8 @@ function shape(r: any) {
     book_no: r.bookNo, notes: r.notes, created_by: r.createdBy, created_at: r.createdAt,
     // credit/debit note fields (null on ordinary invoices)
     original_doc_no: r.originalDocNo ?? null, reason: r.reason ?? null, gl_entry_no: r.glEntryNo ?? null,
+    // ABB→full conversion linkage (TAX-10): on a converted full invoice, the superseded ABB's doc no.
+    replaces_doc_no: r.replacesDocNo ?? null,
     // receipt-style payment fields (0268) — presentation/data-adjacent, not ม.86/4-mandatory
     due_date: r.dueDate ?? null,
     payment: r.paidBy ? { paid_by: r.paidBy, paid_by_other: r.paidByOther ?? null, bank: r.paidBank ?? null, cheque_no: r.paidChequeNo ?? null, branch: r.paidBranch ?? null } : null,
