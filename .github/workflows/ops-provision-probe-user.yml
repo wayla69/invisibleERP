@@ -92,4 +92,28 @@ jobs:
           rm -f /tmp/login.json
           { [ "$CODE" = 200 ] && [ -n "$TOK" ]; } || { echo "::error::probe login verification failed (HTTP $CODE)"; exit 1; }
           echo "✅ synthetic-probe provisioned + credentials stored + live login verified (HTTP 200, role ExecutiveViewer)"
+
+          # ── Cookie ROUND-TRIP matrix (2026-07-10 login-bounce diagnosis): the login POST returning 200
+          # proves nothing about the SESSION — the July-10 class of failure is the httpOnly cookie not
+          # surviving the next authenticated request. Compare the same cookie-jar round-trip through the
+          # WEB same-origin proxy vs DIRECT to the API origin: web=401+direct=200 ⇒ the proxy hop drops or
+          # mangles the Cookie header; both 401 ⇒ the API rejects the fresh token itself (body code says
+          # whether the token is MISSING or INVALID). Statuses + error codes only — never bodies/tokens.
+          API_DOM=$(npx -y @railway/cli variables --service invisibleERP --kv | grep '^RAILWAY_PUBLIC_DOMAIN=' | cut -d= -f2- | tr -d '\r')
+          roundtrip() { # $1 = base URL, $2 = label
+            local jar=/tmp/rt.jar body code msg
+            rm -f "$jar"
+            code=$(curl -s -c "$jar" -o /dev/null -w "%{http_code}" --max-time 20 -X POST "$1/api/login" -H 'Content-Type: application/json' -d "{\"username\":\"synthetic-probe\",\"password\":\"$PW\"}")
+            body=$(curl -s -b "$jar" --max-time 20 "$1/api/auth/me" -o /tmp/me.json -w "%{http_code}")
+            msg=$(jq -r '.error.message // .username // empty' /tmp/me.json 2>/dev/null | head -c 60)
+            local njar; njar=$(grep -c 'ierp_' "$jar" 2>/dev/null || echo 0)
+            echo "  $2: login=$code cookies_in_jar=$njar /api/auth/me=$body ($msg)"
+            rm -f "$jar" /tmp/me.json
+            [ "$body" = 200 ]
+          }
+          ok=0
+          roundtrip "$WEB_URL" "via WEB proxy " || ok=1
+          [ -n "$API_DOM" ] && { roundtrip "https://$API_DOM" "direct to API " || true; }
+          if [ "$ok" != 0 ]; then echo "::error::cookie round-trip through the web proxy FAILED — the session does not survive the authenticated hop (see matrix above)"; exit 1; fi
+          echo "✅ cookie round-trip verified through the web proxy — the browser probe path is fully green."
           echo "The browser-probe job of 'Ops — synthetic prod probe' is now ARMED (next scheduled run, or dispatch it now)."
