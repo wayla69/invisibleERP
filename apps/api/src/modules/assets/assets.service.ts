@@ -1,14 +1,14 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, asc, desc, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations, assetRegistrationRequests, assetScanRequests, assetAudits, assetAuditScans, journalEntries, grItems, goodsReceipts, items } from '../../database/schema';
+import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations, assetRegistrationRequests, assetScanRequests, assetAudits, assetAuditScans, cipAssets, cipCostLines, journalEntries, grItems, goodsReceipts, items } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { QrService } from '../qr/qr.service';
 import { n, fx, ymd } from '../../database/queries';
 import { buildAssetQrPayload, parseQrPayload } from '@ierp/shared';
 import type { JwtUser } from '../../common/decorators';
-import type { CreateCategoryDto, AcquireAssetDto, DisposeAssetDto, RegisterFromGrDto } from './dto';
+import type { CreateCategoryDto, AcquireAssetDto, DisposeAssetDto, RegisterFromGrDto, OpenCipDto, AddCipCostDto, SettleCipDto } from './dto';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
@@ -36,8 +36,10 @@ export class AssetsService {
   }
 
   // acquisition: Dr 1500 Fixed Assets / Cr 1000 Cash (or 2000 AP) = acquire_cost. `opts` carries internal-only
-  // context (the owning tenant + the source GR/PO when capitalised via FA-10) that a request body must not spoof.
-  async acquire(dto: AcquireAssetDto, user: JwtUser, opts?: { tenantId?: number | null; sourceGrNo?: string | null; sourcePoNo?: string | null }) {
+  // context (the owning tenant + the source GR/PO/CIP when capitalised via FA-10 / FA-13) that a request body
+  // must not spoof. `creditAccount` overrides the funding leg (used by CIP settlement: Cr 1520, reclassifying
+  // the accumulated construction cost out of CIP into the productive asset).
+  async acquire(dto: AcquireAssetDto, user: JwtUser, opts?: { tenantId?: number | null; sourceGrNo?: string | null; sourcePoNo?: string | null; sourceCipNo?: string | null; creditAccount?: string }) {
     const db = this.db;
     let life = dto.useful_life_months;
     if (life == null && dto.category_id != null) {
@@ -49,12 +51,16 @@ export class AssetsService {
     const tenantId = opts && 'tenantId' in opts ? (opts.tenantId ?? null) : (user.tenantId ?? null);
     const assetNo = await this.docNo.nextDaily('FA');
     const acquireDate = dto.acquire_date ?? ymd();
+    // FIN-6a — initialise the parallel TAX book at cost when any tax param is supplied (else NULL → no tax book,
+    // deferred tax falls back to the factor approximation). Tax life/salvage default to the book values.
+    const tax = this.taxBookInit(dto, life);
     await db.insert(fixedAssets).values({
       tenantId, assetNo, categoryId: dto.category_id ?? null, name: dto.name,
       acquireDate, acquireCost: fx(cost, 4), salvageValue: fx(dto.salvage_value, 4), usefulLifeMonths: life,
       status: 'active', accumulatedDepreciation: '0', netBookValue: fx(cost, 4), acquireSource: dto.acquire_source,
       location: dto.location ?? null, department: dto.department ?? null, serialNo: dto.serial_no ?? null,
-      sourceGrNo: opts?.sourceGrNo ?? null, sourcePoNo: opts?.sourcePoNo ?? null,
+      sourceGrNo: opts?.sourceGrNo ?? null, sourcePoNo: opts?.sourcePoNo ?? null, sourceCipNo: opts?.sourceCipNo ?? null,
+      ...(tax ? { taxUsefulLifeMonths: tax.life, taxSalvageValue: fx(tax.salvage, 4), taxInitialAllowancePct: fx(tax.initialPct, 4), taxAccumulatedDepreciation: '0', taxNetBookValue: fx(cost, 4) } : {}),
       notes: dto.notes ?? null, createdBy: user.username,
     }).onConflictDoNothing();
     let journalNo: string | null = null;
@@ -62,11 +68,21 @@ export class AssetsService {
       const je: any = await this.ledger.postEntry({
         date: acquireDate, source: 'ASSET', sourceRef: assetNo, tenantId,
         memo: `Asset acquisition ${assetNo} ${dto.name}`, createdBy: user.username,
-        lines: [{ account_code: '1500', debit: cost }, { account_code: dto.acquire_source === 'credit' ? '2000' : '1000', credit: cost }],
+        lines: [{ account_code: '1500', debit: cost }, { account_code: opts?.creditAccount ?? (dto.acquire_source === 'credit' ? '2000' : '1000'), credit: cost }],
       });
       journalNo = je?.entry_no ?? null;
     }
     return { asset_no: assetNo, journal_no: journalNo, net_book_value: cost };
+  }
+
+  // Resolve the tax-book seed params. Returns null when NO tax param is supplied (asset keeps no tax book).
+  private taxBookInit(dto: { tax_useful_life_months?: number; tax_salvage_value?: number; tax_initial_allowance_pct?: number; salvage_value?: number }, bookLife: number) {
+    if (dto.tax_useful_life_months == null && dto.tax_salvage_value == null && dto.tax_initial_allowance_pct == null) return null;
+    return {
+      life: dto.tax_useful_life_months ?? bookLife,
+      salvage: n(dto.tax_salvage_value ?? dto.salvage_value ?? 0),
+      initialPct: n(dto.tax_initial_allowance_pct ?? 0),
+    };
   }
 
   // ── Procure-to-Capitalize (FA-10): register fixed assets from a goods receipt ───────────────────────
@@ -229,6 +245,43 @@ export class AssetsService {
     return { run_no: runs[0].run_no, period, total_depreciation: aggTotal, asset_count: aggCount, journal_no: runs[0].journal_no, runs };
   }
 
+  // FIN-6a — advance the parallel TAX depreciation book for a period. Posts NO GL (tax depreciation is a memo
+  // basis, not a bookkeeping entry); it only updates the tax accumulated/NBV columns so the book-vs-tax
+  // temporary difference feeds the deferred-tax module (TAX-06). Thai tax caps + a first-year INITIAL ALLOWANCE
+  // make tax depreciation run faster than book. Straight-line over tax_useful_life_months down to
+  // tax_salvage_value, plus an initial allowance (tax_initial_allowance_pct × depreciable base) in the FIRST
+  // period. Only assets that carry a tax book (tax_net_book_value not null) are touched; idempotent per period
+  // via tax_last_depreciated_period.
+  async runTaxDepreciation(period: string, user: JwtUser) {
+    const db = this.db;
+    const [y, m] = period.split('-').map(Number) as [number, number];
+    const endExcl = m < 12 ? `${y}-${String(m + 1).padStart(2, '0')}-01` : `${y + 1}-01-01`;
+    const periodEnd = new Date(new Date(endExcl + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
+
+    const conds = [eq(fixedAssets.status, 'active' as const), eq(fixedAssets.disposalPending, false)];
+    if (user.tenantId != null) conds.push(eq(fixedAssets.tenantId, user.tenantId));
+    const assets = await db.select().from(fixedAssets).where(and(...conds));
+    const lines: { asset_no: string; tax_depreciation: number; tax_accumulated_after: number; tax_nbv_after: number; initial_allowance: number }[] = [];
+    let total = 0;
+    for (const a of assets) {
+      if (a.taxNetBookValue == null) continue;                                  // no tax book on this asset
+      if (String(a.acquireDate) > periodEnd) continue;                          // not yet in service
+      if (a.taxLastDepreciatedPeriod && String(a.taxLastDepreciatedPeriod) >= period) continue; // already done
+      const cost = n(a.acquireCost), taxSalvage = n(a.taxSalvageValue), taxNbv = n(a.taxNetBookValue), taxAccum = n(a.taxAccumulatedDepreciation);
+      const taxLife = a.taxUsefulLifeMonths && a.taxUsefulLifeMonths > 0 ? a.taxUsefulLifeMonths : a.usefulLifeMonths;
+      const depreciable = Math.max(0, round4(cost - taxSalvage));
+      const monthly = round4(depreciable / taxLife);
+      const initialAllowance = taxAccum <= 1e-9 ? round4(depreciable * (n(a.taxInitialAllowancePct) / 100)) : 0; // first period only
+      const amount = Math.min(round4(monthly + initialAllowance), round4(taxNbv - taxSalvage));
+      const taxAmount = amount > 0 ? amount : 0;
+      const accumAfter = round4(taxAccum + taxAmount), nbvAfter = round4(taxNbv - taxAmount);
+      await db.update(fixedAssets).set({ taxAccumulatedDepreciation: fx(accumAfter, 4), taxNetBookValue: fx(nbvAfter, 4), taxLastDepreciatedPeriod: period }).where(eq(fixedAssets.id, Number(a.id)));
+      lines.push({ asset_no: a.assetNo, tax_depreciation: taxAmount, tax_accumulated_after: accumAfter, tax_nbv_after: nbvAfter, initial_allowance: initialAllowance });
+      total = round4(total + taxAmount);
+    }
+    return { period, asset_count: lines.length, total_tax_depreciation: total, assets: lines, note: lines.length ? undefined : 'no assets with a tax book due for this period' };
+  }
+
   // disposal: Dr 1590 accum + Dr 1000 proceeds ± 1510 / Cr 1500 cost. FA-09 maker-checker — a disposal
   // REQUEST posts the JE as a Draft (excluded from balances) and flags the asset disposal_pending WITHOUT
   // marking it disposed; a DIFFERENT user must approve before it is effective (asset-stripping control).
@@ -369,6 +422,115 @@ export class AssetsService {
     const db = this.db;
     const rows = await db.select().from(assetRevaluations).where(eq(assetRevaluations.assetNo, assetNo)).orderBy(desc(assetRevaluations.id));
     return { asset_no: assetNo, revaluations: rows.map((r: any) => ({ kind: r.kind, old_value: n(r.oldValue), new_value: n(r.newValue), delta: n(r.delta), reason: r.reason, reval_date: r.revalDate, status: r.status, journal_no: r.glRef, actioned_by: r.actionedBy, approved_by: r.approvedBy })), count: rows.length };
+  }
+
+  // ── CIP / AUC — Construction-in-Progress / Assets-under-Construction (FA-13) ──────────────────────────
+  // Open a CIP asset, accumulate GR/manual/project cost lines onto it (Dr 1520 CIP / Cr AP|Cash — the asset is
+  // NOT depreciated while under construction), then SETTLE it into a normal fixed asset under a maker-checker
+  // gate: the preparer raises a settlement REQUEST (with a mandatory reason) that posts NOTHING; a DIFFERENT
+  // user approves before the fixed_assets row + reclassification JE (Dr 1500 / Cr 1520) post effective.
+  async openCip(dto: OpenCipDto, user: JwtUser) {
+    const db = this.db;
+    const cipNo = await this.docNo.nextDaily('CIP');
+    await db.insert(cipAssets).values({
+      tenantId: user.tenantId ?? null, cipNo, name: dto.name, categoryId: dto.category_id ?? null,
+      status: 'Open', accumulatedCost: '0', location: dto.location ?? null, department: dto.department ?? null,
+      notes: dto.notes ?? null, createdBy: user.username,
+    });
+    return { cip_no: cipNo, name: dto.name, status: 'Open', accumulated_cost: 0 };
+  }
+
+  private async openCipRow(cipNo: string, user: JwtUser) {
+    const db = this.db;
+    const conds = [eq(cipAssets.cipNo, cipNo)];
+    if (user.tenantId != null) conds.push(eq(cipAssets.tenantId, user.tenantId));
+    const [c] = await db.select().from(cipAssets).where(and(...conds)).limit(1);
+    if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: `CIP ${cipNo} not found`, messageTh: 'ไม่พบสินทรัพย์ระหว่างก่อสร้าง' });
+    return c;
+  }
+
+  // Add a cost line to a CIP asset. Posts Dr 1520 CIP / Cr 2000 AP (credit) or Cr 1000 Cash, and rolls the
+  // accumulated cost up. Only an Open CIP accepts new cost.
+  async addCipCost(cipNo: string, dto: AddCipCostDto, user: JwtUser) {
+    const db = this.db;
+    const c = await this.openCipRow(cipNo, user);
+    if (c.status !== 'Open') throw new BadRequestException({ code: 'CIP_NOT_OPEN', message: `CIP ${cipNo} is ${c.status}, not Open`, messageTh: 'สินทรัพย์ระหว่างก่อสร้างนี้ไม่ได้เปิดรับต้นทุน' });
+    const amount = round4(dto.amount);
+    if (amount <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+    const costDate = dto.cost_date ?? ymd();
+    const [line] = await db.insert(cipCostLines).values({
+      tenantId: c.tenantId ?? user.tenantId ?? null, cipId: Number(c.id), cipNo, sourceType: dto.source_type,
+      sourceRef: dto.source_ref ?? null, description: dto.description ?? null, amount: fx(amount, 4),
+      costDate, paySource: dto.pay_source, addedBy: user.username,
+    }).returning({ id: cipCostLines.id });
+    const je: any = await this.ledger.postEntry({
+      date: costDate, source: 'CIP', sourceRef: `${cipNo}-L${Number(line!.id)}`, tenantId: c.tenantId ?? user.tenantId ?? null,
+      memo: `CIP cost ${cipNo}${dto.source_ref ? ` (${dto.source_ref})` : ''}`, createdBy: user.username,
+      lines: [{ account_code: '1520', debit: amount }, { account_code: dto.pay_source === 'cash' ? '1000' : '2000', credit: amount }],
+    });
+    const newTotal = round4(n(c.accumulatedCost) + amount);
+    await db.update(cipCostLines).set({ glRef: je?.entry_no ?? null }).where(eq(cipCostLines.id, Number(line!.id)));
+    await db.update(cipAssets).set({ accumulatedCost: fx(newTotal, 4) }).where(eq(cipAssets.id, Number(c.id)));
+    return { cip_no: cipNo, line_id: Number(line!.id), amount, accumulated_cost: newTotal, journal_no: je?.entry_no ?? null };
+  }
+
+  async listCip(status: string | undefined, user: JwtUser) {
+    const db = this.db;
+    const conds = status ? [eq(cipAssets.status, status)] : [];
+    if (user.tenantId != null) conds.push(eq(cipAssets.tenantId, user.tenantId));
+    const rows = await db.select().from(cipAssets).where(conds.length ? and(...conds) : undefined).orderBy(desc(cipAssets.id)).limit(200);
+    return { cip: rows.map(shapeCip), count: rows.length };
+  }
+
+  async getCip(cipNo: string, user: JwtUser) {
+    const c = await this.openCipRow(cipNo, user);
+    const rows = await this.db.select().from(cipCostLines).where(eq(cipCostLines.cipNo, cipNo)).orderBy(asc(cipCostLines.id));
+    return { ...shapeCip(c), cost_lines: rows.map((r: any) => ({ line_id: Number(r.id), source_type: r.sourceType, source_ref: r.sourceRef, description: r.description, amount: n(r.amount), cost_date: r.costDate, pay_source: r.paySource, journal_no: r.glRef, added_by: r.addedBy })) };
+  }
+
+  // Maker: raise a settlement request. Validates the CIP is Open with cost accumulated and a reason is given.
+  // Posts NOTHING; a DIFFERENT user must approve. Only one settlement can be pending (status = PendingSettlement).
+  async settleCip(cipNo: string, dto: SettleCipDto, user: JwtUser) {
+    const db = this.db;
+    const c = await this.openCipRow(cipNo, user);
+    if (c.status !== 'Open') throw new BadRequestException({ code: 'CIP_NOT_OPEN', message: `CIP ${cipNo} is ${c.status}, not Open`, messageTh: 'สินทรัพย์ระหว่างก่อสร้างนี้ตั้งเบิกไม่ได้' });
+    if (n(c.accumulatedCost) <= 0) throw new BadRequestException({ code: 'CIP_NO_COST', message: 'CIP has no accumulated cost to capitalise', messageTh: 'ยังไม่มีต้นทุนสะสมให้ตั้งเป็นสินทรัพย์' });
+    await db.update(cipAssets).set({
+      status: 'PendingSettlement', settleName: dto.name ?? c.name, settleCategoryId: dto.category_id ?? c.categoryId ?? null,
+      settleUsefulLifeMonths: dto.useful_life_months ?? null, settleSalvageValue: fx(dto.salvage_value, 4),
+      settleTaxUsefulLifeMonths: dto.tax_useful_life_months ?? null, settleTaxInitialAllowancePct: dto.tax_initial_allowance_pct != null ? fx(dto.tax_initial_allowance_pct, 4) : null,
+      settleReason: dto.reason, requestedBy: user.username, requestedAt: new Date(),
+    }).where(eq(cipAssets.id, Number(c.id)));
+    return { cip_no: cipNo, status: 'PendingSettlement', accumulated_cost: n(c.accumulatedCost), settle_reason: dto.reason, requested_by: user.username };
+  }
+
+  // FA-13 maker-checker: a DIFFERENT user approves the settlement → the fixed asset is created and the
+  // reclassification JE (Dr 1500 / Cr 1520) posts EFFECTIVE for the accumulated construction cost.
+  async approveCipSettlement(cipNo: string, user: JwtUser) {
+    const db = this.db;
+    const c = await this.openCipRow(cipNo, user);
+    if (c.status !== 'PendingSettlement') throw new BadRequestException({ code: 'NO_PENDING_SETTLEMENT', message: `No settlement pending approval for ${cipNo}`, messageTh: 'ไม่มีรายการตั้งสินทรัพย์ที่รออนุมัติ' });
+    if (c.requestedBy && c.requestedBy === user.username)
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a CIP settlement you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติการตั้งสินทรัพย์ของตนเองได้' });
+    const cost = round4(n(c.accumulatedCost));
+    const res = await this.acquire({
+      name: c.settleName ?? c.name, category_id: c.settleCategoryId ?? c.categoryId ?? undefined,
+      acquire_cost: cost, salvage_value: n(c.settleSalvageValue), useful_life_months: c.settleUsefulLifeMonths ?? undefined,
+      acquire_source: 'credit', location: c.location ?? undefined, department: c.department ?? undefined, notes: c.notes ?? undefined,
+      tax_useful_life_months: c.settleTaxUsefulLifeMonths ?? undefined,
+      tax_initial_allowance_pct: c.settleTaxInitialAllowancePct != null ? n(c.settleTaxInitialAllowancePct) : undefined,
+    } as AcquireAssetDto, user, { tenantId: c.tenantId ?? user.tenantId ?? null, sourceCipNo: cipNo, creditAccount: '1520' });
+    await db.update(cipAssets).set({ status: 'Capitalized', settledAssetNo: res.asset_no, settleJournalNo: res.journal_no, approvedBy: user.username, approvedAt: new Date() }).where(eq(cipAssets.id, Number(c.id)));
+    return { cip_no: cipNo, status: 'Capitalized', asset_no: res.asset_no, journal_no: res.journal_no, capitalized_cost: cost, approved_by: user.username, requested_by: c.requestedBy };
+  }
+
+  // Reject a pending settlement → the CIP re-opens for more cost / a corrected request.
+  async rejectCipSettlement(cipNo: string, user: JwtUser, reason?: string) {
+    const db = this.db;
+    const c = await this.openCipRow(cipNo, user);
+    if (c.status !== 'PendingSettlement') throw new BadRequestException({ code: 'NO_PENDING_SETTLEMENT', message: `No settlement pending approval for ${cipNo}`, messageTh: 'ไม่มีรายการตั้งสินทรัพย์ที่รออนุมัติ' });
+    await db.update(cipAssets).set({ status: 'Open', rejectReason: reason ?? null, requestedBy: null, requestedAt: null }).where(eq(cipAssets.id, Number(c.id)));
+    return { cip_no: cipNo, status: 'Open', rejected_by: user.username };
   }
 
   // ── QR asset tags ──────────────────────────────────────────────────────
@@ -699,5 +861,11 @@ function shapeReg(r: any) {
   return { reg_no: r.regNo, gr_no: r.grNo, po_no: r.poNo, gr_item_id: r.grItemId != null ? Number(r.grItemId) : null, item_id: r.itemId, name: r.name, category_id: r.categoryId != null ? Number(r.categoryId) : null, acquire_date: r.acquireDate, acquire_cost: n(r.acquireCost), salvage_value: n(r.salvageValue), useful_life_months: r.usefulLifeMonths, location: r.location ?? null, department: r.department ?? null, serial_no: r.serialNo ?? null, status: r.status, asset_no: r.assetNo ?? null, requested_by: r.requestedBy ?? null, requested_at: r.requestedAt, approved_by: r.approvedBy ?? null, approved_at: r.approvedAt ?? null, reject_reason: r.rejectReason ?? null };
 }
 function shapeAsset(a: any) {
-  return { asset_no: a.assetNo, name: a.name, category_id: a.categoryId, status: a.status, acquire_date: a.acquireDate, acquire_cost: n(a.acquireCost), salvage_value: n(a.salvageValue), useful_life_months: a.usefulLifeMonths, accumulated_depreciation: n(a.accumulatedDepreciation), net_book_value: n(a.netBookValue), last_depreciated_period: a.lastDepreciatedPeriod, disposed_date: a.disposedDate, disposal_proceeds: a.disposalProceeds != null ? n(a.disposalProceeds) : null, disposal_gain_loss: a.disposalGainLoss != null ? n(a.disposalGainLoss) : null, disposal_pending: a.disposalPending === true, disposal_requested_by: a.disposalRequestedBy ?? null, disposal_approved_by: a.disposalApprovedBy ?? null, location: a.location ?? null, department: a.department ?? null, serial_no: a.serialNo ?? null, assigned_to: a.assignedTo ?? null, source_gr_no: a.sourceGrNo ?? null, source_po_no: a.sourcePoNo ?? null };
+  return { asset_no: a.assetNo, name: a.name, category_id: a.categoryId, status: a.status, acquire_date: a.acquireDate, acquire_cost: n(a.acquireCost), salvage_value: n(a.salvageValue), useful_life_months: a.usefulLifeMonths, accumulated_depreciation: n(a.accumulatedDepreciation), net_book_value: n(a.netBookValue), last_depreciated_period: a.lastDepreciatedPeriod, disposed_date: a.disposedDate, disposal_proceeds: a.disposalProceeds != null ? n(a.disposalProceeds) : null, disposal_gain_loss: a.disposalGainLoss != null ? n(a.disposalGainLoss) : null, disposal_pending: a.disposalPending === true, disposal_requested_by: a.disposalRequestedBy ?? null, disposal_approved_by: a.disposalApprovedBy ?? null, location: a.location ?? null, department: a.department ?? null, serial_no: a.serialNo ?? null, assigned_to: a.assignedTo ?? null, source_gr_no: a.sourceGrNo ?? null, source_po_no: a.sourcePoNo ?? null, source_cip_no: a.sourceCipNo ?? null,
+    // Parallel TAX book (FIN-6a) — null tax_net_book_value ⇒ no tax book maintained (deferred tax uses the factor fallback).
+    tax_useful_life_months: a.taxUsefulLifeMonths ?? null, tax_salvage_value: a.taxSalvageValue != null ? n(a.taxSalvageValue) : null, tax_initial_allowance_pct: a.taxInitialAllowancePct != null ? n(a.taxInitialAllowancePct) : null,
+    tax_accumulated_depreciation: a.taxAccumulatedDepreciation != null ? n(a.taxAccumulatedDepreciation) : null, tax_net_book_value: a.taxNetBookValue != null ? n(a.taxNetBookValue) : null, tax_last_depreciated_period: a.taxLastDepreciatedPeriod ?? null };
+}
+function shapeCip(c: any) {
+  return { cip_no: c.cipNo, name: c.name, category_id: c.categoryId != null ? Number(c.categoryId) : null, status: c.status, accumulated_cost: n(c.accumulatedCost), location: c.location ?? null, department: c.department ?? null, notes: c.notes ?? null, settle_reason: c.settleReason ?? null, settled_asset_no: c.settledAssetNo ?? null, settle_journal_no: c.settleJournalNo ?? null, requested_by: c.requestedBy ?? null, requested_at: c.requestedAt ?? null, approved_by: c.approvedBy ?? null, approved_at: c.approvedAt ?? null, reject_reason: c.rejectReason ?? null, created_by: c.createdBy ?? null };
 }

@@ -216,7 +216,7 @@ export class DineInService {
     const bad = () => { throw new BadRequestException({ code: 'BAD_TRANSITION', message: `Cannot ${action} from ${cur}`, messageTh: 'เปลี่ยนสถานะไม่ถูกต้อง' }); };
     if (action === 'start') { if (cur !== 'queued') bad(); set.kdsStatus = 'preparing'; set.startedAt = now; }
     else if (action === 'ready') { if (cur !== 'preparing') bad(); set.kdsStatus = 'ready'; set.readyAt = now; }
-    else if (action === 'recall') { if (!['preparing', 'ready'].includes(cur)) bad(); set.kdsStatus = 'queued'; set.startedAt = null; set.readyAt = null; }
+    else if (action === 'recall') { if (!['preparing', 'ready'].includes(cur)) bad(); set.kdsStatus = 'queued'; set.startedAt = null; set.readyAt = null; set.recallCount = (Number(item.recallCount) || 0) + 1; } // KDS recall — bump the all-day recall counter (POS-4)
     else if (action === 'serve') { if (cur !== 'ready') bad(); set.kdsStatus = 'served'; set.servedAt = now; }
     else if (action === 'void') { if (['served', 'voided'].includes(cur)) bad(); set.kdsStatus = 'voided'; set.voidedAt = now; set.voidReason = reason ?? null; }
     else bad();

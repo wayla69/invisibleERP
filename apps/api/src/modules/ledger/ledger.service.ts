@@ -497,6 +497,24 @@ export class LedgerService {
     };
   }
 
+  // ───────────────────── Per-account signed net (FIN-4 statutory FS builder) ─────────────────────
+  // Σ(debit − credit) per account, joined to type/name. `from == null` ⇒ cumulative to `to` (balance-sheet
+  // basis); a `from` scopes it to [from,to] (P&L basis). Reuses the CANONICAL aggregateByType engine (Posted
+  // only, ledger NULL-or-code, RLS-scoped) so the statutory FS pack never re-derives balances — it is a pure
+  // presentation layer over the same numbers the primary statements read. `excludeSources` drops whole
+  // entries by source (e.g. ['CLOSE'] for an in-year P&L window that must not include the year-end sweep).
+  async perAccountNet(to: string, from?: string | null, ledgerCode?: string | null, excludeSources?: string[]): Promise<{ account_code: string; account_name: string | null; account_type: string | null; debit: number; credit: number; net: number }[]> {
+    const rows = await this.aggregateByType(this.db, from ?? null, to, undefined, ledgerCode, undefined, excludeSources);
+    return rows.map((r: any) => ({
+      account_code: r.account_code,
+      account_name: r.account_name,
+      account_type: r.account_type,
+      debit: round4(n(r.debit)),
+      credit: round4(n(r.credit)),
+      net: round4(n(r.debit) - n(r.credit)),
+    }));
+  }
+
   // ── docs/38 ledger PR-1: cash-flow statements/forecast (GL-07) live in LedgerCashflowService; thin delegators. ──
   async cashFlowStatement(from: string, to: string, ledgerCode?: string | null) { return this.cashflow.cashFlowStatement(from, to, ledgerCode); }
   async cashFlowDirect(from: string, to: string, ledgerCode?: string | null) { return this.cashflow.cashFlowDirect(from, to, ledgerCode); }

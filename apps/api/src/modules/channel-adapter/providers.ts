@@ -11,6 +11,9 @@ export interface CallResult { ok: boolean; ref?: string; error?: string }
 export interface PlatformProvider {
   readonly name: string;
   pushMenu(storeRef: string | null, items: PlatformMenuItem[]): Promise<CallResult>;
+  // POS-7 — pause ("86") or resume ("un-86") a single menu item on the aggregator without re-pushing the
+  // whole menu, so an out-of-stock dish stops accepting orders the moment it depletes.
+  setItemAvailability(storeRef: string | null, sku: string, available: boolean): Promise<CallResult>;
   updateStatus(extOrderId: string | null, status: string): Promise<CallResult>;
   acceptOrder(extOrderId: string | null): Promise<CallResult>;
   rejectOrder(extOrderId: string | null, reason: string): Promise<CallResult>;
@@ -20,6 +23,7 @@ export interface PlatformProvider {
 export class MockPlatformProvider implements PlatformProvider {
   readonly name = 'mock';
   async pushMenu() { return { ok: true, ref: `mock_menu_${rnd()}` }; }
+  async setItemAvailability() { return { ok: true, ref: `mock_avail_${rnd()}` }; }
   async updateStatus() { return { ok: true, ref: `mock_status_${rnd()}` }; }
   async acceptOrder() { return { ok: true, ref: `mock_accept_${rnd()}` }; }
   async rejectOrder() { return { ok: true, ref: `mock_reject_${rnd()}` }; }
@@ -47,6 +51,7 @@ export class HttpPlatformProvider implements PlatformProvider {
   }
 
   pushMenu(storeRef: string | null, items: PlatformMenuItem[]) { return this.call('/menu', { store_ref: storeRef, items }); }
+  setItemAvailability(storeRef: string | null, sku: string, available: boolean) { return this.call(`/menu/items/${encodeURIComponent(sku)}/availability`, { store_ref: storeRef, sku, available }); }
   updateStatus(extOrderId: string | null, status: string) { return this.call(`/orders/${extOrderId ?? ''}/status`, { status }); }
   acceptOrder(extOrderId: string | null) { return this.call(`/orders/${extOrderId ?? ''}/accept`, {}); }
   rejectOrder(extOrderId: string | null, reason: string) { return this.call(`/orders/${extOrderId ?? ''}/reject`, { reason }); }

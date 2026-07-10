@@ -413,6 +413,52 @@ async function main() {
   const fcBad = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=5`, sales1);
   ok('Course firing: firing an empty course rejected (400 NO_COURSE_ITEMS)', fcBad.status === 400 && fcBad.json.error?.code === 'NO_COURSE_ITEMS', `${fcBad.status} ${fcBad.json.error?.code}`);
 
+  // ── POS-4: KDS depth — prep-time SLA aging + expo (order-ready pass) + station load + bump/recall counts ──
+  const kdTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'K1', seats: 4 });
+  const kdOpen = await inj('POST', `/api/restaurant/tables/${kdTbl.json.id}/open`, sales1, {});
+  const kdOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: kdTbl.json.id, session_id: kdOpen.json.session_id, items: [
+    { name: 'SLA-OK', qty: 1, unit_price: 50, station_code: 'hot' },
+    { name: 'SLA-WARN', qty: 1, unit_price: 50, station_code: 'hot' },
+    { name: 'SLA-LATE', qty: 2, unit_price: 50, station_code: 'hot' },
+  ] });
+  await inj('POST', `/api/restaurant/orders/${kdOrd.json.order_no}/fire`, sales1);
+  const kdId = (nm: string) => kdOrd.json.items.find((i: any) => i.name === nm).item_id;
+  // Pin prep target to 10 min and backdate fired_at to force each SLA band: <10=ok, <15=warn, ≥15=late.
+  await pg.query(`UPDATE dine_in_order_items SET est_prep_minutes = 10 WHERE order_id = (SELECT id FROM dine_in_orders WHERE order_no = '${kdOrd.json.order_no}')`);
+  await pg.query(`UPDATE dine_in_order_items SET fired_at = now() - interval '2 minutes'  WHERE id = ${kdId('SLA-OK')}`);
+  await pg.query(`UPDATE dine_in_order_items SET fired_at = now() - interval '12 minutes' WHERE id = ${kdId('SLA-WARN')}`);
+  await pg.query(`UPDATE dine_in_order_items SET fired_at = now() - interval '20 minutes' WHERE id = ${kdId('SLA-LATE')}`);
+  const kdFeed = (await inj('GET', '/api/restaurant/kds/feed', sales1)).json;
+  const kdFeedItems = (kdFeed.stations ?? []).flatMap((s: any) => s.items);
+  const fOk = kdFeedItems.find((i: any) => i.name === 'SLA-OK'); const fWarn = kdFeedItems.find((i: any) => i.name === 'SLA-WARN'); const fLate = kdFeedItems.find((i: any) => i.name === 'SLA-LATE');
+  ok('POS-4 SLA aging: feed returns a per-item sla band (ok/warn/late) by elapsed vs prep target', fOk?.sla === 'ok' && fWarn?.sla === 'warn' && fLate?.sla === 'late', `ok=${fOk?.sla} warn=${fWarn?.sla} late=${fLate?.sla} prep=${fOk?.prep_min}`);
+
+  // Expo: ready one line → order shows on the pass but not all-ready; ready the rest → all_ready.
+  await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-OK')}`, sales1, { action: 'start' });
+  await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-OK')}`, sales1, { action: 'ready' });
+  const expo1 = (await inj('GET', '/api/restaurant/kds/expo', sales1)).json;
+  const tk1 = (expo1.tickets ?? []).find((t: any) => t.order_no === kdOrd.json.order_no);
+  ok('POS-4 expo: order with a ready line appears on the pass, not yet all-ready', !!tk1 && tk1.ready_count === 1 && tk1.all_ready === false && tk1.pending_count === 2 && tk1.ready_items.some((it: any) => it.name === 'SLA-OK'), `${JSON.stringify(tk1 ? { r: tk1.ready_count, p: tk1.pending_count, all: tk1.all_ready } : null)}`);
+  // Snapshot the hot station's all-day counts before bump/recall, then act.
+  const loadBefore = (await inj('GET', '/api/restaurant/kds/load', sales1)).json;
+  const hotBefore = (loadBefore.stations ?? []).find((s: any) => s.station_code === 'hot') ?? { bumped_today: 0, recalls_today: 0 };
+  await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-WARN')}`, sales1, { action: 'start' });
+  await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-WARN')}`, sales1, { action: 'ready' });
+  await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-LATE')}`, sales1, { action: 'start' });
+  await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-LATE')}`, sales1, { action: 'ready' });
+  const expo2 = (await inj('GET', '/api/restaurant/kds/expo', sales1)).json;
+  const tk2 = (expo2.tickets ?? []).find((t: any) => t.order_no === kdOrd.json.order_no);
+  ok('POS-4 expo: once nothing is cooking the ticket is all_ready (ready for pass)', !!tk2 && tk2.all_ready === true && tk2.ready_count === 3 && tk2.pending_count === 0, `${JSON.stringify(tk2 ? { r: tk2.ready_count, all: tk2.all_ready } : null)}`);
+  // Recall SLA-WARN off the pass (bump/recall), bump SLA-OK to served.
+  const recalled = await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-WARN')}`, sales1, { action: 'recall' });
+  ok('POS-4 recall: ready→queued transition succeeds', recalled.json.kds_status === 'queued', `${recalled.status} ${recalled.json.kds_status}`);
+  await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-OK')}`, sales1, { action: 'serve' });
+  const loadAfter = (await inj('GET', '/api/restaurant/kds/load', sales1)).json;
+  const hotAfter = (loadAfter.stations ?? []).find((s: any) => s.station_code === 'hot');
+  ok('POS-4 station load: all-day recall count per station increments on recall', !!hotAfter && hotAfter.recalls_today === hotBefore.recalls_today + 1, `recalls ${hotBefore.recalls_today}→${hotAfter?.recalls_today}`);
+  ok('POS-4 station load: all-day bump (served) count per station increments on serve', !!hotAfter && hotAfter.bumped_today === hotBefore.bumped_today + 1, `bumped ${hotBefore.bumped_today}→${hotAfter?.bumped_today}`);
+  ok('POS-4 station load: overdue + all-day qty roll-up per station (SLA-LATE qty 2 still cooking)', !!hotAfter && hotAfter.overdue >= 1 && hotAfter.all_day.some((a: any) => a.name === 'SLA-LATE' && a.qty === 2) && hotAfter.avg_elapsed_min >= 0, `overdue=${hotAfter?.overdue} allday=${JSON.stringify(hotAfter?.all_day?.find((a: any) => a.name === 'SLA-LATE'))}`);
+
   // ── day-parting / menu scheduling (Asia/Bangkok) ──
   const bkk = new Date(Date.now() + 7 * 3600 * 1000);
   const nowMin = bkk.getUTCHours() * 60 + bkk.getUTCMinutes();
