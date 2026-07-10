@@ -21,7 +21,9 @@ export class BankController {
   @Post('deposits/:id/reconcile') @HttpCode(200) reconcileDeposit(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.reconcileDeposit(+id, u); }
 
   @Post('accounts') createAccount(@Body(new ZodValidationPipe(CreateBankAccountBody)) b: CreateBankAccountDto, @CurrentUser() u: JwtUser) { return this.svc.createBankAccount(b, u); }
-  @Get('accounts') listAccounts(@CurrentUser() u: JwtUser) { return this.svc.listBankAccounts(u); }
+  // Read widened to the AP payment-run actors (EXP-13): the `creditors` proposer picks the source
+  // house-bank for the bulk-transfer file; `approvals`/`gl_close` review it. Read-only master list.
+  @Get('accounts') @Permissions('exec', 'ar', 'creditors', 'approvals', 'gl_close') listAccounts(@CurrentUser() u: JwtUser) { return this.svc.listBankAccounts(u); }
   // G9 maker-checker: a new bank account is created PendingApproval; a DIFFERENT approver activates it
   // (approver ≠ requester → 403 SOD_VIOLATION) before it can bank cash.
   @Get('accounts/pending') @Permissions('approvals', 'exec') pendingAccounts(@CurrentUser() u: JwtUser) { return this.svc.listPendingBankAccounts(u); }

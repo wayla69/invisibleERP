@@ -457,7 +457,7 @@ add("BRANCH-04","Multi-Branch & Offline POS","Application","Revenue; Cash","A sa
     "modules/hub/hub-sync.service.ts (ingest + reconciliation); database/hub-push.ts (pusher, hub_push_log, migration 0293); restaurant/offline-sync.service.ts (replay target); cutover/hub-snapshot.ts (ToE)","Inspect the HMAC verification (fail-closed, timing-safe), the deterministic client_uuid derivation, and the skipped_unsupported exception rows.","Re-perform: ring sales on a hub, push (cloud sale + GL posted, TB balanced), delete the hub push-log and re-push (all duplicate, zero new cloud ops), tamper the batch (403 HUB_SYNC_BAD_SIGNATURE), an unsupported sale surfaces as skipped_unsupported with a reason, and a buffet-tier session rung on the hub replays with the charge re-priced from the cloud package master (re-performed by the hub-snapshot harness).","Hub push log; reconciliation report; idempotency + tamper tests","Implemented")
 add("BRANCH-05","Multi-Branch & Offline POS","Application","Cash; Revenue","A cash session (till/Z-report) captured on an in-store hub is certified against an INCOMPLETE or hub-asserted revenue population — the drawer variance is meaningless, a cash shortfall is hidden, or the over/short never reaches the central ledger.","Completeness/Accuracy/Authorization",
     "Hub till/Z-report ingest with cloud-side re-computation (docs/41 Phase 2c): the hub pushes the session envelope (float, physical closing count, cash movements, denominations) PLUS the hub sale numbers rung during the session; it never sends its own expected-cash figure. The cloud resolves EVERY listed sale through the BRANCH-04 dedup ledger and REFUSES the session (400 TILL_SALES_NOT_SYNCED, listing the missing sales) unless all of them have already replayed — a variance is never certified over a partial revenue population. It then computes expected = opening_float + SUM(cloud total + tip of the session's sales) + paid_in - paid_out - drops - cash_refunds from its OWN ledger (the restaurant settlement path debits 1000 Cash for the full settled amount of every tender), derives variance = counted - expected, and posts the over/short to 5830 on the SAME materiality line as a native close (REV-13): a variance above the threshold posts a DRAFT journal and parks the session PendingApproval for a DIFFERENT user to approve (GL-05 maker-checker); sub-threshold posts immediately. Idempotent on session_no (re-push returns duplicate; no second JE). Blocked/failed sessions stay in hub_push_log with their reason. Phase 4a: each hub reports a signed heartbeat (liveness, un-replayed backlog, failed/skipped counts, clock skew measured against the cloud clock); GET /api/hub/fleet flags a stale or backlogged box so un-replayed cash cannot sit unnoticed.","Det/Prev","Automated","Per till close / per heartbeat","HQ Controller / Branch Manager / IT","P10/P16",
-    "modules/hub/hub-sync.service.ts (ingestTill, heartbeat, fleet); database/hub-push.ts (pushHubTills, sendHubHeartbeat); hub_heartbeats + hub_push_log.doc_type (migration 0298); payments.service.ts CASH_VARIANCE_THRESHOLD (shared materiality); cutover/hub-snapshot.ts (ToE)","Inspect the TILL_SALES_NOT_SYNCED completeness gate, the cloud-side expected-cash re-computation (hub figures never trusted), the shared materiality threshold + maker-checker parking, and the heartbeat staleness/backlog flags.","Re-perform: close a till on a hub while one covered sale is un-replayed (session BLOCKED, logged with reason), resolve and re-push (session ingests; expected cash re-derived from the cloud ledger; immaterial short posts 5830 immediately; TB balanced), re-push (idempotent, no second JE), tamper the envelope (403), and confirm the heartbeat surfaces the backlog and is tenant-isolated (re-performed by the hub-snapshot harness).","Hub push log (doc_type='till'); till_sessions + 5830 postings; hub fleet/heartbeat report","Implemented")
+    "modules/hub/hub-sync.service.ts (ingestTill, heartbeat, fleet); database/hub-push.ts (pushHubTills, sendHubHeartbeat); hub_heartbeats + hub_push_log.doc_type (migration 0297); payments.service.ts CASH_VARIANCE_THRESHOLD (shared materiality); cutover/hub-snapshot.ts (ToE)","Inspect the TILL_SALES_NOT_SYNCED completeness gate, the cloud-side expected-cash re-computation (hub figures never trusted), the shared materiality threshold + maker-checker parking, and the heartbeat staleness/backlog flags.","Re-perform: close a till on a hub while one covered sale is un-replayed (session BLOCKED, logged with reason), resolve and re-push (session ingests; expected cash re-derived from the cloud ledger; immaterial short posts 5830 immediately; TB balanced), re-push (idempotent, no second JE), tamper the envelope (403), and confirm the heartbeat surfaces the backlog and is tenant-isolated (re-performed by the hub-snapshot harness).","Hub push log (doc_type='till'); till_sessions + 5830 postings; hub fleet/heartbeat report","Implemented")
 
 # ---- Manufacturing & Costing ----
 add("MFG-01","Manufacturing & Costing","Application","Inventory; COGS","Unauthorized BOM/recipe change mis-states standard cost and every downstream WIP/COGS posting; or the role that maintains the recipe also transacts on it.","Authorization",
@@ -628,6 +628,8 @@ add("EXP-11","Expenditure","Application","Accounts Payable; Vendor Master","A ve
 add("EXP-12","Expenditure","Application","Inventory; Accounts Payable","Goods 'received' without a physical count (blind confirmation), more stock booked than was ordered (over-receipt → inflated inventory + AP exposure), a short/damaged delivery discovered too late to claim against the supplier, or a short-shipped PO left open indefinitely (stale open commitments).","Existence/Accuracy/Completeness",
     "Blind-count goods receiving with an over-receipt tolerance gate, a time-boxed supplier-claim window, and an explicit shortage decision. (1) The /receiving screen loads the selected PO's lines (ordered / already received / outstanding via GET pos/:poNo/receive-lines) but NEVER pre-fills the counted quantity — the receiver must count and key what actually arrived. (2) createGr BLOCKS any line that would exceed the ordered quantity (422 OVER_RECEIPT), checked on the aggregate requested per item; only a WEIGHT-basis UoM (kg/g/ton) may run over, and only within the configurable receiving tolerance (receiving_settings.over_receipt_weight_pct, default 5%). Changing the tolerance is restricted to procurement/exec — the receiver cannot loosen their own gate (mirrors EXP-04). (3) The post-receipt summary shows ordered vs received per line; a supplier claim (photo evidence stored as a GRC doc_attachment) must be opened within receiving_settings.claim_window_hours of goods_receipts.created_at (default 24h) — after that the window auto-closes and the system refuses the claim (422 CLAIM_WINDOW_CLOSED). (4) On a shortage the receiver decides: keep the PO open for a later delivery, or CLOSE IT SHORT (POST pos/:poNo/close-short) — the close releases open project commitments and is binding at line level (po_items.status=Closed → any further receipt is refused, 422 PO_LINE_CLOSED).","Prev","Automated","Per receipt","Warehouse / Procurement","P17",
     "procurement/procurement-grn.service.ts (receiveLines, createGr OVER_RECEIPT/PO_LINE_CLOSED gates, closePoShort, getReceivingSettings); procurement.controller.ts (receive-lines/close-short/receiving-settings routes); claims/claims.service.ts (createGrClaim CLAIM_WINDOW_CLOSED + GRC photo attachment); schema receiving_settings + goods_receipts.created_at (migration 0290); apps/web /receiving (blind-count form + summary + claim + close-short); cutover/compliance.ts (ToE)","Inspect the over-receipt gate (aggregate per item, weight-UoM tolerance), the claim-window check against the GR timestamp, the close-short line binding, and the tolerance-change permission.","Re-perform: receive 12 on a 10-EA line → 422 OVER_RECEIPT; a kg line accepts up to +5% and refuses beyond; a claim inside the window opens with its photo, the same claim after the window → 422 CLAIM_WINDOW_CLOSED; close-short flips the PO+lines Closed, and a further receipt → 422 PO_LINE_CLOSED (re-performed by the compliance harness).","GR summary (ordered vs received); OVER_RECEIPT / CLAIM_WINDOW_CLOSED / PO_LINE_CLOSED negatives; claim photo attachment","Implemented")
+add("EXP-13","Expenditure","Application","Accounts Payable; Cash","A batch vendor-payment run selects and disburses many bills at once: a single user could select, approve and release the whole batch (mass disbursement with no independent review), an unmatched/blocked PO invoice could ride into the batch, the file handed to the bank could differ from the approved run (amounts/beneficiaries altered after approval), or a re-run could double-pay every line.","Authorization/Accuracy","AP payment-run maker-checker with a hash-pinned bank file: (1) a 'creditors' holder PROPOSES the run (open approved AP selected by due-date cutoff; EVERY line must pass the 3-way-match payment gate assertPayable — a blocked PO invoice is skipped at proposal and re-checked at approval, MATCH_BLOCKED); lines are editable only while Draft. (2) A DIFFERENT user with the same authority as a manual AP payment approval (approvals/gl_close) APPROVES the run — proposer self-approval → 403 SOD_VIOLATION, binds even Admin. (3) EXECUTION (also blocked for the proposer) posts each line through the EXISTING per-payment path (requestApPayment→approveApPayment: row-locked paid_amount, identical Dr 2000 / Cr 2361 WHT / Cr 1000 GL, WHT on the pre-VAT base) and is IDEMPOTENT per line (run-scoped idempotency key + Paid-line skip; a partial failure leaves per-line status and a re-execute retries only failed lines — a double-execute pays nothing twice). WHT certificates (50-ทวิ) issue via the existing idempotent batch cert job. (4) The Thai bank bulk-transfer file (generic/scb/kbank/bbl CSV or ISO 20022 pain.001) is generated only from an approved/executed run, FAILS CLOSED on a missing vendor bank account (VENDOR_BANK_MISSING — beneficiaries come from the maker-checked vendor master, EXP-11), and its SHA-256 is pinned on the run + status-logged so the file handed to the bank is provably the approved run's file. (5) Bank-statement auto-match clears run lines (per-payment or bulk-total), giving a detective completeness check that the approved outflow actually left the bank.","Prev","Auto+Manual","Per run","AP / Controller / Treasury","P18",
+    "finance/ap-payment-run.service.ts (propose/editLines/submit/approve SOD/execute idempotent/bankFile sha256); finance.controller.ts (ap/payment-runs routes — creditors proposes, approvals|gl_close approves/executes); match/three-way-match.service.ts assertPayable (per-line gate); tax/tax-jobs.service.ts runWhtCertBatch (50-ทวิ); bank/bank.service.ts autoMatch (line + run-total clearing); schema/finance.ts ap_payment_runs/ap_payment_run_lines + migration 0296; cutover/compliance.ts (ToE)","Inspect the run lifecycle (Draft→PendingApproval→Approved→Executed), the proposer≠approver/executor guards, the per-line match gate, the per-line idempotency, the fail-closed bank-file generation + hash pinning, and the statement-clearing hook.","Re-perform: propose a run (blocked invoice skipped), self-approve → 403 SOD_VIOLATION, approve as a different user, execute posts each line through the manual path (TB balanced; 2361 credited per WHT line; bill Paid), re-execute is a no-op, bank file generated with its SHA-256 recorded + status-logged, missing vendor bank account → 400 VENDOR_BANK_MISSING, statement auto-match flips lines cleared (re-performed by the compliance harness).","Payment-run approval log; per-line APP/PAY-AP references; bank-file SHA-256 status-log entries; cleared-line progress","Implemented")
 add("FA-07","Fixed Assets","Application","Property, Plant & Equipment; Equity","Carrying amount not adjusted for revaluation/impairment — asset over/understated.","Valuation",
     "Asset revaluation / impairment: an upward revaluation credits the revaluation surplus in equity (Dr 1500 / Cr 3200); a downward revaluation (impairment) debits impairment loss (Dr 5820 / Cr 1500). The gross 1500 moves by the delta so the register stays tied to the GL; a no-op revaluation is rejected (NO_CHANGE). Every event is logged for the audit trail.","Det","Automated","Per event","FaAccountant / Controller","P10",
     "assets.service.ts (revalue up→3200 / down→5820, listRevaluations; dispose recycles surplus 3200→3100); assets.controller.ts (exec/creditors); schema/assets.ts (asset_revaluations) + migration 0120; cutover/basics.ts (ToE)","Inspect revaluation/impairment routing + audit log + disposal recycling.","Upward revaluation credits 3200; impairment debits 5820; no-change → NO_CHANGE; both events logged; on disposal the revaluation surplus is recycled to retained earnings (Dr 3200 / Cr 3100), not through P&L (re-performed by the harness).","Revaluation log; disposal recycling JE","Implemented")
@@ -755,6 +757,116 @@ add("BUD-01","Budgeting & Planning","Application","Budget; All (variance reporti
 add("BUD-02","Budgeting & Planning","Application","Budget; Procurement (P2P spend)","Budgets are report-only: a PR/PO that exceeds the approved budget is approved and committed with no availability check, so overspend is only discovered after the fact in the variance report — commitments (open POs / approved PRs) are invisible to spend authorization.","Authorization/Completeness",
     "Budgetary control / encumbrance gate (FIN-3): at PR and PO APPROVAL (never at request — asking is free) the gate computes availability = approved budget (fiscal-YTD) − GL actuals (YTD) − OPEN commitments per resolved budget account (item.cogs_account → item_categories.cogs_account → budget_control_settings.default_expense_account; project/BoQ lines are excluded — PROJ-12/13 encumber them — as are is_capital lines), per the tenant policy (budget_control_settings.policy): off (default, report-only) | advise (approve + annotate) | warn (approver must resubmit with confirm_over_budget) | block (422 BUDGET_EXCEEDED unless an EXEC override with a mandatory reason — BUDGET_OVERRIDE_DENIED for a non-exec approver, BUDGET_OVERRIDE_REASON_REQUIRED without one; audited on the commitment row + doc status log). The final approval RECORDS the commitment in budget_commitments (a PR reserves its item-master estimate, released when it converts to POs; a PO reserves the ordered amount, consumed on full receipt, released on cancel/close-short). Scope: only accounts WITH an approved budget for the year are enforced (unbudgeted spend is caught by ELC-06). Policy change is restricted to exec/gl_close (mirrors EXP-04 change control).","Prev","Automated","Per approval","Controller / FP&A","P10",
     "commitments.service.ts glGate/glReserve/glRelease/glConsume/glAvailability (one encumbrance engine with PROJ-12); procurement-pr.service.ts approvePr + procurement-po.service.ts approvePo (gate + reserve), convertPrToPo/cancelPo/closePoShort/createGr (lifecycle); budget-control.controller.ts (/api/budget availability|commitments|control-settings); schema/budgets.ts budget_control_settings + budget_commitments + migration 0298; cutover/budget.ts (ToE)","Inspect the availability formula (budget − actuals − open commitments), the policy switch + fail-open default, the exec-only override with mandatory reason, and the commitment lifecycle (reserve→consume/release).","Re-perform: default off (response unchanged); advise (approve + exceeded flag); warn (BUDGET_CONFIRM_REQUIRED then confirm); block (BUDGET_EXCEEDED; non-exec override 403; exec override without reason 400; with reason approved + audited row); receipt consumes; PR→PO conversion releases the PR estimate (re-performed by the budget harness).","Budget-control policy + budget_commitments audit rows (override_by/override_reason)","Implemented")
+
+# write RCM sheet
+rcm = wb.create_sheet("RCM")
+rcm.sheet_view.showGridLines = False
+for j,h in enumerate(HEAD, start=1):
+    c = rcm.cell(row=1, column=j, value=h); c.font = f(10, True, "FFFFFF"); c.fill = fill(NAVY); c.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center"); c.border = BORDER
+    rcm.column_dimensions[get_column_letter(j)].width = W[j-1]
+status_style = {"Implemented":(GREEN_F,GREEN_T),"Partial":(AMBER_F,AMBER_T),"Gap":(RED_F,RED_T)}
+cycle_band = {}
+for i,row in enumerate(R, start=2):
+    band = BAND if (i % 2 == 0) else "FFFFFF"
+    for j,val in enumerate(row, start=1):
+        c = rcm.cell(row=i, column=j, value=val); c.font = f(9); c.alignment = WRAP; c.border = BORDER; c.fill = fill(band)
+        if j in (1,3,8,9,10,12,17): c.alignment = WRAPC
+    sc = rcm.cell(row=i, column=17); fc,tc = status_style.get(row[16], ("FFFFFF","000000")); sc.fill = fill(fc); sc.font = f(9, True, tc)
+    rcm.cell(row=i, column=1).font = f(9, True, NAVY)
+rcm.freeze_panes = "C2"
+rcm.auto_filter.ref = f"A1:{get_column_letter(len(HEAD))}{len(R)+1}"
+rcm.row_dimensions[1].height = 34
+
+# ============================================================== GAP REMEDIATION
+gh = ["Control ID","Cycle","Gap / Weakness","Remediation Action","Owner","Phase","Target (relative)","Priority"]
+gw = [11,17,34,46,16,10,16,11]
+# phase mapping per earlier plan; priority H/M
+# NOTE: Phase A (2026-06-23) closed AC-12, AC-13, CM-01, CM-02, CM-03, CM-04, CM-05, OP-01, OP-03 —
+# removed from this remediation backlog (now Implemented in the Controls tab; one-time console [setup]
+# steps tracked in docs/11-next-upgrade-realworld-roadmap.md and the audit-readiness plan).
+GAP = [
+ ("ELC-01","Entity-Level","Code-of-conduct policy adopted (v1.0) + register format defined; collect the annual signed acknowledgements (operating evidence).","Run the annual acknowledgement sign-off; retain the signed register.","CEO / HR","Phase 1","Month 1-2","Medium"),
+ ("ELC-02","Entity-Level","Audit-committee charter adopted (v1.0); hold the quarterly ICFR review and minute it (operating evidence).","Convene the audit committee; retain quarterly ICFR-oversight minutes.","Board","Phase 1","Month 1-2","Medium"),
+ ("ELC-04","Entity-Level","Whistleblower / non-retaliation policy adopted (v1.0); stand up the external anonymous reporting channel + case log.","Contract/stand up the anonymous hotline; retain the case log.","Audit Cttee","Phase 1","Month 2","Medium"),
+]
+gap = wb.create_sheet("Gap Remediation")
+gap.sheet_view.showGridLines = False
+gap["A1"] = "Remediation Plan — Gap & Partial controls (sequenced to the readiness timeline)"; gap["A1"].font = f(12, True, NAVY)
+gap.merge_cells("A1:H1")
+for j,h in enumerate(gh, start=1):
+    c = gap.cell(row=2, column=j, value=h); c.font = f(10, True, "FFFFFF"); c.fill = fill(STEEL); c.alignment = WRAPC; c.border = BORDER
+    gap.column_dimensions[get_column_letter(j)].width = gw[j-1]
+pri_fill = {"High":RED_F,"Medium":AMBER_F}
+for i,row in enumerate(GAP, start=3):
+    band = BAND if (i % 2 == 1) else "FFFFFF"
+    for j,val in enumerate(row, start=1):
+        c = gap.cell(row=i, column=j, value=val); c.font = f(9); c.alignment = WRAP; c.border = BORDER; c.fill = fill(band)
+        if j in (1,2,5,6,7,8): c.alignment = WRAPC
+    pc = gap.cell(row=i, column=8); pc.fill = fill(pri_fill.get(row[7],"FFFFFF")); pc.font = f(9, True)
+    gap.cell(row=i, column=1).font = f(9, True, NAVY)
+gap.freeze_panes = "A3"; gap.auto_filter.ref = f"A2:H{len(GAP)+2}"; gap.row_dimensions[2].height = 28
+
+# ============================================================== COSO MAPPING
+coso = wb.create_sheet("COSO Mapping")
+coso.sheet_view.showGridLines = False
+coso["A1"] = "COSO 2013 — 17 Principles coverage"; coso["A1"].font = f(12, True, NAVY); coso.merge_cells("A1:D1")
+ch = ["Component","#","Principle","Covered by (examples)"]
+cwd = [22,5,55,40]
+for j,h in enumerate(ch, start=1):
+    c = coso.cell(row=2, column=j, value=h); c.font = f(10, True, "FFFFFF"); c.fill = fill(STEEL); c.alignment = WRAPC; c.border = BORDER
+    coso.column_dimensions[get_column_letter(j)].width = cwd[j-1]
+COSO = [
+ ("Control Environment",1,"Commitment to integrity & ethical values","ELC-01, ELC-04"),
+ ("Control Environment",2,"Board exercises oversight responsibility","ELC-02"),
+ ("Control Environment",3,"Establishes structure, authority & responsibility","ELC-03, ITGC-AC-02"),
+ ("Control Environment",4,"Commitment to competence","HR / training (entity)"),
+ ("Control Environment",5,"Enforces accountability","ELC-03, ITGC-AC-08/09"),
+ ("Risk Assessment",6,"Specifies suitable objectives","Scoping memo (to author)"),
+ ("Risk Assessment",7,"Identifies & analyzes risk","Scoping / risk assessment"),
+ ("Risk Assessment",8,"Assesses fraud risk","ELC-05"),
+ ("Risk Assessment",9,"Identifies & analyzes significant change","ITGC-CM-*, ITGC-SD-01"),
+ ("Control Activities",10,"Selects & develops control activities","REV-*, EXP-*, INV-*, GL-*, REC-*"),
+ ("Control Activities",11,"Selects & develops GENERAL CONTROLS over technology (ITGC)","All ITGC-AC/CM/SD/OP"),
+ ("Control Activities",12,"Deploys through policies & procedures","SDLC/DoA/close policies (to author)"),
+ ("Information & Comm.",13,"Uses relevant, quality information","REV-04, ITGC-AC-10/11, GL-*"),
+ ("Information & Comm.",14,"Communicates internally","Close calendar / reporting"),
+ ("Information & Comm.",15,"Communicates externally","ELC-04; investor/auditor comms"),
+ ("Monitoring",16,"Ongoing &/or separate evaluations","REV-05, REC-01/02, ITGC-SD-03, ELC-06"),
+ ("Monitoring",17,"Evaluates & communicates deficiencies","Deficiency log / 404(a) assessment"),
+]
+for i,row in enumerate(COSO, start=3):
+    band = BAND if (i % 2 == 1) else "FFFFFF"
+    for j,val in enumerate(row, start=1):
+        c = coso.cell(row=i, column=j, value=val); c.font = f(9); c.alignment = WRAP; c.border = BORDER; c.fill = fill(band)
+        if j==2: c.alignment = WRAPC
+    if row[1] == 11:
+        for j in range(1,5): coso.cell(row=i, column=j).font = f(9, True, NAVY)
+coso.freeze_panes = "A3"
+
+# ============================================================== DASHBOARD (formulas)
+dash = wb.create_sheet("Summary")
+dash.sheet_view.showGridLines = False
+dash["B2"] = "ICFR Readiness — Control Summary"; dash["B2"].font = f(14, True, NAVY); dash.merge_cells("B2:E2")
+last = len(R)+1
+dash["B4"] = "By Status"; dash["B4"].font = f(11, True, STEEL)
+sd = [("Implemented",GREEN_F,GREEN_T),("Partial",AMBER_F,AMBER_T),("Gap",RED_F,RED_T)]
+for i,(s,fc,tc) in enumerate(sd):
+    r=5+i
+    dash[f"B{r}"]=s; dash[f"B{r}"].fill=fill(fc); dash[f"B{r}"].font=f(10,True,tc)
+    dash[f"C{r}"]=f'=COUNTIF(RCM!$Q$2:$Q${last},B{r})'; dash[f"C{r}"].font=f(10)
+dash["B8"]="Total"; dash["B8"].font=f(10,True)
+dash["C8"]=f'=COUNTA(RCM!$A$2:$A${last})'; dash["C8"].font=f(10,True)
+dash["B10"]="By Category"; dash["B10"].font=f(11,True,STEEL)
+for i,cat in enumerate(["Entity","ITGC","Application"]):
+    r=11+i
+    dash[f"B{r}"]=cat; dash[f"B{r}"].font=f(10)
+    dash[f"C{r}"]=f'=COUNTIF(RCM!$C$2:$C${last},B{r})'; dash[f"C{r}"].font=f(10)
+dash["B15"]="% Implemented"; dash["B15"].font=f(10,True)
+dash["C15"]='=IFERROR(C5/C8,0)'; dash["C15"].font=f(10,True); dash["C15"].number_format='0.0%'
+dash["B17"]=("Read with the 'RCM' tab (full control detail + tests), 'Gap Remediation' (sequenced fixes), and 'COSO Mapping' "
+             "(17-principle coverage). Status counts update automatically from the RCM.")
+dash.merge_cells("B17:E19"); dash["B17"].font=f(9,False,GREY); dash["B17"].alignment=WRAP
+for col,w in (("A",3),("B",22),("C",12),("D",3),("E",40)): dash.column_dimensions[col].width=w
 
 # write RCM sheet
 rcm = wb.create_sheet("RCM")
