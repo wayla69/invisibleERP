@@ -112,6 +112,19 @@ For every such change, review and update as needed:
     scripts; run `grep -ln "<endpoint1>\|<endpoint2>\|<tableName>" tools/cutover/src/*.ts tools/parity/src/*.ts`
     and run every hit locally before pushing. Fix direction per mantra #4: the harness's fake fixture gets a
     real seeded row (`goodsReceipts` insert) — never loosen the control to accept fictitious references.
+12. **A harness that fails identically on main and on your PR is a regression that MERGED WITHOUT CI — check
+    what landed while the Actions queue was frozen, and check the webhook event's SHA before chasing it.**
+    During the 2026-07-10 queue freeze (26 runs / ~2,000 jobs stuck `Queued`; fixed by the per-ref
+    `concurrency` group + the 11-shard harness matrix — `deployment.md` §5) several PRs merged with their
+    checks still queued, so main went red on costing/wms/manufacturing/tenant-idx with no PR ever seeing it.
+    Diagnose exactly like any failure (mantra #1–3): reproduce locally, and when a service 500s as
+    `INTERNAL_ERROR`, wrap/instrument `AllExceptionsFilter` to print the raw error + `.cause` — that
+    surfaced the real `new row violates row-level security policy for table "stock_movements"`. Two other
+    lessons from that day: (a) PR-activity webhooks KEEP FIRING for **superseded** runs (an old head SHA, or
+    pre-rename job names) — compare the event's `HeadSHA` to the live PR head first; a stale run's failure
+    is only signal about *main*, never about your current tip. (b) When landing a CI-topology change (shard
+    names, new required checks), remind the owner to update branch-protection required checks — the old
+    check names never report again.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -306,6 +319,17 @@ For every such change, review and update as needed:
   company column `tenant_id`: use `about_tenant_id` / `created_tenant_id` (see `platform_notifications`,
   `signup_requests`) so both the guard and the RLS loop skip it. Grant `app_user` on the new table in the
   migration's `DO $$ … GRANT … $$` block (mirror `0234`/`0247`); no RLS clause needed.
+- **Tenant-scoping an EXISTING table breaks every writer that doesn't set `tenant_id` — grep ALL insert
+  sites, not just the module you're fixing.** The canonical RLS policy's WITH CHECK rejects a NULL
+  `tenant_id` insert from a tenant session (only bypass/HQ sessions may write NULL), so a migration that
+  adds `tenant_id`+RLS to a table other modules also write instantly 500s those paths. Root cause of the
+  2026-07-10 breakage: `0316` (#621) scoped `stocktakes`+`stock_movements` but fixed only stock-ops'
+  writes — `createGr` (procurement-grn), WMS putaway/pick, replenishment, WO issue/complete
+  (manufacturing), scan close, and `seed-demo-procurement` all still inserted NULL and receiving/WMS/MFG
+  went down until the writes carried the tenant. Rule: after such a migration, run
+  `grep -rn "insert(\(schema\.\)\?<tableVar>)" apps/api/src` (services **and** `database/seed-*`) and add
+  the tenant to every hit; also add the tenant-leading index (mantra: `idx_<table>_tenant`) or the
+  `tenant-idx` gate fails. New tables get this for free only if EVERY writer is in the new module.
 - **Two web ratchets gate the `build` job (both may only go DOWN, but feature PRs routinely bump them by the
   count they add — that's the norm, see the baselines' own `_note`).** `tools/ci/check-use-client.mjs` counts
   files whose first statement is `'use client'` (`use-client-baseline.json`) — a genuinely-interactive new
