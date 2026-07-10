@@ -801,4 +801,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.swh_col_temperature': { th: 'อุณหภูมิ', en: 'Temperature' },
   'st.swh_col_notes': { th: 'หมายเหตุ', en: 'Notes' },
   'st.swh_save_btn': { th: 'บันทึก', en: 'Save' },
+  // mdio.* — shared bulk import/export section heading embedded on list screens (assets, menu, suppliers)
+  // that reuse the master-data registry engine via <MasterIo>.
+  'mdio.section_title': { th: 'นำเข้า/ส่งออกแบบกลุ่ม (Excel/CSV)', en: 'Bulk import / export (Excel / CSV)' },
 };

@@ -1,6 +1,9 @@
 # 03 · Procurement
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2 · 2026-07-10** · *v0.2 (2026-07-10): the **Suppliers** screen (`/inventory/suppliers`)
+gains a **Bulk import / export (Excel/CSV)** section — export the vendor/creditor master, download a blank
+template, or upload vendors in bulk (registry entity `vendors`); gated to the `masterdata` setup duty
+(see §ผู้ขาย → Bulk import/export).*
 
 This chapter covers the full buying cycle — purchase requisition (PR) → purchase
 order (PO) → goods receipt (GR) → 3-way match — plus managing vendors.
@@ -250,6 +253,14 @@ ordered, or **ออก PO บางส่วน / Partially converted** when so
 > requisitions route to the right PO automatically. The quickest way is the **★** tick in the
 > conversion panel above; it's the price-maintenance duty (`md_vendor`, also open to
 > `procurement`/`planner`), kept separate from paying the bill.
+
+**Bulk import/export of vendors (Excel/CSV).** At the bottom of the **Suppliers** screen
+(`/inventory/suppliers`) a **Bulk import / export (Excel/CSV)** section lets you export the
+vendor/creditor master, download a blank **template**, and **import** many vendors at once
+(validate-then-commit, with a per-row error preview). It reuses the shared master-data import engine
+(registry entity `vendors`) and is shown only to users holding the `masterdata` setup duty; a bulk edit
+that touches a financially-sensitive field (payment terms, credit limit) is staged for independent
+approval rather than committed directly. Required columns: `Vendor_Code`, `Name`.
 
 **Reorder what's running out (สินค้าใกล้หมด):** when any item's on-hand has dropped
 to/below its **reorder point** (`min_stock` on the item master), a **สินค้าใกล้หมด** card

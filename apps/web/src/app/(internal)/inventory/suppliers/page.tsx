@@ -16,6 +16,7 @@ import { ChangeHistorySection } from '@/components/change-history-section';
 import { ProvinceInput } from '@/components/province-input';
 import { PartyRelationshipsSection } from '@/components/party-relationships';
 import { CustomFieldsSection } from '@/components/custom-fields-section';
+import { MasterIo } from '@/components/master-io';
 
 const VENDOR_REL_TYPES = ['related_party', 'subsidiary', 'franchisee', 'subcontractor', 'parent', 'other'] as const;
 import { Button } from '@/components/ui/button';
@@ -146,6 +147,14 @@ export default function SuppliersPage() {
             }] : []),
           ]}
         />
+      )}
+      {/* Bulk import/export of the vendor/supplier master — reuses the master-data registry engine (entity
+          `vendors`); gated to the coarse `masterdata` setup duty the /api/admin/master-data endpoints require. */}
+      {hasPerm(me, 'masterdata') && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-muted-foreground">{t('mdio.section_title')}</h3>
+          <MasterIo entityKey="vendors" base="admin" onImported={() => q.refetch()} />
+        </div>
       )}
       {editingBank && <BankChangeDialog vendor={editingBank} onClose={() => setEditingBank(null)} />}
       {editingProfile && <ProfileDialog vendor={editingProfile} onClose={() => setEditingProfile(null)} />}

@@ -17,6 +17,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
+import { useMe, hasPerm } from '@/lib/auth';
+import { MasterIo } from '@/components/master-io';
 import { Select } from '@/components/form-controls';
 
 interface Item {
@@ -73,6 +75,7 @@ export default function MenuPage() {
 function Items() {
   const { t } = useLang();
   const qc = useQueryClient();
+  const { data: me } = useMe();
   const menu = useQuery<MenuResp>({ queryKey: ['menu'], queryFn: () => api('/api/menu') });
   const cats = useQuery<{ categories: Category[] }>({ queryKey: ['menu-categories'], queryFn: () => api('/api/menu/categories') });
 
@@ -218,6 +221,15 @@ function Items() {
           />
         </StateView>
       </div>
+
+      {/* Bulk import/export of the POS menu catalog — reuses the master-data registry engine (entity
+          `menu_items`); gated to the coarse `masterdata` setup duty the /api/admin/master-data endpoints require. */}
+      {hasPerm(me, 'masterdata') && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-muted-foreground">{t('mdio.section_title')}</h3>
+          <MasterIo entityKey="menu_items" base="admin" onImported={() => qc.invalidateQueries({ queryKey: ['menu'] })} />
+        </div>
+      )}
     </div>
   );
 }
