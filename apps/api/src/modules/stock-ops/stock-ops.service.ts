@@ -30,7 +30,7 @@ export class StockOpsService {
   ) {}
 
   // ── Stocktake ────────────────────────────────────────────────────────────
-  // 0299: stocktakes/stock_movements gained a tenant_id. RLS now scopes them, but every query threads an
+  // 0316: stocktakes/stock_movements gained a tenant_id. RLS now scopes them, but every query threads an
   // explicit tenant too — a write path must never depend on RLS alone (and an HQ/god bypass session would
   // otherwise read or post across tenants by document number).
   private tid(user: JwtUser): number {
@@ -89,7 +89,7 @@ export class StockOpsService {
           movements++;
         }
       }
-      await tx.update(stocktakes).set({ status: 'Posted' }).where(and(eq(stocktakes.tenantId, tenantId), eq(stocktakes.stNo, stNo)));
+      await tx.update(stocktakes).set({ status: 'Posted', postedBy: user.username, postedAt: new Date() }).where(and(eq(stocktakes.tenantId, tenantId), eq(stocktakes.stNo, stNo)));
       return { already: false, lines, movements };
     });
     if (res.already) return { st_no: stNo, status: 'Posted', already: true };
@@ -101,6 +101,52 @@ export class StockOpsService {
       if (r.valued) valued++;
     }
     return { st_no: stNo, status: 'Posted', variance_movements: res.movements, valued_lines: valued };
+  }
+
+  /**
+   * Store-hub replay of a POSTED count sheet (control BRANCH-07, docs/41 Phase 2c-2).
+   *
+   * The hub already ran the R11 maker-checker with two real humans; the cloud posts as the machine
+   * principal `hub-sync`, which would silently erase that evidence. So the document must NAME both
+   * humans and the cloud REFUSES it when they are the same person (`STOCKTAKE_NOT_SEGREGATED`) — the
+   * replay can never launder a self-approved count into the central ledger. Both names are persisted
+   * (`counted_by` / `posted_by`, 0317) so the segregation is evidenced on either ledger.
+   *
+   * Idempotent on (tenant, st_no): a re-push returns the stored document and creates no second movement.
+   * Variance movements are created exactly as a native post creates them.
+   */
+  async ingestHubStocktake(doc: { st_no: string; st_date: string; counted_by: string; posted_by: string; remarks?: string; lines: { item_id: string; item_description?: string; uom?: string; system_qty: number; physical_qty: number }[] }, tenantId: number) {
+    if (!doc.lines?.length) throw new BadRequestException({ code: 'NO_LINES', message: 'No count lines', messageTh: 'ไม่มีรายการนับ' });
+    if (!doc.counted_by || !doc.posted_by) throw new BadRequestException({ code: 'STOCKTAKE_NOT_SEGREGATED', message: 'A replayed stocktake must name both the counter and the poster', messageTh: 'ใบนับที่ส่งเข้าระบบต้องระบุทั้งผู้นับและผู้โพสต์' });
+    if (doc.counted_by === doc.posted_by) throw new ForbiddenException({ code: 'STOCKTAKE_NOT_SEGREGATED', message: 'The counter cannot be the poster — SoD R11 (the hub must have an independent reviewer)', messageTh: 'ผู้นับกับผู้โพสต์ต้องเป็นคนละคน (SoD R11)' });
+
+    const db = this.db;
+    const existing = await db.select().from(stocktakes).where(and(eq(stocktakes.tenantId, tenantId), eq(stocktakes.stNo, doc.st_no))).limit(1);
+    if (existing.length) return { st_no: doc.st_no, status: 'Posted', duplicate: true as const, movements: 0 };
+
+    return await db.transaction(async (tx: any) => {
+      const now = new Date();
+      let movements = 0;
+      for (const l of doc.lines) {
+        const sys = n(l.system_qty), phys = n(l.physical_qty);
+        const diff = round2(phys - sys);
+        await tx.insert(stocktakes).values({
+          tenantId, stNo: doc.st_no, stDate: doc.st_date, itemId: l.item_id, itemDescription: l.item_description ?? null,
+          uom: l.uom ?? null, systemQty: String(sys), physicalQty: String(phys), difference: String(diff),
+          countedBy: doc.counted_by, postedBy: doc.posted_by, postedAt: now, status: 'Posted' as const, remarks: doc.remarks ?? null,
+        });
+        if (diff !== 0) {
+          await tx.insert(stockMovements).values({
+            tenantId, moveDate: now, docNo: doc.st_no, moveType: diff > 0 ? 'Stock In' : 'Stock Out',
+            itemId: l.item_id, itemDescription: l.item_description ?? null, uom: l.uom ?? null, qty: String(Math.abs(diff)),
+            fromLocation: diff > 0 ? 'Count Adj' : 'Warehouse', toLocation: diff > 0 ? 'Warehouse' : 'Count Adj',
+            refDoc: doc.st_no, remarks: 'Stocktake variance (hub replay)', createdBy: doc.posted_by,
+          });
+          movements++;
+        }
+      }
+      return { st_no: doc.st_no, status: 'Posted', duplicate: false as const, movements };
+    });
   }
 
   async listStocktakes(limit = 50, user?: JwtUser) {

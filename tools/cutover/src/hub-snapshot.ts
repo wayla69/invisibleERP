@@ -31,6 +31,7 @@ import { PasswordService } from '../../../apps/api/dist/modules/auth/password.se
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
 import { importHubSnapshot } from '../../../apps/api/dist/database/hub-import';
 import { pushHubSales, pushHubTills, pushHubWaste, sendHubHeartbeat, signHubBatch } from '../../../apps/api/dist/database/hub-push';
+import { pushHubSales, pushHubTills, pushHubStocktakes, sendHubHeartbeat, signHubBatch } from '../../../apps/api/dist/database/hub-push';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -319,6 +320,30 @@ async function main() {
   ok('Forced waste re-send with a bad signature is rejected', (wForce as any).err === 'HUB_SYNC_BAD_SIGNATURE', JSON.stringify(wForce));
   const tbW = await cApp.inj('GET', '/api/ledger/trial-balance', t1admin);
   ok('Cloud trial balance balanced after waste ingest', tbW.json?.totals?.balanced === true, JSON.stringify(tbW.json?.totals ?? {}));
+  // ═══ Phase 2c-2 — posted stocktakes replay, SoD R11 preserved (BRANCH-07) ═══
+  const sendStocktake = async (body: any) => {
+    const res = await cApp.inj('POST', '/api/hub/ingest-stocktake', undefined, body);
+    if (res.status !== 200 && res.status !== 201) { const e: any = new Error(res.json?.error?.code ?? String(res.status)); e.code = res.json?.error?.code; throw e; }
+    return res.json;
+  };
+  // a POSTED sheet counted by one person and posted by another (the hub already enforced R11)
+  await hub.pg.query(`INSERT INTO stocktakes (tenant_id, st_no, st_date, item_id, uom, system_qty, physical_qty, difference, counted_by, posted_by, posted_at, status)
+    VALUES (${t1}, 'ST-HUB-1', '2026-07-10', 'ING-BASIL', 'EA', 10, 8, -2, 'counter1', 'reviewer1', now(), 'Posted')`);
+  // and a self-posted sheet — the poster IS the counter: it must be BLOCKED, never laundered into the cloud
+  await hub.pg.query(`INSERT INTO stocktakes (tenant_id, st_no, st_date, item_id, uom, system_qty, physical_qty, difference, counted_by, posted_by, posted_at, status)
+    VALUES (${t1}, 'ST-HUB-SELF', '2026-07-10', 'ING-BASIL', 'EA', 10, 4, -6, 'counter1', 'counter1', now(), 'Posted')`);
+  const stPush = await pushHubStocktakes(hub.db, t1, { secret: SECRET, sendStocktake });
+  ok('Stocktake push: the segregated sheet lands, the self-posted one is BLOCKED', stPush.pushed === 1 && stPush.blocked === 1 && stPush.failed === 0, JSON.stringify(stPush));
+  const cloudSt = (await cloud.pg.query(`SELECT st_no, counted_by, posted_by, status FROM stocktakes ORDER BY st_no`)).rows as any[];
+  ok('Cloud: only the segregated sheet exists, with BOTH humans named (R11 evidence survives the replay)', cloudSt.length === 1 && cloudSt[0].st_no === 'ST-HUB-1' && cloudSt[0].counted_by === 'counter1' && cloudSt[0].posted_by === 'reviewer1', JSON.stringify(cloudSt));
+  const cloudMov = (await cloud.pg.query(`SELECT doc_no, move_type, qty FROM stock_movements WHERE doc_no='ST-HUB-1'`)).rows as any[];
+  ok('Cloud: the variance created a Stock Out movement of 2', cloudMov.length === 1 && cloudMov[0].move_type === 'Stock Out' && Math.abs(Number(cloudMov[0].qty) - 2) < 0.01, JSON.stringify(cloudMov));
+  const stBlockedLog = (await hub.pg.query(`SELECT status, error_code FROM hub_push_log WHERE hub_sale_no='ST-HUB-SELF'`)).rows[0] as any;
+  ok('Blocked sheet is logged with STOCKTAKE_NOT_SEGREGATED (visible, never silent)', /STOCKTAKE_NOT_SEGREGATED/.test(stBlockedLog?.error_code ?? ''), JSON.stringify(stBlockedLog));
+  const stDup = await pushHubStocktakes(hub.db, t1, { secret: SECRET, sendStocktake });
+  ok('Stocktake re-push: the landed sheet is not re-collected; the blocked one retries and is blocked again', stDup.pushed === 0 && stDup.blocked === 1, JSON.stringify(stDup));
+  const movCount = Number(((await cloud.pg.query(`SELECT count(*)::int n FROM stock_movements WHERE doc_no='ST-HUB-1'`)).rows[0] as any).n);
+  ok('Cloud: no second variance movement after the re-push (idempotent)', movCount === 1, String(movCount));
 
   // ═══ Phase 4a — hub heartbeat + fleet view ═══
   const sendHeartbeat = async (body: any) => {
