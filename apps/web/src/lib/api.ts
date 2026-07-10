@@ -141,7 +141,13 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (handleUnauthorized(res.status)) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
+    if (handleUnauthorized(res.status)) {
+      // Carry the HTTP status here too: callers that treat a status-less Error as a NETWORK failure
+      // (e.g. the register's offline-queue fallback) must not mistake an expired session for a dead link.
+      const sessionErr = new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่') as Error & { status?: number };
+      sessionErr.status = res.status;
+      throw sessionErr;
+    }
     const msg = body?.error?.messageTh ?? body?.error?.message ?? `HTTP ${res.status}`;
     // Preserve the machine-readable error `code` and HTTP status on the thrown Error so callers can branch
     // on a specific failure (e.g. map COA_ADMIN_ONLY to a tailored toast) instead of matching message text.

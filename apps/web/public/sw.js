@@ -8,7 +8,7 @@
    - other same-origin GETs → stale-while-revalidate (fast, self-healing).
    Sales made offline are queued client-side (lib/offline.ts) and replayed to /api/portal/pos/offline-sync,
    so we never cache or replay API writes here. */
-const CACHE = 'ierp-pos-v2';
+const CACHE = 'ierp-pos-v3'; // v3: purge shells that may hold redirect-poisoned entries (see guard below)
 
 self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
@@ -35,9 +35,11 @@ self.addEventListener('fetch', (event) => {
   if (isNavigation) {
     // Network-first: always try to load the *current* HTML (with today's chunk hashes). Only if the network
     // is unavailable do we fall back to the last cached shell, so the installed app still opens offline.
+    // Never cache a redirect-followed response: an expired session bouncing /pos/register → /login would
+    // otherwise poison the offline shell with the login page under the register's URL.
     event.respondWith(
       fetch(req)
-        .then((res) => { if (res && res.status === 200) { const c = res.clone(); caches.open(CACHE).then((cache) => cache.put(req, c)); } return res; })
+        .then((res) => { if (res && res.status === 200 && !res.redirected) { const c = res.clone(); caches.open(CACHE).then((cache) => cache.put(req, c)); } return res; })
         .catch(() => caches.open(CACHE).then((cache) => cache.match(req).then((cached) => cached || cache.match('/')))),
     );
     return;
@@ -61,7 +63,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(req);
-      const network = fetch(req).then((res) => { if (res && res.status === 200) cache.put(req, res.clone()); return res; }).catch(() => cached);
+      const network = fetch(req).then((res) => { if (res && res.status === 200 && !res.redirected) cache.put(req, res.clone()); return res; }).catch(() => cached);
       return cached || network;
     }),
   );
