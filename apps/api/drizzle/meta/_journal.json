@@ -2187,27 +2187,6 @@
       "breakpoints": true
     },
     {
-      "idx": 314,
-      "version": "7",
-      "when": 2023820000275,
-      "tag": "0314_ap_dynamic_discount",
-      "breakpoints": true
-    },
-    {
-      "idx": 315,
-      "version": "7",
-      "when": 2023820000276,
-      "tag": "0315_member_ledger_idempotency",
-      "breakpoints": true
-    },
-    {
-      "idx": 316,
-      "version": "7",
-      "when": 2023820000277,
-      "tag": "0316_stocktake_tenant_isolation",
-      "breakpoints": true
-    },
-    {
       "idx": 312,
       "version": "7",
       "when": 2023820000278,
@@ -2215,9 +2194,30 @@
       "breakpoints": true
     },
     {
-      "idx": 317,
+      "idx": 314,
       "version": "7",
       "when": 2023820000279,
+      "tag": "0314_ap_dynamic_discount",
+      "breakpoints": true
+    },
+    {
+      "idx": 315,
+      "version": "7",
+      "when": 2023820000280,
+      "tag": "0315_member_ledger_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 316,
+      "version": "7",
+      "when": 2023820000281,
+      "tag": "0316_stocktake_tenant_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 317,
+      "version": "7",
+      "when": 2023820000282,
       "tag": "0317_pos_tip_adjust",
       "breakpoints": true
     }
