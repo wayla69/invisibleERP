@@ -1,6 +1,6 @@
 # 10 · Approvals
 
-**Status: DRAFT v0.3 · 2026-07-06** · *v0.3 (2026-07-06): documented **where these controls are surfaced in the app** — the workflow readiness check now appears as a **"Control readiness"** tab on the **Workflow Approvals** screen (`/workflow`), and the two detective exception reports (**"Voids / refunds"** G14, **"Voided tax invoices"** G16) appear as read-only review cards on the **Pending Approvals** screen (`/approvals`). UI surfacing of already-shipped checks — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **workflow readiness check** (`GET /api/workflow/readiness`, `masterdata`/`approvals`/`exec`) — a go-live detective/config control that reports which engine-wired document types (PR/PO/BUDGET/PMR/BQR) lack an active definition and would therefore auto-approve; clarified that a document type with no definition auto-approves. No new numbered control.*
+**Status: DRAFT v0.4 · 2026-07-10** · *v0.4 (2026-07-10): documented **batch approve/reject** on the **Pending Approvals** screen (`/approvals`) — an approver can tick several queued items and clear them in one action (§4e). Each ticked item still fires its **own** maker-checker endpoint, so its control and SoD (approver ≠ requester) are enforced per item exactly as a one-by-one approval — this is a UX convenience, **no new endpoint and no new numbered control**.* · *v0.3 (2026-07-06): documented **where these controls are surfaced in the app** — the workflow readiness check now appears as a **"Control readiness"** tab on the **Workflow Approvals** screen (`/workflow`), and the two detective exception reports (**"Voids / refunds"** G14, **"Voided tax invoices"** G16) appear as read-only review cards on the **Pending Approvals** screen (`/approvals`). UI surfacing of already-shipped checks — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **workflow readiness check** (`GET /api/workflow/readiness`, `masterdata`/`approvals`/`exec`) — a go-live detective/config control that reports which engine-wired document types (PR/PO/BUDGET/PMR/BQR) lack an active definition and would therefore auto-approve; clarified that a document type with no definition auto-approves. No new numbered control.*
 
 This chapter is for **anyone who approves documents** — managers, financial
 controllers, procurement leads. It covers the approvals inbox, approving and
@@ -38,6 +38,16 @@ route to an **approver** before they take effect. The rules decide:
 **Expected result:** On approve, the underlying action proceeds (e.g. the PO is
 authorised, the journal entry posts). On reject, it is returned / voided with your
 reason recorded.
+
+> **Budget check on PR/PO approvals (BUD-02):** if your company enabled the
+> budget-control policy (**/budget → ควบคุมงบ**), approving a purchase
+> requisition or purchase order also checks the **available budget** (approved
+> budget − actuals − open commitments). The PR/PO screens show a budget chip
+> next to the decision; over-budget approvals may require a **confirmation**
+> (warn policy) or an **executive override with a recorded reason** (block
+> policy, error `BUDGET_EXCEEDED`). See
+> [Procurement](./03-procurement.md) and the
+> [troubleshooting FAQ](./99-troubleshooting-faq.md) for the exact codes.
 
 [screenshot: My Approvals inbox with Approve / Reject]
 
@@ -175,6 +185,29 @@ shows its **age in days**. The response rolls up the `count`, the
 **control finding** — either a transaction stalled before it can take effect, or
 a control quietly bypassed because no one chased the second sign-off.
 (Control **GOV-01**, COSO *Monitoring*.)
+
+---
+
+## 4e. Clearing several items at once (batch approve / reject)
+
+When the queue is long, an approver doesn't have to open items one by one. On the
+**Pending Approvals** screen (`/approvals`):
+
+1. **Tick** the checkbox on each item you want to act on (or **Select all** to tick
+   every batch-eligible item at once). The action bar shows how many are selected.
+2. Click **Approve selected** — or **Reject selected**, which prompts once for a
+   **reason applied to all** the ticked items.
+3. A summary reports **how many succeeded**, and — if any failed — the count and the
+   first error (e.g. one item you created yourself is blocked as `SOD_VIOLATION`
+   while the rest go through).
+
+> **No new authority.** Each ticked item fires its **own** maker-checker endpoint,
+> so its control and segregation of duties (approver ≠ requester) are enforced
+> **per item**, server-side, exactly as if you had approved it individually.
+> Batching only saves clicks — it never lets you approve something you couldn't
+> approve one at a time. Items that approve via a module-specific screen (a manual
+> **FX rate** or a **budget** version, which need extra keys) are **not** ticked
+> here; a **—** marks them, and you clear them on their own screen.
 
 ---
 

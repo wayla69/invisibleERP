@@ -16,13 +16,15 @@ import { n } from '../../database/queries';
 //   2. Accelerated depreciation (taxable temp diff). Tax depreciation is faster than book, so tax NBV < book
 //      NBV. difference = bookNBV − taxNBV > 0 ⇒ a TAXABLE temp diff ⇒ DTL = difference × taxRate.
 //
-// SIMPLIFYING ASSUMPTION (tax-depreciation basis): the model stores ONLY a book depreciation basis
-// (fixed_assets.accumulated_depreciation / net_book_value); there is no separate tax-dep schedule. We
-// therefore assume tax depreciation runs FASTER than book by a documented factor TAX_DEP_FACTOR (default
-// 1.5 — i.e. Thai Revenue-Code accelerated/initial allowances), capping tax accumulated depreciation at the
-// depreciable base (cost − salvage). tax_accum_dep = min(book_accum_dep × factor, cost − salvage);
-// tax_nbv = cost − tax_accum_dep. Override the factor per run via dto.taxDepFactor. This is a deliberate
-// approximation until a full parallel tax-depreciation ledger is modelled.
+// TAX-DEPRECIATION BASIS (FIN-6a — parallel tax book): an asset that maintains a real parallel TAX book
+// (fixed_assets.tax_net_book_value NOT NULL — seeded at acquisition, advanced by
+// AssetsService.runTaxDepreciation with Thai tax caps + first-year initial allowances) contributes its ACTUAL
+// tax NBV to the temporary difference — so the difference feeds the deferred-tax module directly instead of a
+// manual GAAP adjustment. An asset WITHOUT a tax book falls back to the documented approximation: tax
+// depreciation runs FASTER than book by a factor TAX_DEP_FACTOR (default 1.5 — Thai Revenue-Code
+// accelerated/initial allowances), capping tax accumulated depreciation at the depreciable base (cost −
+// salvage): tax_accum_dep = min(book_accum_dep × factor, cost − salvage); tax_nbv = cost − tax_accum_dep.
+// Override the fallback factor per run via dto.taxDepFactor.
 //
 // DTA/DTL SIGN CONVENTION (and the GL posting of the period DELTA):
 //   net_deferred = DTA − DTL (+ve ⇒ net deferred tax asset). delta = net_deferred − prior posted net_deferred.
@@ -93,11 +95,17 @@ export class DeferredTaxService {
     const assets = await db.select().from(fixedAssets).where(and(...faWhere));
     let bookNbvTotal = 0, taxNbvTotal = 0;
     for (const a of assets) {
-      const cost = n(a.acquireCost), salvage = n(a.salvageValue), bookAccum = n(a.accumulatedDepreciation);
-      const depreciable = Math.max(0, cost - salvage);
-      const taxAccum = Math.min(round4(bookAccum * depFactor), depreciable);
       bookNbvTotal = round4(bookNbvTotal + n(a.netBookValue));
-      taxNbvTotal = round4(taxNbvTotal + (cost - taxAccum));
+      if (a.taxNetBookValue != null) {
+        // FIN-6a — the asset maintains a real parallel tax book: use its ACTUAL tax NBV.
+        taxNbvTotal = round4(taxNbvTotal + n(a.taxNetBookValue));
+      } else {
+        // Fallback: no tax book on this asset → approximate with the accelerated-depreciation factor.
+        const cost = n(a.acquireCost), salvage = n(a.salvageValue), bookAccum = n(a.accumulatedDepreciation);
+        const depreciable = Math.max(0, cost - salvage);
+        const taxAccum = Math.min(round4(bookAccum * depFactor), depreciable);
+        taxNbvTotal = round4(taxNbvTotal + (cost - taxAccum));
+      }
     }
     const depDiff = round4(bookNbvTotal - taxNbvTotal); // bookNBV − taxNBV > 0 ⇒ taxable temp diff ⇒ DTL
     if (Math.abs(depDiff) > 1e-9) {

@@ -15,7 +15,9 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DataTable, type Column } from '@/components/data-table';
+import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 import { PrForm } from '@/components/procurement-forms';
+import { BudgetChip, budgetRetryFields } from '@/components/budget-chip';
 import { baht } from '@/lib/format';
 
 type PrLine = { id: number; item_id: string; item_description: string | null; request_qty: number; uom: string | null; reason: string | null; po_no: string | null; line_status: string | null };
@@ -160,15 +162,17 @@ function PrLineItem({ l }: { l: PrLine }) {
 
 // Approve/reject/convert/cancel — identical decision for the phone-card list and the desktop table row.
 function PrActions({ pr, canApprove, decide, cancel, onConvert }: {
-  pr: Pr; canApprove: boolean; decide: ReturnType<typeof useMutation<any, any, { prNo: string; approve: boolean }>>;
+  pr: Pr; canApprove: boolean; decide: ReturnType<typeof useMutation<any, any, { prNo: string; approve: boolean; extra?: Record<string, unknown> }>>;
   cancel: ReturnType<typeof useMutation<any, any, string>>; onConvert: (pr: Pr) => void;
 }) {
   const { t } = useLang();
   const isPending = pr.status === 'Pending';
   return (
-    <div className="flex flex-wrap justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-2">
       {canApprove && isPending && (
         <>
+          {/* FIN-3 (BUD-02) — budget availability at the point of approval (hidden while the policy is off) */}
+          <BudgetChip docType="PR" docNo={pr.pr_no} />
           <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: true })}>{t('fin.approve')}</Button>
           <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>{t('iv.req_reject')}</Button>
         </>
@@ -192,9 +196,15 @@ function PrListCard() {
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ['prs'] });
   const decide = useMutation({
-    mutationFn: ({ prNo, approve }: { prNo: string; approve: boolean }) => api(`/api/procurement/prs/${prNo}/approve`, { method: 'PATCH', body: JSON.stringify({ approve }) }),
-    onSuccess: (_r, v) => { notifySuccess(v.approve ? t('iv.req_toast_approved') : t('iv.req_toast_rejected')); refresh(); },
-    onError: (e: any) => notifyError(e.message),
+    mutationFn: ({ prNo, approve, extra }: { prNo: string; approve: boolean; extra?: Record<string, unknown> }) =>
+      api(`/api/procurement/prs/${prNo}/approve`, { method: 'PATCH', body: JSON.stringify({ approve, ...(extra ?? {}) }) }),
+    onSuccess: (_r, v) => { notifySuccess(v.approve ? t('iv.req_toast_approved') : t('iv.req_toast_rejected')); qc.invalidateQueries({ queryKey: ['budget-availability'] }); refresh(); },
+    onError: (e: any, v) => {
+      // FIN-3 (BUD-02) — the budget gate's warn/block rejections become the confirm/override interaction.
+      const retry = budgetRetryFields(e, { confirm: t('pb.bctl_confirm_msg'), overridePrompt: t('pb.bctl_override_prompt') });
+      if (retry) decide.mutate({ ...v, extra: { ...(v.extra ?? {}), ...retry } });
+      else notifyError(e.message);
+    },
   });
   const cancel = useMutation({
     mutationFn: (prNo: string) => api(`/api/procurement/prs/${prNo}/cancel`, { method: 'PATCH' }),
@@ -203,6 +213,14 @@ function PrListCard() {
   });
 
   const prs = q.data?.prs ?? [];
+  // Batch approve/reject pending PRs (only when the viewer can approve; engine still blocks self-approval).
+  const batch = useBatchActions<Pr>({
+    items: prs,
+    keyOf: (pr) => pr.pr_no,
+    eligible: (pr) => !!q.data?.can_approve && pr.status === 'Pending',
+    run: (pr, action) => api(`/api/procurement/prs/${pr.pr_no}/approve`, { method: 'PATCH', body: JSON.stringify({ approve: action === 'approve' }) }),
+    onDone: refresh,
+  });
   return (
     <Card className="mt-4 gap-4">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -212,6 +230,15 @@ function PrListCard() {
         </Button>
       </CardHeader>
       <CardContent>
+        <BatchBar
+          eligibleCount={batch.eligibleCount}
+          selectedCount={batch.selectedCount}
+          running={batch.running}
+          onSelectAll={batch.selectAll}
+          onApprove={() => batch.runBatch('approve')}
+          onReject={() => batch.runBatch('reject')}
+          onClear={batch.clear}
+        />
         {/* Phone/narrow: one card per PR instead of a 5-column table — a real <table> squeezed into a
             phone width forces every column (esp. the multi-line item list) to wrap into a tall, cramped
             sliver, and the header row just scrolls away with the rows since nothing pins it. Stacking
@@ -231,9 +258,12 @@ function PrListCard() {
               return (
                 <div key={pr.pr_no} className={cn('rounded-lg border border-l-4 p-3 text-sm', STATUS_ACCENT[pr.status] ?? 'border-l-muted-foreground/30')}>
                   <div className="flex items-start justify-between gap-2">
-                    <div>
+                    <div className="flex items-start gap-2">
+                      {batch.isEligible(pr) && <input type="checkbox" className="mt-1 size-4 shrink-0" aria-label={`select ${pr.pr_no}`} checked={batch.isSel(pr)} onChange={() => batch.toggle(pr)} />}
+                      <div>
                       <p className="font-medium">{pr.pr_no}</p>
                       <p className="text-xs text-muted-foreground">{pr.pr_date ?? ''} · {pr.requested_by ?? '-'}</p>
+                    </div>
                     </div>
                     <div className="text-right">
                       <Badge variant={badge?.variant ?? 'muted'} className="text-[10px]">{badge ? t(badge.key) : pr.status}</Badge>
@@ -267,6 +297,7 @@ function PrListCard() {
               description: `${t('iv.req_empty_before')} pr <${t('iv.req_ph_item')}> <${t('iv.req_ph_qty')}> ${t('iv.req_empty_after')}`,
             }}
             columns={[
+              batchColumn<Pr>({ isSel: batch.isSel, isEligible: batch.isEligible, toggle: batch.toggle, refOf: (pr) => pr.pr_no }),
               {
                 key: 'pr_no', label: t('iv.req_col_no_date'), sortable: true,
                 render: (pr) => <span className="whitespace-nowrap font-medium">{pr.pr_no}<div className="text-xs font-normal text-muted-foreground">{pr.pr_date ?? ''}</div></span>,

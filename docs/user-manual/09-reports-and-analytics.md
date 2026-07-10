@@ -339,9 +339,26 @@ A lighter, account-level budget that compares directly against the posted ledger
    **budget vs actual**, the variance and a **Favorable / Unfavorable** flag, with
    revenue / expense / net roll-ups at the top. Actuals come only from **posted**
    journal lines.
+3. **ควบคุมงบ (Budget control)** tab — control **BUD-02** — make the budget
+   *enforced* on purchasing rather than report-only:
+   - **Policy** (`off` — default, report-only · `advise` — approve + annotate ·
+     `warn` — the approver must confirm an overage · `block` — an over-budget
+     PR/PO approval is rejected unless an **exec** overrides it with a reason).
+     Changing the policy requires `exec` / `gl_close` (change control).
+   - **Default budget account** — used for a line whose item resolves no
+     `cogs_account` of its own (item → item category → this default).
+   - **ตรวจงบคงเหลือ** — check an account/period's availability:
+     **budget (YTD) − actuals (YTD) − open commitments = available**.
+   - **ภาระผูกพันงบประมาณ** — the encumbrance audit list: every approved PR/PO's
+     commitment with its status (`open` / `consumed` / `released`) and, for an
+     over-budget approval, **who overrode it and why**.
+   Only accounts **with an approved budget** for the year are enforced; project
+   (BoQ) purchases and capital lines are governed by their own controls
+   (PROJ-12/13, FA-10) and are excluded here.
 
 **Expected result:** A management view of where actual performance is running
-ahead of or behind budget, by account.
+ahead of or behind budget, by account — and, when the policy is on, over-budget
+purchases are flagged, confirmed or blocked at the point of approval.
 
 ---
 

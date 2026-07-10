@@ -442,6 +442,10 @@ add("INV-13","Inventory & COGS","Application","Inventory; Project WIP","Stock al
     "Stock reservation → issue-to-project (M3, docs/32): a reservation soft-allocates on-hand stock to a project so available-to-issue = on_hand(inv_balances) − Σ(held reservations); the reserve check is ATOMIC (a FOR UPDATE lock on the item+location's held rows) so two concurrent reservations can't over-allocate (INSUFFICIENT_STOCK otherwise). A held reservation is released (frees the stock) or issued to the project — issue-to-project relieves inventory at moving-average / consumed-layer cost and posts Dr 1260 project WIP (project_id) / Cr 1200 Inventory via the valued sub-ledger, so the value is CAPITALISED into project WIP (not expensed to COGS) and inventory 1200 stays tied to the sub-ledger; the issued value is booked as a consumed BoQ-line commitment. Prevents double-allocation and un-valued project draws.","Prev","Automated","Per reservation / issue","Warehouse / ProjectController","P13",
     "reservations.service.ts reserve (FOR UPDATE lock, available = on_hand − held → INSUFFICIENT_STOCK) / release / issueToProject (→ inventory ledger + consumed commitment) / available; reservations.controller.ts (/api/reservations[/:id/issue|release], available); inventory-ledger.service.ts issueToProject (Dr 1260 project_id / Cr 1200, neg-stock guard, moving-avg/FIFO); schema/inventory.ts stock_reservations (migration 0240); cutover/basics.ts (ToE)","Inspect the available = on_hand − held computation, the FOR UPDATE atomicity, the release/consume lifecycle, and the Dr 1260(project)/Cr 1200 issue-to-project posting.","Re-perform: receive stock; reserve part of it (available drops); a reservation beyond available → INSUFFICIENT_STOCK; issue the reservation → inventory relieved, project WIP 1260 debited with project_id, balanced; release restores availability (re-performed by the harness).","Available-to-issue (on_hand − held); the issue-to-project WIP posting","Implemented")
 
+add("INV-14","Inventory & COGS","Application","Inventory; Revenue (delivery channel)","A menu item stays sellable on the delivery aggregators after its ingredients deplete — the store keeps accepting Grab/LINE MAN/Foodpanda/Robinhood orders the kitchen can no longer cook (the #1 aggregator complaint → cancellations, refunds, store-rating penalties), because on-hand availability is not synced OUT to the partners.","Completeness/Accuracy",
+    "Auto-86 out-of-stock sync to aggregators (POS-7, migration 0299): the reactive auto-86 (LockingService.recomputeAvailability — run after every stock-depleting sale and on demand via POST /api/pos/scale/availability/recompute) flips a recipe-backed dish is_available=false the moment an ingredient can't cover one serving, and back to true on restock. Each such transition is now MIRRORED to every connected (enabled) aggregator via the outbound channel-adapter provider's setItemAvailability(store_ref, sku, available) op — a depletion PAUSES ('86') the item on the partners, a restock RESUMES ('un-86') it. IDEMPOTENT: the last-pushed per-(tenant,platform,sku) state is held in channel_item_availability, so a transition is pushed ONLY when the desired state differs from what the aggregator already has (a no-op recompute never spams the partner API). AUDITED: every 86/un-86 actually pushed is recorded (reason, push outcome/ref, actor) in the append-only channel_item_86_log, read at GET /api/channels/auto-86. Best-effort — a partner outage records push_ok=false but never poisons the sale. Both tables tenant-scoped (canonical 0232 RLS, tenant-leading indexes).","Prev/Det","Automated","Per depletion / restock event","Store Ops / F&B Controller","P13",
+    "pos/scale/locking.service.ts recomputeAvailability (local 86 flip both directions → channelSync.syncAuto86); channel-adapter/channel-adapter.service.ts syncAuto86 (per-channel state diff → push, log) + listAuto86; channel-adapter/providers.ts setItemAvailability (Mock + Http); channel-adapter.controller.ts GET /api/channels/auto-86; schema/pos-scale.ts channel_item_availability + channel_item_86_log (migration 0299); cutover/channel-adapter.ts (ToE)","Inspect the deplete→86 / restock→un-86 mirroring, the channel_item_availability idempotency guard (no push when state unchanged), and the channel_item_86_log transition audit.","Re-perform: deplete a recipe ingredient → recompute 86s the dish and POSTs setItemAvailability(available=false) to the aggregator (bearer + store_ref), state+log recorded; a second recompute with unchanged stock pushes NOTHING new (idempotent); restock → recompute un-86s the dish and POSTs available=true, state resumed, transition audited (re-performed by the channel-adapter harness).","channel_item_availability state; channel_item_86_log 86/un-86 audit trail","Implemented")
+
 # ---- Multi-Branch & Offline POS ----
 add("BRANCH-01","Multi-Branch & Offline POS","Application","Revenue","A POS sale is not attributed to its originating branch, so the consolidated branch roll-up is incomplete and cannot be tied to GL revenue.","Completeness",
     "Branch sale-tagging + HQ consolidation: every POS sale carries cust_pos_sales.branch_id; GET /api/branches/consolidated aggregates per branch (excluding Voided) and surfaces untagged sales as branch '(none)' — a deliberate completeness flag the controller investigates and clears before tying the consolidated total to GL revenue.","Det","Auto+Manual","Per sale / period","HQ Controller","P16",
@@ -732,6 +736,9 @@ add("FA-11","Fixed Assets","Application","Property, Plant & Equipment","Asset mo
 add("FA-12","Fixed Assets","Detective","Property, Plant & Equipment","Assets exist on the register but are never physically confirmed — a missing/stolen/scrapped asset stays on the books indefinitely because no periodic existence check flags it, overstating PPE and the existence assertion.","Existence; Completeness",
     "Periodic asset-existence exception monitoring. A schedulable BI report (report_type asset_verification_exceptions) lists every ACTIVE asset not physically verified within N days (default 90) — 'verified' = a Scan Verify or approved Scan Update movement (FA-11), with a never-verified asset falling back to its acquisition date as the implicit receipt baseline. Each exception carries days-since-last-seen so the oldest surface first. Scheduled monthly, it drives a recurring existence count before period-end; the companion asset_audit report surfaces recent audit results (found/missing/misplaced/unknown) and the outstanding custody-change queue. Read-only aggregation over fixed_assets + asset_movements — posts nothing, adds no authority (no SoD conflict); complements the FA-11 audit-by-scan (which supplies the verification movements) and the FA-05 register-to-GL tie-out.","Det","Automated","Monthly (scheduled) / on demand","FaAccountant / Controller","P16",
     "assets.service.ts unverifiedAssets/auditReport; assets.controller.ts (unverified, audit-report); bi.service.ts REPORT_TYPES asset_verification_exceptions + asset_audit + generateReport blocks; bi.module.ts imports AssetsModule; cutover/module-qr.ts (ToE)","Inspect the exception query (last Scan Verify/Update vs N-day threshold, acquisition-date fallback) and that the report is a registered, schedulable BI type.","Re-perform: seed an old never-scanned asset, run GET /api/assets/unverified?days=90 (asset flagged) + a recently-scanned asset is NOT flagged; schedule + run the asset_verification_exceptions report and confirm the summary counts the exception (re-performed by the module-qr harness).","Scheduled exception report runs + exception list + verification-movement log","Implemented")
+add("FA-13","Fixed Assets","Application","Property, Plant & Equipment; Accounts Payable","Construction-in-progress (CIP/AUC) is capitalised into the productive asset register without independent review — the person who accumulates the construction cost also decides when it is 'complete', at what cost/useful life it enters service, and starts depreciation, so premature/over-valued capitalisation (or deferring capitalisation to delay depreciation) goes unchecked; PPE existence/valuation and the depreciation charge are mis-stated.","Authorization; Accuracy",
+    "CIP/AUC settlement maker-checker (SoD): a CIP asset accumulates cost lines (GR/manual/project) into the CIP GL account (Dr 1520 / Cr 2000 AP | 1000 Cash) and is NOT depreciated while under construction. Capitalising it is a settlement REQUEST that posts NOTHING and requires a MANDATORY reason; a DIFFERENT user must approve before the fixed_assets row + reclassification JE (Dr 1500 / Cr 1520, for the accumulated construction cost) are created and depreciation begins (approver != requester enforced regardless of permissions — binds even Admin; the created asset carries its source CIP for traceability and gets its own parallel tax book). Only an Open CIP accepts cost (CIP_NOT_OPEN); a CIP with no accumulated cost cannot be settled (CIP_NO_COST); reject re-opens the CIP. Pairs with the FIN-6a parallel TAX depreciation book, which keeps a memo tax basis (Thai caps + first-year initial allowance) feeding the book-vs-tax temporary difference straight into deferred tax (TAX-06) instead of a manual GAAP adjustment.","Prev","Automated","Per capitalisation","FaAccountant / Controller","P10",
+    "assets.service.ts openCip/addCipCost/settleCip/approveCipSettlement/rejectCipSettlement + runTaxDepreciation + acquire(taxBookInit, creditAccount 1520); assets.controller.ts (cip*, tax-depreciation/run); deferred-tax.service.ts (prefers the stored tax NBV); ledger-constants.ts COA 1520 + CF_CLASSIFY; schema/assets.ts cip_assets + cip_cost_lines + fixed_assets tax-book/source_cip_no cols + migration 0299; cutover/basics.ts (ToE)","Inspect the accumulate->settle->approve flow + the approver!=requester check + the Dr 1500/Cr 1520 reclassification, and that deferred tax consumes the real tax NBV.","Re-perform: open a CIP, accumulate cost into 1520 (not 1500), raise a settlement (no GL), attempt self-approve (SOD_VIOLATION), approve as a different user (asset + Dr 1500/Cr 1520 post); confirm CIP_NOT_OPEN/CIP_NO_COST guards and that the parallel tax book feeds the deferred-tax difference (re-performed by the basics harness).","CIP settlement approval log + SoD test + tax-book/deferred-tax tie-out","Implemented")
 
 # ---- Consolidation / FX ----
 add("CON-01","Consolidation & FX","Application","Consolidation","Group consolidation mis-stated (ownership/currency).","Accuracy",
@@ -754,6 +761,119 @@ add("FX-04","Consolidation & FX","Application","FX gain/loss; Revenue; AR/AP","A
 add("BUD-01","Budgeting & Planning","Application","Budget; All (variance reporting)","A budget figure is entered/changed by one person and immediately drives the budget-vs-actual variance report — the basis for spend authorization and performance review — with no independent approval; a wrong or self-serving budget makes overspending look 'on budget'.","Authorization/Accuracy",
     "Budget maker-checker (SoD): an upserted budget (POST /api/ledger/budgets) lands as PendingApproval and is EXCLUDED from budget-vs-actual until a DIFFERENT user approves it (POST /api/ledger/budgets/approve for the fiscal_year/account/cost-centre[/period]). Self-approval → SOD_VIOLATION (binds even Admin); reject marks it Rejected (excluded). DEFAULT 'Approved' keeps existing rows + direct planning seeds usable. Pending budgets are also surfaced, aged, by the pending-approvals monitor (GOV-01).","Prev","Automated","Per budget","Controller / FP&A","P10",
     "budget.service.ts upsertBudget(→PendingApproval)/approveBudget/rejectBudget/budgetVsActual(Approved only); budget.controller.ts (budgets/approve|reject|pending gated approvals/gl_close); schema/budgets.ts budgets.status + migration 0142; cutover/budget.ts (ToE)","Inspect the request→approve flow + the approver≠requester check + that budget-vs-actual counts Approved budgets only.","Re-perform: upsert a budget (PendingApproval, excluded from variance), attempt self-approve (SOD_VIOLATION), approve as a different user, confirm it then appears in budget-vs-actual (re-performed by the budget harness).","Budget approval log + SoD test","Implemented")
+add("BUD-02","Budgeting & Planning","Application","Budget; Procurement (P2P spend)","Budgets are report-only: a PR/PO that exceeds the approved budget is approved and committed with no availability check, so overspend is only discovered after the fact in the variance report — commitments (open POs / approved PRs) are invisible to spend authorization.","Authorization/Completeness",
+    "Budgetary control / encumbrance gate (FIN-3): at PR and PO APPROVAL (never at request — asking is free) the gate computes availability = approved budget (fiscal-YTD) − GL actuals (YTD) − OPEN commitments per resolved budget account (item.cogs_account → item_categories.cogs_account → budget_control_settings.default_expense_account; project/BoQ lines are excluded — PROJ-12/13 encumber them — as are is_capital lines), per the tenant policy (budget_control_settings.policy): off (default, report-only) | advise (approve + annotate) | warn (approver must resubmit with confirm_over_budget) | block (422 BUDGET_EXCEEDED unless an EXEC override with a mandatory reason — BUDGET_OVERRIDE_DENIED for a non-exec approver, BUDGET_OVERRIDE_REASON_REQUIRED without one; audited on the commitment row + doc status log). The final approval RECORDS the commitment in budget_commitments (a PR reserves its item-master estimate, released when it converts to POs; a PO reserves the ordered amount, consumed on full receipt, released on cancel/close-short). Scope: only accounts WITH an approved budget for the year are enforced (unbudgeted spend is caught by ELC-06). Policy change is restricted to exec/gl_close (mirrors EXP-04 change control).","Prev","Automated","Per approval","Controller / FP&A","P10",
+    "commitments.service.ts glGate/glReserve/glRelease/glConsume/glAvailability (one encumbrance engine with PROJ-12); procurement-pr.service.ts approvePr + procurement-po.service.ts approvePo (gate + reserve), convertPrToPo/cancelPo/closePoShort/createGr (lifecycle); budget-control.controller.ts (/api/budget availability|commitments|control-settings); schema/budgets.ts budget_control_settings + budget_commitments + migration 0298; cutover/budget.ts (ToE)","Inspect the availability formula (budget − actuals − open commitments), the policy switch + fail-open default, the exec-only override with mandatory reason, and the commitment lifecycle (reserve→consume/release).","Re-perform: default off (response unchanged); advise (approve + exceeded flag); warn (BUDGET_CONFIRM_REQUIRED then confirm); block (BUDGET_EXCEEDED; non-exec override 403; exec override without reason 400; with reason approved + audited row); receipt consumes; PR→PO conversion releases the PR estimate (re-performed by the budget harness).","Budget-control policy + budget_commitments audit rows (override_by/override_reason)","Implemented")
+
+# write RCM sheet
+rcm = wb.create_sheet("RCM")
+rcm.sheet_view.showGridLines = False
+for j,h in enumerate(HEAD, start=1):
+    c = rcm.cell(row=1, column=j, value=h); c.font = f(10, True, "FFFFFF"); c.fill = fill(NAVY); c.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center"); c.border = BORDER
+    rcm.column_dimensions[get_column_letter(j)].width = W[j-1]
+status_style = {"Implemented":(GREEN_F,GREEN_T),"Partial":(AMBER_F,AMBER_T),"Gap":(RED_F,RED_T)}
+cycle_band = {}
+for i,row in enumerate(R, start=2):
+    band = BAND if (i % 2 == 0) else "FFFFFF"
+    for j,val in enumerate(row, start=1):
+        c = rcm.cell(row=i, column=j, value=val); c.font = f(9); c.alignment = WRAP; c.border = BORDER; c.fill = fill(band)
+        if j in (1,3,8,9,10,12,17): c.alignment = WRAPC
+    sc = rcm.cell(row=i, column=17); fc,tc = status_style.get(row[16], ("FFFFFF","000000")); sc.fill = fill(fc); sc.font = f(9, True, tc)
+    rcm.cell(row=i, column=1).font = f(9, True, NAVY)
+rcm.freeze_panes = "C2"
+rcm.auto_filter.ref = f"A1:{get_column_letter(len(HEAD))}{len(R)+1}"
+rcm.row_dimensions[1].height = 34
+
+# ============================================================== GAP REMEDIATION
+gh = ["Control ID","Cycle","Gap / Weakness","Remediation Action","Owner","Phase","Target (relative)","Priority"]
+gw = [11,17,34,46,16,10,16,11]
+# phase mapping per earlier plan; priority H/M
+# NOTE: Phase A (2026-06-23) closed AC-12, AC-13, CM-01, CM-02, CM-03, CM-04, CM-05, OP-01, OP-03 —
+# removed from this remediation backlog (now Implemented in the Controls tab; one-time console [setup]
+# steps tracked in docs/11-next-upgrade-realworld-roadmap.md and the audit-readiness plan).
+GAP = [
+ ("ELC-01","Entity-Level","Code-of-conduct policy adopted (v1.0) + register format defined; collect the annual signed acknowledgements (operating evidence).","Run the annual acknowledgement sign-off; retain the signed register.","CEO / HR","Phase 1","Month 1-2","Medium"),
+ ("ELC-02","Entity-Level","Audit-committee charter adopted (v1.0); hold the quarterly ICFR review and minute it (operating evidence).","Convene the audit committee; retain quarterly ICFR-oversight minutes.","Board","Phase 1","Month 1-2","Medium"),
+ ("ELC-04","Entity-Level","Whistleblower / non-retaliation policy adopted (v1.0); stand up the external anonymous reporting channel + case log.","Contract/stand up the anonymous hotline; retain the case log.","Audit Cttee","Phase 1","Month 2","Medium"),
+]
+gap = wb.create_sheet("Gap Remediation")
+gap.sheet_view.showGridLines = False
+gap["A1"] = "Remediation Plan — Gap & Partial controls (sequenced to the readiness timeline)"; gap["A1"].font = f(12, True, NAVY)
+gap.merge_cells("A1:H1")
+for j,h in enumerate(gh, start=1):
+    c = gap.cell(row=2, column=j, value=h); c.font = f(10, True, "FFFFFF"); c.fill = fill(STEEL); c.alignment = WRAPC; c.border = BORDER
+    gap.column_dimensions[get_column_letter(j)].width = gw[j-1]
+pri_fill = {"High":RED_F,"Medium":AMBER_F}
+for i,row in enumerate(GAP, start=3):
+    band = BAND if (i % 2 == 1) else "FFFFFF"
+    for j,val in enumerate(row, start=1):
+        c = gap.cell(row=i, column=j, value=val); c.font = f(9); c.alignment = WRAP; c.border = BORDER; c.fill = fill(band)
+        if j in (1,2,5,6,7,8): c.alignment = WRAPC
+    pc = gap.cell(row=i, column=8); pc.fill = fill(pri_fill.get(row[7],"FFFFFF")); pc.font = f(9, True)
+    gap.cell(row=i, column=1).font = f(9, True, NAVY)
+gap.freeze_panes = "A3"; gap.auto_filter.ref = f"A2:H{len(GAP)+2}"; gap.row_dimensions[2].height = 28
+
+# ============================================================== COSO MAPPING
+coso = wb.create_sheet("COSO Mapping")
+coso.sheet_view.showGridLines = False
+coso["A1"] = "COSO 2013 — 17 Principles coverage"; coso["A1"].font = f(12, True, NAVY); coso.merge_cells("A1:D1")
+ch = ["Component","#","Principle","Covered by (examples)"]
+cwd = [22,5,55,40]
+for j,h in enumerate(ch, start=1):
+    c = coso.cell(row=2, column=j, value=h); c.font = f(10, True, "FFFFFF"); c.fill = fill(STEEL); c.alignment = WRAPC; c.border = BORDER
+    coso.column_dimensions[get_column_letter(j)].width = cwd[j-1]
+COSO = [
+ ("Control Environment",1,"Commitment to integrity & ethical values","ELC-01, ELC-04"),
+ ("Control Environment",2,"Board exercises oversight responsibility","ELC-02"),
+ ("Control Environment",3,"Establishes structure, authority & responsibility","ELC-03, ITGC-AC-02"),
+ ("Control Environment",4,"Commitment to competence","HR / training (entity)"),
+ ("Control Environment",5,"Enforces accountability","ELC-03, ITGC-AC-08/09"),
+ ("Risk Assessment",6,"Specifies suitable objectives","Scoping memo (to author)"),
+ ("Risk Assessment",7,"Identifies & analyzes risk","Scoping / risk assessment"),
+ ("Risk Assessment",8,"Assesses fraud risk","ELC-05"),
+ ("Risk Assessment",9,"Identifies & analyzes significant change","ITGC-CM-*, ITGC-SD-01"),
+ ("Control Activities",10,"Selects & develops control activities","REV-*, EXP-*, INV-*, GL-*, REC-*"),
+ ("Control Activities",11,"Selects & develops GENERAL CONTROLS over technology (ITGC)","All ITGC-AC/CM/SD/OP"),
+ ("Control Activities",12,"Deploys through policies & procedures","SDLC/DoA/close policies (to author)"),
+ ("Information & Comm.",13,"Uses relevant, quality information","REV-04, ITGC-AC-10/11, GL-*"),
+ ("Information & Comm.",14,"Communicates internally","Close calendar / reporting"),
+ ("Information & Comm.",15,"Communicates externally","ELC-04; investor/auditor comms"),
+ ("Monitoring",16,"Ongoing &/or separate evaluations","REV-05, REC-01/02, ITGC-SD-03, ELC-06"),
+ ("Monitoring",17,"Evaluates & communicates deficiencies","Deficiency log / 404(a) assessment"),
+]
+for i,row in enumerate(COSO, start=3):
+    band = BAND if (i % 2 == 1) else "FFFFFF"
+    for j,val in enumerate(row, start=1):
+        c = coso.cell(row=i, column=j, value=val); c.font = f(9); c.alignment = WRAP; c.border = BORDER; c.fill = fill(band)
+        if j==2: c.alignment = WRAPC
+    if row[1] == 11:
+        for j in range(1,5): coso.cell(row=i, column=j).font = f(9, True, NAVY)
+coso.freeze_panes = "A3"
+
+# ============================================================== DASHBOARD (formulas)
+dash = wb.create_sheet("Summary")
+dash.sheet_view.showGridLines = False
+dash["B2"] = "ICFR Readiness — Control Summary"; dash["B2"].font = f(14, True, NAVY); dash.merge_cells("B2:E2")
+last = len(R)+1
+dash["B4"] = "By Status"; dash["B4"].font = f(11, True, STEEL)
+sd = [("Implemented",GREEN_F,GREEN_T),("Partial",AMBER_F,AMBER_T),("Gap",RED_F,RED_T)]
+for i,(s,fc,tc) in enumerate(sd):
+    r=5+i
+    dash[f"B{r}"]=s; dash[f"B{r}"].fill=fill(fc); dash[f"B{r}"].font=f(10,True,tc)
+    dash[f"C{r}"]=f'=COUNTIF(RCM!$Q$2:$Q${last},B{r})'; dash[f"C{r}"].font=f(10)
+dash["B8"]="Total"; dash["B8"].font=f(10,True)
+dash["C8"]=f'=COUNTA(RCM!$A$2:$A${last})'; dash["C8"].font=f(10,True)
+dash["B10"]="By Category"; dash["B10"].font=f(11,True,STEEL)
+for i,cat in enumerate(["Entity","ITGC","Application"]):
+    r=11+i
+    dash[f"B{r}"]=cat; dash[f"B{r}"].font=f(10)
+    dash[f"C{r}"]=f'=COUNTIF(RCM!$C$2:$C${last},B{r})'; dash[f"C{r}"].font=f(10)
+dash["B15"]="% Implemented"; dash["B15"].font=f(10,True)
+dash["C15"]='=IFERROR(C5/C8,0)'; dash["C15"].font=f(10,True); dash["C15"].number_format='0.0%'
+dash["B17"]=("Read with the 'RCM' tab (full control detail + tests), 'Gap Remediation' (sequenced fixes), and 'COSO Mapping' "
+             "(17-principle coverage). Status counts update automatically from the RCM.")
+dash.merge_cells("B17:E19"); dash["B17"].font=f(9,False,GREY); dash["B17"].alignment=WRAP
+for col,w in (("A",3),("B",22),("C",12),("D",3),("E",40)): dash.column_dimensions[col].width=w
 
 # write RCM sheet
 rcm = wb.create_sheet("RCM")
