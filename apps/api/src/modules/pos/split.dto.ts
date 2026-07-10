@@ -19,7 +19,7 @@ const ItemAssign = z.object({
   check: z.number().int().positive(),
 });
 export const SplitPreviewBody = z.object({
-  method: z.enum(['equal', 'by_items']),
+  method: z.enum(['equal', 'by_items', 'by_seat']),   // by_seat (POS-9): one check per guest seat, derived from the seat on each line
   ways: z.number().int().min(2).optional(),
   assignments: z.array(ItemAssign).optional(),
   discount: z.number().nonnegative().optional(),

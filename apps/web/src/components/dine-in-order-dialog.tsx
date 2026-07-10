@@ -20,7 +20,7 @@ type MenuItem = { sku: string; name: string; price: number };
 type MenuCategory = { name?: string; items: MenuItem[] };
 type Menu = { categories: MenuCategory[] };
 
-type Line = { key: string; item_id?: string; name: string; unit_price: number; qty: number; course: number };
+type Line = { key: string; item_id?: string; name: string; unit_price: number; qty: number; course: number; seat: number | null };
 
 export function DineInOrderDialog({
   tableId,
@@ -41,6 +41,7 @@ export function DineInOrderDialog({
   const [free, setFree] = useState({ name: '', unit_price: '' });
   const [guests, setGuests] = useState('');
   const [course, setCourse] = useState(1);   // course assigned to newly-added lines (fire course-by-course)
+  const [seat, setSeat] = useState('');       // seat assigned to newly-added lines (POS-9); blank = shared/table
   const [discount, setDiscount] = useState('');
   const [tip, setTip] = useState('');
   const [msg, setMsg] = useState('');
@@ -50,11 +51,12 @@ export function DineInOrderDialog({
 
   const total = useMemo(() => lines.reduce((a, l) => a + l.qty * l.unit_price, 0), [lines]);
 
+  const seatNo = seat ? Math.max(1, Number(seat) || 1) : null;
   const addLine = (name: string, unit_price: number, item_id?: string) =>
     setLines((ls) => {
-      const idx = ls.findIndex((l) => l.item_id === item_id && l.name === name && l.course === course && (item_id || true));
+      const idx = ls.findIndex((l) => l.item_id === item_id && l.name === name && l.course === course && l.seat === seatNo && (item_id || true));
       if (item_id && idx >= 0) return ls.map((l, j) => (j === idx ? { ...l, qty: l.qty + 1 } : l));
-      return [...ls, { key: `${Date.now()}-${ls.length}`, item_id, name, unit_price, qty: 1, course }];
+      return [...ls, { key: `${Date.now()}-${ls.length}`, item_id, name, unit_price, qty: 1, course, seat: seatNo }];
     });
 
   const setQty = (key: string, delta: number) =>
@@ -70,7 +72,7 @@ export function DineInOrderDialog({
   };
 
   const payload = () =>
-    lines.map((l) => ({ item_id: l.item_id, name: l.name, unit_price: l.unit_price, qty: l.qty, course: l.course }));
+    lines.map((l) => ({ item_id: l.item_id, name: l.name, unit_price: l.unit_price, qty: l.qty, course: l.course, seat: l.seat ?? undefined }));
 
   const createOrAdd = useMutation({
     mutationFn: () => {
@@ -178,10 +180,17 @@ export function DineInOrderDialog({
               </Button>
             </div>
 
-            {/* Course for items added next (apps → mains → dessert), fired course-by-course on the KDS */}
-            <div className="flex items-center gap-2 pt-1">
-              <Label htmlFor="course" className="text-xs text-muted-foreground">{t('px.dine_course_for_added')}</Label>
-              <Input id="course" type="number" min={1} step={1} className="tabular w-16" value={course} onChange={(e) => setCourse(Math.max(1, Number(e.target.value) || 1))} />
+            {/* Course + seat for items added next: course fired course-by-course; seat (POS-9) attributes each
+                line to a guest so the kitchen can fire per seat and the bill can split by who ordered what. */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="course" className="text-xs text-muted-foreground">{t('px.dine_course_for_added')}</Label>
+                <Input id="course" type="number" min={1} step={1} className="tabular w-16" value={course} onChange={(e) => setCourse(Math.max(1, Number(e.target.value) || 1))} />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="seat" className="text-xs text-muted-foreground">{t('px.dine_seat_for_added')}</Label>
+                <Input id="seat" type="number" min={1} step={1} className="tabular w-16" placeholder={t('px.dine_seat_shared')} value={seat} onChange={(e) => setSeat(e.target.value)} />
+              </div>
             </div>
           </div>
 
@@ -198,7 +207,7 @@ export function DineInOrderDialog({
               {lines.length === 0 && <p className="text-sm text-muted-foreground">{t('px.dine_no_items')}</p>}
               {lines.map((l) => (
                 <div key={l.key} className="flex items-center gap-2 text-sm">
-                  <span className="flex-1 truncate">{l.name}{l.course > 1 && <span className="ml-1 text-xs text-muted-foreground">{t('px.dine_course_n', { n: l.course })}</span>}</span>
+                  <span className="flex-1 truncate">{l.name}{l.course > 1 && <span className="ml-1 text-xs text-muted-foreground">{t('px.dine_course_n', { n: l.course })}</span>}{l.seat != null && <span className="ml-1 text-xs text-muted-foreground">{t('px.dine_seat_n', { n: l.seat })}</span>}</span>
                   <div className="flex items-center gap-1">
                     <Button type="button" variant="ghost" size="icon" className="size-6" aria-label={t('px.dine_decrease')} onClick={() => setQty(l.key, -1)}><Minus className="size-3" /></Button>
                     <span className="tabular w-6 text-center">{l.qty}</span>

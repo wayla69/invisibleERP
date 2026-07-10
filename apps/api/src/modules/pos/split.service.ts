@@ -109,11 +109,18 @@ export class SplitBillService {
       }
       return slices;
     }
-    // by_items
+    // by_items / by_seat — assign each non-voided line to a check, then group + net+vat per check.
     const assign = new Map<number, number>();
-    for (const a of dto.assignments!) assign.set(a.item_id, a.check);
-    const unassigned = items.filter((i: any) => !assign.has(Number(i.id)));
-    if (unassigned.length) throw new BadRequestException({ code: 'SPLIT_INCOMPLETE', message: `${unassigned.length} item(s) not assigned to a check`, messageTh: 'มีรายการที่ยังไม่ถูกแบ่งเข้าบิล' });
+    if (dto.method === 'by_seat') {
+      // POS-9: split by who ordered — the check number is the line's seat; every line must be seated first.
+      const unseated = items.filter((i: any) => i.seat == null);
+      if (unseated.length) throw new BadRequestException({ code: 'SEAT_UNASSIGNED', message: `${unseated.length} item(s) not assigned to a seat`, messageTh: 'มีรายการที่ยังไม่ได้กำหนดที่นั่ง' });
+      for (const i of items) assign.set(Number(i.id), Number(i.seat));
+    } else {
+      for (const a of dto.assignments!) assign.set(a.item_id, a.check);
+      const unassigned = items.filter((i: any) => !assign.has(Number(i.id)));
+      if (unassigned.length) throw new BadRequestException({ code: 'SPLIT_INCOMPLETE', message: `${unassigned.length} item(s) not assigned to a check`, messageTh: 'มีรายการที่ยังไม่ถูกแบ่งเข้าบิล' });
+    }
     const byCheck = new Map<number, any[]>();
     for (const i of items) { const c = assign.get(Number(i.id))!; if (!byCheck.has(c)) byCheck.set(c, []); byCheck.get(c)!.push(i); }
     const slices = [];

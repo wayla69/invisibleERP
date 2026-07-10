@@ -15,7 +15,7 @@ import { GuestProfileService, type UpsertDiningProfileDto, type AddCompanionDto 
 import { TipService, type DistributeTipsDto } from './tip.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
-  TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
+  TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody, AssignSeatBody,
   type CreateOrderDto, type AddItemsDto, type KdsActionDto, type CheckoutDto, type CreateTableDto, type UpdateTableDto,
   type ZoneDto, type ZoneUpdateDto, type BuffetPackageDto, type BuffetPackageUpdateDto, type StartBuffetDto,
 } from './dto';
@@ -179,7 +179,9 @@ export class RestaurantController {
   @Get('orders/:orderNo') getOrder(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.getOrder(o, u); }
   @Post('orders/:orderNo/items') addItems(@Param('orderNo') o: string, @Body(new ZodValidationPipe(AddItemsBody)) b: AddItemsDto, @CurrentUser() u: JwtUser) { return this.dineIn.addItems(o, b, u); }
   @Post('orders/:orderNo/transfer-items') transferItems(@Param('orderNo') o: string, @Body(new ZodValidationPipe(TransferItemsBody)) b: { item_ids: number[]; to_table_id: number }, @CurrentUser() u: JwtUser) { return this.dineIn.transferItems(o, b.item_ids, b.to_table_id, u); }
-  @Post('orders/:orderNo/fire') fire(@Param('orderNo') o: string, @Query('course') course: string | undefined, @CurrentUser() u: JwtUser) { return this.dineIn.fire(o, u, course != null && course !== '' ? +course : undefined); }
+  // POS-9: (re)assign lines to a guest seat (null = shared/table)
+  @Post('orders/:orderNo/seats/assign') assignSeat(@Param('orderNo') o: string, @Body(new ZodValidationPipe(AssignSeatBody)) b: { item_ids: number[]; seat: number | null }, @CurrentUser() u: JwtUser) { return this.dineIn.assignSeat(o, b.item_ids, b.seat, u); }
+  @Post('orders/:orderNo/fire') fire(@Param('orderNo') o: string, @Query('course') course: string | undefined, @Query('seat') seat: string | undefined, @CurrentUser() u: JwtUser) { return this.dineIn.fire(o, u, course != null && course !== '' ? +course : undefined, seat != null && seat !== '' ? +seat : undefined); }
   @Post('orders/:orderNo/bill') bill(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.requestBill(o, u); }
   @Post('orders/:orderNo/checkout') async checkout(@Param('orderNo') o: string, @Body(new ZodValidationPipe(CheckoutBody)) b: CheckoutDto, @CurrentUser() u: JwtUser) {
     const res: any = await this.dineIn.checkout(o, b, u);
