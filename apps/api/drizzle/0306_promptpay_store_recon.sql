@@ -1,4 +1,4 @@
--- 0301_promptpay_store_recon — PromptPay store-level auto-reconciliation (POS-8, control POS-08).
+-- 0306_promptpay_store_recon — PromptPay store-level auto-reconciliation (POS-8, control POS-08).
 -- Match PromptPay-tendered sales against imported bank-statement INFLOWS on the store's settlement
 -- account (amount / date-window / payer-ref), REUSING the bank reconciliation auto-match engine
 -- (modules/bank/match-engine.ts) — one matcher, scoped to the settlement account per store per day.
