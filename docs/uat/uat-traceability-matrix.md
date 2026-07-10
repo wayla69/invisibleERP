@@ -590,6 +590,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-091 | Invalid disposition rejected (BAD_DISPOSITION) | INV-15 | 03 §7 (13a) (`waste.ts`) |
 | UAT-INV-092 | Void-fired-item capture — recipe explodes to ingredient waste + one Dr 5810/Cr 1200 JE (NO_RECIPE guard) | INV-15 | 03 §7 (13a), §9 (`waste.ts`) |
 | UAT-INV-093 | Theoretical-vs-actual usage variance (recipe-COGS Consume vs actual depletion) | INV-15 | 03 §7 (13a), §12 (`waste.ts`) |
+| UAT-INV-074 | Stocktake/stock-movement tenant isolation (cross-tenant read + post blocked) | ITGC-AC-18 · R11 | 03 rev 9.99 (`stock-ops.ts`) |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 
