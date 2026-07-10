@@ -1,4 +1,4 @@
--- 0296_budget_control_encumbrance — Budgetary control / encumbrance gate on procurement (FIN-3, BUD-02).
+-- 0298_budget_control_encumbrance — Budgetary control / encumbrance gate on procurement (FIN-3, BUD-02).
 -- (1) budget_control_settings: per-tenant policy for the PR/PO approval budget gate — 'off' (default,
 -- report-only = pre-FIN-3 behaviour) | 'advise' | 'warn' | 'block' — plus the default expense account used
 -- when a line's item resolves no budget account (item.cogs_account → item_categories.cogs_account → this).

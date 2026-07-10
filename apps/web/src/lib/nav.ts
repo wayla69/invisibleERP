@@ -222,11 +222,15 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'nav.group.crm',
     workspace: ['erp'],
     items: [
+      // CRM-2 (docs/41): ONE sales-CRM workspace at /crm (kanban board + leads + accounts + contacts;
+      // deep-linkable tabs /crm?tab=…; deal page /crm/deals/[oppNo]; account page /crm/accounts/[accountNo]).
+      // The old /pipeline and /projects/crm pages now redirect here. The retail member CRM 360 (branch KPI,
+      // member lookup, messaging) moved to /crm/members.
+      { label: 'nav.crm_workspace', href: '/crm', icon: Target, perms: ['crm', 'marketing', 'exec', 'ar'] },
+      { label: 'nav.crm_members', href: '/crm/members', icon: Users, perms: ['marketing', 'exec'] },
       { label: 'nav.customer_master', href: '/customers', icon: Users, perms: ['crm', 'ar', 'exec'] },
-      { label: 'nav.pipeline', href: '/pipeline', icon: Target, perms: ['marketing', 'exec'] },
       { label: 'nav.cpq', href: '/cpq', icon: FileSignature, perms: ['marketing', 'exec'] },
       { label: 'nav.service', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
-      { label: 'nav.crm', href: '/crm', icon: Users, perms: ['marketing', 'exec'] },
       { label: 'nav.marketing', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
       { label: 'nav.campaigns', href: '/campaigns', icon: Megaphone, perms: ['marketing', 'crm'] },
     ],
@@ -435,7 +439,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.pm_tenders', href: '/projects/tenders', icon: FileSignature, perms: ['proj_tender', 'marketing', 'exec'] },
       { label: 'nav.pm_billing', href: '/projects/billing', icon: ReceiptText, perms: ['proj_billing', 'ar', 'exec'] },
       { label: 'nav.pm_subcontracts', href: '/projects/subcontracts', icon: Handshake, perms: ['proj_subcon', 'procurement', 'exec'] },
-      { label: 'nav.pm_crm', href: '/projects/crm', icon: Handshake, perms: ['crm', 'exec', 'ar'] },
+      // CRM-2: /projects/crm merged into the /crm workspace (redirect kept for deep links); the Win/Loss
+      // analytics dashboard stays here and is also linked from the /crm workspace header.
       { label: 'nav.pm_pipeline', href: '/projects/pipeline', icon: Target, perms: ['exec', 'planner', 'ar', 'crm'] },
       { label: 'nav.pm_close', href: '/projects/close', icon: Lock, perms: ['exec'] },
       { label: 'nav.pm_settings', href: '/projects/settings', icon: SlidersHorizontal, perms: ['exec', 'planner'] },

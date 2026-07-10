@@ -17,14 +17,22 @@ const ALLOW_LIST = new Set(['/health', '/healthz', '/health/ready', '/health/liv
 // replace them. `request-otp` is stricter still because it triggers an outbound SMS (cost + abuse vector).
 const AUTH_PATHS = new Set(['/api/login', '/api/login/pin', '/api/member/auth/verify-otp']);
 const OTP_PATHS = new Set(['/api/member/auth/request-otp']);
+// Anonymous public-write endpoints (no JWT) get their own strict per-IP bucket — an unauthenticated form
+// spammer can neither exhaust the global budget nor hide inside it (CRM-2 web-to-lead; honeypot drops are
+// handled in the controller, this is the volume backstop).
+const PUBLIC_WRITE_PATHS = new Set(['/api/crm/web-to-lead']);
 
 const pathOf = (req: { url?: string }) => (req.url ?? '').split('?')[0];
-type Bucket = 'otp' | 'auth' | 'api';
-const bucketOf = (p: string): Bucket => (OTP_PATHS.has(p) ? 'otp' : AUTH_PATHS.has(p) ? 'auth' : 'api');
+type Bucket = 'otp' | 'auth' | 'lead' | 'api';
+const bucketOf = (p: string): Bucket =>
+  OTP_PATHS.has(p) ? 'otp' : AUTH_PATHS.has(p) ? 'auth' : PUBLIC_WRITE_PATHS.has(p) ? 'lead' : 'api';
+// Exported for the control-test harness (ToE): asserts the public web-to-lead path is on the strict bucket.
+export const rateLimitBucketOf = (path: string): Bucket => bucketOf(path);
 
 const GLOBAL_MAX = Number(process.env.RATE_LIMIT_MAX ?? 300);
 const AUTH_MAX = Number(process.env.RATE_LIMIT_AUTH_MAX ?? 30);   // login / pin / verify-otp, per IP per window
 const OTP_MAX = Number(process.env.RATE_LIMIT_OTP_MAX ?? 10);     // request-otp (outbound SMS), per IP per window
+const LEAD_MAX = Number(process.env.RATE_LIMIT_WEB_LEAD_MAX ?? 20); // public web-to-lead form, per IP per window
 
 export async function registerEdge(app: NestFastifyApplication): Promise<void> {
   const fastify = app.getHttpAdapter().getInstance();
@@ -44,7 +52,7 @@ export async function registerEdge(app: NestFastifyApplication): Promise<void> {
     // Per-request ceiling: stricter for auth/OTP, loose for the rest.
     max: (req: { url?: string }) => {
       const b = bucketOf(pathOf(req)!);
-      return b === 'otp' ? OTP_MAX : b === 'auth' ? AUTH_MAX : GLOBAL_MAX;
+      return b === 'otp' ? OTP_MAX : b === 'auth' ? AUTH_MAX : b === 'lead' ? LEAD_MAX : GLOBAL_MAX;
     },
     timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
     // Segment the counter by bucket so each (IP, bucket) is isolated — auth attempts can't drain the

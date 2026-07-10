@@ -1,15 +1,15 @@
 import { Inject, Injectable, Module, Controller, Get, Post, Patch, Param, Query, Body, NotFoundException, BadRequestException, ConflictException, ForbiddenException, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
-import { eq, and, ne, or, ilike, desc, sql } from 'drizzle-orm';
+import { eq, and, ne, or, ilike, desc, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
-import { crmAccounts, crmContacts, crmOpportunities, users } from '../../../database/schema';
+import { crmAccounts, crmContacts, crmOpportunities, crmActivities, users } from '../../../database/schema';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { isUniqueViolation } from '../../../common/db-error';
 import { normalizeName, normalizeKey } from '../../../common/text-similarity';
 
-// ── CRM accounts & contacts (CRM-1 unification, migration 0293) ────────────────────────────────────
+// ── CRM accounts & contacts (CRM-1 unification, migration 0294) ────────────────────────────────────
 // The CRM-side party model: crm_accounts (company — becomes the customer-of-record link once transacting,
 // customer_no → customer_master) and crm_contacts (people under an account, role-tagged, optional
 // pos_members loyalty join). Duplicate-governed: create runs normalized email/phone/tax-id/company-name
@@ -117,8 +117,17 @@ export class CrmAccountsService {
     const db = this.db;
     const a = await this.byNo(accountNo, user);
     const contacts = await db.select().from(crmContacts).where(and(eq(crmContacts.accountId, Number(a.id)), ne(crmContacts.status, 'merged'))).orderBy(desc(crmContacts.id));
-    const [opps] = await db.select({ c: sql<string>`count(*)` }).from(crmOpportunities).where(eq(crmOpportunities.accountId, Number(a.id)));
-    return { ...shapeAccount(a), contacts: contacts.map(shapeContact), opportunity_count: Number(opps?.c ?? 0) };
+    // CRM-2 account page (additive): the account's deals + the recent activities across those deals.
+    const oppRows = await db.select().from(crmOpportunities).where(eq(crmOpportunities.accountId, Number(a.id))).orderBy(desc(crmOpportunities.id)).limit(100);
+    const oppNos = oppRows.map((o: any) => o.oppNo);
+    const actRows = oppNos.length
+      ? await db.select().from(crmActivities).where(and(eq(crmActivities.entityType, 'opportunity'), inArray(crmActivities.entityNo, oppNos))).orderBy(desc(crmActivities.id)).limit(50)
+      : [];
+    return {
+      ...shapeAccount(a), contacts: contacts.map(shapeContact), opportunity_count: oppRows.length,
+      opportunities: oppRows.map((o: any) => ({ opp_no: o.oppNo, name: o.name, stage: o.stage, status: o.status, amount: Number(o.amount ?? 0), probability: Number(o.probability ?? 0), owner: o.owner, expected_close_date: o.expectedCloseDate, created_at: o.createdAt, closed_at: o.closedAt })),
+      recent_activities: actRows.map((x: any) => ({ id: Number(x.id), entity_no: x.entityNo, type: x.type, subject: x.subject, notes: x.notes, due_date: x.dueDate, done: x.done === true, owner: x.owner, created_at: x.createdAt })),
+    };
   }
 
   async update(accountNo: string, dto: z.infer<typeof AccountUpdateBody>, user: JwtUser) {

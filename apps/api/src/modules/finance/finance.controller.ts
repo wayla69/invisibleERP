@@ -6,6 +6,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto, type AdvanceDto, type SettleAdvanceDto } from './finance.service';
 import { FinancialHealthService } from './financial-health.service';
 import { ArAllowanceService, type ComputeAllowanceDto } from './ar-allowance.service';
+import { ArCashApplicationService, type CashApplicationDto, type ApplyOnAccountDto } from './ar-cash-application.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
@@ -18,6 +19,17 @@ const WriteOffBody = z.object({ tenant_id: z.number().optional(), customer_name:
 // to_email optional — when omitted the service defaults the recipient to the counterparty's email on file
 // (master data: the customer for the AR invoice / statement / receipt).
 const DocEmailBody = z.object({ to_email: z.string().email().optional() });
+// AR cash application (REV-21) — one receipt across many invoices; remainder parks on-account.
+const CashAppLine = z.object({ invoice_no: z.string().min(1), amount: z.number().positive() });
+const CashApplicationBody = z.object({
+  customer_no: z.union([z.string().min(1), z.number()]),
+  amount: z.number().nonnegative().optional(),
+  method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional(),
+  lines: z.array(CashAppLine).optional(),
+  credit_notes: z.array(z.object({ doc_no: z.string().min(1), invoice_no: z.string().min(1), amount: z.number().positive() })).optional(),
+});
+const ApplyOnAccountBody = z.object({ receipt_ref: z.string().min(1), lines: z.array(CashAppLine).min(1) });
+const ReverseBody = z.object({ reason: z.string().min(1) });
 const AllowanceComputeBody = z.object({
   as_of_date: z.string().optional(),
   method: z.enum(['aging', 'percentage']).optional(),
@@ -28,7 +40,44 @@ const AllowanceComputeBody = z.object({
 
 @Controller('api/finance')
 export class FinanceController {
-  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService, private readonly allowance: ArAllowanceService) {}
+  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService, private readonly allowance: ArAllowanceService, private readonly cashApp: ArCashApplicationService) {}
+
+  // ── AR cash application (REV-21) — multi-invoice receipt application + on-account cash ──
+  // Worksheet feed: open invoices (with pending-committed amounts), unapplied receipts, applicable credit notes.
+  @Get('ar/open-items') @Permissions('ar', 'exec')
+  arOpenItems(@Query('customer_no') customerNo: string) { return this.cashApp.openItems(customerNo); }
+
+  // Deterministic auto-suggest: exact single-invoice match, else oldest-due-first allocation.
+  @Get('ar/cash-application/suggest') @Permissions('ar', 'exec')
+  suggestCashApplication(@Query('customer_no') customerNo?: string, @Query('amount') amount?: string, @Query('receipt_ref') receiptRef?: string) {
+    return this.cashApp.suggest({ customer_no: customerNo || undefined, amount: amount ? Number(amount) : undefined, receipt_ref: receiptRef || undefined });
+  }
+
+  // The application register / pending queue (declared before the :param POST routes for clarity only).
+  @Get('ar/cash-application') @Permissions('ar', 'exec', 'approvals')
+  listCashApplications(@Query('status') status?: string, @Query('invoice_no') invoiceNo?: string, @Query('receipt_no') receiptNo?: string, @Query('limit') limit?: string) {
+    return this.cashApp.listApplications({ status: status || undefined, invoice_no: invoiceNo || undefined, receipt_no: receiptNo || undefined, limit: limit ? Number(limit) : undefined });
+  }
+
+  // Post a worksheet: one receipt across many invoices (+ credit-note lines); remainder parks on-account.
+  // A batch at/over the threshold parks PendingApproval for a DIFFERENT approver (mirrors REV-16).
+  @Post('ar/cash-application') @Permissions('ar')
+  createCashApplication(@Body(new ZodValidationPipe(CashApplicationBody)) b: CashApplicationDto, @CurrentUser() u: JwtUser) { return this.cashApp.createCashApplication(b, u); }
+
+  // Apply parked on-account cash to invoices later (same validations + threshold).
+  @Post('ar/apply-on-account') @HttpCode(200) @Permissions('ar')
+  applyOnAccount(@Body(new ZodValidationPipe(ApplyOnAccountBody)) b: ApplyOnAccountDto, @CurrentUser() u: JwtUser) { return this.cashApp.applyOnAccount(b, u); }
+
+  // Checker approves/rejects a parked batch (approver ≠ poster enforced in the service, even for Admin).
+  @Post('ar/cash-application/:batchNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  approveCashApplication(@Param('batchNo') batchNo: string, @CurrentUser() u: JwtUser) { return this.cashApp.approveBatch(batchNo, u); }
+
+  @Post('ar/cash-application/:batchNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  rejectCashApplication(@Param('batchNo') batchNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.cashApp.rejectBatch(batchNo, u, b.reason); }
+
+  // Audited reversal of a single application line (reason REQUIRED; cash returns to on-account).
+  @Post('ar/cash-application/:applicationNo/reverse') @HttpCode(200) @Permissions('ar', 'exec')
+  reverseCashApplication(@Param('applicationNo') applicationNo: string, @Body(new ZodValidationPipe(ReverseBody)) b: { reason: string }, @CurrentUser() u: JwtUser) { return this.cashApp.reverseApplication(applicationNo, b.reason, u); }
 
   // REV-18 — AR Allowance for Doubtful Accounts (ECL). Compute an aging-driven provision (maker), then a
   // DIFFERENT user posts the delta to GL (Dr 5720 / Cr 1190).

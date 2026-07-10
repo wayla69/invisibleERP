@@ -21,15 +21,53 @@
 // The core is exported over a drizzle instance + injectable send() so the `hub-snapshot` cutover
 // harness proves the full hub→cloud round-trip on two PGlites.
 import { createHmac } from 'node:crypto';
+import { hostname } from 'node:os';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { custPosSales, dineInOrders, dineInOrderItems, hubPushLog, tenants } from './schema';
+import { buffetPackages, custPosSales, dineInOrders, dineInOrderItems, hubPushLog, tenants } from './schema';
+
+// pseudo item_ids the buffet flow writes for the per-pax charge + overtime surcharge lines
+const BUFFET_CHARGE_REF = '__buffet_charge__';
+const BUFFET_OVERTIME_REF = '__buffet_overtime__';
 
 export interface HubIngestBatch { tenant_id: number; sent_at: string; sales: any[]; signature: string }
 export interface HubIngestResponse { results: { client_uuid: string; status: 'synced' | 'duplicate' | 'failed'; sale_no: string | null; error: string | null }[]; summary: Record<string, number> }
 export interface HubPushSummary { collected: number; pushed: number; duplicate: number; failed: number; skipped: number }
 
+// Canonical JSON (recursively key-sorted) so the signature survives any re-serialization on the way —
+// the cloud verifies AFTER Zod validation, which rebuilds objects in schema-declaration key order.
+function canonicalJson(v: any): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).filter((k) => v[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v);
+}
+
 export function signHubBatch(tenantId: number, sentAt: string, sales: unknown[], secret: string): string {
-  return createHmac('sha256', secret).update(JSON.stringify({ tenant_id: tenantId, sent_at: sentAt, sales })).digest('hex');
+  return createHmac('sha256', secret).update(canonicalJson({ tenant_id: tenantId, sent_at: sentAt, sales })).digest('hex');
+}
+
+/** Sign any hub→cloud document envelope (till close, heartbeat) — canonical JSON of the whole body. */
+export function signHubDoc(body: Record<string, unknown>, secret: string): string {
+  return createHmac('sha256', secret).update(canonicalJson(body)).digest('hex');
+}
+
+// Phase 2c — the till/Z-report envelope. `sale_nos` are the HUB's sale numbers rung in the session:
+// the cloud resolves each through the BRANCH-04 dedup ledger and recomputes expected cash itself.
+export interface HubTillDoc {
+  session_no: string;
+  opened_by?: string; closed_by?: string;
+  opened_at: string; closed_at: string;
+  opening_float: number; closing_count: number;
+  paid_in?: number; paid_out?: number; drops?: number; cash_refunds?: number;
+  denominations?: Record<string, number> | null;
+  sale_nos: string[];
+}
+
+// Phase 4a — heartbeat payload (liveness + replay backlog; the cloud stamps last_seen + clock skew).
+export interface HubHeartbeatDoc {
+  hub_id: string; app_version?: string; last_push_at?: string | null;
+  pending_sales?: number; pending_tills?: number; failed_docs?: number; skipped_docs?: number;
 }
 
 const num = (v: any) => (v == null ? 0 : Number(v));
@@ -76,17 +114,34 @@ export async function pushHubSales(
     if (!order) { await skip('NO_ORDER_LINK — not a restaurant order→checkout sale (portal/split path)'); continue; }
     const items: any[] = await db.select().from(dineInOrderItems)
       .where(and(eq(dineInOrderItems.orderId, Number(order.id)), isNull(dineInOrderItems.voidedAt)));
-    if (items.some((l) => l.isBuffet || l.buffetPackageId != null)) { await skip('BUFFET_SALE — per-pax tier pricing does not replay through the a-la-carte path'); continue; }
-    if (items.some((l) => !l.itemId)) { await skip('LINE_WITHOUT_SKU — custom/unlinked line cannot be re-priced by the cloud'); continue; }
-    if (!items.length) { await skip('NO_LINES'); continue; }
+
+    // buffet-tier sale (Phase 2b): replay as a package_code + pax op — the CLOUD re-prices the charge
+    // from its own package master. ฿0 buffet food lines carry no revenue and are not replayed.
+    let buffet: { package_code: string; pax: number; overtime_pax?: number } | undefined;
+    const chargeLine = items.find((l) => l.itemId === BUFFET_CHARGE_REF);
+    const overtimeLine = items.find((l) => l.itemId === BUFFET_OVERTIME_REF);
+    if (items.some((l) => l.isBuffet || l.buffetPackageId != null)) {
+      if (!chargeLine?.buffetPackageId) { await skip('BUFFET_WITHOUT_CHARGE_LINE — no per-pax charge to replay'); continue; }
+      const [pkg] = await db.select().from(buffetPackages).where(eq(buffetPackages.id, Number(chargeLine.buffetPackageId))).limit(1);
+      if (!pkg) { await skip('BUFFET_PACKAGE_MISSING_ON_HUB — cannot resolve the tier code'); continue; }
+      buffet = { package_code: String(pkg.code), pax: num(chargeLine.qty), ...(overtimeLine ? { overtime_pax: num(overtimeLine.qty) } : {}) };
+    }
+    // regular priced lines: everything that is not buffet food (฿0) and not a charge/overtime pseudo line
+    const skuLines = items.filter((l) => !l.isBuffet && l.buffetPackageId == null);
+    if (skuLines.some((l) => !l.itemId)) { await skip('LINE_WITHOUT_SKU — custom/unlinked line cannot be re-priced by the cloud'); continue; }
+    if (!skuLines.length && !buffet) { await skip('NO_LINES'); continue; }
 
     const subtotal = num(s.subtotal), discount = num(s.discount), sc = num(s.service_charge), tip = num(s.tip);
     const netBase = subtotal - discount;
     const op = {
       client_uuid: clientUuid,
       device_id: 'HUB',
-      captured_at: (order.createdAt instanceof Date ? order.createdAt : new Date(order.createdAt ?? Date.now())).toISOString(),
-      lines: items.map((l) => ({ sku: String(l.itemId), qty: num(l.qty), modifier_option_ids: modifierIds(l.modifiers), notes: l.notes ?? undefined })),
+      // the moment the sale was actually rung on the hub — `dine_in_orders` has openedAt/paidAt (NOT
+      // createdAt): reading a non-existent column silently stamped every replay with the PUSH time,
+      // which would book an offline day's sales on the sync day.
+      captured_at: new Date(order.paidAt ?? order.openedAt ?? Date.now()).toISOString(),
+      lines: skuLines.map((l) => ({ sku: String(l.itemId), qty: num(l.qty), modifier_option_ids: modifierIds(l.modifiers), notes: l.notes ?? undefined })),
+      ...(buffet ? { buffet } : {}),
       method: s.payment_method ?? 'Cash',
       ...(discount > 0 ? { discount } : {}),
       ...(tip > 0 ? { tip } : {}),
@@ -117,6 +172,102 @@ export async function pushHubSales(
   return summary;
 }
 
+export interface HubTillPushSummary { collected: number; pushed: number; duplicate: number; blocked: number; failed: number }
+
+/**
+ * Phase 2c — push CLOSED till sessions (Z-report envelopes) to the cloud (control BRANCH-05).
+ *
+ * The session's sale population is derived from the dine-in orders opened inside the session window
+ * (restaurant hubs settle through the order→checkout path, which writes no `payments` tender — see
+ * PN-24 §7 6d). The cloud resolves every listed hub sale through the BRANCH-04 dedup ledger, so a
+ * session is deliberately BLOCKED (`TILL_SALES_NOT_SYNCED`) until its sales have all replayed: a
+ * variance must never be certified over an incomplete revenue population. Run AFTER pushHubSales.
+ */
+export async function pushHubTills(
+  db: any,
+  tenantId: number,
+  deps: { secret: string; sendTill: (body: { tenant_id: number; sent_at: string; till: HubTillDoc; signature: string }) => Promise<any>; sentAt?: string },
+): Promise<HubTillPushSummary> {
+  const sessions: any[] = await db.execute(sql`
+    SELECT s.session_no, s.opened_by, s.closed_by, s.opened_at, s.closed_at, s.opening_float, s.closing_count, s.denominations
+    FROM till_sessions s
+    LEFT JOIN hub_push_log l ON l.tenant_id = s.tenant_id AND l.hub_sale_no = s.session_no AND l.status <> 'failed'
+    WHERE s.tenant_id = ${tenantId} AND s.status = 'Closed' AND l.id IS NULL
+    ORDER BY s.id`).then((r: any) => r.rows ?? r);
+
+  const summary: HubTillPushSummary = { collected: sessions.length, pushed: 0, duplicate: 0, blocked: 0, failed: 0 };
+  if (!sessions.length) return summary;
+
+  const logRow = async (row: Record<string, any>) => {
+    await db.insert(hubPushLog).values({ tenantId, docType: 'till', attempts: 1, ...row })
+      .onConflictDoUpdate({ target: [hubPushLog.tenantId, hubPushLog.hubSaleNo], set: { ...row, docType: 'till', attempts: sql`${hubPushLog.attempts} + 1`, pushedAt: new Date() } });
+  };
+
+  for (const s of sessions) {
+    const sessionNo = String(s.session_no);
+    const clientUuid = `hub:${tenantId}:${sessionNo}`;
+    // membership is by SETTLEMENT time (paid_at) — that is when the cash entered this drawer.
+    const saleRows: any[] = await db.execute(sql`
+      SELECT DISTINCT o.sale_no FROM dine_in_orders o
+      WHERE o.tenant_id = ${tenantId} AND o.sale_no IS NOT NULL
+        AND coalesce(o.paid_at, o.opened_at) >= ${s.opened_at}
+        AND coalesce(o.paid_at, o.opened_at) <= ${s.closed_at}`).then((r: any) => r.rows ?? r);
+    const saleNos = saleRows.map((r) => String(r.sale_no));
+
+    const till: HubTillDoc = {
+      session_no: sessionNo,
+      opened_by: s.opened_by ?? undefined, closed_by: s.closed_by ?? undefined,
+      opened_at: new Date(s.opened_at).toISOString(), closed_at: new Date(s.closed_at).toISOString(),
+      opening_float: num(s.opening_float), closing_count: num(s.closing_count),
+      denominations: s.denominations ?? null,
+      sale_nos: saleNos,
+    };
+    const sentAt = deps.sentAt ?? new Date().toISOString();
+    const body = { tenant_id: tenantId, sent_at: sentAt, till, signature: signHubDoc({ tenant_id: tenantId, sent_at: sentAt, till }, deps.secret) };
+    try {
+      const res = await deps.sendTill(body);
+      const dup = res?.status === 'duplicate';
+      summary[dup ? 'duplicate' : 'pushed']++;
+      await logRow({ hubSaleNo: sessionNo, clientUuid, status: dup ? 'duplicate' : 'pushed', hubTotal: String(num(s.closing_count).toFixed(2)), errorCode: null, errorMessage: null });
+    } catch (e: any) {
+      const code = String(e?.code ?? e?.message ?? 'TILL_PUSH_FAILED');
+      // A blocked session is NOT a failure to retry blindly: its sales must be reconciled first.
+      if (code.includes('TILL_SALES_NOT_SYNCED')) summary.blocked++; else summary.failed++;
+      await logRow({ hubSaleNo: sessionNo, clientUuid, status: 'failed', hubTotal: String(num(s.closing_count).toFixed(2)), errorCode: code, errorMessage: String(e?.message ?? e) });
+    }
+  }
+  return summary;
+}
+
+/** Phase 4a — report liveness + replay backlog to the cloud (fleet visibility). */
+export async function sendHubHeartbeat(
+  db: any,
+  tenantId: number,
+  deps: { secret: string; hubId: string; appVersion?: string; sendHeartbeat: (body: { tenant_id: number; sent_at: string; hub: HubHeartbeatDoc; signature: string }) => Promise<any>; sentAt?: string },
+): Promise<HubHeartbeatDoc> {
+  const one = async (q: any) => Number(((await db.execute(q).then((r: any) => r.rows ?? r))[0] ?? {}).n ?? 0);
+  const pendingSales = await one(sql`
+    SELECT count(*)::int n FROM cust_pos_sales s
+    LEFT JOIN hub_push_log l ON l.tenant_id = s.tenant_id AND l.hub_sale_no = s.sale_no AND l.status <> 'failed'
+    WHERE s.tenant_id = ${tenantId} AND s.status = 'Completed' AND l.id IS NULL`);
+  const pendingTills = await one(sql`
+    SELECT count(*)::int n FROM till_sessions s
+    LEFT JOIN hub_push_log l ON l.tenant_id = s.tenant_id AND l.hub_sale_no = s.session_no AND l.status <> 'failed'
+    WHERE s.tenant_id = ${tenantId} AND s.status = 'Closed' AND l.id IS NULL`);
+  const failedDocs = await one(sql`SELECT count(*)::int n FROM hub_push_log WHERE tenant_id = ${tenantId} AND status = 'failed'`);
+  const skippedDocs = await one(sql`SELECT count(*)::int n FROM hub_push_log WHERE tenant_id = ${tenantId} AND status = 'skipped_unsupported'`);
+  const lastPush: any[] = await db.execute(sql`SELECT max(pushed_at) AS t FROM hub_push_log WHERE tenant_id = ${tenantId} AND status IN ('pushed','duplicate')`).then((r: any) => r.rows ?? r);
+
+  const hub: HubHeartbeatDoc = {
+    hub_id: deps.hubId, app_version: deps.appVersion,
+    last_push_at: lastPush[0]?.t ? new Date(lastPush[0].t).toISOString() : null,
+    pending_sales: pendingSales, pending_tills: pendingTills, failed_docs: failedDocs, skipped_docs: skippedDocs,
+  };
+  const sentAt = deps.sentAt ?? new Date().toISOString();
+  await deps.sendHeartbeat({ tenant_id: tenantId, sent_at: sentAt, hub, signature: signHubDoc({ tenant_id: tenantId, sent_at: sentAt, hub }, deps.secret) });
+  return hub;
+}
+
 // ── CLI ──
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -136,16 +287,31 @@ async function main() {
       if (rows.length !== 1) { console.error(`hub DB holds ${rows.length} tenants — set HUB_TENANT_ID`); process.exit(2); }
       tenantId = Number(rows[0]!.id);
     }
-    const send = async (batch: HubIngestBatch): Promise<HubIngestResponse> => {
-      const res = await fetch(`${cloud}/api/hub/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(batch) });
+    const post = async (path: string, body: unknown) => {
+      const res = await fetch(`${cloud}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const json: any = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error?.code ?? `HTTP ${res.status}`);
       return json;
     };
+    const send = (batch: HubIngestBatch): Promise<HubIngestResponse> => post('/api/hub/ingest', batch);
+
+    // sales first — a till can only be certified once ALL of its sales are on the cloud (BRANCH-05)
     const sum = await pushHubSales(db, tenantId, { secret, send });
-    console.log(`✅ hub push — collected ${sum.collected}: pushed ${sum.pushed}, duplicate ${sum.duplicate}, failed ${sum.failed}, skipped ${sum.skipped}`);
+    console.log(`✅ hub push — sales collected ${sum.collected}: pushed ${sum.pushed}, duplicate ${sum.duplicate}, failed ${sum.failed}, skipped ${sum.skipped}`);
     if (sum.skipped) console.log('   ⚠ skipped sales are recorded in hub_push_log (status skipped_unsupported) — review per BRANCH-04');
-    process.exit(sum.failed ? 1 : 0);
+
+    const tills = await pushHubTills(db, tenantId, { secret, sendTill: (b) => post('/api/hub/ingest-till', b) });
+    if (tills.collected) {
+      console.log(`✅ hub push — tills collected ${tills.collected}: pushed ${tills.pushed}, duplicate ${tills.duplicate}, blocked ${tills.blocked}, failed ${tills.failed}`);
+      if (tills.blocked) console.log('   ⚠ blocked tills: their sales have not all replayed — resolve the skipped/failed sales, then re-run (BRANCH-05)');
+    }
+
+    await sendHubHeartbeat(db, tenantId, {
+      secret, hubId: process.env.HUB_ID || hostname(), appVersion: process.env.APP_VERSION,
+      sendHeartbeat: (b) => post('/api/hub/heartbeat', b),
+    }).catch((e) => console.log(`   ⚠ heartbeat failed: ${e.message ?? e}`));
+
+    process.exit(sum.failed || tills.failed ? 1 : 0);
   } finally {
     await client.end({ timeout: 5 });
   }

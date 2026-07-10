@@ -1412,7 +1412,115 @@ async function main() {
     setSg.status === 200 && sgInv.json?.status === 'accepted' && String(sgInv.json?.ref ?? '').startsWith('EINV-'),
     `set=${setSg.status} status=${sgInv.json?.status} ref=${sgInv.json?.ref} provider=${sgInv.json?.provider}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) ──');
+  // ───────────────────── AR cash application (REV-21) — multi-invoice / on-account / CN-as-credit ─────────────────────
+  // Dedicated customer so the AR movements are isolated from the earlier collections/statement fixtures.
+  const [capT] = await db.insert(s.tenants).values({ code: 'CAPP', name: 'Cash App Customer' }).returning({ id: s.tenants.id });
+  const capTid = Number(capT.id);
+  const [capT2] = await db.insert(s.tenants).values({ code: 'CAPP2', name: 'Other Cash App Customer' }).returning({ id: s.tenants.id });
+  const capTid2 = Number(capT2.id);
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-CA1', invoiceDate: daysAgo(45), dueDate: daysAgo(40), tenantId: capTid, amount: '600', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+    { invoiceNo: 'INV-CA2', invoiceDate: daysAgo(15), dueDate: daysAgo(10), tenantId: capTid, amount: '500', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+    { invoiceNo: 'INV-CA3', invoiceDate: daysAgo(8), dueDate: daysAgo(5), tenantId: capTid, amount: '150000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+    { invoiceNo: 'INV-CAX', invoiceDate: daysAgo(8), dueDate: daysAgo(5), tenantId: capTid2, amount: '300', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+  ]);
+
+  // Auto-suggest: an EXACT single-invoice match beats FIFO (500 hits INV-CA2 though INV-CA1 is older).
+  const sgExact = (await inj('GET', `/api/finance/ar/cash-application/suggest?customer_no=CAPP&amount=500`, admin)).json;
+  ok('REV-21: suggest — exact single-invoice match wins (500 → INV-CA2)', sgExact.exact_match === true && sgExact.lines?.length === 1 && sgExact.lines?.[0]?.invoice_no === 'INV-CA2' && near(sgExact.lines?.[0]?.apply, 500), JSON.stringify(sgExact.lines));
+  const sgFifo = (await inj('GET', `/api/finance/ar/cash-application/suggest?customer_no=CAPP&amount=900`, admin)).json;
+  ok('REV-21: suggest — no exact match ⇒ oldest-due-first (600 on CA1, 300 partial on CA2)', sgFifo.exact_match === false && sgFifo.lines?.[0]?.invoice_no === 'INV-CA1' && near(sgFifo.lines?.[0]?.apply, 600) && sgFifo.lines?.[1]?.invoice_no === 'INV-CA2' && near(sgFifo.lines?.[1]?.apply, 300), JSON.stringify(sgFifo.lines));
+
+  // Multi-invoice happy path with an on-account remainder: 1000 = 600 (CA1) + 300 (CA2) + 100 on-account.
+  const ca1000Before = await tbBalance('1000'), ca1100Before = await tbBalance('1100'), ca2220Before = await tbBalance('2220');
+  const capPost = await inj('POST', '/api/finance/ar/cash-application', admin, { customer_no: 'CAPP', amount: 1000, ref_no: 'BANK-XFER-1', lines: [{ invoice_no: 'INV-CA1', amount: 600 }, { invoice_no: 'INV-CA2', amount: 300 }] });
+  ok('REV-21: one receipt across two invoices; remainder parks on-account (applied 900 / on-account 100)',
+    capPost.status === 201 && capPost.json?.status === 'Applied' && /^APL-/.test(capPost.json?.batch_no ?? '') && /^RCP-/.test(capPost.json?.receipt_no ?? '') && near(capPost.json?.applied_total, 900) && near(capPost.json?.on_account, 100), JSON.stringify(capPost.json).slice(0, 120));
+  const capRcpNo = capPost.json?.receipt_no;
+  const capInv1 = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-CA1')))[0];
+  const capInv2 = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-CA2')))[0];
+  ok('REV-21: sub-ledger moved per line (CA1 Paid 600, CA2 Partial 300)', capInv1?.status === 'Paid' && near(capInv1?.paidAmount, 600) && capInv2?.status === 'Partial' && near(capInv2?.paidAmount, 300), `ca1=${capInv1?.status}/${capInv1?.paidAmount} ca2=${capInv2?.status}/${capInv2?.paidAmount}`);
+  ok('REV-21: GL — Dr 1000 +1000, Cr 1100 −900, Cr 2220 −100 (on-account liability); receipt carries unapplied 100',
+    near(await tbBalance('1000'), ca1000Before + 1000) && near(await tbBalance('1100'), ca1100Before - 900) && near(await tbBalance('2220'), ca2220Before - 100)
+    && near((await db.select().from(s.arReceipts).where(eq(s.arReceipts.receiptNo, capRcpNo)))[0]?.unappliedAmount, 100),
+    `1000=${await tbBalance('1000')} 1100=${await tbBalance('1100')} 2220=${await tbBalance('2220')}`);
+  const capAging = (await inj('GET', '/api/finance/ar/aging', admin)).json;
+  ok('REV-21: aging reflects applications + surfaces the on-account credit (CA1 gone; on_account ≥ 100; net_total = total − on_account)',
+    !(capAging.rows ?? []).some((r: any) => r.ref === 'INV-CA1') && Number(capAging.on_account) >= 100 && near(capAging.net_total, capAging.total - capAging.on_account), `oa=${capAging.on_account} total=${capAging.total} net=${capAging.net_total}`);
+
+  // Fail-closed guards: over-apply an invoice / exceed the receipt / another customer's invoice.
+  const capOver = await inj('POST', '/api/finance/ar/cash-application', admin, { customer_no: 'CAPP', amount: 300, lines: [{ invoice_no: 'INV-CA2', amount: 300 }] });
+  ok('REV-21: application beyond the invoice open balance → 400 OVER_APPLIED', capOver.status === 400 && capOver.json?.error?.code === 'OVER_APPLIED', `${capOver.status} ${capOver.json?.error?.code}`);
+  const capExceed = await inj('POST', '/api/finance/ar/cash-application', admin, { customer_no: 'CAPP', amount: 100, lines: [{ invoice_no: 'INV-CA2', amount: 200 }] });
+  ok('REV-21: Σ applications beyond the receipt → 400 APPLY_EXCEEDS_RECEIPT', capExceed.status === 400 && capExceed.json?.error?.code === 'APPLY_EXCEEDS_RECEIPT', `${capExceed.status} ${capExceed.json?.error?.code}`);
+  const capXcust = await inj('POST', '/api/finance/ar/cash-application', admin, { customer_no: 'CAPP', amount: 300, lines: [{ invoice_no: 'INV-CAX', amount: 300 }] });
+  ok('REV-21: another customer\'s invoice → 400 CUSTOMER_MISMATCH', capXcust.status === 400 && capXcust.json?.error?.code === 'CUSTOMER_MISMATCH', `${capXcust.status} ${capXcust.json?.error?.code}`);
+
+  // Apply-later: the parked 100 on-account clears into INV-CA2 (Dr 2220 / Cr 1100).
+  const capOI = (await inj('GET', '/api/finance/ar/open-items?customer_no=CAPP', admin)).json;
+  ok('REV-21: open-items worksheet feed lists the open invoices + the unapplied receipt', (capOI.invoices ?? []).some((r: any) => r.invoice_no === 'INV-CA2' && near(r.available, 200)) && (capOI.unapplied_receipts ?? []).some((r: any) => r.receipt_no === capRcpNo && near(r.available, 100)) && near(capOI.totals?.on_account, 100), JSON.stringify(capOI.totals));
+  const capApplyLater = await inj('POST', '/api/finance/ar/apply-on-account', admin, { receipt_ref: capRcpNo, lines: [{ invoice_no: 'INV-CA2', amount: 100 }] });
+  ok('REV-21: apply-on-account later moves the parked cash onto the invoice (2220 → 1100)',
+    capApplyLater.status === 200 && near(capApplyLater.json?.applied_total, 100) && near(await tbBalance('2220'), ca2220Before) && near(await tbBalance('1100'), ca1100Before - 1000)
+    && near((await db.select().from(s.arReceipts).where(eq(s.arReceipts.receiptNo, capRcpNo)))[0]?.unappliedAmount, 0),
+    `2220=${await tbBalance('2220')} 1100=${await tbBalance('1100')}`);
+  const capInsuff = await inj('POST', '/api/finance/ar/apply-on-account', admin, { receipt_ref: capRcpNo, lines: [{ invoice_no: 'INV-CA2', amount: 50 }] });
+  ok('REV-21: applying more than the remaining on-account cash → 400 INSUFFICIENT_UNAPPLIED', capInsuff.status === 400 && capInsuff.json?.error?.code === 'INSUFFICIENT_UNAPPLIED', `${capInsuff.status} ${capInsuff.json?.error?.code}`);
+
+  // Threshold maker-checker (mirrors REV-16): a ≥ THB 100k application parks — cash banks fully on-account,
+  // NO invoice moves — until a DIFFERENT user approves; self-approval is a SoD violation.
+  const capBig = await inj('POST', '/api/finance/ar/cash-application', admin, { customer_no: 'CAPP', amount: 150000, lines: [{ invoice_no: 'INV-CA3', amount: 150000 }] });
+  const capInv3Parked = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-CA3')))[0];
+  ok('REV-21: a ≥100k application parks PendingApproval — invoice untouched, cash fully on-account (Cr 2220)',
+    capBig.json?.pending === true && capBig.json?.status === 'PendingApproval' && near(capBig.json?.applied_total, 0) && near(capBig.json?.on_account, 150000)
+    && near(capInv3Parked?.paidAmount, 0) && near(await tbBalance('2220'), ca2220Before - 150000), JSON.stringify(capBig.json).slice(0, 120));
+  const capGov = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
+  ok('REV-21: the parked batch surfaces in the GOV-01 pending-approvals monitor', (capGov.items ?? []).some((i: any) => i.type === 'ar_cash_application' && i.control === 'REV-21' && i.ref === capBig.json?.batch_no && near(i.amount, 150000)), `types=${JSON.stringify(capGov.by_type ?? {})}`);
+  const capSelf = await inj('POST', `/api/finance/ar/cash-application/${capBig.json?.batch_no}/approve`, admin);
+  ok('REV-21: poster self-approval blocked → 403 SOD_VIOLATION', capSelf.status === 403 && capSelf.json?.error?.code === 'SOD_VIOLATION', `${capSelf.status} ${capSelf.json?.error?.code}`);
+  const capAppr = await inj('POST', `/api/finance/ar/cash-application/${capBig.json?.batch_no}/approve`, mgr);
+  const capInv3 = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-CA3')))[0];
+  ok('REV-21: a different user approves → invoice settles + GL relief posts (Dr 2220 / Cr 1100 150000)',
+    capAppr.status === 200 && near(capAppr.json?.applied_total, 150000) && capInv3?.status === 'Paid' && near(await tbBalance('2220'), ca2220Before) && near(await tbBalance('1100'), ca1100Before - 151000), `st=${capAppr.status} inv3=${capInv3?.status} 2220=${await tbBalance('2220')}`);
+
+  // Audited reversal: reason REQUIRED; the invoice reopens and the cash returns on-account.
+  const capApl1 = `${capPost.json?.batch_no}-L1`; // the 600 applied to INV-CA1
+  const capRevNoReason = await inj('POST', `/api/finance/ar/cash-application/${capApl1}/reverse`, admin, { reason: '   ' });
+  ok('REV-21: reversal without a reason rejected → 400 REASON_REQUIRED', capRevNoReason.status === 400 && capRevNoReason.json?.error?.code === 'REASON_REQUIRED', `${capRevNoReason.status} ${capRevNoReason.json?.error?.code}`);
+  const capRev = await inj('POST', `/api/finance/ar/cash-application/${capApl1}/reverse`, admin, { reason: 'ลูกค้าโต้แย้งยอด — ตัดผิดใบ' });
+  const capInv1After = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-CA1')))[0];
+  ok('REV-21: reversal reopens the invoice + returns the cash on-account (Dr 1100 / Cr 2220), audited with reason',
+    capRev.status === 200 && capRev.json?.reversed === true && capInv1After?.status === 'Unpaid' && near(capInv1After?.paidAmount, 0)
+    && near(await tbBalance('2220'), ca2220Before - 600) && near((await db.select().from(s.arReceipts).where(eq(s.arReceipts.receiptNo, capRcpNo)))[0]?.unappliedAmount, 600),
+    `inv1=${capInv1After?.status} 2220=${await tbBalance('2220')}`);
+  const capAppReg = (await inj('GET', `/api/finance/ar/cash-application?receipt_no=${capRcpNo}`, admin)).json;
+  ok('REV-21: the application register carries the audited reversal (reversed flag + reason + who)', (capAppReg.applications ?? []).some((a: any) => a.application_no === capApl1 && a.reversed === true && a.reversed_by === 'admin' && (a.reverse_reason ?? '').includes('โต้แย้ง')), `n=${capAppReg.count}`);
+  const capRevAgain = await inj('POST', `/api/finance/ar/cash-application/${capApl1}/reverse`, admin, { reason: 'ซ้ำ' });
+  ok('REV-21: a reversed application cannot be reversed again → 400 ALREADY_REVERSED', capRevAgain.status === 400 && capRevAgain.json?.error?.code === 'ALREADY_REVERSED', `${capRevAgain.status} ${capRevAgain.json?.error?.code}`);
+
+  // Credit-note-as-credit-line: an Issued AR-linked ใบลดหนี้ reduces the customer's open balance via the
+  // same worksheet (sub-ledger only — the note's own GL posted at its TAX-07 approval). Seed the note
+  // directly (the TAX-07 issuance/approval flow is exercised by the taxdocs harness).
+  await db.insert(s.taxInvoices).values({
+    tenantId: hq, docNo: 'CN-CAPP-1', type: 'credit_note', issueDate: daysAgo(2), sourceType: 'AR', sourceRef: 'INV-CA2',
+    sellerName: 'HQ Co', sellerTaxId: '0105500000001', sellerAddress: '1 Test Rd', subtotal: '46.73', vatAmount: '3.27', grandTotal: '50',
+    status: 'Issued', originalDocNo: 'TIV-X-1', reason: 'ส่วนลดภายหลัง', createdBy: 'seed',
+  });
+  const capOI2 = (await inj('GET', '/api/finance/ar/open-items?customer_no=CAPP', admin)).json;
+  ok('REV-21: open-items surfaces the applicable AR-linked credit note (remaining 50)', (capOI2.credit_notes ?? []).some((c: any) => c.doc_no === 'CN-CAPP-1' && near(c.remaining, 50)), JSON.stringify(capOI2.credit_notes));
+  const cn1100Before = await tbBalance('1100');
+  const capCn = await inj('POST', '/api/finance/ar/cash-application', admin, { customer_no: 'CAPP', credit_notes: [{ doc_no: 'CN-CAPP-1', invoice_no: 'INV-CA2', amount: 50 }] });
+  const capInv2Cn = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-CA2')))[0];
+  ok('REV-21: credit note applies as a credit line — invoice open balance falls 50, NO new GL (the note posted its own at approval)',
+    capCn.status === 201 && near(capCn.json?.credit_applied, 50) && near(capInv2Cn?.paidAmount, 450) && near(await tbBalance('1100'), cn1100Before), JSON.stringify(capCn.json).slice(0, 120));
+  const capCnOver = await inj('POST', '/api/finance/ar/cash-application', admin, { customer_no: 'CAPP', credit_notes: [{ doc_no: 'CN-CAPP-1', invoice_no: 'INV-CA2', amount: 10 }] });
+  ok('REV-21: exhausted credit note → 400 CN_OVER_APPLIED', capCnOver.status === 400 && capCnOver.json?.error?.code === 'CN_OVER_APPLIED', `${capCnOver.status} ${capCnOver.json?.error?.code}`);
+  const capStmt = (await inj('GET', `/api/finance/ar/statement?tenant_id=${capTid}`, admin)).json;
+  ok('REV-21: customer statement carries the applied credit note as a credit line (type credit_note, 50)', (capStmt.lines ?? []).some((l: any) => l.type === 'credit_note' && near(l.payment, 50) && l.ref === 'CN-CAPP-1'), `n=${capStmt.lines?.length}`);
+  const capWl = (await inj('GET', '/api/finance/ar/collections', admin)).json;
+  ok('REV-21: collections worklist surfaces the customer\'s on-account cash (apply before dunning)', (capWl.rows ?? []).some((r: any) => r.invoice_no === 'INV-CA1' && near(r.on_account, 600)) && Number(capWl.on_account_total) >= 600, `oa_total=${capWl.on_account_total}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

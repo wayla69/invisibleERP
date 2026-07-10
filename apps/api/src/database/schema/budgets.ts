@@ -41,7 +41,7 @@ export const budgetReviews = pgTable('budget_reviews', {
 
 export type BudgetReview = typeof budgetReviews.$inferSelect;
 
-// ── FIN-3 (BUD-02, migration 0296) — budgetary control / encumbrance on procurement ──────────────────────
+// ── FIN-3 (BUD-02, migration 0298) — budgetary control / encumbrance on procurement ──────────────────────
 // Per-tenant budget-control policy for the PR/PO approval gate. One row per tenant (NULL tenant =
 // single-company default), mirroring receiving_settings. policy: 'off' (default — report-only, exactly the
 // pre-FIN-3 behaviour) | 'advise' (approve + annotate) | 'warn' (approver must confirm the overage) |

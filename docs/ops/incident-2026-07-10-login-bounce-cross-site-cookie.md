@@ -47,6 +47,33 @@ the active deployment was healthy throughout the report window.
 3. **Long-term (recommended):** custom domains under one registrable domain (`app.…` + `api.…` with
    `AUTH_COOKIE_DOMAIN`), per the design notes in `common/cookies.ts`.
 
+## Addendum — a SECOND, distinct login bounce (same day, different root cause)
+
+After the same-origin cutover (above) removed the cross-site cookie dependency, login bounced **again**.
+This was a different bug, surfaced only once the real-browser Playwright probe was armed:
+
+1. **Web build regression (fixed by env):** the running web bundle had been built with
+   `NEXT_PUBLIC_API_URL` **unset** (Railway does not inject an *empty-valued* variable into the build
+   environment), so the client fell back to its hard-coded `http://localhost:8000` default and the
+   browser's CSP (`connect-src 'self'`) blocked the login `fetch` → "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้". Fixed by
+   setting `NEXT_PUBLIC_API_URL=https://<web-domain>` (a non-empty, same-origin value) and rebuilding.
+2. **API RLS regression (the real bounce):** with the bundle fixed, login POST returned 200 but the very
+   next authenticated call (`GET /api/auth/me`) returned **401 `USER_NOT_FOUND` ("Account no longer
+   exists")** — identical through the web proxy AND direct to the API, proving it was the API guard, not
+   cookies. **Root cause:** the `JwtAuthGuard` authenticates by reading the `users` row *before* the
+   per-request tenant transaction exists (guards run before interceptors), so it reads as the base
+   `ierp_app` connection role with **no `app.*` GUCs**. `users` carries a `tenant_id` column, so the
+   generic RLS loop in recent migrations had it under **`FORCE ROW LEVEL SECURITY`**; once H-3 made
+   `ierp_app` the non-superuser table **owner**, `FORCE` applied to it too, and the policy returned **zero
+   rows** for the identity lookup → every valid session looked like a deleted account. Confirmed on a
+   local Postgres reproduction of the H-3 role/ownership world (owner read: 0 rows; owner read with
+   `app.bypass_rls=on`: 1 row; `app_user` tenant-scoped reads still correctly isolated).
+   **Fix:** the guard's auth-infra reads (`users`, `revoked_tokens`, `pos_members`) now run in a short
+   `app.bypass_rls=on` transaction (`common/guards.ts` `authRead`). Identity resolution legitimately
+   predates tenant context; normal per-request queries are unchanged (they still `SET ROLE app_user` and
+   enforce tenant RLS). The synthetic browser probe and the provision workflow's cookie round-trip matrix
+   now guard against regression.
+
 ## Lessons / follow-ups
 
 - **The trigger was an unverified deletion.** The whole chain started with deleting a Postgres service
