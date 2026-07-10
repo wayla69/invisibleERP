@@ -2206,6 +2206,8 @@
       "when": 2023820000277,
       "tag": "0316_stocktake_tenant_isolation",
       "breakpoints": true
+<<<<<<< HEAD
+=======
     },
     {
       "idx": 312,
@@ -2213,6 +2215,7 @@
       "when": 2023820000278,
       "tag": "0312_dine_in_seat",
       "breakpoints": true
+>>>>>>> origin/main
     }
   ]
 }
