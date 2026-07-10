@@ -57,3 +57,9 @@ the active deployment was healthy throughout the report window.
   ops checks so a cookie/session regression pages before a user does.
 - The web's 401 bounce masks the response body. Follow-up (UX): surface the API error `code` on the login
   page after a bounce (`?reason=`) to cut diagnosis time.
+- **(DONE 2026-07-10)** Cutting over to the private-network proxy stalled on blind rebuild-and-retry
+  (wrong port guessed, no console access to test from inside the container). Shipped
+  **`GET /proxy-health`** on the web app (`apps/web/src/app/proxy-health/route.ts`): tests the runtime
+  `API_PROXY_TARGET` (and any `?target=http://<name>.railway.internal[:port]` override — restricted to
+  private Railway hostnames, status/error codes only, never the upstream body) from inside the web
+  container, so proxy-target changes are verified in one browser call instead of a rebuild per guess.
