@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.2** _(2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
+**Status: DRAFT v0.3** _(2026-07-10: menu engineering — branch picker + quantity-weighted average-margin threshold + on-screen thresholds; 2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
 
 This chapter is for **managers, planners and executives** — and anyone who needs
 reports. It covers dashboards, Excel / PDF reports, AI-driven forecasting and
@@ -486,8 +486,18 @@ Each costed item is placed in one of four quadrants and given an action:
 | 🐶 **Dog** (สุนัข) | Slow **and** low-margin | Consider removing or reworking |
 
 Popularity uses the **70% rule** (a dish is "popular" when its share of units sold is
-≥ 70% of an equal share); profitability compares each dish's unit contribution margin
-to the menu average. Items with no recipe/cost are listed separately as *uncosted*.
+≥ 70% of an equal share, i.e. mix % ≥ 0.7 × 1/N); profitability compares each dish's
+unit contribution margin (average price − recipe COGS) to the **quantity-weighted
+average margin** of the menu (total contribution ÷ total units sold — the classic
+Kasavana–Smith bar, so one slow premium dish can't skew it). The screen shows the
+exact thresholds used above the table, and the API returns them (`thresholds`).
+Items with no recipe/cost are listed separately as *uncosted* — they appear in the
+list but are never classified.
+
+**Per-branch view:** if your company runs several outlets (and you hold the `branch`
+or `exec` duty), a **สาขา (Branch)** picker appears on the Menu engineering tab —
+pick an outlet to re-derive the whole matrix from that branch's sales only
+(`?branch_id=` on the API). "ทุกสาขา" (all branches) is the default.
 
 ### Daypart & busiest hours (`GET /api/analytics/daypart`)
 

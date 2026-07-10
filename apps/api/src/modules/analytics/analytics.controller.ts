@@ -33,9 +33,15 @@ export class AnalyticsController {
   // ── Restaurant management analytics (date window via ?from=YYYY-MM-DD&to=YYYY-MM-DD; default = today) ──
 
   // Kasavana–Smith menu-engineering matrix: Star / Plowhorse / Puzzle / Dog + actions.
+  // Optional ?branch_id= narrows the sales mix to one outlet.
   @Get('menu-engineering') @Permissions('dashboard', 'exec', 'planner')
-  menuEngineering(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) {
-    return this.menuEng.menuEngineering(u, { from, to });
+  menuEngineering(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('branch_id') branchId: string | undefined,
+    @CurrentUser() u: JwtUser,
+  ) {
+    return this.menuEng.menuEngineering(u, { from, to, branch_id: qintOpt('branch_id', branchId) });
   }
 
   // Daypart / hour-of-day demand (business clock, Asia/Bangkok) from captured tenders.

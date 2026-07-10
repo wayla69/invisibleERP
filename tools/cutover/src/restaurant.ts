@@ -612,6 +612,50 @@ async function main() {
   const scLine = await inj('POST', `/api/print/receipt/${scCo.json.sale_no}/send`, sales1, { channel: 'line', to: 'Uffffffffffffffffffffffffffffffff' });
   ok('E-receipt: send via the LINE channel (mock provider when no token)', (scLine.status === 200 || scLine.status === 201) && scLine.json.channel === 'line' && scLine.json.status === 'sent', `${scLine.status} ${scLine.json.channel}/${scLine.json.status}`);
 
+  // ── POS-5b: menu-engineering matrix (Kasavana–Smith star/plowhorse/puzzle/dog) ──
+  // 4 costed items engineered one-per-quadrant + 1 uncosted, on an isolated past business day so the
+  // harness's own checkouts (today) never shift the mix. Branch 1 carries the high-volume dishes and
+  // branch 2 the slow ones, so ?branch_id= must re-derive N, the 70% threshold and the weighted-avg CM.
+  const ME_DAY = '2026-05-05';
+  await db.insert(s.menuItems).values([
+    { tenantId: t1, sku: 'ME-A', name: 'ME กะเพราไก่', price: '200.00', cost: '40.00', active: true },     // CM 160 × 40 → Star
+    { tenantId: t1, sku: 'ME-B', name: 'ME ข้าวผัดปู', price: '100.00', cost: '80.00', active: true },     // CM 20 × 40 → Plowhorse
+    { tenantId: t1, sku: 'ME-C', name: 'ME สเต๊กพรีเมียม', price: '300.00', cost: '60.00', active: true }, // CM 240 × 5 → Puzzle
+    { tenantId: t1, sku: 'ME-D', name: 'ME น้ำสมุนไพร', price: '90.00', cost: '70.00', active: true },     // CM 20 × 5 → Dog
+    { tenantId: t1, sku: 'ME-X', name: 'ME เมนูไม่มีสูตร', price: '50.00', active: true },                 // no recipe/cost → listed, not classified
+  ]);
+  const [meS1] = await db.insert(s.custPosSales).values({ saleNo: 'SALE-ME5B-1', saleDate: ME_DAY, tenantId: t1, branchId: 1, status: 'Completed', subtotal: '12000', total: '12000' }).returning({ id: s.custPosSales.id });
+  const [meS2] = await db.insert(s.custPosSales).values({ saleNo: 'SALE-ME5B-2', saleDate: ME_DAY, tenantId: t1, branchId: 2, status: 'Completed', subtotal: '2050', total: '2050' }).returning({ id: s.custPosSales.id });
+  await db.insert(s.custPosItems).values([
+    { saleId: meS1.id, itemId: 'ME-A', itemDescription: 'ME กะเพราไก่', qty: '40', unitPrice: '200.00', amount: '8000.00' },
+    { saleId: meS1.id, itemId: 'ME-B', itemDescription: 'ME ข้าวผัดปู', qty: '40', unitPrice: '100.00', amount: '4000.00' },
+    { saleId: meS2.id, itemId: 'ME-C', itemDescription: 'ME สเต๊กพรีเมียม', qty: '5', unitPrice: '300.00', amount: '1500.00' },
+    { saleId: meS2.id, itemId: 'ME-D', itemDescription: 'ME น้ำสมุนไพร', qty: '5', unitPrice: '90.00', amount: '450.00' },
+    { saleId: meS2.id, itemId: 'ME-X', itemDescription: 'ME เมนูไม่มีสูตร', qty: '2', unitPrice: '50.00', amount: '100.00' },
+  ]);
+  const me = await inj('GET', `/api/analytics/menu-engineering?from=${ME_DAY}&to=${ME_DAY}`, sales1);
+  const meBy = Object.fromEntries((me.json.items ?? []).map((i: any) => [i.item_id, i]));
+  ok('Menu engineering: 4 costed items, 90 units → exactly 1 Star + 1 Plowhorse + 1 Puzzle + 1 Dog (A/B/C/D)',
+    me.status === 200 && me.json.summary?.items === 4 && me.json.summary?.units_sold === 90 &&
+    meBy['ME-A']?.quadrant === 'Star' && meBy['ME-B']?.quadrant === 'Plowhorse' && meBy['ME-C']?.quadrant === 'Puzzle' && meBy['ME-D']?.quadrant === 'Dog',
+    `${me.status} ${JSON.stringify({ A: meBy['ME-A']?.quadrant, B: meBy['ME-B']?.quadrant, C: meBy['ME-C']?.quadrant, D: meBy['ME-D']?.quadrant })}`);
+  ok('Menu engineering: CM math exact — A margin 160 (200−40), contribution 6400; total contribution 8500; mix share A 44.44%',
+    near(meBy['ME-A']?.unit_margin, 160) && near(meBy['ME-A']?.contribution, 6400) && near(me.json.summary?.total_contribution, 8500) && Math.abs(Number(meBy['ME-A']?.mix_share) - 0.4444) < 0.0002,
+    JSON.stringify({ margin: meBy['ME-A']?.unit_margin, contrib: meBy['ME-A']?.contribution, share: meBy['ME-A']?.mix_share }));
+  ok('Menu engineering: thresholds returned — popularity 0.175 (70% of 1/4) + weighted-average CM 94.44 (8500/90), not the unweighted mean 110',
+    Math.abs(Number(me.json.thresholds?.popularity_share_threshold) - 0.175) < 0.0002 && near(me.json.thresholds?.avg_unit_margin, 94.44),
+    JSON.stringify(me.json.thresholds));
+  ok('Menu engineering: uncosted item (no recipe/cost) listed but excluded from classification',
+    me.json.summary?.uncosted === 1 && (me.json.uncosted_items ?? []).some((u: any) => u.item_id === 'ME-X' && Number(u.qty) === 2) && !meBy['ME-X'],
+    JSON.stringify(me.json.uncosted_items));
+  const me2 = await inj('GET', `/api/analytics/menu-engineering?from=${ME_DAY}&to=${ME_DAY}&branch_id=2`, sales1);
+  const me2By = Object.fromEntries((me2.json.items ?? []).map((i: any) => [i.item_id, i]));
+  ok('Menu engineering: ?branch_id=2 re-scopes the mix — N=2 (thr 0.35, weighted ACM 130=1300/10): C flips Puzzle→Star, D→Plowhorse',
+    me2.status === 200 && me2.json.branch_id === 2 && me2.json.summary?.items === 2 && me2.json.summary?.units_sold === 10 &&
+    near(me2.json.thresholds?.popularity_share_threshold, 0.35) && near(me2.json.thresholds?.avg_unit_margin, 130) &&
+    me2By['ME-C']?.quadrant === 'Star' && me2By['ME-D']?.quadrant === 'Plowhorse' && !me2By['ME-A'],
+    `${me2.status} ${JSON.stringify({ n: me2.json.summary?.items, thr: me2.json.thresholds, C: me2By['ME-C']?.quadrant, D: me2By['ME-D']?.quadrant })}`);
+
   await app.close();
   await pg.close();
 
