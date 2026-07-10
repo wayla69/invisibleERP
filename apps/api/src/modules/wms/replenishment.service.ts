@@ -157,7 +157,7 @@ export class ReplenishmentService {
         const dstAfter = round2(n(dst.onHand) + qty);
         await tx.update(branchStock).set({ onHand: String(dstAfter), lastUpdated: now }).where(eq(branchStock.id, dst.id));
         // global audit movement
-        await tx.insert(stockMovements).values({ moveDate: now, docNo, moveType: 'Transfer', itemId: s.itemId, itemDescription: src.itemDescription, uom: src.uom ?? null, qty: String(qty), fromLocation: `BR:${codeById.get(Number(s.fromBranchId)) ?? s.fromBranchId}`, toLocation: `BR:${codeById.get(Number(s.branchId)) ?? s.branchId}`, refDoc: s.suggestionNo, remarks: 'Auto-replenish transfer', createdBy: user.username });
+        await tx.insert(stockMovements).values({ tenantId: user.tenantId ?? null, moveDate: now, docNo, moveType: 'Transfer', itemId: s.itemId, itemDescription: src.itemDescription, uom: src.uom ?? null, qty: String(qty), fromLocation: `BR:${codeById.get(Number(s.fromBranchId)) ?? s.fromBranchId}`, toLocation: `BR:${codeById.get(Number(s.branchId)) ?? s.branchId}`, refDoc: s.suggestionNo, remarks: 'Auto-replenish transfer', createdBy: user.username });
         // tenant-scoped, branch-attributed audit (both legs)
         await tx.insert(custStockLog).values({ tenantId, branchId: Number(s.fromBranchId), itemId: s.itemId, itemDescription: src.itemDescription, logDate: now, logType: 'Transfer-Out', qtyChange: String(-qty), balanceAfter: String(srcAfter), refDoc: docNo, createdBy: user.username });
         await tx.insert(custStockLog).values({ tenantId, branchId: Number(s.branchId), itemId: s.itemId, itemDescription: src.itemDescription, logDate: now, logType: 'Transfer-In', qtyChange: String(qty), balanceAfter: String(dstAfter), refDoc: docNo, createdBy: user.username });

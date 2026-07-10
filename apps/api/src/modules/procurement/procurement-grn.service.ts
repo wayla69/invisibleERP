@@ -211,7 +211,7 @@ export class ProcurementGrnService {
           if (c.active) costingLines.push({ itemId: it.item_id, qty: recv, actualCost, method: c.method, standardCost: c.standardCost ?? 0 });
         }
         // stock movement (audit log; ไม่ปรับ snapshot — คง model V1)
-        await tx.insert(stockMovements).values({
+        await tx.insert(stockMovements).values({ tenantId: user.tenantId ?? null,
           moveDate: now, docNo: grNo, moveType: 'GR', itemId: it.item_id, itemDescription: poi?.itemDescription ?? null,
           uom: it.uom ?? poi?.uom ?? null, qty: String(recv), fromLocation: 'Supplier', toLocation: 'Warehouse', refDoc: dto.po_no, createdBy: user.username,
         });

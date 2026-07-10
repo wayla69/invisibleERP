@@ -157,7 +157,7 @@ async function main() {
           expiryDate: ymd(new Date(grDate.getTime() + between(7, 120) * 86400000)), unitCost: String(l.unitPrice),
         })));
         await tx.insert(schema.stockMovements).values(recvLines.map((l) => ({
-          moveDate: grDate, docNo: grNo, moveType: 'GR' as const, itemId: l.itemId, itemDescription: l.itemDescription,
+          tenantId: T, moveDate: grDate, docNo: grNo, moveType: 'GR' as const, itemId: l.itemId, itemDescription: l.itemDescription,
           uom: l.uom, qty: String(l.recv), fromLocation: 'Supplier', toLocation: 'WH-MAIN', refDoc: poNo,
           remarks: vendor.name, createdBy: TAG,
         })));

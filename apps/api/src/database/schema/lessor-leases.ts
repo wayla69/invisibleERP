@@ -45,5 +45,9 @@ export const lessorLeases = pgTable(
     approvedBy: text('approved_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ byDue: index('idx_lessor_lease_due').on(t.status, t.nextRunDate) }),
+  (t) => ({
+    byDue: index('idx_lessor_lease_due').on(t.status, t.nextRunDate),
+    // R1-1 / AUD-ARC-01 — a tenant-scoped table needs a leading (tenant_id, …) index (the tenant-idx guard).
+    byTenant: index('idx_lessor_lease_tenant').on(t.tenantId, t.leaseNo),
+  }),
 );
