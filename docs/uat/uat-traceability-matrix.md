@@ -156,10 +156,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-303 | ≥ THB 100k application parks PendingApproval; self-approve `SOD_VIOLATION`; distinct approver applies | REV-21 (mirrors REV-16) | 01 §7 (8e), rev 0.30 (`basics.ts`) |
 | UAT-O2C-304 | Reversal reason-required + audited; cash returns on-account; `ALREADY_REVERSED` on repeat | REV-21 | 01 §7 (8e), rev 0.30 (`basics.ts`) |
 | UAT-O2C-305 | Issued AR-linked credit note applies as a credit line (`CN_*` guards; statement shows it) | REV-21, TAX-07 | 01 §7 (8e), rev 0.30 (`basics.ts`) |
-| UAT-O2C-300 | CRM workspace kanban: drag persists stage move + history row (Won/Lost reason dialog) | REV-17 | 18 §7 (2b), rev 0.6 (pipeline.ts + manual UI) |
-| UAT-O2C-301 | Deal page: unified timeline (activities + stage audit + quotes) + next-step task | REV-17 | 18 §7 (2b), rev 0.6 (pipeline.ts) |
-| UAT-O2C-302 | Web-to-lead: public capture, silent honeypot drop, TENANT_REQUIRED, strict rate bucket | REV-17 (intake) | 18 §7 (2c), rev 0.6 (pipeline.ts) |
-| UAT-O2C-303 | Lead CSV import: dry-run report, invalid rows skipped, LEAD- numbering | REV-17 (intake) | 18 §7 (2c), rev 0.6 (pipeline.ts) |
+| UAT-O2C-308 | CRM workspace kanban: drag persists stage move + history row (Won/Lost reason dialog) | REV-17 | 18 §7 (2b), rev 0.6 (pipeline.ts + manual UI) |
+| UAT-O2C-309 | Deal page: unified timeline (activities + stage audit + quotes) + next-step task | REV-17 | 18 §7 (2b), rev 0.6 (pipeline.ts) |
+| UAT-O2C-310 | Web-to-lead: public capture, silent honeypot drop, TENANT_REQUIRED, strict rate bucket | REV-17 (intake) | 18 §7 (2c), rev 0.6 (pipeline.ts) |
+| UAT-O2C-311 | Lead CSV import: dry-run report, invalid rows skipped, LEAD- numbering | REV-17 (intake) | 18 §7 (2c), rev 0.6 (pipeline.ts) |
 | UAT-O2C-026 | Cashier-speed quick-tender & change (UI) | Feature (cashier speed) | 01 §0 |
 | UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
 | UAT-O2C-028 | Diner pulls QR menu | REST-08 | 20 §7 |
