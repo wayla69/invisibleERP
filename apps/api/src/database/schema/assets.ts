@@ -223,7 +223,7 @@ export const assetAuditScans = pgTable('asset_audit_scans', {
 // is being built. It is NOT depreciated. When complete it is SETTLED / capitalised into a normal fixed asset
 // under a maker-checker gate: the preparer raises a settlement REQUEST (with a mandatory reason) that posts
 // NOTHING; a DIFFERENT user approves before the fixed_assets row + reclassification JE (Dr 1500 / Cr 1520)
-// are created. tenant-scoped → covered by the RLS DO-loop re-run in migration 0299.
+// are created. tenant-scoped → covered by the RLS DO-loop re-run in migration 0303.
 export const cipAssets = pgTable('cip_assets', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),

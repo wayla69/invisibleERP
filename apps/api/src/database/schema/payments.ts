@@ -130,7 +130,7 @@ export const xzReportDenominations = pgTable('xz_report_denominations', {
 // card flow: a card is AUTHORIZED for the bill at checkout, staff ADJUST the tip the guest wrote on the slip
 // before capture, then capture amount + tip. Every adjustment is written here (old→new tip + the auth amount
 // and policy ceiling in force) so the tip a guest was charged is always tied back to the slip — an immutable
-// trail, never updated in place. Tenant-scoped (RLS + tenant-leading index; migration 0309).
+// trail, never updated in place. Tenant-scoped (RLS + tenant-leading index; migration 0317).
 export const posTipAdjustments = pgTable('pos_tip_adjustments', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),

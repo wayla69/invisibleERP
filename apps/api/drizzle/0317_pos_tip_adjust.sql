@@ -1,4 +1,4 @@
--- 0309_pos_tip_adjust — Tip-adjust-after-auth (POS-10). The US-restaurant "authorize now, add the tip,
+-- 0317_pos_tip_adjust — Tip-adjust-after-auth (POS-10). The US-restaurant "authorize now, add the tip,
 -- capture later" card flow: a card tender is AUTHORIZED for the bill amount at checkout (status Authorized,
 -- no money captured yet), staff then ADJUST the tip the guest wrote on the slip BEFORE capture, and the
 -- final capture takes amount + tip. Two controls bound the adjustment: it is pre-capture only (an already

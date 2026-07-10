@@ -14,6 +14,7 @@ import { TaxInvoiceService } from '../tax/documents/tax-invoice.service';
 import { MenuService } from '../menu/menu.service';
 import { RecipeService } from '../menu/recipe.service';
 import { MemberService } from '../loyalty/member.service';
+import { JournalService } from '../pos/fiscal/journal.service';
 import { GiftCardService } from '../giftcards/gift-card.service';
 import { PromoEngineService } from '../marketing/promo-engine.service';
 import { VouchersService, type VoucherCheckoutPreview } from '../campaigns/vouchers.service';
@@ -43,6 +44,9 @@ export class DineInService {
     private readonly gift: GiftCardService,
     private readonly pricing: PricingService,
     @Optional() private readonly realtime?: RealtimeService,   // multi-terminal SSE fan-out (best-effort)
+    // Electronic fiscal journal (RD tamper-evidence). @Optional so partial harnesses still construct;
+    // the append is best-effort for the same reason the payments path treats it that way.
+    @Optional() private readonly fiscal?: JournalService,
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -84,6 +88,7 @@ export class DineInService {
         qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
         modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
         buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as any).course ?? 1,
+        seat: it.seat ?? null,   // seat-level ordering (POS-9)
         estPrepMinutes: prep ?? null, createdBy: user.username,
       });
     }
@@ -186,18 +191,35 @@ export class DineInService {
   }
 
   // ส่งครัว: new → queued, set firedAt
-  // Fire the kitchen. With no course → fire ALL pending lines (legacy). With a course → fire only that
-  // course's 'new' lines (course-by-course / hold-and-fire); others stay 'new' and off the KDS feed.
-  async fire(orderNo: string, user: JwtUser, course?: number) {
+  // Fire the kitchen. With no course/seat → fire ALL pending lines (legacy). With a course → fire only that
+  // course's 'new' lines (course-by-course / hold-and-fire); with a seat (POS-9) → fire only that seat's
+  // pending lines (serve one guest at a time). course + seat combine. Others stay 'new', off the KDS feed.
+  async fire(orderNo: string, user: JwtUser, course?: number, seat?: number) {
     const db = this.db;
     const o = await this.loadOrder(orderNo);
     const now = new Date();
     const where = [eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'new')];
     if (course != null) where.push(eq(dineInOrderItems.course, course));
+    if (seat != null) where.push(eq(dineInOrderItems.seat, seat));
     const fired = await db.update(dineInOrderItems).set({ kdsStatus: 'queued', firedAt: now, updatedAt: now }).where(and(...where)).returning({ id: dineInOrderItems.id });
-    if (course != null && !fired.length) throw new BadRequestException({ code: 'NO_COURSE_ITEMS', message: `No pending items in course ${course}`, messageTh: `ไม่มีรายการรอส่งในคอร์ส ${course}` });
+    if (!fired.length && (course != null || seat != null)) {
+      if (seat != null && course == null) throw new BadRequestException({ code: 'NO_SEAT_ITEMS', message: `No pending items for seat ${seat}`, messageTh: `ไม่มีรายการรอส่งของที่นั่ง ${seat}` });
+      throw new BadRequestException({ code: 'NO_COURSE_ITEMS', message: `No pending items in course ${course}`, messageTh: `ไม่มีรายการรอส่งในคอร์ส ${course}` });
+    }
     if (!o.firedAt) await db.update(dineInOrders).set({ firedAt: now }).where(eq(dineInOrders.id, o.id));
     await this.recomputeOrderStatus(Number(o.id));
+    return this.getOrder(orderNo, user);
+  }
+
+  // POS-9: (re)assign selected (non-voided) line items to a guest seat (null = shared/table). Blocked once
+  // the order is settled/closed. Returns the refreshed order view (each line now carries its seat).
+  async assignSeat(orderNo: string, itemIds: number[], seat: number | null, user: JwtUser) {
+    const db = this.db;
+    const o = await this.loadOrder(orderNo);
+    if (['paid', 'closed', 'cancelled', 'partially_paid'].includes(String(o.status))) throw new BadRequestException({ code: 'ORDER_CLOSED', message: 'Order is closed', messageTh: 'ออเดอร์ปิดแล้ว' });
+    const moved = await db.update(dineInOrderItems).set({ seat, updatedAt: new Date() })
+      .where(and(eq(dineInOrderItems.orderId, Number(o.id)), inArray(dineInOrderItems.id, itemIds.map(Number)), ne(dineInOrderItems.kdsStatus, 'voided'))).returning({ id: dineInOrderItems.id });
+    if (!moved.length) throw new BadRequestException({ code: 'NO_ITEMS', message: 'No matching items to assign', messageTh: 'ไม่พบรายการที่จะกำหนดที่นั่ง' });
     return this.getOrder(orderNo, user);
   }
 
@@ -283,6 +305,25 @@ export class DineInService {
       ? await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: saleCash, tip: built.tip, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user)
       : null;
     const inv = await this.markPaidAndInvoice(o, saleNo, user);
+
+    // Fiscal electronic journal (RD tamper-evidence, PN-20): the restaurant path used to append NOTHING,
+    // so dine-in/diner-QR/register sales — the bulk of a restaurant's revenue — were absent from the
+    // hash chain that the portal POS and the refund/void paths already write to. Append once here, at
+    // finalisation, with the authoritative figures. Best-effort (like the payments path): a journal
+    // outage must not roll back a settled sale, and `GET /api/pos/journal/verify` detects a gap.
+    // NB on a LAN-first store the hub keeps its OWN chain (its in-store journal) and the cloud appends
+    // again when the sale replays — the cloud chain is the company's book of record (docs/41, PN-24 §7 6c).
+    try {
+      await this.fiscal?.append({
+        doc_type: 'SALE', doc_no: saleNo, action: 'checkout',
+        payload: {
+          order_no: orderNo, sale_no: saleNo, subtotal: built.subtotal, discount: built.discount,
+          vat: built.vat, service_charge: built.service_charge, tip: built.tip, total: built.total,
+          method: dto.method ?? 'Cash', tax_invoice_no: inv ?? null,
+        },
+      }, user);
+    } catch { /* tamper-evidence is detective: verify() surfaces the gap, the sale stands */ }
+
     return { order_no: orderNo, sale_no: saleNo, ...built, payment_no: tender?.payment_no ?? null, payment_status: tender?.status ?? null, tax_invoice_no: inv };
   }
 
@@ -575,7 +616,7 @@ export class DineInService {
     const db = this.db;
     const items = await db.select({
       id: dineInOrderItems.id, itemId: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty, unitPrice: dineInOrderItems.unitPrice,
-      amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet, course: dineInOrderItems.course,
+      amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet, course: dineInOrderItems.course, seat: dineInOrderItems.seat,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, firedAt: dineInOrderItems.firedAt,
       startedAt: dineInOrderItems.startedAt, readyAt: dineInOrderItems.readyAt, estPrep: dineInOrderItems.estPrepMinutes,
     }).from(dineInOrderItems).where(eq(dineInOrderItems.orderId, Number(o.id))).orderBy(dineInOrderItems.id);
@@ -588,14 +629,18 @@ export class DineInService {
       const base = i.startedAt ? Math.floor((now - new Date(i.startedAt).getTime()) / 60000) : elapsedMin;
       const remainingMin = ['ready', 'served', 'voided'].includes(i.kdsStatus) ? 0 : Math.max(0, prep - base);
       const charge = i.itemId === '__buffet_charge__' || i.itemId === '__buffet_overtime__';
-      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, course: i.course ?? 1, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
+      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, course: i.course ?? 1, seat: i.seat ?? null, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
     });
     const waitedMin = o.firedAt ? Math.floor((now - new Date(o.firedAt).getTime()) / 60000) : 0;
     const readyInMin = Math.max(0, ...viewItems.filter((v: any) => !['served', 'voided'].includes(v.kds_status)).map((v: any) => v.remaining_min), 0);
+    // seat-level roll-up (POS-9): per-seat subtotal of non-voided lines — drives the split-by-seat UI.
+    const seats = new Map<number | null, number>();
+    for (const v of viewItems) { if (v.kds_status === 'voided') continue; const key = v.seat ?? null; seats.set(key, roundCurrency((seats.get(key) ?? 0) + v.amount, 'THB')); }
+    const seatSummary = [...seats.entries()].sort((a, b) => (a[0] ?? 1e9) - (b[0] ?? 1e9)).map(([seat, subtotal]) => ({ seat, subtotal }));
     return {
       order_no: o.orderNo, table_id: o.tableId, session_id: o.sessionId, status: o.status, guest_count: o.guestCount,
       subtotal: n(o.subtotal), vat: n(o.vat), total: n(o.total), sale_no: o.saleNo,
-      waited_min: waitedMin, ready_in_min: readyInMin, items: viewItems,
+      waited_min: waitedMin, ready_in_min: readyInMin, items: viewItems, seats: seatSummary,
     };
   }
 }

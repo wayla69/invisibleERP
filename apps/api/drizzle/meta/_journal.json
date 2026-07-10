@@ -2169,7 +2169,56 @@
       "idx": 309,
       "version": "7",
       "when": 2023820000272,
-      "tag": "0309_pos_tip_adjust",
+      "tag": "0309_lessor_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 310,
+      "version": "7",
+      "when": 2023820000273,
+      "tag": "0310_crm_inbound_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 311,
+      "version": "7",
+      "when": 2023820000274,
+      "tag": "0311_arap_netting",
+      "breakpoints": true
+    },
+    {
+      "idx": 314,
+      "version": "7",
+      "when": 2023820000275,
+      "tag": "0314_ap_dynamic_discount",
+      "breakpoints": true
+    },
+    {
+      "idx": 315,
+      "version": "7",
+      "when": 2023820000276,
+      "tag": "0315_member_ledger_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 316,
+      "version": "7",
+      "when": 2023820000277,
+      "tag": "0316_stocktake_tenant_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 312,
+      "version": "7",
+      "when": 2023820000278,
+      "tag": "0312_dine_in_seat",
+      "breakpoints": true
+    },
+    {
+      "idx": 317,
+      "version": "7",
+      "when": 2023820000279,
+      "tag": "0317_pos_tip_adjust",
       "breakpoints": true
     }
   ]

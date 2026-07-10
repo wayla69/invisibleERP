@@ -413,6 +413,21 @@ async function main() {
   const fcBad = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=5`, sales1);
   ok('Course firing: firing an empty course rejected (400 NO_COURSE_ITEMS)', fcBad.status === 400 && fcBad.json.error?.code === 'NO_COURSE_ITEMS', `${fcBad.status} ${fcBad.json.error?.code}`);
 
+  // ── POS-9: seat-level ordering (order per seat + fire per seat + reassign seat + roll-up) ──
+  const stTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A19', seats: 4 });
+  const stOpen = await inj('POST', `/api/restaurant/tables/${stTbl.json.id}/open`, sales1, {});
+  const stOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: stTbl.json.id, session_id: stOpen.json.session_id, items: [{ name: 'ต้มยำ', qty: 1, unit_price: 120, station_code: 'hot', seat: 1 }, { name: 'ผัดไทย', qty: 1, unit_price: 80, station_code: 'hot', seat: 2 }, { name: 'น้ำเปล่า', qty: 2, unit_price: 15, station_code: 'drinks' }] });
+  const stSeat1 = stOrd.json.items?.find((i: any) => i.name === 'ต้มยำ'); const stSeat2 = stOrd.json.items?.find((i: any) => i.name === 'ผัดไทย'); const stShared = stOrd.json.items?.find((i: any) => i.name === 'น้ำเปล่า');
+  ok('Seat: lines carry their seat (null = shared)', stSeat1?.seat === 1 && stSeat2?.seat === 2 && stShared?.seat === null, JSON.stringify((stOrd.json.items ?? []).map((i: any) => [i.name, i.seat])));
+  ok('Seat: per-seat roll-up (seat1=120, seat2=80, shared=30)', (stOrd.json.seats ?? []).some((s: any) => s.seat === 1 && near(s.subtotal, 120)) && (stOrd.json.seats ?? []).some((s: any) => s.seat === 2 && near(s.subtotal, 80)) && (stOrd.json.seats ?? []).some((s: any) => s.seat === null && near(s.subtotal, 30)), JSON.stringify(stOrd.json.seats));
+  const stFire1 = await inj('POST', `/api/restaurant/orders/${stOrd.json.order_no}/fire?seat=1`, sales1);
+  const sf1 = stFire1.json.items?.find((i: any) => i.name === 'ต้มยำ'); const sf2 = stFire1.json.items?.find((i: any) => i.name === 'ผัดไทย');
+  ok('Seat: fire seat 1 queues only seat 1 (seat 2 + shared held)', sf1?.kds_status === 'queued' && sf2?.kds_status === 'new' && stFire1.json.items?.find((i: any) => i.name === 'น้ำเปล่า')?.kds_status === 'new', `s1=${sf1?.kds_status} s2=${sf2?.kds_status}`);
+  const stFireBad = await inj('POST', `/api/restaurant/orders/${stOrd.json.order_no}/fire?seat=9`, sales1);
+  ok('Seat: firing an empty seat rejected (400 NO_SEAT_ITEMS)', stFireBad.status === 400 && stFireBad.json.error?.code === 'NO_SEAT_ITEMS', `${stFireBad.status} ${stFireBad.json.error?.code}`);
+  const stAssign = await inj('POST', `/api/restaurant/orders/${stOrd.json.order_no}/seats/assign`, sales1, { item_ids: [stShared.item_id], seat: 2 });
+  ok('Seat: reassign a shared line onto a seat (POST seats/assign)', stAssign.status < 300 && stAssign.json.items?.find((i: any) => i.name === 'น้ำเปล่า')?.seat === 2, `${stAssign.status} ${JSON.stringify(stAssign.json.seats)}`);
+
   // ── POS-4: KDS depth — prep-time SLA aging + expo (order-ready pass) + station load + bump/recall counts ──
   const kdTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'K1', seats: 4 });
   const kdOpen = await inj('POST', `/api/restaurant/tables/${kdTbl.json.id}/open`, sales1, {});
@@ -701,6 +716,20 @@ async function main() {
     near(me2.json.thresholds?.popularity_share_threshold, 0.35) && near(me2.json.thresholds?.avg_unit_margin, 130) &&
     me2By['ME-C']?.quadrant === 'Star' && me2By['ME-D']?.quadrant === 'Plowhorse' && !me2By['ME-A'],
     `${me2.status} ${JSON.stringify({ n: me2.json.summary?.items, thr: me2.json.thresholds, C: me2By['ME-C']?.quadrant, D: me2By['ME-D']?.quadrant })}`);
+
+  // ── PN-20: the restaurant sale is in the fiscal hash chain (RD tamper-evidence) ──
+  // The restaurant path used to append NOTHING: dine-in / diner-QR / register sales — the bulk of a
+  // restaurant's revenue — were absent from the chain the portal POS + refund/void paths already wrote.
+  {
+    const jrows = (await pg.query(`SELECT seq, doc_type, doc_no, prev_hash, hash FROM pos_journal WHERE doc_no='${co.json.sale_no}' AND doc_type='SALE'`)).rows as any[];
+    ok('Fiscal chain: the dine-in sale appended a SALE row (doc_no = sale_no)', jrows.length === 1 && !!jrows[0].hash, JSON.stringify(jrows[0] ?? {}));
+    const ver = await inj('GET', '/api/pos/journal/verify', sales1);
+    ok('Fiscal chain: verify() ok after restaurant sales', ver.json?.ok === true, JSON.stringify(ver.json ?? {}).slice(0, 90));
+    // tamper: mutate a payload → every later hash breaks; verify() names the first broken seq
+    await pg.query(`UPDATE pos_journal SET payload = jsonb_set(payload, '{total}', '999999') WHERE doc_no='${co.json.sale_no}' AND doc_type='SALE'`);
+    const bad = await inj('GET', '/api/pos/journal/verify', sales1);
+    ok('Fiscal chain: a tampered payload is detected (ok=false + broken_at)', bad.json?.ok === false && Number(bad.json?.broken_at) > 0, JSON.stringify(bad.json ?? {}).slice(0, 90));
+  }
 
   await app.close();
   await pg.close();

@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects, nettingSettlements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -876,6 +876,10 @@ export class FinanceService {
     // banked on-account, no invoice moves until a different user approves).
     for (const b of await db.select({ batchNo: arReceiptApplications.batchNo, requestedBy: sql<string>`max(${arReceiptApplications.appliedBy})`, total: sql<string>`coalesce(sum(${arReceiptApplications.appliedAmount}),0)`, oldest: sql<string>`min(${arReceiptApplications.appliedAt})` }).from(arReceiptApplications).where(eq(arReceiptApplications.status, 'PendingApproval')).groupBy(arReceiptApplications.batchNo))
       items.push({ type: 'ar_cash_application', control: 'REV-21', ref: b.batchNo, label: `ตัดรับชำระลูกหนี้ ${b.batchNo}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
+    // 9c. REV-23 — AR/AP netting contra settlements awaiting approval (no GL/sub-ledger movement until a
+    // different user approves; the contra JE + both sub-ledger reliefs post at approval).
+    for (const st of await db.select().from(nettingSettlements).where(eq(nettingSettlements.status, 'PendingApproval')))
+      items.push({ type: 'ar_ap_netting', control: 'REV-23', ref: st.settlementNo, label: `หักกลบลบหนี้ ${st.counterpartyName ?? st.vendorName ?? ''}`.trim(), amount: n(st.netAmount), requested_by: st.proposedBy ?? null, requested_at: st.proposedAt ?? null, age_days: ageDays(st.proposedAt) });
     // 8. FX-04 — manual FX rates awaiting approval (PendingApproval, unusable until approved; not a JE).
     for (const r of await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')))
       items.push({ type: 'fx_rate', control: 'FX-04', ref: `${r.currency}@${r.rateDate}`, label: `อัตรา ${r.currency} = ${n(r.rate)} (${r.rateDate})`, amount: 0, requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });

@@ -92,7 +92,12 @@ async function main() {
   const pay2 = (await pg.query(`SELECT amount, tip FROM payments WHERE sale_no='${c2.json.sale_no}'`)).rows as any[];
   ok('payments: amount 107 (sale money), tip 20 (separate, not in amount)', near(pay2[0]?.amount, 107) && near(pay2[0]?.tip, 20), JSON.stringify(pay2));
   const xr = await inj('GET', `/api/payments/till/${tillId}/x-report`, sales1);
-  ok('Z/X-report cash counts sale-money 107, not 127 (tip excluded from drawer recon)', near(xr.json.expected_cash, 1000 + 107), `exp=${xr.json.expected_cash}`);
+  // REV-13: `payments.amount` stores sale money only (107) with the tip beside it (20) — but a CASH tip
+  // physically sits in the drawer until it is paid out (the payout posts Dr 2300 / Cr 1000, i.e. cash
+  // LEAVES the drawer then), and checkout debits 1000 for cashDue = total + tip. So the drawer
+  // expectation is 1000 float + 107 + 20. This assertion previously pinned the opposite and made every
+  // shift with cash tips close "over" by the tips.
+  ok('Z/X-report drawer expectation includes the CASH tip (float 1000 + 107 + 20)', near(xr.json.expected_cash, 1000 + 107 + 20), `exp=${xr.json.expected_cash}`);
 
   // ── 7-8. gift-card issue ──
   const iss = await inj('POST', '/api/pos/gift-cards/issue', sales1, { amount: 500, method: 'Cash' });

@@ -4,6 +4,7 @@ import { CrmController } from './crm.controller';
 import { CrmPipelineModule } from './pipeline/crm-pipeline.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { CrmAccountsModule } from './accounts/crm-accounts.module';
+import { CrmInboundModule } from './inbound/crm-inbound.module';
 import { FinanceModule } from '../finance/finance.module';
 
 // Umbrella CRM module: accounts/360 core + the UNIFIED pipeline (CRM-1, migration 0293). The deferred
@@ -14,9 +15,9 @@ import { FinanceModule } from '../finance/finance.module';
 // (crm_accounts/crm_contacts with duplicate governance + audited merge). Re-exported so importers (bi)
 // can keep resolving.
 @Module({
-  imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, FinanceModule],
+  imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmInboundModule, FinanceModule],
   controllers: [CrmController],
   providers: [CrmService],
-  exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule],
+  exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmInboundModule],
 })
 export class CrmModule {}
