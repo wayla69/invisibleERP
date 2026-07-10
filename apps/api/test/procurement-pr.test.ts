@@ -106,10 +106,11 @@ describe('ProcurementPrService — reorderPr', () => {
 type PrCap = {
   headers: any[]; lines: any[][]; inserts: any[]; updates: any[]; logs: any[][];
   starts: any[]; acts: any[][]; cancels: any[][]; pos: any[]; preferred: any[][]; lineMsgs: any[][]; low: any[];
+  glGates: any[][]; glReserves: any[][]; glReleases: any[][]; // FIN-3 (BUD-02)
 };
 
-function prEnv(routes: any[][], opts: { lowItems?: any[]; inst?: any; cleared?: boolean } = {}) {
-  const cap: PrCap = { headers: [], lines: [], inserts: [], updates: [], logs: [], starts: [], acts: [], cancels: [], pos: [], preferred: [], lineMsgs: [], low: opts.lowItems ?? [] };
+function prEnv(routes: any[][], opts: { lowItems?: any[]; inst?: any; cleared?: boolean; gate?: any } = {}) {
+  const cap: PrCap = { headers: [], lines: [], inserts: [], updates: [], logs: [], starts: [], acts: [], cancels: [], pos: [], preferred: [], lineMsgs: [], low: opts.lowItems ?? [], glGates: [], glReserves: [], glReleases: [] };
   let call = 0;
   const chain = (rows: any[]) => {
     const p: any = { from: () => p, where: () => p, limit: () => p, orderBy: () => p, then: (r: any, j: any) => Promise.resolve(rows).then(r, j) };
@@ -148,6 +149,14 @@ function prEnv(routes: any[][], opts: { lowItems?: any[]; inst?: any; cleared?: 
       cancel: async (t: string, no: string) => { cap.cancels.push([t, no]); },
     } as any,
     { notifyUser: async (to: string, _g: any, msg: string) => { cap.lineMsgs.push([to, msg]); } } as any,
+    {
+      // FIN-3 (BUD-02) GL-budget commitments port: glGateForDoc returns opts.gate (default null = policy off,
+      // no behaviour change); glReserve/glRelease record the encumbrance lifecycle the approve/convert flows drive.
+      glGateForDoc: async (t: string, no: string, a: any) => { cap.glGates.push([t, no, a]); return opts.gate ?? null; },
+      glReserve: async (_db: any, gate: any, a: any) => { cap.glReserves.push([gate, a]); },
+      glRelease: async (_db: any, t: string, no: string) => { cap.glReleases.push([t, no]); },
+      glConsume: async () => {},
+    } as any,
   );
   return { svc, cap };
 }
@@ -267,5 +276,47 @@ describe('ProcurementPrService — convertPrToPo write paths (legacy + split)', 
     expect(cap.updates[1]).toEqual({ status: 'PartiallyConverted' });
     expect(cap.preferred[0]).toEqual(['A', { vendor_id: 4, unit_price: 10, uom: undefined }]);
     expect(cap.lineMsgs[0][1]).toContain('ยังมีรายการค้างรอสั่งเพิ่ม');
+  });
+});
+
+describe('ProcurementPrService — approvePr budget gate + convert release (FIN-3 / BUD-02)', () => {
+  const GATE = { policy: 'block', period: '2026-07', exceeded: false, overridden: false, override_reason: null, checks: [{ account_code: '6000', doc_amount: 100, exceeded: false }] };
+
+  it('approve routes through the budget gate and reserves once the PR lands Approved', async () => {
+    const { svc, cap } = prEnv([[{ id: 1, prNo: 'PR-1', status: 'Pending' }]], { gate: GATE });
+    const r = await svc.approvePr('PR-1', true, { username: 'boss', role: 'Admin', tenantId: 1 } as any);
+    expect(cap.glGates[0][0]).toBe('PR');            // glGateForDoc('PR', 'PR-1', …)
+    expect(cap.glReserves).toHaveLength(1);          // reserved because newStatus === 'Approved'
+    expect(r.status).toBe('Approved');
+    expect(r.budget).toMatchObject({ policy: 'block', exceeded: false });
+  });
+
+  it('an overridden gate also writes the BUDGET_OVERRIDE audit line', async () => {
+    const gate = { ...GATE, exceeded: true, overridden: true, override_reason: 'urgent' };
+    const { svc, cap } = prEnv([[{ id: 1, prNo: 'PR-1', status: 'Pending' }]], { gate });
+    await svc.approvePr('PR-1', true, { username: 'boss', role: 'Admin', tenantId: 1 } as any, { overrideBudget: true, overrideReason: 'urgent' });
+    expect(cap.glReserves).toHaveLength(1);
+    expect(cap.logs.some((l) => String(l[5] ?? '').includes('BUDGET_OVERRIDE'))).toBe(true);
+  });
+
+  it('a non-final approval (more steps remain) evaluates the gate but does NOT reserve yet', async () => {
+    const { svc, cap } = prEnv([[{ id: 1, prNo: 'PR-1', status: 'Pending' }]], { gate: GATE, inst: { id: 5 }, cleared: false });
+    const r = await svc.approvePr('PR-1', true, { username: 'lvl1', role: 'Purchasing', tenantId: 1 } as any);
+    expect(r.status).toBe('Pending');
+    expect(cap.glGates).toHaveLength(1);
+    expect(cap.glReserves).toHaveLength(0);
+  });
+
+  it('with the gate off (null) the approve response stays byte-identical (no budget key)', async () => {
+    const { svc, cap } = prEnv([[{ id: 1, prNo: 'PR-1', status: 'Pending' }]]); // default gate null
+    const r = await svc.approvePr('PR-1', true, { username: 'boss', role: 'Admin', tenantId: 1 } as any);
+    expect(r).toEqual({ pr_no: 'PR-1', status: 'Approved' });
+    expect(cap.glReserves).toHaveLength(0);
+  });
+
+  it('convertPrToPo releases the PR estimate commitment (no-op-safe) once POs are raised', async () => {
+    const { svc, cap } = prEnv([[{ id: 1, prNo: 'PR-1', status: 'Approved', requestedBy: 'req1' }], []]);
+    await svc.convertPrToPo('pr-1', { vendor_id: 4, lines: [{ item_id: 'A', order_qty: 1, unit_price: 10 }] } as any, user);
+    expect(cap.glReleases[0]).toEqual(['PR', 'PR-1']);
   });
 });
