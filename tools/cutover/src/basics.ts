@@ -555,6 +555,54 @@ async function main() {
     leRecon.reconciled === true && near(leRecon.difference, 0) && near(leRecon.gl_liability, leRecon.schedule_liability) && leSched && leSched.liability_balance > 0,
     JSON.stringify({ gl: leRecon.gl_liability, sched: leRecon.schedule_liability, diff: leRecon.difference, rec: leRecon.reconciled }));
 
+  // ───────────────── Lessor-side lease accounting (IFRS 16 / TFRS 16 lessor) — LSE-02 (FIN-10) ─────────────────
+  // Classification boundary: the major-part-of-economic-life test flips finance↔operating exactly at 75%.
+  const clsOper = await inj('POST', '/api/lessor-leases/classify', admin, { name: 'boundary op', term_months: 71, monthly_payment: 100, asset_cost: 10000, fair_value: 10000, economic_life_months: 100 });
+  ok('Lessor: classification boundary — term 71/100 (71%) + PV 71% of FV → OPERATING', clsOper.status === 200 && clsOper.json?.classification === 'operating' && clsOper.json?.reasons?.length === 0, JSON.stringify(clsOper.json));
+  const clsFin = await inj('POST', '/api/lessor-leases/classify', admin, { name: 'boundary fin', term_months: 75, monthly_payment: 100, asset_cost: 10000, fair_value: 10000, economic_life_months: 100 });
+  ok('Lessor: classification boundary — term 75/100 (75%) → FINANCE (major part of economic life)', clsFin.status === 200 && clsFin.json?.classification === 'finance' && clsFin.json?.reasons?.includes('major_part_of_economic_life'), JSON.stringify(clsFin.json));
+
+  // FINANCE lease: derecognise the asset + book the net investment (lease receivable) at PV, interest income over the term.
+  const lsr1610Before = await tbDebit('1610'), lsr1500Before = await tbCredit2('1500'), lsr4600Before = await tbCredit2('4600');
+  const mkFin = await inj('POST', '/api/lessor-leases', admin, { name: 'Excavator finance lease', lessee: 'BuildCo', term_months: 12, monthly_payment: 1000, annual_rate_pct: 12, asset_cost: 11000, fair_value: 12000, transfer_ownership: true });
+  ok('Lessor finance: create classifies FINANCE + net investment = PV of payments, PENDING (no GL yet)',
+    mkFin.status === 201 && mkFin.json?.classification === 'finance' && mkFin.json?.net_investment > 11200 && mkFin.json?.net_investment < 11300 && mkFin.json?.status === 'pending' && near(await tbDebit('1610'), lsr1610Before),
+    `cls=${mkFin.json?.classification} ni=${mkFin.json?.net_investment} 1610Δ=${(await tbDebit('1610')) - lsr1610Before}`);
+  const finNo = mkFin.json?.lease_no;
+  const finSelf = await inj('POST', `/api/lessor-leases/${finNo}/approve`, admin);
+  ok('Lessor: the classifier cannot approve their own lease (SOD_SELF_APPROVAL)', finSelf.status === 403 && finSelf.json?.error?.code === 'SOD_SELF_APPROVAL', `st=${finSelf.status} code=${finSelf.json?.error?.code}`);
+  const finAppr = await inj('POST', `/api/lessor-leases/${finNo}/approve`, mgr);
+  const ni = mkFin.json?.net_investment;
+  ok('Lessor finance: a distinct approver books commencement — Dr 1610 (net investment) / Cr 1500 (asset derecognised)',
+    finAppr.status === 200 && finAppr.json?.status === 'active' && near(await tbDebit('1610'), lsr1610Before + ni) && near(await tbCredit2('1500'), lsr1500Before + 11000),
+    `st=${finAppr.status} 1610Δ=${(await tbDebit('1610')) - lsr1610Before} 1500Δ=${(await tbCredit2('1500')) - lsr1500Before}`);
+  const runFin = await inj('POST', '/api/lessor-leases/run', admin);
+  const fe = (runFin.json?.entries ?? []).find((e: any) => e.lease_no === finNo);
+  ok('Lessor finance: periodic run recognises interest income + collects cash (interest + principal = payment)',
+    runFin.status === 200 && fe && near(fe.interest_income + fe.principal, 1000) && fe.interest_income > 0 && near(await tbCredit2('4600'), lsr4600Before + fe.interest_income),
+    `int=${fe?.interest_income} prin=${fe?.principal} 4600Δ=${(await tbCredit2('4600')) - lsr4600Before}`);
+  const lsrList = (await inj('GET', '/api/lessor-leases', admin)).json;
+  const finRow = (lsrList.leases ?? []).find((x: any) => x.lease_no === finNo);
+  ok('Lessor finance: net investment (receivable) reduced by the principal after the period', finRow && finRow.receivable_balance < ni && finRow.receivable_balance > 0, `recv=${finRow?.receivable_balance} ni=${ni}`);
+
+  // OPERATING lease: keep the asset, straight-line rental income + continued depreciation.
+  const lsr4610Before = await tbCredit2('4610'), lsr1590Before = await tbCredit2('1590');
+  const mkOp = await inj('POST', '/api/lessor-leases', admin, { name: 'Office space operating lease', lessee: 'TenantCo', term_months: 12, monthly_payment: 500, asset_cost: 12000, fair_value: 12000, economic_life_months: 120 });
+  ok('Lessor operating: create classifies OPERATING (short term, PV below FV) — asset stays on books', mkOp.status === 201 && mkOp.json?.classification === 'operating' && mkOp.json?.status === 'pending', JSON.stringify(mkOp.json));
+  const opNo = mkOp.json?.lease_no;
+  const opAppr = await inj('POST', `/api/lessor-leases/${opNo}/approve`, mgr);
+  ok('Lessor operating: approval activates with NO commencement GL (net investment 0)', opAppr.status === 200 && opAppr.json?.status === 'active' && near(opAppr.json?.net_investment, 0), `st=${opAppr.status} ni=${opAppr.json?.net_investment}`);
+  const runOp = await inj('POST', '/api/lessor-leases/run', admin);
+  const oe = (runOp.json?.entries ?? []).find((e: any) => e.lease_no === opNo);
+  ok('Lessor operating: periodic run posts straight-line rental income (Cr 4610) + continued depreciation (Dr 5200 / Cr 1590)',
+    runOp.status === 200 && oe && near(oe.rental_income, 500) && oe.depreciation > 0 && near(await tbCredit2('4610'), lsr4610Before + 500) && near(await tbCredit2('1590'), lsr1590Before + oe.depreciation),
+    `rent=${oe?.rental_income} dep=${oe?.depreciation} 4610Δ=${(await tbCredit2('4610')) - lsr4610Before}`);
+  // LSE-02 net-investment reconciliation: GL 1610 net debit == Σ remaining receivable on the FINANCE-lease schedule.
+  const lsrRecon = (await inj('GET', '/api/lessor-leases/receivable-reconciliation', admin)).json;
+  ok('Lessor: net-investment reconciliation ties GL 1610 to the finance-lease receivable schedule (reconciled, difference 0)',
+    lsrRecon.reconciled === true && near(lsrRecon.difference, 0) && near(lsrRecon.gl_receivable, lsrRecon.schedule_receivable) && lsrRecon.schedule_receivable > 0,
+    JSON.stringify({ gl: lsrRecon.gl_receivable, sched: lsrRecon.schedule_receivable, diff: lsrRecon.difference, rec: lsrRecon.reconciled }));
+
   // ───────────────── AR bad-debt write-off maker-checker (REV-15) ─────────────────
   const woMgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
   const wo5720Before = await tbDebit('5720');

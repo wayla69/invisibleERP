@@ -1,4 +1,4 @@
--- 0309_arap_netting — AR/AP netting & contra settlement (docs/41 FIN-8, control REV-23). A counterparty that
+-- 0311_arap_netting — AR/AP netting & contra settlement (docs/41 FIN-8, control REV-23). A counterparty that
 -- is BOTH a customer (AR) and a vendor (AP) can have its open AR offset against its open AP with a single
 -- contra JE (Dr 2000 AP / Cr 1100 AR) that clears both sub-ledgers up to the netted amount, leaving the
 -- residual open. Three tenant-scoped tables (RLS + tenant-leading indexes): (1) netting_agreements — the
