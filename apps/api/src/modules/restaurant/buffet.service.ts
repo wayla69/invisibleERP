@@ -24,6 +24,22 @@ export class BuffetService {
     private readonly tables: TableService,
   ) {}
 
+  // Hub→cloud replay (docs/41 Phase 2b, BRANCH-04): re-create the per-pax charge (+ optional overtime)
+  // on a replayed order, priced from THIS server's package master — the authoritative tier price, never
+  // the hub's. Same line shape the live buffet flow writes, so checkout/analytics see no difference.
+  async applyReplayCharge(orderId: number, tenantId: number | null, packageCode: string, pax: number, overtimePax: number, user: JwtUser) {
+    const db = this.db;
+    const [pkg] = await db.select().from(buffetPackages)
+      .where(and(eq(buffetPackages.code, packageCode), tenantId == null ? undefined : eq(buffetPackages.tenantId, tenantId)))
+      .limit(1);
+    if (!pkg) throw new BadRequestException({ code: 'BUFFET_PACKAGE_NOT_FOUND', message: `Unknown buffet package ${packageCode}`, messageTh: 'ไม่พบแพ็คเกจบุฟเฟต์' });
+    await this.insertChargeLine(orderId, tenantId, Number(pkg.id), CHARGE_REF, `บุฟเฟต์ ${pkg.name} × ${pax}`, n(pkg.pricePerPax), pax, user);
+    if (overtimePax > 0 && n(pkg.overtimeFeePerPax) > 0) {
+      await this.insertChargeLine(orderId, tenantId, Number(pkg.id), OVERTIME_REF, 'ค่าปรับเกินเวลา (บุฟเฟต์)', n(pkg.overtimeFeePerPax), overtimePax, user);
+    }
+    await this.dineIn.refreshOrderTotals(orderId);
+  }
+
   // staff at the POS/floor start a buffet on a table: open (or re-join) the session, then start the tier.
   async startBuffetForTable(tableId: number, packageId: number, pax: number, user: JwtUser) {
     const opened: any = await this.tables.openTable(tableId, pax, user.username, user);

@@ -53,7 +53,7 @@ async function freshDb() {
 
 async function bootApp(db: any) {
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ routerOptions: { maxParamLength: 500 } })); // diner session tokens exceed the 100-char default
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
@@ -94,6 +94,7 @@ async function main() {
   await cApp.inj('POST', '/api/menu/modifier-groups', t1admin, { code: 'egg', name: 'ไข่', min_select: 0, max_select: 1, options: [{ name: 'ไข่ดาว', price_delta: 10 }] });
   const zone = await cApp.inj('POST', '/api/restaurant/zones', t1admin, { name: 'โซนหน้า' });
   const tbl = await cApp.inj('POST', '/api/restaurant/tables', t1admin, { table_no: 'A1', seats: 4, zone_id: zone.json?.id });
+  await cApp.inj('POST', '/api/restaurant/buffet/packages', t1admin, { code: 'BUF1', name: 'บุฟเฟต์มาตรฐาน', price_per_pax: 299, time_limit_min: 90, overtime_fee_per_pax: 50, item_skus: ['GP01'] });
   // T2 noise — must NOT leak into T1's snapshot
   const t2tok = await cApp.login('sales2', 'pw2');
   await cApp.inj('POST', '/api/menu/items', t2tok, { sku: 'XX99', name: 'ของร้านสอง', price: 50 });
@@ -208,6 +209,50 @@ async function main() {
   const badBatch = { tenant_id: t1, sent_at: new Date().toISOString(), sales: [{ client_uuid: 'hub:evil', captured_at: new Date().toISOString(), lines: [{ sku: 'GP01', qty: 1 }] }], signature: signHubBatch(t1, 'other', [], SECRET) };
   const badRes = await cApp.inj('POST', '/api/hub/ingest', undefined, badBatch);
   ok('Ingest rejects a bad signature (403 HUB_SYNC_BAD_SIGNATURE)', badRes.status === 403 && badRes.json?.error?.code === 'HUB_SYNC_BAD_SIGNATURE', JSON.stringify(badRes.json?.error ?? badRes.status));
+
+  // ═══ Phase 3 — diner QR self-order ON THE HUB (no login, no internet) ═══
+  const a1qr = (await hub.pg.query(`SELECT qr_token FROM dining_tables WHERE table_no='A1'`)).rows[0] as any;
+  ok('Hub: imported table kept its printed QR token', !!a1qr?.qr_token, JSON.stringify(a1qr));
+  const dstart = await hApp.inj('POST', `/api/qr/start/${a1qr.qr_token}`);
+  const dtok = dstart.json?.public_token;
+  ok('Hub diner: scanning the table QR opens a session (public)', (dstart.status === 200 || dstart.status === 201) && !!dtok, JSON.stringify(dstart.json ?? dstart.status).slice(0, 120));
+  const dmenu = await hApp.inj('GET', `/api/qr/t/${dtok}/menu`);
+  ok('Hub diner: menu served to the phone', (dmenu.json?.item_count ?? 0) >= 2, JSON.stringify(dmenu.json?.item_count));
+  const dorder = await hApp.inj('POST', `/api/qr/t/${dtok}/order`, undefined, { items: [{ sku: 'TY02', qty: 1 }] });
+  ok('Hub diner: self-order accepted', dorder.status === 200 || dorder.status === 201, JSON.stringify(dorder.json ?? dorder.status).slice(0, 120));
+  const dstat = await hApp.inj('GET', `/api/qr/t/${dtok}`);
+  const dOrderNo = dstat.json?.order?.order_no;
+  ok('Hub diner: order visible on the table session (KDS-bound)', !!dOrderNo, JSON.stringify(dstat.json ?? {}).slice(0, 120));
+  const dsale = await hApp.inj('POST', `/api/restaurant/orders/${dOrderNo}/checkout`, hAdmTok, { method: 'Cash' });
+  ok('Hub diner: staff settles the diner order on the hub', !!dsale.json?.sale_no, JSON.stringify(dsale.json?.sale_no ?? dsale.json?.error));
+
+  // ═══ Phase 2b — buffet session on the hub replays to the cloud (priced from the CLOUD master) ═══
+  await hApp.inj('POST', '/api/restaurant/tables', hAdmTok, { table_no: 'B1', seats: 6 });
+  const b1qr = (await hub.pg.query(`SELECT qr_token FROM dining_tables WHERE table_no='B1'`)).rows[0] as any;
+  const bstart = await hApp.inj('POST', `/api/qr/start/${b1qr.qr_token}`);
+  const btok = bstart.json?.public_token;
+  const btiers = await hApp.inj('GET', `/api/qr/t/${btok}/buffet/tiers`);
+  ok('Hub diner: imported buffet tier offered', JSON.stringify(btiers.json ?? {}).includes('BUF1'), JSON.stringify(btiers.json ?? {}).slice(0, 120));
+  const bufPkgId = Number((fd.data.buffet_packages as any[])[0]?.id);
+  const bgo = await hApp.inj('POST', `/api/qr/t/${btok}/buffet/start`, undefined, { package_id: bufPkgId, pax: 2 });
+  ok('Hub diner: buffet tier started for 2 pax', bgo.status === 200 || bgo.status === 201, JSON.stringify(bgo.json ?? bgo.status).slice(0, 120));
+  await hApp.inj('POST', `/api/qr/t/${btok}/order`, undefined, { items: [{ sku: 'GP01', qty: 3 }] }); // ฿0 buffet food
+  const bstat = await hApp.inj('GET', `/api/qr/t/${btok}`);
+  const bOrderNo = bstat.json?.order?.order_no;
+  const bsale = await hApp.inj('POST', `/api/restaurant/orders/${bOrderNo}/checkout`, hAdmTok, { method: 'Cash' });
+  const bufExpected = Math.round(2 * 299 * 1.07 * 100) / 100; // 2 pax × 299 + VAT7% (food bills ฿0)
+  ok('Hub: buffet sale bills per-pax charge only (2×299 + VAT)', Math.abs(Number(bsale.json?.total) - bufExpected) < 0.02, JSON.stringify({ got: bsale.json?.total, bufExpected }));
+
+  // push the two new hub sales (diner a-la-carte + buffet) to the cloud
+  const push3 = await pushHubSales(hub.db, t1, { secret: SECRET, send });
+  ok('Push: diner + buffet sales replay (no skips, no failures)', push3.pushed === 2 && push3.failed === 0 && push3.skipped === 0, JSON.stringify(push3));
+  const recon3 = await cApp.inj('GET', '/api/hub/reconciliation', t1admin);
+  const bufRow = (recon3.json?.rows ?? []).find((r: any) => r.hub_sale_no === bsale.json?.sale_no);
+  ok('Cloud: buffet replay re-priced from the CLOUD package master, value ties', bufRow && Math.abs(Number(bufRow.cloud_total) - bufExpected) < 0.02, JSON.stringify(bufRow ?? recon3.json?.summary));
+  const tb2 = await cApp.inj('GET', '/api/ledger/trial-balance', t1admin);
+  ok('Cloud trial balance still balanced after buffet ingest', tb2.json?.totals?.balanced === true, JSON.stringify(tb2.json?.totals ?? {}));
+  const push4 = await pushHubSales(hub.db, t1, { secret: SECRET, send });
+  ok('Re-run push: nothing re-collected (push_log excludes terminal rows), nothing fails', push4.collected === 0 && push4.pushed === 0 && push4.failed === 0, JSON.stringify(push4));
 
   await cApp.app.close();
   await hApp.app.close();
