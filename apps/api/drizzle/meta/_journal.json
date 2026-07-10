@@ -2201,9 +2201,16 @@
       "breakpoints": true
     },
     {
-      "idx": 312,
+      "idx": 316,
       "version": "7",
       "when": 2023820000277,
+      "tag": "0316_stocktake_tenant_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 312,
+      "version": "7",
+      "when": 2023820000278,
       "tag": "0312_dine_in_seat",
       "breakpoints": true
     }
