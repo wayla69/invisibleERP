@@ -158,6 +158,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-305 | Issued AR-linked credit note applies as a credit line (`CN_*` guards; statement shows it) | REV-21, TAX-07 | 01 §7 (8e), rev 0.30 (`basics.ts`) |
 | UAT-O2C-306 | Buffet-tier hub sale replays, re-priced from the cloud package master | BRANCH-04 | 24 §7 step 6c, rev 0.6 (`hub-snapshot.ts`) |
 | UAT-O2C-307 | Diner QR self-order end-to-end ON the hub; replay on reconnect | BRANCH-04 · REST-08 | 24 §7 step 6c, rev 0.6 (`hub-snapshot.ts`) |
+| UAT-O2C-308 | Hub till blocked until all its sales have replayed (completeness gate) | BRANCH-05 | 24 §7 step 6d, rev 0.7 (`hub-snapshot.ts`) |
+| UAT-O2C-309 | Cloud-recomputed expected cash + 5830 over/short (materiality preserved) | BRANCH-05 · REV-13 · GL-05 | 24 §7 step 6d, rev 0.7 (`hub-snapshot.ts`) |
+| UAT-O2C-310 | Hub heartbeat + fleet view (stale/backlog, tenant-isolated) | BRANCH-05 (detective) | 24 §7 step 6e, rev 0.7 (`hub-snapshot.ts`) |
 | UAT-O2C-026 | Cashier-speed quick-tender & change (UI) | Feature (cashier speed) | 01 §0 |
 | UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
 | UAT-O2C-028 | Diner pulls QR menu | REST-08 | 20 §7 |
