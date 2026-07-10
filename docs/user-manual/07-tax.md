@@ -1,6 +1,6 @@
 # 07 · Tax
 
-**Status: DRAFT v0.5 · 2026-07-10** · *v0.5 (2026-07-10): **convert an abbreviated slip to a full tax invoice** (ม.86/4 on buyer request) — new card on `/tax/invoices`; buyer Tax ID required + validated, amounts copied from the slip (never recomputed), one full invoice per slip (control **TAX-10**).* · *v0.4 (2026-07-09): RD e-Filing downloads — ภ.ง.ด.3/53 ใบแนบ .txt on the filings tab + CSV working papers (ภาษีขาย/ภาษีซื้อ/ภ.พ.30) on each report tab; purchase-VAT CSV carries filing-readiness notes.* · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
+**Status: DRAFT v0.6 · 2026-07-10** · *v0.6 (2026-07-10): **bulk actions on the tax-invoice register** (`/tax/invoices`) — multi-select checkboxes with **Download selected PDFs**, **Email selected (e-Tax)** (one recipient applied to all), and batch **Approve** for PendingApproval notes; each loops the existing per-row endpoint so per-document controls (note maker-checker, e-Tax email logging) are unchanged. UI-only, no new endpoint or control.* · *v0.5 (2026-07-10): **convert an abbreviated slip to a full tax invoice** (ม.86/4 on buyer request) — new card on `/tax/invoices`; buyer Tax ID required + validated, amounts copied from the slip (never recomputed), one full invoice per slip (control **TAX-10**).* · *v0.4 (2026-07-09): RD e-Filing downloads — ภ.ง.ด.3/53 ใบแนบ .txt on the filings tab + CSV working papers (ภาษีขาย/ภาษีซื้อ/ภ.พ.30) on each report tab; purchase-VAT CSV carries filing-readiness notes.* · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
 
 This chapter is for **accountants** and **finance** staff. It covers VAT, tax
 invoices (full and abbreviated), e-Tax submission, withholding tax (WHT)
@@ -98,6 +98,20 @@ so the sale is counted **once**.
 - **Void** an invoice with a reason if it was issued in error. The voided number is **kept and never
   reused** (a Revenue Department requirement — the sequence stays gapless), so a single user may void; to
   change the **value** of a sale, issue a **credit / debit note** instead (dual-controlled — see §2 below).
+
+**Bulk actions (multi-select).** Each row in the register has a **checkbox**; tick several documents (or
+**เลือกทั้งหมด / Select all**) to reveal a small action bar above the list:
+
+- **ดาวน์โหลด PDF ที่เลือก / Download selected PDFs** — saves each selected document's PDF in turn (one file
+  per document), then reports how many succeeded and how many failed.
+- **ส่งอีเมล (e-Tax) ที่เลือก / Email selected (e-Tax)** — opens the same e-Tax email dialog; enter **one**
+  recipient email and it is sent to every selected document (see §3). A summary reports successes/failures.
+- **อนุมัติ N รายการ / Approve N** — appears only when the selection includes credit/debit notes that are
+  **PendingApproval**; it approves just those notes. Each note still fires its own approval endpoint, so the
+  maker-checker rule (approver ≠ the person who raised the note) is enforced per note exactly as one-by-one.
+
+Bulk actions are a convenience only — they loop each document's existing per-row endpoint and add no new
+authority; a per-document failure (e.g. a self-approval block) fails only that document, not the batch.
 
 [screenshot: tax invoice list with full/abbreviated tabs]
 

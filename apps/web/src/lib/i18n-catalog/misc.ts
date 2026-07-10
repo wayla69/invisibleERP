@@ -699,4 +699,16 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.kds_col_bumped': { th: 'เสิร์ฟวันนี้', en: 'Bumped' },
   'mx.kds_col_recalls': { th: 'เรียกคืนวันนี้', en: 'Recalls' },
   'mx.kds_allday': { th: 'ยอดรวมทั้งวัน', en: 'All-day' },
+  // ── Tax-invoice register bulk actions (multi-select download / e-Tax email) ──
+  'taxbulk.select_all': { th: 'เลือกทั้งหมด', en: 'Select all' },
+  'taxbulk.selected_n': { th: 'เลือก {n} รายการ', en: '{n} selected' },
+  'taxbulk.download_pdfs': { th: 'ดาวน์โหลด PDF ที่เลือก', en: 'Download selected PDFs' },
+  'taxbulk.email_selected': { th: 'ส่งอีเมล (e-Tax) ที่เลือก', en: 'Email selected (e-Tax)' },
+  'taxbulk.approve_selected': { th: 'อนุมัติ {n} รายการ', en: 'Approve {n}' },
+  'taxbulk.clear': { th: 'ล้างที่เลือก', en: 'Clear' },
+  'taxbulk.email_dialog_title': { th: 'ส่ง e-Tax Invoice ทางอีเมล {n} ฉบับ', en: 'Email {n} e-Tax invoices' },
+  'taxbulk.email_dialog_desc': { th: 'อีเมลผู้รับนี้จะใช้กับเอกสารที่เลือกทั้งหมด', en: 'This recipient email is applied to every selected document.' },
+  'taxbulk.pdf_done': { th: 'ดาวน์โหลดสำเร็จ {ok} ฉบับ · ล้มเหลว {fail}', en: 'Downloaded {ok} · failed {fail}' },
+  'taxbulk.email_done': { th: 'ส่งอีเมลสำเร็จ {ok} ฉบับ · ล้มเหลว {fail}', en: 'Emailed {ok} · failed {fail}' },
+  'taxbulk.approve_done': { th: 'อนุมัติสำเร็จ {ok} รายการ · ล้มเหลว {fail}', en: 'Approved {ok} · failed {fail}' },
 };
