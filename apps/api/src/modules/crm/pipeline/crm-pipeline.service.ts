@@ -13,6 +13,7 @@ import { AutomationService } from '../../automation/automation.service';
 import { n, fx } from '../../../database/queries';
 import { normalizeName, normalizeKey } from '../../../common/text-similarity';
 import { parseCsv, parseXlsx, type ImportError } from '../../masterdata/masterdata.service';
+import { newCrmThreadToken, crmThreadMark } from '../crm-thread';
 import type { JwtUser } from './../../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -1078,14 +1079,21 @@ export class CrmPipelineService {
     const ctx = this.commsContext(o, account, contact, user);
     const body = this.renderMergeFields(dto.body, ctx);
     const subject = dto.subject ? this.renderMergeFields(dto.subject, ctx) : null;
-    const res = await this.messaging.send({ to, channel: dto.channel, body: subject ? `${subject}\n\n${body}` : body, campaign: 'crm_comms' }, user);
+    // CRM-6: stamp a deterministic reply-threading token and embed it in the dispatched message (subject +
+    // body footer) so an inbound reply carrying `[ref:<token>]` threads back to THIS deal even when the
+    // sender replies from a different address than the one on file. Only meaningful for email today.
+    const threadToken = newCrmThreadToken();
+    const composed = subject ? `${subject}\n\n${body}` : body;
+    const dispatchBody = dto.channel === 'email' ? `${composed}\n\n${crmThreadMark(threadToken)}` : composed;
+    const dispatchSubject = dto.channel === 'email' && subject ? `${subject} ${crmThreadMark(threadToken)}` : subject;
+    const res = await this.messaging.send({ to, channel: dto.channel, body: dispatchBody, campaign: 'crm_comms' }, user);
     // Log the send as a timeline activity so it shows in the deal history + Customer-360.
     await db.insert(crmActivities).values({
       tenantId: o.tenantId != null ? Number(o.tenantId) : (user.tenantId ?? null), entityType: 'opportunity', entityNo: oppNo,
       type: dto.channel === 'email' ? 'email' : 'note', subject: subject ?? `${dto.channel.toUpperCase()} → ${to}`,
-      notes: body.slice(0, 2000), done: true, owner: user.username, source: 'comms', createdBy: user.username,
+      notes: body.slice(0, 2000), done: true, owner: user.username, source: 'comms', threadToken, createdBy: user.username,
     });
-    return { opp_no: oppNo, channel: dto.channel, to, status: (res as { status?: string })?.status ?? 'sent', subject, body };
+    return { opp_no: oppNo, channel: dto.channel, to, status: (res as { status?: string })?.status ?? 'sent', subject: dispatchSubject, body, thread_token: threadToken };
   }
 }
 
