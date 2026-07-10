@@ -1,4 +1,4 @@
--- 0296_ap_payment_run — AP payment run (EXP-13, docs/41 FIN-2). Combined vendor payment: a single
+-- 0297_ap_payment_run — AP payment run (EXP-13, docs/41 FIN-2). Combined vendor payment: a single
 -- disbursement run now settles MANY bills at once. Modelled as a `run_no` grouping over the existing
 -- per-bill ap_payments rows (mirrors AR cash application's batch_no in 0295 — no separate header table):
 -- the maker selects several due bills into ONE run (each line still passes the 3-way match gate, over-pay

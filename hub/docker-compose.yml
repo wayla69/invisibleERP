@@ -73,6 +73,7 @@ services:
       DATABASE_URL: postgresql://ierp:${HUB_DB_PASSWORD}@db:5432/ierp_hub
       HUB_SYNC_SECRET: ${HUB_SYNC_SECRET}
       CLOUD_URL: ${CLOUD_URL:?set CLOUD_URL in .env (the cloud API origin)}
+      HUB_ID: ${HUB_ID:-}
     entrypoint: ["node", "apps/api/dist/database/hub-push.js"]
     depends_on:
       db:

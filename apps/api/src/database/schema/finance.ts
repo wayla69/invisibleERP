@@ -164,7 +164,7 @@ export const apPayments = pgTable('ap_payments', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   paymentNo: text('payment_no').notNull().unique(), // APP-YYYYMMDD-NNN
   txnNo: text('txn_no').notNull(),                   // → ap_transactions.txn_no
-  runNo: text('run_no'),                             // EXP-13 (0296) — combined payment run grouping (APR-YYYYMMDD-NNN); NULL for a single-invoice payment
+  runNo: text('run_no'),                             // EXP-13 (0297) — combined payment run grouping (APR-YYYYMMDD-NNN); NULL for a single-invoice payment
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
   status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected
