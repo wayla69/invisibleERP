@@ -1,8 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.3** _(2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`)_
-
-*v0.2 (2026-07-09): added `AI_TENANT_OPTED_OUT`.*
+**Status: DRAFT v0.5** _(2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -34,10 +32,24 @@ your code below.
 | `CREDIT_LIMIT` (เกินวงเงินเครดิต) | The order would exceed the customer's credit limit. | Reduce the order, collect payment on overdue invoices, or have a credit manager raise the limit. |
 | `CREDIT_OVERDUE` (ลูกค้ามีหนี้ค้างชำระเกินกำหนด) | The customer has an invoice **90+ days past due** (in default), so new credit orders are blocked even within their limit. | Collect/settle the overdue invoice (or arrange a promise-to-pay) before placing new credit orders; take payment now for a cash sale. |
 | `OVER_RETURN` | Returning more than was originally sold. | Check the original sale quantities; return only up to what was bought. |
+| `VOUCHER_NOT_FOUND` (ไม่พบคูปอง) | The voucher/coupon code entered at checkout doesn't exist (in this shop). | Re-check the code (codes are per shop); confirm it came from this shop's voucher campaign or the member's wallet. |
+| `VOUCHER_NOT_ACTIVE` (แคมเปญคูปองยังไม่เปิดใช้งาน) | The code's campaign hasn't been **approved** yet (or was rejected/ended). | A **different** user than the creator must approve the campaign on `/loyalty/campaigns` (maker-checker, REV-20) before its codes redeem. |
+| `VOUCHER_EXPIRED` / `VOUCHER_NOT_STARTED` (คูปองหมดอายุ / ยังไม่เริ่ม) | Today is outside the voucher campaign's validity window. | Honour only in-window vouchers; marketing can create a fresh campaign if extending. |
+| `VOUCHER_MIN_SPEND` (ยอดซื้อขั้นต่ำ) | The bill is under the campaign's minimum spend. | Add items to reach the minimum, or settle without the voucher. |
+| `VOUCHER_ALREADY_REDEEMED` / `ALREADY_USED` (โค้ด/คูปองถูกใช้แล้ว) | The code was already redeemed — single-use is enforced atomically (two tills racing: exactly one wins). | The code is spent; a customer disputing it can be shown the redemption report (bill no. + time). |
+| `VOUCHER_VOID` (โค้ดถูกยกเลิก) | The code was voided by staff. | See the void reason on the campaign's codes list; issue a new code if warranted. |
+| `VOUCHER_EXHAUSTED` (คูปองแคมเปญถูกใช้ครบจำนวน) | The campaign-wide redemption cap is reached. | Marketing can extend only via a new approved campaign. |
+| `COUPON_KIND_UNSUPPORTED` (คูปองประเภทนี้ใช้เป็นส่วนลดบิลไม่ได้) | A `free_item` wallet coupon was entered as a bill discount. | Redeem free-item coupons via the rewards counter flow (`POST /api/loyalty/coupons/:code/redeem`), not as a checkout discount. |
+| `COUPON_NOT_OWNER` (คูปองนี้เป็นของสมาชิกท่านอื่น) | The wallet coupon belongs to a different member than the one on the sale. | Use the coupon-owner's membership on the sale, or remove the member from the bill. |
 | `BAD_PACKAGE` (แพ็กเกจบุฟเฟ่ต์ไม่ถูกต้อง) | A reservation pre-picked a buffet package that doesn't exist / is retired, or a package was set on an **à-la-carte** booking. | Switch the booking's service mode to **บุฟเฟ่ต์** before picking a tier, or pick an active package (or leave it as *เลือกที่โต๊ะ*). |
 | `CONSENT_REQUIRED` (ยังไม่ได้รับความยินยอม PDPA) | You tried to save a **guest dining profile** (or companion) for a member who hasn't granted the `dining_profile` consent. | Ask the guest for consent and tick the consent checkbox on the profile card — it's recorded in the consent ledger. Without consent the system stores nothing (PDPA). See [Sales & POS → Guest dining profile](./01-sales-and-pos.md). |
 | `OPP_NOT_WON` | You tried to turn a sales opportunity into a project before it was **won** (it's still open, or it was lost). | Move the opportunity to **won** in the CRM pipeline first (`PATCH /api/crm/pipeline/opportunities/{no}/stage {stage:"won"}`), then convert it via **Convert to project**. |
-| `OPP_NOT_FOUND` | The opportunity number given to *Convert to project* doesn't exist (in your tenant). | Check the `OPP-…` number; create/locate the opportunity in the CRM pipeline first. (Re-converting a deal that already became a project simply returns the existing project — no duplicate is created.) |
+| `OPP_NOT_FOUND` | The opportunity number given to *Convert to project* doesn't exist (in your tenant) — also fired by a **CPQ quote** referencing an opportunity id that doesn't exist (CRM-1). | Check the `OPP-…` number / id; create/locate the opportunity in the CRM pipeline first. (Re-converting a deal that already became a project simply returns the existing project — no duplicate is created.) |
+| `OPP_CLOSED` (โอกาสการขายปิดแล้ว) | You tried to move or close a deal that is already **won/lost** — closed deals are terminal on every pipeline screen (CRM-1). | A closed deal stays closed. If it genuinely re-opened, create a new opportunity (the stage-history trail keeps the old one auditable). |
+| `DUPLICATE_SUSPECT` (พบข้อมูลที่อาจซ้ำ, 409) | Creating a CRM **account/contact** that matches an existing record on the normalized tax id / email / phone / company name. The response lists the matches (`error.details.matches`). | Review the matches — usually you should use (or merge into) the existing record. Resubmit with `force: true` only if it's genuinely a different party. |
+| `SOD_VIOLATION` (account merge) | You tried to **merge away an account you created yourself** while it still has contacts/deals to reassign. | A different user performs the merge (maker-checker — one person can't mint a shadow account and fold its pipeline into another record). |
+| `MERGE_CONFLICT` (409) | The merge hit a record both accounts own with the same key. | Resolve the collision on one side, then re-run the merge. |
+| `ACCOUNT_NOT_FOUND` | The `ACC-…` account number doesn't exist (in your tenant). | Check the number via `GET /api/crm/accounts?search=`. |
 | `TASK_NOT_FOUND` | You tried to update a project **WBS task** that doesn't exist. | Check the task id; add the task to the project first. |
 | `MILESTONE_NOT_FOUND` | You tried to mark a project **milestone** reached that doesn't exist. | Check the milestone id; add the milestone to the project first. |
 | `MILESTONE_REACHED` | The milestone was already marked reached. | No action — it's already reached. A billing milestone bills once; it can't be re-reached (that would double-bill). |
@@ -59,6 +71,9 @@ your code below.
 | `EMPTY_CHANGE_ORDER` | A **change order** was raised with no contract/budget/EAC change. | Enter a non-zero delta on at least one of contract value, budget, or estimated cost. |
 | `SOD_SELF_APPROVAL` (change order) | You tried to **approve a change order you requested**. | A different person approves it (maker-checker). Approval applies the contract/budget change and re-baselines the project. |
 | `CHANGE_ORDER_DECIDED` | You tried to approve/reject a change order that's already **approved or rejected**. | It's already decided; raise a new change order for any further variation. |
+| `LINE_NOT_LINKED` (400) | You clicked **ส่งใบเสร็จเข้า LINE สมาชิก** but the sale has **no loyalty member**, or the member has **not linked their LINE account**. | Attach the member at checkout (member_id) and have the customer link LINE via the shop's Official Account / member portal, then resend. Or use the email/SMS box instead. See [Sales & POS](./01-sales-and-pos.md). |
+| `LINE_NOT_CONFIGURED` (400) | LINE e-receipt was requested but the shop's **LINE Messaging API channel token** is not configured (production refuses to fake-send). | An administrator sets the tenant LINE credentials (Settings › ช่องทางข้อความ) or the `LINE_CHANNEL_TOKEN` environment variable. |
+| `BAD_TOKEN` (401, receipt link) | A **ดูใบเสร็จฉบับเต็ม** link was altered or is invalid. | Resend the LINE e-receipt to mint a fresh link — the link is a signed one-off token, not a guessable URL. |
 | `SOD_SELF_POST` | The same person who **computed** an AR allowance (provision for doubtful accounts) tried to **post** it. | A different reviewer (`gl_post` / `exec`) posts the allowance — the computer can't post their own. See [Finance — AR & AP → Allowance](./05-finance-ar-ap.md). |
 | `ALLOWANCE_POSTED` / `ALREADY_POSTED` | You tried to (re)post an AR allowance that is already posted. | A given allowance posts once; to revise, **compute a fresh allowance** for a later `as_of_date`. |
 
@@ -83,6 +98,14 @@ your code below.
 | `OVER_RECEIPT` (422) | You keyed a received quantity beyond what the PO ordered (weight items kg/g/ตัน get up to 5% headroom; everything else is capped at the ordered qty). | Recount and key the actual quantity. If the supplier genuinely delivered more, Procurement must amend/raise a PO for the excess first. See [Procurement — Receive goods](./03-procurement.md). |
 | `CLAIM_WINDOW_CLOSED` (422) | You tried to open a goods-receipt claim more than 24 hours (configurable) after the receipt — the claim window auto-closed. | The system will no longer take the claim; pursue it with the supplier commercially. Going forward, check deliveries and claim from the receiving summary on the spot. |
 | `PO_LINE_CLOSED` (422) | You tried to receive against a PO line that was **closed short** (the shortage decision at the dock). | The close is binding — a new delivery needs a new PO. |
+
+### Tax documents
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `INVALID_BUYER_TAXID` (400) | The buyer's 13-digit Tax ID failed the checksum (a mis-keyed digit) when issuing/converting a full tax invoice. | Re-check the number on the customer's ภ.พ.20 / company card and key all 13 digits again. |
+| `ABB_VOIDED` (400) | You tried to convert a **voided** abbreviated slip into a full tax invoice. | A voided slip cannot be converted. If the sale was real, issue the full tax invoice from the POS sale instead (`/tax/invoices` → full-invoice card). |
+| `NOT_ABBREVIATED` (400) | The document number you entered for conversion is not an abbreviated tax invoice (ATV-…). | Check the slip — conversion applies only to abbreviated invoices; to change a full invoice, use a credit/debit note instead. |
 
 ### Finance & General Ledger
 

@@ -1,8 +1,8 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { sql, eq, and, desc, notInArray, gt, lte, inArray } from 'drizzle-orm';
+import { sql, eq, and, desc, notInArray, gt, lte, inArray, isNotNull } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, tenantAccounts, glPeriodBalances } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, tenantAccounts, glPeriodBalances, branches, projects, departments } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
@@ -24,6 +24,10 @@ import { LedgerRecurringService } from './ledger-recurring.service';
 import { LedgerPostingService } from './ledger-posting.service';
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null; branch_id?: number | null; project_id?: number | null; dept_id?: number | null }
+
+// FIN-7a — dimension filter for TB / account-ledger / income statement. All fields optional; when NONE
+// is set the reports keep their original (snapshot / unfiltered) paths byte-identically.
+export interface DimensionFilter { projectId?: number; deptId?: number; branchId?: number }
 export interface PostEntryDto {
   date?: string;
   source: string;
@@ -201,10 +205,62 @@ export class LedgerService {
   async attemptVoidPosted(entryId: number, actor: string) { return this.posting.attemptVoidPosted(entryId, actor); }
   async listGlAudit(entryId?: number, limit = 100) { return this.posting.listGlAudit(entryId, limit); }
 
+  // FIN-7a: true when any project/dept/branch dimension filter is set (undefined/empty ⇒ legacy paths).
+  private hasDims(dims?: DimensionFilter): boolean {
+    return !!dims && (dims.projectId !== undefined || dims.deptId !== undefined || dims.branchId !== undefined);
+  }
+
+  // FIN-7a: typed-builder conditions for the journal_lines dimension columns (never raw sql — the ids come
+  // straight from query params; eq() binds them, so there is no injection sink for CodeQL to flag).
+  private dimConds(dims?: DimensionFilter): any[] {
+    const conds: any[] = [];
+    if (dims?.projectId !== undefined) conds.push(eq(journalLines.projectId, dims.projectId));
+    if (dims?.deptId !== undefined) conds.push(eq(journalLines.departmentId, dims.deptId));
+    if (dims?.branchId !== undefined) conds.push(eq(journalLines.branchId, dims.branchId));
+    return conds;
+  }
+
   // ───────────────────── Trial Balance ─────────────────────
   // group journal_lines by account_code (joined to accounts) — Σdebit, Σcredit, balance
-  async trialBalance(period?: string, costCenter?: string | null, ledgerCode?: string | null) {
+  async trialBalance(period?: string, costCenter?: string | null, ledgerCode?: string | null, dims?: DimensionFilter) {
     const db = this.db;
+    // FIN-7a: dimension-filtered TB (project/dept/branch) aggregates from the journal LINES — the
+    // gl_period_balances snapshot is keyed by cost-center only and cannot answer a project/dept/branch
+    // slice. Same semantics as the snapshot path: Posted-only, ledger NULL-or-code, per-period (entries
+    // stamp `period` = entry_date 'YYYY-MM', identical to the snapshot key), per-cost-center; RLS scopes
+    // the tenant. With no dimension filter the snapshot path below runs unchanged (byte-identical output).
+    if (this.hasDims(dims)) {
+      const lconds: any[] = [eq(journalEntries.status, 'Posted'), this.ledgerCond(ledgerCode), ...this.dimConds(dims)];
+      if (period) lconds.push(eq(journalEntries.period, period));
+      if (costCenter === '__UNASSIGNED__') lconds.push(sql`${journalLines.costCenterCode} IS NULL`);
+      else if (costCenter) lconds.push(eq(journalLines.costCenterCode, costCenter));
+      const lrows = await db
+        .select({
+          account_code: journalLines.accountCode,
+          account_name: accounts.name,
+          account_type: accounts.type,
+          debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
+          credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
+        })
+        .from(journalLines)
+        .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+        .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
+        .where(and(...lconds))
+        .groupBy(journalLines.accountCode, accounts.name, accounts.type)
+        .orderBy(journalLines.accountCode);
+      const lout = lrows.map((r: any) => {
+        const debit = round4(n(r.debit));
+        const credit = round4(n(r.credit));
+        return { account_code: r.account_code, account_name: r.account_name, account_type: r.account_type, debit, credit, balance: round4(debit - credit) };
+      });
+      const dM = lrows.reduce((a: bigint, r: any) => a + toMinor4(r.debit), 0n);
+      const cM = lrows.reduce((a: bigint, r: any) => a + toMinor4(r.credit), 0n);
+      return {
+        period: period ?? null, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING,
+        project_id: dims?.projectId ?? null, dept_id: dims?.deptId ?? null, branch_id: dims?.branchId ?? null,
+        rows: lout, totals: { debit: minorToNumber4(dM), credit: minorToNumber4(cM), balanced: dM === cM },
+      };
+    }
     // R1-2 (AUD-ARC-02): read the maintained gl_period_balances snapshot instead of aggregating the full
     // journal_lines table per request. Same filters/semantics: Posted-only (the snapshot holds nothing
     // else), ledger NULL-or-code ('' = NULL in the normalized key), per-period, per-cost-center; RLS
@@ -242,11 +298,15 @@ export class LedgerService {
   // Every POSTED journal line for ONE account over [from,to], in date order, with a running balance struck
   // from the opening balance (Σ debit−credit strictly before `from`). Debit-positive running balance — the
   // classic GL-detail drill-down behind the trial balance. Reads the raw ledger (RLS scopes the tenant).
-  async accountLedger(accountCode: string, from?: string | null, to?: string | null, ledgerCode?: string | null) {
+  async accountLedger(accountCode: string, from?: string | null, to?: string | null, ledgerCode?: string | null, dims?: DimensionFilter) {
     const db = this.db;
     const [account] = await db.select({ code: accounts.code, name: accounts.name, type: accounts.type })
       .from(accounts).where(eq(accounts.code, accountCode)).limit(1);
     if (!account) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${accountCode} not found`, messageTh: `ไม่พบบัญชี ${accountCode}` });
+
+    // FIN-7a: the optional project/dept/branch filter narrows BOTH the opening balance and the lines to
+    // the dimension slice (the running/closing balance is then the slice's own, tying to the filtered TB).
+    const dconds = this.dimConds(dims);
 
     // Opening balance = Σ(debit − credit) of POSTED lines on this account strictly before `from`.
     let opening = 0;
@@ -254,11 +314,11 @@ export class LedgerService {
       const [o] = await db
         .select({ net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)` })
         .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-        .where(and(eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode), this.ledgerCond(ledgerCode), sql`${journalEntries.entryDate} < ${from}`));
+        .where(and(eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode), this.ledgerCond(ledgerCode), sql`${journalEntries.entryDate} < ${from}`, ...dconds));
       opening = round4(n(o?.net));
     }
 
-    const conds: any[] = [eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode), this.ledgerCond(ledgerCode)];
+    const conds: any[] = [eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode), this.ledgerCond(ledgerCode), ...dconds];
     if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
     if (to) conds.push(sql`${journalEntries.entryDate} <= ${to}`);
     const rows = await db
@@ -288,8 +348,49 @@ export class LedgerService {
     return {
       account_code: account.code, account_name: account.name, account_type: account.type,
       from: from ?? null, to: to ?? null, ledger: ledgerCode ?? LEADING,
+      // FIN-7a: echo the dimension filter ONLY when one was given — the unfiltered response shape stays
+      // byte-identical to before (golden-master pinned).
+      ...(this.hasDims(dims) ? { project_id: dims?.projectId ?? null, dept_id: dims?.deptId ?? null, branch_id: dims?.branchId ?? null } : {}),
       opening_balance: opening, total_debit: totalDebit, total_credit: totalCredit, closing_balance: bal,
       count: lines.length, lines,
+    };
+  }
+
+  // ───────────────────── In-use reporting dimensions (FIN-7a) ─────────────────────
+  // Distinct dimension values actually carried by journal LINES (RLS scopes the tenant), joined to their
+  // masters for display labels — feeds the TB / GL-detail / P&L filter dropdowns. Read-only; a dimension
+  // appears only once it has at least one posted/draft line, so the dropdowns never offer an empty slice.
+  async listDimensions() {
+    const db = this.db;
+    const ccRows = await db
+      .selectDistinct({ code: journalLines.costCenterCode })
+      .from(journalLines)
+      .where(isNotNull(journalLines.costCenterCode))
+      .orderBy(journalLines.costCenterCode);
+    const brRows = await db
+      .selectDistinct({ id: journalLines.branchId, code: branches.code, name: branches.name })
+      .from(journalLines)
+      .leftJoin(branches, eq(journalLines.branchId, branches.id))
+      .where(isNotNull(journalLines.branchId))
+      .orderBy(journalLines.branchId);
+    const pjRows = await db
+      .selectDistinct({ id: journalLines.projectId, code: projects.projectCode, name: projects.name })
+      .from(journalLines)
+      .leftJoin(projects, eq(journalLines.projectId, projects.id))
+      .where(isNotNull(journalLines.projectId))
+      .orderBy(journalLines.projectId);
+    const dpRows = await db
+      .selectDistinct({ id: journalLines.departmentId, code: departments.code, name: departments.name })
+      .from(journalLines)
+      .leftJoin(departments, eq(journalLines.departmentId, departments.id))
+      .where(isNotNull(journalLines.departmentId))
+      .orderBy(journalLines.departmentId);
+    const shape = (r: any) => ({ id: Number(r.id), code: r.code ?? null, name: r.name ?? null });
+    return {
+      cost_centers: ccRows.map((r: any) => r.code),
+      branches: brRows.map(shape),
+      projects: pjRows.map(shape),
+      departments: dpRows.map(shape),
     };
   }
 
@@ -297,14 +398,16 @@ export class LedgerService {
   // Revenue − Expense = net income, over [from,to] (entry_date inclusive)
   // excludeSources lets a trailing-twelve-month P&L (finance-metrics TTM basis) pass ['CLOSE'] so a window
   // that crosses a fiscal year-end is not understated by the close-out entries that zero P&L into 3100.
-  async incomeStatement(from: string, to: string, costCenter?: string | null, ledgerCode?: string | null, excludeSources?: string[]) {
+  async incomeStatement(from: string, to: string, costCenter?: string | null, ledgerCode?: string | null, excludeSources?: string[], dims?: DimensionFilter) {
     const db = this.db;
-    const rows = await this.aggregateByType(db, from, to, costCenter, ledgerCode, undefined, excludeSources);
+    const rows = await this.aggregateByType(db, from, to, costCenter, ledgerCode, undefined, excludeSources, dims);
     const revenue = round4(typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit'));
     const expense = round4(typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit'));
     const netIncome = round4(revenue - expense);
     return {
       from, to, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING,
+      // FIN-7a: dimension-filter echo only when a filter was given (default response unchanged).
+      ...(this.hasDims(dims) ? { project_id: dims?.projectId ?? null, dept_id: dims?.deptId ?? null, branch_id: dims?.branchId ?? null } : {}),
       revenue, expense, net_income: netIncome,
       lines: rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense'),
     };
@@ -648,7 +751,7 @@ export class LedgerService {
   // group Posted journal_lines by account type within optional date window.
   // excludeSources drops whole entries by source (e.g. CLOSE) — used by the cash-flow statement so a
   // year-end closing reclassification doesn't masquerade as P&L/working-capital movement.
-  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null, tenantId?: number | null, excludeSources?: string[]) {
+  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null, tenantId?: number | null, excludeSources?: string[], dims?: DimensionFilter) {
     const conds = [eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${to}`, this.ledgerCond(ledgerCode)];
     if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
     // Explicit tenant scope for writes like closeYear (which may run under HQ/bypass where RLS won't narrow).
@@ -656,6 +759,7 @@ export class LedgerService {
     if (excludeSources && excludeSources.length) conds.push(notInArray(journalEntries.source, excludeSources));
     if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
     else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
+    conds.push(...this.dimConds(dims)); // FIN-7a: project/dept/branch line-dimension filter (no-op when unset)
     const rows = await db
       .select({
         account_type: accounts.type,

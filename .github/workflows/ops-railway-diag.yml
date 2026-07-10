@@ -8,6 +8,11 @@ name: Ops — Railway failed-deploy diagnostics
 
 on:
   workflow_dispatch:
+    inputs:
+      service:
+        description: 'Railway service to inspect'
+        default: 'invisibleERP'
+        required: false
 
 jobs:
   diag:
@@ -27,13 +32,24 @@ jobs:
           echo "project=$PID environment=$EID"
           SVCS=$(gq "{\"query\":\"query{project(id:\\\"$PID\\\"){services{edges{node{id name}}}}}\"}")
           echo "services:"; echo "$SVCS" | jq -r '.data.project.services.edges[].node | "  "+.name+"  "+.id'
-          SID=$(echo "$SVCS" | jq -r '.data.project.services.edges[].node | select(.name=="invisibleERP") | .id')
-          if [ -z "$SID" ]; then echo "::error::service invisibleERP not found in project"; exit 1; fi
-          echo "::group::variable NAMES on invisibleERP (values never printed)"
+          SVC_NAME="${{ inputs.service || 'invisibleERP' }}"
+          SID=$(echo "$SVCS" | jq -r --arg n "$SVC_NAME" '.data.project.services.edges[].node | select(.name==$n) | .id')
+          if [ -z "$SID" ]; then echo "::error::service $SVC_NAME not found in project"; exit 1; fi
+          echo "::group::variable NAMES on $SVC_NAME (values never printed)"
           gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\")}\"}" | jq -r '.data.variables | keys[]' | sort
           echo "::endgroup::"
+          # Whitelisted NON-SECRET values only (private-network coordinates — meaningless outside the
+          # project's own Railway network; never print anything else, this repo's action logs are public).
+          echo "private-network coordinates:"
+          gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\")}\"}" | jq -r '.data.variables | {RAILWAY_PRIVATE_DOMAIN, PORT} | to_entries[] | "  "+.key+" = "+(.value // "(unset)")'
           DEPS=$(gq "{\"query\":\"query{deployments(first:8,input:{projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\"}){edges{node{id status createdAt}}}}\"}")
           echo "recent deployments:"; echo "$DEPS" | jq -r '.data.deployments.edges[].node | "  "+.createdAt+"  "+.status+"  "+.id'
+          LATEST=$(echo "$DEPS" | jq -r '.data.deployments.edges[0].node.id // empty')
+          if [ -n "$LATEST" ]; then
+            echo "::group::runtime log tail of LATEST deployment $LATEST (any status)"
+            gq "{\"query\":\"query{deploymentLogs(deploymentId:\\\"$LATEST\\\",limit:500){timestamp severity message}}\"}" | jq -r '.data.deploymentLogs[]? | .timestamp+" ["+(.severity // "-")+"] "+.message' | { grep -E "listening|Bootstrap|falling back|dual-stack|EAFNOSUPPORT|Refusing|ERROR|error" || true; } | tail -30
+            echo "::endgroup::"
+          fi
           DID=$(echo "$DEPS" | jq -r '[.data.deployments.edges[].node | select(.status=="FAILED" or .status=="CRASHED")][0].id // empty')
           if [ -z "$DID" ]; then echo "no FAILED/CRASHED deployment in the last 8 — nothing to dump"; exit 0; fi
           echo "::group::runtime logs of failed deployment $DID"

@@ -3,7 +3,8 @@
 //  - wht_certificates / wht_cert_lines : หนังสือรับรองการหักภาษี ณ ที่จ่าย 50 ทวิ (ม.50 ทวิ)
 // Seller/buyer/payer/payee are SNAPSHOT columns (frozen at issue) so an issued legal document is
 // immutable even if the underlying tenant/vendor record later changes.
-import { pgTable, bigserial, bigint, text, numeric, date, boolean, timestamp, integer, jsonb, pgEnum, unique } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, boolean, timestamp, integer, jsonb, pgEnum, unique, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 
 // credit_note = ใบลดหนี้ (ม.86/10) · debit_note = ใบเพิ่มหนี้ (ม.86/9) — sibling adjustment documents (0248)
@@ -44,7 +45,10 @@ export const taxInvoices = pgTable('tax_invoices', {
   grandTotal: numeric('grand_total', { precision: 14, scale: 2 }).notNull(), // รวมทั้งสิ้น
   isVatInclusive: boolean('is_vat_inclusive').notNull().default(false),      // true = abbreviated slip display
   status: taxInvoiceStatusEnum('status').notNull().default('Issued'),
-  replacesDocNo: text('replaces_doc_no'),                  // ใบแทน / reissue chain
+  // ใบแทน / reissue + supersede chain. ABB→full conversion (POS-1, TAX-10): the converted full invoice
+  // stores the ABB's doc_no here and the ABB flips to status 'Replaced' (so the ภ.พ.30 output-VAT report,
+  // which keys on status='Issued', counts the supply exactly once).
+  replacesDocNo: text('replaces_doc_no'),
   // Credit/Debit note (0248) — the referenced original ใบกำกับภาษี, the adjustment reason (ม.86/10(3)/(4)),
   // and the linked GL entry (Draft until the maker-checker approval posts it, TAX-07).
   originalDocNo: text('original_doc_no'),
@@ -61,7 +65,12 @@ export const taxInvoices = pgTable('tax_invoices', {
   notes: text('notes'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-}, (t) => ({ uqDocPerSeller: unique('uq_tiv_doc').on(t.tenantId, t.docNo) }));
+}, (t) => ({
+  uqDocPerSeller: unique('uq_tiv_doc').on(t.tenantId, t.docNo),
+  // ONE full invoice per superseded ABB (TAX-10 idempotency backstop, migration 0291).
+  uqConvertedFrom: uniqueIndex('uq_tiv_converted_from').on(t.tenantId, t.replacesDocNo)
+    .where(sql`${t.replacesDocNo} IS NOT NULL AND ${t.type} = 'full'`),
+}));
 
 export const taxInvoiceLines = pgTable('tax_invoice_lines', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

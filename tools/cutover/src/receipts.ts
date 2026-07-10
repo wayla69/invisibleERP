@@ -1,11 +1,13 @@
 /**
  * POS Tier 2 #8 — Receipts (ใบเสร็จ) + Customer Display (จอลูกค้า) over PGlite:
- * 80mm HTML / ESC-POS / PDF receipt rendering, reprint COPY tracking, email/SMS send seam, CFD snapshot.
+ * 80mm HTML / ESC-POS / PDF receipt rendering, reprint COPY tracking, email/SMS send seam, CFD snapshot,
+ * and the POS-2 LINE e-receipt (member-resolved flex push via the messaging mock + opaque public link).
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover receipts
  */
 import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'rcpt-secret';
 process.env.NODE_ENV = 'test';
+process.env.WEB_BASE_URL = 'http://shop.example'; // makes the LINE e-receipt mint a public receipt link
 
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -47,7 +49,7 @@ async function main() {
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ routerOptions: { maxParamLength: 500 } })); // long HMAC receipt tokens in path (mirrors main.ts)
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
@@ -102,6 +104,46 @@ async function main() {
   // ── 7. send validates email ──
   const bad = await inj('POST', `/api/pos/sales/${saleA}/receipt/send`, sales1, { channel: 'email', to: 'not-an-email' });
   ok('Send invalid email → 400', bad.status === 400, `${bad.status}`);
+
+  // ── POS-2: LINE e-receipt (member-resolved flex push + opaque public link) ──
+  // Seed: loyalty enabled + a LINE-linked member; checkout WITH member_id so the points ledger carries
+  // ref_doc = sale_no (the server resolves the member FROM the sale — never from caller input).
+  await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1' })
+    .onConflictDoUpdate({ target: s.loyaltyConfig.id, set: { enabled: true, pointsPerBaht: '1' } });
+  const [mLine] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LINE1', name: 'คุณลิงก์', phone: '0812345678', lineUserId: 'U0000000000000000000000000000line', balance: '0', lifetime: '0' }).returning();
+  const [mNoLine] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-NOLINE', name: 'คุณไม่ลิงก์', phone: '0898765432', balance: '0', lifetime: '0' }).returning();
+
+  const oL = await makeOrder(200); // 200 net → vat 14 → total 214
+  const cL = await checkout(oL.order_no, { method: 'Cash', member_id: Number(mLine.id) });
+  const saleL = cL.json.sale_no as string;
+  const sndLine = await inj('POST', `/api/pos/sales/${saleL}/receipt/send`, sales1, { channel: 'line' });
+  ok('LINE e-receipt: queued, provider mock (no token), status sent, member resolved from sale',
+    (sndLine.status === 200 || sndLine.status === 201) && sndLine.json.queued === true && sndLine.json.provider === 'mock' && sndLine.json.status === 'sent' && sndLine.json.member_id === Number(mLine.id),
+    `${sndLine.status} ${JSON.stringify(sndLine.json)}`);
+  const lineLog = (await pg.query(`SELECT count(*)::int n FROM message_log WHERE channel='line' AND campaign='e-receipt' AND status='sent'`)).rows as any[];
+  const linePrint = (await pg.query(`SELECT count(*)::int n FROM receipt_prints WHERE sale_no='${saleL}' AND channel='line'`)).rows as any[];
+  ok('LINE e-receipt: send audited in message_log (e-receipt) + receipt_prints channel line', lineLog[0].n === 1 && linePrint[0].n === 1, `log=${lineLog[0].n} print=${linePrint[0].n}`);
+
+  // public receipt link: the response carries an opaque HMAC-token URL; the HTML renders WITHOUT auth,
+  // and a tampered token is rejected (401) — never a guessable sale_no URL.
+  const rcptUrl = String(sndLine.json.receipt_url ?? '');
+  const pubPath = rcptUrl.replace('http://shop.example', '');
+  const pub = await inj('GET', pubPath);
+  ok('Public e-receipt link: opaque token URL renders the HTML receipt without auth', rcptUrl.startsWith('http://shop.example/api/pos/receipt/public/') && pub.status === 200 && pub.body.includes('214.00') && pub.body.includes('ใบเสร็จรับเงิน'), `url=${rcptUrl.slice(0, 60)} status=${pub.status}`);
+  const forged = await inj('GET', `/api/pos/receipt/public/${'A'.repeat(48)}`);
+  ok('Public e-receipt link: forged token → 401 BAD_TOKEN', forged.status === 401 && forged.json.error?.code === 'BAD_TOKEN', `${forged.status} ${forged.json.error?.code}`);
+
+  // negatives: a sale with no member, and a member without a linked LINE account → LINE_NOT_LINKED
+  const noMem = await inj('POST', `/api/pos/sales/${saleA}/receipt/send`, sales1, { channel: 'line' });
+  ok('LINE e-receipt: sale without member → 400 LINE_NOT_LINKED', noMem.status === 400 && noMem.json.error?.code === 'LINE_NOT_LINKED', `${noMem.status} ${noMem.json.error?.code}`);
+  const oN = await makeOrder(50);
+  const cN = await checkout(oN.order_no, { method: 'Cash', member_id: Number(mNoLine.id) });
+  const notLinked = await inj('POST', `/api/pos/sales/${cN.json.sale_no}/receipt/send`, sales1, { channel: 'line' });
+  ok('LINE e-receipt: member without linked LINE → 400 LINE_NOT_LINKED', notLinked.status === 400 && notLinked.json.error?.code === 'LINE_NOT_LINKED', `${notLinked.status} ${notLinked.json.error?.code}`);
+
+  // DTO: email/sms still require an explicit recipient (to optional only for 'line')
+  const noTo = await inj('POST', `/api/pos/sales/${saleA}/receipt/send`, sales1, { channel: 'email' });
+  ok('Send email without recipient → 400', noTo.status === 400, `${noTo.status}`);
 
   // ── 8. CFD on an OPEN order ──
   const oC = await makeOrder(100); // 100 net → total 107

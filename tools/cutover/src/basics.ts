@@ -1090,6 +1090,85 @@ async function main() {
   const bb3 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
   ok('GL-13: journal lines without branch_id appear under "unassigned"', bb3.status === 200 && !!bb3.json?.branches?.['unassigned'], `branches=${Object.keys(bb3.json?.branches ?? {}).join(',')}`);
 
+  // ───────────────────── FIN-7a — Dimension-filtered TB / GL-detail / P&L ─────────────────────
+  // Reports accept additive ?project_id=&dept_id=&branch_id= (aggregated from journal LINES — the
+  // gl_period_balances snapshot is cost-center-keyed); with no filter the original paths are unchanged.
+  // Seed real masters so GET /api/ledger/dimensions can label them, then one JE tagged with all three.
+  const [dimBr] = await db.insert(s.branches).values({ tenantId: hq, code: 'BR-DIM', name: 'Dimension Branch' }).returning({ id: s.branches.id });
+  const [dimPj] = await db.insert(s.projects).values({ tenantId: hq, projectCode: 'PJ-DIM', name: 'Dimension Project' }).returning({ id: s.projects.id });
+  const [dimDp] = await db.insert(s.departments).values({ tenantId: hq, code: 'DP-DIM', name: 'Dimension Dept' }).returning({ id: s.departments.id });
+  const pjId = Number(dimPj.id), dpId = Number(dimDp.id), brId = Number(dimBr.id);
+
+  // Resync the R1-2 snapshot FIRST (TC-GL-13-03's direct insert above never rebuilt it), so the unfiltered
+  // baseline below is clean and the after-vs-before delta isolates this block's own JE.
+  await rebuildGl();
+  const tbAllBefore = (await inj('GET', '/api/ledger/trial-balance', admin)).json; // unfiltered baseline
+  jeSeq++;
+  const [hd1] = await db.insert(s.journalEntries).values({
+    entryNo: `JE-D${String(jeSeq).padStart(4, '0')}`, entryDate: today, period: today.slice(0, 7),
+    source: 'TEST-FIN7A', sourceRef: `FIN7A-${jeSeq}`, tenantId: hq, currency: 'THB', status: 'Posted', createdBy: 'seed',
+  }).returning({ id: s.journalEntries.id });
+  await db.insert(s.journalLines).values([
+    { entryId: Number(hd1.id), accountCode: '5100', debit: '250', credit: '0', currency: 'THB', tenantId: hq, projectId: pjId, departmentId: dpId, branchId: brId },
+    { entryId: Number(hd1.id), accountCode: '1000', debit: '0', credit: '250', currency: 'THB', tenantId: hq, projectId: pjId, departmentId: dpId, branchId: brId },
+  ]);
+  await rebuildGl(); // direct insert bypasses LedgerService → resync the R1-2 snapshot for the unfiltered path
+
+  // TB filtered by project → ONLY this JE's two accounts, each net ±250 (use `balance`, not gross debit).
+  const tbPj = await inj('GET', `/api/ledger/trial-balance?project_id=${pjId}`, admin);
+  const tbPjRows: any[] = tbPj.json?.rows ?? [];
+  ok('FIN-7a: TB filtered by project returns only that project\'s lines (5100 +250 / 1000 −250, balanced)',
+    tbPj.status === 200 && tbPjRows.length === 2
+      && near(tbPjRows.find((r) => r.account_code === '5100')?.balance, 250)
+      && near(tbPjRows.find((r) => r.account_code === '1000')?.balance, -250)
+      && tbPj.json?.totals?.balanced === true && tbPj.json?.project_id === pjId,
+    `st=${tbPj.status} rows=${tbPjRows.map((r) => `${r.account_code}:${r.balance}`).join(',')}`);
+
+  // dept + branch slices see the same single JE; an unused branch id returns an empty (still balanced) TB.
+  const tbDp = await inj('GET', `/api/ledger/trial-balance?dept_id=${dpId}`, admin);
+  const tbBrNone = await inj('GET', `/api/ledger/trial-balance?branch_id=999999`, admin);
+  ok('FIN-7a: dept_id slice sees the tagged JE only; unused branch_id → empty rows',
+    (tbDp.json?.rows ?? []).length === 2 && near(tbDp.json?.totals?.debit, 250)
+      && tbBrNone.status === 200 && (tbBrNone.json?.rows ?? []).length === 0,
+    `dept rows=${(tbDp.json?.rows ?? []).length} none=${(tbBrNone.json?.rows ?? []).length}`);
+
+  // Unfiltered TB is UNCHANGED in shape/semantics: same snapshot path, no dimension echo keys, totals move
+  // only by the new JE's 250/250, and it still balances.
+  const tbAllAfter = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+  ok('FIN-7a: unfiltered TB unchanged (snapshot path — no dim keys; totals move only by the new 250/250; balanced)',
+    !('project_id' in tbAllAfter) && !('dept_id' in tbAllAfter) && !('branch_id' in tbAllAfter)
+      && near(tbAllAfter.totals?.debit, Number(tbAllBefore.totals?.debit) + 250)
+      && near(tbAllAfter.totals?.credit, Number(tbAllBefore.totals?.credit) + 250)
+      && tbAllAfter.totals?.balanced === true,
+    `before=${tbAllBefore.totals?.debit} after=${tbAllAfter.totals?.debit}`);
+
+  // Account-ledger drill-down honours the slice: only the tagged 5100 line, closing = the slice's own 250.
+  const al5100Pj = (await inj('GET', `/api/ledger/account-ledger?account=5100&project_id=${pjId}`, admin)).json;
+  const al5100All = (await inj('GET', '/api/ledger/account-ledger?account=5100', admin)).json;
+  ok('FIN-7a: account-ledger project slice returns only the tagged line (closing 250); unfiltered has more',
+    al5100Pj.count === 1 && near(al5100Pj.closing_balance, 250) && al5100Pj.project_id === pjId
+      && al5100All.count > al5100Pj.count && !('project_id' in al5100All),
+    `slice=${al5100Pj.count}/${al5100Pj.closing_balance} all=${al5100All.count}`);
+
+  // P&L slice: the project's expense is exactly 250 → net −250.
+  const isPj = (await inj('GET', `/api/ledger/income-statement?from=${today}&to=${today}&project_id=${pjId}`, admin)).json;
+  ok('FIN-7a: income statement filtered by project → expense 250, net −250',
+    near(isPj.expense, 250) && near(isPj.net_income, -250) && isPj.project_id === pjId,
+    `exp=${isPj.expense} net=${isPj.net_income}`);
+
+  // Dimension helper lists the in-use values with master labels (feeds the web dropdowns).
+  const dimsRes = await inj('GET', '/api/ledger/dimensions', admin);
+  ok('FIN-7a: GET /api/ledger/dimensions lists in-use project/dept/branch with labels',
+    dimsRes.status === 200
+      && (dimsRes.json?.projects ?? []).some((p: any) => p.id === pjId && p.code === 'PJ-DIM')
+      && (dimsRes.json?.departments ?? []).some((p: any) => p.id === dpId && p.code === 'DP-DIM')
+      && (dimsRes.json?.branches ?? []).some((p: any) => p.id === brId && p.code === 'BR-DIM'),
+    `st=${dimsRes.status} pj=${JSON.stringify(dimsRes.json?.projects)}`);
+
+  // Junk dimension param fails closed with the standard envelope (json.error.code, per AllExceptionsFilter).
+  const tbBad = await inj('GET', '/api/ledger/trial-balance?project_id=abc', admin);
+  ok('FIN-7a: non-integer project_id → 400 BAD_QUERY', tbBad.status === 400 && tbBad.json?.error?.code === 'BAD_QUERY', `st=${tbBad.status} code=${tbBad.json?.error?.code}`);
+
   // ───────────────────── WS1.4 — Sub-ledger Tie-out / Reconciliation (GL-14) ─────────────────────
   // Flag the four control accounts (1100/2000/1200/1500). Migration 0155 sets these via UPDATE, but it
   // runs before the COA is seeded (seedChartOfAccounts at boot), so the flags are re-applied HERE — after

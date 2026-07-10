@@ -4,7 +4,8 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users, alertRules, alertEvents, notifications, customerInventory, workflowInstances, purchaseRequests } from '../../database/schema';
 import { custPosSales } from '../../database/schema/sales';
 import { arInvoices } from '../../database/schema/finance';
-import { opportunities } from '../../database/schema/pipeline';
+// CRM-1 unification (0293): the open-pipeline metric reads the unified spine (crm_opportunities).
+import { crmOpportunities } from '../../database/schema/crm-pipeline';
 import type { JwtUser } from '../../common/decorators';
 import { MessagingService } from '../messaging/messaging.service';
 import { WebhookService } from '../platform/webhook.service';
@@ -105,8 +106,8 @@ export class AlertsService {
       return Number(r?.total ?? 0);
     }
     if (key === 'open_pipeline_value') {
-      const [r] = await db.select({ total: sql<number>`coalesce(sum(${opportunities.expectedValue}),0)` })
-        .from(opportunities).where(eq(opportunities.status, 'Open'));
+      const [r] = await db.select({ total: sql<number>`coalesce(sum(${crmOpportunities.amount}),0)` })
+        .from(crmOpportunities).where(eq(crmOpportunities.status, 'Open'));
       return Number(r?.total ?? 0);
     }
     return 0;

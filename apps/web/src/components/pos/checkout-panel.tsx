@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, CheckCircle2, CreditCard, Delete, Printer, QrCode, Send, ArrowLeftRight } from 'lucide-react';
+import { ArrowLeft, Banknote, CheckCircle2, CreditCard, Delete, MessageCircle, Printer, QrCode, Send, ArrowLeftRight, TicketPercent, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -30,26 +30,60 @@ const METHOD_LABEL_KEYS: Record<Method, string> = {
 
 export interface SettleResult { sale_no: string; total: number; change?: number; offline?: boolean }
 
+const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+
+interface VoucherPreview { valid: boolean; code?: string; discount?: number; reason?: string; message?: string; message_th?: string }
+
 export function CheckoutPanel({
   lines, onSettle, onReprint, onSendReceipt, onClose, onFinish, serviceChargePct = 0,
 }: {
   lines: CartLine[];
-  onSettle: (p: { method: Method; discountPct: number; cashReceived?: number }) => Promise<SettleResult>;
+  onSettle: (p: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string }) => Promise<SettleResult>;
   onReprint: (saleNo: string) => Promise<void>;
-  onSendReceipt: (saleNo: string, channel: 'email' | 'line', to: string) => Promise<void>;
+  // email/sms need a typed recipient; 'line' resolves the member from the sale server-side (no `to`).
+  onSendReceipt: (saleNo: string, channel: 'email' | 'sms' | 'line', to?: string) => Promise<void>;
   onClose: () => void;
   onFinish: () => void;
   serviceChargePct?: number; // mirrors the register's service-charge so the tendered total matches the cart
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [discountPct, setDiscountPct] = useState(0);
   const [method, setMethod] = useState<Method>('Cash');
   const [cash, setCash] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SettleResult | null>(null);
   const [sendTo, setSendTo] = useState('');
+  // POS-3 voucher/coupon code — validated server-side (/api/vouchers/validate) for a discount preview;
+  // the actual redemption is atomic inside checkout. The panel figures stay an estimate (server total wins).
+  const [voucher, setVoucher] = useState('');
+  const [voucherInfo, setVoucherInfo] = useState<VoucherPreview | null>(null);
+  const [voucherBusy, setVoucherBusy] = useState(false);
+  const [lineBusy, setLineBusy] = useState(false);
 
-  const tot = useMemo(() => cartTotals(lines, discountPct, serviceChargePct), [lines, discountPct, serviceChargePct]);
+  const base = useMemo(() => cartTotals(lines, discountPct, serviceChargePct), [lines, discountPct, serviceChargePct]);
+  // Mirror the server: the voucher competes for the order-discount slot (best wins, no stacking).
+  const tot = useMemo(() => {
+    const vDisc = voucherInfo?.valid ? round2(Math.min(voucherInfo.discount ?? 0, base.sub)) : 0;
+    if (vDisc <= base.discount) return base;
+    const net = round2(base.sub - vDisc);
+    const serviceCharge = round2(net * (serviceChargePct || 0) / 100);
+    const vat = round2((net + serviceCharge) * 0.07);
+    return { ...base, discount: vDisc, net, serviceCharge, vat, total: round2(net + serviceCharge + vat) };
+  }, [base, voucherInfo, serviceChargePct]);
+
+  const checkVoucher = async () => {
+    if (!voucher.trim()) return;
+    setVoucherBusy(true);
+    try {
+      const r = await api<VoucherPreview>('/api/vouchers/validate', { method: 'POST', body: JSON.stringify({ code: voucher.trim(), subtotal: base.sub }) });
+      setVoucherInfo({ ...r, code: r.code ?? voucher.trim() });
+    } catch (e) {
+      setVoucherInfo({ valid: false, reason: 'ERROR', message: (e as Error).message, message_th: (e as Error).message });
+    } finally {
+      setVoucherBusy(false);
+    }
+  };
+  const clearVoucher = () => { setVoucher(''); setVoucherInfo(null); };
   const cashNum = cash === '' ? null : Number(cash);
   const change = method === 'Cash' && cashNum != null ? Math.round((cashNum - tot.total) * 100) / 100 : null;
   const cashShort = method === 'Cash' && cashNum != null && cashNum < tot.total;
@@ -67,7 +101,7 @@ export function CheckoutPanel({
   const settle = async () => {
     setBusy(true);
     try {
-      const r = await onSettle({ method, discountPct, cashReceived: cashNum ?? undefined });
+      const r = await onSettle({ method, discountPct, cashReceived: cashNum ?? undefined, voucherCode: voucherInfo?.valid ? voucherInfo.code : undefined });
       setResult(r);
     } catch (e) {
       notifyError((e as Error).message);
@@ -106,18 +140,36 @@ export function CheckoutPanel({
                 <Button onClick={onFinish}>{t('px.chk_next_sale')}</Button>
               </div>
 
-              <div className="mt-1 flex items-center gap-2 border-t pt-3">
-                <Input placeholder={t('px.chk_recipient_ph')} value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
+              <div className="mt-1 space-y-2 border-t pt-3">
+                {/* LINE e-receipt (POS-2): member resolved from the sale server-side — no input needed.
+                    LINE_NOT_LINKED surfaces here when the sale has no LINE-linked member. */}
                 <Button
                   variant="outline"
-                  size="sm"
-                  disabled={!sendTo}
-                  onClick={() => onSendReceipt(result.sale_no, sendTo.includes('@') ? 'email' : 'line', sendTo)
-                    .then(() => notifySuccess(t('px.chk_sent_ok')))
-                    .catch((e) => notifyError((e as Error).message))}
+                  className="w-full"
+                  disabled={lineBusy}
+                  onClick={() => {
+                    setLineBusy(true);
+                    onSendReceipt(result.sale_no, 'line')
+                      .then(() => notifySuccess(t('px.chk_sent_ok')))
+                      .catch((e) => notifyError((e as Error).message))
+                      .finally(() => setLineBusy(false));
+                  }}
                 >
-                  <Send className="size-4" /> {t('px.chk_send')}
+                  <MessageCircle className="size-4" /> {t('px.chk_send_line')}
                 </Button>
+                <div className="flex items-center gap-2">
+                  <Input placeholder={t('px.chk_recipient_ph')} value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!sendTo}
+                    onClick={() => onSendReceipt(result.sale_no, sendTo.includes('@') ? 'email' : 'sms', sendTo)
+                      .then(() => notifySuccess(t('px.chk_sent_ok')))
+                      .catch((e) => notifyError((e as Error).message))}
+                  >
+                    <Send className="size-4" /> {t('px.chk_send')}
+                  </Button>
+                </div>
               </div>
             </>
           )}
@@ -164,6 +216,34 @@ export function CheckoutPanel({
                 value={discountPct || ''}
                 onChange={(e) => setDiscountPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
               />
+            </div>
+            {/* POS-3: voucher / coupon code (campaign voucher or loyalty wallet coupon — one field) */}
+            <div className="rounded-lg border px-3 py-2 text-sm">
+              <div className="flex items-center gap-2">
+                <TicketPercent className="size-4 shrink-0 text-muted-foreground" />
+                <Input
+                  placeholder={t('px.chk_voucher_ph')}
+                  className="h-8 font-mono uppercase"
+                  value={voucher}
+                  onChange={(e) => { setVoucher(e.target.value.toUpperCase()); setVoucherInfo(null); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void checkVoucher(); }}
+                />
+                {voucherInfo ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={clearVoucher} aria-label={t('px.chk_voucher_clear')}><X className="size-4" /></Button>
+                ) : (
+                  <Button type="button" variant="secondary" size="sm" disabled={!voucher.trim() || voucherBusy} onClick={() => void checkVoucher()}>
+                    {voucherBusy ? '…' : t('px.chk_voucher_check')}
+                  </Button>
+                )}
+              </div>
+              {voucherInfo?.valid && (
+                <div className="mt-1.5 flex items-center justify-between text-success">
+                  <span>{t('px.chk_voucher_ok')}</span><span className="tabular">−{baht(round2(Math.min(voucherInfo.discount ?? 0, base.sub)))}</span>
+                </div>
+              )}
+              {voucherInfo && !voucherInfo.valid && (
+                <div className="mt-1.5 text-destructive">{(lang === 'th' ? voucherInfo.message_th : voucherInfo.message) || voucherInfo.reason}</div>
+              )}
             </div>
             {tot.discount > 0 && (
               <div className="flex items-center justify-between px-1 text-sm text-muted-foreground">

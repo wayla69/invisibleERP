@@ -1,4 +1,4 @@
--- 0294_ar_cash_application — AR cash application (REV-20, docs/41 FIN-1). (1) ar_receipt_applications:
+-- 0295_ar_cash_application — AR cash application (REV-20, docs/41 FIN-1). (1) ar_receipt_applications:
 -- one row per (receipt|credit-note) × invoice application — a single customer receipt can now settle MANY
 -- invoices (partial allowed), an Issued AR-linked credit note can be applied as a credit line, an
 -- application at/over the approval threshold parks PendingApproval for a DIFFERENT approver, and a

@@ -1,0 +1,36 @@
+{
+  "$comment": "Config-of-record for Railway service environment VARIABLE NAMES (never values) — incident 2026-07-10 follow-up (AUTH_COOKIE_SAMESITE was silently lost in a hand-rebuild of the service env; docs/ops/incident-2026-07-10-login-bounce-cross-site-cookie.md). The scheduled ops-synthetic-probe.yml workflow diffs each service's LIVE variable names against this manifest: a name listed in `expected` but missing live FAILS the probe (a var was lost — the July-10 class); a live name not listed here warns (update this manifest in the same change that adds the variable). RAILWAY_*-prefixed names are Railway-managed and ignored. `transitional` names are expected to disappear (warn while present, never fail): AUTH_COOKIE_SAMESITE is deleted by the ops-proxy-cutover.yml remove-samesite action once the same-origin proxy is live. Snapshot basis: live listing 2026-07-10 (ops-railway-diag runs 29072390863 / 29072395860).",
+  "services": {
+    "invisibleERP": {
+      "expected": [
+        "ALLOW_NO_OBSERVABILITY",
+        "ALLOW_PROD_GOD",
+        "ALLOW_TENANT_FACTORY_RESET",
+        "APP_ENC_KEY",
+        "CORS_ORIGINS",
+        "DATABASE_URL",
+        "GOD_PASSWORD",
+        "JWT_SECRET",
+        "NIXPACKS_NODE_VERSION",
+        "PLATFORM_ADMIN_USERNAMES",
+        "PORT",
+        "PSP_WEBHOOK_SECRET",
+        "PUBLIC_SIGNUP_ENABLED",
+        "SEED_ADMIN_PASSWORD",
+        "SENTRY_DSN",
+        "TENANCY_MODE"
+      ],
+      "transitional": ["AUTH_COOKIE_SAMESITE"]
+    },
+    "invisiblePOSERP": {
+      "expected": [
+        "API_PROXY_TARGET",
+        "NEXT_PUBLIC_API_URL",
+        "PLATFORM_ADMIN_USERNAMES",
+        "PORT",
+        "TENANCY_MODE"
+      ],
+      "transitional": []
+    }
+  }
+}
