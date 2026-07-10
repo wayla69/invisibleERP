@@ -12,6 +12,10 @@ export const posOfflineSync = pgTable('pos_offline_sync', {
   branchId: bigint('branch_id', { mode: 'number' }),  // which branch/outlet queued the offline sale
   deviceId: text('device_id'),                        // which POS device captured/queued the sale
   status: offlineSyncStatusEnum('status').default('synced'),
+  // POS-6 offline dine-in ops (migration 0301). Legacy quick-sale rows leave these NULL.
+  opType: text('op_type'),                            // 'dinein_open' | 'dinein_add' | 'dinein_fire' (NULL/'sale' = quick sale)
+  orderNo: text('order_no'),                          // dine-in order created (open) or targeted (add/fire) — server-minted DIN-…
+  orderUuid: text('order_uuid'),                      // client offline-order key linking an open op → its add/fire ops
   saleNo: text('sale_no'),                            // server-minted SALE-… (NULL when failed)
   capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(), // ORIGINAL offline moment (client clock)
   syncedAt: timestamp('synced_at', { withTimezone: true }).defaultNow(),  // when the server posted it

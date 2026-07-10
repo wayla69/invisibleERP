@@ -2129,6 +2129,13 @@
       "when": 2023820000266,
       "tag": "0303_consolidation_cta_translation",
       "breakpoints": true
+    },
+    {
+      "idx": 304,
+      "version": "7",
+      "when": 2023820000267,
+      "tag": "0304_offline_dinein_ops",
+      "breakpoints": true
     }
   ]
 }
