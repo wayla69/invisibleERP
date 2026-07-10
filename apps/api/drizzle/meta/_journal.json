@@ -2187,35 +2187,32 @@
       "breakpoints": true
     },
     {
+      "idx": 312,
+      "version": "7",
+      "when": 2023820000278,
+      "tag": "0312_dine_in_seat",
+      "breakpoints": true
+    },
+    {
       "idx": 314,
       "version": "7",
-      "when": 2023820000275,
+      "when": 2023820000279,
       "tag": "0314_ap_dynamic_discount",
       "breakpoints": true
     },
     {
       "idx": 315,
       "version": "7",
-      "when": 2023820000276,
+      "when": 2023820000280,
       "tag": "0315_member_ledger_idempotency",
       "breakpoints": true
     },
     {
       "idx": 316,
       "version": "7",
-      "when": 2023820000277,
+      "when": 2023820000281,
       "tag": "0316_stocktake_tenant_isolation",
       "breakpoints": true
-<<<<<<< HEAD
-=======
-    },
-    {
-      "idx": 312,
-      "version": "7",
-      "when": 2023820000278,
-      "tag": "0312_dine_in_seat",
-      "breakpoints": true
->>>>>>> origin/main
     }
   ]
 }
