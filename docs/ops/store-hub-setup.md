@@ -75,8 +75,14 @@ on diner phones — acceptable to smoke-test the loop).
   directly on the hub survive but will be overwritten per-row by the next snapshot import.)
 - **Local break-glass admin:** set `HUB_ADMIN_PASSWORD` in `.env` before seeding → user `hubadmin`
   (Admin, hub-only). No cloud credential is ever copied to the box.
-- **Backups:** the hub DB is the store's operational state; snapshot the `hub_pgdata` volume nightly
-  (`docker compose exec db pg_dump …`). Full DR posture: `docs/ops/dr-bcp-plan.md`.
+- **Backups (Phase 4b):** `docker compose --profile backup run --rm hub-backup` dumps `ierp_hub`,
+  **verifies the archive**, prunes past `BACKUP_KEEP_DAYS`, prints the **un-replayed sale count the dump
+  protects**, and optionally copies offsite (`BACKUP_OFFSITE_TARGET`). Cron it nightly after close:
+  `0 3 * * * cd /opt/ierp-hub && docker compose --profile backup run --rm hub-backup >> /var/log/hub-backup.log 2>&1`.
+  Restore: `gunzip -c hub-<stamp>.dump.gz | pg_restore -d ierp_hub -c`. Full DR posture:
+  `docs/ops/dr-bcp-plan.md` (scenario 6).
+- **Losing the box = losing un-replayed revenue.** The `GET /api/hub/fleet` backlog (Phase 4a) and the
+  backup log both show that number. Keep the push cron tight (5 min) so the exposure window is minutes.
 - **Clock:** keep NTP on (router default) — `captured_at` drift skews the business-day bucketing.
 - **Security:** the box holds staff credential hashes + sales data — full-disk encryption on, SSH
   key-only, and the same `APP_ENC_KEY` hygiene as any API node. Suspending a staff member on the
@@ -132,6 +138,28 @@ because the import preserves each table's `qr_token` verbatim:
 - New tables created ON the hub get their own QR and work immediately; they'll appear on the cloud only
   as their sales replay (the table master itself re-seeds cloud→hub, not hub→cloud).
 
+## 8. Updating a hub (Phase 4b)
+
+The hub runs the **same images as the cloud**, so an update is a rebuild + restart. Do it **after close**,
+never mid-service, and **push first** so no un-replayed sale rides the restart:
+
+```bash
+cd /opt/ierp-hub
+docker compose --profile push run --rm hub-push      # drain the backlog (verify: pushed/duplicate only)
+docker compose --profile backup run --rm hub-backup  # take a dump you can roll back to
+git -C /opt/invisible-erp pull                       # or pull new images
+docker compose up -d --build                         # api applies migrations on boot (RUN_MIGRATIONS=1)
+docker compose --profile seed run --rm hub-seed      # only if the catalog changed on the cloud
+```
+
+Verify: a till logs in, the menu renders, `GET /api/hub/fleet` (from HQ) shows the box **fresh, backlog 0**.
+Roll back by checking out the previous commit/tag and `up -d --build`; restore the dump only if a
+migration mangled data (migrations are forward-only — a restore is the rollback path).
+
+> **Version skew is safe in one direction only:** a hub may run *behind* the cloud (its pushes still
+> ingest — the ingest contract is additive), but a hub **ahead** of the cloud can send fields the cloud's
+> validator rejects. Upgrade the cloud first, then the hubs.
+
 ## Revision history
 
 | Version | Date | Author | Notes |
@@ -140,3 +168,4 @@ because the import preserves each table's `qr_token` verbatim:
 | 0.2 | 2026-07-10 | Platform | Phase 2a: §6 push-to-cloud operations (`hub-push` one-shot, cron guidance, `skipped_unsupported` review, reconciliation endpoint); scope note updated. |
 | 0.3 | 2026-07-10 | Platform | Phases 2b/3: buffet-tier replay noted in §6 scope; new §7 diner-QR-on-hub + offline-payments honesty. |
 | 0.4 | 2026-07-10 | Platform | Phases 2c/4a: §6 gains cash-session (Z-report) up-sync incl. the deliberate `TILL_SALES_NOT_SYNCED` block, and fleet visibility via the signed heartbeat + `GET /api/hub/fleet` (`HUB_ID`). |
+| 0.5 | 2026-07-10 | Platform | Phase 4b: verified nightly backup (`hub/backup.sh` + `hub-backup` compose profile, retention + optional offsite, reports the un-replayed backlog it protects) and new §8 hub-update procedure (drain → dump → rebuild; cloud-before-hub version-skew rule). |

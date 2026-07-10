@@ -25,7 +25,7 @@ import {
   menuCategories, menuItems, modifierGroups, modifierOptions, menuItemModifierGroups,
   buffetPackages, buffetPackageItems,
   kitchenStations, floorZones, diningTables,
-  posOfflineSync, custPosSales, tillSessions, hubHeartbeats,
+  posOfflineSync, custPosSales, tillSessions, hubHeartbeats, payments,
 } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { RestaurantOfflineSyncService, type RegisterOfflineSaleOp } from '../restaurant/offline-sync.service';
@@ -241,18 +241,26 @@ export class HubSyncService {
       });
     }
 
-    // Drawer takings, valued from the CLOUD's own sale rows (never the hub's numbers).
-    // NB the restaurant settlement path debits 1000 Cash for the FULL settled amount of every tender
-    // (`cust_pos_sales.payment_method` stores 'Dine-in', not the tender type — see PN-24 §7 6d), and the
-    // tip rides into the drawer on top of `total` (credited to 2300). So the drawer expectation is
-    // Σ(total + tip) over the session's sales — exactly what the GL says entered account 1000.
+    // Drawer takings, valued from the CLOUD's own rows (never the hub's numbers).
+    //
+    // The tender — not the sale — says whether cash entered the drawer: replaying a sale re-runs the
+    // restaurant checkout, which records a `payments` row carrying the REAL method (the sale header's
+    // `payment_method` is the literal 'Dine-in', not a tender type). So only `method='Cash'` tenders
+    // count; a card/PromptPay sale in the session must NOT inflate the drawer expectation.
+    // `payments.amount` excludes the tip (stored beside it) while the drawer physically receives both,
+    // so the expectation adds it back — matching the 1000 Cash debit (cashDue = total + tip).
     const cloudSaleNos = mapped.map((m: any) => String(m.saleNo));
-    const saleRows = cloudSaleNos.length
-      ? await db.select({ total: custPosSales.total, tip: custPosSales.tip })
-          .from(custPosSales)
-          .where(and(eq(custPosSales.tenantId, t), inArray(custPosSales.saleNo, cloudSaleNos)))
+    const tenderRows = cloudSaleNos.length
+      ? await db.select({ amount: payments.amount, tip: payments.tip })
+          .from(payments)
+          .where(and(
+            eq(payments.tenantId, t),
+            inArray(payments.saleNo, cloudSaleNos),
+            eq(payments.method, 'Cash'),
+            inArray(payments.status, ['Captured', 'Refunded']),
+          ))
       : [];
-    const cashSales = roundCurrency(saleRows.reduce((s: number, r: any) => s + Number(r.total ?? 0) + Number(r.tip ?? 0), 0), 'THB');
+    const cashSales = roundCurrency(tenderRows.reduce((s: number, r: any) => s + Number(r.amount ?? 0) + Number(r.tip ?? 0), 0), 'THB');
 
     const num = (v: unknown) => Number(v ?? 0);
     const expectedCash = roundCurrency(

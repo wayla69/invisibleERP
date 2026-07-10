@@ -132,20 +132,22 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
    expected-cash figure. The cloud resolves every listed sale through the step-6c dedup ledger and
    **refuses the session** (`400 TILL_SALES_NOT_SYNCED`, listing the missing sales) unless all have
    replayed — a variance is never certified over an incomplete revenue population. It then computes
-   `expected = opening_float + Σ(cloud total + tip of the session's sales) + paid_in − paid_out − drops
-   − cash_refunds` from its **own** ledger, derives `variance = counted − expected`, and posts the
-   over/short to **5830** on the *same* materiality line as a native close (**REV-13**,
-   `CASH_VARIANCE_THRESHOLD`): a material variance posts a **Draft** JE and parks the session
-   `PendingApproval` for a different user (GL-05 maker-checker); a sub-threshold variance posts
-   immediately. Idempotent on `session_no` (a re-push returns `duplicate`; never a second JE).
-   *Control: **BRANCH-05**.*
+   `expected = opening_float + Σ(cash tender amount + tip) + paid_in − paid_out − drops − cash_refunds`
+   from its **own** rows, derives `variance = counted − expected`, and posts the over/short to **5830**
+   on the *same* materiality line as a native close (**REV-13**, `CASH_VARIANCE_THRESHOLD`): a material
+   variance posts a **Draft** JE and parks the session `PendingApproval` for a different user (GL-05
+   maker-checker); a sub-threshold variance posts immediately. Idempotent on `session_no` (a re-push
+   returns `duplicate`; never a second JE). *Control: **BRANCH-05**.*
 
-   *Two product facts this design rests on (verified, not assumed):* the restaurant settlement path
-   writes **no `payments` tender row** — so the native `aggregateTill` (which sums tenders) does not
-   see restaurant cash — and it stores `cust_pos_sales.payment_method = 'Dine-in'` while **debiting
-   1000 Cash for the full settled amount of every tender** (tip included, credited to 2300). A hub
-   session is therefore reconciled against the **sale ledger**, which is exactly what account 1000
-   received. Closing this asymmetry in the native till path is tracked in docs/41 Phase 2c.
+   *Where the cash figure comes from (verified, not assumed):* the **tender** — not the sale header —
+   says whether cash entered the drawer. Replaying a sale re-runs the restaurant checkout, which records
+   a `payments` row carrying the **real method** (`recordTender`, linked to the open till); the sale
+   header's `cust_pos_sales.payment_method` is the literal `'Dine-in'` and must never be read as a
+   tender type. So the ingest sums only `method='Cash'` tenders — a card/PromptPay sale in the session
+   cannot inflate the drawer expectation. `payments.amount` **excludes** the tip (stored beside it) while
+   the drawer physically receives both, so the expectation adds it back — matching the 1000 Cash debit
+   (`cashDue = total + tip`). NB the **native** `aggregateTill` sums `amount` only, so a cash tip makes a
+   native close read "over" by the tip; that pre-existing discrepancy is tracked in docs/41 Phase 2c-2.
 
 6e. **Hub fleet heartbeat (docs/41 Phase 4a).** Each hub reports a signed heartbeat
    (`POST /api/hub/heartbeat`): `hub_id`, app version, the **un-replayed backlog** (pending sales /
@@ -235,3 +237,4 @@ flowchart TD
 | 0.5 | 2026-07-10 | Platform | **Hub→cloud sales replay + reconciliation (docs/41 Phase 2a — NEW control BRANCH-04, RCM 204→205).** New §7 step 6c: hub pusher `db:hub:push` (`database/hub-push.ts`; deterministic `client_uuid` = `hub:{tenant}:{hub_sale_no}` ⇒ exactly-once even after a lost push-log; unsupported shapes logged `skipped_unsupported` WITH reason — visible, never silent) → cloud `POST /api/hub/ingest` (`@Public` + HMAC-SHA256 timing-safe over `{tenant_id,sent_at,sales}`, fail-closed on `HUB_SYNC_SECRET`) → replays via the step-6 register offline-sync path (server re-prices; GL posts on the CLOUD ledger — book of record; the hub's own ledger is operational only). `RegisterOfflineSaleOp` gains additive `discount`/`tip`/`service_charge_pct` pass-through for replay fidelity. New table `hub_push_log` (migration `0293`, canonical RLS); `GET /api/hub/reconciliation` (`branch`/`exec`) ties hub ops ↔ cloud sale values. ToE: `hub-snapshot` harness extended to 27 checks (ring-on-hub → push → cloud GL + TB balanced → log-loss re-push all-duplicate → tamper 403 → skip visibility). UAT-O2C-290..291. |
 | 0.6 | 2026-07-10 | Platform | **Buffet replay + diner QR on the hub (docs/41 Phase 2b/3 — BRANCH-04 widened, no new control).** §7 step 6c: a buffet-tier hub sale now replays via `op.buffet {package_code, pax, overtime_pax}` — the cloud re-creates the per-pax charge via `BuffetService.applyReplayCharge`, **priced from the cloud package master**; ฿0 food lines not replayed; batch signature hardened to **canonical (key-sorted) JSON** (a Zod-reordered body previously broke verification — found by the harness). Diner QR self-order proven end-to-end ON the hub (imported `qr_token` → public session → menu/tiers → order → KDS → settle → replay); payments honesty documented (runbook §7). Loyalty-redeem sales + till/Z + fiscal chain remain the visible `skipped_unsupported` / Phase-2c scope. ToE: harness → **40 checks**; UAT-O2C-306..307. |
 | 0.7 | 2026-07-10 | Platform | **Hub cash-session up-sync + fleet heartbeat (docs/41 Phases 2c/4a — NEW control BRANCH-05, RCM 206→207).** New §7 steps **6d** (till/Z ingest `POST /api/hub/ingest-till`: completeness gate `TILL_SALES_NOT_SYNCED`, cloud-side expected-cash re-computation, 5830 over/short on the shared REV-13 materiality line with GL-05 maker-checker parking, idempotent on `session_no`) and **6e** (`POST /api/hub/heartbeat` + `GET /api/hub/fleet`: liveness, un-replayed backlog, measured clock skew; table `hub_heartbeats`, migration `0296`, which also adds `hub_push_log.doc_type`). Documents two verified product facts the design rests on: restaurant checkout writes **no `payments` tender** (so the native `aggregateTill` misses restaurant cash) and stores `payment_method='Dine-in'` while debiting **1000** for the full settled amount **+ tip**. Fixed en route: `hub-push` read a non-existent `dine_in_orders.created_at`, silently stamping every replayed sale’s `captured_at` with the PUSH time (now `paid_at`/`opened_at`). ToE: harness → **53 checks**; UAT-O2C-308..310. |
+| 0.8 | 2026-07-10 | Platform | **BRANCH-05 correction + hub-push tender fidelity (docs/41 Phase 2c-2).** A blast-radius review disproved rev 0.7’s premise: restaurant checkout **does** record a `payments` tender (`recordTender` — real method, linked to the open till), so the native `aggregateTill` already sees restaurant cash. §7 6d rewritten accordingly, and **two shipped defects fixed**: (1) `hub-push` sent `cust_pos_sales.payment_method` (the literal `Dine-in`) as the replay tender method, mis-typing every cloud tender — it now reads the hub’s tender row; (2) `ingestTill` valued the drawer from **all** sales, so a card/PromptPay sale inflated expected cash and the session read short by that amount — it now sums only `method=Cash` tenders (+ tip). Flagged (pre-existing, NOT introduced): the **native** `aggregateTill` excludes the tip from `expected_cash` although the drawer receives it, so a native close reads “over” by a cash tip — tracked in docs/41 Phase 2c-2. ToE: harness → **55 checks** (adds a card sale that must not inflate the drawer); UAT-O2C-309 updated. |
