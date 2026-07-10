@@ -1,4 +1,4 @@
--- 0291 — Store-hub → cloud replay tracking (docs/41 Phase 2a, control BRANCH-04).
+-- 0292 — Store-hub → cloud replay tracking (docs/41 Phase 2a, control BRANCH-04).
 -- One row per hub-captured sale: which were pushed to the cloud ingest endpoint, the cloud's canonical
 -- sale_no they mapped to, and — crucially for the reconciliation control — the sales the pusher could
 -- NOT replay (status 'skipped_unsupported'): visible, never silently dropped.
