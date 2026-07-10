@@ -1,6 +1,6 @@
 # Members & Points CRM (สมาชิก & แต้ม)
 
-**Status: DRAFT v0.2** · Last updated: 2026-07-06 · For: Sales, Marketing, Loyalty Admin, Managers
+**Status: DRAFT v0.2** · Last updated: 2026-07-10 · For: Sales, Marketing, Loyalty Admin, Managers
 
 This guide covers the loyalty CRM — the **member directory**, the **360° member view**, the **PDPA
 consent register**, and the **points-liability** report. Configuring earn/redeem rates is in
@@ -343,6 +343,34 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > those messages were logged as *sent* but never reached a customer — connect a provider, then use **ส่งทดสอบ**
 > to confirm the badge flips to 🟢 and the last delivery shows the real provider name.
 
+## 11b. Voucher campaigns (คูปองส่วนลด — โค้ดใช้ ณ จุดขาย)
+
+Issue **standalone discount codes** customers redeem at checkout — grand-opening coupons, influencer codes,
+print-and-hand-out vouchers. On **แคมเปญ** (`/loyalty/campaigns`), the **คูปองส่วนลด (Voucher campaigns)** card:
+
+**Required permission:** create/generate/void — `promos` / `pricelist` / `marketing` / `exec` (the R10 split:
+segregated from selling); approve — the same duties **but a different user** than the creator.
+
+1. **Create** a voucher campaign — **ชื่อ**, **ชนิดส่วนลด** (เปอร์เซ็นต์ % or จำนวนเงิน ฿), **มูลค่า**,
+   optional **ยอดซื้อขั้นต่ำ**, **ใช้ได้ถึง** (validity), and an optional **เพดานใช้ทั้งแคมเปญ** (campaign-wide
+   redemption cap). Codes are **single-use** by default.
+2. **A different user approves** (อนุมัติ) the campaign before any code redeems — the creator self-approving is
+   rejected (`SOD_VIOLATION`). Until approval every code answers `VOUCHER_NOT_ACTIVE` at the till.
+3. **Generate codes** (สร้างโค้ด) in batches (จำนวนโค้ดต่อครั้ง, up to 2,000) — crypto-random, unique, unguessable —
+   and **export them as CSV** (⬇) for printing or distribution.
+4. **Redeem at the register:** the cashier enters/scans the code in the **โค้ดคูปอง / บัตรกำนัล** field at checkout
+   (see [Sales & POS →  Checkout](./01-sales-and-pos.md)). The member **wallet coupon** (`CPN-…`, issued by
+   missions/wheels/manual) redeems through the **same field**.
+5. **Track**: each row shows **ใช้แล้ว/ออกแล้ว** (redeemed/issued); the redemption report
+   (`GET /api/vouchers/campaigns/:id/redemptions`) lists every redeemed code with its bill number, cashier and time.
+6. **Void** a mis-issued code (โมฆะ) — audited with who/when/why; a code already redeemed can't be voided
+   (`CANNOT_VOID`). **ปิดแคมเปญ** (end) stops all its codes immediately.
+
+> Controls *(REV-20)*: activation is **maker-checker** (creator ≠ approver); redemption is **atomic single-use**
+> (two tills racing on the same code — exactly one wins, the other gets `VOUCHER_ALREADY_REDEEMED`); validity
+> window, minimum spend and the campaign cap are enforced **server-side**; voids are audited. A **returned sale
+> does not auto-release the code** (same policy as promo usage) — re-issue a fresh code if warranted.
+
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
 Give members perks at partner shops. On **พันธมิตร & สิทธิพิเศษ** (`/loyalty/partners`):
@@ -535,3 +563,4 @@ claim points by uploading a photo of the receipt.
 | 1.39 | 2026-07-06 | Platform | **G13 — where the approval queue lives in the app:** §9 callout now notes that over-threshold staff point-transfers awaiting release appear in a **"Point transfers pending approval"** card on the **Loyalty** config screen (`/loyalty`), where a **different** approver (Approvals/Exec) clicks Approve/Reject. UI surfacing of the already-shipped G13 control — no new endpoint, no new numbered control. |
 | 1.38 | 2026-07-06 | Platform | **G13 — large staff point-transfers need a second approver:** §9 gains a control callout — a **staff-initiated** transfer over **500 points** is held for approval and moves **no points** until a **different** authorised user (**Approvals/Exec**) approves it (`POST /api/loyalty/transfers/:reqNo/approve`; queue `.../transfers/pending`; `.../reject` discards); self-approval is blocked (`SOD_VIOLATION`). Smaller staff transfers and members sending their own points still go through immediately. Strengthens SoD R15/R16 (rides LYL-18; no new control). |
 | 1.29 | 2026-07-02 | Platform | **W1 (docs/27) tier economics + points liquidity:** §7 **ตัวคูณแต้มตามระดับ** — tier-ladder card on `/loyalty` sets ×earn per tier (Gold ×2 earns double **at the till**, audited in the ledger; liability accrues the multiplied points automatically); §9 **โอนแต้มให้เพื่อน** — member-to-member point transfer by phone (same shop, all-or-nothing, daily cap `เพดานโอนแต้มต่อวัน`, 0 = off; staff-assist route for the back office; LYL-18); §4 **เตือนแต้มใกล้หมดอายุ** — the daily sweep fires `loyalty.points_expiring` into Automation/Webhooks 30 days ahead, one nudge per expiring batch. New error codes `SELF_TRANSFER`, `RECIPIENT_NOT_FOUND`, `TRANSFER_CAP`, `TRANSFER_DISABLED`. |
+| 1.40 | 2026-07-10 | Platform | **POS-3 voucher campaigns (docs/41; control REV-20):** new §11b **คูปองส่วนลด** on `/loyalty/campaigns` — create a voucher campaign (percent/amount, min spend, validity, per-code single-use, campaign cap), **a different user approves before codes go live** (`SOD_VIOLATION` on self-approve), bulk-generate crypto-random codes + CSV export, void with audit, redemption stats; codes (and member wallet coupons `CPN-…`) redeem in the new voucher field at POS checkout — atomic single redemption, best-discount-wins. Returned sales do not auto-release codes (promo-consistent policy). |

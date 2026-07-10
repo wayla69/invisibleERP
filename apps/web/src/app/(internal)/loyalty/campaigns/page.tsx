@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Megaphone, Plus, Send, Ban, Users } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Megaphone, Plus, Send, Ban, Users, TicketPercent, Download, CheckCircle2, Sparkles, Square } from 'lucide-react';
+import { api, apiDownload } from '@/lib/api';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
@@ -19,9 +19,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select } from '@/components/form-controls';
 
 const tone: Record<string, any> = { draft: 'muted', scheduled: 'info', sent: 'success', cancelled: 'destructive' };
+const vtone: Record<string, any> = { PendingApproval: 'warning', Active: 'success', Rejected: 'destructive', Ended: 'muted' };
 
 interface Campaign { id: number; campaign_code: string; name: string; channel: string; audience: string; segment: string | null; tier: string | null; saved_segment_id: number | null; status: string; targeted: number; sent_count: number; skipped_count: number; failed_count: number; schedule_at: string | null }
 interface SavedSegment { id: number; name: string }
+interface VoucherCampaign { id: number; campaign_code: string; name: string; kind: string; value: number; min_spend: number | null; valid_to: string | null; per_code_max_uses: number; max_redemptions: number | null; status: string; codes_issued: number; redeemed_count: number; created_by: string | null; approved_by: string | null }
 
 export default function CampaignsPage() {
   const { t } = useLang();
@@ -43,6 +45,31 @@ export default function CampaignsPage() {
   });
   const sendNow = useMutation({ mutationFn: (c: Campaign) => api(`/api/loyalty/campaigns/${c.id}/send`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-campaigns'] }), onError: (e: Error) => notifyError(e.message) });
   const cancel = useMutation({ mutationFn: (c: Campaign) => api(`/api/loyalty/campaigns/${c.id}/cancel`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-campaigns'] }), onError: (e: Error) => notifyError(e.message) });
+
+  // ── POS-3 voucher campaigns (codes redeemable at POS checkout; activation is maker-checker) ──
+  const vlist = useQuery<{ campaigns: VoucherCampaign[] }>({ queryKey: ['voucher-campaigns'], queryFn: () => api('/api/vouchers/campaigns') });
+  const [vf, setVf] = useState({ name: '', kind: 'percent', value: '', min_spend: '', valid_to: '', per_code_max_uses: '1', max_redemptions: '' });
+  const vset = (p: Partial<typeof vf>) => setVf((s) => ({ ...s, ...p }));
+  const [genCount, setGenCount] = useState('100');
+  const vRefresh = () => qc.invalidateQueries({ queryKey: ['voucher-campaigns'] });
+  const vCreate = useMutation({
+    mutationFn: () => api('/api/vouchers/campaigns', { method: 'POST', body: JSON.stringify({
+      name: vf.name, kind: vf.kind, value: Number(vf.value),
+      ...(vf.min_spend ? { min_spend: Number(vf.min_spend) } : {}), ...(vf.valid_to ? { valid_to: vf.valid_to } : {}),
+      ...(vf.per_code_max_uses ? { per_code_max_uses: Number(vf.per_code_max_uses) } : {}), ...(vf.max_redemptions ? { max_redemptions: Number(vf.max_redemptions) } : {}),
+    }) }),
+    onSuccess: () => { notifySuccess(t('ly.vc_created')); setVf({ name: '', kind: 'percent', value: '', min_spend: '', valid_to: '', per_code_max_uses: '1', max_redemptions: '' }); vRefresh(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const vApprove = useMutation({ mutationFn: (c: VoucherCampaign) => api(`/api/vouchers/campaigns/${c.id}/approve`, { method: 'POST' }), onSuccess: () => { notifySuccess(t('ly.vc_approved')); vRefresh(); }, onError: (e: Error) => notifyError(e.message) });
+  const vReject = useMutation({ mutationFn: (c: VoucherCampaign) => api(`/api/vouchers/campaigns/${c.id}/reject`, { method: 'POST', body: '{}' }), onSuccess: vRefresh, onError: (e: Error) => notifyError(e.message) });
+  const vEnd = useMutation({ mutationFn: (c: VoucherCampaign) => api(`/api/vouchers/campaigns/${c.id}/end`, { method: 'POST' }), onSuccess: vRefresh, onError: (e: Error) => notifyError(e.message) });
+  const vGen = useMutation({
+    mutationFn: (c: VoucherCampaign) => api<{ generated: number }>(`/api/vouchers/campaigns/${c.id}/codes`, { method: 'POST', body: JSON.stringify({ count: Math.max(1, Number(genCount) || 1) }) }),
+    onSuccess: (r) => { notifySuccess(t('ly.vc_generated', { count: r.generated })); vRefresh(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const vCsv = (c: VoucherCampaign) => apiDownload(`/api/vouchers/campaigns/${c.id}/codes.csv`, `voucher-codes-${c.campaign_code}.csv`).catch((e: Error) => notifyError(e.message));
 
   return (
     <div>
@@ -93,6 +120,65 @@ export default function CampaignsPage() {
             />
           )}
         </StateView>
+
+        {/* ── POS-3 voucher campaigns: standalone codes redeemable at POS checkout ── */}
+        <Card className="gap-4">
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><TicketPercent className="size-4" /> {t('ly.vc_title')}</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">{t('ly.vc_desc')}</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-1.5"><Label>{t('ly.vc_name')}</Label><Input value={vf.name} onChange={(e) => vset({ name: e.target.value })} placeholder={t('ly.vc_name_ph')} /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.vc_kind')}</Label><Select className="w-auto" value={vf.kind} onChange={(e) => vset({ kind: e.target.value })}><option value="percent">{t('ly.vc_kind_percent')}</option><option value="amount">{t('ly.vc_kind_amount')}</option></Select></div>
+              <div className="grid gap-1.5"><Label>{t('ly.vc_value')}</Label><Input type="number" min={0} className="tabular" value={vf.value} onChange={(e) => vset({ value: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.vc_min_spend')}</Label><Input type="number" min={0} className="tabular" value={vf.min_spend} onChange={(e) => vset({ min_spend: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.vc_valid_to')}</Label><Input type="date" value={vf.valid_to} onChange={(e) => vset({ valid_to: e.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>{t('ly.vc_max_redemptions')}</Label><Input type="number" min={1} className="tabular" value={vf.max_redemptions} onChange={(e) => vset({ max_redemptions: e.target.value })} placeholder={t('ly.vc_unlimited')} /></div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={() => vCreate.mutate()} disabled={!vf.name.trim() || !Number(vf.value) || vCreate.isPending}><Plus className="size-4" /> {vCreate.isPending ? t('ly.saving') : t('ly.vc_create')}</Button>
+              <span className="text-xs text-muted-foreground">{t('ly.vc_sod_note')}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Label className="text-muted-foreground">{t('ly.vc_gen_count')}</Label>
+              <Input type="number" min={1} max={2000} className="h-8 w-24 tabular" value={genCount} onChange={(e) => setGenCount(e.target.value)} />
+            </div>
+            <StateView q={vlist}>
+              {vlist.data && (
+                <DataTable
+                  rows={vlist.data.campaigns}
+                  rowKey={(c) => c.id}
+                  emptyState={{ icon: TicketPercent, title: t('ly.vc_empty'), description: t('ly.vc_empty_desc') }}
+                  columns={[
+                    { key: 'campaign_code', label: t('ly.col_code'), render: (c) => <span className="font-mono text-xs">{c.campaign_code}</span> },
+                    { key: 'name', label: t('ly.col_name') },
+                    { key: 'value', label: t('ly.vc_col_discount'), align: 'right', render: (c) => <span className="tabular">{c.kind === 'percent' ? `${num(c.value)}%` : `฿${num(c.value)}`}{c.min_spend ? <span className="text-xs text-muted-foreground"> ≥฿{num(c.min_spend)}</span> : null}</span> },
+                    { key: 'status', label: t('fin.col_status'), render: (c) => <Badge variant={vtone[c.status] ?? 'muted'}>{c.status}</Badge> },
+                    { key: 'codes_issued', label: t('ly.vc_col_codes'), align: 'right', render: (c) => <span className="tabular text-xs">{num(c.redeemed_count)}/{num(c.codes_issued)}</span> },
+                    { key: 'act', label: '', align: 'right', render: (c) => (
+                      <div className="flex justify-end gap-1">
+                        {c.status === 'PendingApproval' && (
+                          <>
+                            <Button size="sm" variant="outline" disabled={vApprove.isPending} onClick={() => vApprove.mutate(c)}><CheckCircle2 className="size-3.5" /> {t('ly.vc_approve')}</Button>
+                            <Button size="sm" variant="ghost" disabled={vReject.isPending} onClick={() => vReject.mutate(c)}><Ban className="size-3.5" /></Button>
+                          </>
+                        )}
+                        {(c.status === 'PendingApproval' || c.status === 'Active') && (
+                          <Button size="sm" variant="outline" disabled={vGen.isPending} onClick={() => vGen.mutate(c)}><Sparkles className="size-3.5" /> {t('ly.vc_generate')}</Button>
+                        )}
+                        {c.codes_issued > 0 && (
+                          <Button size="sm" variant="ghost" onClick={() => vCsv(c)} aria-label={t('ly.vc_export_csv')}><Download className="size-3.5" /></Button>
+                        )}
+                        {c.status === 'Active' && (
+                          <Button size="sm" variant="ghost" disabled={vEnd.isPending} onClick={() => vEnd.mutate(c)} aria-label={t('ly.vc_end')}><Square className="size-3.5" /></Button>
+                        )}
+                      </div>
+                    ) },
+                  ]}
+                />
+              )}
+            </StateView>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

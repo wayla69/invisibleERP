@@ -109,13 +109,15 @@ export default function RegisterPage() {
 
   // ── settle: create the order (re-priced + 86-checked server-side), fire kitchen for dine-in, checkout,
   //    then drive the hardware (customer display → print → drawer). Returns the authoritative sale. ──
-  const settle = useCallback(async ({ method, discountPct, cashReceived }: { method: Method; discountPct: number; cashReceived?: number }): Promise<SettleResult> => {
+  const settle = useCallback(async ({ method, discountPct, cashReceived, voucherCode }: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string }): Promise<SettleResult> => {
     const items = lines.map((l) => ({ sku: l.sku, qty: l.qty, modifier_option_ids: l.modifier_option_ids, notes: l.notes }));
 
     // ── offline path: queue a QUICK (no-table) cash-ish sale and replay it on reconnect. Dine-in needs
     //    the kitchen/online path (fire + table state), so it is blocked offline with a clear message. ──
     if (!online) {
       if (mode === 'dinein') throw new Error(t('px.reg_err_offline_dinein'));
+      // POS-3: a voucher must be validated + atomically redeemed server-side — not redeemable offline.
+      if (voucherCode) throw new Error(t('px.reg_err_offline_voucher'));
       const offlineTotal = cartTotals(lines, discountPct).total;
       const change = cashReceived != null ? Math.round((cashReceived - offlineTotal) * 100) / 100 : undefined;
       await enqueueRegisterSale({ lines: items, method, discount_pct: discountPct || undefined, captured_at: new Date().toISOString(), device_id: tm.terminalCode, total: offlineTotal });
@@ -138,7 +140,7 @@ export default function RegisterPage() {
     const sc = serviceChargePct > 0 ? { apply_pricing_rules: true, service_charge_pct: serviceChargePct, party_size: pax, service_min_party: 1, channel: orderType } : {};
     const sale = await api<{ sale_no: string; total: number; total_with_tip?: number }>(`/api/restaurant/orders/${orderNo}/checkout`, {
       method: 'POST',
-      body: JSON.stringify({ method, discount_pct: discountPct || undefined, ...sc }),
+      body: JSON.stringify({ method, discount_pct: discountPct || undefined, voucher_code: voucherCode || undefined, ...sc }),
     });
     const total = Number(sale.total ?? sale.total_with_tip ?? tot.total);
     const change = cashReceived != null ? Math.round((cashReceived - total) * 100) / 100 : undefined;
