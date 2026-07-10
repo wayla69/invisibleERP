@@ -166,6 +166,28 @@ contact to a member (§16.4) to light it up.
 
 ---
 
+## 16.6 Inbound replies & the review queue (อีเมลตอบกลับเข้า CRM) — CRM-6
+
+CRM-4 lets you email a customer *from* a deal (§16.3c); **CRM-6 captures their reply back onto the same deal**
+automatically, so the whole conversation lives on the timeline — no copy-pasting from your inbox. It works over
+your company's **CRM inbound email address** (your administrator points the mail provider's inbound route at
+`/api/crm/email/inbound/<company code>`); the system never reads your personal mailbox.
+
+- **Automatic threading.** Every email you send from a deal now carries a hidden reference tag (`[ref:…]`). When
+  the customer replies (even from a different address, or forwarded by a colleague), that tag threads the reply
+  straight back to the right deal and it appears as an **inbound email activity** on the deal page and Customer-360.
+- **Match by sender.** If there's no tag, the reply is matched by the sender's email to a **contact's open deal**,
+  or to an **open lead**.
+- **Review queue (คิวตรวจสอบ).** A reply that can't be matched — a brand-new sender, or a stray email — is **not**
+  guessed onto a deal. It waits in the **review queue** (`GET /api/crm/inbound/review`). Open the queue, and for
+  each item either **Link** it to the right deal/lead (`POST /api/crm/inbound/:id/link` — it's logged as an
+  activity and leaves the queue) or **Dismiss** it (`POST /api/crm/inbound/:id/dismiss`) if it's spam.
+- **Authenticity.** The inbound webhook is signed with your company's email secret (HMAC); a forged or unsigned
+  delivery is rejected and never journaled. Capture is **read-only to your pipeline** — it adds timeline
+  activities but never posts to the ledger and never moves a deal's stage.
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -178,11 +200,14 @@ contact to a member (§16.4) to light it up.
 | `NO_ROUND_ROBIN` | **Assign** pressed with no round-robin owners configured and no owner given | Set `round_robin_owners` in follow-up settings, or pass an owner. |
 | `NO_RECIPIENT` | Comms send where the contact has no address for that channel | Enter a `to` address, or set the contact's email/LINE id/phone. |
 | `ACCOUNT_NOT_FOUND` | Opening Customer 360 for an account number that doesn't exist in your company | Check the `ACC-…` number, or open the account from the Accounts tab. |
+| `BAD_INBOUND_SECRET` / `INBOUND_UNVERIFIED` | An inbound CRM email arrived unsigned or with a wrong signature (CRM-6) | Not a user action — ask your administrator to configure the CRM inbound email secret at the mail provider. |
+| `ALREADY_RESOLVED` | Linking a review-queue item that was already linked or dismissed | Refresh the review queue; someone already handled it. |
 
 ## Revision history
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.3 | 2026-07-10 | **CRM-6 — inbound email capture (2-way comms)** (docs/41): new §16.6. Customer replies to a deal email are captured back onto the deal timeline automatically — via the hidden reply-threading tag CRM-4 now embeds in outbound emails, or the sender's contact/lead email — and appear as inbound email activities on the deal page + Customer-360. Unmatched replies land in a **review queue** (`GET /api/crm/inbound/review`) to **Link** or **Dismiss**. The inbound webhook is HMAC-signed (forged deliveries rejected); capture never posts to the ledger. Added the `BAD_INBOUND_SECRET`/`INBOUND_UNVERIFIED` and `ALREADY_RESOLVED` error rows. |
 | 1.2 | 2026-07-10 | **CRM-4 — sales automation** (docs/41): lead scoring (grade A–D, explainable/versioned breakdown), the follow-up center (SLA-breach / overdue-task / rotting-deal worklist, detective control **REV-22**) + round-robin assignment + the daily follow-up digest, pipeline events into the automation rules engine, and send email/LINE from a deal with merge fields (logged as an activity). |
 | 1.1 | 2026-07-10 | **CRM-5 — analytics that answer "why"** (Module-Depth Uplift Wave 4): new §16.5 covering the funnel-conversion + time-in-stage velocity, source-ROI, and forecast-categories + quota + activity-leaderboard analytics (`/api/crm/pipeline/analytics/*`), each date-bounded and schedulable as the BI report types `crm_funnel` / `crm_source_roi` / `crm_forecast`. |
 | 1.0 | 2026-07-10 | **CRM-2 — first release of the unified CRM workspace** (docs/41): `/crm` kanban board + list toggle, saved filter views, deal page with unified timeline + next-step, account page, leads import wizard, web-to-lead capture; `/pipeline` and `/projects/crm` now redirect here; member CRM 360 moved to `/crm/members`. |
