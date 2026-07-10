@@ -47,7 +47,7 @@ jobs:
           LATEST=$(echo "$DEPS" | jq -r '.data.deployments.edges[0].node.id // empty')
           if [ -n "$LATEST" ]; then
             echo "::group::runtime log tail of LATEST deployment $LATEST (any status)"
-            gq "{\"query\":\"query{deploymentLogs(deploymentId:\\\"$LATEST\\\",limit:60){timestamp severity message}}\"}" | jq -r '.data.deploymentLogs[]? | .timestamp+" ["+(.severity // "-")+"] "+.message'
+            gq "{\"query\":\"query{deploymentLogs(deploymentId:\\\"$LATEST\\\",limit:500){timestamp severity message}}\"}" | jq -r '.data.deploymentLogs[]? | .timestamp+" ["+(.severity // "-")+"] "+.message' | { grep -E "listening|Bootstrap|falling back|dual-stack|EAFNOSUPPORT|Refusing|ERROR|error" || true; } | tail -30
             echo "::endgroup::"
           fi
           DID=$(echo "$DEPS" | jq -r '[.data.deployments.edges[].node | select(.status=="FAILED" or .status=="CRASHED")][0].id // empty')
