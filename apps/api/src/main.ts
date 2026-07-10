@@ -96,8 +96,26 @@ async function bootstrap() {
   }
 
   const port = Number(process.env.PORT ?? 8000);
-  await app.listen({ port, host: '0.0.0.0' });
-  new Logger('Bootstrap').log(`Invisible ERP V2 API listening on http://0.0.0.0:${port} (pid ${process.pid})`);
+  // Bind dual-stack ('::' accepts IPv6 AND IPv4-mapped connections) so Railway PRIVATE networking —
+  // which is IPv6-only (*.railway.internal) — can reach the API; an IPv4-only bind ('0.0.0.0') forces the
+  // web service's same-origin /api proxy out through the public edge (slower, counted egress). Hosts
+  // without an IPv6 stack (some containers/CI) reject '::' with EAFNOSUPPORT/EADDRNOTAVAIL — fall back to
+  // the old IPv4 bind so this change can never brick a boot. BIND_HOST overrides both when set.
+  const preferredHost = process.env.BIND_HOST ?? '::';
+  let boundHost = preferredHost;
+  try {
+    await app.listen({ port, host: preferredHost });
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code ?? '';
+    if (preferredHost === '::' && (code === 'EAFNOSUPPORT' || code === 'EADDRNOTAVAIL')) {
+      boundHost = '0.0.0.0';
+      new Logger('Bootstrap').warn(`IPv6 dual-stack bind unavailable (${code}) — falling back to IPv4 0.0.0.0`);
+      await app.listen({ port, host: boundHost });
+    } else {
+      throw e;
+    }
+  }
+  new Logger('Bootstrap').log(`Invisible ERP V2 API listening on http://${boundHost === '::' ? '[::]' : boundHost}:${port} (pid ${process.pid})`);
 }
 
 // Opt-in multi-process clustering. A single Node process is single-threaded for JS and saturates ~1 core
