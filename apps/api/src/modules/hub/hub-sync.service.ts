@@ -38,6 +38,36 @@ import { signHubBatch, signHubDoc, type HubTillDoc, type HubHeartbeatDoc } from 
 export const HUB_SNAPSHOT_FORMAT = 'ierp-hub-snapshot';
 export const HUB_SNAPSHOT_VERSION = 1;
 
+// ── Phase 4c: version channel ─────────────────────────────────────────────────────────────────────
+// Compare a hub's reported app version against the cloud's. Semver-ish: numeric segments compared
+// left-to-right; anything unparseable is treated as unknown (never as a mismatch, so a hub with no
+// APP_VERSION set is not spuriously flagged).
+export function compareVersions(a: string, b: string): number | null {
+  const parse = (v: string) => {
+    const m = String(v).trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  };
+  const pa = parse(a), pb = parse(b);
+  if (!pa || !pb) return null;
+  for (let i = 0; i < 3; i++) if (pa[i]! !== pb[i]!) return pa[i]! < pb[i]! ? -1 : 1;
+  return 0;
+}
+
+/**
+ * The cloud's advice to a hub about its version. The upgrade order is asymmetric and matters:
+ * a hub BEHIND the cloud is fine (the ingest contract is additive), but a hub AHEAD can send fields
+ * the cloud's validator rejects — that hub is told to stop and wait for the cloud to be upgraded.
+ */
+export function versionAdvice(hubVersion: string | null | undefined) {
+  const cloudVersion = process.env.APP_VERSION ?? null;
+  if (!cloudVersion || !hubVersion) return { cloud_version: cloudVersion, version_status: 'unknown' as const, upgrade_available: false };
+  const cmp = compareVersions(hubVersion, cloudVersion);
+  if (cmp === null) return { cloud_version: cloudVersion, version_status: 'unknown' as const, upgrade_available: false };
+  if (cmp < 0) return { cloud_version: cloudVersion, version_status: 'behind' as const, upgrade_available: true };
+  if (cmp > 0) return { cloud_version: cloudVersion, version_status: 'ahead' as const, upgrade_available: false };
+  return { cloud_version: cloudVersion, version_status: 'current' as const, upgrade_available: false };
+}
+
 /** HMAC-SHA256 signature over the serialized snapshot payload. Shared by exporter and importer. */
 export function signHubPayload(payloadJson: string, secret: string): string {
   return createHmac('sha256', secret).update(payloadJson).digest('hex');
@@ -322,7 +352,9 @@ export class HubSyncService {
     };
     await this.db.insert(hubHeartbeats).values(row)
       .onConflictDoUpdate({ target: [hubHeartbeats.tenantId, hubHeartbeats.hubId], set: row });
-    return { ok: true as const, hub_id: body.hub.hub_id, clock_skew_sec: row.clockSkewSec };
+    // Phase 4c — the heartbeat is the version channel: the cloud answers with the version it is running,
+    // so the box learns it is behind (upgrade at the next close) or, worse, AHEAD of the cloud.
+    return { ok: true as const, hub_id: body.hub.hub_id, clock_skew_sec: row.clockSkewSec, ...versionAdvice(row.appVersion) };
   }
 
   // Fleet view: the tenant's hubs with a derived `stale` flag (no heartbeat within the window) and the
@@ -334,21 +366,29 @@ export class HubSyncService {
     const hubs = rows.map((h: any) => {
       const seenMinAgo = Math.round((now - new Date(h.lastSeenAt).getTime()) / 60000);
       const stale = seenMinAgo > staleMinutes;
+      // Phase 4c: a box AHEAD of the cloud is an operational hazard (it can send fields the cloud
+      // rejects); a box behind is merely due an upgrade. Both surface, only 'ahead' demands attention.
+      const v = versionAdvice(h.appVersion);
       return {
         hub_id: h.hubId, app_version: h.appVersion, last_seen_at: h.lastSeenAt, seen_minutes_ago: seenMinAgo,
         last_push_at: h.lastPushAt, pending_sales: h.pendingSales, pending_tills: h.pendingTills,
         failed_docs: h.failedDocs, skipped_docs: h.skippedDocs, clock_skew_sec: h.clockSkewSec,
-        stale, needs_attention: stale || h.failedDocs > 0 || h.skippedDocs > 0 || Math.abs(h.clockSkewSec ?? 0) > 120,
+        cloud_version: v.cloud_version, version_status: v.version_status, upgrade_available: v.upgrade_available,
+        stale,
+        needs_attention: stale || h.failedDocs > 0 || h.skippedDocs > 0 || Math.abs(h.clockSkewSec ?? 0) > 120 || v.version_status === 'ahead',
       };
     });
     return {
       stale_minutes: staleMinutes,
+      cloud_version: process.env.APP_VERSION ?? null,
       hubs,
       summary: {
         hubs: hubs.length,
         stale: hubs.filter((h) => h.stale).length,
         needs_attention: hubs.filter((h) => h.needs_attention).length,
         pending_docs: hubs.reduce((s, h) => s + h.pending_sales + h.pending_tills, 0),
+        upgrade_available: hubs.filter((h) => h.upgrade_available).length,
+        ahead_of_cloud: hubs.filter((h) => h.version_status === 'ahead').length,
       },
     };
   }

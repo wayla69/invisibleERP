@@ -172,6 +172,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-309 | Cloud-recomputed expected cash + 5830 over/short (materiality preserved) | BRANCH-05 · REV-13 · GL-05 | 24 §7 step 6d, rev 0.7 (`hub-snapshot.ts`) |
 | UAT-O2C-310 | Hub heartbeat + fleet view (stale/backlog, tenant-isolated) | BRANCH-05 (detective) | 24 §7 step 6e, rev 0.7 (`hub-snapshot.ts`) |
 | UAT-O2C-316 | Cash tip counts as drawer cash; card tip excluded (till expected cash) | REV-13 | 24 §7 step 6d, rev 0.9 (`cashreport.ts`) |
+| UAT-O2C-317 | Heartbeat version channel (behind / ahead / current / unknown) | BRANCH-05 (detective) | 24 §7 step 6e, rev 0.7 (`hub-snapshot.ts`) |
 | UAT-O2C-312 | CRM workspace kanban: drag persists stage move + history row (Won/Lost reason dialog) | REV-17 | 18 §7 (2b), rev 0.6 (pipeline.ts + manual UI) |
 | UAT-O2C-313 | Deal page: unified timeline (activities + stage audit + quotes) + next-step task | REV-17 | 18 §7 (2b), rev 0.6 (pipeline.ts) |
 | UAT-O2C-314 | Web-to-lead: public capture, silent honeypot drop, TENANT_REQUIRED, strict rate bucket | REV-17 (intake) | 18 §7 (2c), rev 0.6 (pipeline.ts) |
