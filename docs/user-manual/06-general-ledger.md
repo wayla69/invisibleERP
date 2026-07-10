@@ -379,6 +379,32 @@ present value of the revised payments and **adjusts the right-of-use asset by th
 same amount**; depreciation then continues straight-line over the revised remaining
 term. (A change that leaves the lease unchanged is rejected with `NO_CHANGE`.)
 
+**Lessor-side leases (IFRS 16 lessor, LSE-02).** When your company is the **lessor**
+(you lease an asset *out*), use the lessor register (`POST /api/lessor-leases`;
+**required permission** `exec` / `gl_post`). The system first **classifies** the lease
+as a **finance lease** or an **operating lease** from the IFRS 16 lessor criteria — you
+supply the **asset cost**, the asset's **fair value** and **economic life**, and any
+**transfer-of-ownership** / **bargain-purchase** flags; a finance lease is one that
+transfers substantially all the risks and rewards (transfer of ownership, a bargain
+purchase option, a term ≥ **75%** of the economic life, or a PV of the payments ≥ **90%**
+of fair value). `POST /api/lessor-leases/classify` previews the classification without
+saving. Classification is **maker-checker**: the lease is saved **pending** with no GL,
+and a **different** colleague approves it (`POST /api/lessor-leases/{leaseNo}/approve`) —
+you **cannot** approve your own lease (rejected `SOD_SELF_APPROVAL`).
+
+- **Finance lease:** on approval the underlying **asset is derecognised** (Cr 1500) and a
+  **net investment in lease / lease receivable** is booked at the present value (Dr 1610),
+  with any selling profit/loss to 1510. Press **run** (`POST /api/lessor-leases/run`) to
+  recognise each period's **interest income** (Cr 4600) and collect the cash (Dr 1000);
+  the receivable winds down to zero over the term.
+- **Operating lease:** the asset **stays on your books**; the run recognises **straight-line
+  rental income** (Dr 1000 / Cr 4610) and **continues depreciating** the asset
+  (Dr 5200 / Cr 1590).
+
+The **net-investment reconciliation** (`GET /api/lessor-leases/receivable-reconciliation`)
+ties the GL **1610** control account to the sum of the finance-lease receivable balances on
+the schedule (`reconciled`, `difference`) — review it at close.
+
 ---
 
 ### GL allocation cycles — cost allocation (GL-23)

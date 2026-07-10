@@ -1,4 +1,4 @@
--- 0309_crm_inbound_capture — CRM-6 (docs/41 CRM-4 note): inbound email capture → CRM (2-way comms).
+-- 0310_crm_inbound_capture — CRM-6 (docs/41 CRM-4 note): inbound email capture → CRM (2-way comms).
 -- The deferred inbound reply-capture side of CRM-4's outbound deal comms. Mirrors email-capture's AP rail:
 -- a per-tenant CRM inbound address receives replies; each inbound is matched to an open opportunity/lead
 -- (by reply-threading token embedded in the outbound send, else the sender's contact/lead email) and logged
