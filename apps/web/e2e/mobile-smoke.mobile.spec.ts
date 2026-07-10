@@ -35,6 +35,12 @@ const APPROVALS = {
   items: [{ type: 'till_variance', control: 'REV-13', ref: 'S-240706-01', label: 'เงินสดขาด ฿850', amount: 850, requested_by: 'cashier1', requested_at: '2026-07-01T09:00:00Z', age_days: 5 }],
 };
 
+// ── Expense-approvals queue (ESS pending employee claims) ────────────────────
+const EXPENSES = {
+  count: 1,
+  pending: [{ id: 1, claim_date: '2026-07-01', category: 'ค่าเดินทาง', amount: 850, description: 'ค่าแท็กซี่ไปพบลูกค้า', status: 'Pending', emp_code: 'E001', employee_name: 'สมชาย ใจดี' }],
+};
+
 // ── POS register menu ────────────────────────────────────────────────────────
 const MENU = {
   categories: [{ id: 1, code: 'main', name: 'จานหลัก', name_en: null, color: null, sort: 0, items: [
@@ -59,6 +65,8 @@ async function boot(page: Page) {
     if (url.includes('/api/procurement/catalog')) return json(CATALOG);
     // Approvals
     if (url.includes('/api/finance/approvals/pending')) return json(APPROVALS);
+    // Expense approvals (ESS)
+    if (url.includes('/api/ess/expenses/pending')) return json(EXPENSES);
     if (url.includes('/api/payments/exceptions/voids-refunds')) return json({ voids: [], refunds: [], void_count: 0, refund_count: 0, void_total: 0, refund_total: 0 });
     if (url.includes('/api/tax-invoices/exceptions/voided')) return json({ voided: [], count: 0, total: 0 });
     // POS register
@@ -204,6 +212,28 @@ test('approvals: phone renders the pending-approval cards with inline actions, n
   await expect(card.getByText('S-240706-01')).toBeVisible();
   await expect(card.getByText('REV-13')).toBeVisible();
   await expect(card.getByRole('button', { name: 'อนุมัติ' })).toBeVisible();
+});
+
+test('expense-approvals: phone renders the claim cards with inline actions and no page overflow', async ({ page }) => {
+  await boot(page);
+  await page.goto('/expense-approvals');
+
+  // The ESS pending-claim queue renders BOTH a `sm:hidden` card list (phones) and a `hidden sm:block`
+  // DataTable (tablet+). At the phone viewport the desktop table must be display:none and the card must
+  // show — with the batch checkbox + inline approve/reject thumb targets.
+  await expect(page.locator('table', { hasText: 'สมชาย ใจดี' })).toBeHidden();
+  const card = page.locator('div.sm\\:hidden').first();
+  await expect(card.getByText('สมชาย ใจดี')).toBeVisible();
+  await expect(card.getByText('ค่าแท็กซี่ไปพบลูกค้า')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'อนุมัติ' })).toBeVisible();
+
+  // The critical mobile invariant: no element wider than the viewport (an overflow would shift any
+  // fixed bottom-sheet/bar off-screen).
+  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(scrollWidth).toBe(clientWidth);
 });
 
 test('pos register: menu grid is tappable at phone width and reaches checkout', async ({ page }) => {

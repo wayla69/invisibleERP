@@ -177,6 +177,8 @@ need the `ess` permission.
 
 1. Open **อนุมัติเบิกพนักงาน** (`/expense-approvals`). It lists every employee
    expense claim still **Pending**, with the claimant, date, category and amount.
+   On a phone the queue renders as one **card per claim** (with a batch checkbox and
+   inline approve/reject) instead of the wide desktop table.
 2. Press **อนุมัติ** to approve, or **ปฏิเสธ** to reject.
 
 **Expected result:** On **approve**, the claim becomes **Approved** and an **AP

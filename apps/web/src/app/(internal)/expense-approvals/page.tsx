@@ -84,6 +84,48 @@ export default function ExpenseApprovalsPage() {
               onReject={() => batch.runBatch('reject')}
               onClear={batch.clear}
             />
+            {/* Phone/narrow: one card per pending claim instead of a 9-column table a phone can only
+                scroll sideways. Batch checkbox + inline approve/reject as full-width thumb targets. */}
+            <div className="space-y-3 sm:hidden">
+              {rows.length === 0 ? (
+                <div className="rounded-xl border bg-card p-8 text-center">
+                  <Receipt className="mx-auto size-8 text-muted-foreground opacity-40" />
+                  <p className="mt-2 text-sm font-medium">{t('hx.exp.empty_title')}</p>
+                  <p className="text-sm text-muted-foreground">{t('hx.exp.empty_desc')}</p>
+                </div>
+              ) : (
+                rows.map((r) => (
+                  <div key={r.id} className="rounded-lg border bg-card p-3 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <input type="checkbox" className="mt-1 size-4 shrink-0" aria-label={`select ${r.id}`} checked={batch.isSel(r)} onChange={() => batch.toggle(r)} />
+                        <div className="min-w-0">
+                          <p className="font-medium">{r.employee_name ?? r.emp_code ?? '—'}</p>
+                          <p className="text-xs text-muted-foreground">{r.emp_code ?? '—'} · {thaiDate(r.claim_date)}</p>
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="tabular font-semibold">{baht(r.amount)}</p>
+                        <Badge variant="warning" className="mt-0.5 text-[10px]">{r.status}</Badge>
+                      </div>
+                    </div>
+                    <p className="mt-2 border-t pt-2 text-muted-foreground">
+                      {r.category ? <span className="mr-1 font-medium text-foreground">{r.category}</span> : null}
+                      {r.description ?? '—'}
+                    </p>
+                    <div className="mt-2 flex gap-2 border-t pt-2">
+                      <Button size="sm" className="flex-1" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, approve: true })}>
+                        <Check className="size-3.5" /> {t('fin.approve')}
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, approve: false })}>
+                        <X className="size-3.5" /> {t('fin.rejected')}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="hidden sm:block">
             <DataTable
               rows={rows}
               rowKey={(r) => r.id}
@@ -123,6 +165,7 @@ export default function ExpenseApprovalsPage() {
                 },
               ]}
             />
+            </div>
             </>
           )}
         </StateView>

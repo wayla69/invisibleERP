@@ -205,6 +205,40 @@ function ApprovalsTab() {
               onReject={() => batch.runBatch('reject')}
               onClear={batch.clear}
             />
+            {/* Phone/narrow: one card per pending request instead of a 7-column table. Batch checkbox +
+                inline approve/reject as full-width thumb targets. */}
+            <div className="space-y-3 sm:hidden">
+              {pending.length === 0 ? (
+                <div className="rounded-xl border bg-card p-8 text-center">
+                  <HandCoins className="mx-auto size-8 text-muted-foreground opacity-40" />
+                  <p className="mt-2 text-sm font-medium">{t('fnx.petty.pending_empty_title')}</p>
+                </div>
+              ) : (
+                pending.map((r: any) => (
+                  <div key={r.req_no} className="rounded-lg border bg-card p-3 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <input type="checkbox" className="mt-1 size-4 shrink-0" aria-label={`select ${r.req_no}`} checked={batch.isSel(r)} onChange={() => batch.toggle(r)} />
+                        <div className="min-w-0">
+                          <p className="font-medium">{r.req_no}</p>
+                          <p className="text-xs text-muted-foreground">{r.kind === 'advance' ? t('fnx.petty.kind_advance') : t('fnx.petty.kind_expense')} · {r.payee ?? '—'}</p>
+                        </div>
+                      </div>
+                      <p className="tabular shrink-0 font-semibold">{baht(r.amount)}</p>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-2 border-t pt-2 text-xs text-muted-foreground">
+                      {r.doc_ref ? <span>{r.doc_ref}</span> : null}
+                      {r.requested_by ? <span>· {r.requested_by}</span> : null}
+                    </div>
+                    <div className="mt-2 flex gap-2 border-t pt-2">
+                      <Button size="sm" variant="outline" className="flex-1" disabled={approve.isPending} onClick={() => approve.mutate(r.req_no)}>{t('fin.approve')}</Button>
+                      <Button size="sm" variant="ghost" className="flex-1" disabled={reject.isPending} onClick={() => reject.mutate(r.req_no)}>{t('fnx.petty.reject_btn')}</Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="hidden sm:block">
             <DataTable
               rows={pending}
               emptyState={{ icon: HandCoins, title: t('fnx.petty.pending_empty_title') }}
@@ -224,6 +258,7 @@ function ApprovalsTab() {
                 ) },
               ]}
             />
+            </div>
             </>
           )}
         </StateView>

@@ -434,6 +434,8 @@ the ledger until a different person approves.
    from the accounting AP screen** so the team that books bills is not the team that
    releases cash.
 2. Review the request and click **อนุมัติจ่าย** (approve) or **ปฏิเสธ** (reject).
+   On a phone the single-bill queue renders as one **card per payment** (creditor, amount,
+   batch checkbox and inline approve/reject) instead of the wide desktop table.
 
 **Expected result on approval:** The bill is settled (Unpaid → Partial → Paid) and the
 cash-disbursement entry posts to the ledger. On rejection nothing posts.
@@ -657,7 +659,9 @@ the **payee**, and a **document/receipt number** (for the audit trail). Submitti
 exceed the fund's balance (`INSUFFICIENT_FLOAT`).
 
 A **different** person opens the **อนุมัติ (Maker-checker)** tab and clicks **อนุมัติ
-(Approve)** — only then does the accounting post and the fund balance drop:
+(Approve)** — only then does the accounting post and the fund balance drop. On a phone the
+pending list renders as one **card per request** (number, kind, payee, amount, batch
+checkbox and inline approve/reject) instead of the wide desktop table:
 
 - **direct expense →** Dr the expense account / Cr Petty Cash (1015);
 - **advance →** Dr Employee Advances (1180) / Cr Petty Cash (1015).

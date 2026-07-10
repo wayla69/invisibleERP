@@ -66,6 +66,43 @@ export default function ReceiptApprovalsPage() {
                 onReject={() => batch.runBatch('reject')}
                 onClear={batch.clear}
               />
+              {/* Phone/narrow: one card per submission instead of an 8-column table (with an image column)
+                  a phone can only scroll sideways. Batch checkbox + inline approve/reject as thumb targets. */}
+              <div className="space-y-3 sm:hidden">
+                {pending.length === 0 ? (
+                  <div className="rounded-xl border bg-card p-8 text-center">
+                    <ReceiptText className="mx-auto size-8 text-muted-foreground opacity-40" />
+                    <p className="mt-2 text-sm font-medium">{t('ly.ra_empty')}</p>
+                  </div>
+                ) : (
+                  pending.map((r: any) => (
+                    <div key={r.id} className="rounded-lg border bg-card p-3 text-sm">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" className="mt-1 size-4 shrink-0" aria-label={`select ${r.id}`} checked={batch.isSel(r)} onChange={() => batch.toggle(r)} />
+                        <img src={r.receipt_image} alt={t('ly.ra_receipt_alt')} className="h-20 w-16 shrink-0 rounded border object-cover" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-medium">#{r.member_id}</p>
+                              <p className="text-xs text-muted-foreground">{r.store_name ?? '—'}</p>
+                            </div>
+                            <p className="tabular shrink-0 font-semibold">{baht(r.purchase_amount)}</p>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                            <span>{r.purchase_date ? thaiDate(r.purchase_date) : '—'}</span>
+                            <span>· {t('ly.ra_col_points_est')} {num(r.claimed_points_preview)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex gap-2 border-t pt-2">
+                        <Button size="sm" variant="outline" className="flex-1" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('ly.ra_approve')}</Button>
+                        <Button size="sm" variant="ghost" className="flex-1" disabled={reject.isPending} onClick={() => reject.mutate(r.id)}>{t('ly.ra_reject')}</Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="hidden sm:block">
               <DataTable
                 rows={pending}
                 emptyState={{ icon: ReceiptText, title: t('ly.ra_empty') }}
@@ -86,6 +123,7 @@ export default function ReceiptApprovalsPage() {
                   ) },
                 ]}
               />
+              </div>
               </>
             )}
           </StateView>

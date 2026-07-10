@@ -100,6 +100,49 @@ function SalesClaims() {
               onReject={() => batch.runBatch('reject')}
               onClear={batch.clear}
             />
+            {/* Phone/narrow: one card per claim instead of a wide table. Batch checkbox on Waiting rows +
+                the same approve / reject-reason / reject controls, stacked as thumb targets. */}
+            <div className="space-y-3 sm:hidden">
+              {filtered.length === 0 ? (
+                <div className="rounded-xl border bg-card p-8 text-center">
+                  <FileWarning className="mx-auto size-8 text-muted-foreground opacity-40" />
+                  <p className="mt-2 text-sm font-medium">{search || statusFilter ? t('hx.cl.no_match_title') : t('hx.cl.sales_empty_title')}</p>
+                  <p className="text-sm text-muted-foreground">{search || statusFilter ? t('hx.common.filter_no_match_desc') : t('hx.cl.sales_empty_desc')}</p>
+                  {(search || statusFilter) && (
+                    <Button variant="outline" size="sm" className="mt-3" onClick={() => { setSearch(''); setStatusFilter(null); }}>{t('inv.clear_filter')}</Button>
+                  )}
+                </div>
+              ) : (
+                filtered.map((r: any) => (
+                  <div key={r.id} className="rounded-lg border bg-card p-3 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-start gap-2">
+                        {batch.isEligible(r) && <input type="checkbox" className="mt-1 size-4 shrink-0" aria-label={`select ${r.id}`} checked={batch.isSel(r)} onChange={() => batch.toggle(r)} />}
+                        <div className="min-w-0">
+                          <p className="font-medium">{r.order_no}</p>
+                          <p className="text-xs text-muted-foreground">{r.item_description}</p>
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="tabular font-semibold">{num(r.claimed_qty)}</p>
+                        <Badge variant={statusVariant(r.admin_status)} className="mt-0.5 text-[10px]">{r.admin_status}</Badge>
+                      </div>
+                    </div>
+                    {r.reason ? <p className="mt-2 border-t pt-2 text-muted-foreground">{r.reason}</p> : null}
+                    {r.admin_status === 'Waiting' && (
+                      <div className="mt-2 space-y-2 border-t pt-2">
+                        <Input className="h-8 w-full" placeholder={t('hx.cl.reject_reason')} aria-label={t('hx.cl.reject_reason')} value={reason[r.id] ?? ''} onChange={(e) => setReason((s) => ({ ...s, [r.id]: e.target.value }))} />
+                        <div className="flex gap-2">
+                          <Button size="sm" className="flex-1" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, decision: 'approve' })}>{t('fin.approve')}</Button>
+                          <Button size="sm" variant="destructive" className="flex-1" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, decision: 'reject' })}>{t('fin.rejected')}</Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="hidden sm:block">
             <DataTable
               rows={filtered}
               rowKey={(r: any) => r.id}
@@ -135,6 +178,7 @@ function SalesClaims() {
                   : { icon: FileWarning, title: t('hx.cl.sales_empty_title'), description: t('hx.cl.sales_empty_desc') }
               }
             />
+            </div>
           </div>
         )}
       </StateView>
