@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { sql, eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { arInvoices, arDunningLog, creditEvents, tenants } from '../../database/schema';
+import { arInvoices, arReceipts, arDunningLog, creditEvents, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { FinanceDocsPdfService, type DunningLetterPrintData } from './finance-docs-pdf.service';
@@ -134,6 +134,12 @@ export class CollectionsService {
     const latest = new Map<string, any>();
     for (const l of logs) if (!latest.has(l.invoiceNo)) latest.set(l.invoiceNo, l);
 
+    // REV-21 — a customer's on-account (unapplied) cash: applied receipts already reduced each invoice's
+    // outstanding, but parked cash means the collector should APPLY before dunning — surfaced per row.
+    const uaRows = await db.select({ tenantId: arReceipts.tenantId, v: sql<string>`coalesce(sum(${arReceipts.unappliedAmount}),0)` })
+      .from(arReceipts).groupBy(arReceipts.tenantId);
+    const onAccountBy = new Map<number, number>(uaRows.filter((r: any) => n(r.v) > 0.0001).map((r: any) => [Number(r.tenantId), round2(n(r.v))]));
+
     const out = rows
       .map((r: any) => {
         const outstanding = n(r.outstanding);
@@ -146,6 +152,7 @@ export class CollectionsService {
         return {
           invoice_no: r.invoice_no, tenant_id: r.tenant_id, party: r.party, due_date: r.due_date,
           amount: n(r.amount), outstanding, days_overdue: daysOverdue,
+          on_account: r.tenant_id != null ? (onAccountBy.get(Number(r.tenant_id)) ?? 0) : 0, // customer-level unapplied cash (REV-21)
           current_stage: currentStage, last_action_date: last?.createdAt ?? null,
           promise_to_pay_date: last?.promiseToPayDate ?? null,
           recommended_stage: recommended, escalate: recIdx > curIdx,
@@ -155,7 +162,8 @@ export class CollectionsService {
       .sort((a: any, b: any) => b.days_overdue - a.days_overdue || b.outstanding - a.outstanding);
 
     const totalOverdue = out.filter((r: any) => r.days_overdue > 0).reduce((a: number, r: any) => a + r.outstanding, 0);
-    return { rows: out, count: out.length, total_overdue: round2(totalOverdue), as_of: today };
+    const onAccountTotal = round2([...onAccountBy.values()].reduce((a, v) => a + v, 0));
+    return { rows: out, count: out.length, total_overdue: round2(totalOverdue), on_account_total: onAccountTotal, as_of: today };
   }
 
   // ───────────────────── Record a dunning action ─────────────────────
