@@ -117,6 +117,11 @@ materiality threshold parks the session for a manager to approve — same rule a
 > session stays blocked, look at the `skipped_unsupported` / `failed` rows in `hub_push_log` for the
 > sales in that window, resolve them (e.g. enter a loyalty-redeem sale centrally), then re-run the push.
 
+**Kitchen waste rides the same run (Phase 2c-2, BRANCH-06).** Waste logged on the hub posts Dr 5810 /
+Cr 1200 locally and replays to the cloud with the same  number — idempotent, so a re-push never
+double-relieves inventory. A perpetual-tracked item is refused (INV-07: use the approved write-off) and
+stays visible in  for review.
+
 **Fleet visibility (Phase 4a).** Every push run also sends a signed heartbeat. `GET /api/hub/fleet`
 (perm `branch`/`exec`) lists your hubs with `stale` (no heartbeat in the window), the un-replayed
 backlog, failed/skipped counts and the measured clock skew — so a box that quietly stops replaying is
@@ -153,6 +158,10 @@ docker compose --profile seed run --rm hub-seed      # only if the catalog chang
 ```
 
 Verify: a till logs in, the menu renders, `GET /api/hub/fleet` (from HQ) shows the box **fresh, backlog 0**.
+
+> **The hub tells you when it is due.** Every `hub-push` run gets the cloud version back and prints an
+> upgrade hint when the box is behind — or a loud warning when the box is **ahead of the cloud**, which is
+> the unsafe direction. `GET /api/hub/fleet` shows `cloud_version` and each box’s `version_status`.
 Roll back by checking out the previous commit/tag and `up -d --build`; restore the dump only if a
 migration mangled data (migrations are forward-only — a restore is the rollback path).
 

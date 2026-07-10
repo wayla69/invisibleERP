@@ -130,7 +130,7 @@ export const lotLedger = pgTable('lot_ledger', {
 
 export const stockMovements = pgTable('stock_movements', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // 0309 (see stocktakes)
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // 0316 (see stocktakes)
   moveDate: timestamp('move_date', { withTimezone: true }),
   docNo: text('doc_no'),
   moveType: moveTypeEnum('move_type'),
@@ -150,7 +150,7 @@ export const stockMovements = pgTable('stock_movements', {
 
 export const stocktakes = pgTable('stocktakes', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  // 0309: added — the table used to have NO tenant column, so the RLS loop skipped it and every read
+  // 0316: added — the table used to have NO tenant column, so the RLS loop skipped it and every read
   // (list/detail) and the variance POST were global across tenants. Legacy rows keep NULL (unattributable).
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   stNo: text('st_no'),

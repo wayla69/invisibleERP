@@ -139,7 +139,7 @@ async function main() {
   const recB = (await inj('GET', '/api/inventory/reconciliation', token)).json;
   ok('perpetual sub-ledger ties to GL inventory account after the stock-ops bridge (reconciled 920)', Math.abs(Number(recB.sub_ledger_value) - 920) < 0.01 && Math.abs(Number(recB.gl_inventory) - 920) < 0.01 && recB.reconciled === true, `sub=${recB.sub_ledger_value} gl=${recB.gl_inventory} rec=${recB.reconciled}`);
 
-  // ── 0309: stocktakes / stock_movements were NOT tenant-scoped ──
+  // ── 0316: stocktakes / stock_movements were NOT tenant-scoped ──
   // Before this fix a tenant could LIST every other tenant's count sheets, READ one by document number,
   // and POST its variance movements. tenant_id + explicit scoping + the canonical RLS policy close it.
   {
