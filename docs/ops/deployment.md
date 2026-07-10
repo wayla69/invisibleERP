@@ -118,6 +118,11 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 
 ## 5. CI/CD
 - `ci.yml` — build/typecheck/unit, integration harnesses, security (audit + gitleaks), CodeQL, web-e2e.
+  One run fans out to ~96 jobs against a 20-concurrent-job account limit, so the workflow declares a
+  per-ref `concurrency` group: a new push to a PR **cancels** that PR's superseded run; on main the
+  in-flight run finishes and GitHub keeps only the newest pending run (intermediate main pushes are
+  auto-superseded by the tip run). Without this, a busy day queues thousands of jobs and the Actions
+  queue appears frozen (2026-07-10 backlog: 26 runs / ~2,000 jobs stuck `Queued`).
 - `deploy.yml` — approval-gated production deploy to Railway, pinned to the GitHub `production`
   Environment (required reviewers ⇒ deployer ≠ author, ITGC-CM-03). See `change-management.md`.
   - **Post-deploy smoke (ITGC-OP-04).** After both services deploy, the job hits the API's `/healthz`
@@ -147,6 +152,7 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 ## 6. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.8 | 2026-07-10 | Platform | §5: `ci.yml` per-ref `concurrency` group (cancel superseded PR runs; main keeps in-flight + newest pending) — fixes the 2026-07-10 Actions queue freeze (26 runs / ~2,000 jobs backlogged, 0 in progress). |
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
 | 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
