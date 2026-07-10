@@ -38,6 +38,10 @@ jobs:
           echo "::group::variable NAMES on $SVC_NAME (values never printed)"
           gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\")}\"}" | jq -r '.data.variables | keys[]' | sort
           echo "::endgroup::"
+          # Whitelisted NON-SECRET values only (private-network coordinates — meaningless outside the
+          # project's own Railway network; never print anything else, this repo's action logs are public).
+          echo "private-network coordinates:"
+          gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\")}\"}" | jq -r '.data.variables | {RAILWAY_PRIVATE_DOMAIN, PORT} | to_entries[] | "  "+.key+" = "+(.value // "(unset)")'
           DEPS=$(gq "{\"query\":\"query{deployments(first:8,input:{projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\"}){edges{node{id status createdAt}}}}\"}")
           echo "recent deployments:"; echo "$DEPS" | jq -r '.data.deployments.edges[].node | "  "+.createdAt+"  "+.status+"  "+.id'
           LATEST=$(echo "$DEPS" | jq -r '.data.deployments.edges[0].node.id // empty')
