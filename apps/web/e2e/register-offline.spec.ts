@@ -73,3 +73,46 @@ test('register queues a cash sale offline and auto-syncs it on reconnect', async
   await expect(page.getByRole('button', { name: /รอซิงค์/ })).toHaveCount(0);
   expect(stub.syncCount()).toBeGreaterThan(0);
 });
+
+test('menu survives a reload while /api/menu is unreachable (localStorage snapshot)', async ({ page }) => {
+  await boot(page);
+  await page.goto('/pos/register');
+  // first online load caches the menu snapshot to localStorage (fetchMenuOfflineFirst)
+  await expect(page.getByRole('button', { name: /ผัดกะเพราไก่/ })).toBeVisible();
+
+  // kill the menu API at the NETWORK level and reload — the register must render from the snapshot
+  // (this is the "reboot the till mid-outage" case: the SW serves the shell but never caches /api/*)
+  await page.route('**/api/menu', (route) => route.abort('failed'));
+  await page.reload();
+  await expect(page.getByRole('button', { name: /ผัดกะเพราไก่/ })).toBeVisible();
+
+  // and the recovered menu is sellable — ring a line into the cart
+  await page.getByRole('button', { name: /ผัดกะเพราไก่/ }).click();
+  await expect(page.getByRole('button', { name: /ชำระเงิน/ })).toBeEnabled();
+});
+
+test('checkout falls back to the offline queue when the network dies but the browser still reports online', async ({ page }) => {
+  const stub = await boot(page);
+  await page.goto('/pos/register');
+  await expect(page.getByRole('button', { name: /ผัดกะเพราไก่/ })).toBeVisible();
+  await page.getByRole('button', { name: /ผัดกะเพราไก่/ }).click();
+
+  // navigator.onLine stays TRUE (no context.setOffline) — but order creation dies at the network
+  // level, the real-world "router up, internet down" failure the onLine flag cannot see
+  await page.route('**/api/restaurant/orders', (route) => route.abort('failed'));
+
+  await page.getByRole('button', { name: /ชำระเงิน/ }).click();
+  await page.getByRole('button', { name: 'พอดี' }).click();
+  await page.getByRole('button', { name: /ยืนยันชำระเงิน/ }).click();
+
+  // the sale is queued locally instead of erroring at the cashier
+  await expect(page.getByText('บันทึกออฟไลน์แล้ว')).toBeVisible();
+  await page.getByRole('button', { name: 'ขายต่อไป' }).click();
+  await expect(page.getByRole('button', { name: /รอซิงค์ 1/ })).toBeVisible();
+
+  // network restored → tapping the pending badge replays the queue and it clears
+  await page.unroute('**/api/restaurant/orders');
+  await page.getByRole('button', { name: /รอซิงค์ 1/ }).click();
+  await expect(page.getByRole('button', { name: /รอซิงค์/ })).toHaveCount(0);
+  expect(stub.syncCount()).toBeGreaterThan(0);
+});
