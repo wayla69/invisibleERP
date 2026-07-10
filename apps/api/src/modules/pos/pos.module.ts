@@ -8,7 +8,9 @@ import { ReceiptService } from './receipt.service';
 import { ReceiptDeliveryService, NoopReceiptProvider } from './receipt-delivery.service';
 import { CfdService } from './cfd.service';
 import { TaxDocsPdfService } from '../tax/documents/tax-docs-pdf.service';
+import { RealtimeScope } from '../restaurant/realtime.scope';
 import { RestaurantModule } from '../restaurant/restaurant.module';
+import { MessagingModule } from '../messaging/messaging.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { TaxModule } from '../tax/tax.module';
 import { PosAuditModule } from './audit/pos-audit.module';
@@ -23,10 +25,11 @@ import { PosTerminalModule } from './terminal/pos-terminal.module';
 // satellite imports PosModule (control→audit and terminal→payments only), and payments/restaurant import
 // the satellites directly, never this umbrella.
 @Module({
-  imports: [RestaurantModule, PaymentsModule, TaxModule, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
+  // MessagingModule: POS-2 LINE e-receipt rides the existing messaging LINE client (no second client).
+  imports: [RestaurantModule, PaymentsModule, TaxModule, MessagingModule, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
   controllers: [PosController, OrdersController, SplitController, ReceiptController],
-  // TaxDocsPdfService has no own deps → provide it directly (no cross-module export needed).
-  providers: [PosService, SplitBillService, ReceiptService, ReceiptDeliveryService, NoopReceiptProvider, CfdService, TaxDocsPdfService],
+  // TaxDocsPdfService + RealtimeScope have no own deps (DRIZZLE is global) → provide directly.
+  providers: [PosService, SplitBillService, ReceiptService, ReceiptDeliveryService, NoopReceiptProvider, CfdService, TaxDocsPdfService, RealtimeScope],
   exports: [PosService, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
 })
 export class PosModule {}

@@ -55,7 +55,7 @@ snapshot, false-online fallback + manual flush).
 ## Phase 1 — Store Hub MVP (DELIVERED 2026-07-10)
 
 Package the existing stack as an in-store appliance; all in-store devices use it as their origin.
-Shipped (PN-24 rev 0.4 §7 step 6b, UAT-O2C-286..287, runbook `docs/ops/store-hub-setup.md`):
+Shipped (PN-24 rev 0.4 §7 step 6b, UAT-O2C-288..289, runbook `docs/ops/store-hub-setup.md`):
 
 - **Signed snapshot export** — `GET /api/hub/snapshot` (`modules/hub`): tenant identity + tax config,
   full menu catalog (categories/items/modifiers/buffet tiers), floor plan (stations/zones/tables incl.
@@ -127,4 +127,4 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 | 2026-07-10 | Platform | Initial plan; Phase 0 delivered in the same PR (PN-24 rev 0.3, UAT-O2C-284..285, e2e `register-offline.spec.ts`). |
-| 0.2 | 2026-07-10 | Platform | Phase 1 (Store Hub MVP) delivered: `modules/hub` signed snapshot export, `db:hub:import` id-stable importer, `hub/` compose appliance + `docs/ops/store-hub-setup.md` runbook, CI harness `hub-snapshot` (20 checks). PN-24 rev 0.4; UAT-O2C-286..287. |
+| 0.2 | 2026-07-10 | Platform | Phase 1 (Store Hub MVP) delivered: `modules/hub` signed snapshot export, `db:hub:import` id-stable importer, `hub/` compose appliance + `docs/ops/store-hub-setup.md` runbook, CI harness `hub-snapshot` (20 checks). PN-24 rev 0.4; UAT-O2C-288..289. |
