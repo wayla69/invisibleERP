@@ -14,8 +14,10 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
+import { encrypt } from '../../../apps/api/dist/common/crypto';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
@@ -48,7 +50,9 @@ async function main() {
 
   const ref = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ routerOptions: { maxParamLength: 500 } }));
+  // rawBody:true mirrors production main.ts — CRM-6's inbound webhook verifies the per-tenant email HMAC over
+  // the exact raw bytes (needs rawBody populated), like the email-capture / LINE webhooks.
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ routerOptions: { maxParamLength: 500 } }), { rawBody: true });
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
@@ -313,6 +317,68 @@ async function main() {
   ok('Comms send resolves merge fields (contact.name + opp.name) and returns the rendered body', comms.status === 200 && comms.json.subject?.includes('สมหญิง') && comms.json.body?.includes('Comms Deal') && !comms.json.body?.includes('{{'), JSON.stringify({ subject: comms.json.subject, body: comms.json.body }));
   const commsDetail = await inj('GET', `/api/crm/pipeline/opportunities/${commsOpp.json.opp_no}`, sales1);
   ok('Comms send is logged as a timeline activity on the deal', commsDetail.json.activities?.some((a: any) => a.type === 'email' && String(a.subject ?? '').includes('สวัสดี')), JSON.stringify(commsDetail.json.activities?.map((a: any) => a.subject)));
+  ok('Comms send stamps a reply-threading token and embeds it in the dispatched subject (CRM-6 seam)',
+    typeof comms.json.thread_token === 'string' && comms.json.thread_token.startsWith('crmt_') && String(comms.json.subject ?? '').includes(`[ref:${comms.json.thread_token}]`),
+    JSON.stringify({ token: comms.json.thread_token, subj: comms.json.subject }));
+
+  // ── CRM-6 — inbound email capture → CRM (2-way comms; migration 0309). Mirrors email-capture's AP rail: a
+  // per-tenant CRM inbound address receives replies, authenticated by the tenant email HMAC, matched to a
+  // deal/lead and logged as a timeline activity; unmatched → the review queue; a bad signature is rejected. ──
+  const CRM_WH_SECRET = 'crmwhsec-t1';
+  await db.insert(s.tenantMessagingConfig)
+    .values({ tenantId: t1, channel: 'email', configEnc: encrypt(JSON.stringify({ host: 'smtp.test', hmac_secret: CRM_WH_SECRET })), enabled: true, updatedBy: 'test' })
+    .onConflictDoUpdate({ target: [s.tenantMessagingConfig.tenantId, s.tenantMessagingConfig.channel], set: { configEnc: encrypt(JSON.stringify({ host: 'smtp.test', hmac_secret: CRM_WH_SECRET })), enabled: true } });
+  // Signed inbound-webhook injector: HMAC-SHA256 (hex) over the exact serialized bytes, like production.
+  const crmInbound = async (payload: any, secret = CRM_WH_SECRET) => {
+    const body = JSON.stringify(payload);
+    const res = await app.inject({
+      method: 'POST', url: '/api/crm/email/inbound/T1',
+      headers: { 'content-type': 'application/json', 'x-inbound-signature': createHmac('sha256', secret).update(body).digest('hex') },
+      payload: body,
+    });
+    let json: any = {}; try { json = res.json(); } catch { /* */ }
+    return { status: res.statusCode, json };
+  };
+
+  // 37. Threading-token match: a reply carrying the outbound comms token threads back to the Comms Deal and is
+  //     logged as an inbound timeline activity — even though it arrives from a different address.
+  const replyTok = await crmInbound({ from: 'assistant@invisible.example', subject: `Re: สวัสดี [ref:${comms.json.thread_token}]`, text: 'สนใจครับ ขอใบเสนอราคา', message_id: 'crm-in-1' });
+  ok('CRM-6: signed inbound reply with the thread token → matched to the deal (matched_by=thread_token)',
+    replyTok.status === 201 || replyTok.status === 200 ? replyTok.json.matched === true && replyTok.json.matched_by === 'thread_token' && replyTok.json.entity_no === commsOpp.json.opp_no : false,
+    JSON.stringify({ st: replyTok.status, matched: replyTok.json.matched, by: replyTok.json.matched_by, no: replyTok.json.entity_no }));
+  const afterTok = await inj('GET', `/api/crm/pipeline/opportunities/${commsOpp.json.opp_no}`, sales1);
+  ok('CRM-6: the inbound reply is logged as an email activity on the deal timeline (source=inbound)',
+    afterTok.json.activities?.some((a: any) => a.type === 'email' && String(a.notes ?? '').includes('ขอใบเสนอราคา')),
+    JSON.stringify(afterTok.json.activities?.map((a: any) => ({ t: a.type, s: a.subject }))));
+
+  // 38. Sender-address match: a reply from the contact-of-record's email (no token) matches their open deal.
+  const replyContact = await crmInbound({ from: 'somying@invisible.example', subject: 'สอบถามเพิ่มเติม', text: 'ราคานี้รวม VAT ไหม', message_id: 'crm-in-2' });
+  ok('CRM-6: inbound from a known contact email (no token) → matched to their open opportunity (contact_email)',
+    replyContact.json.matched === true && replyContact.json.matched_by === 'contact_email' && replyContact.json.entity_no === commsOpp.json.opp_no,
+    JSON.stringify({ matched: replyContact.json.matched, by: replyContact.json.matched_by, no: replyContact.json.entity_no }));
+
+  // 39. Redelivery dedupe on message_id — the provider retrying the same delivery does not double-log.
+  const replyDup = await crmInbound({ from: 'somying@invisible.example', subject: 'สอบถามเพิ่มเติม', text: 'ราคานี้รวม VAT ไหม', message_id: 'crm-in-2' });
+  ok('CRM-6: provider redelivery (same message_id) is deduped — no duplicate activity', replyDup.json.matched === false && replyDup.json.skipped === 'duplicate', JSON.stringify(replyDup.json));
+
+  // 40. Unmatched inbound → the review queue (not attached to a guessed deal).
+  const replyUnknown = await crmInbound({ from: 'stranger@nowhere.example', subject: 'hello', text: 'who are you', message_id: 'crm-in-3' });
+  ok('CRM-6: inbound from an unknown sender (no token, no contact) → parked in the review queue', replyUnknown.json.matched === false && replyUnknown.json.queued === true, JSON.stringify(replyUnknown.json));
+  const queue = await inj('GET', '/api/crm/inbound/review', sales1);
+  const queued = queue.json.messages?.find((m: any) => m.from === 'stranger@nowhere.example');
+  ok('CRM-6: the review queue lists the unmatched inbound (unmatched + unresolved)', queue.status === 200 && !!queued && queued.match_status === 'unmatched' && queued.resolved === false, JSON.stringify({ n: queue.json.count, found: !!queued }));
+
+  // 41. Manual link from the queue → logs the activity on a chosen deal + resolves the queue item.
+  const linkRes = await inj('POST', `/api/crm/inbound/${queued?.id}/link`, sales1, { entity_type: 'opportunity', entity_no: commsOpp.json.opp_no });
+  ok('CRM-6: manually linking a queued inbound logs the activity and resolves it (matched_by=manual)', linkRes.status === 200 && linkRes.json.matched === true && linkRes.json.activity_id != null, JSON.stringify(linkRes.json));
+  const queueAfter = await inj('GET', '/api/crm/inbound/review', sales1);
+  ok('CRM-6: the linked message leaves the review queue', !queueAfter.json.messages?.some((m: any) => m.id === queued?.id), JSON.stringify({ n: queueAfter.json.count }));
+
+  // 42. Authenticity gate: a tampered/bad signature is rejected (401 BAD_INBOUND_SECRET) — nothing logged.
+  const badSig = await crmInbound({ from: 'somying@invisible.example', subject: 'forged', text: 'x', message_id: 'crm-in-4' }, 'wrong-secret');
+  ok('CRM-6: inbound with a bad HMAC signature → 401 BAD_INBOUND_SECRET (fail-closed authenticity)', badSig.status === 401 && badSig.json.error?.code === 'BAD_INBOUND_SECRET', JSON.stringify({ st: badSig.status, code: badSig.json.error?.code }));
+  const recentAll = await inj('GET', '/api/crm/inbound?limit=50', sales1);
+  ok('CRM-6: the forged delivery was not journaled (no crm-in-4 capture row)', !recentAll.json.messages?.some((m: any) => m.subject === 'forged'), JSON.stringify({ n: recentAll.json.count }));
   // ── CRM-3 — Customer 360: the finance-joined pre-call screen (docs/42) ────────────────────────────
   // "CRM ไม่เห็นเงิน": one read joins the CRM-1 account to the money. Seed a loyalty member with a paid
   // order (→ RFM profile), the company's overdue AR invoice + a receipt for T1 (AR/credit position + last
