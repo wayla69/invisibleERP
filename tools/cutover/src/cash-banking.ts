@@ -136,6 +136,66 @@ async function main() {
   const undAfter = (await inj('GET', '/api/bank/deposits/undeposited-drops', fin1)).json;
   ok('No SQLi: untargeted drop survives, table intact (1 drop, 222 in safe)', undAfter.count === 1 && near(undAfter.total, 222), JSON.stringify({ c: undAfter.count, t: undAfter.total }));
 
+  // ── POS-8 (control POS-08): PromptPay store-level auto-reconciliation ──
+  // Match the store's PromptPay tenders to the bank-statement INFLOWS on its settlement account (reusing the
+  // bank auto-match engine), surfacing unmatched tenders as a till exception (mirrors the till-variance surface).
+  // Store-tenant actors: gl1 (recon_prep) prepares the reconciliation; cash1 (pos_close) clears exceptions;
+  // sell1 (pos_sell only) is denied. All in t1 — this is a store-level control (admin is HQ, wrong tenant).
+  await db.insert(s.users).values([
+    { username: 'sell1', passwordHash: await pw.hash('ps1'), role: 'Cashier', tenantId: t1 },
+    { username: 'gl1', passwordHash: await pw.hash('pg1'), role: 'GlAccountant', tenantId: t1 },
+  ]).onConflictDoNothing();
+  const sell1 = await login('sell1', 'ps1');
+  const gl1 = await login('gl1', 'pg1');
+
+  // Configure the store's PromptPay settlement account = the approved KBank account (GL 1010).
+  const setAcct = await inj('PUT', '/api/pos/promptpay-recon/settlement-account', gl1, { bank_account_id: bank.json.id });
+  ok('POS-8: settlement account mapped for the store', setAcct.status === 200 && setAcct.json.bank_account_id === bank.json.id, JSON.stringify(setAcct.json).slice(0, 80));
+  // a sell-only cashier (pos_sell, no recon_prep/pos_close/exec) cannot run the reconciliation
+  const denyRun = await inj('POST', '/api/pos/promptpay-recon/run', sell1, { recon_date: '2026-06-27' });
+  ok('POS-8: a pos_sell-only cashier cannot run the reconciliation (403)', denyRun.status === 403, `${denyRun.status}`);
+
+  // Seed 2 PromptPay tenders on 2026-06-27: 500 (will settle) + 300 (no inflow yet → exception).
+  await db.insert(s.payments).values([
+    { paymentNo: 'PAY-PP-500', saleNo: 'SALE-PP-500', tenantId: t1, method: 'PromptPay', amount: '500.0000', gateway: 'promptpay', gatewayRef: 'PPREF500', status: 'Pending', createdBy: 'cash1', createdAt: new Date('2026-06-27T04:00:00Z') },
+    { paymentNo: 'PAY-PP-300', saleNo: 'SALE-PP-300', tenantId: t1, method: 'PromptPay', amount: '300.0000', gateway: 'promptpay', gatewayRef: 'PPREF300', status: 'Pending', createdBy: 'cash1', createdAt: new Date('2026-06-27T05:00:00Z') },
+  ]);
+  // Import the bank statement: one inflow (500) whose narration carries the payer-ref; the 300 has none.
+  await inj('POST', `/api/bank/accounts/${bank.json.id}/statements`, fin1, { statement_date: '2026-06-27', opening_bal: 0, closing_bal: 500, lines: [
+    { date: '2026-06-27', amount: 500, description: 'PromptPay รับโอน PPREF500' },
+  ] });
+
+  // Run 1 — 1 matched (500), 1 unmatched tender (300) → 1 open exception.
+  const run1 = await inj('POST', '/api/pos/promptpay-recon/run', gl1, { recon_date: '2026-06-27' });
+  ok('POS-8: inflow→sale match — 1 PromptPay tender matched (500), 1 unmatched (300)',
+    run1.status === 200 && run1.json.matched === 1 && near(run1.json.matched_amount, 500) && run1.json.unmatched_tenders === 1,
+    JSON.stringify({ m: run1.json.matched, ma: run1.json.matched_amount, u: run1.json.unmatched_tenders }));
+  ok('POS-8: unmatched→exception — the 300 tender is surfaced as an exception', (run1.json.exceptions ?? []).some((e: any) => e.payment_no === 'PAY-PP-300' && near(e.amount, 300)), JSON.stringify(run1.json.exceptions));
+  // the matched inflow line is now reconciled against the tender's payment_no (bank engine recorded the match)
+  const recPP = await inj('GET', `/api/bank/accounts/${bank.json.id}/reconciliation`, fin1);
+  ok('POS-8: matched inflow line reconciled (no unmatched 500 statement line left)', !(recPP.json.unmatched_statement ?? []).some((l: any) => near(l.amount, 500)), JSON.stringify((recPP.json.unmatched_statement ?? []).map((l: any) => l.amount)));
+  const exList = await inj('GET', '/api/pos/promptpay-recon/exceptions?status=Open', gl1);
+  ok('POS-8: open-exception worklist lists the unsettled 300 tender', exList.json.open === 1 && (exList.json.exceptions ?? []).some((e: any) => e.payment_no === 'PAY-PP-300'), JSON.stringify({ open: exList.json.open }));
+
+  // Late inflow arrives for the 300 → re-run auto-matches it and auto-resolves its open exception.
+  await inj('POST', `/api/bank/accounts/${bank.json.id}/statements`, fin1, { statement_date: '2026-06-28', opening_bal: 500, closing_bal: 800, lines: [
+    { date: '2026-06-28', amount: 300, description: 'PromptPay รับโอน PPREF300' },
+  ] });
+  const run2 = await inj('POST', '/api/pos/promptpay-recon/run', gl1, { recon_date: '2026-06-27' });
+  ok('POS-8: late inflow re-run matches the 300 (idempotent — 500 not re-matched)', run2.json.matched === 1 && near(run2.json.matched_amount, 300), JSON.stringify({ m: run2.json.matched, ma: run2.json.matched_amount }));
+  const exOpen2 = await inj('GET', '/api/pos/promptpay-recon/exceptions?status=Open', gl1);
+  ok('POS-8: the 300 open exception auto-resolves once its inflow lands (0 open)', exOpen2.json.open === 0, JSON.stringify({ open: exOpen2.json.open }));
+
+  // Manual clear path: a fresh unmatched tender → a manager (pos_close) clears the exception.
+  await db.insert(s.payments).values({ paymentNo: 'PAY-PP-700', saleNo: 'SALE-PP-700', tenantId: t1, method: 'PromptPay', amount: '700.0000', gateway: 'promptpay', gatewayRef: 'PPREF700', status: 'Pending', createdBy: 'cash1', createdAt: new Date('2026-06-27T06:00:00Z') });
+  await inj('POST', '/api/pos/promptpay-recon/run', gl1, { recon_date: '2026-06-27' });
+  const openBefore = (await inj('GET', '/api/pos/promptpay-recon/exceptions?status=Open', cash1)).json;
+  const exId = openBefore.exceptions.find((e: any) => e.payment_no === 'PAY-PP-700').id;
+  const cleared = await inj('POST', `/api/pos/promptpay-recon/exceptions/${exId}/clear`, cash1, { note: 'confirmed off-system' });
+  ok('POS-8: a manager (pos_close) clears a PromptPay till exception → Resolved', cleared.status === 200 && cleared.json.status === 'Resolved' && cleared.json.resolved_by === 'cash1', JSON.stringify(cleared.json).slice(0, 90));
+  const openAfter = (await inj('GET', '/api/pos/promptpay-recon/exceptions?status=Open', cash1)).json;
+  ok('POS-8: cleared exception drops off the open worklist', openAfter.open === 0, JSON.stringify({ open: openAfter.open }));
+
   await app.close();
   await pg.close();
   console.log('\n── Bank Cash banking: safe-drop → deposit + reconciliation (นำฝากธนาคาร) ──');

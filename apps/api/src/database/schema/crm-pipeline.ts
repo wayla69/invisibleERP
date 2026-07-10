@@ -5,7 +5,7 @@
 // (crm_accounts/crm_contacts), every stage transition is audited in crm_stage_history, and the Batch 2A
 // `opportunities` rows were data-migrated in (legacy_opportunity_id preserves provenance; the old table is
 // read-legacy only — no write path remains).
-import { pgTable, bigserial, bigint, text, numeric, integer, date, boolean, timestamp, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, date, boolean, timestamp, jsonb, unique, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 import { users } from './users';
 import { pipelineStages } from './pipeline';
@@ -143,7 +143,40 @@ export const crmActivities = pgTable('crm_activities', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byEntity: index('idx_crm_activity_entity').on(t.tenantId, t.entityType, t.entityNo) }));
 
+// CRM-4 automation — explainable, versioned rules-based lead score (grade A–D). ONE row per (tenant, lead),
+// upserted by CrmPipelineService.scoreLead; `breakdown` carries the per-factor contributions so the grade is
+// auditable (SOX posture, mirrors the customer_profiles churn/LTV formula). RLS-scoped (migration 0307).
+export const crmLeadScores = pgTable('crm_lead_scores', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  leadNo: text('lead_no').notNull(),
+  score: integer('score').notNull().default(0),        // 0..100 weighted total
+  grade: text('grade').notNull().default('D'),          // A | B | C | D
+  version: text('version').notNull(),                   // formula version stamp (e.g. 'v1')
+  breakdown: jsonb('breakdown'),                         // explainability: [{ factor, points, detail }]
+  scoredAt: timestamp('scored_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqLead: unique('uq_crm_lead_score').on(t.tenantId, t.leadNo),
+  byGrade: index('idx_crm_lead_score_grade').on(t.tenantId, t.grade),
+}));
+
+// CRM-4 follow-up discipline config — ONE row per tenant. sla_hours: a new lead must be touched within N
+// hours (detective control REV-22). rotting_days: an open deal with no activity for N days is "rotting".
+// round_robin_owners: owners a new lead is auto-assigned across (rr_cursor = next index). RLS (migration 0307).
+export const crmFollowupSettings = pgTable('crm_followup_settings', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  slaHours: integer('sla_hours').notNull().default(24),
+  rottingDays: integer('rotting_days').notNull().default(7),
+  roundRobinOwners: jsonb('round_robin_owners').notNull().default('[]'), // string[] of usernames
+  rrCursor: integer('rr_cursor').notNull().default(0),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uqTenant: unique('uq_crm_followup_settings').on(t.tenantId) }));
+
 export type CrmLead = typeof crmLeads.$inferSelect;
 export type CrmOpportunity = typeof crmOpportunities.$inferSelect;
 export type CrmAccount = typeof crmAccounts.$inferSelect;
 export type CrmContact = typeof crmContacts.$inferSelect;
+export type CrmLeadScore = typeof crmLeadScores.$inferSelect;
+export type CrmFollowupSettings = typeof crmFollowupSettings.$inferSelect;

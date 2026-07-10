@@ -381,6 +381,47 @@ term. (A change that leaves the lease unchanged is rejected with `NO_CHANGE`.)
 
 ---
 
+### GL allocation cycles — cost allocation (GL-23)
+
+**Where:** `POST /api/ledger/allocation` (+ `/allocation/:id/active`, `/allocation/run`);
+scheduled job **`gl_allocation_run`** under **Reports → Scheduled reports** ·
+**Required permission:** `gl_post` / `exec`.
+
+Use an **allocation cycle** to spread a **shared / overhead cost** across the
+cost-centers or departments that consume it — instead of an ad-hoc, unbalanced,
+hard-to-audit spreadsheet. Typical uses: IT / facilities / HR overhead split to
+operating departments; a rent pool split by floor area.
+
+1. **Create a cycle** (`POST /api/ledger/allocation`): give it a **name**, the
+   **source account** (the pool that is relieved) and optional **source cost-center**,
+   the **pool amount** to distribute each run, an allocation **method**, a **cadence**
+   (`daily`/`weekly`/`monthly`) and a first-run date, and one or more **targets**.
+   - **method `ratio`** — you enter each target's fixed proportion as its **basis**
+     (e.g. 3 and 1 → 75% / 25%).
+   - **method `driver`** — the basis is a **measured driver** (machine hours, kWh).
+   - **method `statistical`** — the basis is a **statistical key** (headcount, sqm).
+
+   All three split the pool proportionally by the target **basis** weights; each
+   target may name its own **target account** (leave blank to keep the source
+   account and only move the **cost-center**) and its consuming **cost-center**.
+2. Leave it to run automatically (schedule **`gl_allocation_run`**), or post due
+   cycles on demand with `POST /api/ledger/allocation/run`.
+3. **Pause / resume** a cycle with `POST /api/ledger/allocation/:id/active` without
+   losing its history.
+
+**Expected result:** each due cycle posts **one balanced Draft journal entry** —
+**Cr the source pool** and **Dr each target its share** (`pool × basis ÷ Σbasis`, the
+**last target absorbing any rounding remainder** so debits equal the pool exactly).
+Like every recurring entry it posts as a **Draft** and a **different** user must
+**approve** it (§2, maker-checker GL-05) before it affects balances. Running a cycle
+twice in the same period posts nothing extra (idempotent).
+
+**Common messages.** A cycle with **no targets** → `NO_TARGETS`; a **zero total
+basis** (nothing to divide by) → `NO_BASIS`; a **non-positive pool** → `BAD_AMOUNT`;
+an unknown **method / cadence** → `BAD_METHOD` / `BAD_FREQUENCY`.
+
+---
+
 ### Opening balances (cutover from a prior system)
 
 **Screen:** บัญชีแยกประเภท (`/accounting`) → **ยอดยกมา** tab · **Required permission:**
@@ -1018,7 +1059,7 @@ nothing and carries no control of its own.
 
 ---
 
-## Consolidation — eliminations & segment reporting (controls CON-03 / CON-04)
+## Consolidation — eliminations & segment reporting (controls CON-03 / CON-04 / CON-05)
 
 **Who:** Group / Financial Controller. All consolidation actions are **HQ (Admin) only**
 (`CONSOL_HQ_ONLY` for any other tenant). The run uses the `approvals` permission; group,
@@ -1049,6 +1090,32 @@ Optional: define configurable elimination rules (`POST /api/consolidation/rules`
 
 **Expected result:** consolidated TB = Σ entity TBs − IC eliminations, balanced (Σ Dr = Σ Cr);
 1150/2150 net to ~0; the run shows `balanced: true`.
+
+### Foreign-currency translation — CTA / OCI (CON-05, IAS 21 / TAS 21)
+
+When a member entity's **currency is not THB**, the run translates it at **two** rates instead of one:
+
+- its **income statement** (revenue / expense) at the **period average** rate, and
+- its **balance sheet** at the **closing** (period-end) rate.
+
+The difference between the two is the **cumulative translation adjustment (CTA)**, which the run
+parks in a **CTA / OCI translation-reserve** equity line — **account 3400**, line type `FX_CTA`.
+This is standard IFRS/TFRS practice (an auditor expects to see it); a THB entity produces no CTA.
+Each run line shows the `fx_rate` and `rate_type` (`average` / `closing` / `cta`) it used, and the
+run response includes `cta_total`. Rates come from the **Approved** FX rates only (see FX-04); to
+get an average rate, enter one or more approved rates dated within the period month.
+
+**Expected result:** P&L accounts are translated at the average rate, balance-sheet accounts at the
+closing rate, the 3400 CTA/OCI line equals the translation difference, and the consolidated TB still
+balances (`balanced: true`).
+
+### Consolidated statement of cash flows (CON-05, IAS 7)
+
+`GET /api/consolidation/runs/{runId}/cash-flow` produces a **group-level, post-elimination** cash-flow
+statement (indirect method) from the consolidated run: **operating** (net income + add-backs +
+working-capital movements), **investing**, **financing**, and a dedicated **effect of exchange-rate
+changes on cash** section (the CTA). It **reconciles** to the change in the consolidated cash accounts
+(`reconciled: true`). HQ (Admin) only, `exec`.
 
 ### Segment report (CON-04, IFRS 8)
 
