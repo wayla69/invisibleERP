@@ -382,6 +382,42 @@ async function main() {
     return row ? Number(row.balance) : 0;
   };
 
+  // ───────────────────── GL allocation cycles (GL-23, FIN-7b) ─────────────────────
+  // A source pool distributed to targets by ratio / driver / statistical key, posted as a balanced DRAFT JE
+  // on the recurring rail (maker-checker, GL-05), idempotent per period.
+  // Up-front validation: a cycle with a zero total basis can never be saved (nothing to divide by).
+  const badAlloc = await inj('POST', '/api/ledger/allocation', admin, { name: 'bad', method: 'ratio', frequency: 'daily', pool_amount: 1000, source_account: '5000', targets: [{ target_account: '5710', basis: 0 }] });
+  ok('Allocation: zero-basis cycle rejected (NO_BASIS)', badAlloc.status === 400 && badAlloc.json?.error?.code === 'NO_BASIS', `st=${badAlloc.status} code=${badAlloc.json?.error?.code}`);
+  // Ratio method: pool 10,000 split 3:1 across 5710 / 5720 → 7,500 / 2,500; source 5000 credited 10,000.
+  const bAl5710 = await tbBalance('5710'), bAl5720 = await tbBalance('5720'), bAl5000 = await tbBalance('5000');
+  const mkAlloc = await inj('POST', '/api/ledger/allocation', admin, { name: 'Overhead split', method: 'ratio', frequency: 'daily', pool_amount: 10000, source_account: '5000', memo: 'OH', targets: [{ target_account: '5710', basis: 3 }, { target_account: '5720', basis: 1 }] });
+  ok('Allocation: create a ratio cycle (2 targets)', mkAlloc.status === 201 && typeof mkAlloc.json?.id === 'number' && mkAlloc.json?.targets === 2 && !!mkAlloc.json?.cycle_no, JSON.stringify(mkAlloc.json));
+  const runAl = await inj('POST', '/api/ledger/allocation/run', admin);
+  const alEntryNo = runAl.json?.entries?.[0]?.entry_no;
+  ok('Allocation: scheduled run posts the due cycle (1 balanced JE)', runAl.status === 200 && runAl.json?.posted === 1 && /^JE-/.test(alEntryNo ?? ''), `posted=${runAl.json?.posted} no=${alEntryNo}`);
+  // GL-05: posts as DRAFT — excluded from balances until a different user approves.
+  ok('Allocation: posted JE is DRAFT — excluded from trial balance', near(await tbBalance('5710'), bAl5710) && near(await tbBalance('5000'), bAl5000), `d5710=${(await tbBalance('5710')) - bAl5710}`);
+  const pendAl = (await inj('GET', '/api/ledger/journal/pending', admin)).json;
+  ok('Allocation: draft JE awaits maker-checker approval', (pendAl.entries ?? []).some((e: any) => e.entry_no === alEntryNo), `pending=${(pendAl.entries ?? []).length}`);
+  // Idempotent: a same-day re-run advances nothing (next_run rolled forward + ux_je_idem dedupe).
+  const runAl2 = await inj('POST', '/api/ledger/allocation/run', admin);
+  ok('Allocation: same-day re-run is idempotent (0)', runAl2.status === 200 && runAl2.json?.posted === 0, `posted=${runAl2.json?.posted}`);
+  // A DIFFERENT user approves → the split lands in balances: 5710 +7,500, 5720 +2,500, 5000 −10,000 (balanced).
+  const alAppr = await inj('POST', `/api/ledger/journal/${alEntryNo}/approve`, mgr);
+  ok('Allocation: ratio split posts balanced (5710 +7500 / 5720 +2500 / 5000 −10000)',
+    alAppr.status === 200 && near((await tbBalance('5710')) - bAl5710, 7500) && near((await tbBalance('5720')) - bAl5720, 2500) && near((await tbBalance('5000')) - bAl5000, -10000),
+    `st=${alAppr.status} d5710=${(await tbBalance('5710')) - bAl5710} d5720=${(await tbBalance('5720')) - bAl5720} d5000=${(await tbBalance('5000')) - bAl5000}`);
+  // Driver method: pool 900 split by headcount 2:1 across 5710 / 5720 → 600 / 300.
+  const bDv5710 = await tbBalance('5710'), bDv5720 = await tbBalance('5720');
+  const mkDrv = await inj('POST', '/api/ledger/allocation', admin, { name: 'IT by headcount', method: 'driver', frequency: 'monthly', pool_amount: 900, source_account: '5000', targets: [{ target_account: '5710', basis: 2, memo: 'HR 2 ppl' }, { target_account: '5720', basis: 1, memo: 'Ops 1 ppl' }] });
+  ok('Allocation: create a driver cycle (headcount key)', mkDrv.status === 201 && mkDrv.json?.method === 'driver', JSON.stringify(mkDrv.json));
+  const runDrv = await inj('POST', '/api/ledger/allocation/run', admin);
+  const drvEntryNo = runDrv.json?.entries?.find((e: any) => e.cycle_id === mkDrv.json?.id)?.entry_no;
+  await inj('POST', `/api/ledger/journal/${drvEntryNo}/approve`, mgr);
+  ok('Allocation: driver split posts by headcount (5710 +600 / 5720 +300)',
+    !!drvEntryNo && near((await tbBalance('5710')) - bDv5710, 600) && near((await tbBalance('5720')) - bDv5720, 300),
+    `d5710=${(await tbBalance('5710')) - bDv5710} d5720=${(await tbBalance('5720')) - bDv5720}`);
+
   // ───────────────────── Customer / vendor statements of account ─────────────────────
   const [stmtT] = await db.insert(s.tenants).values({ code: 'STMT', name: 'Statement Customer', email: 'stmt@cust.example' }).returning({ id: s.tenants.id });
   const stmtTid = Number(stmtT.id);
