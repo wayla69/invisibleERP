@@ -62,6 +62,22 @@ services:
     depends_on:
       - api
 
+  # One-shot pusher (run explicitly or on a cron: `--profile push run --rm hub-push`): replays
+  # hub-captured sales to the cloud's POST /api/hub/ingest — exactly-once (BRANCH-04), safe to re-run.
+  hub-push:
+    profiles: ["push"]
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://ierp:${HUB_DB_PASSWORD}@db:5432/ierp_hub
+      HUB_SYNC_SECRET: ${HUB_SYNC_SECRET}
+      CLOUD_URL: ${CLOUD_URL:?set CLOUD_URL in .env (the cloud API origin)}
+    entrypoint: ["node", "apps/api/dist/database/hub-push.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+
   # One-shot seeder (run explicitly with `--profile seed run --rm hub-seed`): imports the signed
   # snapshot exported from the cloud's GET /api/hub/snapshot?include_credentials=1.
   hub-seed:

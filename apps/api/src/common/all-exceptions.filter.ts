@@ -3,7 +3,9 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { pgError, type PgErrorLike } from './db-error';
 import { captureRequestException } from '../observability/instrumentation';
 
-// Error envelope สม่ำเสมอ: { error: { code, message, messageTh? } }
+// Error envelope สม่ำเสมอ: { error: { code, message, messageTh?, details? } } — `details` is an optional,
+// endpoint-defined structured payload (e.g. the DUPLICATE_SUSPECT match list, CRM-1) passed through from
+// the thrown HttpException; absent for every error that doesn't set it (back-compat).
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('Exception');
@@ -11,7 +13,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const res = host.switchToHttp().getResponse<FastifyReply>();
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    let body: { code: string; message: string; messageTh?: string } = {
+    let body: { code: string; message: string; messageTh?: string; details?: unknown } = {
       code: 'INTERNAL_ERROR',
       message: 'Unexpected error',
       messageTh: 'เกิดข้อผิดพลาด',
@@ -29,6 +31,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           message: (o.message as string) ?? exception.message,
           messageTh: o.messageTh as string | undefined,
         };
+        if (o.details !== undefined) body.details = o.details;
       }
     } else if (pgError(exception)) {
       // drizzle 0.45 wraps the driver error (SQLSTATE under `.cause`); pgError() unwraps it so the

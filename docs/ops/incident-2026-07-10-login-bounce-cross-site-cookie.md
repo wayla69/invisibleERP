@@ -7,6 +7,7 @@ users unable to stay signed in) · **ITGC-OP-03/05 evidence record.**
 
 | Time (Jul 9–10) | Event |
 |---|---|
+| 09 (before 11:30) | **Trigger:** an "orphan" Postgres service is deleted on a dashboard suggestion, **without first verifying what referenced it** — kicking off the env firefight below. Post-hoc verification (the deleted instance had only ever produced `28P01` auth failures, and the H-3 workflow's sanity gate confirmed the surviving DB carries the live 100+ migration history) showed the deletion itself lost no data — but that was luck, not process. See `docs/ops/pre-deletion-checklist.md`. |
 | 09 11:30–11:44 | 3 production deploys FAIL: first on the H-3 tenancy boot check (`Refusing to boot: RLS BACKSTOP MISSING` — `DATABASE_URL` pointed at a superuser role), then on `drizzle-kit migrate` → `42501 permission denied for database railway` after a partial role swap. Sentry captured the boot refusal. |
 | 09 12:31–12:50 | `Ops — Railway failed-deploy diagnostics` runs during the firefight; **service env variables were rebuilt by hand** during this window. |
 | 09 13:28 | `Ops — provision non-superuser DB role (H-3)` provisions `ierp_app` correctly, repoints `DATABASE_URL`, redeploys → SUCCESS. |
@@ -48,13 +49,29 @@ the active deployment was healthy throughout the report window.
 
 ## Lessons / follow-ups
 
+- **The trigger was an unverified deletion.** The whole chain started with deleting a Postgres service
+  because a dashboard suggestion said it was unused — verification happened only after the fact.
+  **(DONE 2026-07-10)** checked-in runbook `docs/ops/pre-deletion-checklist.md`: reference-check +
+  live-datastore proof + snapshot + ops-log entry before ANY destructive infra change.
 - **Env is config-of-record:** hand-rebuilding service variables under incident pressure silently dropped
-  a security-relevant flag. Follow-up: keep a checked-in **variable-NAME manifest per service** and extend
-  the diagnostics workflow to diff live names against it (values never printed), so a missing var is a
-  one-click detection instead of a multi-hour hunt.
+  a security-relevant flag. **(DONE 2026-07-10)** `docs/ops/railway-env-manifest.json` is the checked-in
+  **variable-NAME manifest per service**; the scheduled `ops-synthetic-probe.yml` `env-manifest` job diffs
+  live names against it every 30 min (values never printed) — a lost variable now fails a probe within
+  half an hour instead of a multi-hour hunt.
 - The diagnostics workflow only dumps FAILED deployments; the healthy-deployment 401s were invisible from
-  CI. Follow-up: add an authenticated **synthetic login probe** (login → `/api/auth/me`) to the scheduled
-  ops checks so a cookie/session regression pages before a user does.
+  CI. **(DONE 2026-07-10)** `ops-synthetic-probe.yml` adds scheduled HTTP probes (login page, proxied
+  `/api/config`, wrong-password 401 shape, `/proxy-health`) plus a **real-browser Playwright login probe**
+  (`tools/ops/synthetic-login-probe.mjs`: login → cookies stored → attached on `/api/auth/me` → session
+  survives reload — the exact step July-10 broke; curl can't see cookie policy). The browser probe reads its
+  credentials from the `PROBE_USERNAME`/`PROBE_PASSWORD` repo secrets, or (fallback) the Railway
+  variables of the same names — provisioned and rotated fully automatically by
+  `ops-provision-probe-user.yml` (upserts the low-privilege `synthetic-probe` user, role
+  ExecutiveViewer, and verifies a live login through the web proxy).
+- **The cutover itself is now automated and self-verifying. (DONE 2026-07-10)** `ops-proxy-cutover.yml`
+  (manual dispatch): `verify` (read-only go/no-go matrix) → `cutover` (pre-checks the private target via
+  `/proxy-health`, flips `API_PROXY_TARGET`, polls green, **auto-rolls back** to the public URL on
+  failure) → `remove-samesite` (deletes `AUTH_COOKIE_SAMESITE` from the API only after the same-origin
+  proxy is verified live, restoring the safer `SameSite=Lax` default).
 - The web's 401 bounce masks the response body. Follow-up (UX): surface the API error `code` on the login
   page after a bounce (`?reason=`) to cut diagnosis time.
 - **(DONE 2026-07-10)** Cutting over to the private-network proxy stalled on blind rebuild-and-retry

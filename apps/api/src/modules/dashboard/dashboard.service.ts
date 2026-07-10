@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lte, lt, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, custPosItems, apTransactions, stockSnapshots, arInvoices, opportunities, purchaseRequests, dashboardLayouts } from '../../database/schema';
+import { custPosSales, custPosItems, apTransactions, stockSnapshots, arInvoices, crmOpportunities, purchaseRequests, dashboardLayouts } from '../../database/schema';
 import { roleEnum } from '../../database/schema/enums';
 import { latestSnapshotDate, ymd, monthStart, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -136,11 +136,12 @@ export class DashboardService {
         return n(r?.c);
       }
       case 'open_pipeline': {
-        const [r] = await db.select({ v: sql<string>`coalesce(sum(${opportunities.expectedValue}),0)` }).from(opportunities).where(eq(opportunities.status, 'Open'));
+        // CRM-1 unification (0293): read the unified spine (crm_opportunities).
+        const [r] = await db.select({ v: sql<string>`coalesce(sum(${crmOpportunities.amount}),0)` }).from(crmOpportunities).where(eq(crmOpportunities.status, 'Open'));
         return n(r?.v);
       }
       case 'pipeline_count': {
-        const [r] = await db.select({ c: sql<string>`count(*)` }).from(opportunities).where(eq(opportunities.status, 'Open'));
+        const [r] = await db.select({ c: sql<string>`count(*)` }).from(crmOpportunities).where(eq(crmOpportunities.status, 'Open'));
         return n(r?.c);
       }
       case 'open_pr': {

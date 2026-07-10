@@ -2,11 +2,12 @@
 
 > Plan: `docs/41-lan-first-store-hub-plan.md` · Narrative: PN-24 §7 step 6b · Package: `hub/`
 >
-> **Phase-1 scope honesty:** the hub runs the restaurant front-of-house **standalone** (register,
-> menu, floor plan, staff password/PIN login). The **hub→cloud financial replay is Phase 2** — until
-> it ships, sales rung on the hub stay in the hub's ledger (fine for a pilot store / lab; not yet a
-> substitute for the cloud POS in an audited store). The register's own browser-level offline outbox
-> (Phase 0) keeps covering short cloud outages in cloud-pointed stores.
+> **Scope (updated for Phase 2a):** the hub runs the restaurant front-of-house **standalone** (register,
+> menu, floor plan, staff password/PIN login), and **a-la-carte sales now replay to the cloud ledger
+> exactly once** via `db:hub:push` → `POST /api/hub/ingest` (control **BRANCH-04**; see §6). Still
+> Phase 2b: buffet-tier and loyalty-redeem sales (visibly `skipped_unsupported` in `hub_push_log`, to
+> reconcile manually), till sessions/Z-reports, tip pools and stock movements. The register's own
+> browser-level offline outbox (Phase 0) keeps covering short cloud outages in cloud-pointed stores.
 
 ## 1. What you need
 
@@ -79,8 +80,27 @@ on diner phones — acceptable to smoke-test the loop).
   cloud does NOT reach the hub until the next re-seed (Phase-2 sync closes this gap) — for immediate
   revocation, deactivate the user on the hub too (`hubadmin`).
 
+## 6. Pushing sales to the cloud (Phase 2a — BRANCH-04)
+
+When the internet is up, replay hub-captured sales into the cloud ledger:
+
+```bash
+docker compose --profile push run --rm hub-push     # or: pnpm --filter @ierp/api db:hub:push
+```
+
+- Env: `CLOUD_URL` (the cloud API origin) + the same `HUB_SYNC_SECRET`; batches are HMAC-signed and the
+  cloud verifies before replaying. Safe on a cron (e.g. every 5 min): the `client_uuid` is derived from
+  the hub sale number, so re-pushes — including after a crash or a restored hub DB — only ever produce
+  `duplicate` results, never a second sale/GL.
+- Outcomes land in the hub's `hub_push_log`. **Review `skipped_unsupported` rows** (buffet/loyalty/no
+  order link) — those sales exist only on the hub ledger until Phase 2b or manual entry; the reason
+  column says why. Failures (`failed`) are retried on the next run.
+- Cloud-side review: `GET /api/hub/reconciliation?from&to` (perm `branch`/`exec`) ties every hub op to
+  its cloud sale + value — the BRANCH-04 detective tie-out.
+
 ## Revision history
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 | 2026-07-10 | Platform | Initial runbook (docs/41 Phase 1: snapshot export/import + `hub/` compose + TLS/DNS recipe). |
+| 0.2 | 2026-07-10 | Platform | Phase 2a: §6 push-to-cloud operations (`hub-push` one-shot, cron guidance, `skipped_unsupported` review, reconciliation endpoint); scope note updated. |
