@@ -1,9 +1,9 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException, ConflictException } from '@nestjs/common';
-import { sql, eq, ne, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
+import { sql, eq, ne, and, desc, asc, isNull, isNotNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, vendorBankChangeRequests, vendorAddresses, vendorContacts, dataChangeLog, vendorRelationships } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, grClaims, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, itemCategories, itemImages, invBalances, projects, vendorBankChangeRequests, vendorAddresses, vendorContacts, dataChangeLog, vendorRelationships } from '../../database/schema';
 import { alias } from 'drizzle-orm/pg-core';
 import { shapeChangeHistory } from '../../common/change-history';
 import { isValidPostalCode, normalizeProvince } from '../../common/thai-address';
@@ -575,14 +575,41 @@ export class ProcurementService {
     await db.update(vendorBankChangeRequests).set({ status: 'Rejected', rejectReason: reason ?? null }).where(eq(vendorBankChangeRequests.reqNo, reqNo));
     return { req_no: reqNo, status: 'Rejected', rejected_by: approver.username };
   }
-  // Scorecard recompute: on-time/quality remain at 100 (placeholder until claims feed them).
-  // price_var_pct: for each GR item received from this vendor, compare unit_cost vs the active
-  // list price (supplier_price_lists) for that item+uom. avg(abs(actual − list) / list * 100).
+  // Scorecard recompute — all three dimensions are now computed from the vendor's own receipt/claim
+  // history (previously on-time/quality were hard-coded 100):
+  //  • on_time_pct: of this vendor's receipts whose PO carried an expected_date, the % received on/before it.
+  //  • quality_pct: 100 − defect rate = 100 − sum(gr_claim.claim_qty)/sum(gr.received_qty)·100 (floored at 0).
+  //  • price_var_pct: avg |actual unit_cost − active list price| / list · 100 across matched GR items.
+  // No measurable data (no dated PO / no receipts) leaves the respective dimension at 100 so a brand-new
+  // vendor isn't penalised for absence of evidence. Overall score = mean of the three (price as 100−var).
   async recomputeScorecard(vendorId: number, period: string, user: JwtUser) {
     const db = this.db;
     const [g] = await db.select({ c: sql<string>`count(*)` }).from(goodsReceipts).where(eq(goodsReceipts.vendorId, vendorId));
     const grCount = Number(g?.c ?? 0);
-    const onTime = 100, quality = 100;
+
+    // On-time delivery: compare each receipt's gr_date to its PO's expected_date (ISO date strings compare
+    // lexicographically). Only receipts whose PO has an expected_date are measurable.
+    const otRows = await db.select({ grDate: goodsReceipts.grDate, expected: purchaseOrders.expectedDate })
+      .from(goodsReceipts)
+      .innerJoin(purchaseOrders, eq(goodsReceipts.poNo, purchaseOrders.poNo))
+      .where(and(eq(goodsReceipts.vendorId, vendorId), isNotNull(purchaseOrders.expectedDate), isNotNull(goodsReceipts.grDate)));
+    let onTime = 100;
+    if (otRows.length) {
+      const onTimeN = otRows.filter((r: any) => String(r.grDate) <= String(r.expected)).length;
+      onTime = Math.round((onTimeN / otRows.length) * 10000) / 100;
+    }
+
+    // Quality: defect rate from goods-receipt claims (EXP-12) against total received quantity.
+    const [recvAgg] = await db.select({ recv: sql<string>`coalesce(sum(${grItems.receivedQty}),0)` })
+      .from(grItems).innerJoin(goodsReceipts, eq(grItems.grId, goodsReceipts.id))
+      .where(eq(goodsReceipts.vendorId, vendorId));
+    const [claimAgg] = await db.select({ claimed: sql<string>`coalesce(sum(${grClaims.claimQty}),0)`, cnt: sql<string>`count(*)` })
+      .from(grClaims).where(eq(grClaims.vendorId, vendorId));
+    const recvQty = Number(recvAgg?.recv ?? 0);
+    const claimedQty = Number(claimAgg?.claimed ?? 0);
+    const claimCount = Number(claimAgg?.cnt ?? 0);
+    let quality = 100;
+    if (recvQty > 0) quality = Math.round((100 - Math.min(100, (claimedQty / recvQty) * 100)) * 100) / 100;
 
     // Compute price variance: join GR items with active price-list entries for this vendor
     const priceRows = await db.select({
@@ -605,10 +632,10 @@ export class ProcurementService {
     }
 
     const score = Math.round(((onTime + quality + (100 - Math.min(priceVar, 100))) / 3) * 100) / 100;
-    await db.insert(supplierScorecards).values({ tenantId: user.tenantId ?? null, vendorId, period, onTimePct: String(onTime), qualityPct: String(quality), priceVarPct: String(priceVar), score: String(score), grCount, claimCount: 0, createdBy: user.username })
-      .onConflictDoUpdate({ target: [supplierScorecards.vendorId, supplierScorecards.period], set: { score: String(score), grCount, priceVarPct: String(priceVar) } });
+    await db.insert(supplierScorecards).values({ tenantId: user.tenantId ?? null, vendorId, period, onTimePct: String(onTime), qualityPct: String(quality), priceVarPct: String(priceVar), score: String(score), grCount, claimCount, createdBy: user.username })
+      .onConflictDoUpdate({ target: [supplierScorecards.vendorId, supplierScorecards.period], set: { onTimePct: String(onTime), qualityPct: String(quality), score: String(score), grCount, claimCount, priceVarPct: String(priceVar) } });
     await db.update(vendors).set({ scorecardScore: String(score) }).where(eq(vendors.id, vendorId));
-    return { vendor_id: vendorId, period, score, gr_count: grCount, price_var_pct: priceVar };
+    return { vendor_id: vendorId, period, score, gr_count: grCount, on_time_pct: onTime, quality_pct: quality, claim_count: claimCount, price_var_pct: priceVar };
   }
 
   // Supplier-performance register: scorecards for the caller's tenant ranked by score. With ?period → that
