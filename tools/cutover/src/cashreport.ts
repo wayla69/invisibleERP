@@ -184,6 +184,23 @@ async function main() {
   const zA = await inj('GET', `/api/payments/till/${tillAId}/z-report`, sales1);
   ok('Refund-till: closed till A unaffected (cash_refunds 0, expected stays 1107 — no phantom variance)', near(zA.json.cash_refunds, 0) && near(zA.json.expected_cash, 1107), `cr=${zA.json.cash_refunds} exp=${zA.json.expected_cash}`);
 
+  // ── REV-13: a CASH tip lands in the drawer, so expected_cash must include it ──
+  // `payments.amount` excludes the tip (2300 liability) while the sale's GL debits 1000 for total+tip.
+  // Omitting it made every close with a cash tip read "over" by exactly the tip — a false variance that
+  // could trip the maker-checker. A tip on a CARD tender never reaches the drawer and must be excluded.
+  const tillT = await inj('POST', '/api/payments/till/open', sales1, { opening_float: 0 });
+  const tipTable = await inj('POST', '/api/restaurant/tables', sales1, { table_no: `C${++tn}`, seats: 2 });
+  const tipOrder = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tipTable.json.id, items: [{ name: 'กะเพรา', qty: 1, unit_price: 100, station_code: 'hot' }] });
+  await inj('POST', `/api/restaurant/orders/${tipOrder.json.order_no}/checkout`, sales1, { method: 'Cash', tip: 20 });
+  const cardTable = await inj('POST', '/api/restaurant/tables', sales1, { table_no: `C${++tn}`, seats: 2 });
+  const cardOrder = await inj('POST', '/api/restaurant/orders', sales1, { table_id: cardTable.json.id, items: [{ name: 'กะเพรา', qty: 1, unit_price: 100, station_code: 'hot' }] });
+  await inj('POST', `/api/restaurant/orders/${cardOrder.json.order_no}/checkout`, sales1, { method: 'Card', tip: 30 });
+  const tillTId = Number((await db.select().from(s.tillSessions).where(eq(s.tillSessions.sessionNo, tillT.json.session_no)))[0].id);
+  const xt = await inj('GET', `/api/payments/till/${tillTId}/x-report`, sales1);
+  ok('Tip: expected_cash includes the CASH tip (107+20=127) and excludes the CARD tip', near(xt.json.expected_cash, 127), `exp=${xt.json.expected_cash}`);
+  const zt = await inj('POST', '/api/payments/till/close', sales1, { session_no: tillT.json.session_no, closing_count: 127 });
+  ok('Tip: counting the real drawer (127) closes with variance 0 — no phantom "over"', near(zt.json.variance, 0) && zt.json.variance_status === 'NotRequired', JSON.stringify({ v: zt.json.variance, st: zt.json.variance_status }));
+
   await app.close();
   await pg.close();
 

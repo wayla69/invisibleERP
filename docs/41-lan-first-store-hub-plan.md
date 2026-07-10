@@ -138,9 +138,10 @@ Extend the proven idempotency contract from "quick-sale replay" to the full fina
 - **DELIVERED:** tender-fidelity fixes (ii)+(iii) above; PN-24 rev 0.8 corrects rev 0.7's premise (a
   blast-radius review proved restaurant checkout **does** record a tender linked to the open till, so the
   native `aggregateTill` already sees restaurant cash — the earlier claim was wrong).
-- **FLAGGED (pre-existing, not introduced):** the **native** `aggregateTill` sums `payments.amount` only,
-  excluding the tip the drawer physically holds → a native close reads "over" by a cash tip. Fixing it
-  touches `pos-p0`'s pinned assertions; do it as its own change with the till/Z evidence re-baselined.
+- **FIXED (was flagged):** the **native** `aggregateTill` excluded the cash tip the drawer physically
+  holds → a close with a cash tip read "over" by the tip. It now counts cash-tender tips (and still
+  excludes card tips), so online and hub closes agree. REV-13 text updated; `cashreport` proves both
+  directions; `pos-p0`/`restaurant`/`tips`/`splitbill` unaffected (their sales carry no cash tip).
 - **PLANNED:** loyalty-redeem sales (cross-system points state — today a visible `skipped_unsupported`
   queue), tip-pool distributions (policy today: distribute on the CLOUD after sync — per-sale tips already
   accrue to 2300 at ingest), hub-local stock ops (waste/receives; sale-driven BOM deductions already post
@@ -182,7 +183,21 @@ that quietly stops replaying — sitting on un-banked cash — is visible. Table
 - **DR/BCP** (`docs/ops/dr-bcp-plan.md` v1.3): new scenario 6 — hub box loss. RPO = the push interval;
   restore + re-push is safe because the deterministic `client_uuid` makes replay idempotent (BRANCH-04).
 
-## Phase 4c — remaining fleet operations (PLANNED)
+## Phase 4c — version channel (DELIVERED 2026-07-10)
+
+The heartbeat **is** the update channel — no new endpoint, no agent on the box. The cloud answers each
+heartbeat with its own `APP_VERSION` plus advice:
+
+- `behind` → `upgrade_available`; `db:hub:push` prints the hint (apply after close, runbook §8).
+- `ahead` → the box is **newer than the cloud**: an operational hazard (it can send fields the cloud’s
+  validator rejects). The fleet view marks it `needs_attention` and counts it in `ahead_of_cloud`.
+- `current` / `unknown` (a hub with no `APP_VERSION`) → no noise, never spuriously flagged.
+
+A real auto-update pipeline (pull images, restart unattended) stays **out of scope**: an unattended restart
+mid-service is a worse failure than running one version behind, and the runbook’s drain → dump → rebuild
+flow is the safe path. `GET /api/hub/fleet` now carries `cloud_version` + per-hub `version_status`.
+
+## Phase 4d — remaining fleet operations (PLANNED)
 
 Hub heartbeat + version into the `/platform` console (god view), staged auto-update channel, on-hub DB
 backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC controls.
@@ -207,6 +222,8 @@ backup, NTP discipline for `captured_at`, disk encryption + edge-device ITGC con
 | 0.1 | 2026-07-10 | Platform | Initial plan; Phase 0 delivered in the same PR (PN-24 rev 0.3, UAT-O2C-284..285, e2e `register-offline.spec.ts`). |
 | 0.2 | 2026-07-10 | Platform | Phase 1 (Store Hub MVP) delivered: `modules/hub` signed snapshot export, `db:hub:import` id-stable importer, `hub/` compose appliance + `docs/ops/store-hub-setup.md` runbook, CI harness `hub-snapshot` (20 checks). PN-24 rev 0.4; UAT-O2C-288..289. |
 | 0.3 | 2026-07-10 | Platform | Phase 2a (hub→cloud sales replay) delivered: `db:hub:push` + `hub_push_log` (0291), cloud `POST /api/hub/ingest` (HMAC) + `GET /api/hub/reconciliation`, op pass-through (discount/tip/SC), **new control BRANCH-04** (RCM 205), harness → 27 checks. PN-24 rev 0.5; UAT-O2C-290..291. |
+| 0.7 | 2026-07-10 | Platform | Phase 2c-2: the flagged native-`aggregateTill` tip exclusion is **fixed** (a cash tip is drawer cash; a card tip is not) — online and hub closes now agree; REV-13 control text updated, `cashreport` harness → 34 checks. UAT-O2C-316. |
+| 0.7c | 2026-07-10 | Platform | Phase 4c: the heartbeat becomes the **version channel** — the cloud answers with its `APP_VERSION`; a hub behind is told to upgrade, a hub **ahead of the cloud** is flagged `needs_attention` (it can send fields the cloud rejects); unversioned hubs stay `unknown` (no false flags). Auto-update pipeline explicitly out of scope. Harness → **60 checks**. UAT-O2C-317. |
 | 0.6 | 2026-07-10 | Platform | Phase 2c-2 (partial) + 4b delivered: tender-fidelity corrections (hub-push replays the REAL tender method; `ingestTill` values the drawer from **cash tenders only** — a card sale no longer inflates expected cash), PN-24 rev 0.8 correcting rev 0.7's wrong premise, flagged the pre-existing native-`aggregateTill` tip exclusion; verified nightly hub backup + update procedure + DR/BCP scenario 6. Harness → **55 checks**. |
 | 0.5 | 2026-07-10 | Platform | Phases 2c-1 + 4a delivered: hub till/Z-report up-sync (cloud-recomputed expected cash, `TILL_SALES_NOT_SYNCED` completeness gate, 5830 over/short on the shared REV-13 materiality line) + fleet heartbeat/`GET /api/hub/fleet`; **new control BRANCH-05** (RCM 207), migration 0296, harness → **53 checks**. Documents the native-till tender asymmetry; fixes the `captured_at` = push-time bug. PN-24 rev 0.7; UAT-O2C-308..310. |
 | 0.4 | 2026-07-10 | Platform | Phases 2b + 3 delivered: buffet-tier replay (`op.buffet`, cloud-master pricing, canonical-JSON signature) + diner QR self-order proven end-to-end ON the hub (harness → **40 checks**); versioned master pull dropped as superseded (re-price + BRANCH-04 drift); Phase 2c scoped (loyalty/till-Z/fiscal). PN-24 rev 0.6; UAT-O2C-292..293. |

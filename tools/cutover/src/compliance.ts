@@ -354,6 +354,58 @@ async function main() {
   ok('EXP-13: nothing eligible (paid / blocked / already-in-open-run) → 400 NO_ELIGIBLE_AP',
     r3.status === 400 && r3.json.error?.code === 'NO_ELIGIBLE_AP', `${r3.status} ${r3.json.error?.code}`);
 
+  // ════════════════════════ EXP-14 — Dynamic / early-payment discounting on the AP payment run (FIN-9) ════════════════════════
+  // A maker-checked sliding-scale prompt-payment discount policy (ap_discount_terms, per-vendor or global);
+  // when a run pays a bill early the discount is captured as income (Cr 4600) and cash out is reduced. The
+  // policy is a CHANGE CONTROL: created Draft by 'creditors', activated by a DIFFERENT approvals/gl_close
+  // user (self-activation → SOD_VIOLATION); only an Active policy is applied.
+  const due30 = new Date(Date.parse(bizToday + 'T00:00:00Z') + 30 * 86400000).toISOString().slice(0, 10); // 30 days after bizToday
+  // 1. Policy change-control maker-checker: creditors proposes Draft, self-activation blocked, distinct approver activates.
+  const polReq = await inj('POST', '/api/finance/ap/discount-terms', apdual, { vendor_id: Number(rv1.id), name: 'ส่วนลด 2/20', discount_pct: 0.02, min_days_early: 1, full_discount_days: 20 });
+  const polId = polReq.json.id;
+  const polSelf = await inj('POST', `/api/finance/ap/discount-terms/${polId}/approve`, apdual);
+  const polApp = await inj('POST', `/api/finance/ap/discount-terms/${polId}/approve`, fincon);
+  ok('EXP-14: discount policy is maker-checked — creditors drafts, self-activation → 403 SOD_VIOLATION, a distinct approver activates',
+    (polReq.status === 200 || polReq.status === 201) && polReq.json.status === 'Draft'
+      && polSelf.status === 403 && polSelf.json.error?.code === 'SOD_VIOLATION'
+      && polApp.status === 200 && polApp.json.status === 'Active',
+    `draft=${polReq.json.status} self=${polSelf.status}/${polSelf.json.error?.code} app=${polApp.json.status}`);
+
+  // 2. A bill paid 30 days early (≥ full_discount_days=20) earns the full 2% — projected on the proposal.
+  const bd1 = await inj('POST', '/api/finance/ap/transactions', apdual, { vendor_id: Number(rv1.id), vendor_name: 'บจก. รันเพย์ ซัพพลาย', amount: 1000, due_date: due30 });
+  const rd = await inj('POST', '/api/finance/ap/payment-runs/propose', apdual, { due_cutoff: due30, bank_account_id: bankId, vendor_ids: [Number(rv1.id)], pay_date: bizToday });
+  const rdNo = rd.json.run_no as string;
+  const ld1 = (rd.json.lines ?? []).find((l: any) => l.txn_no === bd1.json.txn_no);
+  ok('EXP-14: propose projects the sliding-scale discount (2% × ฿1000 = ฿20; 30 days early; net cash ฿980)',
+    (rd.status === 200 || rd.status === 201) && ld1?.discount_rate === 0.02 && ld1?.discount_amount === 20
+      && ld1?.days_early === 30 && ld1?.net_amount === 980 && rd.json.projected_discount === 20,
+    `rate=${ld1?.discount_rate} disc=${ld1?.discount_amount} days=${ld1?.days_early} net=${ld1?.net_amount} proj=${rd.json.projected_discount}`);
+
+  // 3. Execute captures the discount: Cr 4600 income, bill fully Paid on the reduced cash, run total_discount, TB balanced.
+  await inj('POST', `/api/finance/ap/payment-runs/${rdNo}/submit`, apdual);
+  await inj('POST', `/api/finance/ap/payment-runs/${rdNo}/approve`, fincon);
+  const disc4600Before = await tbCredit(runPeriod, '4600');
+  const execD = await inj('POST', `/api/finance/ap/payment-runs/${rdNo}/execute`, fincon);
+  const disc4600After = await tbCredit(runPeriod, '4600');
+  const bd1Paid = await apPaid(bd1.json.txn_no);
+  const tbD = await inj('GET', `/api/ledger/trial-balance?period=${runPeriod}`, admin);
+  const drD = (tbD.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.debit), 0);
+  const crD = (tbD.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.credit), 0);
+  const rdAfter = await inj('GET', `/api/finance/ap/payment-runs/${rdNo}`, fincon);
+  ok('EXP-14: execute captures the discount — Cr 4600 ฿20, bill fully Paid, run total_discount ฿20, TB balanced',
+    execD.status === 200 && execD.json.status === 'Executed' && execD.json.discount_taken === 20
+      && Math.abs(disc4600After - disc4600Before - 20) < 0.01 && bd1Paid === 1000
+      && rdAfter.json.total_discount === 20 && Math.abs(drD - crD) < 0.01,
+    `taken=${execD.json.discount_taken} d4600=${(disc4600After - disc4600Before).toFixed(2)} paid=${bd1Paid} total=${rdAfter.json.total_discount} tbΔ=${(drD - crD).toFixed(2)}`);
+
+  // 4. Policy-OFF: a vendor with NO active policy earns no discount (net = gross; nothing posts to 4600).
+  const bd2 = await inj('POST', '/api/finance/ap/transactions', apdual, { vendor_id: Number(rv2.id), vendor_name: 'บจก. ไร้บัญชี', amount: 500, due_date: due30 });
+  const rd2 = await inj('POST', '/api/finance/ap/payment-runs/propose', apdual, { due_cutoff: due30, bank_account_id: bankId, vendor_ids: [Number(rv2.id)], pay_date: bizToday });
+  const ld2 = (rd2.json.lines ?? []).find((l: any) => l.txn_no === bd2.json.txn_no);
+  ok('EXP-14: policy-off — a vendor with no active discount policy earns ฿0 discount (net = gross ฿500)',
+    (rd2.status === 200 || rd2.status === 201) && (ld2?.discount_amount ?? 0) === 0 && rd2.json.projected_discount === 0 && ld2?.net_amount === 500,
+    `disc=${ld2?.discount_amount} proj=${rd2.json.projected_discount} net=${ld2?.net_amount}`);
+
   // ════════════════════════ PAY-03 — Payroll run maker-checker (SoD) ════════════════════════
   // A payroll run posts its GL entry as a DRAFT; a DIFFERENT user must approve before it hits balances —
   // the run-er can never post their own payroll (ghost-employee / rate-manipulation fraud). Mirrors GL-05.

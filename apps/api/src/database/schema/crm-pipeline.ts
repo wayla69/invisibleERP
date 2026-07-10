@@ -137,11 +137,44 @@ export const crmActivities = pgTable('crm_activities', {
   dueDate: date('due_date'),
   done: boolean('done').notNull().default(false),
   owner: text('owner'),
-  source: text('source'),                              // NULL = crm route; 'pipeline' = /api/pipeline route or 0294 data-migration
+  source: text('source'),                              // NULL = crm route; 'pipeline' = /api/pipeline route or 0294 data-migration; 'comms' = CRM-4 outbound send; 'inbound' = CRM-6 inbound reply
+  threadToken: text('thread_token'),                   // CRM-6: deterministic reply-threading token embedded in CRM-4 outbound comms — crm-inbound matches replies back to THIS activity's entity
   legacyActivityId: bigint('legacy_activity_id', { mode: 'number' }), // provenance: old opportunity_activities.id (0294)
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-}, (t) => ({ byEntity: index('idx_crm_activity_entity').on(t.tenantId, t.entityType, t.entityNo) }));
+}, (t) => ({
+  byEntity: index('idx_crm_activity_entity').on(t.tenantId, t.entityType, t.entityNo),
+  byThread: index('idx_crm_activity_thread').on(t.tenantId, t.threadToken), // CRM-6: resolve an inbound reply's thread token → its originating activity/entity
+}));
+
+// CRM-6 (docs/41 CRM-4 note — the deferred 2-way inbound side). Every inbound customer email that hits the
+// per-tenant CRM address is journaled here — matched to a deal/lead (then also logged as a timeline activity)
+// or parked as `unmatched` for the review queue. Doubles as the provider-redelivery dedupe anchor (message_id)
+// and the authenticity/audit record (mirrors email-capture's message_log receipt). RLS-scoped (migration 0309).
+export const crmInboundMessages = pgTable('crm_inbound_messages', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  messageId: text('message_id'),                        // provider Message-ID (dedupe key)
+  fromAddr: text('from_addr').notNull(),                // normalised sender address
+  subject: text('subject'),
+  bodyPreview: text('body_preview'),                    // first ~2000 chars of the plain-text body
+  threadToken: text('thread_token'),                    // token parsed from the reply (subject/body/headers), if any
+  matchStatus: text('match_status').notNull().default('unmatched'), // matched | unmatched
+  matchedBy: text('matched_by'),                        // thread_token | contact_email | lead_email | manual
+  matchedEntityType: text('matched_entity_type'),       // opportunity | lead
+  matchedEntityNo: text('matched_entity_no'),
+  matchedContactId: bigint('matched_contact_id', { mode: 'number' }),
+  activityId: bigint('activity_id', { mode: 'number' }), // the crm_activities row logged on a match
+  reviewReason: text('review_reason'),                  // why it landed in the queue (e.g. no_match)
+  resolved: boolean('resolved').notNull().default(false), // review-queue triage: true once linked or dismissed
+  resolvedBy: text('resolved_by'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byQueue: index('idx_crm_inbound_queue').on(t.tenantId, t.matchStatus, t.resolved),
+  byMsg: index('idx_crm_inbound_msg').on(t.tenantId, t.messageId),
+}));
 
 // CRM-4 automation — explainable, versioned rules-based lead score (grade A–D). ONE row per (tenant, lead),
 // upserted by CrmPipelineService.scoreLead; `breakdown` carries the per-factor contributions so the grade is
@@ -180,3 +213,4 @@ export type CrmAccount = typeof crmAccounts.$inferSelect;
 export type CrmContact = typeof crmContacts.$inferSelect;
 export type CrmLeadScore = typeof crmLeadScores.$inferSelect;
 export type CrmFollowupSettings = typeof crmFollowupSettings.$inferSelect;
+export type CrmInboundMessage = typeof crmInboundMessages.$inferSelect;
