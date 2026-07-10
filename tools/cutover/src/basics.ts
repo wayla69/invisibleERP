@@ -262,6 +262,36 @@ async function main() {
   const payReimb = await inj('POST', `/api/finance/ap/payments/${reqReimb.json.payment_no}/approve`, mgr);
   ok('Reimbursement settled through the AP maker-checker pay flow', reqReimb.json?.status === 'PendingApproval' && payReimb.json?.bill_status === 'Paid', `req=${reqReimb.json?.status} st=${payReimb.json?.bill_status}`);
 
+  // ───────────────────── AP payment RUN — combined vendor payment (EXP-13, FIN-2) ─────────────────────
+  // Three unpaid bills; a maker schedules a RUN over all three; a DIFFERENT checker approves the whole run.
+  const runBills: string[] = [];
+  for (const [i, amt] of [['A', 300], ['B', 450], ['C', 700]] as [string, number][]) {
+    const b = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: `RunVendor${i}`, txn_type: 'Invoice', invoice_no: `RUN-INV-${i}`, amount: amt, due_date: daysAgo(2), vat_treatment: 'exempt' });
+    runBills.push(b.json?.txn_no);
+  }
+  ok('Seed three unpaid bills for the payment run', runBills.every((t) => /^AP-/.test(t ?? '')), runBills.join(','));
+  // Worksheet proposal: the three due bills surface with their outstanding amounts.
+  const prop = (await inj('GET', '/api/finance/ap/payment-runs/proposal?due_before=' + daysAgo(0), admin)).json;
+  const propHas = runBills.every((t) => (prop.candidates ?? []).some((c: any) => c.txn_no === t && c.outstanding > 0));
+  ok('EXP-13: payment-run proposal lists the due bills with outstanding balances', propHas && prop.count >= 3, `count=${prop.count}`);
+  // Maker creates the run over all three.
+  const run = await inj('POST', '/api/finance/ap/payment-runs', admin, { lines: runBills.map((t, i) => ({ txn_no: t, amount: [300, 450, 700][i] })) });
+  ok('EXP-13: maker creates a payment run over 3 bills (APR-…, PendingApproval, total 1450)', /^APR-/.test(run.json?.run_no ?? '') && run.json?.status === 'PendingApproval' && run.json?.line_count === 3 && near(run.json?.total_amount, 1450), JSON.stringify({ r: run.json?.run_no, n: run.json?.line_count, t: run.json?.total_amount }));
+  // The bills are NOT yet paid (no cash/GL until approval).
+  const preRun = (await inj('GET', '/api/finance/ap?status=Unpaid&limit=80', admin)).json;
+  ok('EXP-13: run bills stay Unpaid until the run is approved (no premature cash)', runBills.every((t) => (preRun.transactions ?? []).some((x: any) => x.Transaction_ID === t)), '');
+  // Run appears on the checker queue, grouped.
+  const runQ = (await inj('GET', '/api/finance/ap/payment-runs/pending', admin)).json;
+  ok('EXP-13: the run surfaces on the checker queue grouped (3 lines, ฿1450)', (runQ.runs ?? []).some((r: any) => r.run_no === run.json?.run_no && r.line_count === 3 && near(r.total_amount, 1450)), JSON.stringify(runQ.runs?.slice(0, 1)));
+  // SoD: the maker (admin) cannot approve their own run.
+  const runSelf = await inj('POST', `/api/finance/ap/payment-runs/${run.json?.run_no}/approve`, admin);
+  ok('EXP-13: maker cannot approve own run → 403 SOD_VIOLATION', runSelf.status === 403 && runSelf.json?.error?.code === 'SOD_VIOLATION', `${runSelf.status} ${runSelf.json?.error?.code}`);
+  // A different checker (mgr) approves the whole run → all three bills Paid in one action.
+  const runAppr = await inj('POST', `/api/finance/ap/payment-runs/${run.json?.run_no}/approve`, mgr);
+  ok('EXP-13: independent checker approves the whole run (3 payments, net ฿1450)', runAppr.json?.status === 'Approved' && runAppr.json?.approved_count === 3 && near(runAppr.json?.net_paid_total, 1450), JSON.stringify({ st: runAppr.json?.status, c: runAppr.json?.approved_count, t: runAppr.json?.net_paid_total }));
+  const postRun = (await inj('GET', '/api/finance/ap?status=Unpaid&limit=80', admin)).json;
+  ok('EXP-13: after run approval all three bills are settled (gone from Unpaid)', runBills.every((t) => !(postRun.transactions ?? []).some((x: any) => x.Transaction_ID === t)), '');
+
   // ───────────────────── EAM: asset maintenance ─────────────────────
   const wo = await inj('POST', '/api/eam/work-orders', admin, { asset_no: 'FA-EAM1', type: 'corrective', priority: 'high', description: 'Seal leak', vendor_name: 'ACME Repairs', cost_estimate: 1000 });
   const woNo = wo.json?.wo_no;

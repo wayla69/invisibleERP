@@ -451,6 +451,40 @@ cash-disbursement entry posts to the ledger. On rejection nothing posts.
 > **Note — separation of duties:** Whoever **raises a purchase** should not also
 > **pay** the supplier (rules R02/R03). The system enforces this.
 
+### B2b. Pay many bills in one go — a payment run (รอบจ่ายรวม, EXP-13)
+
+When you owe several bills at once, you don't have to request and approve them one at a
+time. A **payment run** schedules **many bills together** and is approved in **one**
+maker-checker action — while keeping every control a single payment has.
+
+**Step 1 — build the run (Accounting / AP Clerk, `creditors`, on `/finance`):**
+1. On the **รายจ่าย (AP)** tab of **การเงิน**, open **สร้างรอบจ่ายรวมเจ้าหนี้**
+   (Create a vendor payment run).
+2. (Optional) set **ถึงกำหนดภายใน** (due on/before) to focus on what's due, then click
+   **ค้นบิลที่ถึงกำหนด** (Find due bills).
+3. Tick the bills to pay. Each row's amount defaults to its **outstanding balance
+   net of anything already awaiting approval** (so a bill can't be scheduled twice); you
+   can lower any amount for a part payment.
+4. Click **สร้างรอบจ่าย** (Create payment run).
+
+**Expected result:** A run (**`APR-…`**) is created **awaiting approval**. As with a
+single payment, **no money moves yet** — every line still passes the **3-way-match gate**
+(a PO bill that failed match is refused), the over-pay guard, and any withholding tax; a
+bill listed twice in one run is refused (`DUPLICATE_BILL_IN_RUN`).
+
+**Step 2 — approve the run (Finance, `approvals` / `gl_close`, on `/disbursements`):**
+1. Open **จ่ายเงินเจ้าหนี้ (Disbursements)** — the run appears **grouped** at the top
+   under **รอบจ่ายรวม (Payment runs)** with its bill count and total.
+2. Click **อนุมัติทั้งรอบ** (Approve run) or **ปฏิเสธ** (reject).
+
+**Expected result on approval:** Every bill in the run is settled and each posts its own
+cash-disbursement journal — exactly as approving them one by one, in a single click.
+
+> **Note — you cannot approve your own run:** As with a single payment, the approver
+> must be a **different** user from the person who built the run — a self-approval is
+> blocked with `SOD_VIOLATION` (control **EXP-13**, rules R03/R07). Single-invoice
+> payments are unchanged and still appear on the per-bill queue below the runs.
+
 ### B3. AP aging
 
 1. On the **รายจ่าย (AP)** tab, scroll to **วิเคราะห์อายุเจ้าหนี้ (AP Aging)** (with an

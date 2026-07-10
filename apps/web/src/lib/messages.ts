@@ -719,6 +719,26 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'disb.approve_pay': { th: 'อนุมัติจ่าย', en: 'Approve payment' },
   'disb.reject': { th: 'ปฏิเสธ', en: 'Reject' },
   'disb.no_perm': { th: 'คุณไม่มีสิทธิ์อนุมัติการจ่ายเงิน (ต้องมีสิทธิ์ approvals หรือ gl_close)', en: 'You do not have permission to approve payments (requires approvals or gl_close)' },
+  // ── AP payment runs (EXP-13 — combined vendor payment) ────────────────────
+  'disb.runs_heading': { th: 'รอบจ่ายรวม (Payment runs)', en: 'Payment runs' },
+  'disb.runs_sub': { th: 'อนุมัติทั้งรอบในครั้งเดียว — หลายบิลจ่ายพร้อมกัน (ผู้อนุมัติต้องไม่ใช่ผู้สร้างรอบ)', en: 'Approve a whole run at once — many bills paid together (the approver must differ from the run creator)' },
+  'disb.runs_empty': { th: 'ไม่มีรอบจ่ายรออนุมัติ', en: 'No payment runs awaiting approval' },
+  'disb.col_run_no': { th: 'เลขที่รอบจ่าย', en: 'Run no.' },
+  'disb.col_lines': { th: 'จำนวนบิล', en: 'Bills' },
+  'disb.col_total': { th: 'ยอดรวม', en: 'Total' },
+  'disb.run_approved': { th: 'อนุมัติรอบจ่าย {no} — จ่าย {count} บิล', en: 'Run {no} approved — {count} bill(s) paid' },
+  'disb.run_rejected': { th: 'ปฏิเสธรอบจ่าย {no}', en: 'Run {no} rejected' },
+  'disb.approve_run': { th: 'อนุมัติทั้งรอบ', en: 'Approve run' },
+  'disb.singles_heading': { th: 'คำขอจ่ายรายบิล (Single payments)', en: 'Single payments' },
+  // ── Payment-run worksheet (maker, on /finance) ────────────────────────────
+  'fin.run_worksheet': { th: 'สร้างรอบจ่ายรวมเจ้าหนี้', en: 'Create a vendor payment run' },
+  'fin.run_worksheet_sub': { th: 'เลือกบิลที่ถึงกำหนดหลายใบเพื่อขอจ่ายรวมในรอบเดียว', en: 'Select several due bills to schedule as one combined payment run' },
+  'fin.run_due_before': { th: 'ถึงกำหนดภายใน', en: 'Due on/before' },
+  'fin.run_load': { th: 'ค้นบิลที่ถึงกำหนด', en: 'Find due bills' },
+  'fin.run_selected': { th: 'เลือกแล้ว {n} บิล — รวม {total}', en: '{n} bill(s) selected — total {total}' },
+  'fin.run_submit': { th: 'สร้างรอบจ่าย', en: 'Create payment run' },
+  'fin.run_created': { th: 'สร้างรอบจ่าย {no} — {count} บิล รออนุมัติ', en: 'Payment run {no} created — {count} bill(s) pending approval' },
+  'fin.run_none': { th: 'ไม่มีบิลถึงกำหนดที่ยังค้างจ่าย', en: 'No due bills outstanding' },
 
   // ── Pending approvals (GOV-01 monitor) ────────────────────────────────────
   'appr.title': { th: 'รายการรออนุมัติ (Pending approvals)', en: 'Pending approvals' },

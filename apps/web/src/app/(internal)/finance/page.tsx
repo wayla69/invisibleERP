@@ -686,6 +686,8 @@ function PayablesTab() {
         {t('fin.ap_note_2')}
       </p>
 
+      <PaymentRunWorksheet onCreated={refresh} />
+
       <ApAgingSection />
 
       {/* AP pay-request dialog — submits a request that a different user must approve (maker-checker) */}
@@ -704,6 +706,83 @@ function PayablesTab() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ── AP payment-run worksheet (EXP-13) — maker selects several due bills into ONE combined run ──
+// The CHECKER approves the whole run on /disbursements (approver ≠ requester, SoD R07). Reuses the same
+// per-bill controls (3-way match, over-pay guard, WHT) as a single payment — a run is just a grouping.
+function PaymentRunWorksheet({ onCreated }: { onCreated: () => void }) {
+  const { t } = useLang();
+  const [dueBefore, setDueBefore] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [sel, setSel] = useState<Record<string, string>>({}); // txn_no → amount to pay
+  const proposal = useQuery<any>({
+    queryKey: ['ap-run-proposal', dueBefore],
+    queryFn: () => api(`/api/finance/ap/payment-runs/proposal${dueBefore ? `?due_before=${dueBefore}` : ''}`),
+    enabled: loaded,
+  });
+  const chosen = Object.entries(sel).filter(([, v]) => Number(v) > 0);
+  const total = chosen.reduce((a, [, v]) => a + Number(v), 0);
+  const createRun = useMutation({
+    mutationFn: () => api('/api/finance/ap/payment-runs', { method: 'POST', body: JSON.stringify({ lines: chosen.map(([txn_no, amount]) => ({ txn_no, amount: Number(amount) })) }) }),
+    onSuccess: (r: any) => { notifySuccess(t('fin.run_created', { no: r.run_no, count: r.line_count })); setSel({}); proposal.refetch(); onCreated(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">{t('fin.run_worksheet')}</CardTitle>
+        <p className="text-xs text-muted-foreground">{t('fin.run_worksheet_sub')}</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1">
+            <Label htmlFor="run_due_before" className="text-xs">{t('fin.run_due_before')}</Label>
+            <Input id="run_due_before" type="date" value={dueBefore} onChange={(e) => setDueBefore(e.target.value)} className="w-44" />
+          </div>
+          <Button size="sm" variant="outline" onClick={() => { setLoaded(true); proposal.refetch(); }}>{t('fin.run_load')}</Button>
+        </div>
+
+        {loaded && (
+          <StateView q={proposal}>
+            {proposal.data && (
+              (proposal.data.candidates?.length ?? 0) === 0 ? (
+                <p className="text-sm text-muted-foreground">{t('fin.run_none')}</p>
+              ) : (
+                <>
+                  <DataTable
+                    rows={proposal.data.candidates}
+                    rowKey={(r: any) => r.txn_no}
+                    columns={[
+                      { key: 'sel', label: '', sortable: false, render: (r: any) => (
+                        <input type="checkbox" aria-label={r.txn_no} checked={sel[r.txn_no] != null}
+                          onChange={(e) => setSel((s) => { const n = { ...s }; if (e.target.checked) n[r.txn_no] = String(r.outstanding); else delete n[r.txn_no]; return n; })} />
+                      ) },
+                      { key: 'txn_no', label: t('fin.col_no') },
+                      { key: 'vendor_name', label: t('fin.col_creditor') },
+                      { key: 'due_date', label: t('fin.col_due'), render: (r: any) => thaiDate(r.due_date) },
+                      { key: 'outstanding', label: t('fin.col_outstanding'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.outstanding)}</span> },
+                      { key: 'amt', label: '', sortable: false, render: (r: any) => (
+                        sel[r.txn_no] != null ? (
+                          <Input type="number" step="0.01" value={sel[r.txn_no]} className="w-28 tabular"
+                            onChange={(e) => setSel((s) => ({ ...s, [r.txn_no]: e.target.value }))} />
+                        ) : null
+                      ) },
+                    ]}
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm">{t('fin.run_selected', { n: String(chosen.length), total: baht(total) })}</p>
+                    <Button size="sm" disabled={createRun.isPending || chosen.length === 0} onClick={() => createRun.mutate()}>{t('fin.run_submit')}</Button>
+                  </div>
+                </>
+              )
+            )}
+          </StateView>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

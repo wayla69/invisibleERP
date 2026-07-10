@@ -13,6 +13,9 @@ const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number()
 const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional(), vat_treatment: z.enum(['standard', 'exempt', 'zero', 'reverse_charge']).optional(), tax_code: z.string().optional(), idempotency_key: z.string().optional() });
 const PayBody = z.object({ amount: z.number().positive(), idempotency_key: z.string().optional(), wht_income_type: z.string().optional(), wht_rate: z.number().min(0).max(0.30).optional(), wht_tax_code: z.string().optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
+// AP payment run (EXP-13) — a combined vendor payment: one run settles many bills (each with an optional WHT).
+const PaymentRunLine = z.object({ txn_no: z.string().min(1), amount: z.number().positive(), wht_income_type: z.string().optional(), wht_rate: z.number().min(0).max(0.30).optional(), wht_tax_code: z.string().optional() });
+const PaymentRunBody = z.object({ lines: z.array(PaymentRunLine).min(1), idempotency_key: z.string().optional() });
 const AdvanceBody = z.object({ payee: z.string().min(1), amount: z.number().positive(), purpose: z.string().optional(), expense_account: z.string().optional(), tenant_id: z.number().optional(), project_code: z.string().optional(), boq_line_id: z.number().int().positive().optional() });
 const SettleBody = z.object({ settled_expense: z.number().nonnegative(), returned_cash: z.number().nonnegative().optional(), expense_account: z.string().optional() });
 const WriteOffBody = z.object({ tenant_id: z.number().optional(), customer_name: z.string().optional(), amount: z.number().positive(), reason: z.string().min(1) });
@@ -234,4 +237,34 @@ export class FinanceController {
   // Reject a pending payment (checker).
   @Post('ap/payments/:paymentNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
   rejectApPayment(@Param('paymentNo') paymentNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectApPayment(paymentNo, u, b.reason); }
+
+  // ── AP payment RUN (EXP-13) — combined vendor payment: settle many bills in one maker-checker cycle ──
+  // Worksheet feed (maker): the open bills a run could settle, net of amounts already awaiting approval.
+  // NB static segments (proposal/pending) are declared BEFORE the `:runNo` param route so they aren't shadowed.
+  @Get('ap/payment-runs/proposal') @Permissions('creditors')
+  proposeApPaymentRun(@Query('due_before') dueBefore?: string, @Query('vendor_id') vendorId?: string) {
+    return this.svc.proposeApPaymentRun({ dueBefore: dueBefore || undefined, vendorId: qintOpt('vendor_id', vendorId) });
+  }
+
+  // Checker queue — payment runs awaiting approval (grouped).
+  @Get('ap/payment-runs/pending') @Permissions('approvals', 'gl_close', 'exec')
+  pendingApPaymentRuns() { return this.svc.listPendingApPaymentRuns(); }
+
+  // Create a run (maker). Each line still passes the 3-way-match gate + over-pay guard + optional WHT.
+  @Post('ap/payment-runs') @Permissions('creditors')
+  createApPaymentRun(@Body(new ZodValidationPipe(PaymentRunBody)) b: z.infer<typeof PaymentRunBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.createApPaymentRun(b.lines.map((l) => ({ txn_no: l.txn_no, amount: l.amount, wht: { income_type: l.wht_income_type, rate: l.wht_rate, tax_code: l.wht_tax_code } })), u, b.idempotency_key);
+  }
+
+  // Run detail (drill-down; any status).
+  @Get('ap/payment-runs/:runNo') @Permissions('creditors', 'approvals', 'gl_close', 'exec')
+  getApPaymentRun(@Param('runNo') runNo: string) { return this.svc.getApPaymentRun(runNo); }
+
+  // Approve the whole run (checker; approver ≠ requester enforced in the service). Each line posts its GL.
+  @Post('ap/payment-runs/:runNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  approveApPaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveApPaymentRun(runNo, u); }
+
+  // Reject the whole run (checker).
+  @Post('ap/payment-runs/:runNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  rejectApPaymentRun(@Param('runNo') runNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectApPaymentRun(runNo, u, b.reason); }
 }

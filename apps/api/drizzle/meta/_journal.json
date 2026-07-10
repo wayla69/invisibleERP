@@ -2073,6 +2073,13 @@
       "when": 2023820000258,
       "tag": "0295_ar_cash_application",
       "breakpoints": true
+    },
+    {
+      "idx": 296,
+      "version": "7",
+      "when": 2023820000259,
+      "tag": "0296_ap_payment_run",
+      "breakpoints": true
     }
   ]
 }

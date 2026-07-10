@@ -664,7 +664,7 @@ export class FinanceService {
   // ───────────────────── AP disbursement maker-checker (AP-PAY) ─────────────────────
   // Step 1 (MAKER, `creditors`) — REQUEST a vendor payment. No cash moves and NO GL posts here: the bill's
   // paid_amount is untouched and a PendingApproval row is recorded. PATCH /api/finance/ap/transactions/{no}/pay
-  async requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string, wht?: { income_type?: string; rate?: number; tax_code?: string }) {
+  async requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string, wht?: { income_type?: string; rate?: number; tax_code?: string }, runNo?: string) {
     const db = this.db;
     const [t] = await db.select().from(apTransactions).where(eq(apTransactions.txnNo, txnNo)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
@@ -702,7 +702,7 @@ export class FinanceService {
     }
     const paymentNo = await this.docNo.nextDaily('APP');
     await db.insert(apPayments).values({
-      paymentNo, txnNo, tenantId: apTenant, amount: String(n(amount)), status: 'PendingApproval',
+      paymentNo, txnNo, runNo: runNo ?? null, tenantId: apTenant, amount: String(n(amount)), status: 'PendingApproval',
       requestedBy: user.username, glRef: `${txnNo}:p:${paymentNo}`, idempotencyKey: idempotencyKey ?? null,
       whtIncomeType: whtRate != null ? whtIncome : null, whtRate: whtRate != null ? String(whtRate) : null,
     });
@@ -781,6 +781,144 @@ export class FinanceService {
       .where(eq(apPayments.status, 'PendingApproval')).orderBy(asc(apPayments.requestedAt)).limit(limit).offset(offset);
     const out = rows.map((r: any) => ({ ...r, amount: n(r.amount), bill_amount: n(r.bill_amount), paid_amount: n(r.paid_amount) }));
     return { payments: out, count: out.length };
+  }
+
+  // ───────────────────── AP payment RUN — combined vendor payment (EXP-13, docs/41 FIN-2) ─────────────────────
+  // A payment run is a `run_no` grouping over the per-bill ap_payments rows (0296) — it settles MANY bills in
+  // one maker-checker cycle without duplicating any per-line control: createApPaymentRun loops the SAME
+  // requestApPayment (3-way match gate, over-pay guard, WHT, idempotency) tagging each line with a shared
+  // run_no, and approveApPaymentRun loops the SAME approveApPayment (row-lock paid_amount move + per-bill GL
+  // + SoD). Existing single-invoice payments keep run_no NULL, unchanged.
+
+  // Read-only worksheet feed: the OPEN bills a run could settle, newest-due first, with the outstanding
+  // amount already net of payments awaiting approval (so the maker can't double-schedule). Optional filters:
+  // `dueBefore` (only bills due on/before a date — the classic "pay everything due by month-end") and
+  // `vendorId` (one supplier). Reuses the same outstanding math as requestApPayment's over-pay guard.
+  async proposeApPaymentRun(opts: { dueBefore?: string; vendorId?: number } = {}) {
+    const db = this.db;
+    const preds = [ne(apTransactions.status, 'Paid')];
+    if (opts.dueBefore) preds.push(lte(apTransactions.dueDate, opts.dueBefore));
+    if (opts.vendorId != null) preds.push(eq(apTransactions.vendorId, opts.vendorId));
+    const bills = await db.select({
+      txn_no: apTransactions.txnNo, vendor_id: apTransactions.vendorId, vendor_name: apTransactions.vendorName,
+      invoice_no: apTransactions.invoiceNo, due_date: apTransactions.dueDate,
+      amount: apTransactions.amount, paid_amount: apTransactions.paidAmount,
+    }).from(apTransactions).where(and(...preds)).orderBy(asc(apTransactions.dueDate));
+    // Subtract per-bill amounts already awaiting approval (in any run or single) so the suggested amount is
+    // the truly schedulable balance.
+    const txnNos = bills.map((b: any) => b.txn_no);
+    const pendMap = new Map<string, number>();
+    if (txnNos.length) {
+      const pend = await db.select({ txn_no: apPayments.txnNo, pend: sql<string>`coalesce(sum(${apPayments.amount}),0)` })
+        .from(apPayments).where(and(inArray(apPayments.txnNo, txnNos), eq(apPayments.status, 'PendingApproval'))).groupBy(apPayments.txnNo);
+      for (const p of pend) pendMap.set(p.txn_no, n(p.pend));
+    }
+    const today = ymd();
+    const candidates = bills.map((b: any) => {
+      const outstanding = round2(n(b.amount) - n(b.paid_amount) - (pendMap.get(b.txn_no) ?? 0));
+      return {
+        txn_no: b.txn_no, vendor_id: b.vendor_id != null ? Number(b.vendor_id) : null, vendor_name: b.vendor_name,
+        invoice_no: b.invoice_no, due_date: b.due_date, bill_amount: n(b.amount), paid_amount: n(b.paid_amount),
+        outstanding, overdue: !!(b.due_date && b.due_date < today),
+      };
+    }).filter((c: any) => c.outstanding > 0.001);
+    return { candidates, count: candidates.length, total_outstanding: round2(candidates.reduce((a: number, c: any) => a + c.outstanding, 0)) };
+  }
+
+  // MAKER (`creditors`) — create a payment run from a set of bill lines. All-or-nothing at the VALIDATION
+  // layer: each line is checked (bill exists, 3-way-match payable, within outstanding, WHT sane) before any
+  // row is written, so a run either schedules every line or rejects with the first offending line's error.
+  async createApPaymentRun(
+    lines: Array<{ txn_no: string; amount: number; wht?: { income_type?: string; rate?: number; tax_code?: string } }>,
+    user: JwtUser,
+    idempotencyKey?: string,
+  ) {
+    if (!lines?.length) throw new BadRequestException({ code: 'EMPTY_RUN', message: 'A payment run needs at least one bill', messageTh: 'รอบจ่ายต้องมีอย่างน้อยหนึ่งบิล' });
+    // Reject duplicate bills in one run (they would each pass the guard but sum to an overpay).
+    const seen = new Set<string>();
+    for (const l of lines) {
+      if (seen.has(l.txn_no)) throw new BadRequestException({ code: 'DUPLICATE_BILL_IN_RUN', message: `Bill ${l.txn_no} appears twice in the run`, messageTh: `บิล ${l.txn_no} ซ้ำในรอบจ่ายเดียวกัน` });
+      seen.add(l.txn_no);
+      if (!(n(l.amount) > 0)) throw new BadRequestException({ code: 'INVALID_AMOUNT', message: `Amount for ${l.txn_no} must be positive`, messageTh: `ยอดจ่ายของ ${l.txn_no} ต้องมากกว่า 0` });
+    }
+    const runNo = await this.docNo.nextDaily('APR');
+    const created: any[] = [];
+    // Reuse the proven single-payment path per line (assertPayable + over-pay guard + WHT), tagged with runNo.
+    for (const l of lines) {
+      const r = await this.requestApPayment(l.txn_no, n(l.amount), user, undefined, l.wht, runNo);
+      created.push({ payment_no: r.payment_no, txn_no: l.txn_no, amount: n(l.amount), wht_rate: r.wht_rate ?? null });
+    }
+    const total = round2(created.reduce((a, c) => a + c.amount, 0));
+    await this.statusLog.log('APR', runNo, '', 'PendingApproval', user.username, `Payment run: ${created.length} bill(s), ฿${total}`);
+    return { run_no: runNo, status: 'PendingApproval', line_count: created.length, total_amount: total, lines: created, idempotency_key: idempotencyKey ?? null };
+  }
+
+  // Group the pending AP payments into runs for the checker queue (single-invoice payments — run_no NULL —
+  // stay on the existing per-payment queue and are not surfaced here).
+  async listPendingApPaymentRuns() {
+    const db = this.db;
+    const rows = await db.select({
+      run_no: apPayments.runNo, amount: apPayments.amount, txn_no: apPayments.txnNo,
+      requested_by: apPayments.requestedBy, requested_at: apPayments.requestedAt,
+    }).from(apPayments).where(and(eq(apPayments.status, 'PendingApproval'), sql`${apPayments.runNo} IS NOT NULL`))
+      .orderBy(asc(apPayments.requestedAt));
+    const byRun = new Map<string, any>();
+    for (const r of rows) {
+      const runKey = r.run_no; // non-null by the query filter, but the column type is nullable
+      if (!runKey) continue;
+      const g = byRun.get(runKey) ?? { run_no: runKey, line_count: 0, total_amount: 0, requested_by: r.requested_by, requested_at: r.requested_at, bills: [] };
+      g.line_count += 1; g.total_amount = round2(g.total_amount + n(r.amount)); g.bills.push(r.txn_no);
+      byRun.set(runKey, g);
+    }
+    const runs = [...byRun.values()];
+    return { runs, count: runs.length };
+  }
+
+  // Detail of one run (all its lines, any status) — feeds the run drill-down.
+  async getApPaymentRun(runNo: string) {
+    const db = this.db;
+    const rows = await db.select({
+      payment_no: apPayments.paymentNo, txn_no: apPayments.txnNo, amount: apPayments.amount, status: apPayments.status,
+      requested_by: apPayments.requestedBy, approved_by: apPayments.approvedBy, wht_amount: apPayments.whtAmount,
+      vendor_name: apTransactions.vendorName, bill_amount: apTransactions.amount,
+    }).from(apPayments).leftJoin(apTransactions, eq(apPayments.txnNo, apTransactions.txnNo))
+      .where(eq(apPayments.runNo, runNo)).orderBy(asc(apPayments.paymentNo));
+    if (!rows.length) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment run not found', messageTh: 'ไม่พบรอบจ่าย' });
+    const lines = rows.map((r: any) => ({ ...r, amount: n(r.amount), wht_amount: n(r.wht_amount), bill_amount: n(r.bill_amount) }));
+    const pending = lines.filter((l: any) => l.status === 'PendingApproval');
+    const runStatus = pending.length ? (lines.some((l: any) => l.status === 'Approved') ? 'PartiallyApproved' : 'PendingApproval')
+      : lines.every((l: any) => l.status === 'Rejected') ? 'Rejected' : 'Approved';
+    return { run_no: runNo, status: runStatus, line_count: lines.length, requested_by: lines[0]?.requested_by ?? null, total_amount: round2(lines.reduce((a: number, l: any) => a + l.amount, 0)), lines };
+  }
+
+  // CHECKER (approval authority) — approve the WHOLE run. SoD is enforced BEFORE any line posts: the approver
+  // must differ from the run's requester (all lines share one requester). Each line then goes through the
+  // SAME approveApPayment (row-lock paid_amount move + per-bill cash-disbursement GL + WHT), so a run is
+  // exactly N proven single approvals under one action.
+  async approveApPaymentRun(runNo: string, approver: JwtUser) {
+    const db = this.db;
+    const pend = await db.select().from(apPayments).where(and(eq(apPayments.runNo, runNo), eq(apPayments.status, 'PendingApproval')));
+    if (!pend.length) throw new BadRequestException({ code: 'NOTHING_PENDING', message: `Run ${runNo} has no payments awaiting approval`, messageTh: 'รอบจ่ายนี้ไม่มีรายการที่รออนุมัติ' });
+    const requester = pend[0]!.requestedBy;
+    if (requester && requester === approver.username) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a payment run you requested', messageTh: 'ผู้ขอจ่ายอนุมัติรอบจ่ายของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
+    const results: any[] = [];
+    for (const p of pend) results.push(await this.approveApPayment(p.paymentNo, approver));
+    const total = round2(results.reduce((a, r) => a + n(r.paid_amount ? r.net_paid : 0), 0));
+    await this.statusLog.log('APR', runNo, 'PendingApproval', 'Approved', approver.username, `Approved ${results.length} payment(s)`);
+    return { run_no: runNo, status: 'Approved', approved_count: results.length, net_paid_total: total, payments: results };
+  }
+
+  // CHECKER (alt) — reject the whole run (every pending line; no cash/GL effect). Audited.
+  async rejectApPaymentRun(runNo: string, approver: JwtUser, reason?: string) {
+    const db = this.db;
+    const pend = await db.select().from(apPayments).where(and(eq(apPayments.runNo, runNo), eq(apPayments.status, 'PendingApproval')));
+    if (!pend.length) throw new BadRequestException({ code: 'NOTHING_PENDING', message: `Run ${runNo} has no payments awaiting approval`, messageTh: 'รอบจ่ายนี้ไม่มีรายการที่รออนุมัติ' });
+    const results: any[] = [];
+    for (const p of pend) results.push(await this.rejectApPayment(p.paymentNo, approver, reason));
+    await this.statusLog.log('APR', runNo, 'PendingApproval', 'Rejected', approver.username, reason);
+    return { run_no: runNo, status: 'Rejected', rejected_count: results.length };
   }
 
   // Sub-ledger ↔ GL reconciliation: GL control account 1100 must equal open AR outstanding, 2000 = AP.
