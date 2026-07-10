@@ -75,7 +75,7 @@ export class WorkflowService {
   async listDefinitions(_user: JwtUser) {
     const db = this.db;
     const defs = await db.select().from(workflowDefinitions).orderBy(asc(workflowDefinitions.docType));
-    const out = [] as any[];
+    const out: Array<Record<string, unknown>> = [];
     for (const d of defs) {
       const steps = await db.select().from(workflowSteps).where(eq(workflowSteps.definitionId, Number(d.id))).orderBy(asc(workflowSteps.stepNo));
       out.push({ id: Number(d.id), doc_type: d.docType, name: d.name, sla_hours: d.slaHours, active: d.active, steps: steps.map((s: any) => ({ step_no: s.stepNo, approver_role: s.approverRole, approver_user: s.approverUser, min_amount: n(s.minAmount), all_of_n: s.allOfN, name: s.name, sla_hours: s.slaHours, escalate_to_role: s.escalateToRole, escalate_to_user: s.escalateToUser, match_key: s.matchKey, match_value: s.matchValue })) });
@@ -249,7 +249,7 @@ export class WorkflowService {
     const distinct = new Set(approversAtStep.map((a: any) => a.actor)).size;
     if (distinct < (step.allOfN ?? 1)) return { status: 'pending', currentStep: inst.currentStep };
     const def = await this.defById(Number(inst.definitionId));
-    const next = this.firstEngaged(steps, n(inst.amount), (inst.context as any) ?? {}, Number(inst.currentStep));
+    const next = this.firstEngaged(steps, n(inst.amount), (inst.context as Record<string, string> | null) ?? {}, Number(inst.currentStep));
     if (next) {
       await db.update(workflowInstances).set({ currentStep: next.stepNo, dueAt: this.dueFor(next, def), escalated: false, lastRemindedAt: null }).where(eq(workflowInstances.id, instanceId));
       await this.notifyStepApprovers({ docType: inst.docType, docNo: inst.docNo, createdBy: inst.createdBy, tenantId: inst.tenantId }, next);

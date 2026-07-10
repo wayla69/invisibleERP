@@ -55,7 +55,7 @@ export class DocAiService {
         system: EXTRACT_SYSTEM,
         messages: [{ role: 'user', content: `Extract from this invoice:\n${t}` }],
       });
-      const out = (res.content as any[]).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      const out = (res.content as Array<{ type: string; text?: string }>).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
       try { return { fields: JSON.parse(out), source: 'ai' }; } catch { return { fields: this.ruleExtract(t), source: 'rules-fallback' }; }
     } catch {
       return { fields: this.ruleExtract(t), source: 'rules-fallback' };

@@ -36,7 +36,7 @@ export class PrintService {
     // pulling agent decodes them back to raw ESC/POS. HTML is plain UTF-8 and stored as-is.
     if (format === 'escpos') payload = Buffer.from(payload, 'latin1').toString('base64');
     const [r] = await db.insert(printJobs).values({
-      tenantId: user.tenantId ?? null, branchId: (user as any).branchId ?? null, jobType: dto.job_type,
+      tenantId: user.tenantId ?? null, branchId: (user as { branchId?: number | null }).branchId ?? null, jobType: dto.job_type,
       station: dto.station ?? null, saleNo: dto.sale_no ?? null, orderNo: dto.order_no ?? null,
       format, payload, printerId: dto.printer_id ?? null, status: 'queued', createdBy: user.username,
     }).returning({ id: printJobs.id });

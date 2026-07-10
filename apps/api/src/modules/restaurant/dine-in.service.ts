@@ -87,7 +87,7 @@ export class DineInService {
         tenantId, orderId, stationId: Number(st!.id), itemId: itemRef, name,
         qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
         modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
-        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as any).course ?? 1,
+        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as { course?: number }).course ?? 1,
         seat: it.seat ?? null,   // seat-level ordering (POS-9)
         estPrepMinutes: prep ?? null, createdBy: user.username,
       });
@@ -133,7 +133,7 @@ export class DineInService {
   // ── table operations: transfer items / merge tabs (Phase 1) ──
   private async liveSessionForTable(tableId: number) {
     const db = this.db;
-    const [s] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, tableId), inArray(tableSessions.status, ['open', 'bill_requested', 'paying'] as any))).orderBy(desc(tableSessions.id)).limit(1);
+    const [s] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, tableId), inArray(tableSessions.status, ['open', 'bill_requested', 'paying']))).orderBy(desc(tableSessions.id)).limit(1);
     return s;
   }
 
@@ -361,7 +361,7 @@ export class DineInService {
     const itemRows: any[] = [];
     for (const l of items) {
       const grossLine = roundCurrency(n(l.qty) * n(l.unitPrice), 'THB');
-      const ld = lineDiscounts[String(l.id)] ?? lineDiscounts[Number(l.id) as any];
+      const ld = lineDiscounts[String(l.id)] ?? lineDiscounts[Number(l.id)];
       let lineDisc = ld ? (ld.discount_amt != null ? roundCurrency(ld.discount_amt, 'THB') : roundCurrency(grossLine * n(ld.discount_pct) / 100, 'THB')) : 0;
       lineDisc = Math.min(lineDisc, grossLine);
       const netLine = roundCurrency(grossLine - lineDisc, 'THB');

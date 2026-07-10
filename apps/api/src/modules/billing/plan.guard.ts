@@ -204,7 +204,7 @@ export class PlanGuard implements CanActivate {
       if (row.status === 'PastDue' || row.status === 'Canceled') {
         throw new ForbiddenException({ code: 'SUBSCRIPTION_INACTIVE', message: `Subscription is ${row.status}. Please update your billing to restore access.`, messageTh: 'การสมัครสมาชิกไม่ได้ใช้งาน กรุณาตรวจสอบการชำระเงิน' });
       }
-      const features: Record<string, unknown> = (row.features as any) ?? {};
+      const features: Record<string, unknown> = (row.features as Record<string, unknown> | null) ?? {};
       if (!features[feature]) {
         throw new ForbiddenException({ code: 'PLAN_FEATURE_REQUIRED', message: `Your current plan does not include '${feature}'. Please upgrade to access this feature.`, messageTh: `แพ็กเกจปัจจุบันของคุณไม่รองรับฟีเจอร์ '${feature}' กรุณาอัปเกรดแพ็กเกจ` });
       }

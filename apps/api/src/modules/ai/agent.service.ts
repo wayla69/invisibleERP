@@ -29,6 +29,9 @@ const THAI_FALLBACK = 'ขออภัย ไม่สามารถประ�
 // Per-tool execution timeout — a single slow/hung tool query can't stall the whole agent turn.
 const TOOL_TIMEOUT_MS = Number(process.env.AI_TOOL_TIMEOUT_MS ?? 20000);
 
+// Anthropic message content blocks we read (text for replies, tool_use fields for the tool loop).
+type AiBlock = { type: string; text?: string; id?: string; name?: string; input?: unknown };
+
 // Reject if `p` doesn't settle within `ms` (bounds each tool call).
 async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -63,7 +66,7 @@ const CACHING_BETA_HEADER = { 'anthropic-beta': 'prompt-caching-2024-07-31' };
 // pins everything to one model when set (e.g. for parity tests).
 export function pickModel(messages: any[], envModel?: string): string {
   const last = messages[messages.length - 1];
-  const isToolRelay = Array.isArray(last?.content) && (last.content as any[]).some((b: any) => b.type === 'tool_result');
+  const isToolRelay = Array.isArray(last?.content) && (last.content as AiBlock[]).some((b: any) => b.type === 'tool_result');
   // CHEAP for mechanical tool-result relay, REASONING for the first/synthesis turn. envModel pin wins.
   return modelFor(isToolRelay ? 'agent_tool_relay' : 'agent_reasoning', envModel);
 }
@@ -229,10 +232,10 @@ export class AgentService {
         totalOutput += res.usage?.output_tokens ?? 0;
         messages.push({ role: 'assistant', content: res.content });
         if (res.stop_reason === 'end_turn') {
-          reply = (res.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+          reply = (res.content as AiBlock[]).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
           break;
         }
-        const toolResults = await this.runToolBlocks(res.content as any[], _user);
+        const toolResults = await this.runToolBlocks(res.content as AiBlock[], _user);
         if (toolResults.length) messages.push({ role: 'user', content: toolResults });
         else break;
       }
@@ -309,7 +312,7 @@ export class AgentService {
         totalOutput += final.usage?.output_tokens ?? 0;
         messages.push({ role: 'assistant', content: final.content });
 
-        const textOut = (final.content as any[])
+        const textOut = (final.content as AiBlock[])
           .filter((b) => b.type === 'text')
           .map((b) => b.text)
           .join('\n');
@@ -320,7 +323,7 @@ export class AgentService {
         }
 
         // มี tool_use → รัน tool (ขนาน + per-tool timeout) แล้วป้อนผลกลับเข้า loop
-        const toolResults = await this.runToolBlocks(final.content as any[], _user);
+        const toolResults = await this.runToolBlocks(final.content as AiBlock[], _user);
         if (toolResults.length) messages.push({ role: 'user', content: toolResults });
         else { reply = textOut || reply; break; }
       }
@@ -381,15 +384,15 @@ export class AgentService {
         case 'get_sales_cube': return this.bi ? await this.bi.salesCube({ period: input.period ?? 'month', months: input.months ?? 3 }, user) : { error: 'BI module unavailable' };
         case 'get_finance_trend': return this.bi ? await this.bi.financeTrend({ months: input.months ?? 6 }, user) : { error: 'BI module unavailable' };
         case 'get_pipeline_forecast': return this.pipeline ? await this.pipeline.forecast(user) : { error: 'Pipeline module unavailable' };
-        case 'list_open_opportunities': { const r = this.pipeline ? await this.pipeline.listOpportunities({ status: 'Open' }, user) : { opportunities: [], count: 0 }; return { ...r, opportunities: (r as any).opportunities?.slice(0, input.limit ?? 10) }; }
+        case 'list_open_opportunities': { const r = this.pipeline ? await this.pipeline.listOpportunities({ status: 'Open' }, user) : { opportunities: [], count: 0 }; return { ...r, opportunities: (r as { opportunities?: unknown[] }).opportunities?.slice(0, input.limit ?? 10) }; }
         case 'get_open_quotes': return this.cpq ? await this.cpq.listQuotes({ status: 'Sent' }, user) : { error: 'CPQ module unavailable' };
         case 'get_sla_breaches': {
           if (!this.svc) return { error: 'Service module unavailable' };
           const contracts = await this.svc.listContracts(user);
           const breaches: any[] = [];
-          for (const c of (contracts as any).contracts ?? []) {
+          for (const c of (contracts as { contracts?: Array<{ id: number; contract_no?: string }> }).contracts ?? []) {
             const evts = await this.svc.listEvents(c.id);
-            for (const e of (evts as any).events ?? []) {
+            for (const e of (evts as { events?: Array<Record<string, unknown>> }).events ?? []) {
               if (e.response_breached || e.resolution_breached) breaches.push({ contract: c.contract_no, ...e });
             }
           }

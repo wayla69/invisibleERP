@@ -74,7 +74,7 @@ export class WebhookService {
     const db = this.db;
     const tenantId = await this.tenantOf(user);
     const [hook] = await db.select({ id: webhooks.id }).from(webhooks)
-      .where(and(eq(webhooks.id, id), tenantId == null ? (undefined as any) : eq(webhooks.tenantId, tenantId)));
+      .where(and(eq(webhooks.id, id), tenantId == null ? undefined : eq(webhooks.tenantId, tenantId)));
     if (!hook) throw new NotFoundException({ code: 'WEBHOOK_NOT_FOUND', message: 'Webhook not found', messageTh: 'ไม่พบ webhook' });
     // remove its delivery history first (FK), then the endpoint
     await db.transaction(async (tx: any) => {
@@ -172,7 +172,7 @@ export class WebhookService {
       status: webhookDeliveries.status, statusCode: webhookDeliveries.statusCode, attempts: webhookDeliveries.attempts,
       error: webhookDeliveries.error, createdAt: webhookDeliveries.createdAt, deliveredAt: webhookDeliveries.deliveredAt,
     }).from(webhookDeliveries).innerJoin(webhooks, eq(webhookDeliveries.webhookId, webhooks.id))
-      .where(tenantId == null ? (undefined as any) : eq(webhooks.tenantId, tenantId))
+      .where(tenantId == null ? undefined : eq(webhooks.tenantId, tenantId))
       .orderBy(desc(webhookDeliveries.id)).limit(limit);
     return { deliveries: rows.map((r: any) => ({ id: Number(r.id), webhook_id: Number(r.webhookId), event: r.event, status: r.status, status_code: r.statusCode, attempts: r.attempts ?? 0, error: r.error, created_at: r.createdAt, delivered_at: r.deliveredAt })) };
   }
@@ -183,7 +183,7 @@ export class WebhookService {
     const tenantId = await this.tenantOf(user);
     const [row] = await db.select({ d: webhookDeliveries, h: webhooks }).from(webhookDeliveries)
       .innerJoin(webhooks, eq(webhookDeliveries.webhookId, webhooks.id))
-      .where(and(eq(webhookDeliveries.id, deliveryId), tenantId == null ? (undefined as any) : eq(webhooks.tenantId, tenantId)));
+      .where(and(eq(webhookDeliveries.id, deliveryId), tenantId == null ? undefined : eq(webhooks.tenantId, tenantId)));
     if (!row) throw new NotFoundException({ code: 'DELIVERY_NOT_FOUND', message: 'Delivery not found', messageTh: 'ไม่พบรายการส่ง' });
     const ok = await this.sendOnce(row.h, row.d);
     return { id: deliveryId, status: ok ? 'delivered' : 'failed' };
@@ -195,7 +195,7 @@ export class WebhookService {
     const tenantId = await this.tenantOf(user);
     const rows = await db.select({ d: webhookDeliveries, h: webhooks }).from(webhookDeliveries)
       .innerJoin(webhooks, eq(webhookDeliveries.webhookId, webhooks.id))
-      .where(and(eq(webhookDeliveries.status, 'failed'), sql`coalesce(${webhookDeliveries.attempts},0) < ${MAX_ATTEMPTS}`, tenantId == null ? (undefined as any) : eq(webhooks.tenantId, tenantId)))
+      .where(and(eq(webhookDeliveries.status, 'failed'), sql`coalesce(${webhookDeliveries.attempts},0) < ${MAX_ATTEMPTS}`, tenantId == null ? undefined : eq(webhooks.tenantId, tenantId)))
       .limit(200);
     let delivered = 0;
     for (const r of rows) if (await this.sendOnce(r.h, r.d)) delivered++;
