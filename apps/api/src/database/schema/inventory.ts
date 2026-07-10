@@ -162,6 +162,8 @@ export const stocktakes = pgTable('stocktakes', {
   physicalQty: numeric('physical_qty'),
   difference: numeric('difference'),
   countedBy: text('counted_by'),
+  postedBy: text('posted_by'),                                                   // 0318 — SoD R11 evidence: the independent poster
+  postedAt: timestamp('posted_at', { withTimezone: true }),
   status: stocktakeStatusEnum('status').default('Draft'),
   remarks: text('remarks'),
 });

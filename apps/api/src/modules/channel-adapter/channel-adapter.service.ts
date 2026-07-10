@@ -124,7 +124,7 @@ export class ChannelAdapterService {
     if (!ord) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
     await db.update(dineInOrders).set({ fulfillmentStatus: status as typeof dineInOrders.$inferInsert.fulfillmentStatus }).where(eq(dineInOrders.id, ord.id));
     const res = ord.extSource ? await getPlatformProvider(ord.extSource).updateStatus(ord.extOrderId, status) : { ok: false };
-    return { order_no: orderNo, fulfillment_status: status, posted_to_platform: ord.extSource ?? null, post_ok: res.ok, post_ref: (res as any).ref ?? null };
+    return { order_no: orderNo, fulfillment_status: status, posted_to_platform: ord.extSource ?? null, post_ok: res.ok, post_ref: (res as { ref?: string }).ref ?? null };
   }
 
   // Accept a received (not auto-accepted) aggregator order: confirm to the platform, then route its lines

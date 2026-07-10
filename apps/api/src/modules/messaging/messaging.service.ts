@@ -144,7 +144,7 @@ export class MessagingService {
     const res = token
       ? (rich ? await broadcastLineFlex(token, dto.alt_text ?? logBody, dto.flex) : await broadcastLine(token, dto.body ?? ''))
       : { status: 'sent' as const, provider: 'mock', ref: 'mock_broadcast' };
-    return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: logBody, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, providerRef: (res as any).ref ?? null, error: res.error ?? null });
+    return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: logBody, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, providerRef: (res as { ref?: string }).ref ?? null, error: res.error ?? null });
   }
 
   // Push a rich LINE flex message (card/carousel) to one LINE userId — for a member or an ad-hoc recipient.

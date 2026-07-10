@@ -42,7 +42,7 @@ export class KdsService {
       .innerJoin(kitchenStations, eq(dineInOrderItems.stationId, kitchenStations.id))
       .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
       .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
-      .where(inArray(dineInOrderItems.kdsStatus, ['queued', 'preparing', 'ready'] as any))
+      .where(inArray(dineInOrderItems.kdsStatus, ['queued', 'preparing', 'ready']))
       .orderBy(asc(kitchenStations.sort), asc(dineInOrderItems.course), asc(dineInOrderItems.firedAt));
 
     // Consent-gated dining cautions of the guest seated at each ticket's table — the kitchen sees

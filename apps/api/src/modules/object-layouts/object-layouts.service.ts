@@ -36,7 +36,7 @@ export class ObjectLayoutsService {
   private buildSections(defs: any[], cfg: StoredLayout | null) {
     const byKey = new Map<string, any>(defs.map((d) => [d.field_key, d]));
     if (!cfg || !Array.isArray(cfg.sections) || cfg.sections.length === 0) {
-      return { sections: [{ title: 'ข้อมูล', columns: 1 as const, fields: defs }], hidden: [] as any[] };
+      return { sections: [{ title: 'ข้อมูล', columns: 1 as const, fields: defs }], hidden: [] as string[] };
     }
     const hiddenKeys = (cfg.hidden ?? []).filter((k) => byKey.has(k));
     const hiddenSet = new Set(hiddenKeys);

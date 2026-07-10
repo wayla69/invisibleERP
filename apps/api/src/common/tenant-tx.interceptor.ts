@@ -143,7 +143,7 @@ export class TenantTxInterceptor implements NestInterceptor {
         const dur = Date.now() - started;
         txEnd(dur, SLOW_TX_MS);
         if (dur >= SLOW_TX_MS) {
-          pino.warn({ event: 'slow_request', method: req?.method, route: (req as any)?.url, duration_ms: dur }, 'slow DB transaction');
+          pino.warn({ event: 'slow_request', method: req?.method, route: req?.url, duration_ms: dur }, 'slow DB transaction');
         }
       }),
     );

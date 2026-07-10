@@ -34,7 +34,7 @@ export class PortalUsersService {
     const [exists] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
     if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
     const hash = await this.passwords.hash(dto.password);
-    const [created] = await db.insert(users).values({ username, passwordHash: hash, role: 'Customer' as any, tenantId, mustChangePassword: true }).returning({ id: users.id });
+    const [created] = await db.insert(users).values({ username, passwordHash: hash, role: 'Customer', tenantId, mustChangePassword: true }).returning({ id: users.id });
     // Limit sub-account permissions to customer-portal scopes only.
     const allowed = new Set(['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track']);
     const perms = (dto.permissions ?? []).filter((p) => allowed.has(p));

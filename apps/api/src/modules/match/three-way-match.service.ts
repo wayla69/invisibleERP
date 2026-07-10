@@ -123,7 +123,7 @@ export class ThreeWayMatchService {
     const [m] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1);
     if (!m) return; // non-PO bill — not subject to the 3-way gate
     if (m.payable || m.override) return;
-    throw new ConflictException({ code: 'MATCH_BLOCKED', message: `Invoice ${txnNo} blocked: ${m.matchStatus}`, messageTh: `ใบแจ้งหนี้ถูกระงับ (${m.matchStatus})`, match_status: m.matchStatus } as any);
+    throw new ConflictException({ code: 'MATCH_BLOCKED', message: `Invoice ${txnNo} blocked: ${m.matchStatus}`, messageTh: `ใบแจ้งหนี้ถูกระงับ (${m.matchStatus})`, match_status: m.matchStatus });
   }
 
   // EXP-01 override is maker-checked: the person who RAN the match cannot also override its variance to force the
