@@ -325,7 +325,20 @@ async function main() {
   const sc = await inj('POST', `/api/procurement/suppliers/${V1}/scorecard`, admin, { period: '2026-06' });
   ok('Supplier scorecard computed (score + gr_count)', sc.json.score != null && sc.json.gr_count >= 1, JSON.stringify(sc.json));
   const scReg = await inj('GET', '/api/procurement/scorecards', admin);
-  ok('Supplier scorecard register: ranks vendors by score (V1 present, avg + underperformers)', (scReg.json.scorecards ?? []).some((s: any) => s.vendor_id === V1 && s.score === sc.json.score) && scReg.json.count >= 1 && scReg.json.avg_score >= 0 && typeof scReg.json.underperformers === 'number', `n=${scReg.json.count} avg=${scReg.json.avg_score} under=${scReg.json.underperformers}`);
+  ok('Supplier scorecard register: ranks vendors by score (V1 present, avg + underperformers)', (scReg.json.scorecards ?? []).some((sr: any) => sr.vendor_id === V1 && sr.score === sc.json.score) && scReg.json.count >= 1 && scReg.json.avg_score >= 0 && typeof scReg.json.underperformers === 'number', `n=${scReg.json.count} avg=${scReg.json.avg_score} under=${scReg.json.underperformers}`);
+
+  // ── J2. scorecard on-time + quality are COMPUTED from receipt/claim history (previously hard-coded 100).
+  //     Isolated on a dedicated vendor: one receipt 22 days LATE vs its PO's expected_date → on_time 0%,
+  //     and a 20-of-100 goods-receipt claim → quality 80%. Seeded via raw db (RLS-bypassing superuser). ──
+  const [vsc] = await db.insert(s.vendors).values({ name: 'ผู้ขาย SC', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
+  const VSC = Number(vsc.id);
+  await db.insert(s.purchaseOrders).values({ poNo: 'PO-SC-1', poDate: '2020-01-01', vendorId: VSC, status: 'Approved', expectedDate: '2020-01-10' });
+  const [grSc] = await db.insert(s.goodsReceipts).values({ grNo: 'GR-SC-1', grDate: '2020-02-01', poNo: 'PO-SC-1', vendorId: VSC }).returning({ id: s.goodsReceipts.id });
+  await db.insert(s.grItems).values({ grId: Number(grSc.id), poNo: 'PO-SC-1', itemId: 'X', receivedQty: '100', uom: 'EA' });
+  await db.insert(s.grClaims).values({ claimNo: 'GRC-SC-1', claimDate: '2020-02-02', grNo: 'GR-SC-1', poNo: 'PO-SC-1', vendorId: VSC, itemId: 'X', grQty: '100', claimQty: '20', uom: 'EA', status: 'Open' });
+  const scReal = await inj('POST', `/api/procurement/suppliers/${VSC}/scorecard`, admin, { period: '2020-02' });
+  ok('Supplier scorecard: LATE delivery → on_time_pct = 0 (computed, not hard-coded 100)', scReal.json.on_time_pct === 0, JSON.stringify(scReal.json));
+  ok('Supplier scorecard: GR claim 20/100 → quality_pct = 80 + claim_count = 1', near(scReal.json.quality_pct, 80) && scReal.json.claim_count === 1, JSON.stringify(scReal.json));
 
   // ── K. non-PO bill (no match) is payable — gate fails OPEN, only PO-based matched invoices are gated ──
   const nonPo = await apTxn(500);
