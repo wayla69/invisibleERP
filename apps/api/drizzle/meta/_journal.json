@@ -2155,7 +2155,14 @@
       "idx": 307,
       "version": "7",
       "when": 2023820000270,
-      "tag": "0307_crm_automation",
+      "tag": "0307_gl_allocation_cycles",
+      "breakpoints": true
+    },
+    {
+      "idx": 308,
+      "version": "7",
+      "when": 2023820000271,
+      "tag": "0308_crm_automation",
       "breakpoints": true
     }
   ]
