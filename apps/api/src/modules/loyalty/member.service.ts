@@ -171,7 +171,7 @@ export class MemberService {
    *
    * Returns the points already booked for (member, ref_doc, txn_type) — as a POSITIVE magnitude, matching
    * what the caller would have returned — or null when this is the first booking. Read under the member
-   * row lock the callers already hold; migration 0299's partial unique index is the hard backstop.
+   * row lock the callers already hold; migration 0303's partial unique index is the hard backstop.
    */
   private async priorLedgerPoints(tx: any, tenantId: number, memberId: number, refDoc: string, txnType: 'Earn' | 'Redeem'): Promise<number | null> {
     if (!refDoc) return null;

@@ -130,6 +130,51 @@ async function main() {
   ok('L-2: a valid HMAC-over-body inbound is accepted (proves rawBody plumbing)', signed.status !== 401 && signed.json.error?.code !== 'BAD_WEBHOOK_SIG', JSON.stringify({ s: signed.status, c: signed.json?.error?.code }));
   delete process.env.WEBHOOK_HMAC_SECRET_GRAB;
 
+  // ── 8. POS-7 auto-86: a recipe ingredient depleting → 86 pushed to the aggregator; restock → un-86. ──
+  // Seed a recipe-backed dish (ปลาทอด needs 3 units of fish) with fish stock in hand.
+  const [cItem] = await db.insert(s.menuItems).values({ tenantId: t1, sku: 'C', name: 'ปลาทอด', price: '90.00', isAvailable: true, active: true }).returning({ id: s.menuItems.id });
+  const [rec] = await db.insert(s.menuRecipes).values({ tenantId: t1, menuItemId: Number(cItem.id), sku: 'C', yieldQty: '1', postCogs: false, active: true }).returning({ id: s.menuRecipes.id });
+  await db.insert(s.menuRecipeLines).values({ tenantId: t1, recipeId: Number(rec.id), ingredientItemId: 'fish', ingredientDescription: 'ปลา', qtyPer: '3', unitCost: '1' });
+  const setFish = async (qty: string) => {
+    const [inv] = await db.select().from(s.customerInventory).where(eq(s.customerInventory.itemId, 'fish')).limit(1);
+    if (inv) await db.update(s.customerInventory).set({ currentStock: qty }).where(eq(s.customerInventory.id, inv.id));
+    else await db.insert(s.customerInventory).values({ tenantId: t1, itemId: 'fish', itemDescription: 'ปลา', currentStock: qty });
+  };
+  await setFish('10'); // in stock (10 ≥ 3) — C stays available
+
+  // deplete fish → recompute flips C unavailable → 86 pushed to grab (real partner POST, bearer + body)
+  await setFish('0');
+  const beforeDeplete = calls.length;
+  const dep = await inj('POST', '/api/pos/scale/availability/recompute', { token });
+  const avail86 = lastTo('/menu/items/C/availability');
+  ok('deplete → auto-86 pushed to aggregator (real POST /menu/items/C/availability, available:false, bearer + store_ref)',
+    avail86?.body.available === false && avail86?.body.store_ref === 'GRAB-001' && avail86?.auth === 'Bearer grab-partner-token' && (dep.json.channels?.pushed ?? 0) >= 1 && (dep.json.channels?.transitions ?? []).some((t: any) => t.platform === 'grab' && t.sku === 'C' && t.action === '86'),
+    JSON.stringify({ av: avail86?.body.available, pushed: dep.json.channels?.pushed }));
+
+  // audit + state visible via GET /api/channels/auto-86
+  const view = await inj('GET', '/api/channels/auto-86', { token });
+  const st86 = (view.json.state ?? []).find((r: any) => r.platform === 'grab' && r.sku === 'C');
+  const log86 = (view.json.log ?? []).find((r: any) => r.platform === 'grab' && r.sku === 'C' && r.action === '86');
+  ok('auto-86 state + transition audited (state available:false, log action 86 push_ok)', st86?.available === false && !!log86 && log86.push_ok === true, JSON.stringify({ st: st86?.available, log: !!log86 }));
+
+  // idempotency: a second recompute with no stock change makes NO further partner call (state unchanged)
+  const beforeIdem = calls.length;
+  const idem = await inj('POST', '/api/pos/scale/availability/recompute', { token });
+  ok('idempotent: recompute with unchanged stock pushes nothing new (no adapter spam)',
+    idem.json.count === 0 && calls.length === beforeIdem && beforeDeplete < beforeIdem,
+    JSON.stringify({ changed: idem.json.count, newCalls: calls.length - beforeIdem }));
+
+  // restock fish → recompute flips C available → un-86 pushed to grab (available:true)
+  await setFish('10');
+  const res = await inj('POST', '/api/pos/scale/availability/recompute', { token });
+  const availUn86 = lastTo('/menu/items/C/availability');
+  const view2 = await inj('GET', '/api/channels/auto-86', { token });
+  const stUn = (view2.json.state ?? []).find((r: any) => r.platform === 'grab' && r.sku === 'C');
+  const logUn = (view2.json.log ?? []).find((r: any) => r.platform === 'grab' && r.sku === 'C' && r.action === 'un-86');
+  ok('restock → un-86 pushed (available:true), state resumed, transition audited (action un-86)',
+    availUn86?.body.available === true && (res.json.channels?.pushed ?? 0) >= 1 && stUn?.available === true && !!logUn,
+    JSON.stringify({ av: availUn86?.body.available, st: stUn?.available, log: !!logUn }));
+
   console.log('\n── C6 — Delivery-aggregator outbound adapter framework (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

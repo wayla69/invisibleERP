@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { channelAdapters, channelWebhookEvents, dineInOrders, dineInOrderItems, menuItems } from '../../database/schema';
+import { channelAdapters, channelWebhookEvents, dineInOrders, dineInOrderItems, menuItems, channelItemAvailability, channelItem86Log } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { RealtimeScope } from '../restaurant/realtime.scope';
 import { n } from '../../database/queries';
@@ -148,6 +148,63 @@ export class ChannelAdapterService {
       }
     });
     return { order_no: orderNo, fulfillment_status: accept ? 'accepted' : 'rejected', routed_to_kds: accept, posted_to_platform: ord.extSource, post_ok: res.ok };
+  }
+
+  // ── POS-7 auto-86: push out-of-stock (86) / restock (un-86) transitions to the aggregators ──
+  // Called by LockingService.recomputeAvailability with the local 86 transitions it just applied (deplete
+  // on a sale, or resume on restock). For each connected (enabled) aggregator × changed dish it pushes the
+  // pause/resume via the existing provider — but ONLY when the desired availability differs from the state
+  // we last pushed (channel_item_availability), so a no-op recompute never spams the partner API
+  // (idempotency). Every real transition is audited in channel_item_86_log. Best-effort: a partner outage
+  // records push_ok=false but never throws (the caller wraps this in try/catch either way).
+  async syncAuto86(
+    tenantId: number | null,
+    changed: { sku: string; is_available: boolean }[],
+    createdBy = 'auto-86',
+  ): Promise<{ platforms: number; pushed: number; skipped: number; transitions: { platform: string; sku: string; action: '86' | 'un-86'; push_ok: boolean }[] }> {
+    const empty = { platforms: 0, pushed: 0, skipped: 0, transitions: [] as { platform: string; sku: string; action: '86' | 'un-86'; push_ok: boolean }[] };
+    if (!changed.length) return empty;
+    const db = this.db;
+    const adapters = await db.select().from(channelAdapters).where(and(eq(channelAdapters.tenantId, tenantId!), eq(channelAdapters.enabled, true)));
+    if (!adapters.length) return empty;
+    let pushed = 0, skipped = 0;
+    const transitions: { platform: string; sku: string; action: '86' | 'un-86'; push_ok: boolean }[] = [];
+    for (const a of adapters) {
+      const platform = String(a.platform);
+      for (const c of changed) {
+        const desired = !!c.is_available;
+        const [state] = await db.select().from(channelItemAvailability)
+          .where(and(eq(channelItemAvailability.tenantId, tenantId!), eq(channelItemAvailability.platform, platform), eq(channelItemAvailability.sku, c.sku))).limit(1);
+        if (state && state.available === desired) { skipped++; continue; } // idempotent — aggregator already in this state
+        const action: '86' | 'un-86' = desired ? 'un-86' : '86';
+        const reason = desired ? 'restock: ingredient replenished' : 'auto-86: out of stock';
+        const res = await getPlatformProvider(platform).setItemAvailability(a.storeRef ?? null, c.sku, desired);
+        const now = new Date();
+        if (state) {
+          await db.update(channelItemAvailability).set({ available: desired, reason, lastPushOk: res.ok, lastPushRef: res.ref ?? null, lastSyncedAt: now, updatedAt: now }).where(eq(channelItemAvailability.id, state.id));
+        } else {
+          await db.insert(channelItemAvailability).values({ tenantId, platform, sku: c.sku, available: desired, reason, lastPushOk: res.ok, lastPushRef: res.ref ?? null, lastSyncedAt: now });
+        }
+        await db.insert(channelItem86Log).values({ tenantId, platform, sku: c.sku, action, reason, pushOk: res.ok, pushRef: res.ref ?? null, createdBy });
+        pushed++;
+        transitions.push({ platform, sku: c.sku, action, push_ok: res.ok });
+      }
+    }
+    return { platforms: adapters.length, pushed, skipped, transitions };
+  }
+
+  // Current per-channel auto-86 state + the recent 86/un-86 audit trail (UI + operator visibility).
+  async listAuto86(user: JwtUser, limit = 50) {
+    const db = this.db;
+    const tenantId = user.tenantId ?? null;
+    const state = await db.select().from(channelItemAvailability).where(eq(channelItemAvailability.tenantId, tenantId!)).orderBy(desc(channelItemAvailability.updatedAt));
+    const log = await db.select().from(channelItem86Log).where(eq(channelItem86Log.tenantId, tenantId!)).orderBy(desc(channelItem86Log.id)).limit(limit);
+    return {
+      state: state.map((r: any) => ({ platform: r.platform, sku: r.sku, available: r.available, reason: r.reason, last_push_ok: r.lastPushOk, last_synced_at: r.lastSyncedAt })),
+      log: log.map((r: any) => ({ platform: r.platform, sku: r.sku, action: r.action, reason: r.reason, push_ok: r.pushOk, created_by: r.createdBy, created_at: r.createdAt })),
+      state_count: state.length,
+      log_count: log.length,
+    };
   }
 
   async listChannelOrders(limit = 50) {

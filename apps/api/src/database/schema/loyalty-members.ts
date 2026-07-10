@@ -62,7 +62,7 @@ export const posMemberLedger = pgTable('pos_member_ledger', {
   notes: text('notes'),
   createdBy: text('created_by'),
 }, (t) => ({ idxMember: index('pos_member_ledger_member').on(t.memberId), idxRef: index('pos_member_ledger_ref').on(t.refDoc) }));
-// Migration 0299 additionally creates the PARTIAL unique index `uq_member_ledger_doc` on
+// Migration 0303 additionally creates the PARTIAL unique index `uq_member_ledger_doc` on
 // (tenant_id, member_id, ref_doc, txn_type) WHERE ref_doc IS NOT NULL AND txn_type IN ('Earn','Redeem')
 // — replay safety for the points ledger (LYL-22). drizzle-kit cannot express a partial unique index, so
 // it lives in the migration only; do not "clean it up" by regenerating the snapshot.
