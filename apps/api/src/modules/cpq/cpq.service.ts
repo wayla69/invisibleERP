@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional, BadRequestException, NotFoundException, F
 import { eq, and, sql, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { productConfigs, configOptions, pricingRules, quotes, quoteLines } from '../../database/schema/cpq';
+import { crmOpportunities } from '../../database/schema/crm-pipeline';
 import { docCountersTenant } from '../../database/schema/system';
 import { tenants } from '../../database/schema';
 import { n, fx } from '../../database/queries';
@@ -100,6 +101,15 @@ export class CpqService {
     const quoteNo = await this.nextQuoteNo(tenantId);
     const qty = dto.qty ?? 1;
 
+    // CRM-1 unification (0293): opportunity_id in the DTO now references the unified spine
+    // (crm_opportunities — the id every /api/pipeline and /api/crm/pipeline response returns). Validate it
+    // so a dangling reference is a clean 404, and persist it on crm_opportunity_id (quotes.opportunity_id
+    // is read-legacy → the retired Batch 2A table; no new row writes it).
+    if (dto.opportunity_id != null) {
+      const [opp] = await db.select({ id: crmOpportunities.id }).from(crmOpportunities).where(eq(crmOpportunities.id, dto.opportunity_id)).limit(1);
+      if (!opp) throw new NotFoundException({ code: 'OPP_NOT_FOUND', message: `Opportunity ${dto.opportunity_id} not found`, messageTh: 'ไม่พบโอกาสการขาย' });
+    }
+
     let subtotal = 0;
     const lineValues: any[] = [];
 
@@ -142,7 +152,7 @@ export class CpqService {
     const expiresDate = new Date(Date.now() + validityDays * 86400000).toISOString().slice(0, 10);
 
     const [quote] = await db.insert(quotes).values({
-      tenantId, quoteNo, opportunityId: dto.opportunity_id ?? null, configId: dto.config_id ?? null,
+      tenantId, quoteNo, crmOpportunityId: dto.opportunity_id ?? null, configId: dto.config_id ?? null,
       customerName: dto.customer_name, status: 'Draft', validityDays,
       issuedDate, expiresDate, currency: 'THB',
       subtotal: fx(subtotal, 4), discountTotal: '0', total: fx(subtotal, 4),
@@ -278,5 +288,7 @@ export class CpqService {
   }
 
   private fmtConfig(c: any) { return { id: Number(c.id), code: c.code, name: c.name, base_price: n(c.basePrice), currency: c.currency, description: c.description }; }
-  private fmtQuote(q: any) { return { id: Number(q.id), quote_no: q.quoteNo, customer_name: q.customerName, status: q.status, issued_date: q.issuedDate, expires_date: q.expiresDate, subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), notes: q.notes, created_by: q.createdBy }; }
+  // opportunity_id resolves the unified spine link first (crm_opportunity_id), falling back to the
+  // read-legacy Batch 2A pointer for pre-0293 rows that predate the data-migration backfill.
+  private fmtQuote(q: any) { return { id: Number(q.id), quote_no: q.quoteNo, opportunity_id: q.crmOpportunityId != null ? Number(q.crmOpportunityId) : (q.opportunityId != null ? Number(q.opportunityId) : null), customer_name: q.customerName, status: q.status, issued_date: q.issuedDate, expires_date: q.expiresDate, subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), notes: q.notes, created_by: q.createdBy }; }
 }

@@ -32,9 +32,45 @@ export const arReceipts = pgTable('ar_receipts', {
   refNo: text('ref_no'),
   remarks: text('remarks'),
   idempotencyKey: text('idempotency_key'), // client retry key — dedups a receipt per (tenant, key)
+  // REV-21 (migration 0295) — the on-account (unapplied) portion of the receipt. A cash-application
+  // receipt parks its remainder here (GL 2220 Unapplied Customer Receipts) until applied to invoices
+  // later; legacy single-invoice receipts are fully applied at creation (0).
+  unappliedAmount: numeric('unapplied_amount', { precision: 14, scale: 2 }).default('0'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }),
 });
+
+// AR cash application (REV-21, migration 0295) — one row per (receipt | credit-note) × invoice
+// application, so ONE customer receipt can settle MANY invoices (partial allowed) and an Issued
+// AR-linked credit note can be applied as a credit line in the same worksheet. A worksheet post is a
+// BATCH (batch_no, APL-YYYYMMDD-NNN); each line carries its own application_no (`{batch}:L{n}`).
+// An application batch at/over the approval threshold parks status='PendingApproval' (invoices +
+// GL untouched; the cash sits on-account) until a DIFFERENT user approves it (SoD). A reversal is
+// audited in place (reversed flag + reason + who/when) and returns the cash to on-account.
+export const arReceiptApplications = pgTable('ar_receipt_applications', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  applicationNo: text('application_no').notNull().unique(), // APL-YYYYMMDD-NNN:L<line>
+  batchNo: text('batch_no').notNull(),                      // one worksheet post = one batch (APL-YYYYMMDD-NNN)
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // the customer tenant (RLS)
+  sourceType: text('source_type').notNull().default('receipt'), // receipt | credit_note
+  receiptNo: text('receipt_no').notNull(),  // ar_receipts.receipt_no (or the CN doc_no when source_type='credit_note')
+  invoiceNo: text('invoice_no').notNull(),  // ar_invoices.invoice_no the amount is applied to
+  appliedAmount: numeric('applied_amount', { precision: 14, scale: 2 }).notNull(),
+  status: text('status').notNull().default('applied'), // applied | PendingApproval | Rejected
+  appliedBy: text('applied_by'),
+  appliedAt: timestamp('applied_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),                      // checker — must differ from appliedBy
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+  reversed: boolean('reversed').notNull().default(false),
+  reversedBy: text('reversed_by'),
+  reversedAt: timestamp('reversed_at', { withTimezone: true }),
+  reverseReason: text('reverse_reason'),
+}, (t) => ({
+  byInvoice: index('idx_ar_apply_invoice').on(t.tenantId, t.invoiceNo),
+  byReceipt: index('idx_ar_apply_receipt').on(t.tenantId, t.receiptNo),
+  byBatch: index('idx_ar_apply_batch').on(t.tenantId, t.batchNo),
+}));
 
 // AR collections / dunning log — one row per dunning action taken on an open invoice. The collections
 // worklist derives current stage from the latest row; the history is the audit trail for the control.
@@ -149,7 +185,7 @@ export const apPayments = pgTable('ap_payments', {
   uxIdem: uniqueIndex('ux_ap_payments_idem').on(sql`coalesce(${t.tenantId}, 0)`, t.idempotencyKey).where(sql`${t.idempotencyKey} IS NOT NULL`),
 }));
 
-// AP payment run (FIN-2, EXP-13, migration 0295) — a BATCH disbursement proposal over the one-by-one
+// AP payment run (FIN-2, EXP-13, migration 0296) — a BATCH disbursement proposal over the one-by-one
 // AP-PAY maker-checker. A `creditors` holder PROPOSES a run (open approved AP selected by due-date cutoff;
 // every line re-passes the 3-way-match gate, EXP-09), edits lines only while Draft, then submits for
 // approval; a DIFFERENT user (approvals/gl_close) APPROVES it (SoD, mirrors EXP-06), and EXECUTION posts

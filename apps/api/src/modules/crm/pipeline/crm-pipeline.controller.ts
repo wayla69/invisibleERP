@@ -7,7 +7,7 @@ import { CrmPipelineService } from './crm-pipeline.service';
 const LeadBody = z.object({ name: z.string().min(1), company: z.string().optional(), email: z.string().optional(), phone: z.string().optional(), source: z.string().optional(), owner: z.string().optional(), notes: z.string().optional() });
 const ConvertBody = z.object({ opportunity_name: z.string().optional(), amount: z.number().nonnegative().optional(), expected_close_date: z.string().optional(), customer_no: z.string().optional() });
 const ReasonBody = z.object({ reason: z.string().optional() });
-const OppBody = z.object({ name: z.string().min(1), customer_no: z.string().optional(), amount: z.number().nonnegative().optional(), probability: z.number().int().min(0).max(100).optional(), expected_close_date: z.string().optional(), owner: z.string().optional() });
+const OppBody = z.object({ name: z.string().min(1), customer_no: z.string().optional(), amount: z.number().nonnegative().optional(), probability: z.number().int().min(0).max(100).optional(), expected_close_date: z.string().optional(), owner: z.string().optional(), account_no: z.string().optional(), primary_contact_id: z.number().int().optional() });
 const StageBody = z.object({ stage: z.string().min(1), lost_reason: z.string().optional(), probability: z.number().int().min(0).max(100).optional() });
 const ActivityBody = z.object({ entity_type: z.enum(['lead', 'opportunity']), entity_no: z.string().min(1), type: z.enum(['call', 'email', 'meeting', 'note', 'task']), subject: z.string().optional(), notes: z.string().optional(), due_date: z.string().optional(), done: z.boolean().optional() });
 
@@ -28,6 +28,8 @@ export class CrmPipelineController {
   @Post('opportunities') createOpp(@Body(new ZodValidationPipe(OppBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.createOpportunity(b, u); }
   @Get('opportunities') listOpps(@Query('stage') stage: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listOpportunities(stage, u); }
   @Patch('opportunities/:oppNo/stage') @HttpCode(200) setStage(@Param('oppNo') no: string, @Body(new ZodValidationPipe(StageBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setStage(no, b.stage, b, u); }
+  // Stage-transition audit trail (crm_stage_history, CRM-1) — REV-17 evidence for one deal.
+  @Get('opportunities/:oppNo/history') stageHistory(@Param('oppNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.stageHistory(no, u); }
 
   // Pipeline forecast
   @Get('summary') summary(@CurrentUser() u: JwtUser) { return this.svc.pipelineSummary(u); }

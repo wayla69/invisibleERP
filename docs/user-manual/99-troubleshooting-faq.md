@@ -1,6 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.4** _(2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_ _(2026-07-09: added `AI_TENANT_OPTED_OUT`)_
+**Status: DRAFT v0.5** _(2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -44,7 +44,12 @@ your code below.
 | `BAD_PACKAGE` (แพ็กเกจบุฟเฟ่ต์ไม่ถูกต้อง) | A reservation pre-picked a buffet package that doesn't exist / is retired, or a package was set on an **à-la-carte** booking. | Switch the booking's service mode to **บุฟเฟ่ต์** before picking a tier, or pick an active package (or leave it as *เลือกที่โต๊ะ*). |
 | `CONSENT_REQUIRED` (ยังไม่ได้รับความยินยอม PDPA) | You tried to save a **guest dining profile** (or companion) for a member who hasn't granted the `dining_profile` consent. | Ask the guest for consent and tick the consent checkbox on the profile card — it's recorded in the consent ledger. Without consent the system stores nothing (PDPA). See [Sales & POS → Guest dining profile](./01-sales-and-pos.md). |
 | `OPP_NOT_WON` | You tried to turn a sales opportunity into a project before it was **won** (it's still open, or it was lost). | Move the opportunity to **won** in the CRM pipeline first (`PATCH /api/crm/pipeline/opportunities/{no}/stage {stage:"won"}`), then convert it via **Convert to project**. |
-| `OPP_NOT_FOUND` | The opportunity number given to *Convert to project* doesn't exist (in your tenant). | Check the `OPP-…` number; create/locate the opportunity in the CRM pipeline first. (Re-converting a deal that already became a project simply returns the existing project — no duplicate is created.) |
+| `OPP_NOT_FOUND` | The opportunity number given to *Convert to project* doesn't exist (in your tenant) — also fired by a **CPQ quote** referencing an opportunity id that doesn't exist (CRM-1). | Check the `OPP-…` number / id; create/locate the opportunity in the CRM pipeline first. (Re-converting a deal that already became a project simply returns the existing project — no duplicate is created.) |
+| `OPP_CLOSED` (โอกาสการขายปิดแล้ว) | You tried to move or close a deal that is already **won/lost** — closed deals are terminal on every pipeline screen (CRM-1). | A closed deal stays closed. If it genuinely re-opened, create a new opportunity (the stage-history trail keeps the old one auditable). |
+| `DUPLICATE_SUSPECT` (พบข้อมูลที่อาจซ้ำ, 409) | Creating a CRM **account/contact** that matches an existing record on the normalized tax id / email / phone / company name. The response lists the matches (`error.details.matches`). | Review the matches — usually you should use (or merge into) the existing record. Resubmit with `force: true` only if it's genuinely a different party. |
+| `SOD_VIOLATION` (account merge) | You tried to **merge away an account you created yourself** while it still has contacts/deals to reassign. | A different user performs the merge (maker-checker — one person can't mint a shadow account and fold its pipeline into another record). |
+| `MERGE_CONFLICT` (409) | The merge hit a record both accounts own with the same key. | Resolve the collision on one side, then re-run the merge. |
+| `ACCOUNT_NOT_FOUND` | The `ACC-…` account number doesn't exist (in your tenant). | Check the number via `GET /api/crm/accounts?search=`. |
 | `TASK_NOT_FOUND` | You tried to update a project **WBS task** that doesn't exist. | Check the task id; add the task to the project first. |
 | `MILESTONE_NOT_FOUND` | You tried to mark a project **milestone** reached that doesn't exist. | Check the milestone id; add the milestone to the project first. |
 | `MILESTONE_REACHED` | The milestone was already marked reached. | No action — it's already reached. A billing milestone bills once; it can't be re-reached (that would double-bill). |
@@ -76,6 +81,12 @@ your code below.
 
 | Code | Meaning | What to do |
 |------|---------|-----------|
+| `OVER_APPLIED` (ยอดตัดชำระเกินยอดคงค้าง) | A cash-application line is more than the invoice still owes — allocations already **awaiting approval** count too. | Reduce the line to the invoice's *available* amount shown on the worksheet. See [Finance AR/AP §A2b](./05-finance-ar-ap.md). |
+| `APPLY_EXCEEDS_RECEIPT` (ยอดตัดชำระรวมเกินเงินรับ) | The invoice allocations add up to more than the receipt amount. | Lower the allocations or raise the receipt amount; leave the rest unallocated — it parks **on-account**. |
+| `CUSTOMER_MISMATCH` (เอกสารของลูกค้ารายอื่น) | You tried to apply money (or a credit note) to **another customer's** invoice. | Load the right customer's worksheet; cross-customer application is always rejected. |
+| `INSUFFICIENT_UNAPPLIED` (เงินรับรอตัดชำระไม่พอ) | You tried to apply more than the receipt's remaining **on-account** balance (pending batches count). | Check the receipt's *available* on-account amount on the worksheet and re-key. |
+| `CN_OVER_APPLIED` / `CN_NOT_ISSUED` / `CN_NOT_AR_LINKED` | The credit note's remaining value is exhausted / the note isn't approved (Issued) yet / the note was issued over a POS sale, not an AR invoice. | Use the remaining value shown; have the note approved first; a POS credit note can't be applied to AR invoices. |
+| `REASON_REQUIRED` / `ALREADY_REVERSED` (ยกเลิกตัดชำระ) | You tried to reverse a cash application without a reason — or one that was already reversed. | Enter the reversal reason (it is recorded permanently); an application can only be reversed once. |
 | `MATCH_BLOCKED` | The supplier invoice failed the 3-way match (PO ↔ GR ↔ invoice), so it can't be paid. | Investigate the variance (quantity / price). Fix the document, or have an authorised user **override** the match with a reason. See [Procurement](./03-procurement.md). |
 | `AP_PREPAID_BLOCKED` | You tried to create a supplier bill that is already paid. | Create the bill **Unpaid**, then request the payment so a second person can approve it (control EXP-06). |
 | `AP_OVERPAY` (ยอดจ่ายเกินยอดคงค้าง) | The payment amount exceeds the bill's outstanding balance (including requests already awaiting approval). | Reduce the amount to the remaining balance. |

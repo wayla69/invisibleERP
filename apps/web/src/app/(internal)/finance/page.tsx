@@ -260,10 +260,239 @@ function ReceivablesTab() {
         )}
       </StateView>
 
+      <CashApplicationSection />
       <ReceiptsSection />
       <CollectionsSection />
       <WriteOffSection />
       <ArAgingSection />
+    </div>
+  );
+}
+
+// ── AR cash application worksheet (REV-20): pick customer → open items + suggest-fill → allocate →
+// post one receipt across many invoices; the remainder parks on-account (unapplied) and is applied
+// later from the on-account receipts list. Batches at/over the threshold park for a second approver. ──
+function CashApplicationSection() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [customer, setCustomer] = useState('');
+  const [loaded, setLoaded] = useState(''); // the customer whose open items are on screen
+  const [amount, setAmount] = useState('');
+  const [alloc, setAlloc] = useState<Record<string, string>>({});     // invoice_no → apply amount
+  const [cnAlloc, setCnAlloc] = useState<Record<string, string>>({}); // cn doc_no → { invoice, amount } uses first open invoice
+  const [applyRef, setApplyRef] = useState<any | null>(null);         // on-account mode: the receipt being applied
+  const open = useQuery<any>({
+    queryKey: ['ar-open-items', loaded],
+    queryFn: () => api(`/api/finance/ar/open-items?customer_no=${encodeURIComponent(loaded)}`),
+    enabled: !!loaded, retry: false,
+  });
+  const pendingQ = useQuery<any>({ queryKey: ['ar-cashapp-pending'], queryFn: () => api('/api/finance/ar/cash-application?status=PendingApproval&limit=50'), retry: false });
+  const recentQ = useQuery<any>({ queryKey: ['ar-cashapp-recent'], queryFn: () => api('/api/finance/ar/cash-application?limit=20'), retry: false });
+  const refresh = () => { for (const k of ['ar-open-items', 'fin-ar', 'fin-kpi', 'fin-ar-aging', 'ar-receipts', 'ar-cashapp-pending', 'ar-cashapp-recent', 'ar-collections']) qc.invalidateQueries({ queryKey: [k] }); };
+  const resetWorksheet = () => { setAlloc({}); setCnAlloc({}); setAmount(''); setApplyRef(null); };
+
+  const cashLines = Object.entries(alloc).map(([invoice_no, v]) => ({ invoice_no, amount: Number(v) })).filter((l) => l.amount > 0);
+  const cnLines = Object.entries(cnAlloc).map(([doc_no, v]) => {
+    const [invoice_no, amt] = String(v).split('|');
+    return { doc_no, invoice_no: invoice_no ?? '', amount: Number(amt) };
+  }).filter((l) => l.amount > 0 && l.invoice_no);
+  const appliedTotal = cashLines.reduce((a, l) => a + l.amount, 0);
+  const receiptAmt = applyRef ? Number(applyRef.available) : Number(amount) || 0;
+  const onAccountRest = Math.max(0, Math.round((receiptAmt - appliedTotal) * 100) / 100);
+
+  const suggest = useMutation({
+    mutationFn: () => api<any>(`/api/finance/ar/cash-application/suggest?${applyRef ? `receipt_ref=${encodeURIComponent(applyRef.receipt_no)}` : `customer_no=${encodeURIComponent(loaded)}&amount=${Number(amount) || 0}`}`),
+    onSuccess: (r: any) => setAlloc(Object.fromEntries((r.lines ?? []).map((l: any) => [l.invoice_no, String(l.apply)]))),
+    onError: (e: any) => notifyError(e.message),
+  });
+  const post = useMutation({
+    mutationFn: () => applyRef
+      ? api('/api/finance/ar/apply-on-account', { method: 'POST', body: JSON.stringify({ receipt_ref: applyRef.receipt_no, lines: cashLines }) })
+      : api('/api/finance/ar/cash-application', { method: 'POST', body: JSON.stringify({ customer_no: loaded, amount: Number(amount) || 0, lines: cashLines, credit_notes: cnLines }) }),
+    onSuccess: (r: any) => {
+      if (r.pending) notifySuccess(t('fin.cashapp_pending_ok', { no: r.batch_no }));
+      else notifySuccess(t('fin.cashapp_posted_ok', { no: r.batch_no, applied: baht(r.applied_total), oa: baht(r.on_account ?? 0) }));
+      resetWorksheet(); refresh();
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const approve = useMutation({
+    mutationFn: (batchNo: string) => api(`/api/finance/ar/cash-application/${encodeURIComponent(batchNo)}/approve`, { method: 'POST' }),
+    onSuccess: (r: any) => { notifySuccess(t('fin.cashapp_approved_ok', { no: r.batch_no })); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: (batchNo: string) => api(`/api/finance/ar/cash-application/${encodeURIComponent(batchNo)}/reject`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (r: any) => { notifySuccess(t('fin.cashapp_rejected_ok', { no: r.batch_no })); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reverse = useMutation({
+    mutationFn: (v: { no: string; reason: string }) => api(`/api/finance/ar/cash-application/${encodeURIComponent(v.no)}/reverse`, { method: 'POST', body: JSON.stringify({ reason: v.reason }) }),
+    onSuccess: (r: any) => { notifySuccess(t('fin.cashapp_reversed_ok', { no: r.application_no })); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const promptReverse = (no: string) => { const reason = window.prompt(t('fin.cashapp_reverse_prompt')); if (!reason || !reason.trim()) return; reverse.mutate({ no, reason: reason.trim() }); };
+  const totals = open.data?.totals;
+  // Pending queue grouped per batch for the approve/reject actions.
+  const pendingBatches = Object.values(((pendingQ.data?.applications ?? []) as any[]).reduce((acc: Record<string, any>, a: any) => {
+    const b = acc[a.batch_no] ?? { batch_no: a.batch_no, amount: 0, applied_by: a.applied_by, lines: 0 };
+    b.amount = Math.round((b.amount + a.amount) * 100) / 100; b.lines += 1; acc[a.batch_no] = b; return acc;
+  }, {}));
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold">{t('fin.cashapp_heading')}</h2>
+          <p className="text-xs text-muted-foreground">{t('fin.cashapp_desc')}</p>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="grid gap-1">
+            <Label htmlFor="cashapp-cust" className="text-xs">{t('fin.cashapp_customer')}</Label>
+            <Input id="cashapp-cust" className="h-8 w-36" value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="CUST / 12" />
+          </div>
+          <Button variant="outline" size="sm" disabled={!customer.trim()} onClick={() => { setLoaded(customer.trim()); resetWorksheet(); }}>{t('fin.cashapp_load')}</Button>
+        </div>
+      </div>
+
+      {!loaded ? (
+        <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">{t('fin.cashapp_empty_desc')}</p>
+      ) : (
+        <StateView q={open}>
+          {open.data && (
+            <div className="space-y-4">
+              {totals && (
+                <p className="text-xs text-muted-foreground">
+                  {t('fin.cashapp_totals', { open: baht(totals.open_invoices), oa: baht(totals.on_account), cn: baht(totals.credit_notes), net: baht(totals.net_position) })}
+                </p>
+              )}
+              {applyRef ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/60 px-3 py-2 text-sm">
+                  <span>{t('fin.cashapp_mode_onaccount', { no: applyRef.receipt_no, amt: baht(applyRef.available) })}</span>
+                  <Button variant="ghost" size="sm" onClick={() => { setApplyRef(null); setAlloc({}); }}>{t('fin.cashapp_mode_exit')}</Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="grid gap-1">
+                    <Label htmlFor="cashapp-amt" className="text-xs">{t('fin.cashapp_receipt_amount')}</Label>
+                    <Input id="cashapp-amt" className="h-8 w-36" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                  </div>
+                  <Button variant="outline" size="sm" disabled={suggest.isPending || !(Number(amount) > 0)} onClick={() => suggest.mutate()}>{t('fin.cashapp_suggest')}</Button>
+                </div>
+              )}
+              {applyRef && (
+                <Button variant="outline" size="sm" disabled={suggest.isPending} onClick={() => suggest.mutate()}>{t('fin.cashapp_suggest')}</Button>
+              )}
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-muted-foreground">{t('fin.cashapp_open_invoices')}</h3>
+                <DataTable
+                  rows={open.data.invoices ?? []}
+                  rowKey={(r: any) => r.invoice_no}
+                  emptyState={{ icon: ReceiptText, title: t('fin.ar_empty_title'), description: t('fin.ar_empty_desc') }}
+                  columns={[
+                    { key: 'invoice_no', label: t('fin.col_invoice') },
+                    { key: 'due_date', label: t('fin.col_due'), render: (r: any) => thaiDate(r.due_date) },
+                    { key: 'days_overdue', label: t('fin.col_days_overdue'), align: 'right', render: (r: any) => <span className="tabular">{r.days_overdue}</span> },
+                    { key: 'available', label: t('fin.cashapp_col_available'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.available)}</span> },
+                    { key: 'apply', label: t('fin.cashapp_col_apply'), align: 'right', sortable: false, render: (r: any) => (
+                      <Input aria-label={`${t('fin.cashapp_col_apply')} ${r.invoice_no}`} className="ml-auto h-8 w-28 text-right" type="number" step="0.01"
+                        value={alloc[r.invoice_no] ?? ''} onChange={(e) => setAlloc((a) => ({ ...a, [r.invoice_no]: e.target.value }))} />
+                    ) },
+                  ]}
+                />
+              </div>
+
+              {!applyRef && (open.data.credit_notes ?? []).length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-muted-foreground">{t('fin.cashapp_credit_notes')}</h3>
+                  <DataTable
+                    rows={open.data.credit_notes}
+                    rowKey={(r: any) => r.doc_no}
+                    columns={[
+                      { key: 'doc_no', label: t('fin.col_no') },
+                      { key: 'source_invoice_no', label: t('fin.col_invoice') },
+                      { key: 'remaining', label: t('fin.cashapp_col_remaining'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.remaining)}</span> },
+                      { key: 'apply', label: t('fin.cashapp_col_apply'), align: 'right', sortable: false, render: (r: any) => (
+                        <Input aria-label={`${t('fin.cashapp_col_apply')} ${r.doc_no}`} className="ml-auto h-8 w-28 text-right" type="number" step="0.01"
+                          value={(cnAlloc[r.doc_no] ?? '|').split('|')[1] ?? ''}
+                          onChange={(e) => setCnAlloc((a) => ({ ...a, [r.doc_no]: `${r.source_invoice_no}|${e.target.value}` }))} />
+                      ) },
+                    ]}
+                  />
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm">{t('fin.cashapp_applied_total')}: <span className="tabular font-medium">{baht(appliedTotal)}</span></span>
+                {!applyRef && <span className="text-sm text-muted-foreground">{t('fin.cashapp_on_account_rest')}: <span className="tabular">{baht(onAccountRest)}</span></span>}
+                <Button size="sm" disabled={post.isPending || (applyRef ? cashLines.length === 0 : (!(receiptAmt > 0) && cnLines.length === 0))} onClick={() => post.mutate()}>
+                  <HandCoins className="size-4" /> {t('fin.cashapp_post')}
+                </Button>
+              </div>
+
+              {(open.data.unapplied_receipts ?? []).length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-muted-foreground">{t('fin.cashapp_on_account')}</h3>
+                  <DataTable
+                    rows={open.data.unapplied_receipts}
+                    rowKey={(r: any) => r.receipt_no}
+                    columns={[
+                      { key: 'receipt_no', label: t('fin.col_no') },
+                      { key: 'receipt_date', label: t('dash.col_date'), render: (r: any) => thaiDate(r.receipt_date) },
+                      { key: 'available', label: t('fin.cashapp_col_available'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.available)}</span> },
+                      { key: 'act', label: '', sortable: false, render: (r: any) => (
+                        <Button variant="ghost" size="sm" onClick={() => { setApplyRef(r); setAlloc({}); setCnAlloc({}); }}>{t('fin.cashapp_apply_later')}</Button>
+                      ) },
+                    ]}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </StateView>
+      )}
+
+      {pendingBatches.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-muted-foreground">{t('fin.cashapp_pending_heading')}</h3>
+          <DataTable
+            rows={pendingBatches}
+            rowKey={(r: any) => r.batch_no}
+            columns={[
+              { key: 'batch_no', label: t('fin.col_no') },
+              { key: 'applied_by', label: t('fin.col_requester') },
+              { key: 'amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => (
+                <div className="flex items-center gap-1">
+                  <Button variant="outline" size="sm" disabled={approve.isPending} onClick={() => approve.mutate(r.batch_no)}>{t('fin.approve')}</Button>
+                  <Button variant="ghost" size="sm" disabled={reject.isPending} onClick={() => reject.mutate(r.batch_no)}>{t('fin.rejected')}</Button>
+                </div>
+              ) },
+            ]}
+          />
+        </div>
+      )}
+
+      {(recentQ.data?.applications ?? []).length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-muted-foreground">{t('fin.cashapp_recent_heading')}</h3>
+          <DataTable
+            rows={recentQ.data.applications}
+            rowKey={(r: any) => r.application_no}
+            columns={[
+              { key: 'application_no', label: t('fin.col_no') },
+              { key: 'receipt_no', label: t('fin.receipts_heading') },
+              { key: 'invoice_no', label: t('fin.col_invoice') },
+              { key: 'amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+              { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.reversed ? 'destructive' : statusVariant(r.status)}>{r.reversed ? t('fin.cashapp_reverse') : r.status}</Badge> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => (!r.reversed && r.status === 'applied') ? (
+                <Button variant="ghost" size="sm" disabled={reverse.isPending} onClick={() => promptReverse(r.application_no)}>{t('fin.cashapp_reverse')}</Button>
+              ) : null },
+            ]}
+          />
+        </div>
+      )}
     </div>
   );
 }

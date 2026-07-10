@@ -1,4 +1,4 @@
--- 0295_ap_payment_runs — AP payment run + Thai bank payment file (FIN-2, control EXP-13).
+-- 0296_ap_payment_runs — AP payment run + Thai bank payment file (FIN-2, control EXP-13).
 -- ap_payment_runs: a BATCH disbursement proposal (open approved AP selected by due-date cutoff) with a
 -- maker-checker lifecycle (Draft → PendingApproval → Approved → Executed; Rejected/Cancelled), the source
 -- house-bank for the bulk-transfer file, run totals, and the SHA-256 of the last generated bank file
