@@ -30,7 +30,7 @@ import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exception
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
 import { importHubSnapshot } from '../../../apps/api/dist/database/hub-import';
-import { pushHubSales, signHubBatch } from '../../../apps/api/dist/database/hub-push';
+import { pushHubSales, pushHubTills, sendHubHeartbeat, signHubBatch } from '../../../apps/api/dist/database/hub-push';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -253,6 +253,61 @@ async function main() {
   ok('Cloud trial balance still balanced after buffet ingest', tb2.json?.totals?.balanced === true, JSON.stringify(tb2.json?.totals ?? {}));
   const push4 = await pushHubSales(hub.db, t1, { secret: SECRET, send });
   ok('Re-run push: nothing re-collected (push_log excludes terminal rows), nothing fails', push4.collected === 0 && push4.pushed === 0 && push4.failed === 0, JSON.stringify(push4));
+
+  // ═══ Phase 2c — till / Z-report up-sync (BRANCH-05) ═══
+  const sendTill = async (body: any) => {
+    const res = await cApp.inj('POST', '/api/hub/ingest-till', undefined, body);
+    if (res.status !== 200 && res.status !== 201) { const e: any = new Error(res.json?.error?.code ?? String(res.status)); e.code = res.json?.error?.code; e.missing = res.json?.error?.missing; throw e; }
+    return res.json;
+  };
+  // a hub till session that COVERS the already-replayed sales, counted short by exactly ฿40
+  // drawer takings = Σ(total + tip) over the session's sales (the restaurant path debits 1000 for every tender)
+  const hubSaleTotals = (await hub.pg.query(`SELECT s.total, s.tip FROM cust_pos_sales s JOIN dine_in_orders o ON o.sale_no = s.sale_no WHERE s.status='Completed'`)).rows as any[];
+  const cashTotal = Math.round(hubSaleTotals.reduce((s, r) => s + Number(r.total) + Number(r.tip ?? 0), 0) * 100) / 100;
+  const OPEN_FLOAT = 1000;
+  await hub.pg.query(`INSERT INTO till_sessions (session_no, tenant_id, opened_by, opened_at, opening_float, closed_by, closed_at, closing_count, status)
+    VALUES ('TILL-HUB-1', ${t1}, 'cashier1', now() - interval '3 hours', ${OPEN_FLOAT}, 'cashier1', now(), ${OPEN_FLOAT + cashTotal - 40}, 'Closed')`);
+  // an UNSUPPORTED sale still un-replayed → the till must be BLOCKED, never certified on a partial population
+  await hub.pg.query(`INSERT INTO dine_in_orders (order_no, tenant_id, status, sale_no, opened_at, paid_at) VALUES ('DIN-BLOCK', ${t1}, 'paid', 'SALE-HUB-MANUAL', now() - interval '1 hour', now() - interval '1 hour')`);
+  const blocked = await pushHubTills(hub.db, t1, { secret: SECRET, sendTill });
+  ok('Till blocked while a covered sale has not replayed (TILL_SALES_NOT_SYNCED)', blocked.blocked === 1 && blocked.pushed === 0, JSON.stringify(blocked));
+  const blockedLog = (await hub.pg.query(`SELECT status, error_code FROM hub_push_log WHERE hub_sale_no='TILL-HUB-1'`)).rows[0] as any;
+  ok('Blocked till is logged with its reason (visible, retryable)', blockedLog?.error_code?.includes('TILL_SALES_NOT_SYNCED'), JSON.stringify(blockedLog));
+
+  // resolve it (the manual sale is out of scope for the session) → the till certifies
+  await hub.pg.query(`DELETE FROM dine_in_orders WHERE order_no='DIN-BLOCK'`);
+  const tillPush = await pushHubTills(hub.db, t1, { secret: SECRET, sendTill });
+  ok('Till pushed once its sales are all on the cloud', tillPush.pushed === 1 && tillPush.blocked === 0 && tillPush.failed === 0, JSON.stringify(tillPush));
+
+  const cloudTill = (await cloud.pg.query(`SELECT expected_cash, closing_count, variance, variance_status, variance_journal_no FROM till_sessions WHERE session_no='TILL-HUB-1'`)).rows[0] as any;
+  ok('Cloud recomputed expected cash from ITS OWN sale ledger (float + drawer takings)', Math.abs(Number(cloudTill?.expected_cash) - (OPEN_FLOAT + cashTotal)) < 0.02, JSON.stringify({ got: cloudTill?.expected_cash, want: OPEN_FLOAT + cashTotal }));
+  ok('Immaterial short (฿40 < ฿100) posts 5830 immediately, no approval needed', Math.abs(Number(cloudTill?.variance) + 40) < 0.02 && cloudTill?.variance_status === 'NotRequired' && /^JE-/.test(cloudTill?.variance_journal_no ?? ''), JSON.stringify(cloudTill));
+  const os = (await cloud.pg.query(`SELECT sum(debit)::numeric d FROM journal_lines jl JOIN journal_entries je ON je.id=jl.entry_id WHERE jl.account_code='5830' AND je.status='Posted'`)).rows[0] as any;
+  ok('Cash Over/Short 5830 debited by the short amount', Math.abs(Number(os?.d ?? 0) - 40) < 0.02, JSON.stringify(os));
+  const tbTill = await cApp.inj('GET', '/api/ledger/trial-balance', t1admin);
+  ok('Cloud trial balance balanced after till ingest', tbTill.json?.totals?.balanced === true, JSON.stringify(tbTill.json?.totals ?? {}));
+
+  const tillDup = await pushHubTills(hub.db, t1, { secret: SECRET, sendTill });
+  ok('Till re-push is idempotent (nothing re-collected)', tillDup.collected === 0, JSON.stringify(tillDup));
+  // and a forced re-send of the same session returns duplicate (no second JE)
+  const again = await sendTill({ tenant_id: t1, sent_at: new Date().toISOString(), till: { session_no: 'TILL-HUB-1', opened_at: new Date().toISOString(), closed_at: new Date().toISOString(), opening_float: 0, closing_count: 0, sale_nos: [] }, signature: 'deadbeef' }).catch((e: any) => ({ err: e.code }));
+  ok('Forced re-send with a bad signature is rejected (not silently duplicated)', (again as any).err === 'HUB_SYNC_BAD_SIGNATURE', JSON.stringify(again));
+
+  // ═══ Phase 4a — hub heartbeat + fleet view ═══
+  const sendHeartbeat = async (body: any) => {
+    const res = await cApp.inj('POST', '/api/hub/heartbeat', undefined, body);
+    if (res.status !== 200 && res.status !== 201) throw new Error(res.json?.error?.code ?? String(res.status));
+    return res.json;
+  };
+  const hb = await sendHubHeartbeat(hub.db, t1, { secret: SECRET, hubId: 'store-1', appVersion: 'test', sendHeartbeat });
+  ok('Heartbeat reports the real backlog (1 skipped sale, 0 pending)', hb.skipped_docs === 1 && hb.pending_sales === 0 && hb.pending_tills === 0, JSON.stringify(hb));
+  const fleet = await cApp.inj('GET', '/api/hub/fleet', t1admin);
+  const h0 = fleet.json?.hubs?.[0];
+  ok('Fleet view lists the hub, fresh, flagged for attention (skipped docs)', h0?.hub_id === 'store-1' && h0.stale === false && h0.needs_attention === true && fleet.json?.summary?.hubs === 1, JSON.stringify(fleet.json?.summary ?? fleet.status));
+  const hbBad = await cApp.inj('POST', '/api/hub/heartbeat', undefined, { tenant_id: t1, sent_at: new Date().toISOString(), hub: { hub_id: 'evil' }, signature: 'deadbeef' });
+  ok('Heartbeat rejects a bad signature', hbBad.status === 403, String(hbBad.status));
+  const fleetT2 = await cApp.inj('GET', '/api/hub/fleet', await cApp.login('sales2', 'pw2'));
+  ok('Fleet is tenant-isolated (T2 sees no T1 hub)', (fleetT2.json?.hubs ?? []).length === 0, JSON.stringify(fleetT2.json?.summary ?? fleetT2.status));
 
   await cApp.app.close();
   await hApp.app.close();

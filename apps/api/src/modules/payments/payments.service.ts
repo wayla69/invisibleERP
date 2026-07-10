@@ -16,7 +16,8 @@ import { QrService } from '../qr/qr.service';
 // POS-01: cash over/short at/above this absolute THB amount needs manager approval (maker-checker);
 // below it the over/short posts to GL immediately. A flat threshold for now — a tenant-level override
 // can replace this constant without changing the close/approve flow.
-const CASH_VARIANCE_THRESHOLD = 100;
+// Exported so the hub till-ingest (BRANCH-05) applies the SAME materiality line as a native close.
+export const CASH_VARIANCE_THRESHOLD = 100;
 // REV-16: a standalone refund at/above this absolute THB amount needs a different user's approval
 // (maker-checker, anti-fraud); below it the refund runs immediately. Flat threshold for now.
 const REFUND_APPROVAL_THRESHOLD = 1000;

@@ -48,12 +48,27 @@ try {
   // (the July-10 class) shows up as these cookies existing but not being SENT — caught next step.
   const cookies = await ctx.cookies(WEB_URL);
   for (const name of ['ierp_csrf', 'ierp_token']) {
-    if (!cookies.some((c) => c.name === name)) fail(`cookie ${name} not stored after login`);
+    const c = cookies.find((x) => x.name === name);
+    if (!c) fail(`cookie ${name} not stored after login`);
+    // Attributes are diagnostic gold when the round-trip fails (never log values).
+    else console.log(`   cookie ${name}: domain=${c.domain} path=${c.path} secure=${c.secure} sameSite=${c.sameSite}`);
   }
 
-  console.log('3) authenticated round-trip: GET /api/auth/me (browser cookie jar)');
-  const me = await page.request.get(`${WEB_URL}/api/auth/me`);
-  if (me.status() !== 200) fail(`/api/auth/me returned ${me.status()} — cookies stored but NOT attached (SameSite-class regression)`);
+  // Real in-page fetch — the EXACT call the app's api() helper makes (same-origin, credentials
+  // included, subject to CSP/cookie policy). On failure, surface the server's error code so the log
+  // distinguishes "cookie not attached" (Missing token) from "token rejected" (Invalid or expired).
+  console.log('3) authenticated round-trip: GET /api/auth/me (in-page fetch, browser cookie jar)');
+  const me = await page.evaluate(async () => {
+    try {
+      const r = await fetch('/api/auth/me', { credentials: 'include' });
+      let code = '';
+      try { const j = await r.json(); code = j?.error?.message ?? j?.error?.code ?? ''; } catch { /* non-JSON */ }
+      return { status: r.status, code };
+    } catch (e) {
+      return { status: 0, code: String(e).slice(0, 120) };
+    }
+  });
+  if (me.status !== 200) fail(`/api/auth/me returned ${me.status} (${me.code}) — session does not survive the authenticated hop`);
 
   // The incident's exact symptom: login "succeeds", then the FIRST authenticated page load bounces to
   // /login?next=…. Reload the dashboard and assert we stay signed in.
