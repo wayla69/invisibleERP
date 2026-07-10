@@ -135,6 +135,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-283 | Till-sessions pending list → `/pos/close-of-day` Z-report dropdown (`GET /api/payments/till/sessions`) | Read-only feed (no new control; POS-07 unchanged) | 01 §7, rev 0.29 (`cashreport.ts`) |
 | UAT-O2C-284 | Register menu survives an offline reload (on-device snapshot) | BRANCH-03 (capture resilience) | 24 §7 step 6, rev 0.3 (e2e `register-offline.spec.ts`) |
 | UAT-O2C-285 | Quick-sale checkout auto-queues on a network-level failure (false-online) | BRANCH-03 | 24 §7 step 6, rev 0.3 (e2e `register-offline.spec.ts`) |
+| UAT-O2C-286 | Hub snapshot export — fail-closed / signed / credential-gated / FoH-only / tenant-scoped | BRANCH-02 (extension) | 24 §7 step 6b, rev 0.4 (`hub-snapshot.ts`) |
+| UAT-O2C-287 | Hub import round-trip — tamper-reject, id-stable, idempotent; FoH works on the hub | BRANCH-02 (extension) · ITGC-AC-17 | 24 §7 step 6b, rev 0.4 (`hub-snapshot.ts`) |
 | UAT-O2C-026 | Cashier-speed quick-tender & change (UI) | Feature (cashier speed) | 01 §0 |
 | UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
 | UAT-O2C-028 | Diner pulls QR menu | REST-08 | 20 §7 |

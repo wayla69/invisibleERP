@@ -103,6 +103,7 @@ jobs:
           # ── restaurant ──
           - { pkg: cutover, script: restaurant }
           - { pkg: cutover, script: restaurant-offline }
+          - { pkg: cutover, script: hub-snapshot }
           - { pkg: cutover, script: reservations }
           - { pkg: cutover, script: tips }
           - { pkg: cutover, script: waste }
