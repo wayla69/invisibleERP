@@ -24,6 +24,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/form-controls';
+import { GlDimensionFilter, glDimQuery, emptyGlDims, type GlDims } from '@/components/gl-dimension-filter';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const monthStart = () => today().slice(0, 8) + '01';
@@ -217,8 +218,12 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
   const [byBranch, setByBranch] = useState(false);
+  // FIN-7a: optional dimension slice (project / dept / branch / cost centre) on the P&L (not the
+  // by-branch grouping view, which already breaks down by branch).
+  const [dims, setDims] = useState<GlDims>(emptyGlDims());
+  const dq = glDimQuery(dims);
 
-  const q = useQuery<any>({ queryKey: ['pl', from, to, lp], queryFn: () => api(`/api/ledger/income-statement?from=${from}&to=${to}${lp}`), enabled: !byBranch });
+  const q = useQuery<any>({ queryKey: ['pl', from, to, lp, dq], queryFn: () => api(`/api/ledger/income-statement?from=${from}&to=${to}${lp}${dq}`), enabled: !byBranch });
   const branchQ = useQuery<any>({ queryKey: ['pl-branch', from, to], queryFn: () => api(`/api/ledger/income-statement/by-branch?from=${from}&to=${to}`), enabled: byBranch });
   const d = q.data;
 
@@ -292,6 +297,7 @@ function IncomeStatement({ lp, ledger }: { lp: string; ledger: string }) {
             <Input id="pl-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
           <Button variant="ghost" size="sm" onClick={() => setFrom(yearStart())}>{t('fnx.fs.ytd')}</Button>
+          {!byBranch && <GlDimensionFilter dims={dims} onChange={setDims} idPrefix="fs-pl" />}
         </div>
         <div className="flex items-center gap-2">
           <Button variant={byBranch ? 'default' : 'outline'} size="sm" onClick={() => setByBranch((v) => !v)} disabled={!!ledger && byBranch}>

@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Select } from '@/components/form-controls';
+import { GlDimensionFilter, glDimQuery, emptyGlDims, type GlDims } from '@/components/gl-dimension-filter';
 
 type Account = { code: string; name: string; type: string };
 const today = () => new Date().toISOString().slice(0, 10);
@@ -245,36 +246,46 @@ function EditAccountDialog({ account, onClose, onSaved, onError }: {
 // ───────────────────────── งบทดลอง ─────────────────────────
 function TrialBalance({ initialData }: { initialData?: unknown }) {
   const { t } = useLang();
+  // FIN-7a: optional dimension slice (project / dept / branch / cost centre) — filtered reads aggregate
+  // from the journal lines server-side; no filter = the original snapshot-backed TB.
+  const [dims, setDims] = useState<GlDims>(emptyGlDims());
+  const dq = glDimQuery(dims);
   // Server-prefetched payload (see page.tsx) renders instantly; react-query still owns the cache and
   // refetches on invalidation exactly as before. A null/undefined prefetch = the old client-only path.
-  const q = useQuery<any>({ queryKey: ['tb'], queryFn: () => api('/api/ledger/trial-balance'), initialData: initialData ?? undefined });
+  // The prefetch is UNFILTERED, so it only seeds the no-filter key.
+  const q = useQuery<any>({ queryKey: ['tb', dq], queryFn: () => api(`/api/ledger/trial-balance${dq ? `?${dq.slice(1)}` : ''}`), initialData: dq ? undefined : (initialData ?? undefined) });
   return (
-    <StateView q={q}>
-      {q.data && (
-        <div className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label={t('acct.total_debit')} value={baht(q.data.totals.debit)} tone="primary" />
-            <StatCard label={t('acct.total_credit')} value={baht(q.data.totals.credit)} tone="primary" />
-            <StatCard
-              label={t('fin.col_status')}
-              value={<Badge variant={q.data.totals.balanced ? 'success' : 'destructive'}>{q.data.totals.balanced ? t('acct.balanced') : t('acct.unbalanced')}</Badge>}
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <GlDimensionFilter dims={dims} onChange={setDims} idPrefix="tb" />
+      </div>
+      <StateView q={q}>
+        {q.data && (
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StatCard label={t('acct.total_debit')} value={baht(q.data.totals.debit)} tone="primary" />
+              <StatCard label={t('acct.total_credit')} value={baht(q.data.totals.credit)} tone="primary" />
+              <StatCard
+                label={t('fin.col_status')}
+                value={<Badge variant={q.data.totals.balanced ? 'success' : 'destructive'}>{q.data.totals.balanced ? t('acct.balanced') : t('acct.unbalanced')}</Badge>}
+              />
+            </div>
+            <DataTable
+              rows={q.data.rows}
+              emptyState={{ icon: Scale, title: t('acct.tb_empty_title'), description: t('acct.tb_empty_desc') }}
+              columns={[
+                { key: 'account_code', label: t('acct.col_code') },
+                { key: 'account_name', label: t('acct.col_account_name') },
+                { key: 'account_type', label: t('acct.col_type') },
+                { key: 'debit', label: t('acct.col_debit'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.debit)}</span> },
+                { key: 'credit', label: t('acct.col_credit'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.credit)}</span> },
+                { key: 'balance', label: t('acct.col_balance'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.balance)}</span> },
+              ]}
             />
           </div>
-          <DataTable
-            rows={q.data.rows}
-            emptyState={{ icon: Scale, title: t('acct.tb_empty_title'), description: t('acct.tb_empty_desc') }}
-            columns={[
-              { key: 'account_code', label: t('acct.col_code') },
-              { key: 'account_name', label: t('acct.col_account_name') },
-              { key: 'account_type', label: t('acct.col_type') },
-              { key: 'debit', label: t('acct.col_debit'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.debit)}</span> },
-              { key: 'credit', label: t('acct.col_credit'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.credit)}</span> },
-              { key: 'balance', label: t('acct.col_balance'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.balance)}</span> },
-            ]}
-          />
-        </div>
-      )}
-    </StateView>
+        )}
+      </StateView>
+    </div>
   );
 }
 
@@ -462,7 +473,10 @@ function IncomeStatement() {
   const { t } = useLang();
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
-  const q = useQuery<any>({ queryKey: ['pl', from, to], queryFn: () => api(`/api/ledger/income-statement?from=${from}&to=${to}`) });
+  // FIN-7a: optional dimension slice (project / dept / branch / cost centre) on the P&L.
+  const [dims, setDims] = useState<GlDims>(emptyGlDims());
+  const dq = glDimQuery(dims);
+  const q = useQuery<any>({ queryKey: ['pl', from, to, dq], queryFn: () => api(`/api/ledger/income-statement?from=${from}&to=${to}${dq}`) });
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-end gap-3">
@@ -474,6 +488,7 @@ function IncomeStatement() {
           <Label htmlFor="pl-to">{t('acct.to')}</Label>
           <Input id="pl-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
+        <GlDimensionFilter dims={dims} onChange={setDims} idPrefix="pl" />
       </div>
       <StateView q={q}>
         {q.data && (
@@ -795,7 +810,11 @@ function GLDetail() {
   const [account, setAccount] = useState('');
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
-  const q = useQuery<any>({ queryKey: ['gldetail', account, from, to], queryFn: () => api(`/api/ledger/account-ledger?account=${account}&from=${from}&to=${to}`), enabled: !!account });
+  // FIN-7a: optional project/dept/branch slice — the opening/running/closing balance then belongs to that
+  // slice alone (ties to the dimension-filtered trial balance). account-ledger has no cost_center param.
+  const [dims, setDims] = useState<GlDims>(emptyGlDims());
+  const dq = glDimQuery(dims);
+  const q = useQuery<any>({ queryKey: ['gldetail', account, from, to, dq], queryFn: () => api(`/api/ledger/account-ledger?account=${account}&from=${from}&to=${to}${dq}`), enabled: !!account });
   const d = q.data;
   return (
     <div className="space-y-5">
@@ -809,6 +828,7 @@ function GLDetail() {
         </div>
         <div className="grid gap-1.5"><Label htmlFor="gl-from">{t('acct.from')}</Label><Input id="gl-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
         <div className="grid gap-1.5"><Label htmlFor="gl-to">{t('acct.to')}</Label><Input id="gl-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        <GlDimensionFilter dims={dims} onChange={setDims} idPrefix="gl" showCostCenter={false} />
       </div>
       {!account ? (
         <Card className="p-8 text-center text-sm text-muted-foreground">{t('acct.gl_select_prompt')}</Card>
