@@ -1,0 +1,95 @@
+# Ops utility (manual dispatch): provision the LOW-PRIVILEGE synthetic-probe login account and store its
+# credentials as Railway variables, arming the browser-probe job of ops-synthetic-probe.yml with zero
+# manual secret handling (incident 2026-07-10 follow-up — the Playwright login probe is the only check
+# that catches SameSite-class cookie regressions, and it needs real credentials to run).
+#
+# What it does, in order (idempotent — re-running rotates the probe password):
+#   1. Resolves the live ERP database exactly like ops-provision-app-role.yml (match the API's
+#      DATABASE_URL host against each Postgres service's RAILWAY_PRIVATE_DOMAIN; sanity-check
+#      drizzle.__drizzle_migrations >100 so an orphan copy is never touched).
+#   2. Upserts user `synthetic-probe` — role ExecutiveViewer (read-mostly: fin_report/dashboard/planner/
+#      marketing/pr_raise; NOT in the MFA-required set, so password login works headlessly), bound to the
+#      first tenant, active, must_change_password=false, with a fresh random password hashed in the exact
+#      app format: scrypt$32768$8$1$<saltHex>$<hashHex> (apps/api/src/modules/auth/password.service.ts).
+#      Clears any login-attempt lockout row.
+#   3. Stores PROBE_USERNAME / PROBE_PASSWORD as variables on the invisibleERP Railway service with
+#      --skip-deploys (the API never reads them — Railway is simply the credential store the probe's
+#      production-environment RAILWAY_TOKEN can reach; GitHub Actions cannot write repo secrets).
+#      Both names are listed in docs/ops/railway-env-manifest.json (config-of-record).
+#   4. Verifies end-to-end: logs in through the WEB same-origin proxy with the new credentials (expects
+#      200 + token) — the exact call the browser probe will make.
+# Secrets/passwords are ::add-mask::ed — nothing sensitive reaches the (public) log.
+name: Ops — provision synthetic-probe user
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provision-probe-user:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN binding, same as deploy.yml
+    steps:
+      - name: Create/rotate synthetic-probe user + store creds as Railway variables
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          WEB_URL: ${{ vars.PROD_WEB_URL || 'https://invisibleposerp-production.up.railway.app' }}
+        run: |
+          set -euo pipefail
+          [ -n "${RAILWAY_TOKEN:-}" ] || { echo "::error::RAILWAY_TOKEN not configured"; exit 1; }
+          gq() { curl -s --max-time 30 -X POST https://backboard.railway.app/graphql/v2 -H "Project-Access-Token: $RAILWAY_TOKEN" -H "Content-Type: application/json" -d "$1"; }
+
+          echo "Resolving the live ERP database (same instance-matching as ops-provision-app-role.yml)…"
+          INT=$(npx -y @railway/cli variables --service invisibleERP --kv | grep '^DATABASE_URL=' | cut -d= -f2- | tr -d '\r')
+          [ -n "$INT" ] || { echo "::error::could not read DATABASE_URL from the invisibleERP service"; exit 1; }
+          echo "::add-mask::$INT"
+          HOST=$(python3 -c "import urllib.parse as u; print(u.urlsplit('$INT').hostname)")
+          PT=$(gq '{"query":"query{projectToken{projectId environmentId}}"}')
+          PID=$(echo "$PT" | jq -r '.data.projectToken.projectId // empty')
+          EID=$(echo "$PT" | jq -r '.data.projectToken.environmentId // empty')
+          [ -n "$PID" ] || { echo "::error::Railway token introspection failed"; exit 1; }
+          PUB=""
+          while read -r SID SNAME; do
+            VARS=$(gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\")}\"}")
+            PRIV=$(echo "$VARS" | jq -r '.data.variables.RAILWAY_PRIVATE_DOMAIN // empty')
+            if [ "$PRIV" = "$HOST" ]; then PUB=$(echo "$VARS" | jq -r '.data.variables.DATABASE_PUBLIC_URL // empty'); echo "matched DB instance: service \"$SNAME\""; break; fi
+          done < <(gq "{\"query\":\"query{project(id:\\\"$PID\\\"){services{edges{node{id name}}}}}\"}" | jq -r '.data.project.services.edges[].node | .id+" "+.name')
+          [ -n "$PUB" ] || { echo "::error::no service's RAILWAY_PRIVATE_DOMAIN matches the API's DB host"; exit 1; }
+          echo "::add-mask::$PUB"
+          MIGS=$(psql "$PUB" -tAc "SELECT count(*) FROM drizzle.__drizzle_migrations;" 2>/dev/null || echo 0)
+          [ "${MIGS:-0}" -gt 100 ] || { echo "::error::instance sanity check failed (${MIGS:-0} migrations) — refusing"; exit 1; }
+          echo "instance sanity ok: $MIGS applied migrations"
+
+          PW=$(openssl rand -hex 18)
+          echo "::add-mask::$PW"
+          # Hash in the app's exact self-describing format (password.service.ts): the hex SALT STRING is
+          # the scrypt salt (not decoded), N=32768 r=8 p=1 keylen=64.
+          HASH=$(PW="$PW" node -e '
+            const { scryptSync, randomBytes } = require("node:crypto");
+            const salt = randomBytes(16).toString("hex");
+            const dk = scryptSync(process.env.PW, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
+            console.log(`scrypt$32768$8$1$${salt}$${dk.toString("hex")}`);')
+          echo "::add-mask::$HASH"
+
+          echo "Upserting user synthetic-probe (role ExecutiveViewer, first tenant, active)…"
+          psql "$PUB" -v ON_ERROR_STOP=1 -v hash="$HASH" <<'SQL'
+          INSERT INTO users (username, password_hash, role, tenant_id, is_active, must_change_password)
+          VALUES ('synthetic-probe', :'hash', 'ExecutiveViewer', (SELECT id FROM tenants ORDER BY id LIMIT 1), true, false)
+          ON CONFLICT (username) DO UPDATE
+            SET password_hash = EXCLUDED.password_hash, role = 'ExecutiveViewer',
+                is_active = true, must_change_password = false;
+          DELETE FROM login_attempts WHERE username = 'synthetic-probe';
+          SQL
+
+          echo "Storing PROBE_USERNAME / PROBE_PASSWORD on the invisibleERP service (no redeploy — storage only)…"
+          npx -y @railway/cli variables --set "PROBE_USERNAME=synthetic-probe" --set "PROBE_PASSWORD=$PW" --service invisibleERP --skip-deploys
+
+          echo "End-to-end verification: login through the same-origin proxy (the browser probe's exact path)…"
+          CODE=$(curl -s -o /tmp/login.json -w "%{http_code}" --max-time 20 -X POST "$WEB_URL/api/login" -H 'Content-Type: application/json' -d "{\"username\":\"synthetic-probe\",\"password\":\"$PW\"}")
+          TOK=$(jq -r '.token // empty' /tmp/login.json)
+          rm -f /tmp/login.json
+          { [ "$CODE" = 200 ] && [ -n "$TOK" ]; } || { echo "::error::probe login verification failed (HTTP $CODE)"; exit 1; }
+          echo "✅ synthetic-probe provisioned + credentials stored + live login verified (HTTP 200, role ExecutiveViewer)"
+          echo "The browser-probe job of 'Ops — synthetic prod probe' is now ARMED (next scheduled run, or dispatch it now)."
