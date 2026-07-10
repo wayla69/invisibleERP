@@ -160,6 +160,31 @@ export class MemberService {
     return { member_id: id, balance: n(m.balance), history: rows.map((r: any) => ({ txn_date: r.txnDate, txn_type: r.txnType, points: n(r.points), redeem_value: n(r.redeemValue), balance_after: n(r.balanceAfter), ref_doc: r.refDoc })) };
   }
 
+  /**
+   * LYL-22 — replay guard for the points ledger.
+   *
+   * `pos_member_ledger` is the source of truth for the 2250 points liability, and the member row's
+   * `balance` is derived from it. Nothing used to stop the SAME source document from earning/redeeming
+   * twice: a retried checkout, a store-hub replay (BRANCH-04) or an integration retry would deduct the
+   * points again and write a second row. The idempotency lived one layer up, in the sale-level
+   * `pos_offline_sync` dedup — a guard this code never sees, and which no other caller has.
+   *
+   * Returns the points already booked for (member, ref_doc, txn_type) — as a POSITIVE magnitude, matching
+   * what the caller would have returned — or null when this is the first booking. Read under the member
+   * row lock the callers already hold; migration 0299's partial unique index is the hard backstop.
+   */
+  private async priorLedgerPoints(tx: any, tenantId: number, memberId: number, refDoc: string, txnType: 'Earn' | 'Redeem'): Promise<number | null> {
+    if (!refDoc) return null;
+    const [row] = await tx.select({ points: posMemberLedger.points }).from(posMemberLedger)
+      .where(and(
+        eq(posMemberLedger.tenantId, tenantId),
+        eq(posMemberLedger.memberId, memberId),
+        eq(posMemberLedger.refDoc, refDoc),
+        eq(posMemberLedger.txnType, txnType),
+      )).limit(1);
+    return row ? Math.abs(n(row.points)) : null;
+  }
+
   // EARN — inside the checkout tx. points = floor(netSpend × pointsPerBaht × tier earn_mult). Returns
   // pointsEarned. W1 (docs/27): the member's tier multiplier (loyalty_tiers.earn_mult, ladder by lifetime —
   // the same tierFor rule recomputeTiers uses) now applies on the REAL earn path, not just quoteEarn's
@@ -174,6 +199,9 @@ export class MemberService {
     // Locked BEFORE the multiplier lookup so the tier is derived from the locked lifetime.
     const [m] = await tx.select().from(posMembers).where(eq(posMembers.id, memberId)).for('update').limit(1);
     if (!m) return 0;
+    // LYL-22: a replayed sale must not award the points twice. See priorLedgerPoints.
+    const priorEarn = await this.priorLedgerPoints(tx, tenantId, memberId, saleNo, 'Earn');
+    if (priorEarn != null) return priorEarn;
     const tiers = await tx.select().from(loyaltyTiers).where(and(eq(loyaltyTiers.tenantId, tenantId), eq(loyaltyTiers.active, true))).orderBy(desc(loyaltyTiers.minLifetime));
     const tier = tiers.find((t: any) => n(m.lifetime) >= n(t.minLifetime));
     const mult = tier ? n(tier.earnMult) || 1 : 1;
@@ -312,6 +340,9 @@ export class MemberService {
   async redeemInTx(tx: any, tenantId: number, memberId: number, points: number, redeemValue: number, saleNo: string, createdBy: string): Promise<number> {
     if (points <= 0) return 0;
     const [m] = await tx.select().from(posMembers).where(eq(posMembers.id, memberId)).for('update').limit(1);
+    // LYL-22: a replayed sale must not deduct the points twice. Checked under the member row lock.
+    const priorRedeem = await this.priorLedgerPoints(tx, tenantId, memberId, saleNo, 'Redeem');
+    if (priorRedeem != null) return priorRedeem;
     if (!m || n(m.balance) < points) throw new ConflictException({ code: 'INSUFFICIENT_POINTS', message: 'Insufficient points at redeem', messageTh: 'แต้มไม่พอ' });
     const bal = n(m.balance) - points;
     await tx.update(posMembers).set({ balance: String(bal), lastUpdated: new Date() }).where(eq(posMembers.id, memberId));
