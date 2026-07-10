@@ -309,7 +309,7 @@ export async function sendHubHeartbeat(
   db: any,
   tenantId: number,
   deps: { secret: string; hubId: string; appVersion?: string; sendHeartbeat: (body: { tenant_id: number; sent_at: string; hub: HubHeartbeatDoc; signature: string }) => Promise<any>; sentAt?: string },
-): Promise<HubHeartbeatDoc> {
+): Promise<HubHeartbeatDoc & { advice: any }> {
   const one = async (q: any) => Number(((await db.execute(q).then((r: any) => r.rows ?? r))[0] ?? {}).n ?? 0);
   const pendingSales = await one(sql`
     SELECT count(*)::int n FROM cust_pos_sales s
@@ -329,8 +329,9 @@ export async function sendHubHeartbeat(
     pending_sales: pendingSales, pending_tills: pendingTills, failed_docs: failedDocs, skipped_docs: skippedDocs,
   };
   const sentAt = deps.sentAt ?? new Date().toISOString();
-  await deps.sendHeartbeat({ tenant_id: tenantId, sent_at: sentAt, hub, signature: signHubDoc({ tenant_id: tenantId, sent_at: sentAt, hub }, deps.secret) });
-  return hub;
+  // Phase 4c: the cloud answers with its own version + advice — the heartbeat IS the update channel.
+  const advice = await deps.sendHeartbeat({ tenant_id: tenantId, sent_at: sentAt, hub, signature: signHubDoc({ tenant_id: tenantId, sent_at: sentAt, hub }, deps.secret) });
+  return { ...hub, advice: advice ?? null };
 }
 
 // ── CLI ──
@@ -374,10 +375,17 @@ async function main() {
       if (tills.blocked) console.log('   ⚠ blocked tills: their sales have not all replayed — resolve the skipped/failed sales, then re-run (BRANCH-05)');
     }
 
-    await sendHubHeartbeat(db, tenantId, {
+    const hb = await sendHubHeartbeat(db, tenantId, {
       secret, hubId: process.env.HUB_ID || hostname(), appVersion: process.env.APP_VERSION,
       sendHeartbeat: (b) => post('/api/hub/heartbeat', b),
-    }).catch((e) => console.log(`   ⚠ heartbeat failed: ${e.message ?? e}`));
+    }).catch((e) => { console.log(`   ⚠ heartbeat failed: ${e.message ?? e}`); return null; });
+
+    const advice = hb?.advice;
+    if (advice?.version_status === 'behind') {
+      console.log(`⬆ update available — the cloud runs ${advice.cloud_version}, this hub runs ${process.env.APP_VERSION}. Upgrade after close (runbook §8).`);
+    } else if (advice?.version_status === 'ahead') {
+      console.log(`⚠ THIS HUB IS AHEAD OF THE CLOUD (hub ${process.env.APP_VERSION} > cloud ${advice.cloud_version}). Upgrade the CLOUD first — a hub ahead can send fields the cloud rejects.`);
+    }
 
     process.exit(sum.failed || tills.failed || waste.failed ? 1 : 0);
   } finally {

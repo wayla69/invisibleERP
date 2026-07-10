@@ -471,7 +471,12 @@ export class PaymentService {
     const captured = sql`${payments.status}::text IN ('Captured','Settled','Refunded')`;
     const [gross] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured));
     const byMethod = await db.select({ method: payments.method, amount: sql<string>`coalesce(sum(${payments.amount}),0)`, cnt: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured)).groupBy(payments.method);
-    const [cashSales] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`, sql`${payments.status}::text IN ('Captured','Refunded')`));
+    // Drawer cash from Cash tenders = amount + tip. `payments.amount` deliberately excludes the tip (it
+    // is sale money; the tip is a 2300 liability), but a CASH tip physically lands in the drawer — the
+    // sale's GL debits 1000 for `cashDue = total + tip`. Omitting it made every close with a cash tip
+    // read "over" by exactly the tip (a false variance that could trip the REV-13 maker-checker).
+    // Tips on non-cash tenders never enter the drawer, so the Cash filter also scopes the tip.
+    const [cashSales] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0) + coalesce(sum(${payments.tip}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`, sql`${payments.status}::text IN ('Captured','Refunded')`));
     // Cash refunds reduce THIS till's drawer only if the refund was processed against it (till the cash
     // left), keyed by payment_refunds.till_session_id — not the original sale's till. Still gated to Cash
     // tenders (a card refund moves no drawer cash).
