@@ -217,6 +217,11 @@ export class BiGenerateService {
       const r = await this.ledger.runDuePrepaid(user); // idempotent per (schedule, period)
       return { data: r, summary: `Prepaid amortization: posted ${r.posted} of ${r.scanned} due schedules`, summaryTh: `ตัดจ่ายค่าใช้จ่ายล่วงหน้า: ${r.posted} จาก ${r.scanned} รายการ` };
     }
+    if (reportType === 'gl_allocation_run') {
+      if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger service not available', messageTh: 'ระบบบัญชีแยกประเภทไม่พร้อมใช้งาน' });
+      const r = await this.ledger.runDueAllocations(user); // idempotent per period: next_run_date advanced + ux_je_idem
+      return { data: r, summary: `Allocation cycles: posted ${r.posted} of ${r.scanned} due cycles`, summaryTh: `ปันส่วนต้นทุน: ${r.posted} จาก ${r.scanned} รอบ` };
+    }
     if (reportType === 'lease_periodic_run') {
       if (!this.leases) throw new BadRequestException({ code: 'LEASES_UNAVAILABLE', message: 'Lease service not available', messageTh: 'ระบบสัญญาเช่าไม่พร้อมใช้งาน' });
       const r = await this.leases.runDueLeases(user); // idempotent per (lease, period)

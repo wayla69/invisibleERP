@@ -21,6 +21,7 @@ function resolveTenantId(explicit?: number | null): number | null {
 import { LEADING, LEDGERS, COA } from './ledger-constants';
 import { LedgerCashflowService } from './ledger-cashflow.service';
 import { LedgerRecurringService } from './ledger-recurring.service';
+import { LedgerAllocationService } from './ledger-allocation.service';
 import { LedgerPostingService } from './ledger-posting.service';
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null; branch_id?: number | null; project_id?: number | null; dept_id?: number | null }
@@ -66,10 +67,35 @@ export interface PrepaidDto {
   capitalize?: boolean; // also post Dr prepaid / Cr cash for the up-front payment
 }
 
+// FIN-7b — GL allocation engine (GL-23). A periodic cost-allocation cycle distributes a source pool by
+// fixed ratio / measured driver / statistical key to a set of targets, posted as balanced DRAFT JEs on the
+// recurring rail (maker-checker, GL-05). See LedgerAllocationService.
+export interface AllocationTargetDto {
+  target_account?: string | null; // NULL/omitted = the cycle's source_account (pure cost-center reallocation)
+  cost_center?: string | null;
+  basis: number; // weight (ratio method) / driver value / statistical-key value
+  memo?: string;
+}
+export interface AllocationCycleDto {
+  name: string;
+  method: string; // 'ratio' | 'driver' | 'statistical'
+  frequency: string; // 'daily' | 'weekly' | 'monthly'
+  poolAmount: number;
+  sourceAccount: string;
+  sourceCostCenter?: string | null;
+  ledgerCode?: string | null;
+  currency?: string;
+  memo?: string;
+  tenantId?: number | null;
+  startDate?: string; // first run date (YYYY-MM-DD); defaults to today
+  targets: AllocationTargetDto[];
+}
+
 @Injectable()
 export class LedgerService {
   private readonly cashflow: LedgerCashflowService;
   private readonly recurring: LedgerRecurringService;
+  private readonly allocation: LedgerAllocationService;
   private readonly posting: LedgerPostingService;
 
   constructor(
@@ -82,6 +108,7 @@ export class LedgerService {
     this.cashflow = new LedgerCashflowService(db, (d, from, to, cc, lc, tid, ex) => this.aggregateByType(d, from, to, cc, lc, tid, ex), (code) => this.ledgerCond(code));
     this.posting = new LedgerPostingService(db, docNo);
     this.recurring = new LedgerRecurringService(db, docNo, (dto) => this.postEntry(dto));
+    this.allocation = new LedgerAllocationService(db, docNo, (dto) => this.postEntry(dto));
   }
 
   // ───────────────────── Chart of Accounts ─────────────────────
@@ -195,6 +222,12 @@ export class LedgerService {
   async createPrepaid(dto: PrepaidDto, user: JwtUser) { return this.recurring.createPrepaid(dto, user); }
   async listPrepaid(tenantId?: number) { return this.recurring.listPrepaid(tenantId); }
   async runDuePrepaid(user: JwtUser) { return this.recurring.runDuePrepaid(user); }
+
+  // ── FIN-7b: GL allocation engine (GL-23) lives in LedgerAllocationService; thin delegators. ──
+  async createAllocationCycle(dto: AllocationCycleDto, user: JwtUser) { return this.allocation.createCycle(dto, user); }
+  async listAllocationCycles(tenantId?: number) { return this.allocation.listCycles(tenantId); }
+  async setAllocationCycleActive(id: number, active: boolean) { return this.allocation.setCycleActive(id, active); }
+  async runDueAllocations(user: JwtUser) { return this.allocation.runDueAllocations(user); }
 
   // ── docs/38 ledger PR-3: journal listings, GL-05 approve/reject, GL-17 reversal/immutability/audit — LedgerPostingService delegators. ──
   async listJournal(limit: number) { return this.posting.listJournal(limit); }

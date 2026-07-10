@@ -381,6 +381,47 @@ term. (A change that leaves the lease unchanged is rejected with `NO_CHANGE`.)
 
 ---
 
+### GL allocation cycles — cost allocation (GL-23)
+
+**Where:** `POST /api/ledger/allocation` (+ `/allocation/:id/active`, `/allocation/run`);
+scheduled job **`gl_allocation_run`** under **Reports → Scheduled reports** ·
+**Required permission:** `gl_post` / `exec`.
+
+Use an **allocation cycle** to spread a **shared / overhead cost** across the
+cost-centers or departments that consume it — instead of an ad-hoc, unbalanced,
+hard-to-audit spreadsheet. Typical uses: IT / facilities / HR overhead split to
+operating departments; a rent pool split by floor area.
+
+1. **Create a cycle** (`POST /api/ledger/allocation`): give it a **name**, the
+   **source account** (the pool that is relieved) and optional **source cost-center**,
+   the **pool amount** to distribute each run, an allocation **method**, a **cadence**
+   (`daily`/`weekly`/`monthly`) and a first-run date, and one or more **targets**.
+   - **method `ratio`** — you enter each target's fixed proportion as its **basis**
+     (e.g. 3 and 1 → 75% / 25%).
+   - **method `driver`** — the basis is a **measured driver** (machine hours, kWh).
+   - **method `statistical`** — the basis is a **statistical key** (headcount, sqm).
+
+   All three split the pool proportionally by the target **basis** weights; each
+   target may name its own **target account** (leave blank to keep the source
+   account and only move the **cost-center**) and its consuming **cost-center**.
+2. Leave it to run automatically (schedule **`gl_allocation_run`**), or post due
+   cycles on demand with `POST /api/ledger/allocation/run`.
+3. **Pause / resume** a cycle with `POST /api/ledger/allocation/:id/active` without
+   losing its history.
+
+**Expected result:** each due cycle posts **one balanced Draft journal entry** —
+**Cr the source pool** and **Dr each target its share** (`pool × basis ÷ Σbasis`, the
+**last target absorbing any rounding remainder** so debits equal the pool exactly).
+Like every recurring entry it posts as a **Draft** and a **different** user must
+**approve** it (§2, maker-checker GL-05) before it affects balances. Running a cycle
+twice in the same period posts nothing extra (idempotent).
+
+**Common messages.** A cycle with **no targets** → `NO_TARGETS`; a **zero total
+basis** (nothing to divide by) → `NO_BASIS`; a **non-positive pool** → `BAD_AMOUNT`;
+an unknown **method / cadence** → `BAD_METHOD` / `BAD_FREQUENCY`.
+
+---
+
 ### Opening balances (cutover from a prior system)
 
 **Screen:** บัญชีแยกประเภท (`/accounting`) → **ยอดยกมา** tab · **Required permission:**
