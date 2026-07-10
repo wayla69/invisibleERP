@@ -38,7 +38,7 @@ export class NlAnalyticsService {
           system: `Map the user's question to a JSON query over POS sales. "dimension" must be exactly one of: ${dims.join(', ')}. Return ONLY JSON: {"dimension": "...", "date_from"?: "YYYY-MM-DD", "date_to"?: "YYYY-MM-DD"}.`,
           messages: [{ role: 'user', content: q }],
         });
-        const out = (res.content as any[]).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+        const out = (res.content as Array<{ type: string; text?: string }>).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
         const parsed = JSON.parse(out);
         if (parsed?.dimension && dims.includes(parsed.dimension)) { spec = parsed; source = 'ai'; }
       } catch { /* keep keyword mapping */ }

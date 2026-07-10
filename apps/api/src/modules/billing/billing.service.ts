@@ -892,7 +892,7 @@ export class BillingService {
       return;
     }
 
-    const features: Record<string, unknown> = (row.features as any) ?? {};
+    const features: Record<string, unknown> = (row.features as Record<string, unknown> | null) ?? {};
     const maxUsers = typeof features.users === 'number' ? features.users : -1;
     if (maxUsers < 0) return; // -1 = unlimited (enterprise)
 

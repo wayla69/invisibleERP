@@ -49,7 +49,7 @@ export class AiConfigService {
         system: `You propose a JSON configuration for a "${target}" in an ERP customization studio. Return ONLY JSON, no prose.`,
         messages: [{ role: 'user', content: description }],
       });
-      const out = (res.content as any[]).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      const out = (res.content as Array<{ type: string; text?: string }>).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
       try { return { target, proposal: JSON.parse(out), source: 'ai', note: 'ตรวจทานก่อนนำไปใช้งานจริง' }; } catch { return { target, proposal: this.template(target, description), source: 'template-fallback', note: 'ตรวจทานก่อนนำไปใช้งานจริง' }; }
     } catch {
       return { target, proposal: this.template(target, description), source: 'template-fallback', note: 'ตรวจทานก่อนนำไปใช้งานจริง' };

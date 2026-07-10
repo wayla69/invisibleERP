@@ -182,7 +182,7 @@ export class GovernanceService {
     const oversightOverdue = !lastDate || (nextDue != null && today > nextDue);
 
     // ELC-04 — open whistleblower cases + ageing vs the SLA.
-    const openCases = await db.select({ ref: whistleblowerCases.caseRef, submittedAt: whistleblowerCases.submittedAt }).from(whistleblowerCases).where(inArray(whistleblowerCases.status, OPEN_CASE as any));
+    const openCases = await db.select({ ref: whistleblowerCases.caseRef, submittedAt: whistleblowerCases.submittedAt }).from(whistleblowerCases).where(inArray(whistleblowerCases.status, [...OPEN_CASE]));
     const ages = openCases.map((c: any) => daysBetween(toYmd(c.submittedAt), today));
     const oldestOpen = ages.length ? Math.max(...ages) : 0;
     const overdueCases = ages.filter((d: number) => d > HOTLINE_SLA_DAYS).length;

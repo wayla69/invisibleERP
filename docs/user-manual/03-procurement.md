@@ -766,6 +766,20 @@ claims). Leave the **งวด (period)** box empty to see each vendor's **lates
 standing, or enter a `YYYY-MM` period to rank that month. Use it to decide which
 suppliers to keep, coach, or drop. The list is store-scoped.
 
+> **How the three metrics are computed** (from the vendor's own receipt & claim
+> history — press **คำนวณคะแนนใหม่ / Recompute** on a vendor to refresh):
+> - **On-time %** — of this vendor's goods receipts whose purchase order carried an
+>   **expected date**, the share received **on or before** it. A vendor with no
+>   dated POs shows 100% (nothing to measure against — it isn't penalised for the
+>   absence of a promised date).
+> - **Quality %** — `100 − defect rate`, where the defect rate is the total
+>   **goods-receipt claim** quantity divided by the total quantity received
+>   (a vendor with no claims shows 100%).
+> - **Price-variance %** — the average absolute deviation of the received unit cost
+>   from the vendor's **active price-list** price for that item.
+>
+> The overall **score** is the average of the three (price as `100 − variance`).
+
 > **Note — separation of duties:** Maintaining the **vendor master** is kept
 > separate from **paying** vendors (rule R02), to prevent creating a fictitious
 > vendor and paying it.

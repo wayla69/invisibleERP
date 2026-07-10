@@ -72,7 +72,7 @@ export class SplitBillService {
     if (SETTLED.includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
     const slices = await this.computeSlices(o, dto);
     const tenderBy = new Map<number, { method: string; gateway?: string }>();
-    for (const t of (dto as any).tenders ?? []) tenderBy.set(t.check, { method: t.method, gateway: t.gateway });
+    for (const t of (dto as { tenders?: Array<{ check: number; method: string; gateway?: string }> }).tenders ?? []) tenderBy.set(t.check, { method: t.method, gateway: t.gateway });
     const groupNo = await this.docNo.nextDaily('SPLIT');
     const db = this.db;
     const checks = [];
