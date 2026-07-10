@@ -260,6 +260,48 @@ async function main() {
   const tpl = await inj('GET', '/api/crm/pipeline/leads/import/template', sales1);
   ok('Lead import template lists the header contract (Name required)', tpl.status === 200 && tpl.json.headers?.[0] === 'Name' && tpl.json.required?.includes('Name'), JSON.stringify(tpl.json));
 
+  // ── CRM-3 — Customer 360: the finance-joined pre-call screen (docs/42) ────────────────────────────
+  // "CRM ไม่เห็นเงิน": one read joins the CRM-1 account to the money. Seed a loyalty member with a paid
+  // order (→ RFM profile), the company's overdue AR invoice + a receipt for T1 (AR/credit position + last
+  // payment), then a CRM account whose contact links that member and that carries an open deal + a CPQ
+  // quote. GET /api/crm/customer-360/:accountNo must fold ALL of it into ONE payload.
+  await db.update(s.tenants).set({ creditLimit: '50000' }).where(eq(s.tenants.id, t1));
+  const [mem360] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-360', name: 'ลูกค้า 360', phone: '0899990360', lifetime: '1200', tier: 'Gold', active: true }).returning();
+  const mem360Id = Number(mem360!.id);
+  await db.insert(s.dineInOrders).values({ tenantId: t1, orderNo: 'DIN-360-1', channel: 'web', memberId: mem360Id, total: '850', saleNo: 'S-360-1', openedAt: new Date() });
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-360-1', tenantId: t1, invoiceDate: '2026-01-01', dueDate: '2026-02-01', amount: '10000', paidAmount: '3000', status: 'Unpaid', currency: 'THB', createdAt: new Date() });
+  await db.insert(s.arReceipts).values({ receiptNo: 'RCP-360-1', tenantId: t1, invoiceNo: 'INV-360-1', amount: '3000', receiptDate: '2026-01-20', createdAt: new Date() });
+
+  const acc360 = await inj('POST', '/api/crm/accounts', sales1, { name: 'บริษัท 360 องศา จำกัด', email: 'ceo@360.example' });
+  await inj('POST', `/api/crm/profile/${mem360Id}/refresh`, sales1); // compute the RFM profile (the order was db-seeded)
+  await inj('POST', '/api/crm/contacts', sales1, { account_no: acc360.json.account_no, name: 'ผู้ซื้อ 360', email: 'buyer@360.example', role: 'decision_maker', member_id: mem360Id });
+  const deal360 = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'ดีล 360', amount: 120000, probability: 40, account_no: acc360.json.account_no });
+  const [oppRow360] = await db.select({ id: s.crmOpportunities.id }).from(s.crmOpportunities).where(eq(s.crmOpportunities.oppNo, deal360.json.opp_no)).limit(1);
+  await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'บริษัท 360', opportunity_id: Number(oppRow360!.id), lines: [{ description: 'Implementation', qty: 1, unit_price: 120000 }] });
+
+  const c360 = await inj('GET', `/api/crm/customer-360/${acc360.json.account_no}`, sales1);
+  ok('Customer 360: account joined to the money — AR open balance + overdue + credit limit (company position)',
+    c360.status === 200 && near(c360.json.finance?.open_balance, 7000) && near(c360.json.finance?.overdue, 7000)
+      && near(c360.json.finance?.credit_limit, 50000) && c360.json.finance?.serious_overdue === true && c360.json.finance?.company_level === true,
+    JSON.stringify(c360.json.finance && { bal: c360.json.finance.open_balance, overdue: c360.json.finance.overdue, limit: c360.json.finance.credit_limit }));
+  ok('Customer 360: last payment folded in from the statement (RCP-360-1 / ฿3,000)',
+    c360.json.finance?.last_payments?.[0]?.ref === 'RCP-360-1' && near(c360.json.finance?.last_payments?.[0]?.amount, 3000),
+    JSON.stringify(c360.json.finance?.last_payments));
+  ok('Customer 360: open deal value + probability-weighted forecast',
+    c360.json.deals?.open_count >= 1 && near(c360.json.deals?.open_value, 120000) && near(c360.json.deals?.weighted_value, 48000),
+    JSON.stringify(c360.json.deals && { open: c360.json.deals.open_count, val: c360.json.deals.open_value, wt: c360.json.deals.weighted_value }));
+  ok('Customer 360: the account\'s CPQ quote joined (via crm_opportunity_id)',
+    Array.isArray(c360.json.quotes) && c360.json.quotes.some((q: any) => near(q.total, 120000)),
+    JSON.stringify(c360.json.quotes));
+  ok('Customer 360: loyalty joined through the member-linked contact (RFM + tier + points)',
+    c360.json.loyalty?.member?.id === mem360Id && c360.json.loyalty?.member?.tier === 'Gold'
+      && c360.json.loyalty?.crm?.rfm_segment === 'New' && c360.json.loyalty?.recent_orders?.length === 1,
+    JSON.stringify(c360.json.loyalty && { id: c360.json.loyalty.member?.id, seg: c360.json.loyalty.crm?.rfm_segment }));
+
+  // RLS: a T-scoped manager on ANOTHER account cannot read the 360 for an account they don't own's tenant
+  const c360Missing = await inj('GET', '/api/crm/customer-360/ACC-DOES-NOT-EXIST', sales1);
+  ok('Customer 360: unknown account → 404 ACCOUNT_NOT_FOUND', c360Missing.status === 404 && c360Missing.json.error?.code === 'ACCOUNT_NOT_FOUND', `${c360Missing.status} ${c360Missing.json.error?.code}`);
+
   // ── CRM-5 — analytics that answer "why" (funnel/velocity, source ROI, forecast, date-bounded win/loss) ──
 
   // Seed a clean lead→qualify→convert→won path with a KNOWN source so the funnel + source-ROI have signal.

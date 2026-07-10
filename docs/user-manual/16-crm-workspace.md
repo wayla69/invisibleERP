@@ -70,9 +70,8 @@ Three ways leads arrive:
 ## 16.4 Accounts & contacts (บัญชีลูกค้า & ผู้ติดต่อ)
 
 - **บัญชีลูกค้า (Accounts):** the company records behind your deals. Search, create, and click through to
-  the **account page** — header, its **contacts**, its **deals** (open first) and the recent activity across
-  those deals. **แก้ไข (Edit)** updates the basics. (The finance-joined customer 360 — invoices, AR — is a
-  separate upcoming enhancement.)
+  the **account page** — header, the **Customer 360 panel** (§16.5), its **contacts**, its **deals** (open
+  first) and the recent activity across those deals. **แก้ไข (Edit)** updates the basics.
 - **ผู้ติดต่อ (Contacts):** people under an account, tagged by role (ผู้ตัดสินใจ / วางบิล / เทคนิค / อื่น ๆ).
 - **กันข้อมูลซ้ำ (Duplicate protection):** if the account/contact you create matches an existing record on
   tax ID / email / phone / normalized company name, the system refuses and shows the **suspected matches**
@@ -103,6 +102,26 @@ back over a **time window** (`months`, default 6 — add e.g. `?months=3` to nar
 
 All three are also **schedulable reports** on the report builder (report types `crm_funnel`,
 `crm_source_roi`, `crm_forecast`, alongside `crm_win_loss`) — subscribe to get them emailed/LINE'd on a cadence.
+## 16.5 Customer 360 — see the money before you call (ลูกค้า 360)
+
+On every account page a **Customer 360 panel** sits under the header so you have the whole relationship —
+and the money — in front of you before you dial. It is **read-only** (it changes nothing) and requires the
+`crm`, `exec` or `ar` permission. It joins:
+
+- **The money (company position).** ยอดค้างชำระ **AR open balance**, **overdue** and the **max days overdue**,
+  the **credit limit / available credit**, and a clear **ระงับเครดิต (On credit hold)** or **เครดิตปกติ (Credit
+  OK)** badge with the hold reason. Below it, the **last payments** (recent receipts). *These figures are the
+  **company's** receivables and credit standing — this single-company edition has no per-customer AR
+  sub-ledger, so the panel labels them accordingly ("ยอดลูกหนี้/เครดิต…เป็นระดับบริษัท").*
+- **Open deals & quotes.** The account's open-pipeline value and probability-weighted forecast, plus its
+  **CPQ quotes** (number, status, amount).
+- **Loyalty (สมาชิก).** When a contact is linked to a loyalty member, the member's **tier**, **points**,
+  **RFM segment** and **churn risk**, with an **NPS detractor** or **open recovery case** flag when relevant.
+- **Recent sales orders (company).** The latest company sales orders with their status and estimated
+  delivery.
+
+If the account has no member-linked contact the loyalty box shows "ยังไม่มีผู้ติดต่อที่เชื่อมสมาชิก" — link a
+contact to a member (§16.4) to light it up.
 
 ---
 
@@ -115,6 +134,7 @@ All three are also **schedulable reports** on the report builder (report types `
 | `DUPLICATE_SUSPECT` | The new account/contact matches an existing record | Review the matches in the dialog; open the existing record, or force-create a genuinely different party. |
 | `TENANT_REQUIRED` | Website form posted without a company code (multi-company installs) | Ask the administrator to add `tenant_code` to the embedded form. |
 | `MISSING_COLUMNS` / `ต้องระบุ 'Name'` | Lead import file without the `Name` column / a row with a blank name | Use the template; fix or accept that the row is skipped. |
+| `ACCOUNT_NOT_FOUND` | Opening Customer 360 for an account number that doesn't exist in your company | Check the `ACC-…` number, or open the account from the Accounts tab. |
 
 ## Revision history
 
@@ -122,3 +142,4 @@ All three are also **schedulable reports** on the report builder (report types `
 |---|---|---|
 | 1.1 | 2026-07-10 | **CRM-5 — analytics that answer "why"** (Module-Depth Uplift Wave 4): new §16.5 covering the funnel-conversion + time-in-stage velocity, source-ROI, and forecast-categories + quota + activity-leaderboard analytics (`/api/crm/pipeline/analytics/*`), each date-bounded and schedulable as the BI report types `crm_funnel` / `crm_source_roi` / `crm_forecast`. |
 | 1.0 | 2026-07-10 | **CRM-2 — first release of the unified CRM workspace** (docs/41): `/crm` kanban board + list toggle, saved filter views, deal page with unified timeline + next-step, account page, leads import wizard, web-to-lead capture; `/pipeline` and `/projects/crm` now redirect here; member CRM 360 moved to `/crm/members`. |
+| 1.1 | 2026-07-10 | **CRM-3 — Customer 360 panel on the account page** (docs/42): new §16.5. The account page now shows a read-only *see-the-money-before-you-call* panel that joins the company AR/credit position + last payments, the account's open deals + CPQ quotes, and the linked member's loyalty (tier/points/RFM/NPS/recovery) in one view (`GET /api/crm/customer-360/:accountNo`). Added the `ACCOUNT_NOT_FOUND` error row. |
