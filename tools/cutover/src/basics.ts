@@ -555,6 +555,54 @@ async function main() {
     leRecon.reconciled === true && near(leRecon.difference, 0) && near(leRecon.gl_liability, leRecon.schedule_liability) && leSched && leSched.liability_balance > 0,
     JSON.stringify({ gl: leRecon.gl_liability, sched: leRecon.schedule_liability, diff: leRecon.difference, rec: leRecon.reconciled }));
 
+  // ───────────────── Lessor-side lease accounting (IFRS 16 / TFRS 16 lessor) — LSE-02 (FIN-10) ─────────────────
+  // Classification boundary: the major-part-of-economic-life test flips finance↔operating exactly at 75%.
+  const clsOper = await inj('POST', '/api/lessor-leases/classify', admin, { name: 'boundary op', term_months: 71, monthly_payment: 100, asset_cost: 10000, fair_value: 10000, economic_life_months: 100 });
+  ok('Lessor: classification boundary — term 71/100 (71%) + PV 71% of FV → OPERATING', clsOper.status === 200 && clsOper.json?.classification === 'operating' && clsOper.json?.reasons?.length === 0, JSON.stringify(clsOper.json));
+  const clsFin = await inj('POST', '/api/lessor-leases/classify', admin, { name: 'boundary fin', term_months: 75, monthly_payment: 100, asset_cost: 10000, fair_value: 10000, economic_life_months: 100 });
+  ok('Lessor: classification boundary — term 75/100 (75%) → FINANCE (major part of economic life)', clsFin.status === 200 && clsFin.json?.classification === 'finance' && clsFin.json?.reasons?.includes('major_part_of_economic_life'), JSON.stringify(clsFin.json));
+
+  // FINANCE lease: derecognise the asset + book the net investment (lease receivable) at PV, interest income over the term.
+  const lsr1610Before = await tbDebit('1610'), lsr1500Before = await tbCredit2('1500'), lsr4600Before = await tbCredit2('4600');
+  const mkFin = await inj('POST', '/api/lessor-leases', admin, { name: 'Excavator finance lease', lessee: 'BuildCo', term_months: 12, monthly_payment: 1000, annual_rate_pct: 12, asset_cost: 11000, fair_value: 12000, transfer_ownership: true });
+  ok('Lessor finance: create classifies FINANCE + net investment = PV of payments, PENDING (no GL yet)',
+    mkFin.status === 201 && mkFin.json?.classification === 'finance' && mkFin.json?.net_investment > 11200 && mkFin.json?.net_investment < 11300 && mkFin.json?.status === 'pending' && near(await tbDebit('1610'), lsr1610Before),
+    `cls=${mkFin.json?.classification} ni=${mkFin.json?.net_investment} 1610Δ=${(await tbDebit('1610')) - lsr1610Before}`);
+  const finNo = mkFin.json?.lease_no;
+  const finSelf = await inj('POST', `/api/lessor-leases/${finNo}/approve`, admin);
+  ok('Lessor: the classifier cannot approve their own lease (SOD_SELF_APPROVAL)', finSelf.status === 403 && finSelf.json?.error?.code === 'SOD_SELF_APPROVAL', `st=${finSelf.status} code=${finSelf.json?.error?.code}`);
+  const finAppr = await inj('POST', `/api/lessor-leases/${finNo}/approve`, mgr);
+  const ni = mkFin.json?.net_investment;
+  ok('Lessor finance: a distinct approver books commencement — Dr 1610 (net investment) / Cr 1500 (asset derecognised)',
+    finAppr.status === 200 && finAppr.json?.status === 'active' && near(await tbDebit('1610'), lsr1610Before + ni) && near(await tbCredit2('1500'), lsr1500Before + 11000),
+    `st=${finAppr.status} 1610Δ=${(await tbDebit('1610')) - lsr1610Before} 1500Δ=${(await tbCredit2('1500')) - lsr1500Before}`);
+  const runFin = await inj('POST', '/api/lessor-leases/run', admin);
+  const fe = (runFin.json?.entries ?? []).find((e: any) => e.lease_no === finNo);
+  ok('Lessor finance: periodic run recognises interest income + collects cash (interest + principal = payment)',
+    runFin.status === 200 && fe && near(fe.interest_income + fe.principal, 1000) && fe.interest_income > 0 && near(await tbCredit2('4600'), lsr4600Before + fe.interest_income),
+    `int=${fe?.interest_income} prin=${fe?.principal} 4600Δ=${(await tbCredit2('4600')) - lsr4600Before}`);
+  const lsrList = (await inj('GET', '/api/lessor-leases', admin)).json;
+  const finRow = (lsrList.leases ?? []).find((x: any) => x.lease_no === finNo);
+  ok('Lessor finance: net investment (receivable) reduced by the principal after the period', finRow && finRow.receivable_balance < ni && finRow.receivable_balance > 0, `recv=${finRow?.receivable_balance} ni=${ni}`);
+
+  // OPERATING lease: keep the asset, straight-line rental income + continued depreciation.
+  const lsr4610Before = await tbCredit2('4610'), lsr1590Before = await tbCredit2('1590');
+  const mkOp = await inj('POST', '/api/lessor-leases', admin, { name: 'Office space operating lease', lessee: 'TenantCo', term_months: 12, monthly_payment: 500, asset_cost: 12000, fair_value: 12000, economic_life_months: 120 });
+  ok('Lessor operating: create classifies OPERATING (short term, PV below FV) — asset stays on books', mkOp.status === 201 && mkOp.json?.classification === 'operating' && mkOp.json?.status === 'pending', JSON.stringify(mkOp.json));
+  const opNo = mkOp.json?.lease_no;
+  const opAppr = await inj('POST', `/api/lessor-leases/${opNo}/approve`, mgr);
+  ok('Lessor operating: approval activates with NO commencement GL (net investment 0)', opAppr.status === 200 && opAppr.json?.status === 'active' && near(opAppr.json?.net_investment, 0), `st=${opAppr.status} ni=${opAppr.json?.net_investment}`);
+  const runOp = await inj('POST', '/api/lessor-leases/run', admin);
+  const oe = (runOp.json?.entries ?? []).find((e: any) => e.lease_no === opNo);
+  ok('Lessor operating: periodic run posts straight-line rental income (Cr 4610) + continued depreciation (Dr 5200 / Cr 1590)',
+    runOp.status === 200 && oe && near(oe.rental_income, 500) && oe.depreciation > 0 && near(await tbCredit2('4610'), lsr4610Before + 500) && near(await tbCredit2('1590'), lsr1590Before + oe.depreciation),
+    `rent=${oe?.rental_income} dep=${oe?.depreciation} 4610Δ=${(await tbCredit2('4610')) - lsr4610Before}`);
+  // LSE-02 net-investment reconciliation: GL 1610 net debit == Σ remaining receivable on the FINANCE-lease schedule.
+  const lsrRecon = (await inj('GET', '/api/lessor-leases/receivable-reconciliation', admin)).json;
+  ok('Lessor: net-investment reconciliation ties GL 1610 to the finance-lease receivable schedule (reconciled, difference 0)',
+    lsrRecon.reconciled === true && near(lsrRecon.difference, 0) && near(lsrRecon.gl_receivable, lsrRecon.schedule_receivable) && lsrRecon.schedule_receivable > 0,
+    JSON.stringify({ gl: lsrRecon.gl_receivable, sched: lsrRecon.schedule_receivable, diff: lsrRecon.difference, rec: lsrRecon.reconciled }));
+
   // ───────────────── AR bad-debt write-off maker-checker (REV-15) ─────────────────
   const woMgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
   const wo5720Before = await tbDebit('5720');
@@ -1617,6 +1665,80 @@ async function main() {
   ok('REV-21: customer statement carries the applied credit note as a credit line (type credit_note, 50)', (capStmt.lines ?? []).some((l: any) => l.type === 'credit_note' && near(l.payment, 50) && l.ref === 'CN-CAPP-1'), `n=${capStmt.lines?.length}`);
   const capWl = (await inj('GET', '/api/finance/ar/collections', admin)).json;
   ok('REV-21: collections worklist surfaces the customer\'s on-account cash (apply before dunning)', (capWl.rows ?? []).some((r: any) => r.invoice_no === 'INV-CA1' && near(r.on_account, 600)) && Number(capWl.on_account_total) >= 600, `oa_total=${capWl.on_account_total}`);
+
+  // ───────────────────── AR/AP netting & contra settlement (REV-23, docs/41 FIN-8) ─────────────────────
+  // A counterparty that is BOTH a customer (AR) and a vendor (AP): a netting agreement authorises offsetting
+  // its open AR against its open AP; a maker-checker contra settlement posts a single Dr 2000 / Cr 1100 JE
+  // that clears both sub-ledgers up to the netted amount, leaving the residual open.
+  const [netCust] = await db.insert(s.tenants).values({ code: 'NETCO', name: 'Netting Counterparty' }).returning({ id: s.tenants.id });
+  const netCid = Number(netCust.id);
+  const [netVend] = await db.insert(s.vendors).values({ name: 'NETCO Vendor', tenantId: hq, isCreditor: true }).returning({ id: s.vendors.id });
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-NET1', invoiceDate: daysAgo(40), dueDate: daysAgo(35), tenantId: netCid, amount: '800', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+    { invoiceNo: 'INV-NET2', invoiceDate: daysAgo(20), dueDate: daysAgo(15), tenantId: netCid, amount: '500', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+  ]);
+  await db.insert(s.apTransactions).values([
+    { txnNo: 'AP-NET1', invoiceNo: 'BILL-NET1', invoiceDate: daysAgo(38), dueDate: daysAgo(30), tenantId: hq, vendorName: 'NETCO Vendor', amount: '300', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+    { txnNo: 'AP-NET2', invoiceNo: 'BILL-NET2', invoiceDate: daysAgo(18), dueDate: daysAgo(10), tenantId: hq, vendorName: 'NETCO Vendor', amount: '600', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
+  ]);
+  // Agreement management (maker) + preview.
+  const netAgr = await inj('POST', '/api/finance/netting/agreements', admin, { customer_no: 'NETCO', vendor: 'NETCO Vendor', notes: 'ข้อตกลงหักกลบ' });
+  ok('FIN-8/REV-23: create a counterparty netting agreement', netAgr.status === 200 && typeof netAgr.json?.agreement_id === 'number' && netAgr.json?.enabled === true, JSON.stringify(netAgr.json));
+  const netPrev = (await inj('GET', '/api/finance/netting/preview?customer_no=NETCO&vendor=NETCO%20Vendor', admin)).json;
+  ok('FIN-8/REV-23: preview shows open AR 1300 vs open AP 900 → proposed net 900, residual AR 400 / AP 0',
+    near(netPrev.ar?.open_total, 1300) && near(netPrev.ap?.open_total, 900) && near(netPrev.proposed_net, 900) && near(netPrev.residual_ar, 400) && near(netPrev.residual_ap, 0), JSON.stringify({ ar: netPrev.ar?.open_total, ap: netPrev.ap?.open_total, net: netPrev.proposed_net }));
+
+  // Reason is mandatory (mirrors the REV-21 reversal / bad-debt write-off maker-checker).
+  const netNoReason = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETCO', vendor: 'NETCO Vendor', reason: '   ' });
+  ok('FIN-8/REV-23: propose without a reason → 400 REASON_REQUIRED', netNoReason.status === 400 && netNoReason.json?.error?.code === 'REASON_REQUIRED', `${netNoReason.status} ${netNoReason.json?.error?.code}`);
+
+  // Propose the contra settlement (maker) — parks PendingApproval; NO GL / sub-ledger movement yet.
+  const net2000Before = await tbBalance('2000'), net1100Before = await tbBalance('1100');
+  const netProp = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETCO', vendor: 'NETCO Vendor', reason: 'หักกลบลูกหนี้กับเจ้าหนี้รายเดียวกัน' });
+  const netInv1Parked = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-NET1')))[0];
+  ok('FIN-8/REV-23: propose parks PendingApproval (net 900) — no GL, no sub-ledger movement yet',
+    netProp.status === 201 && netProp.json?.pending === true && near(netProp.json?.net_amount, 900) && /^NET-/.test(netProp.json?.settlement_no ?? '')
+    && near(netInv1Parked?.paidAmount, 0) && near(await tbBalance('2000'), net2000Before) && near(await tbBalance('1100'), net1100Before), JSON.stringify(netProp.json).slice(0, 140));
+  const netNo = netProp.json?.settlement_no;
+  const netGov = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
+  ok('FIN-8/REV-23: the pending settlement surfaces in the GOV-01 monitor (type ar_ap_netting)', (netGov.items ?? []).some((i: any) => i.type === 'ar_ap_netting' && i.control === 'REV-23' && i.ref === netNo && near(i.amount, 900)), `types=${JSON.stringify(netGov.by_type ?? {})}`);
+  const netSelf = await inj('POST', `/api/finance/netting/settlements/${netNo}/approve`, admin);
+  ok('FIN-8/REV-23: proposer self-approval blocked → 403 SOD_VIOLATION (binds even Admin)', netSelf.status === 403 && netSelf.json?.error?.code === 'SOD_VIOLATION', `${netSelf.status} ${netSelf.json?.error?.code}`);
+
+  // A DIFFERENT user approves → contra JE (Dr 2000 / Cr 1100 900) + both sub-ledgers clear; residual open.
+  const netAppr = await inj('POST', `/api/finance/netting/settlements/${netNo}/approve`, mgr);
+  const netInv1 = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-NET1')))[0];
+  const netInv2 = (await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, 'INV-NET2')))[0];
+  const netAp1 = (await db.select().from(s.apTransactions).where(eq(s.apTransactions.txnNo, 'AP-NET1')))[0];
+  const netAp2 = (await db.select().from(s.apTransactions).where(eq(s.apTransactions.txnNo, 'AP-NET2')))[0];
+  ok('FIN-8/REV-23: a different user approves → contra JE posts Dr 2000 +900 / Cr 1100 −900',
+    netAppr.status === 200 && near(netAppr.json?.net_amount, 900) && /^JE-/.test(netAppr.json?.je_entry_no ?? '')
+    && near(await tbBalance('2000'), net2000Before + 900) && near(await tbBalance('1100'), net1100Before - 900), `st=${netAppr.status} je=${netAppr.json?.je_entry_no} 2000=${await tbBalance('2000')}`);
+  ok('FIN-8/REV-23: netting clears BOTH sub-ledgers up to the net — AP fully paid, AR residual stays open (INV-NET2 open 400)',
+    netAp1?.status === 'Paid' && netAp2?.status === 'Paid' && netInv1?.status === 'Paid' && netInv2?.status === 'Partial' && near(netInv2?.paidAmount, 100), `ap1=${netAp1?.status} ap2=${netAp2?.status} inv1=${netInv1?.status} inv2=${netInv2?.status}/${netInv2?.paidAmount}`);
+  const netStmt = (await inj('GET', `/api/finance/netting/settlements/${netNo}`, admin)).json;
+  ok('FIN-8/REV-23: the netting statement records exactly what was offset (AR 800+100, AP 300+600 = 900)',
+    netStmt.status === 'Approved' && near(netStmt.net_amount, 900) && (netStmt.ar_lines ?? []).reduce((a: number, l: any) => a + l.applied, 0) === 900 && (netStmt.ap_lines ?? []).reduce((a: number, l: any) => a + l.applied, 0) === 900 && (netStmt.ar_lines ?? []).some((l: any) => l.invoice_no === 'INV-NET1' && near(l.applied, 800)), JSON.stringify({ ar: netStmt.ar_lines, ap: netStmt.ap_lines }).slice(0, 160));
+
+  // Control negatives: no agreement / disabled agreement / over the per-counterparty threshold / nothing to net.
+  const [netNaC] = await db.insert(s.tenants).values({ code: 'NETNA', name: 'No-Agreement Counterparty' }).returning({ id: s.tenants.id });
+  await db.insert(s.vendors).values({ name: 'NETNA Vendor', tenantId: hq, isCreditor: true });
+  await db.insert(s.arInvoices).values([{ invoiceNo: 'INV-NETNA', invoiceDate: daysAgo(10), dueDate: daysAgo(5), tenantId: Number(netNaC.id), amount: '500', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }]);
+  await db.insert(s.apTransactions).values([{ txnNo: 'AP-NETNA', invoiceNo: 'BILL-NETNA', invoiceDate: daysAgo(10), dueDate: daysAgo(5), tenantId: hq, vendorName: 'NETNA Vendor', amount: '400', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }]);
+  const netNoAgr = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', reason: 'x' });
+  ok('FIN-8/REV-23: propose without a netting agreement → 400 NETTING_NOT_AGREED', netNoAgr.status === 400 && netNoAgr.json?.error?.code === 'NETTING_NOT_AGREED', `${netNoAgr.status} ${netNoAgr.json?.error?.code}`);
+  await inj('POST', '/api/finance/netting/agreements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', enabled: false });
+  const netDis = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', reason: 'x' });
+  ok('FIN-8/REV-23: propose against a disabled agreement → 400 NETTING_DISABLED', netDis.status === 400 && netDis.json?.error?.code === 'NETTING_DISABLED', `${netDis.status} ${netDis.json?.error?.code}`);
+  await inj('POST', '/api/finance/netting/agreements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', enabled: true, threshold: 100 });
+  const netOverThr = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETNA', vendor: 'NETNA Vendor', reason: 'x' });
+  ok('FIN-8/REV-23: net above the per-counterparty threshold → 400 NETTING_EXCEEDS_THRESHOLD', netOverThr.status === 400 && netOverThr.json?.error?.code === 'NETTING_EXCEEDS_THRESHOLD', `${netOverThr.status} ${netOverThr.json?.error?.code}`);
+  const [netOneC] = await db.insert(s.tenants).values({ code: 'NETONE', name: 'AR-only Counterparty' }).returning({ id: s.tenants.id });
+  await db.insert(s.vendors).values({ name: 'NETONE Vendor', tenantId: hq, isCreditor: true });
+  await db.insert(s.arInvoices).values([{ invoiceNo: 'INV-NETONE', invoiceDate: daysAgo(10), dueDate: daysAgo(5), tenantId: Number(netOneC.id), amount: '200', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }]);
+  await inj('POST', '/api/finance/netting/agreements', admin, { customer_no: 'NETONE', vendor: 'NETONE Vendor' });
+  const netNothing = await inj('POST', '/api/finance/netting/settlements', admin, { customer_no: 'NETONE', vendor: 'NETONE Vendor', reason: 'x' });
+  ok('FIN-8/REV-23: no open AP to offset → 400 NOTHING_TO_NET', netNothing.status === 400 && netNothing.json?.error?.code === 'NOTHING_TO_NET', `${netNothing.status} ${netNothing.json?.error?.code}`);
 
   // ───────────────────── FIN-4 — Statutory FS pack (report builder + SOCE + notes + DBD e-Filing) ─────────────────────
   // The configurable financial-report builder (row-grouping + comparative columns) and the three audit-pack
