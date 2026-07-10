@@ -18,6 +18,7 @@ import { QrService } from './qr.service';
 import { BuffetService } from './buffet.service';
 import { ChannelOrderService } from './channel-order.service';
 import { RestaurantOfflineSyncService } from './offline-sync.service';
+import { PosFiscalModule } from '../pos/fiscal/pos-fiscal.module';
 import { ReservationService } from './reservation.service';
 import { GuestProfileService } from './guest-profile.service';
 import { TipService } from './tip.service';
@@ -31,7 +32,7 @@ import { PosScaleModule } from '../pos/scale/pos-scale.module';
 // Restaurant / F&B POS: dine-in orders + KDS, floor-plan tables, table QR sessions (public diner),
 // online/delivery/kiosk channel orders, PromptPay pay → cust_pos_sales + GL + abbreviated tax invoice.
 @Module({
-  imports: [TaxModule, PaymentsModule, LedgerModule, TaxDocsModule, MenuModule, MarketingModule, CampaignsModule, LoyaltyModule, GiftCardsModule, PricingModule, PrintingModule, PeripheralsModule, PosScaleModule, MessagingModule],
+  imports: [TaxModule, PaymentsModule, PosFiscalModule, LedgerModule, TaxDocsModule, MenuModule, MarketingModule, CampaignsModule, LoyaltyModule, GiftCardsModule, PricingModule, PrintingModule, PeripheralsModule, PosScaleModule, MessagingModule],
   controllers: [RestaurantController, QrController, ChannelController],
   providers: [DineInService, KdsService, TableService, QrService, BuffetService, ChannelOrderService, RealtimeScope, RestaurantOfflineSyncService, ReservationService, GuestProfileService, TipService],
   exports: [DineInService, TableService, RestaurantOfflineSyncService],

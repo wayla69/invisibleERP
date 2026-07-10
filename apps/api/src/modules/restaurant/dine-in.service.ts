@@ -14,6 +14,7 @@ import { TaxInvoiceService } from '../tax/documents/tax-invoice.service';
 import { MenuService } from '../menu/menu.service';
 import { RecipeService } from '../menu/recipe.service';
 import { MemberService } from '../loyalty/member.service';
+import { JournalService } from '../pos/fiscal/journal.service';
 import { GiftCardService } from '../giftcards/gift-card.service';
 import { PromoEngineService } from '../marketing/promo-engine.service';
 import { VouchersService, type VoucherCheckoutPreview } from '../campaigns/vouchers.service';
@@ -43,6 +44,9 @@ export class DineInService {
     private readonly gift: GiftCardService,
     private readonly pricing: PricingService,
     @Optional() private readonly realtime?: RealtimeService,   // multi-terminal SSE fan-out (best-effort)
+    // Electronic fiscal journal (RD tamper-evidence). @Optional so partial harnesses still construct;
+    // the append is best-effort for the same reason the payments path treats it that way.
+    @Optional() private readonly fiscal?: JournalService,
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -283,6 +287,25 @@ export class DineInService {
       ? await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: saleCash, tip: built.tip, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user)
       : null;
     const inv = await this.markPaidAndInvoice(o, saleNo, user);
+
+    // Fiscal electronic journal (RD tamper-evidence, PN-20): the restaurant path used to append NOTHING,
+    // so dine-in/diner-QR/register sales — the bulk of a restaurant's revenue — were absent from the
+    // hash chain that the portal POS and the refund/void paths already write to. Append once here, at
+    // finalisation, with the authoritative figures. Best-effort (like the payments path): a journal
+    // outage must not roll back a settled sale, and `GET /api/pos/journal/verify` detects a gap.
+    // NB on a LAN-first store the hub keeps its OWN chain (its in-store journal) and the cloud appends
+    // again when the sale replays — the cloud chain is the company's book of record (docs/41, PN-24 §7 6c).
+    try {
+      await this.fiscal?.append({
+        doc_type: 'SALE', doc_no: saleNo, action: 'checkout',
+        payload: {
+          order_no: orderNo, sale_no: saleNo, subtotal: built.subtotal, discount: built.discount,
+          vat: built.vat, service_charge: built.service_charge, tip: built.tip, total: built.total,
+          method: dto.method ?? 'Cash', tax_invoice_no: inv ?? null,
+        },
+      }, user);
+    } catch { /* tamper-evidence is detective: verify() surfaces the gap, the sale stands */ }
+
     return { order_no: orderNo, sale_no: saleNo, ...built, payment_no: tender?.payment_no ?? null, payment_status: tender?.status ?? null, tax_invoice_no: inv };
   }
 

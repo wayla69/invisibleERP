@@ -1,4 +1,4 @@
--- 0309 — Loyalty points ledger idempotency (control LYL-22; docs/41 Phase 2c-2 follow-up).
+-- 0315 — Loyalty points ledger idempotency (control LYL-22; docs/41 Phase 2c-2 follow-up).
 --
 -- `pos_member_ledger` had NO uniqueness: replaying the same sale's earn/redeem (a retried checkout, a
 -- store-hub replay, an integration retry) would deduct or award the points TWICE and write a second
