@@ -52,13 +52,22 @@ legal sign-off + authority credentials).
 3. **Pluggable e-invoicing engine — Phase 22 (C3).** Puts e-invoicing behind one **provider interface** (the
    same pattern as `tax-providers.ts`): a deterministic **stub** is the default (CI-safe; no-credential tenants
    work), real adapters — **TH** RD e-Tax Invoice, **MY** MyInvois (UBL 2.1), **SG** InvoiceNow (Peppol) — swap
-   in behind it. `submit` validates a **canonical invoice**, submits via the configured provider, and logs the
-   result **idempotently by doc_ref**. `GET /api/einvoice/providers`, `GET/PUT /api/einvoice/config`,
-   `POST /api/einvoice/submit`, `GET /api/einvoice/submissions` (perm `exec`/`creditors`/`ar`). Tables
-   `einvoice_config` (creds AES-256-GCM-encrypted in prod) + `einvoice_submissions` (migration `0100`);
-   RLS-scoped. Read-of-invoice → external send — posts **nothing** to the GL. Web `/einvoice`. *Verified by the
-   `ext` harness (providers / submit-accepted / idempotent / bad-doc). Live authority credentials + conformance
-   testing per country are external follow-ups.*
+   in behind it. `submit` validates a **canonical invoice**, **prepares** the country-appropriate document
+   (MY → MyInvois UBL 2.1; SG → Peppol BIS3; others → JSON) and hashes it, **delivers** it via the provider's
+   **transport**, and logs the result **idempotently by doc_ref**. `GET /api/einvoice/providers`,
+   `GET/PUT /api/einvoice/config`, `POST /api/einvoice/submit`, `GET /api/einvoice/submissions`
+   (perm `exec`/`creditors`/`ar`). Tables `einvoice_config` (creds AES-256-GCM-encrypted in prod) +
+   `einvoice_submissions` (migration `0100`); RLS-scoped. Read-of-invoice → external send — posts **nothing**
+   to the GL. Web `/einvoice`.
+   - **Honesty contract (fail-closed transport).** A real tax-authority filing only happens when a provider's
+     **transport is actually wired** (credentials + endpoint, which live outside the repo). Until then an
+     **external** provider (RD / MyInvois / Peppol) records the submission as **`pending`** — the document is
+     prepared and hashed but **NOT transmitted** — and **never** a false `accepted` with a fabricated QR. Only
+     the sandbox **`stub`** provider acknowledges locally, and it is explicitly flagged **`sandbox:true`** so it
+     can never be mistaken for a real filing. This replaced an earlier stub that unconditionally returned
+     `accepted` with an `einvoice.example` QR for every provider. *Verified by the `ext` harness (stub submit /
+     idempotent / bad-doc) and `basics` (MY & SG providers prepare → `pending`, no QR; stub → `accepted` +
+     `sandbox:true`). Live authority credentials + conformance testing per country remain external follow-ups.*
 
 ## 5. Control matrix
 
@@ -81,4 +90,5 @@ invoice), `BAD_PROVIDER` (unknown provider). Unauthorized → `403`/`401`; cross
 | 0.1 DRAFT | 2026-06-24 | Platform | Initial localization narrative. Delivered **Platform Phase 20 — i18n / locale framework (C1)**: per-locale catalog (th/en/ms/vi/id), interpolation + `Intl` formatters, server-resolved effective locale (user → tenant → th), `users.locale` (migration `0093`). No GL, RLS/self-scoped; `ext` +4 checks. C2 (country packs) + C3 (e-invoicing engine) planned — see roadmap `13` §3. |
 | 0.2 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 21 — country localization packs (C2)**: the Odoo l10n model — a pack (CoA preview / tax codes / statutory reports / e-invoice provider / locale) per country; TH certified + MY draft skeleton. Applying sets tenant tax country + locale + records the active pack (live CoA seeding is a guarded follow-up). Table `tenant_localization` (migration `0099`). RLS-scoped, no GL; new §4.2, control-matrix row, `BAD_COUNTRY`; `ext` +4 checks. |
 | 0.3 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 22 — pluggable e-invoicing engine (C3)**: a provider interface (stub default; TH/MY/SG adapters) submitting a canonical invoice, logged idempotently by doc_ref. Tables `einvoice_config` + `einvoice_submissions` (migration `0100`). RLS-scoped, no GL; new §4.3, control-matrix row, `BAD_DOC`/`BAD_PROVIDER`; `ext` +4 checks. Live authority credentials per country are external. |
+| 0.5 DRAFT | 2026-07-10 | Platform | **E-invoicing submit made honest — fail-closed transport (data-integrity fix; no migration, no new control).** `EInvoiceService.submit` previously returned `status:'accepted'` with a fabricated `https://einvoice.example/…` QR for **every** provider, so a screen implied real filings were made when nothing was transmitted. Submit now **prepares + hashes** the country document (real work) then **delivers via a per-provider transport**: an **external** provider (RD/MyInvois/Peppol) with no live transport wired records **`pending`** (prepared, not transmitted, `qr:null`) — never a false `accepted`; only the sandbox **`stub`** returns `accepted` and is flagged **`sandbox:true`**. New pluggable `EInvoiceTransport` interface (real authority adapters swap in behind it). §4.3 gains the honesty-contract note; web `/einvoice` shows a status pill (pending/accepted-sandbox) + a "prepares, not transmitted" note. ToE: `basics` 326 (MY & SG → `pending` + no QR; stub → `accepted` + `sandbox`), `ext` 295 (stub submit/idempotent/bad-doc). Manual `07-tax.md` note. |
 | 0.4 DRAFT | 2026-06-28 | Platform | **Roadmap C3 — nav i18n wiring**: all `INTERNAL_NAV` and `PORTAL_NAV` `title`/`label` strings replaced with `messages.ts` i18n keys (~170 new entries covering 18 group titles, 9 subgroup titles, and all nav item labels in th+en). `AppShell` and `CommandPalette` now call `t()` for all rendered nav text and sidebar chrome (favourites, recent, search, logout). `portal/layout.tsx` wrapped in `LanguageProvider`. No API, DB, or permission changes; no GL. The UI now switches language correctly when a user selects a non-Thai locale. |

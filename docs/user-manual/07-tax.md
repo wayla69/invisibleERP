@@ -178,6 +178,14 @@ From the tax-invoice detail you can submit electronically:
 > dropdown of your issued tax invoices — picking one also pre-fills the total (choose
 > **พิมพ์เลขเอกสารเอง…** to key another reference). The **POS fiscal screen's e-Tax submit box**
 > (`/pos-fiscal`) offers the same issued-invoice dropdown.
+>
+> **What the status means.** A **real** provider (RD / MyInvois / Peppol) **prepares** the
+> document and marks it **`pending`** — the file is built and hashed but **not actually
+> transmitted** until your administrator wires that provider's live transport (authority
+> credentials + endpoint). It is **never** shown as *accepted* until a genuine acknowledgement
+> comes back. The **`stub`** provider is a **sandbox** for testing only — it shows
+> *accepted (sandbox)*, which is **not** a real filing. So a `pending` row is expected until the
+> live provider is configured; it does not mean the submission failed.
 
 ### Configuring the digital certificate & provider (administrator)
 

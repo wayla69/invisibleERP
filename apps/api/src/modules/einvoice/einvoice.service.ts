@@ -7,9 +7,38 @@ import type { JwtUser } from '../../common/decorators';
 
 // C2 — pluggable tax + e-invoicing engine. Per-country providers behind one interface
 // (mirroring tax-providers.ts); a deterministic STUB is the default so CI + no-credential tenants work. Submit
-// validates a canonical invoice, submits via the configured provider (stub by default), and logs the result
-// idempotently by doc_ref. Read-of-invoice → external send; posts NOTHING to the GL. RLS-scoped.
+// validates a canonical invoice, PREPARES the country-appropriate document (payload + hash), delivers it via
+// the configured provider's TRANSPORT, and logs the result idempotently by doc_ref. Posts NOTHING to the GL.
+// RLS-scoped.
+//
+// HONESTY CONTRACT (do not regress): a real tax-authority filing only happens when a provider's transport is
+// actually wired (credentials + endpoint, which live OUTSIDE the repo). Until then an EXTERNAL provider
+// (RD / MyInvois / Peppol) records the submission as **`pending`** — the document is prepared and hashed but
+// NOT transmitted — and NEVER a false `accepted` with a fabricated QR. Only the sandbox `stub` provider
+// "accepts" locally, and it is explicitly flagged `sandbox:true` so it can't be mistaken for a real filing.
 interface InvoiceDoc { doc_ref: string; seller?: string; buyer?: string; total?: number; currency?: string; lines?: any[] }
+
+// The pluggable delivery leg. A real transport POSTs the prepared payload to the authority and returns its
+// acknowledgement; a wired implementation would live behind this shape (keyed by provider). Result:
+//  • accepted — the authority (or sandbox) acknowledged the filing (externalRef/qr may be set).
+//  • pending  — no live transport for this provider yet; document prepared + hashed, awaiting transmission.
+//  • rejected — the authority refused the document (detail carries the reason).
+type SubmitStatus = 'accepted' | 'pending' | 'rejected';
+interface TransportResult { status: SubmitStatus; externalRef?: string | null; qr?: string | null; sandbox?: boolean; detail: string }
+// Shape of the JSON persisted in einvoice_submissions.response (typed so reads stay strongly typed).
+interface StoredResponse { ref?: string; external_ref?: string | null; qr?: string | null; sandbox?: boolean; detail?: string | null }
+interface EInvoiceTransport { deliver(doc: InvoiceDoc, payloadHash: string, internalRef: string): Promise<TransportResult> | TransportResult }
+
+// Sandbox transport — the only one that acknowledges without a real authority. Clearly flagged so a caller
+// (or an auditor reading the submissions log) can never confuse it with a genuine RD/LHDN/IRAS filing.
+const SANDBOX_TRANSPORT: EInvoiceTransport = {
+  deliver: (_doc, _hash, ref) => ({ status: 'accepted', externalRef: ref, qr: null, sandbox: true, detail: 'sandbox acknowledgement — not a real tax filing' }),
+};
+// Unconfigured external transport — fail-closed. A real provider selected but no live transport wired: the
+// document is prepared and hashed (evidence it was built), but recorded `pending`, never `accepted`.
+function unconfiguredTransport(provider: string): EInvoiceTransport {
+  return { deliver: () => ({ status: 'pending', externalRef: null, qr: null, sandbox: false, detail: `${provider} transport not configured — document prepared and hashed, awaiting transmission to the tax authority` }) };
+}
 const PROVIDERS = [
   { key: 'stub', country: 'XX', label: 'Stub (sandbox)' },
   { key: 'einvoice.th.rd', country: 'TH', label: 'TH — RD e-Tax Invoice & e-Receipt' },
@@ -95,27 +124,39 @@ export class EInvoiceService {
     return { provider: providerKey };
   }
 
+  // Resolve the delivery transport for a provider. Sandbox 'stub' acknowledges locally; every real provider
+  // is fail-closed to `pending` until a genuine authority transport (credentials + endpoint) is wired here.
+  private transportFor(provider: string): EInvoiceTransport {
+    if (provider === 'stub') return SANDBOX_TRANSPORT;
+    return unconfiguredTransport(provider);
+  }
+
   async submit(user: JwtUser, doc: InvoiceDoc) {
     this.validate(doc);
     const db = this.db;
     const [exists] = await db.select().from(einvoiceSubmissions).where(eq(einvoiceSubmissions.docRef, doc.doc_ref)).limit(1);
-    if (exists) return { status: exists.status, ref: (exists.response as { ref?: string; qr?: string } | null)?.ref, qr: (exists.response as { ref?: string; qr?: string } | null)?.qr, provider: exists.provider, idempotent: true };
+    if (exists) { const er = (exists.response ?? {}) as StoredResponse; return { status: exists.status, ref: er.ref, qr: er.qr ?? null, external_ref: er.external_ref ?? null, sandbox: er.sandbox ?? false, detail: er.detail ?? null, provider: exists.provider, idempotent: true }; }
     const [cfg] = await db.select({ p: einvoiceConfig.providerKey }).from(einvoiceConfig).limit(1);
     const provider = cfg?.p ?? 'stub';
     const ref = `EINV-${createHash('sha1').update(`${user.tenantId}:${doc.doc_ref}`).digest('hex').slice(0, 12).toUpperCase()}`;
-    // Build a country-appropriate document for payload hashing (MY → MyInvois UBL 2.1; SG → Peppol BIS3; others → JSON).
+    // Prepare a country-appropriate document (MY → MyInvois UBL 2.1; SG → Peppol BIS3; others → JSON) and
+    // hash it — this is real, provider-shaped work and stands as evidence the document was built, regardless
+    // of whether a live transport then transmits it.
     let payloadSource: string;
     if (provider === 'einvoice.my.myinvois') payloadSource = buildMyInvoisXml(doc);
     else if (provider === 'einvoice.sg.invoicenow') payloadSource = buildSgPeppolXml(doc);
     else payloadSource = JSON.stringify(doc);
     const payloadHash = createHash('sha1').update(payloadSource).digest('hex').slice(0, 16);
-    const response = { ref, qr: `https://einvoice.example/${ref}` };
-    await db.insert(einvoiceSubmissions).values({ tenantId: user.tenantId ?? null, docRef: doc.doc_ref, provider, status: 'accepted', payloadHash, response });
-    return { status: 'accepted', ref, qr: response.qr, provider, idempotent: false };
+    // Deliver via the provider's transport. Only a wired real transport (or the sandbox) can yield `accepted`;
+    // an external provider with no transport records `pending` — the document is prepared, not transmitted.
+    const result = await this.transportFor(provider).deliver(doc, payloadHash, ref);
+    const response = { ref, external_ref: result.externalRef ?? null, qr: result.qr ?? null, sandbox: result.sandbox ?? false, detail: result.detail };
+    await db.insert(einvoiceSubmissions).values({ tenantId: user.tenantId ?? null, docRef: doc.doc_ref, provider, status: result.status, payloadHash, response });
+    return { status: result.status, ref, external_ref: result.externalRef ?? null, qr: result.qr ?? null, sandbox: result.sandbox ?? false, detail: result.detail, provider, idempotent: false };
   }
 
   async submissions(_user: JwtUser) {
     const rows = await this.db.select().from(einvoiceSubmissions);
-    return { submissions: rows.map((s: any) => ({ id: Number(s.id), doc_ref: s.docRef, provider: s.provider, status: s.status, ref: (s.response as { ref?: string } | null)?.ref, submitted_at: s.submittedAt })) };
+    return { submissions: rows.map((row) => { const r = (row.response ?? {}) as StoredResponse; return { id: Number(row.id), doc_ref: row.docRef, provider: row.provider, status: row.status, ref: r.ref, sandbox: r.sandbox ?? false, detail: r.detail ?? null, submitted_at: row.submittedAt }; }) };
   }
 }
