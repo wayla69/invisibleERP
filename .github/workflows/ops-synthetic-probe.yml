@@ -1,0 +1,134 @@
+# Scheduled synthetic monitoring for production (incident 2026-07-10 follow-up — see
+# docs/ops/incident-2026-07-10-login-bounce-cross-site-cookie.md). Two blind spots let that outage run
+# for hours: (1) every existing check was status-code-only, and the broken thing — browser cookie
+# policy — returns 200 all day; (2) nothing watched the service env, so a variable lost in a
+# hand-rebuild was invisible until a user hit it. This workflow closes both:
+#
+#   http-probe    — no secrets needed: login page, the same-origin /api proxy leg, a wrong-password
+#                   login (must be a clean 401 JSON, proving the API pipeline end-to-end), and
+#                   /proxy-health (the runtime proxy target is reachable from inside the web container).
+#   browser-probe — headless-Chromium real login via tools/ops/synthetic-login-probe.mjs: cookies
+#                   stored → attached on the next /api call → session survives a reload. This is the
+#                   ONLY check that catches the SameSite-class regression (curl ignores cookie policy).
+#                   Arms itself when the PROBE_USERNAME / PROBE_PASSWORD repo secrets exist (create a
+#                   dedicated LOW-PRIVILEGE account for it); politely skips otherwise.
+#   env-manifest  — diffs each Railway service's live variable NAMES (values never read into the log)
+#                   against docs/ops/railway-env-manifest.json; a missing expected name fails loudly —
+#                   the one-click detection the July-10 hunt lacked.
+#
+# A failed run notifies the repo owner via GitHub's default workflow-failure notification. Runs from
+# GitHub-hosted runners because prod URLs are unreachable from dev sandboxes.
+name: Ops — synthetic prod probe
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'   # every 30 min, off the top-of-hour congestion
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Public prod URLs (override with repo vars PROD_WEB_URL / PROD_API_URL if the domains change).
+  WEB_URL: ${{ vars.PROD_WEB_URL || 'https://invisibleposerp-production.up.railway.app' }}
+  API_URL: ${{ vars.PROD_API_URL || 'https://invisibleerp-production.up.railway.app' }}
+
+jobs:
+  http-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: HTTP-level probes (no credentials)
+        run: |
+          set -uo pipefail
+          fail=""
+          code() { curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$1" || echo 000; }
+
+          c=$(code "$WEB_URL/login");            echo "login page            → $c"; [ "$c" = 200 ] || fail="$fail login-page($c)"
+          c=$(code "$WEB_URL/api/config");       echo "web /api/config proxy → $c"; [ "$c" = 200 ] || fail="$fail proxy-config($c)"
+          c=$(code "$API_URL/healthz");          echo "api /healthz          → $c"; [ "$c" = 200 ] || fail="$fail healthz($c)"
+          c=$(code "$API_URL/readyz");           echo "api /readyz           → $c"; [ "$c" = 200 ] || fail="$fail readyz($c)"
+
+          # Wrong-password login MUST be a clean 401 with a JSON error body — proves the request
+          # traverses proxy → API → auth → error filter (a 5xx / HTML error page here means the
+          # pipeline is broken even though the static pages above may still be green).
+          r=$(curl -s --max-time 20 -w '\n%{http_code}' -X POST "$WEB_URL/api/login" -H 'Content-Type: application/json' -d '{"username":"synthetic-probe-nouser","password":"wrong"}')
+          c=$(echo "$r" | tail -1); b=$(echo "$r" | head -n -1)
+          echo "wrong-pass login      → $c $(echo "$b" | jq -c '.error.code // .code // empty' 2>/dev/null)"
+          { [ "$c" = 401 ] && echo "$b" | jq -e '.error // .message' >/dev/null 2>&1; } || fail="$fail login-401($c)"
+
+          # /proxy-health: the web container must report its runtime proxy target reachable.
+          ph=$(curl -s --max-time 20 "$WEB_URL/proxy-health" || echo '{}')
+          echo "proxy-health          → $(echo "$ph" | jq -c '{ok, status, error, configured_runtime}' 2>/dev/null)"
+          [ "$(echo "$ph" | jq -r '.ok // false' 2>/dev/null)" = "true" ] || fail="$fail proxy-health"
+
+          [ -z "$fail" ] || { echo "::error::synthetic HTTP probe FAILED:$fail"; exit 1; }
+          echo "✅ HTTP probes green"
+
+  browser-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check probe credentials
+        id: creds
+        env:
+          PROBE_USERNAME: ${{ secrets.PROBE_USERNAME }}
+        run: |
+          if [ -n "${PROBE_USERNAME:-}" ]; then echo "armed=true" >> "$GITHUB_OUTPUT";
+          else echo "armed=false" >> "$GITHUB_OUTPUT"; echo "::notice::PROBE_USERNAME/PROBE_PASSWORD secrets not set — browser login probe skipped. Create a LOW-PRIVILEGE probe user and set the secrets to arm the SameSite-regression detector."; fi
+      - uses: actions/setup-node@v4
+        if: steps.creds.outputs.armed == 'true'
+        with:
+          node-version: 22
+      - name: Install Playwright Chromium
+        if: steps.creds.outputs.armed == 'true'
+        run: |
+          npm i --no-save playwright@^1
+          npx playwright install --with-deps chromium
+      - name: Real-browser login probe (cookie-policy end-to-end)
+        if: steps.creds.outputs.armed == 'true'
+        env:
+          PROBE_USERNAME: ${{ secrets.PROBE_USERNAME }}
+          PROBE_PASSWORD: ${{ secrets.PROBE_PASSWORD }}
+        run: node tools/ops/synthetic-login-probe.mjs
+
+  env-manifest:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN binding, same as deploy.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diff live variable NAMES against docs/ops/railway-env-manifest.json
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "${RAILWAY_TOKEN:-}" ] || { echo "::error::RAILWAY_TOKEN not configured"; exit 1; }
+          gq() { curl -s --max-time 30 -X POST https://backboard.railway.app/graphql/v2 -H "Project-Access-Token: $RAILWAY_TOKEN" -H "Content-Type: application/json" -d "$1"; }
+          PT=$(gq '{"query":"query{projectToken{projectId environmentId}}"}')
+          PID=$(echo "$PT" | jq -r '.data.projectToken.projectId // empty')
+          EID=$(echo "$PT" | jq -r '.data.projectToken.environmentId // empty')
+          [ -n "$PID" ] || { echo "::error::Railway token introspection failed"; exit 1; }
+          SVCS=$(gq "{\"query\":\"query{project(id:\\\"$PID\\\"){services{edges{node{id name}}}}}\"}")
+          MANIFEST=docs/ops/railway-env-manifest.json
+          fail=""
+          for SVC in $(jq -r '.services | keys[]' "$MANIFEST"); do
+            SID=$(echo "$SVCS" | jq -r --arg n "$SVC" '.data.project.services.edges[].node | select(.name==$n) | .id')
+            [ -n "$SID" ] || { echo "::error::service $SVC (in manifest) not found in the Railway project"; fail=1; continue; }
+            LIVE=$(gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\")}\"}" | jq -r '.data.variables | keys[]' | grep -v '^RAILWAY_' | sort)
+            echo "── $SVC ──"
+            # expected-but-missing = a variable was LOST (the July-10 failure class) → hard fail
+            for n in $(jq -r --arg s "$SVC" '.services[$s].expected[]' "$MANIFEST"); do
+              echo "$LIVE" | grep -qx "$n" || { echo "::error::$SVC is MISSING expected variable $n — restore it (docs/ops/railway-env-manifest.json is the config-of-record)"; fail=1; }
+            done
+            # transitional present → informational (expected to disappear after the proxy cutover)
+            for n in $(jq -r --arg s "$SVC" '.services[$s].transitional[]?' "$MANIFEST"); do
+              echo "$LIVE" | grep -qx "$n" && echo "::notice::$SVC still carries transitional variable $n (remove via ops-proxy-cutover.yml action=remove-samesite once the same-origin proxy is live)"
+            done
+            # live-but-unlisted = someone added a var without updating the manifest → warn (keep in sync)
+            KNOWN=$(jq -r --arg s "$SVC" '.services[$s] | (.expected + (.transitional // []))[]' "$MANIFEST")
+            for n in $LIVE; do
+              echo "$KNOWN" | grep -qx "$n" || echo "::warning::$SVC has variable $n not listed in the manifest — add it to docs/ops/railway-env-manifest.json (names only)"
+            done
+            echo "  $(echo "$LIVE" | wc -l) live names checked"
+          done
+          [ -z "$fail" ] || exit 1
+          echo "✅ env manifest check passed"

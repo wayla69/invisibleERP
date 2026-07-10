@@ -1,0 +1,176 @@
+# Ops utility (manual dispatch): SELF-VERIFYING same-origin proxy cutover for the web service —
+# the durable fix for incident 2026-07-10 (login bounce: cross-site cookies dropped when
+# AUTH_COOKIE_SAMESITE was lost in an env hand-rebuild; see
+# docs/ops/incident-2026-07-10-login-bounce-cross-site-cookie.md).
+#
+# Why a workflow: the cutover repeatedly stalled on blind flip-and-pray — dev sandboxes cannot reach
+# prod URLs, each wrong guess broke prod until the next manual revert, and nothing verified the result.
+# GitHub runners CAN reach prod, and RAILWAY_TOKEN can read coordinates + set variables — so every step
+# here is verify → change → re-verify, with an automatic rollback if the flip does not go green.
+#
+# Actions (input `action`):
+#   verify          — read-only health matrix: web /proxy-health (runtime target + an explicit probe of
+#                     the API's private-network address), web /api/config through the proxy, API
+#                     /healthz + /readyz. Run this first; it prints the exact go/no-go for cutover.
+#   cutover         — pre-check the private target via /proxy-health?target=… (aborts if unreachable),
+#                     set API_PROXY_TARGET=http://<api RAILWAY_PRIVATE_DOMAIN>:<PORT> on the web
+#                     service (Railway redeploys it), poll until the proxied /api/config is green with
+#                     the new runtime target — and AUTO-ROLLBACK to the API's public URL if it is not.
+#   rollback        — force API_PROXY_TARGET back to the API's public URL and poll green.
+#   remove-samesite — the final step: once (and only once) the same-origin proxy is verified live,
+#                     delete AUTH_COOKIE_SAMESITE from the API service and redeploy, returning cookies
+#                     to the safer SameSite=Lax default. Refuses to run while the proxy is not green.
+#
+# All coordinates are resolved live from Railway (no hard-coded hosts to drift). This repo's action
+# logs are PUBLIC: only public domains and the whitelisted private-network coordinates (meaningless
+# outside the project's own Railway network — same precedent as ops-railway-diag.yml) are printed.
+name: Ops — same-origin proxy cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'What to do'
+        type: choice
+        default: verify
+        options: [verify, cutover, rollback, remove-samesite]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-proxy-cutover   # two concurrent flips would race the variable + redeploys
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN binding, same as deploy.yml
+    steps:
+      - name: ${{ inputs.action }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          [ -n "${RAILWAY_TOKEN:-}" ] || { echo "::error::RAILWAY_TOKEN not configured"; exit 1; }
+          gq() { curl -s --max-time 30 -X POST https://backboard.railway.app/graphql/v2 -H "Project-Access-Token: $RAILWAY_TOKEN" -H "Content-Type: application/json" -d "$1"; }
+
+          echo "Resolving live coordinates from Railway…"
+          PT=$(gq '{"query":"query{projectToken{projectId environmentId}}"}')
+          PID=$(echo "$PT" | jq -r '.data.projectToken.projectId // empty')
+          EID=$(echo "$PT" | jq -r '.data.projectToken.environmentId // empty')
+          [ -n "$PID" ] || { echo "::error::Railway token introspection failed"; exit 1; }
+          SVCS=$(gq "{\"query\":\"query{project(id:\\\"$PID\\\"){services{edges{node{id name}}}}}\"}")
+          WEB_SID=$(echo "$SVCS" | jq -r '.data.project.services.edges[].node | select(.name=="invisiblePOSERP") | .id')
+          API_SID=$(echo "$SVCS" | jq -r '.data.project.services.edges[].node | select(.name=="invisibleERP") | .id')
+          [ -n "$WEB_SID" ] && [ -n "$API_SID" ] || { echo "::error::could not find invisiblePOSERP/invisibleERP services"; exit 1; }
+          vars_of() { gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$1\\\")}\"}" | jq '.data.variables'; }
+          WEB_VARS=$(vars_of "$WEB_SID"); API_VARS=$(vars_of "$API_SID")
+          WEB_DOMAIN=$(echo "$WEB_VARS" | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty')
+          API_DOMAIN=$(echo "$API_VARS" | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty')
+          API_PRIV=$(echo "$API_VARS" | jq -r '.RAILWAY_PRIVATE_DOMAIN // empty')
+          API_PORT=$(echo "$API_VARS" | jq -r '.PORT // "8000"')
+          CURRENT=$(echo "$WEB_VARS" | jq -r '.API_PROXY_TARGET // empty')
+          [ -n "$WEB_DOMAIN" ] && [ -n "$API_DOMAIN" ] && [ -n "$API_PRIV" ] || { echo "::error::missing public/private domains on the services"; exit 1; }
+          WEB="https://$WEB_DOMAIN"; API_PUB="https://$API_DOMAIN"; INTERNAL="http://$API_PRIV:$API_PORT"
+          # Whitelisted non-secret coordinates only (public domains are public; private-network
+          # coordinates follow the ops-railway-diag.yml precedent).
+          echo "web=$WEB  api(public)=$API_PUB  api(private)=$INTERNAL"
+          case "$CURRENT" in
+            "$INTERNAL") echo "current API_PROXY_TARGET mode: PRIVATE network ($CURRENT)";;
+            "$API_PUB")  echo "current API_PROXY_TARGET mode: public edge ($CURRENT)";;
+            "")          echo "current API_PROXY_TARGET: (unset)";;
+            *)           echo "current API_PROXY_TARGET mode: other/custom (not printed)";;
+          esac
+
+          jget() { curl -s --max-time 15 "$1" || echo '{}'; }
+          code_of() { curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$1" || echo 000; }
+
+          verify_matrix() {
+            echo "── health matrix ──"
+            local ph phin cfg hz rz
+            ph=$(jget "$WEB/proxy-health")
+            phin=$(jget "$WEB/proxy-health?target=$INTERNAL")
+            cfg=$(code_of "$WEB/api/config")
+            hz=$(code_of "$API_PUB/healthz"); rz=$(code_of "$API_PUB/readyz")
+            echo "  web /proxy-health (runtime target): $(echo "$ph"   | jq -c '{ok, status, error, configured_runtime}')"
+            echo "  web /proxy-health?target=<private>: $(echo "$phin" | jq -c '{ok, status, error}')"
+            echo "  web /api/config via proxy:          HTTP $cfg"
+            echo "  api /healthz=$hz /readyz=$rz"
+            PH_OK=$(echo "$ph" | jq -r '.ok // false')
+            PH_RUNTIME=$(echo "$ph" | jq -r '.configured_runtime // empty')
+            PHIN_OK=$(echo "$phin" | jq -r '.ok // false')
+            CFG_OK=$([ "$cfg" = 200 ] && echo true || echo false)
+          }
+
+          # Poll the web service through a variable-change redeploy until the proxied /api/config is
+          # green AND /proxy-health reports the expected runtime target (the old replica keeps serving
+          # the old env until the new one is live). ~8 min budget covers Railway's redeploy window.
+          poll_green() { # $1 = expected runtime target as shown by /proxy-health
+            local want="$1" i ph cfg run ok
+            for i in $(seq 1 48); do
+              sleep 10
+              ph=$(jget "$WEB/proxy-health"); cfg=$(code_of "$WEB/api/config")
+              run=$(echo "$ph" | jq -r '.configured_runtime // empty'); ok=$(echo "$ph" | jq -r '.ok // false')
+              echo "  [$i] runtime=$run ok=$ok /api/config=$cfg"
+              if [ "$run" = "$want" ] && [ "$ok" = "true" ] && [ "$cfg" = "200" ]; then return 0; fi
+            done
+            return 1
+          }
+
+          set_target() { # $1 = new API_PROXY_TARGET (Railway auto-redeploys the web service)
+            npx -y @railway/cli variables --set "API_PROXY_TARGET=$1" --service invisiblePOSERP
+          }
+
+          verify_matrix
+
+          case "$ACTION" in
+            verify)
+              if [ "$PHIN_OK" = "true" ]; then echo "✅ private target $INTERNAL is REACHABLE from the web container — cutover is safe (dispatch action=cutover)";
+              else echo "::warning::private target $INTERNAL NOT reachable from the web container — fix the API bind/port before cutover (see /proxy-health error above)"; fi
+              [ "$CFG_OK" = "true" ] || { echo "::error::the live proxy leg /api/config is failing — investigate before any change"; exit 1; }
+              ;;
+
+            cutover)
+              [ "$PHIN_OK" = "true" ] || { echo "::error::pre-check failed: $INTERNAL not reachable from the web container — refusing to flip (nothing changed)"; exit 1; }
+              if [ "$CURRENT" = "$INTERNAL" ]; then echo "already on the private target — nothing to do"; exit 0; fi
+              echo "Flipping API_PROXY_TARGET → $INTERNAL (web service redeploys)…"
+              set_target "$INTERNAL"
+              if poll_green "$INTERNAL"; then
+                echo "✅ CUTOVER COMPLETE — same-origin proxy now rides the private network."
+                echo "Next (once soaked): dispatch action=remove-samesite to drop AUTH_COOKIE_SAMESITE=None."
+              else
+                echo "::error::cutover did not go green in the poll window — AUTO-ROLLBACK to $API_PUB"
+                set_target "$API_PUB"
+                poll_green "$API_PUB" && echo "rollback verified green" || echo "::error::rollback ALSO not green — manual attention required"
+                exit 1
+              fi
+              ;;
+
+            rollback)
+              echo "Forcing API_PROXY_TARGET → $API_PUB…"
+              set_target "$API_PUB"
+              poll_green "$API_PUB" || { echo "::error::rollback did not go green"; exit 1; }
+              echo "✅ rolled back to the public edge"
+              ;;
+
+            remove-samesite)
+              # Only safe once the browser no longer needs cross-site cookies — i.e. the same-origin
+              # proxy is live and green. Fail-closed on every precondition.
+              [ "$CFG_OK" = "true" ] || { echo "::error::proxy leg not green — refusing"; exit 1; }
+              [ "$PH_RUNTIME" = "$INTERNAL" ] || [ "$CURRENT" = "$INTERNAL" ] || { echo "::error::API_PROXY_TARGET is not the private target — run action=cutover first"; exit 1; }
+              if ! echo "$API_VARS" | jq -e 'has("AUTH_COOKIE_SAMESITE")' >/dev/null; then echo "AUTH_COOKIE_SAMESITE already absent — nothing to do"; exit 0; fi
+              echo "Deleting AUTH_COOKIE_SAMESITE from the API service…"
+              DEL=$(gq "{\"query\":\"mutation{variableDelete(input:{projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$API_SID\\\",name:\\\"AUTH_COOKIE_SAMESITE\\\"})}\"}")
+              echo "$DEL" | jq -e '.data.variableDelete == true' >/dev/null || { echo "::error::variableDelete failed: $(echo "$DEL" | jq -c '.errors // .')"; exit 1; }
+              echo "Redeploying the API so the change takes effect…"
+              npx -y @railway/cli redeploy --service invisibleERP --yes
+              for i in $(seq 1 36); do sleep 10; hz=$(code_of "$API_PUB/readyz"); echo "  [$i] /readyz=$hz"; [ "$hz" = 200 ] && break; done
+              [ "$hz" = 200 ] || { echo "::error::API did not come back ready after redeploy"; exit 1; }
+              verify_matrix
+              [ "$CFG_OK" = "true" ] || { echo "::error::proxy leg went red after the API redeploy"; exit 1; }
+              echo "✅ AUTH_COOKIE_SAMESITE removed — cookies are back to the SameSite=Lax default (same-origin only)."
+              echo "Note: signing in on the API's PUBLIC domain directly stops working by design; always use $WEB."
+              ;;
+          esac
