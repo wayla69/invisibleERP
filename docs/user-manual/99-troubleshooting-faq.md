@@ -88,6 +88,14 @@ your code below.
 | `CLAIM_WINDOW_CLOSED` (422) | You tried to open a goods-receipt claim more than 24 hours (configurable) after the receipt — the claim window auto-closed. | The system will no longer take the claim; pursue it with the supplier commercially. Going forward, check deliveries and claim from the receiving summary on the spot. |
 | `PO_LINE_CLOSED` (422) | You tried to receive against a PO line that was **closed short** (the shortage decision at the dock). | The close is binding — a new delivery needs a new PO. |
 
+### Tax documents
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `INVALID_BUYER_TAXID` (400) | The buyer's 13-digit Tax ID failed the checksum (a mis-keyed digit) when issuing/converting a full tax invoice. | Re-check the number on the customer's ภ.พ.20 / company card and key all 13 digits again. |
+| `ABB_VOIDED` (400) | You tried to convert a **voided** abbreviated slip into a full tax invoice. | A voided slip cannot be converted. If the sale was real, issue the full tax invoice from the POS sale instead (`/tax/invoices` → full-invoice card). |
+| `NOT_ABBREVIATED` (400) | The document number you entered for conversion is not an abbreviated tax invoice (ATV-…). | Check the slip — conversion applies only to abbreviated invoices; to change a full invoice, use a credit/debit note instead. |
+
 ### Finance & General Ledger
 
 | Code | Meaning | What to do |

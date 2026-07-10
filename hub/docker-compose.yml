@@ -1,0 +1,84 @@
+# Invisible ERP — Store Hub (LAN-first Phase 1, docs/41 · runbook: docs/ops/store-hub-setup.md)
+#
+# The SAME api+web images the cloud runs, on a small box in the store. Every in-store device (tills,
+# KDS, customer displays, diner phones on the store WiFi) uses THIS box as its origin; the internet
+# can die and front-of-house keeps working. Seed it once from a cloud snapshot (see `hub-seed` below).
+#
+#   cp .env.example .env   # then fill the secrets
+#   docker compose up -d --build
+#   docker compose --profile seed run --rm hub-seed   # after placing snapshot/hub-snapshot.json
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ierp
+      POSTGRES_PASSWORD: ${HUB_DB_PASSWORD:?set HUB_DB_PASSWORD in .env}
+      POSTGRES_DB: ierp_hub
+    volumes:
+      - hub_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ierp -d ierp_hub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ierp:${HUB_DB_PASSWORD}@db:5432/ierp_hub
+      JWT_SECRET: ${HUB_JWT_SECRET:?set HUB_JWT_SECRET in .env}
+      APP_ENC_KEY: ${HUB_APP_ENC_KEY:?set HUB_APP_ENC_KEY in .env}
+      PSP_WEBHOOK_SECRET: ${HUB_PSP_WEBHOOK_SECRET:-hub-psp-unused}
+      CORS_ORIGINS: ${HUB_ORIGIN:?set HUB_ORIGIN in .env (e.g. https://store1.pos.example.com)}
+      HUB_SYNC_SECRET: ${HUB_SYNC_SECRET:?set HUB_SYNC_SECRET in .env (must match the cloud)}
+      TENANCY_MODE: multi-company   # single store = one tenant; keep Admin scoping fail-closed anyway
+      PUBLIC_SIGNUP_ENABLED: "false" # a hub NEVER self-signs-up tenants
+      RUN_MIGRATIONS: "1"            # entrypoint applies drizzle migrations before boot
+      PORT: "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Empty ⇒ the browser calls RELATIVE /api/* against the web origin, and the Next server
+        # proxies them to the api container (API_PROXY_TARGET rewrite) — one origin per store, no
+        # per-store rebuild, and the session cookie stays first-party (see cross-origin gotcha).
+        NEXT_PUBLIC_API_URL: ""
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PROXY_TARGET: http://api:8000
+    ports:
+      - "80:3000"   # put a TLS terminator in front for HTTPS — see the runbook (§TLS on the LAN)
+    depends_on:
+      - api
+
+  # One-shot seeder (run explicitly with `--profile seed run --rm hub-seed`): imports the signed
+  # snapshot exported from the cloud's GET /api/hub/snapshot?include_credentials=1.
+  hub-seed:
+    profiles: ["seed"]
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://ierp:${HUB_DB_PASSWORD}@db:5432/ierp_hub
+      HUB_SYNC_SECRET: ${HUB_SYNC_SECRET}
+      HUB_ADMIN_PASSWORD: ${HUB_ADMIN_PASSWORD:-}
+    volumes:
+      - ./snapshot:/snapshot:ro
+    entrypoint: ["node", "apps/api/dist/database/hub-import.js", "/snapshot/hub-snapshot.json"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  hub_pgdata:
