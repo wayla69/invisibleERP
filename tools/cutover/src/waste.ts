@@ -48,6 +48,20 @@ async function main() {
   ]).onConflictDoNothing();
   // seed ingredient stock for T1: 100 units of PORK on hand
   await db.insert(s.customerInventory).values({ tenantId: t1, itemId: 'PORK', itemDescription: 'หมูสับ', uom: 'kg', currentStock: '100' });
+  // POS-5a — seed a recipe + ingredient stock for the void-fired-item capture: FRIEDRICE = 0.2kg RICE (30/kg) + 1 EGG (5/ea)
+  await db.insert(s.customerInventory).values([
+    { tenantId: t1, itemId: 'RICE', itemDescription: 'ข้าวสาร', uom: 'kg', currentStock: '50' },
+    { tenantId: t1, itemId: 'EGG', itemDescription: 'ไข่ไก่', uom: 'ea', currentStock: '200' },
+  ]);
+  const [frItem] = await db.insert(s.menuItems).values({ tenantId: t1, sku: 'FRIEDRICE', name: 'ข้าวผัด', type: 'food', price: '60', active: true }).returning();
+  const [fr] = await db.insert(s.menuRecipes).values({ tenantId: t1, menuItemId: Number(frItem.id), sku: 'FRIEDRICE', yieldQty: '1', active: true }).returning();
+  await db.insert(s.menuRecipeLines).values([
+    { tenantId: t1, recipeId: Number(fr.id), ingredientItemId: 'RICE', ingredientDescription: 'ข้าวสาร', qtyPer: '0.2', uom: 'kg', unitCost: '30' },
+    { tenantId: t1, recipeId: Number(fr.id), ingredientItemId: 'EGG', ingredientDescription: 'ไข่ไก่', qtyPer: '1', uom: 'ea', unitCost: '5' },
+  ]);
+  // POS-5a — seed recipe-COGS 'Consume' depletion for RICE (theoretical usage baseline for the usage-variance report):
+  // 50 servings sold × 0.2kg = 10kg theoretical use.
+  await db.insert(s.custStockLog).values({ tenantId: t1, itemId: 'RICE', itemDescription: 'ข้าวสาร', logDate: new Date(), logType: 'Consume', qtyChange: '-10', balanceAfter: '40', refDoc: 'SALE-1', createdBy: 'pos' });
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -99,6 +113,41 @@ async function main() {
   // ── 7. trial balance balanced ──
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after waste postings', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
+
+  // ── 8. POS-5a: disposition taxonomy — costed waste with a disposition + invalid disposition rejected ──
+  const disp = await inj('POST', '/api/inventory/waste', wh1, { item_id: 'PORK', qty: 2, reason_code: 'expiry', unit_cost: 80, disposition: 'donate' });
+  ok('Waste: disposition=donate accepted, echoed back', disp.status === 201 && disp.json.disposition === 'donate' && near(disp.json.total_cost, 160), `${disp.status} ${disp.json.disposition}`);
+  const badD = await inj('POST', '/api/inventory/waste', wh1, { item_id: 'PORK', qty: 1, reason_code: 'damage', disposition: 'nonsense' });
+  ok('Waste: invalid disposition rejected (400 BAD_DISPOSITION)', badD.status === 400, `${badD.status}`);
+
+  // ── 9. POS-5a: void-fired-item capture — a voided FRIEDRICE explodes its recipe to ingredient waste + one JE ──
+  //   1 dish × (0.2kg RICE @30 = 6.00) + (1 EGG @5 = 5.00) = 11.00; reason void_fire, source void_fire.
+  const vf = await inj('POST', '/api/inventory/waste/void-fire', wh1, { sku: 'FRIEDRICE', qty: 1, ref_doc: 'TCKT-9', disposition: 'discard' });
+  ok('VoidFire: FRIEDRICE explodes to 2 ingredient waste lines, total 11.00, one JE', vf.status === 201 && vf.json.lines === 2 && near(vf.json.total_cost, 11) && /^WASTE-/.test(vf.json.waste_no ?? '') && /^JE-/.test(vf.json.journal_no ?? ''), JSON.stringify(vf.json).slice(0, 140));
+  const riceStock = async () => Number(((await pg.query(`SELECT current_stock v FROM customer_inventory WHERE tenant_id=${t1} AND item_id='RICE'`)).rows as any[])[0].v);
+  ok('VoidFire: RICE stock 50 → 49.8 (0.2kg written off)', near(await riceStock(), 49.8), `rice=${await riceStock()}`);
+  const vfBad = await inj('POST', '/api/inventory/waste/void-fire', wh1, { sku: 'NOPE', qty: 1 });
+  ok('VoidFire: unknown sku → NO_RECIPE (400)', vfBad.status === 400 && vfBad.json.error?.code === 'NO_RECIPE', `${vfBad.status} ${vfBad.json.error?.code}`);
+
+  // ── 10. POS-5a: by_disposition analytics + void_fire reason surface in the list ──
+  const list2 = await inj('GET', '/api/inventory/waste', wh1);
+  const donateD = (list2.json.by_disposition ?? []).find((d: any) => d.disposition === 'donate');
+  const voidR = (list2.json.by_reason ?? []).find((r: any) => r.reason === 'void_fire');
+  ok('Waste: by_disposition rolls up donate cost 160; void_fire reason present', near(donateD?.cost, 160) && voidR != null && voidR.count === 2, JSON.stringify(list2.json.by_disposition));
+  const dispFilter = await inj('GET', '/api/inventory/waste?disposition=donate', wh1);
+  ok('Waste: ?disposition=donate filter returns only the donate row', dispFilter.json.count === 1 && dispFilter.json.waste[0]?.disposition === 'donate', `count=${dispFilter.json.count}`);
+
+  // ── 11. POS-5a: theoretical-vs-actual USAGE variance — RICE theoretical 10kg (Consume), waste 0.2kg (void_fire) ──
+  const varr = await inj('GET', '/api/inventory/waste/variance', wh1);
+  const riceVar = (varr.json.items ?? []).find((i: any) => i.item_id === 'RICE');
+  ok('UsageVariance: RICE theoretical 10, waste 0.2, actual 10.2, variance_cost 6 (0.2×30), pct 2%',
+    riceVar != null && near(riceVar.theoretical_use, 10) && near(riceVar.waste_use, 0.2) && near(riceVar.actual_use, 10.2) && near(riceVar.variance_cost, 6) && near(riceVar.variance_pct, 2),
+    JSON.stringify(riceVar));
+  ok('UsageVariance: summary variance_cost > 0 (waste-explained usage above recipe theoretical)', varr.json.summary?.variance_cost > 0, JSON.stringify(varr.json.summary));
+
+  // ── 12. trial balance still balanced after disposition + void-fire postings ──
+  const tb2 = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+  ok('Trial balance balanced after POS-5a postings', tb2.totals?.balanced === true, JSON.stringify(tb2.totals ?? {}));
 
   await app.close();
   await pg.close();

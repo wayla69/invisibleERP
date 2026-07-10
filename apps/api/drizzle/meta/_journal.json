@@ -2136,6 +2136,13 @@
       "when": 2023820000267,
       "tag": "0304_offline_dinein_ops",
       "breakpoints": true
+    },
+    {
+      "idx": 305,
+      "version": "7",
+      "when": 2023820000268,
+      "tag": "0305_waste_disposition",
+      "breakpoints": true
     }
   ]
 }
