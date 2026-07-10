@@ -2194,9 +2194,16 @@
       "breakpoints": true
     },
     {
-      "idx": 312,
+      "idx": 315,
       "version": "7",
       "when": 2023820000276,
+      "tag": "0315_member_ledger_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 312,
+      "version": "7",
+      "when": 2023820000277,
       "tag": "0312_dine_in_seat",
       "breakpoints": true
     }

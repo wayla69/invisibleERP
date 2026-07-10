@@ -501,6 +501,36 @@ each payment individually or one bulk amount for the whole file. The run page sh
 the cleared progress, so you can see at a glance that the approved money actually
 left the bank.
 
+### B2c. Early-payment (prompt-payment) discounts on a payment run
+
+If a supplier offers a discount for paying early — e.g. **2% if paid 20+ days before
+the due date** — the payment run can take it automatically (control **EXP-14**), pay
+the supplier less, and book the saving as income. Two parts: an **approved discount
+policy**, then the run applies it.
+
+**Set up a discount policy (Accounting proposes, Finance activates):**
+1. On `/disbursements` open **นโยบายส่วนลดจ่ายก่อนกำหนด (Early-payment discount policies)**
+   and click **สร้างนโยบาย (New policy)** (`creditors`, `POST /api/finance/ap/discount-terms`).
+   Choose the **vendor** (or leave blank for a **global default** covering all vendors),
+   the **discount rate** (`discount_pct`, e.g. 2% — max 30%), the **minimum days early**
+   to earn any discount, the **full-discount window** (days-early at/above which the
+   full rate applies), whether to **prorate** the rate by how early you pay, and
+   (optionally) a validity date range. The policy is created **Draft** — it does nothing yet.
+2. A **different** person in Finance (`approvals`/`gl_close`) reviews and clicks
+   **เปิดใช้งาน (Activate)**. You **cannot activate a policy you created**
+   (`SOD_VIOLATION`). Activating a new policy automatically **retires the previous
+   active policy** for the same vendor, so only one policy is ever in force at a time.
+
+**How the run uses it:** when you propose a run (Step 1 above), every line that will be
+paid **before** its due date shows the **days early**, the **discount rate**, and the
+**discount amount**, and the run header shows the **projected savings**
+(`projected_discount`) — so the approver sees exactly how much the batch will save.
+On **execute**, each early bill is settled **in full** against the supplier's account,
+but the cash paid is reduced by the discount and the saving is posted as income
+(**4600 — Early-Payment Discount Income**). The bank file pays the reduced amount. A
+vendor with no active policy, or a bill not being paid early, simply gets **no
+discount** (net = gross). The run's **total_discount** records the saving captured.
+
 ### B3. AP aging
 
 1. On the **รายจ่าย (AP)** tab, scroll to **วิเคราะห์อายุเจ้าหนี้ (AP Aging)** (with an
