@@ -51,16 +51,20 @@ async function main() {
     { code: 'CUST', name: 'Credit Customer', creditLimit: '2500', email: 'ar@cust.example', phone: '0810000000' },
     { code: 'CUST2', name: 'Defaulting Customer', creditLimit: '100000', email: 'ar@cust2.example' }, // under limit but 90+ overdue
     { code: 'CUST3', name: 'Good Customer', creditLimit: '100000', phone: '0820000000' },             // under limit, only mildly overdue
+    { code: 'FATAX', name: 'FA Tax Book Co' },  // FIN-6a — parallel tax-book + deferred-tax isolation tenant
   ]).onConflictDoNothing();
   const tid = async (code: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, code)))[0].id);
   const hq = await tid('HQ');
   const cust = await tid('CUST');
   const cust2 = await tid('CUST2');
   const cust3 = await tid('CUST3');
+  const fatax = await tid('FATAX');
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'emp1', passwordHash: await pw.hash('emp123'), role: 'Admin', tenantId: hq }, // claimant (ESS)
     { username: 'mgr', passwordHash: await pw.hash('mgr123'), role: 'Admin', tenantId: hq },   // approver (≠ claimant)
+    { username: 'faadmin', passwordHash: await pw.hash('fa123'), role: 'Admin', tenantId: fatax }, // FIN-6a maker (FATAX)
+    { username: 'famgr', passwordHash: await pw.hash('fa123'), role: 'Admin', tenantId: fatax },   // FIN-6a checker (FATAX, ≠ maker)
   ]).onConflictDoNothing();
   // Employee linked to the emp1 user (ESS self-service) + two assets for EAM maintenance.
   await db.insert(s.employees).values([{ tenantId: hq, empCode: 'EMP1', name: 'Test Employee', userName: 'emp1', monthlySalary: '30000' }]).onConflictDoNothing();
@@ -739,6 +743,64 @@ async function main() {
     JSON.stringify({ location: newFa?.location, department: newFa?.department, serial_no: newFa?.serial_no }));
   const regDup = await inj('POST', '/api/assets/registrations', admin, { gr_no: grCap.json?.gr_no, gr_item_id: grItemId, name: 'dup', useful_life_months: 36 });
   ok('Capitalize: the same GR line cannot be capitalised twice (ALREADY_REGISTERED)', regDup.status === 400 && regDup.json?.error?.code === 'ALREADY_REGISTERED', `st=${regDup.status} code=${regDup.json?.error?.code}`);
+
+  // ───────────────── FIN-6a: parallel TAX depreciation book → deferred tax (FATAX tenant) ─────────────────
+  // A single asset with a Thai-tax book: cost 120000, book life 60m, TAX life 24m + 40% first-year INITIAL
+  // ALLOWANCE. Tax depreciates FAR faster than book, so tax NBV < book NBV → a taxable temp diff → DTL that
+  // flows straight into deferred tax (TAX-06) instead of a manual GAAP adjustment. Isolated in FATAX so the
+  // book/tax/deferred figures are exact (no other assets or AR allowance).
+  const faAdmin = (await inj('POST', '/api/login', undefined, { username: 'faadmin', password: 'fa123' })).json.token;
+  const faMgr = (await inj('POST', '/api/login', undefined, { username: 'famgr', password: 'fa123' })).json.token;
+  const acqTax = await inj('POST', '/api/assets', faAdmin, { name: 'CNC machine', acquire_date: '2026-01-01', acquire_cost: 120000, useful_life_months: 60, acquire_source: 'credit', tax_useful_life_months: 24, tax_initial_allowance_pct: 40 });
+  ok('FIN-6a: acquire seeds the parallel tax book (tax NBV = cost at acquisition)', acqTax.status === 201 && /^FA-/.test(acqTax.json?.asset_no ?? ''), `st=${acqTax.status} asset=${acqTax.json?.asset_no}`);
+  const faTaxAssetNo = acqTax.json?.asset_no;
+  const faReg = (await inj('GET', '/api/assets', faAdmin)).json;
+  const faAsset = (faReg.assets ?? []).find((a: any) => a.asset_no === faTaxAssetNo);
+  ok('FIN-6a: register exposes the tax book (tax_net_book_value 120000, tax_useful_life_months 24)', near(faAsset?.tax_net_book_value, 120000) && faAsset?.tax_useful_life_months === 24 && near(faAsset?.tax_initial_allowance_pct, 40), `tnbv=${faAsset?.tax_net_book_value} tlife=${faAsset?.tax_useful_life_months}`);
+  // Book depreciation for 2026-01 (Dr 5200 / Cr 1590): 120000/60 = 2000 → book NBV 118000.
+  await inj('POST', '/api/assets/depreciation/run', faAdmin, { period: '2026-01' });
+  // Tax depreciation for 2026-01 (NO GL): initial allowance 40% × 120000 = 48000 + 120000/24 = 5000 → 53000; tax NBV 67000.
+  const taxRun = await inj('POST', '/api/assets/tax-depreciation/run', faAdmin, { period: '2026-01' });
+  const taxLine = (taxRun.json?.assets ?? []).find((x: any) => x.asset_no === faTaxAssetNo);
+  ok('FIN-6a: tax-depreciation run applies the initial allowance + accelerated life (53000; tax NBV 67000; NO GL)', taxRun.status === 201 && near(taxLine?.tax_depreciation, 53000) && near(taxLine?.initial_allowance, 48000) && near(taxLine?.tax_nbv_after, 67000), `dep=${taxLine?.tax_depreciation} ia=${taxLine?.initial_allowance} nbv=${taxLine?.tax_nbv_after}`);
+  const taxRerun = await inj('POST', '/api/assets/tax-depreciation/run', faAdmin, { period: '2026-01' });
+  ok('FIN-6a: tax-depreciation run is idempotent per period (re-run → 0 assets)', taxRerun.status === 201 && taxRerun.json?.asset_count === 0, `count=${taxRerun.json?.asset_count}`);
+  // Deferred tax now reads the REAL tax book: book NBV 118000 − tax NBV 67000 = 51000 taxable temp diff → DTL 51000 × 20% = 10200.
+  // (Contrast: the pre-FIN-6 factor fallback would have given only ~200 — the actual tax book is what feeds the difference.)
+  const faDt = await inj('POST', '/api/ledger/deferred-tax/run', faAdmin, { period: '2026-01', as_of_date: '2026-01-31', tenant_id: fatax });
+  ok('FIN-6a: deferred tax consumes the actual tax NBV → DTL 10200, net deferred −10200 (not the factor approximation)', faDt.status === 200 && near(faDt.json?.dtl, 10200) && near(faDt.json?.net_deferred, -10200) && near(faDt.json?.delta_posted, -10200), `dtl=${faDt.json?.dtl} net=${faDt.json?.net_deferred}`);
+  const faDtPost = await inj('POST', `/api/ledger/deferred-tax/${faDt.json?.id}/post`, faMgr);
+  ok('FIN-6a: a different user posts the deferred-tax charge (Dr 5950 / Cr 1700, Δ −10200)', faDtPost.status === 200 && near(faDtPost.json?.delta_posted, -10200) && /^JE-/.test(faDtPost.json?.entry_no ?? ''), `st=${faDtPost.status} delta=${faDtPost.json?.delta_posted} je=${faDtPost.json?.entry_no}`);
+
+  // ───────────────── FA-13: CIP / AUC — accumulate cost → settle to a fixed asset (maker-checker) ─────────────────
+  // A construction-in-progress asset accumulates cost lines into 1520 CIP (NOT depreciated) and is capitalised
+  // to a normal fixed asset (Dr 1500 / Cr 1520) only after a DIFFERENT user approves a settlement request.
+  const cip1500Before = await tbBalance('1500');
+  const cip1520Before = await tbBalance('1520');
+  const cip2000CrBefore = await tbCredit2('2000');
+  const openCip = await inj('POST', '/api/assets/cip', admin, { name: 'New warehouse build', location: 'Site B', department: 'Ops' });
+  ok('CIP: open a construction-in-progress asset (status Open, cost 0)', openCip.status === 201 && /^CIP-/.test(openCip.json?.cip_no ?? '') && openCip.json?.status === 'Open', `st=${openCip.status} no=${openCip.json?.cip_no}`);
+  const cipNo = openCip.json?.cip_no;
+  const cost1 = await inj('POST', `/api/assets/cip/${cipNo}/cost`, admin, { amount: 30000, source_type: 'gr', source_ref: 'GR-CIP-1', description: 'Foundation', pay_source: 'credit' });
+  ok('CIP: add cost line 1 (30000, credit) posts Dr 1520 / Cr 2000; accumulated 30000', cost1.status === 201 && near(cost1.json?.accumulated_cost, 30000) && /^JE-/.test(cost1.json?.journal_no ?? ''), `acc=${cost1.json?.accumulated_cost} je=${cost1.json?.journal_no}`);
+  const cost2 = await inj('POST', `/api/assets/cip/${cipNo}/cost`, admin, { amount: 20000, source_type: 'manual', description: 'Steelwork', pay_source: 'cash' });
+  ok('CIP: add cost line 2 (20000, cash) posts Dr 1520 / Cr 1000; accumulated 50000', cost2.status === 201 && near(cost2.json?.accumulated_cost, 50000), `acc=${cost2.json?.accumulated_cost}`);
+  ok('CIP: accumulated cost sits in 1520 (balance +50000), NOT yet in 1500', near(await tbBalance('1520'), cip1520Before + 50000) && near(await tbBalance('1500'), cip1500Before) && near(await tbCredit2('2000'), cip2000CrBefore + 30000), `b1520=${await tbBalance('1520')} b1500=${await tbBalance('1500')}`);
+  // Settlement request (maker) — reason mandatory; posts nothing.
+  const settleReq = await inj('POST', `/api/assets/cip/${cipNo}/settle`, admin, { name: 'Warehouse B', useful_life_months: 240, reason: 'Construction complete, ready for use', tax_useful_life_months: 120 });
+  ok('CIP: settlement request → PendingSettlement, NO GL yet (1500 unchanged)', settleReq.status === 201 && settleReq.json?.status === 'PendingSettlement' && near(await tbBalance('1500'), cip1500Before), `st=${settleReq.json?.status} b1500=${await tbBalance('1500')}`);
+  const settleSelf = await inj('POST', `/api/assets/cip/${cipNo}/settle/approve`, admin);
+  ok('CIP: preparer self-approval blocked → 403 SOD_VIOLATION (FA-13)', settleSelf.status === 403 && settleSelf.json?.error?.code === 'SOD_VIOLATION', `${settleSelf.status} ${settleSelf.json?.error?.code}`);
+  const settleAppr = await inj('POST', `/api/assets/cip/${cipNo}/settle/approve`, mgr);
+  ok('CIP: a different user approves → asset created, reclass posts (Dr 1500 +50000 / Cr 1520 -50000)', settleAppr.status === 201 && /^FA-/.test(settleAppr.json?.asset_no ?? '') && near(settleAppr.json?.capitalized_cost, 50000) && near(await tbBalance('1500'), cip1500Before + 50000) && near(await tbBalance('1520'), cip1520Before), `asset=${settleAppr.json?.asset_no} b1500=${await tbBalance('1500')} b1520=${await tbBalance('1520')}`);
+  const cipReg = (await inj('GET', '/api/assets', admin)).json;
+  const cipFa = (cipReg.assets ?? []).find((x: any) => x.asset_no === settleAppr.json?.asset_no);
+  ok('CIP: settled asset is on the register with source CIP traceability + its own tax book', cipFa?.source_cip_no === cipNo && near(cipFa?.acquire_cost, 50000) && near(cipFa?.tax_net_book_value, 50000), `cip=${cipFa?.source_cip_no} cost=${cipFa?.acquire_cost} tnbv=${cipFa?.tax_net_book_value}`);
+  const cipAdd = await inj('POST', `/api/assets/cip/${cipNo}/cost`, admin, { amount: 1000 });
+  ok('CIP: a capitalized CIP rejects further cost (CIP_NOT_OPEN)', cipAdd.status === 400 && cipAdd.json?.error?.code === 'CIP_NOT_OPEN', `${cipAdd.status} ${cipAdd.json?.error?.code}`);
+  const emptyCip = await inj('POST', '/api/assets/cip', admin, { name: 'Empty project' });
+  const emptySettle = await inj('POST', `/api/assets/cip/${emptyCip.json?.cip_no}/settle`, admin, { useful_life_months: 60, reason: 'test' });
+  ok('CIP: a CIP with no accumulated cost cannot be settled (CIP_NO_COST)', emptySettle.status === 400 && emptySettle.json?.error?.code === 'CIP_NO_COST', `${emptySettle.status} ${emptySettle.json?.error?.code}`);
 
   // ───────────────────── Perpetual inventory valuation sub-ledger (INV-01..04) ─────────────────────
   // Run in a dedicated tenant so the inventory control account (1200) is isolated from the cash-flow seed.

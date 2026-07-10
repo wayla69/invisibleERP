@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AssetsService } from './assets.service';
-import { CreateCategoryBody, AcquireAssetBody, RunDepreciationBody, DisposeAssetBody, RegisterFromGrBody, type CreateCategoryDto, type AcquireAssetDto, type DisposeAssetDto, type RegisterFromGrDto } from './dto';
+import { CreateCategoryBody, AcquireAssetBody, RunDepreciationBody, DisposeAssetBody, RegisterFromGrBody, OpenCipBody, AddCipCostBody, SettleCipBody, type CreateCategoryDto, type AcquireAssetDto, type DisposeAssetDto, type RegisterFromGrDto, type OpenCipDto, type AddCipCostDto, type SettleCipDto } from './dto';
 import { qint, qintOpt } from '../../common/query';
 
 const ScanUpdateBody = z.object({ code: z.string().min(1), location: z.string().optional(), assigned_to: z.string().optional(), note: z.string().optional() });
@@ -73,4 +73,17 @@ export class AssetsController {
 
   @Post('depreciation/run') runDep(@Body(new ZodValidationPipe(RunDepreciationBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.runDepreciation(b.period, u); }
   @Get('depreciation/runs') runs(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listRuns(u, qint('limit', limit, 50)); }
+
+  // FIN-6a — advance the parallel TAX depreciation book for a period (memo-only, NO GL). Feeds the deferred-tax
+  // book-vs-tax temporary difference (TAX-06).
+  @Post('tax-depreciation/run') runTaxDep(@Body(new ZodValidationPipe(RunDepreciationBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.runTaxDepreciation(b.period, u); }
+
+  // ── CIP / AUC (FA-13): construction-in-progress → accumulate cost → settle to a fixed asset (maker-checker) ──
+  @Post('cip') openCip(@Body(new ZodValidationPipe(OpenCipBody)) b: OpenCipDto, @CurrentUser() u: JwtUser) { return this.svc.openCip(b, u); }
+  @Get('cip') listCip(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listCip(status, u); }
+  @Get('cip/:cipNo') getCip(@Param('cipNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.getCip(no, u); }
+  @Post('cip/:cipNo/cost') addCipCost(@Param('cipNo') no: string, @Body(new ZodValidationPipe(AddCipCostBody)) b: AddCipCostDto, @CurrentUser() u: JwtUser) { return this.svc.addCipCost(no, b, u); }
+  @Post('cip/:cipNo/settle') settleCip(@Param('cipNo') no: string, @Body(new ZodValidationPipe(SettleCipBody)) b: SettleCipDto, @CurrentUser() u: JwtUser) { return this.svc.settleCip(no, b, u); }
+  @Post('cip/:cipNo/settle/approve') approveCip(@Param('cipNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveCipSettlement(no, u); }
+  @Post('cip/:cipNo/settle/reject') rejectCip(@Param('cipNo') no: string, @Body(new ZodValidationPipe(RevalRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectCipSettlement(no, u, b?.reason); }
 }
