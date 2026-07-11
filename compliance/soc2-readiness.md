@@ -8,13 +8,13 @@
 **Related:** `COSO_ICFR_Audit_Readiness_Plan.md` · `Oshinei_ERP_SOX_RCM_v1.xlsx` · `policies/`
 
 > **Relationship to SOX work:** SOC 2 and SOX share most of their ITGC DNA. The <!-- rcm-total -->234<!-- /rcm-total -->-control RCM
-> (<!-- rcm-implemented -->230<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
+> (<!-- rcm-implemented -->231<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
 > **Relationship to SOX work:** SOC 2 and SOX share most of their ITGC DNA. The <!-- rcm-total -->234<!-- /rcm-total -->-control RCM
-> (<!-- rcm-implemented -->230<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
+> (<!-- rcm-implemented -->231<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
 > **Relationship to SOX work:** SOC 2 and SOX share most of their ITGC DNA. The <!-- rcm-total -->234<!-- /rcm-total -->-control RCM
-> (<!-- rcm-implemented -->230<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
+> (<!-- rcm-implemented -->231<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
 > **Relationship to SOX work:** SOC 2 and SOX share most of their ITGC DNA. The <!-- rcm-total -->234<!-- /rcm-total -->-control RCM
-> (<!-- rcm-implemented -->230<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
+> (<!-- rcm-implemented -->231<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
 > the two frameworks is narrower than it appears — SOC 2 adds service-organization-specific
 > requirements (customer commitments, system description, availability) not in SOX. This document
 > maps the existing controls to SOC 2 TSC, identifies the incremental evidence needed, and defines
