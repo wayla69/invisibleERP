@@ -1196,6 +1196,13 @@ async function main() {
   ok('GL-11: deactivating an account with a non-zero balance → 400 ACCOUNT_HAS_BALANCE',
     deac.status === 400 && deac.json.error?.code === 'ACCOUNT_HAS_BALANCE', `${deac.status} ${deac.json.error?.code}`);
 
+  // 5b. Account-universe guard (GL-21 extension, docs/42 step 1): a manual JE naming an account that does
+  //     not exist in the canonical chart is rejected fail-closed — it would otherwise post silently and
+  //     then vanish from every typed report (they INNER JOIN accounts).
+  const ghost = await inj('POST', '/api/ledger/journal', glacct, { date: today, source: 'Manual', memo: 'ghost account', lines: [{ account_code: '6666', debit: 100 }, { account_code: '4000', credit: 100 }] });
+  ok('GL-21: manual JE to a non-existent account → 400 INVALID_POSTING_ACCOUNT (account-universe guard)',
+    ghost.status === 400 && ghost.json.error?.code === 'INVALID_POSTING_ACCOUNT', `${ghost.status} ${ghost.json.error?.code}`);
+
   // 6. Per-tenant overlay curation (gl_coa): a tenant's FinancialController shapes its OWN chart (rename 4000)
   //    without touching the canonical universe. Isolated on the freshly-provisioned RESTC restaurant tenant.
   const restcTid = await tid('RESTC');

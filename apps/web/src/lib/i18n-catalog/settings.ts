@@ -627,6 +627,13 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.wh.verify_prefix': { th: 'ผู้รับตรวจสอบลายเซ็น:', en: 'The recipient verifies the signature:' },
 
   // setup/item-categories
+  'st.scat_det_title': { th: 'การกำหนดบัญชีตามสินค้า (Posting determination)', en: 'Item posting determination' },
+  'st.scat_det_desc': { th: 'เมื่อเปิด รายการบัญชีจะเลือกบัญชี GL/VAT/WHT ตามลำดับ สินค้า → หมวดสินค้า → คลัง → ค่ามาตรฐาน (docs/33, ควบคุม GL-21 ตรวจบัญชีปลายทางก่อนบันทึกเสมอ) เมื่อปิด ทุกโมดูลใช้บัญชีมาตรฐานเดิม และค่าที่ตั้งในหน้านี้จะยังไม่มีผลกับการลงบัญชี', en: 'When ON, postings resolve their GL/VAT/WHT accounts item → category → warehouse → standard default (docs/33; control GL-21 validates every resolved account before posting). When OFF, every module posts to the standard accounts and the values on this page have no posting effect yet.' },
+  'st.scat_det_on': { th: 'เปิดใช้งานอยู่', en: 'Enabled' },
+  'st.scat_det_off': { th: 'ปิดอยู่ (ใช้บัญชีมาตรฐาน)', en: 'Off (standard accounts)' },
+  'st.scat_det_turn_on': { th: 'เปิดใช้งาน', en: 'Turn on' },
+  'st.scat_det_turn_off': { th: 'ปิดการใช้งาน', en: 'Turn off' },
+  'st.scat_det_saved': { th: 'บันทึกการตั้งค่าการกำหนดบัญชีแล้ว', en: 'Posting-determination setting saved' },
   'st.scat_saved': { th: 'บันทึกหมวด {code}', en: 'Saved category {code}' },
   'st.scat_title': { th: 'หมวดสินค้า (Item Categories)', en: 'Item Categories' },
   'st.scat_desc': { th: 'กำหนดผังบัญชีปริยาย (รายได้ / ต้นทุนขาย / สินค้าคงคลัง / มูลค่า) และรหัสภาษี VAT/หัก ณ ที่จ่าย ต่อกลุ่มสินค้า — เครื่องยนต์บัญชีจะเลือก สินค้า → หมวด → บัญชีคุมมาตรฐาน', en: 'Define the default account set (revenue / COGS / inventory / valuation) and VAT/withholding tax codes per item family — the posting engine resolves item → category → standard control account' },

@@ -129,12 +129,22 @@ export class LeasesService {
       const rouNbv = n(l.rouNbv);
       const dep = isLast ? rouNbv : round2(rouNbv / (term - already));
       const period = String(today).slice(0, 7);
+      // docs/42 step 4: tenant posting-rule overrides (LEASE.INTEREST / LEASE.PRINCIPAL / DEPRECIATION.ROU
+      // roles) ?? the standard literals — an un-configured tenant posts exactly as before.
+      const none: Record<string, string> = {};
+      const [ovrInt, ovrPrin, ovrDep] = this.ledger
+        ? await Promise.all([
+            this.ledger.postingOverrides('LEASE.INTEREST', l.tenantId ?? null),
+            this.ledger.postingOverrides('LEASE.PRINCIPAL', l.tenantId ?? null),
+            this.ledger.postingOverrides('DEPRECIATION.ROU', l.tenantId ?? null),
+          ])
+        : [none, none, none];
       const lines: any[] = [];
-      if (interest > 0) lines.push({ account_code: '5900', debit: interest });
-      lines.push({ account_code: '2600', debit: principal });
-      if (dep > 0) lines.push({ account_code: '5210', debit: dep });
-      lines.push({ account_code: '1000', credit: payment });
-      if (dep > 0) lines.push({ account_code: '1690', credit: dep });
+      if (interest > 0) lines.push({ account_code: ovrInt.interest_exp ?? '5900', debit: interest });
+      lines.push({ account_code: ovrPrin.lease_liab ?? '2600', debit: principal });
+      if (dep > 0) lines.push({ account_code: ovrDep.dep_expense ?? '5210', debit: dep });
+      lines.push({ account_code: ovrPrin.cash ?? '1000', credit: payment });
+      if (dep > 0) lines.push({ account_code: ovrDep.accum_dep_rou ?? '1690', credit: dep });
       const res = this.ledger
         ? await this.ledger.postEntry({ date: today, source: 'LSE-RUN', sourceRef: `LSE-${Number(l.id)}-${period}`, tenantId: l.tenantId ?? null, memo: `Lease ${l.leaseNo} period ${already + 1}/${term}`, createdBy: `${user?.username ?? 'system'} (lease)`, lines })
         : { entry_no: `LSE-${period}` };

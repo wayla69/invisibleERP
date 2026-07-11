@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Layers, Plus, Save, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
+import { useMe, hasPerm } from '@/lib/auth';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -51,6 +52,7 @@ export default function ItemCategoriesPage() {
     <div>
       <PageHeader title={t('st.scat_title')} description={t('st.scat_desc')} />
       <div className="space-y-5">
+        <DeterminationToggle />
         <Card className="max-w-4xl gap-4 p-5">
           <h3 className="text-base font-semibold">{editing ? t('st.scat_edit_heading', { code: form.code }) : t('st.scat_add_heading')}</h3>
           <div className="grid gap-4 sm:grid-cols-3">
@@ -104,4 +106,43 @@ export default function ItemCategoriesPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="grid gap-2"><Label>{label}</Label>{children}</div>;
+}
+
+// The per-tenant `posting_determination` master switch (docs/33, GL-21; docs/42 step 3) — surfaced where
+// the determination is CONFIGURED so the "why doesn't my category account apply?" mystery answers itself.
+// Reading the flag list needs one of the GET perms (md_config/exec/dashboard/…); a viewer without it just
+// doesn't see the card. Toggling mirrors the PUT /api/feature-flags guard (md_config / exec).
+function DeterminationToggle() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const me = useMe();
+  const flagsQ = useQuery<{ flags: { key: string; enabled: boolean }[] }>({
+    queryKey: ['feature-flags'],
+    queryFn: () => api('/api/feature-flags'),
+    retry: false,
+  });
+  const flag = (flagsQ.data?.flags ?? []).find((f) => f.key === 'posting_determination');
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => api('/api/feature-flags/posting_determination', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    onSuccess: () => { notifySuccess(t('st.scat_det_saved')); qc.invalidateQueries({ queryKey: ['feature-flags'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  if (!flag) return null; // list not readable (no perm) or flag missing — stay out of the way
+  const canToggle = hasPerm(me.data, 'md_config', 'exec');
+  return (
+    <Card className="max-w-4xl gap-2 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-base font-semibold">{t('st.scat_det_title')}</h3>
+          <Badge variant={flag.enabled ? 'success' : 'muted'}>{flag.enabled ? t('st.scat_det_on') : t('st.scat_det_off')}</Badge>
+        </div>
+        {canToggle && (
+          <Button size="sm" variant={flag.enabled ? 'outline' : 'default'} disabled={toggle.isPending} onClick={() => toggle.mutate(!flag.enabled)}>
+            {flag.enabled ? t('st.scat_det_turn_off') : t('st.scat_det_turn_on')}
+          </Button>
+        )}
+      </div>
+      <p className="text-sm text-muted-foreground">{t('st.scat_det_desc')}</p>
+    </Card>
+  );
 }

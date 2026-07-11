@@ -1,25 +1,30 @@
 'use client';
 
-// ผังบัญชี (Chart of Accounts) — a dedicated, read-optimised reference view of the tenant's chart.
-// Richer than the quick-glance tab inside /accounting: the tenant's curated industry chart is *enriched*
-// with the full accounting attributes from the canonical universe (normal balance, control-account flag +
-// subledger, postability, required dimensions) and grouped by account type. Purely additive & read-only —
-// the canonical `accounts` table is the GLOBAL immutable posting universe (GL-10), so account creation /
-// editing is intentionally out of scope here (that touches the immutable chart + needs its own control).
+// ผังบัญชี (Chart of Accounts) — the tenant's chart reference view PLUS the GL-11 manage surface (docs/40
+// step 2). Reads stay read-optimised (industry overlay enriched with the canonical attributes); writes map
+// 1:1 onto the CoaController duties: canonical create/edit/deactivate = platform Admin/HQ only
+// (COA_ADMIN_ONLY — the `accounts` universe is shared by every tenant), while the per-tenant overlay
+// show/hide toggle is any gl_coa holder, and only when the tenant ALREADY runs a curated overlay — the
+// first overlay row would otherwise flip listAccounts into overlay mode and collapse the chart to one row.
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Ban, Download, Layers, ListTree, ShieldCheck } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Ban, Download, Eye, EyeOff, Layers, ListTree, Pencil, Plus, Power, ShieldCheck } from 'lucide-react';
 
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
+import { useMe } from '@/lib/auth';
+import { notifySuccess, notifyFromError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { SearchInput } from '@/components/search-input';
+import { FormField } from '@/components/form-field';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // Canonical rows arrive camelCase (raw Drizzle); the industry-overlay rows arrive as a snake_case subset.
 type RawAccount = {
@@ -69,12 +74,19 @@ const DIM_KEY: Record<string, string> = { branch: 'fnx.coa.dim_branch', project:
 
 export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initialCanon?: CoaResponse; initialOverlay?: CoaResponse }) {
   const { t } = useLang();
+  const me = useMe();
+  const qc = useQueryClient();
+  // Canonical writes are HQ-only (the API re-asserts COA_ADMIN_ONLY server-side — this only shapes the UI).
+  const isAdmin = me.data?.role === 'Admin';
   // Localised type / dimension labels (guard known keys, raw fallback for unknown).
   const typeLabel = (tp: string) => (TYPE_KEY[tp] ? t(TYPE_KEY[tp]) : tp);
   const dimLabel = (d: string) => (DIM_KEY[d] ? t(DIM_KEY[d]) : d);
   const [showAll, setShowAll] = useState(false);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
+  const [deactivating, setDeactivating] = useState<Row | null>(null);
 
   // Canonical universe = the rich attribute source (normal balance, control flags, postability, dimensions).
   const canonQ = useQuery<CoaResponse>({ queryKey: ['coa', 'canonical'], queryFn: () => api('/api/ledger/accounts?all=true'), initialData: initialCanon ?? undefined });
@@ -84,6 +96,19 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
 
   const gate = { isLoading: canonQ.isLoading || overlayQ.isLoading, error: canonQ.error ?? overlayQ.error };
   const hasOverlay = overlayQ.data?.industry_scoped === true;
+  const refresh = () => qc.invalidateQueries({ queryKey: ['coa'] });
+
+  // Codes currently ACTIVE on the tenant's curated chart (only meaningful when hasOverlay) — drives the
+  // per-row show/hide toggle in the full-chart view.
+  const overlayActive = useMemo(() => new Set((hasOverlay ? overlayQ.data?.accounts ?? [] : []).map((a) => a.code)), [hasOverlay, overlayQ.data]);
+
+  // GL-11 per-tenant curation: toggle an account on/off MY chart (never touches the canonical universe).
+  const curate = useMutation({
+    mutationFn: ({ code, active }: { code: string; active: boolean }) =>
+      api(`/api/ledger/accounts/${code}/overlay`, { method: 'PATCH', body: JSON.stringify({ active }) }),
+    onSuccess: (_d, v) => { notifySuccess(t('fnx.coa.overlay_saved', { code: v.code })); refresh(); },
+    onError: (e) => notifyFromError(e),
+  });
 
   // Enrich whichever base list is shown with the canonical attributes (keyed by code).
   const rows = useMemo<Row[]>(() => {
@@ -180,6 +205,37 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
       ),
     },
     { key: 'parentCode', label: t('fnx.coa.col_parent'), align: 'right' as const, render: (r: Row) => r.parentCode ?? <span className="text-muted-foreground">—</span> },
+    ...(isAdmin || hasOverlay
+      ? [{
+          key: 'actions',
+          label: t('fnx.coa.col_actions'),
+          sortable: false,
+          align: 'right' as const,
+          render: (r: Row) => (
+            <div className="flex items-center justify-end gap-1">
+              {hasOverlay && (overlayActive.has(r.code) ? (
+                <Button size="sm" variant="ghost" title={t('fnx.coa.hide_from_chart')} disabled={curate.isPending} onClick={() => curate.mutate({ code: r.code, active: false })}>
+                  <EyeOff className="size-4" />
+                </Button>
+              ) : (
+                <Button size="sm" variant="ghost" title={t('fnx.coa.add_to_chart')} disabled={curate.isPending} onClick={() => curate.mutate({ code: r.code, active: true })}>
+                  <Eye className="size-4" />
+                </Button>
+              ))}
+              {isAdmin && (
+                <Button size="sm" variant="ghost" title={t('fnx.coa.edit')} onClick={() => setEditing(r)}>
+                  <Pencil className="size-4" />
+                </Button>
+              )}
+              {isAdmin && r.active && (
+                <Button size="sm" variant="ghost" title={t('fnx.coa.deactivate')} onClick={() => setDeactivating(r)}>
+                  <Power className="size-4 text-destructive" />
+                </Button>
+              )}
+            </div>
+          ),
+        }]
+      : []),
   ];
 
   // Group the filtered rows by account type, in financial-statement order.
@@ -195,9 +251,16 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
         title={t('fnx.coa.title')}
         description={t('fnx.coa.description')}
         actions={
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!filtered.length}>
-            <Download className="size-4" /> {t('fnx.coa.export_csv')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!filtered.length}>
+              <Download className="size-4" /> {t('fnx.coa.export_csv')}
+            </Button>
+            {isAdmin && (
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <Plus className="size-4" /> {t('fnx.coa.new_account')}
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -249,6 +312,149 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
           )}
         </div>
       </StateView>
+
+      {creating && <CreateAccountDialog onClose={() => setCreating(false)} onSaved={() => { setCreating(false); refresh(); }} />}
+      {editing && <EditAccountDialog account={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
+      {deactivating && <DeactivateAccountDialog account={deactivating} onClose={() => setDeactivating(null)} onSaved={() => { setDeactivating(null); refresh(); }} />}
     </div>
+  );
+}
+
+const SELECT_CLS = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
+
+// Canonical create (COA_ADMIN_ONLY server-side): a new 4-digit code joins the SHARED universe. The service
+// derives normal balance from the type unless overridden; new accounts default postable.
+function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { t } = useLang();
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [nameTh, setNameTh] = useState('');
+  const [type, setType] = useState<string>('Expense');
+  const [parentCode, setParentCode] = useState('');
+  const [postable, setPostable] = useState(true);
+  const codeOk = /^\d{4}$/.test(code);
+  const save = useMutation({
+    mutationFn: () =>
+      api('/api/ledger/accounts', {
+        method: 'POST',
+        body: JSON.stringify({
+          code, name, type,
+          ...(nameTh.trim() ? { nameTh: nameTh.trim() } : {}),
+          ...(parentCode.trim() ? { parentCode: parentCode.trim() } : {}),
+          isPostable: postable,
+        }),
+      }),
+    onSuccess: () => { notifySuccess(t('fnx.coa.created', { code })); onSaved(); },
+    onError: (e) => notifyFromError(e),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('fnx.coa.create_title')}</DialogTitle>
+          <DialogDescription>{t('fnx.coa.create_desc')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <FormField label={t('fnx.coa.f_code')} htmlFor="coa-code" required error={code && !codeOk ? t('fnx.coa.f_code_error') : undefined}>
+            <Input id="coa-code" value={code} onChange={(e) => setCode(e.target.value.trim())} maxLength={4} inputMode="numeric" />
+          </FormField>
+          <FormField label={t('fnx.coa.f_name_en')} htmlFor="coa-name" required>
+            <Input id="coa-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </FormField>
+          <FormField label={t('fnx.coa.f_name_th')} htmlFor="coa-name-th">
+            <Input id="coa-name-th" value={nameTh} onChange={(e) => setNameTh(e.target.value)} />
+          </FormField>
+          <FormField label={t('fnx.coa.f_type')} htmlFor="coa-type" required>
+            <select id="coa-type" className={SELECT_CLS} value={type} onChange={(e) => setType(e.target.value)}>
+              {TYPE_ORDER.map((tp) => <option key={tp} value={tp}>{TYPE_KEY[tp] ? t(TYPE_KEY[tp]) : tp}</option>)}
+            </select>
+          </FormField>
+          <FormField label={t('fnx.coa.f_parent')} htmlFor="coa-parent">
+            <Input id="coa-parent" value={parentCode} onChange={(e) => setParentCode(e.target.value.trim())} maxLength={4} inputMode="numeric" />
+          </FormField>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={postable} onChange={(e) => setPostable(e.target.checked)} />
+            {t('fnx.coa.f_postable')}
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || !codeOk || !name.trim()}>{t('fnx.coa.save')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Canonical edit (COA_ADMIN_ONLY): rename / toggle postability. Codes are immutable; the service blocks
+// isPostable=false on an account that already carries postings (CODE_HAS_POSTINGS).
+function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLang();
+  const [name, setName] = useState(account.name);
+  const [nameTh, setNameTh] = useState(account.nameTh ?? '');
+  const [postable, setPostable] = useState(account.isPostable);
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/api/ledger/accounts/${account.code}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...(name.trim() && name !== account.name ? { name: name.trim() } : {}),
+          ...(nameTh !== (account.nameTh ?? '') ? { nameTh } : {}),
+          ...(postable !== account.isPostable ? { isPostable: postable } : {}),
+        }),
+      }),
+    onSuccess: () => { notifySuccess(t('fnx.coa.saved', { code: account.code })); onSaved(); },
+    onError: (e) => notifyFromError(e),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('fnx.coa.edit_title', { code: account.code })}</DialogTitle>
+          <DialogDescription>{t('fnx.coa.edit_desc')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <FormField label={t('fnx.coa.f_name_en')} htmlFor="coa-e-name">
+            <Input id="coa-e-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </FormField>
+          <FormField label={t('fnx.coa.f_name_th')} htmlFor="coa-e-name-th">
+            <Input id="coa-e-name-th" value={nameTh} onChange={(e) => setNameTh(e.target.value)} />
+          </FormField>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={postable} onChange={(e) => setPostable(e.target.checked)} />
+            {t('fnx.coa.f_postable')}
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || !name.trim()}>{t('fnx.coa.save')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Retire — never delete (docs/40): the service refuses a non-zero balance (ACCOUNT_HAS_BALANCE); history
+// stays intact and postEntry's account guard blocks new activity once isPostable flips off.
+function DeactivateAccountDialog({ account, onClose, onSaved }: { account: Row; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLang();
+  const save = useMutation({
+    mutationFn: () => api(`/api/ledger/accounts/${account.code}/deactivate`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess(t('fnx.coa.deactivated', { code: account.code })); onSaved(); },
+    onError: (e) => notifyFromError(e),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('fnx.coa.deactivate_title', { code: account.code })}</DialogTitle>
+          <DialogDescription>{t('fnx.coa.deactivate_desc')}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>
+          <Button variant="destructive" onClick={() => save.mutate()} disabled={save.isPending}>{t('fnx.coa.deactivate')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

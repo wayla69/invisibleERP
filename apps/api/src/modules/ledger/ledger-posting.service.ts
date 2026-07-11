@@ -122,23 +122,45 @@ export class LedgerPostingService {
       // a year-end closing journal legitimately posts INTO the period it closes; everything else is blocked
       throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${period} is closed`, messageTh: `งวดบัญชี ${period} ถูกปิดแล้ว` });
     }
+    // Account-universe guard (GL-21 fail-closed, extended to EVERY posting — docs/42 step 1): each line
+    // must reference a REAL, postable account. Without this, a posting to an unknown/retired code lands
+    // silently and then VANISHES from every typed report (they INNER JOIN accounts) — the classic
+    // "balance disappears after a CoA cleanup" defect. Runs for subledger postings too: viaSubledger
+    // only relaxes the control-account rule below, never existence/postability.
+    type AccRow = { code: string; isPostable: boolean | null; isControl: boolean | null; controlSubledger: string | null };
+    const lineCodes = [...new Set(nzLines.map((l) => l.account_code))];
+    const accRows: AccRow[] = await db.select({
+      code: accounts.code, isPostable: accounts.isPostable,
+      isControl: accounts.isControl, controlSubledger: accounts.controlSubledger,
+    }).from(accounts).where(inArray(accounts.code, lineCodes));
+    const accByCode = new Map<string, AccRow>(accRows.map((r) => [r.code, r]));
+    for (const c of lineCodes) {
+      const acc = accByCode.get(c);
+      if (!acc) {
+        throw new BadRequestException({
+          code: 'INVALID_POSTING_ACCOUNT',
+          message: `Account '${c}' does not exist in the chart of accounts`,
+          messageTh: `บัญชี '${c}' ไม่มีอยู่ในผังบัญชี`,
+        });
+      }
+      if (acc.isPostable === false) {
+        throw new BadRequestException({
+          code: 'INVALID_POSTING_ACCOUNT',
+          message: `Account '${c}' is not postable (a header account or deactivated)`,
+          messageTh: `บัญชี '${c}' ไม่สามารถบันทึกรายการได้ (เป็นบัญชีหัวหรือถูกปิดใช้งาน)`,
+        });
+      }
+    }
     // Control-account guard (WS1.1): reject direct postings to control accounts unless
     // the caller explicitly marks viaSubledger:true (only AR/AP/INV/FA service methods do this).
     if (!dto.viaSubledger) {
-      const controlCodes = nzLines.map(l => l.account_code);
-      if (controlCodes.length) {
-        const controlAccounts = await db.select({ code: accounts.code, controlSubledger: accounts.controlSubledger })
-          .from(accounts)
-          .where(and(eq(accounts.isControl, true), inArray(accounts.code, controlCodes)));
-        if (controlAccounts.length > 0) {
-          const hitCode = controlAccounts[0].code;
-          const subledger = controlAccounts[0].controlSubledger;
-          throw new BadRequestException({
-            code: 'CONTROL_ACCOUNT',
-            message: `Account ${hitCode} is a ${subledger} control account; post via its sub-ledger only`,
-            messageTh: `บัญชี ${hitCode} เป็นบัญชีคุมลูกหนี้/เจ้าหนี้ ต้องโพสต์ผ่านระบบย่อยเท่านั้น`,
-          });
-        }
+      const hit = accRows.find((r: any) => r.isControl === true);
+      if (hit) {
+        throw new BadRequestException({
+          code: 'CONTROL_ACCOUNT',
+          message: `Account ${hit.code} is a ${hit.controlSubledger} control account; post via its sub-ledger only`,
+          messageTh: `บัญชี ${hit.code} เป็นบัญชีคุมลูกหนี้/เจ้าหนี้ ต้องโพสต์ผ่านระบบย่อยเท่านั้น`,
+        });
       }
     }
     const currency = dto.currency ?? 'THB';

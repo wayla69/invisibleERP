@@ -221,6 +221,19 @@ async function main() {
   ok('Employee list now projects department/hourly_rate/pf_rate (previously missing from fmtEmp)',
     e3Row?.department === 'Kitchen' && near(e3Row?.hourly_rate, 150) && near(e3Row?.pf_rate, 0.03), JSON.stringify(e3Row).slice(0, 150));
 
+  // ── docs/42 step 4: a tenant posting-rule override re-maps a payroll leg WITHOUT a code change ──
+  // Seed a real override account + a tenant-scoped PAYROLL.GROSS/wages_expense rule → 5601, run a fresh
+  // period and approve: the salaries debit lands on 5601 (unmapped roles keep their literals). The rule is
+  // tenant-scoped — the NULL-tenant demo defaults from 0158 never shadow the code.
+  await db.insert(s.accounts).values({ code: '5601', name: 'Salaries — override test', type: 'Expense', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  await db.insert(s.postingRules).values({ tenantId: hq, eventType: 'PAYROLL.GROSS', legOrder: 1, role: 'wages_expense', side: 'DR', accountCode: '5601', active: true });
+  const runNov = await inj('POST', '/api/payroll/runs?period=2026-11', admin);
+  await inj('POST', '/api/payroll/runs/2026-11/approve', approver);
+  const led5601 = (await inj('GET', '/api/ledger/account-ledger?account=5601', admin)).json;
+  ok('Posting-rule override: PAYROLL.GROSS wages_expense re-mapped to 5601 (tenant rule ?? literal)',
+    /^JE-/.test(runNov.json.entry_no ?? '') && Number(runNov.json.gross_total) > 0 && near(led5601.total_debit, Number(runNov.json.gross_total)),
+    JSON.stringify({ gross: runNov.json.gross_total, dr5601: led5601.total_debit }));
+
   console.log('\n── C2b — payroll (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
