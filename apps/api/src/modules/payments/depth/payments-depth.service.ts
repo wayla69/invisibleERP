@@ -5,6 +5,7 @@ import { customerDeposits, houseAccounts, houseAccountEntries, paymentSurcharges
 import type { JwtUser } from '../../../common/decorators';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { LedgerService } from '../../ledger/ledger.service';
+import { postingDefault } from '../../ledger/posting-events';
 import { TaxService } from '../../tax/tax.service';
 import { roundCurrency } from '../../tax/money';
 
@@ -30,7 +31,9 @@ export class PaymentsDepthService {
     const amount = r2(n(dto.amount));
     if (amount <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     const depositNo = await this.docNo.nextDaily('DEP');
-    const je: any = await this.ledger.postEntry({ source: 'DEPOSIT', sourceRef: depositNo, tenantId: user.tenantId, memo: `Deposit ${depositNo}`, createdBy: user.username, lines: [{ account_code: '1000', debit: amount }, { account_code: '2210', credit: amount }] });
+    // docs/43 PR-2: liability leg follows the tenant posting-rule (DEPOSIT.TAKE) ?? registry default.
+    const takeAcct = (await this.ledger.postingOverrides('DEPOSIT.TAKE', user.tenantId ?? null)).deposit_liability ?? postingDefault('DEPOSIT.TAKE', 'deposit_liability');
+    const je: any = await this.ledger.postEntry({ source: 'DEPOSIT', sourceRef: depositNo, tenantId: user.tenantId, memo: `Deposit ${depositNo}`, createdBy: user.username, lines: [{ account_code: '1000', debit: amount }, { account_code: takeAcct, credit: amount }] });
     const [d] = await db.insert(customerDeposits).values({ tenantId: user.tenantId ?? null, depositNo, memberId: dto.member_id ?? null, customerName: dto.customer_name ?? null, purpose: dto.purpose ?? 'booking', amount: String(amount), status: 'open', journalNo: je?.entry_no ?? null, createdBy: user.username }).returning({ id: customerDeposits.id });
     return { id: Number(d!.id), deposit_no: depositNo, amount, status: 'open', journal_no: je?.entry_no ?? null };
   }
@@ -44,7 +47,10 @@ export class PaymentsDepthService {
     if (amount <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     if (amount > remaining + 0.001) throw new BadRequestException({ code: 'OVER_APPLY', message: `Cannot apply ${amount} — only ${remaining} remains`, messageTh: `ใช้มัดจำเกินคงเหลือ (${remaining})` });
     const inc = this.tax.calcInclusive({ gross: amount, country: 'TH' });
-    const je: any = await this.ledger.postEntry({ source: 'DEPOSIT-APPLY', sourceRef: dto.sale_no ?? depositNo, tenantId: user.tenantId, memo: `Apply deposit ${depositNo}`, createdBy: user.username, lines: [{ account_code: '2210', debit: amount }, { account_code: '4000', credit: r2(inc.net) }, ...(inc.tax > 0 ? [{ account_code: '2100', credit: r2(inc.tax) }] : [])] });
+    // docs/43 PR-2: liability + revenue legs follow the tenant posting-rules (DEPOSIT.APPLY) ?? registry
+    // defaults; the VAT leg (2100) stays literal until the PR-7 tie-out widening.
+    const applyOvr = await this.ledger.postingOverrides('DEPOSIT.APPLY', user.tenantId ?? null);
+    const je: any = await this.ledger.postEntry({ source: 'DEPOSIT-APPLY', sourceRef: dto.sale_no ?? depositNo, tenantId: user.tenantId, memo: `Apply deposit ${depositNo}`, createdBy: user.username, lines: [{ account_code: applyOvr.deposit_liability ?? postingDefault('DEPOSIT.APPLY', 'deposit_liability'), debit: amount }, { account_code: applyOvr.revenue ?? postingDefault('DEPOSIT.APPLY', 'revenue'), credit: r2(inc.net) }, ...(inc.tax > 0 ? [{ account_code: '2100', credit: r2(inc.tax) }] : [])] });
     const applied = r2(n(dep.appliedAmount) + amount);
     const status = applied + n(dep.refundedAmount) >= n(dep.amount) - 0.001 ? 'applied' : 'open';
     await db.update(customerDeposits).set({ appliedAmount: String(applied), status, saleNo: dto.sale_no ?? dep.saleNo }).where(eq(customerDeposits.id, dep.id));
@@ -58,7 +64,9 @@ export class PaymentsDepthService {
     const remaining = r2(n(dep.amount) - n(dep.appliedAmount) - n(dep.refundedAmount));
     const amount = dto.amount != null ? r2(n(dto.amount)) : remaining;
     if (amount <= 0 || amount > remaining + 0.001) throw new BadRequestException({ code: 'OVER_REFUND', message: `Cannot refund ${amount} — only ${remaining} remains`, messageTh: `คืนมัดจำเกินคงเหลือ (${remaining})` });
-    const je: any = await this.ledger.postEntry({ source: 'DEPOSIT-REFUND', sourceRef: depositNo, tenantId: user.tenantId, memo: `Refund deposit ${depositNo}${dto.reason ? ` — ${dto.reason}` : ''}`, createdBy: user.username, lines: [{ account_code: '2210', debit: amount }, { account_code: '1000', credit: amount }] });
+    // docs/43 PR-2: liability leg follows the tenant posting-rule (DEPOSIT.REFUND) ?? registry default.
+    const refundAcct = (await this.ledger.postingOverrides('DEPOSIT.REFUND', user.tenantId ?? null)).deposit_liability ?? postingDefault('DEPOSIT.REFUND', 'deposit_liability');
+    const je: any = await this.ledger.postEntry({ source: 'DEPOSIT-REFUND', sourceRef: depositNo, tenantId: user.tenantId, memo: `Refund deposit ${depositNo}${dto.reason ? ` — ${dto.reason}` : ''}`, createdBy: user.username, lines: [{ account_code: refundAcct, debit: amount }, { account_code: '1000', credit: amount }] });
     const refunded = r2(n(dep.refundedAmount) + amount);
     const status = refunded + n(dep.appliedAmount) >= n(dep.amount) - 0.001 ? (n(dep.appliedAmount) > 0 ? 'closed' : 'refunded') : 'open';
     await db.update(customerDeposits).set({ refundedAmount: String(refunded), status }).where(eq(customerDeposits.id, dep.id));
@@ -118,11 +126,14 @@ export class PaymentsDepthService {
     const receivedThb = currency !== 'THB' && dto.foreign_tendered != null ? r2(n(dto.foreign_tendered) * rate) : appliedThb;
     const fxGainLoss = r2(receivedThb - appliedThb); // + = gain (we received more THB than we cleared)
     const newBalance = r2(n(acct.balance) - appliedThb);
+    // docs/43 PR-2: realized-FX leg follows the tenant posting-rule (FX.REALIZED) ?? registry default;
+    // cash (1000) and AR control (1100) are pinned and stay literal.
+    const fxAcct = (await this.ledger.postingOverrides('FX.REALIZED', user.tenantId ?? null)).fx_gain_loss ?? postingDefault('FX.REALIZED', 'fx_gain_loss');
     const je: any = await this.ledger.postEntry({ source: 'HOUSE-SETTLE', sourceRef: accountNo, tenantId: user.tenantId, memo: `House settle ${accountNo}${currency !== 'THB' ? ` (${currency}@${rate})` : ''}`, createdBy: user.username, lines: [
       { account_code: '1000', debit: receivedThb },
-      ...(fxGainLoss < 0 ? [{ account_code: '5410', debit: r2(-fxGainLoss) }] : []), // loss → debit
+      ...(fxGainLoss < 0 ? [{ account_code: fxAcct, debit: r2(-fxGainLoss) }] : []), // loss → debit
       { account_code: '1100', credit: appliedThb },
-      ...(fxGainLoss > 0 ? [{ account_code: '5410', credit: fxGainLoss }] : []),     // gain → credit
+      ...(fxGainLoss > 0 ? [{ account_code: fxAcct, credit: fxGainLoss }] : []),     // gain → credit
     ] });
     const entry = await this.appendEntry(acct, 'payment', appliedThb, newBalance, { memo: dto.memo, journalNo: je?.entry_no, currency, fxRate: rate, fxGainLoss, user });
     await db.update(houseAccounts).set({ balance: String(newBalance) }).where(eq(houseAccounts.id, acct.id));
@@ -185,7 +196,9 @@ export class PaymentsDepthService {
     const q = await this.quoteSurcharge(dto.method, dto.amount, user);
     if (q.surcharge <= 0) throw new BadRequestException({ code: 'NO_SURCHARGE', message: 'No active surcharge for this method', messageTh: 'ไม่มีค่าธรรมเนียมสำหรับช่องทางนี้' });
     const inc = this.tax.calcInclusive({ gross: q.surcharge, country: 'TH' });
-    const je: any = await this.ledger.postEntry({ source: 'CARD-SURCHARGE', sourceRef: dto.sale_no ?? dto.method, tenantId: user.tenantId, memo: `Card surcharge ${dto.method}`, createdBy: user.username, lines: [{ account_code: '1000', debit: q.surcharge }, { account_code: '4500', credit: r2(inc.net) }, ...(inc.tax > 0 ? [{ account_code: '2100', credit: r2(inc.tax) }] : [])] });
+    // docs/43 PR-2: income leg follows the tenant posting-rule (SURCHARGE.INCOME) ?? registry default.
+    const surAcct = (await this.ledger.postingOverrides('SURCHARGE.INCOME', user.tenantId ?? null)).surcharge_income ?? postingDefault('SURCHARGE.INCOME', 'surcharge_income');
+    const je: any = await this.ledger.postEntry({ source: 'CARD-SURCHARGE', sourceRef: dto.sale_no ?? dto.method, tenantId: user.tenantId, memo: `Card surcharge ${dto.method}`, createdBy: user.username, lines: [{ account_code: '1000', debit: q.surcharge }, { account_code: surAcct, credit: r2(inc.net) }, ...(inc.tax > 0 ? [{ account_code: '2100', credit: r2(inc.tax) }] : [])] });
     return { method: dto.method, surcharge: q.surcharge, net: r2(inc.net), vat: r2(inc.tax), journal_no: je?.entry_no ?? null };
   }
 }

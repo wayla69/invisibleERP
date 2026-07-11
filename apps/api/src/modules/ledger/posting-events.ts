@@ -41,9 +41,9 @@ const r = (side: PostingSide, def: string, tier: RoleTier, description: string):
 // prettier-ignore
 export const POSTING_EVENTS: Record<string, PostingEventDef> = {
   // ── Sales / POS / restaurant ──
-  'SALE.FOOD':        { name: 'Sale — revenue',                description: 'POS/AR sale revenue leg (composes UNDER item-determination when the flag is on)', wired: false, roles: {
+  'SALE.FOOD':        { name: 'Sale — revenue',                description: 'POS/AR sale revenue leg (composes UNDER item-determination when the flag is on)', wired: true, roles: {
     revenue: r(CR, '4000', 'free', 'Sales revenue'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
-  'SALE.VAT':         { name: 'Sale — output VAT',             description: 'Output-VAT leg of a sale/CN/DN', wired: false, roles: {
+  'SALE.VAT':         { name: 'Sale — output VAT',             description: 'Output-VAT leg of a sale/CN/DN', wired: true, roles: {
     vat_output: r(CR, '2100', 'widen', 'Output VAT — PP30 tie sums the VAT-account set') } },
   'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: false, roles: {
     delivery_income: r(CR, '4100', 'free', 'Delivery income') } },
@@ -51,29 +51,29 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     service_charge_income: r(CR, '4400', 'free', 'Service-charge income') } },
   'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: false, roles: {
     rounding: r(CR, '4900', 'free', 'Rounding adjustment (gain=credit, loss=debit)') } },
-  'SURCHARGE.INCOME': { name: 'Card surcharge income',         description: 'Card surcharge collected at settlement', wired: false, roles: {
+  'SURCHARGE.INCOME': { name: 'Card surcharge income',         description: 'Card surcharge collected at settlement', wired: true, roles: {
     surcharge_income: r(CR, '4500', 'free', 'Card surcharge income') } },
   'TIP.COLLECT':      { name: 'Tip collected',                 description: 'Tip pass-through collected with a payment', wired: false, roles: {
     tips_payable: r(CR, '2300', 'pinned', 'Tips payable — TIP-01 reconciles GL 2300 outstanding') } },
   'TIP.PAYOUT':       { name: 'Tip paid out',                  description: 'Tip pool distribution to staff', wired: false, roles: {
     tips_payable: r(DR, '2300', 'pinned', 'Tips payable — TIP-01'), payout: r(CR, '1000', 'pinned', 'Cash/pay account (per-distribution account already supported)') } },
-  'TILL.VARIANCE':    { name: 'Till close over/short',         description: 'Z-close cash variance (payments + hub replay share this key)', wired: false, roles: {
+  'TILL.VARIANCE':    { name: 'Till close over/short',         description: 'Z-close cash variance (payments + hub replay share this key)', wired: true, roles: {
     cash_over_short: r(DR, '5830', 'free', 'Cash over/short (short=debit, over=credit)') } },
-  'TILL.CASHMOV':     { name: 'Till paid-in/out',              description: 'Drawer paid-in / paid-out movement', wired: false, roles: {
+  'TILL.CASHMOV':     { name: 'Till paid-in/out',              description: 'Drawer paid-in / paid-out movement', wired: true, roles: {
     expense: r(DR, '5100', 'free', 'Paid-out expense') } },
-  'DEPOSIT.TAKE':     { name: 'Customer deposit taken',        description: 'Booking/tab prepayment received', wired: false, roles: {
+  'DEPOSIT.TAKE':     { name: 'Customer deposit taken',        description: 'Booking/tab prepayment received', wired: true, roles: {
     deposit_liability: r(CR, '2210', 'free', 'Customer deposits — prepaid') } },
-  'DEPOSIT.APPLY':    { name: 'Customer deposit applied',      description: 'Deposit recognised into a sale', wired: false, roles: {
+  'DEPOSIT.APPLY':    { name: 'Customer deposit applied',      description: 'Deposit recognised into a sale', wired: true, roles: {
     deposit_liability: r(DR, '2210', 'free', 'Customer deposits — prepaid'), revenue: r(CR, '4000', 'free', 'Revenue on application') } },
-  'DEPOSIT.REFUND':   { name: 'Customer deposit refunded',     description: 'Deposit returned to the customer', wired: false, roles: {
+  'DEPOSIT.REFUND':   { name: 'Customer deposit refunded',     description: 'Deposit returned to the customer', wired: true, roles: {
     deposit_liability: r(DR, '2210', 'free', 'Customer deposits — prepaid') } },
   'GIFTCARD.ISSUE':   { name: 'Gift card issued',              description: 'Gift card / store credit sold', wired: false, roles: {
     giftcard_liability: r(CR, '2200', 'pinned', 'Gift-card liability (REC-04 permanent)') } },
   'GIFTCARD.REDEEM':  { name: 'Gift card redeemed',            description: 'Gift-card value applied to a sale', wired: false, roles: {
     giftcard_liability: r(DR, '2200', 'pinned', 'Gift-card liability (REC-04 permanent)') } },
-  'RETURN.AR':        { name: 'Customer return — refund',      description: 'Revenue/VAT reversal on a return', wired: false, roles: {
+  'RETURN.AR':        { name: 'Customer return — refund',      description: 'Revenue/VAT reversal on a return', wired: true, roles: {
     revenue_reversal: r(DR, '4000', 'free', 'Revenue reversal'), vat_reversal: r(DR, '2100', 'widen', 'Output-VAT reversal (PP30 set)') } },
-  'RETURN.STOCK':     { name: 'Customer return — stock',       description: 'COGS reversal when stock returns', wired: false, roles: {
+  'RETURN.STOCK':     { name: 'Customer return — stock',       description: 'COGS reversal when stock returns', wired: true, roles: {
     cogs_reversal: r(CR, '5300', 'free', 'COGS reversal'), inventory: r(DR, '1200', 'pinned', 'Inventory control (REC-04 permanent)') } },
 
   // ── Procurement / inventory / costing / manufacturing ──
@@ -143,37 +143,37 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
   // ── Finance / treasury / AR / AP ──
   'ADVANCE.ISSUE':    { name: 'Employee advance issued',       description: 'Cash advance to an employee (EXP-07)', wired: false, roles: {
     advance_asset: r(DR, '1180', 'pinned', 'Employee-advances control'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'ADVANCE.SETTLE':   { name: 'Employee advance settled',      description: 'Expense + returned cash clear the advance', wired: false, roles: {
+  'ADVANCE.SETTLE':   { name: 'Employee advance settled',      description: 'Expense + returned cash clear the advance', wired: true, roles: {
     expense: r(DR, '5100', 'free', 'Settlement expense (already dto-overridable; registry default)'), advance_asset: r(CR, '1180', 'pinned', 'Employee-advances control') } },
-  'BADDEBT.WRITEOFF': { name: 'Bad-debt write-off',            description: 'Uncollectible AR written off (REV-14)', wired: false, roles: {
+  'BADDEBT.WRITEOFF': { name: 'Bad-debt write-off',            description: 'Uncollectible AR written off (REV-14)', wired: true, roles: {
     bad_debt_exp: r(DR, '5720', 'free', 'Bad-debt expense'), ar_control: r(CR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
-  'APPAY.WHT':        { name: 'AP payment — vendor WHT',       description: 'ภ.ง.ด.3/53 withholding at AP payment (shared by AP pay + subcontract valuations)', wired: false, roles: {
+  'APPAY.WHT':        { name: 'AP payment — vendor WHT',       description: 'ภ.ง.ด.3/53 withholding at AP payment (shared by AP pay + subcontract valuations)', wired: true, roles: {
     wht_payable: r(CR, '2361', 'widen', 'Vendor WHT payable — PND3/53 report set widens in PR-7') } },
-  'APPAY.DISCOUNT':   { name: 'AP early-payment discount',     description: 'Prompt-payment discount captured on a run (EXP-14)', wired: false, roles: {
+  'APPAY.DISCOUNT':   { name: 'AP early-payment discount',     description: 'Prompt-payment discount captured on a run (EXP-14)', wired: true, roles: {
     discount_income: r(CR, '4600', 'free', 'Early-payment discount income (per-policy account already supported)') } },
-  'RCVAT.SELF':       { name: 'Reverse-charge self VAT',       description: 'ภ.พ.36 self-assessed VAT on imported services', wired: false, roles: {
+  'RCVAT.SELF':       { name: 'Reverse-charge self VAT',       description: 'ภ.พ.36 self-assessed VAT on imported services', wired: true, roles: {
     input_vat: r(DR, '1300', 'widen', 'Input VAT (PP30/36 set)'), pp36_payable: r(CR, '2120', 'widen', 'PP36 VAT payable (separate return set)') } },
-  'FX.UNREALIZED':    { name: 'FX revaluation (unrealized)',   description: 'Month-end open-item revaluation (control deltas pinned)', wired: false, roles: {
+  'FX.UNREALIZED':    { name: 'FX revaluation (unrealized)',   description: 'Month-end open-item revaluation (control deltas pinned)', wired: true, roles: {
     fx_gain_loss: r(DR, '5400', 'free', 'Unrealized FX gain/loss') } },
-  'FX.REALIZED':      { name: 'FX settlement (realized)',      description: 'Realized FX difference at settlement', wired: false, roles: {
+  'FX.REALIZED':      { name: 'FX settlement (realized)',      description: 'Realized FX difference at settlement', wired: true, roles: {
     fx_gain_loss: r(DR, '5410', 'free', 'Realized FX gain/loss') } },
-  'BANK.INTEREST':    { name: 'Bank interest income',          description: 'Bank-rec adjustment: interest earned', wired: false, roles: {
+  'BANK.INTEREST':    { name: 'Bank interest income',          description: 'Bank-rec adjustment: interest earned', wired: true, roles: {
     interest_income: r(CR, '4000', 'free', 'Interest income') } },
-  'BANK.FEE':         { name: 'Bank fee expense',              description: 'Bank-rec adjustment: charges', wired: false, roles: {
+  'BANK.FEE':         { name: 'Bank fee expense',              description: 'Bank-rec adjustment: charges', wired: true, roles: {
     fee_expense: r(DR, '5100', 'free', 'Bank fees') } },
   'PETTY.TOPUP':      { name: 'Petty-cash replenishment',      description: 'Imprest float top-up (fund GL per-fund)', wired: false, roles: {
     cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'PETTY.EXPENSE':    { name: 'Petty-cash expense',            description: 'Expense paid from the float', wired: false, roles: {
+  'PETTY.EXPENSE':    { name: 'Petty-cash expense',            description: 'Expense paid from the float', wired: true, roles: {
     expense: r(DR, '5100', 'free', 'Petty-cash expense (already caller-set; registry default)') } },
   'REVENUE.DEFER':    { name: 'Revenue deferred',              description: 'Cash received into deferred revenue', wired: false, roles: {
     deferred_revenue: r(CR, '2400', 'pinned', 'Unearned revenue (REC-04 permanent — §8 Q3)') } },
   'REVENUE.RECOGNIZE': { name: 'Revenue recognized',           description: 'Deferred → earned per schedule (per-schedule accounts already supported)', wired: false, roles: {
     revenue: r(CR, '4300', 'free', 'Recognized revenue') } },
-  'MEMBERSHIP.DEFER': { name: 'Membership sold (deferred)',    description: 'VIP membership fee into contract liability', wired: false, roles: {
+  'MEMBERSHIP.DEFER': { name: 'Membership sold (deferred)',    description: 'VIP membership fee into contract liability', wired: true, roles: {
     deferred: r(CR, '2410', 'free', 'Contract liability / deferred revenue') } },
-  'MEMBERSHIP.RECOGNIZE': { name: 'Membership recognized',     description: 'Membership revenue earned over the term', wired: false, roles: {
+  'MEMBERSHIP.RECOGNIZE': { name: 'Membership recognized',     description: 'Membership revenue earned over the term', wired: true, roles: {
     deferred: r(DR, '2410', 'free', 'Contract liability'), revenue: r(CR, '4300', 'free', 'Subscription & service revenue') } },
-  'LOYALTY.ACCRUE':   { name: 'Loyalty points accrual',        description: 'Points liability provision (TFRS 15)', wired: false, roles: {
+  'LOYALTY.ACCRUE':   { name: 'Loyalty points accrual',        description: 'Points liability provision (TFRS 15)', wired: true, roles: {
     loyalty_expense: r(DR, '5700', 'free', 'Loyalty points expense'), loyalty_liability: r(CR, '2250', 'pinned', 'Points-liability control (watermark tie)') } },
   'SERVICE.ACCRUAL':  { name: 'Subscription billing',          description: 'Recurring service invoice raised', wired: false, roles: {
     service_rev: r(CR, '4300', 'free', 'Subscription & service revenue'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
@@ -223,4 +223,13 @@ export function assertPostingEventDefaults(canonicalCodes: Iterable<string>): vo
       }
     }
   }
+}
+
+/** The registry default for an event role — posting sites use `override ?? postingDefault(...)` so the
+ *  literal can never drift from the catalogue (docs/43 PR-2+). Throws at module-eval time via the boot
+ *  assert rather than here; an unknown pair is a programming error surfaced by tests. */
+export function postingDefault(eventType: string, role: string): string {
+  const def = POSTING_EVENTS[eventType]?.roles[role];
+  if (!def) throw new Error(`posting-events registry: unknown ${eventType}.${role}`);
+  return def.default;
 }

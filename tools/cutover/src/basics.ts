@@ -1848,7 +1848,37 @@ async function main() {
   const rBadType = await inj('POST', '/api/reports/fs/definitions', admin, { code: 'X', name: 'X', statement_type: 'zzz', config: {} });
   ok('FIN-4: upsert with an invalid statement_type is rejected (validation)', rBadType.status === 400, `${rBadType.status}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) ──');
+  // ── docs/43 PR-2 — a GL-24-governed posting-rule override re-routes a wired finance posting ──
+  // End-to-end on BADDEBT.WRITEOFF (REV-14 write-off): default path posts the registry literal (5720);
+  // an approved tenant rule re-routes the expense leg to 5721; the write-off register still lists both
+  // (it keys on the debit leg, not a hard-coded account).
+  const jeLines = async (entryNo: string) => {
+    const [je] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, entryNo)).limit(1);
+    return db.select().from(s.journalLines).where(eq(s.journalLines.entryId, Number(je.id)));
+  };
+  // The write-off posts Cr 1100 directly (REV-14's own flow), so lift the GL-14 control flag the tie-out
+  // section set above for the duration of this block (same re-apply precedent as the GL-14 section itself).
+  await db.update(s.accounts).set({ isControl: false, controlSubledger: null }).where(eq(s.accounts.code, '1100'));
+  const woDef = (await inj('POST', '/api/finance/ar/write-off', admin, { amount: 111.25, reason: 'PR-2 default path' })).json;
+  const woDefLines = await jeLines(woDef.entry_no);
+  ok('PR-2: write-off with NO posting rule debits the registry default 5720', woDefLines.some((l: any) => l.accountCode === '5720' && near(l.debit, 111.25)), `lines=${woDefLines.map((l: any) => l.accountCode).join(',')}`);
+  await db.insert(s.accounts).values({ code: '5721', name: 'Bad Debt — Related Parties', type: 'Expense', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  const ruleUp = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'BADDEBT.WRITEOFF', legOrder: 1, role: 'bad_debt_exp', side: 'DR', accountCode: '5721' });
+  ok('PR-2: override upsert lands PendingApproval (GL-24)', ruleUp.status === 201 && ruleUp.json?.status === 'PendingApproval', `${ruleUp.status} ${ruleUp.json?.status}`);
+  const woPend = (await inj('POST', '/api/finance/ar/write-off', admin, { amount: 50, reason: 'PR-2 unapproved rule must not apply' })).json;
+  ok('PR-2: an UNAPPROVED rule never re-routes a posting', (await jeLines(woPend.entry_no)).some((l: any) => l.accountCode === '5720' && near(l.debit, 50)), 'still 5720');
+  const ruleAp = await inj('POST', `/api/ledger/posting-rules/${Number(ruleUp.json?.id)}/approve`, mgr);
+  ok('PR-2: a different user approves the rule', ruleAp.status === 200 && ruleAp.json?.status === 'Approved', `${ruleAp.status} ${ruleAp.json?.status}`);
+  const woOvr = (await inj('POST', '/api/finance/ar/write-off', admin, { amount: 250, reason: 'PR-2 override path' })).json;
+  const woOvrLines = await jeLines(woOvr.entry_no);
+  ok('PR-2: the approved override re-routes the expense leg to 5721 (AR control 1100 stays pinned)',
+    woOvrLines.some((l: any) => l.accountCode === '5721' && near(l.debit, 250)) && woOvrLines.some((l: any) => l.accountCode === '1100' && near(l.credit, 250)),
+    `lines=${woOvrLines.map((l: any) => `${l.accountCode}`).join(',')}`);
+  const woReg = (await inj('GET', '/api/finance/ar/write-offs', admin)).json;
+  ok('PR-2: the write-off register lists BOTH the default- and override-account write-offs', woReg.write_offs?.some((w: any) => near(w.amount, 111.25)) && woReg.write_offs?.some((w: any) => near(w.amount, 250)), `count=${woReg.count}`);
+  await db.update(s.accounts).set({ isControl: true, controlSubledger: 'AR' }).where(eq(s.accounts.code, '1100'));
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);
