@@ -93,7 +93,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing', 'proj_tender'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
   'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify'],
-  'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
+  'Procurement': ['procurement', 'pr_raise', 'proj_subcon', 'quality', 'quality_approve'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
   'Human Resources': ['hr', 'hr_admin'],

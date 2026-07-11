@@ -318,6 +318,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       // scan → PO auto-map → automated 3-way match (EXP-10); booking the bill stays a creditors action
       { label: 'nav.ap_intake', href: '/procurement/ap-intake', icon: ScanLine, perms: ['procurement', 'creditors'] },
       { label: 'nav.supplier_scorecards', href: '/supplier-scorecards', icon: Award, perms: ['procurement', 'exec'] },
+      // QMS-4 — Supplier Corrective Action Request (SCAR / 8D) register + QC-04 closure maker-checker.
+      { label: 'nav.supplier_scar', href: '/quality/scar', icon: ClipboardCheck, perms: ['quality', 'quality_approve', 'procurement', 'creditors', 'exec'] },
       { label: 'nav.supplier_prices', href: '/supplier-prices', icon: Tag, perms: ['procurement', 'md_vendor', 'planner', 'exec'] },
       { label: 'nav.doc_ai', href: '/doc-ai', icon: FileScan, perms: ['procurement', 'creditors', 'exec'] },
       // vendor self-service surface — visible only to users granted the vendor_portal permission
