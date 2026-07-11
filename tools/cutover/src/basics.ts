@@ -1195,7 +1195,11 @@ async function main() {
 
   // ───────────────────── WS1.3 — Multi-dimensional GL Postings (GL-13) ─────────────────────
   // TC-GL-13-01: smoke test — by-branch endpoint returns a branches key
-  const today = new Date().toISOString().slice(0, 10);
+  // Business day (Asia/Bangkok, UTC+7 — matches the API's ymd()/bizYmdDash). MUST be the business day, not
+  // the UTC date: JEs posted through the API are stamped entryDate=ymd() (business day), so a UTC `today`
+  // used as a report window bound (e.g. the FIN-4 SOCE `fsTo` below) drops the day's own postings during the
+  // Bangkok-morning / UTC-evening window (entryDate=businessDay > to=utcDay) → off-by-one window drift.
+  const today = new Date(Date.now() + Number(process.env.BUSINESS_TZ_OFFSET_MIN ?? 420) * 60_000).toISOString().slice(0, 10);
   const bb0 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
   ok('GL-13: income-statement/by-branch returns a branches key (smoke)', bb0.status === 200 && typeof bb0.json?.branches === 'object', `st=${bb0.status}`);
 
