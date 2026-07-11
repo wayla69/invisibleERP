@@ -32,6 +32,7 @@ import { BillingService } from '../billing/billing.service';
 import { PdpaService } from '../pdpa/pdpa.service';
 import { GovernanceService } from '../governance/governance.service';
 import { TaxJobsService } from '../tax/tax-jobs.service';
+import { HcmLeaveService } from '../hcm/hcm-leave.service';
 import type { JwtUser } from '../../common/decorators';
 
 // Report generation (docs/38 §3 bi pilot, extraction PR-2). generateReport + its ~50 report-type branches
@@ -76,6 +77,8 @@ export class BiGenerateService {
     @Optional() private readonly pdpa?: PdpaService,
     @Optional() private readonly governance?: GovernanceService,
     @Optional() private readonly taxJobs?: TaxJobsService,
+    // HR-2 (docs/42) — supplies the hr_leave_accrual scheduled action job. @Optional so a partial harness constructs.
+    @Optional() private readonly hcmLeave?: HcmLeaveService,
   ) {}
 
   async generateReport(reportType: string, filters: any, user: JwtUser, reads: BiReadPort): Promise<{ data: any; summary: string; summaryTh: string }> {
@@ -231,6 +234,11 @@ export class BiGenerateService {
       if (!this.leases) throw new BadRequestException({ code: 'LEASES_UNAVAILABLE', message: 'Lease service not available', messageTh: 'ระบบสัญญาเช่าไม่พร้อมใช้งาน' });
       const r = await this.leases.runDueLeases(user); // idempotent per (lease, period)
       return { data: r, summary: `Lease run: posted ${r.posted} of ${r.scanned} due leases`, summaryTh: `ลงรายการสัญญาเช่า: ${r.posted} จาก ${r.scanned} สัญญา` };
+    }
+    if (reportType === 'hr_leave_accrual') {
+      if (!this.hcmLeave) throw new BadRequestException({ code: 'HCM_LEAVE_UNAVAILABLE', message: 'HCM leave service not available', messageTh: 'ระบบสะสมวันลาไม่พร้อมใช้งาน' });
+      const r = await this.hcmLeave.runAccrual(user, f.period || undefined); // idempotent per (tenant, period)
+      return { data: r, summary: `Leave accrual ${r.period}: accrued ${r.accrued} day(s) across ${r.employees_count} employee(s)${r.already ? ' (already run)' : ''}`, summaryTh: `สะสมวันลา ${r.period}: ${r.accrued} วัน · ${r.employees_count} คน${r.already ? ' (รันแล้ว)' : ''}` };
     }
     if (reportType === 'apply_scheduled_master_changes') {
       if (!this.scheduledChanges) throw new BadRequestException({ code: 'SCHEDULED_CHANGES_UNAVAILABLE', message: 'Scheduled-changes service not available', messageTh: 'ระบบตั้งเวลาข้อมูลหลักไม่พร้อมใช้งาน' });

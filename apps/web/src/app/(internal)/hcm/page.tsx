@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Clock, Plane, Check } from 'lucide-react';
+import { Clock, Plane, Check, CalendarClock, Play } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
@@ -29,6 +29,7 @@ export default function HcmPage() {
       <Tabs tabs={[
         { key: 'time', label: t('hr.tab_time_ot'), content: <Timesheets /> },
         { key: 'leave', label: t('hr.tab_leave'), content: <Leave /> },
+        { key: 'accrual', label: t('hr.tab_accrual'), content: <LeaveAccrual /> },
       ]} />
     </div>
   );
@@ -128,6 +129,104 @@ function Leave() {
         { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
         { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'Pending' ? <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}><Check className="size-4" /> {t('fin.approve')}</Button> : <span className="text-xs text-muted-foreground">—</span> },
       ]} emptyState={{ icon: Plane, title: t('hr.leave_empty_title'), description: t('hr.leave_empty_desc') }} />}</StateView>
+    </div>
+  );
+}
+
+// HR-2 (docs/42) — leave entitlement / accrual: balances, leave-type + policy config, and the periodic
+// accrual run (control HR-02). Config + run require hr_admin/exec; reads hr/hr_admin/exec/ess.
+function LeaveAccrual() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [empCode, setEmpCode] = useState('');
+  const balancesQ = useQuery<any>({ queryKey: ['leave-balances', empCode], queryFn: () => api(`/api/hcm/leave/balances${empCode ? `?emp_code=${encodeURIComponent(empCode)}` : ''}`) });
+  const typesQ = useQuery<any>({ queryKey: ['leave-types'], queryFn: () => api('/api/hcm/leave/types') });
+  const policiesQ = useQuery<any>({ queryKey: ['leave-policies'], queryFn: () => api('/api/hcm/leave/policies') });
+
+  const [tf, setTf] = useState({ code: '', name: '', accrual_method: 'monthly', accrual_rate_days: '', carryover_cap_days: '', max_balance_days: '' });
+  const addType = useMutation({
+    mutationFn: () => api('/api/hcm/leave/types', { method: 'POST', body: JSON.stringify({ code: tf.code, name: tf.name || tf.code, accrual_method: tf.accrual_method, accrual_rate_days: Number(tf.accrual_rate_days) || 0, carryover_cap_days: Number(tf.carryover_cap_days) || 0, max_balance_days: Number(tf.max_balance_days) || 0 }) }),
+    onSuccess: () => { notifySuccess(t('hr.accrual_type_saved')); setTf({ ...tf, code: '', name: '', accrual_rate_days: '' }); qc.invalidateQueries({ queryKey: ['leave-types'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const [pf, setPf] = useState({ leave_type_code: '', job_grade: '', min_tenure_months: '', accrual_rate_days: '' });
+  const addPolicy = useMutation({
+    mutationFn: () => api('/api/hcm/leave/policies', { method: 'POST', body: JSON.stringify({ leave_type_code: pf.leave_type_code, job_grade: pf.job_grade || null, min_tenure_months: Number(pf.min_tenure_months) || 0, accrual_rate_days: Number(pf.accrual_rate_days) || 0 }) }),
+    onSuccess: () => { notifySuccess(t('hr.accrual_policy_saved')); setPf({ ...pf, job_grade: '', min_tenure_months: '', accrual_rate_days: '' }); qc.invalidateQueries({ queryKey: ['leave-policies'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const [period, setPeriod] = useState(today().slice(0, 7));
+  const runAccrual = useMutation({
+    mutationFn: () => api<any>('/api/hcm/leave/accrual/run', { method: 'POST', body: JSON.stringify({ period }) }),
+    onSuccess: (r: any) => { notifySuccess(t('hr.accrual_ran', { accrued: r.accrued, count: r.employees_count })); qc.invalidateQueries({ queryKey: ['leave-balances'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <div className="grid gap-5">
+      {/* Accrual run + leave-type config */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card className="gap-3 p-5">
+          <h3 className="text-base font-semibold">{t('hr.accrual_run_title')}</h3>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="grid gap-1.5"><Label>{t('hr.period')}</Label><Input value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="2026-06" className="w-32" /></div>
+            <Button onClick={() => runAccrual.mutate()} disabled={runAccrual.isPending}><Play className="size-4" /> {t('hr.accrual_run_btn')}</Button>
+          </div>
+        </Card>
+        <Card className="gap-3 p-5">
+          <h3 className="text-base font-semibold">{t('hr.accrual_types_title')}</h3>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="grid gap-1.5"><Label>{t('hr.col_code')}</Label><Input value={tf.code} onChange={(e) => setTf({ ...tf, code: e.target.value })} className="w-28" placeholder="ANNUAL" /></div>
+            <div className="grid gap-1.5"><Label>{t('hr.name_label')}</Label><Input value={tf.name} onChange={(e) => setTf({ ...tf, name: e.target.value })} className="w-32" /></div>
+            <div className="grid gap-1.5"><Label>{t('hr.col_method')}</Label><Select value={tf.accrual_method} onChange={(e) => setTf({ ...tf, accrual_method: e.target.value })}><option value="monthly">monthly</option><option value="anniversary">anniversary</option><option value="none">none</option></Select></div>
+            <div className="grid gap-1.5"><Label>{t('hr.col_rate')}</Label><Input type="number" value={tf.accrual_rate_days} onChange={(e) => setTf({ ...tf, accrual_rate_days: e.target.value })} className="w-20" /></div>
+            <div className="grid gap-1.5"><Label>{t('hr.col_carryover_cap')}</Label><Input type="number" value={tf.carryover_cap_days} onChange={(e) => setTf({ ...tf, carryover_cap_days: e.target.value })} className="w-20" /></div>
+            <div className="grid gap-1.5"><Label>{t('hr.col_max_balance')}</Label><Input type="number" value={tf.max_balance_days} onChange={(e) => setTf({ ...tf, max_balance_days: e.target.value })} className="w-20" /></div>
+            <Button variant="outline" onClick={() => addType.mutate()} disabled={!tf.code || addType.isPending}><Check className="size-4" /> {t('fin.save')}</Button>
+          </div>
+          <StateView q={typesQ}>{typesQ.data && <DataTable rows={typesQ.data.leave_types} columns={[
+            { key: 'code', label: t('hr.col_code') }, { key: 'accrual_method', label: t('hr.col_method') },
+            { key: 'accrual_rate_days', label: t('hr.col_rate'), align: 'right' }, { key: 'carryover_cap_days', label: t('hr.col_carryover_cap'), align: 'right' }, { key: 'max_balance_days', label: t('hr.col_max_balance'), align: 'right' },
+          ]} emptyState={{ icon: CalendarClock, title: t('hr.accrual_types_title'), description: '' }} />}</StateView>
+        </Card>
+      </div>
+
+      {/* Policy overrides */}
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">{t('hr.accrual_policies_title')}</h3>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5"><Label>{t('hr.col_code')}</Label>
+            <Select value={pf.leave_type_code} onChange={(e) => setPf({ ...pf, leave_type_code: e.target.value })}>
+              <option value="">—</option>
+              {(typesQ.data?.leave_types ?? []).map((x: any) => <option key={x.code} value={x.code}>{x.code}</option>)}
+            </Select>
+          </div>
+          <div className="grid gap-1.5"><Label>{t('hr.col_grade')}</Label><Input value={pf.job_grade} onChange={(e) => setPf({ ...pf, job_grade: e.target.value })} className="w-24" placeholder="M2" /></div>
+          <div className="grid gap-1.5"><Label>{t('hr.col_min_tenure')}</Label><Input type="number" value={pf.min_tenure_months} onChange={(e) => setPf({ ...pf, min_tenure_months: e.target.value })} className="w-24" /></div>
+          <div className="grid gap-1.5"><Label>{t('hr.col_rate')}</Label><Input type="number" value={pf.accrual_rate_days} onChange={(e) => setPf({ ...pf, accrual_rate_days: e.target.value })} className="w-20" /></div>
+          <Button variant="outline" onClick={() => addPolicy.mutate()} disabled={!pf.leave_type_code || addPolicy.isPending}><Check className="size-4" /> {t('fin.save')}</Button>
+        </div>
+        <StateView q={policiesQ}>{policiesQ.data && <DataTable rows={policiesQ.data.leave_policies} columns={[
+          { key: 'leave_type_code', label: t('hr.col_code') }, { key: 'job_grade', label: t('hr.col_grade'), render: (r: any) => r.job_grade ?? '—' },
+          { key: 'min_tenure_months', label: t('hr.col_min_tenure'), align: 'right' }, { key: 'accrual_rate_days', label: t('hr.col_rate'), align: 'right' },
+        ]} emptyState={{ icon: CalendarClock, title: t('hr.accrual_policies_title'), description: '' }} />}</StateView>
+      </Card>
+
+      {/* Balances */}
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">{t('hr.accrual_balances_title')}</h3>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5"><Label>{t('hr.emp_code')}</Label><Input value={empCode} onChange={(e) => setEmpCode(e.target.value)} className="w-36" placeholder="EMP..." /></div>
+        </div>
+        <StateView q={balancesQ}>{balancesQ.data && <DataTable rows={balancesQ.data.balances} columns={[
+          { key: 'employee_id', label: '#' }, { key: 'leave_type_code', label: t('hr.col_code') }, { key: 'year', label: t('hr.col_year') },
+          { key: 'accrued', label: t('hr.col_accrued'), align: 'right' }, { key: 'carryover', label: t('hr.col_carryover'), align: 'right' },
+          { key: 'used', label: t('hr.day_unit'), align: 'right', render: (r: any) => r.used },
+          { key: 'available', label: t('hr.col_available'), align: 'right', render: (r: any) => <Badge variant={r.available > 0 ? 'success' : 'muted'}>{r.available}</Badge> },
+        ]} emptyState={{ icon: CalendarClock, title: t('hr.accrual_balances_title'), description: '' }} />}</StateView>
+      </Card>
     </div>
   );
 }

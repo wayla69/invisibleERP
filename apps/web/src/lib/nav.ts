@@ -417,7 +417,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'nav.group.hr',
     workspace: ['erp'],
     items: [
-      { label: 'nav.hcm', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
+      { label: 'nav.hcm', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors', 'hr', 'hr_admin'] },
       { label: 'hx.perf.nav_title', href: '/hcm/performance', icon: Award, perms: ['hr', 'hr_admin', 'exec'] },
       // HR-1 (docs/42) — org structure, positions & headcount governance (HR-01)
       { label: 'nav.hcm_org', href: '/hcm/org', icon: Network, perms: ['hr', 'hr_admin', 'exec'] },

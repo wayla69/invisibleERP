@@ -14,6 +14,7 @@ const EmployeeBody = z.object({
   sso_no: z.string().optional(),
   position: z.string().optional(),
   department: z.string().optional(),
+  job_grade: z.string().optional(), // HR-2 (docs/42) — drives leave-accrual policy overrides
   monthly_salary: z.number().nonnegative(),
   hourly_rate: z.number().nonnegative().optional(),
   pf_rate: z.number().min(0).max(1).optional(),
