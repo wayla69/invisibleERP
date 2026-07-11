@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { workOrders, workOrderComponents, bomMaster, bomMasterLines, stockMovements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -86,7 +87,9 @@ export class ManufacturingService {
       { account_code: '1250', debit: r2(material + applied), memo: `WIP ${woNo}` },
       { account_code: '1200', credit: material, memo: 'Materials issued' },
     ];
-    if (applied > 0) lines.push({ account_code: '2380', credit: applied, memo: 'Labor + overhead applied' });
+    // docs/43 PR-5: the applied-clearing leg follows the tenant posting-rule (MFG.WO_ISSUE) ?? default;
+    // 1250 WIP + 1200 inventory controls stay pinned.
+    if (applied > 0) lines.push({ account_code: (await this.ledger.postingOverrides('MFG.WO_ISSUE', tenantId)).labor_oh_applied ?? postingDefault('MFG.WO_ISSUE', 'labor_oh_applied'), credit: applied, memo: 'Labor + overhead applied' });
     const je: any = await this.ledger.postEntry({ source: 'WO-ISSUE', sourceRef: woNo, tenantId, memo: `Work order issue ${woNo}`, createdBy: user.username, lines });
 
     await db.update(workOrders).set({ status: 'Released', entryNoIssue: je.entry_no, startedAt: now }).where(eq(workOrders.id, Number(wo.id)));
@@ -118,9 +121,12 @@ export class ManufacturingService {
       uom: wo.uom, qty: fx(produced, 3), refDoc: woNo, remarks: 'WO finished goods receipt', createdBy: user.username,
     });
 
+    // docs/43 PR-5: yield/material variance legs follow the tenant posting-rule (MFG.WO_COMPLETE) ??
+    // registry default; 1210 FG / 1250 WIP / 1200 inventory controls stay pinned.
+    const varAcct = (await this.ledger.postingOverrides('MFG.WO_COMPLETE', tenantId)).yield_variance ?? postingDefault('MFG.WO_COMPLETE', 'yield_variance');
     const lines: any[] = [{ account_code: '1210', debit: fgValue, memo: 'Finished goods' }];
-    if (variance > 0.005) lines.push({ account_code: '5810', debit: variance, memo: `Yield variance (loss) ${woNo}` });
-    else if (variance < -0.005) lines.push({ account_code: '5810', credit: r2(-variance), memo: `Yield variance (gain) ${woNo}` });
+    if (variance > 0.005) lines.push({ account_code: varAcct, debit: variance, memo: `Yield variance (loss) ${woNo}` });
+    else if (variance < -0.005) lines.push({ account_code: varAcct, credit: r2(-variance), memo: `Yield variance (gain) ${woNo}` });
     lines.push({ account_code: '1250', credit: total, memo: `WIP cleared ${woNo}` });
     // MATERIAL USAGE VARIANCE (optional): if the ACTUAL material consumed differs from the standard BOM
     // material, book the difference as a balanced pair — over-usage (actual > standard) debits 5810 / Cr 1200
@@ -128,8 +134,8 @@ export class ManufacturingService {
     let materialVar = 0;
     if (actualMaterial != null && n(actualMaterial) >= 0) {
       materialVar = r2(n(actualMaterial) - n(wo.materialCost));
-      if (materialVar > 0.005) { lines.push({ account_code: '5810', debit: materialVar, memo: `Material usage variance (over) ${woNo}` }, { account_code: '1200', credit: materialVar, memo: 'Extra material consumed' }); }
-      else if (materialVar < -0.005) { lines.push({ account_code: '1200', debit: r2(-materialVar), memo: 'Material returned' }, { account_code: '5810', credit: r2(-materialVar), memo: `Material usage variance (under) ${woNo}` }); }
+      if (materialVar > 0.005) { lines.push({ account_code: varAcct, debit: materialVar, memo: `Material usage variance (over) ${woNo}` }, { account_code: '1200', credit: materialVar, memo: 'Extra material consumed' }); }
+      else if (materialVar < -0.005) { lines.push({ account_code: '1200', debit: r2(-materialVar), memo: 'Material returned' }, { account_code: varAcct, credit: r2(-materialVar), memo: `Material usage variance (under) ${woNo}` }); }
     }
     const je: any = await this.ledger.postEntry({
       source: 'WO-DONE', sourceRef: woNo, tenantId, memo: `Work order complete ${woNo}`, createdBy: user.username, lines,

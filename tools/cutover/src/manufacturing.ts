@@ -39,7 +39,7 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, { username: 'mgr', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
 
   // BOM: yields 10 cakes; materials 130 (flour 5×20 + sugar 2×15), labor 50, overhead 30 — per yield.
   const [bom] = await db.insert(s.bomMaster).values({ bomCode: 'BOM-CAKE', productName: 'เค้ก', yieldQty: '10', yieldUom: 'ชิ้น', laborCost: '50', overheadCost: '30' }).returning({ id: s.bomMaster.id });
@@ -60,6 +60,7 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
+  const mgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'admin123' })).json.token;
 
   // ── 1. create WO for 20 (factor 2) → material 260, labor 100, oh 60, total 420, unit 21 ──
   const wo = await inj('POST', '/api/manufacturing/work-orders', admin, { bom_code: 'BOM-CAKE', qty_planned: 20, product_item_id: 'CAKE', product_name: 'เค้ก' });
@@ -128,6 +129,23 @@ async function main() {
   ok('Material variance GL: 5810 cumulative 145 (105 yield + 40 material), TB balanced',
     tb4.json.totals?.balanced === true && near(row4('5810')?.debit, 145),
     JSON.stringify({ bal: tb4.json.totals?.balanced, v5810: row4('5810')?.debit }));
+
+  // ── docs/43 PR-5 — a GL-24-governed posting-rule override re-routes the MFG variance leg ──
+  // Default path (5810) is pinned by §7/§8 above; an approved MFG.WO_COMPLETE rule re-routes a NEW
+  // work order's yield-variance leg to 5811 while the FG/WIP controls stay pinned.
+  await db.insert(s.accounts).values({ code: '5811', name: 'Yield Variance — override (PR-5)', type: 'Expense', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  const p5Rule = (await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'MFG.WO_COMPLETE', legOrder: 1, role: 'yield_variance', side: 'DR', accountCode: '5811' })).json;
+  ok('PR-5: MFG.WO_COMPLETE override upsert lands PendingApproval (GL-24)', p5Rule?.status === 'PendingApproval', `${p5Rule?.status}`);
+  const p5Ap = await inj('POST', `/api/ledger/posting-rules/${Number(p5Rule?.id)}/approve`, mgr);
+  ok('PR-5: a different user approves the rule', p5Ap.status === 200 && p5Ap.json?.status === 'Approved', `${p5Ap.status} ${p5Ap.json?.status}`);
+  const wo4 = await inj('POST', '/api/manufacturing/work-orders', admin, { bom_code: 'BOM-CAKE', qty_planned: 20, product_item_id: 'CAKE', product_name: 'เค้ก' });
+  await inj('POST', `/api/manufacturing/work-orders/${wo4.json.wo_no}/issue`, admin);
+  const done4 = await inj('POST', `/api/manufacturing/work-orders/${wo4.json.wo_no}/complete`, admin, { qty_produced: 15 });
+  const tb5 = await inj('GET', '/api/ledger/trial-balance', admin);
+  const row5 = (c: string) => (tb5.json.rows ?? []).find((r: any) => r.account_code === c);
+  ok('PR-5: the approved override routes the NEW yield loss (105) to 5811; 5810 stays at 145; TB balanced',
+    near(done4.json.yield_variance, 105) && near(row5('5811')?.debit, 105) && near(row5('5810')?.debit, 145) && tb5.json.totals?.balanced === true,
+    JSON.stringify({ v5811: row5('5811')?.debit, v5810: row5('5810')?.debit, bal: tb5.json.totals?.balanced }));
 
   console.log('\n── Phase 18 — Manufacturing (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

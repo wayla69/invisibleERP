@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { nonConformances, defectCodes, qualityInspections } from '../../database/schema';
 import { docCountersTenant } from '../../database/schema/system';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { StatusLogService } from '../../common/status-log.service';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -138,11 +139,13 @@ export class NcrService {
       writeOff = r2(n(ncr.qty) * n(ncr.unitCost));
       if (writeOff > 0) {
         const creditAcct = ncr.refType === 'WO' ? '1250' : ncr.refType === 'GR' ? '1200' : '1210';
+        // docs/43 PR-5: NCR scrap shares the QA.SCRAP event key — an override re-routes both dispositions.
+        const scrapAcct = (await this.ledger.postingOverrides('QA.SCRAP', ncr.tenantId ?? null)).scrap_loss ?? postingDefault('QA.SCRAP', 'scrap_loss');
         const je: any = await this.ledger.postEntry({
           source: 'QA-NCR', sourceRef: ncr.ncrNo, tenantId: ncr.tenantId ?? null,
           memo: `NCR scrap ${ncr.itemId ?? ''} ${ncr.ncrNo}`, createdBy: user.username,
           lines: [
-            { account_code: '5810', debit: writeOff, memo: 'NCR scrap write-off' },
+            { account_code: scrapAcct, debit: writeOff, memo: 'NCR scrap write-off' },
             { account_code: creditAcct, credit: writeOff, memo: `NCR scrap from ${ncr.refType ?? 'stock'}` },
           ],
         });
