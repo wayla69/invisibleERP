@@ -12,7 +12,7 @@
 // INVARIANTS (boot-asserted from seedChartOfAccounts via assertPostingEventDefaults):
 //   1. every role default exists in the canonical COA;
 //   2. tiers are valid; no event declares zero roles.
-// The posting_event_types seed migration is derived from this registry (0328); consuming services import
+// The posting_event_types seed migration is derived from this registry (0330); consuming services import
 // their fallback literal from here so code and catalogue can never drift. Maintained ON /setup/posting-rules;
 // governance (validation + maker-checker + audit) = control GL-24 in posting.service.ts.
 

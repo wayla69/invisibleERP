@@ -237,4 +237,65 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   // nav
   'nav.crm_workspace': { th: 'CRM งานขาย (บอร์ดดีล)', en: 'Sales CRM (deal board)' },
   'nav.crm_members': { th: 'CRM สมาชิก (360)', en: 'Member CRM (360)' },
+
+  // ── SVC-2 Warranty & Entitlement registry (/service/warranty) ─────────────
+  'wty.title': { th: 'การรับประกัน & สิทธิ์คุ้มครอง', en: 'Warranty & Entitlement' },
+  'wty.subtitle': { th: 'เงื่อนไขรับประกัน · ทะเบียนเครื่อง (Installed Base) · เคลมและการอนุมัติความคุ้มครอง (SVC-01)', en: 'Warranty terms · installed-base registry · claims & coverage authorization (SVC-01)' },
+  'wty.tab_terms': { th: 'เงื่อนไขรับประกัน', en: 'Warranty terms' },
+  'wty.tab_units': { th: 'ทะเบียนเครื่อง', en: 'Installed base' },
+  'wty.tab_claims': { th: 'เคลม', en: 'Claims' },
+  'wty.tab_exceptions': { th: 'รายการยกเว้นความคุ้มครอง', en: 'Coverage exceptions' },
+
+  // terms
+  'wty.new_term': { th: 'สร้างเงื่อนไขรับประกัน', en: 'New warranty term' },
+  'wty.term_code': { th: 'รหัสเงื่อนไข', en: 'Term code' },
+  'wty.term_name': { th: 'ชื่อ', en: 'Name' },
+  'wty.coverage_months': { th: 'ระยะเวลา (เดือน)', en: 'Coverage (months)' },
+  'wty.coverage_type': { th: 'ประเภทความคุ้มครอง', en: 'Coverage type' },
+  'wty.active': { th: 'ใช้งาน', en: 'Active' },
+  'wty.term_created': { th: 'สร้างเงื่อนไข {code} แล้ว', en: 'Created term {code}' },
+  'wty.no_terms_title': { th: 'ยังไม่มีเงื่อนไขรับประกัน', en: 'No warranty terms yet' },
+  'wty.no_terms_desc': { th: 'สร้างเงื่อนไขแรกเพื่อเริ่มลงทะเบียนเครื่อง', en: 'Create your first term to start registering units' },
+
+  // units
+  'wty.new_unit': { th: 'ลงทะเบียนเครื่อง (Serial)', en: 'Register a unit (serial)' },
+  'wty.serial_no': { th: 'หมายเลขเครื่อง', en: 'Serial no' },
+  'wty.item_code': { th: 'รหัสสินค้า', en: 'Item code' },
+  'wty.customer': { th: 'ลูกค้า', en: 'Customer' },
+  'wty.sold_date': { th: 'วันที่ขาย', en: 'Sold date' },
+  'wty.term': { th: 'เงื่อนไขรับประกัน', en: 'Warranty term' },
+  'wty.warranty_end': { th: 'สิ้นสุดการรับประกัน', en: 'Warranty end' },
+  'wty.status': { th: 'สถานะ', en: 'Status' },
+  'wty.unit_registered': { th: 'ลงทะเบียน {serial} แล้ว', en: 'Registered {serial}' },
+  'wty.no_units_title': { th: 'ยังไม่มีเครื่องในทะเบียน', en: 'No registered units yet' },
+  'wty.no_units_desc': { th: 'ลงทะเบียนเครื่องที่ขายเพื่อผูกกับการรับประกัน', en: 'Register a sold unit to bind its warranty' },
+  'wty.register': { th: 'ลงทะเบียน', en: 'Register' },
+
+  // claims
+  'wty.new_claim': { th: 'เปิดเคลม', en: 'Raise a claim' },
+  'wty.unit': { th: 'เครื่อง', en: 'Unit' },
+  'wty.fault': { th: 'อาการเสีย', en: 'Fault' },
+  'wty.coverage_kind': { th: 'ขอเคลมประเภท', en: 'Claim kind' },
+  'wty.in_coverage': { th: 'อยู่ในความคุ้มครอง', en: 'In coverage' },
+  'wty.out_of_coverage': { th: 'นอกความคุ้มครอง', en: 'Out of coverage' },
+  'wty.charge': { th: 'ค่าใช้จ่าย', en: 'Charge' },
+  'wty.disposition': { th: 'การจัดการ', en: 'Disposition' },
+  'wty.requested_by': { th: 'ผู้ยื่น', en: 'Requested by' },
+  'wty.authorized_by': { th: 'ผู้อนุมัติ', en: 'Authorized by' },
+  'wty.claim_raised': { th: 'เปิดเคลม {no} แล้ว', en: 'Raised claim {no}' },
+  'wty.authorize': { th: 'อนุมัติ', en: 'Authorize' },
+  'wty.reject': { th: 'ปฏิเสธ', en: 'Reject' },
+  'wty.authorized_ok': { th: 'อนุมัติเคลมแล้ว', en: 'Claim authorized' },
+  'wty.rejected_ok': { th: 'ปฏิเสธเคลมแล้ว', en: 'Claim rejected' },
+  'wty.authorize_title': { th: 'อนุมัติเคลม {no}', en: 'Authorize claim {no}' },
+  'wty.reject_reason': { th: 'เหตุผลการปฏิเสธ', en: 'Reject reason' },
+  'wty.no_claims_title': { th: 'ยังไม่มีเคลม', en: 'No claims yet' },
+  'wty.no_claims_desc': { th: 'เปิดเคลมกับเครื่องในทะเบียน', en: 'Raise a claim against a registered unit' },
+  'wty.svc01_hint': { th: 'SVC-01 · เคลมในความคุ้มครองอนุมัติฟรีอัตโนมัติ; เคลมนอกความคุ้มครองต้องให้ผู้อื่นอนุมัติ (ไม่ใช่ผู้ยื่น)', en: 'SVC-01 · in-coverage claims auto-authorize free; out-of-coverage claims need a DIFFERENT user to authorize' },
+
+  // exceptions register
+  'wty.exceptions_hint': { th: 'ทะเบียนการอนุมัติฟรีทั้งที่นอกความคุ้มครอง (รายการที่ผู้ตรวจสอบสุ่มตรวจ)', en: 'Register of authorized-free out-of-coverage overrides (the audit sample population)' },
+  'wty.no_exceptions_title': { th: 'ไม่มีรายการยกเว้น', en: 'No coverage exceptions' },
+  'wty.no_exceptions_desc': { th: 'ยังไม่มีเคลมนอกความคุ้มครองที่อนุมัติฟรี', en: 'No out-of-coverage claims were authorized free' },
+  'wty.saving': { th: 'กำลังบันทึก…', en: 'Saving…' },
 };
