@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, AlertTriangle, ShieldCheck, ClipboardList, Repeat } from 'lucide-react';
+import { Plus, AlertTriangle, ShieldCheck, ClipboardList, Repeat, LifeBuoy } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -37,10 +37,141 @@ export default function ServicePage() {
       <PageHeader title={t('crm.service_title')} description={t('crm.service_subtitle')} />
       <Tabs
         tabs={[
+          { key: 'cases', label: t('crm.tab_cases'), content: <Cases /> },
           { key: 'contracts', label: t('crm.tab_contracts'), content: <Contracts /> },
           { key: 'subs', label: t('crm.tab_subscriptions'), content: <Subscriptions /> },
         ]}
       />
+    </div>
+  );
+}
+
+// GET /api/service/cases → { cases: [...], count }
+interface Case { id: number; case_no: string; subject: string; status: string; priority: string; source: string; contact_email: string | null; customer_name: string | null; assignee: string | null; created_at: string | null }
+
+function Cases() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ cases: Case[]; count: number }>({ queryKey: ['svc-cases'], queryFn: () => api('/api/service/cases') });
+  const cases = q.data?.cases ?? [];
+  const openCount = cases.filter((c) => c.status === 'new' || c.status === 'open' || c.status === 'pending').length;
+  const emailCount = cases.filter((c) => c.source === 'email').length;
+
+  const [subject, setSubject] = useState('');
+  const [priority, setPriority] = useState('P3');
+  const [contactEmail, setContactEmail] = useState('');
+  const [assignee, setAssignee] = useState('');
+
+  const create = useMutation({
+    mutationFn: () =>
+      api('/api/service/cases', {
+        method: 'POST',
+        body: JSON.stringify({ subject, priority, contact_email: contactEmail || undefined, assignee: assignee || undefined }),
+      }),
+    onSuccess: (r: any) => {
+      notifySuccess(t('crm.case_created_ok', { no: r.case_no }));
+      setSubject(''); setContactEmail(''); setAssignee('');
+      qc.invalidateQueries({ queryKey: ['svc-cases'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const act = useMutation({
+    mutationFn: ({ id, action, body }: { id: number; action: string; body?: unknown }) =>
+      api(`/api/service/cases/${id}/${action}`, { method: 'POST', body: body != null ? JSON.stringify(body) : undefined }),
+    onSuccess: (_r, v) => {
+      notifySuccess(t(v.action === 'assign' ? 'crm.case_assigned_ok' : v.action === 'resolve' ? 'crm.case_resolved_ok' : v.action === 'close' ? 'crm.case_closed_ok' : 'crm.case_reopened_ok'));
+      qc.invalidateQueries({ queryKey: ['svc-cases'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const assign = (c: Case) => {
+    const who = window.prompt(t('crm.case_assign_prompt'), c.assignee ?? '');
+    if (who && who.trim()) act.mutate({ id: c.id, action: 'assign', body: { assignee: who.trim() } });
+  };
+
+  return (
+    <div className="space-y-5">
+      <StateView q={q}>
+        {q.data && (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatCard label={t('crm.total_cases')} value={num(cases.length)} icon={LifeBuoy} tone="primary" />
+            <StatCard label={t('crm.open_cases')} value={num(openCount)} tone="warning" />
+            <StatCard label={t('crm.email_cases')} value={num(emailCount)} tone="info" />
+          </div>
+        )}
+      </StateView>
+
+      {/* Open a case */}
+      <Card className="max-w-3xl gap-4">
+        <CardHeader>
+          <CardTitle className="text-base">{t('crm.cases_new')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2 sm:col-span-2">
+              <Label htmlFor="case-subj">{t('crm.case_subject')}</Label>
+              <Input id="case-subj" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={t('crm.case_subject_ph')} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="case-email">{t('crm.case_contact_email')}</Label>
+              <Input id="case-email" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="customer@example.com" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="case-pri">{t('crm.case_priority')}</Label>
+              <Select id="case-pri" value={priority} onChange={(e) => setPriority(e.target.value)}>
+                {['P1', 'P2', 'P3', 'P4'].map((p) => <option key={p} value={p}>{p}</option>)}
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="case-assignee">{t('crm.case_assignee')}</Label>
+              <Input id="case-assignee" value={assignee} onChange={(e) => setAssignee(e.target.value)} placeholder={t('crm.case_assignee_ph')} />
+            </div>
+          </div>
+          <Button disabled={create.isPending || !subject.trim()} onClick={() => create.mutate()}>
+            <Plus className="size-4" /> {create.isPending ? t('crm.saving') : t('crm.case_create_btn')}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={cases}
+            emptyState={{ icon: LifeBuoy, title: t('crm.no_cases_title'), description: t('crm.no_cases_desc') }}
+            columns={[
+              { key: 'case_no', label: t('dash.col_no') },
+              { key: 'subject', label: t('crm.case_subject') },
+              { key: 'priority', label: t('crm.case_priority'), render: (r: Case) => <Badge variant={statusVariant(r.priority)}>{r.priority}</Badge> },
+              { key: 'source', label: t('crm.case_source'), render: (r: Case) => <Badge variant="info">{r.source}</Badge> },
+              { key: 'assignee', label: t('crm.case_assignee'), render: (r: Case) => r.assignee ?? '—' },
+              { key: 'status', label: t('fin.col_status'), render: (r: Case) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              {
+                key: 'actions',
+                label: '',
+                align: 'right',
+                render: (r: Case) => (
+                  <div className="flex justify-end gap-2">
+                    {r.status !== 'closed' && (
+                      <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => assign(r)}>{t('crm.case_assign')}</Button>
+                    )}
+                    {(r.status === 'new' || r.status === 'open' || r.status === 'pending') && (
+                      <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'resolve', body: {} })}>{t('crm.case_resolve')}</Button>
+                    )}
+                    {r.status !== 'closed' && (
+                      <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'close' })}>{t('crm.case_close')}</Button>
+                    )}
+                    {(r.status === 'resolved' || r.status === 'closed') && (
+                      <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'reopen' })}>{t('crm.case_reopen')}</Button>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
+        )}
+      </StateView>
     </div>
   );
 }
