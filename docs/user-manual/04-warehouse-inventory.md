@@ -402,5 +402,51 @@ balances update; bought suggestions are marked *PR_Created* and linked to the ne
 
 ---
 
+## 11. Available-to-promise & stock reservations (order-promising) — control INV-09
+
+**Screen:** `/costing` → **พร้อมส่งมอบ & จองสินค้า (ATP)** tab.
+**Required permission:** `planner` / `pos` / `procurement` to check & list; `planner` /
+`pos` to reserve, release, fulfil.
+
+Before you promise a customer a delivery date, check what you can actually commit —
+**available-to-promise (ATP)** — and **reserve** that stock against the order so a second
+order can't sell the same units.
+
+> **ATP = on-hand − already-reserved − safety stock + scheduled receipts** (open purchase
+> orders arriving on/before the need-by date).
+
+### Check what you can promise
+
+1. On the **ATP** tab, enter the **item code**, the **quantity** the customer wants, and the
+   **need-by** date, then press **ตรวจสอบ (Check)**.
+2. The result shows a green **พร้อมส่งมอบได้ (Can promise)** or a red **ไม่พอส่งมอบ (Cannot
+   promise)** badge, the **ATP** figure and its components (on-hand / reserved / safety), and —
+   when short — the **shortfall** and the **first available** date (the soonest scheduled PO
+   receipt). Any scheduled receipts inside the horizon are listed with their PO and expected date.
+
+### Reserve the stock
+
+3. With a promising result on screen, enter a **reference doc** (e.g. the sales-order number)
+   and press **จองสินค้า (Reserve)**. The reservation lowers ATP immediately so it can't be
+   sold twice. Reserving the **same reference** again **adjusts** that reservation rather than
+   stacking a duplicate (no float leak), and you can never reserve **beyond** ATP —
+   over-reserving is rejected with `INSUFFICIENT_ATP`.
+
+### Work the reservation register
+
+4. The **รายการจอง (Reservations)** list shows every reservation with its open quantity. On an
+   **Open** row: **ยกเลิกจอง (Release)** cancels it and frees the stock back to ATP (order
+   cancelled); **ส่งมอบแล้ว (Fulfil)** retires it when the goods physically ship — fulfilment is
+   ATP-neutral (the on-hand drop from the issue already accounts for it, so the reservation isn't
+   double-counted).
+
+*(APIs: `GET /api/costing/atp`, `POST /api/costing/atp/check`, `POST /api/costing/allocate`,
+`POST /api/costing/allocations/{ref}/release|fulfill`, `GET /api/costing/allocations`.)*
+
+**Errors:** `INSUFFICIENT_ATP` (the reserve/adjust exceeds available-to-promise — reduce the
+quantity or wait for a scheduled receipt).
+
+---
+
 **Next:** [Procurement](./03-procurement.md) ·
 [Reports & Analytics](./09-reports-and-analytics.md) (forecasting & replenishment)
