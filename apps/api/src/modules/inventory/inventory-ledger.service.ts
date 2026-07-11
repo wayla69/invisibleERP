@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { invMoves, invBalances, invCostLayers, invWriteoffRequests, itemCosting, items, itemCategories, locations, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -63,7 +64,18 @@ export class InventoryLedgerService {
   // accounts. Off/unconfigured ⇒ 1200 / 5000 / 5810.
   private async invAccounts(tenantId: number, itemId: string, loc: string): Promise<{ inventory: string; cogs: string; adj: string }> {
     const r = this.determination ? await this.determination.resolveItemAccounts(tenantId, itemId, loc) : null;
-    return { inventory: r?.inventoryAccount ?? ACCT_INVENTORY, cogs: r?.cogsAccount ?? ACCT_COGS, adj: r?.adjustmentAccount ?? ACCT_ADJ };
+    // docs/43 PR-5: the tenant posting-rule layer sits BETWEEN item/warehouse determination and the
+    // control literal — precedence: item → category → warehouse → posting-rule → registry default.
+    // The inventory leg stays the pinned control (item-grain override lives in GL-21 determination only).
+    const [issOvr, adjOvr] = await Promise.all([
+      this.ledger.postingOverrides('COSTING.ISSUE', tenantId),
+      this.ledger.postingOverrides('INV.ADJUST', tenantId),
+    ]);
+    return {
+      inventory: r?.inventoryAccount ?? ACCT_INVENTORY,
+      cogs: r?.cogsAccount ?? issOvr.cogs ?? postingDefault('COSTING.ISSUE', 'cogs'),
+      adj: r?.adjustmentAccount ?? adjOvr.adjustment ?? postingDefault('INV.ADJUST', 'adjustment'),
+    };
   }
 
   // docs/33 PR7 — the stock location for a move: the explicit one, else the item's default_location_id

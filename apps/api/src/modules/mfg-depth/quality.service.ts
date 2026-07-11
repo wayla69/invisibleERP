@@ -3,6 +3,7 @@ import { desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { qualityInspections } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -48,10 +49,13 @@ export class QualityService {
     if (scrapValue > 0) {
       // write the scrapped value off the source: WO scrap → WIP(1250); GR scrap → Inventory(1200); else Finished Goods(1210).
       const creditAcct = dto.ref_type === 'WO' ? '1250' : dto.ref_type === 'GR' ? '1200' : '1210';
+      // docs/43 PR-5: the scrap-loss leg follows the tenant posting-rule (QA.SCRAP) ?? registry default;
+      // the ref-type-resolved source credit (1250/1200/1210 controls) stays pinned.
+      const scrapAcct = (await this.ledger.postingOverrides('QA.SCRAP', tenantId)).scrap_loss ?? postingDefault('QA.SCRAP', 'scrap_loss');
       const je: any = await this.ledger.postEntry({
         source: 'QA-SCRAP', sourceRef: inspNo, tenantId, memo: `Scrap ${dto.item_id ?? ''} ${inspNo}`, createdBy: user.username,
         lines: [
-          { account_code: '5810', debit: scrapValue, memo: 'Scrap/rework loss' },
+          { account_code: scrapAcct, debit: scrapValue, memo: 'Scrap/rework loss' },
           { account_code: creditAcct, credit: scrapValue, memo: `Scrap from ${dto.ref_type}` },
         ],
       });

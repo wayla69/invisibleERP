@@ -3,6 +3,7 @@ import { and, eq, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { itemCosting, stdCostRevisions, stdCostRevisionLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { DocNumberService } from '../../common/doc-number.service';
 import { n, fx } from '../../database/queries';
 import { bizYmdDash } from '../../common/bizdate';
@@ -127,9 +128,12 @@ export class StdCostService {
     const total = r2(lineRows.reduce((a: number, l: any) => a + n(l.revaluationAmount), 0));
     let jeNo: string | null = null;
     if (Math.abs(total) >= 0.005 && !(await this.ledger.alreadyPosted('STDREV', revNo, tenantId))) {
+      // docs/43 PR-5: the variance leg shares the COSTING.PPV event key (same 5500 default) — an
+      // override re-routes GRV PPV and the standard-cost revaluation together; 1200 stays pinned.
+      const varAcct = (await this.ledger.postingOverrides('COSTING.PPV', tenantId)).ppv ?? postingDefault('COSTING.PPV', 'ppv');
       const jeLines = total > 0
-        ? [{ account_code: GL_INVENTORY, debit: total }, { account_code: GL_STD_VARIANCE, credit: total }]
-        : [{ account_code: GL_INVENTORY, credit: -total }, { account_code: GL_STD_VARIANCE, debit: -total }];
+        ? [{ account_code: GL_INVENTORY, debit: total }, { account_code: varAcct, credit: total }]
+        : [{ account_code: GL_INVENTORY, credit: -total }, { account_code: varAcct, debit: -total }];
       const res = await this.ledger.postEntry({
         date: bizYmdDash(), source: 'STDREV', sourceRef: revNo, tenantId,
         memo: `Standard-cost revaluation ${revNo}`, createdBy: approver.username, lines: jeLines,
