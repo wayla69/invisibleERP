@@ -69,11 +69,13 @@ const CloseShortBody = z.object({ reason: z.string().max(500).optional() });
 const ReceivingSettingsBody = z.object({ over_receipt_weight_pct: z.number().min(0).max(100).optional(), claim_window_hours: z.number().int().positive().optional() });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
 // Direct-edit vendor master fields (master-data audit Phase 2) — excludes tax_id/credit_limit/bank details
-// (encrypted PII / sensitive-field / maker-checker territory — out of scope for a direct-edit endpoint).
+// AND payment_terms (GRC-3): these payment-redirection / credit-exposure fields are sensitive and now route
+// through the single-record master-data change maker-checker (POST /api/masterdata/change-requests, MDM-01)
+// so a change is applied only on a DISTINCT user's approval. This endpoint keeps the low-risk profile fields.
 const VendorProfileBody = z.object({
   contact: z.string().trim().max(200).nullish(), phone: z.string().trim().max(50).nullish(),
   email: z.union([z.string().trim().email(), z.literal('')]).nullish(),
-  address: z.string().trim().max(500).nullish(), payment_terms: z.string().trim().max(50).nullish(),
+  address: z.string().trim().max(500).nullish(),
   lead_time_days: z.number().int().nonnegative().nullish(), rating: z.number().min(0).max(5).nullish(),
   category: z.string().trim().max(50).nullish(), currency: z.string().trim().max(10).nullish(), notes: z.string().trim().max(2000).nullish(),
 });

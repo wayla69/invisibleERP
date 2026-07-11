@@ -237,6 +237,13 @@ export const SOD_RULES: SodRule[] = [
     a: ['cpq'], b: ['cpq_approve'], severity: 'High', risk: 'Build and approve one’s own quote that breaches the margin floor / max-discount ceiling — sell below cost or over-discount without a second check, straight to GL revenue.', mitigation: 'Separate quote authoring from discount approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, CPQ-01).' },
   { id: 'R21', dutyA: 'Raise non-conformance (NCR)', dutyB: 'Approve NCR financial disposition',
     a: ['quality'], b: ['quality_approve'], severity: 'High', risk: 'Raise and disposition one’s own non-conformance — scrap / use-as-is / return defective stock and post the inventory write-off (Dr 5810) without a second check.', mitigation: 'Separate the NCR raiser from the disposition approver; maker-checker enforced in-app (SOD_SELF_APPROVAL, QC-01).' },
+  // ── Sensitive master-data change (GRC-3, MDM-01) — maintaining sensitive vendor/customer/item master fields
+  //    is segregated from holding the elevated authority to APPROVE a single-record change to them. A person
+  //    who both edits vendor bank/credit/terms AND can release the change could redirect a supplier's payee
+  //    bank details and self-approve. The in-app requester ≠ approver block (SOD_SELF_APPROVAL) is the real
+  //    control regardless of the permissions held; this rule flags the role-design combination. ──
+  { id: 'R22', dutyA: 'Maintain sensitive master data (vendor bank/credit/terms)', dutyB: 'Approve master-data change requests',
+    a: ['md_vendor', 'md_item', 'md_config'], b: ['exec'], severity: 'High', risk: 'Maintain sensitive vendor/customer/item master fields (bank account, credit limit, payment terms) and also hold the elevated authority to approve a single-record master-data change — redirect a supplier’s payee bank details and release the change unchecked.', mitigation: 'Separate master-data maintenance from change-request approval; maker-checker enforced in-app (requester ≠ approver → 403 SOD_SELF_APPROVAL, MDM-01).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }

@@ -209,21 +209,22 @@ async function main() {
     rejectVbc.json.status === 'Rejected' && vendorAfterReject?.bankName === 'ธนาคารกรุงเทพ' && vendorAfterReject?.bankAccount === '111-1-11111-1',
     JSON.stringify({ st: rejectVbc.json.status, row: { bankName: vendorAfterReject?.bankName, bankAccount: vendorAfterReject?.bankAccount } }));
 
-  // ── H3. vendor master direct-edit (master-data audit Phase 2) — contact/address/terms/rating/category/
-  // currency/notes save immediately (no maker-checker; unlike bank details these carry no payment-redirection
-  // risk). tax_id/credit_limit/bank details stay out of scope for this endpoint (see service-level comment). ──
+  // ── H3. vendor master direct-edit (master-data audit Phase 2) — contact/address/rating/category/
+  // currency/notes save immediately (no maker-checker; these carry no payment-redirection risk).
+  // tax_id/credit_limit/bank details AND payment_terms (GRC-3) stay out of scope for this endpoint — those
+  // sensitive fields route through the master-data change maker-checker (see service-level comment). ──
   const vpUpdate = await inj('PATCH', `/api/procurement/vendors/${V1}/profile`, admin, {
     contact: 'คุณสมชาย', phone: '02-111-2222', email: 'v1@example.com', address: '123 ถนนสุขุมวิท กรุงเทพฯ',
-    payment_terms: 'Net 45', lead_time_days: 7, rating: 4.5, category: 'Preferred', currency: 'USD', notes: 'ผู้ขายหลักสำหรับวัตถุดิบ X',
+    lead_time_days: 7, rating: 4.5, category: 'Preferred', currency: 'USD', notes: 'ผู้ขายหลักสำหรับวัตถุดิบ X',
   });
   ok('VBC: vendor profile direct-edit saves immediately (no approval step)',
     vpUpdate.status === 200 && vpUpdate.json.vendor_id === V1, JSON.stringify(vpUpdate.json).slice(0, 150));
   const vendorAfterProfile = (await db.select().from(s.vendors).where(eq(s.vendors.id, V1)))[0];
-  ok('VBC: vendor profile fields persisted (contact/phone/email/address/terms/lead_time/rating/category/currency/notes)',
+  ok('VBC: vendor profile fields persisted (contact/phone/email/address/lead_time/rating/category/currency/notes)',
     vendorAfterProfile?.contact === 'คุณสมชาย' && vendorAfterProfile?.phone === '02-111-2222' && vendorAfterProfile?.email === 'v1@example.com'
-      && vendorAfterProfile?.address === '123 ถนนสุขุมวิท กรุงเทพฯ' && vendorAfterProfile?.paymentTerms === 'Net 45' && vendorAfterProfile?.leadTimeDays === 7
+      && vendorAfterProfile?.address === '123 ถนนสุขุมวิท กรุงเทพฯ' && vendorAfterProfile?.leadTimeDays === 7
       && near(vendorAfterProfile?.rating, 4.5) && vendorAfterProfile?.category === 'Preferred' && vendorAfterProfile?.currency === 'USD' && vendorAfterProfile?.notes === 'ผู้ขายหลักสำหรับวัตถุดิบ X',
-    JSON.stringify({ contact: vendorAfterProfile?.contact, terms: vendorAfterProfile?.paymentTerms, rating: vendorAfterProfile?.rating, cur: vendorAfterProfile?.currency }));
+    JSON.stringify({ contact: vendorAfterProfile?.contact, rating: vendorAfterProfile?.rating, cur: vendorAfterProfile?.currency }));
   const vpEmpty = await inj('PATCH', `/api/procurement/vendors/${V1}/profile`, admin, {});
   ok('VBC: vendor profile PATCH with no fields → 400 NO_FIELDS', vpEmpty.status === 400 && vpEmpty.json.error?.code === 'NO_FIELDS', `${vpEmpty.status} ${vpEmpty.json.error?.code}`);
   // The suppliers list projection (GET /api/inventory/suppliers) now also surfaces these fields for the web UI.
@@ -282,10 +283,12 @@ async function main() {
   // every create/update on the vendor master into the append-only field-level change log (ITGC-AC-14).
   // (VD1 is a tenant-owned vendor; a tenant steward sees their own tenant's trail — shared NULL-tenant
   // master rows are HQ-scoped, consistent with the audit-viewer's tenant filter.) ──
-  await inj('PATCH', `/api/procurement/vendors/${VD1}/profile`, admin, { category: 'Strategic', payment_terms: 'Net 60' });
+  // GRC-3: payment_terms is now a maker-checked sensitive field (routes through /api/masterdata/change-requests,
+  // MDM-01) — only the low-risk category is edited directly here.
+  await inj('PATCH', `/api/procurement/vendors/${VD1}/profile`, admin, { category: 'Strategic' });
   const vHist = await inj('GET', `/api/procurement/vendors/${VD1}/history`, admin);
   const vUpd = (vHist.json.history ?? []).find((e: any) => e.action === 'updated' && e.changes.some((c: any) => c.field === 'category' && c.new === 'Strategic'));
-  ok('Vendor history: records the field-level profile update (category → Strategic) with old→new + actor', !!vUpd && vUpd.actor === 'admin', JSON.stringify(vUpd?.changes?.filter((c: any) => ['category', 'payment_terms'].includes(c.field))));
+  ok('Vendor history: records the field-level profile update (category → Strategic) with old→new + actor', !!vUpd && vUpd.actor === 'admin', JSON.stringify(vUpd?.changes?.filter((c: any) => ['category'].includes(c.field))));
 
   // ── H7. Thai address standardization (master-data audit Phase 7) — province canonicalised, postal validated. ──
   const vAddrNorm = await inj('POST', `/api/procurement/vendors/${VD1}/addresses`, admin, { address_type: 'registered', province: 'เชียงใหม่ ', postal_code: '50000' });
