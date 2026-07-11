@@ -13,6 +13,8 @@ import { HcmLifecycleController } from './hcm-lifecycle.controller';
 import { HcmLifecycleService } from './hcm-lifecycle.service';
 import { HcmRecruitingController } from './hcm-recruiting.controller';
 import { HcmRecruitingService } from './hcm-recruiting.service';
+import { HcmEssController } from './hcm-ess.controller';
+import { HcmEssService } from './hcm-ess.service';
 import { ProjectsModule } from '../projects/projects.module';
 import { MessagingModule } from '../messaging/messaging.module';
 
@@ -28,10 +30,13 @@ import { MessagingModule } from '../messaging/messaging.module';
 // (an offboarding cannot complete while an access-revocation task is pending).
 // HR-4 (docs/42, Wave 2): recruiting/ATS — requisitions → candidate pipeline → offer → hire with the HR-04
 // maker-checker (requisition approval + offer authorization + headcount-bound hiring) control.
+// HR-8 (docs/42, Wave 3): Employee Self-Service (ESS) depth — self-service profile-change requests with the
+// HR-08 maker-checker (sensitive fields need a different hr/hr_admin approver) + personal document center +
+// team directory, own-scoped by emp_code.
 @Module({
   imports: [ProjectsModule, MessagingModule],
-  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmCompController, HcmLifecycleController, HcmRecruitingController],
-  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmCompService, HcmLifecycleService, HcmRecruitingService],
+  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmCompController, HcmLifecycleController, HcmRecruitingController, HcmEssController],
+  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmCompService, HcmLifecycleService, HcmRecruitingService, HcmEssService],
   exports: [HcmLeaveService],
 })
 export class HcmModule {}

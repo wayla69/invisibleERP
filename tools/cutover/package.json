@@ -36,6 +36,7 @@
     "hcm-comp": "tsx src/hcm-comp.ts",
     "hcm-onboarding": "tsx src/hcm-onboarding.ts",
     "hcm-recruiting": "tsx src/hcm-recruiting.ts",
+    "hcm-ess": "tsx src/hcm-ess.ts",
     "scm17c": "tsx src/scm17c.ts",
     "sub-billing": "tsx src/sub-billing.ts",
     "plan-gating": "tsx src/plan-gating.ts",

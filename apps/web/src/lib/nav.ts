@@ -433,6 +433,9 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.payroll', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
       // self-service is for every employee (incl. POS staff) → cross-listed to both surfaces
       { label: 'nav.ess', href: '/ess', icon: IdCard, perms: ['ess'], workspace: BOTH },
+      // HR-8 (docs/42, Wave 3) — ESS profile self-service: profile-change requests (HR-08 maker-checker) +
+      // personal documents + team directory. Cross-listed to every employee.
+      { label: 'nav.hcm_ess', href: '/hcm/ess', icon: FileText, perms: ['ess', 'hr', 'hr_admin', 'exec'], workspace: BOTH },
       // manager surface: approve/reject employee expense claims (perm `approvals`, independent of `ess`)
       { label: 'nav.expense_approvals', href: '/expense-approvals', icon: ReceiptText, perms: ['approvals'], workspace: BOTH },
     ],

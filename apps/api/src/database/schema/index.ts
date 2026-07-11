@@ -93,6 +93,7 @@ export * from './hcm-org';
 export * from './hcm-comp';
 export * from './hcm-lifecycle';
 export * from './hcm-recruiting';
+export * from './hcm-ess';
 export * from './pricing';
 export * from './pos-fiscal';
 export * from './pos-audit';

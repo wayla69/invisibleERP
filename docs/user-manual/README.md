@@ -71,6 +71,7 @@ if this is your first time logging in.
 | 14 | [Project Management](./14-project-management.md) | Planner, Project Managers, Executives |
 | 15 | [Real Estate](./15-real-estate.md) | RE Sales, Executives |
 | 16 | [CRM Workspace (deal board, leads, accounts)](./16-crm-workspace.md) | Sales, CRM Manager, Marketing, Executives |
+| 19 | [HR — Employee Self-Service (My Profile & Documents)](./19-hr-ess.md) | Every employee; HR / HR Admin (approve) |
 | 99 | [Troubleshooting & FAQ](./99-troubleshooting-faq.md) | Everyone |
 
 ---
