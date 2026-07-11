@@ -1,4 +1,4 @@
--- 0323_hcm_lifecycle — HR-5 (docs/42 HCM depth): employee onboarding / offboarding lifecycle
+-- 0324_hcm_lifecycle — HR-5 (docs/42 HCM depth): employee onboarding / offboarding lifecycle
 -- (joiner-mover-leaver). Four tenant-scoped tables:
 --   onboarding_templates       — per-tenant checklist template (kind onboarding|offboarding).
 --   onboarding_template_tasks  — ordered tasks on a template; is_access_revocation flags an access-removal task.

@@ -7,7 +7,7 @@ import { tenants } from './tenants';
 // an OFFBOARDING lifecycle cannot be marked complete while any task flagged is_access_revocation is still
 // pending (ACCESS_REVOCATION_INCOMPLETE) — the SOX access-removal-on-termination control. All four tables
 // are tenant-scoped: leading (tenant_id, …) index + the CANONICAL 0232-form tenant_isolation RLS policy
-// (applied by the generic DO-loop in migration 0323).
+// (applied by the generic DO-loop in migration 0324).
 
 export const onboardingTemplates = pgTable(
   'onboarding_templates',

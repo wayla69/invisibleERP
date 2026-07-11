@@ -9,6 +9,8 @@ import { HcmOrgController } from './hcm-org.controller';
 import { HcmOrgService } from './hcm-org.service';
 import { HcmLifecycleController } from './hcm-lifecycle.controller';
 import { HcmLifecycleService } from './hcm-lifecycle.service';
+import { HcmRecruitingController } from './hcm-recruiting.controller';
+import { HcmRecruitingService } from './hcm-recruiting.service';
 import { ProjectsModule } from '../projects/projects.module';
 import { MessagingModule } from '../messaging/messaging.module';
 
@@ -21,10 +23,12 @@ import { MessagingModule } from '../messaging/messaging.module';
 // headcount-governance control (StatusLogService is provided globally by CommonModule).
 // HR-5 (docs/42): onboarding/offboarding lifecycle with the HR-05 access-revocation-completeness control
 // (an offboarding cannot complete while an access-revocation task is pending).
+// HR-4 (docs/42, Wave 2): recruiting/ATS — requisitions → candidate pipeline → offer → hire with the HR-04
+// maker-checker (requisition approval + offer authorization + headcount-bound hiring) control.
 @Module({
   imports: [ProjectsModule, MessagingModule],
-  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmLifecycleController],
-  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmLifecycleService],
+  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmLifecycleController, HcmRecruitingController],
+  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmLifecycleService, HcmRecruitingService],
   exports: [HcmLeaveService],
 })
 export class HcmModule {}

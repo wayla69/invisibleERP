@@ -650,6 +650,13 @@ request more than the float (`OVER_FLOAT`), and **you cannot approve your own fu
 request** (`SOD_VIOLATION`). So no single person can put cash into a fund: the fund
 holds no cash until an independent approval.
 
+> **Amounts are entered in a validated dialog.** **เติมเงิน (Replenish)** and, when
+> settling an advance, the **actual expense / returned cash** are now keyed into a small
+> dialog whose confirm button stays disabled until each figure is a valid number — a
+> stray letter or a blank can no longer be sent as the amount. (The same validated
+> number dialog backs the subcontract valuation % and the real-estate deposit / contract
+> figures.)
+
 ### Open a direct expense or an advance — then a *different* person approves
 
 On the **เปิดค่าใช้จ่าย / เบิกล่วงหน้า** tab choose the **fund**, the **type**

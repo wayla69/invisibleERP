@@ -2260,7 +2260,14 @@
       "idx": 323,
       "version": "7",
       "when": 2023820000288,
-      "tag": "0323_hcm_lifecycle",
+      "tag": "0323_hcm_recruiting",
+      "breakpoints": true
+    },
+    {
+      "idx": 324,
+      "version": "7",
+      "when": 2023820000289,
+      "tag": "0324_hcm_lifecycle",
       "breakpoints": true
     }
   ]

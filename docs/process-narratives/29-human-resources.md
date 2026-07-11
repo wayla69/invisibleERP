@@ -300,7 +300,7 @@ flowchart TD
 ## L.8 System references
 
 - Service/controller: `apps/api/src/modules/hcm/hcm-lifecycle.service.ts`, `hcm-lifecycle.controller.ts`
-- Schema: `apps/api/src/database/schema/hcm-lifecycle.ts`; migration `apps/api/drizzle/0323_hcm_lifecycle.sql`
+- Schema: `apps/api/src/database/schema/hcm-lifecycle.ts`; migration `apps/api/drizzle/0324_hcm_lifecycle.sql`
 - Web: `apps/web/src/app/(internal)/hcm/onboarding/` (`/hcm/onboarding`)
 - ToE harness: `tools/cutover/src/hcm-onboarding.ts` (27 checks)
 
@@ -308,4 +308,109 @@ flowchart TD
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| 0.1 DRAFT | 2026-07-11 | HR-5 | Initial onboarding/offboarding lifecycle narrative + HR-05 access-revocation-completeness control (migration 0323). |
+| 0.1 DRAFT | 2026-07-11 | HR-5 | Initial onboarding/offboarding lifecycle narrative + HR-05 access-revocation-completeness control (migration 0324). |
+# HR-4 — Recruiting / ATS (control HR-04) — appended section
+
+> Self-contained HR-4 recruiting/ATS narrative; kept on merge alongside the HR-2/HR-3 sections above.
+
+## RC.1 Document control (HR-4)
+
+| Field | Value |
+|---|---|
+| Process ID | PN-29-HR (HR-4 recruiting) |
+| Process owner | `<<HR / Talent Acquisition Manager>>` |
+| Approver | `<<CHRO / CFO>>` |
+| Version | **0.1 DRAFT** |
+| Effective date | `<<effective-date>>` |
+| Review cadence | Per requisition + annual |
+| Related RCM controls | HR-04; SoD (maker-checker on requisition approval + offer authorization); headcount-bound hiring |
+| Related plan | `docs/42-hcm-depth-plan.md` (Wave 2) |
+
+## 2. Purpose
+
+To control recruiting end-to-end so that no one can both request headcount and authorise it, no candidate
+becomes an employee without an independently authorised offer, and the number of hires never exceeds the
+approved requisition establishment — protecting the payroll base and the org plan from unbudgeted or
+un-reviewed hires.
+
+## 3. Scope
+
+**In scope:** job requisitions (`job_requisitions`), the candidate talent pool (`candidates`), the
+application pipeline (`applications`, stages applied → screen → interview → offer → hired/rejected), and
+employment offers (`offers`). A hire converts an accepted+approved offer into a `payroll.employees` row
+(by `emp_code`); positions link `hr_positions` (HR-1).
+
+**Out of scope:** payroll computation/posting (see `05-payroll.md`), org establishment maintenance
+(`hcm-org`, HR-1), onboarding after hire.
+
+## 4. Roles & permissions
+
+| Duty | Permission | Notes |
+|---|---|---|
+| View requisitions / candidates / applications / offers | `hr`, `hr_admin`, `exec` | Reads |
+| Create requisition / candidate / application, advance stage, create offer | `hr`, `hr_admin` | Writes |
+| Approve/reject requisition, authorize offer, convert offer to hire | `hr_admin`, `exec` | Elevated HR duty; approver ≠ maker (HR-04) |
+
+## 5. Workflow
+
+```mermaid
+flowchart TD
+  A[HR raises requisition · status pending<br/>requested_by stamped] --> B{Approve}
+  B -->|approver ≠ requested_by| C[Requisition approved]
+  B -->|approver == requested_by| X1[403 SOD_SELF_APPROVAL]
+  C --> D[Add candidate + application<br/>advance applied → interview]
+  D --> E{Advance to offer / hired}
+  E -->|requisition approved| F[Create offer · status pending<br/>created_by stamped]
+  E -->|requisition not approved| X2[403 REQUISITION_NOT_APPROVED]
+  F --> G{Authorize offer}
+  G -->|approver ≠ created_by| H[Offer approved]
+  G -->|approver == created_by| X3[403 SOD_SELF_APPROVAL]
+  H --> I{Convert to hire}
+  I -->|offer approved AND hires < headcount| J[payroll.employees row created<br/>application → hired · requisition → filled]
+  I -->|offer not approved| X4[403 OFFER_NOT_APPROVED]
+  I -->|hires == headcount| X5[403 HEADCOUNT_EXCEEDED]
+```
+
+## 6. Control matrix
+
+| Control | Assertion | What it prevents | Enforcement |
+|---|---|---|---|
+| **HR-04** | Authorization / Segregation of Duties | A self-authorised requisition, a self-approved offer, an unauthorised hire, or hiring beyond the approved establishment | `approveRequisition` rejects `requested_by == approver` (`SOD_SELF_APPROVAL`); the offer/hired stages require an `approved` requisition (`REQUISITION_NOT_APPROVED`); `approveOffer` rejects `created_by == approver` (`SOD_SELF_APPROVAL`); `convertOffer` requires an `approved` offer (`OFFER_NOT_APPROVED`) and blocks hires beyond `headcount` (`HEADCOUNT_EXCEEDED`) |
+
+## 7. Endpoints (application)
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET /api/hcm/recruiting/requisitions` | read | List job requisitions (with hired vs headcount) |
+| `POST /api/hcm/recruiting/requisitions` | `hr`/`hr_admin` | Raise a requisition (`pending`) |
+| `POST /api/hcm/recruiting/requisitions/:reqNo/approve` | `hr_admin`/`exec` | Approve (HR-04 maker-checker) |
+| `POST /api/hcm/recruiting/requisitions/:reqNo/reject` | `hr_admin`/`exec` | Reject a requisition |
+| `GET/POST /api/hcm/recruiting/candidates` | read / `hr`,`hr_admin` | List / add candidates |
+| `GET/POST /api/hcm/recruiting/applications` | read / `hr`,`hr_admin` | List / create pipeline applications |
+| `PATCH /api/hcm/recruiting/applications/:id/stage` | `hr`/`hr_admin` | Advance stage (HR-04 gates) |
+| `GET/POST /api/hcm/recruiting/offers` | read / `hr`,`hr_admin` | List / create offers |
+| `POST /api/hcm/recruiting/offers/:id/approve` | `hr_admin`/`exec` | Authorize offer (HR-04 SoD) |
+| `POST /api/hcm/recruiting/offers/:id/convert` | `hr_admin`/`exec` | Convert to a `payroll.employees` hire |
+
+## 8. Error codes
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `SOD_SELF_APPROVAL` | 403 | Requisition/offer approved by its own maker |
+| `REQUISITION_NOT_APPROVED` | 403 | Offer/hire stage attempted before the requisition is approved |
+| `OFFER_NOT_APPROVED` | 403 | Convert attempted before the offer is authorized |
+| `HEADCOUNT_EXCEEDED` | 403 | Hire attempted beyond the requisition headcount |
+| `REQUISITION_EXISTS` / `CANDIDATE_EXISTS` | 400 | Duplicate `req_no` / `cand_no` for the tenant |
+
+## 9. System references
+
+- Service/controller: `apps/api/src/modules/hcm/hcm-recruiting.service.ts`, `hcm-recruiting.controller.ts`
+- Schema: `apps/api/src/database/schema/hcm-recruiting.ts`; migration `apps/api/drizzle/0323_hcm_recruiting.sql`
+- Web: `apps/web/src/app/(internal)/hcm/recruiting/page.tsx` (`/hcm/recruiting`)
+- ToE harness: `tools/cutover/src/hcm-recruiting.ts` (20 checks)
+
+## 10. Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-07-11 | HR-4 | Initial recruiting/ATS narrative + HR-04 control matrix (migration 0323) |

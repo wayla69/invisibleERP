@@ -1,6 +1,6 @@
 # UAT — Cycle 09: Human Resources (HCM)
 
-**Status: DRAFT v0.1 · 2026-07-11** · *v0.1: HR-2 leave accrual (control HR-02, migration 0321) — UAT-HR-01..09; HR-3 performance management (control HR-03, migration 0322) — UAT-HR-300..312; HR-5 onboarding/offboarding lifecycle (control HR-05, migration 0323) — UAT-HR-500..515.* · Cross-ref: `docs/process-narratives/29-human-resources.md`; harnesses `tools/cutover/src/hcm-leave.ts` (17), `tools/cutover/src/hcm-perf.ts` (17), `tools/cutover/src/hcm-onboarding.ts` (27).
+**Status: DRAFT v0.1 · 2026-07-11** · *v0.1: HR-2 leave accrual (control HR-02, migration 0321) — UAT-HR-01..09; HR-3 performance management (control HR-03, migration 0322) — UAT-HR-300..312; HR-4 recruiting/ATS (control HR-04, migration 0323) — UAT-HR-400..413; HR-5 onboarding/offboarding lifecycle (control HR-05, migration 0324) — UAT-HR-500..515.* · Cross-ref: `docs/process-narratives/29-human-resources.md`; harnesses `tools/cutover/src/hcm-leave.ts` (17), `tools/cutover/src/hcm-perf.ts` (17), `tools/cutover/src/hcm-recruiting.ts` (20), `tools/cutover/src/hcm-onboarding.ts` (27).
 
 > This cycle is built up wave-by-wave; each HR feature owns a self-contained block so parallel PRs merge keep-both.
 
@@ -59,9 +59,29 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Balance formula = `entitle
 | UAT-HR-514 | Detective | Open offboarding with unrevoked access | `GET …/offboarding-exceptions?days=0` then `?days=30` | days=0 lists the lifecycle (emp_code, `access_revocation_pending`); days=30 count 0 |
 | UAT-HR-515 | Security (RLS) | Tenant T2 HR user | `POST …/templates` as T2; `GET …/templates` as T1 & T2 | T1 does not see T2's template; T2 sees only its own (tenant isolation) |
 
+## Test cases — Recruiting / ATS (HR-4)
+
+| Test ID | Type | Preconditions | Test steps | Expected result |
+|---|---|---|---|---|
+| UAT-HR-400 | Positive | HR admin | `POST /api/hcm/recruiting/requisitions` `{req_no:REQ1, headcount:1}` | 201, status `pending`, `requested_by` set |
+| UAT-HR-401 | Negative (control) | REQ1 raised by hradmin | hradmin approves own requisition `.../requisitions/REQ1/approve` | 403 `SOD_SELF_APPROVAL` |
+| UAT-HR-402 | Negative (perm) | REQ1 pending | `hr`-only maker approves REQ1 | 403 (permission gate) |
+| UAT-HR-403 | Positive | REQ1 pending | A different approver (`exec`) approves REQ1 | 201/200, status `approved`, `approved_by` set |
+| UAT-HR-404 | Positive | Approver ≠ requester | `POST …/candidates` `{cand_no:CAND1,name}` + `POST …/applications {req_no:REQ1,cand_no:CAND1}` | Candidate + application created (stage `applied`) |
+| UAT-HR-405 | Positive | Application exists | `PATCH …/applications/:id/stage` `{stage:screen}` then `{stage:interview}` | 200, stage advances to `interview` |
+| UAT-HR-406 | Negative (control) | REQ2 raised but NOT approved; application on REQ2 | `PATCH …/applications/:id/stage {stage:offer}` | 403 `REQUISITION_NOT_APPROVED` |
+| UAT-HR-407 | Positive | REQ1 approved application | `POST …/offers {application_id, offered_salary}` | 201, offer status `pending`, `created_by` set |
+| UAT-HR-408 | Negative (control) | Offer pending | `POST …/offers/:id/convert` | 403 `OFFER_NOT_APPROVED` |
+| UAT-HR-409 | Negative (control) | Offer created by hradmin | hradmin approves own offer `.../offers/:id/approve` | 403 `SOD_SELF_APPROVAL` |
+| UAT-HR-410 | Positive | Offer pending | A different approver authorizes the offer | 201/200, status `approved` |
+| UAT-HR-411 | Positive | Offer approved | `POST …/offers/:id/convert` | 201, `emp_code` minted; a `payroll.employees` row created from the candidate; requisition → `filled` |
+| UAT-HR-412 | Negative (control) | REQ1 headcount 1 already hired; 2nd approved offer on REQ1 | `POST …/offers/:id2/convert` | 403 `HEADCOUNT_EXCEEDED` |
+| UAT-HR-413 | Security (RLS) | Tenant T2 HR user | T2 creates `T2REQ`; `GET …/requisitions` as T1 and T2 | T1 does not see `T2REQ`; T2 sees only its own (no `REQ1`) |
+
 ## Traceability
 
 | Requirement | Control | Test cases | Harness |
 |---|---|---|---|
 | Review sign-off SoD (reviewer ≠ reviewee; manager rating required; goal weights ≤ 100%) | HR-03 | UAT-HR-300..312 | `tools/cutover/src/hcm-perf.ts` (17 checks) |
+| Requisition approval + offer authorization maker-checker; headcount-bound hiring | HR-04 | UAT-HR-400..413 | `tools/cutover/src/hcm-recruiting.ts` (20 checks) |
 | Offboarding access-revocation completeness (offboarding cannot complete while an access-revocation task is pending; privileged skip with reason; exception register) | HR-05 | UAT-HR-500..515 | `tools/cutover/src/hcm-onboarding.ts` (27 checks) |
