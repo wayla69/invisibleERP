@@ -44,6 +44,13 @@ export const PERMISSIONS = [
   //    elevated duty that configures HR master (leave types/policies — HR-2), closes cycles and signs off
   //    appraisals (HR-03 sign-off SoD) + runs privileged HR jobs (leave accrual — HR-02). ──
   'hr', 'hr_admin',
+  // ── CPQ discount-approval single-duty split (SVC-1, CPQ-01; SoD R20) — authoring/discounting a quote is
+  //    segregated from approving a quote that breaches the margin floor / max-discount ceiling. `cpq` is the
+  //    author duty (build/discount/send/accept quotes); `cpq_approve` is the checker duty (approve/reject a
+  //    floor-breaching quote). Standalone granular perms: NOT implied by a coarse perm. Endpoints gate
+  //    `cpq* OR exec` so existing exec roles keep working; the in-app self-approval block (author ≠ approver)
+  //    is the real control regardless of the permission held. ──
+  'cpq', 'cpq_approve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -59,6 +66,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'proj_subcon', 'proj_subcon_certify',
   'proj_tender',
   're_sales', 're_contract_approve', 're_transfer',
+  'cpq', 'cpq_approve',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -89,7 +97,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Admin: [...PERMISSIONS],
   // 'pr_raise' is seeded into every internal staff role: raising a purchase requisition is company-wide
   // (PR ≠ PO). Customer-portal roles are excluded; Procurement/Planner inherit it via implication.
-  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals', 'pr_raise', 'proj_tender'],
+  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals', 'pr_raise', 'proj_tender', 'cpq'],
   Customer: ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track', 'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
   Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata', 'pr_raise'],
   // Procurement is now a SoD-clean buying role (0 conflicts): it buys (procurement) and may raise PRs
@@ -215,6 +223,8 @@ export const SOD_RULES: SodRule[] = [
     a: ['proj_subcon'], b: ['proj_subcon_certify'], severity: 'High', risk: 'Raise and certify one’s own subcontractor valuation — over-pay a subcontractor / mishandle retention and back-charges.', mitigation: 'Separate valuation preparer from certifier; maker-checker enforced in-app (SOD_SELF_APPROVAL, PROJ-17).' },
   { id: 'R19', dutyA: 'Draft real-estate sale contract', dutyB: 'Approve sale contract',
     a: ['re_sales'], b: ['re_contract_approve'], severity: 'High', risk: 'Draft and approve one’s own unit sale contract — grant an unauthorised price/discount to a related buyer.', mitigation: 'Separate contract drafting from approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, RE-02).' },
+  { id: 'R20', dutyA: 'Author / discount CPQ quote', dutyB: 'Approve discount / margin-floor breach',
+    a: ['cpq'], b: ['cpq_approve'], severity: 'High', risk: 'Build and approve one’s own quote that breaches the margin floor / max-discount ceiling — sell below cost or over-discount without a second check, straight to GL revenue.', mitigation: 'Separate quote authoring from discount approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, CPQ-01).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }
@@ -269,4 +279,5 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   approvals: '/approvals',
   branch: '/branches',
   hr: '/hcm',
+  cpq: '/cpq',
 };

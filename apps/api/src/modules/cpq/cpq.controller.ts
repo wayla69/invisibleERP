@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe, Query, HttpCode, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, ParseIntPipe, Query, HttpCode, Res } from '@nestjs/common';
 import { z } from 'zod';
 import type { FastifyReply } from 'fastify';
 import { CpqService } from './cpq.service';
@@ -13,11 +13,13 @@ const OptionBody = z.object({ group_name: z.string().min(1), option_code: z.stri
 const RuleBody = z.object({ name: z.string().min(1), rule_type: z.string().optional(), discount_pct: z.number(), min_qty: z.number().nonnegative().optional() });
 const QuoteBody = z.object({
   customer_name: z.string().min(1), opportunity_id: z.number().optional(), config_id: z.number().optional(),
-  qty: z.number().positive().optional(),
+  qty: z.number().positive().optional(), unit_cost: z.number().nonnegative().optional(),
   selected_options: z.array(z.object({ group_name: z.string().min(1), option_code: z.string().min(1) })).optional(),
   validity_days: z.number().int().positive().optional(), notes: z.string().optional(),
-  lines: z.array(z.object({ description: z.string().min(1), qty: z.number().optional(), unit_price: z.number().optional() })).optional(),
+  lines: z.array(z.object({ description: z.string().min(1), qty: z.number().optional(), unit_price: z.number().optional(), unit_cost: z.number().nonnegative().optional() })).optional(),
 });
+// CPQ-01 (SVC-1): per-tenant discount/margin floor.
+const SettingsBody = z.object({ min_margin_pct: z.number().min(0).max(100).optional(), max_discount_pct: z.number().min(0).max(100).optional() });
 
 @Controller('api/cpq')
 export class CpqController {
@@ -39,26 +41,47 @@ export class CpqController {
   @Permissions('masterdata')
   createRule(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(RuleBody)) dto: z.infer<typeof RuleBody>, @CurrentUser() user: JwtUser) { return this.svc.createRule({ ...dto, config_id: id }, user); }
 
+  // CPQ-01 (SVC-1): per-tenant discount/margin floor — read is exec/cpq, changing it is a config duty.
+  @Get('settings')
+  @Permissions('exec', 'cpq', 'cpq_approve')
+  getSettings(@CurrentUser() user: JwtUser) { return this.svc.getSettings(user); }
+
+  @Put('settings')
+  @Permissions('masterdata', 'exec')
+  updateSettings(@Body(new ZodValidationPipe(SettingsBody)) dto: z.infer<typeof SettingsBody>, @CurrentUser() user: JwtUser) { return this.svc.updateSettings(dto, user); }
+
   @Get('quotes')
-  @Permissions('exec')
+  @Permissions('exec', 'cpq')
   listQuotes(@Query('status') status?: string, @CurrentUser() user?: JwtUser) { return this.svc.listQuotes({ status }, user!); }
 
+  // CPQ-01: the maker-checker queue of floor-breaching quotes (author view + approver worklist).
+  @Get('approvals')
+  @Permissions('exec', 'cpq', 'cpq_approve')
+  listApprovals(@Query('status') status?: string, @CurrentUser() user?: JwtUser) { return this.svc.listApprovals({ status }, user!); }
+
   @Post('quotes')
-  @Permissions('exec')
+  @Permissions('exec', 'cpq')
   createQuote(@Body(new ZodValidationPipe(QuoteBody)) dto: z.infer<typeof QuoteBody>, @CurrentUser() user: JwtUser) { return this.svc.createQuote(dto, user); }
 
   @Get('quotes/:id/lines')
-  @Permissions('exec')
+  @Permissions('exec', 'cpq')
   getLines(@Param('id', ParseIntPipe) id: number) { return this.svc.getQuoteLines(id); }
 
   @Post('quotes/:id/send')
-  @Permissions('exec')
+  @Permissions('exec', 'cpq')
   @HttpCode(200)
   send(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.sendQuote(id, user); }
 
+  // CPQ-01: approve a floor-breaching quote (PendingApproval → Sent). Reserved to the approver duty; the
+  // author cannot self-approve (SOD_SELF_APPROVAL, enforced in the service regardless of permission).
+  @Post('quotes/:id/approve')
+  @Permissions('exec', 'cpq_approve')
+  @HttpCode(200)
+  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.approveDiscount(id, user); }
+
   // Printable ใบเสนอราคา (Quotation) — HTML→PDF via the shared renderer, HTML fallback when Chromium absent.
   @Get('quotes/:id/pdf')
-  @Permissions('exec')
+  @Permissions('exec', 'cpq')
   async pdf(@Param('id', ParseIntPipe) id: number, @Res() reply: FastifyReply) {
     const q = await this.svc.getQuoteForPrint(id);
     const html = this.svc.quotationHtml(q);
@@ -69,19 +92,21 @@ export class CpqController {
 
   // Email the quotation to the customer as a PDF attachment (marks the quote Sent).
   @Post('quotes/:id/send-email')
-  @Permissions('exec')
+  @Permissions('exec', 'cpq')
   @HttpCode(200)
   sendEmail(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(EmailBody)) b: z.infer<typeof EmailBody>, @CurrentUser() user: JwtUser) {
     return this.svc.emailQuote(id, b.to_email, user);
   }
 
   @Post('quotes/:id/accept')
-  @Permissions('exec')
+  @Permissions('exec', 'cpq')
   @HttpCode(200)
   accept(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.acceptQuote(id, user); }
 
+  // Reject: for a PendingApproval quote this is the checker declining the discount/margin breach (→ Draft,
+  // SOD_SELF_APPROVAL); for a Sent/Draft quote it is the classic quote rejection (→ Rejected).
   @Post('quotes/:id/reject')
-  @Permissions('exec')
+  @Permissions('exec', 'cpq', 'cpq_approve')
   @HttpCode(200)
   reject(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.rejectQuote(id, user); }
 }
