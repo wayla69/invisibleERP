@@ -36,6 +36,14 @@ export const PERMISSIONS = [
   //    contract (maker-checker on the price/discount authority). re_transfer authorises ownership transfer
   //    (RE-04 — recognises revenue). Ungranted ⇒ the vertical is invisible. ──
   're_sales', 're_contract_approve', 're_transfer',
+  // ── HR / HCM organisation (docs/42 HR-1) — org structure, positions & headcount governance (HR-01). `hr` is
+  //    a read duty (view the org chart / departments / positions); `hr_admin` is the maintain duty (create
+  //    departments/positions/assignments). Writes gate on hr_admin/exec; reads on hr/hr_admin/exec. The
+  //    headcount-governance override (assign beyond a position's budgeted_headcount) is reserved to `exec`.
+  //    'hr'/'hr_admin' also carry the HCM depth duties (docs/42): people ops (cycles/goals/reviews) + the
+  //    elevated duty that configures HR master (leave types/policies — HR-2), closes cycles and signs off
+  //    appraisals (HR-03 sign-off SoD) + runs privileged HR jobs (leave accrual — HR-02). ──
+  'hr', 'hr_admin',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -71,6 +79,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
+  'Human Resources': ['hr', 'hr_admin'],
   'Real Estate (Developer)': ['re_sales', 're_contract_approve', 're_transfer'],
 };
 
@@ -259,4 +268,5 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   cust_my_crm: '/my/customers', cust_my_suppliers: '/my/suppliers', cust_my_pos: '/my/purchase-orders', cust_my_users: '/my/users',
   approvals: '/approvals',
   branch: '/branches',
+  hr: '/hcm',
 };

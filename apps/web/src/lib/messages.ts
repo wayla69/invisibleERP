@@ -19,6 +19,7 @@ import { CATALOG as CAT_MISC } from './i18n-catalog/misc';
 import { CATALOG as CAT_CONSTRUCTION } from './i18n-catalog/construction';
 import { CATALOG as CAT_PLATFORM } from './i18n-catalog/platform';
 import { CATALOG as CAT_CRMX } from './i18n-catalog/crmx';
+import { CATALOG as CAT_GOVERNANCE } from './i18n-catalog/governance';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -249,6 +250,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
 
   // ── HR & Payroll ──────────────────────────────────────────────────────────
   'nav.hcm': { th: 'บุคลากร (HR)', en: 'People (HR)' },
+  'nav.hcm_org': { th: 'โครงสร้างองค์กร & ตำแหน่ง', en: 'Org & Positions' },
   'nav.scheduling': { th: 'จัดตารางเวร & แรงงาน', en: 'Scheduling & Labour' },
   'nav.ot_rules': { th: 'กฎ OT & แจ้งเตือนแรงงาน', en: 'OT Rules & Labour Alerts' },
   'nav.payroll': { th: 'เงินเดือน (Payroll)', en: 'Payroll' },
@@ -1200,6 +1202,26 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'hr.hcm_subtitle': { th: 'ลงเวลา/ล่วงเวลา (OT) → เข้าระบบเงินเดือน · การลา (ลาไม่รับค่าจ้างหักเงินเดือนอัตโนมัติ)', en: 'Time / overtime (OT) → feeds payroll · Leave (unpaid leave auto-deducts from salary)' },
   'hr.tab_time_ot': { th: 'ลงเวลา / OT', en: 'Time / OT' },
   'hr.tab_leave': { th: 'การลา', en: 'Leave' },
+  'hr.tab_accrual': { th: 'สิทธิ์การลา (สะสม)', en: 'Leave entitlement (accrual)' },
+  'hr.accrual_balances_title': { th: 'ยอดสิทธิ์การลาคงเหลือ', en: 'Leave balances' },
+  'hr.accrual_types_title': { th: 'ประเภทการลา (นโยบายสะสม)', en: 'Leave types (accrual policy)' },
+  'hr.accrual_policies_title': { th: 'นโยบายตามระดับ/อายุงาน', en: 'Policy overrides (grade / tenure)' },
+  'hr.accrual_run_title': { th: 'รันสะสมวันลาประจำงวด', en: 'Run periodic leave accrual' },
+  'hr.accrual_run_btn': { th: 'รันการสะสม', en: 'Run accrual' },
+  'hr.accrual_ran': { th: 'สะสมวันลาแล้ว: {accrued} วัน · {count} คน', en: 'Accrued {accrued} day(s) · {count} employee(s)' },
+  'hr.accrual_type_saved': { th: 'บันทึกประเภทการลาแล้ว', en: 'Leave type saved' },
+  'hr.accrual_policy_saved': { th: 'บันทึกนโยบายแล้ว', en: 'Policy saved' },
+  'hr.col_method': { th: 'วิธีสะสม', en: 'Method' },
+  'hr.col_rate': { th: 'อัตรา/งวด', en: 'Rate/period' },
+  'hr.col_carryover_cap': { th: 'เพดานยกยอด', en: 'Carryover cap' },
+  'hr.col_max_balance': { th: 'เพดานคงเหลือ', en: 'Max balance' },
+  'hr.col_grade': { th: 'ระดับ', en: 'Grade' },
+  'hr.col_min_tenure': { th: 'อายุงานขั้นต่ำ (เดือน)', en: 'Min tenure (mo)' },
+  'hr.col_year': { th: 'ปี', en: 'Year' },
+  'hr.col_accrued': { th: 'สะสม', en: 'Accrued' },
+  'hr.col_carryover': { th: 'ยกยอด', en: 'Carryover' },
+  'hr.col_available': { th: 'คงเหลือใช้ได้', en: 'Available' },
+  'hr.name_label': { th: 'ชื่อ', en: 'Name' },
   'hr.ts_saved': { th: 'บันทึกเวลาทำงาน', en: 'Time entry saved' },
   'hr.ts_approved_posted': { th: 'อนุมัติแล้ว — ลงต้นทุนโครงการ {cost} ({entry})', en: 'Approved — posted project cost {cost} ({entry})' },
   'hr.ts_form_title': { th: 'บันทึกเวลาทำงาน / ล่วงเวลา', en: 'Log working / overtime hours' },
@@ -1580,5 +1602,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE,
 );

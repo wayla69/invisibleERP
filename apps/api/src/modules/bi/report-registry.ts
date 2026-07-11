@@ -58,6 +58,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   gl_allocation_run: { label: 'ปันส่วนต้นทุนตามรอบ', labelEn: 'Run due GL allocation cycles' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
+  // HR-2 (docs/42, HR-02): each run credits one period of leave accrual per active employee (policy/grade/
+  // tenure-driven), idempotent per (tenant, period) via leave_accrual_runs.
+  hr_leave_accrual: { label: 'สะสมวันลาประจำงวด', labelEn: 'Run monthly leave accrual' },
   apply_scheduled_master_changes: { label: 'ปรับข้อมูลหลักตามวันที่มีผล', labelEn: 'Apply date-effective master changes' },
   // Construction/real-estate sweeps (docs/35 Depth) — each idempotent: retention released on its schedule,
   // bookings expired past their date, overdue property installments surfaced.

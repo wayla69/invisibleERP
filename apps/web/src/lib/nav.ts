@@ -417,7 +417,10 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'nav.group.hr',
     workspace: ['erp'],
     items: [
-      { label: 'nav.hcm', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
+      { label: 'nav.hcm', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors', 'hr', 'hr_admin'] },
+      { label: 'hx.perf.nav_title', href: '/hcm/performance', icon: Award, perms: ['hr', 'hr_admin', 'exec'] },
+      // HR-1 (docs/42) — org structure, positions & headcount governance (HR-01)
+      { label: 'nav.hcm_org', href: '/hcm/org', icon: Network, perms: ['hr', 'hr_admin', 'exec'] },
       { label: 'nav.scheduling', href: '/scheduling', icon: CalendarRange, perms: ['pos', 'users', 'exec'] },
       { label: 'nav.ot_rules', href: '/labor/ot-rules', icon: Timer, perms: ['pos', 'users', 'exec'] },
       { label: 'nav.payroll', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
@@ -479,6 +482,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.sod', href: '/sod', icon: ShieldAlert, perms: ['exec', 'users'] },
       { label: 'nav.audit', href: '/audit', icon: ScrollText, perms: ['users'] },
       { label: 'nav.controls', href: '/controls', icon: ShieldAlert, perms: ['exec', 'users', 'creditors'] },
+      { label: 'nav.governance', href: '/governance', icon: Landmark, perms: ['exec', 'users'] },
       { label: 'nav.ops', href: '/ops', icon: Activity, perms: ['exec', 'users'] },
     ],
   },

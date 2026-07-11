@@ -12,6 +12,23 @@
 > self-order journey is proven end-to-end on the hub (§7). Still Phase 2c: loyalty-redeem sales,
 > till/Z-reports, hub-local stock ops, fiscal-chain verification.
 
+## 0. Prove it locally first (offline dry-run)
+
+Before touching a real box, watch the whole thing work in one command. `hub-dryrun` boots a **cloud** and
+an in-store **hub** (two real AppModules over PGlite), sets up a shop, seeds the hub from a signed
+snapshot, **cuts the internet**, rings real sales on the hub (cash, discount+tip, and a diner QR
+self-order), proves the cloud sees nothing, then **reconnects** and replays — the cloud ends up with every
+sale, GL posted and balanced, and a crash-replay lands all-duplicate (exactly-once):
+
+```bash
+NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover hub-dryrun
+```
+
+It uses the same services production runs (real HMAC signing, real `POST /api/hub/ingest`, real GL), so a
+green run is an honest end-to-end proof of the offline→sync path — a fast sanity check before a store cutover
+or after changing anything in the `hub/` surface. (For the automated control coverage, see the `hub-snapshot`
+harness.)
+
 ## 1. What you need
 
 - A small always-on box in the store (any mini-PC with 8GB RAM; the till PC works for a pilot) with

@@ -20,7 +20,7 @@ const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 export const PAYROLL_RUN_JOB = 'payroll_run';
 
 export interface EmployeeDto {
-  emp_code?: string; name: string; national_id?: string; sso_no?: string; position?: string; department?: string;
+  emp_code?: string; name: string; national_id?: string; sso_no?: string; position?: string; department?: string; job_grade?: string;
   monthly_salary: number; hourly_rate?: number; pf_rate?: number; allowances?: number; sso_eligible?: boolean; bank_account?: string; start_date?: string;
 }
 
@@ -56,7 +56,7 @@ export class PayrollService implements OnModuleInit {
     const code = (dto.emp_code?.trim()) || `EMP${String(Date.now()).slice(-6)}`;
     const [row] = await db.insert(employees).values({
       tenantId: user.tenantId ?? null, empCode: code, name: dto.name, nationalId: dto.national_id ?? null,
-      ssoNo: dto.sso_no ?? null, position: dto.position ?? null, department: dto.department ?? null, monthlySalary: fx(dto.monthly_salary ?? 0, 2),
+      ssoNo: dto.sso_no ?? null, position: dto.position ?? null, department: dto.department ?? null, jobGrade: dto.job_grade ?? null, monthlySalary: fx(dto.monthly_salary ?? 0, 2),
       hourlyRate: fx(dto.hourly_rate ?? 0, 2), pfRate: fx(dto.pf_rate ?? 0, 4),
       allowances: fx(dto.allowances ?? 0, 2), ssoEligible: dto.sso_eligible ?? true,
       bankAccount: dto.bank_account ?? null, startDate: dto.start_date ?? null, active: true,
@@ -375,7 +375,7 @@ export class PayrollService implements OnModuleInit {
   private fmtEmp(r: any) {
     return {
       id: Number(r.id), emp_code: r.empCode, name: r.name, national_id: r.nationalId, sso_no: r.ssoNo,
-      position: r.position, department: r.department, monthly_salary: n(r.monthlySalary), hourly_rate: n(r.hourlyRate), pf_rate: n(r.pfRate),
+      position: r.position, department: r.department, job_grade: r.jobGrade ?? null, monthly_salary: n(r.monthlySalary), hourly_rate: n(r.hourlyRate), pf_rate: n(r.pfRate),
       allowances: n(r.allowances), sso_eligible: r.ssoEligible !== false, bank_account: r.bankAccount, start_date: r.startDate, active: r.active !== false,
     };
   }

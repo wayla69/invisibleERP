@@ -1128,8 +1128,15 @@ Consolidation combines several **entities** (tenants) into a group view, elimina
 
 ### Run a consolidation (CON-03)
 
+**In the app:** everything below is on the **การรวมงบการเงิน (`/consolidation`)** screen. The
+**กลุ่มบริษัท (Groups)** tab has a **สร้างกลุ่มบริษัท (Create group)** form and, when you select a
+group, an **เพิ่มบริษัทในกลุ่ม (Add entity)** form + a **นำออก (Remove)** action per entity. The
+**รวมงบ (Runs)** tab runs a period and shows a **โพสต์เข้า GL (Post to GL)** button on a completed
+(**Final**) run. (The API paths cited below are what those controls invoke.)
+
 1. **Set up the group** — create a group (`POST /api/consolidation/groups`) and add member
-   entities with ownership % and currency (`POST /api/consolidation/groups/{id}/entities`).
+   entities with ownership % and currency (`POST /api/consolidation/groups/{id}/entities`) — from
+   the **Groups** tab's create-group + add-entity forms.
 2. **Run** — `POST /api/consolidation/groups/{id}/run` with the period (`YYYY-MM`). The run:
    - **combines** each member's trial balance (FX-translated, ownership-weighted),
    - **eliminates** in-group IC: for each IC transaction it cancels **1150 Due-From**
@@ -1139,9 +1146,10 @@ Consolidation combines several **entities** (tenants) into a group view, elimina
      net to zero the run is rejected with **`CONSOL_UNBALANCED`** and rolled back.
    Eliminations live at the **group** layer — they are **not** posted into any operating
    entity's books.
-3. **Post** — a **different** user calls `POST /api/consolidation/runs/{runId}/post` to freeze
-   the run as the official group result for the period. You **cannot post a run you ran**
-   (`SELF_POST`), and a posted period cannot be re-run (`ALREADY_POSTED`).
+3. **Post** — a **different** user presses **โพสต์เข้า GL** on the Final run (`POST
+   /api/consolidation/runs/{runId}/post`) to freeze it as the official group result for the
+   period. You **cannot post a run you ran** (`SELF_POST`), and a posted period cannot be re-run
+   (`ALREADY_POSTED`).
 
 Optional: define configurable elimination rules (`POST /api/consolidation/rules`,
 `GET /api/consolidation/rules?group_id=`).
