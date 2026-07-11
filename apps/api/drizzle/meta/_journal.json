@@ -2269,6 +2269,13 @@
       "when": 2023820000289,
       "tag": "0324_hcm_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 325,
+      "version": "7",
+      "when": 2023820000290,
+      "tag": "0325_hcm_comp",
+      "breakpoints": true
     }
   ]
 }

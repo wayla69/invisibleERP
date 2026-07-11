@@ -1,6 +1,6 @@
 # UAT — Cycle 09: Human Resources (HCM)
 
-**Status: DRAFT v0.1 · 2026-07-11** · *v0.1: HR-2 leave accrual (control HR-02, migration 0321) — UAT-HR-01..09; HR-3 performance management (control HR-03, migration 0322) — UAT-HR-300..312; HR-4 recruiting/ATS (control HR-04, migration 0323) — UAT-HR-400..413; HR-5 onboarding/offboarding lifecycle (control HR-05, migration 0324) — UAT-HR-500..515.* · Cross-ref: `docs/process-narratives/29-human-resources.md`; harnesses `tools/cutover/src/hcm-leave.ts` (17), `tools/cutover/src/hcm-perf.ts` (17), `tools/cutover/src/hcm-recruiting.ts` (20), `tools/cutover/src/hcm-onboarding.ts` (27).
+**Status: DRAFT v0.1 · 2026-07-11** · *v0.1: HR-2 leave accrual (control HR-02, migration 0321) — UAT-HR-01..09; HR-3 performance management (control HR-03, migration 0322) — UAT-HR-300..312; HR-4 recruiting/ATS (control HR-04, migration 0323) — UAT-HR-400..413; HR-5 onboarding/offboarding lifecycle (control HR-05, migration 0324) — UAT-HR-500..515; HR-6 compensation bands + benefits (control HR-06, migration 0325) — UAT-HR-600..615.* · Cross-ref: `docs/process-narratives/29-human-resources.md`; harnesses `tools/cutover/src/hcm-leave.ts` (17), `tools/cutover/src/hcm-perf.ts` (17), `tools/cutover/src/hcm-recruiting.ts` (20), `tools/cutover/src/hcm-onboarding.ts` (27), `tools/cutover/src/hcm-comp.ts` (23).
 
 > This cycle is built up wave-by-wave; each HR feature owns a self-contained block so parallel PRs merge keep-both.
 
@@ -85,3 +85,32 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Balance formula = `entitle
 | Review sign-off SoD (reviewer ≠ reviewee; manager rating required; goal weights ≤ 100%) | HR-03 | UAT-HR-300..312 | `tools/cutover/src/hcm-perf.ts` (17 checks) |
 | Requisition approval + offer authorization maker-checker; headcount-bound hiring | HR-04 | UAT-HR-400..413 | `tools/cutover/src/hcm-recruiting.ts` (20 checks) |
 | Offboarding access-revocation completeness (offboarding cannot complete while an access-revocation task is pending; privileged skip with reason; exception register) | HR-05 | UAT-HR-500..515 | `tools/cutover/src/hcm-onboarding.ts` (27 checks) |
+
+## Test cases — Compensation bands + benefits (HR-6, control HR-06)
+
+Grade fixture: **G5** band `[25000, 40000]`. Employees: EMP1 (30000), EMP2 (28000, linked to an `ess` login).
+
+| ID | Type | Precondition | Steps | Expected result |
+|---|---|---|---|---|
+| UAT-HR-600 | Positive | — | `POST /api/hcm/comp/grades` `{grade_code:G5,name,min_salary:25000,mid_salary:32500,max_salary:40000}` | 201; grade created; tenant-scoped |
+| UAT-HR-601 | Negative | G5 exists | Re-`POST` grade `G5` | 400 `GRADE_EXISTS` |
+| UAT-HR-602 | Positive | G5 exists | `POST /api/hcm/comp/changes` `{emp_code:EMP1,change_type:merit,new_salary:35000,new_grade:G5}` | 201; status `pending`; `out_of_band_overridden:false`; employee salary NOT yet changed |
+| UAT-HR-603 | Negative (control) | G5 exists | `POST …/changes` `{emp_code:EMP1,new_salary:50000,new_grade:G5}` as `hr` maker | 400 `OUT_OF_BAND` |
+| UAT-HR-604 | Negative (control) | G5 exists | Same out-of-band request as `hr_admin` **without** the override flag | 400 `OUT_OF_BAND` |
+| UAT-HR-605 | Positive (control) | G5 exists | Same out-of-band request as `exec` with `override:true` | 201; `out_of_band_overridden:true`; a `doc_status_log` `COMPCHG` `OUT_OF_BAND_OVERRIDE` row written |
+| UAT-HR-606 | Negative (control) | A change requested by user X | X (requester) `POST …/changes/:id/approve` | 403 `SOD_SELF_APPROVAL`; salary unchanged |
+| UAT-HR-607 | Positive (control) | Pending change on EMP1 to 35000 requested by another user | Distinct `hr_admin`/`exec` `POST …/changes/:id/approve` | 200 `approved`; `employees.monthly_salary` = **35000** (written only on approval) |
+| UAT-HR-608 | Positive (control) | Pending change on EMP2 | Distinct user `POST …/changes/:id/reject` | 200 `rejected`; `employees.monthly_salary` unchanged (still 28000) |
+| UAT-HR-609 | Negative | Pending change | `hr`-only maker `POST …/changes/:id/approve` | 403 (approval reserved to `hr_admin`/`exec`) |
+| UAT-HR-610 | Positive | — | `POST /api/hcm/comp/benefit-plans` `{plan_code:HMO,category:health,employer_cost,employee_cost}` | 201; plan created |
+| UAT-HR-611 | Positive | HMO exists | `POST /api/hcm/comp/enrollments` `{emp_code:EMP1,plan_code:HMO}` | 201; status `active` |
+| UAT-HR-612 | Negative | EMP1 active on HMO | Re-`POST` the same enrolment | 400 `ALREADY_ENROLLED` |
+| UAT-HR-613 | Positive | Active enrolment | `POST /api/hcm/comp/enrollments/:id/end` | 200; status `ended`; `end_date` set |
+| UAT-HR-614 | Security (own-scope) | `ess` login linked to EMP2, enrolments exist for EMP1+EMP2 | `GET /api/hcm/comp/enrollments` as `ess` | Only EMP2's enrolments returned (own-scope) |
+| UAT-HR-615 | Security (RLS) | Tenant T2 admin creates grade `T2G` | `GET /api/hcm/comp/grades` as T1 vs T2 | T1 sees G5 not T2G; T2 sees T2G not G5 (tenant isolation) |
+
+## Traceability — HR-6
+
+| Requirement | Control | Test cases | Harness |
+|---|---|---|---|
+| Comp-change within pay band + maker-checker (OUT_OF_BAND unless exec override; approver ≠ requester; employee master updated only on approval); benefit plan enrolment | HR-06 | UAT-HR-600..615 | `tools/cutover/src/hcm-comp.ts` (23 checks) |

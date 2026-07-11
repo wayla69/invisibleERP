@@ -1070,6 +1070,47 @@ reflect the closing rate. Re-running or re-posting a posted period is blocked.
 **Errors:** `MISSING_RATE` (no rate for a currency — pass it in `rates` or approve an FX
 rate first), `SELF_POST` (you ran it — ask a colleague to post), `ALREADY_POSTED`.
 
+## Revenue recognition (TFRS 15 / IFRS 15) — control REV-19
+
+**Where:** **Ledger & GL → รับรู้รายได้** (`/revenue`).
+**Who:** `exec` / `ar` (`fin_report` may read).
+
+The Revenue Recognition screen has three tabs: **สัญญา TFRS 15** (the five-step contract
+engine), **รายได้รอตัดบัญชี** (deferred-revenue balance + run recognition), and **ตารางรับรู้**
+(the straight-line DEFREV schedules).
+
+### The five-step contract (สัญญา TFRS 15)
+
+For service / subscription / project contracts that bundle several deliverables, TFRS 15
+recognises revenue **as each obligation is satisfied**, not when cash arrives. Work a
+contract top-to-bottom on the **สัญญา TFRS 15** tab:
+
+1. **Create the contract (สร้างสัญญา TFRS 15).** Enter the **contract price**, date, and one
+   or more **performance obligations** — each a name, its **standalone selling price (SSP)**,
+   and a recognition **method**: **ณ จุดเวลา (point in time)** recognises in a single period,
+   **ตลอดช่วงเวลา (over time)** straight-lines across a start→end range (required for over-time
+   lines). Add/remove obligation rows with **เพิ่มภาระ / ลบ**. The contract opens as **Draft**.
+2. **จัดสรรตาม SSP (Allocate).** Click a contract row to open its panel, then **จัดสรรตาม SSP** —
+   the transaction price is split across the obligations in proportion to SSP (Σ allocated is
+   held exactly equal to the contract price; rounding lands on the largest line).
+3. **สร้างตารางรับรู้ (Build schedule).** Generates the recognition rows — one per month for
+   over-time lines, a single row for point-in-time lines. Already-recognised rows are never
+   rebuilt (safe to re-run).
+4. **เปิดใช้ (Activate).** Raises the contract liability for the full price
+   (**Dr 1100 AR / Cr 2410 Deferred revenue**) and flips the contract to **Active**. You can't
+   activate twice (`ALREADY_ACTIVE`).
+5. **Recognise.** Use the **รายได้รอตัดบัญชี** tab's **รับรู้รายได้งวดนี้** button for a period —
+   every due, unrecognised row releases deferred revenue to income (**Dr 2410 / Cr 4300**). The
+   obligation's **% ที่ปฏิบัติแล้ว** and the contract status advance automatically; when all
+   obligations are satisfied the contract becomes **Completed**.
+
+*(APIs: `POST /api/revenue/contracts`, `…/{id}/allocate`, `…/{id}/schedule`, `…/{id}/activate`,
+`POST /api/revenue/recognize`; the panel reads `GET /api/revenue/contracts` + `…/{id}`.)*
+
+**Errors:** `INVALID_ALLOCATION` (no obligation, non-positive price/SSP, or an over-time line
+missing its dates), `ALREADY_ACTIVE`, `CONTRACT_NOT_FOUND`, `TENANT_REQUIRED` (HQ/Admin must
+pass a tenant to recognise).
+
 ## Deferred tax (TAS 12) — control TAX-06
 
 **Where:** **Ledger & GL → ภาษีเงินได้รอตัดบัญชี** (`/deferred-tax`).
