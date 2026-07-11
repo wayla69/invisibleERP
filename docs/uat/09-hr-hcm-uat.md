@@ -115,6 +115,29 @@ Grade fixture: **G5** band `[25000, 40000]`. Employees: EMP1 (30000), EMP2 (2800
 |---|---|---|---|
 | Comp-change within pay band + maker-checker (OUT_OF_BAND unless exec override; approver ≠ requester; employee master updated only on approval); benefit plan enrolment | HR-06 | UAT-HR-600..615 | `tools/cutover/src/hcm-comp.ts` (23 checks) |
 
+## Test cases — Employee Self-Service depth (HR-8, control HR-08)
+
+| Case | Type | Precondition | Action | Expected result |
+|---|---|---|---|---|
+| UAT-HR-800 | Positive (control) | `ess` login linked to EMP1 | `POST /api/hcm/ess/profile-requests` `{field:bank_account,new_value:1234567890}` | 201; status `pending`; `sensitive:true`; `employees.bank_account` **unchanged** |
+| UAT-HR-801 | Positive | `ess` login linked to EMP1 | `POST …/profile-requests` `{field:phone,new_value:0812345678}` | 201; status `applied`; `auto_applied:true`; `employees.phone` updated immediately |
+| UAT-HR-802 | Security (own-scope) | EMP1 has requests; `ess` linked to EMP2 | `GET …/profile-requests` as EMP2's login | EMP1's requests NOT returned (own-scope); sensitive values masked in the list |
+| UAT-HR-803 | Negative (control) | `hr` user linked to an employee, own sensitive change pending | Same user `POST …/profile-requests/:id/approve` | 403 `SOD_SELF_APPROVAL`; master unchanged |
+| UAT-HR-804 | Negative (perm) | Sensitive request pending | `ess` user `POST …/profile-requests/:id/approve` | 403 (approval reserved to `hr`/`hr_admin`) |
+| UAT-HR-805 | Positive (control) | EMP1 bank_account change pending, requested by EMP1 | A distinct `hr_admin` `POST …/profile-requests/:id/approve` | 200 `approved`; `employees.bank_account` = **1234567890** (written only on approval); `doc_status_log` `ESSPROFILE` `Approved` row |
+| UAT-HR-806 | Positive (control) | A pending sensitive change (national_id) | Distinct `hr_admin` `POST …/profile-requests/:id/reject` | 200 `rejected`; `employees.national_id` unchanged |
+| UAT-HR-807 | Negative | `ess` user | `POST …/profile-requests` `{field:monthly_salary,new_value:99999}` | 400 (`BAD_FIELD` — not an ESS-editable field) |
+| UAT-HR-808 | Positive + Negative | `ess` user | `POST …/documents {doc_type:certificate,title,file_ref:objstore:emp/e1/x.pdf}`; then `file_ref:objstore:../../etc/passwd` | 1st 201 (visibility `private`); 2nd 400 `BAD_OBJECT_KEY` |
+| UAT-HR-809 | Security (own-scope) | EMP1 has a private doc + an HR-uploaded `hr`-visibility doc; `ess` linked to EMP2 | `GET …/documents` as EMP2, then as EMP1 | EMP2 does NOT see EMP1's doc; EMP1 does NOT see the `hr`-visibility doc |
+| UAT-HR-810 | Positive | `ess` linked to EMP1 (dept Sales) vs `hr` user | `GET …/team` as each | ess: `scope:department` (own dept members); HR: `scope:company` |
+| UAT-HR-811 | Security (RLS) | Tenant T2 admin creates a change on its own employee | `GET …/profile-requests` as T1 admin vs T2 admin | T1 does not see T2's request; T2 does not see T1's (tenant isolation) |
+
+## Traceability — HR-8
+
+| Requirement | Control | Test cases | Harness |
+|---|---|---|---|
+| ESS profile-change maker-checker (sensitive field pending → different hr/hr_admin approves; SOD_SELF_APPROVAL; employee master written only on approval; reject leaves it unchanged; own-scope + RLS; safe object keys) | HR-08 | UAT-HR-800..811 | `tools/cutover/src/hcm-ess.ts` (28 checks) |
+
 ## Test cases — Workforce analytics (HR-9, control HR-09)
 
 Fixture (T1): active EMP1 (G5, 32000, hired 2020-01), EMP2 (G5, 50000, hired 2024-06 — above band), EMP3
