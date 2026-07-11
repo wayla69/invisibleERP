@@ -14,6 +14,7 @@ import { TaxService } from '../tax/tax.service';
 import { roundCurrency } from '../tax/money';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { RecipeService } from '../menu/recipe.service';
 import { CostingService } from '../costing/costing.service';
 import { PricingService } from '../pricing/pricing.service';
@@ -190,15 +191,21 @@ export class PortalPosService {
         { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id },
         user,
       );
+      // docs/43 PR-6: revenue/service-charge/rounding legs follow the tenant posting-rules (batched,
+      // cached read); cash/VAT legs stay pinned/widen-gated.
+      const povr = await this.ledger.postingOverridesMany(['SALE.FOOD', 'SVC.CHARGE', 'POS.ROUNDING'], t.id);
+      const pRev = povr['SALE.FOOD']?.revenue ?? postingDefault('SALE.FOOD', 'revenue');
+      const pSvc = povr['SVC.CHARGE']?.service_charge_income ?? postingDefault('SVC.CHARGE', 'service_charge_income');
+      const pRnd = povr['POS.ROUNDING']?.rounding ?? postingDefault('POS.ROUNDING', 'rounding');
       je = await this.ledger.postEntry({
         date: today, source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
         lines: [
           { account_code: '1000', debit: total },    // Dr Cash (rounded total)
-          ...(roundingAdj < 0 ? [{ account_code: '4900', debit: roundCurrency(-roundingAdj, 'THB') }] : []),
-          { account_code: '4000', credit: taxable }, // Cr Sales Revenue (goods)
-          ...(serviceCharge > 0 ? [{ account_code: '4400', credit: serviceCharge }] : []),
+          ...(roundingAdj < 0 ? [{ account_code: pRnd, debit: roundCurrency(-roundingAdj, 'THB') }] : []),
+          { account_code: pRev, credit: taxable }, // Cr Sales Revenue (goods)
+          ...(serviceCharge > 0 ? [{ account_code: pSvc, credit: serviceCharge }] : []),
           { account_code: '2100', credit: vat },     // Cr Tax Payable
-          ...(roundingAdj > 0 ? [{ account_code: '4900', credit: roundingAdj }] : []),
+          ...(roundingAdj > 0 ? [{ account_code: pRnd, credit: roundingAdj }] : []),
         ],
       });
     }

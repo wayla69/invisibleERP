@@ -30,6 +30,7 @@ import { PartnersModule } from './modules/partners/partners.module';
 import { MemberModule } from './modules/loyalty/member/member.module';
 import { BomModule } from './modules/bom/bom.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
+import { DisclosureModule } from './modules/disclosure/disclosure.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { BillingModule } from './modules/billing/billing.module';
@@ -54,6 +55,7 @@ import { WorkflowModule } from './modules/workflow/workflow.module';
 import { MatchModule } from './modules/match/match.module';
 import { SourcingModule } from './modules/sourcing/sourcing.module';
 import { CostingModule } from './modules/costing/costing.module';
+import { LandedCostModule } from './modules/landed-cost/landed-cost.module';
 import { WmsModule } from './modules/wms/wms.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
@@ -169,6 +171,7 @@ import { MailModule } from './modules/mail/mail.module';
     MemberModule,
     BomModule,
     LedgerModule,
+    DisclosureModule,
     PaymentsModule,
     TaxModule,
     BillingModule,
@@ -193,6 +196,7 @@ import { MailModule } from './modules/mail/mail.module';
     MatchModule,
     SourcingModule,
     CostingModule,
+    LandedCostModule,
     WmsModule,
     CrmModule,
     MessagingModule,

@@ -7,6 +7,8 @@ import { fx } from '../../database/queries';
 import { DocNumberService } from '../../common/doc-number.service';
 import type { JwtUser } from '../../common/decorators';
 import { MASTER_REGISTRY, findEntity, type MdEntity, type MdCol, type MdType } from './master-registry';
+import { Optional } from '@nestjs/common';
+import { PostingService } from '../ledger/posting.service';
 
 const HEADER_FILL = 'FF1E3A5F';
 const HEADER_FONT = 'FFFFFFFF';
@@ -16,7 +18,57 @@ export class MasterDataService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
+    // docs/43 PR-8: a posting_rules import routes EVERY row through the GL-24 pipeline (validate
+    // fail-closed → PendingApproval → distinct approver). @Optional so hand-constructed harness
+    // instances still build; without it the posting_rules import is refused (fail-closed).
+    @Optional() private readonly posting?: PostingService,
   ) {}
+
+  // GL-11: canonical chart-of-accounts bulk IO is platform-Admin only (the universe is shared).
+  private assertAccountsImportAllowed(e: MdEntity, user: JwtUser) {
+    if (e.key === 'accounts' && user.role !== 'Admin') {
+      throw new ForbiddenException({
+        code: 'COA_ADMIN_ONLY',
+        message: 'Canonical Chart-of-Accounts bulk import is restricted to the platform administrator (HQ)',
+        messageTh: 'การนำเข้าผังบัญชีกลางสงวนไว้สำหรับผู้ดูแลระบบ (สำนักงานใหญ่) เท่านั้น',
+      });
+    }
+  }
+
+  // docs/43 PR-8: posting_rules rows NEVER hit the table directly — each row goes through
+  // PostingService.upsertRule (GL-24: registry/tier/side/account validation fail-closed; lands
+  // PendingApproval; audited; cache-busted). Returns per-row errors; honors skipErrors.
+  private async importPostingRules(rows: Record<string, any>[], user: JwtUser, skipErrors: boolean) {
+    if (!this.posting) throw new BadRequestException({ code: 'POSTING_RULES_IO_UNAVAILABLE', message: 'Posting-rule import unavailable', messageTh: 'ระบบนำเข้ากฎการลงบัญชีไม่พร้อมใช้งาน' });
+    const errors: ImportError[] = [];
+    let imported = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const raw = rows[i]!;
+      const dto = {
+        eventType: String(raw['Event_Type'] ?? '').trim(),
+        legOrder: Math.trunc(Number(raw['Leg_Order'] ?? 1)) || 1,
+        role: String(raw['Role'] ?? '').trim(),
+        side: String(raw['Side'] ?? '').trim().toUpperCase() as 'DR' | 'CR',
+        accountCode: String(raw['Account_Code'] ?? '').trim(),
+      };
+      try {
+        await this.posting.upsertRule(dto, user);
+        imported++;
+      } catch (err: any) {
+        const body = err?.response ?? {};
+        errors.push({ row: i + 1, code: body.code ?? 'RULE_INVALID', message: body.message ?? String(err?.message ?? err), messageTh: body.messageTh });
+        if (!skipErrors) {
+          return { entity: 'posting_rules', mode: 'append' as const, status: 'invalid' as const, total: rows.length, imported: 0, skipped: rows.length, errors,
+            message: 'Import aborted on the first invalid rule (no rules written); fix the file or re-run with skip_errors' };
+        }
+      }
+    }
+    return {
+      entity: 'posting_rules', mode: 'append' as const, status: 'PendingApproval' as const, pending: true,
+      total: rows.length, imported, skipped: rows.length - imported, errors,
+      message: `ทุกกฎที่นำเข้า (${imported}) รอการอนุมัติจากผู้ใช้อื่นตาม GL-24 — a DIFFERENT user must approve each imported rule before it takes effect`,
+    };
+  }
 
   // Financially-sensitive headers (audit G5/G7/G8) actually SET by this batch — a non-empty value in any row
   // for a column flagged `sensitive` in the registry. If any are touched, the import is staged for approval.
@@ -155,9 +207,20 @@ export class MasterDataService {
         o.netBookValue = fx(o.acquireCost ?? 0, 4); // NOT NULL, no GL here (bulk register load)
         if (o.status == null) o.status = 'active';
       }
+      if (e.key === 'accounts') {
+        // pgEnum casing + defaults (GL-11): Type normalized Asset/Liability/Equity/Revenue/Expense;
+        // normal balance defaults by type like the COA manage API.
+        const t = String(o.type ?? '').trim();
+        const match = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'].find((x) => x.toLowerCase() === t.toLowerCase());
+        if (!match) throw new BadRequestException({ code: 'BAD_ENUM', message: `Row ${i + 1}: 'Type' must be one of Asset/Liability/Equity/Revenue/Expense (got "${t}")`, messageTh: `แถวที่ ${i + 1}: ประเภทบัญชีไม่ถูกต้อง` });
+        o.type = match;
+        if (o.normalBalance == null) o.normalBalance = ['Liability', 'Equity', 'Revenue'].includes(match) ? 'C' : 'D';
+      }
       values.push(o);
     });
 
+    this.assertAccountsImportAllowed(e, user);
+    if (e.key === 'posting_rules') return this.importPostingRules(rows, user, false);
     // Maker-checker (audit G5/G7/G8): a batch that sets a financially-sensitive field is staged for approval.
     const sensitive = this.sensitiveTouched(e, rows);
     if (sensitive.length) return this.stageImportBatch(e, mode, rows, user, sensitive);
@@ -217,6 +280,12 @@ export class MasterDataService {
       }
       if (e.tenantScoped && 'tenantId' in e.table) o.tenantId = user.tenantId ?? null;
       if (e.key === 'assets') { o.netBookValue = fx(o.acquireCost ?? 0, 4); if (o.status == null) o.status = 'active'; }
+      if (e.key === 'accounts') {
+        const t = String(o.type ?? '').trim();
+        const match = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'].find((x) => x.toLowerCase() === t.toLowerCase());
+        if (!match) { errors.push({ row: rowNo, column: 'Type', code: 'BAD_ENUM', message: `'Type' must be one of Asset/Liability/Equity/Revenue/Expense (got "${t}")`, messageTh: 'ประเภทบัญชีไม่ถูกต้อง' }); rowBad = true; }
+        else { o.type = match; if (o.normalBalance == null) o.normalBalance = ['Liability', 'Equity', 'Revenue'].includes(match) ? 'C' : 'D'; }
+      }
       if (rowBad) badRows.add(rowNo); else prepared.push({ rowNo, value: o });
     });
     const invalid = badRows.size;
@@ -231,6 +300,8 @@ export class MasterDataService {
 
   async importChecked(key: string, mode: 'append' | 'replace', rows: Record<string, any>[], user: JwtUser, skipErrors: boolean) {
     const e = this.entOrThrow(key);
+    this.assertAccountsImportAllowed(e, user);
+    if (e.key === 'posting_rules') return this.importPostingRules(rows, user, skipErrors);
     // Maker-checker (audit G5/G7/G8): if the batch sets a financially-sensitive field, validate it (so a
     // broken batch is rejected up-front, not staged) then STAGE it for a distinct approver instead of committing.
     const sensitive = this.sensitiveTouched(e, rows);

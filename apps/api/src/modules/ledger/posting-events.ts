@@ -45,11 +45,11 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     revenue: r(CR, '4000', 'free', 'Sales revenue'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
   'SALE.VAT':         { name: 'Sale — output VAT',             description: 'Output-VAT leg of a sale/CN/DN', wired: true, roles: {
     vat_output: r(CR, '2100', 'widen', 'Output VAT — PP30 tie sums the VAT-account set') } },
-  'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: false, roles: {
+  'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: true, roles: {
     delivery_income: r(CR, '4100', 'free', 'Delivery income') } },
-  'SVC.CHARGE':       { name: 'Sale — service charge',         description: 'Auto service-charge income (large parties)', wired: false, roles: {
+  'SVC.CHARGE':       { name: 'Sale — service charge',         description: 'Auto service-charge income (large parties)', wired: true, roles: {
     service_charge_income: r(CR, '4400', 'free', 'Service-charge income') } },
-  'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: false, roles: {
+  'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: true, roles: {
     rounding: r(CR, '4900', 'free', 'Rounding adjustment (gain=credit, loss=debit)') } },
   'SURCHARGE.INCOME': { name: 'Card surcharge income',         description: 'Card surcharge collected at settlement', wired: true, roles: {
     surcharge_income: r(CR, '4500', 'free', 'Card surcharge income') } },
@@ -83,32 +83,34 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     ap_control: r(CR, '2000', 'pinned', 'AP control (REC-04 permanent)') } },
   'COSTING.RECEIPT':  { name: 'Costed receipt',                description: 'Valued receipt at standard/moving cost', wired: false, roles: {
     inventory: r(DR, '1200', 'pinned', 'Inventory control'), ap_control: r(CR, '2000', 'pinned', 'AP control') } },
-  'COSTING.ISSUE':    { name: 'Costed issue / COGS',           description: 'Issue at cost (POS COGS, stock issues; composes under item-determination)', wired: false, roles: {
+  'COSTING.ISSUE':    { name: 'Costed issue / COGS',           description: 'Issue at cost (POS COGS, stock issues; composes under item-determination)', wired: true, roles: {
     cogs: r(DR, '5000', 'free', 'COGS'), inventory: r(CR, '1200', 'pinned', 'Inventory control') } },
-  'COSTING.PPV':      { name: 'Purchase price variance',       description: 'STD-costing PPV (sign-conditional)', wired: false, roles: {
+  'COSTING.PPV':      { name: 'Purchase price variance',       description: 'STD-costing PPV (sign-conditional)', wired: true, roles: {
     ppv: r(DR, '5500', 'free', 'Purchase price variance') } },
-  'INV.ADJUST':       { name: 'Inventory adjustment',          description: 'Count/valuation adjustment (direction-conditional)', wired: false, roles: {
+  'LANDEDCOST.CAPITALIZE': { name: 'Landed-cost capitalisation', description: 'Freight/duty/insurance/broker apportioned into inventory unit cost; issued-share residual to costing variance (COST-01)', wired: true, roles: {
+    inventory: r(DR, '1200', 'pinned', 'Inventory control — on-hand capitalised share'), variance: r(DR, '5500', 'free', 'Costing variance — already-issued residual (mirrors PPV)'), accrual: r(CR, '2010', 'free', 'Landed-cost accrual liability (freight/duty/insurance/broker payable)') } },
+  'INV.ADJUST':       { name: 'Inventory adjustment',          description: 'Count/valuation adjustment (direction-conditional)', wired: true, roles: {
     adjustment: r(DR, '5810', 'free', 'Adjustment expense (composes under warehouse determination)') } },
-  'WASTE.WRITEOFF':   { name: 'Waste write-off',               description: 'Spoilage/waste written off stock', wired: false, roles: {
+  'WASTE.WRITEOFF':   { name: 'Waste write-off',               description: 'Spoilage/waste written off stock', wired: true, roles: {
     waste_loss: r(DR, '5810', 'free', 'Waste loss'), inventory: r(CR, '1200', 'pinned', 'Inventory control') } },
-  'MFG.WO_ISSUE':     { name: 'Work order — issue',            description: 'Materials + applied labour/OH into WIP', wired: false, roles: {
+  'MFG.WO_ISSUE':     { name: 'Work order — issue',            description: 'Materials + applied labour/OH into WIP', wired: true, roles: {
     wip: r(DR, '1250', 'pinned', 'WIP control'), labor_oh_applied: r(CR, '2380', 'free', 'Manufacturing costs applied (clearing)'), inventory: r(CR, '1200', 'pinned', 'Inventory control') } },
-  'MFG.WO_COMPLETE':  { name: 'Work order — complete',         description: 'Finished goods in; yield variance out', wired: false, roles: {
+  'MFG.WO_COMPLETE':  { name: 'Work order — complete',         description: 'Finished goods in; yield variance out', wired: true, roles: {
     finished_goods: r(DR, '1210', 'pinned', 'FG control'), yield_variance: r(DR, '5810', 'free', 'Yield/material variance'), wip: r(CR, '1250', 'pinned', 'WIP control') } },
-  'QA.SCRAP':         { name: 'QC scrap disposition',          description: 'Scrap loss written off (source credit resolved by ref type)', wired: false, roles: {
+  'QA.SCRAP':         { name: 'QC scrap disposition',          description: 'Scrap loss written off (source credit resolved by ref type)', wired: true, roles: {
     scrap_loss: r(DR, '5810', 'free', 'Scrap / rework loss') } },
 
   // ── Payroll / HR ──
   'PAYROLL.GROSS':    { name: 'Payroll — gross wages',         description: 'Salaries + OT − unpaid (net-pay cash leg is pinned)', wired: true, roles: {
     wages_expense: r(DR, '5600', 'free', 'Salaries & wages'), net_pay_cash: r(CR, '1000', 'pinned', 'Net pay (CASH set)') } },
   'PAYROLL.SSO':      { name: 'Payroll — social security',     description: 'Employer SSO expense + combined payable', wired: true, roles: {
-    sso_expense: r(DR, '5610', 'free', 'Employer SSO expense'), sso_payable: r(CR, '2350', 'widen', 'SSO payable — PAY-02 schedule widens in PR-7') } },
+    sso_expense: r(DR, '5610', 'free', 'Employer SSO expense'), sso_payable: r(CR, '2350', 'free', 'SSO payable — the PAY-02 schedule reads the widened set (PR-7)') } },
   'PAYROLL.WHT':      { name: 'Payroll — income WHT',          description: 'ภ.ง.ด.1 payroll withholding payable', wired: true, roles: {
-    wht_payable: r(CR, '2360', 'widen', 'Payroll WHT payable — PAY-02 schedule widens in PR-7') } },
+    wht_payable: r(CR, '2360', 'free', 'Payroll WHT payable — the PAY-02 schedule reads the widened set (PR-7)') } },
   'PAYROLL.PF':       { name: 'Payroll — provident fund',      description: 'Employer PF expense + combined payable', wired: true, roles: {
-    pf_expense: r(DR, '5620', 'free', 'Employer PF expense'), pf_payable: r(CR, '2370', 'widen', 'PF payable — PAY-02 schedule widens in PR-7') } },
+    pf_expense: r(DR, '5620', 'free', 'Employer PF expense'), pf_payable: r(CR, '2370', 'free', 'PF payable — the PAY-02 schedule reads the widened set (PR-7)') } },
   'PAYROLL.REMIT':    { name: 'Payroll liability remittance',  description: 'Statutory liability remitted to RD/SSO', wired: false, roles: {
-    liability: r(DR, '2350', 'widen', 'Remitted liability (2350/2360/2370 — PAY-02 set)'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
+    liability: r(DR, '2350', 'widen', 'Remitted liability — the remit endpoint accepts any account in the PAY-02 widened sets (PR-7); this role itself stays catalog-only'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
 
   // ── Fixed assets / CIP ──
   'ASSET.ACQUIRE':    { name: 'Asset acquisition',             description: 'Capitalise an asset — under posting_determination the CATEGORY asset_account drives the debit (docs/43 Q2 grain); roles here are catalog visibility', wired: false, roles: {
@@ -148,7 +150,7 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
   'BADDEBT.WRITEOFF': { name: 'Bad-debt write-off',            description: 'Uncollectible AR written off (REV-14)', wired: true, roles: {
     bad_debt_exp: r(DR, '5720', 'free', 'Bad-debt expense'), ar_control: r(CR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
   'APPAY.WHT':        { name: 'AP payment — vendor WHT',       description: 'ภ.ง.ด.3/53 withholding at AP payment (shared by AP pay + subcontract valuations)', wired: true, roles: {
-    wht_payable: r(CR, '2361', 'widen', 'Vendor WHT payable — PND3/53 report set widens in PR-7') } },
+    wht_payable: r(CR, '2361', 'free', 'Vendor WHT payable — the PND3/53 tie-out reads the widened set (PR-7)') } },
   'APPAY.DISCOUNT':   { name: 'AP early-payment discount',     description: 'Prompt-payment discount captured on a run (EXP-14)', wired: true, roles: {
     discount_income: r(CR, '4600', 'free', 'Early-payment discount income (per-policy account already supported)') } },
   'RCVAT.SELF':       { name: 'Reverse-charge self VAT',       description: 'ภ.พ.36 self-assessed VAT on imported services', wired: true, roles: {
@@ -182,20 +184,22 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
   'PREPAID.AMORTIZE': { name: 'Prepaid amortised',             description: 'Monthly amortisation of the prepaid', wired: true, roles: {
     expense: r(DR, '5100', 'free', 'Amortisation expense (per-schedule account already supported)'), prepaid: r(CR, '1280', 'free', 'Prepaid expenses') } },
   'SBT.TAX':          { name: 'Specific business tax',         description: 'ภ.ธ.40 SBT accrued at RE ownership transfer (TAX-09)', wired: false, roles: {
-    sbt_expense: r(DR, '5840', 'free', 'SBT expense'), sbt_payable: r(CR, '2130', 'widen', 'SBT payable — ภ.ธ.40 report set widens in PR-7') } },
+    sbt_expense: r(DR, '5840', 'free', 'SBT expense'), sbt_payable: r(CR, '2130', 'free', 'SBT payable — the ภ.ธ.40 tie-out reads the widened set (PR-7)') } },
 
   // ── Intercompany / projects / construction / real estate ──
-  'IC.TRANSACTION':   { name: 'Intercompany transaction',      description: 'Due-from/due-to pair (category MAP resolves the P&L legs)', wired: false, roles: {
-    ic_receivable: r(DR, '1150', 'pinned', 'IC due-from (elimination pair)'), ic_payable: r(CR, '2150', 'pinned', 'IC due-to (elimination pair)') } },
+  'IC.TRANSACTION':   { name: 'Intercompany transaction',      description: 'Due-from/due-to pair; the category MAP resolves the P&L legs (shared-cost/transfer legs overridable; loan = cash pinned, loyalty-clearing = LYL-03 tie)', wired: true, roles: {
+    ic_receivable: r(DR, '1150', 'pinned', 'IC due-from (elimination pair)'), ic_payable: r(CR, '2150', 'pinned', 'IC due-to (elimination pair)'),
+    recovery_shared_cost: r(CR, '5100', 'free', 'Creditor recovery — shared-cost'), expense_shared_cost: r(DR, '5100', 'free', 'Debtor expense — shared-cost'),
+    recovery_transfer: r(CR, '4000', 'free', 'Creditor recovery — transfer'), expense_transfer: r(DR, '5100', 'free', 'Debtor expense — transfer') } },
   'IC.SETTLE':        { name: 'Intercompany settlement',       description: 'Cash settlement of the IC pair', wired: false, roles: {
     ic_receivable: r(CR, '1150', 'pinned', 'IC due-from'), ic_payable: r(DR, '2150', 'pinned', 'IC due-to'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'PROJECT.COST':     { name: 'Project cost accrual',          description: 'WIP capitalise / non-billable expense', wired: false, roles: {
+  'PROJECT.COST':     { name: 'Project cost accrual',          description: 'WIP capitalise / non-billable expense', wired: true, roles: {
     project_wip: r(DR, '1260', 'pinned', 'Project-WIP control (cost_to_date tie)'), proj_applied: r(CR, '2390', 'free', 'Project costs applied (clearing)'), project_cogs: r(DR, '5800', 'free', 'Non-billable project cost') } },
-  'PROJECT.REVENUE':  { name: 'Project revenue',               description: 'Billing / POC revenue recognition', wired: false, roles: {
+  'PROJECT.REVENUE':  { name: 'Project revenue',               description: 'Billing / POC revenue recognition', wired: true, roles: {
     project_revenue: r(CR, '4200', 'free', 'Project revenue'), project_cogs: r(DR, '5800', 'free', 'Project cost of services'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
   'PROJECT.BILLING':  { name: 'POC progress invoice',          description: 'Contract asset relief / billings in excess', wired: false, roles: {
     contract_asset: r(CR, '1265', 'pinned', 'Contract-asset control'), billings_in_excess: r(CR, '2410', 'widen', 'Billings in excess (progress-billing tie)') } },
-  'REALESTATE.BOOK':  { name: 'RE booking deposit',            description: 'Unit booking deposit received', wired: false, roles: {
+  'REALESTATE.BOOK':  { name: 'RE booking deposit',            description: 'Unit booking deposit received', wired: true, roles: {
     deposit_liability: r(CR, '2210', 'free', 'Customer deposits — prepaid') } },
   'REALESTATE.CONTRACT': { name: 'RE contract down payment',   description: 'Contract signing: deposit reclass + down payment', wired: false, roles: {
     contract_liability: r(CR, '2410', 'widen', 'Contract liability (progress tie)') } },

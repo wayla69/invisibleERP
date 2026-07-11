@@ -3,6 +3,7 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { BiLiveService } from '../bi/bi-live.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { RetentionService } from '../retention/retention.service';
@@ -134,11 +135,15 @@ export class ProjectsService {
     }).returning({ id: projectEntries.id });
 
     const conv = dto.entry_type === 'expense' ? 'Project expense' : 'Project labor';
+    // docs/43 PR-4: the applied-clearing + non-billable-cost legs follow the tenant posting-rules
+    // (PROJECT.COST) ?? registry defaults; the 1260 project-WIP control (cost_to_date tie) stays pinned.
+    const costOvr = await this.ledger.postingOverrides('PROJECT.COST', tenantId);
+    const appliedAcct = costOvr.proj_applied ?? postingDefault('PROJECT.COST', 'proj_applied');
     const je: any = await this.ledger.postEntry({
       source: 'PRJ-COST', sourceRef: `${code}:${Number(e!.id)}`, tenantId, memo: `Project cost ${code}${billable ? '' : ' (non-billable)'}`, createdBy: user.username,
       lines: billable
-        ? [{ account_code: '1260', debit: amount, memo: `WIP ${code}` }, { account_code: '2390', credit: amount, memo: conv }]
-        : [{ account_code: '5800', debit: amount, memo: `Non-billable cost ${code}` }, { account_code: '2390', credit: amount, memo: conv }],
+        ? [{ account_code: '1260', debit: amount, memo: `WIP ${code}` }, { account_code: appliedAcct, credit: amount, memo: conv }]
+        : [{ account_code: costOvr.project_cogs ?? postingDefault('PROJECT.COST', 'project_cogs'), debit: amount, memo: `Non-billable cost ${code}` }, { account_code: appliedAcct, credit: amount, memo: conv }],
     });
     await db.update(projectEntries).set({ entryNo: je.entry_no }).where(eq(projectEntries.id, Number(e!.id)));
     // Only billable costs accumulate in the recoverable WIP (cost_to_date); non-billable are already expensed.
@@ -185,12 +190,15 @@ export class ProjectsService {
     }
 
     const relieve = r2(Math.max(0, n(p.costToDate) - n(p.recognizedCost)));
+    // docs/43 PR-4: revenue + COGS legs follow the tenant posting-rules (PROJECT.REVENUE) ?? registry
+    // defaults; AR control (1100) and project WIP (1260) stay pinned.
+    const revOvr = await this.ledger.postingOverrides('PROJECT.REVENUE', tenantId);
     const lines = [
       { account_code: '1100', debit: bill, memo: `AR ${code}` },
-      { account_code: '4200', credit: bill, memo: 'Project revenue' },
+      { account_code: revOvr.project_revenue ?? postingDefault('PROJECT.REVENUE', 'project_revenue'), credit: bill, memo: 'Project revenue' },
     ];
     if (relieve > 0) {
-      lines.push({ account_code: '5800', debit: relieve, memo: 'Project cost of services' });
+      lines.push({ account_code: revOvr.project_cogs ?? postingDefault('PROJECT.REVENUE', 'project_cogs'), debit: relieve, memo: 'Project cost of services' });
       lines.push({ account_code: '1260', credit: relieve, memo: `WIP relieved ${code}` });
     }
     const je: any = await this.ledger.postEntry({ source: 'PRJ-BILL', sourceRef: `${code}:${newBilled}`, tenantId, memo: `Project billing ${code}`, createdBy: user.username, lines });
@@ -227,6 +235,9 @@ export class ProjectsService {
     const ref = `${code}:${earnedToDate}:${cost}`;
     if (await this.ledger.alreadyPosted('PRJ-REVREC', ref, tenantId)) return { already: true, project_code: code };
 
+    // docs/43 PR-4: revenue + COGS legs follow the tenant posting-rules (PROJECT.REVENUE) ?? registry
+    // defaults; 2410/1265 (progress-billing ties) and 1260 stay pinned/widen-gated.
+    const pocOvr = await this.ledger.postingOverrides('PROJECT.REVENUE', tenantId);
     const lines: any[] = [];
     if (periodRevenue > 0.005) {
       // Recognise revenue: first reverse any billings-in-excess (2410), the remainder builds the contract asset (1265).
@@ -235,10 +246,10 @@ export class ProjectsService {
       const toAsset = r2(periodRevenue - fromLiability);
       if (fromLiability > 0) lines.push({ account_code: '2410', debit: fromLiability, memo: `Release billings in excess ${code}` });
       if (toAsset > 0) lines.push({ account_code: '1265', debit: toAsset, memo: `Contract asset ${code}` });
-      lines.push({ account_code: '4200', credit: periodRevenue, memo: `Project revenue (POC ${pocPct}%)` });
+      lines.push({ account_code: pocOvr.project_revenue ?? postingDefault('PROJECT.REVENUE', 'project_revenue'), credit: periodRevenue, memo: `Project revenue (POC ${pocPct}%)` });
     }
     if (periodCost > 0.005) {
-      lines.push({ account_code: '5800', debit: periodCost, memo: 'Project cost of services' });
+      lines.push({ account_code: pocOvr.project_cogs ?? postingDefault('PROJECT.REVENUE', 'project_cogs'), debit: periodCost, memo: 'Project cost of services' });
       lines.push({ account_code: '1260', credit: periodCost, memo: `WIP relieved ${code}` });
     }
     const je: any = await this.ledger.postEntry({ source: 'PRJ-REVREC', sourceRef: ref, tenantId, date: dto.as_of, memo: `Project POC revenue recognition ${code} (${pocPct}%)`, createdBy: user.username, lines });

@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { wasteLog, customerInventory, custStockLog, invBalances, menuRecipes, menuRecipeLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { n, fx } from '../../database/queries';
 import { round2, roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
@@ -159,7 +160,9 @@ export class WasteService {
   // cost the waste to GL — Dr 5810 Scrap/Waste Loss / Cr 1200 Inventory (idempotent per WASTE- doc).
   private async costToGl(tx: any, tenantId: number | null, wasteNo: string, itemRef: string, reason: string, totalCost: number, user: JwtUser): Promise<string | null> {
     if (await this.ledger.alreadyPosted('WASTE', wasteNo, tenantId, tx)) return null;
-    const je: any = await this.ledger.postEntry({ source: 'WASTE', sourceRef: wasteNo, tenantId, memo: `Waste ${wasteNo} ${itemRef} (${reason})`, createdBy: user.username, lines: [{ account_code: '5810', debit: totalCost }, { account_code: '1200', credit: totalCost }] }, tx);
+    // docs/43 PR-5: the loss leg follows the tenant posting-rule (WASTE.WRITEOFF) ?? registry default.
+    const wasteAcct = (await this.ledger.postingOverrides('WASTE.WRITEOFF', tenantId)).waste_loss ?? postingDefault('WASTE.WRITEOFF', 'waste_loss');
+    const je: any = await this.ledger.postEntry({ source: 'WASTE', sourceRef: wasteNo, tenantId, memo: `Waste ${wasteNo} ${itemRef} (${reason})`, createdBy: user.username, lines: [{ account_code: wasteAcct, debit: totalCost }, { account_code: '1200', credit: totalCost }] }, tx);
     return je?.entry_no ?? null;
   }
 

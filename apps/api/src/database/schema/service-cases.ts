@@ -11,7 +11,7 @@
 // parsed customer email to /api/service/email-to-case/inbound/<tenant code>; a reply carrying the case thread
 // token threads onto the existing case, else the sender address matches an OPEN case by contact, else a NEW
 // case is opened — so no inbound customer email is ever dropped. Append-only: never posts to the GL.
-// Each table is RLS-scoped (canonical 0232-form tenant_isolation, migration 0342) with a leading (tenant_id,…)
+// Each table is RLS-scoped (canonical 0232-form tenant_isolation, migration 0348) with a leading (tenant_id,…)
 // index. No GL post in v1 (a service-order / billable-time posting is future work).
 import { pgTable, bigserial, bigint, text, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';

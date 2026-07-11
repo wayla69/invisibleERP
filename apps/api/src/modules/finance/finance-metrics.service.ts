@@ -77,17 +77,25 @@ export class FinanceMetricsService {
     const bs: any = await this.ledger.balanceSheet(to);
     let cash = 0, receivables = 0, inventory = 0, otherCurrentAssets = 0, nonCurrentAssets = 0;
     let currentLiabilities = 0, nonCurrentLiabilities = 0, interestBearingDebt = 0, arControl = 0, apControl = 0;
+    // docs/43 PR-8: an account's OWN is_current column (0346) wins over the hardcoded lists / CoA-numbering
+    // fallbacks — a new balance-sheet account self-declares current vs non-current.
+    const isCurrentCol = new Map<string, boolean>(
+      (await this.db.select({ code: accounts.code, isCurrent: accounts.isCurrent }).from(accounts))
+        .filter((a: any) => a.isCurrent != null).map((a: any) => [a.code, a.isCurrent as boolean]),
+    );
     for (const l of bs.lines ?? []) {
       const code = String(l.account_code); const bal = num(l.balance);
       if (l.account_type === 'Asset') {
         if (inSet(code, CASH_ACCOUNTS)) cash += bal;
         else if (inSet(code, RECEIVABLE_ACCOUNTS)) receivables += bal;
         else if (inSet(code, INVENTORY_ACCOUNTS)) inventory += bal;
+        else if (isCurrentCol.has(code)) { if (isCurrentCol.get(code)) otherCurrentAssets += bal; else nonCurrentAssets += bal; }
         else if (inSet(code, NONCURRENT_ASSET_ACCOUNTS)) nonCurrentAssets += bal;
         else if (inSet(code, OTHER_CURRENT_ASSET_ACCOUNTS)) otherCurrentAssets += bal;
         else if (code < '1500') otherCurrentAssets += bal; else nonCurrentAssets += bal; // fallback by CoA numbering
       } else if (l.account_type === 'Liability') {
-        if (inSet(code, NONCURRENT_LIABILITY_ACCOUNTS)) nonCurrentLiabilities += bal;
+        if (isCurrentCol.has(code)) { if (isCurrentCol.get(code)) currentLiabilities += bal; else nonCurrentLiabilities += bal; }
+        else if (inSet(code, NONCURRENT_LIABILITY_ACCOUNTS)) nonCurrentLiabilities += bal;
         else if (inSet(code, CURRENT_LIABILITY_ACCOUNTS)) currentLiabilities += bal;
         else if (code < '2600') currentLiabilities += bal; else nonCurrentLiabilities += bal;
       }

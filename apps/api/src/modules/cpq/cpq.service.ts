@@ -7,6 +7,7 @@ import { docCountersTenant } from '../../database/schema/system';
 import { tenants } from '../../database/schema';
 import { n, fx } from '../../database/queries';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { QuotePdfService, type QuotePrintData } from './quote-pdf.service';
 import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
@@ -249,7 +250,8 @@ export class CpqService {
           source: 'CPQ-WIN', sourceRef: q.quoteNo, tenantId, memo: `Quote accepted ${q.quoteNo}`, createdBy: user.username,
           lines: [
             { account_code: '1100', debit: n(q.total), memo: `AR — ${q.customerName}` },
-            { account_code: '4000', credit: n(q.total), memo: 'Sales revenue (CPQ)' },
+            // docs/43 PR-6: the CPQ-win revenue leg shares SALE.FOOD.revenue; AR control stays pinned.
+            { account_code: (await this.ledger.postingOverrides('SALE.FOOD', tenantId)).revenue ?? postingDefault('SALE.FOOD', 'revenue'), credit: n(q.total), memo: 'Sales revenue (CPQ)' },
           ],
         });
         return { ...res, entry_no: je.entry_no, ar_posted: n(q.total) };
