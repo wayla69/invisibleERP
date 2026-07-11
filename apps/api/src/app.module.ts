@@ -30,6 +30,7 @@ import { PartnersModule } from './modules/partners/partners.module';
 import { MemberModule } from './modules/loyalty/member/member.module';
 import { BomModule } from './modules/bom/bom.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
+import { DisclosureModule } from './modules/disclosure/disclosure.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { BillingModule } from './modules/billing/billing.module';
@@ -170,6 +171,7 @@ import { MailModule } from './modules/mail/mail.module';
     MemberModule,
     BomModule,
     LedgerModule,
+    DisclosureModule,
     PaymentsModule,
     TaxModule,
     BillingModule,

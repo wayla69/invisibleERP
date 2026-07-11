@@ -1,4 +1,4 @@
--- 0346_flux_analysis — CLS-01 (GL-25): Flux / variance analysis with forced explanation + sign-off. A SOX
+-- 0348_flux_analysis — CLS-01 (GL-25): Flux / variance analysis with forced explanation + sign-off. A SOX
 -- management-review control over the period close. A preparer GENERATES a period-over-period (or vs
 -- prior-year / vs budget) P&L or BS movement analysis from gl_period_balances; each line's Δ$ / Δ% is tested
 -- against configurable thresholds (absolute + %). A threshold-BREACHING line REQUIRES a written explanation

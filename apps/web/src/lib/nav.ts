@@ -387,6 +387,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'nav.gl_schedules', href: '/gl-schedules', icon: CalendarClock, perms: ['gl_post', 'gl_close', 'exec'] },
           { label: 'nav.period_close', href: '/finance/period-close', icon: CalendarClock, perms: ['gl_close', 'exec'] },
           { label: 'nav.flux_analysis', href: '/close/flux', icon: Activity, perms: ['gl_close', 'fin_report', 'exec'] },
+          { label: 'nav.disclosure_checklist', href: '/close/disclosure', icon: ClipboardCheck, perms: ['gl_close', 'gl_post', 'fin_report', 'exec'] },
         ],
       },
       {

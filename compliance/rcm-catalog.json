@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 251,
+    "total": 252,
     "by_status": {
-      "Implemented": 248,
+      "Implemented": 249,
       "Partial": 3
     },
     "by_family": {
@@ -16,7 +16,7 @@
       "Entity-Level": 7,
       "Expenditure": 16,
       "Fixed Assets": 8,
-      "General Ledger": 25,
+      "General Ledger": 26,
       "ITGC · Access": 22,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
@@ -3622,10 +3622,29 @@
       "frequency": "Per period-close",
       "owner": "Financial Controller",
       "coso": "P10",
-      "code_reference": "flux/flux.service.ts (generate — signed amounts per account from gl_period_balances, prior_period/prior_year/budget comparatives, abs+pct breach flags; explain forced-explanation + Draft→Explained; review UNEXPLAINED_LINES + SOD_SELF_APPROVAL maker-checker → Certified); flux/flux.controller.ts (POST close/flux/generate, GET close/flux[/:id], PUT :id/lines/:lineId/explain, POST :id/review — gl_close/fin_report/exec); schema/flux.ts (flux_analyses + flux_lines, tenant-leading index) + migration 0346 (canonical RLS); ledger/close.service.ts (advisory flux_review checklist step); bi/report-registry.ts + bi-generate.service.ts (flux_analysis report type); apps/web /close/flux; cutover/flux-analysis.ts (ToE)",
+      "code_reference": "flux/flux.service.ts (generate — signed amounts per account from gl_period_balances, prior_period/prior_year/budget comparatives, abs+pct breach flags; explain forced-explanation + Draft→Explained; review UNEXPLAINED_LINES + SOD_SELF_APPROVAL maker-checker → Certified); flux/flux.controller.ts (POST close/flux/generate, GET close/flux[/:id], PUT :id/lines/:lineId/explain, POST :id/review — gl_close/fin_report/exec); schema/flux.ts (flux_analyses + flux_lines, tenant-leading index) + migration 0348 (canonical RLS); ledger/close.service.ts (advisory flux_review checklist step); bi/report-registry.ts + bi-generate.service.ts (flux_analysis report type); apps/web /close/flux; cutover/flux-analysis.ts (ToE)",
       "tod": "Inspect the abs+pct breach logic, the forced-explanation gate before sign-off, the maker-checker reviewer≠preparer rule, and that the analysis posts nothing to the GL.",
       "toe": "Re-perform (flux-analysis harness): generate a P&L flux flags the lines breaching abs/pct thresholds and leaves the below-threshold line unflagged; review while a breached line is unexplained → UNEXPLAINED_LINES; the preparer's self-review → SOD_SELF_APPROVAL; after every breached line is explained a DISTINCT reviewer certifies; prior_year/budget comparatives resolve correctly; RLS isolates tenants.",
       "evidence": "flux_analyses / flux_lines with per-line explanations + reviewer sign-off; flux-analysis harness ToE",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "GL-26",
+      "cycle": "General Ledger",
+      "category": "Detective",
+      "fsli": "All",
+      "risk": "Financial statements / the reporting package are issued without a governed disclosure checklist: required TFRS/IFRS + SEC disclosure notes (related parties, revenue disaggregation, leases, income tax, commitments & contingencies, segments, subsequent events, management disclosure-controls sign-off) may be omitted or incomplete, supporting evidence is not pinned to the note, and one person can compile AND release the package with no independent review — a SEC disclosure-controls failure and an incomplete/inaccurate reporting basis.",
+      "assertion": "Completeness/Accuracy/Presentation/Disclosure",
+      "description": "Governed disclosure / close-package checklist (close binder): POST /api/close/disclosure opens a per-period checklist that AUTO-SEEDS the standard TFRS/IFRS + SEC disclosure items — each carries a standard reference (TAS 1/7/12/24, TFRS 8/15/16, TAS 10/37, SEC disclosure controls), an owner and an Open/Complete/NA status with an optional support-doc reference pinned to doc_attachments (docType DISC via assertDocExists). PUT /api/close/disclosure/:id/items/:itemId completes/NAs each item (recording completed_by/at) and attaches its evidence. Review is a MAKER-CHECKER sign-off gate: POST /api/close/disclosure/:id/review is BLOCKED while any item is still Open (ITEMS_INCOMPLETE, listing the open items) and REJECTS a reviewer equal to the preparer (SOD_SELF_APPROVAL) — moving the binder Draft → Reviewed — and only a Reviewed binder can be Issued (POST …/issue → Issued; NOT_REVIEWED otherwise) so the financials are released only after an independent review. An advisory disclosure_review step cross-links the binder into the GL-15/16 close run. Detective/monitoring; tenant-scoped (canonical RLS); posts NOTHING to the GL.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per period-close / reporting package",
+      "owner": "Financial Controller / CFO",
+      "coso": "P10",
+      "code_reference": "disclosure.service.ts (open seeds STANDARD_ITEMS, updateItem complete/NA + support_doc_ref, review ITEMS_INCOMPLETE + SOD_SELF_APPROVAL maker-checker gate Draft→Reviewed, issue Reviewed→Issued NOT_REVIEWED); disclosure.controller.ts (api/close/disclosure open/list/get/item/review/issue, gl_close mutate + gl_close/gl_post/fin_report/exec read); schema/disclosure-checklists.ts (disclosure_checklists + disclosure_items, tenant-leading index + canonical 0232-form RLS); migration 0347 (tables + RLS + app_user grants); procurement/attachments.service.ts (assertDocExists DISC → disclosure_checklists); common/doc-number.service.ts (DISC daily doc number); ledger/close.service.ts (advisory disclosure_review step); app.module.ts (DisclosureModule wired); cutover/disclosure-checklist.ts (ToE)",
+      "tod": "Inspect the seeded standard-item set with standard refs/owners, the item complete/NA + support-doc attach, the ITEMS_INCOMPLETE review gate, the SOD_SELF_APPROVAL maker-checker (reviewer ≠ preparer), the Reviewed→Issued release, and the tenant RLS isolation.",
+      "toe": "TC-CLS-02-01: open seeds ≥10 standard disclosure items (Draft, DISC checklist_no); TC-CLS-02-02: review while an item is Open → ITEMS_INCOMPLETE (400); TC-CLS-02-03: self-review by the preparer → SOD_SELF_APPROVAL (403); TC-CLS-02-04: complete/NA all + a DISTINCT reviewer reviews → Reviewed, then issue → Issued; TC-CLS-02-05: attach DISC support evidence to the checklist_no (assertDocExists), a bogus checklist_no → NOT_FOUND; TC-CLS-02-06: another tenant sees 0 checklists (RLS) (re-performed by the disclosure-checklist harness).",
+      "evidence": "disclosure_checklists / disclosure_items with prepared_by/reviewed_by/issued_by sign-off trail + per-item completed_by/support_doc_ref; harness ToE (disclosure-checklist)",
       "status": "Implemented"
     },
     {
