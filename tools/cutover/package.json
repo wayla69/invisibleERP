@@ -30,6 +30,7 @@
     "projects": "tsx src/projects.ts",
     "mfg-depth": "tsx src/mfg-depth.ts",
     "hcm": "tsx src/hcm.ts",
+    "hcm-perf": "tsx src/hcm-perf.ts",
     "hcm-org": "tsx src/hcm-org.ts",
     "scm17c": "tsx src/scm17c.ts",
     "sub-billing": "tsx src/sub-billing.ts",
