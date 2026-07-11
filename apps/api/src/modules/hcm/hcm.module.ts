@@ -7,6 +7,8 @@ import { HcmPerfController } from './hcm-perf.controller';
 import { HcmPerfService } from './hcm-perf.service';
 import { HcmOrgController } from './hcm-org.controller';
 import { HcmOrgService } from './hcm-org.service';
+import { HcmCompController } from './hcm-comp.controller';
+import { HcmCompService } from './hcm-comp.service';
 import { ProjectsModule } from '../projects/projects.module';
 import { MessagingModule } from '../messaging/messaging.module';
 
@@ -17,10 +19,11 @@ import { MessagingModule } from '../messaging/messaging.module';
 // HR-3 (docs/42): performance management — cycles/goals/reviews with the HR-03 sign-off SoD.
 // HR-1 (docs/42): organisation structure, positions & effective-dated assignments with the HR-01
 // headcount-governance control (StatusLogService is provided globally by CommonModule).
+// HR-6 (docs/42, Wave 2): compensation bands + benefits with the HR-06 comp-change maker-checker within band.
 @Module({
   imports: [ProjectsModule, MessagingModule],
-  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController],
-  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService],
+  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmCompController],
+  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmCompService],
   exports: [HcmLeaveService],
 })
 export class HcmModule {}

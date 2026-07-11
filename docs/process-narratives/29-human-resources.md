@@ -213,3 +213,101 @@ flowchart TD
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-07-11 | HR-3 | Initial performance-management narrative + HR-03 control matrix |
+
+---
+
+## HR-6 — Compensation bands + benefits (control HR-06)
+
+> Self-contained HCM Wave 2 section (docs/42). Compensation control on the `payroll.employees` identity
+> (emp_code). Merges keep-both with the other HR waves.
+
+### HR6.1 Document control (HR-6)
+
+| Field | Value |
+|---|---|
+| Process ID | PN-29-HR / HR-6 |
+| Process owner | `<<HR Manager / Head of Reward>>` |
+| Approver | `<<CHRO / CFO>>` |
+| Version | **0.1 DRAFT** |
+| Related RCM control | HR-06 (comp-change maker-checker within band) |
+| Related policy | `compliance/policies/03-delegation-of-authority.md` |
+
+### HR6.2 Narrative
+
+Compensation is administered on a per-tenant **pay-grade band register** (`pay_grades`) — each grade carries a
+`[min, mid, max]` salary band and a currency (default THB). A salary or grade change to an employee is a
+**comp change** (`comp_changes`) with a `change_type` of `hire` / `merit` / `promotion` / `adjustment`,
+subject to the **HR-06 control**:
+
+1. **Within-band validation at request time.** When the change names a target grade (`new_grade`), the proposed
+   `new_salary` must fall inside that grade's `[min, max]` band. A salary outside the band is **blocked**
+   (`OUT_OF_BAND`, 400) unless an `hr_admin`/`exec` sets an explicit **override flag** — the override is
+   **audit-logged** (a `doc_status_log` `COMPCHG` row carrying `OUT_OF_BAND_OVERRIDE`) in addition to the
+   append-only `audit_log`.
+2. **Maker-checker on approval.** A comp change is created `pending` and writes **nothing** to the employee
+   record. Approval requires a **different** user (`approved_by` ≠ `requested_by` → `SOD_SELF_APPROVAL`, 403)
+   holding `hr_admin`/`exec`. The employee master (`payroll.employees.monthly_salary` + `job_grade`) is written
+   **only on approval**; a **reject** leaves the salary unchanged.
+
+**Benefits.** `benefit_plans` catalogues offerings (category `health`/`dental`/`life`/`provident_fund`/
+`allowance`, with employer/employee monthly cost). `benefit_enrollments` link an employee to a plan
+(effective-dated, end-datable; a duplicate active enrolment on the same plan is rejected `ALREADY_ENROLLED`).
+Enrolment reads are `ess` **own-scoped** (an employee sees only their own). All four tables are tenant-scoped
+(RLS) so bands, comp history and benefits never leak across companies.
+
+### HR6.3 Workflow
+
+```mermaid
+flowchart TD
+  A[HR maintainer requests comp change] --> B{new_salary within target grade band?}
+  B -- yes --> P[status: pending]
+  B -- no --> O{hr_admin/exec + override flag?}
+  O -- no --> X[Block OUT_OF_BAND]
+  O -- yes --> P2[status: pending + OUT_OF_BAND_OVERRIDE audit]
+  P --> C{approver ≠ requester and hr_admin/exec?}
+  P2 --> C
+  C -- no --> Y[Block SOD_SELF_APPROVAL]
+  C -- approve --> D[status: approved → write employees.monthly_salary + job_grade]
+  C -- reject --> E[status: rejected → salary unchanged]
+```
+
+### HR6.4 Endpoints (application)
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET/POST /api/hcm/comp/grades` | read `hr`/`hr_admin`/`exec`; write `hr`/`hr_admin` | List / create pay-grade bands |
+| `GET/POST /api/hcm/comp/changes` | read `hr`/`hr_admin`/`exec`; write `hr`/`hr_admin` | List / request comp changes (HR-06 band check) |
+| `POST /api/hcm/comp/changes/:id/approve` | `hr_admin`/`exec` | Approve (≠ requester) → write employee master |
+| `POST /api/hcm/comp/changes/:id/reject` | `hr_admin`/`exec` | Reject (salary unchanged) |
+| `GET/POST /api/hcm/comp/benefit-plans` | read `hr`/`hr_admin`/`exec`; write `hr`/`hr_admin` | List / create benefit plans |
+| `GET/POST /api/hcm/comp/enrollments` | read `hr`/`hr_admin`/`exec`/`ess` (own); write `hr`/`hr_admin` | List / create enrolments |
+| `POST /api/hcm/comp/enrollments/:id/end` | `hr`/`hr_admin` | End an enrolment |
+
+### HR6.5 Error codes
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `OUT_OF_BAND` | 400 | `new_salary` outside the target grade band (no valid override) |
+| `SOD_SELF_APPROVAL` | 403 | The requester attempted to approve their own comp change |
+| `GRADE_EXISTS` / `PLAN_EXISTS` | 400 | Duplicate `grade_code` / `plan_code` for the tenant |
+| `ALREADY_ENROLLED` | 400 | Duplicate active enrolment on the same plan |
+| `GRADE_NOT_FOUND` / `PLAN_NOT_FOUND` / `EMP_NOT_FOUND` | 404 | Referenced grade / plan / employee not found |
+
+### HR6.6 Control matrix
+
+| Control | Assertion | What it prevents | Enforcement |
+|---|---|---|---|
+| **HR-06** | Authorization / Segregation of Duties | A salary set outside the sanctioned pay band or a self-approved raise, growing the payroll base without independent authorisation | `createChange` blocks `new_salary` outside `[min,max]` (`OUT_OF_BAND`) unless `hr_admin`/`exec` + override (audit-logged `OUT_OF_BAND_OVERRIDE`); `approveChange` rejects `approved_by == requested_by` (`SOD_SELF_APPROVAL`) and writes the employee master only on approval |
+
+### HR6.7 System references
+
+- Service/controller: `apps/api/src/modules/hcm/hcm-comp.service.ts`, `hcm-comp.controller.ts`
+- Schema: `apps/api/src/database/schema/hcm-comp.ts`; migration `apps/api/drizzle/0325_hcm_comp.sql`
+- Web: `apps/web/src/app/(internal)/hcm/comp/page.tsx` (`/hcm/comp`)
+- ToE harness: `tools/cutover/src/hcm-comp.ts` (23 checks)
+
+### HR6.8 Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-07-11 | HR-6 | Initial compensation-bands & benefits narrative + HR-06 control matrix |
