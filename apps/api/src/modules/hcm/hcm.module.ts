@@ -7,6 +7,8 @@ import { HcmPerfController } from './hcm-perf.controller';
 import { HcmPerfService } from './hcm-perf.service';
 import { HcmOrgController } from './hcm-org.controller';
 import { HcmOrgService } from './hcm-org.service';
+import { HcmRecruitingController } from './hcm-recruiting.controller';
+import { HcmRecruitingService } from './hcm-recruiting.service';
 import { ProjectsModule } from '../projects/projects.module';
 import { MessagingModule } from '../messaging/messaging.module';
 
@@ -17,10 +19,12 @@ import { MessagingModule } from '../messaging/messaging.module';
 // HR-3 (docs/42): performance management — cycles/goals/reviews with the HR-03 sign-off SoD.
 // HR-1 (docs/42): organisation structure, positions & effective-dated assignments with the HR-01
 // headcount-governance control (StatusLogService is provided globally by CommonModule).
+// HR-4 (docs/42, Wave 2): recruiting/ATS — requisitions → candidate pipeline → offer → hire with the HR-04
+// maker-checker (requisition approval + offer authorization + headcount-bound hiring) control.
 @Module({
   imports: [ProjectsModule, MessagingModule],
-  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController],
-  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService],
+  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmRecruitingController],
+  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmRecruitingService],
   exports: [HcmLeaveService],
 })
 export class HcmModule {}
