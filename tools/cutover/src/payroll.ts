@@ -256,6 +256,25 @@ async function main() {
   ok('GL-24: re-editing an approved rule demotes it to PendingApproval (same row, new account pending)',
     reEdit.status === 201 && reEdit.json.status === 'PendingApproval' && Number(reEdit.json.id) === Number(ruleReq.json.id), `${reEdit.status} st=${reEdit.json.status} id=${reEdit.json.id}`);
 
+  // ── docs/43 PR-7 — PAY-02 tie-out widening: an overridden SSO payable still reconciles + remits ──
+  // The sso_payable role flipped widen→free; the liabilities schedule and the remit endpoint now read
+  // the widened set {2350 ∪ override}, closing the docs/42 latent gap.
+  await db.insert(s.accounts).values({ code: '2351', name: 'SSO Payable — override (PR-7)', type: 'Liability', normalBalance: 'C', isPostable: true }).onConflictDoNothing();
+  const ssoRule = (await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.SSO', legOrder: 1, role: 'sso_payable', side: 'CR', accountCode: '2351' })).json;
+  ok('PR-7: a formerly widen-tier role (sso_payable) now accepts an override (GL-24 pending)', ssoRule?.status === 'PendingApproval', `${ssoRule?.status}`);
+  await inj('POST', `/api/ledger/posting-rules/${Number(ssoRule?.id)}/approve`, approver);
+  const runJan = await inj('POST', '/api/payroll/runs?period=2027-01', admin);
+  await inj('POST', '/api/payroll/runs/2027-01/approve', approver);
+  const led2351 = (await inj('GET', '/api/ledger/account-ledger?account=2351', admin)).json;
+  ok('PR-7: the January run posts SSO payable to the override account 2351', Number(led2351.total_credit) > 0, `cr2351=${led2351.total_credit}`);
+  const liabW = (await inj('GET', '/api/payroll/liabilities', admin)).json;
+  const ssoLine = (liabW.lines ?? []).find((l: any) => l.account_code === '2350');
+  ok('PR-7: the PAY-02 schedule reads the WIDENED set {2350, 2351} and still reconciles to the payrun accrual',
+    Array.isArray(ssoLine?.account_set) && ssoLine.account_set.includes('2351') && ssoLine?.reconciled === true,
+    JSON.stringify({ set: ssoLine?.account_set, rec: ssoLine?.reconciled, accrued: ssoLine?.accrued }));
+  const remitW = await inj('POST', '/api/payroll/liabilities/remit', admin, { account_code: '2351', amount: Number(led2351.total_credit), ref: 'SSO-2027-01' });
+  ok('PR-7: remit accepts the override account and clears exactly its balance', remitW.status < 300 && near(remitW.json.outstanding_after, 0), JSON.stringify(remitW.json));
+
   console.log('\n── C2b — payroll (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

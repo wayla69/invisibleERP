@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, type OnModuleInit } from '@nestjs/common';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, payruns, payslips, timesheets, leaveRequests, tenants } from '../../database/schema';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
@@ -220,10 +220,13 @@ export class PayrollService implements OnModuleInit {
   // outside authorities. This schedule ties each account's GL net balance (accrued − remitted = outstanding)
   // back to the independent payrun accrual, and lets treasury REMIT the cash so the liability is cleared and
   // the books reconcile to the statutory filings.
+  // docs/43 PR-7: each canonical liability carries its posting-event role — the schedule and the remit
+  // endpoint read the WIDENED account set {default} ∪ {approved override} so an overridden payable
+  // (GL-24-governed) still reconciles and can still be remitted. Closes the docs/42 latent gap.
   private readonly LIAB = [
-    { code: '2350', label: 'ประกันสังคม (SSO)', authority: 'สำนักงานประกันสังคม', deadline: 'นำส่งภายในวันที่ 15 ของเดือนถัดไป' },
-    { code: '2360', label: 'ภาษีหัก ณ ที่จ่าย (ภ.ง.ด.1)', authority: 'กรมสรรพากร', deadline: 'นำส่ง ภ.ง.ด.1 ภายในวันที่ 7 ของเดือนถัดไป' },
-    { code: '2370', label: 'กองทุนสำรองเลี้ยงชีพ (PF)', authority: 'บริษัทจัดการกองทุน', deadline: 'นำส่งภายใน 3 วันทำการ' },
+    { code: '2350', event: 'PAYROLL.SSO', role: 'sso_payable', label: 'ประกันสังคม (SSO)', authority: 'สำนักงานประกันสังคม', deadline: 'นำส่งภายในวันที่ 15 ของเดือนถัดไป' },
+    { code: '2360', event: 'PAYROLL.WHT', role: 'wht_payable', label: 'ภาษีหัก ณ ที่จ่าย (ภ.ง.ด.1)', authority: 'กรมสรรพากร', deadline: 'นำส่ง ภ.ง.ด.1 ภายในวันที่ 7 ของเดือนถัดไป' },
+    { code: '2370', event: 'PAYROLL.PF', role: 'pf_payable', label: 'กองทุนสำรองเลี้ยงชีพ (PF)', authority: 'บริษัทจัดการกองทุน', deadline: 'นำส่งภายใน 3 วันทำการ' },
   ];
 
   private liabTenant(user: JwtUser, explicitTenantId?: number | null) {
@@ -232,14 +235,16 @@ export class PayrollService implements OnModuleInit {
     return tenantId;
   }
 
-  // GL debit/credit totals for one account (Posted entries only — Draft JEs are excluded from balances).
-  private async glAcct(accountCode: string, tenantId: number) {
+  // GL debit/credit totals across an account SET (Posted entries only — Draft JEs are excluded from
+  // balances). PR-7: the PAY-02 schedule sums the widened set so an overridden payable still ties.
+  private async glAcct(accountCodes: string | string[], tenantId: number) {
     const db = this.db;
+    const codes = Array.isArray(accountCodes) ? accountCodes : [accountCodes];
     const [r] = await db.select({
       debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
       credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
     }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalEntries.tenantId, tenantId), eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode)));
+      .where(and(eq(journalEntries.tenantId, tenantId), eq(journalEntries.status, 'Posted'), inArray(journalLines.accountCode, codes)));
     return { debit: n(r?.debit ?? 0), credit: n(r?.credit ?? 0) };
   }
 
@@ -261,18 +266,27 @@ export class PayrollService implements OnModuleInit {
     const expected: Record<string, number | null> = { '2350': r2(n(pr?.sso ?? 0)), '2360': r2(n(pr?.wht ?? 0)), '2370': r2(n(pf?.pf ?? 0)) };
     const lines = [] as any[];
     for (const L of this.LIAB) {
-      const g = await this.glAcct(L.code, tenantId);
+      // PR-7: the schedule reads the widened set — the canonical account plus any approved override.
+      const set = await this.ledger.postingAccountSet(L.event, L.role, tenantId);
+      const g = await this.glAcct(set, tenantId);
       const accrued = r2(g.credit), remitted = r2(g.debit), outstanding = r2(g.credit - g.debit);
       const exp = expected[L.code];
-      lines.push({ account_code: L.code, label: L.label, authority: L.authority, deadline: L.deadline, accrued, remitted, outstanding, expected_accrued: exp, reconciled: exp == null ? true : Math.abs(accrued - exp) < 0.01 });
+      lines.push({ account_code: L.code, account_set: set, label: L.label, authority: L.authority, deadline: L.deadline, accrued, remitted, outstanding, expected_accrued: exp, reconciled: exp == null ? true : Math.abs(accrued - exp) < 0.01 });
     }
     return { lines, total_outstanding: r2(lines.reduce((a, l) => a + l.outstanding, 0)), all_reconciled: lines.every((l) => l.reconciled) };
   }
 
   async remitLiability(dto: { account_code: string; amount: number; ref?: string }, user: JwtUser, explicitTenantId?: number | null) {
     const tenantId = this.liabTenant(user, explicitTenantId);
-    const L = this.LIAB.find((x) => x.code === dto.account_code);
-    if (!L) throw new BadRequestException({ code: 'NOT_LIABILITY_ACCOUNT', message: `${dto.account_code} is not a payroll-liability account (2350/2360/2370)`, messageTh: 'ไม่ใช่บัญชีหนี้สินเงินเดือน (2350/2360/2370)' });
+    // PR-7: the remit accepts any account inside a liability's WIDENED set (canonical ∪ approved
+    // override) — the outstanding check below reads the SPECIFIC account being remitted, so cash can
+    // only clear a balance that actually sits there.
+    let L: (typeof this.LIAB)[number] | undefined;
+    for (const cand of this.LIAB) {
+      const set = await this.ledger.postingAccountSet(cand.event, cand.role, tenantId);
+      if (set.includes(dto.account_code)) { L = cand; break; }
+    }
+    if (!L) throw new BadRequestException({ code: 'NOT_LIABILITY_ACCOUNT', message: `${dto.account_code} is not a payroll-liability account (2350/2360/2370 or an approved override)`, messageTh: 'ไม่ใช่บัญชีหนี้สินเงินเดือน (2350/2360/2370 หรือบัญชีที่อนุมัติแทน)' });
     const amount = r2(dto.amount);
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่า 0' });
     const g = await this.glAcct(dto.account_code, tenantId);
