@@ -19,6 +19,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 import { Select } from '@/components/form-controls';
+import { ConfirmDialog } from '@/components/confirm-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // GET /api/service/contracts → { contracts: [...], count }
 interface Contract { id: number; contract_no: string; customer_name: string; sla_tier: string; response_hours: number; resolution_hours: number; start_date: string | null; end_date: string | null; status: string; monthly_value: number }
@@ -182,6 +184,15 @@ function ContractEvents({ contractId }: { contractId: number }) {
     onError: (e: any) => notifyError(e.message),
   });
 
+  const resolve = useMutation({
+    mutationFn: (id: number) => api(`/api/service/events/${id}/resolve`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => {
+      notifySuccess(t('crm.svc_resolved_ok'));
+      qc.invalidateQueries({ queryKey: ['svc-events', contractId] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const events = q.data?.events ?? [];
   const breaches = events.filter((e) => e.response_breached || e.resolution_breached).length;
 
@@ -240,6 +251,17 @@ function ContractEvents({ contractId }: { contractId: number }) {
                     <Badge variant={r.resolution_breached ? 'destructive' : 'success'}>{r.resolution_breached ? t('crm.sla_breached') : t('crm.sla_within')}</Badge>
                   ),
                 },
+                {
+                  key: 'resolve',
+                  label: '',
+                  align: 'right',
+                  render: (r: SlaEvent) =>
+                    r.status === 'Resolved' ? null : (
+                      <Button size="sm" variant="outline" disabled={resolve.isPending} onClick={() => resolve.mutate(r.id)}>
+                        {t('crm.svc_resolve')}
+                      </Button>
+                    ),
+                },
               ]}
             />
           )}
@@ -249,12 +271,67 @@ function ContractEvents({ contractId }: { contractId: number }) {
   );
 }
 
+interface Invoice { id: number; invoice_no: string; billing_period: string; amount: number; status: string; due_date: string | null }
+
 function Subscriptions() {
   const { t } = useLang();
+  const qc = useQueryClient();
   // list endpoint returns rows under `subscriptions`
   const q = useQuery<{ subscriptions: Sub[]; count: number }>({ queryKey: ['svc-subs'], queryFn: () => api('/api/service/subscriptions') });
   const subs = q.data?.subscriptions ?? [];
   const mrr = subs.reduce((s, x) => s + (x.status === 'Active' ? x.unit_price * x.qty : 0), 0);
+
+  // Create-subscription form state
+  const [customerName, setCustomerName] = useState('');
+  const [productCode, setProductCode] = useState('');
+  const [unitPrice, setUnitPrice] = useState('');
+  const [qty, setQty] = useState('1');
+  const [cycle, setCycle] = useState('monthly');
+  const [startDate, setStartDate] = useState('2026-01-01');
+
+  const [cancelTarget, setCancelTarget] = useState<Sub | null>(null);
+  const [invoicesOf, setInvoicesOf] = useState<Sub | null>(null);
+
+  const create = useMutation({
+    mutationFn: () =>
+      api('/api/service/subscriptions', {
+        method: 'POST',
+        body: JSON.stringify({
+          customer_name: customerName,
+          product_code: productCode,
+          unit_price: Number(unitPrice) || 0,
+          qty: Number(qty) || 1,
+          billing_cycle: cycle,
+          start_date: startDate,
+        }),
+      }),
+    onSuccess: (r: any) => {
+      notifySuccess(t('crm.svc_created_ok', { no: r.sub_no }));
+      setCustomerName(''); setProductCode(''); setUnitPrice(''); setQty('1');
+      qc.invalidateQueries({ queryKey: ['svc-subs'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const setStatus = useMutation({
+    mutationFn: ({ id, action }: { id: number; action: 'pause' | 'resume' | 'cancel' }) =>
+      api(`/api/service/subscriptions/${id}/${action}`, { method: 'POST' }),
+    onSuccess: (_r, v) => {
+      notifySuccess(t(v.action === 'pause' ? 'crm.svc_paused_ok' : v.action === 'resume' ? 'crm.svc_resumed_ok' : 'crm.svc_cancelled_ok'));
+      setCancelTarget(null);
+      qc.invalidateQueries({ queryKey: ['svc-subs'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const billing = useMutation({
+    mutationFn: () => api('/api/service/billing/run', { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (r: any) => {
+      notifySuccess(t('crm.svc_billing_ok', { inv: num(r.invoices_created), subs: num(r.subscriptions_billed) }));
+      qc.invalidateQueries({ queryKey: ['svc-subs'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
 
   return (
     <div className="space-y-5">
@@ -267,6 +344,52 @@ function Subscriptions() {
           </div>
         )}
       </StateView>
+
+      {/* Create subscription */}
+      <Card className="max-w-3xl gap-4">
+        <CardHeader>
+          <CardTitle className="text-base">{t('crm.svc_new_sub')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="sub-cust">{t('crm.svc_f_customer')}</Label>
+              <Input id="sub-cust" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder={t('crm.customer_name_placeholder')} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="sub-prod">{t('crm.svc_f_product')}</Label>
+              <Input id="sub-prod" value={productCode} onChange={(e) => setProductCode(e.target.value)} placeholder="ERP-BASIC" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="sub-price">{t('crm.svc_f_price')}</Label>
+              <Input id="sub-price" type="number" min="0" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} placeholder="0" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="sub-qty">{t('crm.svc_f_qty')}</Label>
+              <Input id="sub-qty" type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="sub-cycle">{t('crm.svc_f_cycle')}</Label>
+              <Select id="sub-cycle" value={cycle} onChange={(e) => setCycle(e.target.value)}>
+                {['monthly', 'quarterly', 'annual'].map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="sub-start">{t('crm.svc_f_start')}</Label>
+              <Input id="sub-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button disabled={create.isPending || !customerName.trim() || !productCode.trim()} onClick={() => create.mutate()}>
+              <Plus className="size-4" /> {create.isPending ? t('crm.saving') : t('crm.svc_create_btn')}
+            </Button>
+            <Button variant="outline" disabled={billing.isPending} onClick={() => billing.mutate()}>
+              <Repeat className="size-4" /> {t('crm.svc_run_billing')}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       <StateView q={q}>
         {q.data && (
           <DataTable
@@ -281,10 +404,91 @@ function Subscriptions() {
               { key: 'qty', label: t('crm.qty'), align: 'right', render: (r: Sub) => <span className="tabular">{num(r.qty)}</span> },
               { key: 'next_billing_date', label: t('crm.next_billing'), render: (r: Sub) => thaiDate(r.next_billing_date) },
               { key: 'status', label: t('fin.col_status'), render: (r: Sub) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              {
+                key: 'actions',
+                label: '',
+                align: 'right',
+                render: (r: Sub) => (
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => setInvoicesOf(r)}>{t('crm.svc_invoices')}</Button>
+                    {r.status === 'Active' && (
+                      <Button size="sm" variant="outline" disabled={setStatus.isPending} onClick={() => setStatus.mutate({ id: r.id, action: 'pause' })}>{t('crm.svc_pause')}</Button>
+                    )}
+                    {r.status === 'Paused' && (
+                      <Button size="sm" variant="outline" disabled={setStatus.isPending} onClick={() => setStatus.mutate({ id: r.id, action: 'resume' })}>{t('crm.svc_resume')}</Button>
+                    )}
+                    {r.status !== 'Cancelled' && (
+                      <Button size="sm" variant="outline" disabled={setStatus.isPending} onClick={() => setCancelTarget(r)}>{t('crm.svc_cancel')}</Button>
+                    )}
+                  </div>
+                ),
+              },
             ]}
           />
         )}
       </StateView>
+
+      <ConfirmDialog
+        open={cancelTarget != null}
+        onOpenChange={(o) => { if (!o) setCancelTarget(null); }}
+        title={t('crm.svc_cancel')}
+        description={cancelTarget ? t('crm.svc_cancel_confirm', { no: cancelTarget.sub_no }) : ''}
+        confirmLabel={t('crm.svc_cancel')}
+        busy={setStatus.isPending}
+        onConfirm={() => { if (cancelTarget) setStatus.mutate({ id: cancelTarget.id, action: 'cancel' }); }}
+      />
+
+      {invoicesOf && <InvoicesDialog sub={invoicesOf} onClose={() => setInvoicesOf(null)} />}
     </div>
+  );
+}
+
+function InvoicesDialog({ sub, onClose }: { sub: Sub; onClose: () => void }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ invoices: Invoice[] }>({ queryKey: ['svc-invoices', sub.id], queryFn: () => api(`/api/service/subscriptions/${sub.id}/invoices`) });
+  const invoices = q.data?.invoices ?? [];
+
+  const pay = useMutation({
+    mutationFn: (id: number) => api(`/api/service/invoices/${id}/pay`, { method: 'POST' }),
+    onSuccess: (r: any) => {
+      notifySuccess(t('crm.svc_paid_ok', { no: r.invoice_no }));
+      qc.invalidateQueries({ queryKey: ['svc-invoices', sub.id] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t('crm.svc_invoices_title', { no: sub.sub_no })}</DialogTitle>
+        </DialogHeader>
+        <StateView q={q}>
+          {q.data && (
+            <DataTable
+              rows={invoices}
+              emptyState={{ icon: ClipboardList, title: t('crm.svc_invoices'), description: t('crm.svc_no_invoices') }}
+              columns={[
+                { key: 'invoice_no', label: t('dash.col_no') },
+                { key: 'billing_period', label: t('crm.svc_inv_period') },
+                { key: 'amount', label: t('crm.unit_price'), align: 'right', render: (r: Invoice) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'due_date', label: t('crm.svc_inv_due'), render: (r: Invoice) => thaiDate(r.due_date) },
+                { key: 'status', label: t('fin.col_status'), render: (r: Invoice) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                {
+                  key: 'pay',
+                  label: '',
+                  align: 'right',
+                  render: (r: Invoice) =>
+                    r.status === 'Paid' ? null : (
+                      <Button size="sm" variant="outline" disabled={pay.isPending} onClick={() => pay.mutate(r.id)}>{t('crm.svc_pay')}</Button>
+                    ),
+                },
+              ]}
+            />
+          )}
+        </StateView>
+      </DialogContent>
+    </Dialog>
   );
 }

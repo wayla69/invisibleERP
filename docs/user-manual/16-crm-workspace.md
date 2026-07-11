@@ -188,6 +188,41 @@ your company's **CRM inbound email address** (your administrator points the mail
 
 ---
 
+## 16.7 Service contracts & subscriptions (สัญญาบริการ & การสมัครสมาชิก — `/service`)
+
+The **บริการ** workspace is the after-sales home: SLA-backed service contracts, incident tracking with breach
+detection, and recurring **subscription billing**. It has two tabs.
+
+**Contracts tab (สัญญาบริการ).** Create a contract for a customer and pick an **SLA tier** (Bronze / Silver /
+Gold / Platinum) — the tier sets the response/resolution-hour targets automatically. Click a contract row to open
+its **SLA events** panel below:
+
+- **Log an event (บันทึกเคส).** Enter a title and priority (P1–P4). The system stamps the response-due and
+  resolution-due times from the contract's tier.
+- **Resolve (ปิดเคส).** Press **ปิดเคส** on an open event to close it. The system records the resolved time and
+  computes whether the **response** and **resolution** SLAs were breached, shown as green *ตรงเวลา* / red *เกิน SLA*
+  badges. A red **เกิน SLA** count badge on the panel header tallies the breaches so a manager can see them at a
+  glance. Resolved events no longer show the button.
+
+**Subscriptions tab (การสมัครสมาชิก).** Manage recurring revenue streams:
+
+- **Create a subscription (เปิดการสมัคร).** Enter customer, product code, unit price, quantity (default 1), the
+  billing cycle (monthly / quarterly / annual) and a start date. Revenue per cycle for active subscriptions is
+  summarised in the stat cards.
+- **Run billing (รันรอบเรียกเก็บ).** Press **รันรอบเรียกเก็บ** to generate invoices for every **Active**
+  subscription whose next-billing date has arrived. Each run posts subscription revenue to the ledger
+  (Dr AR / Cr Subscription Revenue) and advances the next-billing date by the cycle. Paused and cancelled
+  subscriptions are skipped. Requires the **approvals** permission.
+- **Pause / Resume (พัก / เปิดใช้).** **พัก** stops billing without ending the subscription; **เปิดใช้** brings a
+  paused subscription back to Active so it bills again on the next run.
+- **Cancel (ยกเลิก).** **ยกเลิก** ends a subscription permanently — you're asked to confirm, and a cancelled
+  subscription **cannot be reactivated** (create a new one if the customer returns).
+- **Invoices (ใบแจ้งหนี้).** Press **ใบแจ้งหนี้** on a row to see that subscription's invoices (period, amount, due
+  date, status). Press **บันทึกชำระ** on an unpaid invoice to mark it paid — the payment posts to the ledger
+  (Dr Cash / Cr AR).
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -202,11 +237,14 @@ your company's **CRM inbound email address** (your administrator points the mail
 | `ACCOUNT_NOT_FOUND` | Opening Customer 360 for an account number that doesn't exist in your company | Check the `ACC-…` number, or open the account from the Accounts tab. |
 | `BAD_INBOUND_SECRET` / `INBOUND_UNVERIFIED` | An inbound CRM email arrived unsigned or with a wrong signature (CRM-6) | Not a user action — ask your administrator to configure the CRM inbound email secret at the mail provider. |
 | `ALREADY_RESOLVED` | Linking a review-queue item that was already linked or dismissed | Refresh the review queue; someone already handled it. |
+| `SUB_CANCELLED` | Resuming/pausing a subscription that is already cancelled (§16.7) | Cancel is permanent — create a new subscription instead. |
+| `ALREADY_PAID` | Marking an invoice paid that is already paid (§16.7) | Refresh the invoices list; it was already settled. |
 
 ## Revision history
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.4 | 2026-07-11 | **Service workspace (`/service`) — subscription lifecycle + SLA resolve made usable:** new §16.7 documenting the after-sales workspace. Surfaced the previously UI-less flows: **ปิดเคส (Resolve)** on SLA events (with breach computation + red *เกิน SLA* badges), and on subscriptions a **create form**, **รันรอบเรียกเก็บ (Run billing)**, per-row **พัก/เปิดใช้/ยกเลิก (pause/resume/cancel)** with a cancel-confirm, and an **ใบแจ้งหนี้ (invoices)** drill-down with **บันทึกชำระ (mark paid)**. New backend endpoint `POST /api/service/subscriptions/:id/resume`; cancel is now terminal. Added the `SUB_CANCELLED` / `ALREADY_PAID` error rows. |
 | 1.3 | 2026-07-10 | **CRM-6 — inbound email capture (2-way comms)** (docs/41): new §16.6. Customer replies to a deal email are captured back onto the deal timeline automatically — via the hidden reply-threading tag CRM-4 now embeds in outbound emails, or the sender's contact/lead email — and appear as inbound email activities on the deal page + Customer-360. Unmatched replies land in a **review queue** (`GET /api/crm/inbound/review`) to **Link** or **Dismiss**. The inbound webhook is HMAC-signed (forged deliveries rejected); capture never posts to the ledger. Added the `BAD_INBOUND_SECRET`/`INBOUND_UNVERIFIED` and `ALREADY_RESOLVED` error rows. |
 | 1.2 | 2026-07-10 | **CRM-4 — sales automation** (docs/41): lead scoring (grade A–D, explainable/versioned breakdown), the follow-up center (SLA-breach / overdue-task / rotting-deal worklist, detective control **REV-22**) + round-robin assignment + the daily follow-up digest, pipeline events into the automation rules engine, and send email/LINE from a deal with merge fields (logged as an activity). |
 | 1.1 | 2026-07-10 | **CRM-5 — analytics that answer "why"** (Module-Depth Uplift Wave 4): new §16.5 covering the funnel-conversion + time-in-stage velocity, source-ROI, and forecast-categories + quota + activity-leaderboard analytics (`/api/crm/pipeline/analytics/*`), each date-bounded and schedulable as the BI report types `crm_funnel` / `crm_source_roi` / `crm_forecast`. |
