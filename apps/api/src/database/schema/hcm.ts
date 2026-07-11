@@ -59,6 +59,11 @@ export const leaveBalances = pgTable(
     year: numeric('year').notNull(),
     entitled: numeric('entitled', { precision: 6, scale: 2 }).default('0'),
     used: numeric('used', { precision: 6, scale: 2 }).default('0'),
+    // HR-2 (docs/42) — accrual model: balance = entitled + accrued + carryover − used − expired.
+    leaveTypeCode: text('leave_type_code'),                                   // links the row to leave_types.code
+    accrued: numeric('accrued', { precision: 8, scale: 2 }).default('0'),     // credited by the accrual run
+    carryover: numeric('carryover', { precision: 8, scale: 2 }).default('0'), // rolled from the prior year (capped)
+    expired: numeric('expired', { precision: 8, scale: 2 }).default('0'),     // carryover lost beyond the cap
   },
   (t) => ({ byEmp: index('idx_lb_emp').on(t.employeeId) }),
 );

@@ -6,6 +6,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { LineNotifyService } from '../messaging/line-notify.service';
+import { HcmLeaveService } from './hcm-leave.service';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -20,6 +21,9 @@ export class HcmService {
     private readonly projects: ProjectsService,
     // LC-3 (docs/30) — LINE notify: the requester hears the leave decision. Best-effort.
     @Optional() private readonly lineNotify?: LineNotifyService,
+    // HR-2 (docs/42) — leave accrual/balances; enforces the HR-02 entitlement gate on requestLeave.
+    // @Optional so a partial harness (no HcmLeaveService) still constructs — the gate is then skipped.
+    @Optional() private readonly leave?: HcmLeaveService,
   ) {}
 
   private async emp(code: string) {
@@ -94,6 +98,19 @@ export class HcmService {
     const db = this.db;
     const e = await this.emp(dto.emp_code);
     if (n(dto.days) <= 0) throw new BadRequestException({ code: 'BAD_DAYS', message: 'days must be positive', messageTh: 'จำนวนวันลาต้องมากกว่าศูนย์' });
+    // HR-02 (docs/42) — entitlement gate. When the tenant has CONFIGURED an active leave_type matching this
+    // request's leave_type, a paid request beyond the available balance (entitled+accrued+carryover−used−expired)
+    // is BLOCKED unless the type allows a negative balance. Unconfigured types (legacy) keep the old free flow.
+    const leaveType = dto.leave_type ?? 'annual';
+    if (dto.paid !== false && this.leave) {
+      const cfg = await this.leave.typeByCode(leaveType, user);
+      if (cfg && cfg.allowNegative !== true) {
+        const year = String(dto.from_date).slice(0, 4);
+        const available = (await this.leave.availableBalance(Number(e.id), leaveType, year)) ?? 0;
+        if (n(dto.days) > available)
+          throw new BadRequestException({ code: 'INSUFFICIENT_LEAVE_BALANCE', message: `Requested ${n(dto.days)} day(s) exceeds available ${available} for ${leaveType}`, messageTh: `วันลาที่ขอ (${n(dto.days)}) เกินสิทธิ์คงเหลือ (${available})` });
+      }
+    }
     const [row] = await db.insert(leaveRequests).values({
       tenantId: e.tenantId ?? user.tenantId ?? null, employeeId: Number(e.id), leaveType: dto.leave_type ?? 'annual',
       fromDate: dto.from_date, toDate: dto.to_date, days: fx(dto.days, 2), paid: dto.paid ?? true, status: 'Pending', reason: dto.reason ?? null, createdBy: user.username,

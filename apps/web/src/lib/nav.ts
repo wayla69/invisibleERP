@@ -417,7 +417,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'nav.group.hr',
     workspace: ['erp'],
     items: [
-      { label: 'nav.hcm', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
+      { label: 'nav.hcm', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors', 'hr', 'hr_admin'] },
       { label: 'nav.scheduling', href: '/scheduling', icon: CalendarRange, perms: ['pos', 'users', 'exec'] },
       { label: 'nav.ot_rules', href: '/labor/ot-rules', icon: Timer, perms: ['pos', 'users', 'exec'] },
       { label: 'nav.payroll', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },

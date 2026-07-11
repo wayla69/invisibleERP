@@ -127,6 +127,30 @@ for the chosen period / year.
 
 ---
 
+## 4b. Leave entitlement & accrual (HCM · HR-2)
+
+**Route:** `/hcm` → tab **สิทธิ์การลา (สะสม)** (Leave entitlement / accrual).
+**Required role:** view — `hr` / `hr_admin` / `exec` / `ess` (own); configure + run accrual — `hr_admin` / `exec`.
+
+Leave balances are earned through an **accrual engine** rather than being fixed:
+
+1. **Define leave types.** For each type set an **accrual method** (monthly / anniversary / none), the
+   **rate per period** (e.g. 1.25 days/month), a **carryover cap** and a **max balance**.
+2. **Add policy overrides (optional).** Grant a higher rate for a **job grade** and/or a **minimum tenure**
+   (months of service). The highest matching policy wins; otherwise the type's default rate applies.
+3. **Run the accrual.** Enter a period (`YYYY-MM`) and press **รันการสะสม**. Each active employee's balance is
+   credited; at the year boundary the prior year's remaining balance rolls into **carryover** (capped), and
+   the excess **expires**. Re-running the same period does nothing (idempotent). This job can also be scheduled
+   monthly from Reports (report type *สะสมวันลาประจำงวด / Run monthly leave accrual*).
+4. **Balances table** shows accrued / carryover / used and the **available** balance
+   (`entitled + accrued + carryover − used − expired`).
+
+> **Control HR-02:** a **paid** leave request beyond the available balance is rejected with
+> `INSUFFICIENT_LEAVE_BALANCE` (unless the type allows a negative balance). Unpaid leave is not gated.
+> Approval remains **maker-checker** — the requester cannot approve their own leave (`SOD_SELF_APPROVAL`).
+
+---
+
 ## 5. Employee self-service (ESS)
 
 This section is for **every employee** (not just HR). The self-service screen lets

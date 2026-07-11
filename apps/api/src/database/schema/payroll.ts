@@ -16,6 +16,8 @@ export const employees = pgTable(
     ssoNo: encryptedText('sso_no'),             // เลขประกันสังคม
     position: text('position'),
     department: text('department'),
+    jobGrade: text('job_grade'),                // HR-2 (docs/42) — drives leave-accrual policy overrides by grade
+
     monthlySalary: numeric('monthly_salary', { precision: 14, scale: 2 }).notNull().default('0'),
     hourlyRate: numeric('hourly_rate', { precision: 12, scale: 2 }).default('0'),      // for OT pay
     pfRate: numeric('pf_rate', { precision: 6, scale: 4 }).default('0'),               // provident fund % (ee=er)
