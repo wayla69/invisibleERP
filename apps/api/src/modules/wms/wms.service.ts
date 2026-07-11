@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { eq, ne, and, asc, desc, notInArray, sql } from 'drizzle-orm';
+import { eq, ne, and, asc, desc, inArray, notInArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { bins, binStock, pickWaves, pickLists, pickListLines, shipments, dineInOrders, dineInOrderItems, custPosSales, custPosItems, stockMovements, lotLedger } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -140,11 +140,37 @@ export class WmsService {
   // ── Pending lists — the /wms tabs pick documents from these dropdowns instead of typing numbers.
   // Read-only; RLS scopes rows to the caller's tenant. ──
   async listPicks(_user: JwtUser, status?: string) {
+    // status may be a single value ('Picked') or a comma list ('Open,Picking') so the picking screen can
+    // pull everything still to be picked in one call.
+    const statuses = status ? status.split(',').map((s) => s.trim()).filter(Boolean) : [];
     const rows = await this.db
       .select({ pickNo: pickLists.pickNo, status: pickLists.status, sourceType: pickLists.sourceType, sourceRef: pickLists.sourceRef })
-      .from(pickLists).where(status ? eq(pickLists.status, status) : undefined)
+      .from(pickLists).where(statuses.length ? inArray(pickLists.status, statuses) : undefined)
       .orderBy(desc(pickLists.id)).limit(100);
     return { picks: rows.map((r: any) => ({ pick_no: r.pickNo, status: r.status, source_type: r.sourceType, source_ref: r.sourceRef })) };
+  }
+
+  // Full pick list + its lines (item, requested vs picked, suggested bin) — feeds the /wms Pick screen so a
+  // picker sees what to pull and confirms the counted qty per line before submitting to pick().
+  async getPick(pickNo: string, _user: JwtUser) {
+    const [p] = await this.db.select().from(pickLists).where(eq(pickLists.pickNo, pickNo)).limit(1);
+    if (!p) throw new NotFoundException({ code: 'PICK_NOT_FOUND', message: 'Pick list not found', messageTh: 'ไม่พบใบหยิบ' });
+    const lines = await this.db
+      .select({
+        id: pickListLines.id, itemId: pickListLines.itemId, itemDescription: pickListLines.itemDescription,
+        requestedQty: pickListLines.requestedQty, pickedQty: pickListLines.pickedQty, lotNo: pickListLines.lotNo,
+        uom: pickListLines.uom, status: pickListLines.status, binCode: bins.binCode,
+      })
+      .from(pickListLines).leftJoin(bins, eq(bins.id, pickListLines.binId))
+      .where(eq(pickListLines.pickId, Number(p.id))).orderBy(asc(pickListLines.id));
+    return {
+      pick_no: p.pickNo, status: p.status, source_type: p.sourceType, source_ref: p.sourceRef,
+      lines: lines.map((l: any) => ({
+        pick_line_id: Number(l.id), item_id: l.itemId, description: l.itemDescription ?? null,
+        requested_qty: n(l.requestedQty), picked_qty: n(l.pickedQty), bin_code: l.binCode ?? null,
+        lot_no: l.lotNo ?? null, uom: l.uom ?? null, status: l.status,
+      })),
+    };
   }
 
   async listShipments(_user: JwtUser, status?: string) {

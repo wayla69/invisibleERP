@@ -135,7 +135,16 @@ async function main() {
   const pickW2 = picks.find((p) => p.source_ref === 'SALE-W2').pick_no;
   const lineW1 = Number(linesW1[0].id);
   const lineW2 = Number(((await pg.query(`SELECT pll.id FROM pick_list_lines pll JOIN pick_lists pl ON pll.pick_id=pl.id WHERE pl.source_ref='SALE-W2'`)).rows as any[])[0].id);
-  // 5. pick decrements bin stock
+  // 4c. the /wms Pick screen path: list Open+Picking in one call, then read the pick's lines via the API
+  const toPick = await inj('GET', '/api/wms/picks?status=Open,Picking', wh1);
+  ok('GET picks?status=Open,Picking lists both un-picked picks (multi-status filter)', (toPick.json.picks ?? []).length === 2, `n=${(toPick.json.picks ?? []).length}`);
+  const pickDetail = await inj('GET', `/api/wms/picks/${pickW1}`, wh1);
+  const dLine = (pickDetail.json.lines ?? [])[0];
+  ok('GET picks/:pickNo returns lines (pick_line_id + requested_qty + suggested bin) for the Pick screen', pickDetail.status === 200 && pickDetail.json.lines?.length === 1 && dLine?.pick_line_id === lineW1 && dLine?.item_id === 'A' && dLine?.requested_qty === 5 && dLine?.bin_code === 'A-01-01', JSON.stringify(dLine));
+  const missPick = await inj('GET', '/api/wms/picks/NOPE-1', wh1);
+  ok('GET picks/:pickNo unknown → 404 PICK_NOT_FOUND', missPick.status === 404 && missPick.json.error?.code === 'PICK_NOT_FOUND', `${missPick.status} ${missPick.json.error?.code}`);
+  // 5. pick decrements bin stock (driven by the pick_line_id the Pick screen just read back)
+  ok('Pick screen: the API-read pick_line_id is the same id pick() accepts', dLine?.pick_line_id === lineW1);
   const pick1 = await inj('POST', `/api/wms/picks/${pickW1}/pick`, wh1, { lines: [{ pick_line_id: lineW1, picked_qty: 4 }] });
   const issue = (await pg.query(`SELECT count(*)::int n FROM stock_movements WHERE doc_no='${pickW1}' AND move_type='Issue'`)).rows as any[];
   ok('Pick 4×A → bin_stock 10→6 + Issue movement + pick Picked', pick1.json.status === 'Picked' && (await binQty('A-01-01', 'A')) === 6 && issue[0].n === 1, `qty=${await binQty('A-01-01', 'A')}`);
