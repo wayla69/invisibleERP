@@ -2339,6 +2339,13 @@
       "when": 2023820000299,
       "tag": "0334_quality_coa",
       "breakpoints": true
+    },
+    {
+      "idx": 335,
+      "version": "7",
+      "when": 2023820000300,
+      "tag": "0335_supplier_scar",
+      "breakpoints": true
     }
   ]
 }
