@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 246,
+    "total": 247,
     "by_status": {
-      "Implemented": 243,
+      "Implemented": 244,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 16,
+      "Inventory & COGS": 17,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -2391,6 +2391,25 @@
       "tod": "Inspect the reason×disposition taxonomy + the void-fire recipe explosion → ingredient waste + aggregated 5810/1200 JE + the theoretical-vs-actual usage-variance nets Consume vs Waste.",
       "toe": "Re-perform: log costed waste with disposition=donate (echoed, by_disposition rolls it up); void-fire a recipe'd dish → 2 ingredient waste lines, one Dr 5810/Cr 1200 JE, ingredient stock decremented; unknown sku → NO_RECIPE; usage-variance shows theoretical (Consume) vs actual (Consume+Waste) with the valued waste gap; trial balance balanced (re-performed by the waste harness, 19 checks).",
       "evidence": "Waste ledger + by_disposition + void-fire audit + usage-variance report",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "INV-18",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Inventory; COGS; Warranty/recall cost",
+      "risk": "A defective or recalled lot cannot be traced or contained: there is no genealogy linking a batch back to its supplier/goods-receipt or forward to the customers/sales it was issued into (so a recall can't scope who received it), and a suspect lot stays PICKABLE — the FEFO suggestion and the WMS wave keep allocating it — so non-conforming material keeps shipping while the investigation runs.",
+      "assertion": "Existence/Completeness/Occurrence",
+      "description": "Lot recall / genealogy traceability + lot hold (INV-5, migration 0341): every lot (lot_ledger) gains a two-way GENEALOGY trace — GET /api/lots/:lotNo/trace resolves BACKWARD (lot → goods_receipt(s) via lot_ledger.gr_no → goods_receipts → PO → supplier/vendor) and FORWARD (lot → issue rows qty_out>0 → ref_doc pick → pick_lists → cust_pos_sales → customer/branch), so a recall investigation can scope both the source supplier and every downstream sale from one call. A one-click QUARANTINE — POST /api/lots/:lotNo/hold (reason-coded, HOLD- doc) — places a lot on hold (lot_holds, status Held); a held lot is EXCLUDED from BOTH the FEFO pick-suggestion (GET /api/lots/fefo/:itemId, excluded_held count returned) AND the WMS wave bin-allocation (wms.service suggestPickBin skips any bin whose lot has an active Held row), so a recalled/suspect lot physically cannot be picked, shipped or sold. POST /api/lots/:lotNo/release lifts the hold (audit trail retained — released_by/released_at/release_reason) and re-enables picking; LOT_NOT_HELD if not held. Hold/release gated to the inventory-control duties (lots/warehouse/wh_adjust); the trace read to lots/warehouse. lot_holds is tenant-scoped (canonical 0232 RLS, tenant-leading index); lot_ledger (no tenant_id) is never rewritten.",
+      "prev_det": "Det/Prev",
+      "nature": "Automated",
+      "frequency": "Per recall / per pick",
+      "owner": "Warehouse / QA / F&B Controller",
+      "coso": "P10",
+      "code_reference": "modules/lots/lots.service.ts (trace backward/forward genealogy; hold/release quarantine; fefo + heldLotNos exclusion); lots.controller.ts (/api/lots/:lotNo/trace|hold|release); modules/wms/wms.service.ts suggestPickBin (Held-lot exclusion in wave allocation); schema/inventory.ts lot_holds + migration 0341 (RLS, tenant-leading index, HOLD- doc); permissions.ts lots/warehouse/wh_adjust; cutover/lot-trace.ts (ToE)",
+      "tod": "Inspect the two-way trace (backward GR→supplier, forward pick/sale→customer), the hold/release lifecycle, and that a Held lot is excluded from BOTH the FEFO suggestion and the WMS wave allocation.",
+      "toe": "Re-perform (lot-trace harness): seed GR→lot→issue→sale; the backward trace returns the supplier + GR; the forward trace returns the customer + sale; holding the lot excludes it from FEFO (excluded_held>0) and from the WMS wave bin-allocation; releasing it re-includes the lot; releasing a non-held lot → LOT_NOT_HELD.",
+      "evidence": "Two-way lot genealogy trace; lot hold/quarantine excluded from FEFO + WMS pick",
       "status": "Implemented"
     },
     {

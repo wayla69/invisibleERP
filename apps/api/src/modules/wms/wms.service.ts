@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { eq, ne, and, asc, desc, inArray, notInArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { bins, binStock, pickWaves, pickLists, pickListLines, shipments, dineInOrders, dineInOrderItems, custPosSales, custPosItems, stockMovements, lotLedger } from '../../database/schema';
+import { bins, binStock, pickWaves, pickLists, pickListLines, shipments, dineInOrders, dineInOrderItems, custPosSales, custPosItems, stockMovements, lotLedger, lotHolds } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -104,9 +104,14 @@ export class WmsService {
     const [b] = await db.select().from(bins).where(and(eq(bins.tenantId, tenantId), eq(bins.binCode, binCode))).limit(1);
     return b ?? null;
   }
-  // a bin currently holding the item (FEFO-ish: earliest expiry / any positive qty)
+  // a bin currently holding the item (FEFO-ish: earliest expiry / any positive qty). INV-18: a QUARANTINED
+  // lot (an active lot_holds 'Held' row for this tenant+lot) is EXCLUDED so a recalled/suspect lot is never
+  // allocated to a pick — release the hold to make it pickable again.
   private async suggestPickBin(db: any, tenantId: number, itemId: string) {
-    const [r] = await db.select().from(binStock).where(and(eq(binStock.tenantId, tenantId), eq(binStock.itemId, itemId), sql`${binStock.qty} > 0`)).orderBy(asc(binStock.expiryDate), asc(binStock.id)).limit(1);
+    const [r] = await db.select().from(binStock).where(and(
+      eq(binStock.tenantId, tenantId), eq(binStock.itemId, itemId), sql`${binStock.qty} > 0`,
+      sql`not exists (select 1 from ${lotHolds} lh where lh.tenant_id = ${tenantId} and lh.lot_no = ${binStock.lotNo} and lh.status = 'Held')`,
+    )).orderBy(asc(binStock.expiryDate), asc(binStock.id)).limit(1);
     return r ?? null;
   }
 
