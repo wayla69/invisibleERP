@@ -2283,6 +2283,13 @@
       "when": 2023820000291,
       "tag": "0326_hcm_training",
       "breakpoints": true
+    },
+    {
+      "idx": 327,
+      "version": "7",
+      "when": 2023820000292,
+      "tag": "0327_posting_rule_governance",
+      "breakpoints": true
     }
   ]
 }

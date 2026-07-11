@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, boolean, smallint, jsonb, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, boolean, smallint, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 export const postingEventTypes = pgTable('posting_event_types', {
@@ -18,6 +18,13 @@ export const postingRules = pgTable('posting_rules', {
   dimensionSource: text('dimension_source'), // 'branch_id'|'project_id'|null — which ctx field to stamp
   condition: jsonb('condition'),      // optional filter e.g. {"category":"exempt"}
   active: boolean('active').default(true),
+  // GL-24 (0327): rule changes are governed config — API writes land PendingApproval and only a
+  // DIFFERENT user's approval activates them. DB default 'Approved' grandfathers pre-existing rows
+  // and direct harness seeds; the resolver consumes active + Approved rows only.
+  status: text('status').notNull().default('Approved'), // 'PendingApproval' | 'Approved' | 'Rejected'
+  createdBy: text('created_by'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
   uqRule: uniqueIndex('uq_posting_rules').on(
@@ -26,6 +33,19 @@ export const postingRules = pgTable('posting_rules', {
     // Drizzle knows the index exists.
     t.tenantId, t.eventType, t.legOrder,
   ),
+}));
+
+// GL-24 append-only audit trail: every CREATE/APPROVE/REJECT/DEACTIVATE on a posting rule (0327).
+export const postingRuleAudit = pgTable('posting_rule_audit', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  ruleId: bigint('rule_id', { mode: 'number' }),
+  action: text('action').notNull(),
+  actor: text('actor'),
+  detail: jsonb('detail'),
+  at: timestamp('at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_posting_rule_audit_tenant').on(t.tenantId, t.ruleId),
 }));
 
 export type PostingRule = typeof postingRules.$inferSelect;

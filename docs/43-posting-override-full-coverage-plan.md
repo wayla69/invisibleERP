@@ -1,6 +1,6 @@
 # docs/43 — Posting-override FULL coverage: every GL mapping user-adjustable (PLANNED)
 
-**Status: PLANNED (v0.2, 2026-07-11) — the four §8 review questions are RESOLVED (owner decisions
+**Status: IN DELIVERY (v0.3, 2026-07-11) — PR-1 DELIVERED — the four §8 review questions are RESOLVED (owner decisions
 incorporated); implementation may start with PR-1.**
 Extends docs/42 (steps 1–4, delivered) from 3 wired posters to **every posting flow in the system**,
 plus the platform rails that make tenant re-mapping safe at this scale.
@@ -229,5 +229,6 @@ Sequencing: PR-1 blocks all; PR-2..6 independent after it; PR-7 after 2–3; PR-
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-11 | 0.3 | **PR-1 (rails) DELIVERED**: `posting-events.ts` registry (74 events / 121 roles, tier free 56 / widen 13 / pinned 52; boot assert), migration `0327` (catalogue 28→74; posting_rules status/created_by/approved_by/approved_at; `posting_rule_audit`), GL-24 full maker-checker (validate fail-closed → PendingApproval → distinct approver, SoD binds Admin; audit; re-edit demotes), Approved-only resolver + per-tenant bust-on-approve TtlCache + `postingOverridesMany`, minimal approve/reject UI on `/setup/posting-rules`. RCM 232; ToE compliance 173 / payroll 42. Also restored the PR #665 deferred hot-doc edits (UAT-GL-150..152, PN-09 rev 1.6, traceability). |
 | 2026-07-11 | 0.2 | §8 questions resolved by owner (GL-24 full; asset_categories grain; REC-04 pinned permanently; bulk IO in). D5/§3/§4/PR-3/PR-7/PR-8 updated to match; status PROPOSED → PLANNED. |
 | 2026-07-11 | 0.1 | Initial full-coverage plan (inventory: ~90 flows / ~45 new events; tier policy; 9-PR series). |

@@ -29,9 +29,20 @@ export default function PostingRulesPage() {
   const [role, setRole] = useState('');
   const [side, setSide] = useState<'DR' | 'CR'>('DR');
   const [accountCode, setAccountCode] = useState('');
+  // GL-24: an override lands PendingApproval — a DIFFERENT user must approve it before postings use it.
   const upsert = useMutation({
     mutationFn: () => api('/api/ledger/posting-rules', { method: 'POST', body: JSON.stringify({ eventType, legOrder: Number(legOrder), role: role.trim(), side, accountCode: accountCode.trim() }) }),
-    onSuccess: () => { notifySuccess(t('st.spost_saved')); setRole(''); setAccountCode(''); qc.invalidateQueries({ queryKey: ['posting-rules', eventType] }); },
+    onSuccess: () => { notifySuccess(t('st.spost_saved_pending')); setRole(''); setAccountCode(''); qc.invalidateQueries({ queryKey: ['posting-rules', eventType] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const approve = useMutation({
+    mutationFn: (id: number) => api(`/api/ledger/posting-rules/${id}/approve`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess(t('st.spost_approved')); qc.invalidateQueries({ queryKey: ['posting-rules', eventType] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: (id: number) => api(`/api/ledger/posting-rules/${id}/reject`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => { notifySuccess(t('st.spost_rejected')); qc.invalidateQueries({ queryKey: ['posting-rules', eventType] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -70,6 +81,15 @@ export default function PostingRulesPage() {
                   { key: 'side', label: t('st.spost_col_side'), render: (r: any) => <Badge variant={r.side === 'DR' ? 'success' : 'warning'}>{r.side}</Badge> },
                   { key: 'accountCode', label: t('st.spost_col_account') },
                   { key: 'tenantId', label: t('st.spost_col_source'), render: (r: any) => <Badge variant={r.tenantId ? 'info' : 'muted'}>{r.tenantId ? t('st.spost_source_tenant') : t('st.spost_source_default')}</Badge> },
+                  { key: 'status', label: t('st.spost_col_status'), render: (r: any) => !r.tenantId ? <span className="text-muted-foreground">—</span> : r.status === 'PendingApproval' ? <Badge variant="warning">{t('st.spost_status_pending')}</Badge> : <Badge variant="success">{t('st.spost_status_approved')}</Badge> },
+                  {
+                    key: 'actions', label: t('st.spost_col_actions'), sortable: false, render: (r: any) => r.tenantId && r.status === 'PendingApproval' ? (
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(Number(r.id))}>{t('st.spost_approve')}</Button>
+                        <Button size="sm" variant="ghost" disabled={reject.isPending} onClick={() => reject.mutate(Number(r.id))}>{t('st.spost_reject')}</Button>
+                      </div>
+                    ) : <span className="text-muted-foreground">—</span>,
+                  },
                 ]}
                 emptyState={{ icon: Route, title: t('st.spost_empty_rules_title'), description: t('st.spost_empty_rules_desc') }}
               />

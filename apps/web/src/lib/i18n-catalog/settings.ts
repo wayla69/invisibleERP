@@ -717,6 +717,15 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
 
   // setup/posting-rules
   'st.spost_saved': { th: 'บันทึกกฎเฉพาะกิจการแล้ว', en: 'Tenant-specific rule saved' },
+  'st.spost_saved_pending': { th: 'บันทึกกฎแล้ว — รอผู้อื่นอนุมัติก่อนมีผล (GL-24)', en: 'Rule saved — pending a different approver before it takes effect (GL-24)' },
+  'st.spost_approved': { th: 'อนุมัติกฎแล้ว มีผลกับการลงบัญชีถัดไป', en: 'Rule approved — applies to the next posting' },
+  'st.spost_rejected': { th: 'ปฏิเสธกฎแล้ว', en: 'Rule rejected' },
+  'st.spost_col_status': { th: 'สถานะ', en: 'Status' },
+  'st.spost_col_actions': { th: 'จัดการ', en: 'Actions' },
+  'st.spost_status_pending': { th: 'รออนุมัติ', en: 'Pending approval' },
+  'st.spost_status_approved': { th: 'อนุมัติแล้ว', en: 'Approved' },
+  'st.spost_approve': { th: 'อนุมัติ', en: 'Approve' },
+  'st.spost_reject': { th: 'ปฏิเสธ', en: 'Reject' },
   'st.spost_json_error': { th: 'จำนวนเงิน (amounts) ต้องเป็น JSON ที่ถูกต้อง', en: 'Amounts must be valid JSON' },
   'st.spost_title': { th: 'กฎการลงบัญชี (Posting Rules / Account Determination)', en: 'Posting Rules / Account Determination' },
   'st.spost_desc': { th: 'ผังการกำหนดบัญชีต่อเหตุการณ์ทางบัญชี — ค่าปริยายมากับระบบ กิจการสามารถแทนที่บัญชีของแต่ละ leg ได้เอง และดูตัวอย่างรายการก่อนใช้งานจริง', en: 'Account-determination map per accounting event — defaults ship with the product; a tenant can override each leg\'s account and preview the entry before it goes live' },
