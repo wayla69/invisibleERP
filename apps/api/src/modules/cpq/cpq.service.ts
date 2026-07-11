@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, sql, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { productConfigs, configOptions, pricingRules, quotes, quoteLines } from '../../database/schema/cpq';
+import { productConfigs, configOptions, pricingRules, quotes, quoteLines, cpqSettings, quoteApprovals } from '../../database/schema/cpq';
 import { crmOpportunities } from '../../database/schema/crm-pipeline';
 import { docCountersTenant } from '../../database/schema/system';
 import { tenants } from '../../database/schema';
@@ -93,8 +93,8 @@ export class CpqService {
 
   async createQuote(dto: {
     customer_name: string; opportunity_id?: number; config_id?: number;
-    qty?: number; selected_options?: { group_name: string; option_code: string }[];
-    validity_days?: number; notes?: string; lines?: { description: string; qty?: number; unit_price?: number }[];
+    qty?: number; selected_options?: { group_name: string; option_code: string }[]; unit_cost?: number;
+    validity_days?: number; notes?: string; lines?: { description: string; qty?: number; unit_price?: number; unit_cost?: number }[];
   }, user: JwtUser) {
     const db = this.db;
     const tenantId = user.tenantId!;
@@ -135,17 +135,21 @@ export class CpqService {
       const discountPct = bestRule ? n(bestRule.discountPct) : 0;
 
       const lineTotal = round4(unitPrice * qty * (1 - discountPct / 100));
-      lineValues.push({ lineNo: 1, description: cfg.name, qty: fx(qty, 2), unitPrice: fx(unitPrice, 4), discountPct: fx(discountPct, 4), lineTotal: fx(lineTotal, 4) });
+      lineValues.push({ lineNo: 1, description: cfg.name, qty: fx(qty, 2), unitPrice: fx(unitPrice, 4), unitCost: fx(dto.unit_cost ?? 0, 2), discountPct: fx(discountPct, 4), lineTotal: fx(lineTotal, 4) });
       subtotal = lineTotal;
     } else if (dto.lines?.length) {
       let lineNo = 1;
       for (const l of dto.lines) {
         const q = l.qty ?? 1; const up = l.unit_price ?? 0;
         const lt = round4(q * up);
-        lineValues.push({ lineNo: lineNo++, description: l.description, qty: fx(q, 2), unitPrice: fx(up, 4), discountPct: '0', lineTotal: fx(lt, 4) });
+        lineValues.push({ lineNo: lineNo++, description: l.description, qty: fx(q, 2), unitPrice: fx(up, 4), unitCost: fx(l.unit_cost ?? 0, 2), discountPct: '0', lineTotal: fx(lt, 4) });
         subtotal += lt;
       }
     }
+
+    // SVC-1 (CPQ-01): compute the quote's effective discount% (gross→net) and margin% (net vs unit cost) up
+    // front so the list surfaces them; they are RE-computed authoritatively on send (the floor gate).
+    const metrics = this.metricsFromLines(lineValues);
 
     const validityDays = dto.validity_days ?? 30;
     const issuedDate = new Date().toISOString().slice(0, 10);
@@ -156,6 +160,7 @@ export class CpqService {
       customerName: dto.customer_name, status: 'Draft', validityDays,
       issuedDate, expiresDate, currency: 'THB',
       subtotal: fx(subtotal, 4), discountTotal: '0', total: fx(subtotal, 4),
+      discountPct: fx(metrics.discountPct, 3), marginPct: fx(metrics.marginPct, 3),
       notes: dto.notes ?? null, createdBy: user.username,
     }).returning();
 
@@ -166,8 +171,60 @@ export class CpqService {
     return this.fmtQuote(quote);
   }
 
+  // CPQ-01 (SVC-1): sending computes the quote's effective discount% + margin% from its lines and checks the
+  // per-tenant floor (cpq_settings). Within the floor → Sent as before. Breaching max_discount_pct OR below
+  // min_margin_pct → the quote parks in 'PendingApproval' and a `quote_approvals` maker-checker row is opened;
+  // it CANNOT reach Accepted until a DIFFERENT authorised user approves. An already-approved quote (returning
+  // to send after an edit) is not re-gated.
   async sendQuote(quoteId: number, user: JwtUser) {
-    return this.transitionQuote(quoteId, 'Sent', ['Draft'], user);
+    const db = this.db;
+    const q = await this.assertQuote(quoteId);
+    if (q.status !== 'Draft') throw new BadRequestException({ code: 'INVALID_TRANSITION', message: `Cannot move from ${q.status} to Sent` });
+
+    const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, quoteId));
+    const m = this.metricsFromLines(lines);
+    const floor = await this.getFloor(q.tenantId ?? null);
+    const breach = m.discountPct > floor.maxDiscountPct + 1e-6 || m.marginPct < floor.minMarginPct - 1e-6;
+
+    if (breach && !q.approvedBy) {
+      const [updated] = await db.update(quotes)
+        .set({ status: 'PendingApproval', requiresApproval: true, discountPct: fx(m.discountPct, 3), marginPct: fx(m.marginPct, 3) })
+        .where(eq(quotes.id, quoteId)).returning();
+      // Open (or refresh) the pending maker-checker row with the floor snapshot + the breaching actuals.
+      await db.delete(quoteApprovals).where(and(eq(quoteApprovals.quoteId, quoteId), eq(quoteApprovals.status, 'pending')));
+      await db.insert(quoteApprovals).values({
+        tenantId: q.tenantId ?? null, quoteId, requestedBy: user.username, status: 'pending',
+        reason: m.discountPct > floor.maxDiscountPct + 1e-6
+          ? `Discount ${m.discountPct.toFixed(2)}% exceeds max ${floor.maxDiscountPct}%`
+          : `Margin ${m.marginPct.toFixed(2)}% below floor ${floor.minMarginPct}%`,
+        minMarginPct: fx(floor.minMarginPct, 3), maxDiscountPct: fx(floor.maxDiscountPct, 3),
+        marginPct: fx(m.marginPct, 3), discountPct: fx(m.discountPct, 3),
+      });
+      return this.fmtQuote(updated);
+    }
+
+    const [updated] = await db.update(quotes)
+      .set({ status: 'Sent', discountPct: fx(m.discountPct, 3), marginPct: fx(m.marginPct, 3) })
+      .where(eq(quotes.id, quoteId)).returning();
+    return this.fmtQuote(updated);
+  }
+
+  // CPQ-01 (SVC-1): approve a floor-breaching quote (PendingApproval → Sent). The approver MUST differ from
+  // the quote's author — one person may not both discount below the floor and approve it (SOD_SELF_APPROVAL).
+  async approveDiscount(quoteId: number, user: JwtUser) {
+    const db = this.db;
+    const q = await this.assertQuote(quoteId);
+    if (q.status !== 'PendingApproval') throw new BadRequestException({ code: 'INVALID_TRANSITION', message: `Quote ${q.quoteNo} is not pending approval (status ${q.status})` });
+    if (q.createdBy && q.createdBy === user.username) {
+      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot approve their own discount/margin breach — a different authorised user must approve', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติส่วนลด/มาร์จิ้นของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
+    }
+    await db.update(quoteApprovals)
+      .set({ status: 'approved', approvedBy: user.username, decidedAt: new Date() })
+      .where(and(eq(quoteApprovals.quoteId, quoteId), eq(quoteApprovals.status, 'pending')));
+    const [updated] = await db.update(quotes)
+      .set({ status: 'Sent', approvedBy: user.username, approvedAt: new Date() })
+      .where(eq(quotes.id, quoteId)).returning();
+    return this.fmtQuote(updated);
   }
 
   async acceptQuote(quoteId: number, user: JwtUser) {
@@ -201,8 +258,57 @@ export class CpqService {
     return res;
   }
 
+  // Rejecting a quote in 'PendingApproval' is the CHECKER declining the discount/margin breach (CPQ-01): the
+  // quote returns to Draft for re-work and the approver must differ from the author (SOD_SELF_APPROVAL). A
+  // quote in Sent/Draft is rejected the classic way (→ Rejected).
   async rejectQuote(quoteId: number, user: JwtUser) {
+    const db = this.db;
+    const q = await this.assertQuote(quoteId);
+    if (q.status === 'PendingApproval') {
+      if (q.createdBy && q.createdBy === user.username) {
+        throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot decide their own discount/margin breach — a different authorised user must approve/reject', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติ/ปฏิเสธส่วนลดของตนเองได้ ต้องให้ผู้อื่นดำเนินการ' });
+      }
+      await db.update(quoteApprovals)
+        .set({ status: 'rejected', approvedBy: user.username, decidedAt: new Date() })
+        .where(and(eq(quoteApprovals.quoteId, quoteId), eq(quoteApprovals.status, 'pending')));
+      return this.transitionQuote(quoteId, 'Draft', ['PendingApproval'], user);
+    }
     return this.transitionQuote(quoteId, 'Rejected', ['Sent', 'Draft'], user);
+  }
+
+  // ── CPQ-01: discount/margin floor settings (per tenant) ──
+
+  async getSettings(user: JwtUser) {
+    const f = await this.getFloor(user.tenantId ?? null);
+    return { min_margin_pct: f.minMarginPct, max_discount_pct: f.maxDiscountPct };
+  }
+
+  async updateSettings(dto: { min_margin_pct?: number; max_discount_pct?: number }, user: JwtUser) {
+    const db = this.db;
+    const tenantId = user.tenantId!;
+    const cur = await this.getFloor(tenantId);
+    const minMargin = dto.min_margin_pct ?? cur.minMarginPct;
+    const maxDiscount = dto.max_discount_pct ?? cur.maxDiscountPct;
+    await db.insert(cpqSettings)
+      .values({ tenantId, minMarginPct: fx(minMargin, 3), maxDiscountPct: fx(maxDiscount, 3), updatedBy: user.username, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: [cpqSettings.tenantId], set: { minMarginPct: fx(minMargin, 3), maxDiscountPct: fx(maxDiscount, 3), updatedBy: user.username, updatedAt: new Date() } });
+    return { min_margin_pct: minMargin, max_discount_pct: maxDiscount };
+  }
+
+  async listApprovals(filter: { status?: string }, user: JwtUser) {
+    const db = this.db;
+    const conds: any[] = [eq(quoteApprovals.tenantId, user.tenantId!)];
+    if (filter.status) conds.push(eq(quoteApprovals.status, filter.status));
+    const rows = await db.select().from(quoteApprovals).where(and(...conds)).orderBy(sql`${quoteApprovals.id} DESC`);
+    return {
+      approvals: rows.map((a: any) => ({
+        id: Number(a.id), quote_id: Number(a.quoteId), status: a.status, reason: a.reason,
+        requested_by: a.requestedBy, approved_by: a.approvedBy,
+        min_margin_pct: n(a.minMarginPct), max_discount_pct: n(a.maxDiscountPct),
+        margin_pct: n(a.marginPct), discount_pct: n(a.discountPct),
+      })),
+      count: rows.length,
+    };
   }
 
   async listQuotes(filter: { status?: string }, user: JwtUser) {
@@ -216,7 +322,7 @@ export class CpqService {
   async getQuoteLines(quoteId: number) {
     const db = this.db;
     const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, quoteId)).orderBy(quoteLines.lineNo);
-    return { lines: lines.map((l: any) => ({ line_no: l.lineNo, description: l.description, qty: n(l.qty), unit_price: n(l.unitPrice), discount_pct: n(l.discountPct), line_total: n(l.lineTotal) })) };
+    return { lines: lines.map((l: any) => ({ line_no: l.lineNo, description: l.description, qty: n(l.qty), unit_price: n(l.unitPrice), unit_cost: n(l.unitCost), discount_pct: n(l.discountPct), line_total: n(l.lineTotal) })) };
   }
 
   // Assemble the printable ใบเสนอราคา (header + lines + our-company seller block) for the PDF/email path.
@@ -273,6 +379,31 @@ export class CpqService {
     return this.fmtQuote(updated);
   }
 
+  // CPQ-01: derive a quote's effective discount% (gross list vs net after discounts) and margin% (net vs unit
+  // cost) from its line rows. Works on either freshly-built line values (fx-string fields) or persisted rows.
+  private metricsFromLines(lines: { qty: any; unitPrice: any; unitCost: any; lineTotal: any }[]) {
+    let gross = 0, net = 0, cost = 0;
+    for (const l of lines) {
+      const qty = n(l.qty);
+      gross += n(l.unitPrice) * qty;
+      net += n(l.lineTotal);
+      cost += n(l.unitCost) * qty;
+    }
+    const discountPct = gross > 0 ? ((gross - net) / gross) * 100 : 0;
+    const marginPct = net > 0 ? ((net - cost) / net) * 100 : (cost > 0 ? -100 : 100);
+    return { discountPct: round4(discountPct), marginPct: round4(marginPct), gross, net, cost };
+  }
+
+  // The per-tenant discount/margin floor; defaults (20% margin / 15% discount) when no row is configured.
+  private async getFloor(tenantId: number | null) {
+    const db = this.db;
+    const rows = tenantId != null
+      ? await db.select().from(cpqSettings).where(eq(cpqSettings.tenantId, tenantId)).limit(1)
+      : [];
+    const s = rows[0];
+    return { minMarginPct: s ? n(s.minMarginPct) : 20, maxDiscountPct: s ? n(s.maxDiscountPct) : 15 };
+  }
+
   private async assertConfig(id: number) {
     const db = this.db;
     const [c] = await db.select().from(productConfigs).where(eq(productConfigs.id, id)).limit(1);
@@ -290,5 +421,5 @@ export class CpqService {
   private fmtConfig(c: any) { return { id: Number(c.id), code: c.code, name: c.name, base_price: n(c.basePrice), currency: c.currency, description: c.description }; }
   // opportunity_id resolves the unified spine link first (crm_opportunity_id), falling back to the
   // read-legacy Batch 2A pointer for pre-0293 rows that predate the data-migration backfill.
-  private fmtQuote(q: any) { return { id: Number(q.id), quote_no: q.quoteNo, opportunity_id: q.crmOpportunityId != null ? Number(q.crmOpportunityId) : (q.opportunityId != null ? Number(q.opportunityId) : null), customer_name: q.customerName, status: q.status, issued_date: q.issuedDate, expires_date: q.expiresDate, subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), notes: q.notes, created_by: q.createdBy }; }
+  private fmtQuote(q: any) { return { id: Number(q.id), quote_no: q.quoteNo, opportunity_id: q.crmOpportunityId != null ? Number(q.crmOpportunityId) : (q.opportunityId != null ? Number(q.opportunityId) : null), customer_name: q.customerName, status: q.status, issued_date: q.issuedDate, expires_date: q.expiresDate, subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), discount_pct: n(q.discountPct), margin_pct: q.marginPct != null ? n(q.marginPct) : null, requires_approval: !!q.requiresApproval, approved_by: q.approvedBy ?? null, notes: q.notes, created_by: q.createdBy }; }
 }

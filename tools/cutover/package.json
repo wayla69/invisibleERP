@@ -120,6 +120,7 @@
     "bi": "tsx src/bi.ts",
     "pipeline": "tsx src/pipeline.ts",
     "cpq": "tsx src/cpq.ts",
+    "cpq-approval": "tsx src/cpq-approval.ts",
     "service": "tsx src/service.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",

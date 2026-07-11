@@ -48,7 +48,10 @@ export const pricingRules = pgTable('pricing_rules', {
   byConfig: index('idx_pr_config').on(t.configId),
 }));
 
-// status: 'Draft' | 'Sent' | 'Accepted' | 'Rejected' | 'Expired'
+// status: 'Draft' | 'Sent' | 'PendingApproval' | 'Accepted' | 'Rejected' | 'Expired'
+//   SVC-1 (CPQ-01): a quote whose effective discount% breaches max_discount_pct OR whose margin% is below
+//   min_margin_pct (per-tenant floor, cpq_settings) parks in 'PendingApproval' on send — it cannot be
+//   sent/accepted until a DIFFERENT authorised user approves (author cannot self-approve → SOD_SELF_APPROVAL).
 export const quotes = pgTable('quotes', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
@@ -68,6 +71,13 @@ export const quotes = pgTable('quotes', {
   subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull().default('0'),
   discountTotal: numeric('discount_total', { precision: 18, scale: 4 }).notNull().default('0'),
   total: numeric('total', { precision: 18, scale: 4 }).notNull().default('0'),
+  // SVC-1 (CPQ-01): the quote's effective discount% (gross→net) and margin% (net vs unit cost), computed on
+  // send. requires_approval flips true when a floor is breached; approved_by/approved_at record the checker.
+  discountPct: numeric('discount_pct', { precision: 6, scale: 3 }).notNull().default('0'),
+  marginPct: numeric('margin_pct', { precision: 6, scale: 3 }),
+  requiresApproval: boolean('requires_approval').notNull().default(false),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
   notes: text('notes'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -83,10 +93,45 @@ export const quoteLines = pgTable('quote_lines', {
   description: text('description').notNull(),
   qty: numeric('qty', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull().default('0'),
+  // SVC-1 (CPQ-01): unit cost (COGS basis) captured per line so the margin floor is enforceable.
+  unitCost: numeric('unit_cost', { precision: 14, scale: 2 }).notNull().default('0'),
   discountPct: numeric('discount_pct', { precision: 7, scale: 4 }).notNull().default('0'),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull().default('0'),
 }, (t) => ({
   byQuote: index('idx_ql_quote').on(t.quoteId),
+}));
+
+// SVC-1 (CPQ-01): per-tenant discount/margin floor. One row per tenant (defaults 20% margin / 15% discount).
+export const cpqSettings = pgTable('cpq_settings', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  minMarginPct: numeric('min_margin_pct', { precision: 6, scale: 3 }).notNull().default('20'),
+  maxDiscountPct: numeric('max_discount_pct', { precision: 6, scale: 3 }).notNull().default('15'),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: uniqueIndex('idx_cpq_settings_tenant').on(t.tenantId),
+}));
+
+// SVC-1 (CPQ-01): the maker-checker audit row for a floor-breaching quote. status: 'pending'|'approved'|'rejected'.
+export const quoteApprovals = pgTable('quote_approvals', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  quoteId: bigint('quote_id', { mode: 'number' }).notNull().references(() => quotes.id),
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),
+  status: text('status').notNull().default('pending'),
+  reason: text('reason'),
+  // Floor snapshot at request time + the actuals that breached it (evidence for the ToE).
+  minMarginPct: numeric('min_margin_pct', { precision: 6, scale: 3 }),
+  maxDiscountPct: numeric('max_discount_pct', { precision: 6, scale: 3 }),
+  marginPct: numeric('margin_pct', { precision: 6, scale: 3 }),
+  discountPct: numeric('discount_pct', { precision: 6, scale: 3 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+}, (t) => ({
+  byQuote: index('idx_quote_appr_quote').on(t.tenantId, t.quoteId),
+  byStatus: index('idx_quote_appr_status').on(t.tenantId, t.status),
 }));
 
 export type Quote = typeof quotes.$inferSelect;
