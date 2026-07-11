@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, Layers, ListTree, PlayCircle, Rows3, Plus, Trash2, Send } from 'lucide-react';
+import { Building2, Layers, ListTree, PlayCircle, Rows3, Plus, Trash2, Send, Scissors, PieChart, Coins, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -46,6 +46,21 @@ interface RunLine {
   notes: string | null;
 }
 interface RunLinesResp { run_id: number; lines: RunLine[] }
+interface Rule { id: number; group_id: number; name: string; rule_type: string; match_account_pattern: string | null; debit_account: string | null; credit_account: string | null; active: boolean }
+interface RulesResp { rules: Rule[]; count: number }
+interface Segment { id: number; code: string; name: string; dimension: string; member_keys: unknown; active: boolean }
+interface SegmentsResp { segments: Segment[]; count: number }
+interface SegmentReportRow { segment: string; name: string; revenue: number; expense: number; net: number }
+interface SegmentReportResp { period: string; dimension: string; segments: SegmentReportRow[] }
+interface CfLine { account_code: string; label: string; amount: number }
+interface CashFlowResp {
+  run_id: number; group_id: number; period: string; method: string; post_elimination: boolean;
+  operating: { net_income: number; adjustments: CfLine[]; working_capital: CfLine[]; net: number };
+  investing: { lines: CfLine[]; net: number };
+  financing: { lines: CfLine[]; net: number };
+  fx_effect: { lines: CfLine[]; net: number };
+  net_change_in_cash: number; consolidated_cash_movement: number; reconciled: boolean;
+}
 
 export default function ConsolidationPage() {
   const { t } = useLang();
@@ -59,6 +74,7 @@ export default function ConsolidationPage() {
         tabs={[
           { key: 'groups', label: t('fnx.consol.tab_groups'), content: <GroupsTab /> },
           { key: 'runs', label: t('fnx.consol.tab_runs'), content: <RunsTab /> },
+          { key: 'segments', label: t('fnx.consol.tab_segments'), content: <SegmentsTab /> },
         ]}
       />
     </div>
@@ -303,6 +319,7 @@ function RunsTab() {
                 }}
               />
               {openRun != null && <RunLines runId={openRun} />}
+              {openRun != null && <ConsolCashFlow runId={openRun} />}
               <ConfirmDialog
                 open={posting != null}
                 onOpenChange={(o) => !o && setPosting(null)}
@@ -346,6 +363,290 @@ function RunLines({ runId }: { runId: number }) {
             />
           )}
         </StateView>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ───────────────────── FIN-5: consolidated cash flow (indirect, post-elimination) ─────────────────────
+function ConsolCashFlow({ runId }: { runId: number }) {
+  const { t } = useLang();
+  const q = useQuery<CashFlowResp>({ queryKey: ['consol-cash-flow', runId], queryFn: () => api(`/api/consolidation/runs/${runId}/cash-flow`) });
+  const cf = q.data;
+  const section = (label: string, lines: CfLine[], net: number, netLabel: string) => (
+    <div className="space-y-1.5">
+      <div className="text-sm font-semibold">{label}</div>
+      {lines.length ? lines.map((l) => (
+        <div key={l.account_code} className="flex items-center justify-between gap-4 pl-3 text-sm">
+          <span className="text-muted-foreground">{l.label} <span className="text-xs opacity-60">({l.account_code})</span></span>
+          <span className="tabular">{baht(l.amount)}</span>
+        </div>
+      )) : <div className="pl-3 text-xs text-muted-foreground">—</div>}
+      <div className="flex items-center justify-between gap-4 border-t pt-1.5 pl-3 text-sm font-medium">
+        <span>{netLabel}</span>
+        <span className="tabular">{baht(net)}</span>
+      </div>
+    </div>
+  );
+  return (
+    <Card className="gap-4 p-5">
+      <CardHeader className="p-0">
+        <CardTitle className="flex items-center gap-2 text-base"><TrendingUp className="size-4" /> {t('fnx.consol.cf_title', { id: runId })}</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <StateView q={q}>
+          {cf && (
+            <div className="space-y-4">
+              <div className="text-xs text-muted-foreground">{t('fnx.consol.cf_method', { period: cf.period })}</div>
+              <div className="space-y-1.5">
+                <div className="text-sm font-semibold">{t('fnx.consol.cf_operating')}</div>
+                <div className="flex items-center justify-between gap-4 pl-3 text-sm">
+                  <span className="text-muted-foreground">{t('fnx.consol.cf_net_income')}</span>
+                  <span className="tabular">{baht(cf.operating.net_income)}</span>
+                </div>
+                {cf.operating.adjustments.map((l) => (
+                  <div key={l.account_code} className="flex items-center justify-between gap-4 pl-3 text-sm">
+                    <span className="text-muted-foreground">{l.label} <span className="text-xs opacity-60">({l.account_code})</span></span>
+                    <span className="tabular">{baht(l.amount)}</span>
+                  </div>
+                ))}
+                {cf.operating.working_capital.map((l) => (
+                  <div key={l.account_code} className="flex items-center justify-between gap-4 pl-3 text-sm">
+                    <span className="text-muted-foreground">{l.label} <span className="text-xs opacity-60">({l.account_code})</span></span>
+                    <span className="tabular">{baht(l.amount)}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-4 border-t pt-1.5 pl-3 text-sm font-medium">
+                  <span>{t('fnx.consol.cf_net_operating')}</span>
+                  <span className="tabular">{baht(cf.operating.net)}</span>
+                </div>
+              </div>
+              {section(t('fnx.consol.cf_investing'), cf.investing.lines, cf.investing.net, t('fnx.consol.cf_net_investing'))}
+              {section(t('fnx.consol.cf_financing'), cf.financing.lines, cf.financing.net, t('fnx.consol.cf_net_financing'))}
+              {section(t('fnx.consol.cf_fx'), cf.fx_effect.lines, cf.fx_effect.net, t('fnx.consol.cf_net_fx'))}
+              <div className="flex items-center justify-between gap-4 border-t-2 pt-2 text-sm font-semibold">
+                <span>{t('fnx.consol.cf_net_change')}</span>
+                <span className="tabular">{baht(cf.net_change_in_cash)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
+                <span>{t('fnx.consol.cf_cash_movement')}</span>
+                <span className="tabular">{baht(cf.consolidated_cash_movement)}</span>
+              </div>
+              <Badge variant={cf.reconciled ? 'default' : 'destructive'}>
+                {cf.reconciled ? t('fnx.consol.cf_reconciled') : t('fnx.consol.cf_not_reconciled')}
+              </Badge>
+            </div>
+          )}
+        </StateView>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ───────────────────── CON-04: elimination rules + segments + segment report ─────────────────────
+function SegmentsTab() {
+  const { t } = useLang();
+  return (
+    <div className="space-y-5">
+      <EliminationRules />
+      <SegmentDefinitions />
+      <SegmentReport />
+    </div>
+  );
+}
+
+function EliminationRules() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const groups = useQuery<GroupsResp>({ queryKey: ['consol-groups'], queryFn: () => api('/api/consolidation/groups') });
+  const [groupId, setGroupId] = useState<number | null>(null);
+  const gid = groupId ?? groups.data?.groups[0]?.id ?? null;
+  const [name, setName] = useState('');
+  const [ruleType, setRuleType] = useState('ic_balance');
+  const [pattern, setPattern] = useState('');
+  const [debit, setDebit] = useState('');
+  const [credit, setCredit] = useState('');
+
+  const rules = useQuery<RulesResp>({
+    queryKey: ['consol-rules', gid],
+    queryFn: () => api(`/api/consolidation/rules?group_id=${gid}`),
+    enabled: gid != null,
+  });
+  const create = useMutation({
+    mutationFn: () => api<Rule>('/api/consolidation/rules', {
+      method: 'POST',
+      body: JSON.stringify({ group_id: gid, name, rule_type: ruleType, match_account_pattern: pattern || undefined, debit_account: debit || undefined, credit_account: credit || undefined }),
+    }),
+    onSuccess: () => { notifySuccess(t('fnx.consol.rule_created', { name })); setName(''); setPattern(''); setDebit(''); setCredit(''); qc.invalidateQueries({ queryKey: ['consol-rules', gid] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
+  return (
+    <Card className="gap-4 p-5">
+      <CardHeader className="p-0">
+        <CardTitle className="flex items-center gap-2 text-base"><Scissors className="size-4" /> {t('fnx.consol.rules_title')}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 p-0">
+        <p className="text-sm text-muted-foreground">{t('fnx.consol.rules_hint')}</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-2">
+            <Label htmlFor="er-group">{t('fnx.consol.field_group')}</Label>
+            <Select id="er-group" className="w-auto" value={gid ?? ''} onChange={(e) => setGroupId(Number(e.target.value))}>
+              {groups.data?.groups.length
+                ? groups.data.groups.map((g) => <option key={g.id} value={g.id}>{g.name} ({g.fiscal_year})</option>)
+                : <option value="">{t('fnx.consol.opt_no_group')}</option>}
+            </Select>
+          </div>
+          <div className="grid gap-2"><Label htmlFor="er-name">{t('fnx.consol.field_rule_name')}</Label><Input id="er-name" className="max-w-[200px]" value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div className="grid gap-2">
+            <Label htmlFor="er-type">{t('fnx.consol.field_rule_type')}</Label>
+            <Select id="er-type" className="w-auto" value={ruleType} onChange={(e) => setRuleType(e.target.value)}>
+              <option value="ic_balance">{t('fnx.consol.rt_ic_balance')}</option>
+              <option value="ic_revenue">{t('fnx.consol.rt_ic_revenue')}</option>
+              <option value="investment">{t('fnx.consol.rt_investment')}</option>
+              <option value="manual">{t('fnx.consol.rt_manual')}</option>
+            </Select>
+          </div>
+          <div className="grid gap-2"><Label htmlFor="er-pat">{t('fnx.consol.field_pattern')}</Label><Input id="er-pat" className="max-w-[140px]" placeholder="1150%" value={pattern} onChange={(e) => setPattern(e.target.value)} /></div>
+          <div className="grid gap-2"><Label htmlFor="er-dr">{t('fnx.consol.field_debit')}</Label><Input id="er-dr" className="max-w-[120px]" value={debit} onChange={(e) => setDebit(e.target.value)} /></div>
+          <div className="grid gap-2"><Label htmlFor="er-cr">{t('fnx.consol.field_credit')}</Label><Input id="er-cr" className="max-w-[120px]" value={credit} onChange={(e) => setCredit(e.target.value)} /></div>
+          <Button disabled={!name || gid == null || create.isPending} onClick={() => create.mutate()}><Plus className="size-4" /> {t('fnx.consol.add_rule_btn')}</Button>
+        </div>
+        <StateView q={rules}>
+          {rules.data && (
+            <DataTable
+              rows={rules.data.rules}
+              rowKey={(r) => r.id}
+              columns={[
+                { key: 'name', label: t('fnx.consol.col_rule_name'), render: (r) => <span className="font-medium">{r.name}</span> },
+                { key: 'rule_type', label: t('fnx.consol.col_rule_type'), render: (r) => <Badge variant={statusVariant(r.rule_type)}>{r.rule_type}</Badge> },
+                { key: 'match_account_pattern', label: t('fnx.consol.col_pattern'), render: (r) => r.match_account_pattern ?? '—' },
+                { key: 'debit_account', label: t('fnx.consol.field_debit'), render: (r) => r.debit_account ?? '—' },
+                { key: 'credit_account', label: t('fnx.consol.field_credit'), render: (r) => r.credit_account ?? '—' },
+                { key: 'active', label: t('fnx.consol.col_active'), render: (r) => <Badge variant={r.active ? 'default' : 'secondary'}>{r.active ? t('fnx.consol.yes') : t('fnx.consol.no')}</Badge> },
+              ]}
+              emptyState={{ icon: Scissors, title: t('fnx.consol.empty_rules_title'), description: t('fnx.consol.empty_rules_desc') }}
+            />
+          )}
+        </StateView>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SegmentDefinitions() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<SegmentsResp>({ queryKey: ['consol-segments'], queryFn: () => api('/api/consolidation/segments') });
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [dimension, setDimension] = useState('branch');
+  const [members, setMembers] = useState('');
+
+  const create = useMutation({
+    mutationFn: () => {
+      const member_keys = members.split(',').map((s) => s.trim()).filter(Boolean).map((s) => (/^\d+$/.test(s) ? Number(s) : s));
+      return api<Segment>('/api/consolidation/segments', {
+        method: 'POST',
+        body: JSON.stringify({ code, name, dimension, member_keys: member_keys.length ? member_keys : undefined }),
+      });
+    },
+    onSuccess: () => { notifySuccess(t('fnx.consol.segment_created', { code })); setCode(''); setName(''); setMembers(''); qc.invalidateQueries({ queryKey: ['consol-segments'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
+  return (
+    <Card className="gap-4 p-5">
+      <CardHeader className="p-0">
+        <CardTitle className="flex items-center gap-2 text-base"><PieChart className="size-4" /> {t('fnx.consol.segments_title')}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 p-0">
+        <p className="text-sm text-muted-foreground">{t('fnx.consol.segments_hint')}</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-2"><Label htmlFor="sd-code">{t('fnx.consol.field_seg_code')}</Label><Input id="sd-code" className="max-w-[140px]" value={code} onChange={(e) => setCode(e.target.value)} /></div>
+          <div className="grid gap-2"><Label htmlFor="sd-name">{t('fnx.consol.field_seg_name')}</Label><Input id="sd-name" className="max-w-[200px]" value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div className="grid gap-2">
+            <Label htmlFor="sd-dim">{t('fnx.consol.field_dimension')}</Label>
+            <Select id="sd-dim" className="w-auto" value={dimension} onChange={(e) => setDimension(e.target.value)}>
+              <option value="branch">{t('fnx.consol.dim_branch')}</option>
+              <option value="project">{t('fnx.consol.dim_project')}</option>
+              <option value="department">{t('fnx.consol.dim_department')}</option>
+              <option value="entity">{t('fnx.consol.dim_entity')}</option>
+            </Select>
+          </div>
+          <div className="grid gap-2"><Label htmlFor="sd-mem">{t('fnx.consol.field_members')}</Label><Input id="sd-mem" className="max-w-[200px]" placeholder="1, 2, 3" value={members} onChange={(e) => setMembers(e.target.value)} /></div>
+          <Button disabled={!code || !name || create.isPending} onClick={() => create.mutate()}><Plus className="size-4" /> {t('fnx.consol.add_segment_btn')}</Button>
+        </div>
+        <StateView q={q}>
+          {q.data && (
+            <DataTable
+              rows={q.data.segments}
+              rowKey={(r) => r.id}
+              columns={[
+                { key: 'code', label: t('fnx.consol.col_seg_code'), render: (r) => <span className="font-medium">{r.code}</span> },
+                { key: 'name', label: t('fnx.consol.col_seg_name') },
+                { key: 'dimension', label: t('fnx.consol.col_dimension'), render: (r) => <Badge variant="secondary">{r.dimension}</Badge> },
+                { key: 'member_keys', label: t('fnx.consol.col_members'), render: (r) => (Array.isArray(r.member_keys) ? (r.member_keys as unknown[]).join(', ') : '—') },
+                { key: 'active', label: t('fnx.consol.col_active'), render: (r) => <Badge variant={r.active ? 'default' : 'secondary'}>{r.active ? t('fnx.consol.yes') : t('fnx.consol.no')}</Badge> },
+              ]}
+              emptyState={{ icon: PieChart, title: t('fnx.consol.empty_segments_title'), description: t('fnx.consol.empty_segments_desc') }}
+            />
+          )}
+        </StateView>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SegmentReport() {
+  const { t } = useLang();
+  const [period, setPeriod] = useState(currentPeriod());
+  const [dimension, setDimension] = useState('branch');
+  const [params, setParams] = useState<{ period: string; dimension: string } | null>(null);
+  const q = useQuery<SegmentReportResp>({
+    queryKey: ['consol-segment-report', params],
+    queryFn: () => api(`/api/consolidation/segment-report?period=${params!.period}&dimension=${params!.dimension}`),
+    enabled: params != null,
+  });
+
+  return (
+    <Card className="gap-4 p-5">
+      <CardHeader className="p-0">
+        <CardTitle className="flex items-center gap-2 text-base"><Coins className="size-4" /> {t('fnx.consol.seg_report_title')}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 p-0">
+        <p className="text-sm text-muted-foreground">{t('fnx.consol.seg_report_hint')}</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-2"><Label htmlFor="sr-period">{t('fnx.consol.field_period')}</Label><Input id="sr-period" className="max-w-[160px]" placeholder="2026-06" value={period} onChange={(e) => setPeriod(e.target.value)} /></div>
+          <div className="grid gap-2">
+            <Label htmlFor="sr-dim">{t('fnx.consol.field_dimension')}</Label>
+            <Select id="sr-dim" className="w-auto" value={dimension} onChange={(e) => setDimension(e.target.value)}>
+              <option value="branch">{t('fnx.consol.dim_branch')}</option>
+              <option value="project">{t('fnx.consol.dim_project')}</option>
+              <option value="department">{t('fnx.consol.dim_department')}</option>
+            </Select>
+          </div>
+          <Button disabled={!/^\d{4}-\d{2}$/.test(period)} onClick={() => setParams({ period, dimension })}>
+            <PlayCircle className="size-4" /> {t('fnx.consol.run_report_btn')}
+          </Button>
+        </div>
+        {params != null && (
+          <StateView q={q}>
+            {q.data && (
+              <DataTable
+                rows={q.data.segments}
+                rowKey={(r) => r.segment}
+                columns={[
+                  { key: 'name', label: t('fnx.consol.col_segment'), render: (r) => <span className="font-medium">{r.name}</span> },
+                  { key: 'revenue', label: t('fnx.consol.col_revenue'), align: 'right', render: (r) => <span className="tabular">{baht(r.revenue)}</span> },
+                  { key: 'expense', label: t('fnx.consol.col_expense'), align: 'right', render: (r) => <span className="tabular">{baht(r.expense)}</span> },
+                  { key: 'net', label: t('fnx.consol.col_seg_net'), align: 'right', render: (r) => <span className={`tabular font-medium ${r.net < 0 ? 'text-destructive' : ''}`}>{baht(r.net)}</span> },
+                ]}
+                emptyState={{ icon: Coins, title: t('fnx.consol.empty_seg_report_title'), description: t('fnx.consol.empty_seg_report_desc') }}
+              />
+            )}
+          </StateView>
+        )}
       </CardContent>
     </Card>
   );
