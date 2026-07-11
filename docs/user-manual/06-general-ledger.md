@@ -795,6 +795,44 @@ period is already hard-closed), `CLOSE_RUN_NOT_FOUND`, `STEP_NOT_FOUND`.
 **Expected result:** Profit & loss accounts are zeroed into **Retained Earnings
 (3100)** and all twelve periods are closed. The operation is safe to re-run.
 
+### Disclosure / close-package checklist (governed close binder — GL-26)
+
+**Screen:** `/close/disclosure` (**รายการตรวจสอบการเปิดเผยข้อมูล**) · **Required
+permission:** `gl_close` to open/complete/review/issue; `gl_close`, `gl_post`,
+`fin_report` or `exec` to view.
+
+Before the financial statements are issued, the **disclosure checklist** governs the
+reporting package — the note disclosures a TFRS/SEC-compliant filing must contain. It is a
+detective/monitoring control (**GL-26**) and posts **nothing** to the GL.
+
+1. **Open a checklist** for the period (`YYYY-MM`). The system auto-seeds the standard
+   disclosure items — related-party transactions (TAS 24), revenue disaggregation
+   (TFRS 15), leases (TFRS 16), income & deferred tax (TAS 12), commitments &
+   contingencies / subsequent events (TAS 10/37), operating segments (TFRS 8), the primary
+   statements (TAS 1/7), and the management disclosure-controls sign-off (SEC). Each item
+   carries a **standard reference**, an **owner** and an **Open / Complete / N/A** status.
+2. **Work each item**: mark it **Complete** (or **N/A** if it doesn't apply) and record a
+   **support-doc reference** — the evidence (a note working paper, a memo) can be pinned to
+   the checklist number as a `DISC` attachment via the document-attachment surface.
+3. **Review (maker-checker):** once every item is Complete/NA, a **different** `gl_close`
+   colleague presses **สอบทาน (Review)**. The reviewer **cannot be the preparer**
+   (`SOD_SELF_APPROVAL`), and review is **blocked while any item is still Open**
+   (`ITEMS_INCOMPLETE`, listing the open items). The binder moves **ร่าง (Draft) →
+   สอบทานแล้ว (Reviewed)**.
+4. **Issue:** with the binder Reviewed, press **ออกงบการเงิน (Issue financials)** to record
+   that the reporting package was released after independent review (**Reviewed → ออกงบแล้ว
+   (Issued)**). An Issued binder is immutable.
+
+> **Cross-link:** the GL-15/16 period-close checklist carries an advisory
+> **"Disclosure / close-package checklist reviewed"** step so the controller can see the
+> binder alongside the sub-ledger tie-out, bank rec and trial-balance sign-off.
+
+**Possible errors:** `ITEMS_INCOMPLETE` (review attempted while an item is still Open),
+`SOD_SELF_APPROVAL` (the preparer tried to review their own checklist), `NOT_REVIEWED`
+(issue attempted before review), `NOT_DRAFT` / `ALREADY_ISSUED` (editing or re-reviewing an
+Issued binder), `BAD_PERIOD` (period not `YYYY-MM`), `CHECKLIST_NOT_FOUND`,
+`ITEM_NOT_FOUND`.
+
 ---
 
 ## 5. Multi-ledger (TFRS / TAX / IFRS)

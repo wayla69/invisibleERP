@@ -24,6 +24,9 @@ const CHECKLIST: { stepKey: string; title: string; required: boolean }[] = [
   { stepKey: 'fx_reval', title: 'FX revaluation posted', required: false },
   { stepKey: 'deferred_tax', title: 'Deferred tax computed & posted', required: false },
   { stepKey: 'trial_balance_review', title: 'Trial-balance review & sign-off', required: true },
+  // CLS-02 (GL-26) — the disclosure / close-package checklist (governed close binder) is a separate
+  // maker-checker artefact at /api/close/disclosure; this advisory step cross-links it into the close run.
+  { stepKey: 'disclosure_review', title: 'Disclosure / close-package checklist reviewed', required: false },
 ];
 
 @Injectable()
