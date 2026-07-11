@@ -23,6 +23,10 @@ const CHECKLIST: { stepKey: string; title: string; required: boolean }[] = [
   { stepKey: 'recurring', title: 'Recurring / prepaid journals run', required: true },
   { stepKey: 'fx_reval', title: 'FX revaluation posted', required: false },
   { stepKey: 'deferred_tax', title: 'Deferred tax computed & posted', required: false },
+  // CLS-01 (GL-25): management flux/variance review — build the flux analysis on /close/flux, explain every
+  // threshold-breaching line and get an independent sign-off. Advisory to the hard lock (the review is a
+  // detective management control, not a hard blocker).
+  { stepKey: 'flux_review', title: 'Flux / variance analysis reviewed & signed off (CLS-01)', required: false },
   { stepKey: 'trial_balance_review', title: 'Trial-balance review & sign-off', required: true },
 ];
 
