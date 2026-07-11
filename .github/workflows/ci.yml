@@ -123,7 +123,7 @@ jobs:
           # ── supply chain / inventory / manufacturing ──
           - shard: scm-mfg
             run: >-
-              cutover:stock-ops cutover:cycle-counts cutover:match cutover:costing cutover:wms cutover:scm17c
+              cutover:stock-ops cutover:cycle-counts cutover:match cutover:costing cutover:wms cutover:scm17c cutover:transfer-orders cutover:std-cost-roll cutover:lot-trace
               cutover:manufacturing cutover:mfg-depth cutover:mrp
           # ── CRM / billing / projects / loyalty ──
           - shard: crm

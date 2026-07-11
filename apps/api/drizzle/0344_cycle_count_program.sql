@@ -1,4 +1,4 @@
--- 0341_cycle_count_program — INV-3 / INV-17: governed cycle-count program with ABC classification + blind counts.
+-- 0344_cycle_count_program — INV-3 / INV-17: governed cycle-count program with ABC classification + blind counts.
 -- Ad-hoc stocktakes (INV-04) had no schedule and no risk-based cadence: everything was counted (or not) at
 -- whim, so high-velocity / high-value items — the ones inventory-existence risk concentrates in — were not
 -- necessarily counted more often. This turns counting into a governed PROGRAM:
