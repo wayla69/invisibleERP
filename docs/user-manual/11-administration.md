@@ -210,6 +210,30 @@ listed for audit history.
 
 [screenshot: User Access Review with certify button]
 
+### 4.1 Access Recertification Campaign — keep/revoke each user in-app (ITGC-AC-21)
+
+For an auditor-grade review, use a **recertification campaign** instead of the blanket
+sign-off. Here you decide **keep or revoke for every user individually**, and a **revoke**
+decision actually removes that user's granted permissions when you certify (closed loop).
+
+**Screen:** `/admin/access-recert` · **Required permission:** `users`
+
+1. Go to **Access Recertification** (`/admin/access-recert`) → **Open campaign** and
+   enter the period (e.g. `2026-Q3`). The system snapshots every user's current access as
+   a keep/revoke worklist.
+2. For each user, click **Keep** (access still appropriate) or **Revoke** (remove their
+   granted access). Every user must be decided.
+3. Click **Certify**. If any line is still undecided you get **ITEMS_PENDING** — finish
+   the worklist first. On certification, each **Revoke** user's permission grants are
+   removed immediately and the line is marked *Revoked*.
+
+**Expected result:** The campaign is certified and frozen (it can no longer be edited);
+each user's keep/revoke decision, reviewer and revocation outcome are retained as
+line-item audit evidence. A revoked user loses their granted access at once.
+
+> The blanket **Certify review** (§4) and CSV export still work for back-compat; the
+> campaign is the stronger, closed-loop control.
+
 ---
 
 ## 5. Segregation of Duties (SoD) conflict report

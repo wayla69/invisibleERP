@@ -567,6 +567,7 @@ export const INTERNAL_NAV: NavGroup[] = [
         items: [
           { label: 'nav.onboarding', href: '/onboarding', icon: Rocket, perms: ['users', 'exec', 'dashboard'] },
           { label: 'nav.admin_users', href: '/admin/users', icon: UserCog, perms: ['users'] },
+          { label: 'nav.access_recert', href: '/admin/access-recert', icon: ShieldCheck, perms: ['users'] },
           { label: 'nav.setup', href: '/setup', icon: BadgeCheck, perms: ['users'] },
           { label: 'nav.billing', href: '/billing', icon: CreditCard, perms: ['users'] },
           { label: 'nav.settings_page', href: '/settings', icon: Settings, perms: ['users'] },
