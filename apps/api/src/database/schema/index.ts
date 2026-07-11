@@ -140,6 +140,7 @@ export * from './close-runs';
 export * from './ic-recon';
 export * from './gl-audit';
 export * from './deferred-tax-fx';
+export * from './tax-utp';
 export * from './revrec-contracts';
 export * from './ai-usage';
 export * from './usage-meters';
