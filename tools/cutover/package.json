@@ -117,6 +117,7 @@
     "match": "tsx src/match.ts",
     "costing": "tsx src/costing.ts",
     "wms": "tsx src/wms.ts",
+    "lot-trace": "tsx src/lot-trace.ts",
     "crm": "tsx src/crm.ts",
     "epm-planning": "tsx src/epm-planning.ts",
     "consolidation": "tsx src/consolidation.ts",

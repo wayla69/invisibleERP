@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 245,
+    "total": 246,
     "by_status": {
-      "Implemented": 242,
+      "Implemented": 243,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 16,
+      "Inventory & COGS": 17,
       "Leases": 2,
       "Manufacturing & Costing": 4,
       "Monitoring": 3,
@@ -2394,6 +2394,25 @@
       "status": "Implemented"
     },
     {
+      "control_id": "INV-18",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Inventory; COGS; Warranty/recall cost",
+      "risk": "A defective or recalled lot cannot be traced or contained: there is no genealogy linking a batch back to its supplier/goods-receipt or forward to the customers/sales it was issued into (so a recall can't scope who received it), and a suspect lot stays PICKABLE — the FEFO suggestion and the WMS wave keep allocating it — so non-conforming material keeps shipping while the investigation runs.",
+      "assertion": "Existence/Completeness/Occurrence",
+      "description": "Lot recall / genealogy traceability + lot hold (INV-5, migration 0341): every lot (lot_ledger) gains a two-way GENEALOGY trace — GET /api/lots/:lotNo/trace resolves BACKWARD (lot → goods_receipt(s) via lot_ledger.gr_no → goods_receipts → PO → supplier/vendor) and FORWARD (lot → issue rows qty_out>0 → ref_doc pick → pick_lists → cust_pos_sales → customer/branch), so a recall investigation can scope both the source supplier and every downstream sale from one call. A one-click QUARANTINE — POST /api/lots/:lotNo/hold (reason-coded, HOLD- doc) — places a lot on hold (lot_holds, status Held); a held lot is EXCLUDED from BOTH the FEFO pick-suggestion (GET /api/lots/fefo/:itemId, excluded_held count returned) AND the WMS wave bin-allocation (wms.service suggestPickBin skips any bin whose lot has an active Held row), so a recalled/suspect lot physically cannot be picked, shipped or sold. POST /api/lots/:lotNo/release lifts the hold (audit trail retained — released_by/released_at/release_reason) and re-enables picking; LOT_NOT_HELD if not held. Hold/release gated to the inventory-control duties (lots/warehouse/wh_adjust); the trace read to lots/warehouse. lot_holds is tenant-scoped (canonical 0232 RLS, tenant-leading index); lot_ledger (no tenant_id) is never rewritten.",
+      "prev_det": "Det/Prev",
+      "nature": "Automated",
+      "frequency": "Per recall / per pick",
+      "owner": "Warehouse / QA / F&B Controller",
+      "coso": "P10",
+      "code_reference": "modules/lots/lots.service.ts (trace backward/forward genealogy; hold/release quarantine; fefo + heldLotNos exclusion); lots.controller.ts (/api/lots/:lotNo/trace|hold|release); modules/wms/wms.service.ts suggestPickBin (Held-lot exclusion in wave allocation); schema/inventory.ts lot_holds + migration 0341 (RLS, tenant-leading index, HOLD- doc); permissions.ts lots/warehouse/wh_adjust; cutover/lot-trace.ts (ToE)",
+      "tod": "Inspect the two-way trace (backward GR→supplier, forward pick/sale→customer), the hold/release lifecycle, and that a Held lot is excluded from BOTH the FEFO suggestion and the WMS wave allocation.",
+      "toe": "Re-perform (lot-trace harness): seed GR→lot→issue→sale; the backward trace returns the supplier + GR; the forward trace returns the customer + sale; holding the lot excludes it from FEFO (excluded_held>0) and from the WMS wave bin-allocation; releasing it re-includes the lot; releasing a non-held lot → LOT_NOT_HELD.",
+      "evidence": "Two-way lot genealogy trace; lot hold/quarantine excluded from FEFO + WMS pick",
+      "status": "Implemented"
+    },
+    {
       "control_id": "QC-03",
       "cycle": "Inventory & COGS",
       "category": "Application",
@@ -3616,7 +3635,7 @@
       "fsli": "Vendor Master; Accounts Payable; Cash",
       "risk": "Maker-checker on master data covered only BULK imports (masterdata_import_batches) and a vendor's bank_name/bank_account (EXP-11, 0270). A NORMAL single-record UI/CRUD edit of a SENSITIVE vendor field — its payee account-holder NAME (bank_account_name), its CREDIT LIMIT, or its PAYMENT TERMS — was written to the master directly with no second check, so a single md_vendor holder could redirect a disbursement (substitute the payee name on file), inflate credit exposure, or alter the payment schedule with no independent review — a disbursement-fraud / BEC vector alongside the bank-account number already governed by EXP-11.",
       "assertion": "Authorization/Segregation of Duties",
-      "description": "Sensitive master-data single-record maker-checker (GRC-3, migration 0336): a change to a sensitive vendor field (bank_account / bank_name / bank_account_name / credit_limit / payment_terms) does NOT write the vendor master — it is STAGED as a `pending` masterdata_change_requests row (a GENERIC entity_type vendor|customer|item + field + before/after value; old_value/new_value encrypted at rest via the encryptedText column type so a staged bank value is never plaintext). The master is applied ONLY when a DISTINCT user approves it (POST /api/masterdata/change-requests/:reqNo/approve; approved_by ≠ requested_by → 403 SOD_SELF_APPROVAL, binds even Admin), which supersedes the direct-edit path (payment_terms was removed from the vendor-profile direct edit; credit_limit / bank details were already excluded). Reject discards it (the master is untouched). Non-sensitive profile fields keep their direct-edit path (the generic endpoint refuses them → FIELD_NOT_SENSITIVE). The applied change is captured before/after by the DB trigger trg_dcl_vendors (0274) on the master row; the change-request row is the full staging trail (who requested / who released). New SoD rule R22 (master-data maintenance md_vendor/md_item/md_config vs the elevated change-approval authority exec). Tenant-scoped (RLS, canonical 0232 policy); reads/stage gate masterdata/md_vendor/exec, approve/reject gate masterdata/exec.",
+      "description": "Sensitive master-data single-record maker-checker (GRC-3, migration 0340): a change to a sensitive vendor field (bank_account / bank_name / bank_account_name / credit_limit / payment_terms) does NOT write the vendor master — it is STAGED as a `pending` masterdata_change_requests row (a GENERIC entity_type vendor|customer|item + field + before/after value; old_value/new_value encrypted at rest via the encryptedText column type so a staged bank value is never plaintext). The master is applied ONLY when a DISTINCT user approves it (POST /api/masterdata/change-requests/:reqNo/approve; approved_by ≠ requested_by → 403 SOD_SELF_APPROVAL, binds even Admin), which supersedes the direct-edit path (payment_terms was removed from the vendor-profile direct edit; credit_limit / bank details were already excluded). Reject discards it (the master is untouched). Non-sensitive profile fields keep their direct-edit path (the generic endpoint refuses them → FIELD_NOT_SENSITIVE). The applied change is captured before/after by the DB trigger trg_dcl_vendors (0274) on the master row; the change-request row is the full staging trail (who requested / who released). New SoD rule R22 (master-data maintenance md_vendor/md_item/md_config vs the elevated change-approval authority exec). Tenant-scoped (RLS, canonical 0232 policy); reads/stage gate masterdata/md_vendor/exec, approve/reject gate masterdata/exec.",
       "prev_det": "Prev",
       "nature": "Automated",
       "frequency": "Per change",

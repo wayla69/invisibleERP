@@ -86,6 +86,40 @@ expiry.
 
 [screenshot: lots ledger with expiry alert buckets]
 
+### Lot recall / genealogy trace & lot hold (control INV-18)
+
+**Screen:** `/lots` → **สืบย้อน / ระงับล็อต (Trace / Hold)** tab
+· **Required permission:** trace `lots` / `warehouse`; hold & release `lots` / `warehouse` / `wh_adjust`
+
+Use this when a supplier issues a recall, a lot is suspected of a quality
+problem, or you need to know exactly where a batch came from and where it went.
+
+1. Open the **Trace / Hold** tab and enter a **lot number**.
+2. The trace shows the lot's two-way **genealogy**:
+   - **Backward** — the **goods receipt(s)** the lot arrived on, the **PO**, and
+     the **supplier** (so a recall can be scoped back to its source).
+   - **Forward** — the **issue/pick documents** and the **sales / customers** the
+     lot was shipped into (so you know who received the affected batch).
+3. To **quarantine** a suspect/recalled lot, type a reason and click
+   **ระงับล็อต (Hold lot)**. The lot is immediately marked **On hold** and is
+   **excluded from picking** — it will no longer be suggested by FEFO and the WMS
+   wave will not allocate it, so recalled stock cannot be picked, shipped or sold.
+4. When the lot is cleared, click **ปลดระงับ (Release)** with a reason to return
+   it to normal picking. The hold/release history is retained for audit.
+
+**Expected result:** A held lot never appears in a FEFO suggestion or a WMS pick;
+releasing it makes it pickable again. Trace gives the full source→destination
+genealogy for recall evidence.
+
+> **Control note (INV-18):** the hold IS the block — there is no separate step to
+> stop picking. Only a user with the inventory-control duty can hold or release a
+> lot; anyone with `lots`/`warehouse` can run the trace.
+
+**Error messages:**
+
+- **LOT_NOT_HELD** — you tried to release a lot that is not currently on hold.
+- **LOT_NOT_FOUND** — the lot number has no ledger records (check for typos).
+
 ---
 
 ## 4. Mobile scanning

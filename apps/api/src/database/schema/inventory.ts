@@ -128,6 +128,30 @@ export const lotLedger = pgTable('lot_ledger', {
   byLot: index('idx_ll_lot').on(t.lotNo),
 }));
 
+// INV-5 / INV-18 — lot recall & quarantine control. A Held lot is quarantined: FEFO pick-suggestion and the
+// WMS wave bin allocation both EXCLUDE it, so a recalled/suspect lot cannot be picked, shipped or sold until
+// a DIFFERENT-status Released row supersedes it. Detective + preventive: the hold IS the block. `lot_ledger`
+// has no tenant_id (a shared physical ledger written by GR/WMS), so hold state lives here in a genuinely
+// tenant-scoped table (RLS via the 0341 canonical 0232-form loop) rather than a flag on the ledger.
+export const lotHolds = pgTable('lot_holds', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  holdNo: text('hold_no').notNull(),      // HOLD-YYYYMMDD-NNN
+  lotNo: text('lot_no').notNull(),
+  itemId: text('item_id'),
+  status: text('status').notNull().default('Held'),  // Held | Released
+  reason: text('reason'),
+  heldBy: text('held_by'),
+  heldAt: timestamp('held_at', { withTimezone: true }).defaultNow(),
+  releasedBy: text('released_by'),
+  releasedAt: timestamp('released_at', { withTimezone: true }),
+  releaseReason: text('release_reason'),
+}, (t) => ({
+  byTenantStatus: index('idx_lot_holds_tenant').on(t.tenantId, t.status),   // R1-1 tenant-leading index
+  byTenantLot: index('idx_lot_holds_lot').on(t.tenantId, t.lotNo),
+  uqHoldNo: unique('uq_lot_holds_no').on(t.tenantId, t.holdNo),
+}));
+
 export const stockMovements = pgTable('stock_movements', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // 0316 (see stocktakes)
