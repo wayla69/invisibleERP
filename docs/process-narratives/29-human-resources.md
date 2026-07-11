@@ -510,6 +510,97 @@ flowchart TD
 |---|---|---|---|
 | 0.1 DRAFT | 2026-07-11 | HR-4 | Initial recruiting/ATS narrative + HR-04 control matrix (migration 0323) |
 
+# HR-8 — Employee Self-Service (ESS) depth (control HR-08) — appended section
+
+## E.1 Document control (HR-8)
+
+| Field | Value |
+|---|---|
+| Cycle | Human Resources / Human Capital Management (docs/42 Wave 3) |
+| Related RCM control | **HR-08** (ESS profile-change maker-checker) |
+| Migration | `apps/api/drizzle/0327_hcm_ess.sql` |
+| Suite | `hcm` |
+
+## E.2 Purpose & scope
+
+Give every employee a self-service surface to maintain their own master data and personal documents —
+without letting an employee silently repoint their own pay or alter a statutory identifier, and without one
+employee reaching another's record. A change to a **sensitive** profile field is subject to an HR maker-checker
+(**HR-08**); low-risk contact fields apply immediately; every read/write is **own-scoped** by the caller's
+linked employee (`emp_code` resolved from the JWT, never a body param) and tenant-isolated by RLS.
+
+**Field classification**
+
+| Class | Fields | Behaviour |
+|---|---|---|
+| Sensitive | `name`, `national_id`, `bank_account`, `tax_id` | Parked `pending`; the `payroll.employees` master is written **only** when a different `hr`/`hr_admin` user approves |
+| Low-risk | `phone`, `address`, `emergency_contact` | Auto-applied at request time (`applied`); still recorded for the audit trail |
+
+## E.3 Roles & permissions
+
+| Duty | Permission | Can |
+|---|---|---|
+| Employee (self-service) | `ess` | Create profile-change requests, upload/read their **own** documents, view the team directory |
+| HR maintain / approve | `hr`, `hr_admin` | List all requests, **approve/reject** sensitive changes, upload documents on behalf of an employee |
+| Executive (read) | `exec` | List requests/documents/team (read) |
+
+## E.4 Workflow
+
+```mermaid
+flowchart TD
+  A[Employee submits a profile change<br/>POST /api/hcm/ess/profile-requests] --> B{Sensitive field?}
+  B -->|No · phone/address/emergency_contact| C[Auto-apply to employees master<br/>status = applied · ESSPROFILE audit]
+  B -->|Yes · name/national_id/bank_account/tax_id| D[Park pending<br/>master untouched]
+  D --> E{HR decision<br/>hr/hr_admin}
+  E -->|approver == requested_by| X1[403 SOD_SELF_APPROVAL]
+  E -->|Reject| F[status = rejected<br/>master unchanged]
+  E -->|Approve · approver ≠ requester| G[Write employees master field<br/>status = approved · ESSPROFILE before/after audit]
+```
+
+## E.5 Control matrix
+
+| Control | Assertion | What it prevents | Enforcement |
+|---|---|---|---|
+| **HR-08** | Authorization / Segregation of Duties | An employee repointing their own bank account or altering a statutory identifier with no independent check; one employee viewing/amending another's profile or documents | Sensitive-field changes are parked `pending` and the `payroll.employees` master is written **only** on approval; `approveRequest` rejects `approved_by == requested_by` (`SOD_SELF_APPROVAL`) and the approve endpoint is reserved to `hr`/`hr_admin`; reject leaves the master unchanged; before/after audit on `doc_status_log` (`ESSPROFILE`); reads/writes own-scoped by JWT `emp_code`; object-storage keys `isSafeObjectKey`-validated; RLS tenant isolation. ToE: `tools/cutover/src/hcm-ess.ts` (28 checks); UAT-HR-800..809 |
+
+## E.6 Endpoints (application)
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET /api/hcm/ess/profile-requests` | `ess`/`hr`/`hr_admin`/`exec` | List profile-change requests (ess = own-scope) |
+| `POST /api/hcm/ess/profile-requests` | `ess`/`hr`/`hr_admin` | Submit a change (sensitive → pending; low-risk → auto-apply) |
+| `POST /api/hcm/ess/profile-requests/:id/approve` | `hr`/`hr_admin` | Approve a sensitive change (HR-08 maker-checker) |
+| `POST /api/hcm/ess/profile-requests/:id/reject` | `hr`/`hr_admin` | Reject a pending change (master unchanged) |
+| `GET /api/hcm/ess/documents` | `ess`/`hr`/`hr_admin`/`exec` | List personal documents (ess = own-scope; hr-visibility hidden) |
+| `POST /api/hcm/ess/documents` | `ess`/`hr`/`hr_admin` | Upload a document (object key `isSafeObjectKey`-validated) |
+| `GET /api/hcm/ess/team` | `ess`/`hr`/`hr_admin`/`exec` | Team directory (ess = own department; HR = company) |
+
+## E.7 Error codes
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `SOD_SELF_APPROVAL` | 403 | A sensitive change approved by its own requester |
+| `ESS_NO_EMPLOYEE` | 403 | The caller's login is not linked to an employee record |
+| `BAD_FIELD` | 400 | The named field is not an ESS-editable profile field |
+| `BAD_VALUE` | 400 | `new_value` is empty |
+| `BAD_OBJECT_KEY` | 400 | `file_ref` object-storage key failed `isSafeObjectKey` |
+| `CHANGE_NOT_FOUND` | 404 | No such change request |
+| `CHANGE_REJECTED` / `CHANGE_DECIDED` | 400 | Change already rejected / already applied |
+| `EMP_NOT_FOUND` | 404 | HR upload targets an unknown `emp_code` |
+
+## E.8 System references
+
+- Service/controller: `apps/api/src/modules/hcm/hcm-ess.service.ts`, `hcm-ess.controller.ts`
+- Schema: `apps/api/src/database/schema/hcm-ess.ts` + ESS columns on `payroll.employees`; migration `apps/api/drizzle/0327_hcm_ess.sql`
+- Web: `apps/web/src/app/(internal)/hcm/ess/page.tsx` + `ess-client.tsx` (`/hcm/ess`)
+- ToE harness: `tools/cutover/src/hcm-ess.ts` (28 checks)
+
+## E.9 Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-07-11 | HR-8 | Initial ESS-depth narrative + HR-08 control matrix (migration 0327) |
+
 # HR-9 — Workforce analytics (control HR-09) — appended section
 
 > Self-contained HR-9 workforce-analytics narrative; kept on merge alongside the HR-2/3/4/5/6 sections above.

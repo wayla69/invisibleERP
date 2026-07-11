@@ -18,7 +18,7 @@ export const postingRules = pgTable('posting_rules', {
   dimensionSource: text('dimension_source'), // 'branch_id'|'project_id'|null — which ctx field to stamp
   condition: jsonb('condition'),      // optional filter e.g. {"category":"exempt"}
   active: boolean('active').default(true),
-  // GL-24 (0327): rule changes are governed config — API writes land PendingApproval and only a
+  // GL-24 (0328): rule changes are governed config — API writes land PendingApproval and only a
   // DIFFERENT user's approval activates them. DB default 'Approved' grandfathers pre-existing rows
   // and direct harness seeds; the resolver consumes active + Approved rows only.
   status: text('status').notNull().default('Approved'), // 'PendingApproval' | 'Approved' | 'Rejected'
@@ -35,7 +35,7 @@ export const postingRules = pgTable('posting_rules', {
   ),
 }));
 
-// GL-24 append-only audit trail: every CREATE/APPROVE/REJECT/DEACTIVATE on a posting rule (0327).
+// GL-24 append-only audit trail: every CREATE/APPROVE/REJECT/DEACTIVATE on a posting rule (0328).
 export const postingRuleAudit = pgTable('posting_rule_audit', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),

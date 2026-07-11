@@ -25,6 +25,12 @@ export const employees = pgTable(
     ssoEligible: boolean('sso_eligible').default(true),
     bankAccount: encryptedText('bank_account'), // PII-at-rest (ITGC-AC-19) — decrypts only at the payment boundary
     userName: text('user_name'),                // ESS: link to users.username for self-service (Phase D3)
+    // HR-8 (docs/42, Wave 3) — ESS-editable contact/identity fields. Low-risk (phone/address/emergency_contact)
+    // auto-apply from a self-service change request; tax_id is a sensitive field routed through HR-08 approval.
+    phone: text('phone'),
+    address: text('address'),
+    emergencyContact: text('emergency_contact'),
+    taxId: text('tax_id'),                       // taxpayer id (sensitive; HR-08 maker-checker)
     startDate: date('start_date'),
     active: boolean('active').default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

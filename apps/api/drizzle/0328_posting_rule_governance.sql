@@ -1,4 +1,4 @@
--- 0327_posting_rule_governance — docs/43 PR-1 (control GL-24): the posting-event catalogue grows to the
+-- 0328_posting_rule_governance — docs/43 PR-1 (control GL-24): the posting-event catalogue grows to the
 -- full registry (74 events — see apps/api/src/modules/ledger/posting-events.ts, the single source of
 -- truth this seed is generated from), and tenant posting-rule changes become GOVERNED config:
 --   • posting_rules gains status ('Approved' default so pre-existing rows + direct harness seeds are

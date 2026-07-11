@@ -253,6 +253,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.hcm_org': { th: 'โครงสร้างองค์กร & ตำแหน่ง', en: 'Org & Positions' },
   'nav.hcm_comp': { th: 'ค่าตอบแทน & สวัสดิการ', en: 'Comp & Benefits' },
   'nav.hcm_onboarding': { th: 'เข้า/ออกงาน (Onboarding)', en: 'Onboarding / Offboarding' },
+  'nav.hcm_ess': { th: 'ข้อมูลส่วนตัว & เอกสาร', en: 'My Profile & Documents' },
   'nav.scheduling': { th: 'จัดตารางเวร & แรงงาน', en: 'Scheduling & Labour' },
   'nav.ot_rules': { th: 'กฎ OT & แจ้งเตือนแรงงาน', en: 'OT Rules & Labour Alerts' },
   'nav.payroll': { th: 'เงินเดือน (Payroll)', en: 'Payroll' },
