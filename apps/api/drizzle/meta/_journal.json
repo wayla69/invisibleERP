@@ -2351,7 +2351,35 @@
       "idx": 336,
       "version": "7",
       "when": 2023820000301,
-      "tag": "0336_masterdata_change_requests",
+      "tag": "0336_control_console",
+      "breakpoints": true
+    },
+    {
+      "idx": 337,
+      "version": "7",
+      "when": 2023820000302,
+      "tag": "0337_access_review_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 338,
+      "version": "7",
+      "when": 2023820000303,
+      "tag": "0338_sod_conflict_dispositions",
+      "breakpoints": true
+    },
+    {
+      "idx": 339,
+      "version": "7",
+      "when": 2023820000304,
+      "tag": "0339_control_exceptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 340,
+      "version": "7",
+      "when": 2023820000305,
+      "tag": "0340_masterdata_change_requests",
       "breakpoints": true
     }
   ]

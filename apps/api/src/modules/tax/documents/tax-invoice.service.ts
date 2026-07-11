@@ -5,6 +5,7 @@ import { taxInvoices, taxInvoiceLines, custPosSales, custPosItems, arInvoices, t
 import { DocNumberService } from '../../../common/doc-number.service';
 import { TaxService } from '../tax.service';
 import { LedgerService } from '../../ledger/ledger.service';
+import { postingDefault } from '../../ledger/posting-events';
 import { n, fx, ymd } from '../../../database/queries';
 import type { JwtUser } from '../../../common/decorators';
 import { appendAuditMeta } from '../../../common/tenant-context';
@@ -324,9 +325,17 @@ export class TaxInvoiceService {
     // note ADDS to it (Dr AR / Cr revenue + Cr output-VAT). Posted to the AR control account via subledger.
     let je: any = null;
     if (this.ledger) {
+      // docs/43 PR-2: revenue/VAT legs follow the tenant posting-rules (SALE.FOOD / SALE.VAT) ?? registry
+      // defaults; the AR control leg (1100) is REC-04-pinned and stays literal.
+      const [saleOvr, vatOvr] = await Promise.all([
+        this.ledger.postingOverrides('SALE.FOOD', tenantId),
+        this.ledger.postingOverrides('SALE.VAT', tenantId),
+      ]);
+      const revAcct = saleOvr.revenue ?? postingDefault('SALE.FOOD', 'revenue');
+      const vatAcct = vatOvr.vat_output ?? postingDefault('SALE.VAT', 'vat_output');
       const glLines = kind === 'credit_note'
-        ? [{ account_code: '4000', debit: subtotal, memo: `ใบลดหนี้ ${docNo}` }, { account_code: '2100', debit: vat, memo: 'กลับภาษีขาย' }, { account_code: '1100', credit: total, memo: `ลดลูกหนี้ ${orig.buyerName ?? ''}` }]
-        : [{ account_code: '1100', debit: total, memo: `เพิ่มลูกหนี้ ${orig.buyerName ?? ''}` }, { account_code: '4000', credit: subtotal, memo: `ใบเพิ่มหนี้ ${docNo}` }, { account_code: '2100', credit: vat, memo: 'ภาษีขายเพิ่ม' }];
+        ? [{ account_code: revAcct, debit: subtotal, memo: `ใบลดหนี้ ${docNo}` }, { account_code: vatAcct, debit: vat, memo: 'กลับภาษีขาย' }, { account_code: '1100', credit: total, memo: `ลดลูกหนี้ ${orig.buyerName ?? ''}` }]
+        : [{ account_code: '1100', debit: total, memo: `เพิ่มลูกหนี้ ${orig.buyerName ?? ''}` }, { account_code: revAcct, credit: subtotal, memo: `ใบเพิ่มหนี้ ${docNo}` }, { account_code: vatAcct, credit: vat, memo: 'ภาษีขายเพิ่ม' }];
       je = await this.ledger.postEntry({
         source: prefix, sourceRef: docNo, tenantId, createdBy: user.username, viaSubledger: true, pendingApproval: true,
         memo: `${kind === 'credit_note' ? 'ใบลดหนี้' : 'ใบเพิ่มหนี้'} ${docNo} (อ้างอิง ${orig.docNo})`, lines: glLines,

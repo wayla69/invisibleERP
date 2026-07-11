@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, Layers, ListTree, PlayCircle, Rows3, Plus, Trash2, Send, Scissors, PieChart, Coins, TrendingUp } from 'lucide-react';
+import { Building2, Layers, ListTree, PlayCircle, Rows3, Plus, Trash2, Send, Scissors, PieChart, Coins, TrendingUp, Handshake, CheckCheck, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -74,6 +74,7 @@ export default function ConsolidationPage() {
         tabs={[
           { key: 'groups', label: t('fnx.consol.tab_groups'), content: <GroupsTab /> },
           { key: 'runs', label: t('fnx.consol.tab_runs'), content: <RunsTab /> },
+          { key: 'icrecon', label: t('fnx.consol.tab_icrecon'), content: <IcReconTab /> },
           { key: 'segments', label: t('fnx.consol.tab_segments'), content: <SegmentsTab /> },
         ]}
       />
@@ -649,5 +650,142 @@ function SegmentReport() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ───────────────────── REC-03: intercompany reconciliation sign-off (gates elimination) ─────────────────────
+// Per-period IC reconciliation maker-checker: a preparer reconciles the group's IC balances (Due-From 1150 vs
+// Due-To 2150) and signs (Prepared); an independent approver (SoD, approver ≠ preparer) approves only when the
+// balances eliminate (Due-From = Due-To). consolidation.runConsolidation() is hard-gated on the period being
+// Approved (IC_RECON_NOT_APPROVED). Read-only over the same spine — surfaces the existing endpoints.
+interface IcReconPeriod {
+  id?: number; group_id: number; period: string; status: string;
+  total_due_from?: number; total_due_to?: number; eliminates?: boolean; unmatched_count?: number;
+  prepared_by?: string | null; prepared_at?: string | null; approved_by?: string | null; approved_at?: string | null; rejection_reason?: string | null;
+}
+interface IcReconListResp { periods: IcReconPeriod[]; count: number }
+
+function IcReconTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const groups = useQuery<GroupsResp>({ queryKey: ['consol-groups'], queryFn: () => api('/api/consolidation/groups') });
+  const [groupId, setGroupId] = useState<number | null>(null);
+  const [period, setPeriod] = useState(currentPeriod());
+  const [approving, setApproving] = useState<IcReconPeriod | null>(null);
+  const [rejecting, setRejecting] = useState<IcReconPeriod | null>(null);
+  const [reason, setReason] = useState('');
+
+  const gid = groupId ?? groups.data?.groups[0]?.id ?? null;
+  const list = useQuery<IcReconListResp>({
+    queryKey: ['ic-recon', gid],
+    queryFn: () => api(`/api/ic-reconciliation/groups/${gid}`),
+    enabled: gid != null,
+  });
+
+  const prepare = useMutation({
+    mutationFn: () => api<IcReconPeriod>(`/api/ic-reconciliation/groups/${gid}/prepare`, { method: 'POST', body: JSON.stringify({ period }) }),
+    onSuccess: (r) => {
+      notifySuccess(t('fnx.consol.icr_prepared', { period: r.period }), r.eliminates ? t('fnx.consol.icr_eliminates_yes') : t('fnx.consol.icr_eliminates_no'));
+      qc.invalidateQueries({ queryKey: ['ic-recon', gid] });
+    },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const approve = useMutation({
+    mutationFn: (p: string) => api<IcReconPeriod>(`/api/ic-reconciliation/groups/${gid}/approve`, { method: 'POST', body: JSON.stringify({ period: p }) }),
+    onSuccess: (r) => { notifySuccess(t('fnx.consol.icr_approved', { period: r.period })); setApproving(null); qc.invalidateQueries({ queryKey: ['ic-recon', gid] }); },
+    onError: (e: Error) => { notifyError(e.message); setApproving(null); },
+  });
+  const reject = useMutation({
+    mutationFn: ({ p, why }: { p: string; why: string }) => api<IcReconPeriod>(`/api/ic-reconciliation/groups/${gid}/reject`, { method: 'POST', body: JSON.stringify({ period: p, reason: why }) }),
+    onSuccess: (r) => { notifySuccess(t('fnx.consol.icr_rejected', { period: r.period })); setRejecting(null); setReason(''); qc.invalidateQueries({ queryKey: ['ic-recon', gid] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
+  return (
+    <div className="space-y-5">
+      <Card className="max-w-2xl gap-4">
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Handshake className="size-4" /> {t('fnx.consol.icr_title')}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">{t('fnx.consol.icr_hint')}</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="grid gap-2">
+              <Label htmlFor="icr-group">{t('fnx.consol.field_group')}</Label>
+              <Select id="icr-group" className="w-auto" value={gid ?? ''} onChange={(e) => setGroupId(Number(e.target.value))}>
+                {groups.data?.groups.length
+                  ? groups.data.groups.map((g) => <option key={g.id} value={g.id}>{g.name} ({g.fiscal_year})</option>)
+                  : <option value="">{t('fnx.consol.opt_no_group')}</option>}
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="icr-period">{t('fnx.consol.field_period')}</Label>
+              <Input id="icr-period" className="max-w-[160px]" placeholder="2026-06" value={period} onChange={(e) => setPeriod(e.target.value)} />
+            </div>
+            <Button disabled={prepare.isPending || gid == null || !/^\d{4}-\d{2}$/.test(period)} onClick={() => prepare.mutate()}>
+              <PlayCircle className="size-4" /> {prepare.isPending ? t('fnx.consol.icr_preparing') : t('fnx.consol.icr_prepare_btn')}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {gid != null && (
+        <StateView q={list}>
+          {list.data && (
+            <DataTable
+              rows={list.data.periods}
+              rowKey={(r) => r.period}
+              columns={[
+                { key: 'period', label: t('fnx.consol.col_period'), render: (r) => <span className="font-medium">{r.period}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                { key: 'total_due_from', label: t('fnx.consol.icr_col_due_from'), align: 'right', render: (r) => <span className="tabular">{baht(r.total_due_from ?? 0)}</span> },
+                { key: 'total_due_to', label: t('fnx.consol.icr_col_due_to'), align: 'right', render: (r) => <span className="tabular">{baht(r.total_due_to ?? 0)}</span> },
+                { key: 'eliminates', label: t('fnx.consol.icr_col_eliminates'), render: (r) => <Badge variant={r.eliminates ? 'default' : 'destructive'}>{r.eliminates ? t('fnx.consol.yes') : t('fnx.consol.no')}</Badge> },
+                { key: 'prepared_by', label: t('fnx.consol.icr_col_prepared_by'), render: (r) => r.prepared_by ?? '—' },
+                { key: 'approved_by', label: t('fnx.consol.icr_col_approved_by'), render: (r) => r.approved_by ?? '—' },
+                { key: 'actions', label: t('fnx.consol.col_actions'), align: 'right', render: (r) => (
+                  r.status === 'Prepared'
+                    ? <div className="flex justify-end gap-1">
+                        <Button size="sm" onClick={() => setApproving(r)}><CheckCheck className="size-3.5" /> {t('fnx.consol.icr_approve_btn')}</Button>
+                        <Button size="sm" variant="outline" onClick={() => { setRejecting(r); setReason(''); }}><XCircle className="size-3.5" /> {t('fnx.consol.icr_reject_btn')}</Button>
+                      </div>
+                    : r.status === 'Rejected' && r.rejection_reason
+                      ? <span className="text-xs text-muted-foreground" title={r.rejection_reason}>{t('fnx.consol.icr_rejected_tag')}</span>
+                      : <span className="text-xs text-muted-foreground">—</span>
+                ) },
+              ]}
+              emptyState={{ icon: Handshake, title: t('fnx.consol.icr_empty_title'), description: t('fnx.consol.icr_empty_desc') }}
+            />
+          )}
+        </StateView>
+      )}
+
+      {rejecting && (
+        <Card className="max-w-2xl gap-4 border-destructive/30 p-5">
+          <CardHeader className="p-0"><CardTitle className="text-base">{t('fnx.consol.icr_reject_title', { period: rejecting.period })}</CardTitle></CardHeader>
+          <CardContent className="space-y-3 p-0">
+            <div className="grid gap-2">
+              <Label htmlFor="icr-reason">{t('fnx.consol.icr_reason')}</Label>
+              <Input id="icr-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t('fnx.consol.icr_reason_ph')} />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="destructive" disabled={reject.isPending || !reason.trim()} onClick={() => reject.mutate({ p: rejecting.period, why: reason.trim() })}>
+                {reject.isPending ? t('fnx.consol.icr_rejecting') : t('fnx.consol.icr_reject_confirm')}
+              </Button>
+              <Button variant="ghost" onClick={() => { setRejecting(null); setReason(''); }}>{t('fin.cancel')}</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <ConfirmDialog
+        open={approving != null}
+        onOpenChange={(o) => !o && setApproving(null)}
+        destructive={false}
+        title={t('fnx.consol.icr_approve_confirm_title', { period: approving?.period ?? '' })}
+        description={t('fnx.consol.icr_approve_confirm_desc')}
+        confirmLabel={t('fnx.consol.icr_approve_btn')}
+        busy={approve.isPending}
+        onConfirm={() => approving && approve.mutate(approving.period)}
+      />
+    </div>
   );
 }

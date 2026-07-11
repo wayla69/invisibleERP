@@ -23,6 +23,8 @@ import { CATALOG as CAT_GOVERNANCE } from './i18n-catalog/governance';
 import { CATALOG as CAT_SVC } from './i18n-catalog/svc';
 import { CATALOG as CAT_QUALITY } from './i18n-catalog/quality';
 import { CATALOG as CAT_SCAR } from './i18n-catalog/scar';
+import { CATALOG as CAT_CONTROLCONSOLE } from './i18n-catalog/controlconsole';
+import { CATALOG as CAT_SODREG } from './i18n-catalog/sodreg';
 import { CATALOG as CAT_MDCHANGE } from './i18n-catalog/mdchange';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
@@ -337,6 +339,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Settings / Admin ──────────────────────────────────────────────────────
   'nav.onboarding': { th: 'เริ่มต้นใช้งาน (Onboarding)', en: 'Onboarding' },
   'nav.admin_users': { th: 'จัดการผู้ใช้', en: 'User Management' },
+  'nav.access_recert': { th: 'ทบทวนรับรองสิทธิ์', en: 'Access Recertification' },
   'nav.setup': { th: 'ตั้งค่ากิจการ', en: 'Company Setup' },
   'nav.billing': { th: 'แพ็กเกจ', en: 'Billing' },
   'nav.settings_page': { th: 'ตั้งค่า', en: 'Settings' },
@@ -1646,5 +1649,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_MDCHANGE,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE,
 );

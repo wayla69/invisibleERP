@@ -5,6 +5,7 @@ import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arRec
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { TaxService } from '../tax/tax.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
@@ -427,7 +428,9 @@ export class FinanceService {
     const spent = round2(dto.settled_expense);
     const returned = round2(dto.returned_cash ?? 0);
     if (round2(spent + returned) !== round2(n(a.amount))) throw new BadRequestException({ code: 'SETTLE_MISMATCH', message: `settled_expense + returned_cash (${round2(spent + returned)}) must equal the advance (${n(a.amount)})`, messageTh: 'ยอดใช้จ่ายรวมเงินคืนต้องเท่ากับเงินทดรองจ่าย' });
-    const expAcct = dto.expense_account ?? a.expenseAccount ?? '5100';
+    // docs/43 PR-2: dto ?? advance-row ?? tenant posting-rule ?? registry default (ADVANCE.SETTLE.expense)
+    const advOvr = this.ledger ? await this.ledger.postingOverrides('ADVANCE.SETTLE', a.tenantId ?? null) : {};
+    const expAcct = dto.expense_account ?? a.expenseAccount ?? advOvr.expense ?? postingDefault('ADVANCE.SETTLE', 'expense');
     const projectId = a.projectId ?? null; // M4 — settled site-cash spend carries the project dimension
     const lines: any[] = [];
     if (spent > 0) lines.push({ account_code: expAcct, debit: spent, project_id: projectId });
@@ -471,11 +474,14 @@ export class FinanceService {
     if (!dto.reason || !dto.reason.trim()) throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A write-off reason is required', messageTh: 'ต้องระบุเหตุผลการตัดหนี้สูญ' });
     const tenantId = user.tenantId ?? (dto.tenant_id != null ? Number(dto.tenant_id) : null);
     const who = dto.customer_name?.trim() ? ` — ${dto.customer_name.trim()}` : (dto.tenant_id != null ? ` — ลูกค้า #${dto.tenant_id}` : '');
+    // docs/43 PR-2: the expense leg follows the tenant posting-rule (BADDEBT.WRITEOFF.bad_debt_exp);
+    // the AR control leg stays pinned (Tier C).
+    const wovr = await this.ledger.postingOverrides('BADDEBT.WRITEOFF', tenantId);
     const je: any = await this.ledger.postEntry({
       date: ymd(), source: 'AR-WRITEOFF', sourceRef: `${dto.tenant_id ?? 'NA'}:${new Date().toISOString()}`, tenantId,
       memo: `ตัดหนี้สูญ${who}: ${dto.reason.trim()}`, createdBy: user.username, pendingApproval: true,
       lines: [
-        { account_code: '5720', debit: amount, memo: `Bad debt write-off${who}` },
+        { account_code: wovr.bad_debt_exp ?? postingDefault('BADDEBT.WRITEOFF', 'bad_debt_exp'), debit: amount, memo: `Bad debt write-off${who}` },
         { account_code: '1100', credit: amount, memo: 'AR written off' },
       ],
     });
@@ -483,12 +489,12 @@ export class FinanceService {
   }
 
   // The write-off register: every AR-WRITEOFF entry — Draft (pending approval), Posted (approved/effective),
-  // or Voided (rejected) — with its amount (the 5720 debit), so the controller can review bad-debt activity.
+  // or Voided (rejected) — with its amount (the expense debit), so the controller can review bad-debt activity.
   async listWriteOffs(tenantId?: number) {
     const db = this.db;
-    // Each write-off has exactly one 5720 debit line, so an inner join on that line yields one row per write-off
-    // with its amount directly (no correlated subquery).
-    const conds: SQL[] = [eq(journalEntries.source, 'AR-WRITEOFF'), eq(journalLines.accountCode, '5720')];
+    // Each write-off has exactly one DEBIT line (the bad-debt expense leg — 5720 or its tenant posting-rule
+    // override), so joining on debit > 0 yields one row per write-off regardless of which account it hit.
+    const conds: SQL[] = [eq(journalEntries.source, 'AR-WRITEOFF'), sql`${journalLines.debit} > 0`];
     if (tenantId != null) conds.push(eq(journalEntries.tenantId, tenantId));
     const rows = await db.select({
       entryNo: journalEntries.entryNo, status: journalEntries.status, memo: journalEntries.memo,
@@ -650,7 +656,10 @@ export class FinanceService {
     if (this.ledger && apGross > 0) {
       const expenseAccount = dto.expense_account ?? ((dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100');
       const lines = [{ account_code: expenseAccount, debit: net }, { account_code: vatAccount, debit: vat }, { account_code: '2000', credit: apGross }];
-      if (selfVat > 0) { lines.push({ account_code: '1300', debit: selfVat }, { account_code: '2120', credit: selfVat }); }
+      if (selfVat > 0) {
+        const rcOvr = await this.ledger.postingOverrides('RCVAT.SELF', tenantId);
+        lines.push({ account_code: rcOvr.input_vat ?? postingDefault('RCVAT.SELF', 'input_vat'), debit: selfVat }, { account_code: rcOvr.pp36_payable ?? postingDefault('RCVAT.SELF', 'pp36_payable'), credit: selfVat });
+      }
       await this.ledger.postEntry({
         date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId,
         memo: `AP bill ${txnNo}${dto.vendor_name ? ' ' + dto.vendor_name : ''}${reverseCharge ? ' (ภ.พ.36 reverse-charge)' : ''}`, createdBy: user.username,
@@ -746,7 +755,10 @@ export class FinanceService {
     // this is the original Dr 2000 / Cr 1000. The per-request glRef is stable + unique → idempotent post.
     if (this.ledger && n(p.amount) > 0 && !(await this.ledger.alreadyPosted('PAY-AP', p.glRef!, apTenant))) {
       const lines: any[] = [{ account_code: '2000', debit: n(p.amount) }];
-      if (whtAmount > 0) lines.push({ account_code: '2361', credit: whtAmount });
+      if (whtAmount > 0) {
+        const whtOvr = await this.ledger.postingOverrides('APPAY.WHT', apTenant);
+        lines.push({ account_code: whtOvr.wht_payable ?? postingDefault('APPAY.WHT', 'wht_payable'), credit: whtAmount });
+      }
       lines.push({ account_code: '1000', credit: round2(n(p.amount) - whtAmount) });
       await this.ledger.postEntry({
         date: ymd(), source: 'PAY-AP', sourceRef: p.glRef ?? undefined, tenantId: apTenant,

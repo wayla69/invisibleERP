@@ -2,11 +2,11 @@ import { pgTable, bigserial, bigint, text, timestamp, index, unique } from 'driz
 import { tenants } from './tenants';
 import { encryptedText } from '../encrypted-column';
 
-// GRC-3 — Sensitive master-data single-record maker-checker (control MDM-01, migration 0336).
+// GRC-3 — Sensitive master-data single-record maker-checker (control MDM-01, migration 0340).
 // The bulk master-data import already had a maker-checker (masterdata_import_batches, G5/G7/G8) and a
 // vendor's bank_name/bank_account got a dedicated dual-control in 0270 (vendor_bank_change_requests). But a
 // NORMAL single-record UI/CRUD edit of a SENSITIVE vendor field — its credit limit, its payment terms, or
-// the payee account-holder name (bank_account_name, added in 0336) — still wrote the master directly with no
+// the payee account-holder name (bank_account_name, added in 0340) — still wrote the master directly with no
 // second check. Redirecting a supplier's payee details is the classic disbursement-fraud / BEC vector, so
 // this stages such an edit as `pending` and applies it to the entity ONLY when a DISTINCT user approves it
 // (approved_by ≠ requested_by → 403 SOD_SELF_APPROVAL). Reject discards it; the master is untouched.

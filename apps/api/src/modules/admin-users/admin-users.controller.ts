@@ -16,6 +16,7 @@ const UpdateBody = z.object({ role: z.enum(ROLES).optional(), customer_name: z.s
 const ResetBody = z.object({ password: z.string().min(6) });
 const CertifyBody = z.object({ period: z.string().min(1), notes: z.string().optional() });
 const RejectExcBody = z.object({ reason: z.string().max(500).optional() });
+const DecideItemBody = z.object({ decision: z.enum(['keep', 'revoke']), notes: z.string().max(500).optional() });
 
 @Controller('api/admin/users')
 @Permissions('users')
@@ -32,6 +33,15 @@ export class AdminUsersController {
     reply.header('Content-Type', 'text/csv; charset=utf-8').header('Content-Disposition', 'attachment; filename="access-review.csv"').send(csv);
   }
   @Post('access-review/certify') certifyReview(@Body(new ZodValidationPipe(CertifyBody)) b: z.infer<typeof CertifyBody>, @CurrentUser() u: JwtUser) { return this.svc.certifyReview(b, u); }
+
+  // ── ITGC-AC-21: line-item Access Recertification Campaign (closed-loop revocation) ──
+  // Open a campaign (snapshots every user's effective access as a keep/revoke worklist); disposition each
+  // user in-app; certify — which asserts all lines decided (ITEMS_PENDING else) and AUTO-REMOVES the grants
+  // of every 'revoke' line (the closed loop).
+  @Post('access-review/campaign') openCampaign(@Body(new ZodValidationPipe(CertifyBody)) b: z.infer<typeof CertifyBody>, @CurrentUser() u: JwtUser) { return this.svc.openCampaign(b, u); }
+  @Get('access-review/campaign/:id') getCampaign(@Param('id') id: string) { return this.svc.getCampaign(Number(id)); }
+  @Post('access-review/campaign/:id/items/:username') decideItem(@Param('id') id: string, @Param('username') username: string, @Body(new ZodValidationPipe(DecideItemBody)) b: z.infer<typeof DecideItemBody>, @CurrentUser() u: JwtUser) { return this.svc.decideItem(Number(id), username, b, u); }
+  @Post('access-review/campaign/:id/certify') certifyCampaign(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.certifyCampaign(Number(id), u); }
 
   // ── ITGC-AC-09 (audit G11): two-person SoD-exception maker-checker ──
   // A SoD-conflicting grant is staged (by create/update with allow_sod_override + reason) and listed here;

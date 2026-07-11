@@ -88,6 +88,7 @@ import { LotsModule } from './modules/lots/lots.module';
 import { ScanModule } from './modules/scan/scan.module';
 import { ImagesModule } from './modules/images/images.module';
 import { AdminUsersModule } from './modules/admin-users/admin-users.module';
+import { SodRegisterModule } from './modules/sod-register/sod-register.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { ProjectsModule } from './modules/projects/projects.module';
@@ -116,6 +117,7 @@ import { EmailCaptureModule } from './modules/email-capture/email-capture.module
 import { NlAnalyticsModule } from './modules/nl-analytics/nl-analytics.module';
 import { AiConfigModule } from './modules/ai-config/ai-config.module';
 import { ControlsModule } from './modules/controls/controls.module';
+import { ControlConsoleModule } from './modules/control-console/control-console.module';
 import { DocumentTemplatesModule } from './modules/document-templates/document-templates.module';
 import { CustomObjectsModule } from './modules/custom-objects/custom-objects.module';
 import { ObjectLayoutsModule } from './modules/object-layouts/object-layouts.module';
@@ -224,6 +226,7 @@ import { MailModule } from './modules/mail/mail.module';
     ScanModule,
     ImagesModule,
     AdminUsersModule,
+    SodRegisterModule,
     PayrollModule,
     ManufacturingModule,
     ProjectsModule,
@@ -257,6 +260,7 @@ import { MailModule } from './modules/mail/mail.module';
     NlAnalyticsModule,
     AiConfigModule,
     ControlsModule,
+    ControlConsoleModule,
     I18nModule,
     ThemeModule,
     OnboardingModule,
