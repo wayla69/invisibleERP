@@ -109,16 +109,24 @@ export class PayrollService implements OnModuleInit {
 
     // GL: Dr 5600 salaries + 5610 employer-SSO (+ 5620 employer-PF) / Cr 1000 net + 2350 SSO-payable
     // + 2360 WHT-payable (+ 2370 PF-payable). Balanced: Dr (gross+erSSO+erPF) == Cr (net+ssoBoth+wht+pfBoth).
+    // docs/40 step 4: a tenant posting-rule (PAYROLL.* event + role) re-maps a leg's account; the literal
+    // stays the fallback so an un-configured tenant posts exactly as before. The cash leg has no role.
+    const [ovrGross, ovrSso, ovrWht, ovrPf] = await Promise.all([
+      this.ledger.postingOverrides('PAYROLL.GROSS', tenantId),
+      this.ledger.postingOverrides('PAYROLL.SSO', tenantId),
+      this.ledger.postingOverrides('PAYROLL.WHT', tenantId),
+      this.ledger.postingOverrides('PAYROLL.PF', tenantId),
+    ]);
     const lines: { account_code: string; debit?: number; credit?: number; memo?: string }[] = [
-      { account_code: '5600', debit: grossTotal, memo: 'Salaries + OT − unpaid' },
-      { account_code: '5610', debit: ssoEr, memo: 'Employer social security' },
+      { account_code: ovrGross.wages_expense ?? '5600', debit: grossTotal, memo: 'Salaries + OT − unpaid' },
+      { account_code: ovrSso.sso_expense ?? '5610', debit: ssoEr, memo: 'Employer social security' },
       { account_code: '1000', credit: netTotal, memo: 'Net pay' },
-      { account_code: '2350', credit: r2(ssoEe + ssoEr), memo: 'Social security payable' },
-      { account_code: '2360', credit: whtTotal, memo: 'Payroll WHT payable (PND1)' },
+      { account_code: ovrSso.sso_payable ?? '2350', credit: r2(ssoEe + ssoEr), memo: 'Social security payable' },
+      { account_code: ovrWht.wht_payable ?? '2360', credit: whtTotal, memo: 'Payroll WHT payable (PND1)' },
     ];
     if (pfEr > 0 || pfEe > 0) {
-      lines.push({ account_code: '5620', debit: pfEr, memo: 'Employer provident fund' });
-      lines.push({ account_code: '2370', credit: r2(pfEe + pfEr), memo: 'Provident fund payable' });
+      lines.push({ account_code: ovrPf.pf_expense ?? '5620', debit: pfEr, memo: 'Employer provident fund' });
+      lines.push({ account_code: ovrPf.pf_payable ?? '2370', credit: r2(pfEe + pfEr), memo: 'Provident fund payable' });
     }
     // PAY-03: post the JE as a DRAFT (excluded from balances) — a DIFFERENT user must approve it (below)
     // before it becomes effective. The run record mirrors this with status 'PendingApproval'.

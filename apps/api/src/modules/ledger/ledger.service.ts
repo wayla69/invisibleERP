@@ -2,7 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException, type OnModu
 import { sql, eq, and, desc, notInArray, gt, lte, inArray, isNotNull } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, tenantAccounts, glPeriodBalances, branches, projects, departments } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, tenantAccounts, glPeriodBalances, branches, projects, departments, postingRules } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
@@ -117,6 +117,26 @@ export class LedgerService implements OnModuleInit {
   // the runner's own explicit seed (or main.ts's) covers it later. Idempotent (onConflictDoNothing).
   async onModuleInit() {
     try { await this.seedChartOfAccounts(); } catch { /* DB not ready — explicit seed runs later */ }
+  }
+
+  // ───────────────────── Posting-rule account overrides (docs/40 step 4) ─────────────────────
+  // A tenant's ACTIVE posting_rules rows (event_type + role — maintained on /setup/posting-rules) re-map
+  // where a recurring system posting lands, per company, WITHOUT a code change. Only TENANT-scoped rows
+  // apply: the NULL-tenant rows seeded by 0158 are display defaults that pre-date the real posting paths
+  // (some drift from the literals — e.g. PAYROLL.GROSS's seed credits AP 2000 while payroll actually pays
+  // cash 1000), so they must never shadow the code. Callers keep their literal as the fallback: no
+  // override ⇒ byte-identical behaviour (parity). A typo'd override account is caught fail-closed by
+  // postEntry's account-universe guard (INVALID_POSTING_ACCOUNT), never posted.
+  async postingOverrides(eventType: string, tenantId?: number | null): Promise<Record<string, string>> {
+    const tid = tenantId ?? currentTenantStore()?.tenantId ?? null;
+    if (tid == null) return {};
+    const rows = await this.db
+      .select({ role: postingRules.role, accountCode: postingRules.accountCode })
+      .from(postingRules)
+      .where(and(eq(postingRules.eventType, eventType), eq(postingRules.tenantId, tid), eq(postingRules.active, true)));
+    const out: Record<string, string> = {};
+    for (const r of rows) if (r.accountCode) out[r.role] = r.accountCode;
+    return out;
   }
 
   // ───────────────────── Chart of Accounts ─────────────────────
