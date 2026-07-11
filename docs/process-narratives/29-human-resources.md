@@ -595,3 +595,108 @@ flowchart TD
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-07-11 | HR-9 | Initial workforce-analytics narrative + HR-09 detective control matrix (five BI report types; no migration) |
+
+---
+
+## HR-7 — Training & Certifications (control HR-07)
+
+> Self-contained HCM Wave 3 section (docs/42). Training & competency control on the `payroll.employees`
+> identity (emp_code). Merges keep-both with the other HR waves.
+
+### HR7.1 Document control (HR-7)
+
+| Field | Value |
+|---|---|
+| Process ID | PN-29-HR / HR-7 |
+| Process owner | `<<HR Manager / Learning & Development>>` |
+| Approver | `<<CHRO / Compliance>>` |
+| Version | **0.1 DRAFT** |
+| Related RCM control | HR-07 (mandatory-training / certification compliance) |
+| Related policy | `compliance/policies/03-delegation-of-authority.md` |
+
+### HR7.2 Narrative
+
+Training is administered on a per-tenant **course catalogue** (`training_courses`) — each course carries a
+`category` (`safety`/`compliance`/`technical`/`general`), an `is_mandatory` flag, a `requires_score` flag, and
+a `validity_months` recert cadence (NULL/0 → the resulting certification never expires). A course is delivered
+through scheduled **sessions** (`training_sessions`, `session_date`/instructor/capacity); an employee is booked
+to a session through an **enrollment** (`training_enrollments`, status `enrolled` → `attended` → `completed` |
+`failed`). Completion drives the **HR-07 control**:
+
+1. **Score gate at completion (preventive).** Marking an enrollment `completed` on a course flagged
+   `requires_score` **requires a score** — a completion with no score is **blocked** (`SCORE_REQUIRED`, 400).
+   Completing an absent / foreign enrollment is rejected (`ENROLLMENT_NOT_FOUND`, 404).
+2. **Certification mint on completion (automated).** A successful completion of a course that either carries a
+   recert cadence (`validity_months`) **or** is `is_mandatory` **mints/renews** a `certifications` row with
+   `expiry_date = completed_date + validity_months` (a mandatory course with no cadence mints a **non-expiring**
+   credential). A renewal **supersedes** the employee's prior active credential for that course so only the
+   freshest is evaluated, and the mint is **audit-logged** (a `doc_status_log` `TRAINCERT` row) in addition to
+   the append-only `audit_log`.
+3. **Compliance detective read.** `GET /api/hcm/training/compliance?days=N` returns every employee whose
+   **mandatory-course** certification is **expired or expiring within N days** (default 30) — the periodic
+   recurring-training compliance evidence. A non-expiring mandatory credential is compliant and is never
+   surfaced.
+
+**Certifications.** `certifications` is the credential register (cert_code/name, `issued_date`,
+`expiry_date` nullable, `source_course_id`, `is_mandatory`, status `active`/`expired`/`superseded`; the
+`expired` flag is derived at read time from `expiry_date`). Certification and enrollment reads are `ess`
+**own-scoped** (an employee sees only their own). All four tables are tenant-scoped (RLS) so the catalogue,
+sessions, enrollments and certifications never leak across companies.
+
+### HR7.3 Workflow
+
+```mermaid
+flowchart TD
+  A[HR creates course + session] --> B[Enroll employee in session]
+  B --> C{Mark completed}
+  C --> D{course requires_score and no score?}
+  D -- yes --> X[Block SCORE_REQUIRED]
+  D -- no --> E[status: completed]
+  E --> F{course mandatory or has validity_months?}
+  F -- no --> G[No certification minted]
+  F -- yes --> H[Mint/renew certification\nexpiry = completed_date + validity_months\nsupersede prior active + TRAINCERT audit]
+  H --> I{compliance read: mandatory cert\nexpired or expiring within N days?}
+  I -- yes --> J[Surface on compliance report]
+  I -- no --> K[Compliant]
+```
+
+### HR7.4 Endpoints (application)
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET/POST /api/hcm/training/courses` | read `hr`/`hr_admin`/`exec`; write `hr`/`hr_admin` | List / create courses |
+| `GET/POST /api/hcm/training/sessions` | read `hr`/`hr_admin`/`exec`; write `hr`/`hr_admin` | List / schedule sessions |
+| `GET/POST /api/hcm/training/enrollments` | read `hr`/`hr_admin`/`exec`/`ess` (own); write `hr`/`hr_admin` | List / enroll employees |
+| `POST /api/hcm/training/enrollments/:id/complete` | `hr`/`hr_admin` | Complete (SCORE_REQUIRED gate → mint certification) |
+| `GET /api/hcm/training/certifications` | `hr`/`hr_admin`/`exec`/`ess` (own) | Certification register (derived expired flag) |
+| `GET /api/hcm/training/compliance?days=N` | `hr`/`hr_admin`/`exec` | Expired / expiring mandatory certifications (detective) |
+
+### HR7.5 Error codes
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `SCORE_REQUIRED` | 400 | A `requires_score` course cannot be completed without a score |
+| `COURSE_EXISTS` | 400 | Duplicate `course_code` for the tenant |
+| `ALREADY_ENROLLED` | 400 | Duplicate enrollment on the same session |
+| `BAD_VALIDITY` | 400 | `validity_months` is negative |
+| `ENROLLMENT_NOT_FOUND` | 404 | Referenced enrollment not found (or foreign) |
+| `COURSE_NOT_FOUND` / `SESSION_NOT_FOUND` / `EMP_NOT_FOUND` | 404 | Referenced course / session / employee not found |
+
+### HR7.6 Control matrix
+
+| Control | Assertion | What it prevents | Enforcement |
+|---|---|---|---|
+| **HR-07** | Completeness / Accuracy | A mandatory or safety-critical certification lapsing unnoticed, or a course booked complete without its required assessment | `complete` blocks a `requires_score` completion with no score (`SCORE_REQUIRED`); a completion mints/renews a `certifications` row (`expiry = completed_date + validity_months`, supersede + `TRAINCERT` audit); `compliance` lists expired/expiring mandatory certifications for periodic review |
+
+### HR7.7 System references
+
+- Service/controller: `apps/api/src/modules/hcm/hcm-training.service.ts`, `hcm-training.controller.ts`
+- Schema: `apps/api/src/database/schema/hcm-training.ts`; migration `apps/api/drizzle/0326_hcm_training.sql`
+- Web: `apps/web/src/app/(internal)/hcm/training/page.tsx` (`/hcm/training`)
+- ToE harness: `tools/cutover/src/hcm-training.ts` (27 checks)
+
+### HR7.8 Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-07-11 | HR-7 | Initial training & certifications narrative + HR-07 control matrix (migration 0326) |
