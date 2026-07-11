@@ -337,6 +337,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Settings / Admin ──────────────────────────────────────────────────────
   'nav.onboarding': { th: 'เริ่มต้นใช้งาน (Onboarding)', en: 'Onboarding' },
   'nav.admin_users': { th: 'จัดการผู้ใช้', en: 'User Management' },
+  'nav.access_recert': { th: 'ทบทวนรับรองสิทธิ์', en: 'Access Recertification' },
   'nav.setup': { th: 'ตั้งค่ากิจการ', en: 'Company Setup' },
   'nav.billing': { th: 'แพ็กเกจ', en: 'Billing' },
   'nav.settings_page': { th: 'ตั้งค่า', en: 'Settings' },

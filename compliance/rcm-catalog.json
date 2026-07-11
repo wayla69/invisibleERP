@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 241,
+    "total": 242,
     "by_status": {
-      "Implemented": 238,
+      "Implemented": 239,
       "Partial": 3
     },
     "by_family": {
@@ -17,7 +17,7 @@
       "Expenditure": 15,
       "Fixed Assets": 8,
       "General Ledger": 24,
-      "ITGC · Access": 20,
+      "ITGC · Access": 21,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
@@ -548,6 +548,25 @@
       "tod": "Inspect the TTL on issue + the expiry check on verify.",
       "toe": "Re-perform: a key past expires_at is rejected (treated as revoked); a NULL-expiry key keeps working.",
       "evidence": "API-key expiry",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "ITGC-AC-21",
+      "cycle": "ITGC · Access",
+      "category": "ITGC",
+      "fsli": "All",
+      "risk": "The periodic access review (ITGC-AC-08) is a BLANKET period sign-off — one attestation row with counts, and per-user keep/revoke exists only as blank columns in an offline CSV, so there is no in-app line-item disposition and, critically, no follow-through: a decision to REMOVE a user's access is never actually applied (access creep and terminated-user access persist despite the review).",
+      "assertion": "Restricted access",
+      "description": "Line-item Access Recertification Campaign with CLOSED-LOOP revocation (GRC-2). Opening a campaign snapshots every in-scope user's effective permissions into access_review_items as `pending`; the reviewer keeps or revokes EACH user in-app (decision keep|revoke + note); certification asserts every line is decided (ITEMS_PENDING otherwise) and, for each `revoke`, ACTUALLY removes that user's user_permissions grants and bumps the token watermark (immediate effect, docs/27 R2-2) — recording actioned=true. The campaign is then frozen (status open → in_review → certified; a certified campaign rejects further edits, CAMPAIGN_CERTIFIED) and every line is retained as line-item evidence with the disposing reviewer. Tenant-scoped (RLS); the legacy blanket certify + CSV export remain for back-compat. Deepens ITGC-AC-08 from an attestation into an enforced recertification.",
+      "prev_det": "Prev/Det",
+      "nature": "Automated",
+      "frequency": "Quarterly",
+      "owner": "Controller / IT",
+      "coso": "P11/P16",
+      "code_reference": "admin-users.service.ts (openCampaign/getCampaign/decideItem/certifyCampaign — closed-loop revoke); admin-users.controller.ts (POST access-review/campaign[/:id/items/:username|/certify], GET .../campaign/:id); schema/access-review.ts (access_review_items + access_reviews.status/items_total/items_revoked) + drizzle/0337_access_review_items.sql (tenant-scoped RLS); cutover/access-recert.ts (ToE)",
+      "tod": "Inspect the campaign lifecycle, the all-lines-decided gate, and the auto-revoke on certification.",
+      "toe": "Re-perform: opening a campaign snapshots the population as pending; certify is BLOCKED while any line is pending (ITEMS_PENDING); a 'revoke' decision on certification actually removes the user's permission grants (asserted against the DB — the closed loop) and stamps actioned=true; a certified campaign is frozen; RLS isolates a campaign to its tenant — re-performed by the access-recert harness.",
+      "evidence": "Recertification campaign + closed-loop revoke ToE (access-recert)",
       "status": "Implemented"
     },
     {
