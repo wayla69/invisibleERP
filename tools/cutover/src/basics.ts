@@ -1921,6 +1921,20 @@ async function main() {
   ok('PR-3: a new prepaid schedule stamps the approved PREPAID.AMORTIZE override as its expense account',
     (ppdList.schedules ?? []).some((sch: any) => sch.name === 'PR-3 prepaid (override)' && sch.expense_account === '5721'), `n=${ppdList.count}`);
 
+  // ── docs/43 PR-8 — accounts.cf_bucket drives the indirect SCF (column ?? CF_CLASSIFY map) ──
+  // A NEW balance-sheet account created with its own bucket classifies itself: a loan drawdown on 2650
+  // (cf_bucket=financing, is_current=false) lands in the FINANCING section — before 0346 it fell to the
+  // type-based operating fallback and was surfaced "unclassified".
+  const coa2650 = await inj('POST', '/api/ledger/accounts', admin, { code: '2650', name: 'Long-term Bank Loan (PR-8)', type: 'Liability', cfBucket: 'financing', cfLabel: 'เงินกู้ยืมระยะยาว', isCurrent: false });
+  ok('PR-8: COA create accepts cfBucket/isCurrent self-classification', coa2650.status === 201 && coa2650.json?.cfBucket === 'financing', `${coa2650.status} ${coa2650.json?.cfBucket}`);
+  const loanJe = await inj('POST', '/api/ledger/journal', admin, { date: '2027-03-05', source: 'Manual', memo: 'PR-8 loan drawdown', lines: [{ account_code: '1010', debit: 250000 }, { account_code: '2650', credit: 250000 }] });
+  await inj('POST', `/api/ledger/journal/${loanJe.json?.entry_no}/approve`, mgr);
+  const scf8 = (await inj('GET', '/api/ledger/cash-flow?from=2027-03-01&to=2027-03-31', admin)).json;
+  const finLine = (scf8.financing?.lines ?? []).find((l: any) => l.account_code === '2650');
+  ok('PR-8: the loan drawdown classifies under FINANCING via the account column (not unclassified/operating)',
+    finLine != null && near(finLine.amount, 250000) && !(scf8.unclassified_accounts ?? []).includes('2650'),
+    JSON.stringify({ fin: finLine, uncls: scf8.unclassified_accounts }));
+
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) + PR-3 category-grain asset accounts & dispose/prepaid overrides ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
