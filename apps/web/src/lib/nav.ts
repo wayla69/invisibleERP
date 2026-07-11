@@ -233,6 +233,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.customer_master', href: '/customers', icon: Users, perms: ['crm', 'ar', 'exec'] },
       { label: 'nav.cpq', href: '/cpq', icon: FileSignature, perms: ['marketing', 'exec'] },
       { label: 'nav.service', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
+      { label: 'nav.service_renewals', href: '/service/renewals', icon: CalendarClock, perms: ['marketing', 'exec'] },
       { label: 'nav.marketing', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
       { label: 'nav.campaigns', href: '/campaigns', icon: Megaphone, perms: ['marketing', 'crm'] },
     ],
