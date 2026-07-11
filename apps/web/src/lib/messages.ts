@@ -19,6 +19,7 @@ import { CATALOG as CAT_MISC } from './i18n-catalog/misc';
 import { CATALOG as CAT_CONSTRUCTION } from './i18n-catalog/construction';
 import { CATALOG as CAT_PLATFORM } from './i18n-catalog/platform';
 import { CATALOG as CAT_CRMX } from './i18n-catalog/crmx';
+import { CATALOG as CAT_GOVERNANCE } from './i18n-catalog/governance';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -249,6 +250,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
 
   // ── HR & Payroll ──────────────────────────────────────────────────────────
   'nav.hcm': { th: 'บุคลากร (HR)', en: 'People (HR)' },
+  'nav.hcm_org': { th: 'โครงสร้างองค์กร & ตำแหน่ง', en: 'Org & Positions' },
   'nav.scheduling': { th: 'จัดตารางเวร & แรงงาน', en: 'Scheduling & Labour' },
   'nav.ot_rules': { th: 'กฎ OT & แจ้งเตือนแรงงาน', en: 'OT Rules & Labour Alerts' },
   'nav.payroll': { th: 'เงินเดือน (Payroll)', en: 'Payroll' },
@@ -1580,5 +1582,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE,
 );

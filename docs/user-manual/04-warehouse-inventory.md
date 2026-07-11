@@ -139,13 +139,25 @@ fills the item field for you to confirm the quantity).
 
 **Expected result:** Received stock is placed and available to pick.
 
+**Outbound: wave → pick → pack → ship.** On `/wms`:
+1. **Wave** batches one or more orders into pick lists.
+2. **Pick** — open the **หยิบ (Pick)** tab, choose a pick list still to be picked, and
+   confirm the counted quantity per line (each line is pre-filled with the requested
+   quantity and its suggested bin; adjust down to record a short). Submitting decrements
+   bin stock and, once every line is picked, the list becomes packable.
+3. **Pack** turns a fully-picked list into a shipment.
+4. **Ship** dispatches the packed shipment with a carrier + tracking number.
+
 > **Outbound tabs pick documents from pending lists — no typed numbers.** On `/wms`:
 > the **Wave** tab's order-ref field is a dropdown of orders **not yet waved**
-> (`GET /api/wms/wave-candidates` — POS/SO sales and open dine-in orders); the **Pack**
-> tab lists only **fully-picked** pick lists (`GET /api/wms/picks?status=Picked`); the
-> **Ship** tab lists only **packed** shipments (`GET /api/wms/shipments?status=Packed`).
-> Completing an action removes the document from its list automatically, so the dropdown
-> doubles as the team's to-do list. All three reads are tenant-scoped and read-only.
+> (`GET /api/wms/wave-candidates` — POS/SO sales and open dine-in orders); the **Pick**
+> tab lists pick lists still **open or partially picked**
+> (`GET /api/wms/picks?status=Open,Picking`) and loads a list's lines via
+> `GET /api/wms/picks/:pickNo`; the **Pack** tab lists only **fully-picked** pick lists
+> (`GET /api/wms/picks?status=Picked`); the **Ship** tab lists only **packed** shipments
+> (`GET /api/wms/shipments?status=Packed`). Completing an action removes the document from
+> its list automatically, so the dropdown doubles as the team's to-do list. All reads are
+> tenant-scoped and read-only.
 
 ---
 

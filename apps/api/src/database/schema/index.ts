@@ -88,6 +88,7 @@ export * from './realestate';
 export * from './mfg-depth';
 export * from './hcm';
 export * from './hcm-perf';
+export * from './hcm-org';
 export * from './pricing';
 export * from './pos-fiscal';
 export * from './pos-audit';

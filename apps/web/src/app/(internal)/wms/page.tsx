@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Boxes, MapPin, PackageCheck, Plus, Truck, Layers, Search, Boxes as Cube } from 'lucide-react';
+import { Boxes, MapPin, PackageCheck, Plus, Truck, Layers, Search, Boxes as Cube, ClipboardCheck } from 'lucide-react';
 import type { LayoutBin } from '@/components/warehouse-3d';
 
 // react-three-fiber renders to <canvas> using browser-only APIs → load client-side only (no SSR).
@@ -43,6 +43,7 @@ export default function WmsPage() {
           { key: 'layout', label: t('iv.wms_tab_layout'), content: <Layout3DTab /> },
           { key: 'inbound', label: t('iv.wms_tab_inbound'), content: <PutawayTab /> },
           { key: 'wave', label: t('iv.wms_tab_wave'), content: <WaveTab /> },
+          { key: 'pick', label: t('iv.wms_tab_pick'), content: <PickTab /> },
           { key: 'pack', label: t('iv.wms_tab_pack'), content: <PackTab /> },
           { key: 'ship', label: t('iv.wms_tab_ship'), content: <ShipTab /> },
         ]}
@@ -337,6 +338,95 @@ function WaveTab() {
         <Button disabled={mut.isPending || !sourceRef} onClick={() => mut.mutate()}>
           <Layers className="size-4" /> {mut.isPending ? t('iv.wms_creating') : t('iv.wms_create_wave')}
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ───────────────────────── Pick ─────────────────────────
+function PickTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [pickNo, setPickNo] = useState('');
+  const [qty, setQty] = useState<Record<number, string>>({});
+  // Open + partially-picked (Picking) lists still need picking — pull both in one call.
+  const picks = useQuery<any>({ queryKey: ['wms-picks', 'to-pick'], queryFn: () => api('/api/wms/picks?status=Open,Picking') });
+  const options = (picks.data?.picks ?? []).map((p: any) => ({ value: p.pick_no, label: p.source_ref || undefined }));
+  const detail = useQuery<any>({
+    queryKey: ['wms-pick', pickNo],
+    queryFn: () => api(`/api/wms/picks/${encodeURIComponent(pickNo)}`),
+    enabled: !!pickNo,
+  });
+  const lines: any[] = detail.data?.lines ?? [];
+  const openLines = lines.filter((l) => l.status !== 'Picked');
+
+  // Default the counted qty to the requested qty when a pick loads (a full pick is the common case; the
+  // picker adjusts down to record a short).
+  useEffect(() => {
+    if (!detail.data) return;
+    const init: Record<number, string> = {};
+    for (const l of detail.data.lines as any[]) if (l.status !== 'Picked') init[l.pick_line_id] = String(l.requested_qty);
+    setQty(init);
+  }, [detail.data]);
+
+  const mut = useMutation({
+    mutationFn: () =>
+      api<{ pick_no: string; status: string; picked: number }>(`/api/wms/picks/${encodeURIComponent(pickNo)}/pick`, {
+        method: 'POST',
+        body: JSON.stringify({ lines: openLines.map((l) => ({ pick_line_id: l.pick_line_id, picked_qty: Number(qty[l.pick_line_id] ?? 0) })) }),
+      }),
+    onSuccess: (r) => {
+      notifySuccess(t('iv.wms_pick_result', { status: r.status, picked: num(r.picked) }));
+      qc.invalidateQueries({ queryKey: ['wms-picks'] });
+      qc.invalidateQueries({ queryKey: ['wms-pick', pickNo] });
+      if (r.status === 'Picked') setPickNo('');
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const canSubmit = !!pickNo && openLines.length > 0 && openLines.every((l) => {
+    const v = Number(qty[l.pick_line_id]);
+    return Number.isFinite(v) && v >= 0;
+  });
+
+  return (
+    <Card className="max-w-3xl gap-4">
+      <CardHeader>
+        <CardTitle className="text-base">{t('iv.wms_pick_title')}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">{t('iv.wms_pick_desc')}</p>
+        <div className="grid max-w-xs gap-2">
+          <Label htmlFor="pick-no">{t('iv.wms_pick_no_label')}</Label>
+          <DocSelect id="pick-no" value={pickNo} onValueChange={(v) => { setPickNo(v); setQty({}); }} options={options} placeholder={t('common.doc_select_ph')} emptyText={t('common.doc_none')} />
+        </div>
+        {pickNo && (
+          <StateView q={detail}>
+            {lines.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t('iv.wms_pick_no_lines')}</p>
+            ) : (
+              <>
+                <DataTable
+                  rows={lines}
+                  rowKey={(r: any) => r.pick_line_id}
+                  columns={[
+                    { key: 'item_id', label: t('iv.wms_col_item') },
+                    { key: 'description', label: t('iv.wms_col_desc'), render: (r: any) => r.description || '—' },
+                    { key: 'bin_code', label: t('iv.wms_col_bin_code'), render: (r: any) => r.bin_code || '—' },
+                    { key: 'requested_qty', label: t('iv.wms_col_requested'), align: 'right', render: (r: any) => <span className="tabular">{num(r.requested_qty)}</span> },
+                    { key: 'picked', label: t('iv.wms_col_picked'), align: 'right', render: (r: any) => r.status === 'Picked'
+                      ? <span className="tabular">{num(r.picked_qty)}</span>
+                      : <Input type="number" min="0" className="ml-auto w-24 text-right" value={qty[r.pick_line_id] ?? ''} onChange={(e) => setQty((p) => ({ ...p, [r.pick_line_id]: e.target.value }))} /> },
+                    { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.status === 'Picked' ? 'success' : r.status === 'Short' ? 'warning' : 'muted'}>{r.status}</Badge> },
+                  ]}
+                />
+                <Button disabled={mut.isPending || !canSubmit} onClick={() => mut.mutate()}>
+                  <ClipboardCheck className="size-4" /> {mut.isPending ? t('iv.wms_picking') : t('iv.wms_pick_confirm')}
+                </Button>
+              </>
+            )}
+          </StateView>
+        )}
       </CardContent>
     </Card>
   );

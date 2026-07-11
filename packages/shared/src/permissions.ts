@@ -13,9 +13,6 @@ export const PERMISSIONS = [
   'branch',    // Multi-branch — manage outlets, consolidate branch sales, master-bundle for offline POS
   'ess',           // Phase D3 — employee self-service (own timesheets/leave/payslips/expenses)
   'vendor_portal', // Phase D3 — supplier portal (own POs, acknowledge, submit invoice)
-  // HR / HCM depth (docs/42): 'hr' = day-to-day people ops (cycles, goals, reviews, manager ratings);
-  // 'hr_admin' = the elevated HR duty that may close cycles and sign off appraisals (HR-03 sign-off SoD).
-  'hr', 'hr_admin',
   // ── SoD sub-permissions (single-duty splits of coarse permissions; see PERMISSION_IMPLICATIONS) ──
   'pos_sell', 'pos_refund', 'pos_till', 'pos_close',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
@@ -39,6 +36,13 @@ export const PERMISSIONS = [
   //    contract (maker-checker on the price/discount authority). re_transfer authorises ownership transfer
   //    (RE-04 — recognises revenue). Ungranted ⇒ the vertical is invisible. ──
   're_sales', 're_contract_approve', 're_transfer',
+  // ── HR / HCM organisation (docs/42 HR-1) — org structure, positions & headcount governance (HR-01). `hr` is
+  //    a read duty (view the org chart / departments / positions); `hr_admin` is the maintain duty (create
+  //    departments/positions/assignments). Writes gate on hr_admin/exec; reads on hr/hr_admin/exec. The
+  //    headcount-governance override (assign beyond a position's budgeted_headcount) is reserved to `exec`.
+  //    'hr'/'hr_admin' also carry the HCM depth duties (docs/42 HR-3): people ops (cycles/goals/reviews) and
+  //    the elevated duty that closes cycles + signs off appraisals (HR-03 sign-off SoD). ──
+  'hr', 'hr_admin',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
