@@ -125,6 +125,7 @@
     "service": "tsx src/service.ts",
     "contract-renewal": "tsx src/contract-renewal.ts",
     "warranty": "tsx src/warranty.ts",
+    "quality-capa": "tsx src/quality-capa.ts",
     "quality-coa": "tsx src/quality-coa.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",

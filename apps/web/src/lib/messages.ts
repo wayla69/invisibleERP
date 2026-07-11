@@ -208,6 +208,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.aps_schedule': { th: 'จัดตารางการผลิต (APS)', en: 'Production Schedule (APS)' },
   'nav.quality_ncr': { th: 'ของไม่เป็นไปตามข้อกำหนด (NCR)', en: 'Non-Conformance (NCR)' },
   'nav.eam': { th: 'ซ่อมบำรุงสินทรัพย์ (EAM)', en: 'Asset Maintenance (EAM)' },
+  'nav.capa': { th: 'การแก้ไข & ป้องกัน (CAPA)', en: 'Corrective/Preventive (CAPA)' },
 
   // ── Finance / AR-AP ───────────────────────────────────────────────────────
   'nav.finance': { th: 'การเงิน', en: 'Finance' },

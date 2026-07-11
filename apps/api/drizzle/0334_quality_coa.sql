@@ -1,4 +1,4 @@
--- 0333_quality_coa — QMS-3 (QMS audit): Certificate of Analysis (CoA) capture + out-of-spec release approval.
+-- 0334_quality_coa — QMS-3 (QMS audit): Certificate of Analysis (CoA) capture + out-of-spec release approval.
 -- Lots exist (lot_ledger, read-only, with a Quarantine status value never written) but there is no concept of
 -- a quality spec / measured characteristic / Certificate of Analysis, and no gate on releasing an out-of-spec
 -- lot. This adds, ALONGSIDE the read-only lot ledger (which is NOT rewritten — CoA references a lot_no text):

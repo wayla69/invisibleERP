@@ -5,7 +5,7 @@ import { tenants } from './tenants';
 // Lots exist (lot_ledger, read-only) but there is no concept of a quality spec, a measured characteristic,
 // or a Certificate of Analysis, and no gate on releasing an out-of-spec lot. These tables add CoA capture
 // against a received/produced lot (text lot_no ref — the lot ledger is NOT rewritten), with a maker-checker
-// deviation approval to release an out-of-spec lot. Tenant-scoped (canonical 0232 RLS loop; migration 0333).
+// deviation approval to release an out-of-spec lot. Tenant-scoped (canonical 0232 RLS loop; migration 0334).
 
 // Per-item quality specification: an acceptable range [min,max] for a measured characteristic.
 export const qualitySpecs = pgTable(

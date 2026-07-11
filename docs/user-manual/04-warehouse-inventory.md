@@ -446,6 +446,49 @@ order can't sell the same units.
 **Errors:** `INSUFFICIENT_ATP` (the reserve/adjust exceeds available-to-promise — reduce the
 quantity or wait for a scheduled receipt).
 
+## 12. CAPA — corrective & preventive actions with effectiveness sign-off (control QC-02)
+
+**Route:** *Production → การแก้ไข & ป้องกัน (CAPA)* — `/quality/capa`.
+**Required role/permission:** view — `quality`, `quality_approve` or `exec`; open/own a CAPA and its
+actions — `quality` (or `exec`); **verify / close** — `quality_approve` (or `exec`).
+
+Where **waste & spoilage** (§7a) or a supplier **claim** dispositions a *single* defect, a **CAPA**
+manages the *loop* that stops it recurring: root cause → action plan → **independent** effectiveness
+verification → closure.
+
+1. **Open a CAPA.** On the **ทะเบียน CAPA** tab fill the title, problem statement, root cause, the
+   *action type* (corrective / preventive / both) and a *target date*. Optionally link its origin with a
+   *source* (NCR, supplier claim, complaint, audit or manual) + a free-text reference — this is just a
+   pointer, so a CAPA can be raised even before the source module exists. Saving mints a **CAPA-#####**
+   number; you are recorded as the owner.
+2. **Plan the actions.** Click a CAPA row to open it, then add **action items** (description + due date).
+   Adding the first action moves the CAPA **open → in_progress**. Tick **ทำเสร็จ (mark done)** as each is
+   completed.
+3. **Submit for verification.** When the plan is complete press **ส่งตรวจสอบ** — the CAPA moves to
+   **pending_verification**. (A CAPA with no action plan is refused — add at least one action first.)
+4. **Independent effectiveness sign-off (the control, QC-02).** A **different** person holding
+   `quality_approve`/`exec` opens the CAPA, picks a result and presses **ยืนยันประสิทธิผล (Verify)**:
+   - **effective** → the CAPA **closes** (the result + your name are stamped on it). This is allowed
+     **only** when every action is done and you are **not** the owner/creator.
+   - **ineffective** → the CAPA **reopens** to *in_progress* — the root cause was not resolved; the loop
+     continues.
+   The verifier may instead **ตีกลับ (Reject)** the verification with a reason to send it back.
+5. **Detective — overdue.** The **เกินกำหนด** tab lists open CAPAs whose target date has passed, so a
+   slipping corrective-action loop is caught (`GET /api/quality/capa/overdue?days=N`).
+
+**Why the split?** One person cannot both own a corrective action and sign off that it worked — that would
+let a case be closed with the underlying problem still live. The owner/creator and the effectiveness
+verifier **must be different people** (segregation of duties, rule **R21**).
+
+**Errors:**
+- `SOD_SELF_APPROVAL` — you tried to verify/reject a CAPA you own or created; route it to an independent
+  reviewer.
+- `ACTIONS_INCOMPLETE` — an action item is still pending; complete them all before verifying.
+- `NO_ACTIONS` — you submitted a CAPA with no action plan; add at least one action.
+- `NOT_PENDING_VERIFICATION` — the CAPA is not awaiting verification (submit it first; closed/cancelled is
+  terminal).
+- `REASON_REQUIRED` — a rejection needs a reason.
+
 ---
 
 ## 12. Certificate of Analysis & out-of-spec release — control QC-03
