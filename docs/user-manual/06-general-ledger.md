@@ -1,6 +1,8 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.10 · 2026-07-11** · *v0.10 (2026-07-11): posting-rule overrides (docs/43 PR-2) now also
+**Status: DRAFT v0.11 · 2026-07-11** · *v0.11 (2026-07-11): posting-rule overrides extended to assets &
+leases (docs/43 PR-3) — disposal gain/loss, impairment, lease remeasurement, lessor income, prepaid
+schedules; asset categories can carry their own posting accounts under Item posting (see §"Posting Rules").* · *v0.10 (2026-07-11): posting-rule overrides (docs/43 PR-2) now also
 drive the day-to-day finance & POS money postings — write-offs, advances, reverse-charge VAT, AP WHT/discount,
 bank fees/interest, petty cash, FX, returns, credit/debit notes, membership/loyalty, till over/short &
 paid-in/out, deposits, surcharges (see §"Posting Rules"); control-account legs never move.* · *v0.9 (2026-07-10): the **Fixed asset register** (`/assets` → Register
@@ -174,7 +176,12 @@ customer returns, credit/debit notes, VIP membership defer/recognize, loyalty ac
 over/short & drawer paid-in/out (including tills replayed from a store hub), customer deposits,
 and card surcharges. Each leg posts to your override account, or the standard account when you
 haven't set one; **control-account legs (cash, AR 1100, AP 2000, inventory 1200, gift cards
-2200) never move** regardless of overrides.
+2200) never move** regardless of overrides. Assets & leases joined in docs/43 PR-3: asset disposal
+gain/loss, impairment loss, lease remeasurement gains, lessor income and prepaid schedules all follow
+your approved rules — and if your company has switched on **กำหนดบัญชีตามสินค้า (Item posting)**, each
+**asset category's** own asset / accumulated-depreciation / depreciation-expense accounts drive
+acquisition and the monthly depreciation run for assets in that category (a category with a bad account
+code is rejected at save).
 
 > **Changing a posting rule is a two-person action (GL-24).** A saved rule shows **รออนุมัติ**
 > and has **no effect** until a *different* user presses **อนุมัติ** on the same screen — you

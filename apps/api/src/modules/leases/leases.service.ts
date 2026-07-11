@@ -5,6 +5,7 @@ import { leases } from '../../database/schema';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -195,11 +196,15 @@ export class LeasesService {
       if (liabDelta > 0) { lines.push({ account_code: '1600', debit: liabDelta }, { account_code: '2600', credit: liabDelta }); }
       else { lines.push({ account_code: '2600', debit: -liabDelta }, { account_code: '1600', credit: -liabDelta }); }
     } else {
-      // downward remeasurement larger than the ROU carrying amount → zero the ROU, excess is a P&L gain
+      // downward remeasurement larger than the ROU carrying amount → zero the ROU, excess is a P&L gain.
+      // docs/43 PR-3: the gain leg follows the tenant posting-rule (LEASE.MODIFY) ?? registry default;
+      // the ROU (1600) and lease-liability (2600) controls stay pinned (LSE-01 schedule tie).
       gain = round2(-newRou);
+      const gainAcct = (this.ledger ? (await this.ledger.postingOverrides('LEASE.MODIFY', l.tenantId ?? null)).remeasure_gain : undefined)
+        ?? postingDefault('LEASE.MODIFY', 'remeasure_gain');
       lines.push({ account_code: '2600', debit: -liabDelta }); // reduce liability by |delta|
       if (rouBefore > 0) lines.push({ account_code: '1600', credit: rouBefore }); // reduce ROU to zero
-      lines.push({ account_code: '1510', credit: gain }); // remeasurement gain to P&L
+      lines.push({ account_code: gainAcct, credit: gain }); // remeasurement gain to P&L
     }
     const je: any = this.ledger
       ? await this.ledger.postEntry({ date: effective, source: 'LSE-MOD', sourceRef: `LSE-${Number(l.id)}-MOD-${effective}-${newLiability}`, tenantId: l.tenantId ?? null, memo: `Lease ${leaseNo} remeasurement (liability ${liabBefore}→${newLiability})`, createdBy: user.username, lines })
