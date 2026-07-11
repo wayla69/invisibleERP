@@ -1,4 +1,4 @@
--- 0326_hcm_ess — HR-8 (docs/42 HCM depth, Wave 3): Employee Self-Service (ESS) depth on the payroll.employees
+-- 0327_hcm_ess — HR-8 (docs/42 HCM depth, Wave 3): Employee Self-Service (ESS) depth on the payroll.employees
 -- identity (emp_code). Adds:
 --   • Four nullable ESS-editable columns on employees (phone, address, emergency_contact, tax_id) — additive,
 --     so existing inserts are unaffected; employees is already tenant-scoped (RLS).

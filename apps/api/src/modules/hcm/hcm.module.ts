@@ -15,6 +15,8 @@ import { HcmRecruitingController } from './hcm-recruiting.controller';
 import { HcmRecruitingService } from './hcm-recruiting.service';
 import { HcmEssController } from './hcm-ess.controller';
 import { HcmEssService } from './hcm-ess.service';
+import { HcmTrainingController } from './hcm-training.controller';
+import { HcmTrainingService } from './hcm-training.service';
 import { ProjectsModule } from '../projects/projects.module';
 import { MessagingModule } from '../messaging/messaging.module';
 
@@ -33,10 +35,13 @@ import { MessagingModule } from '../messaging/messaging.module';
 // HR-8 (docs/42, Wave 3): Employee Self-Service (ESS) depth — self-service profile-change requests with the
 // HR-08 maker-checker (sensitive fields need a different hr/hr_admin approver) + personal document center +
 // team directory, own-scoped by emp_code.
+// HR-7 (docs/42, Wave 3): training & certifications — course catalogue → sessions → enrollments → completion
+// mints/renews a certification (expiry = completed_date + validity_months) with the HR-07 mandatory-training /
+// certification-compliance control (SCORE_REQUIRED gate + expired/expiring detective read).
 @Module({
   imports: [ProjectsModule, MessagingModule],
-  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmCompController, HcmLifecycleController, HcmRecruitingController, HcmEssController],
-  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmCompService, HcmLifecycleService, HcmRecruitingService, HcmEssService],
+  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmCompController, HcmLifecycleController, HcmRecruitingController, HcmEssController, HcmTrainingController],
+  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmCompService, HcmLifecycleService, HcmRecruitingService, HcmEssService, HcmTrainingService],
   exports: [HcmLeaveService],
 })
 export class HcmModule {}

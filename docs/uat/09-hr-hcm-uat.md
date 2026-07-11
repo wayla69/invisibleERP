@@ -137,3 +137,63 @@ Grade fixture: **G5** band `[25000, 40000]`. Employees: EMP1 (30000), EMP2 (2800
 | Requirement | Control | Test cases | Harness |
 |---|---|---|---|
 | ESS profile-change maker-checker (sensitive field pending → different hr/hr_admin approves; SOD_SELF_APPROVAL; employee master written only on approval; reject leaves it unchanged; own-scope + RLS; safe object keys) | HR-08 | UAT-HR-800..811 | `tools/cutover/src/hcm-ess.ts` (28 checks) |
+
+## Test cases — Workforce analytics (HR-9, control HR-09)
+
+Fixture (T1): active EMP1 (G5, 32000, hired 2020-01), EMP2 (G5, 50000, hired 2024-06 — above band), EMP3
+(G4, 22000, hired 2025-10), EMP4 (ungraded, no start date), EMP5 (left — inactive, completed offboarding
+lifecycle). Pay grades: **G5** `[25000, 40000]` mid 32500, **G4** `[18000, 24000]` mid 21000. EMP3 leave
+balance: entitled 10, used 2 (8 untaken). Each report runs via a BI subscription (`exec`), persisting to
+`report_runs`. Tenant T2 has a single active employee + grade for the isolation check.
+
+| ID | Type | Precondition | Steps | Expected result |
+|---|---|---|---|---|
+| UAT-HR-900 | Positive | — | `GET /api/bi/report-types` | Catalog exposes `hr_headcount_trend`, `hr_turnover`, `hr_tenure_distribution`, `hr_comp_ratio`, `hr_leave_liability` |
+| UAT-HR-901 | Positive | Subscription of `hr_headcount_trend` | Run it | `status:success`; `total_active` = **4**; `by_department` Engineering headcount = **2** (current assignments); `by_position` Developer = **2**; `by_hire_month` present |
+| UAT-HR-902 | Positive | One completed offboarding lifecycle in window | Run `hr_turnover` | `separations` = **1**; `turnover_pct` = **20%** (1 ÷ 5 avg headcount) |
+| UAT-HR-903 | Positive | — | Run `hr_tenure_distribution` | `total` = **4**; `<1y` bucket = **1** (EMP3); `unknown` bucket = **1** (EMP4, no start date) |
+| UAT-HR-904 | Positive (control) | Pay grades G5/G4 seeded | Run `hr_comp_ratio` | `count_rated` = **3** (EMP4 ungraded, EMP5 inactive excluded); `employees_out_of_band` = **1** — EMP2 flagged `above` (50000 > G5 max 40000) |
+| UAT-HR-905 | Positive | EMP3 leave balance 8 untaken | Run `hr_leave_liability` `{working_days:20}` | `total_untaken_days` = **8**; `total_liability` = **8800** THB (8 × 22000/20); summary carries the THB total |
+| UAT-HR-906 | Security (RLS) | T2 has 1 active employee | Run `hr_headcount_trend` as T2 admin | `total_active` = **1** (its own only, not T1's 4) |
+| UAT-HR-907 | Security (RLS) | T2 grade T2G only | Run `hr_comp_ratio` as T2 admin | `count_rated` = **1**; `employees_out_of_band` = **0** (no T1 rows visible) |
+
+## Traceability — HR-9
+
+| Requirement | RCM control | UAT cases | ToE harness |
+|---|---|---|---|
+| Workforce-analytics review — headcount/turnover/tenure/comp-ratio/leave-liability read-only report types, scheduled, tenant-scoped; comp-ratio out-of-band flag; leave-liability valuation | HR-09 | UAT-HR-900..907 | `tools/cutover/src/hcm-analytics.ts` (23 checks) |
+
+## Test cases — Training & certifications (HR-7, control HR-07)
+
+Course fixtures: **SAFETY** (mandatory, `validity_months:12`), **FIRSTAID** (mandatory, `requires_score`,
+`validity_months:24`), **ORIENT** (non-mandatory, no validity), **EXPSOON** (mandatory, `validity_months:1`),
+**LAPSED** (mandatory, `validity_months:1`). Employees: EMP1, EMP2 (linked to an `ess` login).
+
+| ID | Type | Precondition | Steps | Expected result |
+|---|---|---|---|---|
+| UAT-HR-700 | Positive | — | `POST /api/hcm/training/courses` `{course_code:SAFETY,name,category:safety,is_mandatory:true,validity_months:12}` | 201; course created; tenant-scoped |
+| UAT-HR-701 | Negative | SAFETY exists | Re-`POST` course `SAFETY` | 400 `COURSE_EXISTS` |
+| UAT-HR-702 | Positive | SAFETY exists | `POST /api/hcm/training/sessions` `{course_code:SAFETY,session_date,instructor,capacity}` | 201; session scheduled |
+| UAT-HR-703 | Negative | — | `POST …/sessions` `{course_code:NOPE}` | 404 `COURSE_NOT_FOUND` |
+| UAT-HR-704 | Positive | Session exists | `POST /api/hcm/training/enrollments` `{session_id,emp_code:EMP1}` | 201; status `enrolled` |
+| UAT-HR-705 | Negative | EMP1 enrolled | Re-`POST` the same enrollment | 400 `ALREADY_ENROLLED` |
+| UAT-HR-706 | Positive (control) | EMP1 enrolled in a SAFETY session | `POST …/enrollments/:id/complete` `{}` | 200 `completed`; a `certifications` row minted with `expiry_date = completed_date + 12 months` |
+| UAT-HR-707 | Negative (control) | — | `POST …/enrollments/999999/complete` | 404 `ENROLLMENT_NOT_FOUND` |
+| UAT-HR-708 | Negative (control) | EMP1 enrolled in a FIRSTAID (`requires_score`) session | `POST …/enrollments/:id/complete` `{}` (no score) | 400 `SCORE_REQUIRED` |
+| UAT-HR-709 | Positive (control) | Same FIRSTAID enrollment | `POST …/enrollments/:id/complete` `{score:88}` | 200 `completed`; certification minted |
+| UAT-HR-710 | Positive (control) | EMP1 enrolled in an ORIENT (non-mandatory, no validity) session | `POST …/enrollments/:id/complete` `{}` | 200 `completed`; `certification:null` (no cert minted) |
+| UAT-HR-711 | Positive | EMP2 has a LAPSED cert (completed 90 days ago, validity 1mo) | `GET /api/hcm/training/certifications?emp_code=EMP2` | 200; the LAPSED cert reads `status:expired`, `expired:true` |
+| UAT-HR-712 | Positive (control) | EMP2 has an expired LAPSED + a soon-expiring EXPSOON cert | `GET /api/hcm/training/compliance` (default 30d) | 200; the expired LAPSED cert is surfaced; `expired ≥ 1` |
+| UAT-HR-713 | Positive (control) | Same fixtures | `GET …/compliance?days=45` | The ~30-day-out EXPSOON cert is included; `expiring ≥ 1` |
+| UAT-HR-714 | Positive (control) | Same fixtures | `GET …/compliance?days=5` | EXPSOON excluded (beyond the 5-day window); the expired LAPSED cert still included |
+| UAT-HR-715 | Positive (control) | EMP1 holds a non-expiring SAFETY cert | `GET …/compliance?days=45` | SAFETY is NOT flagged (a non-expiring mandatory cert is compliant) |
+| UAT-HR-716 | Positive (control) | EMP2 recompletes EXPSOON | `GET …/certifications?emp_code=EMP2` | Exactly one **active** EXPSOON cert (the renewal superseded the prior active one) |
+| UAT-HR-717 | Security (own-scope) | `ess` login linked to EMP2, certs exist for EMP1+EMP2 | `GET /api/hcm/training/certifications` as `ess` | Only EMP2's certifications returned (own-scope) |
+| UAT-HR-718 | Security (own-scope) | `ess` login linked to EMP2 | `GET /api/hcm/training/enrollments` as `ess` | Only EMP2's enrollments returned (own-scope) |
+| UAT-HR-719 | Security (RLS) | Tenant T2 admin creates course `T2C` | `GET /api/hcm/training/courses` as T1 vs T2 | T1 sees SAFETY not T2C; T2 sees T2C not SAFETY (tenant isolation) |
+
+## Traceability — HR-7
+
+| Requirement | Control | Test cases | Harness |
+|---|---|---|---|
+| Mandatory-training / certification compliance (SCORE_REQUIRED completion gate; completion mints/renews a certification with expiry = completed_date + validity_months; expired/expiring detective read; ess own-scope; RLS) | HR-07 | UAT-HR-700..719 | `tools/cutover/src/hcm-training.ts` (27 checks) |

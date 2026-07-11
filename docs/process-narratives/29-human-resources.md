@@ -518,7 +518,7 @@ flowchart TD
 |---|---|
 | Cycle | Human Resources / Human Capital Management (docs/42 Wave 3) |
 | Related RCM control | **HR-08** (ESS profile-change maker-checker) |
-| Migration | `apps/api/drizzle/0326_hcm_ess.sql` |
+| Migration | `apps/api/drizzle/0327_hcm_ess.sql` |
 | Suite | `hcm` |
 
 ## E.2 Purpose & scope
@@ -591,7 +591,7 @@ flowchart TD
 ## E.8 System references
 
 - Service/controller: `apps/api/src/modules/hcm/hcm-ess.service.ts`, `hcm-ess.controller.ts`
-- Schema: `apps/api/src/database/schema/hcm-ess.ts` + ESS columns on `payroll.employees`; migration `apps/api/drizzle/0326_hcm_ess.sql`
+- Schema: `apps/api/src/database/schema/hcm-ess.ts` + ESS columns on `payroll.employees`; migration `apps/api/drizzle/0327_hcm_ess.sql`
 - Web: `apps/web/src/app/(internal)/hcm/ess/page.tsx` + `ess-client.tsx` (`/hcm/ess`)
 - ToE harness: `tools/cutover/src/hcm-ess.ts` (28 checks)
 
@@ -599,4 +599,195 @@ flowchart TD
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| 0.1 DRAFT | 2026-07-11 | HR-8 | Initial ESS-depth narrative + HR-08 control matrix (migration 0326) |
+| 0.1 DRAFT | 2026-07-11 | HR-8 | Initial ESS-depth narrative + HR-08 control matrix (migration 0327) |
+
+# HR-9 — Workforce analytics (control HR-09) — appended section
+
+> Self-contained HR-9 workforce-analytics narrative; kept on merge alongside the HR-2/3/4/5/6 sections above.
+
+## WA.1 Document control (HR-9)
+
+| Field | Value |
+|---|---|
+| Process ID | PN-29-HR (HR-9 workforce analytics) |
+| Process owner | `<<HR / People Ops Manager>>` |
+| Approver | `<<CHRO / CFO>>` |
+| Version | **0.1 DRAFT** |
+| Effective date | `<<effective-date>>` |
+| Review cadence | Monthly / quarterly workforce review |
+| Related RCM controls | HR-09 (detective — monitoring / analytical review) |
+| Related plan | `docs/42-hcm-depth-plan.md` (Wave 3) |
+
+## WA.2 Purpose & scope
+
+To give management a recurring, independent analytical review over the workforce base so that establishment
+creep, above-tolerance attrition, out-of-band pay and understated leave liability are detected on a cadence
+rather than only on an ad-hoc pull.
+
+**In scope:** five read-only, schedulable, tenant-scoped BI report types aggregating the existing HCM spine —
+`payroll.employees`, `hr_assignments`/`hr_positions`/`hr_departments` (HR-1), `employee_lifecycle` (HR-5),
+`pay_grades` (HR-6) and `leave_balances` (HR-2). No new tables and no writes.
+
+**Out of scope:** the transactional HR controls themselves (headcount governance HR-01, leave accrual HR-02,
+performance HR-03, recruiting HR-04, lifecycle HR-05, comp-change HR-06) — the analytics *review* their output,
+they do not replace those preventive/maker-checker controls.
+
+## WA.3 Report types
+
+| Report type | What it aggregates | Key outputs |
+|---|---|---|
+| `hr_headcount_trend` | Active headcount by department & position from the CURRENT org assignments (`end_date IS NULL`), plus a hire-cohort trend | `total_active`, `by_department[]`, `by_position[]`, `by_hire_month[]` |
+| `hr_turnover` | Attrition over a window (default 12 months). Separations = completed HR-5 **offboarding** lifecycles ÷ average headcount | `separations`, `active_headcount`, `avg_headcount`, `turnover_pct` |
+| `hr_tenure_distribution` | Tenure buckets from `start_date` (<1y, 1-3y, 3-5y, 5-10y, 10y+, unknown) | `total`, `avg_tenure_months`, `buckets[]` |
+| `hr_comp_ratio` | Each active employee's salary vs the HR-6 `pay_grades` `[min,mid,max]` band; comp ratio = salary ÷ midpoint; flags OUT-OF-BAND (above max / below min) | `count_rated`, `ungraded`, `avg_comp_ratio`, `employees_out_of_band`, `by_grade[]`, `out_of_band[]` |
+| `hr_leave_liability` | Accrued-but-untaken days (`entitled+accrued+carryover−used−expired`) valued at salary ÷ working-days (default 22) | `total_untaken_days`, `total_liability`, `by_leave_type[]`, `by_employee[]` |
+
+Each is an idempotent read-aggregation, runs through the existing BI subscription scheduler
+(`POST /api/bi/subscriptions` + a `daily`/`weekly`/`monthly` frequency → each run persists to `report_runs`,
+deliverable by email/LINE/in-app), and is tenant-scoped (explicit tenant filter + RLS) so one company's
+workforce metrics never leak to another. Optional filters: `window_months` (turnover), `working_days`
+(leave liability).
+
+## WA.4 Workflow
+
+```mermaid
+flowchart TD
+  A[Exec/HR creates a BI subscription<br/>report_type = hr_* · frequency daily/weekly/monthly] --> B[Scheduler due-sweep<br/>or Run now]
+  B --> C[generateReport read-aggregates the HCM spine<br/>tenant-scoped · no writes]
+  C --> D[report_runs row persisted<br/>+ in-app/email/LINE delivery]
+  D --> E{Review exceptions}
+  E --> F[Out-of-band pay · turnover spike ·<br/>establishment creep · leave liability]
+```
+
+## WA.5 Control matrix
+
+| Control | Assertion | What it detects | Enforcement |
+|---|---|---|---|
+| **HR-09** | Monitoring / analytical review (detective) | Establishment creep, above-tolerance attrition, out-of-band pay, understated leave liability going unreviewed | Five schedulable read-only report types persist headcount/turnover/tenure/comp-ratio/leave-liability to `report_runs` on a cadence; each is tenant-scoped (RLS) and idempotent; `hr_comp_ratio` flags salaries outside the `pay_grades` band and `hr_leave_liability` values untaken leave for the provision review |
+
+## WA.6 Endpoints (application)
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET /api/bi/report-types` | `exec` | Catalog exposes the five `hr_*` workforce-analytics report types |
+| `POST /api/bi/subscriptions` | `exec` | Schedule a workforce-analytics report (`report_type`, `frequency`, `filters`) |
+| `POST /api/bi/subscriptions/:id/run` | `exec` | Run now; persists the aggregate to `report_runs` |
+| `GET /api/bi/runs` | `exec` | Review persisted report runs |
+
+## WA.7 System references
+
+- Report registry: `apps/api/src/modules/bi/report-registry.ts` (`hr_headcount_trend`, `hr_turnover`, `hr_tenure_distribution`, `hr_comp_ratio`, `hr_leave_liability`)
+- Generation branches: `apps/api/src/modules/bi/bi-generate.service.ts` (`generateReport`)
+- Web: `apps/web/src/app/(internal)/scheduled-reports/page.tsx` (`/scheduled-reports` — data-driven from the report-type catalog; no new page)
+- ToE harness: `tools/cutover/src/hcm-analytics.ts` (23 checks)
+
+## WA.8 Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-07-11 | HR-9 | Initial workforce-analytics narrative + HR-09 detective control matrix (five BI report types; no migration) |
+
+---
+
+## HR-7 — Training & Certifications (control HR-07)
+
+> Self-contained HCM Wave 3 section (docs/42). Training & competency control on the `payroll.employees`
+> identity (emp_code). Merges keep-both with the other HR waves.
+
+### HR7.1 Document control (HR-7)
+
+| Field | Value |
+|---|---|
+| Process ID | PN-29-HR / HR-7 |
+| Process owner | `<<HR Manager / Learning & Development>>` |
+| Approver | `<<CHRO / Compliance>>` |
+| Version | **0.1 DRAFT** |
+| Related RCM control | HR-07 (mandatory-training / certification compliance) |
+| Related policy | `compliance/policies/03-delegation-of-authority.md` |
+
+### HR7.2 Narrative
+
+Training is administered on a per-tenant **course catalogue** (`training_courses`) — each course carries a
+`category` (`safety`/`compliance`/`technical`/`general`), an `is_mandatory` flag, a `requires_score` flag, and
+a `validity_months` recert cadence (NULL/0 → the resulting certification never expires). A course is delivered
+through scheduled **sessions** (`training_sessions`, `session_date`/instructor/capacity); an employee is booked
+to a session through an **enrollment** (`training_enrollments`, status `enrolled` → `attended` → `completed` |
+`failed`). Completion drives the **HR-07 control**:
+
+1. **Score gate at completion (preventive).** Marking an enrollment `completed` on a course flagged
+   `requires_score` **requires a score** — a completion with no score is **blocked** (`SCORE_REQUIRED`, 400).
+   Completing an absent / foreign enrollment is rejected (`ENROLLMENT_NOT_FOUND`, 404).
+2. **Certification mint on completion (automated).** A successful completion of a course that either carries a
+   recert cadence (`validity_months`) **or** is `is_mandatory` **mints/renews** a `certifications` row with
+   `expiry_date = completed_date + validity_months` (a mandatory course with no cadence mints a **non-expiring**
+   credential). A renewal **supersedes** the employee's prior active credential for that course so only the
+   freshest is evaluated, and the mint is **audit-logged** (a `doc_status_log` `TRAINCERT` row) in addition to
+   the append-only `audit_log`.
+3. **Compliance detective read.** `GET /api/hcm/training/compliance?days=N` returns every employee whose
+   **mandatory-course** certification is **expired or expiring within N days** (default 30) — the periodic
+   recurring-training compliance evidence. A non-expiring mandatory credential is compliant and is never
+   surfaced.
+
+**Certifications.** `certifications` is the credential register (cert_code/name, `issued_date`,
+`expiry_date` nullable, `source_course_id`, `is_mandatory`, status `active`/`expired`/`superseded`; the
+`expired` flag is derived at read time from `expiry_date`). Certification and enrollment reads are `ess`
+**own-scoped** (an employee sees only their own). All four tables are tenant-scoped (RLS) so the catalogue,
+sessions, enrollments and certifications never leak across companies.
+
+### HR7.3 Workflow
+
+```mermaid
+flowchart TD
+  A[HR creates course + session] --> B[Enroll employee in session]
+  B --> C{Mark completed}
+  C --> D{course requires_score and no score?}
+  D -- yes --> X[Block SCORE_REQUIRED]
+  D -- no --> E[status: completed]
+  E --> F{course mandatory or has validity_months?}
+  F -- no --> G[No certification minted]
+  F -- yes --> H[Mint/renew certification\nexpiry = completed_date + validity_months\nsupersede prior active + TRAINCERT audit]
+  H --> I{compliance read: mandatory cert\nexpired or expiring within N days?}
+  I -- yes --> J[Surface on compliance report]
+  I -- no --> K[Compliant]
+```
+
+### HR7.4 Endpoints (application)
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET/POST /api/hcm/training/courses` | read `hr`/`hr_admin`/`exec`; write `hr`/`hr_admin` | List / create courses |
+| `GET/POST /api/hcm/training/sessions` | read `hr`/`hr_admin`/`exec`; write `hr`/`hr_admin` | List / schedule sessions |
+| `GET/POST /api/hcm/training/enrollments` | read `hr`/`hr_admin`/`exec`/`ess` (own); write `hr`/`hr_admin` | List / enroll employees |
+| `POST /api/hcm/training/enrollments/:id/complete` | `hr`/`hr_admin` | Complete (SCORE_REQUIRED gate → mint certification) |
+| `GET /api/hcm/training/certifications` | `hr`/`hr_admin`/`exec`/`ess` (own) | Certification register (derived expired flag) |
+| `GET /api/hcm/training/compliance?days=N` | `hr`/`hr_admin`/`exec` | Expired / expiring mandatory certifications (detective) |
+
+### HR7.5 Error codes
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `SCORE_REQUIRED` | 400 | A `requires_score` course cannot be completed without a score |
+| `COURSE_EXISTS` | 400 | Duplicate `course_code` for the tenant |
+| `ALREADY_ENROLLED` | 400 | Duplicate enrollment on the same session |
+| `BAD_VALIDITY` | 400 | `validity_months` is negative |
+| `ENROLLMENT_NOT_FOUND` | 404 | Referenced enrollment not found (or foreign) |
+| `COURSE_NOT_FOUND` / `SESSION_NOT_FOUND` / `EMP_NOT_FOUND` | 404 | Referenced course / session / employee not found |
+
+### HR7.6 Control matrix
+
+| Control | Assertion | What it prevents | Enforcement |
+|---|---|---|---|
+| **HR-07** | Completeness / Accuracy | A mandatory or safety-critical certification lapsing unnoticed, or a course booked complete without its required assessment | `complete` blocks a `requires_score` completion with no score (`SCORE_REQUIRED`); a completion mints/renews a `certifications` row (`expiry = completed_date + validity_months`, supersede + `TRAINCERT` audit); `compliance` lists expired/expiring mandatory certifications for periodic review |
+
+### HR7.7 System references
+
+- Service/controller: `apps/api/src/modules/hcm/hcm-training.service.ts`, `hcm-training.controller.ts`
+- Schema: `apps/api/src/database/schema/hcm-training.ts`; migration `apps/api/drizzle/0326_hcm_training.sql`
+- Web: `apps/web/src/app/(internal)/hcm/training/page.tsx` (`/hcm/training`)
+- ToE harness: `tools/cutover/src/hcm-training.ts` (27 checks)
+
+### HR7.8 Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-07-11 | HR-7 | Initial training & certifications narrative + HR-07 control matrix (migration 0326) |
