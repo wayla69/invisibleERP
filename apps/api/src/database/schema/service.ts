@@ -21,8 +21,53 @@ export const serviceContracts = pgTable('service_contracts', {
   currency: text('currency').notNull().default('THB'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  // ── SVC-3 (migration 0330) — renewal & expiry lifecycle. Additive; NOT touched by the SLA/subscription
+  //    paths. renewal_status: none | pending | renewed | declined. renewed_to_contract_id → successor row. ──
+  renewalStatus: text('renewal_status').notNull().default('none'),
+  autoRenew: boolean('auto_renew').notNull().default(false),
+  renewalUpliftPct: numeric('renewal_uplift_pct', { precision: 6, scale: 3 }).notNull().default('0'),
+  renewedToContractId: bigint('renewed_to_contract_id', { mode: 'number' }),
 }, (t) => ({
   byTenant: index('idx_sc_tenant').on(t.tenantId, t.status),
+}));
+
+// ── SVC-3 (migration 0330): Service-contract renewal workflow (SVC-02 maker-checker + expiry worklist) ──────
+// A proposed renewal of a contract. status: pending → approved | rejected. A renewal whose uplift_pct exceeds
+// the tenant threshold (contract_renewal_settings.max_auto_uplift_pct), or an auto-renew that would raise
+// price, is parked `pending` and the successor service_contracts row is created ONLY when a DIFFERENT user
+// approves (approved_by ≠ requested_by → SOD_SELF_APPROVAL). Within-threshold renewals auto-approve.
+export const contractRenewals = pgTable('contract_renewals', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  renewalNo: text('renewal_no').notNull().unique(),
+  contractId: bigint('contract_id', { mode: 'number' }).notNull().references(() => serviceContracts.id),
+  proposedStart: date('proposed_start').notNull(),
+  proposedEnd: date('proposed_end').notNull(),
+  baseValue: numeric('base_value', { precision: 18, scale: 4 }).notNull().default('0'),
+  upliftPct: numeric('uplift_pct', { precision: 6, scale: 3 }).notNull().default('0'),
+  newValue: numeric('new_value', { precision: 18, scale: 4 }).notNull().default('0'),
+  autoRenew: boolean('auto_renew').notNull().default(false),
+  status: text('status').notNull().default('pending'), // pending | approved | rejected
+  reason: text('reason'),
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+}, (t) => ({
+  byTenant: index('idx_contract_renewals_tenant').on(t.tenantId, t.status),
+  byContract: index('idx_contract_renewals_contract').on(t.contractId),
+}));
+
+// Per-tenant renewal-uplift threshold (SVC-02). Change-gated (exec). Auto-approval ceiling for a renewal's
+// price uplift — a renewal above this % (or an auto-renew that raises price at all) routes to maker-checker.
+export const contractRenewalSettings = pgTable('contract_renewal_settings', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  maxAutoUpliftPct: numeric('max_auto_uplift_pct', { precision: 6, scale: 3 }).notNull().default('5'),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: uniqueIndex('idx_contract_renewal_settings_tenant').on(t.tenantId),
 }));
 
 // priority: 'P1' | 'P2' | 'P3' | 'P4'
@@ -87,3 +132,5 @@ export const serviceSubscriptionInvoices = pgTable('service_subscription_invoice
 
 export type ServiceContract = typeof serviceContracts.$inferSelect;
 export type ServiceSubscription = typeof serviceSubscriptions.$inferSelect;
+export type ContractRenewal = typeof contractRenewals.$inferSelect;
+export type ContractRenewalSetting = typeof contractRenewalSettings.$inferSelect;
