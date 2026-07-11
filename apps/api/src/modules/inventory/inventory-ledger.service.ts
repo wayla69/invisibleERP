@@ -19,12 +19,17 @@ const ACCT_INVENTORY = '1200';
 const ACCT_AP = '2000';
 const ACCT_COGS = '5000';
 const ACCT_ADJ = '5810';
-const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ'];
+// Goods-in-Transit (INV-2/INV-16): value in transit on a two-step transfer order. On SHIP the value leaves
+// the source inventory account (Cr 1200) into 1255 (Dr); on RECEIVE it lands at the destination (Dr 1200,
+// Cr 1255). INV-GIT is included in INV_SOURCES so reconcile() sees the 1200 leg of both legs and the
+// perpetual sub-ledger stays tied to GL 1200 throughout (the 1255 balance sits outside the inventory set).
+const ACCT_GIT = '1255';
+const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ', 'INV-GIT'];
 const COSTING_METHODS = ['moving_avg', 'fifo', 'fefo'] as const;
 type CostingMethod = (typeof COSTING_METHODS)[number];
 const isLayered = (m?: string | null): boolean => m === 'fifo' || m === 'fefo';
 
-interface LayerSlice { qty: number; unitCost: number; lotNo: string | null; expiry: string | null }
+export interface LayerSlice { qty: number; unitCost: number; lotNo: string | null; expiry: string | null }
 
 export interface ReceiveDto { item_id: string; item_description?: string; uom?: string; location_id?: string; qty: number; unit_cost: number; ref_type?: string; ref_id?: string; costing_method?: CostingMethod; lot_no?: string; expiry_date?: string }
 export interface IssueDto { item_id: string; location_id?: string; qty: number; ref_type?: string; ref_id?: string }
@@ -515,6 +520,71 @@ export class InventoryLedgerService {
     await this.writeMove({ tenantId, moveNo, moveType: 'transfer', itemId: p.item_id, locationId: p.from_location, qtySigned: -qty, unitCost: unit, valueSigned: -moveVal, balanceQty: fromQty, avgCost: fromQty > EPS ? round4(fromVal / fromQty) : avg, glNo: null, by: user.username });
     await this.writeMove({ tenantId, moveNo, moveType: 'transfer', itemId: p.item_id, locationId: p.to_location, qtySigned: qty, unitCost: unit, valueSigned: moveVal, balanceQty: toQty, avgCost: toQty > EPS ? round4(toVal / toQty) : avg, glNo: null, by: user.username });
     return { valued: true as const, move_no: moveNo, qty, unit_cost: unit };
+  }
+
+  // ── Two-step transfer-order in-transit legs (INV-2/INV-16) ────────────────────────────────
+  // SHIP: relieve the source location's valued stock into Goods-in-Transit. Value = consumed FIFO/FEFO layer
+  // cost (carried as slices so the destination can recreate them on receive) or qty × moving-average. Posts a
+  // balanced JE Dr 1255 Goods-in-Transit / Cr <source inventory acct>. Untracked (no balance row) ⇒ valued:false
+  // (audit-only — the transfer-order document still records the qty; no GL). Same NEG_STOCK guard as a transfer.
+  async shipToInTransit(p: { item_id: string; item_description?: string | null; from_location: string; qty: number; ref_type?: string; ref_id?: string }, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const from = await this.balanceRow(tenantId, p.item_id, p.from_location);
+    if (!from) return { valued: false as const, value: 0, unit_cost: 0, method: 'moving_avg' as CostingMethod, slices: [] as LayerSlice[] };
+    const qty = round4(p.qty);
+    if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
+    const fromOld = n(from.onHandQty), avg = n(from.avgCost);
+    if (qty > fromOld + EPS) throw bad('NEG_STOCK', `Cannot ship ${qty} of ${p.item_id} from ${p.from_location}; only ${fromOld} on hand`, 'สต๊อกต้นทางไม่พอสำหรับการโอน');
+    const method: CostingMethod = (from.costingMethod as CostingMethod) ?? 'moving_avg';
+    const moveNo = this.mkNo('INV-GIT');
+    let moveVal: number; let slices: LayerSlice[] = [];
+    if (isLayered(method)) { const c = await this.consumeLayers(tenantId, p.item_id, p.from_location, qty, method); moveVal = c.cost; slices = c.slices; }
+    else moveVal = round4(qty * avg);
+    const unit = qty > EPS ? round4(moveVal / qty) : avg;
+    const fromQty = round4(fromOld - qty), fromVal = round4(n(from.totalValue) - moveVal);
+    await this.upsertBalance(tenantId, p.item_id, from.itemDescription, p.from_location, fromQty, fromQty > EPS ? round4(fromVal / fromQty) : avg, fromVal, method);
+    const acc = await this.invAccounts(tenantId, p.item_id, p.from_location);
+    const je = moveVal > EPS ? await this.ledger.postEntry({
+      date: ymd(), source: 'INV-GIT', sourceRef: p.ref_type && p.ref_id ? `${p.ref_type}:${p.ref_id}:SHIP` : `${moveNo}:SHIP`,
+      tenantId, memo: `Transfer ship ${moveNo} — ${p.item_id} → in-transit`, createdBy: user.username,
+      lines: [{ account_code: ACCT_GIT, debit: moveVal }, { account_code: acc.inventory, credit: moveVal }],
+    }) : null;
+    await this.writeMove({
+      tenantId, moveNo, moveType: 'transfer_ship', itemId: p.item_id, itemDescription: p.item_description ?? from.itemDescription, locationId: p.from_location,
+      qtySigned: -qty, unitCost: unit, valueSigned: -moveVal, balanceQty: fromQty, avgCost: fromQty > EPS ? round4(fromVal / fromQty) : avg,
+      refType: p.ref_type, refId: p.ref_id ? `${p.ref_id}:SHIP` : null, glNo: je?.entry_no ?? null, by: user.username,
+    });
+    return { valued: true as const, value: moveVal, unit_cost: unit, method, slices, move_no: moveNo, gl_entry_no: je?.entry_no ?? null };
+  }
+
+  // RECEIVE: land the in-transit value at the destination location. Adds qty + the shipped snapshot value to
+  // the destination balance (recreating carried FIFO/FEFO layers), and posts Dr <dest inventory acct> / Cr 1255
+  // Goods-in-Transit. value/unit_cost/slices come from the shipping leg's snapshot on the transfer-order line.
+  async receiveFromInTransit(p: { item_id: string; item_description?: string | null; to_location: string; qty: number; value: number; unit_cost?: number; method?: CostingMethod; slices?: LayerSlice[]; ref_type?: string; ref_id?: string }, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const qty = round4(p.qty);
+    const value = round4(p.value);
+    if (value <= EPS && qty <= EPS) return { valued: false as const };
+    const to = await this.balanceRow(tenantId, p.item_id, p.to_location);
+    const method: CostingMethod = p.method ?? (to?.costingMethod as CostingMethod) ?? 'moving_avg';
+    const toOldQty = n(to?.onHandQty), toOldVal = n(to?.totalValue);
+    const toQty = round4(toOldQty + qty), toVal = round4(toOldVal + value);
+    const toAvg = toQty > EPS ? round4(toVal / toQty) : round4(p.unit_cost ?? 0);
+    await this.upsertBalance(tenantId, p.item_id, p.item_description ?? to?.itemDescription, p.to_location, toQty, toAvg, toVal, method);
+    if (isLayered(method) && p.slices?.length) for (const sl of p.slices) await this.createLayer(tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TO', p.ref_id ?? null, user.username);
+    const acc = await this.invAccounts(tenantId, p.item_id, p.to_location);
+    const je = value > EPS ? await this.ledger.postEntry({
+      date: ymd(), source: 'INV-GIT', sourceRef: p.ref_type && p.ref_id ? `${p.ref_type}:${p.ref_id}:RECV` : `${p.item_id}:RECV`,
+      tenantId, memo: `Transfer receive ${p.ref_id ?? p.item_id} — in-transit → ${p.to_location}`, createdBy: user.username,
+      lines: [{ account_code: acc.inventory, debit: value }, { account_code: ACCT_GIT, credit: value }],
+    }) : null;
+    const moveNo = this.mkNo('INV-GIT');
+    await this.writeMove({
+      tenantId, moveNo, moveType: 'transfer_receive', itemId: p.item_id, itemDescription: p.item_description ?? to?.itemDescription, locationId: p.to_location,
+      qtySigned: qty, unitCost: p.unit_cost ?? (qty > EPS ? round4(value / qty) : 0), valueSigned: value, balanceQty: toQty, avgCost: toAvg,
+      refType: p.ref_type, refId: p.ref_id ? `${p.ref_id}:RECV` : null, glNo: je?.entry_no ?? null, by: user.username,
+    });
+    return { valued: true as const, value, balance_qty: toQty, avg_cost: toAvg, gl_entry_no: je?.entry_no ?? null };
   }
 
   // ── Movement ledger (audit trail) ─────────────────────────────────────────────────────────

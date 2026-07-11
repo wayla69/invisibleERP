@@ -45,6 +45,7 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '2360', name: 'Payroll WHT Payable (PND1)', type: 'Liability' }, // ภาษีหัก ณ ที่จ่ายเงินเดือน (ภ.ง.ด.1) ค้างจ่าย
   { code: '2361', name: 'Vendor WHT Payable (PND3/53)', type: 'Liability' }, // ภาษีหัก ณ ที่จ่ายผู้ขาย (ภ.ง.ด.3/53) ค้างจ่าย — withheld at AP payment, remitted to RD (TAX-03)
   { code: '1250', name: 'Work-in-Process', type: 'Asset' },             // งานระหว่างทำ (WIP) — manufacturing
+  { code: '1255', name: 'Goods-in-Transit', type: 'Asset' },            // สินค้าระหว่างทาง — inventory shipped on an inter-warehouse/branch transfer order but not yet received (INV-2/INV-16); Dr on ship, Cr on receive. Distinct from 1250 WIP.
   { code: '1210', name: 'Finished Goods', type: 'Asset' },              // สินค้าสำเร็จรูป — จากใบสั่งผลิต
   { code: '2380', name: 'Manufacturing Costs Applied', type: 'Liability' }, // ค่าแรง/โสหุ้ยการผลิตที่คิดเข้างาน (clearing)
   { code: '1260', name: 'Project WIP / Unbilled Cost', type: 'Asset' },  // ต้นทุนงานโครงการที่ยังไม่รับรู้
@@ -113,6 +114,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '1200': { bucket: 'operating', label: 'สินค้าคงเหลือ (Inventory)' },
   '1210': { bucket: 'operating', label: 'สินค้าสำเร็จรูป (Finished goods)' },
   '1250': { bucket: 'operating', label: 'งานระหว่างทำ (Work-in-process)' },
+  '1255': { bucket: 'operating', label: 'สินค้าระหว่างทาง (Goods-in-transit)' }, // INV-2/INV-16 — inter-warehouse transfer value in transit (working-capital asset)
   '1260': { bucket: 'operating', label: 'ต้นทุนโครงการที่ยังไม่เรียกเก็บ (Unbilled project cost)' },
   '1265': { bucket: 'operating', label: 'สินทรัพย์ตามสัญญา (Contract asset / unbilled receivable)' },
   '1170': { bucket: 'operating', label: 'ลูกหนี้เงินประกันผลงาน (Retention receivable)' }, // docs/35 Phase 0 — retention withheld by customers (working-capital asset)

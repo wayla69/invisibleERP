@@ -207,6 +207,60 @@ fills the item field for you to confirm the quantity).
 **Expected result:** Stock balances at each location are updated and a movement is
 logged.
 
+> The transfer above is an **instant** location-to-location move (value-neutral, no
+> GL). For stock that physically **travels between warehouses or branches** — and is
+> therefore in transit for a period — use the two-step **transfer order** below.
+
+---
+
+## 6a. Inter-warehouse / branch transfer orders (ship → receive) — control INV-16
+
+**Screen:** `/stock-ops/transfer-orders` · **Required permission:** `wh_custody`
+(the in-transit aging report also opens to `dashboard` / `exec` reviewers)
+
+When goods move between sites they belong at **neither** end while in transit, so a
+transfer order splits the move into **two steps** and parks the value in a **Goods-in-Transit**
+account (**1255**) in between — it is never double-counted at both ends nor lost.
+
+### Create the order (`wh_custody`)
+1. On the **สร้างใบโอน (New order)** tab, enter the **From** and **To** locations and add
+   item lines (item + quantity). Click **สร้างใบโอน**.
+2. The order is created as **Draft** — a document only. **No** stock or GL has moved yet.
+   (From and To must differ, or you get `SAME_LOCATION`.)
+
+### Ship the goods (`wh_custody`)
+1. On the **ใบโอนทั้งหมด (Orders)** tab, click **ส่งของ (Ship)** on the Draft order.
+2. The source location's valued stock is relieved at its current cost and the value moves
+   into Goods-in-Transit: **Dr 1255 Goods-in-Transit / Cr 1200 Inventory**. Status → **Shipped**;
+   each line's cost is pinned as a snapshot.
+
+### Receive the goods — a *different* person (`wh_custody`)
+1. On arrival, an **independent custodian** (not the shipper) clicks **รับของ (Receive)**.
+2. The stock lands at the destination and the in-transit value is relieved back to inventory:
+   **Dr 1200 Inventory / Cr 1255**. Status → **Received**.
+
+> **Custody segregation (SoD):** the person who **shipped** an order **cannot** receive it —
+> the app returns `SOD_SELF_APPROVAL`. Someone else must confirm arrival.
+
+### Period-end in-transit aging / cutoff report
+The **สินค้าระหว่างทาง (In-transit aging)** tab lists every order still **Shipped** (not yet
+received) with its **days-in-transit** and value, bucketed **0-7 / 8-30 / 31+**. At period end
+this is the cutoff check for inventory existence — a long-outstanding in-transit line is an
+exception to investigate (goods lost, or a receipt not recorded).
+
+**Expected result:** the perpetual sub-ledger stays tied to GL 1200 across the round-trip;
+between ship and receive the value is visible in 1255 and on the aging report.
+
+**Troubleshooting**
+
+| Message | Meaning | What to do |
+|---|---|---|
+| `SAME_LOCATION` | From and To are the same location | Choose a different destination |
+| `NOT_DRAFT` | Tried to ship an order that is not a Draft | It is already shipped/received — check its status |
+| `NOT_SHIPPED` | Tried to receive an order that is not Shipped | Ship it first (or it is already received) |
+| `SOD_SELF_APPROVAL` | The shipper tried to receive their own transfer | An independent custodian (≠ shipper) must receive it |
+| `NEG_STOCK` | Shipping more than the source location has on hand | Recount / receive at the source before shipping |
+
 ---
 
 ## 7. Cycle counts & stocktake

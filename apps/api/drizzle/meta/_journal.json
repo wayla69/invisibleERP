@@ -2395,6 +2395,13 @@
       "when": 2023820000307,
       "tag": "0342_lot_holds",
       "breakpoints": true
+    },
+    {
+      "idx": 343,
+      "version": "7",
+      "when": 2023820000308,
+      "tag": "0343_transfer_orders",
+      "breakpoints": true
     }
   ]
 }
