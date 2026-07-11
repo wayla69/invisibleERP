@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 
-interface RevisionHead { rev_no: string; status: string; reason: string | null; revaluation_total: number; je_no: string | null; prepared_by: string | null; approved_by: string | null }
+export interface RevisionHead { rev_no: string; status: string; reason: string | null; revaluation_total: number; je_no: string | null; prepared_by: string | null; approved_by: string | null }
 interface RevisionLine { item_id: string; old_std: number; new_std: number; on_hand_snapshot: number; revaluation_amount: number; current_std: number | null }
 interface RevisionDetail extends RevisionHead { lines: RevisionLine[] }
 interface DraftLine { item_id: string; new_std: string }

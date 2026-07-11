@@ -4,6 +4,8 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations, assetRegistrationRequests, assetScanRequests, assetAudits, assetAuditScans, cipAssets, cipCostLines, journalEntries, grItems, goodsReceipts, items } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { AccountDeterminationService } from '../ledger/account-determination.service';
+import { postingDefault } from '../ledger/posting-events';
 import { QrService } from '../qr/qr.service';
 import { n, fx, ymd } from '../../database/queries';
 import { buildAssetQrPayload, parseQrPayload } from '@ierp/shared';
@@ -19,10 +21,15 @@ export class AssetsService {
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
     private readonly qr: QrService,
+    private readonly determination: AccountDeterminationService,
   ) {}
 
   async createCategory(dto: CreateCategoryDto, user: JwtUser) {
     const db = this.db;
+    // docs/43 PR-3 (Q2 grain): category accounts drive acquisition/depreciation under posting_determination,
+    // so a category save is GL-21 fail-closed validated like an item profile — a typo'd/unpostable account
+    // is rejected at save, not discovered at month-end.
+    await this.determination.assertAccountsPostable(`asset category ${dto.code}`, [dto.asset_account, dto.accum_dep_account, dto.dep_expense_account]);
     const [c] = await db.insert(assetCategories).values({
       tenantId: user.tenantId ?? null, code: dto.code, name: dto.name, defaultUsefulLifeYears: dto.default_useful_life_years,
       assetAccount: dto.asset_account, accumDepAccount: dto.accum_dep_account, depExpenseAccount: dto.dep_expense_account,
@@ -65,10 +72,13 @@ export class AssetsService {
     }).onConflictDoNothing();
     let journalNo: string | null = null;
     if (cost > 0 && !(await this.ledger.alreadyPosted('ASSET', assetNo))) {
+      // docs/43 PR-3 (Q2): under posting_determination the CATEGORY's asset_account drives the debit
+      // (mirrors item-determination; validated postable). Flag off / no category → the 1500 register control.
+      const catAccts = await this.determination.resolveAssetCategoryAccounts(tenantId, dto.category_id ?? null);
       const je: any = await this.ledger.postEntry({
         date: acquireDate, source: 'ASSET', sourceRef: assetNo, tenantId,
         memo: `Asset acquisition ${assetNo} ${dto.name}`, createdBy: user.username,
-        lines: [{ account_code: '1500', debit: cost }, { account_code: opts?.creditAccount ?? (dto.acquire_source === 'credit' ? '2000' : '1000'), credit: cost }],
+        lines: [{ account_code: catAccts.assetAccount ?? postingDefault('ASSET.ACQUIRE', 'fixed_asset_gross'), debit: cost }, { account_code: opts?.creditAccount ?? (dto.acquire_source === 'credit' ? '2000' : '1000'), credit: cost }],
       });
       journalNo = je?.entry_no ?? null;
     }
@@ -210,8 +220,18 @@ export class AssetsService {
       const tenantId: number | null = a.tenantId != null ? Number(a.tenantId) : null;
       const key = String(tenantId);
       if (!groups.has(key)) groups.set(key, { tenantId, computed: [] });
-      groups.get(key)!.computed.push({ id: Number(a.id), amount, accumAfter, nbvAfter, status: nbvAfter <= salvage + 1e-6 ? 'fully_depreciated' : 'active' });
+      groups.get(key)!.computed.push({ id: Number(a.id), amount, accumAfter, nbvAfter, status: nbvAfter <= salvage + 1e-6 ? 'fully_depreciated' : 'active', catId: a.categoryId != null ? Number(a.categoryId) : null });
     }
+
+    // docs/43 PR-3 (Q2 grain): per-category account resolution, memoized per (tenant, category) — the
+    // resolver returns all-nulls when the tenant hasn't opted into posting_determination.
+    const catCache = new Map<string, { assetAccount: string | null; accumDepAccount: string | null; depExpenseAccount: string | null }>();
+    const catAccts = async (tid: number | null, catId: number | null) => {
+      if (catId == null) return { assetAccount: null, accumDepAccount: null, depExpenseAccount: null };
+      const k = `${tid}:${catId}`;
+      if (!catCache.has(k)) catCache.set(k, await this.determination.resolveAssetCategoryAccounts(tid, catId));
+      return catCache.get(k)!;
+    };
 
     const runs: any[] = [];
     let aggTotal = 0, aggCount = 0;
@@ -226,12 +246,26 @@ export class AssetsService {
         await db.update(fixedAssets).set({ accumulatedDepreciation: fx(c.accumAfter, 4), netBookValue: fx(c.nbvAfter, 4), status: c.status, lastDepreciatedPeriod: period }).where(eq(fixedAssets.id, c.id));
         await db.insert(depreciationLines).values({ tenantId, runId: Number(run!.id), assetId: c.id, amount: fx(c.amount, 4), accumulatedAfter: fx(c.accumAfter, 4), nbvAfter: fx(c.nbvAfter, 4) });
       }
-      // docs/42 step 4: tenant posting-rule override (DEPRECIATION.FA roles) ?? the standard literals.
+      // Account precedence per leg (docs/43 Q2): asset's CATEGORY columns (posting_determination on) →
+      // tenant posting-rule (DEPRECIATION.FA) → registry default. One balanced JE per tenant; assets whose
+      // categories map different accounts become separate debit/credit line pairs within it.
       const ovr = await this.ledger.postingOverrides('DEPRECIATION.FA', tenantId);
+      const defDep = ovr.dep_expense ?? postingDefault('DEPRECIATION.FA', 'dep_expense');
+      const defAcc = ovr.accum_dep ?? postingDefault('DEPRECIATION.FA', 'accum_dep');
+      const pairTotals = new Map<string, number>();
+      for (const c of computed) {
+        const cat = await catAccts(tenantId, c.catId);
+        const pk = `${cat.depExpenseAccount ?? defDep}|${cat.accumDepAccount ?? defAcc}`;
+        pairTotals.set(pk, round4((pairTotals.get(pk) ?? 0) + c.amount));
+      }
+      const jeLines = [...pairTotals.entries()].flatMap(([pk, amt]) => {
+        const [dep, acc] = pk.split('|') as [string, string];
+        return [{ account_code: dep, debit: amt }, { account_code: acc, credit: amt }];
+      });
       const je: any = await this.ledger.postEntry({
         date: periodEnd, source: 'DEP', sourceRef: srcRef, tenantId,
         memo: `Depreciation ${period} (${computed.length} assets)`, createdBy: user.username,
-        lines: [{ account_code: ovr.dep_expense ?? '5200', debit: total }, { account_code: ovr.accum_dep ?? '1590', credit: total }],
+        lines: jeLines,
       });
       await db.update(depreciationRuns).set({ journalNo: je?.entry_no ?? null }).where(eq(depreciationRuns.id, run!.id));
       runs.push({ tenant_id: tenantId, run_no: runNo, journal_no: je?.entry_no ?? null, total_depreciation: total, asset_count: computed.length });
@@ -295,9 +329,13 @@ export class AssetsService {
     if (a.disposalPending) throw new BadRequestException({ code: 'DISPOSAL_PENDING', message: 'A disposal of this asset is already pending approval', messageTh: 'มีรายการจำหน่ายสินทรัพย์นี้รออนุมัติอยู่แล้ว' });
     const cost = n(a.acquireCost), accum = n(a.accumulatedDepreciation), nbv = n(a.netBookValue), proceeds = n(dto.proceeds);
     const gainLoss = round4(proceeds - nbv);
+    // docs/43 PR-3: the gain/loss leg follows the tenant posting-rule (ASSET.DISPOSE) ?? registry default;
+    // register controls (1500/1590) and cash stay pinned.
+    const glAcct = (await this.ledger.postingOverrides('ASSET.DISPOSE', a.tenantId != null ? Number(a.tenantId) : (user.tenantId ?? null))).gain_loss
+      ?? postingDefault('ASSET.DISPOSE', 'gain_loss');
     const lines: any[] = [{ account_code: '1590', debit: accum }, { account_code: '1000', debit: proceeds }, { account_code: '1500', credit: cost }];
-    if (gainLoss > 0) lines.push({ account_code: '1510', credit: gainLoss });
-    else if (gainLoss < 0) lines.push({ account_code: '1510', debit: -gainLoss });
+    if (gainLoss > 0) lines.push({ account_code: glAcct, credit: gainLoss });
+    else if (gainLoss < 0) lines.push({ account_code: glAcct, debit: -gainLoss });
     const date = dto.disposal_date ?? ymd();
     const je: any = await this.ledger.postEntry({
       date, source: 'DISP', sourceRef: assetNo, tenantId: a.tenantId ?? user.tenantId ?? null,
@@ -372,9 +410,13 @@ export class AssetsService {
     if (pending) throw new BadRequestException({ code: 'REVALUATION_PENDING', message: `A revaluation of ${assetNo} is already pending approval`, messageTh: 'มีรายการตีมูลค่าใหม่ของสินทรัพย์นี้รออนุมัติอยู่แล้ว' });
     const kind = delta > 0 ? 'revaluation' : 'impairment';
     const date = dto.reval_date ?? ymd();
+    // docs/43 PR-3: the impairment-loss leg follows the tenant posting-rule (ASSET.REVALUE) ?? registry
+    // default; the revaluation surplus (equity 3200) and the 1500 register control stay pinned.
+    const impAcct = (await this.ledger.postingOverrides('ASSET.REVALUE', a.tenantId != null ? Number(a.tenantId) : (user.tenantId ?? null))).impairment_loss
+      ?? postingDefault('ASSET.REVALUE', 'impairment_loss');
     const lines: any[] = delta > 0
       ? [{ account_code: '1500', debit: delta }, { account_code: '3200', credit: delta }]      // upward: gross up, surplus to equity
-      : [{ account_code: '5820', debit: -delta }, { account_code: '1500', credit: -delta }];    // impairment: loss, gross down
+      : [{ account_code: impAcct, debit: -delta }, { account_code: '1500', credit: -delta }];    // impairment: loss, gross down
     // FA-08: post the JE as a DRAFT (excluded from balances) and DEFER the carrying-value change. A
     // different user must approve before the revaluation/impairment is effective.
     const je: any = await this.ledger.postEntry({
