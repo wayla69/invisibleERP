@@ -288,6 +288,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.receiving', href: '/receiving', icon: PackageCheck, perms: ['wh_receive', 'warehouse'] },
       { label: 'nav.goods_issue', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
       { label: 'nav.lots', href: '/lots', icon: Boxes, perms: ['lots', 'warehouse'] },
+      { label: 'nav.quality_coa', href: '/quality/coa', icon: FlaskConical, perms: ['quality', 'quality_approve', 'exec'] },
       { label: 'nav.mobile_scan', href: '/mobile-scan', icon: ScanLine, perms: ['mobile', 'warehouse'] },
       { label: 'nav.images', href: '/images', icon: Camera, perms: ['images', 'masterdata'] },
       { label: 'nav.wms', href: '/wms', icon: Warehouse, perms: ['warehouse'] },
