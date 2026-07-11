@@ -122,6 +122,8 @@
     "cpq": "tsx src/cpq.ts",
     "cpq-approval": "tsx src/cpq-approval.ts",
     "service": "tsx src/service.ts",
+    "contract-renewal": "tsx src/contract-renewal.ts",
+    "warranty": "tsx src/warranty.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

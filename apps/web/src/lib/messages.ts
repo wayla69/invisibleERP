@@ -20,6 +20,7 @@ import { CATALOG as CAT_CONSTRUCTION } from './i18n-catalog/construction';
 import { CATALOG as CAT_PLATFORM } from './i18n-catalog/platform';
 import { CATALOG as CAT_CRMX } from './i18n-catalog/crmx';
 import { CATALOG as CAT_GOVERNANCE } from './i18n-catalog/governance';
+import { CATALOG as CAT_SVC } from './i18n-catalog/svc';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -144,6 +145,8 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.pipeline': { th: 'โอกาสการขาย', en: 'Sales Pipeline' },
   'nav.cpq': { th: 'ใบเสนอราคา', en: 'Quotations (CPQ)' },
   'nav.service': { th: 'บริการ & SLA', en: 'Service & SLA' },
+  'nav.service_renewals': { th: 'ต่ออายุสัญญา', en: 'Contract renewals' },
+  'nav.warranty': { th: 'การรับประกัน & สิทธิ์', en: 'Warranty & Entitlement' },
   'nav.crm': { th: 'CRM 360', en: 'CRM 360' },
   'nav.marketing': { th: 'การตลาด', en: 'Marketing' },
   'nav.campaigns': { th: 'แคมเปญ LINE (Automation)', en: 'LINE Campaigns (Automation)' },
@@ -1637,5 +1640,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC,
 );

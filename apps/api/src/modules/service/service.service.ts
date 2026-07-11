@@ -278,7 +278,7 @@ export class ServiceService {
     return s;
   }
 
-  private fmtContract(c: any) { return { id: Number(c.id), contract_no: c.contractNo, customer_name: c.customerName, sla_tier: c.slaTier, response_hours: c.responseHours, resolution_hours: c.resolutionHours, start_date: c.startDate, end_date: c.endDate, status: c.status, monthly_value: n(c.monthlyValue) }; }
+  private fmtContract(c: any) { return { id: Number(c.id), contract_no: c.contractNo, customer_name: c.customerName, sla_tier: c.slaTier, response_hours: c.responseHours, resolution_hours: c.resolutionHours, start_date: c.startDate, end_date: c.endDate, status: c.status, monthly_value: n(c.monthlyValue), renewal_status: c.renewalStatus ?? 'none', auto_renew: c.autoRenew ?? false, renewal_uplift_pct: n(c.renewalUpliftPct ?? 0), renewed_to_contract_id: c.renewedToContractId ? Number(c.renewedToContractId) : null }; }
   private fmtEvent(e: any) { return { id: Number(e.id), event_no: e.eventNo, title: e.title, priority: e.priority, opened_at: e.openedAt, response_due_at: e.responseDueAt, responded_at: e.respondedAt, resolved_at: e.resolvedAt, resolution_due_at: e.resolutionDueAt, response_breached: e.responseBreached, resolution_breached: e.resolutionBreached, status: e.status }; }
   private fmtSub(s: any) { return { id: Number(s.id), sub_no: s.subNo, customer_name: s.customerName, product_code: s.productCode, billing_cycle: s.billingCycle, unit_price: n(s.unitPrice), qty: s.qty, next_billing_date: s.nextBillingDate, status: s.status }; }
 }

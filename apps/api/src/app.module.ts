@@ -75,6 +75,7 @@ import { ReconciliationModule } from './modules/reconciliation/reconciliation.mo
 import { ProfitabilityModule } from './modules/profitability/profitability.module';
 import { CpqModule } from './modules/cpq/cpq.module';
 import { ServiceModule } from './modules/service/service.module';
+import { ServiceWarrantyModule } from './modules/service-warranty/service-warranty.module';
 import { BiModule } from './modules/bi/bi.module';
 import { AdminConfigModule } from './modules/admin-config/admin-config.module';
 import { MasterDataModule } from './modules/masterdata/masterdata.module';
@@ -208,6 +209,7 @@ import { MailModule } from './modules/mail/mail.module';
     ProfitabilityModule,
     CpqModule,
     ServiceModule,
+    ServiceWarrantyModule,
     BiModule,
     AdminConfigModule,
     MasterDataModule,
