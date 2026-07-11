@@ -9,6 +9,7 @@ import { FinanceService } from './finance.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { TaxJobsService } from '../tax/tax-jobs.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -364,7 +365,9 @@ export class ApPaymentRunService {
         // (Cr discount_account) so cash-out nets to amount−wht−discount while the payable is fully settled.
         // Idempotent per line via a distinct source/source_ref; a retried execute never double-books it.
         const discountAmount = round2(n(l.discountAmount));
-        const discountAccount = l.discountAccount ?? '4600';
+        // docs/43 PR-2: policy account ?? tenant posting-rule ?? registry default (APPAY.DISCOUNT)
+        const discOvr = this.ledger ? await this.ledger.postingOverrides('APPAY.DISCOUNT', run.tenantId ?? null) : {};
+        const discountAccount = l.discountAccount ?? discOvr.discount_income ?? postingDefault('APPAY.DISCOUNT', 'discount_income');
         if (this.ledger && discountAmount > 0) {
           const discRef = `${l.txnNo}:disc:${paymentNo}`;
           if (!(await this.ledger.alreadyPosted('AP-DISC', discRef, apTenant))) {

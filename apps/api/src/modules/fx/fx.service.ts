@@ -3,6 +3,7 @@ import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { fxRates, arInvoices, apTransactions } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { roundCurrency, isSupportedCurrency } from '../tax/money';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -128,8 +129,9 @@ export class FxService {
     if (bankDelta > 0) { lines.push({ account_code: '1010', debit: bankDelta }); fx5400 += bankDelta; }
     else if (bankDelta < 0) { lines.push({ account_code: '1010', credit: -bankDelta }); fx5400 += bankDelta; }
     const fxNet = thb(fx5400);
-    if (fxNet > 0) lines.push({ account_code: '5400', credit: fxNet });
-    else if (fxNet < 0) lines.push({ account_code: '5400', debit: -fxNet });
+    const fxAcct = (await this.ledger.postingOverrides('FX.UNREALIZED', dto.tenantId ?? null)).fx_gain_loss ?? postingDefault('FX.UNREALIZED', 'fx_gain_loss');
+    if (fxNet > 0) lines.push({ account_code: fxAcct, credit: fxNet });
+    else if (fxNet < 0) lines.push({ account_code: fxAcct, debit: -fxNet });
     if (!lines.length) return { currency: dto.currency, as_of: dto.as_of, current_rate: cur, ar_delta: 0, ap_delta: 0, bank_delta: 0, entry_no: null, note: 'no open foreign balances' };
 
     const je: any = await this.ledger.postEntry({ date: dto.as_of, source: 'FXREVAL', sourceRef, tenantId: dto.tenantId ?? null, currency: 'THB', memo: `FX revaluation ${dto.currency} @ ${cur} as of ${dto.as_of}`, createdBy: dto.createdBy, lines });

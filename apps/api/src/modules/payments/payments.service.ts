@@ -5,6 +5,7 @@ import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundR
 import { createHash } from 'node:crypto';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { n, fx } from '../../database/queries';
 import { round2, roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
@@ -499,9 +500,13 @@ export class PaymentService {
     if (Math.abs(variance) >= 0.005 && !(await this.ledger.alreadyPosted('TILL_CLOSE', dto.session_no, sess.tenantId ?? null))) {
       const material = Math.abs(variance) > CASH_VARIANCE_THRESHOLD;
       const v = Math.abs(variance);
+      // docs/43 PR-2: over/short leg follows the tenant posting-rule (TILL.VARIANCE) ?? registry default;
+      // cash (1000) is CASH-set pinned and stays literal. hub-sync's till replay shares this event key.
+      const varAcct = (await this.ledger.postingOverrides('TILL.VARIANCE', sess.tenantId ?? null)).cash_over_short
+        ?? postingDefault('TILL.VARIANCE', 'cash_over_short');
       const lines = variance < 0
-        ? [{ account_code: '5830', debit: v }, { account_code: '1000', credit: v }]
-        : [{ account_code: '1000', debit: v }, { account_code: '5830', credit: v }];
+        ? [{ account_code: varAcct, debit: v }, { account_code: '1000', credit: v }]
+        : [{ account_code: '1000', debit: v }, { account_code: varAcct, credit: v }];
       const je: any = await this.ledger.postEntry({
         source: 'TILL_CLOSE', sourceRef: dto.session_no, tenantId: sess.tenantId ?? null,
         memo: `Till close variance ${dto.session_no} (${variance < 0 ? 'short' : 'over'} ${v})`,
@@ -562,9 +567,12 @@ export class PaymentService {
     await db.insert(cashMovements).values({ movementNo, tenantId: sess.tenantId, tillSessionId: tillId, type: dto.type, amount: fx(amt, 4), reason: dto.reason ?? null, createdBy: user.username });
     let journalNo: string | null = null;
     if ((dto.type === 'paid_in' || dto.type === 'paid_out') && !(await this.ledger.alreadyPosted('CASHMOV', movementNo))) {
+      // docs/43 PR-2: paid-in/out expense leg follows the tenant posting-rule (TILL.CASHMOV) ?? default.
+      const movAcct = (await this.ledger.postingOverrides('TILL.CASHMOV', sess.tenantId ?? null)).expense
+        ?? postingDefault('TILL.CASHMOV', 'expense');
       const lines = dto.type === 'paid_out'
-        ? [{ account_code: '5100', debit: amt }, { account_code: '1000', credit: amt }]
-        : [{ account_code: '1000', debit: amt }, { account_code: '5100', credit: amt }];
+        ? [{ account_code: movAcct, debit: amt }, { account_code: '1000', credit: amt }]
+        : [{ account_code: '1000', debit: amt }, { account_code: movAcct, credit: amt }];
       const je: any = await this.ledger.postEntry({ source: 'CASHMOV', sourceRef: movementNo, tenantId: sess.tenantId ?? null, memo: `Cash ${dto.type} ${movementNo}`, createdBy: user.username, lines });
       journalNo = je?.entry_no ?? null;
       await db.update(cashMovements).set({ journalNo }).where(eq(cashMovements.movementNo, movementNo));

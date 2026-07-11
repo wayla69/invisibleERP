@@ -30,6 +30,7 @@ import {
 import type { JwtUser } from '../../common/decorators';
 import { RestaurantOfflineSyncService, type RegisterOfflineSaleOp } from '../restaurant/offline-sync.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { WasteService, type WasteReason } from '../inventory/waste.service';
 import { StockOpsService } from '../stock-ops/stock-ops.service';
 import { CASH_VARIANCE_THRESHOLD } from '../payments/payments.service';
@@ -307,9 +308,13 @@ export class HubSyncService {
     if (Math.abs(variance) >= 0.005 && !(await this.ledger.alreadyPosted('TILL_CLOSE', doc.session_no, t))) {
       const material = Math.abs(variance) > CASH_VARIANCE_THRESHOLD;
       const v = Math.abs(variance);
+      // docs/43 PR-2: the hub till replay shares the native close's posting-event key (TILL.VARIANCE),
+      // so an override re-routes BOTH paths identically; cash (1000) stays literal (pinned).
+      const varAcct = (await this.ledger.postingOverrides('TILL.VARIANCE', t)).cash_over_short
+        ?? postingDefault('TILL.VARIANCE', 'cash_over_short');
       const lines = variance < 0
-        ? [{ account_code: '5830', debit: v }, { account_code: '1000', credit: v }]
-        : [{ account_code: '1000', debit: v }, { account_code: '5830', credit: v }];
+        ? [{ account_code: varAcct, debit: v }, { account_code: '1000', credit: v }]
+        : [{ account_code: '1000', debit: v }, { account_code: varAcct, credit: v }];
       const je: any = await this.ledger.postEntry({
         source: 'TILL_CLOSE', sourceRef: doc.session_no, tenantId: t,
         memo: `Hub till close variance ${doc.session_no} (${variance < 0 ? 'short' : 'over'} ${v})`,

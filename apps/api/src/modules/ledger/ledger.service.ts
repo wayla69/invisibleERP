@@ -8,7 +8,7 @@ import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
 import { toMinor4, minorToNumber4 } from '../../common/money';
 import { assertTemplatesSubsetOf, isIndustryKey, COA_TEMPLATES, type IndustryKey, type CoaTemplateRow } from './coa-templates';
-import { assertPostingEventDefaults } from './posting-events';
+import { assertPostingEventDefaults, postingDefault } from './posting-events';
 import { postingOverridesCache, postingOverridesKey, POSTING_OVERRIDES_TTL_MS } from './posting-overrides-cache';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -745,9 +745,12 @@ export class LedgerService implements OnModuleInit {
       const delta = round2(target - priorLiability);
       let journalNo: string | null = null;
       if (Math.abs(delta) >= 0.005) {
+        // docs/43 PR-2: the expense leg follows the tenant posting-rule (LOYALTY.ACCRUE.loyalty_expense);
+        // the 2250 points-liability control stays pinned (watermark tie).
+        const loyAcct = (await this.postingOverrides('LOYALTY.ACCRUE', tenantId)).loyalty_expense ?? postingDefault('LOYALTY.ACCRUE', 'loyalty_expense');
         const lines = delta > 0
-          ? [{ account_code: '5700', debit: delta }, { account_code: '2250', credit: delta }]
-          : [{ account_code: '2250', debit: -delta }, { account_code: '5700', credit: -delta }];
+          ? [{ account_code: loyAcct, debit: delta }, { account_code: '2250', credit: delta }]
+          : [{ account_code: '2250', debit: -delta }, { account_code: loyAcct, credit: -delta }];
         const je: any = await this.postEntry({
           ...(ctx.asOfDate ? { date: ctx.asOfDate } : {}),
           source: 'LOYALTY', sourceRef: `${tenantId}:upto-${newHigh}`, tenantId,
