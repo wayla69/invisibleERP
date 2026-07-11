@@ -90,6 +90,7 @@ export * from './hcm';
 export * from './hcm-leave';
 export * from './hcm-perf';
 export * from './hcm-org';
+export * from './hcm-comp';
 export * from './hcm-lifecycle';
 export * from './hcm-recruiting';
 export * from './pricing';
