@@ -260,6 +260,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Tax ───────────────────────────────────────────────────────────────────
   'nav.tax_invoices': { th: 'ใบกำกับภาษี', en: 'Tax Invoices' },
   'nav.tax_reports': { th: 'รายงานภาษี', en: 'Tax Reports' },
+  'nav.tax_provision': { th: 'ประมาณการภาษีเงินได้', en: 'Income-Tax Provision' },
   'nav.wht': { th: 'หัก ณ ที่จ่าย', en: 'Withholding Tax' },
   'nav.pos_fiscal': { th: 'ภาษีอิเล็กทรอนิกส์ (e-Tax/Journal)', en: 'e-Tax / Fiscal Journal' },
 

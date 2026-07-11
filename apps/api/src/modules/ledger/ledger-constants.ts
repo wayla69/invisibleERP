@@ -81,6 +81,8 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '1700', name: 'Deferred Tax Asset', type: 'Asset' },                 // สินทรัพย์ภาษีเงินได้รอการตัดบัญชี (TAS 12) — deductible temporary differences × CIT (TAX-06)
   { code: '2700', name: 'Deferred Tax Liability', type: 'Liability' },         // หนี้สินภาษีเงินได้รอการตัดบัญชี (TAS 12) — taxable temporary differences × CIT (TAX-06)
   { code: '5950', name: 'Deferred Tax Expense', type: 'Expense' },             // ค่าใช้จ่าย(รายได้)ภาษีเงินได้รอการตัดบัญชี — deferred tax expense/benefit (TAX-06)
+  { code: '5960', name: 'Corporate Income Tax Expense (current)', type: 'Expense' }, // ค่าภาษีเงินได้นิติบุคคล (งวดปัจจุบัน) — current CIT provision (ASC 740 / IAS 12, TAX-11); Dr 5960 / Cr 2110
+  { code: '2110', name: 'CIT Payable', type: 'Liability' },                     // ภาษีเงินได้นิติบุคคลค้างจ่าย — current income-tax payable to the Revenue Department (TAX-11)
   { code: '2410', name: 'Contract Liability / Deferred Revenue', type: 'Liability' }, // หนี้สินตามสัญญา/รายได้รอรับรู้ (TFRS 15) — deferred revenue released as POs are satisfied (REV-19)
   { code: '2420', name: 'Refund Liability', type: 'Liability' },               // หนี้สินค่าคืนเงิน — provision for expected returns/refunds (TFRS 15, REV-19)
   { code: '1300', name: 'Input VAT', type: 'Asset' },                         // ภาษีซื้อ — recoverable input VAT (e.g. on subcontractor valuations, docs/35 Depth); also the PP36 self-assessed input-VAT credit (ม.83/6)
@@ -127,6 +129,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '2010': { bucket: 'operating', label: 'เจ้าหนี้ต้นทุนแฝง (Landed-cost accrual)' }, // INV-1 COST-01 — freight/duty/insurance/broker payable (working-capital liability)
   '2440': { bucket: 'operating', label: 'เจ้าหนี้เงินประกันผลงาน (Retention payable)' }, // docs/35 Phase 0 — retention withheld from subcontractors (working-capital liability)
   '2100': { bucket: 'operating', label: 'ภาษีค้างจ่าย (Tax payable)' },
+  '2110': { bucket: 'operating', label: 'ภาษีเงินได้นิติบุคคลค้างจ่าย (CIT payable)' }, // TAX-11 — current income-tax payable (working-capital liability)
   '2120': { bucket: 'operating', label: 'ภาษีขายนำส่ง ภ.พ.36 (PP36 VAT payable, self-assessed)' }, // imported-service reverse-charge VAT payable (ม.83/6)
   '2130': { bucket: 'operating', label: 'ภาษีธุรกิจเฉพาะค้างจ่าย ภ.ธ.40 (SBT payable)' }, // SBT on commercial RE sales (ม.91/2(6))
   '2150': { bucket: 'operating', label: 'เจ้าหนี้ระหว่างบริษัท (Intercompany payable)' },

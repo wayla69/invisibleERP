@@ -153,6 +153,8 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     wht_payable: r(CR, '2361', 'widen', 'Vendor WHT payable — PND3/53 report set widens in PR-7') } },
   'APPAY.DISCOUNT':   { name: 'AP early-payment discount',     description: 'Prompt-payment discount captured on a run (EXP-14)', wired: true, roles: {
     discount_income: r(CR, '4600', 'free', 'Early-payment discount income (per-policy account already supported)') } },
+  'TAX.PROVISION':    { name: 'Current income-tax provision',   description: 'Current CIT provision (ASC 740 / IAS 12) — Dr 5960 expense / Cr 2110 payable (TAX-11, maker-checker)', wired: true, roles: {
+    cit_expense: r(DR, '5960', 'free', 'Corporate income-tax expense (current)'), cit_payable: r(CR, '2110', 'free', 'CIT payable — Revenue Department') } },
   'RCVAT.SELF':       { name: 'Reverse-charge self VAT',       description: 'ภ.พ.36 self-assessed VAT on imported services', wired: true, roles: {
     input_vat: r(DR, '1300', 'widen', 'Input VAT (PP30/36 set)'), pp36_payable: r(CR, '2120', 'widen', 'PP36 VAT payable (separate return set)') } },
   'FX.UNREALIZED':    { name: 'FX revaluation (unrealized)',   description: 'Month-end open-item revaluation (control deltas pinned)', wired: true, roles: {
