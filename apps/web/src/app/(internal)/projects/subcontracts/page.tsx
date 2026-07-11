@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DocSelect } from '@/components/doc-select';
+import { NumberPromptDialog } from '@/components/number-prompt-dialog';
 import { Select } from '@/components/form-controls';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -35,6 +36,7 @@ export default function SubcontractsPage() {
   const boq = useQuery<any>({ queryKey: ['subcon-boq', active], queryFn: () => api(`/api/projects/${active}/boq`), enabled: !!active });
   const [f, setF] = useState({ vendor_name: '', boq_line_id: '', amount: '', retention_pct: '10', wht_pct: '3' });
   const [vals, setVals] = useState<Record<string, string>>({}); // subcontract_no → draft valuation_no
+  const [pctFor, setPctFor] = useState<string | null>(null); // subcontract_no pending a valuation %
   const refresh = () => qc.invalidateQueries({ queryKey: ['subcon', active] });
 
   const create = useMutation({
@@ -99,7 +101,7 @@ export default function SubcontractsPage() {
                 { key: 'status', label: t('cx.col_status'), render: (r: any) => <Badge variant={r.status === 'active' ? 'default' : 'secondary'}>{r.status}</Badge> },
                 { key: 'actions', label: '', align: 'right', render: (r: any) => (
                   <div className="flex justify-end gap-1.5">
-                    <Button size="sm" variant="outline" onClick={() => { const pct = prompt(t('cx.s_prompt_pct')); if (pct) raiseVal.mutate({ subNo: r.subcontract_no, pct: Number(pct) }); }}><FilePlus2 className="size-3.5" /> {t('cx.s_btn_raiseval')}</Button>
+                    <Button size="sm" variant="outline" onClick={() => setPctFor(r.subcontract_no)}><FilePlus2 className="size-3.5" /> {t('cx.s_btn_raiseval')}</Button>
                     {vals[r.subcontract_no] && <Button size="sm" onClick={() => certifyVal.mutate(vals[r.subcontract_no]!)}><CheckCircle2 className="size-3.5" /> {t('cx.s_btn_certifyval', { no: vals[r.subcontract_no] })}</Button>}
                     {vals[r.subcontract_no] && <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}><a href={`${BASE}/api/subcontracts/valuations/${encodeURIComponent(vals[r.subcontract_no]!)}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-3.5" /></a></Button>}
                   </div>
@@ -108,6 +110,17 @@ export default function SubcontractsPage() {
             />
           )}</StateView>
         </>
+      )}
+
+      {pctFor && (
+        <NumberPromptDialog
+          title={t('cx.s_btn_raiseval')}
+          fields={[{ key: 'pct', label: t('cx.s_prompt_pct'), min: 0, max: 100 }]}
+          confirmLabel={t('cx.s_btn_raiseval')}
+          busy={raiseVal.isPending}
+          onConfirm={(get) => raiseVal.mutate({ subNo: pctFor, pct: get('pct') }, { onSuccess: () => setPctFor(null) })}
+          onClose={() => setPctFor(null)}
+        />
       )}
     </div>
   );

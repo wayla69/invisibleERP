@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/form-controls';
+import { NumberPromptDialog } from '@/components/number-prompt-dialog';
 import { useBatchActions, BatchBar, batchColumn } from '@/components/batch-actions';
 
 const reqStatusVariant = (s: string) => (s === 'Approved' ? 'success' : s === 'Rejected' ? 'destructive' : s === 'Settled' ? 'secondary' : 'warning');
@@ -54,11 +55,12 @@ function FundsTab() {
     onSuccess: (r: any) => { notifySuccess(r.pending ? t('fnx.petty.toast_fund_pending', { code: r.fund_code, no: r.funding_req_no }) : t('fnx.petty.toast_fund_opened', { code: r.fund_code, limit: baht(r.float_limit) })); setCode(''); setName(''); setFloatLimit(''); setInitial(''); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
+  const [replenishFor, setReplenishFor] = useState<string | null>(null);
   const replenish = useMutation({
-    mutationFn: (fundCode: string) => { const amt = window.prompt(t('fnx.petty.prompt_replenish')); if (!amt) throw new Error(t('fin.cancel')); return api<any>(`/api/finance/petty-cash/funds/${fundCode}/replenish`, { method: 'POST', body: JSON.stringify({ amount: Number(amt) }) }); },
+    mutationFn: (v: { fundCode: string; amount: number }) => api<any>(`/api/finance/petty-cash/funds/${v.fundCode}/replenish`, { method: 'POST', body: JSON.stringify({ amount: v.amount }) }),
     // EXP-08 (audit G3): replenishment now raises a funding request approved by a different user.
-    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_replenish_pending', { code: r.fund_code, no: r.funding_req_no })); refresh(); },
-    onError: (e: any) => { if (e.message !== t('fin.cancel')) notifyError(e.message); },
+    onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_replenish_pending', { code: r.fund_code, no: r.funding_req_no })); setReplenishFor(null); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const funds: any[] = q.data?.funds ?? [];
@@ -86,12 +88,23 @@ function FundsTab() {
               { key: 'balance', label: t('fnx.petty.col_balance'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.balance)}</span> },
               { key: 'available', label: t('fnx.petty.col_available'), align: 'right', render: (r: any) => <span className="tabular text-muted-foreground">{baht(r.available)}</span> },
               { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={r.status === 'active' ? 'success' : 'muted'}>{r.status}</Badge> },
-              { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" disabled={replenish.isPending} onClick={() => replenish.mutate(r.fund_code)}>{t('fnx.petty.replenish_btn')}</Button> },
+              { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" disabled={replenish.isPending} onClick={() => setReplenishFor(r.fund_code)}>{t('fnx.petty.replenish_btn')}</Button> },
             ]}
             emptyState={{ icon: Wallet, title: t('fnx.petty.funds_empty_title'), description: t('fnx.petty.funds_empty_desc') }}
           />
         )}
       </StateView>
+
+      {replenishFor && (
+        <NumberPromptDialog
+          title={t('fnx.petty.replenish_title', { code: replenishFor })}
+          fields={[{ key: 'amount', label: t('fnx.petty.prompt_replenish'), min: 0 }]}
+          confirmLabel={t('fnx.petty.replenish_btn')}
+          busy={replenish.isPending}
+          onConfirm={(get) => replenish.mutate({ fundCode: replenishFor, amount: get('amount') })}
+          onClose={() => setReplenishFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -109,10 +122,11 @@ function RequestsTab() {
     onSuccess: (r: any) => { notifySuccess(t('fnx.petty.toast_request_sent', { no: r.req_no, amount: baht(r.amount) })); setPayee(''); setAmount(''); setDocRef(''); setPurpose(''); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
+  const [settleFor, setSettleFor] = useState<string | null>(null);
   const settle = useMutation({
-    mutationFn: (reqNo: string) => { const sp = window.prompt(t('fnx.petty.prompt_settled')); if (sp == null) throw new Error(t('fin.cancel')); const rc = window.prompt(t('fnx.petty.prompt_returned'), '0') ?? '0'; return api<any>(`/api/finance/petty-cash/requests/${reqNo}/settle`, { method: 'POST', body: JSON.stringify({ settled_expense: Number(sp), returned_cash: Number(rc) }) }); },
-    onSuccess: () => { notifySuccess(t('fnx.petty.toast_settled')); refresh(); },
-    onError: (e: any) => { if (e.message !== t('fin.cancel')) notifyError(e.message); },
+    mutationFn: (v: { reqNo: string; settled_expense: number; returned_cash: number }) => api<any>(`/api/finance/petty-cash/requests/${v.reqNo}/settle`, { method: 'POST', body: JSON.stringify({ settled_expense: v.settled_expense, returned_cash: v.returned_cash }) }),
+    onSuccess: () => { notifySuccess(t('fnx.petty.toast_settled')); setSettleFor(null); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const fundList: any[] = funds.data?.funds ?? [];
@@ -153,12 +167,26 @@ function RequestsTab() {
               { key: 'amount', label: t('fnx.petty.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
               { key: 'doc_ref', label: t('fnx.petty.col_doc'), render: (r: any) => r.doc_ref ?? '—' },
               { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={reqStatusVariant(r.status)}>{REQ_STATUS_KEY[r.status] ? t(REQ_STATUS_KEY[r.status]) : r.status}</Badge> },
-              { key: 'act', label: '', align: 'right', render: (r: any) => (r.kind === 'advance' && r.status === 'Approved' ? <Button size="sm" variant="outline" disabled={settle.isPending} onClick={() => settle.mutate(r.req_no)}>{t('fnx.petty.settle_btn')}</Button> : null) },
+              { key: 'act', label: '', align: 'right', render: (r: any) => (r.kind === 'advance' && r.status === 'Approved' ? <Button size="sm" variant="outline" disabled={settle.isPending} onClick={() => setSettleFor(r.req_no)}>{t('fnx.petty.settle_btn')}</Button> : null) },
             ]}
             emptyState={{ icon: ReceiptText, title: t('fnx.petty.requests_empty_title') }}
           />
         )}
       </StateView>
+
+      {settleFor && (
+        <NumberPromptDialog
+          title={t('fnx.petty.settle_title', { no: settleFor })}
+          fields={[
+            { key: 'settled_expense', label: t('fnx.petty.prompt_settled'), min: 0 },
+            { key: 'returned_cash', label: t('fnx.petty.prompt_returned'), default: '0', min: 0 },
+          ]}
+          confirmLabel={t('fnx.petty.settle_btn')}
+          busy={settle.isPending}
+          onConfirm={(get) => settle.mutate({ reqNo: settleFor, settled_expense: get('settled_expense'), returned_cash: get('returned_cash') })}
+          onClose={() => setSettleFor(null)}
+        />
+      )}
     </div>
   );
 }
