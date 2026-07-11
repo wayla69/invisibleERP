@@ -43,6 +43,12 @@ export const accounts = pgTable('accounts', {
   requireDimension: jsonb('require_dimension'),  // e.g. {"branch":true}
   effectiveFrom: date('effective_from'),
   effectiveTo: date('effective_to'),
+  // docs/43 PR-8 (0346): a balance-sheet account self-declares its indirect-SCF bucket
+  // (operating|investing|financing|addback) + current/non-current; the hardcoded CF_CLASSIFY map and
+  // the metrics account lists stay as FALLBACKS for rows that leave these null.
+  cfBucket: text('cf_bucket'),
+  cfLabel: text('cf_label'),
+  isCurrent: boolean('is_current'),
 });
 
 // Per-tenant fiscal calendar. tenant_id added in 0043 so one tenant's period/year-end close

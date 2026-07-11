@@ -2,7 +2,7 @@ import { and, eq, gte, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines, arInvoices, apTransactions } from '../../database/schema';
 import { ymd, n } from '../../database/queries';
-import { LEADING, CASH_ACCOUNTS, CF_CLASSIFY } from './ledger-constants';
+import { LEADING, CASH_ACCOUNTS, CF_CLASSIFY, type CfBucket } from './ledger-constants';
 
 // Cash-flow sub-service (docs/38 §3 ledger decomposition, PR-1 — the most self-contained GL cut, GL-07):
 // the indirect statement (net income + add-backs + working capital off aggregateByType), the DIRECT
@@ -32,6 +32,12 @@ export class LedgerCashflowService {
     // Net income over the window = Σ P&L (credit−debit). Equals the income statement on an unclosed window.
     const netIncome = round4(rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense').reduce((a: number, r: any) => a + move(r), 0));
 
+    // docs/43 PR-8: an account's OWN cf_bucket/cf_label columns (0346) win over the hardcoded
+    // CF_CLASSIFY map — a newly-created balance-sheet account self-classifies without a code change.
+    const acctMeta = new Map<string, { cfBucket: string | null; cfLabel: string | null }>(
+      (await db.select({ code: accounts.code, cfBucket: accounts.cfBucket, cfLabel: accounts.cfLabel }).from(accounts))
+        .map((a: any) => [a.code, { cfBucket: a.cfBucket ?? null, cfLabel: a.cfLabel ?? null }]),
+    );
     const addbacks: any[] = [], operating: any[] = [], investing: any[] = [], financing: any[] = [], unclassified: any[] = [];
     for (const r of rows) {
       const t = r.account_type;
@@ -40,7 +46,10 @@ export class LedgerCashflowService {
       const amount = move(r);
       if (Math.abs(amount) < 1e-9) continue;
       const line = { account_code: r.account_code, account_name: r.account_name, amount };
-      const cls = CF_CLASSIFY[r.account_code];
+      const meta = acctMeta.get(r.account_code);
+      const cls = meta?.cfBucket
+        ? { bucket: meta.cfBucket as CfBucket, label: meta.cfLabel ?? r.account_name ?? r.account_code }
+        : CF_CLASSIFY[r.account_code];
       const bucket = cls?.bucket ?? (t === 'Asset' ? 'operating' : t === 'Liability' ? 'operating' : t === 'Equity' ? 'financing' : 'operating');
       const label = cls?.label ?? r.account_name ?? r.account_code;
       const entry = { ...line, label };

@@ -1,6 +1,11 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.11 · 2026-07-11** · *v0.11 (2026-07-11): posting-rule overrides extended to assets &
+**Status: DRAFT v0.12 · 2026-07-11** · *v0.12 (2026-07-11): a new balance-sheet account can declare its own
+cash-flow bucket (ดำเนินงาน/ลงทุน/จัดหาเงิน/บวกกลับ) and current/non-current split in the /chart-of-accounts
+create dialog — the indirect cash-flow statement and the financial metrics then classify it automatically;
+the chart and posting-rule overrides can also be bulk-imported (Administration → Bulk import): chart imports
+are staged for an independent approver, and every imported posting rule waits for GL-24 approval before it
+has any effect.* · *v0.11 (2026-07-11): posting-rule overrides extended to assets &
 leases (docs/43 PR-3) — disposal gain/loss, impairment, lease remeasurement, lessor income, prepaid
 schedules; asset categories can carry their own posting accounts under Item posting (see §"Posting Rules").* · *v0.10 (2026-07-11): posting-rule overrides (docs/43 PR-2) now also
 drive the day-to-day finance & POS money postings — write-offs, advances, reverse-charge VAT, AP WHT/discount,
