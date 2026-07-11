@@ -86,6 +86,40 @@ expiry.
 
 [screenshot: lots ledger with expiry alert buckets]
 
+### Lot recall / genealogy trace & lot hold (control INV-18)
+
+**Screen:** `/lots` → **สืบย้อน / ระงับล็อต (Trace / Hold)** tab
+· **Required permission:** trace `lots` / `warehouse`; hold & release `lots` / `warehouse` / `wh_adjust`
+
+Use this when a supplier issues a recall, a lot is suspected of a quality
+problem, or you need to know exactly where a batch came from and where it went.
+
+1. Open the **Trace / Hold** tab and enter a **lot number**.
+2. The trace shows the lot's two-way **genealogy**:
+   - **Backward** — the **goods receipt(s)** the lot arrived on, the **PO**, and
+     the **supplier** (so a recall can be scoped back to its source).
+   - **Forward** — the **issue/pick documents** and the **sales / customers** the
+     lot was shipped into (so you know who received the affected batch).
+3. To **quarantine** a suspect/recalled lot, type a reason and click
+   **ระงับล็อต (Hold lot)**. The lot is immediately marked **On hold** and is
+   **excluded from picking** — it will no longer be suggested by FEFO and the WMS
+   wave will not allocate it, so recalled stock cannot be picked, shipped or sold.
+4. When the lot is cleared, click **ปลดระงับ (Release)** with a reason to return
+   it to normal picking. The hold/release history is retained for audit.
+
+**Expected result:** A held lot never appears in a FEFO suggestion or a WMS pick;
+releasing it makes it pickable again. Trace gives the full source→destination
+genealogy for recall evidence.
+
+> **Control note (INV-18):** the hold IS the block — there is no separate step to
+> stop picking. Only a user with the inventory-control duty can hold or release a
+> lot; anyone with `lots`/`warehouse` can run the trace.
+
+**Error messages:**
+
+- **LOT_NOT_HELD** — you tried to release a lot that is not currently on hold.
+- **LOT_NOT_FOUND** — the lot number has no ledger records (check for typos).
+
 ---
 
 ## 4. Mobile scanning
@@ -173,6 +207,60 @@ fills the item field for you to confirm the quantity).
 **Expected result:** Stock balances at each location are updated and a movement is
 logged.
 
+> The transfer above is an **instant** location-to-location move (value-neutral, no
+> GL). For stock that physically **travels between warehouses or branches** — and is
+> therefore in transit for a period — use the two-step **transfer order** below.
+
+---
+
+## 6a. Inter-warehouse / branch transfer orders (ship → receive) — control INV-16
+
+**Screen:** `/stock-ops/transfer-orders` · **Required permission:** `wh_custody`
+(the in-transit aging report also opens to `dashboard` / `exec` reviewers)
+
+When goods move between sites they belong at **neither** end while in transit, so a
+transfer order splits the move into **two steps** and parks the value in a **Goods-in-Transit**
+account (**1255**) in between — it is never double-counted at both ends nor lost.
+
+### Create the order (`wh_custody`)
+1. On the **สร้างใบโอน (New order)** tab, enter the **From** and **To** locations and add
+   item lines (item + quantity). Click **สร้างใบโอน**.
+2. The order is created as **Draft** — a document only. **No** stock or GL has moved yet.
+   (From and To must differ, or you get `SAME_LOCATION`.)
+
+### Ship the goods (`wh_custody`)
+1. On the **ใบโอนทั้งหมด (Orders)** tab, click **ส่งของ (Ship)** on the Draft order.
+2. The source location's valued stock is relieved at its current cost and the value moves
+   into Goods-in-Transit: **Dr 1255 Goods-in-Transit / Cr 1200 Inventory**. Status → **Shipped**;
+   each line's cost is pinned as a snapshot.
+
+### Receive the goods — a *different* person (`wh_custody`)
+1. On arrival, an **independent custodian** (not the shipper) clicks **รับของ (Receive)**.
+2. The stock lands at the destination and the in-transit value is relieved back to inventory:
+   **Dr 1200 Inventory / Cr 1255**. Status → **Received**.
+
+> **Custody segregation (SoD):** the person who **shipped** an order **cannot** receive it —
+> the app returns `SOD_SELF_APPROVAL`. Someone else must confirm arrival.
+
+### Period-end in-transit aging / cutoff report
+The **สินค้าระหว่างทาง (In-transit aging)** tab lists every order still **Shipped** (not yet
+received) with its **days-in-transit** and value, bucketed **0-7 / 8-30 / 31+**. At period end
+this is the cutoff check for inventory existence — a long-outstanding in-transit line is an
+exception to investigate (goods lost, or a receipt not recorded).
+
+**Expected result:** the perpetual sub-ledger stays tied to GL 1200 across the round-trip;
+between ship and receive the value is visible in 1255 and on the aging report.
+
+**Troubleshooting**
+
+| Message | Meaning | What to do |
+|---|---|---|
+| `SAME_LOCATION` | From and To are the same location | Choose a different destination |
+| `NOT_DRAFT` | Tried to ship an order that is not a Draft | It is already shipped/received — check its status |
+| `NOT_SHIPPED` | Tried to receive an order that is not Shipped | Ship it first (or it is already received) |
+| `SOD_SELF_APPROVAL` | The shipper tried to receive their own transfer | An independent custodian (≠ shipper) must receive it |
+| `NEG_STOCK` | Shipping more than the source location has on hand | Recount / receive at the source before shipping |
+
 ---
 
 ## 7. Cycle counts & stocktake
@@ -213,6 +301,46 @@ general ledger (Dr 5810 / Cr 1200 for shrinkage, reversed for a gain).
   requests from warehouse staff. The controller approves or rejects each one.
   A write-off request posts **nothing** until approved by a *different* `wh_adjust`
   user; self-approval returns `SOD_VIOLATION` (control INV-07).
+
+---
+
+## 7b. Cycle-count program — ABC classification & blind counts (control INV-17)
+
+**Screen:** `/stock-ops/cycle-counts` · **Required permission:** `wh_count` (StockCounter) or
+`warehouse` to count; `wh_adjust` (InventoryController) to recompute ABC and post variances.
+
+Instead of counting everything at once (or at random), the cycle-count program counts the
+**right items at the right frequency**. It ranks each item by **how much value flows through it**
+(ABC) and counts the fast/valuable **A** items often and the slow **C** items rarely. Counts are
+**blind** — the counter never sees the system (book) quantity, so a shortage can't be hidden by just
+writing the book number down.
+
+### Recompute ABC (InventoryController — `wh_adjust`)
+
+1. Open **ตรวจนับตามรอบ (Cycle counts)** (`/stock-ops/cycle-counts`) → the **ABC** tab.
+2. Click **คำนวณ ABC ใหม่ (Recompute ABC)**.
+
+**Expected result:** every item is classified **A / B / C** by its annual consumption value
+(A ≈ top 80% of value, B ≈ next 15%, C ≈ last 5%). The count **cadence** per class is seeded the
+first time — **A = every 30 days, B = 90, C = 180** — and can be tuned.
+
+### Work the due worklist & count (StockCounter — `wh_count`)
+
+1. Open the **ครบกำหนด (Due)** tab — it lists items whose next count is due, **A items first**.
+2. Click **สร้างใบตรวจนับ (Generate count)** for the items you'll count. This creates a **blind**
+   task: the item list is shown **without** any system quantity.
+3. Count the shelf and enter the **physical quantity** for each line, then submit.
+
+**Expected result:** a cycle-count task (`CC-…`) and a linked stocktake (`ST-…`) are created; the
+task moves to **Counted**. The variance is **not** posted yet.
+
+### Post the variance (InventoryController — `wh_adjust`)
+
+Posting reuses the normal stocktake path — go to **อนุมัติปรับสต๊อก** (`/stock-adjustment`) or post
+the linked `ST-…` directly. The person who **counted** cannot post their own count
+(`SOD_SELF_APPROVAL`, SoD R11); a different `wh_adjust` reviewer posts it, correcting the on-hand and
+booking the valued GL adjustment (Dr 5810 / Cr 1200 for shrinkage). Once posted, the item drops off
+the due worklist until its class cadence comes round again (control INV-17).
 
 ---
 
@@ -490,6 +618,37 @@ order can't sell the same units.
 
 **Errors:** `INSUFFICIENT_ATP` (the reserve/adjust exceeds available-to-promise — reduce the
 quantity or wait for a scheduled receipt).
+
+## 11a. Standard-cost roll & inventory revaluation — control COST-02
+
+**Screen:** `/costing` → **ปรับปรุงต้นทุนมาตรฐาน (Standard-cost roll)** — required role: **`masterdata`**
+to propose, **`exec`** to approve (`planner` may view).
+
+For **standard-cost (STD)** items the standard is set once on the `/costing` costing-method screen and
+otherwise never changes. As real cost drifts, on-hand inventory (valued at the stale standard) becomes
+mis-stated. The standard-cost roll revises the standard **under maker-checker** and revalues the on-hand
+stock in one governed, audited step.
+
+### Propose a revision (CostAccountant — `masterdata`)
+1. Open **ปรับปรุงต้นทุนมาตรฐาน**. In **เสนอปรับปรุงต้นทุนมาตรฐาน**, add one line per item: the **รหัสสินค้า**
+   (must be a STD-costed item) and the **ต้นทุนมาตรฐานใหม่** (new standard). Add a **เหตุผล**.
+2. Click **ส่งคำขอ**. The system records a **Draft** revision, **snapshots the current on-hand**, and shows the
+   **revalue impact** = on-hand × (new − old) per line. **Nothing posts to the GL yet.**
+3. A non-STD (FIFO/AVG) item is rejected — set its method to STD first.
+
+### Review & approve (FinancialController — `exec`, a *different* user)
+1. Click the revision in the register to see **proposed vs current** and the impact per item.
+2. Click **อนุมัติ & ตีราคาใหม่**. The approver **must be a different user than the preparer**. On approval the
+   stored standard **rolls forward** (subsequent issues cost at the new standard) and a **balanced revaluation
+   journal** posts: a standard **rise** → **Dr 1200 Inventory / Cr 5500** (favourable); a standard **drop** →
+   **Cr 1200 / Dr 5500** (unfavourable). The posted **JE** number appears on the detail panel.
+
+*(APIs: `POST /api/costing/std-cost/revise`, `GET /api/costing/std-cost[/{no}]`,
+`POST /api/costing/std-cost/{no}/approve`.)*
+
+**Errors:** `STD_ITEM_REQUIRED` (the item is not standard-costed), `SOD_SELF_APPROVAL` (the preparer cannot
+approve their own revision — ask a different user with `exec`), `NOT_DRAFT` (the revision is already approved —
+no double posting), `NO_LINES` (add at least one item line).
 
 ## 12. CAPA — corrective & preventive actions with effectiveness sign-off (control QC-02)
 

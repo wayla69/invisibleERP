@@ -128,6 +128,30 @@ export const lotLedger = pgTable('lot_ledger', {
   byLot: index('idx_ll_lot').on(t.lotNo),
 }));
 
+// INV-5 / INV-18 — lot recall & quarantine control. A Held lot is quarantined: FEFO pick-suggestion and the
+// WMS wave bin allocation both EXCLUDE it, so a recalled/suspect lot cannot be picked, shipped or sold until
+// a DIFFERENT-status Released row supersedes it. Detective + preventive: the hold IS the block. `lot_ledger`
+// has no tenant_id (a shared physical ledger written by GR/WMS), so hold state lives here in a genuinely
+// tenant-scoped table (RLS via the 0342 canonical 0232-form loop) rather than a flag on the ledger.
+export const lotHolds = pgTable('lot_holds', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  holdNo: text('hold_no').notNull(),      // HOLD-YYYYMMDD-NNN
+  lotNo: text('lot_no').notNull(),
+  itemId: text('item_id'),
+  status: text('status').notNull().default('Held'),  // Held | Released
+  reason: text('reason'),
+  heldBy: text('held_by'),
+  heldAt: timestamp('held_at', { withTimezone: true }).defaultNow(),
+  releasedBy: text('released_by'),
+  releasedAt: timestamp('released_at', { withTimezone: true }),
+  releaseReason: text('release_reason'),
+}, (t) => ({
+  byTenantStatus: index('idx_lot_holds_tenant').on(t.tenantId, t.status),   // R1-1 tenant-leading index
+  byTenantLot: index('idx_lot_holds_lot').on(t.tenantId, t.lotNo),
+  uqHoldNo: unique('uq_lot_holds_no').on(t.tenantId, t.holdNo),
+}));
+
 export const stockMovements = pgTable('stock_movements', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // 0316 (see stocktakes)
@@ -281,6 +305,51 @@ export const stockReservations = pgTable('stock_reservations', {
 }));
 export type StockReservation = typeof stockReservations.$inferSelect;
 
+// ── Inter-warehouse/branch transfer orders (INV-2, INV-16, 0341) ─────────────────────────────
+// A TWO-STEP ship→receive transfer (distinct from the instant value-neutral stock-ops transfer). On SHIP the
+// value leaves the source location's inventory into a Goods-in-Transit control account (Dr 1255 / Cr 1200);
+// on RECEIVE it lands at the destination (Dr 1200 / Cr 1255). Between the two, ownership sits in-transit — the
+// period-end cutoff/aging report (INV-16) evidences existence. Custody segregation (SoD): the receiver must
+// differ from the shipper (SOD_SELF_APPROVAL). Both tables tenant-scoped (RLS, canonical 0232 form).
+export const transferOrders = pgTable('transfer_orders', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  toNo: text('to_no').notNull(),
+  fromLocation: text('from_location').notNull(),
+  toLocation: text('to_location').notNull(),
+  status: text('status').notNull().default('Draft'),            // Draft | Shipped | Received | Cancelled
+  remarks: text('remarks'),
+  shippedBy: text('shipped_by'),
+  shippedAt: timestamp('shipped_at', { withTimezone: true }),
+  receivedBy: text('received_by'),                               // SoD: must differ from shippedBy
+  receivedAt: timestamp('received_at', { withTimezone: true }),
+  shipGlEntryNo: text('ship_gl_entry_no'),                       // Dr 1255 / Cr 1200 JE at ship
+  receiveGlEntryNo: text('receive_gl_entry_no'),                 // Dr 1200 / Cr 1255 JE at receive
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_transfer_orders_tenant').on(t.tenantId, t.status),
+  byNo: index('idx_transfer_orders_no').on(t.tenantId, t.toNo),
+}));
+export type TransferOrder = typeof transferOrders.$inferSelect;
+
+export const transferOrderLines = pgTable('transfer_order_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  toNo: text('to_no').notNull(),
+  itemId: text('item_id').notNull(),
+  itemDescription: text('item_description'),
+  uom: text('uom'),
+  qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),   // cost snapshot at ship
+  lineValue: numeric('line_value', { precision: 18, scale: 4 }).notNull().default('0'), // qty × snapshot cost
+  costSlices: text('cost_slices'),                                                       // JSON — FIFO/FEFO layer slices carried ship→receive
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_transfer_order_lines_tenant').on(t.tenantId, t.toNo),
+}));
+export type TransferOrderLine = typeof transferOrderLines.$inferSelect;
+
 export const scanSessions = pgTable('scan_sessions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   sessionNo: text('session_no').unique(),
@@ -324,6 +393,57 @@ export const itemSupplier = pgTable('item_supplier', {
 }, (t) => ({
   uq: unique('item_supplier_uq').on(t.tenantId, t.itemId, t.vendorId),
   byItem: index('idx_itemsupplier_item').on(t.tenantId, t.itemId),
+}));
+
+// ── Cycle-count program with ABC classification (INV-3 / INV-17, migration 0341) ─────────────────
+// A governed cadence-driven cycle-count program layered over the existing stocktake spine. item_abc_class
+// ranks a tenant's items by annual consumption VALUE and Pareto-bands them A/B/C; cycle_count_plans holds the
+// count cadence (days) per class; cycle_count_tasks are generated BLIND count tasks linked to a Draft
+// stocktake (posting reuses the INV-04 counter≠poster maker-checker + the valued GL adjustment path).
+export const itemAbcClass = pgTable('item_abc_class', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  itemId: text('item_id').notNull(),
+  class: text('class').notNull(),                                      // 'A' | 'B' | 'C'
+  annualValue: numeric('annual_value', { precision: 18, scale: 4 }).notNull().default('0'),
+  rank: integer('rank'),
+  cumPct: numeric('cum_pct', { precision: 9, scale: 4 }),
+  computedAt: timestamp('computed_at', { withTimezone: true }).defaultNow(),
+  computedBy: text('computed_by'),
+}, (t) => ({
+  uq: unique('uq_item_abc_tenant_item').on(t.tenantId, t.itemId),
+  byTenant: index('idx_item_abc_tenant').on(t.tenantId, t.class),
+}));
+
+export const cycleCountPlans = pgTable('cycle_count_plans', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  class: text('class').notNull(),                                     // 'A' | 'B' | 'C'
+  cadenceDays: integer('cadence_days').notNull(),                     // days between counts for this class
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  updatedBy: text('updated_by'),
+}, (t) => ({
+  uq: unique('uq_ccplan_tenant_class').on(t.tenantId, t.class),
+  byTenant: index('idx_ccplan_tenant').on(t.tenantId, t.class),
+}));
+
+export const cycleCountTasks = pgTable('cycle_count_tasks', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  taskNo: text('task_no').notNull(),
+  class: text('class'),
+  location: text('location'),
+  dueDate: date('due_date'),
+  status: text('status').notNull().default('Open'),                  // Open | Counted | Cancelled (Posted derived)
+  stNo: text('st_no'),                                               // linked Draft stocktake
+  itemCount: integer('item_count').notNull().default(0),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  countedBy: text('counted_by'),
+  countedAt: timestamp('counted_at', { withTimezone: true }),
+}, (t) => ({
+  uq: unique('uq_cctask_no').on(t.taskNo),
+  byTenant: index('idx_cctask_tenant').on(t.tenantId, t.status),
 }));
 
 export type Item = typeof items.$inferSelect;

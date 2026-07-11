@@ -5,6 +5,7 @@ import { lessorLeases } from '../../database/schema';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -136,10 +137,14 @@ export class LessorLeasesService {
     const pv = n(l.netInvestment);
     let journalNo: string | null = null;
     if (l.classification === 'finance') {
-      const diff = round2(pv - assetCost); // >0 selling profit (Cr 1510), <0 selling loss (Dr 1510)
+      const diff = round2(pv - assetCost); // >0 selling profit (credit), <0 selling loss (debit)
+      // docs/43 PR-3: the selling-P&L leg follows the tenant posting-rule (LEASE.LESSOR_COMMENCE) ??
+      // registry default; the net-investment (1610, LSE-02 tie) and asset (1500) controls stay pinned.
+      const plAcct = (this.ledger ? (await this.ledger.postingOverrides('LEASE.LESSOR_COMMENCE', l.tenantId ?? null)).selling_pl : undefined)
+        ?? postingDefault('LEASE.LESSOR_COMMENCE', 'selling_pl');
       const lines: { account_code: string; debit?: number; credit?: number }[] = [{ account_code: '1610', debit: pv }, { account_code: '1500', credit: assetCost }];
-      if (diff > 0) lines.push({ account_code: '1510', credit: diff });
-      else if (diff < 0) lines.push({ account_code: '1510', debit: -diff });
+      if (diff > 0) lines.push({ account_code: plAcct, credit: diff });
+      else if (diff < 0) lines.push({ account_code: plAcct, debit: -diff });
       const je: { entry_no?: string | null } = this.ledger
         ? await this.ledger.postEntry({ date: start, source: 'LSR', sourceRef: leaseNo, tenantId: l.tenantId ?? null, memo: `Finance lease commencement ${leaseNo} — ${l.name} (net investment ${pv})`, createdBy: approver.username, lines })
         : { entry_no: `LSR-${start}` };
@@ -192,8 +197,11 @@ export class LessorLeasesService {
         interestIncome = round2(recv * r);
         principal = isLast ? round2(recv) : round2(n(l.monthlyPayment) - interestIncome);
         const cashIn = round2(principal + interestIncome);
+        // docs/43 PR-3: income leg follows the tenant posting-rule (LEASE.LESSOR_FINANCE) ?? default.
+        const intAcct = (this.ledger ? (await this.ledger.postingOverrides('LEASE.LESSOR_FINANCE', l.tenantId ?? null)).interest_income : undefined)
+          ?? postingDefault('LEASE.LESSOR_FINANCE', 'interest_income');
         lines.push({ account_code: '1000', debit: cashIn });
-        if (interestIncome > 0) lines.push({ account_code: '4600', credit: interestIncome });
+        if (interestIncome > 0) lines.push({ account_code: intAcct, credit: interestIncome });
         lines.push({ account_code: '1610', credit: principal });
         set.receivableBalance = String(round2(recv - principal));
         set.interestIncomeRecognized = String(round2(n(l.interestIncomeRecognized) + interestIncome));
@@ -203,8 +211,11 @@ export class LessorLeasesService {
         const remainingDep = round2(n(l.assetCost) - n(l.accumulatedDep));
         dep = Math.min(round2(n(l.assetCost) / life), remainingDep);
         if (dep < 0) dep = 0;
-        lines.push({ account_code: '1000', debit: rentalIncome }, { account_code: '4610', credit: rentalIncome });
-        if (dep > 0) lines.push({ account_code: '5200', debit: dep }, { account_code: '1590', credit: dep });
+        // docs/43 PR-3: rental-income + depreciation-expense legs follow the tenant posting-rules
+        // (LEASE.LESSOR_OPERATING) ?? defaults; cash (1000) and accum-dep (1590) stay pinned.
+        const opOvr = this.ledger ? await this.ledger.postingOverrides('LEASE.LESSOR_OPERATING', l.tenantId ?? null) : {} as Record<string, string>;
+        lines.push({ account_code: '1000', debit: rentalIncome }, { account_code: opOvr.rental_income ?? postingDefault('LEASE.LESSOR_OPERATING', 'rental_income'), credit: rentalIncome });
+        if (dep > 0) lines.push({ account_code: opOvr.dep_expense ?? postingDefault('LEASE.LESSOR_OPERATING', 'dep_expense'), debit: dep }, { account_code: '1590', credit: dep });
         set.accumulatedDep = String(round2(n(l.accumulatedDep) + dep));
         set.rentalIncomeRecognized = String(round2(n(l.rentalIncomeRecognized) + rentalIncome));
       }

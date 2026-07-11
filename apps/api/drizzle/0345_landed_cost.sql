@@ -1,4 +1,4 @@
--- 0341_landed_cost — INV-1: Landed-cost allocation (COST-01). A landed-cost voucher attaches freight / duty /
+-- 0345_landed_cost — INV-1: Landed-cost allocation (COST-01). A landed-cost voucher attaches freight / duty /
 -- insurance / broker charges to one or more posted goods receipts and apportions them into inventory unit
 -- cost (allocation basis: value / qty / weight). Posting capitalises the still-on-hand share into the
 -- perpetual inventory sub-ledger (Dr 1200 / raises moving-avg + open cost layers) and expenses the

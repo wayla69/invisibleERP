@@ -28,6 +28,7 @@ import {
   CircleDollarSign,
   KeyRound,
   ClipboardCheck,
+  ListChecks,
   ClipboardList,
   Code,
   Coins,
@@ -285,9 +286,13 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.stocktake', href: '/stocktake', icon: ClipboardCheck, perms: ['wh_count', 'warehouse', 'mobile'] },
       // SoD R11: wh_adjust (Inventory Controller) posts variance from counts and approves write-offs.
       { label: 'nav.stock_adjustment', href: '/stock-adjustment', icon: SlidersHorizontal, perms: ['wh_adjust', 'warehouse'] },
+      // INV-17: ABC-classified, cadence-driven blind cycle-count program (counting = wh_count; posting reuses /stock-adjustment).
+      { label: 'nav.cycle_counts', href: '/stock-ops/cycle-counts', icon: ListChecks, perms: ['wh_count', 'wh_adjust', 'warehouse'] },
       { label: 'nav.waste', href: '/waste', icon: Trash2, perms: ['warehouse', 'pos', 'order_mgt'] },
       { label: 'nav.receiving', href: '/receiving', icon: PackageCheck, perms: ['wh_receive', 'warehouse'] },
       { label: 'nav.goods_issue', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
+      // INV-2/INV-16: two-step inter-warehouse transfer ORDERS (ship→receive, in-transit GL + cutoff aging).
+      { label: 'nav.transfer_orders', href: '/stock-ops/transfer-orders', icon: Truck, perms: ['wh_custody', 'warehouse'] },
       { label: 'nav.lots', href: '/lots', icon: Boxes, perms: ['lots', 'warehouse'] },
       { label: 'nav.quality_coa', href: '/quality/coa', icon: FlaskConical, perms: ['quality', 'quality_approve', 'exec'] },
       { label: 'nav.mobile_scan', href: '/mobile-scan', icon: ScanLine, perms: ['mobile', 'warehouse'] },
@@ -296,6 +301,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.costing', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
       // INV-1 (COST-01) — landed-cost allocation voucher: apportion freight/duty/insurance/broker into unit cost.
       { label: 'nav.landed_cost', href: '/costing/landed-cost', icon: Ship, perms: ['procurement', 'wh_receive', 'exec'] },
+      { label: 'nav.std_cost', href: '/costing/std-cost', icon: Layers, perms: ['masterdata', 'exec', 'planner'] },
       { label: 'nav.inventory_ledger', href: '/inventory-ledger', icon: Wallet, perms: ['warehouse', 'dashboard'] },
       { label: 'nav.replenishment', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
     ],

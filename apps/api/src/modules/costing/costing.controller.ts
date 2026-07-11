@@ -4,14 +4,28 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CostingService } from './costing.service';
 import { AtpService } from './atp.service';
+import { StdCostService } from './std-cost.service';
 
 const ConfigBody = z.object({ item_id: z.string().nullable().optional(), method: z.enum(['FIFO', 'AVG', 'STD']), standard_cost: z.number().nonnegative().nullable().optional() });
+const ReviseBody = z.object({ reason: z.string().optional(), lines: z.array(z.object({ item_id: z.string().min(1), new_std: z.number().nonnegative() })).min(1) });
 const CheckBody = z.object({ item_id: z.string().min(1), qty: z.number().positive(), date: z.string().min(1) });
 const AllocBody = z.object({ item_id: z.string().min(1), qty: z.number().positive(), ref_doc: z.string().min(1), need_by: z.string().optional() });
 
 @Controller('api/costing')
 export class CostingController {
-  constructor(private readonly costing: CostingService, private readonly atp: AtpService) {}
+  constructor(private readonly costing: CostingService, private readonly atp: AtpService, private readonly stdCost: StdCostService) {}
+
+  // ── INV-4 (COST-02) — standard-cost roll / inventory revaluation (maker-checker) ──
+  // Preparer proposes a new standard per STD-costed item (snapshots on-hand); a DISTINCT approver (≠ preparer)
+  // approves → rolls the stored standard + posts the balanced revaluation JE (Dr/Cr 1200 ↔ 5500).
+  @Post('std-cost/revise') @Permissions('masterdata')
+  revise(@Body(new ZodValidationPipe(ReviseBody)) b: any, @CurrentUser() u: JwtUser) { return this.stdCost.revise(u.tenantId as number, b, u); }
+  @Get('std-cost') @Permissions('masterdata', 'exec', 'planner')
+  listStd(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.stdCost.list(u.tenantId as number, status); }
+  @Get('std-cost/:no') @Permissions('masterdata', 'exec', 'planner')
+  stdDetail(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.stdCost.detail(u.tenantId as number, no); }
+  @Post('std-cost/:no/approve') @HttpCode(200) @Permissions('exec')
+  approveStd(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.stdCost.approve(u.tenantId as number, no, u); }
 
   @Put('config') @Permissions('masterdata')
   setMethod(@Body(new ZodValidationPipe(ConfigBody)) b: any, @CurrentUser() u: JwtUser) { return this.costing.setMethod(u.tenantId as number, b.item_id ?? null, b.method, b.standard_cost ?? null, u); }

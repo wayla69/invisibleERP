@@ -109,7 +109,7 @@ export class LedgerService implements OnModuleInit {
     // and are passed as callback ports.
     this.cashflow = new LedgerCashflowService(db, (d, from, to, cc, lc, tid, ex) => this.aggregateByType(d, from, to, cc, lc, tid, ex), (code) => this.ledgerCond(code));
     this.posting = new LedgerPostingService(db, docNo);
-    this.recurring = new LedgerRecurringService(db, docNo, (dto) => this.postEntry(dto));
+    this.recurring = new LedgerRecurringService(db, docNo, (dto) => this.postEntry(dto), (ev, tid) => this.postingOverrides(ev, tid));
     this.allocation = new LedgerAllocationService(db, docNo, (dto) => this.postEntry(dto));
   }
 
