@@ -4,6 +4,37 @@ import { CoaService } from './coa.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 
+// Canonical-universe write bodies (docs/40 step 2 — the /chart-of-accounts manage UI posts these).
+// Codes are the 4-digit universe convention; type drives normal-balance defaulting in the service.
+const ACCOUNT_TYPES = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
+const CreateAccountBody = z.object({
+  code: z.string().regex(/^\d{4}$/, 'Account code must be 4 digits'),
+  name: z.string().min(1),
+  nameTh: z.string().optional(),
+  type: z.enum(ACCOUNT_TYPES),
+  parentCode: z.string().regex(/^\d{4}$/).optional(),
+  accountGroupId: z.number().int().optional(),
+  normalBalance: z.enum(['D', 'C']).optional(),
+  isPostable: z.boolean().optional(),
+  requireDimension: z.record(z.boolean()).optional(),
+  effectiveFrom: z.string().optional(),
+  effectiveTo: z.string().optional(),
+});
+type CreateAccountBodyT = z.infer<typeof CreateAccountBody>;
+const UpdateAccountBody = z
+  .object({
+    name: z.string().min(1).optional(),
+    nameTh: z.string().optional(),
+    accountGroupId: z.number().int().optional(),
+    isPostable: z.boolean().optional(),
+    requireDimension: z.record(z.boolean()).optional(),
+    effectiveFrom: z.string().optional(),
+    effectiveTo: z.string().optional(),
+    active: z.enum(['true', 'false']).optional(),
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: 'At least one field is required' });
+type UpdateAccountBodyT = z.infer<typeof UpdateAccountBody>;
+
 // Per-tenant chart curation body — at least one field must be present (a no-op PATCH is rejected).
 const OverlayBody = z
   .object({
@@ -51,13 +82,13 @@ export class CoaController {
 
   // ── Canonical universe (Admin/HQ) ──
   @Post()
-  create(@Body() dto: any, @CurrentUser() u: JwtUser) {
+  create(@Body(new ZodValidationPipe(CreateAccountBody)) dto: CreateAccountBodyT, @CurrentUser() u: JwtUser) {
     this.assertPlatformAdmin(u);
     return this.coa.createAccount(dto);
   }
 
   @Patch(':code')
-  update(@Param('code') code: string, @Body() dto: any, @CurrentUser() u: JwtUser) {
+  update(@Param('code') code: string, @Body(new ZodValidationPipe(UpdateAccountBody)) dto: UpdateAccountBodyT, @CurrentUser() u: JwtUser) {
     this.assertPlatformAdmin(u);
     return this.coa.updateAccount(code, dto);
   }
