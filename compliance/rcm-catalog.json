@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 242,
+    "total": 244,
     "by_status": {
-      "Implemented": 239,
+      "Implemented": 241,
       "Partial": 3
     },
     "by_family": {
@@ -17,14 +17,14 @@
       "Expenditure": 15,
       "Fixed Assets": 8,
       "General Ledger": 24,
-      "ITGC · Access": 21,
+      "ITGC · Access": 22,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
       "Inventory & COGS": 16,
       "Leases": 2,
       "Manufacturing & Costing": 4,
-      "Monitoring": 2,
+      "Monitoring": 3,
       "Multi-Branch & Offline POS": 7,
       "Payroll": 15,
       "Privacy · PDPA": 4,
@@ -548,6 +548,25 @@
       "tod": "Inspect the TTL on issue + the expiry check on verify.",
       "toe": "Re-perform: a key past expires_at is rejected (treated as revoked); a NULL-expiry key keeps working.",
       "evidence": "API-key expiry",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "ITGC-AC-22",
+      "cycle": "ITGC · Access",
+      "category": "ITGC",
+      "fsli": "All",
+      "risk": "An SoD conflict is blocked at grant time (ITGC-AC-09) but a consciously-ACCEPTED conflict has no standing register — there is no whole-population view of the CURRENT conflicts, and an accepted exception is a one-time approval that is never re-reviewed, so residual SoD risk drifts undetected (a compensating control lapses, an owner leaves, an acceptance never expires).",
+      "assertion": "Authorization",
+      "description": "SoD-conflict register + compensating-control governance (detective + preventive-governance) — the layer that completes the SoD story ALONGSIDE the preventive block. A standing dashboard scans the whole tenant user population, runs detectSodConflicts() on each user's EFFECTIVE permissions and groups the CURRENT conflicts by rule (who holds both sides), cross-referenced to any governance decision. A conflict a company consciously ACCEPTS is recorded in the register and MUST carry a documented compensating control, an accountable owner and an expiry date (422 COMPENSATING_CONTROL_REQUIRED otherwise), records who accepted the residual risk, and cannot be raised for a user who does not actually hold the conflict (NO_SUCH_CONFLICT). A detective worklist flags accepted conflicts past expiry OR overdue for re-review (quarterly cadence), and a periodic re-review stamps last_reviewed_at and clears the flag. Read-only aggregation + a governance register — no change to SOD_RULES / detectSodConflicts / the grant-time enforcement.",
+      "prev_det": "Prev/Det",
+      "nature": "Auto+Manual",
+      "frequency": "Quarterly",
+      "owner": "Controller / IT / Access Admin",
+      "coso": "P10/P11",
+      "code_reference": "permissions.ts (SOD_RULES R01..R21, detectSodConflicts — unchanged); modules/sod-register (sod-register.service.ts conflicts/accept/review/expired; sod-register.controller.ts GET/POST /api/admin/sod/conflicts|dispositions[/:id/review|/expired] — reads gate users/exec, acceptor recorded); schema/sod-dispositions.ts (sod_conflict_dispositions) + drizzle/0338_sod_conflict_dispositions.sql (tenant-scoped RLS); cutover/sod-register.ts (ToE)",
+      "tod": "Inspect the standing conflict dashboard (current conflicts by rule) + the accepted-conflict register (compensating control, owner, expiry, acceptor).",
+      "toe": "Re-perform: the dashboard surfaces a user holding both sides of a rule; accepting without a compensating control/owner/expiry is rejected (422); an accepted conflict past expiry or overdue for re-review is flagged on the detective worklist; a re-review stamps last_reviewed_at and clears it; the register is RLS-isolated per tenant (sod-register harness).",
+      "evidence": "SoD-conflict register + compensating-control worklist",
       "status": "Implemented"
     },
     {
@@ -3892,6 +3911,25 @@
       "tod": "Inspect the aggregation across all pending sources + the age/overdue roll-up.",
       "toe": "Re-perform: create a pending item (e.g. a Draft JE) and confirm it appears in the worklist with its control ID, amount and age; the overdue count flags items past the threshold (re-performed by the harness).",
       "evidence": "Pending-approvals worklist",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "GOV-02",
+      "cycle": "Monitoring",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "Control exceptions surfaced by continuous monitoring are noted but never owned or closed: an anomaly the scanner flags (duplicate invoice/payment, ghost/duplicate vendor, split PO under the approval ceiling, weekend manual JE, dormant-vendor reactivation) is reviewed ad-hoc with no accountable owner, no remediation due date, no documented root cause and no link to the RCM control it relates to, so a real red flag drifts unresolved and management has no key-control-indicator (KCI) view of exception volume, ageing or mean-time-to-remediate.",
+      "assertion": "Monitoring/Completeness",
+      "description": "Managed continuous-monitoring program (GRC-4): the read-only scanner (POST /api/controls/scan) runs six tenant-scoped detectors — duplicate vendor invoice (EXP-10), possible duplicate payment (EXP-01), ghost/duplicate vendor via decrypted-tax-ID grouping (EXP-02), split PO under the approval threshold (EXP-02: ≥2 non-Draft POs to one vendor within a 7-day window each below the THB 50,000 ceiling but summing over it), weekend manual JE (GL-05: source=Manual with entry_date on Sat/Sun), and dormant-vendor reactivation (EXP-05: a >180-day gap between a vendor's AP transactions) — each upserting a control_findings row by a stable fingerprint (idempotent; an already-dispositioned finding is never reset) that carries the RCM control it relates to (rcm_ref). Every exception is then DISPOSITIONED (POST /api/controls/findings/:id/disposition): an accountable owner, a remediation due_date and a documented root_cause, with a lifecycle open → investigating → remediated | accepted | false_positive; a closing disposition stamps remediated_by/at so the exception is tracked to closure. GET /api/controls/kci rolls the population up into KEY-CONTROL-INDICATORS — open exceptions by detector/severity/RCM family, an overdue count (open past due_date) and the mean time-to-remediate — the management scorecard reviewed each monitoring cycle. Read-only vs the GL; reads + disposition gate exec/users/creditors; tenant-scoped via the caller's RLS (findings never cross tenants).",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Continuous / per monitoring cycle",
+      "owner": "Controller / Internal Audit",
+      "coso": "P16",
+      "code_reference": "modules/controls/controls.service.ts (scan 6 detectors + disposition + kci); controls.controller.ts (POST scan, GET findings, POST findings/:id/{review,disposition}, GET kci); schema/controls.ts control_findings (rcm_ref/disposition/owner/due_date/root_cause/remediated_by/at) + migration 0336_control_exceptions; cutover/control-exceptions.ts (ToE)",
+      "tod": "Inspect the six detectors + fingerprint idempotency, the disposition lifecycle (owner/due/root-cause + closing stamp), the KCI roll-up (overdue + MTTR) and the RLS scoping.",
+      "toe": "Re-perform: seed data triggering each detector, scan surfaces the findings each with its rcm_ref; disposition a finding (owner/due/root-cause set, still open on the KCI) then remediate it (remediated_by/at stamped, dropped from the open KCI); the KCI returns open-by-detector/severity/family, an overdue count and MTTR; another tenant cannot see the findings (RLS) — re-performed by the control-exceptions harness.",
+      "evidence": "Control-exception disposition register + KCI roll-up",
       "status": "Implemented"
     },
     {
