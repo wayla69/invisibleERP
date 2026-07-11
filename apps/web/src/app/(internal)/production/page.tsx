@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Play, ClipboardCheck, Network, Route, ListChecks, ClipboardList } from 'lucide-react';
+import { Plus, Play, ClipboardCheck, Network, Route, ListChecks, ClipboardList, FileText, Gauge } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht } from '@/lib/format';
+import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -181,15 +182,52 @@ function Quality() {
 
 // ───────────── MRP ─────────────
 type Dem = { item_id: string; qty: string };
+type Wc = { code: string; available_minutes: string };
 function Mrp() {
   const { t } = useLang();
   const [rows, setRows] = useState<Dem[]>([{ item_id: '', qty: '' }]);
+  const [lotSizing, setLotSizing] = useState(false);
   const [res, setRes] = useState<any>(null);
+  const [prNo, setPrNo] = useState<string | null>(null);
+
+  // Rough-cut capacity (RCCP) — work centres + available minutes, run against the same demand
+  const [wcs, setWcs] = useState<Wc[]>([{ code: '', available_minutes: '' }]);
+  const [cap, setCap] = useState<any>(null);
+
+  const demand = () => rows.filter((r) => r.item_id && r.qty).map((r) => ({ item_id: r.item_id, qty: Number(r.qty) }));
+
   const run = useMutation({
-    mutationFn: () => api<any>('/api/mrp/run', { method: 'POST', body: JSON.stringify({ demand: rows.filter((r) => r.item_id && r.qty).map((r) => ({ item_id: r.item_id, qty: Number(r.qty) })) }) }),
-    onSuccess: (r) => { setRes(r); notifySuccess(t('mf.mrp_planned', { make: r.summary.make_orders, buy: r.summary.buy_orders })); }, onError: (e: any) => notifyError(e.message),
+    mutationFn: () => api<any>('/api/mrp/run', { method: 'POST', body: JSON.stringify({ demand: demand(), lot_sizing: lotSizing }) }),
+    onSuccess: (r) => { setRes(r); setPrNo(null); notifySuccess(t('mf.mrp_planned', { make: r.summary.make_orders, buy: r.summary.buy_orders })); }, onError: (e: any) => notifyError(e.message),
   });
+  const planToPr = useMutation({
+    mutationFn: () => api<any>('/api/mrp/plan-to-pr', { method: 'POST', body: JSON.stringify({ demand: demand(), lot_sizing: lotSizing }) }),
+    onSuccess: (r) => {
+      setRes({ planned_make: r.planned_make, planned_buy: r.planned_buy, summary: r.summary });
+      setPrNo(r.pr_no ?? null);
+      notifySuccess(r.pr_no ? t('mf.mrp_pr_created', { pr: r.pr_no }) : t('mf.mrp_pr_none'));
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const capacity = useMutation({
+    mutationFn: () => api<any>('/api/mrp/capacity', {
+      method: 'POST',
+      body: JSON.stringify({ demand: demand(), work_centers: wcs.filter((w) => w.code).map((w) => ({ code: w.code, available_minutes: Number(w.available_minutes) || 0 })) }),
+    }),
+    onSuccess: (r) => { setCap(r); notifySuccess(t('mf.mrp_cap_ok', { n: r.summary.centers, over: r.summary.overloaded })); }, onError: (e: any) => notifyError(e.message),
+  });
+
   const setRow = (i: number, p: Partial<Dem>) => setRows((a) => a.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  const setWc = (i: number, p: Partial<Wc>) => setWcs((a) => a.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  const hasDemand = demand().length > 0;
+  const buyCols: any[] = [
+    { key: 'item_id', label: t('mf.col_material') },
+    { key: 'gross_qty', label: t('mf.mrp_col_gross'), align: 'right' },
+    { key: 'on_hand', label: t('mf.mrp_col_onhand'), align: 'right' },
+    { key: 'qty', label: t('mf.mrp_col_toorder'), align: 'right', render: (r: any) => <span className="tabular">{num(r.ordered_qty ?? r.qty)}</span> },
+  ];
+  if (lotSizing) buyCols.push({ key: 'lot_policy', label: t('mf.mrp_col_lot'), render: (r: any) => (r.lot_policy ? <Badge variant="secondary">{r.lot_policy}</Badge> : '—') });
+
   return (
     <div className="grid gap-5">
       <Card className="gap-3 p-5">
@@ -200,17 +238,53 @@ function Mrp() {
             <Input type="number" placeholder={t('inv.col_qty')} value={r.qty} onChange={(e) => setRow(i, { qty: e.target.value })} className="w-32" />
           </div>
         ))}
-        <div className="flex items-center gap-3">
+        <label className="flex w-fit items-center gap-2 text-sm">
+          <input type="checkbox" checked={lotSizing} onChange={(e) => setLotSizing(e.target.checked)} className="size-4" />
+          {t('mf.mrp_lot_sizing')}
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => setRows((a) => [...a, { item_id: '', qty: '' }])}><Plus className="size-4" /> {t('mf.add')}</Button>
-          <Button onClick={() => run.mutate()} disabled={run.isPending}><Play className="size-4" /> {t('mf.mrp_run')}</Button>
+          <Button onClick={() => run.mutate()} disabled={run.isPending || !hasDemand}><Play className="size-4" /> {t('mf.mrp_run')}</Button>
+          <Button variant="outline" onClick={() => planToPr.mutate()} disabled={planToPr.isPending || !hasDemand}><FileText className="size-4" /> {t('mf.mrp_plan_to_pr')}</Button>
+          {prNo && <Badge variant="success">{t('mf.mrp_pr_badge', { pr: prNo })}</Badge>}
         </div>
       </Card>
       {res && (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card className="gap-2 p-5"><h4 className="font-semibold">{t('mf.mrp_make_title')}</h4><DataTable rows={res.planned_make} columns={[{ key: 'item_id', label: t('mf.col_product') }, { key: 'qty', label: t('inv.col_qty'), align: 'right' }]} emptyState={{ title: t('mf.mrp_no_make') }} /></Card>
-          <Card className="gap-2 p-5"><h4 className="font-semibold">{t('mf.mrp_buy_title')}</h4><DataTable rows={res.planned_buy} columns={[{ key: 'item_id', label: t('mf.col_material') }, { key: 'gross_qty', label: t('mf.mrp_col_gross'), align: 'right' }, { key: 'on_hand', label: t('mf.mrp_col_onhand'), align: 'right' }, { key: 'qty', label: t('mf.mrp_col_toorder'), align: 'right' }]} emptyState={{ title: t('mf.mrp_no_buy') }} /></Card>
+          <Card className="gap-2 p-5"><h4 className="font-semibold">{t('mf.mrp_buy_title')}</h4><DataTable rows={res.planned_buy} columns={buyCols} emptyState={{ title: t('mf.mrp_no_buy') }} /></Card>
         </div>
       )}
+
+      {/* Rough-cut capacity (RCCP) */}
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">{t('mf.mrp_capacity_title')}</h3>
+        <p className="text-sm text-muted-foreground">{t('mf.mrp_capacity_hint')}</p>
+        {wcs.map((w, i) => (
+          <div key={i} className="flex gap-3">
+            <Input placeholder={t('mf.mrp_wc_code')} value={w.code} onChange={(e) => setWc(i, { code: e.target.value })} className="w-56" />
+            <Input type="number" placeholder={t('mf.mrp_wc_minutes')} value={w.available_minutes} onChange={(e) => setWc(i, { available_minutes: e.target.value })} className="w-40" />
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => setWcs((a) => [...a, { code: '', available_minutes: '' }])}><Plus className="size-4" /> {t('mf.mrp_add_wc')}</Button>
+          <Button onClick={() => capacity.mutate()} disabled={capacity.isPending || !hasDemand}><Gauge className="size-4" /> {t('mf.mrp_capacity_run')}</Button>
+        </div>
+        {cap && (
+          <DataTable
+            rows={cap.work_centers}
+            rowKey={(r: any) => r.work_center}
+            columns={[
+              { key: 'work_center', label: t('mf.mrp_wc_code') },
+              { key: 'load_minutes', label: t('mf.mrp_col_load'), align: 'right', render: (r: any) => <span className="tabular">{num(r.load_minutes)}</span> },
+              { key: 'available_minutes', label: t('mf.mrp_col_avail'), align: 'right', render: (r: any) => <span className="tabular">{r.available_minutes == null ? '—' : num(r.available_minutes)}</span> },
+              { key: 'utilization_pct', label: t('mf.mrp_col_util'), align: 'right', render: (r: any) => (r.utilization_pct == null ? '—' : <span className="tabular">{num(r.utilization_pct)}%</span>) },
+              { key: 'overloaded', label: t('mf.mrp_col_over'), render: (r: any) => <Badge variant={r.overloaded ? 'destructive' : 'success'}>{r.overloaded ? t('mf.mrp_over_yes') : t('mf.mrp_over_no')}</Badge> },
+            ]}
+            emptyState={{ icon: Gauge, title: t('mf.mrp_capacity_title'), description: t('mf.mrp_cap_empty') }}
+          />
+        )}
+      </Card>
     </div>
   );
 }
