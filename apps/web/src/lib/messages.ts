@@ -205,6 +205,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.production': { th: 'การผลิตขั้นสูง (Routing/QA/MRP)', en: 'Advanced Production (Routing/QA/MRP)' },
   'nav.aps_schedule': { th: 'จัดตารางการผลิต (APS)', en: 'Production Schedule (APS)' },
   'nav.eam': { th: 'ซ่อมบำรุงสินทรัพย์ (EAM)', en: 'Asset Maintenance (EAM)' },
+  'nav.capa': { th: 'การแก้ไข & ป้องกัน (CAPA)', en: 'Corrective/Preventive (CAPA)' },
 
   // ── Finance / AR-AP ───────────────────────────────────────────────────────
   'nav.finance': { th: 'การเงิน', en: 'Finance' },

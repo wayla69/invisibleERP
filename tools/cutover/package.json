@@ -124,6 +124,7 @@
     "service": "tsx src/service.ts",
     "contract-renewal": "tsx src/contract-renewal.ts",
     "warranty": "tsx src/warranty.ts",
+    "quality-capa": "tsx src/quality-capa.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

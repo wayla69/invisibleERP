@@ -332,6 +332,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.production', href: '/production', icon: Network, perms: ['bom_master', 'warehouse', 'planner'] },
       { label: 'nav.aps_schedule', href: '/production/schedule', icon: CalendarRange, perms: ['bom_master', 'warehouse', 'planner'] },
       { label: 'nav.eam', href: '/eam', icon: Wrench, perms: ['exec', 'warehouse', 'creditors'] },
+      { label: 'nav.capa', href: '/quality/capa', icon: ClipboardCheck, perms: ['quality', 'quality_approve', 'exec'] },
     ],
   },
 
