@@ -708,17 +708,47 @@ approval queue always shows only the latest ask. (Control EXP-11.)
 **Screen:** `/inventory/suppliers` — press **แก้ไข (Edit)** on a supplier row ·
 **Required permission:** `md_vendor`.
 
-Contact person, phone, email, address, payment terms, lead time, rating,
-category, currency, and notes can be updated **directly** — unlike the bank
-account above, none of these carry a payment-redirection risk, so no second
-approval is required. The same dialog also lets you set the supplier's
-**vendor status** (approved / pending / **ระงับ — blocked**); blocking asks
-for a reason and immediately prevents new POs/quotes against that vendor
-(see "Screen the vendor" above). Tax ID and credit limit are **not** editable
-here — they stay PII-encrypted / bulk-import-only pending a future dual-control
-design of their own. The same dialog also has a **รหัสผู้ขายบริษัทแม่ (parent
-vendor ID)** field — link this vendor to its group's parent vendor for
-consolidated spend/reporting (a vendor cannot be its own parent).
+Contact person, phone, email, address, lead time, rating, category, currency,
+and notes can be updated **directly** — none of these carry a payment-redirection
+risk, so no second approval is required. The same dialog also lets you set the
+supplier's **vendor status** (approved / pending / **ระงับ — blocked**); blocking
+asks for a reason and immediately prevents new POs/quotes against that vendor
+(see "Screen the vendor" above). **Payment terms, credit limit, bank details and
+tax ID are *not* editable here** — payment terms and credit limit are now
+**maker-checked** (a change is staged and needs a second person to approve —
+see "Sensitive master-data changes" below), the bank account has its own dual
+control (above), and the tax ID stays PII-encrypted / bulk-import-only. The same
+dialog also has a **รหัสผู้ขายบริษัทแม่ (parent vendor ID)** field — link this
+vendor to its group's parent vendor for consolidated spend/reporting (a vendor
+cannot be its own parent).
+
+### Sensitive master-data changes (maker-checker) — control MDM-01
+
+**Screen:** `/masterdata/change-requests` (**อนุมัติการเปลี่ยนข้อมูลหลัก**, ERP
+nav → การตั้งค่า/ข้อมูลหลัก) · **Required permission:** `masterdata` / `md_vendor`
+/ `exec` to read & propose; `masterdata` / `exec` to approve or reject.
+
+Some vendor fields are too fraud-sensitive to change with a single click: the
+payee **account-holder name** (`bank_account_name`), the **credit limit**, and
+the **payment terms** — alongside the bank name / account number that already
+have their own dual control. Editing any of these does **not** write the vendor
+master. Instead:
+
+1. On the **เสนอการเปลี่ยนแปลง (Propose a change)** tab, pick the vendor (by ID),
+   choose the field, type the new value and (optionally) a reason, then
+   **ส่งขออนุมัติ**. The change is parked as **rออนุมัติ (pending)** — the master
+   is unchanged.
+2. A **different** person opens the **รออนุมัติ (Pending queue)** tab and presses
+   **อนุมัติ (Approve)** (or **ปฏิเสธ (Reject)** with a reason). Only on approval is
+   the value written to the vendor. **You cannot approve your own request** — the
+   system rejects it (`SOD_SELF_APPROVAL`). Rejecting or leaving it pending leaves
+   the vendor untouched.
+
+The before/after value is recorded (encrypted at rest for bank details), and the
+request itself keeps the full trail of who asked and who released it. Non-sensitive
+fields are **not** handled here — edit those directly on `/inventory/suppliers`.
+(Control **MDM-01**; separation of duties **R22** — a master-data maintainer
+should not also hold the change-approval authority.)
 
 ### Vendor addresses & contacts
 

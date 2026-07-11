@@ -526,6 +526,7 @@ export const INTERNAL_NAV: NavGroup[] = [
         title: 'nav.sub.master_data',
         items: [
           { label: 'nav.master_data', href: '/master-data', icon: Database, perms: ['masterdata'] },
+          { label: 'nav.masterdata_changes', href: '/masterdata/change-requests', icon: ShieldCheck, perms: ['masterdata', 'md_vendor', 'exec'] },
           { label: 'nav.item_categories', href: '/setup/item-categories', icon: Layers, perms: ['md_item', 'masterdata', 'exec'] },
           { label: 'nav.tax_codes', href: '/setup/tax-codes', icon: Coins, perms: ['md_config', 'masterdata', 'exec'] },
           { label: 'nav.item_posting', href: '/setup/items', icon: Boxes, perms: ['md_item', 'masterdata', 'exec'] },

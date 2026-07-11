@@ -138,6 +138,7 @@
     "ess": "tsx src/ess.ts",
     "supplier": "tsx src/supplier.ts",
     "supplier-scar": "tsx src/supplier-scar.ts",
+    "masterdata-change": "tsx src/masterdata-change.ts",
     "demand-ml": "tsx src/demand-ml.ts",
     "customers": "tsx src/customers.ts",
     "load": "tsx src/load-smoke.ts",

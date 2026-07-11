@@ -267,8 +267,8 @@ describe('Segregation of Duties — conflict detection (ITGC-AC-09)', () => {
     expect(c('Customer')).toBe(0);
     expect(c('Sales') + c('Procurement') + c('Planner') + c('Warehouse') + c('Customer')).toBe(8);
   });
-  it('Admin is the inherent superuser (violates all 21 rules)', () => {
-    expect(detectSodConflicts(resolvePermissions('Admin')).length).toBe(21);
+  it('Admin is the inherent superuser (violates all 22 rules)', () => {
+    expect(detectSodConflicts(resolvePermissions('Admin')).length).toBe(22);
   });
   it('shipped single-duty role DEFAULTS are SoD-clean (the redesign in action)', () => {
     const NEW = ['Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',

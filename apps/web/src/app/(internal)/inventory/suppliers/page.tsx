@@ -316,7 +316,7 @@ function ProfileDialog({ vendor, onClose }: { vendor: Supplier; onClose: () => v
   const qc = useQueryClient();
   const [form, setForm] = useState({
     contact: vendor.Contact_Person ?? '', phone: vendor.Phone ?? '', email: vendor.Email ?? '', address: vendor.Address ?? '',
-    payment_terms: vendor.Payment_Terms ?? '', lead_time_days: vendor.Lead_Time_Days ?? '', rating: vendor.Rating ?? '',
+    lead_time_days: vendor.Lead_Time_Days ?? '', rating: vendor.Rating ?? '',
     category: vendor.Category ?? '', currency: vendor.Currency ?? '', notes: vendor.Notes ?? '',
     parent_vendor_id: vendor.parent_vendor_id != null ? String(vendor.parent_vendor_id) : '',
   });
@@ -329,7 +329,7 @@ function ProfileDialog({ vendor, onClose }: { vendor: Supplier; onClose: () => v
         method: 'PATCH',
         body: JSON.stringify({
           contact: form.contact || undefined, phone: form.phone || undefined, email: form.email || undefined, address: form.address || undefined,
-          payment_terms: form.payment_terms || undefined, lead_time_days: form.lead_time_days !== '' ? Number(form.lead_time_days) : undefined,
+          lead_time_days: form.lead_time_days !== '' ? Number(form.lead_time_days) : undefined,
           rating: form.rating !== '' ? Number(form.rating) : undefined, category: form.category || undefined,
           currency: form.currency || undefined, notes: form.notes || undefined,
         }),
@@ -361,7 +361,7 @@ function ProfileDialog({ vendor, onClose }: { vendor: Supplier; onClose: () => v
           <FormField label={t('inv.col_phone')}><Input value={form.phone} onChange={set('phone')} /></FormField>
           <FormField label={t('mx.vp_col_email')}><Input type="email" value={form.email} onChange={set('email')} /></FormField>
           <FormField label={t('mx.vp_f_address')} className="sm:col-span-2"><Input value={form.address} onChange={set('address')} /></FormField>
-          <FormField label={t('inv.col_terms')}><Input value={form.payment_terms} onChange={set('payment_terms')} placeholder="Net 30" /></FormField>
+          <FormField label={t('inv.col_terms')} hint={t('mdc.vp_terms_hint')}><Input value={vendor.Payment_Terms ?? ''} disabled readOnly /></FormField>
           <FormField label={t('mx.vp_f_lead_time')}><Input type="number" min="0" value={form.lead_time_days} onChange={set('lead_time_days')} /></FormField>
           <FormField label={t('mx.vp_f_rating')}><Input type="number" min="0" max="5" step="0.1" value={form.rating} onChange={set('rating')} /></FormField>
           <FormField label={t('mx.vp_f_category')}><Input value={form.category} onChange={set('category')} /></FormField>

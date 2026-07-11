@@ -30,6 +30,10 @@ export const vendors = pgTable('vendors', {
   rating: numeric('rating').default('3.0'),
   bankName: text('bank_name'),
   bankAccount: encryptedText('bank_account'), // PII-at-rest (ITGC-AC-19) — decrypts only at the payment boundary
+  // Payee account-holder name (GRC-3, migration 0336) — the name the payment file must match. A distinct
+  // field from bank_name/bank_account; like them it is a payment-redirection-sensitive field, routed through
+  // the single-record master-data change maker-checker (MDM-01, modules/masterdata/masterdata-change.service.ts).
+  bankAccountName: text('bank_account_name'),
   creditLimit: numeric('credit_limit', { precision: 14, scale: 2 }),
   currency: text('currency').default('THB'),
   category: text('category').default('Supplier'),
