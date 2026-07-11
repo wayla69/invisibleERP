@@ -135,6 +135,10 @@ async function main() {
   const lineM = ordM.json.items?.[0];
   ok('Menu-order: dine-in resolves name/price/station from catalog (60+ไข่10 → 70×2=140)', lineM?.name === 'ผัดกะเพราไก่' && near(lineM?.unit_price, 70) && near(lineM?.amount, 140), JSON.stringify(lineM).slice(0, 120));
   ok('Menu-order: resolved modifiers attached to KDS line', (lineM?.modifiers ?? []).some((m: any) => m.option_name === 'ไข่ดาว'), JSON.stringify(lineM?.modifiers));
+  // menu item EDIT (updateItem) — the manager Menu screen edits name/price in place; the catalog reflects it immediately
+  await inj('PATCH', '/api/menu/items/GP01', sales1, { name: 'ผัดกะเพราไก่ (พิเศษ)', price: 65 });
+  const gpEdited = (await inj('GET', '/api/menu/items/GP01', sales1)).json;
+  ok('Menu-edit: PATCH item updates name + price in the catalog', gpEdited.name === 'ผัดกะเพราไก่ (พิเศษ)' && near(gpEdited.price, 65), JSON.stringify({ n: gpEdited.name, p: gpEdited.price }));
   const ordBad = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblM.json.id, items: [{ sku: 'GP01', qty: 1 }] });
   ok('Menu-order: missing required modifier → order rejected (400)', ordBad.status === 400 && ordBad.json.error?.code === 'MODIFIER_REQUIRED', `${ordBad.status} ${ordBad.json.error?.code}`);
   await inj('PATCH', '/api/menu/items/GP01/availability', sales1, { available: false });

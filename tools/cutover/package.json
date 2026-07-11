@@ -64,6 +64,7 @@
     "restaurant": "tsx src/restaurant.ts",
     "restaurant-offline": "tsx src/restaurant-offline.ts",
     "hub-snapshot": "tsx src/hub-snapshot.ts",
+    "hub-dryrun": "tsx src/hub-dryrun.ts",
     "reservations": "tsx src/reservations.ts",
     "waste": "tsx src/waste.ts",
     "scheduling": "tsx src/scheduling.ts",

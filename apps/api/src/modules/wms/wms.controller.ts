@@ -38,6 +38,8 @@ export class WmsController {
   // Pending-list reads — feed the /wms doc-reference dropdowns (wave/pack/ship pick a document, not type it).
   @Get('picks') @Permissions('wh_custody', 'mobile')
   listPicks(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.wms.listPicks(u, status); }
+  @Get('picks/:pickNo') @Permissions('wh_custody', 'mobile')
+  getPick(@Param('pickNo') p: string, @CurrentUser() u: JwtUser) { return this.wms.getPick(p, u); }
   @Get('shipments') @Permissions('wh_custody', 'delivery')
   listShipments(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.wms.listShipments(u, status); }
   @Get('wave-candidates') @Permissions('wh_custody')
