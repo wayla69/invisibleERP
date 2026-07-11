@@ -45,11 +45,11 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     revenue: r(CR, '4000', 'free', 'Sales revenue'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
   'SALE.VAT':         { name: 'Sale — output VAT',             description: 'Output-VAT leg of a sale/CN/DN', wired: true, roles: {
     vat_output: r(CR, '2100', 'widen', 'Output VAT — PP30 tie sums the VAT-account set') } },
-  'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: false, roles: {
+  'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: true, roles: {
     delivery_income: r(CR, '4100', 'free', 'Delivery income') } },
-  'SVC.CHARGE':       { name: 'Sale — service charge',         description: 'Auto service-charge income (large parties)', wired: false, roles: {
+  'SVC.CHARGE':       { name: 'Sale — service charge',         description: 'Auto service-charge income (large parties)', wired: true, roles: {
     service_charge_income: r(CR, '4400', 'free', 'Service-charge income') } },
-  'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: false, roles: {
+  'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: true, roles: {
     rounding: r(CR, '4900', 'free', 'Rounding adjustment (gain=credit, loss=debit)') } },
   'SURCHARGE.INCOME': { name: 'Card surcharge income',         description: 'Card surcharge collected at settlement', wired: true, roles: {
     surcharge_income: r(CR, '4500', 'free', 'Card surcharge income') } },
