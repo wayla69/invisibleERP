@@ -72,6 +72,7 @@ if this is your first time logging in.
 | 15 | [Real Estate](./15-real-estate.md) | RE Sales, Executives |
 | 16 | [CRM Workspace (deal board, leads, accounts)](./16-crm-workspace.md) | Sales, CRM Manager, Marketing, Executives |
 | 19 | [HR — Employee Self-Service (My Profile & Documents)](./19-hr-ess.md) | Every employee; HR / HR Admin (approve) |
+| 20 | [Quality — Non-Conformance (NCR) Register](./20-quality-ncr.md) | Quality (raise), Quality Approver / Executives (disposition) |
 | 99 | [Troubleshooting & FAQ](./99-troubleshooting-faq.md) | Everyone |
 
 ---

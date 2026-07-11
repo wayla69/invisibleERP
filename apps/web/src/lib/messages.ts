@@ -21,6 +21,7 @@ import { CATALOG as CAT_PLATFORM } from './i18n-catalog/platform';
 import { CATALOG as CAT_CRMX } from './i18n-catalog/crmx';
 import { CATALOG as CAT_GOVERNANCE } from './i18n-catalog/governance';
 import { CATALOG as CAT_SVC } from './i18n-catalog/svc';
+import { CATALOG as CAT_QUALITY } from './i18n-catalog/quality';
 import { CATALOG as CAT_SCAR } from './i18n-catalog/scar';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
@@ -205,7 +206,9 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.manufacturing': { th: 'ใบสั่งผลิต (Manufacturing)', en: 'Manufacturing Orders' },
   'nav.production': { th: 'การผลิตขั้นสูง (Routing/QA/MRP)', en: 'Advanced Production (Routing/QA/MRP)' },
   'nav.aps_schedule': { th: 'จัดตารางการผลิต (APS)', en: 'Production Schedule (APS)' },
+  'nav.quality_ncr': { th: 'ของไม่เป็นไปตามข้อกำหนด (NCR)', en: 'Non-Conformance (NCR)' },
   'nav.eam': { th: 'ซ่อมบำรุงสินทรัพย์ (EAM)', en: 'Asset Maintenance (EAM)' },
+  'nav.capa': { th: 'การแก้ไข & ป้องกัน (CAPA)', en: 'Corrective/Preventive (CAPA)' },
 
   // ── Finance / AR-AP ───────────────────────────────────────────────────────
   'nav.finance': { th: 'การเงิน', en: 'Finance' },
@@ -1641,5 +1644,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_SCAR,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR,
 );

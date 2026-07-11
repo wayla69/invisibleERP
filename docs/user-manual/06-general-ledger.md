@@ -162,10 +162,19 @@ item or its **item category**. Set these up under *Settings → Master data* on 
 (`/setup/tax-codes`) and **ตั้งค่าบัญชีสินค้า (Item Posting Setup)** (`/setup/items`) screens
 — or bulk-import them from a spreadsheet (*Administration → Bulk import*). Account determination
 across every business event is viewable/overridable on **กฎการลงบัญชี (Posting Rules)**
-(`/setup/posting-rules`) — and your company's **active override rows there now drive the
+(`/setup/posting-rules`) — and your company's **approved override rows there now drive the
 recurring system postings** (payroll `PAYROLL.*`, asset depreciation `DEPRECIATION.FA`, lease
 runs `LEASE.*`/`DEPRECIATION.ROU`): each leg posts to your override account, or the standard
-account when you haven't set one. Each item/category can carry its
+account when you haven't set one.
+
+> **Changing a posting rule is a two-person action (GL-24).** A saved rule shows **รออนุมัติ**
+> and has **no effect** until a *different* user presses **อนุมัติ** on the same screen — you
+> cannot approve a rule you created (`SOD_VIOLATION`, even for Admin). The form also refuses,
+> at save: an unknown event/role, a debit/credit side that doesn't match the role, an account
+> that doesn't exist or can't be posted to (`INVALID_POSTING_ACCOUNT`), and any **บัญชีคุม**
+> role (sub-ledger control accounts such as AR 1100 / AP 2000 / inventory 1200, equity, cash —
+> `OVERRIDE_ROLE_PINNED`). Editing an approved rule sends it back to รออนุมัติ. Every create /
+> approve / reject / deactivate is kept in an audit trail. Each item/category can carry its
 own revenue, COGS, inventory and valuation account plus a VAT code and — for service/labour
 categories — a withholding-tax income type.
 
