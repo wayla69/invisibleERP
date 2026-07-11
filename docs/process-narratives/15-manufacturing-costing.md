@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | MFG-01, MFG-02, MFG-03, GL-01, INV-01; SoD R04, R13 |
+| Related RCM controls | MFG-01, MFG-02, MFG-03, QC-01, GL-01, INV-01; SoD R04, R13, R21 |
 | Related policy | `compliance/policies/03-delegation-of-authority.md`, `compliance/policies/11-financial-close-policy.md` |
 
 ## 2. Purpose
@@ -26,7 +26,8 @@ To define and control the bill-of-materials (BOM) lifecycle, the work-order conv
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 8.1 (operational planning & control), cl. 8.5 (production & service provision), cl. 8.7 (control of nonconforming outputs).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — MFG-01..03, GL-01, INV-01.
+- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — MFG-01..03, QC-01, GL-01, INV-01.
+- Code (QC-01): `apps/api/src/modules/mfg-depth/ncr.service.ts` + `mfg-depth.controller.ts` (`NcrController`), `apps/api/src/database/schema/quality-ncr.ts`, migration `apps/api/drizzle/0332_quality_ncr.sql`; ToE `tools/cutover/src/quality-ncr.ts`.
 - `compliance/policies/03-delegation-of-authority.md` (BOM and work-order authority), `11-financial-close-policy.md` (manufacturing cutoff).
 - Code: `apps/api/src/modules/bom/bom.service.ts` + `bom.controller.ts`, `apps/api/src/modules/manufacturing/manufacturing.service.ts` + `manufacturing.controller.ts`, `apps/api/src/modules/costing/costing.service.ts` + `costing.controller.ts` + `atp.service.ts`, `apps/api/src/modules/ledger/ledger.service.ts`, `apps/api/src/common/doc-number.service.ts`.
 
@@ -80,6 +81,7 @@ Single-duty roles enforce SoD: the role that **records a goods receipt / work-or
 10. **COGS on issue & recipe consumption.** Issuing inventory for sale posts **Dr 5000 COGS Cr 1200** (source **POS-COGS-V**). Recipe-driven consumption uses **5300 Recipe COGS** (see `03-inventory-cogs.md` and `20-restaurant-operations.md`).
 11. **ATP / allocation.** `GET /api/costing/atp`, `POST /api/costing/atp/check`, and `POST /api/costing/allocate` reserve and confirm uncommitted inventory against demand; these are operational planning controls (no GL impact).
 12. **Scrap / rework write-off.** QA write-off of defective WIP or output posts a loss to **5810 Scrap / Rework Loss**; the write-off requires CostAccountant authorization (**MFG-02**).
+13. **Non-Conformance (NCR) register with maker-checker disposition (QC-01, decision point).** The legacy quality-inspection path (`POST /api/quality/inspect`) let the inspector **self-disposition** a failed inspection and a **Scrap** disposition posted the write-off with **no approval** — the largest quality-cycle SOX gap. A failed inspection (or a customer/supplier complaint) is now promoted to a first-class **NCR** (`POST /api/quality/ncr`, or `POST /api/quality/inspections/:id/promote`; permission `quality`) with a lifecycle **open → pending_disposition → dispositioned → closed**. A **financial disposition** (`scrap` / `use_as_is` / `return`) is *proposed* as **pending_disposition** and is applied — and any scrap write-off posted (source **QA-NCR**: **Dr 5810 Scrap / Rework Loss / Cr** the source inventory account, WO→**1250 WIP**, GR→**1200 Raw Materials**, else→**1210 Finished Goods**) — **ONLY when a DIFFERENT user approves** (`POST /api/quality/ncr/:id/disposition`, permission `quality_approve`/`exec`; `dispositioned_by ≠ raised_by` → **403 `SOD_SELF_APPROVAL`**). Reject (`…/reject`) returns the NCR to **open**; close (`…/close`) locks a dispositioned NCR. Raising (`quality`) is segregated from disposition-approval (`quality_approve`) by **SoD R21**. A small per-tenant **defect-code** lookup (`/api/quality/defect-codes`) supplies the reason taxonomy. Every status transition is written to the `doc_status_log` audit trail (docType `NCR`). Web `/quality/ncr` (**QC-01**).
 
 ## 8. Process flow
 
@@ -107,6 +109,25 @@ flowchart TD
     M -- "Yes" --> M1[Scrap write-off to 5810 authorized]
 ```
 
+**Non-Conformance (NCR) maker-checker (QC-01):**
+
+```mermaid
+flowchart TD
+    N0[Failed inspection / complaint] --> N1[Raise NCR quality raised_by]
+    N1 --> N2{Financial disposition proposed? scrap/use-as-is/return}
+    N2 -- "No" --> N3[status open]
+    N2 -- "Yes" --> N4[status pending_disposition]
+    N4 --> N5{Approver = raiser? QC-01 R21}
+    N5 -- "Yes - self" --> N6[Reject 403 SOD_SELF_APPROVAL]
+    N5 -- "No - quality_approve" --> N7{Reject or approve?}
+    N7 -- "Reject" --> N3
+    N7 -- "Approve" --> N8[status dispositioned]
+    N8 --> N9{Scrap?}
+    N9 -- "Yes" --> N10[Post QA-NCR Dr 5810 Cr 1250/1200/1210 entry_no]
+    N9 -- "No" --> N11[No GL write-off]
+    N8 --> N12[Close - status closed]
+```
+
 **Swimlane description by role:** **HqMasterSteward** owns the master BOM library, distributes it to tenants, and acts as checker on tenant BOM submissions. **ProductionPlanner** raises work orders from BOMs and runs ATP/allocation. **WarehouseStaff** issues materials into WIP and completes work orders to receive finished goods. The **system** enforces the `BAD_QTY` / `BOM_NOT_FOUND` guards, the Open → Released → Completed lifecycle with `BAD_STATUS` gating, idempotent balanced WO-ISSUE and WO-DONE postings, and STD purchase-price-variance computation on goods receipt. **CostAccountant** owns costing configuration, reviews PPV (5500) and the 2380 / 1250 clearing tie-outs, and authorizes scrap (5810). **FinancialController / CFO** approves master changes and reviews close-period tie-outs.
 
 ## 9. Control matrix
@@ -124,6 +145,7 @@ flowchart TD
 | 9 | Inventory mis-capitalized vs standard | STD PPV to 5500; FIFO/AVG at actual | Prev / Auto | MFG-03, INV-01 | GRV JE; PPV report |
 | 9 | Receipt by the requisitioner | SoD: PO/production-order vs receipt segregated | Prev / Manual | R04 | SoD conflict report |
 | 12 | Unauthorized scrap / rework loss | Scrap write-off to 5810 requires authorization | Prev / Manual | MFG-02 | Scrap JE; approval record |
+| 13 | NCR dispositioned (scrap/use-as-is/return) and the inventory write-off posted by whoever raised it — shrink concealed or good stock written off | NCR maker-checker: a financial disposition is parked `pending_disposition` and applied — and the Dr 5810 / Cr inventory write-off posted — only when a DIFFERENT user approves (`dispositioned_by ≠ raised_by` → 403 `SOD_SELF_APPROVAL`); raiser (`quality`) segregated from approver (`quality_approve`) by R21; status-log trail | **Prev / Auto** | **QC-01**, R21, GL-01 | NCR register (status, dispositioned_by, entry_no); scrap write-off JE; `doc_status_log` |
 | 8 | Unauthorized costing-method change | Costing config segregated from transacting | Prev / Manual | R13 | Config change log; access review |
 
 ## 10. Inputs & outputs
@@ -162,11 +184,18 @@ flowchart TD
 | `BOM_NOT_FOUND` | Work order references unknown BOM | Verify / create BOM first |
 | `BAD_STATUS` | Issue while not Open, or complete while not Released | Advance WO through correct lifecycle state |
 | `SOD_VIOLATION` / SoD conflict | Same user creates order and receives, or maintains master and transacts | AccessAdmin remediates (see `08-itgc.md`) |
+| `SOD_SELF_APPROVAL` | The user who raised an NCR tries to disposition or reject it (QC-01 maker-checker) | A different `quality_approve`/`exec` user dispositions |
+| `NCR_NOT_PENDING` | Disposition/reject on an NCR not in `pending_disposition` | Re-check the NCR status; only pending NCRs can be dispositioned/rejected |
+| `NCR_NOT_DISPOSITIONED` | Close on an NCR not in `dispositioned` | Disposition the NCR before closing |
+| `BAD_DISPOSITION` | Disposition value not one of `scrap` / `use_as_is` / `return` | Supply a valid financial disposition |
+| `INSPECTION_NOT_FAILED` | Promote a quality inspection with no failed quantity | Only failed inspections can be promoted to an NCR |
+| `DEFECT_CODE_EXISTS` | Duplicate defect code for the tenant | Use a unique code |
 
 ## 14. Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.6 | 2026-07-11 | Platform | **QMS-1 — Non-Conformance (NCR) register with maker-checker disposition (new control QC-01).** Closes the largest quality-cycle SOX gap: the legacy `/api/quality/inspect` path let an inspector self-disposition a failed inspection and a Scrap disposition posted the write-off with no approval. A failed inspection (or a customer/supplier complaint) is now promoted to a first-class NCR (`/api/quality/ncr`, `…/inspections/:id/promote`) whose financial disposition (scrap/use-as-is/return) is parked `pending_disposition` and applied — with the scrap write-off (source QA-NCR, Dr 5810 / Cr the source inventory account, reusing the mfg-depth scrap posting) posted — only when a DIFFERENT user approves (`dispositioned_by ≠ raised_by` → 403 `SOD_SELF_APPROVAL`). New dedicated duties `quality` (raiser) + `quality_approve` (disposition approver) with SoD R21; per-tenant defect-code lookup; `doc_status_log` audit trail; web `/quality/ncr`. Schema `non_conformances` + `defect_codes` (migration 0332). ToE: `quality-ncr` harness (11 checks); `mfg-depth` regression + `golden` unchanged (the scrap posting is byte-identical). UAT `15-quality-ncr-uat.md` UAT-QC-001..008. |
 | 0.5 | 2026-07-11 | Platform | **MRP plan-to-PR + lot-sizing + rough-cut capacity surfaced on the `/production → MRP` tab (UI-only; §5a engine unchanged).** The MRP **run** was already on screen (make/buy lists), but `POST /api/mrp/plan-to-pr`, the `lot_sizing` option, and `POST /api/mrp/capacity` (RCCP) had **no UI**. Added: a **ใช้ขนาดล็อต (lot-sizing)** checkbox (buy grid then shows the `lot_policy` column + `ordered_qty`), a **สร้างใบขอซื้อจากแผน (Plan → PR)** button (surfaces the consolidated PR number; empty-buy → no PR), and a **กำลังการผลิตคร่าว (RCCP)** panel — enter available minutes per work centre, run, and see each centre's load / utilisation / overloaded flag. No control/GL/schema change — the endpoints, `CIRCULAR_BOM` guard, and the planning-vs-purchasing segregation (R03/R04) are unchanged. ToE unchanged (`mrp` harness, 16 checks); UAT `04-inventory-uat.md` UAT-INV-097. |
 | 0.2 | 2026-07-09 | Platform | **Doc-reference dropdowns on the manufacturing screens (UI-only, no control change).** `/production` shop-floor picks the WO from `GET /api/manufacturing/work-orders` and the routing from `GET /api/routings`; the quality-inspection ref-doc dropdown switches source with the WO/GR toggle (WO list vs `GET /api/procurement/grs`); `/manufacturing` create-WO picks the BOM from `GET /api/bom/master`; `/goods-issue`'s optional ref offers the open-WO list. All existing reads via the shared `doc-select.tsx` island with a manual-entry escape; MFG-01/02 and posting logic unchanged. UAT `04-inventory-uat.md` UAT-INV-073. |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |

@@ -9,7 +9,7 @@
 // Read-only; multi-GAAP ledger selectable (TFRS / TAX / IFRS). CSV export per statement.
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, ShieldCheck } from 'lucide-react';
+import { Download, ShieldCheck, PlayCircle, Landmark, FileText, Scale } from 'lucide-react';
 
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
@@ -52,6 +52,7 @@ export function FinancialStatementsClient() {
     { key: 'bs', label: t('fnx.fs.tab_bs'), content: <BalanceSheet lp={lp} /> },
     { key: 'pl', label: t('fnx.fs.tab_pl'), content: <IncomeStatement lp={lp} ledger={ledger} /> },
     { key: 'cf', label: t('fnx.fs.tab_cf'), content: <CashFlow lp={lp} /> },
+    { key: 'stat', label: t('fnx.fs.tab_stat'), content: <StatutoryPack lp={lp} /> },
   ];
 
   return (
@@ -569,5 +570,312 @@ function CashFlow({ lp }: { lp: string }) {
         )}
       </StateView>
     </div>
+  );
+}
+
+// ───────────────────────── งบตามกฎหมาย (Statutory pack — FIN-4) ─────────────────────────
+// Surfaces the statutory-FS read outputs that have no other screen: statement of changes in equity,
+// the DBD e-Filing (Thai งบการเงิน XBRL / S-form) export, and the definition-driven statement/notes viewer.
+// All read-only over the audited GL; the layout definitions themselves are maintained by the close approver
+// via api/reports/fs/definitions (a full config editor is out of scope for this surfacing).
+
+interface SoceComponent { account_code: string; account_name: string; opening: number; movements: number; profit: number; closing: number }
+interface SoceResp {
+  from: string; to: string; ledger: string; profit_for_period: number;
+  components: SoceComponent[]; totals: { opening: number; movements: number; profit: number; closing: number };
+  ties_to_balance_sheet: boolean; balance_sheet_equity: number;
+}
+interface DbdFact { concept: string; label: string; context: string; current: number; prior: number }
+interface DbdResp {
+  format: string; form: string; fiscal_year: number; ledger: string; taxpayer_name: string; taxpayer_id: string;
+  facts: DbdFact[]; balanced: boolean; xml: string;
+}
+interface FsDef { code: string; name: string; statement_type: string; active: boolean }
+interface RenderRow { key: string; label?: string; label_th?: string | null; account_name?: string; level: number; is_subtotal?: boolean; current: number; prior?: number }
+interface RenderResp { code: string; name: string; statement_type: string; as_of: string; from: string | null; comparative: boolean; rows: RenderRow[] }
+interface NoteLine { account_code: string; account_name: string; current: number; prior: number | null }
+interface NoteBlock { number: string; title: string; title_th: string | null; policy_text: string | null; lines: NoteLine[]; total: number; prior_total: number | null }
+interface NotesResp { code: string; name: string; as_of?: string; basis: string; comparative: boolean; notes: NoteBlock[] }
+
+function downloadText(name: string, text: string, type: string) {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function StatutoryPack({ lp }: { lp: string }) {
+  return (
+    <div className="space-y-6">
+      <ChangesInEquity lp={lp} />
+      <DbdExport lp={lp} />
+      <CustomStatements lp={lp} />
+    </div>
+  );
+}
+
+// ── Statement of changes in equity (roll-forward) ──
+function ChangesInEquity({ lp }: { lp: string }) {
+  const { t } = useLang();
+  const [from, setFrom] = useState(yearStart());
+  const [to, setTo] = useState(today());
+  const [params, setParams] = useState<{ from: string; to: string } | null>(null);
+  const q = useQuery<SoceResp>({
+    queryKey: ['fs-soce', params, lp],
+    queryFn: () => api(`/api/reports/fs/changes-in-equity?from=${params!.from}&to=${params!.to}${lp}`),
+    enabled: params != null,
+  });
+  const d = q.data;
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="flex items-center gap-2">
+        <Scale className="size-4 text-primary" />
+        <h3 className="text-base font-semibold">{t('fnx.fs.stat.soce_title')}</h3>
+      </div>
+      <p className="text-sm text-muted-foreground">{t('fnx.fs.stat.soce_hint')}</p>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-2"><Label htmlFor="soce-from">{t('fnx.fs.from')}</Label><Input id="soce-from" type="date" className="max-w-[170px]" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+        <div className="grid gap-2"><Label htmlFor="soce-to">{t('fnx.fs.to')}</Label><Input id="soce-to" type="date" className="max-w-[170px]" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        <Button disabled={!from || !to} onClick={() => setParams({ from, to })}><PlayCircle className="size-4" /> {t('fnx.fs.stat.run')}</Button>
+        {d && (
+          <Button variant="outline" onClick={() => downloadCsv(`changes-in-equity-${d.from}_${d.to}.csv`, [
+            [t('fnx.fs.stat.col_component'), t('fnx.fs.stat.col_opening'), t('fnx.fs.stat.col_movements'), t('fnx.fs.stat.col_profit'), t('fnx.fs.stat.col_closing')],
+            ...d.components.map((c) => [c.account_name, c.opening, c.movements, c.profit, c.closing]),
+            [t('fnx.fs.stat.col_total'), d.totals.opening, d.totals.movements, d.totals.profit, d.totals.closing],
+          ])}><Download className="size-4" /> CSV</Button>
+        )}
+      </div>
+      {params != null && (
+        <StateView q={q}>
+          {d && (
+            <div className="space-y-3">
+              <Badge variant={d.ties_to_balance_sheet ? 'success' : 'destructive'}>
+                {d.ties_to_balance_sheet ? t('fnx.fs.stat.soce_ties') : t('fnx.fs.stat.soce_no_ties')}
+              </Badge>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="text-left text-muted-foreground">
+                    <th className="py-1">{t('fnx.fs.stat.col_component')}</th>
+                    <th className="py-1 text-right">{t('fnx.fs.stat.col_opening')}</th>
+                    <th className="py-1 text-right">{t('fnx.fs.stat.col_movements')}</th>
+                    <th className="py-1 text-right">{t('fnx.fs.stat.col_profit')}</th>
+                    <th className="py-1 text-right">{t('fnx.fs.stat.col_closing')}</th>
+                  </tr></thead>
+                  <tbody>
+                    {d.components.map((c) => (
+                      <tr key={c.account_code} className="border-t">
+                        <td className="py-1">{c.account_name} <span className="text-xs text-muted-foreground">({c.account_code})</span></td>
+                        <td className="py-1 text-right tabular">{baht(c.opening)}</td>
+                        <td className="py-1 text-right tabular">{baht(c.movements)}</td>
+                        <td className="py-1 text-right tabular">{c.profit ? baht(c.profit) : '—'}</td>
+                        <td className="py-1 text-right tabular font-medium">{baht(c.closing)}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t-2 font-semibold">
+                      <td className="py-1">{t('fnx.fs.stat.col_total')}</td>
+                      <td className="py-1 text-right tabular">{baht(d.totals.opening)}</td>
+                      <td className="py-1 text-right tabular">{baht(d.totals.movements)}</td>
+                      <td className="py-1 text-right tabular">{baht(d.totals.profit)}</td>
+                      <td className="py-1 text-right tabular">{baht(d.totals.closing)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </StateView>
+      )}
+    </Card>
+  );
+}
+
+// ── DBD e-Filing export (Thai งบการเงิน — XBRL / S-form) ──
+function DbdExport({ lp }: { lp: string }) {
+  const { t } = useLang();
+  const [fy, setFy] = useState(String(new Date().getFullYear()));
+  const [name, setName] = useState('');
+  const [tid, setTid] = useState('');
+  const [params, setParams] = useState<{ fy: string; name: string; tid: string } | null>(null);
+  const q = useQuery<DbdResp>({
+    queryKey: ['fs-dbd', params, lp],
+    queryFn: () => api(`/api/reports/fs/dbd-export?fiscal_year=${params!.fy}${lp}${params!.name ? `&taxpayer_name=${encodeURIComponent(params!.name)}` : ''}${params!.tid ? `&taxpayer_id=${encodeURIComponent(params!.tid)}` : ''}`),
+    enabled: params != null,
+  });
+  const d = q.data;
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="flex items-center gap-2">
+        <Landmark className="size-4 text-primary" />
+        <h3 className="text-base font-semibold">{t('fnx.fs.stat.dbd_title')}</h3>
+      </div>
+      <p className="text-sm text-muted-foreground">{t('fnx.fs.stat.dbd_hint')}</p>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-2"><Label htmlFor="dbd-fy">{t('fnx.fs.stat.fiscal_year')}</Label><Input id="dbd-fy" type="number" className="max-w-[120px]" value={fy} onChange={(e) => setFy(e.target.value)} /></div>
+        <div className="grid gap-2"><Label htmlFor="dbd-name">{t('fnx.fs.stat.taxpayer_name')}</Label><Input id="dbd-name" className="max-w-[200px]" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('fnx.fs.stat.taxpayer_name_ph')} /></div>
+        <div className="grid gap-2"><Label htmlFor="dbd-tid">{t('fnx.fs.stat.taxpayer_id')}</Label><Input id="dbd-tid" className="max-w-[180px]" value={tid} onChange={(e) => setTid(e.target.value)} placeholder="0105xxxxxxxxx" /></div>
+        <Button disabled={!/^\d{4}$/.test(fy)} onClick={() => setParams({ fy, name, tid })}><PlayCircle className="size-4" /> {t('fnx.fs.stat.run')}</Button>
+        {d && (
+          <Button variant="outline" onClick={() => downloadText(`dbd-sform-${d.fiscal_year}.xbrl`, d.xml, 'application/xml;charset=utf-8')}>
+            <Download className="size-4" /> {t('fnx.fs.stat.dbd_download')}
+          </Button>
+        )}
+      </div>
+      {params != null && (
+        <StateView q={q}>
+          {d && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge variant={d.balanced ? 'success' : 'destructive'}>{d.balanced ? t('fnx.fs.stat.dbd_balanced') : t('fnx.fs.stat.dbd_unbalanced')}</Badge>
+                <span className="text-xs text-muted-foreground">{d.format} · {d.form} · {d.fiscal_year}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="text-left text-muted-foreground">
+                    <th className="py-1">{t('fnx.fs.stat.col_concept')}</th>
+                    <th className="py-1 text-right">{t('fnx.fs.stat.col_current')}</th>
+                    <th className="py-1 text-right">{t('fnx.fs.stat.col_prior')}</th>
+                  </tr></thead>
+                  <tbody>
+                    {d.facts.map((f) => (
+                      <tr key={f.concept} className="border-t">
+                        <td className="py-1">{f.label} <span className="text-xs text-muted-foreground">{f.concept}</span></td>
+                        <td className="py-1 text-right tabular">{baht(f.current)}</td>
+                        <td className="py-1 text-right tabular text-muted-foreground">{baht(f.prior)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </StateView>
+      )}
+    </Card>
+  );
+}
+
+// ── Definition-driven statement + note-schedule viewer ──
+function CustomStatements({ lp }: { lp: string }) {
+  const { t } = useLang();
+  const defsQ = useQuery<{ definitions: FsDef[]; count: number }>({ queryKey: ['fs-defs'], queryFn: () => api('/api/reports/fs/definitions') });
+  const [code, setCode] = useState('');
+  const [asOf, setAsOf] = useState(today());
+  const [from, setFrom] = useState(yearStart());
+  const [prior, setPrior] = useState(false);
+  const [priorAsOf, setPriorAsOf] = useState('');
+  const [priorFrom, setPriorFrom] = useState('');
+  const [run, setRun] = useState<{ code: string; type: string } | null>(null);
+
+  const defs = defsQ.data?.definitions ?? [];
+  const selected = defs.find((d) => d.code === code);
+  const isNotes = selected?.statement_type === 'notes';
+  const isPl = selected?.statement_type === 'pl';
+
+  const priorQs = prior && priorAsOf ? `&prior_as_of=${priorAsOf}${isPl && priorFrom ? `&prior_from=${priorFrom}` : ''}` : '';
+  const renderQ = useQuery<RenderResp>({
+    queryKey: ['fs-render', run, asOf, from, priorQs, lp],
+    queryFn: () => api(`/api/reports/fs/render/${run!.code}?as_of=${asOf}${isPl ? `&from=${from}` : ''}${priorQs}${lp}`),
+    enabled: run != null && run.type !== 'notes',
+  });
+  const notesQ = useQuery<NotesResp>({
+    queryKey: ['fs-notes', run, asOf, priorQs, lp],
+    queryFn: () => api(`/api/reports/fs/notes/${run!.code}?as_of=${asOf}${priorQs}&basis=bs${lp}`),
+    enabled: run != null && run.type === 'notes',
+  });
+
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="flex items-center gap-2">
+        <FileText className="size-4 text-primary" />
+        <h3 className="text-base font-semibold">{t('fnx.fs.stat.custom_title')}</h3>
+      </div>
+      <p className="text-sm text-muted-foreground">{t('fnx.fs.stat.custom_hint')}</p>
+      <StateView q={defsQ}>
+        {defsQ.data && (
+          defs.length === 0 ? (
+            <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">{t('fnx.fs.stat.custom_empty')}</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="cs-def">{t('fnx.fs.stat.definition')}</Label>
+                  <Select id="cs-def" className="w-auto" value={code} onChange={(e) => { setCode(e.target.value); setRun(null); }}>
+                    <option value="">{t('fnx.fs.stat.pick_definition')}</option>
+                    {defs.map((d) => <option key={d.code} value={d.code}>{d.name} ({d.statement_type.toUpperCase()})</option>)}
+                  </Select>
+                </div>
+                <div className="grid gap-2"><Label htmlFor="cs-asof">{t('fnx.fs.stat.as_of')}</Label><Input id="cs-asof" type="date" className="max-w-[170px]" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></div>
+                {isPl && <div className="grid gap-2"><Label htmlFor="cs-from">{t('fnx.fs.from')}</Label><Input id="cs-from" type="date" className="max-w-[170px]" value={from} onChange={(e) => setFrom(e.target.value)} /></div>}
+                <label className="flex items-center gap-2 pb-2 text-sm">
+                  <input type="checkbox" className="size-4" checked={prior} onChange={(e) => setPrior(e.target.checked)} /> {t('fnx.fs.stat.comparative')}
+                </label>
+                {prior && <div className="grid gap-2"><Label htmlFor="cs-pasof">{t('fnx.fs.stat.prior_as_of')}</Label><Input id="cs-pasof" type="date" className="max-w-[170px]" value={priorAsOf} onChange={(e) => setPriorAsOf(e.target.value)} /></div>}
+                {prior && isPl && <div className="grid gap-2"><Label htmlFor="cs-pfrom">{t('fnx.fs.stat.prior_from')}</Label><Input id="cs-pfrom" type="date" className="max-w-[170px]" value={priorFrom} onChange={(e) => setPriorFrom(e.target.value)} /></div>}
+                <Button disabled={!selected} onClick={() => selected && setRun({ code: selected.code, type: selected.statement_type })}><PlayCircle className="size-4" /> {t('fnx.fs.stat.run')}</Button>
+              </div>
+
+              {run != null && !isNotes && (
+                <StateView q={renderQ}>
+                  {renderQ.data && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead><tr className="text-left text-muted-foreground">
+                          <th className="py-1">{renderQ.data.name}</th>
+                          <th className="py-1 text-right">{t('fnx.fs.stat.col_current')}</th>
+                          {renderQ.data.comparative && <th className="py-1 text-right">{t('fnx.fs.stat.col_prior')}</th>}
+                        </tr></thead>
+                        <tbody>
+                          {renderQ.data.rows.map((r) => (
+                            <tr key={r.key} className={`border-t ${r.is_subtotal ? 'font-semibold' : ''}`}>
+                              <td className="py-1" style={{ paddingLeft: `${(r.level ?? 0) * 16}px` }}>{r.label ?? r.account_name}</td>
+                              <td className="py-1 text-right tabular">{baht(r.current)}</td>
+                              {renderQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(r.prior ?? 0)}</td>}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </StateView>
+              )}
+
+              {run != null && isNotes && (
+                <StateView q={notesQ}>
+                  {notesQ.data && (
+                    <div className="space-y-4">
+                      {notesQ.data.notes.map((n) => (
+                        <div key={n.number} className="rounded-md border p-3">
+                          <div className="mb-2 text-sm font-semibold">{t('fnx.fs.stat.note_no', { no: n.number })} · {n.title}</div>
+                          {n.policy_text && <p className="mb-2 text-xs text-muted-foreground">{n.policy_text}</p>}
+                          <table className="w-full text-sm">
+                            <tbody>
+                              {n.lines.map((l) => (
+                                <tr key={l.account_code} className="border-t">
+                                  <td className="py-1">{l.account_name} <span className="text-xs text-muted-foreground">({l.account_code})</span></td>
+                                  <td className="py-1 text-right tabular">{baht(l.current)}</td>
+                                  {notesQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(l.prior ?? 0)}</td>}
+                                </tr>
+                              ))}
+                              <tr className="border-t-2 font-semibold">
+                                <td className="py-1">{t('fnx.fs.stat.col_total')}</td>
+                                <td className="py-1 text-right tabular">{baht(n.total)}</td>
+                                {notesQ.data!.comparative && <td className="py-1 text-right tabular">{baht(n.prior_total ?? 0)}</td>}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </StateView>
+              )}
+            </div>
+          )
+        )}
+      </StateView>
+    </Card>
   );
 }

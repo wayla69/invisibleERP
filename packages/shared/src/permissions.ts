@@ -51,12 +51,13 @@ export const PERMISSIONS = [
   //    `cpq* OR exec` so existing exec roles keep working; the in-app self-approval block (author ≠ approver)
   //    is the real control regardless of the permission held. ──
   'cpq', 'cpq_approve',
-  // ── Quality management (QMS) single-duty split (QMS-1..4; SoD R21) — recording a quality result / CoA is
-  //    segregated from approving an out-of-spec (deviation) release. `quality` is the recorder duty (maintain
-  //    specs, capture CoA + measured results, release an in-spec lot); `quality_approve` is the checker duty
-  //    (approve/reject an out-of-spec deviation release). Standalone granular perms: NOT implied by a coarse
-  //    perm. Endpoints gate `quality* OR exec`; the in-app self-approval block (recorder ≠ release approver)
-  //    is the real control regardless of the permission held. ──
+  // ── Quality management (QMS-1, QC-01) — non-conformance (NCR) register with maker-checker disposition.
+  //    `quality` is the raiser/read duty (raise an NCR from a failed inspection, view the register, maintain
+  //    defect codes); a financial disposition (scrap / use-as-is / return) that may post a GL write-off
+  //    requires `quality_approve` (the disposition-approver duty). The two are segregated in-app (SoD R21 —
+  //    raiser ≠ disposition approver → 403 SOD_SELF_APPROVAL). `quality_approve` is a standalone granular perm
+  //    (NOT implied by a coarse perm); endpoints gate `quality_approve OR exec` so exec approvers keep working.
+  //    Ungranted ⇒ the module is invisible. ──
   'quality', 'quality_approve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -74,6 +75,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'proj_tender',
   're_sales', 're_contract_approve', 're_transfer',
   'cpq', 'cpq_approve',
+  'quality_approve',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -233,8 +235,8 @@ export const SOD_RULES: SodRule[] = [
     a: ['re_sales'], b: ['re_contract_approve'], severity: 'High', risk: 'Draft and approve one’s own unit sale contract — grant an unauthorised price/discount to a related buyer.', mitigation: 'Separate contract drafting from approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, RE-02).' },
   { id: 'R20', dutyA: 'Author / discount CPQ quote', dutyB: 'Approve discount / margin-floor breach',
     a: ['cpq'], b: ['cpq_approve'], severity: 'High', risk: 'Build and approve one’s own quote that breaches the margin floor / max-discount ceiling — sell below cost or over-discount without a second check, straight to GL revenue.', mitigation: 'Separate quote authoring from discount approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, CPQ-01).' },
-  { id: 'R21', dutyA: 'Record quality result / CoA', dutyB: 'Approve out-of-spec (deviation) release',
-    a: ['quality'], b: ['quality_approve'], severity: 'High', risk: 'Record a Certificate of Analysis and also approve the release of an out-of-spec lot — release failing material into stock/production on one’s own authority, defeating the quality gate.', mitigation: 'Separate quality recording from out-of-spec release approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, QC-03).' },
+  { id: 'R21', dutyA: 'Raise non-conformance (NCR)', dutyB: 'Approve NCR financial disposition',
+    a: ['quality'], b: ['quality_approve'], severity: 'High', risk: 'Raise and disposition one’s own non-conformance — scrap / use-as-is / return defective stock and post the inventory write-off (Dr 5810) without a second check.', mitigation: 'Separate the NCR raiser from the disposition approver; maker-checker enforced in-app (SOD_SELF_APPROVAL, QC-01).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }
@@ -290,4 +292,5 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   branch: '/branches',
   hr: '/hcm',
   cpq: '/cpq',
+  quality: '/quality/ncr',
 };
