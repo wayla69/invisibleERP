@@ -1,4 +1,4 @@
--- 0331_quality_ncr — QMS-1 (QC-01): Non-Conformance (NCR) register with maker-checker disposition.
+-- 0332_quality_ncr — QMS-1 (QC-01): Non-Conformance (NCR) register with maker-checker disposition.
 -- The only quality surface today (quality_inspections / /api/quality) lets an inspector self-disposition a
 -- failed inspection, and a Scrap disposition posts a GL write-off (Dr 5810 / Cr inventory) with NO approval.
 -- This adds a first-class NCR register where a financial disposition (scrap / use_as_is / return) is proposed

@@ -1,9 +1,12 @@
-import { Injectable, BadRequestException, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Inject } from '@nestjs/common';
 import { eq, and, isNull, or } from 'drizzle-orm';
+// (governance below uses only eq/and/or/isNull — the resolver keeps its original read shape)
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { postingRules, postingEventTypes } from '../../database/schema';
+import { postingRules, postingEventTypes, postingRuleAudit, accounts } from '../../database/schema';
 import { LedgerService, type PostEntryDto } from './ledger.service';
 import { currentTenantStore } from '../../common/tenant-context';
+import { POSTING_EVENTS, postingRole } from './posting-events';
+import { bustPostingOverridesCache } from './posting-overrides-cache';
 
 export interface PostingContext {
   tenantId?: number | null;
@@ -60,6 +63,7 @@ export class PostingService {
         and(
           eq(postingRules.eventType, eventType),
           eq(postingRules.active, true),
+          eq(postingRules.status, 'Approved'), // GL-24: an unapproved rule never reaches a posting/preview
           or(
             isNull(postingRules.tenantId),
             tenantId ? eq(postingRules.tenantId, tenantId) : isNull(postingRules.tenantId),
@@ -153,11 +157,66 @@ export class PostingService {
       .orderBy(postingRules.eventType, postingRules.legOrder);
   }
 
-  /** Upsert a tenant-specific posting rule (override global default). */
+  // ───────────────────── GL-24 — posting-rule change governance (docs/43 PR-1) ─────────────────────
+  // A posting-rule override re-routes where financial statements land, so a change is GOVERNED config:
+  // validated fail-closed at save (registry role/side, tier policy, real postable account), lands
+  // PendingApproval, and only a DIFFERENT user's approval activates it (SoD — binds even Admin).
+  // Every action writes an append-only posting_rule_audit row. The resolver + cache consume only
+  // active + Approved rows, so an unapproved rule can never touch a posting.
+
+  private async audit(tenantId: number | null, ruleId: number | null, action: string, actor: string | null, detail: Record<string, unknown>) {
+    await this.db.insert(postingRuleAudit).values({ tenantId, ruleId, action, actor, detail });
+  }
+
+  /** GL-24 validation: event/role from the registry, side must match, tier must be 'free', account must
+   *  be a real POSTABLE canonical account. Fail-closed — reject at save, not at month-end. */
+  private async validateRule(dto: { eventType: string; role: string; side: 'DR' | 'CR'; accountCode: string }) {
+    const ev = POSTING_EVENTS[dto.eventType];
+    if (!ev) {
+      throw new BadRequestException({
+        code: 'UNKNOWN_POSTING_EVENT',
+        message: `Unknown posting event '${dto.eventType}'`,
+        messageTh: `ไม่รู้จักเหตุการณ์ '${dto.eventType}'`,
+      });
+    }
+    const role = postingRole(dto.eventType, dto.role);
+    if (!role) {
+      throw new BadRequestException({
+        code: 'UNKNOWN_POSTING_ROLE',
+        message: `Event '${dto.eventType}' has no role '${dto.role}' (valid: ${Object.keys(ev.roles).join(', ')})`,
+        messageTh: `เหตุการณ์ '${dto.eventType}' ไม่มีบทบาท '${dto.role}'`,
+      });
+    }
+    if (role.side !== dto.side) {
+      throw new BadRequestException({
+        code: 'POSTING_SIDE_MISMATCH',
+        message: `Role '${dto.role}' posts ${role.side}, not ${dto.side}`,
+        messageTh: `บทบาท '${dto.role}' ลงด้าน ${role.side} ไม่ใช่ ${dto.side}`,
+      });
+    }
+    if (role.tier !== 'free') {
+      throw new BadRequestException({
+        code: 'OVERRIDE_ROLE_PINNED',
+        message: `Role '${dto.eventType}.${dto.role}' is ${role.tier === 'pinned' ? 'pinned (a sub-ledger control / structural account)' : 'reconciliation-gated (Tier B — not yet widened)'} and cannot be re-mapped`,
+        messageTh: `บทบาท '${dto.eventType}.${dto.role}' เป็นบัญชีคุม/ผูกกับการกระทบยอด ไม่สามารถเปลี่ยนได้`,
+      });
+    }
+    const [acc] = await this.db.select({ code: accounts.code, isPostable: accounts.isPostable })
+      .from(accounts).where(eq(accounts.code, dto.accountCode)).limit(1);
+    if (!acc || acc.isPostable === false) {
+      throw new BadRequestException({
+        code: 'INVALID_POSTING_ACCOUNT',
+        message: `Account '${dto.accountCode}' ${!acc ? 'does not exist in the chart of accounts' : 'is not postable'}`,
+        messageTh: `บัญชี '${dto.accountCode}' ${!acc ? 'ไม่มีอยู่ในผังบัญชี' : 'ไม่สามารถบันทึกรายการได้'}`,
+      });
+    }
+  }
+
+  /** Upsert a tenant-specific posting rule → lands PendingApproval (GL-24 maker-checker). */
   async upsertRule(dto: {
     eventType: string; legOrder: number; role: string;
     side: 'DR' | 'CR'; accountCode: string; dimensionSource?: string; condition?: Record<string, unknown>;
-  }) {
+  }, user?: { username: string }) {
     const tenantId = currentTenantStore()?.tenantId ?? null;
     if (!tenantId) {
       throw new BadRequestException({
@@ -166,26 +225,83 @@ export class PostingService {
         messageTh: 'ต้องมี tenant context ในการบันทึกกฎ',
       });
     }
-    const [row] = await this.db.insert(postingRules).values({
-      tenantId,
-      eventType: dto.eventType,
-      legOrder: dto.legOrder,
+    await this.validateRule(dto);
+    // Manual upsert: the uq_posting_rules index is the COALESCE(tenant_id,0) EXPRESSION form, which a
+    // plain-column ON CONFLICT target cannot address. Rule edits are rare, human-paced writes — a
+    // select-then-write is fine (the unique index still backstops a true race).
+    const [existing] = await this.db.select({ id: postingRules.id }).from(postingRules)
+      .where(and(eq(postingRules.tenantId, tenantId), eq(postingRules.eventType, dto.eventType), eq(postingRules.legOrder, dto.legOrder)))
+      .limit(1);
+    const values = {
       role: dto.role,
       side: dto.side,
       accountCode: dto.accountCode,
       dimensionSource: dto.dimensionSource,
       condition: dto.condition,
-    }).onConflictDoUpdate({
-      target: [postingRules.tenantId, postingRules.eventType, postingRules.legOrder],
-      set: {
-        role: dto.role,
-        side: dto.side,
-        accountCode: dto.accountCode,
-        dimensionSource: dto.dimensionSource,
-        condition: dto.condition,
-        active: true,
-      },
-    }).returning();
+      active: true,
+      status: 'PendingApproval',
+      createdBy: user?.username ?? null,
+      approvedBy: null,
+      approvedAt: null,
+    };
+    const [row] = existing
+      ? await this.db.update(postingRules).set(values).where(eq(postingRules.id, existing.id)).returning()
+      : await this.db.insert(postingRules).values({ tenantId, eventType: dto.eventType, legOrder: dto.legOrder, ...values }).returning();
+    // A re-edited rule falls back to PendingApproval, so a previously-approved mapping can't be
+    // silently repointed; the cache is busted so the old approved value stops serving immediately.
+    bustPostingOverridesCache(tenantId);
+    await this.audit(tenantId, Number(row!.id), 'CREATE', user?.username ?? null, {
+      event_type: dto.eventType, role: dto.role, side: dto.side, account_code: dto.accountCode, leg_order: dto.legOrder,
+    });
     return row;
+  }
+
+  /** GL-24 approve: a DIFFERENT user activates the pending rule (SoD binds even Admin). */
+  async approveRule(id: number, user: { username: string }) {
+    const tenantId = currentTenantStore()?.tenantId ?? null;
+    const [row] = await this.db.select().from(postingRules).where(eq(postingRules.id, id)).limit(1);
+    if (!row) throw new NotFoundException({ code: 'RULE_NOT_FOUND', message: `Posting rule ${id} not found`, messageTh: `ไม่พบกฎ ${id}` });
+    if (row.status !== 'PendingApproval') {
+      throw new BadRequestException({ code: 'NOT_PENDING', message: `Rule ${id} is ${row.status}, not pending approval`, messageTh: 'กฎนี้ไม่ได้รออนุมัติ' });
+    }
+    if (row.createdBy && row.createdBy === user.username) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a posting rule you created', messageTh: 'ผู้สร้างอนุมัติกฎของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
+    const [upd] = await this.db.update(postingRules)
+      .set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() })
+      .where(eq(postingRules.id, id)).returning();
+    bustPostingOverridesCache(row.tenantId ?? tenantId);
+    await this.audit(row.tenantId ?? tenantId, id, 'APPROVE', user.username, { created_by: row.createdBy, event_type: row.eventType, role: row.role, account_code: row.accountCode });
+    return upd;
+  }
+
+  /** GL-24 reject: close a pending rule without effect. */
+  async rejectRule(id: number, user: { username: string }, reason?: string) {
+    const [row] = await this.db.select().from(postingRules).where(eq(postingRules.id, id)).limit(1);
+    if (!row) throw new NotFoundException({ code: 'RULE_NOT_FOUND', message: `Posting rule ${id} not found`, messageTh: `ไม่พบกฎ ${id}` });
+    if (row.status !== 'PendingApproval') {
+      throw new BadRequestException({ code: 'NOT_PENDING', message: `Rule ${id} is ${row.status}, not pending approval`, messageTh: 'กฎนี้ไม่ได้รออนุมัติ' });
+    }
+    const [upd] = await this.db.update(postingRules)
+      .set({ status: 'Rejected', active: false })
+      .where(eq(postingRules.id, id)).returning();
+    await this.audit(row.tenantId ?? null, id, 'REJECT', user.username, { reason: reason ?? null, event_type: row.eventType, role: row.role });
+    return upd;
+  }
+
+  /** GL-24 deactivate: retire an approved rule (postings fall back to the registry default). */
+  async deactivateRule(id: number, user: { username: string }) {
+    const [row] = await this.db.select().from(postingRules).where(eq(postingRules.id, id)).limit(1);
+    if (!row) throw new NotFoundException({ code: 'RULE_NOT_FOUND', message: `Posting rule ${id} not found`, messageTh: `ไม่พบกฎ ${id}` });
+    const [upd] = await this.db.update(postingRules).set({ active: false }).where(eq(postingRules.id, id)).returning();
+    bustPostingOverridesCache(row.tenantId ?? null);
+    await this.audit(row.tenantId ?? null, id, 'DEACTIVATE', user.username, { event_type: row.eventType, role: row.role, account_code: row.accountCode });
+    return upd;
+  }
+
+  /** GL-24 audit trail (tenant-scoped by RLS). */
+  async listRuleAudit(limit = 100) {
+    const rows = await this.db.select().from(postingRuleAudit).orderBy(postingRuleAudit.id).limit(limit);
+    return { audit: rows, count: rows.length };
   }
 }
