@@ -1,6 +1,7 @@
-# docs/43 — Posting-override FULL coverage: every GL mapping user-adjustable (PROPOSED)
+# docs/43 — Posting-override FULL coverage: every GL mapping user-adjustable (PLANNED)
 
-**Status: PROPOSED (v0.1, 2026-07-11) — awaiting review/comparison before implementation.**
+**Status: PLANNED (v0.2, 2026-07-11) — the four §8 review questions are RESOLVED (owner decisions
+incorporated); implementation may start with PR-1.**
 Extends docs/42 (steps 1–4, delivered) from 3 wired posters to **every posting flow in the system**,
 plus the platform rails that make tenant re-mapping safe at this scale.
 
@@ -59,12 +60,15 @@ A full sweep of `apps/api/src/modules/**` found:
     retention 1170/2440 · lessor 1610 · lease 2600 · FA 1500/1590 · IC 1150/2150 ·
     equity plugs 3000/3100/3200 · the CASH set 1000/1010/1015/1020 (bank/petty GL are already
     per-row configurable on `bank_accounts`/fund). Save-time reject: `OVERRIDE_ROLE_PINNED`.
-- **D5 — Rule-change governance (new control, proposed GL-24).** `upsertRule` today validates
-  nothing and applies immediately. Add: (a) account exists + postable (`INVALID_POSTING_ACCOUNT`,
-  reusing the docs/42 guard), (b) role ∈ registry + side matches, (c) tier check, (d)
-  **maker-checker**: a rule change lands `PendingApproval` and takes effect only when a different
-  user approves (mirrors GL-05/BUD-01), (e) append-only audit rows. Posting-rule changes re-route
-  financial statements — SOX-wise they are config changes to an application control.
+- **D5 — Rule-change governance (new control GL-24 — DECIDED: full from day one, §8 Q1).**
+  `upsertRule` today validates nothing and applies immediately. PR-1 ships the complete control:
+  (a) account exists + postable (`INVALID_POSTING_ACCOUNT`, reusing the docs/42 guard), (b) role ∈
+  registry + side matches, (c) tier check (`OVERRIDE_ROLE_PINNED`), (d) **maker-checker**: a rule
+  change lands `PendingApproval` and takes effect only when a **different** user approves
+  (self-approval → `SOD_VIOLATION`, binds even Admin — mirrors GL-05/BUD-01), (e) append-only audit
+  rows, (f) the resolver + cache read **approved** rules only. Posting-rule changes re-route
+  financial statements — SOX-wise they are config changes to an application control. No
+  audit-only interim mode.
 - **D6 — Per-tenant cache** for override maps (copy `ModuleConfigService`'s load-once/bust-on-write
   + `TtlCache`): one cached `Map<event, Map<role, account>>` per tenant; `upsertRule`/approve busts
   it. Batch API `postingOverridesMany(events[])` so a POS sale does ≤1 read even uncached.
@@ -83,7 +87,7 @@ A full sweep of `apps/api/src/modules/**` found:
 |---|---|---|---|
 | Inventory sub-ledger (INV-06/GL-14) | 1200 set | **already widened** (`inventoryAccountSet`) | template for others |
 | PP30 VAT tie (TAX-04/05) | 2100 + tax-code accts | **already widened** (`vatAccounts`) | add posting-rule VAT overrides to the set |
-| REC-04 / Close-cockpit (GL-22) | 1100/2000/1200/2200/2400 | hard-pinned `glBal('…')` | Tier C for control roles; 2400 → Tier B (widen `reconcileControls` to a set) |
+| REC-04 / Close-cockpit (GL-22) | 1100/2000/1200/2200/2400 | hard-pinned `glBal('…')` | **Tier C PERMANENT for all five (DECIDED, §8 Q3)** — REC-04 is never widened; deferred-revenue roles that land on 2400 are pinned too |
 | Payroll liabilities (PAY-02) | 2350/2360/2370 | schedule hard-pins; **posting already overridable (docs/42)** — latent mismatch | PR-7 widens the schedule to the override set (closes the docs/42 gap) |
 | Tips (TIP-01) | 2300 | hard-pinned + live over-distribute guard | Tier C both legs (collect+payout) |
 | Unapplied receipts (REV-21) | 2220 | hard-pinned | Tier C |
@@ -113,7 +117,7 @@ Legend: **(E)** existing key · **(N)** new key · tier per role. Defaults shown
 | FX.REALIZED (E) | fx_gain_loss 5410 (A) | payments-depth `HOUSE-SETTLE` |
 | BANK.INTEREST (N) / BANK.FEE (N) | interest_income 4000 (A) · fee_expense 5100 (A) | bank `BANKADJ` |
 | PETTY.TOPUP (N) / PETTY.EXPENSE (N) | fund GL per-fund (keep) · expense 5100 (A) | petty-cash |
-| REVENUE.DEFER (N) / REVENUE.RECOGNIZE (N) | deferred 2400 (B — REC-04 widen) · revenue per-schedule (keep) | revenue `DEFREV`/`REVREC` |
+| REVENUE.DEFER (N) / REVENUE.RECOGNIZE (N) | deferred 2400 (**C — REC-04 pinned permanently, §8 Q3**) · revenue per-schedule (keep) | revenue `DEFREV`/`REVREC` |
 | MEMBERSHIP.DEFER (N) / MEMBERSHIP.RECOGNIZE (N) | deferred 2410 (A) · revenue 4300 (A) | loyalty membership `VIP`/`VIP-REC` |
 | LOYALTY.ACCRUE (N) | loyalty_expense 5700 (A) · liability 2250 (C) | ledger `LOYALTY` |
 | GIFTCARD.ISSUE (E) | liability 2200 (C) · cash 1000 (C) | gift-card `GCISSUE` |
@@ -140,7 +144,7 @@ Legend: **(E)** existing key · **(N)** new key · tier per role. Defaults shown
 ### 4.3 Assets / leases
 | Event | Roles (tier) | Flows |
 |---|---|---|
-| ASSET.ACQUIRE (N) | funding 2000/1000 (C) · gross 1500 (C) — **register event, no free roles**; ambition = per-asset-category accounts (FA categories already carry defaults — prefer wiring `asset_categories` accounts over posting-rules here) | assets `acquire`/CIP settle |
+| ASSET.ACQUIRE (N) | funding 2000/1000 (C) · gross 1500 (C) — **register event, no free roles**. **DECIDED (§8 Q2): acquisition/depreciation account defaults are wired at the `asset_categories` grain** (the category rows already carry asset/accum/dep-expense accounts — mirror item-determination: `category account ?? registry default`), with `DEPRECIATION.FA` posting-rules kept as the tenant-wide fallback layer | assets `acquire`/CIP settle |
 | ASSET.DISPOSE (N) | gain_loss 1510 (A); 1500/1590/1000 (C) | assets `dispose` |
 | ASSET.REVALUE (N) | impairment_loss 5820 (A) · surplus 3200 (C) | assets `revalue` |
 | ASSET.CIP_COST (N) | cip 1520 (C) · funding (C) | assets `addCipCost` |
@@ -179,12 +183,12 @@ Legend: **(E)** existing key · **(N)** new key · tier per role. Defaults shown
 |---|---|---|
 | **PR-1 Rails** | `posting-events.ts` registry (all ~72 events, roles/tiers/defaults) + boot assert; ONE migration seeding new `posting_event_types`; `upsertRule` validation (postable / role / side / tier) + **maker-checker + audit** (control GL-24 in RCM → census bump); per-tenant cache + `postingOverridesMany`; deactivate endpoint | golden untouched; unit tests on validation matrix; compliance ToE for GL-24 SoD |
 | **PR-2 Finance/treasury** | wire §4.1 (finance, ap-run, bank, petty, fx, returns, giftcards, loyalty, membership, revenue, tax-invoice CN/DN) | `basics`/`taxdocs`/`worldclass` + new override ToEs; golden unchanged |
-| **PR-3 Assets & leases** | §4.3 (asset dispose/revalue P&L legs; lessor income legs; lease modify; payroll remit + net_pay role; prepaid) — prefer `asset_categories` accounts for acquire/dep defaults | `basics` FA/lease blocks; golden unchanged |
+| **PR-3 Assets & leases** | §4.3 (asset dispose/revalue P&L legs; lessor income legs; lease modify; payroll remit + net_pay role; prepaid) — **DECIDED (§8 Q2): acquire/depreciation defaults resolve `asset_categories` account columns first** (category grain, GL-21-style fail-closed validation at category save), posting-rules as the tenant-wide fallback | `basics` FA/lease blocks; golden unchanged |
 | **PR-4 Projects/RE/IC** | §4.4 projects, progress-billing, subcontracts, realestate, intercompany | `projects` (44), `basics`; **golden touches projects service — verify no re-pin** |
 | **PR-5 Manufacturing & inventory** | MFG.WO_*, QA.SCRAP, INV.ADJUST, WASTE, GR.AP leg, COSTING roles | `manufacturing`/`costing`/`wms` harnesses + inventory reconcile stays green |
 | **PR-6 POS hot paths** | dine-in / portal / channel / split, tips, till, deposits, surcharge (batch + cached reads; hub-sync shares keys) | `restaurant` 182, `splitbill`, `tips`, `e2e`, hub; latency check on cached path |
-| **PR-7 Tie-out widening** | PAY-02 schedule set (fixes the docs/42 latent gap), REC-04 2400 set, PND3/53 2361 set, ภ.ธ.40 2130 set; flip those roles Tier B→active | `payroll`/`compliance` recon ToEs: override + schedule still `reconciled:true` |
-| **PR-8 Reporting completeness** | `accounts.cf_bucket/cf_label/is_current` (migration) + `aggregateByType`/SCF/metrics fallback chain + COA dialogs + optional masterdata IO for `accounts`+`posting_rules` | `basics` SCF/metrics; `analytics` parity; census |
+| **PR-7 Tie-out widening** | PAY-02 schedule set (fixes the docs/42 latent gap), PND3/53 2361 set, ภ.ธ.40 2130 set; flip those roles Tier B→active. **REC-04 is NOT widened (DECIDED, §8 Q3)** — its five accounts stay Tier C permanently, so PR-7 shrinks to the payroll + tax-report sets | `payroll`/`compliance` recon ToEs: override + schedule still `reconciled:true` |
+| **PR-8 Reporting completeness + bulk IO** | `accounts.cf_bucket/cf_label/is_current` (migration) + `aggregateByType`/SCF/metrics fallback chain + COA dialogs. **DECIDED (§8 Q4): masterdata bulk IO ships for BOTH `accounts` (Admin/HQ-gated, GL-11) and `posting_rules`** — a posting-rules import validates every row (tier/role/postable) and lands the whole batch as **PendingApproval under GL-24** (a different user approves the batch; import can never bypass the maker-checker) | `basics` SCF/metrics; `analytics` parity; `ext` masterdata ToEs; census |
 | **PR-9 UI overhaul** | `/setup/posting-rules`: per-event role grid showing **default vs override**, COA picker (validated), pending-approval queue, deactivate, auto-role preview; Thai i18n | web build + ratchets (extend existing island); mobile spec |
 
 Sequencing: PR-1 blocks all; PR-2..6 independent after it; PR-7 after 2–3; PR-8/9 anytime after 1.
@@ -206,16 +210,24 @@ Sequencing: PR-1 blocks all; PR-2..6 independent after it; PR-7 after 2–3; PR-
 | RCM census churn (GL-24) | single census bump in PR-1 |
 | Harness fan-out (~110 scripts) | per-PR endpoint grep per mantra #11 before push |
 
-## 8. Open questions for review
+## 8. Review decisions (RESOLVED 2026-07-11 — owner)
 
-1. GL-24 maker-checker on posting rules: hard requirement from day one, or ship audit-only first?
-2. Should `ASSET.ACQUIRE`/`DEPRECIATION.FA` defaults move to `asset_categories` accounts (per-category
-   grain, mirrors item-determination) instead of tenant-wide posting rules? (plan prefers this)
-3. Widen REC-04 to sets in PR-7, or keep 2400/2361/2130 pinned permanently?
-4. Masterdata bulk IO for `posting_rules` (xlsx import of a full mapping) — in PR-8 or dropped?
+1. **GL-24 maker-checker: FULL from day one.** PR-1 ships validation + PendingApproval +
+   distinct-approver SoD + audit together; no audit-only interim (→ D5).
+2. **Asset accounts at the `asset_categories` grain**, per the plan's preference: acquisition /
+   depreciation legs resolve `category account ?? posting-rule override ?? registry default`;
+   category saves are GL-21-style fail-closed validated (→ §4.3, PR-3).
+3. **REC-04 pinned PERMANENTLY.** Its five control accounts (1100/2000/1200/2200/2400) are Tier C
+   forever — REC-04 is never converted to a widened set, and every role that would land on them
+   (incl. `REVENUE.DEFER` 2400) is pinned. PR-7 shrinks to the PAY-02 + PND3/53 + ภ.ธ.40 sets
+   (→ §3, §4.1, PR-7).
+4. **Bulk IO: YES, both `accounts` and `posting_rules`** in PR-8 — with the constraint that a
+   posting-rules import lands as a PendingApproval batch under GL-24 (import never bypasses the
+   maker-checker) and the accounts import stays Admin/HQ-gated under GL-11 (→ PR-8).
 
 ## Revision history
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-07-11 | 0.2 | §8 questions resolved by owner (GL-24 full; asset_categories grain; REC-04 pinned permanently; bulk IO in). D5/§3/§4/PR-3/PR-7/PR-8 updated to match; status PROPOSED → PLANNED. |
 | 2026-07-11 | 0.1 | Initial full-coverage plan (inventory: ~90 flows / ~45 new events; tier policy; 9-PR series). |
