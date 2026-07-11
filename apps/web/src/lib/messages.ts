@@ -146,6 +146,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.cpq': { th: 'ใบเสนอราคา', en: 'Quotations (CPQ)' },
   'nav.service': { th: 'บริการ & SLA', en: 'Service & SLA' },
   'nav.service_renewals': { th: 'ต่ออายุสัญญา', en: 'Contract renewals' },
+  'nav.warranty': { th: 'การรับประกัน & สิทธิ์', en: 'Warranty & Entitlement' },
   'nav.crm': { th: 'CRM 360', en: 'CRM 360' },
   'nav.marketing': { th: 'การตลาด', en: 'Marketing' },
   'nav.campaigns': { th: 'แคมเปญ LINE (Automation)', en: 'LINE Campaigns (Automation)' },
