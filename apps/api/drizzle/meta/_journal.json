@@ -2423,6 +2423,13 @@
       "when": 2023820000311,
       "tag": "0346_accounts_cf_bucket",
       "breakpoints": true
+    },
+    {
+      "idx": 347,
+      "version": "7",
+      "when": 2023820000312,
+      "tag": "0347_disclosure_checklists",
+      "breakpoints": true
     }
   ]
 }

@@ -137,6 +137,7 @@ export * from './posting-setup';
 export * from './departments';
 export * from './subledger-tieout';
 export * from './close-runs';
+export * from './disclosure-checklists';
 export * from './ic-recon';
 export * from './gl-audit';
 export * from './deferred-tax-fx';
