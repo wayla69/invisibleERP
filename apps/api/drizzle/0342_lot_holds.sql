@@ -1,4 +1,4 @@
--- 0341_lot_holds — INV-5 / INV-18: lot recall / genealogy traceability + lot hold (quarantine) control.
+-- 0342_lot_holds — INV-5 / INV-18: lot recall / genealogy traceability + lot hold (quarantine) control.
 -- The `lots` module was read-only over lot_ledger (ledger inquiry, expiry buckets, FEFO suggestion). This
 -- adds a real detective + preventive traceability control for F&B / pharma:
 --   • Backward trace (lot → goods receipt → supplier) and forward trace (lot → issues/picks → sales/customers)

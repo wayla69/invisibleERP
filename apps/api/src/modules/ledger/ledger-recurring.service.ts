@@ -8,6 +8,7 @@ import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
 import { toMinor4, minorToNumber4 } from '../../common/money';
 import type { RecurringJournalDto, PrepaidDto, PostEntryDto, JournalLineDto } from './ledger.service';
+import { postingDefault } from './posting-events';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -23,6 +24,9 @@ export class LedgerRecurringService {
     private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly postEntry: (dto: PostEntryDto) => Promise<{ entry_no: string | null }>,
+    // docs/43 PR-3: optional tenant posting-rule resolver (PREPAID.* roles). Optional so harnesses that
+    // construct the facade positionally with (db, docNo, postEntry) keep working — absent = registry defaults.
+    private readonly postingOverrides?: (eventType: string, tenantId: number | null) => Promise<Record<string, string>>,
   ) {}
 
   // ───────────────────── Recurring / template journal entries (GL-08) ─────────────────────
@@ -104,14 +108,20 @@ export class LedgerRecurringService {
     const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
     const start = dto.startDate ?? ymd();
     const scheduleNo = await this.docNo.nextDaily('PPD');
-    const prepaidAcct = dto.prepaidAccount ?? '1280';
-    // Optionally record the up-front prepayment (Dr 1280 prepaid / Cr 1000 cash) when not already on the books.
+    // docs/43 PR-3: account precedence per leg — the dto's per-schedule account (already supported) →
+    // the tenant posting-rule (PREPAID.CAPITALIZE.prepaid / PREPAID.AMORTIZE.expense) → registry default.
+    // Resolved at CREATE and stamped on the schedule, so a later rule change never re-routes a live schedule.
+    const [capOvr, amortOvr] = this.postingOverrides
+      ? await Promise.all([this.postingOverrides('PREPAID.CAPITALIZE', tenantId), this.postingOverrides('PREPAID.AMORTIZE', tenantId)])
+      : [{} as Record<string, string>, {} as Record<string, string>];
+    const prepaidAcct = dto.prepaidAccount ?? capOvr.prepaid ?? postingDefault('PREPAID.CAPITALIZE', 'prepaid');
+    // Optionally record the up-front prepayment (Dr prepaid / Cr 1000 cash) when not already on the books.
     if (dto.capitalize) {
       await this.postEntry({ date: start, source: 'PPD-CAP', sourceRef: scheduleNo, tenantId, memo: `Prepaid ${scheduleNo} — ${dto.name}`, createdBy: user.username, lines: [{ account_code: prepaidAcct, debit: total }, { account_code: '1000', credit: total }] });
     }
     const [r] = await db.insert(prepaidSchedules).values({
       scheduleNo, tenantId, name: dto.name, totalAmount: String(total), months: dto.months, amortizedAmount: '0', periodsPosted: 0,
-      expenseAccount: dto.expenseAccount ?? '5100', prepaidAccount: prepaidAcct, startDate: start, nextRunDate: start, status: 'active', createdBy: user.username,
+      expenseAccount: dto.expenseAccount ?? amortOvr.expense ?? postingDefault('PREPAID.AMORTIZE', 'expense'), prepaidAccount: prepaidAcct, startDate: start, nextRunDate: start, status: 'active', createdBy: user.username,
     }).returning({ id: prepaidSchedules.id });
     return { id: Number(r!.id), schedule_no: scheduleNo, name: dto.name, total_amount: total, months: dto.months, monthly_amount: round2(total / dto.months), next_run_date: start };
   }

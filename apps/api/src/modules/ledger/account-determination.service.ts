@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { items, itemCategories, taxCodes, featureFlags, accounts, locations } from '../../database/schema';
+import { items, itemCategories, taxCodes, featureFlags, accounts, locations, assetCategories } from '../../database/schema';
 
 // Item-posting account determination (docs/33, GL-21). Resolves the GL/VAT/WHT accounts a posting should use
 // FROM THE ITEM, applying precedence: item column → its category (item_categories) → null (the caller then
@@ -65,14 +65,43 @@ export class AccountDeterminationService {
       vatCode: pick(it.vatCode, cat?.vatCode),
       whtIncomeType: pick(it.whtIncomeType, cat?.whtIncomeType),
     };
-    await this.assertPostable(itemId, [
+    await this.assertPostable(`Item ${itemId}`, [
       resolved.revenueAccount, resolved.cogsAccount, resolved.inventoryAccount, resolved.valuationAccount, resolved.adjustmentAccount,
     ]);
     return resolved;
   }
 
+  /**
+   * docs/43 PR-3 (owner decision Q2) — asset-account determination at the asset_categories grain.
+   * Mirrors resolveItemAccounts: gated by the SAME per-tenant `posting_determination` flag (default OFF →
+   * all-nulls, callers keep their literal/posting-rule path), and any resolved account is GL-21-validated
+   * postable. When ON, the category's asset / accum-dep / dep-expense columns drive acquisition and the
+   * depreciation run for assets in that category; the DEPRECIATION.FA posting-rule stays the tenant-wide
+   * fallback layer beneath it.
+   */
+  async resolveAssetCategoryAccounts(tenantId: number | null | undefined, categoryId: number | null | undefined):
+    Promise<{ assetAccount: string | null; accumDepAccount: string | null; depExpenseAccount: string | null }> {
+    const none = { assetAccount: null, accumDepAccount: null, depExpenseAccount: null };
+    if (categoryId == null || !(await this.enabled(tenantId))) return none;
+    const [cat] = await this.db.select().from(assetCategories).where(eq(assetCategories.id, categoryId)).limit(1);
+    if (!cat) return none;
+    const resolved = {
+      assetAccount: cat.assetAccount ?? null,
+      accumDepAccount: cat.accumDepAccount ?? null,
+      depExpenseAccount: cat.depExpenseAccount ?? null,
+    };
+    await this.assertPostable(`asset category ${cat.code}`, [resolved.assetAccount, resolved.accumDepAccount, resolved.depExpenseAccount]);
+    return resolved;
+  }
+
+  /** GL-21 fail-closed check for a set of account codes — exposed for setup-time validation (asset-category save). */
+  async assertAccountsPostable(label: string, codes: (string | null | undefined)[]) {
+    await this.assertPostable(label, codes.map((c) => c ?? null));
+  }
+
   // GL-21: a resolved account override must exist in the canonical COA and be postable.
-  private async assertPostable(itemId: string, codes: (string | null)[]) {
+  // `subject` names the carrier of the bad account in the error (an item id, or "asset category X").
+  private async assertPostable(subject: string, codes: (string | null)[]) {
     const wanted = [...new Set(codes.filter((c): c is string => !!c))];
     if (!wanted.length) return;
     const rows = await this.db.select({ code: accounts.code, isPostable: accounts.isPostable }).from(accounts);
@@ -81,15 +110,15 @@ export class AccountDeterminationService {
       if (!byCode.has(c)) {
         throw new BadRequestException({
           code: 'INVALID_POSTING_ACCOUNT',
-          message: `Item ${itemId}: posting account '${c}' does not exist in the chart of accounts`,
-          messageTh: `สินค้า ${itemId}: บัญชี '${c}' ไม่มีอยู่ในผังบัญชี`,
+          message: `${subject}: posting account '${c}' does not exist in the chart of accounts`,
+          messageTh: `${subject}: บัญชี '${c}' ไม่มีอยู่ในผังบัญชี`,
         });
       }
       if (byCode.get(c) === false) {
         throw new BadRequestException({
           code: 'INVALID_POSTING_ACCOUNT',
-          message: `Item ${itemId}: posting account '${c}' is not postable (a header/control account)`,
-          messageTh: `สินค้า ${itemId}: บัญชี '${c}' ไม่สามารถบันทึกรายการได้ (เป็นบัญชีหัว/คุม)`,
+          message: `${subject}: posting account '${c}' is not postable (a header/control account)`,
+          messageTh: `${subject}: บัญชี '${c}' ไม่สามารถบันทึกรายการได้ (เป็นบัญชีหัว/คุม)`,
         });
       }
     }

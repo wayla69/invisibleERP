@@ -480,6 +480,37 @@ order can't sell the same units.
 **Errors:** `INSUFFICIENT_ATP` (the reserve/adjust exceeds available-to-promise — reduce the
 quantity or wait for a scheduled receipt).
 
+## 11a. Standard-cost roll & inventory revaluation — control COST-02
+
+**Screen:** `/costing` → **ปรับปรุงต้นทุนมาตรฐาน (Standard-cost roll)** — required role: **`masterdata`**
+to propose, **`exec`** to approve (`planner` may view).
+
+For **standard-cost (STD)** items the standard is set once on the `/costing` costing-method screen and
+otherwise never changes. As real cost drifts, on-hand inventory (valued at the stale standard) becomes
+mis-stated. The standard-cost roll revises the standard **under maker-checker** and revalues the on-hand
+stock in one governed, audited step.
+
+### Propose a revision (CostAccountant — `masterdata`)
+1. Open **ปรับปรุงต้นทุนมาตรฐาน**. In **เสนอปรับปรุงต้นทุนมาตรฐาน**, add one line per item: the **รหัสสินค้า**
+   (must be a STD-costed item) and the **ต้นทุนมาตรฐานใหม่** (new standard). Add a **เหตุผล**.
+2. Click **ส่งคำขอ**. The system records a **Draft** revision, **snapshots the current on-hand**, and shows the
+   **revalue impact** = on-hand × (new − old) per line. **Nothing posts to the GL yet.**
+3. A non-STD (FIFO/AVG) item is rejected — set its method to STD first.
+
+### Review & approve (FinancialController — `exec`, a *different* user)
+1. Click the revision in the register to see **proposed vs current** and the impact per item.
+2. Click **อนุมัติ & ตีราคาใหม่**. The approver **must be a different user than the preparer**. On approval the
+   stored standard **rolls forward** (subsequent issues cost at the new standard) and a **balanced revaluation
+   journal** posts: a standard **rise** → **Dr 1200 Inventory / Cr 5500** (favourable); a standard **drop** →
+   **Cr 1200 / Dr 5500** (unfavourable). The posted **JE** number appears on the detail panel.
+
+*(APIs: `POST /api/costing/std-cost/revise`, `GET /api/costing/std-cost[/{no}]`,
+`POST /api/costing/std-cost/{no}/approve`.)*
+
+**Errors:** `STD_ITEM_REQUIRED` (the item is not standard-costed), `SOD_SELF_APPROVAL` (the preparer cannot
+approve their own revision — ask a different user with `exec`), `NOT_DRAFT` (the revision is already approved —
+no double posting), `NO_LINES` (add at least one item line).
+
 ## 12. CAPA — corrective & preventive actions with effectiveness sign-off (control QC-02)
 
 **Route:** *Production → การแก้ไข & ป้องกัน (CAPA)* — `/quality/capa`.

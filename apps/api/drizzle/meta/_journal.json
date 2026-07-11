@@ -2386,7 +2386,14 @@
       "idx": 341,
       "version": "7",
       "when": 2023820000306,
-      "tag": "0341_lot_holds",
+      "tag": "0341_std_cost_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 342,
+      "version": "7",
+      "when": 2023820000307,
+      "tag": "0342_lot_holds",
       "breakpoints": true
     }
   ]

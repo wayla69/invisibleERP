@@ -132,7 +132,7 @@ export const lotLedger = pgTable('lot_ledger', {
 // WMS wave bin allocation both EXCLUDE it, so a recalled/suspect lot cannot be picked, shipped or sold until
 // a DIFFERENT-status Released row supersedes it. Detective + preventive: the hold IS the block. `lot_ledger`
 // has no tenant_id (a shared physical ledger written by GR/WMS), so hold state lives here in a genuinely
-// tenant-scoped table (RLS via the 0341 canonical 0232-form loop) rather than a flag on the ledger.
+// tenant-scoped table (RLS via the 0342 canonical 0232-form loop) rather than a flag on the ledger.
 export const lotHolds = pgTable('lot_holds', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
