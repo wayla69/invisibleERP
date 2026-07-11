@@ -2374,6 +2374,13 @@
       "when": 2023820000304,
       "tag": "0339_control_exceptions",
       "breakpoints": true
+    },
+    {
+      "idx": 340,
+      "version": "7",
+      "when": 2023820000305,
+      "tag": "0340_masterdata_change_requests",
+      "breakpoints": true
     }
   ]
 }

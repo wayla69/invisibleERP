@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 244,
+    "total": 245,
     "by_status": {
-      "Implemented": 241,
+      "Implemented": 242,
       "Partial": 3
     },
     "by_family": {
@@ -14,7 +14,7 @@
       "Cash & Treasury": 2,
       "Consolidation & FX": 6,
       "Entity-Level": 7,
-      "Expenditure": 15,
+      "Expenditure": 16,
       "Fixed Assets": 8,
       "General Ledger": 24,
       "ITGC · Access": 22,
@@ -3610,6 +3610,25 @@
       "status": "Implemented"
     },
     {
+      "control_id": "MDM-01",
+      "cycle": "Expenditure",
+      "category": "Application",
+      "fsli": "Vendor Master; Accounts Payable; Cash",
+      "risk": "Maker-checker on master data covered only BULK imports (masterdata_import_batches) and a vendor's bank_name/bank_account (EXP-11, 0270). A NORMAL single-record UI/CRUD edit of a SENSITIVE vendor field — its payee account-holder NAME (bank_account_name), its CREDIT LIMIT, or its PAYMENT TERMS — was written to the master directly with no second check, so a single md_vendor holder could redirect a disbursement (substitute the payee name on file), inflate credit exposure, or alter the payment schedule with no independent review — a disbursement-fraud / BEC vector alongside the bank-account number already governed by EXP-11.",
+      "assertion": "Authorization/Segregation of Duties",
+      "description": "Sensitive master-data single-record maker-checker (GRC-3, migration 0336): a change to a sensitive vendor field (bank_account / bank_name / bank_account_name / credit_limit / payment_terms) does NOT write the vendor master — it is STAGED as a `pending` masterdata_change_requests row (a GENERIC entity_type vendor|customer|item + field + before/after value; old_value/new_value encrypted at rest via the encryptedText column type so a staged bank value is never plaintext). The master is applied ONLY when a DISTINCT user approves it (POST /api/masterdata/change-requests/:reqNo/approve; approved_by ≠ requested_by → 403 SOD_SELF_APPROVAL, binds even Admin), which supersedes the direct-edit path (payment_terms was removed from the vendor-profile direct edit; credit_limit / bank details were already excluded). Reject discards it (the master is untouched). Non-sensitive profile fields keep their direct-edit path (the generic endpoint refuses them → FIELD_NOT_SENSITIVE). The applied change is captured before/after by the DB trigger trg_dcl_vendors (0274) on the master row; the change-request row is the full staging trail (who requested / who released). New SoD rule R22 (master-data maintenance md_vendor/md_item/md_config vs the elevated change-approval authority exec). Tenant-scoped (RLS, canonical 0232 policy); reads/stage gate masterdata/md_vendor/exec, approve/reject gate masterdata/exec.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per change",
+      "owner": "MasterDataAdmin / Controller (segregated)",
+      "coso": "P10",
+      "code_reference": "modules/masterdata/masterdata-change.service.ts (stageChange NO-write + supersede; approve applies to the master with SOD_SELF_APPROVAL; reject discards; FIELD_NOT_SENSITIVE / NO_CHANGE guards); masterdata-change.controller.ts (/api/masterdata/change-requests[|/:reqNo/approve|/:reqNo/reject]); schema/masterdata-change.ts masterdata_change_requests + vendors.bank_account_name (migration 0336); procurement.service.ts/.controller.ts (payment_terms removed from the vendor-profile direct edit); permissions.ts SoD R22; apps/web /masterdata/change-requests (reviewer queue + propose form); cutover/masterdata-change.ts (ToE).",
+      "tod": "Inspect the stage→approve routing, the requester≠approver self-approval block, that the vendor master is written ONLY on approval, that reject/pending leave it unchanged, and that a non-sensitive field is refused by the maker-checker (still edits directly).",
+      "toe": "Re-perform (masterdata-change harness): stage a vendor bank_account_name change → pending, master unchanged; self-approve → 403 SOD_SELF_APPROVAL; a DISTINCT approver → master updated; an encrypted bank_account round-trips; stage credit_limit → reject → master unchanged; payment_terms applies ONLY via the maker-checker; a non-sensitive field (category) still edits directly and the generic endpoint refuses it (FIELD_NOT_SENSITIVE); a second tenant sees 0 requests and cannot approve one (RLS).",
+      "evidence": "Master-data change-request queue (pending/approved/rejected) + before/after; SOD_SELF_APPROVAL / FIELD_NOT_SENSITIVE negatives",
+      "status": "Implemented"
+    },
+    {
       "control_id": "EXP-12",
       "cycle": "Expenditure",
       "category": "Application",
@@ -3926,7 +3945,7 @@
       "frequency": "Continuous / per monitoring cycle",
       "owner": "Controller / Internal Audit",
       "coso": "P16",
-      "code_reference": "modules/controls/controls.service.ts (scan 6 detectors + disposition + kci); controls.controller.ts (POST scan, GET findings, POST findings/:id/{review,disposition}, GET kci); schema/controls.ts control_findings (rcm_ref/disposition/owner/due_date/root_cause/remediated_by/at) + migration 0336_control_exceptions; cutover/control-exceptions.ts (ToE)",
+      "code_reference": "modules/controls/controls.service.ts (scan 6 detectors + disposition + kci); controls.controller.ts (POST scan, GET findings, POST findings/:id/{review,disposition}, GET kci); schema/controls.ts control_findings (rcm_ref/disposition/owner/due_date/root_cause/remediated_by/at) + migration 0339_control_exceptions; cutover/control-exceptions.ts (ToE)",
       "tod": "Inspect the six detectors + fingerprint idempotency, the disposition lifecycle (owner/due/root-cause + closing stamp), the KCI roll-up (overdue + MTTR) and the RLS scoping.",
       "toe": "Re-perform: seed data triggering each detector, scan surfaces the findings each with its rcm_ref; disposition a finding (owner/due/root-cause set, still open on the KCI) then remediate it (remediated_by/at stamped, dropped from the open KCI); the KCI returns open-by-detector/severity/family, an overdue count and MTTR; another tenant cannot see the findings (RLS) — re-performed by the control-exceptions harness.",
       "evidence": "Control-exception disposition register + KCI roll-up",
