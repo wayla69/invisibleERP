@@ -5,6 +5,7 @@ import { pettyCashFunds, expenseRequests, projects } from '../../database/schema
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { LineNotifyService } from '../messaging/line-notify.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd } from '../../database/queries';
@@ -154,9 +155,13 @@ export class PettyCashService {
     if (amount > n(fund.balance) + 1e-9) throw new UnprocessableEntityException({ code: 'INSUFFICIENT_FLOAT', message: `Fund balance ${n(fund.balance)} is now below the request ${amount}`, messageTh: 'ยอดคงเหลือในกองทุนไม่พอ' });
     const tenantId = req.tenantId ?? user.tenantId ?? null;
     const projectId = req.projectId ?? null; // M4 — the debit (advance/expense) carries the project dimension
+    // docs/43 PR-2: request-level expenseAccount wins, then the tenant posting-rule (PETTY.EXPENSE), then default.
+    const pexAcct = req.expenseAccount
+      ?? (this.ledger ? (await this.ledger.postingOverrides('PETTY.EXPENSE', tenantId)).expense : undefined)
+      ?? postingDefault('PETTY.EXPENSE', 'expense');
     const lines = req.kind === 'advance'
       ? [{ account_code: '1180', debit: amount, project_id: projectId }, { account_code: fund.glAccount, credit: amount }]
-      : [{ account_code: req.expenseAccount ?? '5100', debit: amount, project_id: projectId }, { account_code: fund.glAccount, credit: amount }];
+      : [{ account_code: pexAcct, debit: amount, project_id: projectId }, { account_code: fund.glAccount, credit: amount }];
     let glRef: string | null = null;
     if (this.ledger) { const je: any = await this.ledger.postEntry({ date: ymd(), source: 'PEX', sourceRef: reqNo, tenantId, memo: `${req.kind === 'advance' ? 'Advance' : 'Expense'} ${reqNo} — ${req.payee ?? ''}`, createdBy: user.username, lines }); glRef = je?.entry_no ?? null; }
     await db.update(pettyCashFunds).set({ balance: String(round2(n(fund.balance) - amount)) }).where(eq(pettyCashFunds.id, Number(fund.id)));
@@ -201,7 +206,11 @@ export class PettyCashService {
     const fund = (await db.select().from(pettyCashFunds).where(eq(pettyCashFunds.id, Number(req.fundId))).limit(1))[0];
     const glAccount = fund?.glAccount ?? '1015';
     const lines: any[] = [];
-    if (spent > 0) lines.push({ account_code: req.expenseAccount ?? '5100', debit: spent });
+    // docs/43 PR-2: request-level expenseAccount wins, then the tenant posting-rule (PETTY.EXPENSE), then default.
+    const stlAcct = req.expenseAccount
+      ?? (this.ledger ? (await this.ledger.postingOverrides('PETTY.EXPENSE', req.tenantId ?? user.tenantId ?? null)).expense : undefined)
+      ?? postingDefault('PETTY.EXPENSE', 'expense');
+    if (spent > 0) lines.push({ account_code: stlAcct, debit: spent });
     if (returned > 0) lines.push({ account_code: glAccount, debit: returned });
     lines.push({ account_code: '1180', credit: round2(n(req.amount)) });
     if (this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'PEX-STL', sourceRef: reqNo, tenantId: req.tenantId ?? user.tenantId ?? null, memo: `Settle advance ${reqNo}`, createdBy: user.username, lines });
