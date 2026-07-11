@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 245,
+    "total": 246,
     "by_status": {
-      "Implemented": 242,
+      "Implemented": 243,
       "Partial": 3
     },
     "by_family": {
@@ -23,7 +23,7 @@
       "ITGC · SDLC": 3,
       "Inventory & COGS": 16,
       "Leases": 2,
-      "Manufacturing & Costing": 4,
+      "Manufacturing & Costing": 5,
       "Monitoring": 3,
       "Multi-Branch & Offline POS": 7,
       "Payroll": 15,
@@ -2603,6 +2603,25 @@
       "status": "Implemented"
     },
     {
+      "control_id": "COST-02",
+      "cycle": "Manufacturing & Costing",
+      "category": "Application",
+      "fsli": "Inventory; COGS",
+      "risk": "A standard-cost item's standard is set once and never rolled: as real cost drifts, on-hand inventory (valued at the stale standard) is mis-stated and COGS on issue is wrong; OR one person unilaterally re-values inventory by editing the standard, with no independent review of the revaluation that hits the GL.",
+      "assertion": "Valuation/Accuracy/Authorization",
+      "description": "Standard-cost roll / inventory revaluation under MAKER-CHECKER (INV-4). A periodic standard-cost revision is PROPOSED per STD-costed item (a Draft header + per-item lines capturing old_std, the proposed new_std, and an on-hand SNAPSHOT), computing the revaluation = on_hand x (new_std - old_std) with NO posting. A DISTINCT approver (approved_by != prepared_by -> 403 SOD_SELF_APPROVAL) approves it -> for every line the stored standard is rolled forward (so subsequent issues cost at the NEW standard) and a BALANCED revaluation JE posts: standard rose -> Dr 1200 Inventory / Cr 5500 std-cost variance (favourable); standard fell -> Cr 1200 / Dr 5500 (unfavourable) - the two legs are equal by construction so the JE never rejects UNBALANCED. Draft -> Approved only; a non-STD item is rejected (STD_ITEM_REQUIRED); re-approval of an Approved revision is refused (NOT_DRAFT - no double post). The preparer duty is md_config (masterdata); the approver duty is exec - the standing md_config<->exec SoD conflict (MDM-01 rule) already prevents one person holding both, and the in-app self-approval block is the runtime control.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per revision",
+      "owner": "CostAccountant / FinancialController",
+      "coso": "P13",
+      "code_reference": "modules/costing/std-cost.service.ts (revise snapshots on-hand + STD_ITEM_REQUIRED guard; approve rolls item_costing.standard_cost + posts the 1200<->5500 revaluation JE via LedgerService.postEntry, idempotent on STDREV/rev_no; SOD_SELF_APPROVAL + NOT_DRAFT guards); costing.controller.ts (std-cost/revise @masterdata, std-cost[/:no] @masterdata/exec/planner, std-cost/:no/approve @exec); schema/std-cost.ts std_cost_revisions/std_cost_revision_lines (migration 0341); cutover/std-cost-roll.ts (ToE)",
+      "tod": "Inspect the revise->approve maker-checker + the on-hand snapshot + the revaluation formula + the 1200/5500 JE routing + the preparer!=approver check + the roll-forward of the stored standard.",
+      "toe": "Re-perform: revise a STD item (on-hand snapshotted, nothing posted); the preparer self-approves -> 403 SOD_SELF_APPROVAL; a distinct approver approves -> Dr 1200/Cr 5500 (or the reverse on a drop), the standard rolls forward, a subsequent issue costs at the new standard, TB balanced; a non-STD item is rejected (STD_ITEM_REQUIRED) and re-approval refused (NOT_DRAFT) - re-performed by the harness.",
+      "evidence": "Std-cost revision register (old/new std, on-hand snapshot, revaluation, prepared_by/approved_by); revaluation JEs (STDREV)",
+      "status": "Implemented"
+    },
+    {
       "control_id": "QC-01",
       "cycle": "Manufacturing & Costing",
       "category": "Application",
@@ -3616,7 +3635,7 @@
       "fsli": "Vendor Master; Accounts Payable; Cash",
       "risk": "Maker-checker on master data covered only BULK imports (masterdata_import_batches) and a vendor's bank_name/bank_account (EXP-11, 0270). A NORMAL single-record UI/CRUD edit of a SENSITIVE vendor field — its payee account-holder NAME (bank_account_name), its CREDIT LIMIT, or its PAYMENT TERMS — was written to the master directly with no second check, so a single md_vendor holder could redirect a disbursement (substitute the payee name on file), inflate credit exposure, or alter the payment schedule with no independent review — a disbursement-fraud / BEC vector alongside the bank-account number already governed by EXP-11.",
       "assertion": "Authorization/Segregation of Duties",
-      "description": "Sensitive master-data single-record maker-checker (GRC-3, migration 0336): a change to a sensitive vendor field (bank_account / bank_name / bank_account_name / credit_limit / payment_terms) does NOT write the vendor master — it is STAGED as a `pending` masterdata_change_requests row (a GENERIC entity_type vendor|customer|item + field + before/after value; old_value/new_value encrypted at rest via the encryptedText column type so a staged bank value is never plaintext). The master is applied ONLY when a DISTINCT user approves it (POST /api/masterdata/change-requests/:reqNo/approve; approved_by ≠ requested_by → 403 SOD_SELF_APPROVAL, binds even Admin), which supersedes the direct-edit path (payment_terms was removed from the vendor-profile direct edit; credit_limit / bank details were already excluded). Reject discards it (the master is untouched). Non-sensitive profile fields keep their direct-edit path (the generic endpoint refuses them → FIELD_NOT_SENSITIVE). The applied change is captured before/after by the DB trigger trg_dcl_vendors (0274) on the master row; the change-request row is the full staging trail (who requested / who released). New SoD rule R22 (master-data maintenance md_vendor/md_item/md_config vs the elevated change-approval authority exec). Tenant-scoped (RLS, canonical 0232 policy); reads/stage gate masterdata/md_vendor/exec, approve/reject gate masterdata/exec.",
+      "description": "Sensitive master-data single-record maker-checker (GRC-3, migration 0340): a change to a sensitive vendor field (bank_account / bank_name / bank_account_name / credit_limit / payment_terms) does NOT write the vendor master — it is STAGED as a `pending` masterdata_change_requests row (a GENERIC entity_type vendor|customer|item + field + before/after value; old_value/new_value encrypted at rest via the encryptedText column type so a staged bank value is never plaintext). The master is applied ONLY when a DISTINCT user approves it (POST /api/masterdata/change-requests/:reqNo/approve; approved_by ≠ requested_by → 403 SOD_SELF_APPROVAL, binds even Admin), which supersedes the direct-edit path (payment_terms was removed from the vendor-profile direct edit; credit_limit / bank details were already excluded). Reject discards it (the master is untouched). Non-sensitive profile fields keep their direct-edit path (the generic endpoint refuses them → FIELD_NOT_SENSITIVE). The applied change is captured before/after by the DB trigger trg_dcl_vendors (0274) on the master row; the change-request row is the full staging trail (who requested / who released). New SoD rule R22 (master-data maintenance md_vendor/md_item/md_config vs the elevated change-approval authority exec). Tenant-scoped (RLS, canonical 0232 policy); reads/stage gate masterdata/md_vendor/exec, approve/reject gate masterdata/exec.",
       "prev_det": "Prev",
       "nature": "Automated",
       "frequency": "Per change",
