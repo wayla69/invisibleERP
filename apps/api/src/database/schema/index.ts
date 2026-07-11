@@ -87,6 +87,7 @@ export * from './retention';
 export * from './realestate';
 export * from './mfg-depth';
 export * from './hcm';
+export * from './hcm-perf';
 export * from './pricing';
 export * from './pos-fiscal';
 export * from './pos-audit';

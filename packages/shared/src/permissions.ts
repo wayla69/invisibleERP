@@ -13,6 +13,9 @@ export const PERMISSIONS = [
   'branch',    // Multi-branch — manage outlets, consolidate branch sales, master-bundle for offline POS
   'ess',           // Phase D3 — employee self-service (own timesheets/leave/payslips/expenses)
   'vendor_portal', // Phase D3 — supplier portal (own POs, acknowledge, submit invoice)
+  // HR / HCM depth (docs/42): 'hr' = day-to-day people ops (cycles, goals, reviews, manager ratings);
+  // 'hr_admin' = the elevated HR duty that may close cycles and sign off appraisals (HR-03 sign-off SoD).
+  'hr', 'hr_admin',
   // ── SoD sub-permissions (single-duty splits of coarse permissions; see PERMISSION_IMPLICATIONS) ──
   'pos_sell', 'pos_refund', 'pos_till', 'pos_close',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
@@ -71,6 +74,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
+  'Human Resources': ['hr', 'hr_admin'],
   'Real Estate (Developer)': ['re_sales', 're_contract_approve', 're_transfer'],
 };
 
@@ -259,4 +263,5 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   cust_my_crm: '/my/customers', cust_my_suppliers: '/my/suppliers', cust_my_pos: '/my/purchase-orders', cust_my_users: '/my/users',
   approvals: '/approvals',
   branch: '/branches',
+  hr: '/hcm/performance',
 };
