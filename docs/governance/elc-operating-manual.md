@@ -1,6 +1,6 @@
 # Entity-Level Controls — Operating Manual (ELC-01 / ELC-02 / ELC-04)
 
-> **Status:** v1.0 · **Date:** 2026-06-30 · **Owner:** Compliance / Company Secretary
+> **Status:** v1.1 · **Date:** 2026-07-11 · **Owner:** Compliance / Company Secretary
 > **Scope:** how to *operate* the three entity-level controls whose **systems are already built** but whose
 > effectiveness depends on management running them on a cadence. This manual is the operating procedure the
 > auditor samples alongside the in-app evidence.
@@ -22,6 +22,13 @@ assessment (`05`). The **systems** that capture the evidence live in `modules/go
 cadence and case ageing with a `ready` flag + `alerts[]`. Schedule the **`governance_readiness`** BI report
 (weekly) to push the same snapshot to compliance and raise a reminder whenever a signal breaches — the
 scheduler logs each run (`report_runs`) and notifies, so the reminders are themselves audit evidence.
+
+**In the app:** every runbook below can be operated from the **`/governance`** screen (nav → **Controls →
+การกำกับดูแล (Governance)**, gated to `exec`/`users`) — a tabbed workspace over the same endpoints: **ภาพรวม**
+(the readiness dashboard + alerts), **จรรยาบรรณ** (acknowledge + register, ELC-01), **สายด่วนแจ้งเบาะแส**
+(file + advance cases, ELC-04), **ตารางมอบอำนาจ** (DoA matrix, ELC-03), **ความเสี่ยงทุจริต** (fraud-risk
+register + review, ELC-05) and **การกำกับดูแล** (oversight log, ELC-02). The raw `/api/governance/*` calls
+cited in each runbook are what the screen invokes; you no longer need to call them by hand.
 
 ---
 
@@ -143,3 +150,4 @@ ICFR conclusions, decisions + owners + due dates, whistleblower cases reviewed, 
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-06-30 | Compliance | Initial ELC operating manual — runbooks + cadence + templates for ELC-01/02/04, the `governance_readiness` monitor + weekly reminder job, and the operating calendar. Pairs with the in-app governance module (`modules/governance`) that captures the evidence. |
+| 1.1 | 2026-07-11 | Platform | **`/governance` UI shipped.** The `modules/governance` endpoints — previously API-only — now have a tabbed web workspace at **`/governance`** (nav → Controls, `exec`/`users`): readiness dashboard, ethics ack + register (ELC-01), whistleblower hotline file + advance (ELC-04), DoA matrix (ELC-03), fraud-risk register + review (ELC-05), oversight log (ELC-02). No control/endpoint change — surfaces the existing `/api/governance/*` operations. User manual `11-administration.md` §15; UAT-ADM-139..141. |

@@ -712,6 +712,33 @@ sample data can be layered on later.
 
 ---
 
+## 15. Governance — entity-level controls (ELC)
+
+**Where:** the **การกำกับดูแล (Governance)** screen (`/governance`, nav → **Controls**), for the
+compliance / admin function (`exec` or `users`). It's the operating surface for the board-level
+"entity-level controls" (ELC-01…05) — the same runbooks are in `docs/governance/elc-operating-manual.md`.
+
+Six tabs:
+- **ภาพรวม (Overview)** — a readiness dashboard: code-of-conduct acknowledgement coverage %, open
+  whistleblower cases (with SLA ageing), and the last/next audit-committee oversight review, plus a
+  **needs-attention** list. Green when nothing is outstanding.
+- **จรรยาบรรณ (Ethics, ELC-01)** — tap **ยอมรับจรรยาบรรณเวอร์ชันนี้** to record your own acknowledgement
+  of the current code-of-conduct version, and review the **acknowledgement register** (who has / hasn't).
+- **สายด่วนแจ้งเบาะแส (Hotline, ELC-04)** — file a report (optionally **anonymous**), and from the case
+  log **ดำเนินการ (Advance)** a case through *received → investigating → resolved / dismissed* with a
+  resolution note. Anyone may file; only compliance sees the log and can advance.
+- **ตารางมอบอำนาจ (DoA, ELC-03)** — the delegation-of-authority matrix: who may approve which authority
+  area, up to which limit.
+- **ความเสี่ยงทุจริต (Fraud risk, ELC-05)** — the fraud-risk register: log a risk (likelihood × impact +
+  mitigating controls + owner) and **ทบทวน (Review)** its status (*open → mitigated / accepted / closed*).
+- **การกำกับดูแล (Oversight, ELC-02)** — record each audit-committee / board oversight meeting (date,
+  topics, whether ICFR was reviewed, attendees, minutes reference, sign-off) — the ELC-02 evidence log.
+
+**Expected result:** the ELC evidence that used to require raw API calls is now captured and reviewed from
+one screen; the Overview tab's alerts mirror the weekly `governance_readiness` monitor.
+
+---
+
 ## LINE chat channel governance (LC-3)
 
 Staff can link their LINE accounts to raise requisitions, expenses, and leave from the
