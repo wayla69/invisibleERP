@@ -36,6 +36,11 @@ export const PERMISSIONS = [
   //    contract (maker-checker on the price/discount authority). re_transfer authorises ownership transfer
   //    (RE-04 — recognises revenue). Ungranted ⇒ the vertical is invisible. ──
   're_sales', 're_contract_approve', 're_transfer',
+  // ── HR / HCM organisation (docs/42 HR-1) — org structure, positions & headcount governance (HR-01). `hr` is
+  //    a read duty (view the org chart / departments / positions); `hr_admin` is the maintain duty (create
+  //    departments/positions/assignments). Writes gate on hr_admin/exec; reads on hr/hr_admin/exec. The
+  //    headcount-governance override (assign beyond a position's budgeted_headcount) is reserved to `exec`. ──
+  'hr', 'hr_admin',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -72,6 +77,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
   'Real Estate (Developer)': ['re_sales', 're_contract_approve', 're_transfer'],
+  'Human Resources': ['hr', 'hr_admin'],
 };
 
 // Canonical role → default permission seed (init_db DEFAULT_PERMS, verbatim).
