@@ -7,6 +7,8 @@ import { HcmPerfController } from './hcm-perf.controller';
 import { HcmPerfService } from './hcm-perf.service';
 import { HcmOrgController } from './hcm-org.controller';
 import { HcmOrgService } from './hcm-org.service';
+import { HcmLifecycleController } from './hcm-lifecycle.controller';
+import { HcmLifecycleService } from './hcm-lifecycle.service';
 import { ProjectsModule } from '../projects/projects.module';
 import { MessagingModule } from '../messaging/messaging.module';
 
@@ -17,10 +19,12 @@ import { MessagingModule } from '../messaging/messaging.module';
 // HR-3 (docs/42): performance management — cycles/goals/reviews with the HR-03 sign-off SoD.
 // HR-1 (docs/42): organisation structure, positions & effective-dated assignments with the HR-01
 // headcount-governance control (StatusLogService is provided globally by CommonModule).
+// HR-5 (docs/42): onboarding/offboarding lifecycle with the HR-05 access-revocation-completeness control
+// (an offboarding cannot complete while an access-revocation task is pending).
 @Module({
   imports: [ProjectsModule, MessagingModule],
-  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController],
-  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService],
+  controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmLifecycleController],
+  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmLifecycleService],
   exports: [HcmLeaveService],
 })
 export class HcmModule {}

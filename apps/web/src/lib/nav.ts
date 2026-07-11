@@ -421,6 +421,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'hx.perf.nav_title', href: '/hcm/performance', icon: Award, perms: ['hr', 'hr_admin', 'exec'] },
       // HR-1 (docs/42) — org structure, positions & headcount governance (HR-01)
       { label: 'nav.hcm_org', href: '/hcm/org', icon: Network, perms: ['hr', 'hr_admin', 'exec'] },
+      // HR-5 (docs/42) — onboarding/offboarding lifecycle & access-revocation completeness (HR-05)
+      { label: 'nav.hcm_onboarding', href: '/hcm/onboarding', icon: ClipboardCheck, perms: ['hr', 'hr_admin', 'exec'] },
       { label: 'nav.scheduling', href: '/scheduling', icon: CalendarRange, perms: ['pos', 'users', 'exec'] },
       { label: 'nav.ot_rules', href: '/labor/ot-rules', icon: Timer, perms: ['pos', 'users', 'exec'] },
       { label: 'nav.payroll', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
