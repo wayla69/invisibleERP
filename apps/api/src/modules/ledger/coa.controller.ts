@@ -4,7 +4,7 @@ import { CoaService } from './coa.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 
-// Canonical-universe write bodies (docs/40 step 2 — the /chart-of-accounts manage UI posts these).
+// Canonical-universe write bodies (docs/42 step 2 — the /chart-of-accounts manage UI posts these).
 // Codes are the 4-digit universe convention; type drives normal-balance defaulting in the service.
 const ACCOUNT_TYPES = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
 const CreateAccountBody = z.object({

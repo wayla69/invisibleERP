@@ -109,7 +109,7 @@ export class PayrollService implements OnModuleInit {
 
     // GL: Dr 5600 salaries + 5610 employer-SSO (+ 5620 employer-PF) / Cr 1000 net + 2350 SSO-payable
     // + 2360 WHT-payable (+ 2370 PF-payable). Balanced: Dr (gross+erSSO+erPF) == Cr (net+ssoBoth+wht+pfBoth).
-    // docs/40 step 4: a tenant posting-rule (PAYROLL.* event + role) re-maps a leg's account; the literal
+    // docs/42 step 4: a tenant posting-rule (PAYROLL.* event + role) re-maps a leg's account; the literal
     // stays the fallback so an un-configured tenant posts exactly as before. The cash leg has no role.
     const [ovrGross, ovrSso, ovrWht, ovrPf] = await Promise.all([
       this.ledger.postingOverrides('PAYROLL.GROSS', tenantId),

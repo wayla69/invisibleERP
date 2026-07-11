@@ -122,7 +122,7 @@ export class LedgerPostingService {
       // a year-end closing journal legitimately posts INTO the period it closes; everything else is blocked
       throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${period} is closed`, messageTh: `งวดบัญชี ${period} ถูกปิดแล้ว` });
     }
-    // Account-universe guard (GL-21 fail-closed, extended to EVERY posting — docs/40 step 1): each line
+    // Account-universe guard (GL-21 fail-closed, extended to EVERY posting — docs/42 step 1): each line
     // must reference a REAL, postable account. Without this, a posting to an unknown/retired code lands
     // silently and then VANISHES from every typed report (they INNER JOIN accounts) — the classic
     // "balance disappears after a CoA cleanup" defect. Runs for subledger postings too: viaSubledger

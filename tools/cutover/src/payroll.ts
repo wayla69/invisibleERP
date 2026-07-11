@@ -221,7 +221,7 @@ async function main() {
   ok('Employee list now projects department/hourly_rate/pf_rate (previously missing from fmtEmp)',
     e3Row?.department === 'Kitchen' && near(e3Row?.hourly_rate, 150) && near(e3Row?.pf_rate, 0.03), JSON.stringify(e3Row).slice(0, 150));
 
-  // ── docs/40 step 4: a tenant posting-rule override re-maps a payroll leg WITHOUT a code change ──
+  // ── docs/42 step 4: a tenant posting-rule override re-maps a payroll leg WITHOUT a code change ──
   // Seed a real override account + a tenant-scoped PAYROLL.GROSS/wages_expense rule → 5601, run a fresh
   // period and approve: the salaries debit lands on 5601 (unmapped roles keep their literals). The rule is
   // tenant-scoped — the NULL-tenant demo defaults from 0158 never shadow the code.

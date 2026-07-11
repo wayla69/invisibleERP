@@ -129,7 +129,7 @@ export class LeasesService {
       const rouNbv = n(l.rouNbv);
       const dep = isLast ? rouNbv : round2(rouNbv / (term - already));
       const period = String(today).slice(0, 7);
-      // docs/40 step 4: tenant posting-rule overrides (LEASE.INTEREST / LEASE.PRINCIPAL / DEPRECIATION.ROU
+      // docs/42 step 4: tenant posting-rule overrides (LEASE.INTEREST / LEASE.PRINCIPAL / DEPRECIATION.ROU
       // roles) ?? the standard literals — an un-configured tenant posts exactly as before.
       const none: Record<string, string> = {};
       const [ovrInt, ovrPrin, ovrDep] = this.ledger

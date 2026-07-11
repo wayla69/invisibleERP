@@ -226,7 +226,7 @@ export class AssetsService {
         await db.update(fixedAssets).set({ accumulatedDepreciation: fx(c.accumAfter, 4), netBookValue: fx(c.nbvAfter, 4), status: c.status, lastDepreciatedPeriod: period }).where(eq(fixedAssets.id, c.id));
         await db.insert(depreciationLines).values({ tenantId, runId: Number(run!.id), assetId: c.id, amount: fx(c.amount, 4), accumulatedAfter: fx(c.accumAfter, 4), nbvAfter: fx(c.nbvAfter, 4) });
       }
-      // docs/40 step 4: tenant posting-rule override (DEPRECIATION.FA roles) ?? the standard literals.
+      // docs/42 step 4: tenant posting-rule override (DEPRECIATION.FA roles) ?? the standard literals.
       const ovr = await this.ledger.postingOverrides('DEPRECIATION.FA', tenantId);
       const je: any = await this.ledger.postEntry({
         date: periodEnd, source: 'DEP', sourceRef: srcRef, tenantId,

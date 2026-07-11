@@ -112,14 +112,14 @@ export class LedgerService implements OnModuleInit {
   }
 
   // Boot parity for EVERY embedding of the app module (prod main.ts and the ~120 injected harnesses):
-  // postEntry's account-universe guard (GL-21, docs/40 step 1) needs the canonical chart present, so seed
+  // postEntry's account-universe guard (GL-21, docs/42 step 1) needs the canonical chart present, so seed
   // it at module init. Best-effort like main.ts's seed loop — a not-yet-migrated DB skips silently and
   // the runner's own explicit seed (or main.ts's) covers it later. Idempotent (onConflictDoNothing).
   async onModuleInit() {
     try { await this.seedChartOfAccounts(); } catch { /* DB not ready — explicit seed runs later */ }
   }
 
-  // ───────────────────── Posting-rule account overrides (docs/40 step 4) ─────────────────────
+  // ───────────────────── Posting-rule account overrides (docs/42 step 4) ─────────────────────
   // A tenant's ACTIVE posting_rules rows (event_type + role — maintained on /setup/posting-rules) re-map
   // where a recurring system posting lands, per company, WITHOUT a code change. Only TENANT-scoped rows
   // apply: the NULL-tenant rows seeded by 0158 are display defaults that pre-date the real posting paths

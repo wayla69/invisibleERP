@@ -108,7 +108,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <div className="grid gap-2"><Label>{label}</Label>{children}</div>;
 }
 
-// The per-tenant `posting_determination` master switch (docs/33, GL-21; docs/40 step 3) — surfaced where
+// The per-tenant `posting_determination` master switch (docs/33, GL-21; docs/42 step 3) — surfaced where
 // the determination is CONFIGURED so the "why doesn't my category account apply?" mystery answers itself.
 // Reading the flag list needs one of the GET perms (md_config/exec/dashboard/…); a viewer without it just
 // doesn't see the card. Toggling mirrors the PUT /api/feature-flags guard (md_config / exec).

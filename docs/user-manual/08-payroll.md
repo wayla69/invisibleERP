@@ -55,6 +55,13 @@ The run prepares the accounting entries automatically (salary expense, the
 employer's SSO contribution, and withholding tax payable) — but **does not post
 them yet**.
 
+> **Which accounts?** By default the standard set (salaries 5600, employer SSO 5610,
+> SSO payable 2350, WHT payable 2360, provident fund 5620/2370, net pay from cash 1000).
+> If your company needs a leg on a different account, add an override row on
+> **กฎการลงบัญชี** (`/setup/posting-rules`) for the matching `PAYROLL.*` event/role —
+> the run then posts that leg to your account, and everything you don't override keeps
+> the standard behaviour.
+
 ### 2.1 Approval (required before payroll counts) — two people
 
 Payroll uses **maker-checker**: the run you just made is **"รออนุมัติ" (PendingApproval)**

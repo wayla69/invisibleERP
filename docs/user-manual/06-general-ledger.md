@@ -74,9 +74,21 @@ canonical universe:
 
 Use the **search box** (code or name), the **type filter** chips, and the **แสดงบัญชีทั้งหมด /
 เฉพาะบัญชีของธุรกิจ** toggle (canonical universe ↔ your industry chart). **ส่งออก CSV** downloads
-the currently-filtered list. This screen is **read-only** — the canonical chart is the global,
-immutable posting universe, so accounts are created/curated only via **Onboarding → Industry
-packs**, never edited here.
+the currently-filtered list. The screen is also the chart's **manage surface** (GL-11):
+
+- **เพิ่มบัญชี** (header button, platform **Admin/HQ** only) opens the create dialog — 4-digit
+  code, EN/TH names, account type (normal balance is derived), optional parent, postable flag.
+- Row **แก้ไข** (pencil, Admin/HQ) renames the master account or toggles its postability; row
+  **ปิดใช้งาน** (power, Admin/HQ) retires a zero-balance account — history is kept and new
+  postings stop (`INVALID_POSTING_ACCOUNT`); a non-zero balance is refused `ACCOUNT_HAS_BALANCE`.
+- Row **ตา (แสดง/ซ่อน)** (any `gl_coa` user, shown when your company runs a curated industry
+  chart) adds/removes the account on **your own** chart only — the overlay never affects posting
+  or other companies. In the **แสดงบัญชีทั้งหมด** view the same eye adds a canonical account your
+  industry pack didn't include.
+
+A non-Admin `gl_coa` user sees only the overlay eye — master-account changes stay head-office
+(`COA_ADMIN_ONLY`), and accounts can still be provisioned in bulk via **Onboarding → Industry
+packs**.
 
 > **Nothing is ever removed.** The accounting engine always has the full set of accounts
 > available, so a posting is never blocked. Press **แสดงบัญชีทั้งหมด** on the ผังบัญชี tab
@@ -150,12 +162,17 @@ item or its **item category**. Set these up under *Settings → Master data* on 
 (`/setup/tax-codes`) and **ตั้งค่าบัญชีสินค้า (Item Posting Setup)** (`/setup/items`) screens
 — or bulk-import them from a spreadsheet (*Administration → Bulk import*). Account determination
 across every business event is viewable/overridable on **กฎการลงบัญชี (Posting Rules)**
-(`/setup/posting-rules`). Each item/category can carry its
+(`/setup/posting-rules`) — and your company's **active override rows there now drive the
+recurring system postings** (payroll `PAYROLL.*`, asset depreciation `DEPRECIATION.FA`, lease
+runs `LEASE.*`/`DEPRECIATION.ROU`): each leg posts to your override account, or the standard
+account when you haven't set one. Each item/category can carry its
 own revenue, COGS, inventory and valuation account plus a VAT code and — for service/labour
 categories — a withholding-tax income type.
 
-This is **opt-in per company**: turn on **กำหนดบัญชีตามสินค้า (Item posting)** under
-*Settings → Labs / feature flags* (`posting_determination`). While it's **off** (the default),
+This is **opt-in per company**: turn on **กำหนดบัญชีตามสินค้า (Item posting)** with the
+status card at the top of **หมวดสินค้า** (`/setup/item-categories`) — it shows whether the
+switch is on and lets an `md_config`/`exec` user flip it (the same `posting_determination`
+flag is also reachable via the feature-flags API). While it's **off** (the default),
 every posting behaves exactly as before. While it's **on**, each posting picks its account by
 precedence — **the item's own setting → its category's setting → its warehouse's default →
 the standard control account** — so anything you leave blank simply falls back to today's
@@ -171,7 +188,7 @@ codes** (see [Tax](./07-tax.md)). Leave any of them blank to keep the standard b
 
 | Message | Meaning | What to do |
 |---------|---------|-----------|
-| `INVALID_POSTING_ACCOUNT` | An item/category account profile points at a code that doesn't exist in the chart, or at a header/control account you can't post to | Fix the account on the item or category to a real, postable code (see the chart above) |
+| `INVALID_POSTING_ACCOUNT` | A posting line (manual JE, item/category profile, or a posting-rule override) points at a code that doesn't exist in the chart, or at a header/deactivated account | Fix the account (on the JE line, the item/category, or the `/setup/posting-rules` row) to a real, postable code (see the chart above) |
 
 **ตั้งค่าบัญชีสินค้า (Item Posting Setup)** (`/setup/items`) also carries an
 **ข้อมูลหลักสินค้า (Item master)** card below the posting-profile fields — barcode,
@@ -247,7 +264,10 @@ affects the books.
 approval. Drafts are excluded from balances.
 
 > **Note:** If debits and credits don't balance (or there are no lines) the entry
-> is rejected (`UNBALANCED`).
+> is rejected (`UNBALANCED`). Every line must also name a **real, postable** account
+> from the chart — a code that doesn't exist (or a header / deactivated account) is
+> rejected `INVALID_POSTING_ACCOUNT`, so a typo can never post silently and then
+> disappear from your reports.
 >
 > **The form checks this for you before you save.** When you press save, any problem
 > is shown **in place**: a line that has no account, no amount, or both a debit and a
