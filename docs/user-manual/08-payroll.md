@@ -216,4 +216,59 @@ GL impact.
 
 ---
 
+## 6. Organisation structure & positions (HR-1)
+
+Model your **org chart** — departments, positions and who sits in each — on top of
+the employee master. This is where the **headcount governance** control (HR-01)
+lives: you cannot over-fill a position beyond its budgeted headcount without an
+executive override.
+
+**Screen:** `/hcm/org` · **Where:** sidebar → **บุคลากร (HR) → โครงสร้างองค์กร &
+ตำแหน่ง** · **Required permission:** view = `hr` / `hr_admin` / `exec`; create =
+`hr_admin` / `exec`.
+
+Tabs: **ผังองค์กร** (Org chart) · **แผนก** (Departments) · **ตำแหน่ง** (Positions) ·
+**การมอบหมาย** (Assignments).
+
+### 6.1 Departments
+
+1. Open the **แผนก** tab and fill **รหัสแผนก** (dept code, unique per company),
+   **ชื่อ**, an optional **แผนกแม่** (parent department code, to build a hierarchy),
+   a **ศูนย์ต้นทุน** (GL cost centre) and a **ผู้จัดการ** (manager `EMP…`).
+2. Press **บันทึก**. A duplicate code is refused with `DEPT_EXISTS`.
+
+### 6.2 Positions
+
+1. Open the **ตำแหน่ง** tab and fill **รหัสตำแหน่ง**, **ชื่อตำแหน่ง**, the owning
+   **แผนก**, an optional **ระดับ** (grade) and **รายงานต่อ** (reports-to position),
+   and the **อัตราที่ตั้งไว้** (budgeted headcount).
+2. Each position row shows **บรรจุ/ตั้งไว้** — the current filled headcount vs the
+   budget. Set the budget to **0** for an unbudgeted seat (no cap).
+
+### 6.3 Assignments — the HR-01 headcount control
+
+1. Open the **การมอบหมาย** tab, enter the employee **EMP…**, the **รหัสตำแหน่ง** and
+   an **วันที่มีผล** (effective date), then press **มอบหมาย**.
+2. If the position still has a vacancy the assignment is saved.
+
+> **Control (HR-01):** If the position is **already at its budgeted headcount**, the
+> assignment is **blocked** with `HEADCOUNT_EXCEEDED`. Only a user with the **`exec`**
+> permission can override and add the over-establishment seat — supply an **เหตุผล**
+> (override reason); the override is **audit-logged** (an `HRASSIGN` /
+> `HEADCOUNT_OVERRIDE` entry) so every over-plan hire is attributable.
+
+### 6.4 Org chart
+
+The **ผังองค์กร** tab renders the department tree with each position, its assignees
+and its **vacancies**, plus roll-up totals (departments, positions, budgeted vs
+filled headcount). It is read-only.
+
+> **Troubleshooting:** `HEADCOUNT_EXCEEDED` → the position is full; either raise the
+> position's budgeted headcount, end an existing assignment, or ask an `exec` to
+> override. `DEPT_EXISTS` / `POSITION_EXISTS` → the code is already used in your
+> company; pick another. A **403** on create means you have only the read `hr`
+> permission — creating departments/positions/assignments needs `hr_admin` or `exec`.
+
+---
+
 **Next:** [Tax](./07-tax.md) · [General Ledger](./06-general-ledger.md)

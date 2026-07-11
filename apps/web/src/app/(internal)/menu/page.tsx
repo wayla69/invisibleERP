@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, FolderTree, Plus, Utensils } from 'lucide-react';
+import { BookOpen, FolderTree, Pencil, Plus, Power, Utensils } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useLang } from '@/lib/i18n';
 import { useMe, hasPerm } from '@/lib/auth';
 import { MasterIo } from '@/components/master-io';
@@ -86,6 +87,24 @@ function Items() {
   }, [menu.data]);
 
   const catName = (id: number | null) => cats.data?.categories.find((c) => c.id === id)?.name ?? '—';
+
+  const [editing, setEditing] = useState<Item | null>(null);
+
+  // 86 / un-86 a dish — the core mid-service availability control. A quick, reversible toggle (no confirm):
+  // POS re-reads menu availability, so a mistaken 86 is one tap to undo.
+  const toggle = useMutation({
+    mutationFn: (v: { sku: string; available: boolean }) =>
+      api(`/api/menu/items/${encodeURIComponent(v.sku)}/availability`, {
+        method: 'PATCH',
+        body: JSON.stringify({ available: v.available }),
+      }),
+    onSuccess: (_d, v) => {
+      const it = items.find((i) => i.sku === v.sku);
+      notifySuccess(t(v.available ? 'mf.menu_reavail_ok' : 'mf.menu_86_ok', { name: it?.name ?? v.sku }));
+      qc.invalidateQueries({ queryKey: ['menu'] });
+    },
+    onError: (e: Error) => notifyError(e.message),
+  });
 
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
@@ -216,6 +235,21 @@ function Items() {
               { key: 'type', label: t('mf.col_type'), render: (r) => <Badge variant="secondary">{r.type}</Badge> },
               { key: 'price', label: t('mf.menu_col_price'), align: 'right', render: (r) => <span className="tabular">{baht(r.price)}</span> },
               { key: 'is_available', label: t('fin.col_status'), render: (r) => <Badge variant={r.is_available ? 'success' : 'muted'}>{r.is_available ? t('mf.available') : t('mf.menu_unavailable')}</Badge> },
+              { key: 'actions', label: '', align: 'right', render: (r) => (
+                <div className="flex items-center justify-end gap-1">
+                  <Button size="sm" variant="outline" onClick={() => setEditing(r)}>
+                    <Pencil className="size-3.5" /> {t('mf.edit')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={r.is_available ? 'outline' : 'default'}
+                    disabled={toggle.isPending && toggle.variables?.sku === r.sku}
+                    onClick={() => toggle.mutate({ sku: r.sku, available: !r.is_available })}
+                  >
+                    <Power className="size-3.5" /> {r.is_available ? t('mf.menu_86_btn') : t('mf.menu_reavail_btn')}
+                  </Button>
+                </div>
+              ) },
             ]}
             emptyState={{ icon: Utensils, title: t('mf.menu_empty_title'), description: t('mf.menu_empty_desc') }}
           />
@@ -230,7 +264,96 @@ function Items() {
           <MasterIo entityKey="menu_items" base="admin" onImported={() => qc.invalidateQueries({ queryKey: ['menu'] })} />
         </div>
       )}
+
+      {editing && <EditItemDialog item={editing} categories={cats.data?.categories ?? []} onClose={() => setEditing(null)} />}
     </div>
+  );
+}
+
+// ───────────────────────── แก้ไขเมนู ─────────────────────────
+function EditItemDialog({ item, categories, onClose }: { item: Item; categories: Category[]; onClose: () => void }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [name, setName] = useState(item.name);
+  const [nameEn, setNameEn] = useState(item.name_en ?? '');
+  const [price, setPrice] = useState(String(item.price));
+  const [cost, setCost] = useState(item.cost != null ? String(item.cost) : '');
+  const [categoryId, setCategoryId] = useState(item.category_id != null ? String(item.category_id) : '');
+  const [taxType, setTaxType] = useState(item.tax_type);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api<Item>(`/api/menu/items/${encodeURIComponent(item.sku)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name,
+          name_en: nameEn || undefined,
+          price: Number(price),
+          cost: cost === '' ? undefined : Number(cost),
+          category_id: categoryId ? Number(categoryId) : undefined,
+          tax_type: taxType,
+        }),
+      }),
+    onSuccess: () => {
+      notifySuccess(t('mf.menu_edit_ok', { sku: item.sku }));
+      qc.invalidateQueries({ queryKey: ['menu'] });
+      onClose();
+    },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
+  const invalid = !name || price === '' || Number.isNaN(Number(price)) || (cost !== '' && Number.isNaN(Number(cost)));
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t('mf.menu_edit_title', { sku: item.sku })}</DialogTitle>
+          <DialogDescription>{t('mf.menu_edit_desc')}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor="ei-name">{t('mf.menu_name_label')}</Label>
+            <Input id="ei-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ei-name-en">{t('mf.menu_name_en_label')}</Label>
+            <Input id="ei-name-en" value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ei-price">{t('mf.menu_price_label')}</Label>
+            <Input id="ei-price" type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ei-cost">{t('mf.menu_cost_label')}</Label>
+            <Input id="ei-cost" type="number" min="0" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ei-cat">{t('mf.menu_tab_categories')}</Label>
+            <Select id="ei-cat" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value="">{t('mf.menu_none_option')}</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ei-tax">{t('mf.menu_tax_label')}</Label>
+            <Select id="ei-tax" value={taxType} onChange={(e) => setTaxType(e.target.value)}>
+              <option value="standard">{t('mf.menu_tax_standard')}</option>
+              <option value="exempt">{t('mf.menu_tax_exempt')}</option>
+              <option value="zero">{t('mf.menu_tax_zero')}</option>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('fin.cancel')}</Button>
+          <Button disabled={invalid || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? t('mf.saving') : t('mf.save')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
