@@ -490,6 +490,51 @@ that have never had a valued receipt are unaffected — they keep the simple aud
 
 ---
 
+## 9a. Landed cost — load freight/duty into inventory unit cost (control COST-01)
+
+**Screen:** `/costing` → **ต้นทุนแฝง (Landed Cost)** (`/costing/landed-cost`)
+**Required permission:** create/preview — `procurement` / `wh_receive` / `exec`; post — `gl_post` / `exec`
+
+When you import or freight-in goods, the extra charges — **freight, import duty, insurance, broker/customs
+fees** — are part of the true cost of the stock, not a period expense. A **landed-cost voucher** spreads
+those charges over the received items so the inventory unit cost (and therefore future COGS) reflects what
+the goods really cost to land.
+
+### How it works
+
+1. **Create the voucher.** Enter the four charge amounts, pick an **allocation basis** — *by value*, *by
+   quantity* or *by weight* — and add the received item lines (item, received qty, and for weight-basis the
+   weight; base value defaults to qty × current average cost). The items must already be tracked in the
+   perpetual stock ledger (received via *Goods receipt* / §5–9); an untracked item is rejected
+   (`LANDED_UNTRACKED`).
+2. **Preview the allocation.** *Preview allocation* shows each line's share; the shares always sum to
+   **100%** of the total charges.
+3. **Post (maker-checker).** Posting must be done by **someone other than the preparer** (`SOD_SELF_APPROVAL`
+   if you try to post your own) who holds the GL-posting duty. On post:
+   - the part of each line still **on hand** is **capitalised into inventory** — it raises the item's
+     moving-average cost (and open FIFO/FEFO cost layers), so the **next issue carries the loaded cost**
+     (`Dr 1200 Inventory`);
+   - the part already **issued/sold** is **not** re-costed — that residual is charged to the costing
+     variance account (`Dr 5500`, the same account STD-costing uses for purchase price variance);
+   - the total charges are credited to the **landed-cost accrual** liability (`Cr 2010`).
+
+The capitalisation posts inside the same reconciliation scope as ordinary receipts/issues, so
+**Inventory valuation & GL reconciliation** (§9) still ties after a voucher posts.
+
+### Messages you may see
+
+| Message / code | Meaning | What to do |
+|---|---|---|
+| `SOD_SELF_APPROVAL` | You tried to post a voucher you prepared | A different `gl_post`/`exec` user posts it |
+| `LANDED_UNTRACKED` | The item has no perpetual stock balance | Receive it (Goods receipt) first, then post |
+| `ALLOC_BASIS_ZERO` | The chosen basis sums to zero across the lines | Enter base values / qty / weight, or change the basis |
+| `ALREADY_POSTED` / `NOT_DRAFT` | The voucher is already posted | A posted voucher is final; create a new one for further charges |
+
+*(APIs: `POST /api/costing/landed-cost`, `GET /api/costing/landed-cost[/{no}]`,
+`POST /api/costing/landed-cost/{no}/allocate`, `POST /api/costing/landed-cost/{no}/post`.)*
+
+---
+
 ## 10. Branch replenishment — transfer first, then buy
 
 **Screen:** `/replenishment` · **Required permission:** `planner` or `procurement`

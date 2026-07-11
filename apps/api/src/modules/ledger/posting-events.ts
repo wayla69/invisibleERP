@@ -87,6 +87,8 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     cogs: r(DR, '5000', 'free', 'COGS'), inventory: r(CR, '1200', 'pinned', 'Inventory control') } },
   'COSTING.PPV':      { name: 'Purchase price variance',       description: 'STD-costing PPV (sign-conditional)', wired: true, roles: {
     ppv: r(DR, '5500', 'free', 'Purchase price variance') } },
+  'LANDEDCOST.CAPITALIZE': { name: 'Landed-cost capitalisation', description: 'Freight/duty/insurance/broker apportioned into inventory unit cost; issued-share residual to costing variance (COST-01)', wired: true, roles: {
+    inventory: r(DR, '1200', 'pinned', 'Inventory control — on-hand capitalised share'), variance: r(DR, '5500', 'free', 'Costing variance — already-issued residual (mirrors PPV)'), accrual: r(CR, '2010', 'free', 'Landed-cost accrual liability (freight/duty/insurance/broker payable)') } },
   'INV.ADJUST':       { name: 'Inventory adjustment',          description: 'Count/valuation adjustment (direction-conditional)', wired: true, roles: {
     adjustment: r(DR, '5810', 'free', 'Adjustment expense (composes under warehouse determination)') } },
   'WASTE.WRITEOFF':   { name: 'Waste write-off',               description: 'Spoilage/waste written off stock', wired: true, roles: {
