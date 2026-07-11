@@ -151,7 +151,10 @@ export class ServiceService {
 
   async updateSubscriptionStatus(subId: number, status: 'Active' | 'Paused' | 'Cancelled', user: JwtUser) {
     const db = this.db;
-    await this.assertSub(subId);
+    const existing = await this.assertSub(subId);
+    // Cancel is terminal — a cancelled subscription cannot be resumed/paused.
+    if (existing.status === 'Cancelled' && status !== 'Cancelled')
+      throw new BadRequestException({ code: 'SUB_CANCELLED', message: 'Cancelled subscription cannot be reactivated' });
     const [updated] = await db.update(serviceSubscriptions).set({ status }).where(eq(serviceSubscriptions.id, subId)).returning();
     return this.fmtSub(updated);
   }

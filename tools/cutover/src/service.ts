@@ -138,6 +138,18 @@ async function main() {
   const billing2 = await inj('POST', '/api/service/billing/run', admin, { as_of_date: '2026-02-01' });
   ok('Billing run on paused sub → 0 invoices', billing2.json.invoices_created === 0, JSON.stringify(billing2.json));
 
+  // 13. Resume subscription → Active; billing run picks it up again
+  const resumed = await inj('POST', `/api/service/subscriptions/${subId}/resume`, admin);
+  ok('Resume subscription → status=Active', resumed.status === 200 && resumed.json.status === 'Active', JSON.stringify(resumed.json));
+  const billing3 = await inj('POST', '/api/service/billing/run', admin, { as_of_date: '2026-02-01' });
+  ok('Billing run on resumed sub → 1 invoice', billing3.json.invoices_created === 1, JSON.stringify(billing3.json));
+
+  // 14. Cancel is terminal → resume rejected
+  const cancelled = await inj('POST', `/api/service/subscriptions/${subId}/cancel`, admin);
+  ok('Cancel subscription → status=Cancelled', cancelled.status === 200 && cancelled.json.status === 'Cancelled', JSON.stringify(cancelled.json));
+  const resumeCancelled = await inj('POST', `/api/service/subscriptions/${subId}/resume`, admin);
+  ok('Resume cancelled sub → 400 SUB_CANCELLED', resumeCancelled.status === 400 && resumeCancelled.json.error?.code === 'SUB_CANCELLED', JSON.stringify(resumeCancelled.json));
+
   await app.close();
 }
 
