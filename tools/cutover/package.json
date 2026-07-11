@@ -29,6 +29,7 @@
     "manufacturing": "tsx src/manufacturing.ts",
     "projects": "tsx src/projects.ts",
     "mfg-depth": "tsx src/mfg-depth.ts",
+    "quality-ncr": "tsx src/quality-ncr.ts",
     "hcm": "tsx src/hcm.ts",
     "hcm-leave": "tsx src/hcm-leave.ts",
     "hcm-perf": "tsx src/hcm-perf.ts",

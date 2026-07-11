@@ -5,7 +5,7 @@
 // verification (verified_by ≠ owner/created_by → 403 SOD_SELF_APPROVAL) and completion of every child action.
 //
 // Two tenant-scoped tables (canonical 0232-form tenant_isolation RLS + leading (tenant_id,…) index +
-// app_user grants, migration 0332). A CAPA may LINK to an NCR (QMS-1) or a gr_claim via a generic, NULLABLE
+// app_user grants, migration 0333). A CAPA may LINK to an NCR (QMS-1) or a gr_claim via a generic, NULLABLE
 // source_type/source_ref pair — deliberately NOT a FK to non_conformances, so this builds standalone (QMS-1
 // is a sibling branch that may not exist yet). No GL posting.
 import { pgTable, bigserial, bigint, text, date, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';

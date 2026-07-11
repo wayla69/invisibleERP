@@ -2316,7 +2316,21 @@
       "idx": 331,
       "version": "7",
       "when": 2023820000296,
-      "tag": "0332_quality_capa",
+      "tag": "0331_posting_rule_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 332,
+      "version": "7",
+      "when": 2023820000297,
+      "tag": "0332_quality_ncr",
+      "breakpoints": true
+    },
+    {
+      "idx": 333,
+      "version": "7",
+      "when": 2023820000298,
+      "tag": "0333_quality_capa",
       "breakpoints": true
     }
   ]

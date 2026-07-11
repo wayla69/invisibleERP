@@ -8,6 +8,8 @@ import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
 import { toMinor4, minorToNumber4 } from '../../common/money';
 import { assertTemplatesSubsetOf, isIndustryKey, COA_TEMPLATES, type IndustryKey, type CoaTemplateRow } from './coa-templates';
+import { assertPostingEventDefaults } from './posting-events';
+import { postingOverridesCache, postingOverridesKey, POSTING_OVERRIDES_TTL_MS } from './posting-overrides-cache';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -130,12 +132,50 @@ export class LedgerService implements OnModuleInit {
   async postingOverrides(eventType: string, tenantId?: number | null): Promise<Record<string, string>> {
     const tid = tenantId ?? currentTenantStore()?.tenantId ?? null;
     if (tid == null) return {};
-    const rows = await this.db
-      .select({ role: postingRules.role, accountCode: postingRules.accountCode })
-      .from(postingRules)
-      .where(and(eq(postingRules.eventType, eventType), eq(postingRules.tenantId, tid), eq(postingRules.active, true)));
-    const out: Record<string, string> = {};
-    for (const r of rows) if (r.accountCode) out[r.role] = r.accountCode;
+    // GL-24 + hot-path cache (docs/43 PR-1): only ACTIVE + APPROVED rules apply; the per-tenant 5s
+    // TtlCache (bust-on-approve in PostingService) keeps POS-frequency callers off the DB.
+    return postingOverridesCache.wrap(postingOverridesKey(tid, eventType), POSTING_OVERRIDES_TTL_MS, async () => {
+      const rows = await this.db
+        .select({ role: postingRules.role, accountCode: postingRules.accountCode })
+        .from(postingRules)
+        .where(and(
+          eq(postingRules.eventType, eventType),
+          eq(postingRules.tenantId, tid),
+          eq(postingRules.active, true),
+          eq(postingRules.status, 'Approved'),
+        ));
+      const out: Record<string, string> = {};
+      for (const r of rows) if (r.accountCode) out[r.role] = r.accountCode;
+      return out;
+    });
+  }
+
+  // Batch resolve several events in one call (one query on cache miss) — a POS sale resolves its whole
+  // SALE/POS event set with a single lookup instead of N sequential awaits (docs/43 PR-1).
+  async postingOverridesMany(eventTypes: string[], tenantId?: number | null): Promise<Record<string, Record<string, string>>> {
+    const tid = tenantId ?? currentTenantStore()?.tenantId ?? null;
+    const out: Record<string, Record<string, string>> = {};
+    for (const ev of eventTypes) out[ev] = {};
+    if (tid == null || !eventTypes.length) return out;
+    // serve whatever is cached; fetch the misses in ONE query
+    const misses: string[] = [];
+    for (const ev of eventTypes) {
+      const hit = postingOverridesCache.get<Record<string, string>>(postingOverridesKey(tid, ev));
+      if (hit !== undefined) out[ev] = hit; else misses.push(ev);
+    }
+    if (misses.length) {
+      const rows = await this.db
+        .select({ eventType: postingRules.eventType, role: postingRules.role, accountCode: postingRules.accountCode })
+        .from(postingRules)
+        .where(and(
+          inArray(postingRules.eventType, misses),
+          eq(postingRules.tenantId, tid),
+          eq(postingRules.active, true),
+          eq(postingRules.status, 'Approved'),
+        ));
+      for (const r of rows) if (r.accountCode) (out[r.eventType] ??= {})[r.role] = r.accountCode;
+      for (const ev of misses) postingOverridesCache.set(postingOverridesKey(tid, ev), out[ev] ?? {}, POSTING_OVERRIDES_TTL_MS);
+    }
     return out;
   }
 
@@ -144,6 +184,9 @@ export class LedgerService implements OnModuleInit {
   async seedChartOfAccounts() {
     // Fail fast at boot if any industry CoA template drifts from the canonical universe (unknown/dup code).
     assertTemplatesSubsetOf(COA.map((a) => a.code));
+    // docs/43 PR-1: same fail-fast for the posting-event registry — every role default must be a real
+    // canonical account, so a registry typo can never become a silent mis-posting fallback.
+    assertPostingEventDefaults(COA.map((a) => a.code));
     const db = this.db;
     await db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code });
     return { seeded: COA.length };

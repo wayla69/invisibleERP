@@ -1203,6 +1203,38 @@ async function main() {
   ok('GL-21: manual JE to a non-existent account → 400 INVALID_POSTING_ACCOUNT (account-universe guard)',
     ghost.status === 400 && ghost.json.error?.code === 'INVALID_POSTING_ACCOUNT', `${ghost.status} ${ghost.json.error?.code}`);
 
+  // 5c. GL-24 — posting-rule change governance (docs/43 PR-1). Rule writes are validated FAIL-CLOSED
+  //     against the posting-event registry (tier/role/side/account), land PendingApproval, and only a
+  //     DIFFERENT user can activate them; every action lands in the append-only audit trail.
+  const prPinned = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.GROSS', legOrder: 9, role: 'net_pay_cash', side: 'CR', accountCode: '4000' });
+  ok('GL-24: overriding a PINNED role (net-pay cash) → 400 OVERRIDE_ROLE_PINNED',
+    prPinned.status === 400 && prPinned.json.error?.code === 'OVERRIDE_ROLE_PINNED', `${prPinned.status} ${prPinned.json.error?.code}`);
+  const prRole = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.GROSS', legOrder: 9, role: 'bogus_role', side: 'DR', accountCode: '5100' });
+  ok('GL-24: unknown role for the event → 400 UNKNOWN_POSTING_ROLE',
+    prRole.status === 400 && prRole.json.error?.code === 'UNKNOWN_POSTING_ROLE', `${prRole.status} ${prRole.json.error?.code}`);
+  const prSide = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.GROSS', legOrder: 9, role: 'wages_expense', side: 'CR', accountCode: '5100' });
+  ok('GL-24: side mismatch (wages_expense posts DR) → 400 POSTING_SIDE_MISMATCH',
+    prSide.status === 400 && prSide.json.error?.code === 'POSTING_SIDE_MISMATCH', `${prSide.status} ${prSide.json.error?.code}`);
+  const prAcct = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.GROSS', legOrder: 9, role: 'wages_expense', side: 'DR', accountCode: '6666' });
+  ok('GL-24: override to a non-existent account → 400 INVALID_POSTING_ACCOUNT (fail-closed at save)',
+    prAcct.status === 400 && prAcct.json.error?.code === 'INVALID_POSTING_ACCOUNT', `${prAcct.status} ${prAcct.json.error?.code}`);
+  const prOk = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.GROSS', legOrder: 1, role: 'wages_expense', side: 'DR', accountCode: '5100' });
+  ok('GL-24: a VALID rule write lands PendingApproval (no posting effect yet)',
+    prOk.status === 201 && prOk.json.status === 'PendingApproval', `${prOk.status} st=${prOk.json.status}`);
+  const prSelf = await inj('POST', `/api/ledger/posting-rules/${prOk.json.id}/approve`, admin);
+  ok('GL-24: creator self-approval → 403 SOD_VIOLATION (binds even Admin)',
+    prSelf.status === 403 && prSelf.json.error?.code === 'SOD_VIOLATION', `${prSelf.status} ${prSelf.json.error?.code}`);
+  const prAppr = await inj('POST', `/api/ledger/posting-rules/${prOk.json.id}/approve`, whchk);
+  ok('GL-24: a DIFFERENT user approves → Approved (rule now live for the resolver)',
+    prAppr.status === 200 && prAppr.json.status === 'Approved' && prAppr.json.approvedBy === 'whchk', `${prAppr.status} st=${prAppr.json.status}`);
+  const prAudit = await inj('GET', '/api/ledger/posting-rules/audit', admin);
+  const auditActions = (prAudit.json.audit ?? []).map((a: any) => a.action);
+  ok('GL-24: append-only audit trail carries the CREATE + APPROVE rows',
+    auditActions.includes('CREATE') && auditActions.includes('APPROVE'), `actions=${auditActions.slice(0, 6).join(',')}`);
+  const prDeact = await inj('POST', `/api/ledger/posting-rules/${prOk.json.id}/deactivate`, admin);
+  ok('GL-24: deactivate retires the rule (postings fall back to the registry default)',
+    prDeact.status === 200 && prDeact.json.active === false, `${prDeact.status} active=${prDeact.json.active}`);
+
   // 6. Per-tenant overlay curation (gl_coa): a tenant's FinancialController shapes its OWN chart (rename 4000)
   //    without touching the canonical universe. Isolated on the freshly-provisioned RESTC restaurant tenant.
   const restcTid = await tid('RESTC');

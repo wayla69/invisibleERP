@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
@@ -6,6 +6,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { RoutingService, type CreateRoutingDto } from './routing.service';
 import { ShopFloorService, type ReportOpDto } from './shopfloor.service';
 import { QualityService, type InspectDto } from './quality.service';
+import { NcrService, type RaiseNcrDto, type DispositionDto, type DefectCodeDto } from './ncr.service';
 import { MrpService, type MrpRunDto, type MrpCapacityDto } from './mrp.service';
 import { ApsService, type WorkCenterDto, type ScheduleDto } from './aps.service';
 
@@ -52,6 +53,53 @@ export class QualityController {
   constructor(private readonly svc: QualityService) {}
   @Post('inspect') inspect(@Body(new ZodValidationPipe(InspectBody)) b: InspectDto, @CurrentUser() u: JwtUser) { return this.svc.inspect(b, u); }
   @Get() list(@CurrentUser() u: JwtUser) { return this.svc.list(u); }
+}
+
+// ── Quality — Non-Conformance (NCR) register with maker-checker disposition (QMS-1, QC-01) ──
+// Reads/raise gate the `quality` duty (or exec); a financial disposition (scrap/use_as_is/return, which may
+// post a GL write-off) is applied ONLY by a DIFFERENT `quality_approve`/exec user (SOD_SELF_APPROVAL, QC-01).
+const DISPOSITION = z.enum(['scrap', 'use_as_is', 'return', 'rework']);
+const RaiseNcrBody = z.object({
+  source: z.enum(['incoming', 'in_process', 'customer', 'supplier']).optional(),
+  ref_type: z.string().optional(), ref_doc: z.string().optional(),
+  item_id: z.string().optional(), item_description: z.string().optional(),
+  defect_code: z.string().optional(), severity: z.enum(['minor', 'major', 'critical']).optional(),
+  qty: z.number().nonnegative().optional(), unit_cost: z.number().nonnegative().optional(),
+  description: z.string().optional(), proposed_disposition: DISPOSITION.optional(),
+});
+const PromoteBody = z.object({
+  defect_code: z.string().optional(), severity: z.enum(['minor', 'major', 'critical']).optional(),
+  qty: z.number().nonnegative().optional(), unit_cost: z.number().nonnegative().optional(),
+  description: z.string().optional(), proposed_disposition: DISPOSITION.optional(),
+});
+const DispositionBody = z.object({ disposition: z.enum(['scrap', 'use_as_is', 'return']).optional(), notes: z.string().optional() });
+const RejectBody = z.object({ notes: z.string().optional() });
+const DefectCodeBody = z.object({ code: z.string().min(1), name: z.string().optional(), category: z.string().optional(), active: z.boolean().optional() });
+
+@Controller('api/quality')
+@RequiresSuite('manufacturing')
+export class NcrController {
+  constructor(private readonly svc: NcrService) {}
+
+  // Defect-code lookup
+  @Get('defect-codes') @Permissions('quality', 'exec') listDefectCodes(@CurrentUser() u: JwtUser) { return this.svc.listDefectCodes(u); }
+  @Post('defect-codes') @Permissions('quality') createDefectCode(@Body(new ZodValidationPipe(DefectCodeBody)) b: DefectCodeDto, @CurrentUser() u: JwtUser) { return this.svc.createDefectCode(b, u); }
+
+  // NCR register
+  @Get('ncr') @Permissions('quality', 'exec') list(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.list(u, status); }
+  @Get('ncr/:id') @Permissions('quality', 'exec') get(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) { return this.svc.get(id, u); }
+  @Post('ncr') @Permissions('quality') raise(@Body(new ZodValidationPipe(RaiseNcrBody)) b: RaiseNcrDto, @CurrentUser() u: JwtUser) { return this.svc.raiseNcr(b, u); }
+
+  // Promote a failed quality_inspection into an NCR
+  @Post('inspections/:id/promote') @Permissions('quality') promote(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(PromoteBody)) b: RaiseNcrDto, @CurrentUser() u: JwtUser) { return this.svc.promoteInspection(id, b, u); }
+
+  // Disposition maker-checker (QC-01): approver ≠ raiser
+  @Post('ncr/:id/disposition') @Permissions('quality_approve', 'exec') @HttpCode(200)
+  disposition(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(DispositionBody)) b: DispositionDto, @CurrentUser() u: JwtUser) { return this.svc.disposition(id, b, u); }
+  @Post('ncr/:id/reject') @Permissions('quality_approve', 'exec') @HttpCode(200)
+  reject(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(RejectBody)) b: DispositionDto, @CurrentUser() u: JwtUser) { return this.svc.reject(id, b, u); }
+  @Post('ncr/:id/close') @Permissions('quality_approve', 'exec') @HttpCode(200)
+  close(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) { return this.svc.close(id, u); }
 }
 
 // ── MRP ──

@@ -1,4 +1,4 @@
--- 0332_quality_capa — QMS-2: CAPA (Corrective & Preventive Action) lifecycle with effectiveness sign-off.
+-- 0333_quality_capa — QMS-2: CAPA (Corrective & Preventive Action) lifecycle with effectiveness sign-off.
 -- The system captured one-off quality dispositions (mfg-depth) + supplier claims (gr_claims) but had no
 -- MANAGED corrective-action loop: root-cause → action plan → verification → effectiveness sign-off → closure.
 -- This adds a first-class CAPA register (control QC-02) whose CLOSURE requires an INDEPENDENT effectiveness

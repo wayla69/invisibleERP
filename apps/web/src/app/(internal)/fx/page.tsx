@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Coins, Plus, RefreshCw } from 'lucide-react';
+import { Coins, Plus, RefreshCw, PlayCircle, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -16,6 +16,8 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmDialog } from '@/components/confirm-dialog';
+import { statusVariant } from '@/components/ui';
 import { useLang } from '@/lib/i18n';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -32,6 +34,7 @@ export default function FxPage() {
         tabs={[
           { key: 'rates', label: t('fnx.fx.tab_rates'), content: <Rates /> },
           { key: 'revalue', label: t('fnx.fx.tab_revalue'), content: <Revalue /> },
+          { key: 'periodend', label: t('fnx.fx.tab_periodend'), content: <PeriodEndReval /> },
         ]}
       />
     </div>
@@ -230,3 +233,147 @@ const fxRowColumns = (t: (key: string) => string) => [
   { key: 'current_thb', label: t('fnx.fx.col_current_thb'), align: 'right' as const, render: (r: any) => <span className="tabular">{baht(r.current_thb)}</span> },
   { key: 'delta', label: t('fnx.fx.col_delta'), align: 'right' as const, render: (r: any) => <span className="tabular">{baht(r.delta)}</span> },
 ];
+
+// ───────────────────── ปรับปรุงสิ้นงวด — maker-checker run→post (GL-18) ─────────────────────
+// The governed period-end FX revaluation: `run` stages an Open run computing the unrealized FX on open
+// foreign AR/AP at the closing rate; `/:id/post` posts it (AR/AP restatement + net to 5400) under a
+// maker-checker gate (poster ≠ runner ⇒ SELF_POST). Distinct from the immediate api/fx/revalue on the
+// Revalue tab — this is the auditable staged workflow (RCM GL-18).
+interface FxRevalDetail { scope: string; doc_no: string; currency: string; open_foreign: number; booked_rate: number; closing_rate: number; delta: number }
+interface FxRevalRun {
+  id: number; period: string; as_of_date: string; status: string; rates?: Record<string, number> | null;
+  total_gain: number; total_loss: number; net: number; detail?: FxRevalDetail[];
+  run_by: string | null; posted_by: string | null; posted_at: string | null; created_at: string | null;
+  ar_delta?: number; ap_delta?: number; entry_no?: string | null;
+}
+interface FxRevalListResp { runs: FxRevalRun[]; count: number }
+
+const currentPeriod = () => new Date().toISOString().slice(0, 7);
+
+function PeriodEndReval() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const list = useQuery<FxRevalListResp>({ queryKey: ['fx-reval-runs'], queryFn: () => api('/api/ledger/fx-reval') });
+  const [period, setPeriod] = useState(currentPeriod());
+  const [asOf, setAsOf] = useState('');
+  const [open, setOpen] = useState<number | null>(null);
+  const [posting, setPosting] = useState<FxRevalRun | null>(null);
+
+  const run = useMutation({
+    mutationFn: () => api<FxRevalRun>('/api/ledger/fx-reval/run', {
+      method: 'POST',
+      body: JSON.stringify({ period, as_of_date: asOf || undefined }),
+    }),
+    onSuccess: (r) => {
+      notifySuccess(t('fnx.fx.pe_run_ok', { id: r.id, period: r.period }), t('fnx.fx.pe_run_sub', { net: baht(r.net) }));
+      qc.invalidateQueries({ queryKey: ['fx-reval-runs'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const post = useMutation({
+    mutationFn: (id: number) => api<FxRevalRun>(`/api/ledger/fx-reval/${id}/post`, { method: 'POST' }),
+    onSuccess: (r) => {
+      notifySuccess(t('fnx.fx.pe_post_ok', { id: r.id }), r.entry_no ? t('fnx.fx.pe_post_je', { je: r.entry_no }) : t('fnx.fx.pe_post_nil'));
+      setPosting(null);
+      qc.invalidateQueries({ queryKey: ['fx-reval-runs'] });
+    },
+    onError: (e: any) => { notifyError(e.message); setPosting(null); },
+  });
+
+  return (
+    <div className="space-y-5">
+      <Card className="gap-4 p-5">
+        <h3 className="text-base font-semibold">{t('fnx.fx.pe_run_title')}</h3>
+        <p className="text-sm text-muted-foreground">{t('fnx.fx.pe_hint')}</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-2">
+            <Label htmlFor="pe-period">{t('fnx.fx.pe_field_period')}</Label>
+            <Input id="pe-period" className="max-w-[150px]" placeholder="2026-06" value={period} onChange={(e) => setPeriod(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="pe-asof">{t('fnx.fx.pe_field_asof')}</Label>
+            <Input id="pe-asof" type="date" className="max-w-[170px]" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+          </div>
+          <Button disabled={run.isPending || !/^\d{4}-\d{2}$/.test(period)} onClick={() => run.mutate()}>
+            <PlayCircle className="size-4" /> {run.isPending ? t('fnx.fx.pe_running') : t('fnx.fx.pe_run_btn')}
+          </Button>
+        </div>
+      </Card>
+
+      <StateView q={list}>
+        {list.data && (
+          <div className="space-y-4">
+            <DataTable
+              rows={list.data.runs}
+              rowKey={(r) => r.id}
+              onRowClick={(r) => setOpen((cur) => (cur === r.id ? null : r.id))}
+              emptyState={{ icon: RefreshCw, title: t('fnx.fx.pe_empty_title'), description: t('fnx.fx.pe_empty_desc') }}
+              columns={[
+                { key: 'id', label: t('fnx.fx.pe_col_run'), render: (r) => <span className="font-medium">#{r.id}</span> },
+                { key: 'period', label: t('fnx.fx.pe_col_period') },
+                { key: 'as_of_date', label: t('fnx.fx.pe_col_asof'), render: (r) => (r.as_of_date ? thaiDate(r.as_of_date) : '—') },
+                { key: 'net', label: t('fnx.fx.pe_col_net'), align: 'right', render: (r) => <span className={`tabular ${r.net < 0 ? 'text-destructive' : ''}`}>{baht(r.net)}</span> },
+                { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                { key: 'run_by', label: t('fnx.fx.pe_col_runby'), render: (r) => r.run_by ?? '—' },
+                { key: 'posted_by', label: t('fnx.fx.pe_col_postedby'), render: (r) => r.posted_by ?? '—' },
+                { key: 'actions', label: '', align: 'right', render: (r) => (
+                  r.status === 'Open'
+                    ? <Button size="sm" onClick={(e) => { e.stopPropagation(); setPosting(r); }}><Send className="size-3.5" /> {t('fnx.fx.pe_post_btn')}</Button>
+                    : <span className="text-xs text-muted-foreground">—</span>
+                ) },
+              ]}
+            />
+            {open != null && <RevalDetail id={open} />}
+          </div>
+        )}
+      </StateView>
+
+      <ConfirmDialog
+        open={posting != null}
+        onOpenChange={(o) => !o && setPosting(null)}
+        destructive={false}
+        title={t('fnx.fx.pe_post_confirm_title', { id: posting?.id ?? '' })}
+        description={t('fnx.fx.pe_post_confirm_desc')}
+        confirmLabel={t('fnx.fx.pe_post_btn')}
+        busy={post.isPending}
+        onConfirm={() => posting && post.mutate(posting.id)}
+      />
+    </div>
+  );
+}
+
+function RevalDetail({ id }: { id: number }) {
+  const { t } = useLang();
+  const q = useQuery<FxRevalRun>({ queryKey: ['fx-reval-run', id], queryFn: () => api(`/api/ledger/fx-reval/${id}`) });
+  return (
+    <Card className="gap-4 p-5">
+      <h4 className="text-sm font-semibold">{t('fnx.fx.pe_detail_title', { id })}</h4>
+      <StateView q={q}>
+        {q.data && (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StatCard label={t('fnx.fx.pe_stat_gain')} value={baht(q.data.total_gain)} tone="success" />
+              <StatCard label={t('fnx.fx.pe_stat_loss')} value={baht(q.data.total_loss)} tone="danger" />
+              <StatCard label={t('fnx.fx.pe_stat_net')} value={baht(q.data.net)} tone={q.data.net >= 0 ? 'success' : 'danger'} />
+            </div>
+            <DataTable
+              rows={q.data.detail ?? []}
+              rowKey={(r) => `${r.scope}:${r.doc_no}`}
+              dense
+              emptyState={{ title: t('fnx.fx.pe_detail_empty') }}
+              columns={[
+                { key: 'scope', label: t('fnx.fx.pe_col_scope'), render: (r) => <Badge variant="secondary">{r.scope}</Badge> },
+                { key: 'doc_no', label: t('fnx.fx.col_doc_no') },
+                { key: 'currency', label: t('fnx.fx.col_ccy') },
+                { key: 'open_foreign', label: t('fnx.fx.col_open_foreign'), align: 'right', render: (r) => <span className="tabular">{num(r.open_foreign)}</span> },
+                { key: 'booked_rate', label: t('fnx.fx.col_booked_rate'), align: 'right', render: (r) => <span className="tabular">{num(r.booked_rate)}</span> },
+                { key: 'closing_rate', label: t('fnx.fx.pe_col_closing'), align: 'right', render: (r) => <span className="tabular">{num(r.closing_rate)}</span> },
+                { key: 'delta', label: t('fnx.fx.col_delta'), align: 'right', render: (r) => <span className={`tabular ${r.delta < 0 ? 'text-destructive' : ''}`}>{baht(r.delta)}</span> },
+              ]}
+            />
+          </div>
+        )}
+      </StateView>
+    </Card>
+  );
+}

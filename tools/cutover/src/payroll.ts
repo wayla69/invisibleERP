@@ -221,18 +221,40 @@ async function main() {
   ok('Employee list now projects department/hourly_rate/pf_rate (previously missing from fmtEmp)',
     e3Row?.department === 'Kitchen' && near(e3Row?.hourly_rate, 150) && near(e3Row?.pf_rate, 0.03), JSON.stringify(e3Row).slice(0, 150));
 
-  // ── docs/42 step 4: a tenant posting-rule override re-maps a payroll leg WITHOUT a code change ──
-  // Seed a real override account + a tenant-scoped PAYROLL.GROSS/wages_expense rule → 5601, run a fresh
-  // period and approve: the salaries debit lands on 5601 (unmapped roles keep their literals). The rule is
-  // tenant-scoped — the NULL-tenant demo defaults from 0158 never shadow the code.
+  // ── docs/42 step 4 + docs/43 PR-1 (GL-24): a tenant posting-rule override re-maps a payroll leg
+  // WITHOUT a code change — and the rule change itself is maker-checked end-to-end. A rule created via
+  // the API lands PendingApproval: the next run IGNORES it (default 5600 posts), the creator cannot
+  // activate it (SoD), a DIFFERENT user's approval re-maps the run after that, and a re-edit demotes
+  // the rule back to PendingApproval. (Direct-DB seeded rows are grandfathered Approved by 0327.)
   await db.insert(s.accounts).values({ code: '5601', name: 'Salaries — override test', type: 'Expense', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
-  await db.insert(s.postingRules).values({ tenantId: hq, eventType: 'PAYROLL.GROSS', legOrder: 1, role: 'wages_expense', side: 'DR', accountCode: '5601', active: true });
+  const ruleReq = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.GROSS', legOrder: 1, role: 'wages_expense', side: 'DR', accountCode: '5601' });
+  ok('GL-24: API rule write lands PendingApproval', ruleReq.status === 201 && ruleReq.json.status === 'PendingApproval', `${ruleReq.status} st=${ruleReq.json.status}`);
+  const led5600pre = (await inj('GET', '/api/ledger/account-ledger?account=5600', admin)).json;
   const runNov = await inj('POST', '/api/payroll/runs?period=2026-11', admin);
   await inj('POST', '/api/payroll/runs/2026-11/approve', approver);
-  const led5601 = (await inj('GET', '/api/ledger/account-ledger?account=5601', admin)).json;
-  ok('Posting-rule override: PAYROLL.GROSS wages_expense re-mapped to 5601 (tenant rule ?? literal)',
-    /^JE-/.test(runNov.json.entry_no ?? '') && Number(runNov.json.gross_total) > 0 && near(led5601.total_debit, Number(runNov.json.gross_total)),
-    JSON.stringify({ gross: runNov.json.gross_total, dr5601: led5601.total_debit }));
+  const led5600nov = (await inj('GET', '/api/ledger/account-ledger?account=5600', admin)).json;
+  const led5601a = (await inj('GET', '/api/ledger/account-ledger?account=5601', admin)).json;
+  ok('GL-24: a PENDING rule never posts — November salaries land on the 5600 default (Δ = gross), 5601 untouched',
+    Number(runNov.json.gross_total) > 0
+      && near(Number(led5600nov.total_debit) - Number(led5600pre.total_debit), Number(runNov.json.gross_total))
+      && near(led5601a.total_debit ?? 0, 0),
+    JSON.stringify({ gross: runNov.json.gross_total, d5600: Number(led5600nov.total_debit) - Number(led5600pre.total_debit), dr5601: led5601a.total_debit ?? 0 }));
+  const selfAppr = await inj('POST', `/api/ledger/posting-rules/${ruleReq.json.id}/approve`, admin);
+  ok('GL-24: creator self-approval → 403 SOD_VIOLATION', selfAppr.status === 403 && selfAppr.json.error?.code === 'SOD_VIOLATION', `${selfAppr.status} ${selfAppr.json.error?.code}`);
+  const apprOk = await inj('POST', `/api/ledger/posting-rules/${ruleReq.json.id}/approve`, approver);
+  ok('GL-24: a different user approves → Approved (approved_by stamped)', apprOk.status === 200 && apprOk.json.status === 'Approved' && apprOk.json.approvedBy === 'approver', `${apprOk.status} st=${apprOk.json.status}`);
+  const runDec = await inj('POST', '/api/payroll/runs?period=2026-12', admin);
+  await inj('POST', '/api/payroll/runs/2026-12/approve', approver);
+  const led5601b = (await inj('GET', '/api/ledger/account-ledger?account=5601', admin)).json;
+  ok('GL-24: the APPROVED rule re-maps the next run — December salaries land on 5601 (override ?? literal)',
+    Number(runDec.json.gross_total) > 0 && near(led5601b.total_debit, Number(runDec.json.gross_total)),
+    JSON.stringify({ gross: runDec.json.gross_total, dr5601: led5601b.total_debit }));
+  // Re-editing the approved rule demotes it back to PendingApproval — an approved mapping can't be
+  // silently repointed by its maintainer.
+  await db.insert(s.accounts).values({ code: '5602', name: 'Salaries — governed override', type: 'Expense', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  const reEdit = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.GROSS', legOrder: 1, role: 'wages_expense', side: 'DR', accountCode: '5602' });
+  ok('GL-24: re-editing an approved rule demotes it to PendingApproval (same row, new account pending)',
+    reEdit.status === 201 && reEdit.json.status === 'PendingApproval' && Number(reEdit.json.id) === Number(ruleReq.json.id), `${reEdit.status} st=${reEdit.json.status} id=${reEdit.json.id}`);
 
   console.log('\n── C2b — payroll (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
