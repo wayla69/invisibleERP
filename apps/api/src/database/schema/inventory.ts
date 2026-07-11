@@ -326,5 +326,56 @@ export const itemSupplier = pgTable('item_supplier', {
   byItem: index('idx_itemsupplier_item').on(t.tenantId, t.itemId),
 }));
 
+// ── Cycle-count program with ABC classification (INV-3 / INV-17, migration 0341) ─────────────────
+// A governed cadence-driven cycle-count program layered over the existing stocktake spine. item_abc_class
+// ranks a tenant's items by annual consumption VALUE and Pareto-bands them A/B/C; cycle_count_plans holds the
+// count cadence (days) per class; cycle_count_tasks are generated BLIND count tasks linked to a Draft
+// stocktake (posting reuses the INV-04 counter≠poster maker-checker + the valued GL adjustment path).
+export const itemAbcClass = pgTable('item_abc_class', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  itemId: text('item_id').notNull(),
+  class: text('class').notNull(),                                      // 'A' | 'B' | 'C'
+  annualValue: numeric('annual_value', { precision: 18, scale: 4 }).notNull().default('0'),
+  rank: integer('rank'),
+  cumPct: numeric('cum_pct', { precision: 9, scale: 4 }),
+  computedAt: timestamp('computed_at', { withTimezone: true }).defaultNow(),
+  computedBy: text('computed_by'),
+}, (t) => ({
+  uq: unique('uq_item_abc_tenant_item').on(t.tenantId, t.itemId),
+  byTenant: index('idx_item_abc_tenant').on(t.tenantId, t.class),
+}));
+
+export const cycleCountPlans = pgTable('cycle_count_plans', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  class: text('class').notNull(),                                     // 'A' | 'B' | 'C'
+  cadenceDays: integer('cadence_days').notNull(),                     // days between counts for this class
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  updatedBy: text('updated_by'),
+}, (t) => ({
+  uq: unique('uq_ccplan_tenant_class').on(t.tenantId, t.class),
+  byTenant: index('idx_ccplan_tenant').on(t.tenantId, t.class),
+}));
+
+export const cycleCountTasks = pgTable('cycle_count_tasks', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  taskNo: text('task_no').notNull(),
+  class: text('class'),
+  location: text('location'),
+  dueDate: date('due_date'),
+  status: text('status').notNull().default('Open'),                  // Open | Counted | Cancelled (Posted derived)
+  stNo: text('st_no'),                                               // linked Draft stocktake
+  itemCount: integer('item_count').notNull().default(0),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  countedBy: text('counted_by'),
+  countedAt: timestamp('counted_at', { withTimezone: true }),
+}, (t) => ({
+  uq: unique('uq_cctask_no').on(t.taskNo),
+  byTenant: index('idx_cctask_tenant').on(t.tenantId, t.status),
+}));
+
 export type Item = typeof items.$inferSelect;
 export type StockSnapshot = typeof stockSnapshots.$inferSelect;

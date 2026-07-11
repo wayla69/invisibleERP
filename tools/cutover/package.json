@@ -10,6 +10,7 @@
     "pos-wiring": "tsx src/pos-wiring.ts",
     "module-qr": "tsx src/module-qr.ts",
     "stock-ops": "tsx src/stock-ops.ts",
+    "cycle-counts": "tsx src/cycle-counts.ts",
     "gaps": "tsx src/gaps.ts",
     "portal-extra": "tsx src/portal-extra.ts",
     "pos-p0": "tsx src/pos-p0.ts",

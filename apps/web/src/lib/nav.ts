@@ -27,6 +27,7 @@ import {
   CircleDollarSign,
   KeyRound,
   ClipboardCheck,
+  ListChecks,
   ClipboardList,
   Code,
   Coins,
@@ -284,6 +285,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.stocktake', href: '/stocktake', icon: ClipboardCheck, perms: ['wh_count', 'warehouse', 'mobile'] },
       // SoD R11: wh_adjust (Inventory Controller) posts variance from counts and approves write-offs.
       { label: 'nav.stock_adjustment', href: '/stock-adjustment', icon: SlidersHorizontal, perms: ['wh_adjust', 'warehouse'] },
+      // INV-17: ABC-classified, cadence-driven blind cycle-count program (counting = wh_count; posting reuses /stock-adjustment).
+      { label: 'nav.cycle_counts', href: '/stock-ops/cycle-counts', icon: ListChecks, perms: ['wh_count', 'wh_adjust', 'warehouse'] },
       { label: 'nav.waste', href: '/waste', icon: Trash2, perms: ['warehouse', 'pos', 'order_mgt'] },
       { label: 'nav.receiving', href: '/receiving', icon: PackageCheck, perms: ['wh_receive', 'warehouse'] },
       { label: 'nav.goods_issue', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },

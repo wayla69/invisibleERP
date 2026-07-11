@@ -216,6 +216,46 @@ general ledger (Dr 5810 / Cr 1200 for shrinkage, reversed for a gain).
 
 ---
 
+## 7b. Cycle-count program — ABC classification & blind counts (control INV-17)
+
+**Screen:** `/stock-ops/cycle-counts` · **Required permission:** `wh_count` (StockCounter) or
+`warehouse` to count; `wh_adjust` (InventoryController) to recompute ABC and post variances.
+
+Instead of counting everything at once (or at random), the cycle-count program counts the
+**right items at the right frequency**. It ranks each item by **how much value flows through it**
+(ABC) and counts the fast/valuable **A** items often and the slow **C** items rarely. Counts are
+**blind** — the counter never sees the system (book) quantity, so a shortage can't be hidden by just
+writing the book number down.
+
+### Recompute ABC (InventoryController — `wh_adjust`)
+
+1. Open **ตรวจนับตามรอบ (Cycle counts)** (`/stock-ops/cycle-counts`) → the **ABC** tab.
+2. Click **คำนวณ ABC ใหม่ (Recompute ABC)**.
+
+**Expected result:** every item is classified **A / B / C** by its annual consumption value
+(A ≈ top 80% of value, B ≈ next 15%, C ≈ last 5%). The count **cadence** per class is seeded the
+first time — **A = every 30 days, B = 90, C = 180** — and can be tuned.
+
+### Work the due worklist & count (StockCounter — `wh_count`)
+
+1. Open the **ครบกำหนด (Due)** tab — it lists items whose next count is due, **A items first**.
+2. Click **สร้างใบตรวจนับ (Generate count)** for the items you'll count. This creates a **blind**
+   task: the item list is shown **without** any system quantity.
+3. Count the shelf and enter the **physical quantity** for each line, then submit.
+
+**Expected result:** a cycle-count task (`CC-…`) and a linked stocktake (`ST-…`) are created; the
+task moves to **Counted**. The variance is **not** posted yet.
+
+### Post the variance (InventoryController — `wh_adjust`)
+
+Posting reuses the normal stocktake path — go to **อนุมัติปรับสต๊อก** (`/stock-adjustment`) or post
+the linked `ST-…` directly. The person who **counted** cannot post their own count
+(`SOD_SELF_APPROVAL`, SoD R11); a different `wh_adjust` reviewer posts it, correcting the on-hand and
+booking the valued GL adjustment (Dr 5810 / Cr 1200 for shrinkage). Once posted, the item drops off
+the due worklist until its class cadence comes round again (control INV-17).
+
+---
+
 ## 7a. Logging waste & spoilage
 
 **Screen:** `/waste` (**ของเสีย / ทิ้ง**) · **Required permission:** `warehouse`,
