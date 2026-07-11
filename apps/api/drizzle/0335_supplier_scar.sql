@@ -1,4 +1,4 @@
--- 0334_supplier_scar — QMS-4: Supplier Corrective Action Request (SCAR / 8D) register (control QC-04).
+-- 0335_supplier_scar — QMS-4: Supplier Corrective Action Request (SCAR / 8D) register (control QC-04).
 -- Supplier defects are captured (gr_claims) and supplier performance is scored (supplier_scorecards via
 -- procurement.service.ts recomputeScorecard), but there is NO formal corrective-action request issued to a
 -- vendor with response tracking and a closure gate before requalification. This adds, ALONGSIDE those paths

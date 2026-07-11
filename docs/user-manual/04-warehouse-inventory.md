@@ -491,5 +491,54 @@ verifier **must be different people** (segregation of duties, rule **R21**).
 
 ---
 
+## 12. Certificate of Analysis & out-of-spec release — control QC-03
+
+**Screen:** `/quality/coa` · **Required permission:** `quality` (record) / `quality_approve` (approve
+an out-of-spec release) / `exec`
+
+A **Certificate of Analysis (CoA)** evidences the quality of a received or produced **lot** against the
+item's **quality spec** (an acceptable min–max range per measured characteristic). An **out-of-spec** lot
+— one whose measured value falls outside its range — can be released into stock/production **only** as a
+documented **deviation approved by a second person** (maker-checker, **QC-03**).
+
+### Set up a quality spec (`quality`)
+
+1. Go to **Certificate of Analysis** (`/quality/coa`) → the **สเปกคุณภาพ (Quality specs)** tab.
+2. Enter the **item**, the **characteristic** (e.g. Moisture %, pH, Purity %), unit, and the acceptable
+   **Min / Max** (and an optional target). Click **บันทึกสเปก (Add spec)**.
+
+### Record a CoA against a lot (`quality`)
+
+3. On the **ใบรับรอง (Certificates)** tab, click **เปิดใบรับรอง (Create CoA)**: enter the **lot no.**,
+   **item**, and **source** (Incoming / Production).
+4. Open the CoA and **add measured results** — one row per characteristic with its spec Min/Max and the
+   **actual** value. Each row shows **pass / fail** against its range.
+5. Click **ประเมินผล (Evaluate)**. The CoA's overall result becomes **pass** if every characteristic is in
+   range, or **fail (out of spec)** if **any** actual is outside its range.
+
+### Release the lot
+
+6. **In-spec (pass):** the recorder can **ปล่อยล็อต (Release lot)** directly — routine.
+7. **Out-of-spec (fail):** release is a **deviation approval** and must be done by a **different** person
+   who holds `quality_approve`/`exec`. They enter a mandatory **deviation reason** and click
+   **อนุมัติปล่อยแบบเบี่ยงเบน (Approve deviation release)**. Alternatively **ปฏิเสธ (Reject)** holds the
+   lot (never released).
+
+### Review deviations (audit)
+
+8. The **ทะเบียนเบี่ยงเบน (Deviation register)** tab lists every out-of-spec lot that was **released** —
+   the recorder, the approver, and the reason — the population an auditor samples.
+
+*(APIs: `GET/POST /api/quality/specs`, `POST /api/quality/coa`, `POST /api/quality/coa/{id}/results`,
+`POST /api/quality/coa/{id}/evaluate|release|reject`, `GET /api/quality/coa/out-of-spec`.)*
+
+**Errors:** `COA_NOT_EVALUATED` (release before evaluating — evaluate first); `SOD_SELF_APPROVAL` (the
+recorder tried to release their own out-of-spec lot — a different approver must); `DEVIATION_APPROVER_REQUIRED`
+(a `quality`-only user tried to release a fail — needs `quality_approve`/`exec`); `DEVIATION_REASON_REQUIRED`
+(out-of-spec release with no reason); `COA_NOT_HELD` (the CoA is already released/rejected);
+`SPEC_RANGE_INVALID` (spec min greater than max).
+
+---
+
 **Next:** [Procurement](./03-procurement.md) ·
 [Reports & Analytics](./09-reports-and-analytics.md) (forecasting & replenishment)
