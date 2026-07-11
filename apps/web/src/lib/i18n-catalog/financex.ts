@@ -691,6 +691,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.petty.pending_stat': { th: 'คำขอรออนุมัติ', en: 'Requests pending approval' },
   'fnx.petty.prompt_reject': { th: 'เหตุผลที่ปฏิเสธ (ไม่บังคับ)', en: 'Reason for rejection (optional)' },
   'fnx.petty.prompt_replenish': { th: 'จำนวนเงินเติมกองทุน', en: 'Replenishment amount' },
+  'fnx.petty.replenish_title': { th: 'เติมเงินกองทุน {code}', en: 'Replenish fund {code}' },
+  'fnx.petty.settle_title': { th: 'เคลียร์เงินทดรอง {no}', en: 'Settle advance {no}' },
   'fnx.petty.prompt_returned': { th: 'เงินคืนกองทุน (returned cash)', en: 'Cash returned to fund (returned cash)' },
   'fnx.petty.prompt_settled': { th: 'ยอดใช้จ่ายจริง (settled expense)', en: 'Actual expense (settled expense)' },
   'fnx.petty.reject_btn': { th: 'ปฏิเสธ', en: 'Reject' },

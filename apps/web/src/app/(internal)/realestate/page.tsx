@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DocSelect } from '@/components/doc-select';
+import { NumberPromptDialog } from '@/components/number-prompt-dialog';
 
 const unitTone: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = { available: 'default', reserved: 'outline', contracted: 'secondary', transferred: 'destructive' };
 
@@ -37,6 +38,8 @@ export default function RealEstatePage() {
   const contract = useQuery<any>({ queryKey: ['re-contract', contractNo], queryFn: () => api(`/api/realestate/contracts/${contractNo}`), enabled: !!contractNo });
   const [dev, setDev] = useState({ dev_code: '', name: '', location: '' });
   const [unit, setUnit] = useState({ unit_no: '', unit_type: 'condo', area_sqm: '', list_price: '', cost: '' });
+  const [bookFor, setBookFor] = useState<string | null>(null);
+  const [contractFor, setContractFor] = useState<string | null>(null);
   const refreshUnits = () => qc.invalidateQueries({ queryKey: ['re-units', active] });
   const refreshContract = () => qc.invalidateQueries({ queryKey: ['re-contract', contractNo] });
 
@@ -103,8 +106,8 @@ export default function RealEstatePage() {
                 { key: 'status', label: t('cx.col_status'), render: (r: any) => <Badge variant={unitTone[r.status] ?? 'secondary'}>{r.status}</Badge> },
                 { key: 'actions', label: '', align: 'right', render: (r: any) => (
                   <div className="flex justify-end gap-1.5">
-                    {r.status === 'available' && <Button size="sm" variant="outline" onClick={() => { const dep = prompt(t('cx.re_prompt_deposit')); if (dep) book.mutate({ unit_no: r.unit_no, deposit: Number(dep) }); }}><KeyRound className="size-3.5" /> {t('cx.re_btn_book')}</Button>}
-                    {(r.status === 'available' || r.status === 'reserved') && <Button size="sm" onClick={() => { const discount = Number(prompt(t('cx.re_prompt_discount'), '0') || 0); const down = Number(prompt(t('cx.re_prompt_down'), '0') || 0); const inst = Number(prompt(t('cx.re_prompt_inst'), '12') || 0); contractM.mutate({ unit_no: r.unit_no, discount, down, inst }); }}><FileSignature className="size-3.5" /> {t('cx.re_btn_contract')}</Button>}
+                    {r.status === 'available' && <Button size="sm" variant="outline" onClick={() => setBookFor(r.unit_no)}><KeyRound className="size-3.5" /> {t('cx.re_btn_book')}</Button>}
+                    {(r.status === 'available' || r.status === 'reserved') && <Button size="sm" onClick={() => setContractFor(r.unit_no)}><FileSignature className="size-3.5" /> {t('cx.re_btn_contract')}</Button>}
                   </div>
                 ) },
               ]}
@@ -143,6 +146,31 @@ export default function RealEstatePage() {
             )}
           </Card>
         </>
+      )}
+
+      {bookFor && (
+        <NumberPromptDialog
+          title={t('cx.re_btn_book')}
+          fields={[{ key: 'deposit', label: t('cx.re_prompt_deposit'), min: 0 }]}
+          confirmLabel={t('cx.re_btn_book')}
+          busy={book.isPending}
+          onConfirm={(get) => book.mutate({ unit_no: bookFor, deposit: get('deposit') }, { onSuccess: () => setBookFor(null) })}
+          onClose={() => setBookFor(null)}
+        />
+      )}
+      {contractFor && (
+        <NumberPromptDialog
+          title={t('cx.re_btn_contract')}
+          fields={[
+            { key: 'discount', label: t('cx.re_prompt_discount'), default: '0', min: 0 },
+            { key: 'down', label: t('cx.re_prompt_down'), default: '0', min: 0 },
+            { key: 'inst', label: t('cx.re_prompt_inst'), default: '12', min: 0, integer: true },
+          ]}
+          confirmLabel={t('cx.re_btn_contract')}
+          busy={contractM.isPending}
+          onConfirm={(get) => contractM.mutate({ unit_no: contractFor, discount: get('discount'), down: get('down'), inst: get('inst') }, { onSuccess: () => setContractFor(null) })}
+          onClose={() => setContractFor(null)}
+        />
       )}
     </div>
   );
