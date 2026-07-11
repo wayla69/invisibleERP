@@ -114,3 +114,38 @@ Grade fixture: **G5** band `[25000, 40000]`. Employees: EMP1 (30000), EMP2 (2800
 | Requirement | Control | Test cases | Harness |
 |---|---|---|---|
 | Comp-change within pay band + maker-checker (OUT_OF_BAND unless exec override; approver ≠ requester; employee master updated only on approval); benefit plan enrolment | HR-06 | UAT-HR-600..615 | `tools/cutover/src/hcm-comp.ts` (23 checks) |
+
+## Test cases — Training & certifications (HR-7, control HR-07)
+
+Course fixtures: **SAFETY** (mandatory, `validity_months:12`), **FIRSTAID** (mandatory, `requires_score`,
+`validity_months:24`), **ORIENT** (non-mandatory, no validity), **EXPSOON** (mandatory, `validity_months:1`),
+**LAPSED** (mandatory, `validity_months:1`). Employees: EMP1, EMP2 (linked to an `ess` login).
+
+| ID | Type | Precondition | Steps | Expected result |
+|---|---|---|---|---|
+| UAT-HR-700 | Positive | — | `POST /api/hcm/training/courses` `{course_code:SAFETY,name,category:safety,is_mandatory:true,validity_months:12}` | 201; course created; tenant-scoped |
+| UAT-HR-701 | Negative | SAFETY exists | Re-`POST` course `SAFETY` | 400 `COURSE_EXISTS` |
+| UAT-HR-702 | Positive | SAFETY exists | `POST /api/hcm/training/sessions` `{course_code:SAFETY,session_date,instructor,capacity}` | 201; session scheduled |
+| UAT-HR-703 | Negative | — | `POST …/sessions` `{course_code:NOPE}` | 404 `COURSE_NOT_FOUND` |
+| UAT-HR-704 | Positive | Session exists | `POST /api/hcm/training/enrollments` `{session_id,emp_code:EMP1}` | 201; status `enrolled` |
+| UAT-HR-705 | Negative | EMP1 enrolled | Re-`POST` the same enrollment | 400 `ALREADY_ENROLLED` |
+| UAT-HR-706 | Positive (control) | EMP1 enrolled in a SAFETY session | `POST …/enrollments/:id/complete` `{}` | 200 `completed`; a `certifications` row minted with `expiry_date = completed_date + 12 months` |
+| UAT-HR-707 | Negative (control) | — | `POST …/enrollments/999999/complete` | 404 `ENROLLMENT_NOT_FOUND` |
+| UAT-HR-708 | Negative (control) | EMP1 enrolled in a FIRSTAID (`requires_score`) session | `POST …/enrollments/:id/complete` `{}` (no score) | 400 `SCORE_REQUIRED` |
+| UAT-HR-709 | Positive (control) | Same FIRSTAID enrollment | `POST …/enrollments/:id/complete` `{score:88}` | 200 `completed`; certification minted |
+| UAT-HR-710 | Positive (control) | EMP1 enrolled in an ORIENT (non-mandatory, no validity) session | `POST …/enrollments/:id/complete` `{}` | 200 `completed`; `certification:null` (no cert minted) |
+| UAT-HR-711 | Positive | EMP2 has a LAPSED cert (completed 90 days ago, validity 1mo) | `GET /api/hcm/training/certifications?emp_code=EMP2` | 200; the LAPSED cert reads `status:expired`, `expired:true` |
+| UAT-HR-712 | Positive (control) | EMP2 has an expired LAPSED + a soon-expiring EXPSOON cert | `GET /api/hcm/training/compliance` (default 30d) | 200; the expired LAPSED cert is surfaced; `expired ≥ 1` |
+| UAT-HR-713 | Positive (control) | Same fixtures | `GET …/compliance?days=45` | The ~30-day-out EXPSOON cert is included; `expiring ≥ 1` |
+| UAT-HR-714 | Positive (control) | Same fixtures | `GET …/compliance?days=5` | EXPSOON excluded (beyond the 5-day window); the expired LAPSED cert still included |
+| UAT-HR-715 | Positive (control) | EMP1 holds a non-expiring SAFETY cert | `GET …/compliance?days=45` | SAFETY is NOT flagged (a non-expiring mandatory cert is compliant) |
+| UAT-HR-716 | Positive (control) | EMP2 recompletes EXPSOON | `GET …/certifications?emp_code=EMP2` | Exactly one **active** EXPSOON cert (the renewal superseded the prior active one) |
+| UAT-HR-717 | Security (own-scope) | `ess` login linked to EMP2, certs exist for EMP1+EMP2 | `GET /api/hcm/training/certifications` as `ess` | Only EMP2's certifications returned (own-scope) |
+| UAT-HR-718 | Security (own-scope) | `ess` login linked to EMP2 | `GET /api/hcm/training/enrollments` as `ess` | Only EMP2's enrollments returned (own-scope) |
+| UAT-HR-719 | Security (RLS) | Tenant T2 admin creates course `T2C` | `GET /api/hcm/training/courses` as T1 vs T2 | T1 sees SAFETY not T2C; T2 sees T2C not SAFETY (tenant isolation) |
+
+## Traceability — HR-7
+
+| Requirement | Control | Test cases | Harness |
+|---|---|---|---|
+| Mandatory-training / certification compliance (SCORE_REQUIRED completion gate; completion mints/renews a certification with expiry = completed_date + validity_months; expired/expiring detective read; ess own-scope; RLS) | HR-07 | UAT-HR-700..719 | `tools/cutover/src/hcm-training.ts` (27 checks) |

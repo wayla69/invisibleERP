@@ -2276,6 +2276,13 @@
       "when": 2023820000290,
       "tag": "0325_hcm_comp",
       "breakpoints": true
+    },
+    {
+      "idx": 326,
+      "version": "7",
+      "when": 2023820000291,
+      "tag": "0326_hcm_training",
+      "breakpoints": true
     }
   ]
 }
