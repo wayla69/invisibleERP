@@ -104,7 +104,9 @@ export class PaymentsDepthService {
     const newBalance = r2(n(acct.balance) + amount);
     if (n(acct.creditLimit) > 0 && newBalance > n(acct.creditLimit) + 0.001) throw new BadRequestException({ code: 'CREDIT_LIMIT_EXCEEDED', message: `Charge would exceed credit limit (${n(acct.creditLimit)})`, messageTh: `เกินวงเงินเครดิต (${n(acct.creditLimit)})` });
     const inc = this.tax.calcInclusive({ gross: amount, country: 'TH' });
-    const je: any = await this.ledger.postEntry({ source: 'HOUSE-CHARGE', sourceRef: dto.sale_no ?? accountNo, tenantId: user.tenantId, memo: `House charge ${accountNo}${dto.memo ? ` — ${dto.memo}` : ''}`, createdBy: user.username, lines: [{ account_code: '1100', debit: amount }, { account_code: '4000', credit: r2(inc.net) }, ...(inc.tax > 0 ? [{ account_code: '2100', credit: r2(inc.tax) }] : [])] });
+    // docs/43 PR-6: the house-charge revenue leg shares SALE.FOOD.revenue; 1100 AR + 2100 VAT stay pinned/widen.
+    const hcRev = (await this.ledger.postingOverrides('SALE.FOOD', user.tenantId ?? null)).revenue ?? postingDefault('SALE.FOOD', 'revenue');
+    const je: any = await this.ledger.postEntry({ source: 'HOUSE-CHARGE', sourceRef: dto.sale_no ?? accountNo, tenantId: user.tenantId, memo: `House charge ${accountNo}${dto.memo ? ` — ${dto.memo}` : ''}`, createdBy: user.username, lines: [{ account_code: '1100', debit: amount }, { account_code: hcRev, credit: r2(inc.net) }, ...(inc.tax > 0 ? [{ account_code: '2100', credit: r2(inc.tax) }] : [])] });
     const entry = await this.appendEntry(acct, 'charge', amount, newBalance, { saleNo: dto.sale_no, memo: dto.memo, journalNo: je?.entry_no, user });
     await db.update(houseAccounts).set({ balance: String(newBalance) }).where(eq(houseAccounts.id, acct.id));
     return { account_no: accountNo, entry_no: entry, charged: amount, balance: newBalance, journal_no: je?.entry_no ?? null };

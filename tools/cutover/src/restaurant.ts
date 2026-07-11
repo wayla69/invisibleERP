@@ -52,6 +52,8 @@ async function main() {
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
+    { username: 'glcfg1', passwordHash: await pw.hash('pw1'), role: 'Admin', tenantId: t1 }, // docs/43 PR-6: rule maker
+    { username: 'glapp1', passwordHash: await pw.hash('pw1'), role: 'Admin', tenantId: t1 }, // docs/43 PR-6: distinct approver
     { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t2 },
   ]).onConflictDoNothing();
 
@@ -734,6 +736,27 @@ async function main() {
     const bad = await inj('GET', '/api/pos/journal/verify', sales1);
     ok('Fiscal chain: a tampered payload is detected (ok=false + broken_at)', bad.json?.ok === false && Number(bad.json?.broken_at) > 0, JSON.stringify(bad.json ?? {}).slice(0, 90));
   }
+
+  // ── docs/43 PR-6 — a GL-24-governed posting-rule override re-routes the dine-in revenue leg ──
+  // The default 4000 path is pinned by the GL checks above; an approved SALE.FOOD rule (maker ≠ approver)
+  // re-routes a NEW checkout's revenue to 4010 while cash/VAT legs stay pinned; the batched
+  // postingOverridesMany read serves the POS hot path.
+  await db.insert(s.accounts).values({ code: '4010', name: 'Restaurant Revenue — override (PR-6)', type: 'Revenue', normalBalance: 'C', isPostable: true }).onConflictDoNothing();
+  const glcfg1 = await login('glcfg1', 'pw1');
+  const glapp1 = await login('glapp1', 'pw1');
+  const p6Rule = (await inj('POST', '/api/ledger/posting-rules', glcfg1, { eventType: 'SALE.FOOD', legOrder: 1, role: 'revenue', side: 'CR', accountCode: '4010' })).json;
+  ok('PR-6: SALE.FOOD override upsert lands PendingApproval (GL-24)', p6Rule?.status === 'PendingApproval', `${p6Rule?.status}`);
+  const p6Ap = await inj('POST', `/api/ledger/posting-rules/${Number(p6Rule?.id)}/approve`, glapp1);
+  ok('PR-6: a different user approves the rule', p6Ap.status === 200 && p6Ap.json?.status === 'Approved', `${p6Ap.status} ${p6Ap.json?.status}`);
+  const tblOvr = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'Z9', seats: 2 });
+  const openOvr = await inj('POST', `/api/restaurant/tables/${tblOvr.json.id}/open`, sales1, { party_size: 1 });
+  const ordOvr = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblOvr.json.id, session_id: openOvr.json.session_id, guest_count: 1, items: [{ name: 'ข้าวผัด', qty: 1, unit_price: 100, station_code: 'hot' }] });
+  await inj('POST', `/api/restaurant/orders/${ordOvr.json.order_no}/bill`, sales1);
+  const coOvr = await inj('POST', `/api/restaurant/orders/${ordOvr.json.order_no}/checkout`, sales1, { method: 'Cash' });
+  const jeRows = (await pg.query(`SELECT jl.account_code, jl.credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id = je.id WHERE je.entry_no = '${coOvr.json.journal_no}'`)).rows as any[];
+  ok('PR-6: the approved override re-routes the checkout revenue to 4010 (cash/VAT pinned)',
+    jeRows.some((l: any) => l.account_code === '4010' && Number(l.credit) > 0) && !jeRows.some((l: any) => l.account_code === '4000'),
+    JSON.stringify(jeRows.map((l: any) => l.account_code)));
 
   await app.close();
   await pg.close();

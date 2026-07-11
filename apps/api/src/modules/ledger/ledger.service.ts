@@ -152,6 +152,14 @@ export class LedgerService implements OnModuleInit {
 
   // Batch resolve several events in one call (one query on cache miss) — a POS sale resolves its whole
   // SALE/POS event set with a single lookup instead of N sequential awaits (docs/43 PR-1).
+  /** docs/43 PR-7: a reconciliation that reads a WIDENED role must sum the account SET
+   *  {registry default} ∪ {approved tenant override} — so overriding the role never breaks the tie-out. */
+  async postingAccountSet(eventType: string, role: string, tenantId?: number | null): Promise<string[]> {
+    const def = postingDefault(eventType, role);
+    const ovr = (await this.postingOverrides(eventType, tenantId))[role];
+    return ovr && ovr !== def ? [def, ovr] : [def];
+  }
+
   async postingOverridesMany(eventTypes: string[], tenantId?: number | null): Promise<Record<string, Record<string, string>>> {
     const tid = tenantId ?? currentTenantStore()?.tenantId ?? null;
     const out: Record<string, Record<string, string>> = {};

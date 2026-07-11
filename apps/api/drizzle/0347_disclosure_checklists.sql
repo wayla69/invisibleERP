@@ -1,4 +1,4 @@
--- 0346_disclosure_checklists — CLS-02 (control GL-26): Disclosure / close-package checklist (governed close binder).
+-- 0347_disclosure_checklists — CLS-02 (control GL-26): Disclosure / close-package checklist (governed close binder).
 -- SEC disclosure-controls expectation: a statutory-FS *report* exists (reports/statutory-fs) but there is no
 -- governed checklist producing the reporting package. This adds a per-period disclosure binder: a preparer
 -- opens a checklist for a period (auto-seeded with the standard TFRS/SEC disclosure items — each with an owner,

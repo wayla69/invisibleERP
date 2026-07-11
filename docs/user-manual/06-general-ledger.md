@@ -1,6 +1,17 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.11 · 2026-07-11** · *v0.11 (2026-07-11): posting-rule overrides extended to assets &
+**Status: DRAFT v0.13 · 2026-07-11** · *v0.13 (2026-07-11): the **กฎการลงบัญชี (Posting Rules)** screen
+(`/setup/posting-rules`) becomes a four-tab workspace — **ทะเบียนเหตุการณ์** (the full event registry: every
+event/role with its default account, override tier and your company's current override, searchable and
+filterable by tier, with a ตั้งค่า shortcut on overridable roles), **ตั้งค่า & ทดลอง** (the per-event editor
+and posting preview, unchanged), **คิวรออนุมัติ** (all GL-24 pending overrides across every event in one
+queue, with approve/reject), and **ประวัติการแก้ไข** (the append-only audit trail, newest first). Screen
+behaviour and permissions are unchanged — this is the same data, easier to see.* · *v0.12 (2026-07-11): a new balance-sheet account can declare its own
+cash-flow bucket (ดำเนินงาน/ลงทุน/จัดหาเงิน/บวกกลับ) and current/non-current split in the /chart-of-accounts
+create dialog — the indirect cash-flow statement and the financial metrics then classify it automatically;
+the chart and posting-rule overrides can also be bulk-imported (Administration → Bulk import): chart imports
+are staged for an independent approver, and every imported posting rule waits for GL-24 approval before it
+has any effect.* · *v0.11 (2026-07-11): posting-rule overrides extended to assets &
 leases (docs/43 PR-3) — disposal gain/loss, impairment, lease remeasurement, lessor income, prepaid
 schedules; asset categories can carry their own posting accounts under Item posting (see §"Posting Rules").* · *v0.10 (2026-07-11): posting-rule overrides (docs/43 PR-2) now also
 drive the day-to-day finance & POS money postings — write-offs, advances, reverse-charge VAT, AP WHT/discount,
@@ -182,6 +193,17 @@ your approved rules — and if your company has switched on **กำหนดบ
 **asset category's** own asset / accumulated-depreciation / depreciation-expense accounts drive
 acquisition and the monthly depreciation run for assets in that category (a category with a bad account
 code is rejected at save).
+
+The **กฎการลงบัญชี** screen itself is a four-tab workspace: **ทะเบียนเหตุการณ์** lists every
+posting event with each role's debit/credit side, **default account**, override **tier**
+(ปรับได้ *free* / ชุดบัญชี *widen* / ล็อกถาวร *pinned*) and your company's current override with
+its approval status — search by event, role or account, filter by tier, and press **ตั้งค่า** on
+an overridable role to jump straight into the editor with the event/role/side pre-filled;
+**ตั้งค่า & ทดลอง** is the per-event editor and posting preview; **คิวรออนุมัติ** collects every
+pending override across all events so an approver clears one queue instead of walking events one
+by one; **ประวัติการแก้ไข** shows the append-only audit trail (who created / approved / rejected /
+deactivated which rule, newest first). An approved override can be retired with **ปิดใช้** —
+postings then fall back to the default account.
 
 > **Changing a posting rule is a two-person action (GL-24).** A saved rule shows **รออนุมัติ**
 > and has **no effect** until a *different* user presses **อนุมัติ** on the same screen — you
