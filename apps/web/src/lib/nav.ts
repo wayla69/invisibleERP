@@ -503,6 +503,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.sod', href: '/sod', icon: ShieldAlert, perms: ['exec', 'users'] },
       { label: 'nav.audit', href: '/audit', icon: ScrollText, perms: ['users'] },
       { label: 'nav.controls', href: '/controls', icon: ShieldAlert, perms: ['exec', 'users', 'creditors'] },
+      { label: 'nav.control_console', href: '/controls/rcm', icon: ClipboardCheck, perms: ['exec', 'users'] },
       { label: 'nav.governance', href: '/governance', icon: Landmark, perms: ['exec', 'users'] },
       { label: 'nav.ops', href: '/ops', icon: Activity, perms: ['exec', 'users'] },
     ],

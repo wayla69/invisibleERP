@@ -26,7 +26,7 @@ export type AccessReview = typeof accessReviews.$inferSelect;
 // ITGC-AC-21: line-item Access Recertification. One row per user in a campaign — the reviewer keeps or
 // revokes each user's access IN-APP, and on campaign certification a 'revoke' decision ACTUALLY removes the
 // user's permission grants (actioned=true; closed-loop revocation). current_perms is the effective-permission
-// snapshot at open time (the recertification evidence). Tenant-scoped (RLS via migration 0336).
+// snapshot at open time (the recertification evidence). Tenant-scoped (RLS via migration 0337).
 export const accessReviewItems = pgTable('access_review_items', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),

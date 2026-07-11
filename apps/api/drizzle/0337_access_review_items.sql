@@ -1,4 +1,4 @@
--- 0336_access_review_items — GRC-2 (ITGC-AC-21): line-item Access Recertification Campaign with
+-- 0337_access_review_items — GRC-2 (ITGC-AC-21): line-item Access Recertification Campaign with
 -- closed-loop revocation. The existing UAR (access_reviews) is a BLANKET period sign-off (one row + counts);
 -- per-user keep/revoke lived only as blank columns in an offline CSV, with no in-app disposition and no
 -- auto-revoke. This promotes it to a first-class recertification campaign:
