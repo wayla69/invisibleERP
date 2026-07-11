@@ -145,3 +145,4 @@ export * from './gl-period-balances';
 export * from './doc-attachments';
 
 export * from './vouchers';
+export * from './supplier-scar';

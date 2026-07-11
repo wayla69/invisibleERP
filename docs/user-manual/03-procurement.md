@@ -795,6 +795,46 @@ suppliers to keep, coach, or drop. The list is store-scoped.
 > separate from **paying** vendors (rule R02), to prevent creating a fictitious
 > vendor and paying it.
 
+### Supplier corrective action (SCAR / 8D) — control QC-04
+
+**Screen:** `/quality/scar` (**SCAR ผู้ขาย (8D)**, ERP nav → จัดซื้อ) ·
+**Required permission:** raise `quality` / `creditors`; closure review `quality_approve` / `exec`;
+read `quality` / `quality_approve` / `creditors` / `exec`.
+
+When a supplier defect **keeps happening**, a per-receipt claim isn't enough — you
+issue a **formal corrective-action request (SCAR)** and hold the supplier to a **8D**
+root-cause / corrective-action commitment, closed only after an **independent review**.
+This builds on the existing supplier claims and scorecards (it never changes a score).
+
+**Raise a SCAR.** In the **ทะเบียน SCAR (SCAR register)** tab, fill the *Raise a SCAR*
+card: the **vendor**, an optional **source claim number** (it must be a **real** GR
+claim for that vendor — a made-up reference is refused, `CLAIM_NOT_FOUND` /
+`CLAIM_VENDOR_MISMATCH`), the **defect summary**, **severity** (minor / major /
+critical) and a **due date**. It opens with status **open**.
+
+**Record the supplier's 8D response.** Press **บันทึกการตอบกลับ (Respond)** and enter
+the 8D fields — **D3 containment**, **D4 root cause**, **D5/D6 corrective action**,
+**D7 preventive action**. Status moves to **supplier_responded**. Then **ส่งปิดงาน
+(Submit for closure)** moves it to **pending_closure** (refused `SCAR_INCOMPLETE` if
+the root cause / corrective action are still blank).
+
+**Close it — the QC-04 control.** A SCAR can be **closed only by a *different* person
+than the one who raised it** (a raiser closing their own SCAR is refused
+`SOD_SELF_APPROVAL` — even for Admin), and only after a **complete 8D response**
+(else `SCAR_INCOMPLETE`). The reviewer presses **ปิดงาน (Close)** and records an
+**effectiveness** verdict — **ได้ผล (effective)** or **ไม่ได้ผล (ineffective)**.
+Closing an **effective** SCAR is the sign-off that permits a suppressed supplier to be
+**requalified** (the verdict is recorded; scorecard maths are untouched). Or press
+**ปฏิเสธ (Reject)** with a reason (`REASON_REQUIRED`) to send it back for re-work.
+
+**Overdue worklist.** The **เกินกำหนด (Overdue)** tab lists open SCARs **past their due
+date** (choose a look-ahead horizon in days) — the supplier-quality follow-up queue.
+
+> **Note — separation of duties (rule R21):** the person who **raises** a SCAR
+> (`quality`) can never **close** it — the closure reviewer (`quality_approve`) must be
+> a different, authorised person, so a defective supplier is never quietly requalified
+> on a self-signed 8D.
+
 ---
 
 ## 6. Supplier portal (for your vendors)

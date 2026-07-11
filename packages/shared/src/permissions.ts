@@ -51,6 +51,13 @@ export const PERMISSIONS = [
   //    `cpq* OR exec` so existing exec roles keep working; the in-app self-approval block (author ≠ approver)
   //    is the real control regardless of the permission held. ──
   'cpq', 'cpq_approve',
+  // ── Supplier quality / corrective action (QMS; SoD R21) — `quality` is the raise duty (issue a supplier
+  //    corrective-action request / SCAR-8D, record supplier response); `quality_approve` is the closure
+  //    reviewer duty (close/reject a SCAR after verifying the 8D response — QC-04 maker-checker: the
+  //    closer must differ from the raiser). Standalone granular perms: NOT implied by a coarse perm.
+  //    Endpoints gate `quality*`/`creditors`/`exec` so procurement roles keep read access; the in-app
+  //    self-approval block (raiser ≠ closer) is the real control regardless of the permission held. ──
+  'quality', 'quality_approve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -67,6 +74,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'proj_tender',
   're_sales', 're_contract_approve', 're_transfer',
   'cpq', 'cpq_approve',
+  'quality', 'quality_approve',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -84,7 +92,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing', 'proj_tender'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
   'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify'],
-  'Procurement': ['procurement', 'pr_raise', 'proj_subcon'],
+  'Procurement': ['procurement', 'pr_raise', 'proj_subcon', 'quality', 'quality_approve'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
   'Human Resources': ['hr', 'hr_admin'],
@@ -225,6 +233,8 @@ export const SOD_RULES: SodRule[] = [
     a: ['re_sales'], b: ['re_contract_approve'], severity: 'High', risk: 'Draft and approve one’s own unit sale contract — grant an unauthorised price/discount to a related buyer.', mitigation: 'Separate contract drafting from approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, RE-02).' },
   { id: 'R20', dutyA: 'Author / discount CPQ quote', dutyB: 'Approve discount / margin-floor breach',
     a: ['cpq'], b: ['cpq_approve'], severity: 'High', risk: 'Build and approve one’s own quote that breaches the margin floor / max-discount ceiling — sell below cost or over-discount without a second check, straight to GL revenue.', mitigation: 'Separate quote authoring from discount approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, CPQ-01).' },
+  { id: 'R21', dutyA: 'Raise supplier corrective-action request (SCAR)', dutyB: 'Close / approve SCAR closure',
+    a: ['quality'], b: ['quality_approve'], severity: 'High', risk: 'Raise a supplier SCAR and close it oneself — sign off an ineffective (or fabricated) 8D response and requalify a defective supplier without an independent check.', mitigation: 'Separate SCAR raising from closure review; maker-checker enforced in-app (SOD_SELF_APPROVAL, QC-04).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }
@@ -280,4 +290,5 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   branch: '/branches',
   hr: '/hcm',
   cpq: '/cpq',
+  quality: '/quality/scar',
 };
