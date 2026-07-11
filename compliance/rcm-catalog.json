@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 249,
+    "total": 250,
     "by_status": {
-      "Implemented": 246,
+      "Implemented": 247,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 19,
+      "Inventory & COGS": 20,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -2315,6 +2315,25 @@
       "tod": "Inspect the reason_code enum capture, the valued by_reason/by_station roll-ups, the anomaly bands, and tenant isolation.",
       "toe": "Re-perform: seed counts with reason/station; the variance values per ingredient (NOODLE +฿30 High), nets +30/−50 to −20, by_reason PORTIONING +30 / WASTE −50, by_station Sauce +30 (20%); another tenant's counts are excluded (re-performed by the restaurant harness).",
       "evidence": "Reason-coded variance roll-up + by-station test",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "COST-01",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Inventory (1200); Landed-cost accrual (2010); Costing variance (5500)",
+      "risk": "Landed costs (freight, import duty, insurance, broker fees) on goods received are expensed as period costs instead of being capitalised into inventory unit cost — so on-hand inventory is understated, COGS is distorted (the charge hits P&L in the wrong period), and unit cost is understated for pricing/valuation; OR a landed-cost voucher is posted by the same person who prepared it (no independent check on the capitalised amount / accrued liability), OR the charge is retroactively loaded onto stock that has already been sold (overstating on-hand inventory that no longer exists).",
+      "assertion": "Completeness/Accuracy/Valuation/Authorization",
+      "description": "Landed-cost allocation voucher: freight/duty/insurance/broker charges are attached to one or more posted goods receipts and APPORTIONED into inventory unit cost by a chosen basis (value/qty/weight), summing to 100% of the charges (rounding remainder pinned so Σalloc = total). On post, the STILL-ON-HAND share of each line's allocation is capitalised into the perpetual sub-ledger — raising the moving-average value and the open FIFO/FEFO cost layers so FUTURE issues carry the loaded cost (Dr 1200) — while the ALREADY-ISSUED residual is expensed to the costing variance account (Dr 5500, mirroring STD-costing PPV; issued qty is never retroactively re-costed), crediting the landed-cost accrual liability (Dr 1200 + Dr 5500 / Cr 2010). Posting is MAKER-CHECKER: the poster must differ from the preparer (403 SOD_SELF_APPROVAL). The capitalisation JE is inside the INV-06 reconcile scope (source INV-LC) so the sub-ledger still ties to GL 1200 after a voucher posts. Tenant-scoped (RLS).",
+      "prev_det": "Prev+Det",
+      "nature": "Automated",
+      "frequency": "Per voucher",
+      "owner": "Controller / Warehouse / Procurement",
+      "coso": "P10",
+      "code_reference": "landed-cost/landed-cost.service.ts create/allocate/post (apportion, on-hand vs issued split, maker-checker); landed-cost.controller.ts (/api/costing/landed-cost[/:no][/allocate|/post]); schema/landed-cost.ts landed_cost_vouchers/landed_cost_allocations + migration 0341; ledger-constants.ts account 2010; inventory-ledger.service.ts INV_SOURCES (INV-LC); posting-events.ts LANDEDCOST.CAPITALIZE; cutover/landed-cost.ts (ToE)",
+      "tod": "Walkthrough create voucher → allocate preview (ties to 100%) → post: inspect the on-hand-vs-issued capitalisation split, the balanced Dr1200/Dr5500/Cr2010 JE, the maker-checker block, and that a future issue carries the loaded cost.",
+      "toe": "Re-perform: create a voucher, preview apportionment (sums to total), self-post is blocked (403 SOD_SELF_APPROVAL), a distinct approver posts (Dr 1200 / Cr 2010 balanced), a subsequent issue carries the raised moving-average / FIFO-layer cost, and the already-issued residual lands in 5500 — never re-costing sold stock; sub-ledger reconciles to GL 1200 (re-performed by the landed-cost harness).",
+      "evidence": "Landed-cost voucher register + apportionment/maker-checker ToE",
       "status": "Implemented"
     },
     {

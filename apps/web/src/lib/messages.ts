@@ -189,6 +189,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.images': { th: 'รูปภาพสินค้า', en: 'Product Images' },
   'nav.wms': { th: 'คลังสินค้า (WMS)', en: 'Warehouse (WMS)' },
   'nav.costing': { th: 'ต้นทุนสินค้า', en: 'Product Costing' },
+  'nav.landed_cost': { th: 'ต้นทุนแฝง (Landed Cost)', en: 'Landed Cost' },
   'nav.std_cost': { th: 'ปรับปรุงต้นทุนมาตรฐาน', en: 'Standard-cost Roll' },
   'nav.inventory_ledger': { th: 'บัญชีสต๊อก & มูลค่า', en: 'Stock Ledger & Valuation' },
   'nav.replenishment': { th: 'เติมสต๊อกอัตโนมัติ', en: 'Auto Replenishment' },

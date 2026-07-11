@@ -19,12 +19,13 @@ const ACCT_INVENTORY = '1200';
 const ACCT_AP = '2000';
 const ACCT_COGS = '5000';
 const ACCT_ADJ = '5810';
-// Goods-in-Transit (INV-2/INV-16): value in transit on a two-step transfer order. On SHIP the value leaves
-// the source inventory account (Cr 1200) into 1255 (Dr); on RECEIVE it lands at the destination (Dr 1200,
-// Cr 1255). INV-GIT is included in INV_SOURCES so reconcile() sees the 1200 leg of both legs and the
-// perpetual sub-ledger stays tied to GL 1200 throughout (the 1255 balance sits outside the inventory set).
+// INV-LC (landed cost, INV-1/COST-01) capitalises freight/duty/etc into 1200 and raises the sub-ledger value.
+// Goods-in-Transit (INV-2/INV-16): value in transit on a two-step transfer order — SHIP moves value out of
+// source inventory (Cr 1200) into 1255 (Dr); RECEIVE lands it at destination (Dr 1200, Cr 1255). Both INV-GIT
+// and INV-LC are in INV_SOURCES so reconcile() sees the 1200 legs and the perpetual sub-ledger stays tied to
+// GL 1200 (the 1255 balance sits outside the inventory set).
 const ACCT_GIT = '1255';
-const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ', 'INV-GIT'];
+const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ', 'INV-GIT', 'INV-LC'];
 const COSTING_METHODS = ['moving_avg', 'fifo', 'fefo'] as const;
 type CostingMethod = (typeof COSTING_METHODS)[number];
 const isLayered = (m?: string | null): boolean => m === 'fifo' || m === 'fefo';
