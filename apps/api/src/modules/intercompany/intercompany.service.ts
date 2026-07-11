@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { icTransactions, icSettlements, journalLines, journalEntries } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { CreateIcDto, SettleIcDto } from './dto';
@@ -48,16 +49,27 @@ export class IntercompanyService {
     if (!m) throw new BadRequestException({ code: 'IC_BAD_CATEGORY', message: `Unknown IC category '${cat}'`, messageTh: 'ประเภทรายการระหว่างกิจการไม่ถูกต้อง' });
     const icNo = await this.docNo.nextDaily('IC');
     await db.insert(icTransactions).values({ icNo, tenantId: dto.from_tenant_id, fromTenantId: dto.from_tenant_id, toTenantId: dto.to_tenant_id, txnDate: date, amount: fx(A, 4), settledAmount: '0', currency: dto.currency ?? 'THB', category: cat as typeof icTransactions.$inferInsert.category, description: dto.description ?? null, status: 'Open', createdBy: username });
+    // docs/43 PR-4: the P&L legs of the OVERRIDABLE categories (shared-cost / transfer) follow each side's
+    // OWN tenant posting-rule (IC.TRANSACTION.recovery_*/expense_*) ?? the category MAP literal — resolved
+    // per tenant because creditor and debtor are different companies. loan (cash) and loyalty-clearing
+    // (LYL-03 per-shop-truth tie on 5700) keep the MAP literals. 1150/2150 elimination pair stays pinned.
+    const roleSuffix = cat === 'shared-cost' ? 'shared_cost' : cat === 'transfer' ? 'transfer' : null;
+    const fromCr = roleSuffix
+      ? ((await this.ledger.postingOverrides('IC.TRANSACTION', dto.from_tenant_id))[`recovery_${roleSuffix}`] ?? postingDefault('IC.TRANSACTION', `recovery_${roleSuffix}`))
+      : m.creditorCr;
+    const toDr = roleSuffix
+      ? ((await this.ledger.postingOverrides('IC.TRANSACTION', dto.to_tenant_id))[`expense_${roleSuffix}`] ?? postingDefault('IC.TRANSACTION', `expense_${roleSuffix}`))
+      : m.debtorDr;
     // FROM (creditor): Dr 1150 Due-From / Cr recovery
     let fromJe: string | null = null;
     if (!(await this.ledger.alreadyPosted('IC', icNo))) {
-      const je: any = await this.ledger.postEntry({ date, source: 'IC', sourceRef: icNo, tenantId: dto.from_tenant_id, currency: dto.currency, memo: `IC ${icNo} due-from`, createdBy: username, lines: [{ account_code: '1150', debit: A }, { account_code: m.creditorCr, credit: A }] });
+      const je: any = await this.ledger.postEntry({ date, source: 'IC', sourceRef: icNo, tenantId: dto.from_tenant_id, currency: dto.currency, memo: `IC ${icNo} due-from`, createdBy: username, lines: [{ account_code: '1150', debit: A }, { account_code: fromCr, credit: A }] });
       fromJe = je?.entry_no ?? null;
     }
     // TO (debtor): Dr expense/cash / Cr 2150 Due-To
     let toJe: string | null = null;
     if (!(await this.ledger.alreadyPosted('IC', `${icNo}:TO`))) {
-      const je: any = await this.ledger.postEntry({ date, source: 'IC', sourceRef: `${icNo}:TO`, tenantId: dto.to_tenant_id, currency: dto.currency, memo: `IC ${icNo} due-to`, createdBy: username, lines: [{ account_code: m.debtorDr, debit: A }, { account_code: '2150', credit: A }] });
+      const je: any = await this.ledger.postEntry({ date, source: 'IC', sourceRef: `${icNo}:TO`, tenantId: dto.to_tenant_id, currency: dto.currency, memo: `IC ${icNo} due-to`, createdBy: username, lines: [{ account_code: toDr, debit: A }, { account_code: '2150', credit: A }] });
       toJe = je?.entry_no ?? null;
     }
     await db.update(icTransactions).set({ fromJournalNo: fromJe, toJournalNo: toJe }).where(eq(icTransactions.icNo, icNo));
