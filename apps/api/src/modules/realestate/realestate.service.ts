@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { reProjects, reUnits, reBookings, reContracts, reInstallments } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
@@ -107,7 +108,7 @@ export class RealEstateService {
       if (deposit > 0) {
         const je: any = await this.ledger.postEntry({ source: 'RE-BOOK', sourceRef: bookingNo, tenantId, memo: `Booking deposit ${bookingNo} (${dto.unit_no})`, createdBy: user.username, lines: [
           { account_code: GL_CASH, debit: deposit, memo: `Booking deposit ${dto.unit_no}` },
-          { account_code: GL_DEPOSIT, credit: deposit, memo: `Customer deposit ${bookingNo}` },
+          { account_code: (await this.ledger.postingOverrides('REALESTATE.BOOK', tenantId)).deposit_liability ?? GL_DEPOSIT, credit: deposit, memo: `Customer deposit ${bookingNo}` },
         ] }, tx);
         entryNo = je.entry_no;
       }
@@ -167,7 +168,7 @@ export class RealEstateService {
       if (downPayment > 0) {
         const lines: any[] = [];
         if (cashIn > 0) lines.push({ account_code: GL_CASH, debit: cashIn, memo: `Down payment ${contractNo}` });
-        if (bookingDeposit > 0) lines.push({ account_code: GL_DEPOSIT, debit: bookingDeposit, memo: `Reclass booking deposit ${contractNo}` });
+        if (bookingDeposit > 0) lines.push({ account_code: (await this.ledger.postingOverrides('REALESTATE.BOOK', tenantId)).deposit_liability ?? GL_DEPOSIT, debit: bookingDeposit, memo: `Reclass booking deposit ${contractNo}` });
         lines.push({ account_code: GL_CONTRACT_LIAB, credit: downPayment, memo: `Contract liability ${contractNo}` });
         je = await this.ledger.postEntry({ source: 'RE-CONTRACT', sourceRef: contractNo, tenantId, memo: `Sale contract ${contractNo} down payment`, createdBy: user.username, lines }, tx);
       }
@@ -236,11 +237,14 @@ export class RealEstateService {
     const sbtAmount = sbtRate != null && sbtRate > 0 ? r2(price * (sbtRate / 100)) : null;
 
     const entryNo = await this.db.transaction(async (tx) => {
+      // docs/43 PR-4: revenue + unit-cost legs follow the tenant posting-rules (PROJECT.REVENUE) ??
+      // registry defaults; the 2410 contract liability and 1200 inventory control stay pinned/widen-gated.
+      const revOvr = await this.ledger.postingOverrides('PROJECT.REVENUE', tenantId);
       const lines: any[] = [
         { account_code: GL_CONTRACT_LIAB, debit: price, memo: `RE revenue ${contractNo}` },   // release the contract liability…
-        { account_code: '4200', credit: price, memo: `RE sale revenue ${contractNo}` },        // …into revenue on handover
+        { account_code: revOvr.project_revenue ?? postingDefault('PROJECT.REVENUE', 'project_revenue'), credit: price, memo: `RE sale revenue ${contractNo}` },        // …into revenue on handover
       ];
-      if (cost > 0) { lines.push({ account_code: '5800', debit: cost, memo: `RE unit cost ${contractNo}` }); lines.push({ account_code: '1200', credit: cost, memo: `RE inventory relieved ${contractNo}` }); }
+      if (cost > 0) { lines.push({ account_code: revOvr.project_cogs ?? postingDefault('PROJECT.REVENUE', 'project_cogs'), debit: cost, memo: `RE unit cost ${contractNo}` }); lines.push({ account_code: '1200', credit: cost, memo: `RE inventory relieved ${contractNo}` }); }
       if (sbtAmount != null && sbtAmount > 0) {
         lines.push({ account_code: '5840', debit: sbtAmount, memo: `SBT ${sbtRate}% ${contractNo} (ภ.ธ.40)` });
         lines.push({ account_code: '2130', credit: sbtAmount, memo: `SBT payable ${contractNo} (ภ.ธ.40)` });

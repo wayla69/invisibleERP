@@ -1221,6 +1221,23 @@ async function main() {
   const ioRun = await inj('POST', `/api/bi/subscriptions/${ioSub.json.id}/run`, admin, {});
   ok('Sweep: re_installment_overdue runs (detective worklist)', ioRun.json.status === 'success' && /[Oo]verdue installments/.test(ioRun.json.summary ?? ''), JSON.stringify({ s: ioRun.json.status, sum: (ioRun.json.summary ?? '').slice(0, 40) }));
 
+  // ── docs/43 PR-4 — a GL-24-governed posting-rule override re-routes a wired PROJECT posting ──
+  // End-to-end on PROJECT.REVENUE.project_revenue: default path posts 4200 (asserted in §5 above);
+  // an approved tenant rule re-routes the revenue leg of a NEW project bill to 4210, while the AR
+  // control (1100) stays pinned.
+  await db.insert(s.accounts).values({ code: '4210', name: 'Project Revenue — Government (PR-4)', type: 'Revenue', normalBalance: 'C', isPostable: true }).onConflictDoNothing();
+  const p4Rule = (await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PROJECT.REVENUE', legOrder: 1, role: 'project_revenue', side: 'CR', accountCode: '4210' })).json;
+  ok('PR-4: PROJECT.REVENUE override upsert lands PendingApproval (GL-24)', p4Rule?.status === 'PendingApproval', `${p4Rule?.status}`);
+  const p4Ap = await inj('POST', `/api/ledger/posting-rules/${Number(p4Rule?.id)}/approve`, mgr);
+  ok('PR-4: a different user approves the rule', p4Ap.status === 200 && p4Ap.json?.status === 'Approved', `${p4Ap.status} ${p4Ap.json?.status}`);
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-OVR', name: 'Override test', customer_name: 'OVR Co', billing_type: 'TM' });
+  const p4Bill = (await inj('POST', '/api/projects/PRJ-OVR/bill', admin, { amount: 4444 })).json;
+  const [p4Je] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, p4Bill.entry_no)).limit(1);
+  const p4Lines = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, Number(p4Je.id)));
+  ok('PR-4: the approved override re-routes the project-revenue leg to 4210 (AR 1100 stays pinned)',
+    p4Lines.some((l: any) => l.accountCode === '4210' && Math.abs(Number(l.credit) - 4444) < 0.01) && p4Lines.some((l: any) => l.accountCode === '1100' && Math.abs(Number(l.debit) - 4444) < 0.01),
+    `lines=${p4Lines.map((l: any) => l.accountCode).join(',')}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

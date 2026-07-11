@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { projects, projectBoqLines, projectProgressClaims, progressClaimLines, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { RetentionService } from '../retention/retention.service';
 import { ProgressClaimPdfService, type ProgressClaimPrintData } from './progress-claim-pdf.service';
 import { DocEmailService } from '../mail/doc-email.service';
@@ -165,9 +166,11 @@ export class ProgressBillingService {
     } else {
       // Billing-method project: the claim recognises revenue and relieves unbilled WIP to COGS.
       revenue = gross; costRecognized = relieve;
-      lines.push({ account_code: '4200', credit: gross, memo: `Progress billing ${claimNo}`, project_id: projectId });
+      // docs/43 PR-4: revenue + COGS legs follow the tenant posting-rules (PROJECT.REVENUE) ?? defaults.
+      const revOvr = await this.ledger.postingOverrides('PROJECT.REVENUE', tenantId);
+      lines.push({ account_code: revOvr.project_revenue ?? postingDefault('PROJECT.REVENUE', 'project_revenue'), credit: gross, memo: `Progress billing ${claimNo}`, project_id: projectId });
       if (relieve > 0) {
-        lines.push({ account_code: '5800', debit: relieve, memo: 'Project cost of services', project_id: projectId });
+        lines.push({ account_code: revOvr.project_cogs ?? postingDefault('PROJECT.REVENUE', 'project_cogs'), debit: relieve, memo: 'Project cost of services', project_id: projectId });
         lines.push({ account_code: '1260', credit: relieve, memo: `WIP relieved ${claimNo}`, project_id: projectId });
       }
     }
