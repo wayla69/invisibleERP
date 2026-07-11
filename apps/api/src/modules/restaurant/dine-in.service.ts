@@ -10,6 +10,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { TaxService } from '../tax/tax.service';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { TaxInvoiceService } from '../tax/documents/tax-invoice.service';
 import { MenuService } from '../menu/menu.service';
 import { RecipeService } from '../menu/recipe.service';
@@ -444,17 +445,23 @@ export class DineInService {
     if (cashDue > 0) {
       // Dr 1000 cash leg + Dr 2200 gift draw-down = Cr 4000 net + Cr 2100 vat + Cr 2300 tip (balanced;
       // zero legs auto-dropped by postEntry). VAT base excludes tip → tip never inflates 4000/2100.
+      // docs/43 PR-6: revenue/service-charge/rounding legs follow the tenant posting-rules (ONE batched,
+      // cached read — POS hot path); cash/gift/tip/VAT legs stay pinned/widen-gated.
+      const ovr = await this.ledger.postingOverridesMany(['SALE.FOOD', 'SVC.CHARGE', 'POS.ROUNDING'], o.tenantId);
+      const revAcct = ovr['SALE.FOOD']?.revenue ?? postingDefault('SALE.FOOD', 'revenue');
+      const svcAcct = ovr['SVC.CHARGE']?.service_charge_income ?? postingDefault('SVC.CHARGE', 'service_charge_income');
+      const rndAcct = ovr['POS.ROUNDING']?.rounding ?? postingDefault('POS.ROUNDING', 'rounding');
       const je: any = await this.ledger.postEntry({
         source: 'POS', sourceRef: saleNo, tenantId: o.tenantId, memo: `Dine-in ${o.orderNo}`, createdBy: user.username,
         lines: [
           ...(cashLeg > 0 ? [{ account_code: '1000', debit: cashLeg }] : []),
           ...(giftApplied > 0 ? [{ account_code: '2200', debit: giftApplied }] : []),
-          ...(roundingAdj < 0 ? [{ account_code: '4900', debit: roundCurrency(-roundingAdj, 'THB') }] : []), // rounded down → expense
-          { account_code: '4000', credit: taxable },
-          ...(serviceCharge > 0 ? [{ account_code: '4400', credit: serviceCharge }] : []),
+          ...(roundingAdj < 0 ? [{ account_code: rndAcct, debit: roundCurrency(-roundingAdj, 'THB') }] : []), // rounded down → expense
+          { account_code: revAcct, credit: taxable },
+          ...(serviceCharge > 0 ? [{ account_code: svcAcct, credit: serviceCharge }] : []),
           { account_code: '2100', credit: vat },
           ...(tip > 0 ? [{ account_code: '2300', credit: tip }] : []),
-          ...(roundingAdj > 0 ? [{ account_code: '4900', credit: roundingAdj }] : []), // rounded up → income
+          ...(roundingAdj > 0 ? [{ account_code: rndAcct, credit: roundingAdj }] : []), // rounded up → income
         ],
       });
       journalNo = je?.entry_no ?? null;

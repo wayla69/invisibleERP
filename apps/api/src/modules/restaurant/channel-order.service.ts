@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { dineInOrders, orderDeliveryDetails, channelWebhookEvents, tenants, payments, posMemberLedger } from '../../database/schema';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { TaxService } from '../tax/tax.service';
 import { MemberService } from '../loyalty/member.service';
 import { roundCurrency } from '../tax/money';
@@ -267,6 +268,8 @@ export class ChannelOrderService {
     if (!(fee > 0)) return;
     if (await this.ledger.alreadyPosted('POS-DELIV', saleNo)) return;
     const inc = this.tax.calcInclusive({ gross: fee, country: 'TH' });
-    await this.ledger.postEntry({ source: 'POS-DELIV', sourceRef: saleNo, tenantId: o.tenantId, memo: `Delivery fee ${saleNo}`, createdBy: user.username, lines: [{ account_code: '1000', debit: fee }, { account_code: '4100', credit: inc.net }, { account_code: '2100', credit: inc.tax }] });
+    // docs/43 PR-6: the delivery-income leg follows the tenant posting-rule (SALE.DELIVERY) ?? default.
+    const delAcct = (await this.ledger.postingOverrides('SALE.DELIVERY', o.tenantId)).delivery_income ?? postingDefault('SALE.DELIVERY', 'delivery_income');
+    await this.ledger.postEntry({ source: 'POS-DELIV', sourceRef: saleNo, tenantId: o.tenantId, memo: `Delivery fee ${saleNo}`, createdBy: user.username, lines: [{ account_code: '1000', debit: fee }, { account_code: delAcct, credit: inc.net }, { account_code: '2100', credit: inc.tax }] });
   }
 }
