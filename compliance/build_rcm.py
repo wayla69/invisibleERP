@@ -734,6 +734,9 @@ add("TR-01","Cash & Treasury","Detective","Cash; Bank","The business runs into a
 add("GOV-01","Monitoring","Application","All","A maker-checker approval sits un-actioned and is forgotten — a transaction stalls before it is effective, or (worse) a control is quietly bypassed and no one notices an item never got its independent review.","Authorization/Completeness",
     "Pending-approvals MONITOR (COSO monitoring): a single worklist of EVERY item awaiting independent approval across the system, each with its AGE in days and an overdue roll-up — spanning the manual-JE (GL-05), bank-adjustment (BANK-02), AP-disbursement (EXP-06), payroll (PAY-03), asset-revaluation (FA-08), asset-disposal (FA-09), inventory-write-off (INV-07), till-close cash over/short (REV-13), FX-rate (FX-04), budget (BUD-01) and large-refund (REV-16) maker-checkers. The controller reviews it before close; a stale item (age beyond the threshold) is a control finding to chase or escalate. The /approvals screen also lets a manager approve/reject a material till variance or a large refund inline (the pending types with no dedicated module screen). Read-only worklist; tenant-scoped via the caller's RLS.","Det","Automated","Continuous / pre-close","Controller / CFO","P16",
     "finance.service.ts pendingApprovals; finance.controller.ts GET approvals/pending (exec/approvals/creditors); aggregates journalEntries(Draft incl. BANKADJ→BANK-02)/apPayments/payruns/asset_revaluations/fixed_assets(disposal_pending)/inv_writeoff_requests/till_sessions(PendingApproval)/fx_rates(PendingApproval)/budgets(PendingApproval); cutover/compliance.ts (ToE)","Inspect the aggregation across all pending sources + the age/overdue roll-up.","Re-perform: create a pending item (e.g. a Draft JE) and confirm it appears in the worklist with its control ID, amount and age; the overdue count flags items past the threshold (re-performed by the harness).","Pending-approvals worklist","Implemented")
+add("ITGC-MON-01","Monitoring","ITGC","All","The control inventory (this RCM), each control's status, and its test-of-effectiveness (ToE) results live only in an offline spreadsheet + scattered CI harness scripts — an external auditor has NO in-product way to browse the control catalogue, see which ToE passed, or pull the underlying evidence, so management's ongoing self-monitoring of ICFR operating effectiveness is neither centralised nor reviewable in-system.","Completeness/Accuracy",
+    "In-app CONTROL CONSOLE (auditor-facing): the full ~240-control RCM catalogue (all 17 RCM fields — risk, assertion, description, COSO principle, code reference, TOD/TOE, evidence, status) is surfaced read-only in the product from a build-time census artifact (compliance/rcm-catalog.json, regenerated alongside the RCM xlsx from build_rcm.py so it can never silently drift), grouped by control family with a live census summary. Against each control a tenant records a ToE test-run (pass/fail/na, harness name, checks passed/total, evidence reference, notes); the control-detail view then shows the latest + historical test-runs, any linked continuous-controls-monitoring (CCM) findings, and the recent tamper-evident audit-log evidence for that control. Reads + test-run recording are gated to the compliance/exec function and every test-run row is tenant-isolated by the canonical RLS policy (a tenant sees only its own ToE evidence). Read-heavy monitor; posts NOTHING to the GL.","Det","Automated","Continuous / on-demand","Controller / SOX PMO","P16",
+    "modules/control-console/control-console.service.ts (loadCatalog reads compliance/rcm-catalog.json; rcm()/rcmDetail()/recordTestRun()); control-console.controller.ts GET /api/controls/rcm + GET /api/controls/rcm/:id + POST /api/controls/rcm/:id/test-run (exec/users); schema/control-console.ts (control_test_runs, tenant-scoped RLS + (tenant_id,…) index); drizzle/0336_control_console.sql; compliance/build_rcm.py --json -> compliance/rcm-catalog.json (catalogue source of truth); apps/web /controls/rcm (server-shell + rcm-client.tsx island); cutover/control-console.ts (ToE)","Inspect that the catalogue is generated from the same build_rcm.py source as the xlsx (no drift), that reads + test-run recording are permission-gated, and that control_test_runs carries a leading (tenant_id,…) index + the canonical tenant_isolation RLS policy.","Re-perform (control-console harness): the catalogue endpoint returns the full control inventory (>=240 controls) + the census summary; a control-detail read returns the 17 RCM fields + its test-run history; a ToE test-run is recorded against a control and read back with its result/harness/checks; and a second tenant cannot see the first tenant's recorded test-runs (RLS isolation).","Control catalogue + recorded ToE test-runs + linked CCM findings / audit evidence","Implemented")
 
 # ---- Tax ----
 add("TAX-01","Tax","Application","Tax (VAT)","VAT computed incorrectly → filing/penalty risk.","Accuracy",
@@ -1094,6 +1097,26 @@ CENSUS = {"total": len(R), "by_status": dict(sorted(_by_status.items())), "by_fa
 if "--counts" in _sys.argv:
     print(_json.dumps(CENSUS, ensure_ascii=False, indent=2))
     _sys.exit(0)
+
+# ---- machine-readable control catalogue (GRC-1 / ITGC-MON-01) ----
+# `python3 compliance/build_rcm.py --json` emits the full RCM (all 17 fields per control) to
+# compliance/rcm-catalog.json and SKIPS the xlsx. The normal run also (re)writes it alongside the xlsx so
+# the two can never silently diverge. The in-app Control Console (modules/control-console) reads this file at
+# module init as platform reference data (identical for every tenant). Keys are the snake_case of the RCM
+# HEAD columns; keep them in lockstep with HEAD/W above.
+_CAT_KEYS = ["control_id","cycle","category","fsli","risk","assertion","description","prev_det","nature",
+             "frequency","owner","coso","code_reference","tod","toe","evidence","status"]
+def _catalog_json():
+    controls = [dict(zip(_CAT_KEYS, row)) for row in R]
+    payload = {"generated_from": "compliance/build_rcm.py", "date": DATE, "census": CENSUS, "controls": controls}
+    with open("compliance/rcm-catalog.json", "w", encoding="utf-8") as fh:
+        _json.dump(payload, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    return len(controls)
+if "--json" in _sys.argv:
+    print("WROTE compliance/rcm-catalog.json | controls:", _catalog_json())
+    _sys.exit(0)
+_catalog_json()
 
 # order tabs
 wb.move_sheet("Cover", -wb.sheetnames.index("Cover"))

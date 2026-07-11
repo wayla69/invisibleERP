@@ -993,6 +993,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-118 | Requester cannot self-approve a staged SoD exception (`SOD_VIOLATION`) | ITGC-AC-09 | 08 §7 (6), §9, §13 |
 | UAT-ADM-119 | Distinct admin approves → user created + who/why/rules in hash-chained audit meta | ITGC-AC-09, R03 | 08 §7 (6), §9 |
 | UAT-ADM-120 | Conflicting set with NO reason still blocked (`SOD_CONFLICT`), incl. UPDATE | ITGC-AC-09, R03 | 08 §7 (6), §9, §13 |
+| UAT-ADM-142 | Control Console — RCM catalogue + census render (`GET /api/controls/rcm`) | ITGC-MON-01 | 08 §9 (20) |
+| UAT-ADM-143 | Control Console — control detail drawer + record a ToE test-run; unknown id → `CONTROL_NOT_FOUND` | ITGC-MON-01 | 08 §9 (20) |
+| UAT-ADM-144 | Control Console — `exec`/`users` gating + RLS isolation of `control_test_runs` (T1≠T2) | ITGC-MON-01 | 08 §9 (20) |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
