@@ -78,6 +78,7 @@ export * from './pipeline';
 export * from './cpq';
 export * from './service';
 export * from './service-warranty';
+export * from './quality-capa';
 export * from './item-images';
 export * from './payroll';
 export * from './manufacturing';
