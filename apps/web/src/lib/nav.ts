@@ -295,6 +295,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.images', href: '/images', icon: Camera, perms: ['images', 'masterdata'] },
       { label: 'nav.wms', href: '/wms', icon: Warehouse, perms: ['warehouse'] },
       { label: 'nav.costing', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
+      { label: 'nav.std_cost', href: '/costing/std-cost', icon: Layers, perms: ['masterdata', 'exec', 'planner'] },
       { label: 'nav.inventory_ledger', href: '/inventory-ledger', icon: Wallet, perms: ['warehouse', 'dashboard'] },
       { label: 'nav.replenishment', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
     ],

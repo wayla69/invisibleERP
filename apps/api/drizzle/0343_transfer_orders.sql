@@ -1,4 +1,4 @@
--- 0341_transfer_orders — INV-2: inter-warehouse/branch transfer orders with in-transit ownership + GL (INV-16).
+-- 0343_transfer_orders — INV-2: inter-warehouse/branch transfer orders with in-transit ownership + GL (INV-16).
 -- A TWO-STEP ship→receive transfer order, distinct from the existing instant value-neutral stock-ops transfer
 -- (kept as-is). On SHIP the value leaves the source location's inventory into a Goods-in-Transit control
 -- account (Dr 1255 Goods-in-Transit / Cr 1200 Inventory); on RECEIVE it lands at the destination

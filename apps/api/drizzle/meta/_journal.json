@@ -2386,7 +2386,21 @@
       "idx": 341,
       "version": "7",
       "when": 2023820000306,
-      "tag": "0341_transfer_orders",
+      "tag": "0341_std_cost_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 342,
+      "version": "7",
+      "when": 2023820000307,
+      "tag": "0342_lot_holds",
+      "breakpoints": true
+    },
+    {
+      "idx": 343,
+      "version": "7",
+      "when": 2023820000308,
+      "tag": "0343_transfer_orders",
       "breakpoints": true
     }
   ]
