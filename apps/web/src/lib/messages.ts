@@ -178,6 +178,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.receiving': { th: 'รับสินค้า (GR)', en: 'Goods Receipt (GR)' },
   'nav.goods_issue': { th: 'เบิก / โอนสินค้า', en: 'Issue & Transfer' },
   'nav.lots': { th: 'ล็อต / อายุสินค้า', en: 'Lots & Expiry' },
+  'nav.quality_coa': { th: 'ใบรับรองผลวิเคราะห์ (CoA)', en: 'Certificate of Analysis' },
   'nav.mobile_scan': { th: 'สแกนมือถือ', en: 'Mobile Scan' },
   'nav.images': { th: 'รูปภาพสินค้า', en: 'Product Images' },
   'nav.wms': { th: 'คลังสินค้า (WMS)', en: 'Warehouse (WMS)' },
@@ -207,6 +208,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.aps_schedule': { th: 'จัดตารางการผลิต (APS)', en: 'Production Schedule (APS)' },
   'nav.quality_ncr': { th: 'ของไม่เป็นไปตามข้อกำหนด (NCR)', en: 'Non-Conformance (NCR)' },
   'nav.eam': { th: 'ซ่อมบำรุงสินทรัพย์ (EAM)', en: 'Asset Maintenance (EAM)' },
+  'nav.capa': { th: 'การแก้ไข & ป้องกัน (CAPA)', en: 'Corrective/Preventive (CAPA)' },
 
   // ── Finance / AR-AP ───────────────────────────────────────────────────────
   'nav.finance': { th: 'การเงิน', en: 'Finance' },

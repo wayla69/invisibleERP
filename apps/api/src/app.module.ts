@@ -76,6 +76,7 @@ import { ProfitabilityModule } from './modules/profitability/profitability.modul
 import { CpqModule } from './modules/cpq/cpq.module';
 import { ServiceModule } from './modules/service/service.module';
 import { ServiceWarrantyModule } from './modules/service-warranty/service-warranty.module';
+import { QualityCapaModule } from './modules/quality-capa/quality-capa.module';
 import { BiModule } from './modules/bi/bi.module';
 import { AdminConfigModule } from './modules/admin-config/admin-config.module';
 import { MasterDataModule } from './modules/masterdata/masterdata.module';
@@ -97,6 +98,7 @@ import { SubcontractsModule } from './modules/subcontracts/subcontracts.module';
 import { TendersModule } from './modules/tenders/tenders.module';
 import { RealEstateModule } from './modules/realestate/realestate.module';
 import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
+import { QualityModule } from './modules/quality/quality.module';
 import { HcmModule } from './modules/hcm/hcm.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { ChannelAdapterModule } from './modules/channel-adapter/channel-adapter.module';
@@ -210,6 +212,7 @@ import { MailModule } from './modules/mail/mail.module';
     CpqModule,
     ServiceModule,
     ServiceWarrantyModule,
+    QualityCapaModule,
     BiModule,
     AdminConfigModule,
     MasterDataModule,
@@ -231,6 +234,7 @@ import { MailModule } from './modules/mail/mail.module';
     TendersModule,
     RealEstateModule,
     MfgDepthModule,
+    QualityModule,
     HcmModule,
     PricingModule,
     ChannelAdapterModule,

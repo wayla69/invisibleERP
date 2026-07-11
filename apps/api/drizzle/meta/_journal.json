@@ -2325,6 +2325,20 @@
       "when": 2023820000297,
       "tag": "0332_quality_ncr",
       "breakpoints": true
+    },
+    {
+      "idx": 333,
+      "version": "7",
+      "when": 2023820000298,
+      "tag": "0333_quality_capa",
+      "breakpoints": true
+    },
+    {
+      "idx": 334,
+      "version": "7",
+      "when": 2023820000299,
+      "tag": "0334_quality_coa",
+      "breakpoints": true
     }
   ]
 }
