@@ -501,6 +501,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'nav.workflow', href: '/workflow', icon: Workflow, perms: ['exec', 'creditors', 'procurement', 'users'] },
       { label: 'nav.sod', href: '/sod', icon: ShieldAlert, perms: ['exec', 'users'] },
+      { label: 'nav.sod_register', href: '/admin/sod', icon: ShieldCheck, perms: ['exec', 'users'] },
       { label: 'nav.audit', href: '/audit', icon: ScrollText, perms: ['users'] },
       { label: 'nav.controls', href: '/controls', icon: ShieldAlert, perms: ['exec', 'users', 'creditors'] },
       { label: 'nav.governance', href: '/governance', icon: Landmark, perms: ['exec', 'users'] },

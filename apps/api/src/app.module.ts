@@ -88,6 +88,7 @@ import { LotsModule } from './modules/lots/lots.module';
 import { ScanModule } from './modules/scan/scan.module';
 import { ImagesModule } from './modules/images/images.module';
 import { AdminUsersModule } from './modules/admin-users/admin-users.module';
+import { SodRegisterModule } from './modules/sod-register/sod-register.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { ProjectsModule } from './modules/projects/projects.module';
@@ -224,6 +225,7 @@ import { MailModule } from './modules/mail/mail.module';
     ScanModule,
     ImagesModule,
     AdminUsersModule,
+    SodRegisterModule,
     PayrollModule,
     ManufacturingModule,
     ProjectsModule,

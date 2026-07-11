@@ -101,6 +101,7 @@ jobs:
             run: >-
               cutover:compliance cutover:cookie-auth cutover:async-jobs cutover:bi-cache
               cutover:pdf-render cutover:pdpa cutover:saas-metrics cutover:governance
+              cutover:sod-register
           # ── POS ──
           - shard: pos
             run: >-

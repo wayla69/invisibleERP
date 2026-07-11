@@ -104,6 +104,7 @@ export * from './pos-fiscal';
 export * from './pos-audit';
 export * from './pos-scale';
 export * from './access-review';
+export * from './sod-dispositions';
 export * from './masterdata-import';
 export * from './tenant-profile';
 export * from './ai-actions';
