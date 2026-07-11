@@ -210,6 +210,30 @@ listed for audit history.
 
 [screenshot: User Access Review with certify button]
 
+### 4.1 Access Recertification Campaign — keep/revoke each user in-app (ITGC-AC-21)
+
+For an auditor-grade review, use a **recertification campaign** instead of the blanket
+sign-off. Here you decide **keep or revoke for every user individually**, and a **revoke**
+decision actually removes that user's granted permissions when you certify (closed loop).
+
+**Screen:** `/admin/access-recert` · **Required permission:** `users`
+
+1. Go to **Access Recertification** (`/admin/access-recert`) → **Open campaign** and
+   enter the period (e.g. `2026-Q3`). The system snapshots every user's current access as
+   a keep/revoke worklist.
+2. For each user, click **Keep** (access still appropriate) or **Revoke** (remove their
+   granted access). Every user must be decided.
+3. Click **Certify**. If any line is still undecided you get **ITEMS_PENDING** — finish
+   the worklist first. On certification, each **Revoke** user's permission grants are
+   removed immediately and the line is marked *Revoked*.
+
+**Expected result:** The campaign is certified and frozen (it can no longer be edited);
+each user's keep/revoke decision, reviewer and revocation outcome are retained as
+line-item audit evidence. A revoked user loses their granted access at once.
+
+> The blanket **Certify review** (§4) and CSV export still work for back-compat; the
+> campaign is the stronger, closed-loop control.
+
 ---
 
 ## 5. Segregation of Duties (SoD) conflict report
@@ -790,6 +814,42 @@ Six tabs:
 
 **Expected result:** the ELC evidence that used to require raw API calls is now captured and reviewed from
 one screen; the Overview tab's alerts mirror the weekly `governance_readiness` monitor.
+
+---
+
+## 16. Control Console — RCM + test-of-effectiveness evidence (ITGC-MON-01)
+
+**Where:** the **คอนโซลการควบคุม — RCM (Control Console)** screen (`/controls/rcm`, nav → **Controls**), for
+the compliance / audit / exec function (`exec` or `users`). This is the single auditor-facing view of the
+whole control environment — the ~240-control Risk & Control Matrix (RCM), each control's status, and its
+test-of-effectiveness (ToE) results — that a NASDAQ audit team asks for. The catalogue is the *same* source
+as `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` (both are generated from `compliance/build_rcm.py`), so what you
+see in-app can never drift from the spreadsheet.
+
+**Browse the catalogue.** The top cards show the census (total / Implemented / Partial / Gap). The table lists
+every control with its ID, family, category, risk, owner and status. Filter by **สายงาน (family)** and
+**สถานะ (status)**, or search by control ID / risk / description.
+
+**Open a control.** Click any row to open the detail drawer. It shows all 17 RCM fields — risk, assertion(s),
+control description, prevent/detect, nature, frequency, owner, COSO principle, FSLI, the system / code
+reference, the Test of Design (TOD), the Test of Operating Effectiveness (TOE), and the key evidence — plus:
+- **ประวัติการทดสอบ ToE (ToE test-run history)** — every recorded test-run for this control (result, harness,
+  checks passed/total, evidence reference, who recorded it, when).
+- **สิ่งที่ตรวจพบจากการเฝ้าระวัง (CCM findings)** — for monitoring controls, any open continuous-controls
+  findings.
+- **หลักฐานจากบันทึกตรวจสอบ (audit-log evidence)** — recent tamper-evident audit-log rows tied to the control.
+
+**Record a ToE run.** In the drawer's **บันทึกผลการทดสอบ ToE** form, pick a result (**ผ่าน / ไม่ผ่าน /
+ไม่เกี่ยวข้อง** = pass / fail / na), the harness or method used (e.g. `compliance`, `basics`, `manual`), the
+checks passed / total, an evidence reference (a CI-run link or document id), and notes — then **บันทึกผลการ
+ทดสอบ (Record test-run)**. The run appears immediately as the control's **latest ToE**.
+
+**Isolation & gating:** the console is gated to `exec` / `users`; a role without them cannot open it or record
+a run (**403**). Recorded test-runs are **tenant-isolated** — one company can never see another's ToE evidence.
+
+**Expected result:** an auditor can browse the entire control inventory, see which controls have passing ToE
+and pull the underlying evidence, and management can record its ongoing self-monitoring of control operating
+effectiveness — all in-product.
 
 ---
 

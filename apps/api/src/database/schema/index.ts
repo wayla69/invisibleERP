@@ -123,6 +123,7 @@ export * from './custom-objects';
 export * from './object-layouts';
 export * from './automation';
 export * from './controls';
+export * from './control-console';
 export * from './onboarding';
 export * from './connectors';
 export * from './migration-jobs';

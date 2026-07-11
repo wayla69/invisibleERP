@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, UnprocessableEntityException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { users, userPermissions, tenants, accessReviews, accessGrantExceptions } from '../../database/schema';
+import { users, userPermissions, tenants, accessReviews, accessReviewItems, accessGrantExceptions } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { BillingService } from '../billing/billing.service';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -288,7 +288,91 @@ export class AdminUsersService {
   async listReviews() {
     const db = this.db;
     const rows = await db.select().from(accessReviews).orderBy(desc(accessReviews.id)).limit(50);
-    return { reviews: rows.map((r: any) => ({ id: Number(r.id), period: r.period, reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt, user_count: r.userCount, conflict_user_count: r.conflictUserCount, notes: r.notes })), count: rows.length };
+    return { reviews: rows.map((r: any) => ({ id: Number(r.id), period: r.period, reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt, user_count: r.userCount, conflict_user_count: r.conflictUserCount, status: r.status ?? 'certified', items_total: r.itemsTotal, items_revoked: r.itemsRevoked, notes: r.notes })), count: rows.length };
+  }
+
+  // ── ITGC-AC-21: line-item Access Recertification Campaign (closed-loop revocation) ─────────────
+  // Open a campaign — snapshot the buildReview() population into access_review_items, each 'pending'. The
+  // reviewer then keeps/revokes every user in-app (decideItem), and certifyCampaign finalizes it: each
+  // 'revoke' decision ACTUALLY removes that user's permission grants (actioned=true; the closed loop).
+  async openCampaign(dto: { period: string; notes?: string }, user: JwtUser) {
+    const db = this.db;
+    const rows = await this.buildReview();
+    const tenantId = user.tenantId ?? null;
+    const [rev] = await db.insert(accessReviews).values({
+      period: dto.period, reviewedBy: user.username, tenantId, notes: dto.notes ?? null,
+      userCount: rows.length, conflictUserCount: rows.filter((x: any) => x.sod_conflict_count > 0).length,
+      status: 'open', itemsTotal: rows.length,
+    }).returning({ id: accessReviews.id });
+    const reviewId = Number(rev!.id);
+    if (rows.length) {
+      await db.insert(accessReviewItems).values(rows.map((r) => ({
+        tenantId, reviewId, username: r.username, role: r.role as string | null,
+        currentPerms: JSON.stringify(r.permissions), decision: 'pending',
+      })));
+    }
+    return { id: reviewId, period: dto.period, status: 'open', items_total: rows.length, opened_by: user.username };
+  }
+
+  private async campaignOrThrow(id: number) {
+    const [rev] = await this.db.select().from(accessReviews).where(eq(accessReviews.id, id)).limit(1);
+    if (!rev) throw new NotFoundException({ code: 'CAMPAIGN_NOT_FOUND', message: `Access-review campaign ${id} not found`, messageTh: 'ไม่พบแคมเปญทบทวนสิทธิ์' });
+    return rev;
+  }
+
+  // The line items of a campaign (the keep/revoke worklist + evidence).
+  async getCampaign(id: number) {
+    const db = this.db;
+    const rev = await this.campaignOrThrow(id);
+    const items = await db.select().from(accessReviewItems).where(eq(accessReviewItems.reviewId, id)).orderBy(accessReviewItems.username);
+    return {
+      id, period: rev.period, status: rev.status, opened_by: rev.reviewedBy, opened_at: rev.reviewedAt,
+      items_total: rev.itemsTotal, items_revoked: rev.itemsRevoked, notes: rev.notes,
+      pending: items.filter((i: any) => i.decision === 'pending').length,
+      items: items.map((i: any) => ({
+        username: i.username, role: i.role, decision: i.decision, reviewer: i.reviewer, decided_at: i.decidedAt,
+        actioned: i.actioned, notes: i.notes, current_perms: i.currentPerms ? JSON.parse(i.currentPerms) : [],
+      })),
+    };
+  }
+
+  // Disposition one user's line: keep or revoke (+ optional note). A certified campaign is frozen.
+  async decideItem(campaignId: number, username: string, dto: { decision: string; notes?: string }, user: JwtUser) {
+    const db = this.db;
+    username = normalizeUsername(username);
+    const decision = dto.decision;
+    if (decision !== 'keep' && decision !== 'revoke') throw new BadRequestException({ code: 'BAD_DECISION', message: "decision must be 'keep' or 'revoke'", messageTh: "ต้องเป็น 'keep' หรือ 'revoke'" });
+    const rev = await this.campaignOrThrow(campaignId);
+    if (rev.status === 'certified') throw new UnprocessableEntityException({ code: 'CAMPAIGN_CERTIFIED', message: 'Campaign already certified — line items are frozen', messageTh: 'แคมเปญรับรองแล้ว — ไม่สามารถแก้ไขรายการได้' });
+    const [item] = await db.select().from(accessReviewItems).where(and(eq(accessReviewItems.reviewId, campaignId), eq(accessReviewItems.username, username))).limit(1);
+    if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: `No line for ${username} in campaign ${campaignId}`, messageTh: 'ไม่พบรายการผู้ใช้ในแคมเปญ' });
+    await db.update(accessReviewItems).set({ decision, reviewer: user.username, decidedAt: new Date(), notes: dto.notes ?? null }).where(eq(accessReviewItems.id, Number(item.id)));
+    if (rev.status === 'open') await db.update(accessReviews).set({ status: 'in_review' }).where(eq(accessReviews.id, campaignId));
+    return { campaign_id: campaignId, username, decision, reviewer: user.username };
+  }
+
+  // Finalize the campaign (ITGC-AC-21): every line must be decided (ITEMS_PENDING otherwise), and for each
+  // 'revoke' the user's permission grants are ACTUALLY removed — the closed loop — recording actioned=true.
+  async certifyCampaign(id: number, user: JwtUser) {
+    const db = this.db;
+    const rev = await this.campaignOrThrow(id);
+    if (rev.status === 'certified') throw new UnprocessableEntityException({ code: 'CAMPAIGN_CERTIFIED', message: 'Campaign already certified', messageTh: 'แคมเปญนี้รับรองแล้ว' });
+    const items = await db.select().from(accessReviewItems).where(eq(accessReviewItems.reviewId, id));
+    const pending = items.filter((i: any) => i.decision === 'pending');
+    if (pending.length) throw new UnprocessableEntityException({ code: 'ITEMS_PENDING', message: `${pending.length} line item(s) still pending a keep/revoke decision`, messageTh: `ยังมี ${pending.length} รายการที่ยังไม่ได้ตัดสิน (keep/revoke)`, pending: pending.map((i: any) => i.username) });
+    const toRevoke = items.filter((i: any) => i.decision === 'revoke');
+    for (const item of toRevoke) {
+      const [u] = await db.select({ id: users.id }).from(users).where(eq(users.username, item.username)).limit(1);
+      if (u) {
+        // Closed loop: drop the user's permission overrides and bump the token watermark so the narrowing
+        // takes effect immediately (mirrors applyUpdate / docs/27 R2-2), then stamp the line actioned.
+        await db.delete(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
+        await db.update(users).set({ tokensValidFrom: new Date() }).where(eq(users.id, u.id));
+      }
+      await db.update(accessReviewItems).set({ actioned: true }).where(eq(accessReviewItems.id, Number(item.id)));
+    }
+    await db.update(accessReviews).set({ status: 'certified', reviewedBy: user.username, reviewedAt: new Date(), itemsRevoked: toRevoke.length }).where(eq(accessReviews.id, id));
+    return { id, period: rev.period, status: 'certified', certified_by: user.username, items_total: items.length, items_kept: items.length - toRevoke.length, items_revoked: toRevoke.length, revoked_users: toRevoke.map((i: any) => i.username) };
   }
 
   async remove(username: string, actor: JwtUser) {

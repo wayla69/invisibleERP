@@ -1,4 +1,4 @@
--- 0336_sod_conflict_dispositions — GRC-5 (ITGC-AC-22): SoD-Conflict Register + Compensating-Control
+-- 0338_sod_conflict_dispositions — GRC-5 (ITGC-AC-22): SoD-Conflict Register + Compensating-Control
 -- governance. SoD conflicts are computed LIVE per-user (detectSodConflicts over SOD_RULES R01..R21 in
 -- permissions.ts) and BLOCKED at grant time (admin-users.service.ts sodConflictOrThrow, ITGC-AC-09), but
 -- there was NO standing register of ACCEPTED conflicts — a conflict a company consciously accepts with a

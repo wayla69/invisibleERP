@@ -5,6 +5,7 @@ import { custPosSales, custPosItems, payments, customerInventory, custStockLog, 
 import { DocNumberService } from '../../common/doc-number.service';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { RecipeService } from '../menu/recipe.service';
 import { GiftCardService } from '../giftcards/gift-card.service';
 import { n, fx, ymd } from '../../database/queries';
@@ -115,7 +116,8 @@ export class ReturnsService {
       let journalNo: string | null = null;
       if (totalReturned > 0 && !(await this.ledger.alreadyPosted('RTN', returnNo, sale.tenantId, tx))) {
         const creditLeg = isStoreCredit ? '2200' : '1000';
-        const je: any = await this.ledger.postEntry({ source: 'RTN', sourceRef: returnNo, tenantId: sale.tenantId, memo: `Return ${returnNo} of ${dto.sale_no}`, createdBy: user.username, lines: [{ account_code: '4000', debit: subtotalReturned }, { account_code: '2100', debit: vatReturned }, { account_code: creditLeg, credit: totalReturned }] }, tx);
+        const rtnOvr = await this.ledger.postingOverrides('RETURN.AR', sale.tenantId ?? null);
+        const je: any = await this.ledger.postEntry({ source: 'RTN', sourceRef: returnNo, tenantId: sale.tenantId, memo: `Return ${returnNo} of ${dto.sale_no}`, createdBy: user.username, lines: [{ account_code: rtnOvr.revenue_reversal ?? postingDefault('RETURN.AR', 'revenue_reversal'), debit: subtotalReturned }, { account_code: rtnOvr.vat_reversal ?? postingDefault('RETURN.AR', 'vat_reversal'), debit: vatReturned }, { account_code: creditLeg, credit: totalReturned }] }, tx);
         journalNo = je?.entry_no ?? null;
         await tx.update(posReturns).set({ journalNo }).where(eq(posReturns.id, h.id));
       }
@@ -124,7 +126,7 @@ export class ReturnsService {
       let cogsRev = 0;
       for (const rl of retLines) { const rev = await this.recipe.reverseDeduction(tx, sale.tenantId, String(rl.line.itemId ?? ''), rl.qty, returnNo, user, sale.branchId); cogsRev = round2(cogsRev + rev.cost); }
       if (cogsRev > 0 && !(await this.ledger.alreadyPosted('RTN-COGS', returnNo, sale.tenantId, tx))) {
-        await this.ledger.postEntry({ source: 'RTN-COGS', sourceRef: returnNo, tenantId: sale.tenantId, memo: `COGS reversal ${returnNo}`, createdBy: user.username, lines: [{ account_code: '1200', debit: cogsRev }, { account_code: '5300', credit: cogsRev }] }, tx);
+        await this.ledger.postEntry({ source: 'RTN-COGS', sourceRef: returnNo, tenantId: sale.tenantId, memo: `COGS reversal ${returnNo}`, createdBy: user.username, lines: [{ account_code: postingDefault('RETURN.STOCK', 'inventory'), debit: cogsRev }, { account_code: (await this.ledger.postingOverrides('RETURN.STOCK', sale.tenantId ?? null)).cogs_reversal ?? postingDefault('RETURN.STOCK', 'cogs_reversal'), credit: cogsRev }] }, tx);
       }
 
       // credit-note (ใบลดหนี้) hook: link the original tax invoice for a future CRN issuer (Tier 2)

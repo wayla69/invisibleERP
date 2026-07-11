@@ -1,6 +1,9 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.9 · 2026-07-10** · *v0.9 (2026-07-10): the **Fixed asset register** (`/assets` → Register
+**Status: DRAFT v0.10 · 2026-07-11** · *v0.10 (2026-07-11): posting-rule overrides (docs/43 PR-2) now also
+drive the day-to-day finance & POS money postings — write-offs, advances, reverse-charge VAT, AP WHT/discount,
+bank fees/interest, petty cash, FX, returns, credit/debit notes, membership/loyalty, till over/short &
+paid-in/out, deposits, surcharges (see §"Posting Rules"); control-account legs never move.* · *v0.9 (2026-07-10): the **Fixed asset register** (`/assets` → Register
 tab) gains a **Bulk import / export (Excel/CSV)** section — download the register, a blank template, or
 upload assets in bulk (registry entity `assets`); gated to the `masterdata` setup duty (see §6 → Bulk
 import/export).* · *v0.8: dimension filters (โครงการ/แผนก/สาขา/ศูนย์ต้นทุน) on the
@@ -164,8 +167,14 @@ item or its **item category**. Set these up under *Settings → Master data* on 
 across every business event is viewable/overridable on **กฎการลงบัญชี (Posting Rules)**
 (`/setup/posting-rules`) — and your company's **approved override rows there now drive the
 recurring system postings** (payroll `PAYROLL.*`, asset depreciation `DEPRECIATION.FA`, lease
-runs `LEASE.*`/`DEPRECIATION.ROU`): each leg posts to your override account, or the standard
-account when you haven't set one.
+runs `LEASE.*`/`DEPRECIATION.ROU`) **and the day-to-day finance & POS money postings** (docs/43
+PR-2): bad-debt write-off, employee-advance settlement, reverse-charge VAT, AP payment WHT and
+early-payment discount, bank interest/fees, petty-cash expenses, FX revaluation & realized FX,
+customer returns, credit/debit notes, VIP membership defer/recognize, loyalty accrual, till
+over/short & drawer paid-in/out (including tills replayed from a store hub), customer deposits,
+and card surcharges. Each leg posts to your override account, or the standard account when you
+haven't set one; **control-account legs (cash, AR 1100, AP 2000, inventory 1200, gift cards
+2200) never move** regardless of overrides.
 
 > **Changing a posting rule is a two-person action (GL-24).** A saved rule shows **รออนุมัติ**
 > and has **no effect** until a *different* user presses **อนุมัติ** on the same screen — you

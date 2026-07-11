@@ -7,7 +7,7 @@ import { tenants } from './tenants';
 // (rule_id, username). An `accepted` disposition is a conscious residual-risk acceptance and MUST carry a
 // documented compensating_control, an accountable owner and an expiry_date; it records who accepted it and
 // is periodically re-reviewed (last_reviewed_at). The detective "expired" worklist flags acceptances past
-// expiry or overdue for re-review. Tenant-scoped (RLS via migration 0336, canonical 0232 org-clause form).
+// expiry or overdue for re-review. Tenant-scoped (RLS via migration 0338, canonical 0232 org-clause form).
 export const sodConflictDispositions = pgTable('sod_conflict_dispositions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
