@@ -51,6 +51,13 @@ export const PERMISSIONS = [
   //    `cpq* OR exec` so existing exec roles keep working; the in-app self-approval block (author ≠ approver)
   //    is the real control regardless of the permission held. ──
   'cpq', 'cpq_approve',
+  // ── Quality management (QMS) single-duty split (QMS-1..4; SoD R21) — recording a quality result / CoA is
+  //    segregated from approving an out-of-spec (deviation) release. `quality` is the recorder duty (maintain
+  //    specs, capture CoA + measured results, release an in-spec lot); `quality_approve` is the checker duty
+  //    (approve/reject an out-of-spec deviation release). Standalone granular perms: NOT implied by a coarse
+  //    perm. Endpoints gate `quality* OR exec`; the in-app self-approval block (recorder ≠ release approver)
+  //    is the real control regardless of the permission held. ──
+  'quality', 'quality_approve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -89,6 +96,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
   'Human Resources': ['hr', 'hr_admin'],
   'Real Estate (Developer)': ['re_sales', 're_contract_approve', 're_transfer'],
+  'Quality (QMS)': ['quality', 'quality_approve'],
 };
 
 // Canonical role → default permission seed (init_db DEFAULT_PERMS, verbatim).
@@ -225,6 +233,8 @@ export const SOD_RULES: SodRule[] = [
     a: ['re_sales'], b: ['re_contract_approve'], severity: 'High', risk: 'Draft and approve one’s own unit sale contract — grant an unauthorised price/discount to a related buyer.', mitigation: 'Separate contract drafting from approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, RE-02).' },
   { id: 'R20', dutyA: 'Author / discount CPQ quote', dutyB: 'Approve discount / margin-floor breach',
     a: ['cpq'], b: ['cpq_approve'], severity: 'High', risk: 'Build and approve one’s own quote that breaches the margin floor / max-discount ceiling — sell below cost or over-discount without a second check, straight to GL revenue.', mitigation: 'Separate quote authoring from discount approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, CPQ-01).' },
+  { id: 'R21', dutyA: 'Record quality result / CoA', dutyB: 'Approve out-of-spec (deviation) release',
+    a: ['quality'], b: ['quality_approve'], severity: 'High', risk: 'Record a Certificate of Analysis and also approve the release of an out-of-spec lot — release failing material into stock/production on one’s own authority, defeating the quality gate.', mitigation: 'Separate quality recording from out-of-spec release approval; maker-checker enforced in-app (SOD_SELF_APPROVAL, QC-03).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }

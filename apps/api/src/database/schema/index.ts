@@ -87,6 +87,7 @@ export * from './projects';
 export * from './retention';
 export * from './realestate';
 export * from './mfg-depth';
+export * from './quality-coa';
 export * from './hcm';
 export * from './hcm-leave';
 export * from './hcm-perf';

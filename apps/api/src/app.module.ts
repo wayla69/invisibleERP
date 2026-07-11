@@ -97,6 +97,7 @@ import { SubcontractsModule } from './modules/subcontracts/subcontracts.module';
 import { TendersModule } from './modules/tenders/tenders.module';
 import { RealEstateModule } from './modules/realestate/realestate.module';
 import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
+import { QualityModule } from './modules/quality/quality.module';
 import { HcmModule } from './modules/hcm/hcm.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { ChannelAdapterModule } from './modules/channel-adapter/channel-adapter.module';
@@ -231,6 +232,7 @@ import { MailModule } from './modules/mail/mail.module';
     TendersModule,
     RealEstateModule,
     MfgDepthModule,
+    QualityModule,
     HcmModule,
     PricingModule,
     ChannelAdapterModule,

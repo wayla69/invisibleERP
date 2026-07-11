@@ -21,6 +21,7 @@ import { CATALOG as CAT_PLATFORM } from './i18n-catalog/platform';
 import { CATALOG as CAT_CRMX } from './i18n-catalog/crmx';
 import { CATALOG as CAT_GOVERNANCE } from './i18n-catalog/governance';
 import { CATALOG as CAT_SVC } from './i18n-catalog/svc';
+import { CATALOG as CAT_QUALITY } from './i18n-catalog/quality';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -177,6 +178,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.receiving': { th: 'รับสินค้า (GR)', en: 'Goods Receipt (GR)' },
   'nav.goods_issue': { th: 'เบิก / โอนสินค้า', en: 'Issue & Transfer' },
   'nav.lots': { th: 'ล็อต / อายุสินค้า', en: 'Lots & Expiry' },
+  'nav.quality_coa': { th: 'ใบรับรองผลวิเคราะห์ (CoA)', en: 'Certificate of Analysis' },
   'nav.mobile_scan': { th: 'สแกนมือถือ', en: 'Mobile Scan' },
   'nav.images': { th: 'รูปภาพสินค้า', en: 'Product Images' },
   'nav.wms': { th: 'คลังสินค้า (WMS)', en: 'Warehouse (WMS)' },
@@ -1640,5 +1642,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY,
 );

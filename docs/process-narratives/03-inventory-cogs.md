@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | INV-01, INV-02, INV-03, INV-04, INV-05, INV-06, INV-07, INV-08, INV-09, INV-10, INV-15, REV-07; SoD R11, EXP-03 |
+| Related RCM controls | INV-01, INV-02, INV-03, INV-04, INV-05, INV-06, INV-07, INV-08, INV-09, INV-10, INV-15, QC-03, REV-07; SoD R11, R21, EXP-03 |
 | Related policy | `compliance/policies/11-financial-close-policy.md`, `compliance/policies/13-segregation-of-duties-policy.md` |
 
 ## 2. Purpose
@@ -83,6 +83,8 @@ SoD rule **R11**: the role that **adjusts** inventory (InventoryController) is n
    - **Void-fired-item capture.** A **cancelled/voided FIRED ticket line** (the dish was already prepped/cooked before the void) is written off through `POST /api/inventory/waste/void-fire` (`{ sku, qty, disposition?, ref_doc? }`): the dish's recipe (`menu_recipes` / `menu_recipe_lines`) is **exploded** to its gross ingredient quantities (`qty_per ÷ (yield_factor − waste_factor) ÷ batch yield × dishes` — the same food-cost formula as recipe COGS), each ingredient posts a waste row (`source=void_fire`, `ref_doc`=the voided ticket) and decrements stock, and the batch books **one aggregated `Dr 5810 / Cr 1200`** (idempotent per `WASTE-` doc). Guards: `NO_RECIPE` / `NO_RECIPE_LINES`. The INV-07 perpetual boundary still holds — kitchen ingredients (`customer_inventory`) only.
    - **Theoretical-vs-actual usage variance.** `GET /api/inventory/waste/variance` nets the **recipe-COGS theoretical** depletion (the `cust_stock_log` `Consume` rows the recipe deduction writes on every sale) against the **actual** depletion (theoretical + logged `Waste`), per ingredient, valued at cost, with the waste-explained gap and its % of theoretical flagged High (≥10%) / Medium (≥5%). This closes the loop between what the recipe *said* should have been used and what actually left stock (**INV-15**).
 
+14. **Certificate of Analysis + out-of-spec release maker-checker (decision point — QC-03).** Lots exist in the lot/expiry ledger (step 1) but their quality is separately evidenced. A per-item **quality spec** (`quality_specs`) defines an acceptable `[min_value, max_value]` range per measured characteristic (e.g. Moisture %, pH, Purity %). A **Certificate of Analysis** (`coa_certificates`) is raised against a lot (`lot_no`, source `incoming`/`production`) by the QA recorder (`quality` duty), and its measured results (`coa_results`) are captured; on **evaluate** the CoA's `overall_result` is computed = **fail if ANY characteristic's actual falls outside its `[min,max]` window**, else **pass**. A **PASS** (in-spec) CoA is released by its recorder (routine, `POST /api/quality/coa/:id/release`). A **FAIL** (out-of-spec) lot may be released **only as a documented deviation**: the releaser must (a) hold the **quality-approver** duty `quality_approve`/`exec` (`DEVIATION_APPROVER_REQUIRED` otherwise), (b) be a **different user** than the CoA recorder (`released_by ≠ created_by` → `403 SOD_SELF_APPROVAL`, binds even Admin — the SoD **R21** maker-checker), and (c) supply a **mandatory `deviation_reason`** (`DEVIATION_REASON_REQUIRED`). Release before evaluation is blocked (`COA_NOT_EVALUATED`); a decided CoA cannot be re-actioned (`COA_NOT_HELD`); **reject** holds the lot (`release_status='rejected'`, never released). **Detective:** `GET /api/quality/coa/out-of-spec` is the **deviation register** — CoAs that failed spec yet were released — exactly the audit sample. This control posts **no GL** (it gates the physical release of a lot; costing is booked on issue/consumption per steps 3/9) and never rewrites the read-only lot ledger — the CoA references `lot_no` as text (**QC-03**).
+
 ## 8. Process flow
 
 ```mermaid
@@ -115,6 +117,25 @@ flowchart TD
 
 **Swimlane description by role:** The **system** enforces the no-oversell pick lock, perpetual movement logging, and COGS posting. **WarehouseOperator** receives/picks/moves. **StockCounter** counts (custody/count duty). **InventoryController** raises adjustments — never counts the same stock (**R11**). **Warehouse Mgr** independently approves variances. **FinancialController** reviews COGS and adjustment postings.
 
+**QC-03 — Certificate of Analysis + out-of-spec release maker-checker (quality gate on a lot):**
+
+```mermaid
+flowchart TD
+    QA[QA recorder raises CoA for a lot - quality] --> QB[Capture measured results vs spec]
+    QB --> QC[Evaluate: any actual outside min..max?]
+    QC -- "No - pass" --> QD[Recorder releases lot - in spec]
+    QC -- "Yes - fail / out of spec" --> QE{Release as deviation?}
+    QE -- "Reject" --> QF[release_status = rejected - lot held]
+    QE -- "Release" --> QG{Approver = recorder? / has quality_approve?}
+    QG -- "Same user" --> QH[403 SOD_SELF_APPROVAL]
+    QG -- "No approver duty" --> QI[403 DEVIATION_APPROVER_REQUIRED]
+    QG -- "Different approver + duty" --> QJ{deviation_reason given?}
+    QJ -- "No" --> QK[400 DEVIATION_REASON_REQUIRED]
+    QJ -- "Yes" --> QL[Released with deviation → out-of-spec register]
+```
+
+**Swimlane (QC-03):** the **QA recorder** (`quality`) captures the CoA and evaluates it; the **QA manager / approver** (`quality_approve`/`exec`) — a different person — is the only one who can authorise the release of an out-of-spec lot, with a documented deviation reason. The **out-of-spec register** is the auditor's deviation sample.
+
 ## 9. Control matrix
 
 | Step | Risk | Control | Type | RCM ID | Evidence / Record |
@@ -134,6 +155,7 @@ flowchart TD
 | 9 | Perpetual stock value drifts from GL; uncosted/unposted moves | Valued sub-ledger posts a balanced JE per move (moving-avg or FIFO/FEFO); periodic reconcile to GL 1200 | Prev / Det / Auto | INV-06 | Reconciliation report (`GET /api/inventory/reconciliation`) |
 | 9 | Duplicate goods-receipt double-counts stock/GL | Idempotent posting on source ref (+ GL `ux_je_idem`) | Prev / Auto | INV-06 (INV-02) | `deduped:true`; single JE |
 | 10 | Stock-ops issue/transfer/count not costed for tracked items | Bridge posts valued moves (COGS / variance / value-move) for tracked items; legacy items audit-only | Prev / Auto | INV-06 | `valued_lines` in response; reconcile ties |
+| 14 | Out-of-spec lot released into stock/production with no independent sign-off; failing result recorded and released by one person | **CoA capture + out-of-spec release maker-checker**: `evaluate` fails the CoA if any characteristic's actual is outside `[min,max]`; a fail lot is released only by a **different** user holding `quality_approve`/`exec` (`SOD_SELF_APPROVAL` / `DEVIATION_APPROVER_REQUIRED`) **with** a mandatory `deviation_reason` (`DEVIATION_REASON_REQUIRED`); out-of-spec deviation register for audit | **Prev / Det / Auto** | **QC-03**, R21 | CoA + measured-result register; out-of-spec deviation register; SoD self-approval test |
 
 ## 10. Inputs & outputs
 
@@ -167,11 +189,17 @@ flowchart TD
 | `SOD_VIOLATION` / SoD conflict | `wh_adjust`+`wh_count` on one user | AccessAdmin remediates (R11) |
 | `NEG_STOCK` | Sub-ledger issue/adjustment beyond on-hand | Rejected; recount / receive before issuing (INV-01/INV-06) |
 | `REASON_REQUIRED` | Stock adjustment posted with no reason | Rejected; re-submit with justification (INV-04/INV-06) |
+| `COA_NOT_EVALUATED` | Release attempted before the CoA is evaluated | Evaluate the measured results first, then release (QC-03) |
+| `SOD_SELF_APPROVAL` | Recorder tries to release their own out-of-spec CoA | A different `quality_approve`/`exec` user must release the deviation (QC-03/R21) |
+| `DEVIATION_APPROVER_REQUIRED` | A non-approver (`quality`-only) tries to release a fail lot | Route to a `quality_approve`/`exec` holder (QC-03) |
+| `DEVIATION_REASON_REQUIRED` | Out-of-spec release with no `deviation_reason` | Re-submit with a documented deviation reason (QC-03) |
+| `COA_NOT_HELD` | Results/evaluate/release on an already-decided CoA | The CoA is released/rejected; raise a new CoA if needed (QC-03) |
 
 ## 14. Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.3 | 2026-07-11 | Platform | **Certificate of Analysis capture + out-of-spec release maker-checker (QMS-3, new control QC-03, migration `0333`).** §1 RCM list (+ QC-03, SoD R21), §7 step 14, §8 QC-03 sub-flow + swimlane, §9 control matrix, §13 error codes. Lots existed (`lot_ledger`, read-only) but there was no CoA / quality spec / measured characteristic and no gate on releasing an out-of-spec lot. New `modules/quality` (`coa.service.ts`/`coa.controller.ts`): a per-item `quality_specs` range catalogue; `coa_certificates` raised against a lot with `coa_results` measured values; **evaluate** computes `overall_result` = fail if any actual is outside `[min,max]`; a **pass** CoA is released by its recorder, a **fail** (out-of-spec) lot only by a **different** `quality_approve`/`exec` user (`SOD_SELF_APPROVAL`/`DEVIATION_APPROVER_REQUIRED`) with a mandatory `deviation_reason` (`DEVIATION_REASON_REQUIRED`); reject holds the lot; `GET /api/quality/coa/out-of-spec` is the deviation register. New tables `quality_specs`/`coa_certificates`/`coa_results` (migration `0333`, canonical 0232 RLS, tenant-leading indexes, `coa_no`/`spec_no` unique per tenant); `permissions.ts` `quality`/`quality_approve` + SoD **R21**. No GL (gates physical release; references `lot_no` as text — the lot ledger is never rewritten). New RCM control **QC-03** (RCM → 236). Web `/quality/coa` (server-shell + `coa-client.tsx` island). ToE: `quality-coa` harness (16 checks). Manual `04-warehouse-inventory.md` + FAQ; UAT `04-inventory-uat.md` UAT-INV-097..104 + traceability. |
 | 1.2 | 2026-07-11 | Platform | **ATP / order-promising surfaced on the `/costing` screen (UI-only; INV-09 unchanged).** The available-to-promise + reservation-lifecycle engine (§7 step 12, §9 row 12) was reachable only via API — added a **พร้อมส่งมอบ & จองสินค้า (ATP)** tab to `/costing`: check ATP (item/qty/need-by → can-promise + on-hand/allocated/safety/scheduled-receipts + shortfall/first-available), reserve against a reference doc, and a reservation register with per-row **release/fulfil**. No control/GL/schema change — endpoints (`api/costing/atp`, `…/atp/check`, `…/allocate`, `…/allocations/:ref/release|fulfill`, `…/allocations`) and the `INSUFFICIENT_ATP` guard are unchanged. ToE unchanged (`costing` harness, 19 checks); UAT-INV-096 added; manual `04-warehouse-inventory.md` §11. |
 | 1.1 | 2026-07-10 | Platform | **Waste-ledger closing-the-loop — reason × disposition, void-fired-item capture, theoretical-vs-actual usage variance (POS-5a, new control INV-15, migration `0305`).** §1 RCM list, §7 step 13a, §9 control matrix. Extends the ONE waste ledger (`waste_log`, INV-10) — not a parallel ledger. (1) `waste_log` gains `disposition` (discard/compost/donate/staff_meal/rework/return_supplier, enum → `BAD_DISPOSITION`) + `source` + `ref_doc`; `reason_code` gains `void_fire`; the list surfaces `by_disposition` + a `?disposition=` filter. (2) **`POST /api/inventory/waste/void-fire`** explodes a voided fired dish's recipe (`menu_recipes`/`menu_recipe_lines`, gross qty = `qty_per ÷ (yield−waste) ÷ yield × dishes`) into per-ingredient waste rows (`source=void_fire`), decrements stock and posts ONE aggregated **Dr 5810 / Cr 1200** (idempotent per `WASTE-`; `NO_RECIPE`/`NO_RECIPE_LINES` guards). (3) **`GET /api/inventory/waste/variance`** nets recipe-COGS theoretical (`cust_stock_log` `Consume`) vs actual depletion (theoretical + `Waste`), valued at cost with High/Medium anomaly bands. INV-07 perpetual boundary (`USE_WRITEOFF`) unchanged. New RCM control **INV-15** (RCM now 212). ToE: `waste` harness (19 checks — disposition echo/roll-up/filter, `BAD_DISPOSITION`, void-fire 2-line explosion + aggregated JE + stock decrement, `NO_RECIPE`, usage-variance theoretical/actual/variance_cost, TB balanced). Manual `04-warehouse-inventory.md` §waste + FAQ; UAT `04-inventory-uat.md` UAT-INV-090..093 + traceability. |
 | 0.8 | 2026-07-09 | Platform | **/goods-issue optional ref-doc offers the open-WO pending list (UI-only, no control change).** The free-text WO/SO ref on issue/transfer now offers `GET /api/manufacturing/work-orders` (existing read) via the shared doc-select island; SO/other refs stay manual-entry. Posting logic unchanged. |
