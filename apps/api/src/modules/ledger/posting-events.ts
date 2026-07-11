@@ -111,13 +111,13 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     liability: r(DR, '2350', 'widen', 'Remitted liability (2350/2360/2370 — PAY-02 set)'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
 
   // ── Fixed assets / CIP ──
-  'ASSET.ACQUIRE':    { name: 'Asset acquisition',             description: 'Capitalise an asset (per-category accounts are the docs/43 Q2 grain — this event is catalog visibility)', wired: false, roles: {
+  'ASSET.ACQUIRE':    { name: 'Asset acquisition',             description: 'Capitalise an asset — under posting_determination the CATEGORY asset_account drives the debit (docs/43 Q2 grain); roles here are catalog visibility', wired: false, roles: {
     fixed_asset_gross: r(DR, '1500', 'pinned', 'FA register control'), funding: r(CR, '2000', 'pinned', 'AP/cash funding leg') } },
-  'DEPRECIATION.FA':  { name: 'Fixed-asset depreciation',      description: 'Periodic depreciation run', wired: true, roles: {
+  'DEPRECIATION.FA':  { name: 'Fixed-asset depreciation',      description: 'Periodic depreciation run — under posting_determination the CATEGORY dep/accum accounts win (docs/43 Q2 grain), then the tenant posting-rule', wired: true, roles: {
     dep_expense: r(DR, '5200', 'free', 'Depreciation expense'), accum_dep: r(CR, '1590', 'pinned', 'Accumulated depreciation — FA register tie') } },
-  'ASSET.DISPOSE':    { name: 'Asset disposal',                description: 'Derecognition with gain/loss', wired: false, roles: {
+  'ASSET.DISPOSE':    { name: 'Asset disposal',                description: 'Derecognition with gain/loss', wired: true, roles: {
     gain_loss: r(CR, '1510', 'free', 'Gain/loss on disposal'), fixed_asset_gross: r(CR, '1500', 'pinned', 'FA register control'), accum_dep: r(DR, '1590', 'pinned', 'Accum-dep control') } },
-  'ASSET.REVALUE':    { name: 'Asset revaluation / impairment', description: 'Revaluation surplus up / impairment down', wired: false, roles: {
+  'ASSET.REVALUE':    { name: 'Asset revaluation / impairment', description: 'Revaluation surplus up / impairment down', wired: true, roles: {
     impairment_loss: r(DR, '5820', 'free', 'Impairment loss'), revaluation_surplus: r(CR, '3200', 'pinned', 'Revaluation reserve (equity)') } },
   'ASSET.CIP_COST':   { name: 'CIP cost accumulation',         description: 'Construction-in-progress cost (FA-13)', wired: false, roles: {
     cip: r(DR, '1520', 'pinned', 'CIP control'), funding: r(CR, '2000', 'pinned', 'AP/cash funding leg') } },
@@ -131,13 +131,13 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     lease_liab: r(DR, '2600', 'pinned', 'Lease-liability control (LSE-01)'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
   'DEPRECIATION.ROU': { name: 'ROU depreciation',              description: 'Right-of-use asset depreciation', wired: true, roles: {
     dep_expense: r(DR, '5210', 'free', 'ROU depreciation expense'), accum_dep_rou: r(CR, '1690', 'pinned', 'Accum ROU dep control') } },
-  'LEASE.MODIFY':     { name: 'Lease remeasurement',           description: 'Modification/termination remeasurement', wired: false, roles: {
+  'LEASE.MODIFY':     { name: 'Lease remeasurement',           description: 'Modification/termination remeasurement', wired: true, roles: {
     remeasure_gain: r(CR, '1510', 'free', 'Remeasurement gain (ROU floored at zero)') } },
-  'LEASE.LESSOR_COMMENCE': { name: 'Lessor finance-lease commencement', description: 'Derecognise asset → net investment (LSE-02)', wired: false, roles: {
+  'LEASE.LESSOR_COMMENCE': { name: 'Lessor finance-lease commencement', description: 'Derecognise asset → net investment (LSE-02)', wired: true, roles: {
     selling_pl: r(CR, '1510', 'free', 'Selling profit/loss'), net_investment: r(DR, '1610', 'pinned', 'Net-investment control (LSE-02)') } },
-  'LEASE.LESSOR_FINANCE': { name: 'Lessor finance-lease receipt', description: 'Collection: interest income + principal', wired: false, roles: {
+  'LEASE.LESSOR_FINANCE': { name: 'Lessor finance-lease receipt', description: 'Collection: interest income + principal', wired: true, roles: {
     interest_income: r(CR, '4600', 'free', 'Finance-lease interest income'), net_investment: r(CR, '1610', 'pinned', 'Net-investment control (LSE-02)') } },
-  'LEASE.LESSOR_OPERATING': { name: 'Lessor operating-lease receipt', description: 'Straight-line rental + continued depreciation', wired: false, roles: {
+  'LEASE.LESSOR_OPERATING': { name: 'Lessor operating-lease receipt', description: 'Straight-line rental + continued depreciation', wired: true, roles: {
     rental_income: r(CR, '4610', 'free', 'Operating-lease rental income'), dep_expense: r(DR, '5200', 'free', 'Depreciation expense') } },
 
   // ── Finance / treasury / AR / AP ──
@@ -177,9 +177,9 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     loyalty_expense: r(DR, '5700', 'free', 'Loyalty points expense'), loyalty_liability: r(CR, '2250', 'pinned', 'Points-liability control (watermark tie)') } },
   'SERVICE.ACCRUAL':  { name: 'Subscription billing',          description: 'Recurring service invoice raised', wired: false, roles: {
     service_rev: r(CR, '4300', 'free', 'Subscription & service revenue'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
-  'PREPAID.CAPITALIZE': { name: 'Prepaid capitalised',         description: 'Up-front payment into the prepaid asset', wired: false, roles: {
+  'PREPAID.CAPITALIZE': { name: 'Prepaid capitalised',         description: 'Up-front payment into the prepaid asset', wired: true, roles: {
     prepaid: r(DR, '1280', 'free', 'Prepaid expenses (per-schedule account already supported)'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'PREPAID.AMORTIZE': { name: 'Prepaid amortised',             description: 'Monthly amortisation of the prepaid', wired: false, roles: {
+  'PREPAID.AMORTIZE': { name: 'Prepaid amortised',             description: 'Monthly amortisation of the prepaid', wired: true, roles: {
     expense: r(DR, '5100', 'free', 'Amortisation expense (per-schedule account already supported)'), prepaid: r(CR, '1280', 'free', 'Prepaid expenses') } },
   'SBT.TAX':          { name: 'Specific business tax',         description: 'ภ.ธ.40 SBT accrued at RE ownership transfer (TAX-09)', wired: false, roles: {
     sbt_expense: r(DR, '5840', 'free', 'SBT expense'), sbt_payable: r(CR, '2130', 'widen', 'SBT payable — ภ.ธ.40 report set widens in PR-7') } },
