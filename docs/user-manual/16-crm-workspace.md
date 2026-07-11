@@ -223,6 +223,34 @@ its **SLA events** panel below:
 
 ---
 
+## 16.8 Warranty & Entitlement (การรับประกัน & สิทธิ์คุ้มครอง — `/service/warranty`)
+
+The **การรับประกัน & สิทธิ์** page tracks serialized units you have sold and the warranty coverage they carry, and
+controls warranty claims so that free service or replacement goods are only given when the unit is actually in
+coverage (**control SVC-01**). It has four tabs.
+
+- **เงื่อนไขรับประกัน (Warranty terms).** The catalogue of your warranty offerings. Create a term with a code, a
+  name, a **ระยะเวลา (coverage months)**, and a **ประเภทความคุ้มครอง** — `full` (covers everything), `parts`, or `labor`.
+  Requires the master-data duty.
+- **ทะเบียนเครื่อง (Installed base).** Register a sold unit against a term: its **หมายเลขเครื่อง (serial)** (unique in
+  your company), item code, customer, **วันที่ขาย (sold date)**, and the warranty term. The system automatically
+  computes the **สิ้นสุดการรับประกัน (warranty end)** = sold date + the term's coverage months. Requires the
+  master-data duty.
+- **เคลม (Claims).** Raise a claim against a registered unit (unit, fault, and the **ขอเคลมประเภท** — parts / labor /
+  full). The system checks coverage the moment you raise it:
+  - **In coverage** (still within the warranty window *and* the coverage type covers the claim kind) → the claim
+    is **authorized automatically and free of charge** — it is contractually covered.
+  - **Out of coverage** (expired, or a kind the term doesn't cover) → the claim **waits as *pending*** and shows a
+    red **นอกความคุ้มครอง** badge. A **different person** (the approvals duty — never the person who raised it) must
+    press **อนุมัติ (Authorize)** and either set a real charge (a paid repair) or authorize it free, or **ปฏิเสธ
+    (Reject)** it with a reason. If you try to authorize your own claim the system blocks it
+    (`SOD_SELF_APPROVAL`).
+- **รายการยกเว้นความคุ้มครอง (Coverage exceptions).** A read-only register of claims that were authorized **free**
+  even though the unit was **out of coverage** — the list a reviewer or auditor samples to confirm every free
+  grant was independently authorized. A soon-expiring-warranty worklist is available via the *expiring* read.
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -239,11 +267,15 @@ its **SLA events** panel below:
 | `ALREADY_RESOLVED` | Linking a review-queue item that was already linked or dismissed | Refresh the review queue; someone already handled it. |
 | `SUB_CANCELLED` | Resuming/pausing a subscription that is already cancelled (§16.7) | Cancel is permanent — create a new subscription instead. |
 | `ALREADY_PAID` | Marking an invoice paid that is already paid (§16.7) | Refresh the invoices list; it was already settled. |
+| `SOD_SELF_APPROVAL` | Authorizing/rejecting a warranty claim you raised yourself (§16.8, SVC-01) | A different person with the approvals duty must action the claim. |
+| `CLAIM_NOT_PENDING` | Authorizing/rejecting a warranty claim that is already decided (§16.8) | Refresh the claims list; it was already actioned. |
+| `SERIAL_EXISTS` / `TERM_EXISTS` | Registering a serial / creating a term code that already exists (§16.8) | Use a unique serial / term code. |
 
 ## Revision history
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.5 | 2026-07-11 | **SVC-2 Warranty & Entitlement registry (`/service/warranty`):** new §16.8 documenting the warranty-term catalogue, the installed-base serialized-unit registry (auto-computed warranty end), and warranty claims with the **SVC-01** coverage-authorization maker-checker (in-coverage → auto-free; out-of-coverage → a *different* person authorizes/rejects, `SOD_SELF_APPROVAL` on self-approval), plus the coverage-exceptions override register. Added `SOD_SELF_APPROVAL` / `CLAIM_NOT_PENDING` / `SERIAL_EXISTS`+`TERM_EXISTS` error rows. |
 | 1.4 | 2026-07-11 | **Service workspace (`/service`) — subscription lifecycle + SLA resolve made usable:** new §16.7 documenting the after-sales workspace. Surfaced the previously UI-less flows: **ปิดเคส (Resolve)** on SLA events (with breach computation + red *เกิน SLA* badges), and on subscriptions a **create form**, **รันรอบเรียกเก็บ (Run billing)**, per-row **พัก/เปิดใช้/ยกเลิก (pause/resume/cancel)** with a cancel-confirm, and an **ใบแจ้งหนี้ (invoices)** drill-down with **บันทึกชำระ (mark paid)**. New backend endpoint `POST /api/service/subscriptions/:id/resume`; cancel is now terminal. Added the `SUB_CANCELLED` / `ALREADY_PAID` error rows. |
 | 1.3 | 2026-07-10 | **CRM-6 — inbound email capture (2-way comms)** (docs/41): new §16.6. Customer replies to a deal email are captured back onto the deal timeline automatically — via the hidden reply-threading tag CRM-4 now embeds in outbound emails, or the sender's contact/lead email — and appear as inbound email activities on the deal page + Customer-360. Unmatched replies land in a **review queue** (`GET /api/crm/inbound/review`) to **Link** or **Dismiss**. The inbound webhook is HMAC-signed (forged deliveries rejected); capture never posts to the ledger. Added the `BAD_INBOUND_SECRET`/`INBOUND_UNVERIFIED` and `ALREADY_RESOLVED` error rows. |
 | 1.2 | 2026-07-10 | **CRM-4 — sales automation** (docs/41): lead scoring (grade A–D, explainable/versioned breakdown), the follow-up center (SLA-breach / overdue-task / rotting-deal worklist, detective control **REV-22**) + round-robin assignment + the daily follow-up digest, pipeline events into the automation rules engine, and send email/LINE from a deal with merge fields (logged as an activity). |

@@ -2290,6 +2290,13 @@
       "when": 2023820000292,
       "tag": "0327_hcm_ess",
       "breakpoints": true
+    },
+    {
+      "idx": 329,
+      "version": "7",
+      "when": 2023820000294,
+      "tag": "0329_service_warranty",
+      "breakpoints": true
     }
   ]
 }
