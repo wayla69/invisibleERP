@@ -17,14 +17,16 @@ import { statusVariant } from '@/components/ui';
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 // GET /api/cpq/quotes → { quotes: [...], count }
-interface Quote { id: number; quote_no: string; customer_name: string; status: string; issued_date: string | null; expires_date: string | null; subtotal: number; discount_total: number; total: number; created_by: string | null }
+interface Quote { id: number; quote_no: string; customer_name: string; status: string; issued_date: string | null; expires_date: string | null; subtotal: number; discount_total: number; total: number; discount_pct: number; margin_pct: number | null; requires_approval: boolean; approved_by: string | null; created_by: string | null }
 // GET /api/cpq/configs → { configs: [...], count }
 interface Config { id: number; code: string; name: string; base_price: number; currency: string | null; description: string | null }
 
-// Quote lifecycle (cpq.service.ts transitionQuote): Draft → Sent → Accepted | Rejected.
+// Quote lifecycle (cpq.service.ts): Draft → Sent → Accepted | Rejected. CPQ-01 (SVC-1): a quote breaching the
+// margin floor / max discount parks in PendingApproval on send and needs a different approver.
 const QUOTE_STATUS_KEYS: Record<string, string> = {
-  Draft: 'crm.status_draft', Sent: 'crm.status_sent', Accepted: 'crm.status_accepted', Rejected: 'crm.status_rejected',
+  Draft: 'crm.status_draft', Sent: 'crm.status_sent', PendingApproval: 'crm.status_pending_approval', Accepted: 'crm.status_accepted', Rejected: 'crm.status_rejected',
 };
+const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
 const quoteStatusLabel = (t: (key: string) => string, s: string) => (QUOTE_STATUS_KEYS[s] ? t(QUOTE_STATUS_KEYS[s]) : s);
 
 export default function CpqPage() {
@@ -48,7 +50,7 @@ function Quotes() {
   const q = useQuery<{ quotes: Quote[]; count: number }>({ queryKey: ['cpq-quotes'], queryFn: () => api('/api/cpq/quotes') });
 
   const action = useMutation({
-    mutationFn: (v: { id: number; verb: 'send' | 'accept' | 'reject' }) =>
+    mutationFn: (v: { id: number; verb: 'send' | 'accept' | 'reject' | 'approve' }) =>
       api(`/api/cpq/quotes/${v.id}/${v.verb}`, { method: 'POST' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cpq-quotes'] }),
     onError: (e: any) => notifyError(e.message),
@@ -77,6 +79,8 @@ function Quotes() {
               { key: 'expires_date', label: t('crm.expires_date'), render: (r: Quote) => thaiDate(r.expires_date) },
               { key: 'subtotal', label: t('crm.subtotal'), align: 'right', render: (r: Quote) => <span className="tabular">{baht(r.subtotal)}</span> },
               { key: 'total', label: t('crm.total'), align: 'right', render: (r: Quote) => <span className="tabular">{baht(r.total)}</span> },
+              { key: 'discount_pct', label: t('crm.discount_pct'), align: 'right', render: (r: Quote) => <span className="tabular">{pct(r.discount_pct)}</span> },
+              { key: 'margin_pct', label: t('crm.margin_pct'), align: 'right', render: (r: Quote) => <span className="tabular">{pct(r.margin_pct)}</span> },
               { key: 'status', label: t('fin.col_status'), render: (r: Quote) => <Badge variant={statusVariant(r.status)}>{quoteStatusLabel(t, r.status)}</Badge> },
               {
                 key: 'actions',
@@ -95,12 +99,17 @@ function Quotes() {
                         <Send className="size-3.5" /> {t('crm.send')}
                       </Button>
                     )}
+                    {r.status === 'PendingApproval' && (
+                      <Button variant="default" size="sm" disabled={action.isPending} onClick={() => action.mutate({ id: r.id, verb: 'approve' })}>
+                        <Check className="size-3.5" /> {t('crm.approve')}
+                      </Button>
+                    )}
                     {r.status === 'Sent' && (
                       <Button variant="default" size="sm" disabled={action.isPending} onClick={() => action.mutate({ id: r.id, verb: 'accept' })}>
                         <Check className="size-3.5" /> {t('crm.accept')}
                       </Button>
                     )}
-                    {(r.status === 'Sent' || r.status === 'Draft') && (
+                    {(r.status === 'Sent' || r.status === 'Draft' || r.status === 'PendingApproval') && (
                       <Button variant="destructive" size="sm" disabled={action.isPending} onClick={() => action.mutate({ id: r.id, verb: 'reject' })}>
                         <X className="size-3.5" /> {t('crm.reject')}
                       </Button>
