@@ -510,6 +510,92 @@ flowchart TD
 |---|---|---|---|
 | 0.1 DRAFT | 2026-07-11 | HR-4 | Initial recruiting/ATS narrative + HR-04 control matrix (migration 0323) |
 
+# HR-9 — Workforce analytics (control HR-09) — appended section
+
+> Self-contained HR-9 workforce-analytics narrative; kept on merge alongside the HR-2/3/4/5/6 sections above.
+
+## WA.1 Document control (HR-9)
+
+| Field | Value |
+|---|---|
+| Process ID | PN-29-HR (HR-9 workforce analytics) |
+| Process owner | `<<HR / People Ops Manager>>` |
+| Approver | `<<CHRO / CFO>>` |
+| Version | **0.1 DRAFT** |
+| Effective date | `<<effective-date>>` |
+| Review cadence | Monthly / quarterly workforce review |
+| Related RCM controls | HR-09 (detective — monitoring / analytical review) |
+| Related plan | `docs/42-hcm-depth-plan.md` (Wave 3) |
+
+## WA.2 Purpose & scope
+
+To give management a recurring, independent analytical review over the workforce base so that establishment
+creep, above-tolerance attrition, out-of-band pay and understated leave liability are detected on a cadence
+rather than only on an ad-hoc pull.
+
+**In scope:** five read-only, schedulable, tenant-scoped BI report types aggregating the existing HCM spine —
+`payroll.employees`, `hr_assignments`/`hr_positions`/`hr_departments` (HR-1), `employee_lifecycle` (HR-5),
+`pay_grades` (HR-6) and `leave_balances` (HR-2). No new tables and no writes.
+
+**Out of scope:** the transactional HR controls themselves (headcount governance HR-01, leave accrual HR-02,
+performance HR-03, recruiting HR-04, lifecycle HR-05, comp-change HR-06) — the analytics *review* their output,
+they do not replace those preventive/maker-checker controls.
+
+## WA.3 Report types
+
+| Report type | What it aggregates | Key outputs |
+|---|---|---|
+| `hr_headcount_trend` | Active headcount by department & position from the CURRENT org assignments (`end_date IS NULL`), plus a hire-cohort trend | `total_active`, `by_department[]`, `by_position[]`, `by_hire_month[]` |
+| `hr_turnover` | Attrition over a window (default 12 months). Separations = completed HR-5 **offboarding** lifecycles ÷ average headcount | `separations`, `active_headcount`, `avg_headcount`, `turnover_pct` |
+| `hr_tenure_distribution` | Tenure buckets from `start_date` (<1y, 1-3y, 3-5y, 5-10y, 10y+, unknown) | `total`, `avg_tenure_months`, `buckets[]` |
+| `hr_comp_ratio` | Each active employee's salary vs the HR-6 `pay_grades` `[min,mid,max]` band; comp ratio = salary ÷ midpoint; flags OUT-OF-BAND (above max / below min) | `count_rated`, `ungraded`, `avg_comp_ratio`, `employees_out_of_band`, `by_grade[]`, `out_of_band[]` |
+| `hr_leave_liability` | Accrued-but-untaken days (`entitled+accrued+carryover−used−expired`) valued at salary ÷ working-days (default 22) | `total_untaken_days`, `total_liability`, `by_leave_type[]`, `by_employee[]` |
+
+Each is an idempotent read-aggregation, runs through the existing BI subscription scheduler
+(`POST /api/bi/subscriptions` + a `daily`/`weekly`/`monthly` frequency → each run persists to `report_runs`,
+deliverable by email/LINE/in-app), and is tenant-scoped (explicit tenant filter + RLS) so one company's
+workforce metrics never leak to another. Optional filters: `window_months` (turnover), `working_days`
+(leave liability).
+
+## WA.4 Workflow
+
+```mermaid
+flowchart TD
+  A[Exec/HR creates a BI subscription<br/>report_type = hr_* · frequency daily/weekly/monthly] --> B[Scheduler due-sweep<br/>or Run now]
+  B --> C[generateReport read-aggregates the HCM spine<br/>tenant-scoped · no writes]
+  C --> D[report_runs row persisted<br/>+ in-app/email/LINE delivery]
+  D --> E{Review exceptions}
+  E --> F[Out-of-band pay · turnover spike ·<br/>establishment creep · leave liability]
+```
+
+## WA.5 Control matrix
+
+| Control | Assertion | What it detects | Enforcement |
+|---|---|---|---|
+| **HR-09** | Monitoring / analytical review (detective) | Establishment creep, above-tolerance attrition, out-of-band pay, understated leave liability going unreviewed | Five schedulable read-only report types persist headcount/turnover/tenure/comp-ratio/leave-liability to `report_runs` on a cadence; each is tenant-scoped (RLS) and idempotent; `hr_comp_ratio` flags salaries outside the `pay_grades` band and `hr_leave_liability` values untaken leave for the provision review |
+
+## WA.6 Endpoints (application)
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET /api/bi/report-types` | `exec` | Catalog exposes the five `hr_*` workforce-analytics report types |
+| `POST /api/bi/subscriptions` | `exec` | Schedule a workforce-analytics report (`report_type`, `frequency`, `filters`) |
+| `POST /api/bi/subscriptions/:id/run` | `exec` | Run now; persists the aggregate to `report_runs` |
+| `GET /api/bi/runs` | `exec` | Review persisted report runs |
+
+## WA.7 System references
+
+- Report registry: `apps/api/src/modules/bi/report-registry.ts` (`hr_headcount_trend`, `hr_turnover`, `hr_tenure_distribution`, `hr_comp_ratio`, `hr_leave_liability`)
+- Generation branches: `apps/api/src/modules/bi/bi-generate.service.ts` (`generateReport`)
+- Web: `apps/web/src/app/(internal)/scheduled-reports/page.tsx` (`/scheduled-reports` — data-driven from the report-type catalog; no new page)
+- ToE harness: `tools/cutover/src/hcm-analytics.ts` (23 checks)
+
+## WA.8 Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-07-11 | HR-9 | Initial workforce-analytics narrative + HR-09 detective control matrix (five BI report types; no migration) |
+
 ---
 
 ## HR-7 — Training & Certifications (control HR-07)

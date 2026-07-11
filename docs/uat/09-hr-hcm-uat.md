@@ -115,6 +115,31 @@ Grade fixture: **G5** band `[25000, 40000]`. Employees: EMP1 (30000), EMP2 (2800
 |---|---|---|---|
 | Comp-change within pay band + maker-checker (OUT_OF_BAND unless exec override; approver ≠ requester; employee master updated only on approval); benefit plan enrolment | HR-06 | UAT-HR-600..615 | `tools/cutover/src/hcm-comp.ts` (23 checks) |
 
+## Test cases — Workforce analytics (HR-9, control HR-09)
+
+Fixture (T1): active EMP1 (G5, 32000, hired 2020-01), EMP2 (G5, 50000, hired 2024-06 — above band), EMP3
+(G4, 22000, hired 2025-10), EMP4 (ungraded, no start date), EMP5 (left — inactive, completed offboarding
+lifecycle). Pay grades: **G5** `[25000, 40000]` mid 32500, **G4** `[18000, 24000]` mid 21000. EMP3 leave
+balance: entitled 10, used 2 (8 untaken). Each report runs via a BI subscription (`exec`), persisting to
+`report_runs`. Tenant T2 has a single active employee + grade for the isolation check.
+
+| ID | Type | Precondition | Steps | Expected result |
+|---|---|---|---|---|
+| UAT-HR-900 | Positive | — | `GET /api/bi/report-types` | Catalog exposes `hr_headcount_trend`, `hr_turnover`, `hr_tenure_distribution`, `hr_comp_ratio`, `hr_leave_liability` |
+| UAT-HR-901 | Positive | Subscription of `hr_headcount_trend` | Run it | `status:success`; `total_active` = **4**; `by_department` Engineering headcount = **2** (current assignments); `by_position` Developer = **2**; `by_hire_month` present |
+| UAT-HR-902 | Positive | One completed offboarding lifecycle in window | Run `hr_turnover` | `separations` = **1**; `turnover_pct` = **20%** (1 ÷ 5 avg headcount) |
+| UAT-HR-903 | Positive | — | Run `hr_tenure_distribution` | `total` = **4**; `<1y` bucket = **1** (EMP3); `unknown` bucket = **1** (EMP4, no start date) |
+| UAT-HR-904 | Positive (control) | Pay grades G5/G4 seeded | Run `hr_comp_ratio` | `count_rated` = **3** (EMP4 ungraded, EMP5 inactive excluded); `employees_out_of_band` = **1** — EMP2 flagged `above` (50000 > G5 max 40000) |
+| UAT-HR-905 | Positive | EMP3 leave balance 8 untaken | Run `hr_leave_liability` `{working_days:20}` | `total_untaken_days` = **8**; `total_liability` = **8800** THB (8 × 22000/20); summary carries the THB total |
+| UAT-HR-906 | Security (RLS) | T2 has 1 active employee | Run `hr_headcount_trend` as T2 admin | `total_active` = **1** (its own only, not T1's 4) |
+| UAT-HR-907 | Security (RLS) | T2 grade T2G only | Run `hr_comp_ratio` as T2 admin | `count_rated` = **1**; `employees_out_of_band` = **0** (no T1 rows visible) |
+
+## Traceability — HR-9
+
+| Requirement | RCM control | UAT cases | ToE harness |
+|---|---|---|---|
+| Workforce-analytics review — headcount/turnover/tenure/comp-ratio/leave-liability read-only report types, scheduled, tenant-scoped; comp-ratio out-of-band flag; leave-liability valuation | HR-09 | UAT-HR-900..907 | `tools/cutover/src/hcm-analytics.ts` (23 checks) |
+
 ## Test cases — Training & certifications (HR-7, control HR-07)
 
 Course fixtures: **SAFETY** (mandatory, `validity_months:12`), **FIRSTAID** (mandatory, `requires_score`,

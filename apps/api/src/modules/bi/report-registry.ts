@@ -61,6 +61,15 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // HR-2 (docs/42, HR-02): each run credits one period of leave accrual per active employee (policy/grade/
   // tenure-driven), idempotent per (tenant, period) via leave_accrual_runs.
   hr_leave_accrual: { label: 'สะสมวันลาประจำงวด', labelEn: 'Run monthly leave accrual' },
+  // HR-9 (docs/42 HCM depth, Wave 3, HR-09) — Workforce analytics: read-only aggregations over the HCM spine
+  // (payroll.employees + hr_assignments/positions/departments + employee_lifecycle + pay_grades + leave_balances).
+  // Each is idempotent (pure reads), schedulable and tenant-scoped; they feed the detective HR-09 workforce-
+  // metrics review control.
+  hr_headcount_trend: { label: 'กำลังคนตามแผนก/ตำแหน่ง/ช่วงเข้าทำงาน', labelEn: 'Workforce headcount by dept/position' },
+  hr_turnover: { label: 'อัตราการลาออก (Turnover)', labelEn: 'Workforce turnover / attrition rate' },
+  hr_tenure_distribution: { label: 'การกระจายอายุงานพนักงาน', labelEn: 'Employee tenure distribution' },
+  hr_comp_ratio: { label: 'อัตราค่าตอบแทนเทียบกรอบเงินเดือน (Comp ratio)', labelEn: 'Compensation ratio vs pay-grade band' },
+  hr_leave_liability: { label: 'ภาระวันลาสะสมคงค้าง', labelEn: 'Accrued leave liability' },
   apply_scheduled_master_changes: { label: 'ปรับข้อมูลหลักตามวันที่มีผล', labelEn: 'Apply date-effective master changes' },
   // Construction/real-estate sweeps (docs/35 Depth) — each idempotent: retention released on its schedule,
   // bookings expired past their date, overdue property installments surfaced.
