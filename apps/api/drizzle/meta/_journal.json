@@ -2381,6 +2381,13 @@
       "when": 2023820000305,
       "tag": "0340_masterdata_change_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 341,
+      "version": "7",
+      "when": 2023820000306,
+      "tag": "0341_landed_cost",
+      "breakpoints": true
     }
   ]
 }

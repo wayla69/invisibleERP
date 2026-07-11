@@ -629,6 +629,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-103 | Out-of-spec release without a reason blocked (`DEVIATION_REASON_REQUIRED`); distinct approver with a reason releases | QC-03 · R21 | 03 §7 (14), rev 1.3 (`quality-coa.ts`) |
 | UAT-INV-104 | Out-of-spec deviation register lists only released fails | QC-03 | 03 §7 (14), rev 1.3 (`quality-coa.ts`) |
 | UAT-INV-105 | CoA RLS isolation — a second tenant sees/acts on none (`COA_NOT_FOUND`) | QC-03 · ITGC-AC-18 | 03 §7 (14), rev 1.3 (`quality-coa.ts`) |
+| UAT-INV-106 | Landed-cost voucher — create + allocation preview ties to 100% | COST-01 | 03 §7 (15), rev 1.4 (`landed-cost.ts`) |
+| UAT-INV-107 | Landed-cost post is maker-checker — self-post `SOD_SELF_APPROVAL`; distinct approver posts balanced Dr1200/Cr2010 | COST-01 | 03 §7 (15), rev 1.4 (`landed-cost.ts`) |
+| UAT-INV-108 | Future issue carries the loaded cost (avg 10→11, COGS 110) | COST-01 | 03 §7 (15), rev 1.4 (`landed-cost.ts`) |
+| UAT-INV-109 | Already-issued residual expensed to variance 5500, not re-costed | COST-01 | 03 §7 (15), rev 1.4 (`landed-cost.ts`) |
+| UAT-INV-110 | Landed cost RLS + reconcile — T2 sees none; sub-ledger ties to GL 1200 | COST-01 · ITGC-AC-18 | 03 §7 (15), rev 1.4 (`landed-cost.ts`) |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 

@@ -18,7 +18,9 @@ const ACCT_INVENTORY = '1200';
 const ACCT_AP = '2000';
 const ACCT_COGS = '5000';
 const ACCT_ADJ = '5810';
-const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ'];
+// INV-LC (landed cost, INV-1/COST-01) capitalises freight/duty/etc into 1200 and raises the sub-ledger
+// value — it must be inside the reconcile scope so the sub-ledger still ties to GL 1200 after a voucher posts.
+const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ', 'INV-LC'];
 const COSTING_METHODS = ['moving_avg', 'fifo', 'fefo'] as const;
 type CostingMethod = (typeof COSTING_METHODS)[number];
 const isLayered = (m?: string | null): boolean => m === 'fifo' || m === 'fefo';

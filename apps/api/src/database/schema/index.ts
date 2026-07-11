@@ -152,3 +152,5 @@ export * from './doc-attachments';
 export * from './vouchers';
 export * from './supplier-scar';
 export * from './masterdata-change';
+
+export * from './landed-cost';

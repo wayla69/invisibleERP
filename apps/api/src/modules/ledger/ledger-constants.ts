@@ -94,6 +94,9 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '1610', name: 'Net Investment in Lease (Lease Receivable)', type: 'Asset' }, // เงินลงทุนสุทธิในสัญญาเช่า/ลูกหนี้ตามสัญญาเช่า — finance-lease receivable (lessor); ties to Σ lessor_leases.receivable_balance
   { code: '4600', name: 'Finance Lease Interest Income', type: 'Revenue' },   // ดอกเบี้ยรับตามสัญญาเช่าการเงิน — interest income unwound on the net investment (lessor finance lease)
   { code: '4610', name: 'Operating Lease Rental Income', type: 'Revenue' },   // รายได้ค่าเช่าตามสัญญาเช่าดำเนินงาน — straight-line rental income (lessor operating lease)
+  // Landed-cost accrual (INV-1, COST-01) — freight/duty/insurance/broker payable, credited when a landed-cost
+  // voucher capitalises those charges into inventory unit cost (Dr 1200 / Dr 5500 variance / Cr 2010).
+  { code: '2010', name: 'Landed-Cost Accrual', type: 'Liability' },          // เจ้าหนี้ค่าขนส่ง/อากร/ประกันภัย/นายหน้า (ต้นทุนแฝง) — landed-cost charges accrued at capitalisation
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -119,6 +122,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '1300': { bucket: 'operating', label: 'ภาษีซื้อ (Input VAT recoverable)' }, // docs/35 Depth — recoverable input VAT (working-capital asset)
   // Operating — current liabilities (an increase releases cash)
   '2000': { bucket: 'operating', label: 'เจ้าหนี้การค้า (Accounts payable)' },
+  '2010': { bucket: 'operating', label: 'เจ้าหนี้ต้นทุนแฝง (Landed-cost accrual)' }, // INV-1 COST-01 — freight/duty/insurance/broker payable (working-capital liability)
   '2440': { bucket: 'operating', label: 'เจ้าหนี้เงินประกันผลงาน (Retention payable)' }, // docs/35 Phase 0 — retention withheld from subcontractors (working-capital liability)
   '2100': { bucket: 'operating', label: 'ภาษีค้างจ่าย (Tax payable)' },
   '2120': { bucket: 'operating', label: 'ภาษีขายนำส่ง ภ.พ.36 (PP36 VAT payable, self-assessed)' }, // imported-service reverse-charge VAT payable (ม.83/6)

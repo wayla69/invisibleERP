@@ -116,6 +116,7 @@
     "control-console": "tsx src/control-console.ts",
     "match": "tsx src/match.ts",
     "costing": "tsx src/costing.ts",
+    "landed-cost": "tsx src/landed-cost.ts",
     "wms": "tsx src/wms.ts",
     "crm": "tsx src/crm.ts",
     "epm-planning": "tsx src/epm-planning.ts",

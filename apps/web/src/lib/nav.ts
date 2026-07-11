@@ -21,6 +21,7 @@ import {
   Cable,
   Building2,
   Calculator,
+  Ship,
   Camera,
   CheckCheck,
   ChefHat,
@@ -293,6 +294,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.images', href: '/images', icon: Camera, perms: ['images', 'masterdata'] },
       { label: 'nav.wms', href: '/wms', icon: Warehouse, perms: ['warehouse'] },
       { label: 'nav.costing', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
+      // INV-1 (COST-01) — landed-cost allocation voucher: apportion freight/duty/insurance/broker into unit cost.
+      { label: 'nav.landed_cost', href: '/costing/landed-cost', icon: Ship, perms: ['procurement', 'wh_receive', 'exec'] },
       { label: 'nav.inventory_ledger', href: '/inventory-ledger', icon: Wallet, perms: ['warehouse', 'dashboard'] },
       { label: 'nav.replenishment', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
     ],
