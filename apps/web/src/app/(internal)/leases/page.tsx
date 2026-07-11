@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, PlayCircle, Scale, Coins, Landmark, Pencil } from 'lucide-react';
+import { Plus, PlayCircle, Scale, Coins, Landmark, Pencil, HandCoins, Scale3d, CheckCircle2, Building2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht, num, thaiDate } from '@/lib/format';
@@ -11,11 +11,13 @@ import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { statusVariant } from '@/components/ui';
 
 // ── API contract (apps/api/src/modules/leases) ────────────────────────────────
@@ -27,6 +29,22 @@ interface Lease {
 }
 
 export default function LeasesPage() {
+  const { t } = useLang();
+  return (
+    <div>
+      <PageHeader title={t('fnx.lease.title')} description={t('fnx.lease.subtitle')} />
+      <Tabs
+        tabs={[
+          { key: 'lessee', label: t('fnx.lease.tab_lessee'), content: <LesseeTab /> },
+          { key: 'lessor', label: t('fnx.lease.tab_lessor'), content: <LessorTab /> },
+        ]}
+      />
+    </div>
+  );
+}
+
+// ───────────────────────── ผู้เช่า (lessee, IFRS 16 lessee) ─────────────────────────
+function LesseeTab() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ leases: Lease[]; count: number }>({ queryKey: ['leases'], queryFn: () => api('/api/leases') });
@@ -76,102 +94,95 @@ export default function LeasesPage() {
   const active = leases.filter((l) => l.status === 'active').length;
 
   return (
-    <div>
-      <PageHeader
-        title={t('fnx.lease.title')}
-        description={t('fnx.lease.subtitle')}
-      />
-
-      <div className="space-y-5">
-        <StateView q={q}>
-          {q.data && (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label={t('fnx.lease.stat_total')} value={num(leases.length)} icon={Scale} tone="primary" />
-              <StatCard label={t('fnx.lease.stat_active')} value={num(active)} tone="success" />
-              <StatCard label={t('fnx.lease.stat_liability')} value={baht(totalLiab)} icon={Landmark} tone="info" />
-              <StatCard label={t('fnx.lease.stat_rou')} value={baht(totalRou)} icon={Coins} tone="warning" />
-            </div>
-          )}
-        </StateView>
-
-        {recon.data && (
-          <Card className={`flex flex-row flex-wrap items-center justify-between gap-3 px-5 py-3 ${recon.data.reconciled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'}`}>
-            <div className="flex items-center gap-3">
-              <Badge variant={recon.data.reconciled ? 'success' : 'destructive'}>{recon.data.reconciled ? t('fnx.lease.recon_ok') : t('fnx.lease.recon_diff')}</Badge>
-              <span className="text-sm text-muted-foreground">{t('fnx.lease.recon_gl_label')} <span className="tabular font-medium text-foreground">{baht(recon.data.gl_liability)}</span> {t('fnx.lease.recon_schedule_label')} <span className="tabular font-medium text-foreground">{baht(recon.data.schedule_liability)}</span></span>
-            </div>
-            <span className={`text-sm tabular ${recon.data.reconciled ? 'text-muted-foreground' : 'font-medium text-destructive'}`}>{t('fnx.lease.recon_diff_label')} {baht(recon.data.difference)}</span>
-          </Card>
+    <div className="space-y-5">
+      <StateView q={q}>
+        {q.data && (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label={t('fnx.lease.stat_total')} value={num(leases.length)} icon={Scale} tone="primary" />
+            <StatCard label={t('fnx.lease.stat_active')} value={num(active)} tone="success" />
+            <StatCard label={t('fnx.lease.stat_liability')} value={baht(totalLiab)} icon={Landmark} tone="info" />
+            <StatCard label={t('fnx.lease.stat_rou')} value={baht(totalRou)} icon={Coins} tone="warning" />
+          </div>
         )}
+      </StateView>
 
-        <Card className="max-w-4xl gap-4">
-          <CardHeader>
-            <CardTitle className="text-base">{t('fnx.lease.create_title')}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="grid gap-2">
-                <Label htmlFor="ls-name">{t('fnx.lease.f_name')}</Label>
-                <Input id="ls-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('fnx.lease.f_name_ph')} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="ls-lessor">{t('fnx.lease.f_lessor')}</Label>
-                <Input id="ls-lessor" value={lessor} onChange={(e) => setLessor(e.target.value)} placeholder={t('fnx.lease.f_lessor_ph')} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="ls-start">{t('fnx.lease.f_start')}</Label>
-                <Input id="ls-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="ls-term">{t('fnx.lease.f_term')}</Label>
-                <Input id="ls-term" type="number" min="1" value={termMonths} onChange={(e) => setTermMonths(e.target.value)} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="ls-pay">{t('fnx.lease.f_payment')}</Label>
-                <Input id="ls-pay" type="number" min="0" value={monthlyPayment} onChange={(e) => setMonthlyPayment(e.target.value)} placeholder="0" />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="ls-rate">{t('fnx.lease.f_rate')}</Label>
-                <Input id="ls-rate" type="number" min="0" step="0.01" value={annualRate} onChange={(e) => setAnnualRate(e.target.value)} />
-              </div>
-            </div>
-            <Button disabled={create.isPending || !name.trim() || !monthlyPayment || !termMonths} onClick={() => create.mutate()}>
-              <Plus className="size-4" /> {create.isPending ? t('fnx.lease.saving') : t('fnx.lease.create_btn')}
-            </Button>
-          </CardContent>
+      {recon.data && (
+        <Card className={`flex flex-row flex-wrap items-center justify-between gap-3 px-5 py-3 ${recon.data.reconciled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'}`}>
+          <div className="flex items-center gap-3">
+            <Badge variant={recon.data.reconciled ? 'success' : 'destructive'}>{recon.data.reconciled ? t('fnx.lease.recon_ok') : t('fnx.lease.recon_diff')}</Badge>
+            <span className="text-sm text-muted-foreground">{t('fnx.lease.recon_gl_label')} <span className="tabular font-medium text-foreground">{baht(recon.data.gl_liability)}</span> {t('fnx.lease.recon_schedule_label')} <span className="tabular font-medium text-foreground">{baht(recon.data.schedule_liability)}</span></span>
+          </div>
+          <span className={`text-sm tabular ${recon.data.reconciled ? 'text-muted-foreground' : 'font-medium text-destructive'}`}>{t('fnx.lease.recon_diff_label')} {baht(recon.data.difference)}</span>
         </Card>
+      )}
 
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-muted-foreground">{t('fnx.lease.list_heading')}</h3>
-          <Button variant="outline" size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
-            <PlayCircle className="size-4" /> {run.isPending ? t('fnx.lease.running') : t('fnx.lease.run_btn')}
+      <Card className="max-w-4xl gap-4">
+        <CardHeader>
+          <CardTitle className="text-base">{t('fnx.lease.create_title')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-2">
+              <Label htmlFor="ls-name">{t('fnx.lease.f_name')}</Label>
+              <Input id="ls-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('fnx.lease.f_name_ph')} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ls-lessor">{t('fnx.lease.f_lessor')}</Label>
+              <Input id="ls-lessor" value={lessor} onChange={(e) => setLessor(e.target.value)} placeholder={t('fnx.lease.f_lessor_ph')} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ls-start">{t('fnx.lease.f_start')}</Label>
+              <Input id="ls-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ls-term">{t('fnx.lease.f_term')}</Label>
+              <Input id="ls-term" type="number" min="1" value={termMonths} onChange={(e) => setTermMonths(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ls-pay">{t('fnx.lease.f_payment')}</Label>
+              <Input id="ls-pay" type="number" min="0" value={monthlyPayment} onChange={(e) => setMonthlyPayment(e.target.value)} placeholder="0" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ls-rate">{t('fnx.lease.f_rate')}</Label>
+              <Input id="ls-rate" type="number" min="0" step="0.01" value={annualRate} onChange={(e) => setAnnualRate(e.target.value)} />
+            </div>
+          </div>
+          <Button disabled={create.isPending || !name.trim() || !monthlyPayment || !termMonths} onClick={() => create.mutate()}>
+            <Plus className="size-4" /> {create.isPending ? t('fnx.lease.saving') : t('fnx.lease.create_btn')}
           </Button>
-        </div>
+        </CardContent>
+      </Card>
 
-        <StateView q={q}>
-          {q.data && (
-            <DataTable
-              rows={leases}
-              rowKey={(r) => r.lease_no}
-              onRowClick={(r) => setSelected((s) => (s?.lease_no === r.lease_no ? null : r))}
-              emptyState={{ icon: Scale, title: t('fnx.lease.empty_title'), description: t('fnx.lease.empty_desc') }}
-              columns={[
-                { key: 'lease_no', label: t('dash.col_no'), render: (r) => <span className="font-medium">{r.lease_no}</span> },
-                { key: 'name', label: t('fnx.lease.col_name') },
-                { key: 'term_months', label: t('fnx.lease.col_term'), align: 'right', render: (r) => <span className="tabular">{num(r.term_months)}</span> },
-                { key: 'monthly_payment', label: t('fnx.lease.col_payment'), align: 'right', render: (r) => <span className="tabular">{baht(r.monthly_payment)}</span> },
-                { key: 'liability_balance', label: t('fnx.lease.col_liability'), align: 'right', render: (r) => <span className="tabular">{baht(r.liability_balance)}</span> },
-                { key: 'rou_nbv', label: t('fnx.lease.col_rou'), align: 'right', render: (r) => <span className="tabular">{baht(r.rou_nbv)}</span> },
-                { key: 'periods_posted', label: t('fnx.lease.col_posted'), align: 'right', render: (r) => <span className="tabular">{num(r.periods_posted)}/{num(r.term_months)}</span> },
-                { key: 'next_run_date', label: t('fnx.lease.col_next'), render: (r) => thaiDate(r.next_run_date) },
-                { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-              ]}
-            />
-          )}
-        </StateView>
-
-        {selected && <ModifyLease lease={selected} onDone={() => { setSelected(null); qc.invalidateQueries({ queryKey: ['leases'] }); qc.invalidateQueries({ queryKey: ['lease-recon'] }); }} />}
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-muted-foreground">{t('fnx.lease.list_heading')}</h3>
+        <Button variant="outline" size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
+          <PlayCircle className="size-4" /> {run.isPending ? t('fnx.lease.running') : t('fnx.lease.run_btn')}
+        </Button>
       </div>
+
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={leases}
+            rowKey={(r) => r.lease_no}
+            onRowClick={(r) => setSelected((s) => (s?.lease_no === r.lease_no ? null : r))}
+            emptyState={{ icon: Scale, title: t('fnx.lease.empty_title'), description: t('fnx.lease.empty_desc') }}
+            columns={[
+              { key: 'lease_no', label: t('dash.col_no'), render: (r) => <span className="font-medium">{r.lease_no}</span> },
+              { key: 'name', label: t('fnx.lease.col_name') },
+              { key: 'term_months', label: t('fnx.lease.col_term'), align: 'right', render: (r) => <span className="tabular">{num(r.term_months)}</span> },
+              { key: 'monthly_payment', label: t('fnx.lease.col_payment'), align: 'right', render: (r) => <span className="tabular">{baht(r.monthly_payment)}</span> },
+              { key: 'liability_balance', label: t('fnx.lease.col_liability'), align: 'right', render: (r) => <span className="tabular">{baht(r.liability_balance)}</span> },
+              { key: 'rou_nbv', label: t('fnx.lease.col_rou'), align: 'right', render: (r) => <span className="tabular">{baht(r.rou_nbv)}</span> },
+              { key: 'periods_posted', label: t('fnx.lease.col_posted'), align: 'right', render: (r) => <span className="tabular">{num(r.periods_posted)}/{num(r.term_months)}</span> },
+              { key: 'next_run_date', label: t('fnx.lease.col_next'), render: (r) => thaiDate(r.next_run_date) },
+              { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+            ]}
+          />
+        )}
+      </StateView>
+
+      {selected && <ModifyLease lease={selected} onDone={() => { setSelected(null); qc.invalidateQueries({ queryKey: ['leases'] }); qc.invalidateQueries({ queryKey: ['lease-recon'] }); }} />}
     </div>
   );
 }
@@ -241,5 +252,242 @@ function ModifyLease({ lease, onDone }: { lease: Lease; onDone: () => void }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ───────────────────────── ผู้ให้เช่า (lessor, IFRS 16 lessor — LSE-02) ─────────────────────────
+interface LessorLease {
+  id: number; lease_no: string; name: string; lessee: string | null; term_months: number;
+  monthly_payment: number; annual_rate_pct: number; asset_cost: number; classification: string;
+  net_investment: number; receivable_balance: number; interest_income_recognized: number;
+  accumulated_dep: number; rental_income_recognized: number; periods_posted: number;
+  next_run_date: string | null; status: string; created_by: string | null; approved_by: string | null;
+}
+interface LessorListResp { leases: LessorLease[]; count: number }
+interface ClassifyResp { classification: string; net_investment: number; pv_to_fair_value: number; term_to_life: number; reasons: string[] }
+interface LessorReconResp {
+  gl_account: string; gl_receivable: number; schedule_receivable: number; difference: number; reconciled: boolean;
+  leases: { lease_no: string; name: string; classification: string; status: string; receivable_balance: number }[]; count: number;
+}
+
+function LessorTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<LessorListResp>({ queryKey: ['lessor-leases'], queryFn: () => api('/api/lessor-leases') });
+  const recon = useQuery<LessorReconResp>({ queryKey: ['lessor-recon'], queryFn: () => api('/api/lessor-leases/receivable-reconciliation') });
+
+  const [name, setName] = useState('');
+  const [lessee, setLessee] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [termMonths, setTermMonths] = useState('36');
+  const [monthlyPayment, setMonthlyPayment] = useState('');
+  const [annualRate, setAnnualRate] = useState('5');
+  const [assetCost, setAssetCost] = useState('');
+  const [fairValue, setFairValue] = useState('');
+  const [economicLife, setEconomicLife] = useState('');
+  const [transferOwnership, setTransferOwnership] = useState(false);
+  const [bargainPurchase, setBargainPurchase] = useState(false);
+  const [preview, setPreview] = useState<ClassifyResp | null>(null);
+  const [approving, setApproving] = useState<LessorLease | null>(null);
+
+  const body = () => ({
+    name,
+    lessee: lessee || undefined,
+    term_months: Number(termMonths) || 0,
+    monthly_payment: Number(monthlyPayment) || 0,
+    annual_rate_pct: annualRate ? Number(annualRate) : undefined,
+    asset_cost: Number(assetCost) || 0,
+    fair_value: fairValue ? Number(fairValue) : undefined,
+    economic_life_months: economicLife ? Number(economicLife) : undefined,
+    transfer_ownership: transferOwnership || undefined,
+    bargain_purchase: bargainPurchase || undefined,
+    start_date: startDate || undefined,
+  });
+
+  const classify = useMutation({
+    mutationFn: () => api<ClassifyResp>('/api/lessor-leases/classify', { method: 'POST', body: JSON.stringify(body()) }),
+    onSuccess: (r) => setPreview(r),
+    onError: (e: any) => notifyError(e.message),
+  });
+  const create = useMutation({
+    mutationFn: () => api<LessorLease>('/api/lessor-leases', { method: 'POST', body: JSON.stringify(body()) }),
+    onSuccess: (r) => {
+      notifySuccess(t('fnx.lessor.toast_created', { no: r.lease_no }), t('fnx.lessor.toast_created_sub', { cls: r.classification, ni: baht(r.net_investment) }));
+      setName(''); setLessee(''); setMonthlyPayment(''); setAssetCost(''); setFairValue(''); setPreview(null);
+      qc.invalidateQueries({ queryKey: ['lessor-leases'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const approve = useMutation({
+    mutationFn: (leaseNo: string) => api<{ lease_no: string; classification: string; journal_no: string | null }>(`/api/lessor-leases/${leaseNo}/approve`, { method: 'POST' }),
+    onSuccess: (r) => {
+      notifySuccess(t('fnx.lessor.toast_approved', { no: r.lease_no }), r.journal_no ? t('fnx.lessor.toast_approved_je', { je: r.journal_no }) : t('fnx.lessor.toast_approved_op'));
+      setApproving(null);
+      qc.invalidateQueries({ queryKey: ['lessor-leases'] }); qc.invalidateQueries({ queryKey: ['lessor-recon'] });
+    },
+    onError: (e: any) => { notifyError(e.message); setApproving(null); },
+  });
+  const run = useMutation({
+    mutationFn: () => api<{ scanned: number; posted: any[] }>('/api/lessor-leases/run', { method: 'POST' }),
+    onSuccess: (r) => {
+      notifySuccess(t('fnx.lessor.toast_run', { scanned: r.scanned, posted: r.posted.length }));
+      qc.invalidateQueries({ queryKey: ['lessor-leases'] }); qc.invalidateQueries({ queryKey: ['lessor-recon'] });
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const leases = q.data?.leases ?? [];
+  const financeCount = leases.filter((l) => l.classification === 'finance').length;
+  const receivable = leases.reduce((s, l) => s + (l.receivable_balance || 0), 0);
+  const active = leases.filter((l) => l.status === 'active').length;
+  const canSubmit = !!name.trim() && !!monthlyPayment && !!termMonths && !!assetCost;
+
+  return (
+    <div className="space-y-5">
+      <StateView q={q}>
+        {q.data && (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label={t('fnx.lessor.stat_total')} value={num(leases.length)} icon={HandCoins} tone="primary" />
+            <StatCard label={t('fnx.lessor.stat_active')} value={num(active)} tone="success" />
+            <StatCard label={t('fnx.lessor.stat_finance')} value={num(financeCount)} icon={Scale3d} tone="info" />
+            <StatCard label={t('fnx.lessor.stat_receivable')} value={baht(receivable)} icon={Landmark} tone="warning" />
+          </div>
+        )}
+      </StateView>
+
+      {recon.data && (
+        <Card className={`flex flex-row flex-wrap items-center justify-between gap-3 px-5 py-3 ${recon.data.reconciled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'}`}>
+          <div className="flex items-center gap-3">
+            <Badge variant={recon.data.reconciled ? 'success' : 'destructive'}>{recon.data.reconciled ? t('fnx.lessor.recon_ok') : t('fnx.lessor.recon_diff')}</Badge>
+            <span className="text-sm text-muted-foreground">{t('fnx.lessor.recon_gl_label')} <span className="tabular font-medium text-foreground">{baht(recon.data.gl_receivable)}</span> {t('fnx.lessor.recon_schedule_label')} <span className="tabular font-medium text-foreground">{baht(recon.data.schedule_receivable)}</span></span>
+          </div>
+          <span className={`text-sm tabular ${recon.data.reconciled ? 'text-muted-foreground' : 'font-medium text-destructive'}`}>{t('fnx.lease.recon_diff_label')} {baht(recon.data.difference)}</span>
+        </Card>
+      )}
+
+      <Card className="max-w-4xl gap-4">
+        <CardHeader>
+          <CardTitle className="text-base">{t('fnx.lessor.create_title')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-2">
+              <Label htmlFor="lr-name">{t('fnx.lessor.f_name')}</Label>
+              <Input id="lr-name" value={name} onChange={(e) => { setName(e.target.value); setPreview(null); }} placeholder={t('fnx.lessor.f_name_ph')} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lr-lessee">{t('fnx.lessor.f_lessee')}</Label>
+              <Input id="lr-lessee" value={lessee} onChange={(e) => setLessee(e.target.value)} placeholder={t('fnx.lessor.f_lessee_ph')} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lr-start">{t('fnx.lease.f_start')}</Label>
+              <Input id="lr-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lr-term">{t('fnx.lease.f_term')}</Label>
+              <Input id="lr-term" type="number" min="1" value={termMonths} onChange={(e) => { setTermMonths(e.target.value); setPreview(null); }} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lr-pay">{t('fnx.lessor.f_payment')}</Label>
+              <Input id="lr-pay" type="number" min="0" value={monthlyPayment} onChange={(e) => { setMonthlyPayment(e.target.value); setPreview(null); }} placeholder="0" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lr-rate">{t('fnx.lease.f_rate')}</Label>
+              <Input id="lr-rate" type="number" min="0" step="0.01" value={annualRate} onChange={(e) => { setAnnualRate(e.target.value); setPreview(null); }} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lr-cost">{t('fnx.lessor.f_asset_cost')}</Label>
+              <Input id="lr-cost" type="number" min="0" value={assetCost} onChange={(e) => { setAssetCost(e.target.value); setPreview(null); }} placeholder="0" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lr-fv">{t('fnx.lessor.f_fair_value')}</Label>
+              <Input id="lr-fv" type="number" min="0" value={fairValue} onChange={(e) => { setFairValue(e.target.value); setPreview(null); }} placeholder={t('fnx.lessor.f_fair_value_ph')} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lr-life">{t('fnx.lessor.f_life')}</Label>
+              <Input id="lr-life" type="number" min="1" value={economicLife} onChange={(e) => { setEconomicLife(e.target.value); setPreview(null); }} placeholder={t('fnx.lessor.f_life_ph')} />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-6">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" className="size-4" checked={transferOwnership} onChange={(e) => { setTransferOwnership(e.target.checked); setPreview(null); }} /> {t('fnx.lessor.f_transfer')}
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" className="size-4" checked={bargainPurchase} onChange={(e) => { setBargainPurchase(e.target.checked); setPreview(null); }} /> {t('fnx.lessor.f_bargain')}
+            </label>
+          </div>
+
+          {preview && (
+            <div className="rounded-md border bg-muted/30 px-4 py-3 text-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge variant={preview.classification === 'finance' ? 'default' : 'secondary'}>
+                  {preview.classification === 'finance' ? t('fnx.lessor.cls_finance') : t('fnx.lessor.cls_operating')}
+                </Badge>
+                <span className="text-muted-foreground">{t('fnx.lessor.preview_ni')} <span className="tabular font-medium text-foreground">{baht(preview.net_investment)}</span></span>
+                <span className="text-muted-foreground">{t('fnx.lessor.preview_pv_fv')} <span className="tabular font-medium text-foreground">{(preview.pv_to_fair_value * 100).toFixed(1)}%</span></span>
+                <span className="text-muted-foreground">{t('fnx.lessor.preview_term_life')} <span className="tabular font-medium text-foreground">{(preview.term_to_life * 100).toFixed(1)}%</span></span>
+              </div>
+              {preview.reasons.length > 0 && (
+                <div className="mt-1.5 text-xs text-muted-foreground">{t('fnx.lessor.preview_reasons')} {preview.reasons.join(', ')}</div>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" disabled={classify.isPending || !canSubmit} onClick={() => classify.mutate()}>
+              <Scale3d className="size-4" /> {t('fnx.lessor.classify_btn')}
+            </Button>
+            <Button disabled={create.isPending || !canSubmit} onClick={() => create.mutate()}>
+              <Plus className="size-4" /> {create.isPending ? t('fnx.lease.saving') : t('fnx.lessor.create_btn')}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">{t('fnx.lessor.maker_note')}</p>
+        </CardContent>
+      </Card>
+
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-muted-foreground">{t('fnx.lessor.list_heading')}</h3>
+        <Button variant="outline" size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
+          <PlayCircle className="size-4" /> {run.isPending ? t('fnx.lease.running') : t('fnx.lease.run_btn')}
+        </Button>
+      </div>
+
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={leases}
+            rowKey={(r) => r.lease_no}
+            emptyState={{ icon: HandCoins, title: t('fnx.lessor.empty_title'), description: t('fnx.lessor.empty_desc') }}
+            columns={[
+              { key: 'lease_no', label: t('dash.col_no'), render: (r) => <span className="font-medium">{r.lease_no}</span> },
+              { key: 'name', label: t('fnx.lease.col_name'), render: (r) => <span>{r.name}{r.lessee ? <span className="block text-xs text-muted-foreground"><Building2 className="mr-1 inline size-3" />{r.lessee}</span> : null}</span> },
+              { key: 'classification', label: t('fnx.lessor.col_class'), render: (r) => <Badge variant={r.classification === 'finance' ? 'default' : 'secondary'}>{r.classification === 'finance' ? t('fnx.lessor.cls_finance') : t('fnx.lessor.cls_operating')}</Badge> },
+              { key: 'term_months', label: t('fnx.lease.col_term'), align: 'right', render: (r) => <span className="tabular">{num(r.term_months)}</span> },
+              { key: 'monthly_payment', label: t('fnx.lease.col_payment'), align: 'right', render: (r) => <span className="tabular">{baht(r.monthly_payment)}</span> },
+              { key: 'receivable_balance', label: t('fnx.lessor.col_receivable'), align: 'right', render: (r) => <span className="tabular">{r.classification === 'finance' ? baht(r.receivable_balance) : '—'}</span> },
+              { key: 'periods_posted', label: t('fnx.lease.col_posted'), align: 'right', render: (r) => <span className="tabular">{num(r.periods_posted)}/{num(r.term_months)}</span> },
+              { key: 'next_run_date', label: t('fnx.lease.col_next'), render: (r) => thaiDate(r.next_run_date) },
+              { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'actions', label: '', align: 'right', render: (r) => (
+                r.status === 'pending'
+                  ? <Button size="sm" onClick={() => setApproving(r)}><CheckCircle2 className="size-3.5" /> {t('fnx.lessor.approve_btn')}</Button>
+                  : <span className="text-xs text-muted-foreground">—</span>
+              ) },
+            ]}
+          />
+        )}
+      </StateView>
+
+      <ConfirmDialog
+        open={approving != null}
+        onOpenChange={(o) => !o && setApproving(null)}
+        destructive={false}
+        title={t('fnx.lessor.approve_confirm_title', { no: approving?.lease_no ?? '' })}
+        description={t('fnx.lessor.approve_confirm_desc')}
+        confirmLabel={t('fnx.lessor.approve_btn')}
+        busy={approve.isPending}
+        onConfirm={() => approving && approve.mutate(approving.lease_no)}
+      />
+    </div>
   );
 }
