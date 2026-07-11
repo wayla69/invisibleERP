@@ -3,6 +3,7 @@ import { eq, and, asc, isNull, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { itemCosting, costLayers, costMovements, invBalances } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -86,10 +87,13 @@ export class CostingService {
     const invDrR = r2(invDr);
     const apCrR = r2(apCr);
     const ppvNet = r2(apCrR - invDrR); // >0 unfavorable (actual>std) → PPV debit; <0 favorable → PPV credit
+    // docs/43 PR-5: the PPV plug follows the tenant posting-rule (COSTING.PPV) ?? registry default;
+    // 1200/2000 controls stay pinned.
+    const ppvAcct = (await this.ledger.postingOverrides('COSTING.PPV', p.tenantId ?? null)).ppv ?? postingDefault('COSTING.PPV', 'ppv');
     const lines = [
       { account_code: '1200', debit: invDrR },
-      ...(ppvNet > 0 ? [{ account_code: '5500', debit: ppvNet }] : []),
-      ...(ppvNet < 0 ? [{ account_code: '5500', credit: -ppvNet }] : []),
+      ...(ppvNet > 0 ? [{ account_code: ppvAcct, debit: ppvNet }] : []),
+      ...(ppvNet < 0 ? [{ account_code: ppvAcct, credit: -ppvNet }] : []),
       { account_code: '2000', credit: apCrR },
     ];
     await this.ledger.postEntry({ date: p.date, source: 'GRV', sourceRef: p.grNo, tenantId: p.tenantId, memo: `Inventory receipt ${p.grNo}`, createdBy: p.createdBy, lines });
@@ -141,7 +145,9 @@ export class CostingService {
       cogs = r2(cogs + lineCost);
     }
     if (cogs > 0 && !(await this.ledger.alreadyPosted('POS-COGS-V', p.saleNo))) {
-      await this.ledger.postEntry({ date: p.date, source: 'POS-COGS-V', sourceRef: p.saleNo, tenantId: p.tenantId, memo: `Costed COGS ${p.saleNo}`, createdBy: p.createdBy, lines: [{ account_code: '5000', debit: cogs }, { account_code: '1200', credit: cogs }] });
+      // docs/43 PR-5: the COGS leg follows the tenant posting-rule (COSTING.ISSUE) ?? registry default.
+      const cogsAcct = (await this.ledger.postingOverrides('COSTING.ISSUE', p.tenantId ?? null)).cogs ?? postingDefault('COSTING.ISSUE', 'cogs');
+      await this.ledger.postEntry({ date: p.date, source: 'POS-COGS-V', sourceRef: p.saleNo, tenantId: p.tenantId, memo: `Costed COGS ${p.saleNo}`, createdBy: p.createdBy, lines: [{ account_code: cogsAcct, debit: cogs }, { account_code: '1200', credit: cogs }] });
     }
     return { cogs };
   }
