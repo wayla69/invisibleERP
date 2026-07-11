@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 247,
+    "total": 248,
     "by_status": {
-      "Implemented": 244,
+      "Implemented": 245,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 17,
+      "Inventory & COGS": 18,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -2391,6 +2391,25 @@
       "tod": "Inspect the reason×disposition taxonomy + the void-fire recipe explosion → ingredient waste + aggregated 5810/1200 JE + the theoretical-vs-actual usage-variance nets Consume vs Waste.",
       "toe": "Re-perform: log costed waste with disposition=donate (echoed, by_disposition rolls it up); void-fire a recipe'd dish → 2 ingredient waste lines, one Dr 5810/Cr 1200 JE, ingredient stock decremented; unknown sku → NO_RECIPE; usage-variance shows theoretical (Consume) vs actual (Consume+Waste) with the valued waste gap; trial balance balanced (re-performed by the waste harness, 19 checks).",
       "evidence": "Waste ledger + by_disposition + void-fire audit + usage-variance report",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "INV-16",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Inventory; Goods-in-transit",
+      "risk": "Inventory moved between warehouses/branches is mis-stated at period end: a single instant transfer either records the stock at BOTH locations (double count) or at NEITHER (existence gap) while goods are physically in transit, and the value in transit sits in no identifiable account — so an auditor cannot cut off in-transit inventory at the balance-sheet date (existence / completeness of inventory).",
+      "assertion": "Existence/Completeness/Cutoff",
+      "description": "Two-step ship→receive TRANSFER ORDER with in-transit ownership + GL (INV-2, migration 0341): an inter-warehouse/branch transfer is created Draft (document only), SHIPPED (relieves the source location's valued stock at current cost — moving-average, or consumed FIFO/FEFO layers carried forward — and books Dr 1255 Goods-in-Transit / Cr 1200 Inventory), and RECEIVED by a DIFFERENT custodian (lands the stock at the destination and books Dr 1200 Inventory / Cr 1255). Between ship and receive the value is isolated in the Goods-in-Transit control account (1255, seeded in the COA + the SCF CF_CLASSIFY operating bucket; distinct from 1250 WIP), so it is neither double-counted nor lost. Custody segregation (SoD): the shipper may not receive their own transfer (SOD_SELF_APPROVAL, binds even Admin). A period-end in-transit AGING / cutoff report (GET …/in-transit/aging) lists every still-Shipped order with its days-in-transit + value bucketed (0-7 / 8-30 / 31+) — the population an auditor tests for cutoff. The perpetual sub-ledger stays tied to GL 1200 throughout (INV-GIT included in the reconcile source set). The legacy instant value-neutral stock-ops transfer is unchanged. Tenant-scoped (canonical 0232 RLS); custody duty wh_custody, mirroring the instant transfer.",
+      "prev_det": "Prev/Det",
+      "nature": "Automated",
+      "frequency": "Per transfer; period-end cutoff review",
+      "owner": "Warehouse / Inventory Controller (segregated ship vs receive)",
+      "coso": "P10",
+      "code_reference": "stock-ops/transfer-order.service.ts create/ship/receive/inTransitAging + inventory/inventory-ledger.service.ts shipToInTransit/receiveFromInTransit (Dr/Cr 1255); transfer-order.controller.ts (/api/stock-ops/transfer-orders[/:no/ship|/receive][/in-transit/aging]); schema/inventory.ts transfer_orders + transfer_order_lines + migration 0341; ledger-constants.ts 1255 COA + CF_CLASSIFY; cutover/transfer-orders.ts (ToE, 21 checks)",
+      "tod": "Walkthrough create→ship→receive: inspect the ship JE (Dr 1255 / Cr 1200), the source relief, the in-transit aging read model, the receive JE (Dr 1200 / Cr 1255) + dest landing, the shipper≠receiver SoD, and that the perpetual sub-ledger reconciles to GL 1200 across the round-trip.",
+      "toe": "Re-perform: ship a transfer order → source qty down, Dr 1255 / Cr 1200 balanced, aging lists it; shipper receiving their own order is blocked (403 SOD_SELF_APPROVAL); an independent user receives → dest qty up, Dr 1200 / Cr 1255, in-transit cleared, sub-ledger ties to GL 1200 (re-performed by the transfer-orders harness, 21 checks).",
+      "evidence": "In-transit aging / cutoff report + ship/receive JE pair + SoD test",
       "status": "Implemented"
     },
     {

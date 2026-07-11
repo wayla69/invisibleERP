@@ -305,6 +305,51 @@ export const stockReservations = pgTable('stock_reservations', {
 }));
 export type StockReservation = typeof stockReservations.$inferSelect;
 
+// ── Inter-warehouse/branch transfer orders (INV-2, INV-16, 0341) ─────────────────────────────
+// A TWO-STEP ship→receive transfer (distinct from the instant value-neutral stock-ops transfer). On SHIP the
+// value leaves the source location's inventory into a Goods-in-Transit control account (Dr 1255 / Cr 1200);
+// on RECEIVE it lands at the destination (Dr 1200 / Cr 1255). Between the two, ownership sits in-transit — the
+// period-end cutoff/aging report (INV-16) evidences existence. Custody segregation (SoD): the receiver must
+// differ from the shipper (SOD_SELF_APPROVAL). Both tables tenant-scoped (RLS, canonical 0232 form).
+export const transferOrders = pgTable('transfer_orders', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  toNo: text('to_no').notNull(),
+  fromLocation: text('from_location').notNull(),
+  toLocation: text('to_location').notNull(),
+  status: text('status').notNull().default('Draft'),            // Draft | Shipped | Received | Cancelled
+  remarks: text('remarks'),
+  shippedBy: text('shipped_by'),
+  shippedAt: timestamp('shipped_at', { withTimezone: true }),
+  receivedBy: text('received_by'),                               // SoD: must differ from shippedBy
+  receivedAt: timestamp('received_at', { withTimezone: true }),
+  shipGlEntryNo: text('ship_gl_entry_no'),                       // Dr 1255 / Cr 1200 JE at ship
+  receiveGlEntryNo: text('receive_gl_entry_no'),                 // Dr 1200 / Cr 1255 JE at receive
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_transfer_orders_tenant').on(t.tenantId, t.status),
+  byNo: index('idx_transfer_orders_no').on(t.tenantId, t.toNo),
+}));
+export type TransferOrder = typeof transferOrders.$inferSelect;
+
+export const transferOrderLines = pgTable('transfer_order_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  toNo: text('to_no').notNull(),
+  itemId: text('item_id').notNull(),
+  itemDescription: text('item_description'),
+  uom: text('uom'),
+  qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),   // cost snapshot at ship
+  lineValue: numeric('line_value', { precision: 18, scale: 4 }).notNull().default('0'), // qty × snapshot cost
+  costSlices: text('cost_slices'),                                                       // JSON — FIFO/FEFO layer slices carried ship→receive
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_transfer_order_lines_tenant').on(t.tenantId, t.toNo),
+}));
+export type TransferOrderLine = typeof transferOrderLines.$inferSelect;
+
 export const scanSessions = pgTable('scan_sessions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   sessionNo: text('session_no').unique(),

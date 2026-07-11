@@ -287,6 +287,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.waste', href: '/waste', icon: Trash2, perms: ['warehouse', 'pos', 'order_mgt'] },
       { label: 'nav.receiving', href: '/receiving', icon: PackageCheck, perms: ['wh_receive', 'warehouse'] },
       { label: 'nav.goods_issue', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
+      // INV-2/INV-16: two-step inter-warehouse transfer ORDERS (ship→receive, in-transit GL + cutoff aging).
+      { label: 'nav.transfer_orders', href: '/stock-ops/transfer-orders', icon: Truck, perms: ['wh_custody', 'warehouse'] },
       { label: 'nav.lots', href: '/lots', icon: Boxes, perms: ['lots', 'warehouse'] },
       { label: 'nav.quality_coa', href: '/quality/coa', icon: FlaskConical, perms: ['quality', 'quality_approve', 'exec'] },
       { label: 'nav.mobile_scan', href: '/mobile-scan', icon: ScanLine, perms: ['mobile', 'warehouse'] },

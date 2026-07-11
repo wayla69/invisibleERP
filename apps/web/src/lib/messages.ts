@@ -181,6 +181,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.waste': { th: 'ของเสีย / ทิ้ง', en: 'Waste & Disposals' },
   'nav.receiving': { th: 'รับสินค้า (GR)', en: 'Goods Receipt (GR)' },
   'nav.goods_issue': { th: 'เบิก / โอนสินค้า', en: 'Issue & Transfer' },
+  'nav.transfer_orders': { th: 'ใบโอนระหว่างคลัง', en: 'Transfer Orders' },
   'nav.lots': { th: 'ล็อต / อายุสินค้า', en: 'Lots & Expiry' },
   'nav.quality_coa': { th: 'ใบรับรองผลวิเคราะห์ (CoA)', en: 'Certificate of Analysis' },
   'nav.mobile_scan': { th: 'สแกนมือถือ', en: 'Mobile Scan' },
