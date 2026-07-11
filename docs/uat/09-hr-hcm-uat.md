@@ -1,6 +1,6 @@
 # UAT — Cycle 09: Human Resources (HCM)
 
-**Status: DRAFT v0.1 · 2026-07-11** · *v0.1: HR-2 leave accrual (control HR-02, migration 0321) — UAT-HR-01..09; HR-3 performance management (control HR-03, migration 0322) — UAT-HR-300..312; HR-4 recruiting/ATS (control HR-04, migration 0323) — UAT-HR-400..413.* · Cross-ref: `docs/process-narratives/29-human-resources.md`; harnesses `tools/cutover/src/hcm-leave.ts` (17), `tools/cutover/src/hcm-perf.ts` (17), `tools/cutover/src/hcm-recruiting.ts` (20).
+**Status: DRAFT v0.1 · 2026-07-11** · *v0.1: HR-2 leave accrual (control HR-02, migration 0321) — UAT-HR-01..09; HR-3 performance management (control HR-03, migration 0322) — UAT-HR-300..312; HR-4 recruiting/ATS (control HR-04, migration 0323) — UAT-HR-400..413; HR-5 onboarding/offboarding lifecycle (control HR-05, migration 0324) — UAT-HR-500..515.* · Cross-ref: `docs/process-narratives/29-human-resources.md`; harnesses `tools/cutover/src/hcm-leave.ts` (17), `tools/cutover/src/hcm-perf.ts` (17), `tools/cutover/src/hcm-recruiting.ts` (20), `tools/cutover/src/hcm-onboarding.ts` (27).
 
 > This cycle is built up wave-by-wave; each HR feature owns a self-contained block so parallel PRs merge keep-both.
 
@@ -38,6 +38,27 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Balance formula = `entitle
 | UAT-HR-311 | Negative | Cycle closed | Add a goal to the closed cycle | 400 `CYCLE_CLOSED` |
 | UAT-HR-312 | Security (RLS) | Tenant T2 HR user | `GET …/cycles` and `…/reviews?cycle_id=<T1>` | No T1 rows returned (tenant isolation) |
 
+## Test cases — Onboarding / offboarding lifecycle (HR-5, control HR-05)
+
+| ID | Type | Precondition | Steps | Expected result |
+|---|---|---|---|---|
+| UAT-HR-500 | Positive | HR user (`hr`/`hr_admin`) | `POST /api/hcm/lifecycle/templates` `{code:ONB-STD,name,kind:onboarding}` | 201, `kind` onboarding |
+| UAT-HR-501 | Positive | Template exists | `POST …/templates/:id/tasks` ×3 (docs, it_access, equipment) | Tasks appended with ascending `seq` |
+| UAT-HR-502 | Positive | Offboarding template | Add task `{category:it_access, is_access_revocation:true}` | Task flagged `is_access_revocation` |
+| UAT-HR-503 | Negative (SoD) | `exec`-only user | `POST …/templates` | 403 (writes gate `hr`/`hr_admin`; exec is read-only) |
+| UAT-HR-504 | Negative | Template `ONB-STD` exists | `POST …/templates {code:ONB-STD}` | 400 `TEMPLATE_EXISTS` |
+| UAT-HR-505 | Positive | Employee EMP1; ONB template | `POST …/lifecycle/start {emp_code:EMP1,template_id}` | 201, `tasks_created` = template task count, status `in_progress` |
+| UAT-HR-506 | Negative | ONB template | `POST …/start {emp_code:EMP-NONE,…}` | 404 `EMP_NOT_FOUND` |
+| UAT-HR-507 | Positive | Onboarding started | `PATCH …/tasks/:id {status:done}` for each task, then `POST …/:id/complete` | All done; lifecycle `complete` |
+| UAT-HR-508 | Positive | Offboarding template (2 access-revocation tasks) | `POST …/start {emp_code:EMP1,template_id}` | 201; `access_revocation_pending` = 2 |
+| UAT-HR-509 | **Negative (control HR-05)** | Offboarding with an access-revocation task pending | `POST …/lifecycle/:id/complete` | **400 `ACCESS_REVOCATION_INCOMPLETE`** |
+| UAT-HR-510 | Negative (control) | `hr`-only user | `PATCH …/tasks/:id {status:skipped,reason}` on an access-revocation task | 403 `SKIP_REQUIRES_HR_ADMIN` |
+| UAT-HR-511 | Negative (control) | `hr_admin` | `PATCH …/tasks/:id {status:skipped}` (no reason) on an access-revocation task | 400 `SKIP_REASON_REQUIRED` |
+| UAT-HR-512 | Positive (control) | `hr_admin` | `PATCH …/tasks/:id {status:skipped,reason:"…"}` | 200, `skipped`; audit row `doc_status_log` `EMPLIFECYCLE` `ACCESS_REVOCATION_SKIP` |
+| UAT-HR-513 | Positive | All access-revocation tasks done/skipped | `POST …/lifecycle/:id/complete` | 200, status `complete` |
+| UAT-HR-514 | Detective | Open offboarding with unrevoked access | `GET …/offboarding-exceptions?days=0` then `?days=30` | days=0 lists the lifecycle (emp_code, `access_revocation_pending`); days=30 count 0 |
+| UAT-HR-515 | Security (RLS) | Tenant T2 HR user | `POST …/templates` as T2; `GET …/templates` as T1 & T2 | T1 does not see T2's template; T2 sees only its own (tenant isolation) |
+
 ## Test cases — Recruiting / ATS (HR-4)
 
 | Test ID | Type | Preconditions | Test steps | Expected result |
@@ -63,3 +84,4 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Balance formula = `entitle
 |---|---|---|---|
 | Review sign-off SoD (reviewer ≠ reviewee; manager rating required; goal weights ≤ 100%) | HR-03 | UAT-HR-300..312 | `tools/cutover/src/hcm-perf.ts` (17 checks) |
 | Requisition approval + offer authorization maker-checker; headcount-bound hiring | HR-04 | UAT-HR-400..413 | `tools/cutover/src/hcm-recruiting.ts` (20 checks) |
+| Offboarding access-revocation completeness (offboarding cannot complete while an access-revocation task is pending; privileged skip with reason; exception register) | HR-05 | UAT-HR-500..515 | `tools/cutover/src/hcm-onboarding.ts` (27 checks) |

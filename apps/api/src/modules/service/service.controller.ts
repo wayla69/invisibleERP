@@ -49,6 +49,11 @@ export class ServiceController {
   @HttpCode(200)
   pause(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.updateSubscriptionStatus(id, 'Paused', user); }
 
+  @Post('subscriptions/:id/resume')
+  @Permissions('exec')
+  @HttpCode(200)
+  resume(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.updateSubscriptionStatus(id, 'Active', user); }
+
   @Post('subscriptions/:id/cancel')
   @Permissions('exec')
   @HttpCode(200)

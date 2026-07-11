@@ -216,6 +216,99 @@ flowchart TD
 
 ---
 
+# HR-5 — Onboarding / offboarding lifecycle (control HR-05) — appended section
+
+> Self-contained HR-5 onboarding/offboarding narrative; kept on merge alongside the HR-2/HR-3 sections above.
+
+## L.1 Document control (HR-5)
+
+| Field | Value |
+|---|---|
+| Process ID | PN-29-HR (HR-5 lifecycle) |
+| Version | **0.1 DRAFT** |
+| Related RCM control | **HR-05** (offboarding access-revocation completeness — joiner-mover-leaver) |
+| Related policy | `compliance/policies/03-delegation-of-authority.md` |
+
+## L.2 Purpose & scope
+
+Govern the employee **joiner-mover-leaver** lifecycle on the `payroll.employees` master with enforced
+checklists, so that (a) new hires are provisioned consistently and (b) — the SOX control — a **terminated
+employee's access is provably removed** before the offboarding is closed. In scope: checklist templates,
+per-employee lifecycles, task completion, the access-revocation completion gate, and an exception register.
+Out of scope: the identity-provider integration that physically disables accounts (the checklist records
+that the removal was done/waived; it does not itself call the IdP).
+
+## L.3 Roles & permissions
+
+| Action | Permission |
+|---|---|
+| List templates / lifecycles / exceptions | `hr` / `hr_admin` / `exec` |
+| Create templates & tasks, start a lifecycle, mark a task done, complete a lifecycle | `hr` / `hr_admin` |
+| **Skip an access-revocation task** (with a reason) | `hr_admin` / `exec` (audit-logged) |
+
+## L.4 Workflow
+
+```mermaid
+flowchart TD
+  A[Create template<br/>kind: onboarding / offboarding] --> B[Add ordered tasks<br/>category; is_access_revocation flag]
+  B --> C[Start for an employee<br/>tasks instantiated pending]
+  C --> D{Task}
+  D -->|Mark done| E[status = done]
+  D -->|Skip access-revocation| F{hr_admin/exec + reason?}
+  F -->|no| G[SKIP_REQUIRES_HR_ADMIN /<br/>SKIP_REASON_REQUIRED]
+  F -->|yes| H[status = skipped<br/>ACCESS_REVOCATION_SKIP audit]
+  E --> I[Complete lifecycle]
+  H --> I
+  I --> J{Offboarding &<br/>access-revocation still pending?}
+  J -->|yes| K[ACCESS_REVOCATION_INCOMPLETE 400]
+  J -->|no| L[status = complete]
+  subgraph Detective
+    M[offboarding-exceptions?days=N<br/>open offboardings w/ unrevoked access]
+  end
+```
+
+## L.5 Control matrix
+
+| Control | Type | Description | Evidence |
+|---|---|---|---|
+| **HR-05** | Preventive/Detective, Automated | An **offboarding** lifecycle cannot be marked complete while any `is_access_revocation` task is still `pending` (`ACCESS_REVOCATION_INCOMPLETE`). Skipping such a task requires `hr_admin`/`exec` + a reason (`SKIP_REQUIRES_HR_ADMIN` / `SKIP_REASON_REQUIRED`) and is audit-logged (`doc_status_log` `EMPLIFECYCLE`, `ACCESS_REVOCATION_SKIP`). A detective read lists open offboardings with unrevoked access past N days. | `tools/cutover/src/hcm-onboarding.ts` (27 checks); UAT-HR-5xx |
+
+## L.6 Endpoints (application)
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET /api/hcm/lifecycle/templates` | read | List templates (+ their tasks); `?kind=` filter |
+| `POST /api/hcm/lifecycle/templates` | `hr`/`hr_admin` | Create a template (`onboarding`/`offboarding`) |
+| `POST /api/hcm/lifecycle/templates/:id/tasks` | `hr`/`hr_admin` | Add an ordered task (category; `is_access_revocation`) |
+| `POST /api/hcm/lifecycle/start` | `hr`/`hr_admin` | Instantiate a template for an employee |
+| `GET /api/hcm/lifecycle?emp_code=` | read | List an employee's lifecycles + tasks |
+| `PATCH /api/hcm/lifecycle/tasks/:id` | `hr`/`hr_admin` | Mark a task `done`/`skipped` |
+| `POST /api/hcm/lifecycle/:id/complete` | `hr`/`hr_admin` | Complete (HR-05 gate for offboarding) |
+| `GET /api/hcm/lifecycle/offboarding-exceptions?days=N` | read | Detective: open offboardings with unrevoked access |
+
+## L.7 Error codes
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `ACCESS_REVOCATION_INCOMPLETE` | 400 | Offboarding completion attempted while an access-revocation task is pending |
+| `SKIP_REQUIRES_HR_ADMIN` | 403 | An `hr`-only user tried to skip an access-revocation task |
+| `SKIP_REASON_REQUIRED` | 400 | Skip of an access-revocation task without a reason |
+| `TEMPLATE_EXISTS` | 400 | Duplicate template code |
+| `TEMPLATE_EMPTY` | 400 | Start attempted on a template with no tasks |
+| `EMP_NOT_FOUND` | 404 | Unknown `emp_code` on start |
+
+## L.8 System references
+
+- Service/controller: `apps/api/src/modules/hcm/hcm-lifecycle.service.ts`, `hcm-lifecycle.controller.ts`
+- Schema: `apps/api/src/database/schema/hcm-lifecycle.ts`; migration `apps/api/drizzle/0324_hcm_lifecycle.sql`
+- Web: `apps/web/src/app/(internal)/hcm/onboarding/` (`/hcm/onboarding`)
+- ToE harness: `tools/cutover/src/hcm-onboarding.ts` (27 checks)
+
+## L.9 Revision history
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-07-11 | HR-5 | Initial onboarding/offboarding lifecycle narrative + HR-05 access-revocation-completeness control (migration 0324). |
 # HR-4 — Recruiting / ATS (control HR-04) — appended section
 
 > Self-contained HR-4 recruiting/ATS narrative; kept on merge alongside the HR-2/HR-3 sections above.
