@@ -2302,7 +2302,14 @@
       "idx": 330,
       "version": "7",
       "when": 2023820000295,
-      "tag": "0330_posting_rule_governance",
+      "tag": "0330_service_contract_renewal",
+      "breakpoints": true
+    },
+    {
+      "idx": 331,
+      "version": "7",
+      "when": 2023820000296,
+      "tag": "0331_posting_rule_governance",
       "breakpoints": true
     }
   ]

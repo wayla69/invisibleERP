@@ -248,6 +248,32 @@ coverage (**control SVC-01**). It has four tabs.
 - **รายการยกเว้นความคุ้มครอง (Coverage exceptions).** A read-only register of claims that were authorized **free**
   even though the unit was **out of coverage** — the list a reviewer or auditor samples to confirm every free
   grant was independently authorized. A soon-expiring-warranty worklist is available via the *expiring* read.
+## 16.9 Contract renewals & expiry (ต่ออายุสัญญา — `/service/renewals`)
+
+Service contracts have an end date. The **ต่ออายุสัญญา** workspace stops a contract from silently lapsing and
+controls the renewal price. It requires the **บริการ/ผู้บริหาร** (`marketing`/`exec`) permission to view. It has
+two tabs.
+
+**Proposing a renewal.** From the contract you propose a renewal with an **uplift %** (the price increase on the
+next term). The new value is computed as **base × (1 + uplift ⁄ 100)**. What happens next depends on the size of
+the uplift and your tenant's **renewal-uplift ceiling** (default **5%**, changeable by an executive):
+
+- **Within the ceiling** (and not an auto-renew that raises price) → the renewal is **approved automatically** and
+  a **successor contract** is created immediately for the new term and value. The old contract is marked
+  *ต่ออายุแล้ว (renewed)* and links to its successor.
+- **Above the ceiling, or any auto-renew that raises price** → the renewal is parked **รออนุมัติ (pending)** and
+  routes to maker-checker: a **different** person (with the **approvals**/**exec** duty) must approve it. The person
+  who proposed it **cannot** approve their own — the system returns *SOD_SELF_APPROVAL* (control **SVC-02**). Only on
+  independent approval is the successor contract created.
+
+**Renewal queue tab (คิวต่ออายุ).** Lists the pending renewals with base value, uplift %, the computed new value and
+the proposed term. Press **อนุมัติ** to approve (creates the successor contract) or **ปฏิเสธ** to reject (leaves the
+old contract untouched — it is marked *declined*, not renewed).
+
+**Expiring tab (ใกล้หมดอายุ).** A detective worklist of Active contracts nearing their end date **that have no
+renewal in flight** — pick a horizon (30 / 60 / 90 / 180 days). Already-renewed or pending contracts are excluded, so
+what remains is exactly the list a service manager must action before it lapses. An already-expired contract carries a
+red *หมดอายุแล้ว* badge.
 
 ---
 
@@ -270,11 +296,15 @@ coverage (**control SVC-01**). It has four tabs.
 | `SOD_SELF_APPROVAL` | Authorizing/rejecting a warranty claim you raised yourself (§16.8, SVC-01) | A different person with the approvals duty must action the claim. |
 | `CLAIM_NOT_PENDING` | Authorizing/rejecting a warranty claim that is already decided (§16.8) | Refresh the claims list; it was already actioned. |
 | `SERIAL_EXISTS` / `TERM_EXISTS` | Registering a serial / creating a term code that already exists (§16.8) | Use a unique serial / term code. |
+| `SOD_SELF_APPROVAL` | Approving a contract renewal you proposed yourself (§16.9, SVC-02) | A different service/executive user must approve the renewal. |
+| `CONTRACT_ALREADY_RENEWED` | Proposing a renewal on a contract that already has a successor (§16.9) | The contract is already renewed — open its successor instead. |
+| `RENEWAL_IN_FLIGHT` | Proposing a second renewal while one is still pending (§16.9) | Approve or reject the pending renewal first. |
 
 ## Revision history
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.6 | 2026-07-11 | **Contract renewals & expiry (`/service/renewals`) — SVC-3, control SVC-02:** new §16.9. Propose a renewal with an uplift % (new value = base × (1+uplift)); within the tenant ceiling (default 5%) it auto-approves and creates the successor contract, above the ceiling — or any auto-renew that raises price — it routes to maker-checker (a different user must approve; the proposer is blocked with `SOD_SELF_APPROVAL`). Renewal queue (approve/reject) + an expiry worklist of Active contracts near their end date with no renewal in flight. Added the `SOD_SELF_APPROVAL` / `CONTRACT_ALREADY_RENEWED` / `RENEWAL_IN_FLIGHT` error rows. |
 | 1.5 | 2026-07-11 | **SVC-2 Warranty & Entitlement registry (`/service/warranty`):** new §16.8 documenting the warranty-term catalogue, the installed-base serialized-unit registry (auto-computed warranty end), and warranty claims with the **SVC-01** coverage-authorization maker-checker (in-coverage → auto-free; out-of-coverage → a *different* person authorizes/rejects, `SOD_SELF_APPROVAL` on self-approval), plus the coverage-exceptions override register. Added `SOD_SELF_APPROVAL` / `CLAIM_NOT_PENDING` / `SERIAL_EXISTS`+`TERM_EXISTS` error rows. |
 | 1.4 | 2026-07-11 | **Service workspace (`/service`) — subscription lifecycle + SLA resolve made usable:** new §16.7 documenting the after-sales workspace. Surfaced the previously UI-less flows: **ปิดเคส (Resolve)** on SLA events (with breach computation + red *เกิน SLA* badges), and on subscriptions a **create form**, **รันรอบเรียกเก็บ (Run billing)**, per-row **พัก/เปิดใช้/ยกเลิก (pause/resume/cancel)** with a cancel-confirm, and an **ใบแจ้งหนี้ (invoices)** drill-down with **บันทึกชำระ (mark paid)**. New backend endpoint `POST /api/service/subscriptions/:id/resume`; cancel is now terminal. Added the `SUB_CANCELLED` / `ALREADY_PAID` error rows. |
 | 1.3 | 2026-07-10 | **CRM-6 — inbound email capture (2-way comms)** (docs/41): new §16.6. Customer replies to a deal email are captured back onto the deal timeline automatically — via the hidden reply-threading tag CRM-4 now embeds in outbound emails, or the sender's contact/lead email — and appear as inbound email activities on the deal page + Customer-360. Unmatched replies land in a **review queue** (`GET /api/crm/inbound/review`) to **Link** or **Dismiss**. The inbound webhook is HMAC-signed (forged deliveries rejected); capture never posts to the ledger. Added the `BAD_INBOUND_SECRET`/`INBOUND_UNVERIFIED` and `ALREADY_RESOLVED` error rows. |
