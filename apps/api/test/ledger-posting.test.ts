@@ -81,14 +81,41 @@ describe('LedgerPostingService — postEntry guards (GL-05, balanced by construc
   });
 
   it('rejects a direct posting to a control account without viaSubledger (WS1.1 CONTROL_ACCOUNT)', async () => {
-    // route 1: period lookup (open) · route 2: control-account scan hits 1100
+    // route 1: period lookup (open) · route 2: account-universe scan (both codes exist; 1100 is control)
     const svcCtl = new LedgerPostingService(fakeDb([
       { rows: [] },
-      { rows: [{ code: '1100', controlSubledger: 'AR' }] },
+      { rows: [
+        { code: '1100', isPostable: true, isControl: true, controlSubledger: 'AR' },
+        { code: '4000', isPostable: true, isControl: false, controlSubledger: null },
+      ] },
     ]) as any, docNo);
     expect(await code(() => svcCtl.postEntry({ source: 'T', createdBy: 'a', tenantId: 1, lines: [
       { account_code: '1100', debit: 10 }, { account_code: '4000', credit: 10 },
     ] } as any))).toBe('CONTROL_ACCOUNT');
+  });
+
+  it('rejects a line whose account is NOT in the chart of accounts (GL-21 INVALID_POSTING_ACCOUNT)', async () => {
+    // route 1: period lookup (open) · route 2: account scan finds only 4000 — 6666 is unknown
+    const svcMissing = new LedgerPostingService(fakeDb([
+      { rows: [] },
+      { rows: [{ code: '4000', isPostable: true, isControl: false, controlSubledger: null }] },
+    ]) as any, docNo);
+    expect(await code(() => svcMissing.postEntry({ source: 'T', createdBy: 'a', tenantId: 1, lines: [
+      { account_code: '6666', debit: 10 }, { account_code: '4000', credit: 10 },
+    ] } as any))).toBe('INVALID_POSTING_ACCOUNT');
+  });
+
+  it('rejects a non-postable (header/deactivated) account even via a subledger (INVALID_POSTING_ACCOUNT)', async () => {
+    const svcHeader = new LedgerPostingService(fakeDb([
+      { rows: [] },
+      { rows: [
+        { code: '1000', isPostable: false, isControl: false, controlSubledger: null },
+        { code: '4000', isPostable: true, isControl: false, controlSubledger: null },
+      ] },
+    ]) as any, docNo);
+    expect(await code(() => svcHeader.postEntry({ source: 'T', createdBy: 'a', tenantId: 1, viaSubledger: true, lines: [
+      { account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 },
+    ] } as any))).toBe('INVALID_POSTING_ACCOUNT');
   });
 });
 

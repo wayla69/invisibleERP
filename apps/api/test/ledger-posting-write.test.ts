@@ -14,8 +14,12 @@ type Captured = { headers: any[]; lines: any[][]; audits: any[]; executes: numbe
 
 function writeDb(opts: { dedupe?: boolean } = {}): { db: any; cap: Captured } {
   const cap: Captured = { headers: [], lines: [], audits: [], executes: 0 };
-  const selectChain = () => {
-    const p: any = { from: () => p, where: () => p, limit: () => p, then: (r: any, j: any) => Promise.resolve([]).then(r, j) };
+  // The account-universe guard (GL-21 in postEntry) selects {code,isPostable,isControl,...} — recognise
+  // that projection and serve the accounts the fixtures post to; every other select stays empty.
+  const ACCOUNT_ROWS = ['5100', '1000', '2100'].map((code) => ({ code, isPostable: true, isControl: false, controlSubledger: null }));
+  const selectChain = (proj?: any) => {
+    const rows = proj && 'isPostable' in proj ? ACCOUNT_ROWS : [];
+    const p: any = { from: () => p, where: () => p, limit: () => p, then: (r: any, j: any) => Promise.resolve(rows).then(r, j) };
     return p;
   };
   const tx = {
@@ -182,7 +186,11 @@ function reverseDb(orig: any, origLines: any[]): { db: any; cap: ReverseCap } {
     execute: () => { cap.executes++; return Promise.resolve(); },
   };
   const db = {
-    select: () => chain(routes[Math.min(call++, routes.length - 1)] ?? []),
+    // The account-universe guard inside the nested postEntry selects {code,isPostable,...} — serve the
+    // contra legs' accounts out-of-band so the sequential routes stay aligned with the read chains.
+    select: (proj?: any) => proj && 'isPostable' in proj
+      ? chain(['5100', '1000'].map((code) => ({ code, isPostable: true, isControl: false, controlSubledger: null })))
+      : chain(routes[Math.min(call++, routes.length - 1)] ?? []),
     transaction: async (cb: any) => cb(tx),
     update: () => ({ set: (v: any) => ({ where: () => { cap.dbUpdates.push(v); return Promise.resolve(); } }) }),
     insert: () => ({ values: (v: any) => { cap.dbAudits.push(v); return Promise.resolve(); } }),

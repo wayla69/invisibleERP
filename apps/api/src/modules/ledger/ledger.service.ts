@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { sql, eq, and, desc, notInArray, gt, lte, inArray, isNotNull } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -92,7 +92,7 @@ export interface AllocationCycleDto {
 }
 
 @Injectable()
-export class LedgerService {
+export class LedgerService implements OnModuleInit {
   private readonly cashflow: LedgerCashflowService;
   private readonly recurring: LedgerRecurringService;
   private readonly allocation: LedgerAllocationService;
@@ -109,6 +109,14 @@ export class LedgerService {
     this.posting = new LedgerPostingService(db, docNo);
     this.recurring = new LedgerRecurringService(db, docNo, (dto) => this.postEntry(dto));
     this.allocation = new LedgerAllocationService(db, docNo, (dto) => this.postEntry(dto));
+  }
+
+  // Boot parity for EVERY embedding of the app module (prod main.ts and the ~120 injected harnesses):
+  // postEntry's account-universe guard (GL-21, docs/40 step 1) needs the canonical chart present, so seed
+  // it at module init. Best-effort like main.ts's seed loop — a not-yet-migrated DB skips silently and
+  // the runner's own explicit seed (or main.ts's) covers it later. Idempotent (onConflictDoNothing).
+  async onModuleInit() {
+    try { await this.seedChartOfAccounts(); } catch { /* DB not ready — explicit seed runs later */ }
   }
 
   // ───────────────────── Chart of Accounts ─────────────────────
