@@ -1878,7 +1878,50 @@ async function main() {
   ok('PR-2: the write-off register lists BOTH the default- and override-account write-offs', woReg.write_offs?.some((w: any) => near(w.amount, 111.25)) && woReg.write_offs?.some((w: any) => near(w.amount, 250)), `count=${woReg.count}`);
   await db.update(s.accounts).set({ isControl: true, controlSubledger: 'AR' }).where(eq(s.accounts.code, '1100'));
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) ──');
+  // ── docs/43 PR-3 — assets & leases: Q2 category-grain accounts + governed dispose override ──
+  // (a) GL-21 fail-closed at category save: an unknown account is rejected, not saved.
+  const badCat = await inj('POST', '/api/assets/categories', admin, { code: 'PR3-BAD', name: 'Bad accounts', default_useful_life_years: 5, asset_account: '1500', accum_dep_account: '1590', dep_expense_account: '9999' });
+  ok('PR-3: asset-category save with an unknown dep account → 400 INVALID_POSTING_ACCOUNT', badCat.status === 400 && badCat.json?.error?.code === 'INVALID_POSTING_ACCOUNT', `${badCat.status} ${badCat.json?.error?.code}`);
+  // (b) Q2 grain: a category maps its own dep-expense account; under posting_determination the
+  // depreciation run debits it PER CATEGORY (one balanced JE, split line pairs), assets without a
+  // category keep the posting-rule/registry default.
+  await db.insert(s.accounts).values({ code: '5201', name: 'Depreciation — Vehicles (PR-3)', type: 'Expense', normalBalance: 'D', isPostable: true }).onConflictDoNothing();
+  // acquire/dispose post Dr/Cr 1500 directly (the FA register's own flow) — lift the GL-14 control flag the
+  // tie-out section set above for the duration of this block (same re-apply precedent as GL-14 itself).
+  await db.update(s.accounts).set({ isControl: false, controlSubledger: null }).where(eq(s.accounts.code, '1500'));
+  const vehCatRes = await inj('POST', '/api/assets/categories', admin, { code: 'PR3-VEH', name: 'Vehicles', default_useful_life_years: 5, asset_account: '1500', accum_dep_account: '1590', dep_expense_account: '5201' });
+  const vehCat = vehCatRes.json;
+  await inj('POST', '/api/assets', admin, { name: 'PR-3 delivery van', category_id: Number(vehCat.id), acquire_cost: 120000, acquire_source: 'cash', acquire_date: '2026-06-01' });
+  await inj('PUT', '/api/feature-flags/posting_determination', admin, { enabled: true }); // opt HQ in
+  const depRun = (await inj('POST', '/api/assets/depreciation/run', admin, { period: '2026-08' })).json;
+  const hqRun = (depRun.runs ?? []).find((r: any) => r.tenant_id === hq);
+  const dep3Lines = hqRun?.journal_no ? await jeLines(hqRun.journal_no) : [];
+  ok('PR-3: category-grain depreciation — the van\'s charge debits the CATEGORY account 5201 (2,000/mo)',
+    dep3Lines.some((l: any) => l.accountCode === '5201' && near(l.debit, 2000)), `lines=${dep3Lines.map((l: any) => `${l.accountCode}:${l.debit}`).join(',')}`);
+  ok('PR-3: uncategorized assets in the SAME run keep the default 5200 (split pairs, one balanced JE)',
+    dep3Lines.some((l: any) => l.accountCode === '5200' && Number(l.debit ?? 0) > 0) && near(dep3Lines.reduce((a: number, l: any) => a + Number(l.debit ?? 0) - Number(l.credit ?? 0), 0), 0),
+    `lines=${dep3Lines.map((l: any) => `${l.accountCode}:${l.debit ?? ''}/${l.credit ?? ''}`).join(',')}`);
+  // (c) ASSET.DISPOSE.gain_loss override (GL-24 flow): rule to 5721, distinct approver, then a disposal's
+  // gain leg re-routes while the 1500/1590 register controls stay pinned.
+  const dspRule = (await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'ASSET.DISPOSE', legOrder: 1, role: 'gain_loss', side: 'CR', accountCode: '5721' })).json;
+  await inj('POST', `/api/ledger/posting-rules/${Number(dspRule.id)}/approve`, mgr);
+  const van = (await inj('GET', '/api/assets', admin)).json.assets?.find((a: any) => a.name === 'PR-3 delivery van');
+  const dsp = (await inj('PATCH', `/api/assets/${van.asset_no}/dispose`, admin, { proceeds: 120000 })).json;
+  const dspLines = await jeLines(dsp.journal_no);
+  ok('PR-3: disposal gain leg follows the approved ASSET.DISPOSE rule (5721); 1500/1590 stay pinned',
+    dspLines.some((l: any) => l.accountCode === '5721' && near(l.credit, 2000)) && dspLines.some((l: any) => l.accountCode === '1500' && near(l.credit, 120000)) && dspLines.some((l: any) => l.accountCode === '1590' && near(l.debit, 2000)),
+    `lines=${dspLines.map((l: any) => l.accountCode).join(',')}`);
+  await inj('PUT', '/api/feature-flags/posting_determination', admin, { enabled: false }); // restore HQ opt-out
+  await db.update(s.accounts).set({ isControl: true, controlSubledger: 'FA' }).where(eq(s.accounts.code, '1500'));
+  // (d) PREPAID.AMORTIZE.expense override is stamped on a new schedule at create (dto account still wins).
+  const ppdRule = (await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PREPAID.AMORTIZE', legOrder: 1, role: 'expense', side: 'DR', accountCode: '5721' })).json;
+  await inj('POST', `/api/ledger/posting-rules/${Number(ppdRule.id)}/approve`, mgr);
+  await inj('POST', '/api/ledger/prepaid', admin, { name: 'PR-3 prepaid (override)', total_amount: 600, months: 6 });
+  const ppdList = (await inj('GET', '/api/ledger/prepaid', admin)).json;
+  ok('PR-3: a new prepaid schedule stamps the approved PREPAID.AMORTIZE override as its expense account',
+    (ppdList.schedules ?? []).some((sch: any) => sch.name === 'PR-3 prepaid (override)' && sch.expense_account === '5721'), `n=${ppdList.count}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) + PR-3 category-grain asset accounts & dispose/prepaid overrides ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);
