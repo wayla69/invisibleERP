@@ -1,4 +1,4 @@
-// Continuous controls monitoring (Platform Phase 19 — B5; GRC-4 disposition + KCI, migration 0336). Detective
+// Continuous controls monitoring (Platform Phase 19 — B5; GRC-4 disposition + KCI, migration 0339). Detective
 // controls that scan the books for red flags — duplicate vendor invoices, duplicate payments, ghost/duplicate
 // vendors, split POs under an approval threshold, weekend/after-hours manual JEs, and dormant-vendor
 // reactivation. Findings are surfaced for a MANAGED disposition (accountable owner + due date + root cause,

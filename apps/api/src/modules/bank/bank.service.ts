@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts, cashMovements, bankDeposits, apPaymentRuns, apPaymentRunLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { postingDefault } from '../ledger/posting-events';
 import { n, fx } from '../../database/queries';
 import { roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
@@ -261,8 +262,8 @@ export class BankService {
     const sourceRef = `STMTLN-${statementLineId}`;
     if (await this.ledger.alreadyPosted('BANKADJ', sourceRef)) return { statement_line_id: statementLineId, already: true };
     const lines = dto.kind === 'interest'
-      ? [{ account_code: bankGl, debit: amt }, { account_code: '4000', credit: amt }]
-      : [{ account_code: '5100', debit: amt }, { account_code: bankGl, credit: amt }];
+      ? [{ account_code: bankGl, debit: amt }, { account_code: (await this.ledger.postingOverrides('BANK.INTEREST', acct.tenantId ?? null)).interest_income ?? postingDefault('BANK.INTEREST', 'interest_income'), credit: amt }]
+      : [{ account_code: (await this.ledger.postingOverrides('BANK.FEE', acct.tenantId ?? null)).fee_expense ?? postingDefault('BANK.FEE', 'fee_expense'), debit: amt }, { account_code: bankGl, credit: amt }];
     const je: any = await this.ledger.postEntry({ date: sl.lineDate, source: 'BANKADJ', sourceRef, tenantId: acct.tenantId ?? null, memo: `Bank ${dto.kind} ${sourceRef}${dto.memo ? ' ' + dto.memo : ''}`, createdBy: user.username, lines, pendingApproval: true });
     await db.update(bankStatementLines).set({ adjustmentJournalNo: je?.entry_no ?? null }).where(eq(bankStatementLines.id, statementLineId));
     return { statement_line_id: statementLineId, journal_no: je?.entry_no ?? null, kind: dto.kind, amount: amt, status: 'PendingApproval', requested_by: user.username };

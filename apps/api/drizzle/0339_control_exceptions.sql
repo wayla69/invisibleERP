@@ -1,4 +1,4 @@
--- 0336 — GRC-4 (GOV-02): Control-Exception Disposition + KCI. Turns the continuous-controls monitor
+-- 0339 — GRC-4 (GOV-02): Control-Exception Disposition + KCI. Turns the continuous-controls monitor
 -- (0092 control_findings) from a review list into a MANAGED continuous-monitoring program: every exception
 -- carries the RCM control it relates to (rcm_ref), an accountable remediation owner + due date, a documented
 -- root cause, and a disposition tracked to closure (open → investigating → remediated | accepted |

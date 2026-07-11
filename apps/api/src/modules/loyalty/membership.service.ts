@@ -90,7 +90,7 @@ export class MembershipService {
     // Fee → deferred revenue (idempotent per membership via the JE dedup on source_ref).
     const je: any = await this.ledger.postEntry({
       source: 'VIP', sourceRef: `VIP-${Number(row.id)}`, tenantId, memo: `VIP membership ${plan.code} member ${dto.member_id}`,
-      createdBy: user.username, lines: [{ account_code: '1000', debit: n(plan.price) }, { account_code: DEFERRED, credit: n(plan.price) }],
+      createdBy: user.username, lines: [{ account_code: '1000', debit: n(plan.price) }, { account_code: (await this.ledger.postingOverrides('MEMBERSHIP.DEFER', tenantId)).deferred ?? DEFERRED, credit: n(plan.price) }],
     });
     // Tier grant — audited like every tier change; the recompute leaves it alone while the membership is
     // Active (see expireLapsed: the sweep expires first, THEN recompute pulls the tier back to earned).
@@ -111,6 +111,8 @@ export class MembershipService {
     const rows = await db.select().from(memberMemberships)
       .where(and(eq(memberMemberships.tenantId, tenantId), sql`${memberMemberships.recognizedMonths} < ${memberMemberships.periodMonths}`));
     let posted = 0, amount = 0;
+    // docs/43 PR-2: both legs follow the tenant posting-rule (MEMBERSHIP.RECOGNIZE) ?? module defaults.
+    const recOvr = await this.ledger.postingOverrides('MEMBERSHIP.RECOGNIZE', tenantId);
     for (const ms of rows) {
       const startMs = new Date(String(ms.startDate) + 'T00:00:00Z').getTime() - 7 * 3600_000;
       const daysSince = Math.floor((Date.now() - startMs) / 86_400_000);
@@ -121,7 +123,7 @@ export class MembershipService {
         if (await this.ledger.alreadyPosted('VIP-REC', `VIP-${Number(ms.id)}:M${k}`)) { continue; }
         await this.ledger.postEntry({
           source: 'VIP-REC', sourceRef: `VIP-${Number(ms.id)}:M${k}`, tenantId, memo: `VIP revenue recognition M${k}/${ms.periodMonths} membership ${Number(ms.id)}`,
-          createdBy: user.username ?? 'system:vip', lines: [{ account_code: DEFERRED, debit: amt }, { account_code: REVENUE, credit: amt }],
+          createdBy: user.username ?? 'system:vip', lines: [{ account_code: recOvr.deferred ?? DEFERRED, debit: amt }, { account_code: recOvr.revenue ?? REVENUE, credit: amt }],
         });
         posted++; amount = r2(amount + amt);
         await db.update(memberMemberships).set({ recognizedMonths: k }).where(eq(memberMemberships.id, Number(ms.id)));

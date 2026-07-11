@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.16 · 2026-07-07** · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company
+**Status: DRAFT v0.17 · 2026-07-11** · *v0.17 (2026-07-11): §5a — new **SoD-Conflict Register & Compensating Controls** screen (`/admin/sod`, permission `users`/`exec`; control **ITGC-AC-22**): a standing dashboard of the company's CURRENT SoD conflicts grouped by rule, plus governed **acceptance** of a residual conflict (mandatory compensating control + owner + expiry, acceptor recorded) and a periodic **re-review** with an expired/overdue detective worklist. Governs (does not change) the preventive block in §2.2.* · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company
 info form (`/setup`); it prints alongside phone in the full tax invoice (ม.86/4) header. Saves immediately
 like phone (not a maker-checker field).* · *v0.15 (2026-07-06): §13 — documented **where the G15 company-profile approval queue lives in the app**: a **"Financial-profile changes pending approval"** card on the **Company Setup** screen (`/setup`), where a **different** exec/approvals user approves/rejects the staged PromptPay/tax-ID change. UI surfacing of an already-shipped control — no new endpoint, no new numbered control.* · *v0.14 (2026-07-06): §13 — a change to the **PromptPay ID** or **tax ID** on the company profile is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve it before it takes effect (self-approval → `SOD_VIOLATION`); all other company-info fields still save immediately, and a no-op never stages (G15; strengthens SoD R02; no new numbered control).* · *v0.13 (2026-07-05): §8 — a bulk master-data import that **sets** a financially-sensitive field (customer/vendor credit limit, vendor payment term, price-list price, promotion discount) is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve before anything is written (self-approval → `SOD_VIOLATION`); ordinary imports are unaffected (audit gaps G5+G8; strengthens SoD R02/R09/R10/R13).* · *v0.12 (2026-07-05): §2.2 — granting an SoD-conflicting set with a justified override is now a two-person maker-checker; it stages a **Pending SoD-exception** request that a **different** admin (≠ requester, ≠ the affected user) must approve/reject (self-approval → `SOD_VIOLATION`), with the who/why/rules recorded in the audit trail (audit gap G11, part b).* · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
@@ -210,6 +210,30 @@ listed for audit history.
 
 [screenshot: User Access Review with certify button]
 
+### 4.1 Access Recertification Campaign — keep/revoke each user in-app (ITGC-AC-21)
+
+For an auditor-grade review, use a **recertification campaign** instead of the blanket
+sign-off. Here you decide **keep or revoke for every user individually**, and a **revoke**
+decision actually removes that user's granted permissions when you certify (closed loop).
+
+**Screen:** `/admin/access-recert` · **Required permission:** `users`
+
+1. Go to **Access Recertification** (`/admin/access-recert`) → **Open campaign** and
+   enter the period (e.g. `2026-Q3`). The system snapshots every user's current access as
+   a keep/revoke worklist.
+2. For each user, click **Keep** (access still appropriate) or **Revoke** (remove their
+   granted access). Every user must be decided.
+3. Click **Certify**. If any line is still undecided you get **ITEMS_PENDING** — finish
+   the worklist first. On certification, each **Revoke** user's permission grants are
+   removed immediately and the line is marked *Revoked*.
+
+**Expected result:** The campaign is certified and frozen (it can no longer be edited);
+each user's keep/revoke decision, reviewer and revocation outcome are retained as
+line-item audit evidence. A revoked user loses their granted access at once.
+
+> The blanket **Certify review** (§4) and CSV export still work for back-compat; the
+> campaign is the stronger, closed-loop control.
+
 ---
 
 ## 5. Segregation of Duties (SoD) conflict report
@@ -241,6 +265,60 @@ duties, so you can remediate. Examples of rules enforced:
 > roles where strict separation matters.
 
 [screenshot: SoD live user conflicts]
+
+---
+
+## 5a. SoD-Conflict Register & Compensating Controls (ITGC-AC-22)
+
+**Screen:** `/admin/sod` · **Required permission:** `users` or `exec`
+
+The report above (§5) shows conflicts; the **register** is where you *govern* the
+ones you cannot immediately remove. Sometimes a small team genuinely needs one
+person to hold two conflicting duties for a while — that residual risk must be
+**consciously accepted** with a **compensating control**, an **owner** and an
+**expiry**, and then **re-reviewed periodically**. This screen is that standing
+governance layer. (It does **not** change the preventive block in §2.2 — a
+conflicting *grant* is still stopped at save time.)
+
+Three tabs:
+
+1. **Current conflicts** — a live scan of **every** user in your company, grouped
+   **by rule**, showing who holds both sides. A row is either *Ungoverned* (no
+   decision yet) or *Accepted* (governed, see below). The KPI strip shows the total
+   users, users with conflicts, and how many conflicts are still **ungoverned**.
+2. **Acceptance register** — every conflict your company has formally accepted, with
+   its compensating control, owner, expiry, who accepted it and when it was last
+   reviewed.
+3. **Expired / overdue** — the detective worklist: acceptances that are **past their
+   expiry date** or **overdue for re-review** (more than ~90 days since the last
+   review). These need a fresh decision.
+
+### To accept a conflict (record a compensating control)
+
+1. On **Current conflicts**, find the user under the offending rule and click
+   **Accept risk**.
+2. Enter the **compensating control** (e.g. "Monthly independent review of every PO
+   this user approves, by the Controller"), the **owner** accountable for it, and an
+   **expiry date**. A note is optional. All three are **mandatory** — saving without
+   them is rejected (`COMPENSATING_CONTROL_REQUIRED`).
+3. Save. The acceptance is recorded with **your name** as the acceptor, and the
+   dashboard row flips to **Accepted**.
+
+> You can only accept a conflict a user **actually holds** — the screen will refuse
+> a stale/phantom acceptance (`NO_SUCH_CONFLICT`).
+
+### To re-review an acceptance
+
+On **Acceptance register** or **Expired / overdue**, click **Re-review** on the row,
+optionally extend the expiry, and save. This stamps the **last-reviewed** date and
+clears it from the overdue worklist. Re-review each acceptance at least **quarterly**
+— an expired or overdue acceptance is a finding for the auditor.
+
+**Expected result:** every conflicting duty in the company is either removed,
+ or consciously accepted with a documented compensating control, an owner, an
+expiry and a live re-review trail.
+
+[screenshot: SoD conflict register]
 
 ---
 
@@ -736,6 +814,42 @@ Six tabs:
 
 **Expected result:** the ELC evidence that used to require raw API calls is now captured and reviewed from
 one screen; the Overview tab's alerts mirror the weekly `governance_readiness` monitor.
+
+---
+
+## 16. Control Console — RCM + test-of-effectiveness evidence (ITGC-MON-01)
+
+**Where:** the **คอนโซลการควบคุม — RCM (Control Console)** screen (`/controls/rcm`, nav → **Controls**), for
+the compliance / audit / exec function (`exec` or `users`). This is the single auditor-facing view of the
+whole control environment — the ~240-control Risk & Control Matrix (RCM), each control's status, and its
+test-of-effectiveness (ToE) results — that a NASDAQ audit team asks for. The catalogue is the *same* source
+as `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` (both are generated from `compliance/build_rcm.py`), so what you
+see in-app can never drift from the spreadsheet.
+
+**Browse the catalogue.** The top cards show the census (total / Implemented / Partial / Gap). The table lists
+every control with its ID, family, category, risk, owner and status. Filter by **สายงาน (family)** and
+**สถานะ (status)**, or search by control ID / risk / description.
+
+**Open a control.** Click any row to open the detail drawer. It shows all 17 RCM fields — risk, assertion(s),
+control description, prevent/detect, nature, frequency, owner, COSO principle, FSLI, the system / code
+reference, the Test of Design (TOD), the Test of Operating Effectiveness (TOE), and the key evidence — plus:
+- **ประวัติการทดสอบ ToE (ToE test-run history)** — every recorded test-run for this control (result, harness,
+  checks passed/total, evidence reference, who recorded it, when).
+- **สิ่งที่ตรวจพบจากการเฝ้าระวัง (CCM findings)** — for monitoring controls, any open continuous-controls
+  findings.
+- **หลักฐานจากบันทึกตรวจสอบ (audit-log evidence)** — recent tamper-evident audit-log rows tied to the control.
+
+**Record a ToE run.** In the drawer's **บันทึกผลการทดสอบ ToE** form, pick a result (**ผ่าน / ไม่ผ่าน /
+ไม่เกี่ยวข้อง** = pass / fail / na), the harness or method used (e.g. `compliance`, `basics`, `manual`), the
+checks passed / total, an evidence reference (a CI-run link or document id), and notes — then **บันทึกผลการ
+ทดสอบ (Record test-run)**. The run appears immediately as the control's **latest ToE**.
+
+**Isolation & gating:** the console is gated to `exec` / `users`; a role without them cannot open it or record
+a run (**403**). Recorded test-runs are **tenant-isolated** — one company can never see another's ToE evidence.
+
+**Expected result:** an auditor can browse the entire control inventory, see which controls have passing ToE
+and pull the underlying evidence, and management can record its ongoing self-monitoring of control operating
+effectiveness — all in-product.
 
 ---
 
