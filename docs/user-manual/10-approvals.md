@@ -1,6 +1,6 @@
 # 10 · Approvals
 
-**Status: DRAFT v0.4 · 2026-07-10** · *v0.4 (2026-07-10): documented **batch approve/reject** on the **Pending Approvals** screen (`/approvals`) — an approver can tick several queued items and clear them in one action (§4e). Each ticked item still fires its **own** maker-checker endpoint, so its control and SoD (approver ≠ requester) are enforced per item exactly as a one-by-one approval — this is a UX convenience, **no new endpoint and no new numbered control**.* · *v0.3 (2026-07-06): documented **where these controls are surfaced in the app** — the workflow readiness check now appears as a **"Control readiness"** tab on the **Workflow Approvals** screen (`/workflow`), and the two detective exception reports (**"Voids / refunds"** G14, **"Voided tax invoices"** G16) appear as read-only review cards on the **Pending Approvals** screen (`/approvals`). UI surfacing of already-shipped checks — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **workflow readiness check** (`GET /api/workflow/readiness`, `masterdata`/`approvals`/`exec`) — a go-live detective/config control that reports which engine-wired document types (PR/PO/BUDGET/PMR/BQR) lack an active definition and would therefore auto-approve; clarified that a document type with no definition auto-approves. No new numbered control.*
+**Status: DRAFT v0.5 · 2026-07-11** · *v0.5 (2026-07-11): documented the **Continuous controls monitoring** screen (`/controls`, §4d-bis) — the six-detector exception scanner (duplicate invoice/payment, ghost/duplicate vendor, split PO, weekend manual JE, dormant-vendor reactivation) with **managed disposition** (owner + due date + root cause, tracked to closure) and the **KCI dashboard** (open / overdue / MTTR + by-detector/severity/family). New RCM control **GOV-02**, migration `0336`.* · *v0.4 (2026-07-10): documented **batch approve/reject** on the **Pending Approvals** screen (`/approvals`) — an approver can tick several queued items and clear them in one action (§4e). Each ticked item still fires its **own** maker-checker endpoint, so its control and SoD (approver ≠ requester) are enforced per item exactly as a one-by-one approval — this is a UX convenience, **no new endpoint and no new numbered control**.* · *v0.3 (2026-07-06): documented **where these controls are surfaced in the app** — the workflow readiness check now appears as a **"Control readiness"** tab on the **Workflow Approvals** screen (`/workflow`), and the two detective exception reports (**"Voids / refunds"** G14, **"Voided tax invoices"** G16) appear as read-only review cards on the **Pending Approvals** screen (`/approvals`). UI surfacing of already-shipped checks — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **workflow readiness check** (`GET /api/workflow/readiness`, `masterdata`/`approvals`/`exec`) — a go-live detective/config control that reports which engine-wired document types (PR/PO/BUDGET/PMR/BQR) lack an active definition and would therefore auto-approve; clarified that a document type with no definition auto-approves. No new numbered control.*
 
 This chapter is for **anyone who approves documents** — managers, financial
 controllers, procurement leads. It covers the approvals inbox, approving and
@@ -185,6 +185,40 @@ shows its **age in days**. The response rolls up the `count`, the
 **control finding** — either a transaction stalled before it can take effect, or
 a control quietly bypassed because no one chased the second sign-off.
 (Control **GOV-01**, COSO *Monitoring*.)
+
+---
+
+## 4d-bis. Continuous controls monitoring — exceptions & KCIs (`/controls`)
+
+Where **Pending Approvals** watches items *awaiting* a sign-off, the **Controls
+monitoring** screen (`/controls`, gated `exec`/`users`/`creditors`) scans the books
+after the fact for **red-flag exceptions** and tracks each one to closure.
+
+**Run scan** upserts findings from six detectors, each tagged with the **RCM control**
+it relates to:
+
+| Detector | What it flags | RCM |
+| --- | --- | --- |
+| Duplicate vendor invoice | Same vendor + invoice no. booked more than once | EXP-10 |
+| Possible duplicate payment | Same vendor + amount repeated (possible double-pay) | EXP-01 |
+| Ghost / duplicate vendor | Two vendors sharing one tax ID (grouped on *decrypted* values) | EXP-02 |
+| Split PO | ≥2 non-Draft POs to one vendor within 7 days, each below the THB 50,000 approval ceiling but summing over it | EXP-02 |
+| Weekend manual JE | A manual journal entry dated on a Saturday/Sunday | GL-05 |
+| Dormant-vendor reactivation | A vendor with a >180-day gap between transactions that suddenly transacts again | EXP-05 |
+
+Re-scanning is **idempotent** (a stable fingerprint per finding), so a recurring
+issue is never duplicated and an already-dispositioned finding is never reset.
+
+**Disposition** each finding (the **Findings** tab → *Disposition*): assign an
+accountable **owner**, a remediation **due date** and a documented **root cause**, and
+move it through *open → investigating → remediated | accepted | false positive*. A
+closing disposition stamps **who/when** closed it, so every exception is tracked to an
+accountable close.
+
+The **KCI dashboard** tab is the management scorecard: **open exceptions**, an
+**overdue** count (open past their due date), the **mean time-to-remediate**, and
+breakdowns **by detector**, **by severity** and **by RCM control family**. The monitor
+is **read-only** — it posts nothing to the GL. (Control **GOV-02**, COSO *Monitoring*.)
 
 ---
 

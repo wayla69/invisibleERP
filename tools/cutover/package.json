@@ -103,6 +103,7 @@
     "channel": "tsx src/channel.ts",
     "workflow": "tsx src/workflow.ts",
     "compliance": "tsx src/compliance.ts",
+    "control-exceptions": "tsx src/control-exceptions.ts",
     "cookie-auth": "tsx src/cookie-auth.ts",
     "pos-pin": "tsx src/pos-pin.ts",
     "async-jobs": "tsx src/async-jobs.ts",
