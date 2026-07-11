@@ -178,6 +178,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.inventory': { th: 'สินค้าคงคลัง', en: 'Inventory' },
   'nav.stocktake': { th: 'ตรวจนับสต๊อก', en: 'Stocktake' },
   'nav.stock_adjustment': { th: 'อนุมัติปรับสต๊อก', en: 'Approve Stock Adjustment' },
+  'nav.cycle_counts': { th: 'ตรวจนับตามรอบ', en: 'Cycle Counts' },
   'nav.waste': { th: 'ของเสีย / ทิ้ง', en: 'Waste & Disposals' },
   'nav.receiving': { th: 'รับสินค้า (GR)', en: 'Goods Receipt (GR)' },
   'nav.goods_issue': { th: 'เบิก / โอนสินค้า', en: 'Issue & Transfer' },
