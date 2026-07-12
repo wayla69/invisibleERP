@@ -7,10 +7,10 @@
 | Process ID | PN-32-SVC |
 | Process owner | `<<Service Manager>>` |
 | Approver | `<<CFO>>` |
-| Version | **0.2 DRAFT** |
+| Version | **0.3 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | SVC-01; SVC-04 (support cases / Email-to-Case completeness); SoD (requester ≠ authorizer) |
+| Related RCM controls | SVC-01; SVC-04 (support cases / Email-to-Case completeness); SVC-05 (case SLA entitlement / breach tracking); SoD (requester ≠ authorizer) |
 | Related policy | `compliance/policies/03-delegation-of-authority.md` |
 
 ## 2. Purpose
@@ -204,9 +204,38 @@ to the GL (v1).
 Email-to-Case new-case-on-unmatched, thread-token + contact threading, Message-ID idempotency, reopen-on-reply,
 `UNKNOWN_TENANT`, illegal-transition rejects, and RLS tenant isolation).
 
+## 10c. Case Entitlements & SLA breach tracking (SVC-5 · control SVC-05)
+
+A support case (§10b) carries a **service-level entitlement** so its commitments are measured and breaches surfaced
+(the SVC-05 completeness control).
+
+**Entitlement (`service_cases` SLA columns, migration 0351).** Every case has an `sla_tier`
+(Standard / Bronze / Silver / Gold / Platinum, mirroring the §7 / #666 contract SLA tiers). At open — and whenever
+the entitlement is (re)set via `POST /api/service/cases/:id/entitlement` — the tier's **first-response** and
+**resolution** targets (hours) are **computed** into `first_response_due_at` and `resolution_due_at`, anchored on
+the case's open time. Re-setting the entitlement recomputes the due times off the *original* open time and
+re-evaluates the breach flags. Email-opened cases (§10b) default to the **Standard** entitlement, so no case is
+untracked. Tiers → (first-response h / resolution h): Platinum 1/4, Gold 2/8, Silver 4/24, Bronze 8/72,
+Standard 8/48.
+
+**Breach flags.** The **first outbound reply** (`…/reply`) is the first response: it stamps `first_responded_at`
+and sets `response_breached` = responded *after* `first_response_due_at`. Resolving a case stamps
+`resolution_breached` = resolved *after* `resolution_due_at`. Both are snapshots recorded on the case.
+
+**Breach worklist (detective — the SVC-05 population).** `GET /api/service/cases/sla/breaches` lists **open**
+cases (new/open/pending) whose first-response (no response yet, past due) or resolution (past due, not resolved)
+SLA is **currently breached**, each tagged `breach_kind` = `response` / `resolution` / `both`. A case that has been
+responded-to / resolved drops out of the worklist. This is the population a service manager actions so no
+commitment lapses unseen. Reads gate `exec`/`marketing`; RLS-scoped; posts no GL (v1).
+
+**Verification.** `tools/cutover/src/service.ts` exercises the SVC-5 surface (tier→due-time computation, entitlement
+recompute off open, first-response stamp + breach, resolution breach, the breach worklist appear/drop, RLS
+isolation).
+
 ## 11. Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-07-11 | `<<author>>` | Initial narrative — SVC-2 Warranty & Entitlement registry (warranty terms, installed base, warranty claims) with control SVC-01 (coverage-authorization maker-checker) + expiring / coverage-exceptions detective reads. Migration 0329; harness `tools/cutover/src/warranty.ts` (20 checks). |
+| 0.3 DRAFT | 2026-07-12 | `<<author>>` | Added **§10c — Case Entitlements & SLA breach tracking (SVC-5, control SVC-05, migration 0351)**: the `service_cases` object gains an SLA `sla_tier` whose first-response + resolution targets are computed into `first_response_due_at`/`resolution_due_at` at open and on `POST …/cases/:id/entitlement` (recomputed off the original open time); the first reply stamps `first_responded_at` + `response_breached`, resolve stamps `resolution_breached`; and `GET …/cases/sla/breaches` is the detective worklist of open past-due cases (`breach_kind` response/resolution/both). Additive columns on the RLS-scoped `service_cases`; harness SVC-5 checks. |
 | 0.2 DRAFT | 2026-07-11 | `<<author>>` | Added **§10b — Support Cases & Email-to-Case (SVC-4, control SVC-04, migration 0350)**: the `service_cases` object with a governed status lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee/CRM-contact link, the append-only `case_email_messages` trail (Message-ID dedupe), and the public HMAC-authenticated Email-to-Case webhook that threads a reply onto its case (thread token → sender's open case) or opens a new case so no inbound email is dropped. Added the case + inbound error-code rows. Harness `tools/cutover/src/service.ts` (SVC-4 checks). |
