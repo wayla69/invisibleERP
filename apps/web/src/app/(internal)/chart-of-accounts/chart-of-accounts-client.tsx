@@ -58,6 +58,8 @@ type Row = {
   isPostable: boolean;
   requireDimension: Record<string, boolean> | null;
   active: boolean;
+  cfBucket: string | null;
+  isCurrent: boolean | null;
 };
 
 type CoaResponse = { accounts: RawAccount[]; count?: number; source?: string; industry_scoped?: boolean };
@@ -132,6 +134,8 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
         isPostable: c?.isPostable ?? true,
         requireDimension: (c?.requireDimension ?? r.requireDimension ?? null) as Record<string, boolean> | null,
         active: activeRaw === false || activeRaw === 'false' ? false : true,
+        cfBucket: c?.cfBucket ?? null,
+        isCurrent: c?.isCurrent ?? null,
       };
     });
   }, [showAll, canonQ.data, overlayQ.data]);
@@ -421,6 +425,13 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
   const [name, setName] = useState(account.name);
   const [nameTh, setNameTh] = useState(account.nameTh ?? '');
   const [postable, setPostable] = useState(account.isPostable);
+  // Backfill classification on an EXISTING account (docs/43 PR-8 added the columns; create-only until now).
+  // '' = auto (fallback chain) — sending null clears an earlier declaration back to auto.
+  const cf0 = account.cfBucket ?? '';
+  const cur0 = account.isCurrent === true ? 'true' : account.isCurrent === false ? 'false' : '';
+  const [cfBucket, setCfBucket] = useState(cf0);
+  const [isCurrent, setIsCurrent] = useState(cur0);
+  const isBs = account.type === 'Asset' || account.type === 'Liability' || account.type === 'Equity';
   const save = useMutation({
     mutationFn: () =>
       api(`/api/ledger/accounts/${account.code}`, {
@@ -429,6 +440,8 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
           ...(name.trim() && name !== account.name ? { name: name.trim() } : {}),
           ...(nameTh !== (account.nameTh ?? '') ? { nameTh } : {}),
           ...(postable !== account.isPostable ? { isPostable: postable } : {}),
+          ...(cfBucket !== cf0 ? { cfBucket: cfBucket || null } : {}),
+          ...(isCurrent !== cur0 ? { isCurrent: isCurrent === '' ? null : isCurrent === 'true' } : {}),
         }),
       }),
     onSuccess: () => { notifySuccess(t('fnx.coa.saved', { code: account.code })); onSaved(); },
@@ -452,6 +465,26 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
             <input type="checkbox" checked={postable} onChange={(e) => setPostable(e.target.checked)} />
             {t('fnx.coa.f_postable')}
           </label>
+          {isBs && (
+            <>
+              <FormField label={t('fnx.coa.f_cf_bucket')} htmlFor="coa-e-cf">
+                <select id="coa-e-cf" className={SELECT_CLS} value={cfBucket} onChange={(e) => setCfBucket(e.target.value)}>
+                  <option value="">{t('fnx.coa.f_cf_auto')}</option>
+                  <option value="operating">{t('fnx.coa.cf_operating')}</option>
+                  <option value="investing">{t('fnx.coa.cf_investing')}</option>
+                  <option value="financing">{t('fnx.coa.cf_financing')}</option>
+                  <option value="addback">{t('fnx.coa.cf_addback')}</option>
+                </select>
+              </FormField>
+              <FormField label={t('fnx.coa.f_is_current')} htmlFor="coa-e-cur">
+                <select id="coa-e-cur" className={SELECT_CLS} value={isCurrent} onChange={(e) => setIsCurrent(e.target.value)}>
+                  <option value="">{t('fnx.coa.f_cf_auto')}</option>
+                  <option value="true">{t('fnx.coa.cur_current')}</option>
+                  <option value="false">{t('fnx.coa.cur_noncurrent')}</option>
+                </select>
+              </FormField>
+            </>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>

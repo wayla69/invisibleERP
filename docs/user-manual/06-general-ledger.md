@@ -1,6 +1,10 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.13 · 2026-07-11** · *v0.13 (2026-07-11): the **กฎการลงบัญชี (Posting Rules)** screen
+**Status: DRAFT v0.14 · 2026-07-12** · *v0.14 (2026-07-12): the /chart-of-accounts **edit** dialog now
+carries the cash-flow bucket and current/non-current fields too, so an EXISTING balance-sheet account can be
+backfilled (create-only before; "อัตโนมัติ" clears back to the fallback chain); the indirect cash-flow screen
+shows a warning banner listing any account codes that fell through to the type fallback
+(`unclassified_accounts`), linking to the chart to fix them.* · *v0.13 (2026-07-11): the **กฎการลงบัญชี (Posting Rules)** screen
 (`/setup/posting-rules`) becomes a four-tab workspace — **ทะเบียนเหตุการณ์** (the full event registry: every
 event/role with its default account, override tier and your company's current override, searchable and
 filterable by tier, with a ตั้งค่า shortcut on overridable roles), **ตั้งค่า & ทดลอง** (the per-event editor
@@ -694,6 +698,14 @@ closing entries are excluded** so they don't distort the period.
 > **Note — it always ties out:** the three sections together equal the change in the
 > cash accounts (1000 / 1010 / 1020). The response carries a `reconciled` flag; if it
 > ever shows `false`, an account is mis-classified — raise it with finance.
+
+> **Unclassified accounts are called out on screen.** If a balance-sheet account has no
+> declared cash-flow bucket and isn't in the built-in map, the indirect statement still
+> buckets it by its account type — but the screen shows a **warning banner listing those
+> account codes** so the classification gets fixed rather than silently guessed. Declare
+> the bucket (and the current/non-current split) on **ผังบัญชี** (`/chart-of-accounts`) —
+> both the **create** and the **edit** dialog carry the two fields, so an existing account
+> can be backfilled at any time (Admin/HQ; leave a field on "อัตโนมัติ" to keep the fallback).
 
 ### Statement of Cash Flows (direct method)
 
