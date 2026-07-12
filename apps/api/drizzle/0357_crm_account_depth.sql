@@ -1,4 +1,4 @@
--- 0356_crm_account_depth — CRM-7 (B2B Account/Contact 360 depth, control REV-24). Net-new depth on the
+-- 0357_crm_account_depth — CRM-7 (B2B Account/Contact 360 depth, control REV-24). Net-new depth on the
 -- REV-17 CRM pipeline spine (no change to the lead→convert→opportunity paths). Three additions:
 --   • crm_accounts.parent_account_id — a self-referential PARENT link so a company can be modelled as a
 --     hierarchy (parent ⋈ subsidiaries); the set-parent endpoint rejects cycles (HIERARCHY_CYCLE) and the

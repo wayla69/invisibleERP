@@ -2491,7 +2491,14 @@
       "idx": 356,
       "version": "7",
       "when": 2023820000321,
-      "tag": "0356_crm_account_depth",
+      "tag": "0356_treasury_hedge_register",
+      "breakpoints": true
+    },
+    {
+      "idx": 357,
+      "version": "7",
+      "when": 2023820000322,
+      "tag": "0357_crm_account_depth",
       "breakpoints": true
     }
   ]
