@@ -5,10 +5,10 @@
 //     MATERIAL financing benefit, the promised consideration is adjusted to its cash-selling-price PRESENT
 //     VALUE and the difference (face − PV) is recognized as interest, UNWOUND over the contract using the
 //     effective-interest method (the same EIR primitive the lease engine uses, LSE-01). Two directions:
-//       • advance (customer PREPAYS)   — the financing benefit unwinds as financing interest INCOME (4650),
-//                                        releasing a slice of the contract liability: Dr 2410 / Cr 4650.
-//       • arrears (deferred payment)   — the entity finances the customer; the financing charge accretes the
-//                                        contract asset / receivable against the net interest line: Dr 1265 / Cr 5900.
+//       • advance (customer PREPAYS)   — the entity BORROWS from the customer; the financing charge accretes
+//                                        the contract liability from PV toward face as interest EXPENSE (5900): Dr 5900 / Cr 2410.
+//       • arrears (deferred payment)   — the entity LENDS to the customer; the financing charge accretes the
+//                                        contract asset / receivable from PV toward face as interest INCOME (4650): Dr 1265 / Cr 4650.
 //     The DISCOUNT RATE is a management judgement → maker-checker (REV-27): the maker records+rates the
 //     component (rows land 'Pending', drive NOTHING), a DIFFERENT user approves it, and only an APPROVED
 //     component may post its interest unwind. All GL routes through LedgerService.postEntry (PERIOD_LOCKED +

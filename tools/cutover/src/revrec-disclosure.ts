@@ -7,8 +7,9 @@
  *   • Financing component (§60-65): the transaction price is discounted to PV and the interest is UNWOUND by
  *     the effective-interest method so Σ interest == face − PV; the DISCOUNT RATE is a maker-checker judgement
  *     (the maker may NOT approve their own → 403 SOD_SELF_APPROVAL; run-financing on an unapproved component →
- *     FINANCING_NOT_APPROVED; a Pending component posts nothing). advance (prepay) posts Dr 2410 / Cr 4650
- *     interest income; arrears (deferred) posts Dr 1265 / Cr 5900. Idempotent (a re-run posts nothing).
+ *     FINANCING_NOT_APPROVED; a Pending component posts nothing). advance (prepay → entity borrows) posts
+ *     Dr 5900 / Cr 2410 (interest expense, contract liability accretes); arrears (deferred → entity lends)
+ *     posts Dr 1265 / Cr 4650 (interest income, contract asset accretes). Idempotent (a re-run posts nothing).
  *   • Disclosure pack (§120): the contract-liability rollforward reconciles to GL 2410/1265
  *     (opening + billings − recognized = closing = GL); the RPO/backlog = Σ unrecognized allocated price,
  *     banded by expected timing.
@@ -82,7 +83,7 @@ async function main() {
   const creditBal = (b: number) => round4(-b);
   const sumInterest = (sched: any[]) => round4(sched.reduce((a: number, x: any) => a + Number(x.interest_amount), 0));
 
-  // ── Scenario A — significant financing component, ADVANCE (customer prepays → interest income 4650) ──────────
+  // ── Scenario A — significant financing component, ADVANCE (customer prepays → entity borrows → interest expense 5900, liability 2410 accretes) ──────────
   // 1200 billed up-front (Dr 1100 / Cr 2410 1200). Financing: 12% p.a. (1%/mo) over 12 months on the 1200 face.
   const rate = 12, periods = 12, faceA = 1200;
   const pvA = round4(faceA / Math.pow(1 + rate / 100 / 12, periods));   // = 1200 / 1.01^12
@@ -109,16 +110,18 @@ async function main() {
   const aprA = await inj('POST', `/api/revenue/contracts/${idA}/financing-component/approve`, exec2, {});
   ok('REV-27: a different checker approves the discount rate → Approved', aprA.json.status === 'Approved' && aprA.json.approved_by === 'exec2' && aprA.json.approved_periods === periods, JSON.stringify(aprA.json));
 
-  const inc4650Before = creditBal(await bal(exec1, '4650'));
+  const exp5900Before = await bal(exec1, '5900');
+  const liab2410Before = creditBal(await bal(exec1, '2410'));
   const runA = await inj('POST', `/api/revenue/contracts/${idA}/run-financing`, exec1, { period: '2075-12' });
   ok('REV-27: run-financing posts the full unwind (12 periods, Σ interest == face − PV)', runA.json.posted_count === periods && near(runA.json.total_interest, finA), JSON.stringify({ n: runA.json.posted_count, t: runA.json.total_interest, exp: finA }));
-  ok('REV-27: advance case posts financing INTEREST INCOME to 4650 (Dr 2410 / Cr 4650)', near(creditBal(await bal(exec1, '4650')) - inc4650Before, finA), `Δ4650=${(creditBal(await bal(exec1, '4650')) - inc4650Before).toFixed(4)}`);
+  ok('REV-27: advance case posts financing INTEREST EXPENSE to 5900 (Dr 5900 / Cr 2410)', near((await bal(exec1, '5900')) - exp5900Before, finA), `Δ5900=${((await bal(exec1, '5900')) - exp5900Before).toFixed(4)}`);
+  ok('REV-27: advance case accretes the contract liability 2410 (Cr 2410 grows toward face)', near(creditBal(await bal(exec1, '2410')) - liab2410Before, finA), `Δ2410=${(creditBal(await bal(exec1, '2410')) - liab2410Before).toFixed(4)}`);
 
   // Idempotent: a re-run posts nothing more.
   const runA2 = await inj('POST', `/api/revenue/contracts/${idA}/run-financing`, exec1, { period: '2075-12' });
   ok('REV-27: run-financing is idempotent (re-run posts 0)', runA2.json.posted_count === 0, JSON.stringify({ n: runA2.json.posted_count }));
 
-  // ── Scenario B — significant financing component, ARREARS (deferred payment → interest 5900) ─────────────────
+  // ── Scenario B — significant financing component, ARREARS (deferred payment → entity lends → interest income 4650, contract asset 1265 accretes) ─────────────────
   const faceB = 1000, periodsB = 6;
   const pvB = round4(faceB / Math.pow(1 + rate / 100 / 12, periodsB));
   const finB = round4(faceB - pvB);
@@ -128,11 +131,11 @@ async function main() {
   ok('REV-27: arrears component discounts to PV + Σ interest = face − PV', near(setB.json.present_value, pvB) && near(setB.json.financing_total, finB), JSON.stringify({ pv: setB.json.present_value, fin: setB.json.financing_total, expPv: pvB }));
   await inj('POST', `/api/revenue/contracts/${idB}/financing-component/approve`, exec2, {});
   const asset1265Before = await bal(exec1, '1265');
-  const int5900Before = creditBal(await bal(exec1, '5900'));
+  const inc4650Before = creditBal(await bal(exec1, '4650'));
   const runB = await inj('POST', `/api/revenue/contracts/${idB}/run-financing`, exec1, { period: '2076-12' });
   ok('REV-27: arrears run posts 6 periods, total interest = face − PV', runB.json.posted_count === periodsB && near(runB.json.total_interest, finB), JSON.stringify({ n: runB.json.posted_count, t: runB.json.total_interest }));
   ok('REV-27: arrears accretes the contract asset 1265 (Dr 1265)', near((await bal(exec1, '1265')) - asset1265Before, finB), `Δ1265=${((await bal(exec1, '1265')) - asset1265Before).toFixed(4)}`);
-  ok('REV-27: arrears books the financing charge to the net interest line 5900 (Cr 5900)', near(creditBal(await bal(exec1, '5900')) - int5900Before, finB), `Δ5900=${(creditBal(await bal(exec1, '5900')) - int5900Before).toFixed(4)}`);
+  ok('REV-27: arrears books the financing INTEREST INCOME to 4650 (Cr 4650)', near(creditBal(await bal(exec1, '4650')) - inc4650Before, finB), `Δ4650=${(creditBal(await bal(exec1, '4650')) - inc4650Before).toFixed(4)}`);
 
   // A second financing component on the same contract is rejected.
   const dup = await inj('POST', `/api/revenue/contracts/${idB}/financing-component`, exec1, { discount_rate_pct: rate, periods: periodsB, direction: 'arrears' });

@@ -208,10 +208,10 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
   'REVENUE.RECOGNIZE': { name: 'Revenue recognized',           description: 'Deferred → earned per schedule (per-schedule accounts already supported)', wired: false, roles: {
     revenue: r(CR, '4300', 'free', 'Recognized revenue') } },
   // ── TFRS 15 significant financing component (§60-65, REV-27) ──
-  'REVFIN.INCOME':    { name: 'Financing component — interest income', description: 'Customer PREPAYS (advance): the significant-financing benefit unwinds as financing interest income, releasing a slice of the contract liability (Dr 2410 / Cr 4650) — REV-27', wired: true, roles: {
-    deferred_revenue: r(DR, '2410', 'pinned', 'Contract liability / deferred revenue (REV-19/24 tie)'), interest_income: r(CR, '4650', 'free', 'Significant financing component interest income') } },
-  'REVFIN.EXPENSE':   { name: 'Financing component — interest charge', description: 'Deferred payment (arrears): the entity finances the customer; the financing charge accretes the contract asset/receivable against the net interest line (Dr 1265 / Cr 5900) — REV-27', wired: true, roles: {
-    contract_asset: r(DR, '1265', 'pinned', 'Contract asset / unbilled receivable (REV-24 tie)'), interest: r(CR, '5900', 'free', 'Interest (net) — financing charge on the customer receivable') } },
+  'REVFIN.INCOME':    { name: 'Financing component — interest income', description: 'Deferred payment (arrears): the entity finances the customer; interest income accretes the contract asset (Dr 1265 / Cr 4650) — REV-27 / TFRS 15 §60-65', wired: true, roles: {
+    contract_asset: r(DR, '1265', 'pinned', 'Contract asset / unbilled receivable (REV-24 tie)'), interest_income: r(CR, '4650', 'free', 'Significant financing component interest income') } },
+  'REVFIN.EXPENSE':   { name: 'Financing component — interest charge', description: 'Customer PREPAYS (advance): the significant-financing charge accretes the contract liability as interest expense (Dr 5900 / Cr 2410) — REV-27 / TFRS 15 §60-65', wired: true, roles: {
+    interest_expense: r(DR, '5900', 'free', 'Interest expense — financing charge on the customer prepayment'), contract_liability: r(CR, '2410', 'pinned', 'Contract liability / deferred revenue (REV-19/24 tie)') } },
   'MEMBERSHIP.DEFER': { name: 'Membership sold (deferred)',    description: 'VIP membership fee into contract liability', wired: true, roles: {
     deferred: r(CR, '2410', 'free', 'Contract liability / deferred revenue') } },
   'MEMBERSHIP.RECOGNIZE': { name: 'Membership recognized',     description: 'Membership revenue earned over the term', wired: true, roles: {

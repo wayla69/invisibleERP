@@ -97,7 +97,7 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '1610', name: 'Net Investment in Lease (Lease Receivable)', type: 'Asset' }, // เงินลงทุนสุทธิในสัญญาเช่า/ลูกหนี้ตามสัญญาเช่า — finance-lease receivable (lessor); ties to Σ lessor_leases.receivable_balance
   { code: '4600', name: 'Finance Lease Interest Income', type: 'Revenue' },   // ดอกเบี้ยรับตามสัญญาเช่าการเงิน — interest income unwound on the net investment (lessor finance lease)
   { code: '4610', name: 'Operating Lease Rental Income', type: 'Revenue' },   // รายได้ค่าเช่าตามสัญญาเช่าดำเนินงาน — straight-line rental income (lessor operating lease)
-  { code: '4650', name: 'Significant Financing Component Interest Income', type: 'Revenue' }, // ดอกเบี้ยรับจากองค์ประกอบทางการเงินที่มีนัยสำคัญ (TFRS 15 §60-65) — financing benefit unwound when a customer PREPAYS (Dr 2410 / Cr 4650, REV-27); the deferred-payment (entity finances the customer) case reuses 5900 Interest Expense
+  { code: '4650', name: 'Significant Financing Component Interest Income', type: 'Revenue' }, // ดอกเบี้ยรับจากองค์ประกอบทางการเงินที่มีนัยสำคัญ (TFRS 15 §60-65) — interest income when the entity FINANCES the customer (deferred payment / arrears): the contract asset accretes from PV toward face (Dr 1265 / Cr 4650, REV-27); the customer-PREPAYS (advance) case is interest expense and reuses 5900 (Dr 5900 / Cr 2410)
 
   // Landed-cost accrual (INV-1, COST-01) — freight/duty/insurance/broker payable, credited when a landed-cost
   // voucher capitalises those charges into inventory unit cost (Dr 1200 / Dr 5500 variance / Cr 2010).

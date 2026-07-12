@@ -11,16 +11,19 @@ import type { JwtUser } from '../../common/decorators';
 // When the TIMING of payment gives the customer or the entity a MATERIAL financing benefit, the promised
 // consideration is adjusted to its cash-selling-price PRESENT VALUE, and the difference (face − PV) is
 // recognized as interest UNWOUND over the contract by the effective-interest method — the SAME EIR primitive
-// the lease engine uses (leases.service.ts presentValue + periodic interest accrual). Two directions:
-//   • advance (customer PREPAYS)  — the financing benefit unwinds as financing interest INCOME (4650),
-//                                   releasing a slice of the contract liability: Dr 2410 / Cr 4650.
-//   • arrears (deferred payment)  — the entity finances the customer; the financing charge accretes the
-//                                   contract asset/receivable against the net interest line: Dr 1265 / Cr 5900.
+// the lease engine uses (leases.service.ts presentValue + periodic interest accrual). Two directions
+// (TFRS 15 / IFRS 15 §60-65; Examples 26 & 29):
+//   • advance (customer PREPAYS)  — the entity has effectively BORROWED from the customer, so it recognizes
+//                                   interest EXPENSE (5900) and the contract liability ACCRETES from PV toward
+//                                   face: Dr 5900 / Cr 2410. (IFRS 15 Example 29.)
+//   • arrears (deferred payment)  — the entity effectively LENDS to the customer, so it recognizes interest
+//                                   INCOME (4650) and the contract asset/receivable ACCRETES from PV toward
+//                                   face: Dr 1265 / Cr 4650. (IFRS 15 Example 26.)
 // The DISCOUNT RATE is a management JUDGEMENT and IS the control (an aggressive/omitted rate mis-states the
 // revenue↔interest split), so the component is a maker-checker artifact: the maker records+rates it (rows land
 // 'Pending', drive NOTHING), a DIFFERENT user approves it (→ SOD_SELF_APPROVAL), and only an APPROVED
 // component may post its interest unwind. All GL routes through LedgerService.postEntry (PERIOD_LOCKED + GL-17
-// audit), idempotent via alreadyPosted. New COA 4650; the arrears case reuses 5900.
+// audit), idempotent via alreadyPosted. New COA 4650 (arrears interest income); the advance case reuses 5900.
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 function addMonths(period: string, k: number): string {
@@ -110,8 +113,8 @@ export class RevFinancingService {
       discount_rate_pct: rate, periods, nominal, present_value: pv, financing_total: financingTotal,
       status: 'Pending', created_by: user.username,
       basis: direction === 'advance'
-        ? 'TFRS 15 §60-65 — customer prepays: financing benefit unwound as interest income (Dr 2410 / Cr 4650)'
-        : 'TFRS 15 §60-65 — deferred payment: entity finances the customer, interest on the receivable (Dr 1265 / Cr 5900)',
+        ? 'TFRS 15 §60-65 — customer prepays: the entity borrows from the customer; financing charge accretes the contract liability as interest expense (Dr 5900 / Cr 2410)'
+        : 'TFRS 15 §60-65 — deferred payment: the entity finances the customer; interest income accretes the contract asset (Dr 1265 / Cr 4650)',
       schedule: await this.scheduleRows(contractId),
     };
   }
@@ -133,7 +136,7 @@ export class RevFinancingService {
   }
 
   // ── POST :id/run-financing — post the periodic interest unwind for the Approved schedule due through the
-  //    period (idempotent). advance: Dr 2410 / Cr 4650 (interest income); arrears: Dr 1265 / Cr 5900. ──
+  //    period (idempotent). advance: Dr 5900 / Cr 2410 (interest expense, liability accretes); arrears: Dr 1265 / Cr 4650 (interest income, asset accretes). ──
   async runFinancing(contractId: number, dto: RunFinancingDto, user: JwtUser) {
     const db = this.db;
     const c = await this.assertContract(contractId);
@@ -154,12 +157,14 @@ export class RevFinancingService {
       if (interest > 0 && this.ledger && !(await this.ledger.alreadyPosted('REVFIN', ref, c.tenantId))) {
         const lines = rrow.direction === 'arrears'
           ? [
-              { account_code: postingDefault('REVFIN.EXPENSE', 'contract_asset'), debit: interest, memo: 'Contract asset — financing interest on the customer receivable' },
-              { account_code: postingDefault('REVFIN.EXPENSE', 'interest'), credit: interest, memo: 'Financing interest (net interest line)' },
+              // arrears → REVFIN.INCOME: the entity lends to the customer; interest income accretes the contract asset.
+              { account_code: postingDefault('REVFIN.INCOME', 'contract_asset'), debit: interest, memo: 'Contract asset accretes — financing interest income on the customer receivable' },
+              { account_code: postingDefault('REVFIN.INCOME', 'interest_income'), credit: interest, memo: 'Significant financing component interest income' },
             ]
           : [
-              { account_code: postingDefault('REVFIN.INCOME', 'deferred_revenue'), debit: interest, memo: 'Release contract liability (financing benefit unwind)' },
-              { account_code: postingDefault('REVFIN.INCOME', 'interest_income'), credit: interest, memo: 'Significant financing component interest income' },
+              // advance → REVFIN.EXPENSE: the entity borrows from the customer; interest expense accretes the contract liability.
+              { account_code: postingDefault('REVFIN.EXPENSE', 'interest_expense'), debit: interest, memo: 'Financing interest expense on the customer prepayment' },
+              { account_code: postingDefault('REVFIN.EXPENSE', 'contract_liability'), credit: interest, memo: 'Contract liability accretes toward face (financing charge)' },
             ];
         const je: any = await this.ledger.postEntry({
           date: dto.date ?? `${rrow.period}-01`, source: 'REVFIN', sourceRef: ref, tenantId: c.tenantId, currency: c.currency ?? undefined,
