@@ -45,6 +45,9 @@ export const crmAccounts = pgTable('crm_accounts', {
   website: text('website'),
   ownerUserId: bigint('owner_user_id', { mode: 'number' }).references(() => users.id),
   customerNo: text('customer_no'),                     // → customer_master once transacting (nullable)
+  // CRM-7 (REV-24, migration 0356): a self-referential PARENT link so a company can be modelled as a
+  // hierarchy (parent ⋈ subsidiaries). The set-parent endpoint rejects cycles (HIERARCHY_CYCLE).
+  parentAccountId: bigint('parent_account_id', { mode: 'number' }),
   status: text('status').notNull().default('active'),  // active | inactive | merged
   mergedInto: bigint('merged_into', { mode: 'number' }),
   mergedBy: text('merged_by'),
@@ -56,6 +59,48 @@ export const crmAccounts = pgTable('crm_accounts', {
   uqNo: unique('uq_crm_account_no').on(t.tenantId, t.accountNo),
   byName: index('idx_crm_account_name').on(t.tenantId, t.name),
   byCustomer: index('idx_crm_account_customer').on(t.tenantId, t.customerNo),
+  byParent: index('idx_crm_account_parent').on(t.tenantId, t.parentAccountId),
+}));
+
+// CRM-7 (REV-24, migration 0356): the per-deal BUYING COMMITTEE — which contacts sit on an opportunity,
+// each with a role + influence weight; at most one is_primary per deal. Tenant-scoped (RLS).
+export const crmOpportunityContacts = pgTable('crm_opportunity_contacts', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  opportunityId: bigint('opportunity_id', { mode: 'number' }).notNull().references(() => crmOpportunities.id),
+  contactId: bigint('contact_id', { mode: 'number' }).notNull().references(() => crmContacts.id),
+  role: text('role').notNull().default('user'),        // decision_maker | champion | influencer | evaluator | blocker | user
+  influence: text('influence').notNull().default('medium'), // high | medium | low
+  isPrimary: boolean('is_primary').notNull().default(false),
+  notes: text('notes'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqOppContact: unique('uq_crm_opp_contact').on(t.tenantId, t.opportunityId, t.contactId),
+  byOpp: index('idx_crm_opp_contact_opp').on(t.tenantId, t.opportunityId),
+}));
+
+// CRM-7 (REV-24, migration 0356): a governed ACCOUNT PLAN (draft → active → closed) with an owner,
+// objective, strategy, target revenue and target product categories (validated against item_categories).
+// The whitespace read diffs the tenant's active item_categories against the account's active-plan targets.
+export const crmAccountPlans = pgTable('crm_account_plans', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  planNo: text('plan_no').notNull(),                   // APL-YYYYMMDD-NNN
+  accountId: bigint('account_id', { mode: 'number' }).notNull().references(() => crmAccounts.id),
+  period: text('period'),                              // FY2026 / 2026-H1
+  objective: text('objective'),
+  strategy: text('strategy'),
+  targetRevenue: numeric('target_revenue', { precision: 14, scale: 2 }).notNull().default('0'),
+  targetCategories: jsonb('target_categories').notNull().default([]), // array of item_categories.code
+  status: text('status').notNull().default('draft'),   // draft | active | closed
+  owner: text('owner'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqNo: unique('uq_crm_account_plan_no').on(t.tenantId, t.planNo),
+  byAccount: index('idx_crm_account_plan_account').on(t.tenantId, t.accountId),
 }));
 
 // Contacts (people) under an account. role tags the buying-committee seat; member_id optionally joins the

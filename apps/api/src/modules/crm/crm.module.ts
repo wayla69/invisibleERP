@@ -4,6 +4,7 @@ import { CrmController } from './crm.controller';
 import { CrmPipelineModule } from './pipeline/crm-pipeline.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { CrmAccountsModule } from './accounts/crm-accounts.module';
+import { CrmAccountDepthModule } from './account-depth/crm-account-depth.module';
 import { CrmInboundModule } from './inbound/crm-inbound.module';
 import { FinanceModule } from '../finance/finance.module';
 
@@ -15,9 +16,9 @@ import { FinanceModule } from '../finance/finance.module';
 // (crm_accounts/crm_contacts with duplicate governance + audited merge). Re-exported so importers (bi)
 // can keep resolving.
 @Module({
-  imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmInboundModule, FinanceModule],
+  imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmInboundModule, FinanceModule],
   controllers: [CrmController],
   providers: [CrmService],
-  exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmInboundModule],
+  exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmInboundModule],
 })
 export class CrmModule {}

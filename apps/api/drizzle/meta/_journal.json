@@ -2486,6 +2486,13 @@
       "when": 2023820000320,
       "tag": "0355_service_kb",
       "breakpoints": true
+    },
+    {
+      "idx": 356,
+      "version": "7",
+      "when": 2023820000321,
+      "tag": "0356_crm_account_depth",
+      "breakpoints": true
     }
   ]
 }
