@@ -52,6 +52,7 @@ import { BankModule } from './modules/bank/bank.module';
 import { BudgetModule } from './modules/budget/budget.module';
 import { RevenueModule } from './modules/revenue/revenue.module';
 import { RevBillingModule } from './modules/revrec-billing/rev-billing.module';
+import { RevVariableModule } from './modules/revrec-variable/rev-variable.module';
 import { FxModule } from './modules/fx/fx.module';
 import { IntercompanyModule } from './modules/intercompany/intercompany.module';
 import { CoalitionModule } from './modules/coalition/coalition.module';
@@ -201,6 +202,7 @@ import { MailModule } from './modules/mail/mail.module';
     BudgetModule,
     RevenueModule,
     RevBillingModule,
+    RevVariableModule,
     FxModule,
     IntercompanyModule,
     CoalitionModule,

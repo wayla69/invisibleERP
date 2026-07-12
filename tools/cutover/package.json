@@ -101,6 +101,7 @@
     "budget": "tsx src/budget.ts",
     "revrec": "tsx src/revrec.ts",
     "revrec-billing": "tsx src/revrec-billing.ts",
+    "revrec-variable": "tsx src/revrec-variable.ts",
     "fxreval": "tsx src/fxreval.ts",
     "intercompany": "tsx src/intercompany.ts",
     "multiledger": "tsx src/multiledger.ts",
