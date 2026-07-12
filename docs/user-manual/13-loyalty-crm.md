@@ -482,6 +482,29 @@ claim points by uploading a photo of the receipt.
 > keeps the system fast as volume grows. Nothing changes for the member or reviewer. If a customer exercises
 > their right to be forgotten (PDPA), the stored photo is deleted along with their other personal data.
 
+## 15. Link marketplace accounts (เชื่อมบัญชี Grab/LINE MAN เข้ากับสมาชิก)
+
+**Who:** staff with **CRM-member/Loyalty** duty (staff link), **POS/Order-management** (QR mint); the customer self-links from their phone.
+**Where:** `/loyalty` back-office (`GET /api/loyalty/channel-refs`) · channels screen (QR per order) · member app (QR landing).
+
+Repeat buyers on Grab / LINE MAN / foodpanda / Robinhood are anonymous by default. The system captures a
+**hashed** reference of each platform buyer (never the raw phone/id — PDPA data minimization) so you can see
+repeat-buyer counts, and lets the buyer become a **known member** — always with explicit consent (MKT-13):
+
+1. **Mint the QR** for an aggregator order (`POST /api/channels/orders/:orderNo/link-qr`) and slip it in the bag.
+2. **The customer scans**, logs in to the member app (OTP or LINE), reviews the shop + order count, ticks the
+   **marketing consent checkbox** (required — accept or decline, never pre-filled), and links. The consent
+   decision is recorded on their consent register (`source=self`) in the same action as the link.
+3. From then on that platform account's orders attach to their member profile automatically (dining history,
+   loyalty attribution). One platform account can only ever belong to **one** member.
+4. **Staff link** (customer identifies their account at the counter): pick the ref on `/api/loyalty/channel-refs`
+   and link with the customer's attested consent decision (`POST /api/loyalty/channel-refs/:id/link` —
+   the request is rejected without an explicit `marketing_opt_in` boolean; recorded `source=pos`).
+
+> 🔒 **Control MKT-13:** a stolen QR alone links nothing (member login required; another shop's QR → 403), the
+> raw platform identifier is never stored (hash only), and a ref already linked to someone else answers
+> `409 REF_ALREADY_LINKED`.
+
 ## Errors you might see
 
 | Code | Meaning | What to do |
@@ -490,6 +513,9 @@ claim points by uploading a photo of the receipt.
 | `NO_TENANT` | Your login has no shop context | Sign in to the correct tenant. |
 | `INSUFFICIENT_POINTS` | Member doesn't have enough points for the reward | Choose a cheaper reward or earn more. |
 | `OUT_OF_STOCK` / `LIMIT_REACHED` | Reward sold out, or per-person limit reached | Pick another reward. |
+| `BAD_LINK_TOKEN` / `NO_CUSTOMER_REF` | Marketplace-link QR invalid, or the platform sent no stable buyer id | Re-mint the QR from the channels screen; an order without a buyer ref cannot be linked. |
+| `TENANT_MISMATCH` | The scanned link QR belongs to another shop | Use the QR printed by the shop the order came from. |
+| `REF_ALREADY_LINKED` | That platform account is already linked to another member | Review on `/api/loyalty/channel-refs`; one platform account = one member. |
 | `ALREADY_USED` | Redemption/coupon code was already redeemed | Each code works once only. |
 | `REDEMPTION_EXPIRED` / `COUPON_EXPIRED` | The code passed its expiry date | Issue a new reward/coupon. |
 | `SELF_REFERRAL` / `ALREADY_REFERRED` | Referring yourself, or a member already referred | Refer a different friend. |
@@ -566,3 +592,4 @@ claim points by uploading a photo of the receipt.
 | 1.29 | 2026-07-02 | Platform | **W1 (docs/27) tier economics + points liquidity:** §7 **ตัวคูณแต้มตามระดับ** — tier-ladder card on `/loyalty` sets ×earn per tier (Gold ×2 earns double **at the till**, audited in the ledger; liability accrues the multiplied points automatically); §9 **โอนแต้มให้เพื่อน** — member-to-member point transfer by phone (same shop, all-or-nothing, daily cap `เพดานโอนแต้มต่อวัน`, 0 = off; staff-assist route for the back office; LYL-18); §4 **เตือนแต้มใกล้หมดอายุ** — the daily sweep fires `loyalty.points_expiring` into Automation/Webhooks 30 days ahead, one nudge per expiring batch. New error codes `SELF_TRANSFER`, `RECIPIENT_NOT_FOUND`, `TRANSFER_CAP`, `TRANSFER_DISABLED`. |
 | 1.41 | 2026-07-10 | Platform | **CRM-2 route move:** the retail **CRM 360** page (branch KPI, member 360 lookup, marketing messaging) moved from `/crm` to **`/crm/members`** — `/crm` is now the unified sales-CRM workspace (deal board/leads/accounts/contacts; see manual 16). §13 segment links updated; content unchanged. |
 | 1.40 | 2026-07-10 | Platform | **POS-3 voucher campaigns (docs/41; control REV-20):** new §11b **คูปองส่วนลด** on `/loyalty/campaigns` — create a voucher campaign (percent/amount, min spend, validity, per-code single-use, campaign cap), **a different user approves before codes go live** (`SOD_VIOLATION` on self-approve), bulk-generate crypto-random codes + CSV export, void with audit, redemption stats; codes (and member wallet coupons `CPN-…`) redeem in the new voucher field at POS checkout — atomic single redemption, best-discount-wins. Returned sales do not auto-release codes (promo-consistent policy). |
+| 1.42 | 2026-07-12 | Platform | **G1 (docs/45) — marketplace account linking (control MKT-13, migration `0363`):** new §15 — hashed buyer-ref capture on aggregator ingest, package-insert QR → member self-link with required consent (`source=self`), staff link with attested consent (`source=pos`), refs list `GET /api/loyalty/channel-refs`; new error rows `BAD_LINK_TOKEN`/`NO_CUSTOMER_REF`/`TENANT_MISMATCH`/`REF_ALREADY_LINKED`. |

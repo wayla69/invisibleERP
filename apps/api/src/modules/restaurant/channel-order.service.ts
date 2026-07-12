@@ -15,6 +15,7 @@ import { verifyInboundWebhook } from '../../common/webhook-auth';
 import { RealtimeScope } from './realtime.scope';
 import { DineInService } from './dine-in.service';
 import { mintChannelToken, verifyChannelToken } from './channel-token.util';
+import { ChannelCustomerRefsService } from '../channel-adapter/channel-customer-refs.service';
 
 // A synthetic principal for public/aggregator channel writes — tenant-scoped, no extra permissions.
 const diner = (tenantId: number): JwtUser => ({ username: 'channel:public', role: 'Sales', customerName: null, tenantId, permissions: [] });
@@ -44,6 +45,7 @@ export class ChannelOrderService {
     private readonly ledger: LedgerService,
     private readonly tax: TaxService,
     @Optional() private readonly member?: MemberService,
+    @Optional() private readonly channelRefs?: ChannelCustomerRefsService,
   ) {}
 
   // slug → tenant (controlled bypass: reads only id + name by code)
@@ -247,7 +249,15 @@ export class ChannelOrderService {
         const u = diner(tenantId);
         const items = (body.items ?? []).map((it: any) => ({ name: it.name, qty: n(it.qty), unit_price: n(it.unit_price), station_code: it.station_code ?? 'hot' }));
         const view: any = await this.dineIn.createOrder({ items }, u);
-        await db.update(dineInOrders).set({ channel: source as any, fulfillmentType: body.fulfillment_type ?? 'delivery', fulfillmentStatus: 'accepted', extSource: source, extOrderId: String(body.ext_order_id), server: `channel:${source}` }).where(eq(dineInOrders.orderNo, view.order_no));
+        // G1 (MKT-13): capture the source's stable buyer ref (hashed) — an already-linked ref attaches the
+        // member so guest-profile/loyalty attribution accrues. Best-effort: never blocks the order.
+        const rawRef = body.customer?.id ?? body.customer?.external_id ?? body.customer?.phone;
+        let linkedMemberId: number | null = null;
+        if (rawRef != null && String(rawRef).trim() && this.channelRefs) {
+          const cap = await this.channelRefs.captureOnIngest(tenantId, source, String(rawRef), view.order_no).catch(() => null);
+          linkedMemberId = cap?.memberId ?? null;
+        }
+        await db.update(dineInOrders).set({ channel: source as any, fulfillmentType: body.fulfillment_type ?? 'delivery', fulfillmentStatus: 'accepted', extSource: source, extOrderId: String(body.ext_order_id), server: `channel:${source}`, memberId: linkedMemberId }).where(eq(dineInOrders.orderNo, view.order_no));
         if (body.customer) {
           const [oRow] = await db.select({ id: dineInOrders.id }).from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
           await db.insert(orderDeliveryDetails).values({ tenantId, orderId: Number(oRow!.id), contactName: body.customer.name ?? null, contactPhone: body.customer.phone ?? null, addressLine: body.customer.address ?? null });
