@@ -125,6 +125,14 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '2460', name: 'Derivative Liability', type: 'Liability' },          // หนี้สินอนุพันธ์ — hedging-instrument negative fair value (Cr on a derivative loss, TRE-04)
   { code: '3550', name: 'Cash-Flow Hedge Reserve (OCI)', type: 'Equity' },    // สำรองการป้องกันความเสี่ยงกระแสเงินสด (OCI equity) — effective portion of a CASH_FLOW hedge deferred in OCI, recycled to P&L when the hedged cash flow occurs (TRE-04)
   { code: '5450', name: 'Hedge Ineffectiveness / Fair-value Hedge P&L', type: 'Expense' }, // ผล(ขาดทุน)กำไรการป้องกันความเสี่ยงที่ไม่มีประสิทธิผล — ineffective portion of a CF hedge + the FV-hedge derivative/basis P&L (gain=credit, loss=debit, TRE-04)
+  // Cash pooling / in-house bank / intercompany-loan register (Track C Wave 4, TRE-05) — an IC loan books the
+  // principal to the IC-loan receivable (creditor, 1155) and IC-loan payable (debtor, 2155); EIR interest accrues
+  // Cr 4700 Investment/Interest Income (creditor) / Dr 5900 Interest Expense (debtor). BOTH the 1155/2155 pair
+  // AND the 4700/5900 IC interest ELIMINATE on consolidation (mirroring the 1150/2150 IC pair) so group balances
+  // and group finance cost/income net to zero. Distinct from the trade IC 1150/2150 (which are operating): an IC
+  // loan is a financing/investing instrument, so its receivable buckets investing and its payable financing.
+  { code: '1155', name: 'Intercompany Loan Receivable', type: 'Asset' },      // ลูกหนี้เงินให้กู้ยืมระหว่างบริษัท — creditor side of an IC loan (elimination pair with 2155, TRE-05)
+  { code: '2155', name: 'Intercompany Loan Payable', type: 'Liability' },     // เจ้าหนี้เงินกู้ยืมระหว่างบริษัท — debtor side of an IC loan (elimination pair with 1155, TRE-05)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -202,4 +210,9 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   // remeasurement (asset/liability ↔ 3550 OCI / 5450 P&L), so it self-cancels in the SCF reconciliation.
   '1380': { bucket: 'operating', label: 'สินทรัพย์อนุพันธ์ (Derivative asset — hedging instruments)' },
   '2460': { bucket: 'operating', label: 'หนี้สินอนุพันธ์ (Derivative liability — hedging instruments)' },
+  // Intercompany-loan register (TRE-05) — an IC loan is a financing/investing instrument (unlike the trade IC
+  // 1150/2150 operating pair): the creditor's loan receivable is an investing outflow, the debtor's loan payable
+  // a financing inflow. Both ELIMINATE on consolidation, so at the group layer they self-cancel.
+  '1155': { bucket: 'investing', label: 'ลูกหนี้เงินให้กู้ยืมระหว่างบริษัท (Intercompany loan receivable)' },
+  '2155': { bucket: 'financing', label: 'เจ้าหนี้เงินกู้ยืมระหว่างบริษัท (Intercompany loan payable)' },
 };
