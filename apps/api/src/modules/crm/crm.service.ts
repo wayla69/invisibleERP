@@ -1,10 +1,11 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { eq, and, isNotNull, desc, sql, gt, gte, lt, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, promoAudienceRules } from '../../database/schema/crm';
 import { posMembers } from '../../database/schema/loyalty-members';
 import { memberConsents } from '../../database/schema/member-consents';
-import { auditLog } from '../../database/schema';
+import { auditLog, audienceExports } from '../../database/schema';
 import { dineInOrders } from '../../database/schema/restaurant';
 import { npsResponses, recoveryCases } from '../../database/schema/nps';
 import { promotions } from '../../database/schema/marketing';
@@ -285,6 +286,79 @@ export class CrmService {
   // Explicitly tenant-scoped (like loyalty analytics): HQ/Admin must pass tenant_id (no cross-tenant export).
   // Consent flags ship WITH each row so the downstream CDP can honour opt-outs — the export never itself
   // sends anything. (For a single data-subject access/erasure request, use the PDPA DSAR endpoints instead.)
+
+  // G3 (docs/45, PDPA-05) — the ads-activation export: SHA-256-hashed phone/email rows in the Meta Custom
+  // Audiences / Google Customer Match ingest format. STRICTER than exportForCdp BY DESIGN:
+  //   • consent is FILTERED, not carried — only members with a LIVE marketing consent row in
+  //     member_consents (granted, not withdrawn) are included. NO fallback to the legacy marketingOptIn
+  //     flag: the consent ledger is the legal basis, and a member with no row is EXCLUDED (fail-closed).
+  //   • raw PII never leaves — email is trim+lowercased, phone normalized to E.164 digits (Thai 0x → 66x),
+  //     then each is SHA-256 hashed (the exact normalization both ad platforms specify). Rows with neither
+  //     identifier are skipped. No names, no member codes, no traits.
+  async exportForCustomerMatch(user: JwtUser, opts: { tenantId?: number | null; limit?: number; offset?: number } = {}) {
+    const db = this.db;
+    const tenantId = opts.tenantId ?? user.tenantId;
+    if (tenantId == null) return { error: { code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id' } };
+    const limit = Math.min(Math.max(opts.limit ?? 500, 1), 5000);
+    const offset = Math.max(opts.offset ?? 0, 0);
+
+    const liveConsent = and(
+      eq(memberConsents.tenantId, tenantId), eq(memberConsents.purpose, 'marketing'),
+      eq(memberConsents.granted, true), sql`${memberConsents.withdrawnAt} IS NULL`,
+    );
+    const consentedIds = db.select({ id: memberConsents.memberId }).from(memberConsents).where(liveConsent);
+    const rows = await db.select({ id: posMembers.id, phone: posMembers.phone, email: posMembers.email })
+      .from(posMembers)
+      .where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true), inArray(posMembers.id, consentedIds)))
+      .orderBy(posMembers.id).limit(limit).offset(offset);
+
+    const [tot] = await db.select({ c: sql<number>`count(*)` }).from(posMembers)
+      .where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true)));
+    const [cons] = await db.select({ c: sql<number>`count(*)` }).from(posMembers)
+      .where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true), inArray(posMembers.id, consentedIds)));
+
+    const sha = (v: string) => createHash('sha256').update(v).digest('hex');
+    const normPhone = (raw: string): string | null => {
+      const digits = String(raw).replace(/\D/g, '').replace(/^00/, '');
+      if (digits.length < 7) return null;
+      return digits.startsWith('0') ? `66${digits.slice(1)}` : digits; // Thai-first E.164, no '+'
+    };
+    const members = rows.flatMap((r: any) => {
+      const em = r.email ? String(r.email).trim().toLowerCase() : null;
+      const ph = r.phone ? normPhone(r.phone) : null;
+      if (!em && !ph) return [];
+      return [{ ...(em ? { hashed_email: sha(em) } : {}), ...(ph ? { hashed_phone: sha(ph) } : {}) }];
+    });
+
+    // ICFR/PDPA egress trail (ITGC-AC-10): a hashed-audience export is still a sensitive egress — record it.
+    try {
+      await db.insert(auditLog).values({
+        actor: user?.username ?? null, tenantId, action: 'CRM.AUDIENCE_EXPORT', entity: 'audience_export',
+        entityId: null, status: 'success', meta: { rows: members.length, consented: Number(cons?.c ?? 0), total: Number(tot?.c ?? 0), limit, offset },
+      });
+    } catch { /* never throw from audit */ }
+
+    return {
+      tenant_id: tenantId, hash_alg: 'sha256', consent_basis: 'member_consents:marketing',
+      total_active: Number(tot?.c ?? 0), consented: Number(cons?.c ?? 0),
+      count: members.length, limit, offset, members,
+    };
+  }
+
+  // G3 — the append-only export register (PDPA-05 evidence surface).
+  async audienceExportRegister(user: JwtUser, limit = 50) {
+    const db = this.db;
+    const rows = await db.select().from(audienceExports).orderBy(desc(audienceExports.id)).limit(Math.min(limit, 200));
+    return {
+      exports: rows.map((r: any) => ({
+        id: r.id, purpose: r.purpose, consent_basis: r.consentBasis, target: r.target, hash_alg: r.hashAlg,
+        members_considered: Number(r.membersConsidered), members_consented: Number(r.membersConsented), rows_pushed: Number(r.rowsPushed),
+        status: r.status, error: r.error, ropa_activity_id: r.ropaActivityId, created_by: r.createdBy, created_at: r.createdAt,
+      })),
+      count: rows.length,
+    };
+  }
+
   async exportForCdp(user: JwtUser, opts: { tenantId?: number | null; limit?: number; offset?: number }) {
     const db = this.db;
     const tenantId = opts.tenantId ?? user.tenantId;

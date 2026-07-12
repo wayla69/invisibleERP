@@ -2563,6 +2563,13 @@
       "when": 2023820000331,
       "tag": "0378_crm_forecast",
       "breakpoints": true
+    },
+    {
+      "idx": 367,
+      "version": "7",
+      "when": 2023820000332,
+      "tag": "0379_audience_exports",
+      "breakpoints": true
     }
   ]
 }

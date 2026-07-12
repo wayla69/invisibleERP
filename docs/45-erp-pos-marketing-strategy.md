@@ -1,6 +1,6 @@
 # 45 — ERP × POS Data-Driven Marketing Strategy (internal + external, combined)
 
-> **Date:** 2026-07-12 · **Status:** v0.4 — G1 + G2 + G4 DELIVERED; G3 PLANNED · **Owner:** ERP / Product
+> **Date:** 2026-07-12 · **Status:** v0.5 — ALL FOUR GAPS (G1–G4) DELIVERED · **Owner:** ERP / Product
 > **Question answered:** *"Can we use the data in ERP and POS to make a marketing strategy by combining
 > both internally and externally together?"* — **Yes**, and most of the plumbing already exists. This doc
 > inventories what we already collect, maps it into one closed marketing loop, and lists the four thin
@@ -83,7 +83,7 @@ holdout, cost is checked against `budget`. Every step is an existing endpoint.
   analytic. Add an affinity computation over `custPosItems` (support/confidence/lift, per branch +
   daypart) surfaced in `analytics` and consumable by `promo_audience_rules` (cross-sell offers).
   Read-only aggregator — build on `analytics`, don't fork it.
-- **G3 — External activation & enrichment via `cdp_export_sync`.** Give the existing hook a real
+- **G3 — External activation & enrichment via `cdp_export_sync`. ✅ DELIVERED (BI job `audience_export_sync`, control PDPA-05, migration `0379`, PN-19 rev 1.47, UAT-LOY-081..082). Residuals stated: live Meta/Google API adapters are creds-gated follow-ups (webhook/middleware target today); the weather overlay needs a data-vendor decision — the Thai-holiday overlay already ships in demand-ml (`th_holiday`).** Give the existing hook a real
   target: start with **ads-platform custom audiences** (hashed phone/email export, consent-filtered) and
   a weather/holiday overlay for demand-ml-timed promos. Strictly opt-in-only export + ROPA entry;
   fail-closed if consent basis missing (mirrors the security-review posture).
@@ -106,6 +106,7 @@ Extend them per the module map above.
 
 | Version | Date | Change |
 | --- | --- | --- |
+| v0.5 | 2026-07-12 | G3 DELIVERED — `audience_export_sync`: consent-gated (live `member_consents` rows only), sha256-hashed audiences, fail-closed ROPA gate + append-only `audience_exports` register (0371, PDPA-05), SSRF-gated push. Weather overlay = stated residual; Thai-holiday overlay already in demand-ml. **Roadmap complete.** |
 | v0.4 | 2026-07-12 | G2 DELIVERED — menu-affinity analytic (support/confidence/lift per daypart, `min_pair_count` gate), web tab on /restaurant-analytics, schedulable `menu_affinity` BI type. No new control. |
 | v0.3 | 2026-07-12 | G4 DELIVERED — `marketing_roi` BI report: spend (discount given) → attributed revenue/margin (food-cost layer) → organic holdout lift, + voucher/B2B/budget legs. No new control. |
 | v0.2 | 2026-07-12 | G1 DELIVERED — `channel_customer_refs` (0366), hash-only capture on both ingest paths, consent-gated QR/staff linking, auto-attach `dine_in_orders.member_id`, control MKT-13 (RCM 268). |
