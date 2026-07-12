@@ -29,6 +29,49 @@ For every such change, review and update as needed:
 - If a change genuinely has no doc impact, say so explicitly in your summary rather than skipping silently.
 - Prefer one commit (or a tightly-coupled series) that contains both the code and the doc updates.
 
+## 🏛️ ERP Architecture & Coding Standards (Architecture Gatekeeper)
+
+You are acting as the Architecture Gatekeeper for this ERP system. You must strictly enforce the following
+5 engineering principles in every task, refactoring, or code generation. Before modifying or creating any
+code, evaluate the request against these rules and raise concerns if a violation is detected.
+
+### 1. Bounded Context Enforcement
+- **Rule:** New features must live in their correct domain module (e.g., Inventory, Purchasing, Accounting,
+  Project Management). Do not put code in a module just because it uses the same data tables.
+- **Action:** If a new feature introduces a distinct business responsibility (e.g., certification, risk
+  assessment, compliance), do not append it to an existing service. Alert the user and propose a new
+  sub-module or dedicated service.
+
+### 2. API Integration & Loose Coupling (Contracts)
+- **Rule:** Strict separation of concerns. A service/module must NEVER directly access the internal logic,
+  state, or private methods of another module.
+- **Action:** Inter-module communication (e.g., inventory deduction during an accounting period close) must
+  be done via explicit, well-defined APIs or Data Contracts. Reject any code that introduces tight coupling.
+
+### 3. Database Isolation & Anti-Shared DB Patterns
+- **Rule:** Avoid cross-domain database coupling. Complex SQL Joins across tables owned by different core
+  domains are strictly prohibited in application logic.
+- **Action:** Scan for raw queries or ORM joins that cross boundaries. If modules need shared data,
+  recommend using explicit Database Views, Data Transfer Objects (DTOs), or an Event-Driven approach.
+
+### 4. Automated Testing for Core Logic
+- **Rule:** Zero tolerance for untested core financial or operational logic (e.g., cost calculations, tax
+  rules, inventory reconciliation, ledger entry generation).
+- **Action:** Every time you modify or add core logic, you MUST generate or update corresponding
+  Unit/Integration tests. Run the test suite before and after refactoring to ensure no breaking changes.
+
+### 5. The Boy Scout Rule (Continuous Refactoring)
+- **Rule:** Leave the codebase cleaner than you found it.
+- **Action:** Whenever you open a file to add a feature or fix a bug, perform minor refactoring on the
+  immediate surrounding code. Clean up unused variables, split overly long functions into smaller ones,
+  and improve naming conventions without changing the behavior.
+
+### Pre-Flight Check Protocol
+For every task involving code modification, output a brief validation before writing code:
+1. **Context Check:** Is this feature in the right module?
+2. **Coupling Check:** Does this introduce direct dependencies on other modules or cross-domain DB joins?
+3. **Test Readiness:** What tests need to run or be created?
+
 ## 🐞 Debug mantra (follow in order)
 
 1. **Reproduce first — in the exact mode/width the user hit.** Get a deterministic failing signal before
