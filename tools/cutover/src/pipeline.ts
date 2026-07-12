@@ -539,6 +539,62 @@ async function main() {
   const t1Plans = await inj('GET', '/api/crm/account-plans', sales1);
   ok('CRM-7 RLS: a T1 user sees none of HQ\'s account plans', t1Plans.status === 200 && !t1Plans.json.plans?.some((p: any) => p.plan_no === hqPlan.json.plan_no), `t1_count=${t1Plans.json.plans?.length}`);
 
+  // ── CRM-15 — B2B account health / churn + renewal pipeline (migration 0370, control CRM-08) ──────
+  // 42. Healthy account: a recent activity + an open deal → high score, 'healthy' band, explainable breakdown.
+  const hAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Healthy Health Co', tax_id: '0105561000901' });
+  const hOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Health Deal', amount: 200000, account_no: hAcc.json.account_no });
+  await inj('POST', '/api/crm/pipeline/activities', sales1, { entity_type: 'opportunity', entity_no: hOpp.json.opp_no, type: 'call', subject: 'health check call' });
+  const hHealth = await inj('GET', `/api/crm/accounts/${hAcc.json.account_no}/health`, sales1);
+  ok('CRM-15 health: engaged account (recent activity + open pipeline) → healthy band, score ≥ 70', hHealth.status === 200 && hHealth.json.band === 'healthy' && hHealth.json.score >= 70, JSON.stringify({ score: hHealth.json.score, band: hHealth.json.band }));
+  ok('CRM-15 health: explainable breakdown (engagement + pipeline factors)', Array.isArray(hHealth.json.breakdown) && hHealth.json.breakdown.some((b: any) => b.factor === 'engagement') && hHealth.json.breakdown.some((b: any) => b.factor === 'pipeline'), JSON.stringify(hHealth.json.breakdown?.map((b: any) => b.factor)));
+
+  // 43. At-risk account: open escalated (P1/P2) + SLA-breached support cases, no activity, no open pipeline.
+  const rAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Churny Risk Co', tax_id: '0105561000902' });
+  const [rRow] = await db.select().from(s.crmAccounts).where(eq(s.crmAccounts.accountNo, rAcc.json.account_no));
+  await db.insert(s.serviceCases).values([
+    { tenantId: t1, caseNo: 'CASE-R1', subject: 'system down', status: 'open', priority: 'P1', accountId: Number(rRow.id), responseBreached: true, resolutionBreached: false, createdBy: 'sales1' },
+    { tenantId: t1, caseNo: 'CASE-R2', subject: 'degraded', status: 'open', priority: 'P2', accountId: Number(rRow.id), responseBreached: false, resolutionBreached: false, createdBy: 'sales1' },
+  ]);
+  const rHealth = await inj('GET', `/api/crm/accounts/${rAcc.json.account_no}/health`, sales1);
+  ok('CRM-15 health: open escalated + SLA-breached cases, no pipeline → at_risk band', rHealth.status === 200 && rHealth.json.band === 'at_risk' && rHealth.json.signals?.escalated_cases === 2 && rHealth.json.signals?.breached_cases === 1, JSON.stringify({ score: rHealth.json.score, band: rHealth.json.band, sig: rHealth.json.signals }));
+
+  // 44. deal_type + renewal/expansion pipeline.
+  const renOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Renewal Deal', amount: 150000, account_no: hAcc.json.account_no });
+  const setDt = await inj('PATCH', `/api/crm/opportunities/${renOpp.json.opp_no}/deal-type`, sales1, { deal_type: 'renewal' });
+  ok('CRM-15 deal-type: set an opportunity to renewal', setDt.status === 200 && setDt.json.deal_type === 'renewal', JSON.stringify(setDt.json));
+  const renPipe = await inj('GET', '/api/crm/account-health/renewals', sales1);
+  ok('CRM-15 renewals: the renewal pipeline lists the renewal deal + a weighted total', renPipe.status === 200 && renPipe.json.renewals?.some((o: any) => o.opp_no === renOpp.json.opp_no && o.deal_type === 'renewal') && renPipe.json.weighted > 0, JSON.stringify({ count: renPipe.json.count, weighted: renPipe.json.weighted }));
+
+  // 45. Renewal GAP: an account with a won deal but NO open renewal is flagged a churn risk.
+  const gapAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Gap Renewal Co', tax_id: '0105561000903' });
+  const gapOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Gap Deal', amount: 90000, account_no: gapAcc.json.account_no });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${gapOpp.json.opp_no}/stage`, sales1, { stage: 'won', win_reason: 'closed' });
+  const renPipe2 = await inj('GET', '/api/crm/account-health/renewals', sales1);
+  ok('CRM-15 renewal gap: a won account with no open renewal is flagged', renPipe2.json.renewal_gaps?.some((g: any) => g.account_no === gapAcc.json.account_no), `gaps=${renPipe2.json.gap_count}`);
+
+  // 46. Portfolio churn watchlist: ranks worst-first + band counts + band filter.
+  const port = await inj('GET', '/api/crm/account-health', sales1);
+  ok('CRM-15 portfolio: churn watchlist ranks at_risk first + band counts', port.status === 200 && (port.json.accounts?.length ?? 0) > 0 && port.json.accounts[0].band === 'at_risk' && port.json.band_counts?.at_risk >= 1, JSON.stringify({ first: port.json.accounts?.[0]?.band, counts: port.json.band_counts }));
+  const portFilter = await inj('GET', '/api/crm/account-health?band=at_risk', sales1);
+  ok('CRM-15 portfolio: band filter → only at_risk accounts', (portFilter.json.accounts ?? []).every((a: any) => a.band === 'at_risk') && portFilter.json.count >= 1, `count=${portFilter.json.count}`);
+
+  // 47. Snapshot (BI-schedulable) + trend history, idempotent per (account, day).
+  const snap = await inj('POST', '/api/crm/account-health/snapshot', sales1, {});
+  ok('CRM-15 snapshot: captures a health snapshot for every account', snap.status === 200 && snap.json.captured >= 1 && snap.json.captured === snap.json.scanned, JSON.stringify(snap.json));
+  await inj('POST', '/api/crm/account-health/snapshot', sales1, {}); // re-run same day → upsert, not dup
+  const rHist = await inj('GET', `/api/crm/accounts/${rAcc.json.account_no}/health/history`, sales1);
+  ok('CRM-15 history: one dated snapshot (idempotent), band=at_risk', rHist.status === 200 && rHist.json.history?.length === 1 && rHist.json.history[0].band === 'at_risk', JSON.stringify(rHist.json));
+
+  // 48. BI registry exposes the crm_account_health snapshot report type.
+  const rtypes2 = await inj('GET', '/api/bi/report-types', admin);
+  ok('CRM-15 BI: registry exposes crm_account_health report type', (rtypes2.json.report_types ?? []).some((r: any) => r.key === 'crm_account_health'), 'crm_account_health');
+
+  // 49. RLS: a T1 user cannot read an HQ account's health.
+  const hqhAcc = await inj('POST', '/api/crm/accounts', admin, { name: 'HQ Health Only' });
+  await inj('POST', '/api/crm/account-health/snapshot', admin, {});
+  const t1See = await inj('GET', `/api/crm/accounts/${hqhAcc.json.account_no}/health/history`, sales1);
+  ok('CRM-15 RLS: a T1 user cannot read an HQ account\'s health (404)', t1See.status === 404 && t1See.json.error?.code === 'ACCOUNT_NOT_FOUND', `${t1See.status} ${t1See.json.error?.code}`);
+
   await app.close();
 }
 

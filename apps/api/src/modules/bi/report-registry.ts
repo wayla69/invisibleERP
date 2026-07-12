@@ -26,6 +26,7 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // CRM-4 (docs/41) — schedulable daily follow-up digest: SLA-breached leads + overdue tasks + rotting deals
   // (detective control REV-22). Fires lead.stagnant into the automation engine + drops a rail notification.
   crm_followup_digest: { label: 'สรุปการติดตามงานขายประจำวัน', labelEn: 'CRM follow-up digest' },
+  crm_account_health: { label: 'บันทึกสุขภาพบัญชีลูกค้า (churn watchlist)', labelEn: 'CRM account health snapshot' },
   // Likewise: each run advances every ACTIVE lifecycle journey — segment-entry sweeps + due steps (G1).
   journey_runner: { label: 'รันเจอร์นีย์ลูกค้า (Journeys)', labelEn: 'Run lifecycle journeys' },
   // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.

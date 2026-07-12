@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 269,
+    "total": 270,
     "by_status": {
-      "Implemented": 266,
+      "Implemented": 267,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 38,
+      "Revenue & Cash": 39,
       "Tax": 12
     }
   },
@@ -1593,6 +1593,25 @@
       "tod": "Inspect the account-hierarchy cycle guard + subtree pipeline roll-up, the buying-committee account-membership + uniqueness + single-primary rules, the account-plan draft->active->closed lifecycle + category validation, and the whitespace derivation.",
       "toe": "Re-perform: link a subsidiary under a parent, then parenting the parent under its own child -> HIERARCHY_CYCLE; the hierarchy read rolls a child's open deal into the parent's subtree weighted pipeline; add a buying-committee member (is_primary) then re-add the same contact -> COMMITTEE_DUP and a contact from another account -> CONTACT_ACCOUNT_MISMATCH; create an account plan (APL-) with a valid target category, an unknown category -> UNKNOWN_CATEGORY, activate a complete draft -> active, re-activate -> PLAN_NOT_DRAFT, activate an incomplete draft -> PLAN_INCOMPLETE, close -> closed; whitespace reports the targeted category as covered and the rest as whitespace; a T1 user sees none of HQ's account plans (RLS) (re-performed by the pipeline harness CRM-7 checks).",
       "evidence": "Account hierarchy + subtree pipeline roll-up; buying-committee register (role/influence/primary); governed account-plan lifecycle + whitespace coverage read",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-08",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (retention / renewal pipeline)",
+      "risk": "A strategic B2B account slips toward CHURN with no early warning — declining engagement (deals go quiet, no activity logged), open support cases pile up (escalated / SLA-breached), the pipeline dries up — and no one notices until the account has effectively lapsed; and renewal/expansion revenue is not tracked as its own forward pipeline, so a due renewal is simply missed (a won account with no renewal in flight silently drops off). The account-based retention forecast is unreliable and revenue is lost to neglect rather than to a competitor on the merits.",
+      "assertion": "Completeness/Accuracy/Timeliness",
+      "description": "B2B account HEALTH / churn surveillance + renewal-expansion pipeline (CRM-15, migration 0370) — a read-only DETECTIVE layer on the REV-17 CRM spine. A per-account health SCORE is computed by an EXPLAINABLE, code-reviewed weighted formula (base 60, clamped 0..100, with a persisted per-factor breakdown — same posture as the CRM-4 lead score, no trained model) from ACCOUNT-SPECIFIC signals: engagement recency (days since the last activity logged across the account's deals), open pipeline (Σ open weighted amount), open / escalated (P1-P2) / SLA-breached support cases (service_cases, SVC-4/5, grouped by account), and win/loss balance; the score is BANDED healthy (≥70) / watch (40-69) / at_risk (<40) and GET /api/crm/account-health returns the CHURN WATCHLIST ranked worst-first with band counts (filterable by band). RENEWAL/EXPANSION opportunities are tagged crm_opportunities.deal_type (new|renewal|expansion; PATCH /api/crm/opportunities/:no/deal-type) and GET /api/crm/account-health/renewals is the forward pipeline (Σ weighted) PLUS the renewal GAP queue — accounts with a won deal but NO open renewal (the churn-risk population). A schedulable daily SNAPSHOT (POST /api/crm/account-health/snapshot / BI report crm_account_health) persists the score to crm_account_health_snapshots (upsert per account/day, mirrors project_health_snapshots) for trend (GET …/health/history). The company AR/credit position (creditStatus) is surfaced as CONTEXT (tenant-level, company_level=true) but deliberately NOT folded into the per-account score. Tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes); the surface gates crm/exec/ar (snapshot crm/exec). No GL post.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per account / daily",
+      "owner": "Sales Manager / Account Manager / Customer Success",
+      "coso": "P13",
+      "code_reference": "modules/crm/account-health/crm-account-health.module.ts (computeHealth explainable weighted score + band + breakdown; gatherSignals 4 grouped queries — open pipeline / last-activity join opps⋈activities / open-escalated-breached cases by account; accountHealth; portfolio churn watchlist ranked worst-first + band filter + counts; renewalPipeline forward pipeline + renewal-gap queue; setDealType new/renewal/expansion; captureAllHealth idempotent snapshot per account/day; healthHistory trend); schema/crm-pipeline.ts crm_opportunities.deal_type + crm_account_health_snapshots + migration 0370 (RLS, tenant-leading indexes); service_cases (tenant_id, account_id) index; bi report-registry crm_account_health + bi-generate crm_account_health branch (captureAllHealth action job); cutover/pipeline.ts (ToE, CRM-15 checks)",
+      "tod": "Inspect the explainable per-account health formula (engagement / pipeline / support-case / win-loss factors + banding), the churn watchlist ranking, the renewal/expansion pipeline + renewal-gap detection, and the idempotent snapshot + trend.",
+      "toe": "Re-perform: an engaged account (recent activity + open deal) scores in the healthy band with an explainable breakdown; an account with open escalated + SLA-breached cases and no open pipeline scores in the at_risk band; tagging a deal renewal surfaces it in the renewal pipeline (weighted); a won account with no open renewal is flagged a renewal gap; the portfolio watchlist ranks at_risk first and filters by band; a snapshot captures a dated score per account (re-run same day is idempotent) and appears in the account's health history; the crm_account_health report type is registered; a second tenant cannot read the first tenant's account health (RLS) (re-performed by the pipeline harness CRM-15 checks).",
+      "evidence": "Per-account health score register (band + explainable breakdown) + churn watchlist; renewal/expansion forward pipeline + renewal-gap queue; daily health snapshot + trend",
       "status": "Implemented"
     },
     {

@@ -147,6 +147,27 @@ Three tools deepen the account view so a strategic B2B account is *governed*, no
 
 ---
 
+## 16.4c Account health & churn watchlist (สุขภาพบัญชีลูกค้า — the "Account health" tab, CRM-15)
+
+The **สุขภาพบัญชีลูกค้า** tab is an early-warning screen so a strategic account is worked *before* it churns.
+
+- **Health score & band.** Every account gets a **0–100 health score** computed from its own signals —
+  **engagement** (how recently any activity was logged on its deals), **open pipeline**, **support strain**
+  (open / escalated / SLA-breached cases from `/service`), and **win/loss balance**. The score bands
+  **แข็งแรง (Healthy ≥70) / เฝ้าระวัง (Watch 40–69) / เสี่ยงหลุด (At risk <40)**. Open an account to see the
+  **breakdown** — which factors added or subtracted points — so you know *why* an account is at risk.
+- **Churn watchlist.** The table lists accounts **worst-first** (at-risk before watch before healthy), with the
+  band, score, open weighted pipeline, open-case count, days idle, and a **renewal-gap** flag. Filter by band
+  to work just the at-risk queue. The top tiles count each band and the total renewal pipeline.
+- **Renewal / expansion pipeline.** Tag a deal **new / renewal / expansion** (its `deal_type`); the renewal
+  pipeline card totals the open renewal/expansion weighted value. An account that **won** before but has **no
+  open renewal** is a **renewal gap** — the churn-risk queue to chase before the contract lapses.
+- **Snapshot & trend.** **บันทึกสแนปช็อต (Snapshot now)** stores today's score for every account (also runs
+  daily if you schedule the **CRM account health snapshot** BI report), building a per-account trend. This is
+  a **read-only** screen — it posts nothing to the ledger. *(Control CRM-08.)*
+
+---
+
 ## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
 
 Beyond the win/loss dashboard, three read-only analytics answer *why* deals move the way they do. Each looks
@@ -407,6 +428,7 @@ interactions ended without a case being opened — a direct read on how much wor
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.1 | 2026-07-12 | **Account health & churn watchlist (`/crm`) — CRM-15, control CRM-08:** new §16.4c + a new *Account health* tab. Every account gets a 0–100 **health score** (engagement recency, open pipeline, open/escalated/SLA-breached support cases, win/loss) banded **healthy / watch / at-risk**, ranked worst-first as a **churn watchlist** with an explainable per-factor breakdown. Deals tag **new / renewal / expansion** and a **renewal pipeline** card totals renewal/expansion value; an account that won before but has no open renewal is flagged a **renewal gap**. **Snapshot now** (or the scheduled *CRM account health snapshot* report) stores a dated score per account for trend. Read-only — posts nothing to the ledger. |
 | 2.0 | 2026-07-12 | **B2B account/contact 360 depth (`/crm`) — CRM-7, control CRM-07:** new §16.4b. **Account hierarchy** (give an account a parent to model a group; the hierarchy view rolls the whole group's weighted pipeline up; cycles blocked); **buying committee** (record who decides on a deal — role + influence + one primary, contacts must belong to the deal's account); and **account plans** (a new *Account plans* tab — governed draft → active → closed plans with an owner, objective, target revenue and target product categories, plus a **whitespace** panel showing which product categories the account isn't being pursued for). Added the `HIERARCHY_CYCLE`/`SELF_PARENT`, `CONTACT_ACCOUNT_MISMATCH`/`COMMITTEE_DUP`, `UNKNOWN_CATEGORY`, and `PLAN_*` error rows. |
 | 1.9 | 2026-07-12 | **Knowledge base & case deflection (`/service`) — SVC-6, control SVC-06:** new §16.12. Write help articles as drafts; a **different colleague** publishes them (authors can't self-publish — governed review); published articles are searchable (published-only), archivable, and score helpful votes; a **deflection-rate** stat shows the share of KB-assisted interactions that avoided opening a case. |
 | 1.8 | 2026-07-12 | **Case SLAs & breach worklist (`/service`) — SVC-5, control SVC-05:** new §16.11. Each case gets an **SLA tier** (Standard/Bronze/Silver/Gold/Platinum) that sets first-response + resolution due times from the case open time; the first reply and a late resolution flag a red **เกิน SLA** badge; a **SLA-breaches** stat counts open past-due cases and clears as you respond/resolve. Added a **Set SLA tier** row action and the SLA-tier field on the open-a-case form; email-opened cases default to Standard. |
