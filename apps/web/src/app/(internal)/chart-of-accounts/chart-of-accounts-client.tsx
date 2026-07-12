@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ban, Download, Eye, EyeOff, Layers, ListTree, Pencil, Plus, Power, ShieldCheck } from 'lucide-react';
 
 import { api } from '@/lib/api';
+import { thaiDateTime } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
 import { useMe } from '@/lib/auth';
 import { notifySuccess, notifyFromError } from '@/lib/notify';
@@ -110,10 +111,15 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
   // second Admin clears it on the same screen. Creator self-approval is rejected server-side (SOD_VIOLATION).
   const changes = useQuery<{ requests: any[]; count: number }>({
     queryKey: ['coa-change-requests'],
-    queryFn: () => api('/api/ledger/accounts/change-requests?status=PendingApproval'),
+    queryFn: () => api('/api/ledger/accounts/change-requests'),
     enabled: isAdmin,
     retry: false,
   });
+  const pendingChanges = useMemo(() => (changes.data?.requests ?? []).filter((r: any) => r.status === 'PendingApproval'), [changes.data]);
+  // COA-D1: the request HISTORY (Approved / Rejected / AutoApplied — incl. the single-Admin exception rows)
+  // was API-only; a compact register makes the GL-27 trail reviewable where the changes happen.
+  const historyChanges = useMemo(() => (changes.data?.requests ?? []).filter((r: any) => r.status !== 'PendingApproval').slice(0, 20), [changes.data]);
+  const [showHistory, setShowHistory] = useState(false);
   const approveChange = useMutation({
     mutationFn: (id: number) => api(`/api/ledger/accounts/change-requests/${id}/approve`, { method: 'POST' }),
     onSuccess: () => { notifySuccess(t('fnx.coa.mc_approved')); qc.invalidateQueries({ queryKey: ['coa-change-requests'] }); refresh(); },
@@ -322,15 +328,15 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
             <StatCard label={t('fnx.coa.stat_types')} value={groups.length} hint={t('fnx.coa.stat_types_hint')} />
           </div>
 
-          {isAdmin && (changes.data?.requests?.length ?? 0) > 0 && (
+          {isAdmin && pendingChanges.length > 0 && (
             <Card className="gap-3 p-5">
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-semibold">{t('fnx.coa.mc_queue_title')}</h3>
-                <Badge variant="warning">{changes.data!.requests.length}</Badge>
+                <Badge variant="warning">{pendingChanges.length}</Badge>
               </div>
               <p className="text-sm text-muted-foreground">{t('fnx.coa.mc_queue_desc')}</p>
               <DataTable
-                rows={changes.data!.requests}
+                rows={pendingChanges}
                 rowKey={(r: any) => r.id}
                 dense
                 columns={[
@@ -348,6 +354,32 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
                   },
                 ]}
               />
+            </Card>
+          )}
+
+          {isAdmin && historyChanges.length > 0 && (
+            <Card className="gap-3 p-5">
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold">{t('fnx.coa.mc_history_title')}</h3>
+                <Badge variant="secondary">{historyChanges.length}</Badge>
+                <Button size="sm" variant="ghost" onClick={() => setShowHistory((v) => !v)}>{showHistory ? t('fnx.coa.mc_history_hide') : t('fnx.coa.mc_history_show')}</Button>
+              </div>
+              {showHistory && (
+                <DataTable
+                  rows={historyChanges}
+                  rowKey={(r: any) => r.id}
+                  dense
+                  columns={[
+                    { key: 'approvedAt', label: t('fnx.coa.mc_col_at'), render: (r: any) => <span className="text-xs text-muted-foreground">{thaiDateTime(r.approvedAt ?? r.createdAt)}</span> },
+                    { key: 'action', label: t('fnx.coa.mc_col_action'), render: (r: any) => <Badge variant={r.action === 'deactivate' ? 'destructive' : r.action === 'create' ? 'success' : 'info'}>{t(`fnx.coa.mc_action_${r.action}`)}</Badge> },
+                    { key: 'accountCode', label: t('fnx.coa.col_code'), render: (r: any) => <span className="font-mono">{r.accountCode}</span> },
+                    { key: 'status', label: t('fnx.coa.mc_col_status'), render: (r: any) => r.status === 'Approved' ? <Badge variant="success">{t('fnx.coa.mc_st_approved')}</Badge> : r.status === 'Rejected' ? <Badge variant="warning">{t('fnx.coa.mc_st_rejected')}</Badge> : <Badge variant="info">{t('fnx.coa.mc_st_autoapplied')}</Badge> },
+                    { key: 'createdBy', label: t('fnx.coa.mc_col_by') },
+                    { key: 'approvedBy', label: t('fnx.coa.mc_col_approver'), render: (r: any) => r.approvedBy ?? '—' },
+                    { key: 'reason', label: t('fnx.coa.mc_col_reason'), sortable: false, render: (r: any) => <span className="text-xs text-muted-foreground">{r.reason ?? '—'}</span> },
+                  ]}
+                />
+              )}
             </Card>
           )}
 

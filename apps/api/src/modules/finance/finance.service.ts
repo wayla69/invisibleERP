@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects, nettingSettlements } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects, nettingSettlements, postingRules, coaChangeRequests, masterdataImportBatches, masterdataChangeRequests } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -838,8 +838,10 @@ export class FinanceService {
   // approval across the system, with its age — so the controller can see what is stuck and catch a stale
   // approval (a control breakdown / bottleneck) before close. Spans the manual-JE (GL-05), bank-adjustment
   // (BANK-02), AP-disbursement (EXP-06), payroll (PAY-03), asset-revaluation (FA-08), asset-disposal (FA-09),
-  // inventory-write-off (INV-07), FX-rate (FX-04) and budget (BUD-01) maker-checkers. Read-only; tenant-scoped
-  // via the caller's RLS (HQ/Admin sees every tenant).
+  // inventory-write-off (INV-07), FX-rate (FX-04) and budget (BUD-01) maker-checkers — and, since COA-D1,
+  // the governance-config queues: posting-rule overrides (GL-24), canonical CoA change requests (GL-27),
+  // staged sensitive bulk imports (MDM-03) and staged sensitive master-field changes (MDM-01). Read-only;
+  // tenant-scoped via the caller's RLS (HQ/Admin sees every tenant; GL-27 rows are platform-global).
   async pendingApprovals(opts?: { overdue_days?: number }) {
     const db = this.db;
     const overdueDays = opts?.overdue_days ?? 3;
@@ -895,6 +897,21 @@ export class FinanceService {
     // 8. FX-04 — manual FX rates awaiting approval (PendingApproval, unusable until approved; not a JE).
     for (const r of await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')))
       items.push({ type: 'fx_rate', control: 'FX-04', ref: `${r.currency}@${r.rateDate}`, label: `อัตรา ${r.currency} = ${n(r.rate)} (${r.rateDate})`, amount: 0, requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
+    // 10. GL-24 — tenant posting-rule overrides awaiting a DIFFERENT user's approval (COA-D1: the override
+    // is inert until approved, but it used to wait invisibly on /setup/posting-rules — now it ages here too).
+    for (const r of await db.select().from(postingRules).where(and(eq(postingRules.status, 'PendingApproval'), eq(postingRules.active, true))))
+      items.push({ type: 'posting_rule', control: 'GL-24', ref: `PRULE-${Number(r.id)}`, label: `กฎการลงบัญชี ${r.eventType} · ${r.role} → ${r.accountCode}`, amount: 0, requested_by: r.createdBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
+    // 11. GL-27 — canonical CoA change requests awaiting a DIFFERENT Admin (platform-level: the canonical
+    // chart is global, so these rows are not tenant-scoped; approval still requires platform Admin).
+    for (const c of await db.select().from(coaChangeRequests).where(eq(coaChangeRequests.status, 'PendingApproval')))
+      items.push({ type: 'coa_change', control: 'GL-27', ref: `COA-${Number(c.id)}`, label: `${c.action === 'create' ? 'สร้างบัญชี' : c.action === 'deactivate' ? 'ปิดใช้บัญชี' : 'แก้ไขบัญชี'} ${c.accountCode}`, amount: 0, requested_by: c.createdBy ?? null, requested_at: c.createdAt ?? null, age_days: ageDays(c.createdAt) });
+    // 12. Sensitive bulk-import batches staged for a distinct approver (MDM-03 path; incl. the canonical
+    // CoA + posting-rule imports from PR-8).
+    for (const b of await db.select().from(masterdataImportBatches).where(eq(masterdataImportBatches.status, 'PendingApproval')))
+      items.push({ type: 'masterdata_import', control: 'MDM-03', ref: b.reqNo, label: `นำเข้า ${b.entityKey} (${Number(b.rowCount)} แถว)`, amount: 0, requested_by: b.requestedBy ?? null, requested_at: b.requestedAt ?? null, age_days: ageDays(b.requestedAt) });
+    // 13. MDM-01 — sensitive single-field master changes staged for a distinct approver (status is lowercase).
+    for (const c of await db.select().from(masterdataChangeRequests).where(eq(masterdataChangeRequests.status, 'pending')))
+      items.push({ type: 'masterdata_change', control: 'MDM-01', ref: c.reqNo, label: `แก้ไข ${c.entityType} #${Number(c.entityId)} · ${c.field}`, amount: 0, requested_by: c.requestedBy ?? null, requested_at: c.requestedAt ?? null, age_days: ageDays(c.requestedAt) });
     // 9. BUD-01 — budgets awaiting approval (excluded from budget-vs-actual); grouped per fiscal-year/account/cost-centre.
     for (const b of await db.select({ fiscalYear: budgets.fiscalYear, accountCode: budgets.accountCode, costCenterCode: budgets.costCenterCode, requestedBy: sql<string>`max(${budgets.requestedBy})`, total: sql<string>`coalesce(sum(${budgets.amount}),0)`, oldest: sql<string>`min(${budgets.updatedAt})` }).from(budgets).where(eq(budgets.status, 'PendingApproval')).groupBy(budgets.fiscalYear, budgets.accountCode, budgets.costCenterCode))
       items.push({ type: 'budget', control: 'BUD-01', ref: `FY${b.fiscalYear}/${b.accountCode}${b.costCenterCode ? '/' + b.costCenterCode : ''}`, label: `งบประมาณ FY${b.fiscalYear} ${b.accountCode}${b.costCenterCode ? ' @ ' + b.costCenterCode : ''}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
