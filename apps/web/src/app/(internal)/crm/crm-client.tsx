@@ -51,6 +51,8 @@ interface Whitespace { account_no: string; name: string; categories: { code: str
 interface HealthRow { account_no: string; name: string; score: number; band: string; open_weighted: number; open_cases: number; days_since_activity: number | null; renewal_gap: boolean }
 interface HealthPortfolio { accounts: HealthRow[]; count: number; band_counts: Record<string, number> }
 interface RenewalPipeline { renewals: { opp_no: string; name: string; deal_type: string; amount: number; weighted: number; expected_close_date: string | null }[]; count: number; weighted: number; renewal_gaps: { account_no: string; name: string }[]; gap_count: number }
+interface ForecastRollupRow { owner: string; system: { commit: number; best_case: number; pipeline: number; weighted: number; open_count: number; forecast: number }; submitted: { commit: number; best_case: number; pipeline: number; forecast: number | null; status: string } | null; variance: number | null }
+interface ForecastDepth { period: string; totals: { system_commit: number; system_forecast: number; weighted: number; open_total: number; submitted_total: number; submissions: number; reps: number }; coverage: { open_pipeline: number; target: number; ratio: number | null; basis: string }; waterfall: { stage: string; amount: number; running: number }[]; rollup: ForecastRollupRow[]; accuracy: { period: string; forecast: number; actual_won: number; accuracy_pct: number | null }[] }
 
 // The six seeded default stage names ↔ the legacy lowercase machine kept in sync on `opp.stage`.
 const LEGACY_BY_NAME: Record<string, string> = {
@@ -84,6 +86,7 @@ export default function CrmWorkspaceClient() {
           { key: 'contacts', label: t('crmx.tab_contacts'), content: <ContactsTab /> },
           { key: 'plans', label: t('crmx.tab_plans'), content: <PlansTab /> },
           { key: 'health', label: t('crmx.tab_health'), content: <AccountHealthTab /> },
+          { key: 'forecast', label: t('crmx.tab_forecast'), content: <ForecastTab /> },
         ]}
       />
     </div>
@@ -964,6 +967,82 @@ function AccountHealthTab() {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+// ── CRM-12 — sales forecasting depth: rep→manager roll-up + coverage + waterfall + accuracy ────────
+function ForecastTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [owner, setOwner] = useState('');
+  const [commit, setCommit] = useState('');
+  const [best, setBest] = useState('');
+  const depthQ = useQuery<ForecastDepth>({ queryKey: ['crm-forecast-depth'], queryFn: () => api('/api/crm/forecast/depth') });
+  const submit = useMutation({
+    mutationFn: () => api('/api/crm/forecast/submission', { method: 'POST', body: JSON.stringify({ owner: owner || undefined, commit_amount: Number(commit) || 0, best_case_amount: Number(best) || 0, status: 'submitted' }) }),
+    onSuccess: () => { notifySuccess(t('crmx.toast_forecast_submitted')); setCommit(''); setBest(''); qc.invalidateQueries({ queryKey: ['crm-forecast-depth'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const snapshot = useMutation({
+    mutationFn: () => api<{ period: string }>('/api/crm/forecast/snapshot', { method: 'POST' }),
+    onSuccess: (r) => { notifySuccess(t('crmx.toast_forecast_snapshot', { p: r.period })); qc.invalidateQueries({ queryKey: ['crm-forecast-depth'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const d = depthQ.data;
+  const cov = d?.coverage.ratio;
+  const latestAcc = (d?.accuracy ?? []).slice(-1)[0];
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <StatCard label={t('crmx.fc_system_forecast')} value={baht(d?.totals.system_forecast ?? 0)} icon={TrendingUp} tone="primary" hint={d ? t('crmx.fc_period', { p: d.period }) : undefined} />
+        <StatCard label={t('crmx.fc_coverage')} value={cov == null ? '—' : `${cov.toFixed(2)}×`} icon={BarChart3} tone={cov != null && cov >= 3 ? 'success' : 'warning'} hint={t('crmx.fc_coverage_hint')} />
+        <StatCard label={t('crmx.fc_submitted_total')} value={baht(d?.totals.submitted_total ?? 0)} icon={Target} tone="info" hint={t('crmx.fc_reps', { n: d?.totals.submissions ?? 0 })} />
+        <StatCard label={t('crmx.fc_accuracy')} value={latestAcc?.accuracy_pct == null ? '—' : `${Math.round(latestAcc.accuracy_pct)}%`} icon={Layers} tone="info" hint={latestAcc ? t('crmx.fc_accuracy_hint', { p: latestAcc.period }) : undefined} />
+      </div>
+
+      {/* Category waterfall: commit → best-case → pipeline builds the system forecast. */}
+      {(d?.waterfall?.length ?? 0) > 0 && (
+        <Card className="p-4">
+          <div className="mb-2 text-sm font-medium">{t('crmx.fc_waterfall')}</div>
+          <div className="grid gap-1.5">
+            {(d?.waterfall ?? []).map((w) => (
+              <div key={w.stage} className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-muted-foreground">{t(`crmx.fc_cat_${w.stage}`)}</span>
+                <span className="tabular-nums">+{baht(w.amount)} <span className="text-muted-foreground">→ {baht(w.running)}</span></span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Rep override submission (a rep governs their own commit; a manager may submit on behalf of a named owner). */}
+      <Card className="p-4">
+        <div className="mb-2 text-sm font-medium">{t('crmx.fc_submit_title')}</div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="grid gap-1"><Label htmlFor="fc-owner">{t('crmx.fc_owner')}</Label><Input id="fc-owner" className="w-40" placeholder={t('crmx.fc_owner_ph')} value={owner} onChange={(e) => setOwner(e.target.value)} /></div>
+          <div className="grid gap-1"><Label htmlFor="fc-commit">{t('crmx.fc_commit')}</Label><Input id="fc-commit" className="w-32" inputMode="numeric" value={commit} onChange={(e) => setCommit(e.target.value)} /></div>
+          <div className="grid gap-1"><Label htmlFor="fc-best">{t('crmx.fc_best_case')}</Label><Input id="fc-best" className="w-32" inputMode="numeric" value={best} onChange={(e) => setBest(e.target.value)} /></div>
+          <Button size="sm" disabled={submit.isPending || !commit} onClick={() => submit.mutate()}>{t('crmx.fc_submit_btn')}</Button>
+          <div className="ms-auto"><Button size="sm" variant="outline" disabled={snapshot.isPending} onClick={() => snapshot.mutate()}><BarChart3 className="size-4" /> {t('crmx.fc_snapshot_btn')}</Button></div>
+        </div>
+      </Card>
+
+      <StateView q={depthQ}>
+        <DataTable
+          rows={d?.rollup ?? []}
+          rowKey={(r) => r.owner}
+          columns={[
+            { key: 'owner', label: t('crmx.fc_owner'), render: (r: ForecastRollupRow) => <span className="font-medium">{r.owner}</span> },
+            { key: 'system', label: t('crmx.fc_system_forecast'), render: (r: ForecastRollupRow) => baht(r.system.forecast) },
+            { key: 'open', label: t('crmx.fc_open_deals'), render: (r: ForecastRollupRow) => r.system.open_count || '—' },
+            { key: 'submitted', label: t('crmx.fc_submitted'), render: (r: ForecastRollupRow) => r.submitted?.forecast == null ? <Badge variant="outline">{t('crmx.fc_not_submitted')}</Badge> : baht(r.submitted.forecast) },
+            { key: 'variance', label: t('crmx.fc_variance'), render: (r: ForecastRollupRow) => r.variance == null ? '—' : <span className={`tabular-nums ${r.variance < 0 ? 'text-destructive' : 'text-emerald-600'}`}>{r.variance > 0 ? '+' : ''}{baht(r.variance)}</span> },
+          ]}
+          emptyState={{ icon: TrendingUp, title: t('crmx.empty_forecast_title'), description: t('crmx.empty_forecast_desc') }}
+        />
+      </StateView>
     </div>
   );
 }

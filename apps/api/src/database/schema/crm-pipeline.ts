@@ -178,6 +178,50 @@ export const crmAccountHealthSnapshots = pgTable('crm_account_health_snapshots',
   byAccount: index('idx_crm_acct_health_account').on(t.tenantId, t.accountId),
 }));
 
+// CRM-12 (CRM-09, migration 0378): sales-forecasting depth over the REV-17 pipeline forecast.
+// A rep→manager manual OVERRIDE: per (period, owner) a rep submits their own commit / best-case number
+// (governed draft → submitted); the manager roll-up reconciles it against the system-weighted forecast.
+export const crmForecastSubmissions = pgTable('crm_forecast_submissions', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  period: text('period').notNull(),                    // 'YYYY-MM' (business month, Asia/Bangkok)
+  owner: text('owner').notNull(),                      // the rep (crm_opportunities.owner)
+  commitAmount: numeric('commit_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  bestCaseAmount: numeric('best_case_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  pipelineAmount: numeric('pipeline_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  status: text('status').notNull().default('draft'),   // draft | submitted
+  notes: text('notes'),
+  submittedBy: text('submitted_by'),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqPeriodOwner: unique('uq_crm_fc_sub_period_owner').on(t.tenantId, t.period, t.owner),
+  byPeriod: index('idx_crm_fc_sub_period').on(t.tenantId, t.period),
+}));
+
+// CRM-12 (CRM-09, migration 0378): a dated, immutable period SNAPSHOT of the forecast + the period's actual
+// won, so forecast-vs-actual ACCURACY and pipeline-coverage are tracked over time (schedulable via the BI
+// report crm_forecast_snapshot; idempotent per period/day, mirrors crm_account_health_snapshots).
+export const crmForecastSnapshots = pgTable('crm_forecast_snapshots', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  period: text('period').notNull(),                    // 'YYYY-MM'
+  snapshotDate: date('snapshot_date').notNull(),
+  forecastAmount: numeric('forecast_amount', { precision: 14, scale: 2 }).notNull().default('0'), // commit + best-case(w) + pipeline(w)
+  commitAmount: numeric('commit_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  bestCaseAmount: numeric('best_case_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  pipelineAmount: numeric('pipeline_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  weightedAmount: numeric('weighted_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  openCount: integer('open_count').notNull().default(0),
+  actualWonAmount: numeric('actual_won_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  submittedTotal: numeric('submitted_total', { precision: 14, scale: 2 }).notNull().default('0'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqDay: unique('uq_crm_fc_snap_day').on(t.tenantId, t.period, t.snapshotDate),
+  byPeriod: index('idx_crm_fc_snap_period').on(t.tenantId, t.period),
+}));
+
 // Append-only stage-transition audit (REV-17): who moved which opportunity from → to, when. Written on
 // creation (from_stage NULL) and on every transition through either route (/api/crm/pipeline, /api/pipeline).
 export const crmStageHistory = pgTable('crm_stage_history', {

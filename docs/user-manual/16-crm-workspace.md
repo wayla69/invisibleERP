@@ -166,6 +166,27 @@ The **สุขภาพบัญชีลูกค้า** tab is an early-warn
   daily if you schedule the **CRM account health snapshot** BI report), building a per-account trend. This is
   a **read-only** screen — it posts nothing to the ledger. *(Control CRM-08.)*
 
+## 16.4d Sales forecast depth (พยากรณ์ยอดขาย — the "Forecast" tab, CRM-12)
+
+The **พยากรณ์ยอดขาย** tab turns the live pipeline forecast into a governed, reviewable number — with rep→manager
+accountability, coverage, and after-the-fact accuracy. It posts nothing to the ledger. *(Control CRM-09.)*
+
+- **System forecast & the manager roll-up.** The tiles show the **system forecast** for the period (commit deals
+  at full value + best-case & pipeline at their risk-weighted value), the **pipeline-coverage** ratio and the
+  **submitted total**. The table lists each rep (owner) with their **system** forecast, **submitted** override
+  and the **variance** (submitted − system) — so an over-optimistic or a sandbagged number is visible next to
+  the model's.
+- **Submit your forecast (rep override).** In *ส่งพยากรณ์ของตัวแทน*, enter your **commit** (and optionally
+  **best-case**) for the period and **ส่งพยากรณ์ (Submit)**. Leave *เจ้าของ (Owner)* blank to submit your own;
+  a manager can submit on behalf of a named rep. Your number is saved per period and rolls up into the manager
+  view (governed draft → submitted).
+- **Coverage & waterfall.** **สัดส่วนไปป์ไลน์ (Pipeline coverage)** is open pipeline ÷ the commit target —
+  **≥3×** is the healthy rule of thumb; below it, the forecast is thinly backed. The **waterfall** shows how
+  commit → best-case → pipeline build up to the forecast total.
+- **Snapshot & forecast-vs-actual.** **บันทึกสแนปช็อต (Snapshot now)** (or the scheduled **CRM sales forecast
+  snapshot** BI report) stores a dated snapshot of the forecast **and** the period's actual won, so the
+  **ความแม่นยำ (Accuracy)** tile and the history track how the forecast compared to what actually closed.
+
 ---
 
 ## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
@@ -428,6 +449,7 @@ interactions ended without a case being opened — a direct read on how much wor
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.2 | 2026-07-12 | **Sales forecast depth (`/crm`) — CRM-12, control CRM-09:** new §16.4d + a new *Forecast* tab. A governance layer over the live pipeline forecast: the **manager roll-up** reconciles each rep's **submitted** commit/best-case override against the **system-weighted** forecast with the **variance**; reps submit their own number per period (governed draft → submitted); a **pipeline-coverage** ratio (open pipeline ÷ commit target, ≥3× healthy) + a commit→best-case→pipeline **waterfall**; and **Snapshot now** (or the scheduled *CRM sales forecast snapshot* report) records a dated forecast + the period's actual won for the **forecast-vs-actual accuracy** trend. Read-only — posts nothing to the ledger. |
 | 2.1 | 2026-07-12 | **Account health & churn watchlist (`/crm`) — CRM-15, control CRM-08:** new §16.4c + a new *Account health* tab. Every account gets a 0–100 **health score** (engagement recency, open pipeline, open/escalated/SLA-breached support cases, win/loss) banded **healthy / watch / at-risk**, ranked worst-first as a **churn watchlist** with an explainable per-factor breakdown. Deals tag **new / renewal / expansion** and a **renewal pipeline** card totals renewal/expansion value; an account that won before but has no open renewal is flagged a **renewal gap**. **Snapshot now** (or the scheduled *CRM account health snapshot* report) stores a dated score per account for trend. Read-only — posts nothing to the ledger. |
 | 2.0 | 2026-07-12 | **B2B account/contact 360 depth (`/crm`) — CRM-7, control CRM-07:** new §16.4b. **Account hierarchy** (give an account a parent to model a group; the hierarchy view rolls the whole group's weighted pipeline up; cycles blocked); **buying committee** (record who decides on a deal — role + influence + one primary, contacts must belong to the deal's account); and **account plans** (a new *Account plans* tab — governed draft → active → closed plans with an owner, objective, target revenue and target product categories, plus a **whitespace** panel showing which product categories the account isn't being pursued for). Added the `HIERARCHY_CYCLE`/`SELF_PARENT`, `CONTACT_ACCOUNT_MISMATCH`/`COMMITTEE_DUP`, `UNKNOWN_CATEGORY`, and `PLAN_*` error rows. |
 | 1.9 | 2026-07-12 | **Knowledge base & case deflection (`/service`) — SVC-6, control SVC-06:** new §16.12. Write help articles as drafts; a **different colleague** publishes them (authors can't self-publish — governed review); published articles are searchable (published-only), archivable, and score helpful votes; a **deflection-rate** stat shows the share of KB-assisted interactions that avoided opening a case. |
