@@ -1,4 +1,4 @@
--- 0355_treasury_hedge_register — Track C Wave 3: Hedge accounting register (control TRE-04; IFRS 9 / TFRS 9 ·
+-- 0356_treasury_hedge_register — Track C Wave 3: Hedge accounting register (control TRE-04; IFRS 9 / TFRS 9 ·
 -- ASC 815). A hedge RELATIONSHIP is DESIGNATED under maker-checker (create → PendingApproval carrying the hedged
 -- item, the hedging instrument, the hedge TYPE (CASH_FLOW | FAIR_VALUE), the hedge ratio and the formal
 -- documentation; a DIFFERENT user approves → Approved; self-approve → SOD_SELF_APPROVAL). THE CONTROL: no

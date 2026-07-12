@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 260,
+    "total": 261,
     "by_status": {
-      "Implemented": 257,
+      "Implemented": 258,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 32,
+      "Revenue & Cash": 33,
       "Tax": 12
     }
   },
@@ -1593,6 +1593,25 @@
       "tod": "Inspect the tier→hours due-time computation (anchored on open time), the first-response stamp + breach on the first outbound reply, the resolution breach on resolve, the entitlement recompute + breach re-evaluation, and the breaches detective worklist (open past-due population).",
       "toe": "Re-perform: create a case with a Gold entitlement → resolution_due_at = opened + 8h, first_response_due_at = opened + 2h; re-set the entitlement to Bronze → due times recompute off the original open time (resolution = opened + 72h); a first reply stamps first_responded_at + response_breached vs the due; resolve after the resolution due → resolution_breached=true; a case opened with a due time in the past appears in GET /cases/sla/breaches with breach_kind; a responded/resolved case drops out of the worklist; a second tenant cannot see the first tenant's breaches (RLS) (re-performed by the service harness SVC-5 checks).",
       "evidence": "Per-case SLA entitlement (tier + computed first-response/resolution due times); first-response & resolution breach flags; SLA-breach worklist (breach_kind)",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SVC-06",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Service revenue; Customer-service quality / self-service knowledge (no direct GL in v1)",
+      "risk": "Knowledge published to customers is unreviewed — a knowledge-base article reaches customers (and drives their self-service decisions) without any independent review, so inaccurate or unauthorized guidance is published by a single hand (the author self-publishes); AND the effectiveness of self-service is unmeasured — there is no record of whether the knowledge base actually deflected a case or the customer still had to open one, so case-deflection / self-service performance is invisible and unmanaged.",
+      "assertion": "Accuracy/Authorization/Completeness",
+      "description": "Service Cloud — Knowledge Base + Case Deflection (SVC-6, migration 0355): a per-tenant kb_articles register (article_no unique per tenant) with a GOVERNED publish lifecycle draft → published → archived. An article is authored as a draft (editable only while draft — a published article is immutable, ARTICLE_NOT_DRAFT), and the SVC-06 MAKER-CHECKER is the publish: draft → published ONLY by a user who is NOT the author (published_by ≠ author → 403 SOD_SELF_PUBLISH), so no one publishes their own unreviewed knowledge; archive is published → archived (ARTICLE_NOT_PUBLISHED otherwise). Self-service is GET /api/service/kb/search?q= over PUBLISHED articles only (title/body/tags, view-count incremented on the hits) with a helpful/not_helpful feedback signal. The DETECTIVE side is the case-deflection log kb_deflections — POST /api/service/kb/deflect records each KB-assisted interaction (query, article, deflected=true self-served / false a case was opened, optional case link) — and GET /api/service/kb/deflection-stats returns the deflection rate + top articles, the population a service manager reads to gauge self-service effectiveness. Both tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes); the surface gates exec/marketing. No GL post.",
+      "prev_det": "Prev/Det",
+      "nature": "Automated",
+      "frequency": "Per article / continuous",
+      "owner": "Knowledge Manager / Service Manager (segregated author≠publisher)",
+      "coso": "P13",
+      "code_reference": "modules/service-kb/service-kb.service.ts (createArticle draft + author; updateArticle draft-only ARTICLE_NOT_DRAFT; publishArticle SVC-06 maker-checker published_by ≠ author → SOD_SELF_PUBLISH; archiveArticle; search published-only + view bump; feedback helpful/not_helpful; logDeflection kb_deflections; deflectionStats rate + top articles); service-kb.controller.ts (/api/service/kb/articles[/:id[/publish|archive|feedback]], /search, /deflect, /deflection-stats — gated exec/marketing); schema/service-kb.ts kb_articles + kb_deflections + migration 0355 (RLS, tenant-leading indexes, article_no unique per tenant); cutover/service.ts (ToE, SVC-6 checks)",
+      "tod": "Inspect the draft→published→archived lifecycle, the draft-only edit guard, the publish maker-checker (published_by ≠ author → SOD_SELF_PUBLISH), the published-only search surface, and the deflection log + deflection-rate detective read.",
+      "toe": "Re-perform: author a draft article; the author self-publishing → 403 SOD_SELF_PUBLISH; a DIFFERENT user publishes → status='published', published_by set; editing a published article → ARTICLE_NOT_DRAFT; search returns the published article (and not a draft), incrementing its views; a helpful vote increments the counter; a deflected interaction and a case-opened interaction are logged and deflection-stats returns the rate (deflected/total) + top articles; archive a published article; a second tenant cannot see the first tenant's articles/deflections (RLS) (re-performed by the service harness SVC-6 checks).",
+      "evidence": "KB article register (governed publish lifecycle) + author≠publisher SOD_SELF_PUBLISH test; case-deflection log + deflection-rate detective read; published-only self-service search",
       "status": "Implemented"
     },
     {
@@ -4154,7 +4173,7 @@
       "frequency": "Per designation / month-end remeasurement / on the hedged cash flow",
       "owner": "Treasury / Financial Controller",
       "coso": "P10",
-      "code_reference": "treasury-hedge/hedge.service.ts (designate PendingApproval + BAD_DOCUMENTATION / approve SOD_SELF_APPROVAL maker-checker / recordEffectiveness (HEDGE_NOT_DESIGNATED before approval) / measure — the CONTROL GATE: HEDGE_NOT_DESIGNATED if unapproved, CASH_FLOW OCI refused HEDGE_NOT_EFFECTIVE unless Approved+effective else to_pl routes to P&L, effective portion → 3550 / ineffective → 5450, FAIR_VALUE basis-adjusts the hedged item + P&L 5450 / reclassify Dr 3550 / Cr revenue with OCI_INSUFFICIENT guard / rebalance); hedge.controller.ts (api/treasury/hedges[/:id/{approve,reject,effectiveness,measure,rebalance,reclassify}]); schema/treasury-hedge.ts (hedge_relationships/hedge_derivatives/hedge_effectiveness_tests/hedge_oci_movements, tenant-leading indexes); migration 0355 (tables + RLS + HEDGE.* posting-events); ledger-constants 1380/2460/3550/5450 (COA + CF_CLASSIFY 3550 financing, 1380/2460 operating); posting-events.ts HEDGE.DERIVATIVE.MTM/CF.OCI/RECLASSIFY/FV.BASIS; permissions.ts treasury/treasury_approve + SoD R23; hedge.module.ts (wired, imports LedgerModule); cutover/treasury-hedge.ts (TRE-04 ToE, 38 checks)",
+      "code_reference": "treasury-hedge/hedge.service.ts (designate PendingApproval + BAD_DOCUMENTATION / approve SOD_SELF_APPROVAL maker-checker / recordEffectiveness (HEDGE_NOT_DESIGNATED before approval) / measure — the CONTROL GATE: HEDGE_NOT_DESIGNATED if unapproved, CASH_FLOW OCI refused HEDGE_NOT_EFFECTIVE unless Approved+effective else to_pl routes to P&L, effective portion → 3550 / ineffective → 5450, FAIR_VALUE basis-adjusts the hedged item + P&L 5450 / reclassify Dr 3550 / Cr revenue with OCI_INSUFFICIENT guard / rebalance); hedge.controller.ts (api/treasury/hedges[/:id/{approve,reject,effectiveness,measure,rebalance,reclassify}]); schema/treasury-hedge.ts (hedge_relationships/hedge_derivatives/hedge_effectiveness_tests/hedge_oci_movements, tenant-leading indexes); migration 0356 (tables + RLS + HEDGE.* posting-events); ledger-constants 1380/2460/3550/5450 (COA + CF_CLASSIFY 3550 financing, 1380/2460 operating); posting-events.ts HEDGE.DERIVATIVE.MTM/CF.OCI/RECLASSIFY/FV.BASIS; permissions.ts treasury/treasury_approve + SoD R23; hedge.module.ts (wired, imports LedgerModule); cutover/treasury-hedge.ts (TRE-04 ToE, 38 checks)",
       "tod": "Inspect the designation create→approve maker-checker (SOD_SELF_APPROVAL), the two-part control gate (Approved designation AND a passing effectiveness test) before any OCI treatment, the CASH_FLOW effective→OCI-3550 / ineffective→P&L-5450 split vs the not-effective route-to-P&L (HEDGE_NOT_EFFECTIVE), the HEDGE_NOT_DESIGNATED bar on unapproved relationships, the FAIR_VALUE hedged-item basis adjustment, and the OCI→P&L reclassification (Dr 3550 / Cr revenue).",
       "toe": "TC-TRE-04-01: designate a hedge, self-approve → SOD_SELF_APPROVAL (403), a distinct approver approves; measuring an unapproved relationship → HEDGE_NOT_DESIGNATED; a non-treasury role is denied. TC-TRE-04-02: with the latest effectiveness test effective=false the CASH_FLOW OCI attempt → HEDGE_NOT_EFFECTIVE and the whole change routes to P&L 5450 (nothing to OCI); with effective=true the effective portion lands in OCI 3550 and only the ineffective portion in P&L 5450. TC-TRE-04-03: reclassification recycles the deferred OCI to revenue (Dr 3550 / Cr 4000) on the hedged cash flow; over-release → OCI_INSUFFICIENT. TC-TRE-04-04: a FAIR_VALUE hedge basis-adjusts the hedged item (Cr 1200 / Dr 5450) with the derivative gain to P&L (net ineffectiveness); a sibling tenant never sees the register (RLS) (re-performed by the treasury-hedge harness, 38 checks).",
       "evidence": "Hedge accounting register (relationship PendingApproval→Approved designation, effectiveness tests, derivative FV, OCI movement ledger); the HEDGE-MTM / HEDGE-RECLASS JEs; the Cash-Flow Hedge Reserve 3550; the FV-hedge basis adjustment",
