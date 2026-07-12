@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, inArray, gte, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { posMembers, customerProfiles, automationCampaigns, campaignSends } from '../../database/schema';
+import { posMembers, customerProfiles, automationCampaigns, campaignSends, custPosSales, custPosItems } from '../../database/schema';
 import { dineInOrders } from '../../database/schema/restaurant';
 import { n } from '../../database/queries';
 import { resolveMessageGateway } from '../messaging/gateways';
@@ -251,6 +251,79 @@ export class MarketingAutomationService {
       holdout: sends.filter((s: any) => s.status === 'holdout').length,
       redeemed, redemption_rate_pct: sent > 0 ? r2((redeemed / sent) * 100) : 0, attributed_revenue: attributed,
       split_b_pct: Number(camp.splitBPct ?? 0), holdout_pct: Number(camp.holdoutPct ?? 0), ab: abReport, organic,
+    };
+  }
+
+  // G4 (docs/45) — cross-campaign ROI attribution over a window, for the marketing_roi BI report.
+  // HONEST FRAMING: campaign_sends.redeemedValue is the DISCOUNT GIVEN (marketing cost — see redeem(),
+  // which defaults it to the campaign's discountValue), NOT revenue. Real revenue comes from the redeemed
+  // sales' own totals, margin from their line items (joined to the food-cost layer by the BI generator),
+  // and the organic holdout lift (report().organic) is the incremental-revenue truth.
+  async roiAttribution(user: JwtUser, opts: { days?: number } = {}) {
+    const db = this.db;
+    this.tid(user);
+    const days = Math.min(Math.max(Number(opts.days ?? 90) || 90, 1), 365);
+    const since = new Date(Date.now() - days * 86_400_000);
+    const sends = await db.select().from(campaignSends).where(gte(campaignSends.sentAt, since));
+    const sent = sends.filter((s: any) => s.status === 'sent').length;
+    const redeemedSends = sends.filter((s: any) => s.redeemedAt != null);
+    const discountCost = r2(redeemedSends.reduce((a: number, s: any) => a + n(s.redeemedValue), 0));
+
+    // per-campaign rollup (windowed sends only), newest first
+    const camps = await db.select().from(automationCampaigns).orderBy(desc(automationCampaigns.id)).limit(200);
+    const byCamp = new Map<number, { sent: number; redeemed: number; discount_cost: number }>();
+    for (const s of sends) {
+      const id = Number(s.campaignId);
+      const b = byCamp.get(id) ?? { sent: 0, redeemed: 0, discount_cost: 0 };
+      if (s.status === 'sent') b.sent++;
+      if (s.redeemedAt != null) { b.redeemed++; b.discount_cost = r2(b.discount_cost + n(s.redeemedValue)); }
+      byCamp.set(id, b);
+    }
+    const topCampaigns = camps.filter((c: any) => byCamp.has(Number(c.id))).slice(0, 10).map((c: any) => {
+      const b = byCamp.get(Number(c.id))!;
+      return { campaign_id: Number(c.id), name: c.name, trigger: c.trigger, channel: c.channel, ...b, redemption_rate_pct: b.sent > 0 ? r2((b.redeemed / b.sent) * 100) : 0 };
+    });
+
+    // attributed sales: the REAL revenue (sale totals) + line items for the margin join
+    const saleNos = Array.from(new Set(redeemedSends.map((s: any) => s.redeemedSaleNo).filter(Boolean))) as string[];
+    let salesCount = 0, revenue = 0;
+    let items: { item_id: string; qty: number; amount: number }[] = [];
+    if (saleNos.length) {
+      const sales = await db.select({ id: custPosSales.id, total: custPosSales.total }).from(custPosSales).where(inArray(custPosSales.saleNo, saleNos));
+      salesCount = sales.length;
+      revenue = r2(sales.reduce((a: number, s: any) => a + n(s.total), 0));
+      if (sales.length) {
+        const lines = await db.select({ itemId: custPosItems.itemId, qty: custPosItems.qty, amount: custPosItems.amount })
+          .from(custPosItems).where(inArray(custPosItems.saleId, sales.map((s: any) => Number(s.id))));
+        const byItem = new Map<string, { item_id: string; qty: number; amount: number }>();
+        for (const l of lines) {
+          const key = String(l.itemId ?? '');
+          if (!key) continue;
+          const b = byItem.get(key) ?? { item_id: key, qty: 0, amount: 0 };
+          b.qty = r2(b.qty + n(l.qty)); b.amount = r2(b.amount + n(l.amount));
+          byItem.set(key, b);
+        }
+        items = Array.from(byItem.values());
+      }
+    }
+
+    // organic lift: re-use report()'s holdout baseline for the (bounded) most recent holdout campaigns
+    const holdoutCamps = camps.filter((c: any) => Number(c.holdoutPct ?? 0) > 0 && byCamp.has(Number(c.id))).slice(0, 5);
+    let liftMeasured = 0, liftIncremental = 0;
+    for (const c of holdoutCamps) {
+      const rep = await this.report(Number(c.id), user).catch(() => null);
+      const inc = rep?.organic?.organic_lift?.incremental_revenue;
+      if (inc != null) { liftMeasured++; liftIncremental = r2(liftIncremental + Number(inc)); }
+    }
+    const lift = liftMeasured > 0 ? { campaigns_measured: liftMeasured, incremental_revenue: liftIncremental } : null;
+
+    return {
+      window_days: days,
+      campaigns: { count: byCamp.size, sent, redeemed: redeemedSends.length, redemption_rate_pct: sent > 0 ? r2((redeemedSends.length / sent) * 100) : 0 },
+      discount_cost: discountCost,
+      top_campaigns: topCampaigns,
+      attributed: { sales_count: salesCount, revenue, items },
+      lift,
     };
   }
 

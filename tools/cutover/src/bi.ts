@@ -261,6 +261,13 @@ async function main() {
   ok('supplier_scorecard runs success + avg / underperformer summary',
     supRun.json.status === 'success' && /avg/.test(supRun.json.summary ?? '') && /underperformer/.test(supRun.json.summary ?? ''), JSON.stringify({ s: supRun.json.status, sum: (supRun.json.summary ?? '').slice(0, 60) }));
 
+  // ── 19a. G4 (docs/45) — marketing_roi: one exec view of spend → lift → margin ──
+  ok('report-types catalog exposes marketing_roi', JSON.stringify(rtypes.json).includes('marketing_roi'), '');
+  const roiRun = await runType('marketing_roi');
+  ok('marketing_roi runs success + spend → attributed revenue summary (zero-safe on an empty window)',
+    roiRun.json.status === 'success' && /Marketing ROI/.test(roiRun.json.summary ?? '') && /spend/.test(roiRun.json.summary ?? '') && /revenue/.test(roiRun.json.summary ?? ''),
+    JSON.stringify({ s: roiRun.json.status, sum: (roiRun.json.summary ?? '').slice(0, 80) }));
+
   // ── 19b. docs/35 Phase 6 — schedulable finance packs (cfo_kpi_pack / cash_position_pack / close_status_pack) ──
   ok('report-types catalog exposes cfo_kpi_pack + cash_position_pack + close_status_pack',
     ['cfo_kpi_pack', 'cash_position_pack', 'close_status_pack'].every((k) => JSON.stringify(rtypes.json).includes(k)), '');
