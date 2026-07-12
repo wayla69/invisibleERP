@@ -27,6 +27,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { RetentionService } from '../retention/retention.service';
 import { RealEstateService } from '../realestate/realestate.service';
 import { CrmPipelineService } from '../crm/pipeline/crm-pipeline.service';
+import { CrmAccountHealthService } from '../crm/account-health/crm-account-health.module';
 import { CrmService } from '../crm/crm.service';
 import { NpsService } from '../nps/nps.service';
 import { MembershipService } from '../loyalty/membership.service';
@@ -98,6 +99,9 @@ export class BiGenerateService {
     @Optional() private readonly marketingAuto?: MarketingAutomationService,
     @Optional() private readonly vouchers?: VouchersService,
     @Optional() private readonly foodCost?: FoodCostService,
+    // CRM-15 (CRM-08) — supplies the crm_account_health snapshot action job. Appended at the END to preserve
+    // the positional constructor contract the goldenmaster harness relies on. @Optional so a partial harness constructs.
+    @Optional() private readonly crmHealth?: CrmAccountHealthService,
   ) {}
 
   async generateReport(reportType: string, filters: any, user: JwtUser, reads: BiReadPort): Promise<{ data: any; summary: string; summaryTh: string }> {
@@ -556,6 +560,11 @@ export class BiGenerateService {
       if (!this.projects) throw new BadRequestException({ code: 'PROJECTS_UNAVAILABLE', message: 'Projects service not available', messageTh: 'ระบบโครงการไม่พร้อมใช้งาน' });
       const r = await this.projects.captureAllHealth(user); // idempotent per (project, date)
       return { data: r, summary: `Project health: captured ${r.captured} of ${r.scanned} project(s) for ${r.as_of}`, summaryTh: `บันทึกสุขภาพโครงการ: ${r.captured} จาก ${r.scanned} โครงการ` };
+    }
+    if (reportType === 'crm_account_health') {
+      if (!this.crmHealth) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM service not available', messageTh: 'ระบบ CRM ไม่พร้อมใช้งาน' });
+      const r = await this.crmHealth.captureAllHealth(user); // idempotent per (account, date)
+      return { data: r, summary: `Account health: captured ${r.captured} of ${r.scanned} account(s) for ${r.as_of}`, summaryTh: `บันทึกสุขภาพบัญชีลูกค้า: ${r.captured} จาก ${r.scanned} บัญชี` };
     }
     if (reportType === 'project_governance_pack') {
       if (!this.projects) throw new BadRequestException({ code: 'PROJECTS_UNAVAILABLE', message: 'Projects service not available', messageTh: 'ระบบโครงการไม่พร้อมใช้งาน' });

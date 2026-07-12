@@ -47,6 +47,10 @@ interface SavedView { id: number; name: string; config: Record<string, unknown>;
 // CRM-7: governed account plan + product-whitespace shapes.
 interface AccountPlan { plan_no: string; account_no: string | null; period: string | null; objective: string | null; target_revenue: number; target_categories: string[]; status: string; owner: string | null; created_at: string }
 interface Whitespace { account_no: string; name: string; categories: { code: string; name: string; targeted: boolean; plan_no: string | null }[]; targeted_count: number; whitespace_count: number }
+// CRM-15: account health / churn + renewal pipeline shapes.
+interface HealthRow { account_no: string; name: string; score: number; band: string; open_weighted: number; open_cases: number; days_since_activity: number | null; renewal_gap: boolean }
+interface HealthPortfolio { accounts: HealthRow[]; count: number; band_counts: Record<string, number> }
+interface RenewalPipeline { renewals: { opp_no: string; name: string; deal_type: string; amount: number; weighted: number; expected_close_date: string | null }[]; count: number; weighted: number; renewal_gaps: { account_no: string; name: string }[]; gap_count: number }
 
 // The six seeded default stage names ↔ the legacy lowercase machine kept in sync on `opp.stage`.
 const LEGACY_BY_NAME: Record<string, string> = {
@@ -79,6 +83,7 @@ export default function CrmWorkspaceClient() {
           { key: 'accounts', label: t('crmx.tab_accounts'), content: <AccountsTab /> },
           { key: 'contacts', label: t('crmx.tab_contacts'), content: <ContactsTab /> },
           { key: 'plans', label: t('crmx.tab_plans'), content: <PlansTab /> },
+          { key: 'health', label: t('crmx.tab_health'), content: <AccountHealthTab /> },
         ]}
       />
     </div>
@@ -891,6 +896,74 @@ function PlansTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ── Account health / churn watchlist + renewal pipeline (CRM-15) ───────────────────────────────────
+const HEALTH_BAND_VARIANT: Record<string, 'success' | 'warning' | 'destructive' | 'outline'> = { healthy: 'success', watch: 'warning', at_risk: 'destructive', no_data: 'outline' };
+function AccountHealthTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [band, setBand] = useState('');
+  const portQ = useQuery<HealthPortfolio>({ queryKey: ['crm-health', band], queryFn: () => api(`/api/crm/account-health${band ? `?band=${band}` : ''}`) });
+  const renQ = useQuery<RenewalPipeline>({ queryKey: ['crm-renewals'], queryFn: () => api('/api/crm/account-health/renewals') });
+  const snapshot = useMutation({
+    mutationFn: () => api<{ captured: number; scanned: number }>('/api/crm/account-health/snapshot', { method: 'POST' }),
+    onSuccess: (r) => { notifySuccess(t('crmx.toast_health_snapshot', { n: r.captured })); qc.invalidateQueries({ queryKey: ['crm-health'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const counts = portQ.data?.band_counts ?? {};
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <StatCard label={t('crmx.health_at_risk')} value={String(counts.at_risk ?? 0)} icon={TrendingUp} tone="danger" />
+        <StatCard label={t('crmx.health_watch')} value={String(counts.watch ?? 0)} icon={BarChart3} tone="warning" />
+        <StatCard label={t('crmx.health_healthy')} value={String(counts.healthy ?? 0)} icon={Target} tone="success" />
+        <StatCard label={t('crmx.health_renewals')} value={baht(renQ.data?.weighted ?? 0)} icon={Handshake} tone="info" hint={t('crmx.health_renewals_hint', { n: renQ.data?.count ?? 0 })} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Select className="w-auto" aria-label={t('crmx.health_band')} value={band} onChange={(e) => setBand(e.target.value)}>
+          <option value="">{t('crmx.health_band_all')}</option>
+          <option value="at_risk">{t('crmx.health_at_risk')}</option>
+          <option value="watch">{t('crmx.health_watch')}</option>
+          <option value="healthy">{t('crmx.health_healthy')}</option>
+        </Select>
+        <div className="ms-auto"><Button size="sm" variant="outline" disabled={snapshot.isPending} onClick={() => snapshot.mutate()}><BarChart3 className="size-4" /> {t('crmx.btn_health_snapshot')}</Button></div>
+      </div>
+
+      <StateView q={portQ}>
+        <DataTable
+          rows={portQ.data?.accounts ?? []}
+          rowKey={(r) => r.account_no}
+          columns={[
+            { key: 'band', label: t('crmx.health_band'), render: (r: HealthRow) => <Badge variant={HEALTH_BAND_VARIANT[r.band] ?? 'outline'}>{t(`crmx.health_${r.band}`)}</Badge> },
+            { key: 'score', label: t('crmx.health_score'), render: (r: HealthRow) => <span className="tabular-nums">{r.score}</span> },
+            { key: 'account', label: t('crmx.col_account'), render: (r: HealthRow) => <Link className="text-primary underline-offset-2 hover:underline" href={`/crm/accounts/${encodeURIComponent(r.account_no)}`}>{r.name}</Link> },
+            { key: 'open_weighted', label: t('crmx.stat_weighted'), render: (r: HealthRow) => baht(r.open_weighted) },
+            { key: 'open_cases', label: t('crmx.health_open_cases'), render: (r: HealthRow) => r.open_cases || '—' },
+            { key: 'idle', label: t('crmx.health_idle_days'), render: (r: HealthRow) => r.days_since_activity == null ? '—' : `${r.days_since_activity}d` },
+            { key: 'gap', label: t('crmx.health_renewal_gap'), render: (r: HealthRow) => r.renewal_gap ? <Badge variant="warning">{t('crmx.health_gap')}</Badge> : '—' },
+          ]}
+          emptyState={{ icon: TrendingUp, title: t('crmx.empty_health_title'), description: t('crmx.empty_health_desc') }}
+        />
+      </StateView>
+
+      {(renQ.data?.renewals?.length ?? 0) > 0 && (
+        <Card className="p-4">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Handshake className="size-4 text-primary" /> {t('crmx.health_renewal_pipeline')}</div>
+          <div className="grid gap-1.5">
+            {(renQ.data?.renewals ?? []).map((o) => (
+              <div key={o.opp_no} className="flex items-center justify-between gap-2 text-sm">
+                <span className="min-w-0 truncate">{o.name} <Badge variant="outline">{t(`crmx.deal_${o.deal_type}`)}</Badge></span>
+                <span className="tabular-nums text-muted-foreground">{baht(o.weighted)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
