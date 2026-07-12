@@ -4,6 +4,7 @@ import { BudgetController } from './budget.controller';
 import { BudgetControlController } from './budget-control.controller';
 import { CommitmentsModule } from '../commitments/commitments.module';
 import { BudgetBiReports } from './budget-bi-reports';
+import { BudgetApprovalQueues } from './budget-approval-queues';
 
 // Budget vs Actual — reference data + variance report read from the GL. DRIZZLE is global.
 // FIN-3 (BUD-02): the budgetary-control surface (availability / commitments / policy settings) rides the
@@ -11,7 +12,7 @@ import { BudgetBiReports } from './budget-bi-reports';
 @Module({
   imports: [CommitmentsModule],
   controllers: [BudgetController, BudgetControlController],
-  providers: [BudgetBiReports, BudgetService],
+  providers: [BudgetApprovalQueues, BudgetBiReports, BudgetService],
   exports: [BudgetService],
 })
 export class BudgetModule {}

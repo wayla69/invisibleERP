@@ -469,6 +469,11 @@ For every such change, review and update as needed:
   finite-capacity production scheduler (extends `mfg-depth` routings/RCCP; new `work_centers` master) +
   a live KPI SSE feed (reuses the `@Sse` `RealtimeService` bus; BI is poll-based today). Build on, don't duplicate.
 - **Finance/GL feature map (controls + where the logic lives):**
+  - **GOV-01 pending-approvals center:** `finance.service.ts` `pendingApprovals` AGGREGATES module-owned
+    `*-approval-queues.ts` providers (docs/46 Phase 2 — implement `ApprovalQueueSource` from
+    `common/approval-queues.ts`; discovered at boot by `ApprovalQueueRegistrarService`). **A new maker-checker
+    queue = a provider in its owning module**, never a new inline query in finance.service.ts (the
+    `check-service-size` ratchet blocks it); only finance's own EXP-06/REV-21/REV-23 stay inline.
   - GL maker-checker / recurring / prepaid: `modules/ledger/ledger.service.ts` — `postEntry` (Draft+approve, **GL-05**),
     `createRecurring`/`runDueRecurring` (**GL-08**), `createPrepaid`/`runDuePrepaid` (**GL-09**); cash flow
     `cashFlowStatement`/`cashFlowDirect`/`cashFlowForecast` (**GL-07**).

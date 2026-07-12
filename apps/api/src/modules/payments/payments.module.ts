@@ -6,6 +6,7 @@ import { PosAuditModule } from '../pos/audit/pos-audit.module';
 import { PosFiscalModule } from '../pos/fiscal/pos-fiscal.module';
 import { QrModule } from '../qr/qr.module';
 import { PaymentsDepthModule } from './depth/payments-depth.module';
+import { PaymentsApprovalQueues } from './payments-approval-queues';
 
 // Payments is the ONE owning module for the payment domain (docs/28 consolidation PR #1):
 // the former standalone payments-depth (deposits, house accounts, surcharge — a phase name, not a
@@ -14,7 +15,7 @@ import { PaymentsDepthModule } from './depth/payments-depth.module';
 @Module({
   imports: [LedgerModule, PosAuditModule, PosFiscalModule, QrModule, PaymentsDepthModule],
   controllers: [PaymentsController],
-  providers: [PaymentService],
+  providers: [PaymentsApprovalQueues, PaymentService],
   exports: [PaymentService, PaymentsDepthModule],
 })
 export class PaymentsModule {}

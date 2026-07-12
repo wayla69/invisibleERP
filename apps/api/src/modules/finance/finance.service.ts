@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions, fxRates, budgets, refundRequests, projects, nettingSettlements, postingRules, coaChangeRequests, masterdataImportBatches, masterdataChangeRequests } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, projects, nettingSettlements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -19,6 +19,7 @@ import { sellerParty } from '../../common/doc-party';
 import type { DocParty } from '../../common/doc-html';
 import { vendors as vendorsTbl } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
+import { approvalAgeDays, type ApprovalQueue, type ApprovalQueueSource } from '../../common/approval-queues';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
 export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero' | 'reverse_charge'; tax_code?: string; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
@@ -836,85 +837,62 @@ export class FinanceService {
 
   // GOV-01 — pending-approvals monitor. One worklist of EVERY item awaiting independent (maker-checker)
   // approval across the system, with its age — so the controller can see what is stuck and catch a stale
-  // approval (a control breakdown / bottleneck) before close. Spans the manual-JE (GL-05), bank-adjustment
-  // (BANK-02), AP-disbursement (EXP-06), payroll (PAY-03), asset-revaluation (FA-08), asset-disposal (FA-09),
-  // inventory-write-off (INV-07), FX-rate (FX-04) and budget (BUD-01) maker-checkers — and, since COA-D1,
-  // the governance-config queues: posting-rule overrides (GL-24), canonical CoA change requests (GL-27),
-  // staged sensitive bulk imports (MDM-03) and staged sensitive master-field changes (MDM-01). Read-only;
-  // tenant-scoped via the caller's RLS (HQ/Admin sees every tenant; GL-27 rows are platform-global).
+  // approval (a control breakdown / bottleneck) before close. Read-only; tenant-scoped via the caller's RLS
+  // (HQ/Admin sees every tenant; GL-27 rows are platform-global). Since docs/46 Phase 2 each queue LIVES in
+  // its owning module (an ApprovalQueueSource provider, discovered at boot by ApprovalQueueRegistrarService):
+  // ledger (GL-05/BANK-02, GL-24, GL-27), payroll (PAY-03), assets (FA-08/FA-09), inventory (INV-07),
+  // petty-cash (EXP-08), payments (REV-13/REV-16), fx (FX-04), masterdata (MDM-03/MDM-01), budget (BUD-01).
+  // Only finance's OWN queues stay inline below: EXP-06 AP disbursements, REV-21 AR cash applications,
+  // REV-23 AR/AP netting. A new maker-checker registers a queue from its owning module — never a new inline
+  // query here (the check-service-size ratchet enforces it).
+  private readonly approvalQueues = new Map<string, ApprovalQueue>();
+  registerApprovalQueues(source: ApprovalQueueSource) {
+    for (const q of source.approvalQueues()) this.approvalQueues.set(q.source, q);
+  }
+
   async pendingApprovals(opts?: { overdue_days?: number }) {
     const db = this.db;
     const overdueDays = opts?.overdue_days ?? 3;
-    const ageDays = (d: any): number | null => (d ? Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000)) : null);
+    const ageDays = approvalAgeDays;
     const items: any[] = [];
 
-    // 1. GL-05 — manual journals posted as Draft, awaiting approval. Amount = Σ debit of the entry's lines.
-    // A Draft JE from another maker-checker that posts via ledger.postEntry (e.g. a bank fee/interest
-    // adjustment, source BANKADJ → BANK-02) is tagged to its own control here.
-    const JE_CONTROL: Record<string, { control: string; type: string }> = { BANKADJ: { control: 'BANK-02', type: 'bank_adjustment' } };
-    const drafts = await db.select().from(journalEntries).where(eq(journalEntries.status, 'Draft'));
-    if (drafts.length) {
-      const ids = drafts.map((e: any) => Number(e.id));
-      const sums = await db.select({ entryId: journalLines.entryId, dr: sql<string>`coalesce(sum(${journalLines.debit}),0)` }).from(journalLines).where(inArray(journalLines.entryId, ids)).groupBy(journalLines.entryId);
-      const byId = new Map<number, number>(sums.map((s: any) => [Number(s.entryId), n(s.dr)]));
-      for (const e of drafts) {
-        const meta = JE_CONTROL[String(e.source ?? '')] ?? { control: 'GL-05', type: 'journal' };
-        items.push({ type: meta.type, control: meta.control, ref: e.entryNo, label: e.memo ?? 'Manual journal', amount: byId.get(Number(e.id)) ?? 0, requested_by: e.createdBy ?? null, requested_at: e.createdAt ?? null, age_days: ageDays(e.createdAt) });
-      }
+    const inline: Record<string, () => Promise<any[]>> = {
+      // EXP-06 — AP disbursements awaiting approval.
+      ap_payment: async () => {
+        const out: any[] = [];
+        for (const p of await db.select().from(apPayments).where(eq(apPayments.status, 'PendingApproval')))
+          out.push({ type: 'ap_payment', control: 'EXP-06', ref: p.paymentNo, label: `จ่ายเจ้าหนี้ ${p.txnNo}`, amount: n(p.amount), requested_by: p.requestedBy ?? null, requested_at: p.requestedAt ?? null, age_days: ageDays(p.requestedAt) });
+        return out;
+      },
+      // REV-21 — large AR cash applications awaiting approval (grouped per worksheet batch; the cash is
+      // banked on-account, no invoice moves until a different user approves).
+      ar_cash_application: async () => {
+        const out: any[] = [];
+        for (const b of await db.select({ batchNo: arReceiptApplications.batchNo, requestedBy: sql<string>`max(${arReceiptApplications.appliedBy})`, total: sql<string>`coalesce(sum(${arReceiptApplications.appliedAmount}),0)`, oldest: sql<string>`min(${arReceiptApplications.appliedAt})` }).from(arReceiptApplications).where(eq(arReceiptApplications.status, 'PendingApproval')).groupBy(arReceiptApplications.batchNo))
+          out.push({ type: 'ar_cash_application', control: 'REV-21', ref: b.batchNo, label: `ตัดรับชำระลูกหนี้ ${b.batchNo}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
+        return out;
+      },
+      // REV-23 — AR/AP netting contra settlements awaiting approval (no GL/sub-ledger movement until a
+      // different user approves; the contra JE + both sub-ledger reliefs post at approval).
+      ar_ap_netting: async () => {
+        const out: any[] = [];
+        for (const st of await db.select().from(nettingSettlements).where(eq(nettingSettlements.status, 'PendingApproval')))
+          out.push({ type: 'ar_ap_netting', control: 'REV-23', ref: st.settlementNo, label: `หักกลบลบหนี้ ${st.counterpartyName ?? st.vendorName ?? ''}`.trim(), amount: n(st.netAmount), requested_by: st.proposedBy ?? null, requested_at: st.proposedAt ?? null, age_days: ageDays(st.proposedAt) });
+        return out;
+      },
+    };
+    // Canonical aggregation order = the historical inline order, so the worklist's tie order under the
+    // stable age sort below is byte-identical to the pre-Phase-2 aggregator. Queues registered by modules
+    // but not named here (future maker-checkers) run after the canonical list, in registration order.
+    const QUEUE_ORDER = ['gl_drafts', 'ap_payment', 'payroll', 'asset_revaluation', 'asset_disposal', 'inventory_writeoff', 'petty_cash', 'till_variance', 'refund', 'ar_cash_application', 'ar_ap_netting', 'fx_rate', 'posting_rule', 'coa_change', 'masterdata_import', 'masterdata_change', 'budget'];
+    const seen = new Set<string>();
+    for (const key of QUEUE_ORDER) {
+      seen.add(key);
+      const q = this.approvalQueues.get(key);
+      if (q) items.push(...(await q.pending()));
+      else if (inline[key]) items.push(...(await inline[key]!()));
     }
-    // 2. EXP-06 — AP disbursements awaiting approval.
-    for (const p of await db.select().from(apPayments).where(eq(apPayments.status, 'PendingApproval')))
-      items.push({ type: 'ap_payment', control: 'EXP-06', ref: p.paymentNo, label: `จ่ายเจ้าหนี้ ${p.txnNo}`, amount: n(p.amount), requested_by: p.requestedBy ?? null, requested_at: p.requestedAt ?? null, age_days: ageDays(p.requestedAt) });
-    // 3. PAY-03 — payroll runs awaiting approval.
-    for (const r of await db.select().from(payruns).where(eq(payruns.status, 'PendingApproval')))
-      items.push({ type: 'payroll', control: 'PAY-03', ref: r.period, label: `เงินเดือนงวด ${r.period} (${Number(r.headcount)} คน)`, amount: n(r.netTotal), requested_by: r.runBy ?? null, requested_at: r.runAt ?? null, age_days: ageDays(r.runAt) });
-    // 4. FA-08 — asset revaluations/impairments awaiting approval.
-    for (const v of await db.select().from(assetRevaluations).where(eq(assetRevaluations.status, 'PendingApproval')))
-      items.push({ type: 'asset_revaluation', control: 'FA-08', ref: v.assetNo, label: `ตีมูลค่า ${v.assetNo} (${v.kind})`, amount: Math.abs(n(v.delta)), requested_by: v.actionedBy ?? null, requested_at: v.createdAt ?? null, age_days: ageDays(v.createdAt) });
-    // 5. FA-09 — asset disposals awaiting approval (disposed_date is the requested date).
-    for (const a of await db.select().from(fixedAssets).where(eq(fixedAssets.disposalPending, true)))
-      items.push({ type: 'asset_disposal', control: 'FA-09', ref: a.assetNo, label: `จำหน่าย ${a.assetNo}`, amount: a.disposalProceeds != null ? n(a.disposalProceeds) : 0, requested_by: a.disposalRequestedBy ?? null, requested_at: a.disposedDate ?? null, age_days: ageDays(a.disposedDate) });
-    // 6. INV-07 — inventory write-offs awaiting approval.
-    for (const w of await db.select().from(invWriteoffRequests).where(eq(invWriteoffRequests.status, 'PendingApproval')))
-      items.push({ type: 'inventory_writeoff', control: 'INV-07', ref: `WO-${Number(w.id)}`, label: `ตัดสต๊อก ${w.itemId} (${n(w.qtyDelta)})`, amount: n(w.estValue), requested_by: w.requestedBy ?? null, requested_at: w.createdAt ?? null, age_days: ageDays(w.createdAt) });
-    // 7. EXP-08 — petty-cash expense / advance requests awaiting approval.
-    for (const e of await db.select().from(expenseRequests).where(eq(expenseRequests.status, 'PendingApproval')))
-      items.push({ type: 'petty_cash', control: 'EXP-08', ref: e.reqNo, label: `${e.kind === 'advance' ? 'เงินเบิกล่วงหน้า' : 'ค่าใช้จ่าย'} ${e.payee ?? ''}`.trim(), amount: n(e.amount), requested_by: e.requestedBy ?? null, requested_at: e.requestedAt ?? null, age_days: ageDays(e.requestedAt) });
-    // 8. REV-13 — material till-close cash over/short awaiting a manager's approval.
-    for (const t of await db.select().from(tillSessions).where(eq(tillSessions.varianceStatus, 'PendingApproval')))
-      items.push({ type: 'till_variance', control: 'REV-13', ref: t.sessionNo, label: `เงินสด${n(t.variance) < 0 ? 'ขาด' : 'เกิน'} ${t.sessionNo}`, amount: Math.abs(n(t.variance)), requested_by: t.closedBy ?? null, requested_at: t.closedAt ?? null, age_days: ageDays(t.closedAt) });
-    // 9. REV-16 — large standalone refunds awaiting approval.
-    for (const r of await db.select().from(refundRequests).where(eq(refundRequests.status, 'PendingApproval')))
-      items.push({ type: 'refund', control: 'REV-16', ref: `RR-${Number(r.id)}`, label: `คืนเงิน ${r.paymentNo}`, amount: n(r.amount), requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
-    // 9b. REV-21 — large AR cash applications awaiting approval (grouped per worksheet batch; the cash is
-    // banked on-account, no invoice moves until a different user approves).
-    for (const b of await db.select({ batchNo: arReceiptApplications.batchNo, requestedBy: sql<string>`max(${arReceiptApplications.appliedBy})`, total: sql<string>`coalesce(sum(${arReceiptApplications.appliedAmount}),0)`, oldest: sql<string>`min(${arReceiptApplications.appliedAt})` }).from(arReceiptApplications).where(eq(arReceiptApplications.status, 'PendingApproval')).groupBy(arReceiptApplications.batchNo))
-      items.push({ type: 'ar_cash_application', control: 'REV-21', ref: b.batchNo, label: `ตัดรับชำระลูกหนี้ ${b.batchNo}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
-    // 9c. REV-23 — AR/AP netting contra settlements awaiting approval (no GL/sub-ledger movement until a
-    // different user approves; the contra JE + both sub-ledger reliefs post at approval).
-    for (const st of await db.select().from(nettingSettlements).where(eq(nettingSettlements.status, 'PendingApproval')))
-      items.push({ type: 'ar_ap_netting', control: 'REV-23', ref: st.settlementNo, label: `หักกลบลบหนี้ ${st.counterpartyName ?? st.vendorName ?? ''}`.trim(), amount: n(st.netAmount), requested_by: st.proposedBy ?? null, requested_at: st.proposedAt ?? null, age_days: ageDays(st.proposedAt) });
-    // 8. FX-04 — manual FX rates awaiting approval (PendingApproval, unusable until approved; not a JE).
-    for (const r of await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')))
-      items.push({ type: 'fx_rate', control: 'FX-04', ref: `${r.currency}@${r.rateDate}`, label: `อัตรา ${r.currency} = ${n(r.rate)} (${r.rateDate})`, amount: 0, requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
-    // 10. GL-24 — tenant posting-rule overrides awaiting a DIFFERENT user's approval (COA-D1: the override
-    // is inert until approved, but it used to wait invisibly on /setup/posting-rules — now it ages here too).
-    for (const r of await db.select().from(postingRules).where(and(eq(postingRules.status, 'PendingApproval'), eq(postingRules.active, true))))
-      items.push({ type: 'posting_rule', control: 'GL-24', ref: `PRULE-${Number(r.id)}`, label: `กฎการลงบัญชี ${r.eventType} · ${r.role} → ${r.accountCode}`, amount: 0, requested_by: r.createdBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
-    // 11. GL-27 — canonical CoA change requests awaiting a DIFFERENT Admin (platform-level: the canonical
-    // chart is global, so these rows are not tenant-scoped; approval still requires platform Admin).
-    for (const c of await db.select().from(coaChangeRequests).where(eq(coaChangeRequests.status, 'PendingApproval')))
-      items.push({ type: 'coa_change', control: 'GL-27', ref: `COA-${Number(c.id)}`, label: `${c.action === 'create' ? 'สร้างบัญชี' : c.action === 'deactivate' ? 'ปิดใช้บัญชี' : 'แก้ไขบัญชี'} ${c.accountCode}`, amount: 0, requested_by: c.createdBy ?? null, requested_at: c.createdAt ?? null, age_days: ageDays(c.createdAt) });
-    // 12. Sensitive bulk-import batches staged for a distinct approver (MDM-03 path; incl. the canonical
-    // CoA + posting-rule imports from PR-8).
-    for (const b of await db.select().from(masterdataImportBatches).where(eq(masterdataImportBatches.status, 'PendingApproval')))
-      items.push({ type: 'masterdata_import', control: 'MDM-03', ref: b.reqNo, label: `นำเข้า ${b.entityKey} (${Number(b.rowCount)} แถว)`, amount: 0, requested_by: b.requestedBy ?? null, requested_at: b.requestedAt ?? null, age_days: ageDays(b.requestedAt) });
-    // 13. MDM-01 — sensitive single-field master changes staged for a distinct approver (status is lowercase).
-    for (const c of await db.select().from(masterdataChangeRequests).where(eq(masterdataChangeRequests.status, 'pending')))
-      items.push({ type: 'masterdata_change', control: 'MDM-01', ref: c.reqNo, label: `แก้ไข ${c.entityType} #${Number(c.entityId)} · ${c.field}`, amount: 0, requested_by: c.requestedBy ?? null, requested_at: c.requestedAt ?? null, age_days: ageDays(c.requestedAt) });
-    // 9. BUD-01 — budgets awaiting approval (excluded from budget-vs-actual); grouped per fiscal-year/account/cost-centre.
-    for (const b of await db.select({ fiscalYear: budgets.fiscalYear, accountCode: budgets.accountCode, costCenterCode: budgets.costCenterCode, requestedBy: sql<string>`max(${budgets.requestedBy})`, total: sql<string>`coalesce(sum(${budgets.amount}),0)`, oldest: sql<string>`min(${budgets.updatedAt})` }).from(budgets).where(eq(budgets.status, 'PendingApproval')).groupBy(budgets.fiscalYear, budgets.accountCode, budgets.costCenterCode))
-      items.push({ type: 'budget', control: 'BUD-01', ref: `FY${b.fiscalYear}/${b.accountCode}${b.costCenterCode ? '/' + b.costCenterCode : ''}`, label: `งบประมาณ FY${b.fiscalYear} ${b.accountCode}${b.costCenterCode ? ' @ ' + b.costCenterCode : ''}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
+    for (const [key, q] of this.approvalQueues) if (!seen.has(key)) items.push(...(await q.pending()));
 
     items.sort((a, b) => (b.age_days ?? -1) - (a.age_days ?? -1));
     const byType: Record<string, number> = {};
