@@ -634,6 +634,38 @@ async function main() {
   const t1subs = await inj('GET', '/api/crm/forecast/submissions', sales1);
   ok('CRM-12 RLS: a T1 user cannot see HQ forecast submissions', t1subs.status === 200 && !(t1subs.json.submissions ?? []).some((x: any) => x.owner === 'hq_rep'), `owners=${(t1subs.json.submissions ?? []).map((x: any) => x.owner).join(',')}`);
 
+  // ── CRM-11 — persisted territory & quota management (migration 0385, control CRM-10) ─────────────
+  // 57. Create a territory hierarchy (parent + child) + assign a rep to the child.
+  const terrN = await inj('POST', '/api/crm/territory/territories', sales1, { name: 'North Region', manager: 'mgr_n' });
+  const terrNE = await inj('POST', '/api/crm/territory/territories', sales1, { name: 'Northeast', parent_code: terrN.json.code, manager: 'mgr_ne' });
+  ok('CRM-11 territory: create a parent + child territory (hierarchy)', [200, 201].includes(terrN.status) && [200, 201].includes(terrNE.status) && !!terrN.json.code && !!terrNE.json.code, JSON.stringify({ parent: terrN.json.code, child: terrNE.json.code }));
+  const addM = await inj('POST', `/api/crm/territory/territories/${terrNE.json.code}/members`, sales1, { owner: 'terr_rep', role: 'rep' });
+  ok('CRM-11 territory: assign a rep to the child territory', [200, 201].includes(addM.status) && addM.json.owner === 'terr_rep', JSON.stringify(addM.json));
+
+  // 58. A won deal for the rep in the current period + owner & territory quotas → attainment roll-up.
+  const twAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Territory Deal Co', tax_id: '0105561000905' });
+  const twOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Terr Deal', amount: 300000, owner: 'terr_rep', account_no: twAcc.json.account_no });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${twOpp.json.opp_no}/stage`, sales1, { stage: 'won', win_reason: 'closed' });
+  await inj('POST', '/api/crm/territory/quotas', sales1, { scope: 'owner', subject: 'terr_rep', target_amount: 600000 });
+  await inj('POST', '/api/crm/territory/quotas', sales1, { scope: 'territory', subject: terrN.json.code, target_amount: 1000000 });
+  const att = await inj('GET', '/api/crm/territory/attainment', sales1);
+  const ownerRow = (att.json.owners ?? []).find((o: any) => o.owner === 'terr_rep');
+  ok('CRM-11 attainment: rep won-in-period vs a persisted owner quota', att.status === 200 && !!ownerRow && ownerRow.won_amount >= 300000 && ownerRow.quota === 600000 && ownerRow.attainment_pct !== null, JSON.stringify(ownerRow));
+
+  // 59. Territory subtree roll-up: parent North's subtree includes the child NE member's won.
+  const parentRow = (att.json.territories ?? []).find((tr: any) => tr.code === terrN.json.code);
+  ok('CRM-11 roll-up: parent territory subtree_won includes the child member\'s won + territory quota', !!parentRow && parentRow.subtree_won >= 300000 && parentRow.quota === 1000000 && parentRow.attainment_pct !== null, JSON.stringify(parentRow));
+
+  // 60. Territory read exposes members.
+  const terrGet = await inj('GET', `/api/crm/territory/territories/${terrNE.json.code}`, sales1);
+  ok('CRM-11 territory read: members listed on the territory', terrGet.status === 200 && (terrGet.json.members ?? []).some((m: any) => m.owner === 'terr_rep'), JSON.stringify({ members: (terrGet.json.members ?? []).map((m: any) => m.owner) }));
+
+  // 61. RLS: a T1 user cannot see an HQ tenant's territory (per-tenant codes collide, so assert via the
+  //     tenant-scoped list rather than a code lookup).
+  await inj('POST', '/api/crm/territory/territories', admin, { name: 'HQ Only Region' });
+  const t1list = await inj('GET', '/api/crm/territory/territories', sales1);
+  ok('CRM-11 RLS: a T1 user cannot see an HQ tenant\'s territory', t1list.status === 200 && !(t1list.json.territories ?? []).some((tr: any) => tr.name === 'HQ Only Region'), `names=${(t1list.json.territories ?? []).map((tr: any) => tr.name).join('|')}`);
+
   await app.close();
 }
 
