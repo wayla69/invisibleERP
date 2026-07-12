@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.3** _(2026-07-10: menu engineering — branch picker + quantity-weighted average-margin threshold + on-screen thresholds; 2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
+**Status: DRAFT v0.4** _(2026-07-12: menu affinity — คู่เมนูขายด้วยกัน tab (co-purchase support/confidence/lift, per daypart) + schedulable `menu_affinity` report; 2026-07-10: menu engineering — branch picker + quantity-weighted average-margin threshold + on-screen thresholds; 2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
 
 This chapter is for **managers, planners and executives** — and anyone who needs
 reports. It covers dashboards, Excel / PDF reports, AI-driven forecasting and
@@ -521,6 +521,17 @@ list but are never classified.
 or `exec` duty), a **สาขา (Branch)** picker appears on the Menu engineering tab —
 pick an outlet to re-derive the whole matrix from that branch's sales only
 (`?branch_id=` on the API). "ทุกสาขา" (all branches) is the default.
+
+### Menu affinity / co-purchase (คู่เมนูขายด้วยกัน)
+
+Which dishes sell **together** on the same bill. Each pair shows how many bills carried both
+(**count**), the share of all bills (**support**), how often buying one side means the other is on the
+bill too (**confidence**, shown A→B / B→A), and **lift** — the load-bearing number: lift > 1 means the
+pair co-occurs *more than chance*, so it's a genuine set-menu / cross-sell candidate rather than two
+independently popular dishes. Sliced per daypart (breakfast … late) on the business clock so a lunch
+pairing isn't diluted by dinner traffic; bills without a captured payment time count in the overall
+view only. Rare pairs are hidden below a minimum count (default 2). Also schedulable as the
+**Menu affinity** report type (default: trailing 30 days).
 
 ### Daypart & busiest hours (`GET /api/analytics/daypart`)
 

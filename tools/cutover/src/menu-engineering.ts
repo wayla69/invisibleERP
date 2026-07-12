@@ -134,6 +134,56 @@ async function main() {
     actor.cashier1?.count === 2 && near(actor.cashier1?.amount, 240) && (vd.json.by_reason ?? []).length === 3,
     JSON.stringify({ cashier1: actor.cashier1, reasons: (vd.json.by_reason ?? []).length }));
 
+  // ── 4. G2 (docs/45) — market-basket affinity (isolated day so the quadrant/void checks stay untouched) ──
+  const DAY2 = '2026-06-21';
+  const afIds: number[] = [];
+  for (let i = 1; i <= 5; i++) {
+    const [row] = await db.insert(s.custPosSales).values({ saleNo: `SALE-AF-${i}`, saleDate: DAY2, tenantId: t1, status: 'Completed', subtotal: '0', total: '0' }).returning({ id: s.custPosSales.id });
+    afIds.push(Number(row.id));
+  }
+  // baskets: S1 A+B, S2 A+B, S3 A+B+C, S4 A, S5 C → counts A=4 B=3 C=2; pair A|B=3 (A|C=1, B|C=1 under min 2)
+  await db.insert(s.custPosItems).values([
+    { saleId: afIds[0], itemId: 'A', itemDescription: 'ผัดไทยกุ้ง', qty: '1', unitPrice: '200.00', amount: '200.00' },
+    { saleId: afIds[0], itemId: 'B', itemDescription: 'ข้าวผัด', qty: '1', unitPrice: '100.00', amount: '100.00' },
+    { saleId: afIds[1], itemId: 'A', itemDescription: 'ผัดไทยกุ้ง', qty: '2', unitPrice: '200.00', amount: '400.00' },
+    { saleId: afIds[1], itemId: 'B', itemDescription: 'ข้าวผัด', qty: '1', unitPrice: '100.00', amount: '100.00' },
+    { saleId: afIds[2], itemId: 'A', itemDescription: 'ผัดไทยกุ้ง', qty: '1', unitPrice: '200.00', amount: '200.00' },
+    { saleId: afIds[2], itemId: 'B', itemDescription: 'ข้าวผัด', qty: '1', unitPrice: '100.00', amount: '100.00' },
+    { saleId: afIds[2], itemId: 'C', itemDescription: 'สเต๊กพรีเมียม', qty: '1', unitPrice: '300.00', amount: '300.00' },
+    { saleId: afIds[3], itemId: 'A', itemDescription: 'ผัดไทยกุ้ง', qty: '1', unitPrice: '200.00', amount: '200.00' },
+    { saleId: afIds[4], itemId: 'C', itemDescription: 'สเต๊กพรีเมียม', qty: '1', unitPrice: '300.00', amount: '300.00' },
+  ]);
+  // tenders time the baskets: S1/S2 lunch (05:30Z → 12:30 BKK), S3/S4 dinner (12:00Z → 19:00); S5 has NO tender → overall only
+  await db.insert(s.payments).values([
+    { paymentNo: 'PAY-AF-1', saleNo: 'SALE-AF-1', tenantId: t1, method: 'Cash', amount: '300.0000', currency: 'THB', status: 'Captured', createdAt: new Date('2026-06-21T05:30:00Z') },
+    { paymentNo: 'PAY-AF-2', saleNo: 'SALE-AF-2', tenantId: t1, method: 'Cash', amount: '500.0000', currency: 'THB', status: 'Captured', createdAt: new Date('2026-06-21T05:35:00Z') },
+    { paymentNo: 'PAY-AF-3', saleNo: 'SALE-AF-3', tenantId: t1, method: 'Card', amount: '600.0000', currency: 'THB', status: 'Captured', createdAt: new Date('2026-06-21T12:00:00Z') },
+    { paymentNo: 'PAY-AF-4', saleNo: 'SALE-AF-4', tenantId: t1, method: 'Card', amount: '200.0000', currency: 'THB', status: 'Captured', createdAt: new Date('2026-06-21T12:05:00Z') },
+  ]);
+  const win2 = `from=${DAY2}&to=${DAY2}`;
+  const af = await inj(`/api/analytics/menu-affinity?${win2}`, token);
+  const topAf = (af.json.pairs ?? [])[0];
+  ok('affinity: 5 baskets (3 multi-item), 1 pair over min-2 — A+B count 3, support 60%, conf 75/100, lift 1.25',
+    af.json.summary?.baskets === 5 && af.json.summary?.multi_item_baskets === 3 && af.json.summary?.pairs_returned === 1 &&
+    topAf?.item_a === 'A' && topAf?.item_b === 'B' && topAf?.pair_count === 3 &&
+    near(topAf?.support_pct, 60) && near(topAf?.confidence_a_to_b_pct, 75) && near(topAf?.confidence_b_to_a_pct, 100) && near(topAf?.lift, 1.25),
+    JSON.stringify({ sum: af.json.summary, top: topAf }));
+  const dpAf = Object.fromEntries((af.json.by_daypart ?? []).map((d: any) => [d.daypart, d]));
+  ok('affinity by daypart: lunch 2 baskets with A+B pair 2; dinner 2 baskets with no pair over min-2; tenderless sale overall-only',
+    dpAf.lunch?.baskets === 2 && dpAf.lunch?.top_pairs?.[0]?.pair_count === 2 &&
+    dpAf.dinner?.baskets === 2 && (dpAf.dinner?.top_pairs ?? []).length === 0 && Object.keys(dpAf).length === 2,
+    JSON.stringify({ lunch: dpAf.lunch?.top_pairs?.length, dinner: dpAf.dinner?.top_pairs?.length, parts: Object.keys(dpAf) }));
+  const af1 = await inj(`/api/analytics/menu-affinity?${win2}&min_pair_count=1`, token);
+  ok('affinity min_pair_count=1 surfaces the long tail (3 pairs)', af1.json.summary?.pairs_returned === 3, JSON.stringify(af1.json.summary));
+  // BI report type rides the same computation (schedulable)
+  const rt = await inj('/api/bi/report-types', token);
+  const subRes = await app.inject({ method: 'POST', url: '/api/bi/subscriptions', headers: { authorization: `Bearer ${token}` }, payload: { name: 'affinity', report_type: 'menu_affinity', frequency: 'weekly', filters: { from: DAY2, to: DAY2 } } });
+  const runRes = await app.inject({ method: 'POST', url: `/api/bi/subscriptions/${subRes.json().id}/run`, headers: { authorization: `Bearer ${token}` }, payload: {} });
+  const afRun = runRes.json();
+  ok('BI menu_affinity: catalog exposed + scheduled run success with top-pair summary',
+    JSON.stringify(rt.json).includes('menu_affinity') && afRun.status === 'success' && /Menu affinity/.test(afRun.summary ?? '') && /lift 1.25/.test(afRun.summary ?? ''),
+    JSON.stringify({ s: afRun.status, sum: (afRun.summary ?? '').slice(0, 90) }));
+
   console.log('\n── C4 — Menu-engineering + daypart + void analytics (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
