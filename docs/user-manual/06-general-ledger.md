@@ -1,6 +1,6 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.15 · 2026-07-12** · *v0.15 (2026-07-12): the deactivate-account dialog now shows a **where-used** list first — every configuration still pointing at the code (posting rules, item categories, tax codes, item/warehouse accounts, asset categories, bank accounts, recurring JEs, prepaid and rev-rec schedules) with counts, so the impact is visible BEFORE retiring instead of failing at posting time; deactivation itself is unchanged (zero balance required).* · *v0.14 (2026-07-12): the /chart-of-accounts **edit** dialog now
+**Status: DRAFT v0.16 · 2026-07-12** · *v0.16 (2026-07-12): canonical chart changes are now a two-person action (GL-27) — a create/edit/deactivate on ผังบัญชี is SAVED AS A REQUEST and takes effect only when a DIFFERENT Admin presses อนุมัติ in the new "คำขอแก้ไขผังบัญชีรออนุมัติ" queue on the same screen (you cannot approve your own request — SOD_VIOLATION). Exception: when the system has only ONE active Admin the change applies immediately and is recorded in the request log as AutoApplied.* · *v0.15 (2026-07-12): the deactivate-account dialog now shows a **where-used** list first — every configuration still pointing at the code (posting rules, item categories, tax codes, item/warehouse accounts, asset categories, bank accounts, recurring JEs, prepaid and rev-rec schedules) with counts, so the impact is visible BEFORE retiring instead of failing at posting time; deactivation itself is unchanged (zero balance required).* · *v0.14 (2026-07-12): the /chart-of-accounts **edit** dialog now
 carries the cash-flow bucket and current/non-current fields too, so an EXISTING balance-sheet account can be
 backfilled (create-only before; "อัตโนมัติ" clears back to the fallback chain); the indirect cash-flow screen
 shows a warning banner listing any account codes that fell through to the type fallback
@@ -166,6 +166,8 @@ changing its postability, or retiring it is a **head-office (Admin/HQ)** action:
 | Message | Meaning | What to do |
 |---------|---------|-----------|
 | `COA_ADMIN_ONLY` | You tried a master-account change without the Admin/HQ role | Curate your own chart (level 1), or ask the platform admin |
+| *(คำขอรออนุมัติ / staged)* | Your canonical change was saved as a GL-27 request | A DIFFERENT Admin approves it in the "คำขอแก้ไขผังบัญชีรออนุมัติ" queue on ผังบัญชี — you cannot approve your own (`SOD_VIOLATION`) |
+| `CHANGE_ALREADY_PENDING` | Another change for the same account code is already waiting for approval | Approve or reject the pending request first (one open request per code) |
 | `DUPLICATE_ACCOUNT` | The code already exists | Use a new code, or edit the existing account |
 | `ACCOUNT_HAS_BALANCE` | You tried to deactivate an account that still has a balance | Clear the balance with a correcting entry first |
 | *(where-used warning in the deactivate dialog)* | Configurations still reference the account (listed with counts) | Re-point those settings to another account first — a retired code left in them will reject postings with `INVALID_POSTING_ACCOUNT` |
