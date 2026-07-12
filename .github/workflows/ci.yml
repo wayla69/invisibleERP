@@ -119,8 +119,7 @@ jobs:
             run: >-
               cutover:revrec cutover:fxreval cutover:intercompany cutover:consolidation
               cutover:recon-profitability cutover:multiledger cutover:bankrec
-              cutover:costcenter cutover:budget cutover:flux-analysis
-              cutover:costcenter cutover:budget cutover:disclosure-checklist
+              cutover:costcenter cutover:budget cutover:flux-analysis cutover:disclosure-checklist cutover:tax-provision
           # ── supply chain / inventory / manufacturing ──
           - shard: scm-mfg
             run: >-

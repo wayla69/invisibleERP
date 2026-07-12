@@ -568,12 +568,21 @@ Recognises deferred tax from book-vs-tax **temporary** differences at the CIT ra
   โพสต์" tab lists staged/posted runs with a **โพสต์เข้า GL** button; the maker-checker rule is enforced
   server-side (`SELF_POST`), and the screen shows the runner/poster per row.
 
+> **Current side — income-tax provision + ETR (TAX-11).** The *current* income-tax provision that pairs with
+> this deferred-tax run — pretax book income → permanent + temporary adjustments → taxable income → current
+> CIT @ statutory rate, with the effective-tax-rate reconciliation and a maker-checker post **Dr 5960 Current
+> CIT Expense / Cr 2110 CIT Payable** — is documented in `06-tax-compliance.md` §9b (control **TAX-11**,
+> `/tax/provision`, migration `0346`). It **reuses this run's period delta** for the temporary adjustment, so
+> the current and deferred sides never disagree.
+
 ### COA accounts (added WS3.2)
 | Code | Name | Type | Normal balance |
 |------|------|------|----------------|
 | 1700 | Deferred Tax Asset | Asset | D |
 | 2700 | Deferred Tax Liability | Liability | C |
 | 5950 | Deferred Tax Expense | Expense | D |
+| 5960 | Corporate Income Tax Expense (current) — *current provision, TAX-11* | Expense | D |
+| 2110 | CIT Payable — *current income-tax payable, TAX-11* | Liability | C |
 | 5400 | FX Gain/Loss (Unrealized) — *pre-existing* | Expense | D (loss) / C (gain) |
 
 ### Close-checklist integration

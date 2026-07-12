@@ -2437,6 +2437,13 @@
       "when": 2023820000313,
       "tag": "0348_flux_analysis",
       "breakpoints": true
+    },
+    {
+      "idx": 349,
+      "version": "7",
+      "when": 2023820000314,
+      "tag": "0349_income_tax_provision",
+      "breakpoints": true
     }
   ]
 }

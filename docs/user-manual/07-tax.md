@@ -1,6 +1,6 @@
 # 07 · Tax
 
-**Status: DRAFT v0.6 · 2026-07-10** · *v0.6 (2026-07-10): **bulk actions on the tax-invoice register** (`/tax/invoices`) — multi-select checkboxes with **Download selected PDFs**, **Email selected (e-Tax)** (one recipient applied to all), and batch **Approve** for PendingApproval notes; each loops the existing per-row endpoint so per-document controls (note maker-checker, e-Tax email logging) are unchanged. UI-only, no new endpoint or control.* · *v0.5 (2026-07-10): **convert an abbreviated slip to a full tax invoice** (ม.86/4 on buyer request) — new card on `/tax/invoices`; buyer Tax ID required + validated, amounts copied from the slip (never recomputed), one full invoice per slip (control **TAX-10**).* · *v0.4 (2026-07-09): RD e-Filing downloads — ภ.ง.ด.3/53 ใบแนบ .txt on the filings tab + CSV working papers (ภาษีขาย/ภาษีซื้อ/ภ.พ.30) on each report tab; purchase-VAT CSV carries filing-readiness notes.* · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
+**Status: DRAFT v0.7 · 2026-07-11** · *v0.7 (2026-07-11): **Income-Tax Provision + ETR reconciliation** (`/tax/provision`, control **TAX-11**) — computes the **current** income-tax provision (pretax book income → permanent + temporary adjustments → taxable income → current CIT @ statutory rate) with the effective-tax-rate reconciliation, reusing the deferred-tax (TAX-06) temporary difference; maker-checker post **Dr 5960 / Cr 2110** (`SOD_SELF_APPROVAL`, `ALREADY_POSTED`).* · *v0.6 (2026-07-10): **bulk actions on the tax-invoice register** (`/tax/invoices`) — multi-select checkboxes with **Download selected PDFs**, **Email selected (e-Tax)** (one recipient applied to all), and batch **Approve** for PendingApproval notes; each loops the existing per-row endpoint so per-document controls (note maker-checker, e-Tax email logging) are unchanged. UI-only, no new endpoint or control.* · *v0.5 (2026-07-10): **convert an abbreviated slip to a full tax invoice** (ม.86/4 on buyer request) — new card on `/tax/invoices`; buyer Tax ID required + validated, amounts copied from the slip (never recomputed), one full invoice per slip (control **TAX-10**).* · *v0.4 (2026-07-09): RD e-Filing downloads — ภ.ง.ด.3/53 ใบแนบ .txt on the filings tab + CSV working papers (ภาษีขาย/ภาษีซื้อ/ภ.พ.30) on each report tab; purchase-VAT CSV carries filing-readiness notes.* · *v0.3 (2026-07-06): documented **where the G16 voided-tax-invoice exception report is surfaced in the app**: a read-only **"Voided tax invoices"** review card on the **Pending Approvals** screen (`/approvals`) for periodic independent review. UI surfacing of an already-shipped report — no new endpoint, no new numbered control.* · *v0.2 (2026-07-06): added the **voided-tax-invoice exception report** (`GET /api/tax-invoices/exceptions/voided`, `exec`/`ar`/`fin_report`, optional `from`/`to` on issue date) — a detective control for periodic review of invoice voids (gap **G16**); the void itself stays single-user (RD requirement, numbers never reused). No new numbered control.*
 
 This chapter is for **accountants** and **finance** staff. It covers VAT, tax
 invoices (full and abbreviated), e-Tax submission, withholding tax (WHT)
@@ -346,6 +346,31 @@ the General Ledger close: `POST /api/ledger/deferred-tax/run` then a **different
 posts `POST /api/ledger/deferred-tax/{id}/post` (maker-checker) → **Dr 1700 / Cr 5950**
 for a deferred tax benefit. Full steps: [General Ledger](./06-general-ledger.md) ▸
 *Deferred tax*. Errors: `SELF_POST`, `ALREADY_POSTED`.
+
+## Income-tax provision + ETR reconciliation — control TAX-11
+
+Where deferred tax (above) is the *deferred* side, the **Income-Tax Provision** screen computes
+the **current** side of the income-tax provision — the bridge from **pretax book income** to
+**taxable income** to **current CIT payable** — plus the **effective-tax-rate (ETR)
+reconciliation**. Open it at **Tax ▸ ประมาณการภาษีเงินได้** (`/tax/provision`), permissions
+`gl_close` / `gl_post` / `exec`.
+
+**To run a provision** (tab *คำนวณงวดใหม่*):
+1. Enter the **period** (`YYYY-MM`), optionally the P&L **from/to** dates and the **statutory
+   rate** (defaults to **20%** Thai CIT).
+2. Add any **permanent differences** (M-1 items) — a **positive** amount is an add-back
+   (non-deductible expense), a **negative** amount is a deduction (tax-exempt income).
+3. Press **คำนวณ**. The screen reads pretax book income from the income statement (income-tax
+   postings are excluded so the base is genuinely pre-tax), **reuses the temporary difference
+   from the matching deferred-tax run (TAX-06)** — you never key it twice — and shows the
+   **book → taxable-income bridge**, the **current CIT**, and the **ETR schedule** (statutory →
+   permanent differences → rate changes → valuation allowance → prior deferred → effective rate).
+
+**To post it** (tab *ทบทวน & โพสต์*): a **different** user presses **โพสต์เข้า GL** — maker-checker,
+the runner cannot post their own provision. Posting books the current tax **Dr 5960 Corporate
+Income Tax Expense (current) / Cr 2110 CIT Payable** through the period-lock gate (the deferred
+leg is posted separately by the deferred-tax screen). Errors: `SOD_SELF_APPROVAL` (self-post),
+`ALREADY_POSTED` (re-post).
 
 ---
 
