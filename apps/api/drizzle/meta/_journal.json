@@ -2512,7 +2512,14 @@
       "idx": 359,
       "version": "7",
       "when": 2023820000324,
-      "tag": "0359_crm_account_depth",
+      "tag": "0359_revrec_variable_estimates",
+      "breakpoints": true
+    },
+    {
+      "idx": 360,
+      "version": "7",
+      "when": 2023820000325,
+      "tag": "0362_crm_account_depth",
       "breakpoints": true
     }
   ]
