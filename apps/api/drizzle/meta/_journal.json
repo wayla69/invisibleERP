@@ -2554,6 +2554,13 @@
       "idx": 365,
       "version": "7",
       "when": 2023820000330,
+      "tag": "0367_revrec_financing_schedules",
+      "breakpoints": true
+    },
+    {
+      "idx": 366,
+      "version": "7",
+      "when": 2023820000331,
       "tag": "0378_crm_forecast",
       "breakpoints": true
     }
