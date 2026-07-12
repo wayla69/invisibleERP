@@ -45,11 +45,11 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     revenue: r(CR, '4000', 'free', 'Sales revenue'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
   'SALE.VAT':         { name: 'Sale — output VAT',             description: 'Output-VAT leg of a sale/CN/DN', wired: true, roles: {
     vat_output: r(CR, '2100', 'widen', 'Output VAT — PP30 tie sums the VAT-account set') } },
-  'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: false, roles: {
+  'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: true, roles: {
     delivery_income: r(CR, '4100', 'free', 'Delivery income') } },
-  'SVC.CHARGE':       { name: 'Sale — service charge',         description: 'Auto service-charge income (large parties)', wired: false, roles: {
+  'SVC.CHARGE':       { name: 'Sale — service charge',         description: 'Auto service-charge income (large parties)', wired: true, roles: {
     service_charge_income: r(CR, '4400', 'free', 'Service-charge income') } },
-  'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: false, roles: {
+  'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: true, roles: {
     rounding: r(CR, '4900', 'free', 'Rounding adjustment (gain=credit, loss=debit)') } },
   'SURCHARGE.INCOME': { name: 'Card surcharge income',         description: 'Card surcharge collected at settlement', wired: true, roles: {
     surcharge_income: r(CR, '4500', 'free', 'Card surcharge income') } },
@@ -104,13 +104,13 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
   'PAYROLL.GROSS':    { name: 'Payroll — gross wages',         description: 'Salaries + OT − unpaid (net-pay cash leg is pinned)', wired: true, roles: {
     wages_expense: r(DR, '5600', 'free', 'Salaries & wages'), net_pay_cash: r(CR, '1000', 'pinned', 'Net pay (CASH set)') } },
   'PAYROLL.SSO':      { name: 'Payroll — social security',     description: 'Employer SSO expense + combined payable', wired: true, roles: {
-    sso_expense: r(DR, '5610', 'free', 'Employer SSO expense'), sso_payable: r(CR, '2350', 'widen', 'SSO payable — PAY-02 schedule widens in PR-7') } },
+    sso_expense: r(DR, '5610', 'free', 'Employer SSO expense'), sso_payable: r(CR, '2350', 'free', 'SSO payable — the PAY-02 schedule reads the widened set (PR-7)') } },
   'PAYROLL.WHT':      { name: 'Payroll — income WHT',          description: 'ภ.ง.ด.1 payroll withholding payable', wired: true, roles: {
-    wht_payable: r(CR, '2360', 'widen', 'Payroll WHT payable — PAY-02 schedule widens in PR-7') } },
+    wht_payable: r(CR, '2360', 'free', 'Payroll WHT payable — the PAY-02 schedule reads the widened set (PR-7)') } },
   'PAYROLL.PF':       { name: 'Payroll — provident fund',      description: 'Employer PF expense + combined payable', wired: true, roles: {
-    pf_expense: r(DR, '5620', 'free', 'Employer PF expense'), pf_payable: r(CR, '2370', 'widen', 'PF payable — PAY-02 schedule widens in PR-7') } },
+    pf_expense: r(DR, '5620', 'free', 'Employer PF expense'), pf_payable: r(CR, '2370', 'free', 'PF payable — the PAY-02 schedule reads the widened set (PR-7)') } },
   'PAYROLL.REMIT':    { name: 'Payroll liability remittance',  description: 'Statutory liability remitted to RD/SSO', wired: false, roles: {
-    liability: r(DR, '2350', 'widen', 'Remitted liability (2350/2360/2370 — PAY-02 set)'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
+    liability: r(DR, '2350', 'widen', 'Remitted liability — the remit endpoint accepts any account in the PAY-02 widened sets (PR-7); this role itself stays catalog-only'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
 
   // ── Fixed assets / CIP ──
   'ASSET.ACQUIRE':    { name: 'Asset acquisition',             description: 'Capitalise an asset — under posting_determination the CATEGORY asset_account drives the debit (docs/43 Q2 grain); roles here are catalog visibility', wired: false, roles: {
@@ -150,9 +150,11 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
   'BADDEBT.WRITEOFF': { name: 'Bad-debt write-off',            description: 'Uncollectible AR written off (REV-14)', wired: true, roles: {
     bad_debt_exp: r(DR, '5720', 'free', 'Bad-debt expense'), ar_control: r(CR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
   'APPAY.WHT':        { name: 'AP payment — vendor WHT',       description: 'ภ.ง.ด.3/53 withholding at AP payment (shared by AP pay + subcontract valuations)', wired: true, roles: {
-    wht_payable: r(CR, '2361', 'widen', 'Vendor WHT payable — PND3/53 report set widens in PR-7') } },
+    wht_payable: r(CR, '2361', 'free', 'Vendor WHT payable — the PND3/53 tie-out reads the widened set (PR-7)') } },
   'APPAY.DISCOUNT':   { name: 'AP early-payment discount',     description: 'Prompt-payment discount captured on a run (EXP-14)', wired: true, roles: {
     discount_income: r(CR, '4600', 'free', 'Early-payment discount income (per-policy account already supported)') } },
+  'TAX.PROVISION':    { name: 'Current income-tax provision',   description: 'Current CIT provision (ASC 740 / IAS 12) — Dr 5960 expense / Cr 2110 payable (TAX-11, maker-checker)', wired: true, roles: {
+    cit_expense: r(DR, '5960', 'free', 'Corporate income-tax expense (current)'), cit_payable: r(CR, '2110', 'free', 'CIT payable — Revenue Department') } },
   'RCVAT.SELF':       { name: 'Reverse-charge self VAT',       description: 'ภ.พ.36 self-assessed VAT on imported services', wired: true, roles: {
     input_vat: r(DR, '1300', 'widen', 'Input VAT (PP30/36 set)'), pp36_payable: r(CR, '2120', 'widen', 'PP36 VAT payable (separate return set)') } },
   'FX.UNREALIZED':    { name: 'FX revaluation (unrealized)',   description: 'Month-end open-item revaluation (control deltas pinned)', wired: true, roles: {
@@ -184,7 +186,7 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
   'PREPAID.AMORTIZE': { name: 'Prepaid amortised',             description: 'Monthly amortisation of the prepaid', wired: true, roles: {
     expense: r(DR, '5100', 'free', 'Amortisation expense (per-schedule account already supported)'), prepaid: r(CR, '1280', 'free', 'Prepaid expenses') } },
   'SBT.TAX':          { name: 'Specific business tax',         description: 'ภ.ธ.40 SBT accrued at RE ownership transfer (TAX-09)', wired: false, roles: {
-    sbt_expense: r(DR, '5840', 'free', 'SBT expense'), sbt_payable: r(CR, '2130', 'widen', 'SBT payable — ภ.ธ.40 report set widens in PR-7') } },
+    sbt_expense: r(DR, '5840', 'free', 'SBT expense'), sbt_payable: r(CR, '2130', 'free', 'SBT payable — the ภ.ธ.40 tie-out reads the widened set (PR-7)') } },
 
   // ── Intercompany / projects / construction / real estate ──
   'IC.TRANSACTION':   { name: 'Intercompany transaction',      description: 'Due-from/due-to pair; the category MAP resolves the P&L legs (shared-cost/transfer legs overridable; loan = cash pinned, loyalty-clearing = LYL-03 tie)', wired: true, roles: {

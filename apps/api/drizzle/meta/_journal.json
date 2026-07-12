@@ -2421,7 +2421,35 @@
       "idx": 346,
       "version": "7",
       "when": 2023820000311,
-      "tag": "0346_dta_valuation_allowance_utp",
+      "tag": "0346_accounts_cf_bucket",
+      "breakpoints": true
+    },
+    {
+      "idx": 347,
+      "version": "7",
+      "when": 2023820000312,
+      "tag": "0347_disclosure_checklists",
+      "breakpoints": true
+    },
+    {
+      "idx": 348,
+      "version": "7",
+      "when": 2023820000313,
+      "tag": "0348_flux_analysis",
+      "breakpoints": true
+    },
+    {
+      "idx": 349,
+      "version": "7",
+      "when": 2023820000314,
+      "tag": "0349_income_tax_provision",
+      "breakpoints": true
+    },
+    {
+      "idx": 350,
+      "version": "7",
+      "when": 2023820000315,
+      "tag": "0350_dta_valuation_allowance_utp",
       "breakpoints": true
     }
   ]

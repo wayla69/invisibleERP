@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, Optional } from '@nestjs/common';
 import { and, eq, gte, lt, asc, desc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes, vendors, reContracts } from '../../../database/schema';
@@ -6,6 +6,7 @@ import { n } from '../../../database/queries';
 import { PND_LABELS } from '../documents/wht-rates';
 import { pndEfilingText, type PndEfilingRow } from './rd-efiling';
 import { currentTenantStore } from '../../../common/tenant-context';
+import { LedgerService } from '../../ledger/ledger.service';
 import { NotFoundException } from '@nestjs/common';
 import type { JwtUser } from '../../../common/decorators';
 
@@ -17,7 +18,13 @@ const nextMonthDay = (month: number, year: number, day: number) => {
 
 @Injectable()
 export class TaxReportsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // docs/43 PR-7: @Optional ledger — the tie-outs read the WIDENED account sets (canonical ∪ approved
+  // override); hand-constructed harness instances without it fall back to the canonical single account.
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, @Optional() private readonly ledger?: LedgerService) {}
+
+  private async acctSet(eventType: string, role: string, fallback: string): Promise<string[]> {
+    return this.ledger ? this.ledger.postingAccountSet(eventType, role, this.tenantId()) : [fallback];
+  }
 
   private win(month: number, year: number) {
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
@@ -142,9 +149,12 @@ export class TaxReportsService {
   async pndTieOut(month: number, year: number) {
     const db = this.db; const { start, end, period } = this.win(month, year);
     // (1) GL 2361 net credit movement (Posted) in the period.
+    // PR-7: sum the widened vendor-WHT set (2361 ∪ approved APPAY.WHT override) so an overridden
+    // payable still ties; the subcontract WHT leg stays on the canonical 2361 inside the same set.
+    const whtSet = await this.acctSet('APPAY.WHT', 'wht_payable', '2361');
     const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '2361'), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
+      .where(and(inArray(journalLines.accountCode, whtSet), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
     const gl2361 = round2(n(g?.v));
     // (2) WHT withheld on AP payments approved in the period (the operational record).
     const [a] = await db.select({ v: sql<string>`coalesce(sum(${apPayments.whtAmount}),0)` })
@@ -155,7 +165,7 @@ export class TaxReportsService {
       .from(whtCertificates).where(and(inArray(whtCertificates.pndType, ['PND3', 'PND53']), eq(whtCertificates.status, 'Issued'), gte(whtCertificates.datePaid, start), lt(whtCertificates.datePaid, end)));
     const certWht = round2(n(c?.v));
     return {
-      report: 'pnd_tieout', month, year, period, gl_account: '2361',
+      report: 'pnd_tieout', month, year, period, gl_account: '2361', gl_account_set: whtSet,
       gl_net_movement: gl2361, ap_wht_withheld: apWht, cert_wht_issued: certWht,
       tied_gl_ap: Math.abs(gl2361 - apWht) < 0.01,
       uncertificated_wht: round2(apWht - certWht),
@@ -210,14 +220,16 @@ export class TaxReportsService {
       .orderBy(asc(reContracts.transferredAt), asc(reContracts.contractNo));
     const out = rows.map((r: any) => ({ contract_no: r.contract_no, buyer_name: r.buyer_name, date: r.transferred_at, gross_receipts: round2(n(r.price)), sbt_rate: n(r.sbt_rate), sbt: round2(n(r.sbt_amount)) }));
     const sbtTotal = round2(out.reduce((a: number, r: any) => a + r.sbt, 0));
+    // PR-7: sum the widened SBT set (2130 ∪ approved SBT.TAX override).
+    const sbtSet = await this.acctSet('SBT.TAX', 'sbt_payable', '2130');
     const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '2130'), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
+      .where(and(inArray(journalLines.accountCode, sbtSet), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
     const gl2130 = round2(n(g?.v));
     return {
       report: 'pt40', month, year, period, rows: out,
       totals: { gross_receipts: round2(out.reduce((a: number, r: any) => a + r.gross_receipts, 0)), sbt: sbtTotal, count: out.length },
-      reconciliation: { gl_account: '2130', gl_net_movement: gl2130, report_sbt: sbtTotal, tied: Math.abs(gl2130 - sbtTotal) < 0.01 },
+      reconciliation: { gl_account: '2130', gl_account_set: sbtSet, gl_net_movement: gl2130, report_sbt: sbtTotal, tied: Math.abs(gl2130 - sbtTotal) < 0.01 },
       deadline: nextMonthDay(month, year, 15),
       deadline_note: 'ยื่นแบบ ภ.ธ.40 และนำส่งภาษีธุรกิจเฉพาะภายในวันที่ 15 ของเดือนถัดไป',
     };

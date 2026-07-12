@@ -238,6 +238,8 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.cost_centers': { th: 'ศูนย์ต้นทุน & กำไรตามมิติ', en: 'Cost Centres & P&L' },
   'nav.gl_schedules': { th: 'รายการบัญชีตั้งเวลา', en: 'Recurring & Prepaid' },
   'nav.period_close': { th: 'ปิดงวดบัญชี (Period-close)', en: 'Period Close' },
+  'nav.flux_analysis': { th: 'วิเคราะห์ผลต่าง (Flux)', en: 'Flux / Variance' },
+  'nav.disclosure_checklist': { th: 'รายการตรวจสอบการเปิดเผยข้อมูล', en: 'Disclosure Checklist' },
 
   // ── Finance / Banking ─────────────────────────────────────────────────────
   'nav.bank': { th: 'ธนาคาร', en: 'Banking' },
@@ -260,6 +262,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Tax ───────────────────────────────────────────────────────────────────
   'nav.tax_invoices': { th: 'ใบกำกับภาษี', en: 'Tax Invoices' },
   'nav.tax_reports': { th: 'รายงานภาษี', en: 'Tax Reports' },
+  'nav.tax_provision': { th: 'ประมาณการภาษีเงินได้', en: 'Income-Tax Provision' },
   'nav.wht': { th: 'หัก ณ ที่จ่าย', en: 'Withholding Tax' },
   'nav.tax_utp': { th: 'ค่าเผื่อภาษี & สถานะภาษีไม่แน่นอน', en: 'DTA Allowance & Uncertain Positions' },
   'nav.pos_fiscal': { th: 'ภาษีอิเล็กทรอนิกส์ (e-Tax/Journal)', en: 'e-Tax / Fiscal Journal' },

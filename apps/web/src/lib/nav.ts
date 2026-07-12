@@ -386,6 +386,8 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'nav.posting_rules', href: '/setup/posting-rules', icon: Route, perms: ['gl_posting_rules', 'exec'] },
           { label: 'nav.gl_schedules', href: '/gl-schedules', icon: CalendarClock, perms: ['gl_post', 'gl_close', 'exec'] },
           { label: 'nav.period_close', href: '/finance/period-close', icon: CalendarClock, perms: ['gl_close', 'exec'] },
+          { label: 'nav.flux_analysis', href: '/close/flux', icon: Activity, perms: ['gl_close', 'fin_report', 'exec'] },
+          { label: 'nav.disclosure_checklist', href: '/close/disclosure', icon: ClipboardCheck, perms: ['gl_close', 'gl_post', 'fin_report', 'exec'] },
         ],
       },
       {
@@ -427,6 +429,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'nav.tax_invoices', href: '/tax/invoices', icon: FileText, perms: ['exec', 'ar', 'creditors'] },
       { label: 'nav.tax_reports', href: '/tax/reports', icon: FileSpreadsheet, perms: ['exec', 'ar', 'creditors'] },
+      { label: 'nav.tax_provision', href: '/tax/provision', icon: Calculator, perms: ['gl_close', 'gl_post', 'exec'] },
       { label: 'nav.wht', href: '/tax/wht', icon: FileMinus, perms: ['exec', 'creditors'] },
       { label: 'nav.tax_utp', href: '/tax/utp', icon: Scale, perms: ['gl_close', 'gl_post', 'exec'] },
       // dual-use: the fiscal/e-Tax journal is generated at POS, reconciled in ERP → cross-listed

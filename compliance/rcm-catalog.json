@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 251,
+    "total": 254,
     "by_status": {
-      "Implemented": 248,
+      "Implemented": 251,
       "Partial": 3
     },
     "by_family": {
@@ -16,7 +16,7 @@
       "Entity-Level": 7,
       "Expenditure": 16,
       "Fixed Assets": 8,
-      "General Ledger": 24,
+      "General Ledger": 26,
       "ITGC · Access": 22,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
@@ -33,7 +33,7 @@
       "Real Estate": 4,
       "Reconciliation": 5,
       "Revenue & Cash": 30,
-      "Tax": 11
+      "Tax": 12
     }
   },
   "controls": [
@@ -3610,6 +3610,44 @@
       "status": "Implemented"
     },
     {
+      "control_id": "GL-25",
+      "cycle": "General Ledger",
+      "category": "Detective",
+      "fsli": "All",
+      "risk": "Material period-over-period movements in the financial statements are relied upon without a documented management analysis — a large or anomalous swing in a revenue/expense (or balance-sheet) account is neither explained nor independently reviewed, so an error or manipulation that first surfaces as an unexpected fluctuation goes undetected before the books are relied upon / the period is locked.",
+      "assertion": "Completeness/Accuracy/Presentation",
+      "description": "Flux / variance analysis with FORCED explanation + independent sign-off (CLS-01): a preparer GENERATES a period movement analysis from the gl_period_balances snapshot (POST /api/close/flux/generate — basis P&L period-activity or Balance-Sheet cumulative-through-period; comparative prior_period / prior_year / vs approved-budget). Each account line carries the current amount, the comparative amount, Δ$ and Δ%, and is flagged BREACHED when |Δ$| ≥ a configurable absolute threshold AND |Δ%| ≥ a configurable percent threshold (both must trip, so a trivial % on a large base or a large % on a trivial base is not noise). A threshold-breaching line REQUIRES a written explanation (PUT …/lines/:lineId/explain) before the analysis can advance from Draft to Explained; review/sign-off (POST …/review) is REFUSED while any breached line is unexplained (UNEXPLAINED_LINES). Sign-off is maker-checker: the reviewer MUST differ from the preparer (SOD_SELF_APPROVAL), and certification locks the analysis (ALREADY_CERTIFIED). Read-only aggregator — posts NOTHING to the GL, adds no posting authority (no new SoD conflict). Surfaced as the advisory 'flux_review' step on the close checklist (GL-15) and as the schedulable flux_analysis BI report.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per period-close",
+      "owner": "Financial Controller",
+      "coso": "P10",
+      "code_reference": "flux/flux.service.ts (generate — signed amounts per account from gl_period_balances, prior_period/prior_year/budget comparatives, abs+pct breach flags; explain forced-explanation + Draft→Explained; review UNEXPLAINED_LINES + SOD_SELF_APPROVAL maker-checker → Certified); flux/flux.controller.ts (POST close/flux/generate, GET close/flux[/:id], PUT :id/lines/:lineId/explain, POST :id/review — gl_close/fin_report/exec); schema/flux.ts (flux_analyses + flux_lines, tenant-leading index) + migration 0348 (canonical RLS); ledger/close.service.ts (advisory flux_review checklist step); bi/report-registry.ts + bi-generate.service.ts (flux_analysis report type); apps/web /close/flux; cutover/flux-analysis.ts (ToE)",
+      "tod": "Inspect the abs+pct breach logic, the forced-explanation gate before sign-off, the maker-checker reviewer≠preparer rule, and that the analysis posts nothing to the GL.",
+      "toe": "Re-perform (flux-analysis harness): generate a P&L flux flags the lines breaching abs/pct thresholds and leaves the below-threshold line unflagged; review while a breached line is unexplained → UNEXPLAINED_LINES; the preparer's self-review → SOD_SELF_APPROVAL; after every breached line is explained a DISTINCT reviewer certifies; prior_year/budget comparatives resolve correctly; RLS isolates tenants.",
+      "evidence": "flux_analyses / flux_lines with per-line explanations + reviewer sign-off; flux-analysis harness ToE",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "GL-26",
+      "cycle": "General Ledger",
+      "category": "Detective",
+      "fsli": "All",
+      "risk": "Financial statements / the reporting package are issued without a governed disclosure checklist: required TFRS/IFRS + SEC disclosure notes (related parties, revenue disaggregation, leases, income tax, commitments & contingencies, segments, subsequent events, management disclosure-controls sign-off) may be omitted or incomplete, supporting evidence is not pinned to the note, and one person can compile AND release the package with no independent review — a SEC disclosure-controls failure and an incomplete/inaccurate reporting basis.",
+      "assertion": "Completeness/Accuracy/Presentation/Disclosure",
+      "description": "Governed disclosure / close-package checklist (close binder): POST /api/close/disclosure opens a per-period checklist that AUTO-SEEDS the standard TFRS/IFRS + SEC disclosure items — each carries a standard reference (TAS 1/7/12/24, TFRS 8/15/16, TAS 10/37, SEC disclosure controls), an owner and an Open/Complete/NA status with an optional support-doc reference pinned to doc_attachments (docType DISC via assertDocExists). PUT /api/close/disclosure/:id/items/:itemId completes/NAs each item (recording completed_by/at) and attaches its evidence. Review is a MAKER-CHECKER sign-off gate: POST /api/close/disclosure/:id/review is BLOCKED while any item is still Open (ITEMS_INCOMPLETE, listing the open items) and REJECTS a reviewer equal to the preparer (SOD_SELF_APPROVAL) — moving the binder Draft → Reviewed — and only a Reviewed binder can be Issued (POST …/issue → Issued; NOT_REVIEWED otherwise) so the financials are released only after an independent review. An advisory disclosure_review step cross-links the binder into the GL-15/16 close run. Detective/monitoring; tenant-scoped (canonical RLS); posts NOTHING to the GL.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per period-close / reporting package",
+      "owner": "Financial Controller / CFO",
+      "coso": "P10",
+      "code_reference": "disclosure.service.ts (open seeds STANDARD_ITEMS, updateItem complete/NA + support_doc_ref, review ITEMS_INCOMPLETE + SOD_SELF_APPROVAL maker-checker gate Draft→Reviewed, issue Reviewed→Issued NOT_REVIEWED); disclosure.controller.ts (api/close/disclosure open/list/get/item/review/issue, gl_close mutate + gl_close/gl_post/fin_report/exec read); schema/disclosure-checklists.ts (disclosure_checklists + disclosure_items, tenant-leading index + canonical 0232-form RLS); migration 0347 (tables + RLS + app_user grants); procurement/attachments.service.ts (assertDocExists DISC → disclosure_checklists); common/doc-number.service.ts (DISC daily doc number); ledger/close.service.ts (advisory disclosure_review step); app.module.ts (DisclosureModule wired); cutover/disclosure-checklist.ts (ToE)",
+      "tod": "Inspect the seeded standard-item set with standard refs/owners, the item complete/NA + support-doc attach, the ITEMS_INCOMPLETE review gate, the SOD_SELF_APPROVAL maker-checker (reviewer ≠ preparer), the Reviewed→Issued release, and the tenant RLS isolation.",
+      "toe": "TC-CLS-02-01: open seeds ≥10 standard disclosure items (Draft, DISC checklist_no); TC-CLS-02-02: review while an item is Open → ITEMS_INCOMPLETE (400); TC-CLS-02-03: self-review by the preparer → SOD_SELF_APPROVAL (403); TC-CLS-02-04: complete/NA all + a DISTINCT reviewer reviews → Reviewed, then issue → Issued; TC-CLS-02-05: attach DISC support evidence to the checklist_no (assertDocExists), a bogus checklist_no → NOT_FOUND; TC-CLS-02-06: another tenant sees 0 checklists (RLS) (re-performed by the disclosure-checklist harness).",
+      "evidence": "disclosure_checklists / disclosure_items with prepared_by/reviewed_by/issued_by sign-off trail + per-item completed_by/support_doc_ref; harness ToE (disclosure-checklist)",
+      "status": "Implemented"
+    },
+    {
       "control_id": "EXP-07",
       "cycle": "Expenditure",
       "category": "Application",
@@ -4192,7 +4230,7 @@
       "frequency": "Quarterly / year-end",
       "owner": "Tax / Financial Controller",
       "coso": "P10",
-      "code_reference": "tax/tax-utp.service.ts (runValuationAllowance gross-DTA-from-TAX-06 + allowance=max(0,gross−MLTN) + delta-vs-prior + stage Open, idempotent ALREADY_POSTED; postValuationAllowance SELF_POST maker-checker + 5950/1700 delta posting; createUtp reserve=gross−recognized + BENEFIT_EXCEEDS_EXPOSURE; settleUtp SELF_SETTLE/NOT_OPEN maker-checker; list*); tax/tax-utp.controller.ts (valuation-allowance run + :id/post gl_close/gl_post, utp create + :id/settle gl_close/gl_post, reads gl_close/gl_post/exec); tax/tax-utp.module.ts (wired into TaxModule, imports LedgerModule); schema/tax-utp.ts (dta_valuation_allowances uq tenant/period, uncertain_tax_positions uq tenant/position_no) + migration 0346 (tables + leading tenant index + 0232-form RLS); reuses deferred_tax_runs (TAX-06) + COA 1700/5950 + DocNumberService (UTP-…); cutover/tax-utp.ts (TAX-12 ToE)",
+      "code_reference": "tax/tax-utp.service.ts (runValuationAllowance gross-DTA-from-TAX-06 + allowance=max(0,gross−MLTN) + delta-vs-prior + stage Open, idempotent ALREADY_POSTED; postValuationAllowance SELF_POST maker-checker + 5950/1700 delta posting; createUtp reserve=gross−recognized + BENEFIT_EXCEEDS_EXPOSURE; settleUtp SELF_SETTLE/NOT_OPEN maker-checker; list*); tax/tax-utp.controller.ts (valuation-allowance run + :id/post gl_close/gl_post, utp create + :id/settle gl_close/gl_post, reads gl_close/gl_post/exec); tax/tax-utp.module.ts (wired into TaxModule, imports LedgerModule); schema/tax-utp.ts (dta_valuation_allowances uq tenant/period, uncertain_tax_positions uq tenant/position_no) + migration 0350 (tables + leading tenant index + 0232-form RLS); reuses deferred_tax_runs (TAX-06) + COA 1700/5950 + DocNumberService (UTP-…); cutover/tax-utp.ts (TAX-12 ToE)",
       "tod": "Inspect the allowance computation (gross DTA sourced from TAX-06, max(0, gross − MLTN)), the delta-vs-prior-run, the SELF_POST maker-checker and the 5950/1700 posting; and the UTP register's reserve = gross − recognized, the BENEFIT_EXCEEDS_EXPOSURE guard, and the SELF_SETTLE create→settle segregation.",
       "toe": "TC-TAX-12-01: run a valuation allowance with gross DTA 1000 vs MLTN 600 → allowance 400, delta 400 (Open); TC-TAX-12-02: runner self-post → SELF_POST (403), a different user posts → Dr 5950 / Cr 1700 (400) + trial balance balanced, re-post → ALREADY_POSTED (400); TC-TAX-12-03: run without an explicit gross DTA sources it (500) from deferred_tax_runs; TC-TAX-12-04: register a UTP (gross 100000, recognized 60000 → reserve 40000, Open), recognized > gross → BENEFIT_EXCEEDS_EXPOSURE (400); TC-TAX-12-05: creator self-settle → SELF_SETTLE (403), a different user settles → Settled, re-settle → NOT_OPEN (400); TC-TAX-12-06: a second tenant's positions are not visible cross-tenant (RLS) (re-performed by the tax-utp harness).",
       "evidence": "dta_valuation_allowances register (Open→Posted, gross/MLTN/allowance, runner/poster); the DTAVA JE to 5950/1700; uncertain_tax_positions register (Open→Settled/Lapsed, exposure/recognized/reserve, creator/settler); quarterly/year-end deferred-tax & UTP sign-off",
@@ -4272,6 +4310,25 @@
       "tod": "Inspect the buyer Tax-ID validation, the verbatim amount copy, the Replaced-status single-count, the idempotency backstop index and the audit metadata.",
       "toe": "TC-TAX-10-01: convert an issued ABB with a valid buyer block → a full TIV with identical amounts/VAT, linked to the ABB, ABB → Replaced, ภ.พ.30 output VAT unchanged (single count); TC-TAX-10-02: re-convert the same ABB → the SAME full invoice returned (already_converted, no second document); TC-TAX-10-03: an invalid 13-digit Tax ID (bad checksum) or a missing Tax ID is rejected 400; TC-TAX-10-04: a Voided ABB → ABB_VOIDED, a non-ABB document → NOT_ABBREVIATED, cross-tenant → 404 (re-performed by the taxdocs harness).",
       "evidence": "Converted-invoice pair (ABB Replaced + linked full TIV); ภ.พ.30 single-count assertion; audit_log tax_abb_convert row; taxdocs harness ToE",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "TAX-11",
+      "cycle": "Tax",
+      "category": "Application",
+      "fsli": "Corporate Income Tax Expense — current (5960); CIT Payable (2110); Deferred Tax (1700/2700/5950)",
+      "risk": "The CURRENT income-tax provision is mis-stated — pretax book income is not bridged to taxable income (permanent + temporary book-to-tax adjustments omitted or double-counted), the current CIT is computed at the wrong statutory rate, the temporary difference is re-derived inconsistently with the deferred-tax module (TAX-06), or the provision entry is computed and posted by one person with no review — so income-tax expense, the CIT payable and the effective-tax-rate (ETR) disclosure are misstated (ASC 740 / IAS 12).",
+      "assertion": "Accuracy/Valuation/Completeness/Authorization/Segregation of Duties",
+      "description": "Current income-tax provision + ETR reconciliation (ASC 740 / IAS 12, maker-checker, idempotent per (tenant, period)): POST /api/tax/provision/run reads pretax book income from the income statement EXCLUDING income-tax postings (DEFTAX + CITPROV so the base is genuinely pre-tax), applies caller-supplied PERMANENT book-to-tax adjustments (non-deductible expenses +, tax-exempt income −), and REUSES the deferred-tax run's period delta for the TEMPORARY adjustment (temporaryAdjustment = deltaNetDeferred / deferred-rate) rather than re-deriving temporary differences — so the current and deferred modules never disagree. taxable income = pretax + permanent + temporary; current tax = taxable × statutory rate (default 0.20 Thai CIT); it stages an 'Open' income_tax_provisions row (a Posted period → ALREADY_POSTED) and computes the ETR schedule (statutory → effective: permanent differences × rate, rate-change effect, valuation allowance, prior-year deferred), which ties by construction (current + deferred = statutory + permanent×rate). GET /api/tax/provision[/:id] and /:id/etr expose the register + reconciliation. POST /api/tax/provision/:id/post is segregated (poster ≠ runner → SOD_SELF_APPROVAL) and posts the CURRENT tax via LedgerService.postEntry (Dr 5960 Corporate Income Tax Expense / Cr 2110 CIT Payable; a tax benefit reverses the legs), so PERIOD_LOCKED + the GL audit trail apply; the deferred leg is posted by TAX-06. Marks the row Posted.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Quarterly / year-end",
+      "owner": "Tax / Financial Controller",
+      "coso": "P10",
+      "code_reference": "tax-provision.service.ts (runProvision: pretax from incomeStatement excl DEFTAX/CITPROV + permanent M-1 + temporary reused from deferred_tax_runs delta, taxable/current-tax, ETR schedule, stage Open, idempotent ALREADY_POSTED; postProvision SOD_SELF_APPROVAL maker-checker + 5960/2110 posting; list/get/etr); tax-provision.controller.ts (gl_close/gl_post run + :id/post, gl_close/gl_post/exec read + :id/etr); schema/income-tax-provision.ts (income_tax_provisions, uq tenant/period); migration 0349 (table + RLS + TAX.PROVISION posting-event); ledger-constants 5960/2110 (COA + CF_CLASSIFY 2110 operating); posting-events.ts TAX.PROVISION; tax-provision.module.ts (wired, imports LedgerModule); reuses deferred-tax (TAX-06) + ledger.incomeStatement; cutover/tax-provision.ts (TAX-11 ToE, 24 checks)",
+      "tod": "Inspect the pretax-book-income basis (income-tax postings excluded), the permanent + REUSED-temporary book-to-tax bridge to taxable income, the statutory-rate current tax, the statutory→effective ETR reconciliation tie, the SOD_SELF_APPROVAL maker-checker, and the Dr 5960 / Cr 2110 posting through the period-lock gate.",
+      "toe": "TC-TAX-11-01: run for a period with pretax book income 600,000, a 50,000 non-deductible permanent add-back and a deferred-tax DTL originating 100,000 → taxable income 550,000, current CIT 110,000 (20%), total income-tax expense 130,000, ETR ≈ 21.67%, and the ETR schedule reconciles statutory 120,000 + permanent 10,000 = 130,000; TC-TAX-11-02: runner self-post → SOD_SELF_APPROVAL (403), a different user posts → Dr 5960 / Cr 2110 (110,000) balanced, re-post → ALREADY_POSTED (400); TC-TAX-11-03: a sibling tenant never sees the provision (RLS) (re-performed by the tax-provision.ts harness, 24 checks).",
+      "evidence": "income_tax_provisions register (Open→Posted, taxable-income bridge + ETR schedule, runner/poster, deferred-tax link); the CITPROV JE to 5960/2110; quarterly/year-end income-tax provision + ETR sign-off",
       "status": "Implemented"
     },
     {

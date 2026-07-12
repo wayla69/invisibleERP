@@ -1,6 +1,17 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.11 · 2026-07-11** · *v0.11 (2026-07-11): posting-rule overrides extended to assets &
+**Status: DRAFT v0.13 · 2026-07-11** · *v0.13 (2026-07-11): the **กฎการลงบัญชี (Posting Rules)** screen
+(`/setup/posting-rules`) becomes a four-tab workspace — **ทะเบียนเหตุการณ์** (the full event registry: every
+event/role with its default account, override tier and your company's current override, searchable and
+filterable by tier, with a ตั้งค่า shortcut on overridable roles), **ตั้งค่า & ทดลอง** (the per-event editor
+and posting preview, unchanged), **คิวรออนุมัติ** (all GL-24 pending overrides across every event in one
+queue, with approve/reject), and **ประวัติการแก้ไข** (the append-only audit trail, newest first). Screen
+behaviour and permissions are unchanged — this is the same data, easier to see.* · *v0.12 (2026-07-11): a new balance-sheet account can declare its own
+cash-flow bucket (ดำเนินงาน/ลงทุน/จัดหาเงิน/บวกกลับ) and current/non-current split in the /chart-of-accounts
+create dialog — the indirect cash-flow statement and the financial metrics then classify it automatically;
+the chart and posting-rule overrides can also be bulk-imported (Administration → Bulk import): chart imports
+are staged for an independent approver, and every imported posting rule waits for GL-24 approval before it
+has any effect.* · *v0.11 (2026-07-11): posting-rule overrides extended to assets &
 leases (docs/43 PR-3) — disposal gain/loss, impairment, lease remeasurement, lessor income, prepaid
 schedules; asset categories can carry their own posting accounts under Item posting (see §"Posting Rules").* · *v0.10 (2026-07-11): posting-rule overrides (docs/43 PR-2) now also
 drive the day-to-day finance & POS money postings — write-offs, advances, reverse-charge VAT, AP WHT/discount,
@@ -182,6 +193,17 @@ your approved rules — and if your company has switched on **กำหนดบ
 **asset category's** own asset / accumulated-depreciation / depreciation-expense accounts drive
 acquisition and the monthly depreciation run for assets in that category (a category with a bad account
 code is rejected at save).
+
+The **กฎการลงบัญชี** screen itself is a four-tab workspace: **ทะเบียนเหตุการณ์** lists every
+posting event with each role's debit/credit side, **default account**, override **tier**
+(ปรับได้ *free* / ชุดบัญชี *widen* / ล็อกถาวร *pinned*) and your company's current override with
+its approval status — search by event, role or account, filter by tier, and press **ตั้งค่า** on
+an overridable role to jump straight into the editor with the event/role/side pre-filled;
+**ตั้งค่า & ทดลอง** is the per-event editor and posting preview; **คิวรออนุมัติ** collects every
+pending override across all events so an approver clears one queue instead of walking events one
+by one; **ประวัติการแก้ไข** shows the append-only audit trail (who created / approved / rejected /
+deactivated which rule, newest first). An approved override can be retired with **ปิดใช้** —
+postings then fall back to the default account.
 
 > **Changing a posting rule is a two-person action (GL-24).** A saved rule shows **รออนุมัติ**
 > and has **no effect** until a *different* user presses **อนุมัติ** on the same screen — you
@@ -794,6 +816,79 @@ period is already hard-closed), `CLOSE_RUN_NOT_FOUND`, `STEP_NOT_FOUND`.
 
 **Expected result:** Profit & loss accounts are zeroed into **Retained Earnings
 (3100)** and all twelve periods are closed. The operation is safe to re-run.
+
+### Flux / variance analysis with forced explanation + sign-off (control GL-25 / CLS-01)
+
+A management-review control for the close: before you rely on the financial statements,
+**explain the material movements**. The screen lives at **`/close/flux`** (menu: *บัญชีแยกประเภท
+› วิเคราะห์ผลต่าง (Flux)*).
+
+**Required permission:** `gl_close`, `fin_report` or `exec` to read and generate/explain;
+sign-off is `gl_close`/`exec`. Sign-off is **maker-checker** — the reviewer must be a
+different person from the preparer.
+
+**How it works:**
+
+1. **Generate** — pick the **period** (`YYYY-MM`), the **basis** (P&L or Balance Sheet), the
+   **comparative** (prior period, prior year, or approved budget — budget applies to P&L
+   only), and the **thresholds** (an absolute THB amount *and* a percentage). Click
+   **สร้างการวิเคราะห์** (`POST /api/close/flux/generate`). The system reads the
+   `gl_period_balances` snapshot and lists every account with its current amount, the
+   comparative amount, Δ$ and Δ%. A line is flagged **เกินเกณฑ์ (breach)** when the movement
+   exceeds **both** thresholds (so a tiny % on a large base, or a large % on a trivial base,
+   is not flagged). The analysis **posts nothing to the GL** — it is read-only.
+2. **Explain** — every breaching line **requires a written explanation** (`PUT
+   /api/close/flux/:id/lines/:lineId/explain`). Type the cause and click บันทึกคำอธิบาย. When
+   every breaching line is explained the analysis advances to **Explained**.
+3. **Sign off** — an **independent** reviewer clicks **ลงนามรับรอง** (`POST
+   /api/close/flux/:id/review`). The analysis becomes **Certified** and is locked.
+
+The `flux_review` step also appears on the hard-close checklist (advisory), and the
+`flux_analysis` BI report type lets you schedule the analysis to run automatically.
+
+**Possible errors:** `UNEXPLAINED_LINES` (you tried to sign off while a breaching line still
+has no explanation — explain every flagged line first), `SOD_SELF_APPROVAL` (you tried to
+sign off an analysis you prepared — a different reviewer must sign), `LINE_NOT_BREACHED` (only
+threshold-breaching lines take an explanation), `ALREADY_CERTIFIED` (a certified analysis is
+locked), `BUDGET_PL_ONLY` (the budget comparative is available only on the P&L basis),
+`BAD_PERIOD` / `BAD_THRESHOLD`.
+### Disclosure / close-package checklist (governed close binder — GL-26)
+
+**Screen:** `/close/disclosure` (**รายการตรวจสอบการเปิดเผยข้อมูล**) · **Required
+permission:** `gl_close` to open/complete/review/issue; `gl_close`, `gl_post`,
+`fin_report` or `exec` to view.
+
+Before the financial statements are issued, the **disclosure checklist** governs the
+reporting package — the note disclosures a TFRS/SEC-compliant filing must contain. It is a
+detective/monitoring control (**GL-26**) and posts **nothing** to the GL.
+
+1. **Open a checklist** for the period (`YYYY-MM`). The system auto-seeds the standard
+   disclosure items — related-party transactions (TAS 24), revenue disaggregation
+   (TFRS 15), leases (TFRS 16), income & deferred tax (TAS 12), commitments &
+   contingencies / subsequent events (TAS 10/37), operating segments (TFRS 8), the primary
+   statements (TAS 1/7), and the management disclosure-controls sign-off (SEC). Each item
+   carries a **standard reference**, an **owner** and an **Open / Complete / N/A** status.
+2. **Work each item**: mark it **Complete** (or **N/A** if it doesn't apply) and record a
+   **support-doc reference** — the evidence (a note working paper, a memo) can be pinned to
+   the checklist number as a `DISC` attachment via the document-attachment surface.
+3. **Review (maker-checker):** once every item is Complete/NA, a **different** `gl_close`
+   colleague presses **สอบทาน (Review)**. The reviewer **cannot be the preparer**
+   (`SOD_SELF_APPROVAL`), and review is **blocked while any item is still Open**
+   (`ITEMS_INCOMPLETE`, listing the open items). The binder moves **ร่าง (Draft) →
+   สอบทานแล้ว (Reviewed)**.
+4. **Issue:** with the binder Reviewed, press **ออกงบการเงิน (Issue financials)** to record
+   that the reporting package was released after independent review (**Reviewed → ออกงบแล้ว
+   (Issued)**). An Issued binder is immutable.
+
+> **Cross-link:** the GL-15/16 period-close checklist carries an advisory
+> **"Disclosure / close-package checklist reviewed"** step so the controller can see the
+> binder alongside the sub-ledger tie-out, bank rec and trial-balance sign-off.
+
+**Possible errors:** `ITEMS_INCOMPLETE` (review attempted while an item is still Open),
+`SOD_SELF_APPROVAL` (the preparer tried to review their own checklist), `NOT_REVIEWED`
+(issue attempted before review), `NOT_DRAFT` / `ALREADY_ISSUED` (editing or re-reviewing an
+Issued binder), `BAD_PERIOD` (period not `YYYY-MM`), `CHECKLIST_NOT_FOUND`,
+`ITEM_NOT_FOUND`.
 
 ---
 

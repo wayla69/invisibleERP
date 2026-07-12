@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, isNull, or } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { docAttachments, purchaseOrders, purchaseRequests, goodsReceipts, grClaims } from '../../database/schema';
+import { docAttachments, purchaseOrders, purchaseRequests, goodsReceipts, grClaims, disclosureChecklists } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 
 export interface AddAttachmentDto { doc_type: string; doc_no: string; data_url: string; kind?: string; filename?: string; note?: string; source?: string }
@@ -31,6 +31,10 @@ export class AttachmentsService {
     } else if (docType === 'GRC') {
       const [c] = await db.select({ id: grClaims.id }).from(grClaims).where(eq(grClaims.claimNo, docNo)).limit(1);
       if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Claim not found', messageTh: 'ไม่พบรายการเคลม' });
+    } else if (docType === 'DISC') {
+      // CLS-02 (GL-26) — disclosure/close-package checklist support evidence pinned to the checklist_no.
+      const [d] = await db.select({ id: disclosureChecklists.id }).from(disclosureChecklists).where(eq(disclosureChecklists.checklistNo, docNo)).limit(1);
+      if (!d) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Disclosure checklist not found', messageTh: 'ไม่พบรายการตรวจสอบการเปิดเผยข้อมูล' });
     } else {
       throw new BadRequestException({ code: 'BAD_DOC_TYPE', message: `Unsupported doc_type: ${docType}`, messageTh: 'ประเภทเอกสารไม่รองรับ' });
     }
