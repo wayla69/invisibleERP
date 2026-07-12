@@ -142,6 +142,7 @@ export * from './disclosure-checklists';
 export * from './ic-recon';
 export * from './gl-audit';
 export * from './deferred-tax-fx';
+export * from './income-tax-provision';
 export * from './revrec-contracts';
 export * from './ai-usage';
 export * from './usage-meters';

@@ -429,6 +429,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'nav.tax_invoices', href: '/tax/invoices', icon: FileText, perms: ['exec', 'ar', 'creditors'] },
       { label: 'nav.tax_reports', href: '/tax/reports', icon: FileSpreadsheet, perms: ['exec', 'ar', 'creditors'] },
+      { label: 'nav.tax_provision', href: '/tax/provision', icon: Calculator, perms: ['gl_close', 'gl_post', 'exec'] },
       { label: 'nav.wht', href: '/tax/wht', icon: FileMinus, perms: ['exec', 'creditors'] },
       // dual-use: the fiscal/e-Tax journal is generated at POS, reconciled in ERP → cross-listed
       { label: 'nav.pos_fiscal', href: '/pos-fiscal', icon: FileSpreadsheet, perms: ['exec', 'ar', 'pos'], workspace: BOTH },

@@ -10,8 +10,8 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Each filing period + annual |
-| Version note | Rev **0.26** (2026-07-10) — ABB → full tax-invoice conversion at the counter (ม.86/4, new control TAX-10). |
-| Related RCM controls | TAX-01, TAX-02, TAX-03, TAX-04, TAX-05, TAX-06, TAX-07, TAX-08, TAX-09, TAX-10, REV-10, PAY-02 |
+| Version note | Rev **0.28** (2026-07-11) — Current income-tax provision + ETR reconciliation (ASC 740 / IAS 12, new control TAX-11, migration `0349`). |
+| Related RCM controls | TAX-01, TAX-02, TAX-03, TAX-04, TAX-05, TAX-06, TAX-07, TAX-08, TAX-09, TAX-10, TAX-11, REV-10, PAY-02 |
 | Related policy | `compliance/policies/11-financial-close-policy.md` |
 
 ## 2. Purpose
@@ -110,6 +110,7 @@ flowchart TD
 | 7 | WHT remittance diverges from GL | WHT-account-to-GL reconciliation before filing | Det / Hybrid | TAX-03 | Reconciliation evidence |
 | 5b | SBT on a commercial RE sale not accrued/remitted (ภ.ธ.40, ม.91/2(6)) — transfer books tax-free or the payable diverges from the GL | Per-project opt-in rate → atomic Dr 5840 / Cr 2130 accrual inside the transfer JE; ภ.ธ.40 report reconciled to the GL 2130 movement (tie verdict); filed via TAX-05 + remittance calendar due the 15th | Det / Auto | TAX-09 | ภ.ธ.40 report + GL-2130 tie; transfer-JE SBT lines; filing register row |
 | 5a | VAT on imported services not self-assessed/remitted (ภ.พ.36, ม.83/6) — reverse-charge output VAT omitted, or the self-assessed VAT not tied to the GL before filing | Reverse-charge self-assessment on a flagged AP bill (net booking + Dr 1300 / Cr 2120), ภ.พ.36 report reconciled to the GL 2120 net movement (tie verdict), filed via TAX-05 + shown on the remittance calendar due the 7th | Det / Auto | TAX-08 | ภ.พ.36 report + GL-2120 reconciliation tie; self-assessment JE; ภ.พ.36 filing register row |
+| 8 (close) | Current income-tax provision mis-stated — pretax book income not bridged to taxable income (permanent/temporary adjustments omitted or double-counted), wrong statutory rate, temp diff re-derived inconsistently with TAX-06, or computed + posted by one person | Run→post `income_tax_provisions` (pretax excl. income-tax postings → permanent M-1 + temporary reused from the TAX-06 delta → taxable × statutory rate); ETR schedule ties statutory→effective; maker-checker `SOD_SELF_APPROVAL`; Dr 5960 / Cr 2110 through the period-lock gate | Prev / Auto | TAX-11 | `income_tax_provisions` register (Open→Posted, taxable bridge + ETR schedule); CITPROV JE to 5960/2110; `tax-provision` ToE |
 
 ## 9a. Deferred tax (TAS 12 / TFRS, TAX-06)
 
@@ -147,6 +148,50 @@ button; maker-checker (`SELF_POST`) is enforced server-side.
 | Owner | Tax / Financial Controller |
 | Test | TC-TAX-06-01/02 (basics.ts harness) |
 
+## 9b. Current income-tax provision + ETR reconciliation (ASC 740 / IAS 12, TAX-11)
+
+Where TAX-06 governs the **deferred** side, TAX-11 governs the **current** side of the income-tax provision:
+the bridge from **pretax book income** to **taxable income** to **current CIT payable**, plus the
+**effective-tax-rate (ETR) reconciliation**. It is a governed, maker-checker, idempotent-per-(tenant, period)
+run that never re-derives temporary differences — it **reuses** the TAX-06 deferred-tax run so the two modules
+can never disagree.
+
+1. **Run** — `POST /api/tax/provision/run` (perms `gl_close`/`gl_post`) computes:
+   - **Pretax book income** from the income statement over `[from, to]`, **excluding** income-tax postings
+     (`DEFTAX` deferred + `CITPROV` current) so the base is genuinely *pre-tax* and idempotent.
+   - **+ permanent book-to-tax adjustments** (caller-supplied M-1 items: non-deductible expenses `+`,
+     tax-exempt income `−`).
+   - **+ temporary book-to-tax adjustment**, **reused** from the deferred-tax run's period delta:
+     `temporaryAdjustment = deltaNetDeferred / deferred-rate` (an originating taxable temp diff lowers taxable
+     income below book; a deductible temp diff raises it).
+   - `= taxable income`; **current tax = taxable income × statutory rate** (default **20%** Thai CIT).
+   It stages an `Open` `income_tax_provisions` row (`ALREADY_POSTED` on re-post) and computes the **ETR
+   schedule** — statutory tax → permanent differences × rate → rate-change effect → valuation-allowance impact
+   → prior-year deferred → **total income-tax expense** / effective rate. The reconciliation **ties by
+   construction**: current + deferred = statutory + permanent × rate.
+2. **Post** — `POST /api/tax/provision/:id/post` (maker-checker, poster ≠ runner → `SOD_SELF_APPROVAL`) posts
+   the **current** tax **Dr 5960 Corporate Income Tax Expense (current) / Cr 2110 CIT Payable** through the
+   period-lock gate (a tax benefit reverses the legs); the deferred leg is posted separately by TAX-06.
+   `GET /api/tax/provision[/:id]` and `/:id/etr` expose the register + reconciliation schedule.
+
+New COA accounts: **5960** Corporate Income Tax Expense (current, P&L), **2110** CIT Payable (balance-sheet
+liability; CF_CLASSIFY operating). New posting-event `TAX.PROVISION`.
+
+**Web UI:** operable from **`/tax/provision`** (Tax nav, perms `gl_close`/`gl_post`/`exec`) — a
+"คำนวณงวดใหม่" tab runs the computation (period / dates / statutory rate / permanent-difference lines,
+showing the book→taxable bridge + the ETR schedule) and a "ทบทวน & โพสต์" tab lists provisions with a
+**โพสต์เข้า GL** button; maker-checker (`SOD_SELF_APPROVAL`) is enforced server-side.
+
+### Control TAX-11 — Current income-tax provision + ETR reconciliation (maker-checker)
+| Control ID | TAX-11 |
+|------------|--------|
+| Name | Current income-tax provision bridged from book income; ETR reconciled; segregated post |
+| Type | Application — Automated (Preventive, Quarterly / year-end) |
+| Risk | Pretax book income not correctly bridged to taxable income (permanent/temporary adjustments omitted or double-counted), wrong statutory rate, temp diff re-derived inconsistently with TAX-06, or computed and posted by one person — income tax expense, CIT payable and the ETR disclosure mis-stated |
+| Mitigation | Run→post `income_tax_provisions`; pretax excl. income-tax postings; permanent M-1 + temporary reused from TAX-06 delta; taxable × statutory rate; ETR schedule ties statutory→effective; `SOD_SELF_APPROVAL`; Dr 5960 / Cr 2110 through the period-lock gate |
+| Owner | Tax / Financial Controller |
+| Test | TC-TAX-11-01/02/03 (tax-provision.ts harness, 24 checks) |
+
 ## 10. Inputs & outputs
 
 **Inputs:** sales/purchase transactions, tax-rate config, vendor/customer tax IDs, payment data.
@@ -181,6 +226,7 @@ button; maker-checker (`SELF_POST`) is enforced server-side.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.28 | 2026-07-11 | Platform / Tax | **Current income-tax provision + ETR reconciliation (ASC 740 / IAS 12, new control TAX-11, migration `0349`).** New §9b + §9 control-matrix row. `POST /api/tax/provision/run` (`gl_close`/`gl_post`) bridges **pretax book income** (from `ledger.incomeStatement`, EXCLUDING `DEFTAX`/`CITPROV` income-tax postings) **+ permanent M-1 adjustments + a temporary adjustment REUSED from the TAX-06 deferred-tax run's period delta** (`temporaryAdjustment = deltaNetDeferred / deferred-rate`) → **taxable income → current CIT @ statutory rate** (default 20%), staging an `Open` `income_tax_provisions` row (`ALREADY_POSTED` on re-post) and computing the **ETR reconciliation** schedule (statutory → permanent × rate → rate-change → valuation-allowance → prior deferred → effective; ties by construction). `POST /api/tax/provision/:id/post` is **maker-checker** (poster ≠ runner → `SOD_SELF_APPROVAL`) and posts **Dr 5960 Corporate Income Tax Expense (current) / Cr 2110 CIT Payable** through the period-lock gate; the deferred leg stays with TAX-06. `GET /api/tax/provision[/:id]` + `/:id/etr` expose the register + schedule. New COA **5960**/**2110** (COA + CF_CLASSIFY 2110 operating); posting-event `TAX.PROVISION`; new `income_tax_provisions` table (migration **0349**, RLS). Web `/tax/provision` (Tax nav; server-shell + client island). New RCM control **TAX-11** (251 controls, census 248/3/0). ToE: `tax-provision` harness (**24 checks**: taxable-income bridge, ETR reconcile, `SOD_SELF_APPROVAL`, distinct-approver Dr5960/Cr2110 balanced, RLS isolation). Manual `07-tax.md` + UAT `06-tax-uat.md` (UAT-TAX-060/061/062) + traceability matrix updated. |
 | 0.27 | 2026-07-11 | Platform | **docs/43 PR-7 — PND3/53 + ภ.ธ.40 tie-out widening (no control/flow change, no migration).** `APPAY.WHT.wht_payable` (2361) and `SBT.TAX.sbt_payable` (2130) flip Tier B→A (GL-24-governed overrides now accepted), and the TAX-03 `pndTieOut` + TAX-09 `pt40` reconciliations sum the **WIDENED account set** `{canonical} ∪ {approved override}` (responses gain `gl_account_set`; `gl_account` stays the canonical code) — an overridden payable still ties, and a manual JE outside the set still flags. The subcontract WHT leg stays on the canonical 2361 inside the same set. The PP30/PP36 VAT sets (2100/1300/2120) and the 2410 progress ties stay Tier B (out of PR-7 scope); **REC-04's five accounts stay pinned permanently (owner decision Q3)**. ToE `taxdocs`/`input-vat` regression + `payroll` 46; docs/43 rev 0.9. |
 | 0.26 | 2026-07-10 | Platform / Tax | **ABB → full tax-invoice conversion at the counter (ม.86/4 on buyer request; POS-1, new control TAX-10, migration `0293`).** §7 step 3a + §9 control row. New `POST /api/tax-invoices/abbreviated/:docNo/convert-full` (`cust_pos`/`pos`/`ar`): mandatory buyer block — name + address, **required checksum-validated 13-digit Tax ID** (`INVALID_BUYER_TAXID`), 5-digit branch defaulted `00000` (`ConvertAbbBody`); the full TIV **copies the ABB's amounts/VAT/lines + frozen seller snapshot verbatim (never recomputed)** and keeps the ABB's issue/tax-point dates (VAT stays in the original ภ.พ.30 period); linkage `full.replaces_doc_no = ABB doc_no` + ABB → status **`Replaced`** (pre-existing enum value/column, previously unused) so output VAT counts the supply **once**; **idempotent — one full per ABB** (re-call returns the same doc, `already_converted`; DB backstop = partial unique index `uq_tiv_converted_from`, migration **0291**, ADD-INDEX only — table already tenant-scoped/RLS'd); `ABB_VOIDED` / `NOT_ABBREVIATED` guards; conversion recorded on the hash-chained `audit_log` (`appendAuditMeta` `tax_abb_convert`); flows into the existing e-Tax XML/PDF path + customer-master upsert. `shape()` gains `replaces_doc_no`. Web `/tax/invoices` gains a conversion card (pick the ATV, buyer form, result PDF link — inlined, no new `'use client'` file). New RCM control **TAX-10** (203 controls, census 200/3/0). ToE: `taxdocs` **131** (+15: happy path incl. verbatim amounts + linkage + Replaced + output-VAT single-count; idempotent double-convert; bad/missing Tax ID; voided ABB; non-ABB; cross-tenant 404; converted PDF). Manual `07-tax.md` + UAT `06-tax-uat.md` (UAT-TAX-050) + traceability matrix updated. |
 | 0.25 | 2026-07-09 | Platform / Tax | **/pos-fiscal e-Tax submit box picks the doc from a dropdown (UI-only, no control change).** The submit target on `/pos-fiscal` now offers the issued-tax-invoice list (`GET /api/tax-invoices`, existing read) instead of a typed doc no — same pattern as `/einvoice` (rev 0.24); submission idempotency and provider flow unchanged. Manual `07-tax.md`. |
