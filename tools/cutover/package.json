@@ -56,6 +56,7 @@
     "tax-provision": "tsx src/tax-provision.ts",
     "treasury-debt": "tsx src/treasury-debt.ts",
     "treasury-invest": "tsx src/treasury-invest.ts",
+    "treasury-hedge": "tsx src/treasury-hedge.ts",
     "tax-point": "tsx src/tax-point.ts",
     "migration-tooling": "tsx src/migration-tooling.ts",
     "proration": "tsx src/proration.ts",

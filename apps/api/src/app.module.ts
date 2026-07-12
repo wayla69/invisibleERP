@@ -33,6 +33,7 @@ import { LedgerModule } from './modules/ledger/ledger.module';
 import { TaxProvisionModule } from './modules/tax-provision/tax-provision.module';
 import { TreasuryDebtModule } from './modules/treasury-debt/debt.module';
 import { TreasuryInvestModule } from './modules/treasury-invest/investment.module';
+import { TreasuryHedgeModule } from './modules/treasury-hedge/hedge.module';
 import { DisclosureModule } from './modules/disclosure/disclosure.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { TaxModule } from './modules/tax/tax.module';
@@ -179,6 +180,7 @@ import { MailModule } from './modules/mail/mail.module';
     TaxProvisionModule,
     TreasuryDebtModule,
     TreasuryInvestModule,
+    TreasuryHedgeModule,
     DisclosureModule,
     PaymentsModule,
     TaxModule,

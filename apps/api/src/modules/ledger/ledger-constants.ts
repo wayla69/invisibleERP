@@ -116,6 +116,15 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '4700', name: 'Investment Income', type: 'Revenue' },               // รายได้จากเงินลงทุน — interest (amortized-cost accretion) + dividends (TRE-03)
   { code: '5430', name: 'Fair-value Gain/Loss (FVTPL)', type: 'Expense' },    // กำไร/ขาดทุนจากการวัดมูลค่ายุติธรรม (FVTPL) — MTM through P&L; gain=credit, loss=debit
   { code: '5440', name: 'Investment Impairment (ECL)', type: 'Expense' },     // ผลขาดทุนจากการด้อยค่าเงินลงทุน — ECL impairment (Dr 5440 / Cr 1355 allowance, TRE-03)
+  // Hedge accounting register (Track C Wave 3, TRE-04; IFRS 9 / TFRS 9 · ASC 815) — a derivative's fair-value
+  // change books to the derivative asset/liability (1380/2460); a CASH_FLOW hedge defers its EFFECTIVE portion
+  // in the Cash-Flow Hedge Reserve 3550 (OCI equity, mirroring the FVOCI reserve 3500) and its INEFFECTIVE
+  // portion to P&L 5450; a FAIR_VALUE hedge routes the derivative change to P&L 5450 and basis-adjusts the
+  // hedged item's own carrying account. Reclassification recycles 3550 → the hedged-item revenue/P&L line.
+  { code: '1380', name: 'Derivative Asset', type: 'Asset' },                  // สินทรัพย์อนุพันธ์ — hedging-instrument positive fair value (Dr on a derivative gain, TRE-04)
+  { code: '2460', name: 'Derivative Liability', type: 'Liability' },          // หนี้สินอนุพันธ์ — hedging-instrument negative fair value (Cr on a derivative loss, TRE-04)
+  { code: '3550', name: 'Cash-Flow Hedge Reserve (OCI)', type: 'Equity' },    // สำรองการป้องกันความเสี่ยงกระแสเงินสด (OCI equity) — effective portion of a CASH_FLOW hedge deferred in OCI, recycled to P&L when the hedged cash flow occurs (TRE-04)
+  { code: '5450', name: 'Hedge Ineffectiveness / Fair-value Hedge P&L', type: 'Expense' }, // ผล(ขาดทุน)กำไรการป้องกันความเสี่ยงที่ไม่มีประสิทธิผล — ineffective portion of a CF hedge + the FV-hedge derivative/basis P&L (gain=credit, loss=debit, TRE-04)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -188,4 +197,9 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '3100': { bucket: 'financing', label: 'เงินปันผลจ่าย / กำไรสะสม (Dividends paid)' },
   '3200': { bucket: 'financing', label: 'ส่วนเกินทุนจากการตีราคา (Revaluation surplus)' },
   '3500': { bucket: 'financing', label: 'สำรองมูลค่ายุติธรรม FVOCI (FVOCI reserve, OCI)' }, // TRE-03 — FVOCI cumulative MTM equity reserve (non-cash remeasurement; mirrors 3200 handling)
+  '3550': { bucket: 'financing', label: 'สำรองการป้องกันความเสี่ยงกระแสเงินสด (Cash-flow hedge reserve, OCI)' }, // TRE-04 — CF-hedge OCI equity reserve (non-cash remeasurement; mirrors 3500/3200 handling)
+  // Hedge accounting derivatives (TRE-04) — a hedging derivative's fair value is a non-cash risk-management
+  // remeasurement (asset/liability ↔ 3550 OCI / 5450 P&L), so it self-cancels in the SCF reconciliation.
+  '1380': { bucket: 'operating', label: 'สินทรัพย์อนุพันธ์ (Derivative asset — hedging instruments)' },
+  '2460': { bucket: 'operating', label: 'หนี้สินอนุพันธ์ (Derivative liability — hedging instruments)' },
 };
