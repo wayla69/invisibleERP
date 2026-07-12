@@ -19,6 +19,10 @@ const CreateAccountBody = z.object({
   requireDimension: z.record(z.boolean()).optional(),
   effectiveFrom: z.string().optional(),
   effectiveTo: z.string().optional(),
+  // docs/43 PR-8: SCF bucket + current/non-current self-declaration (fallback = CF_CLASSIFY / metric lists).
+  cfBucket: z.enum(['operating', 'investing', 'financing', 'addback']).optional(),
+  cfLabel: z.string().optional(),
+  isCurrent: z.boolean().optional(),
 });
 type CreateAccountBodyT = z.infer<typeof CreateAccountBody>;
 const UpdateAccountBody = z
@@ -31,6 +35,9 @@ const UpdateAccountBody = z
     effectiveFrom: z.string().optional(),
     effectiveTo: z.string().optional(),
     active: z.enum(['true', 'false']).optional(),
+    cfBucket: z.enum(['operating', 'investing', 'financing', 'addback']).nullable().optional(),
+    cfLabel: z.string().nullable().optional(),
+    isCurrent: z.boolean().nullable().optional(),
   })
   .refine((b) => Object.keys(b).length > 0, { message: 'At least one field is required' });
 type UpdateAccountBodyT = z.infer<typeof UpdateAccountBody>;

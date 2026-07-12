@@ -89,6 +89,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   exec_scorecard: { label: 'สรุปผู้บริหารข้ามโมดูล', labelEn: 'Executive cross-module scorecard' },
   // Budget-vs-actual variance (RG-2): wraps BudgetService.budgetVsActual (ELC-06) for the scheduler.
   budget_variance: { label: 'งบประมาณเทียบกับจริง', labelEn: 'Budget vs actual variance' },
+  // Flux / variance analysis (CLS-01/GL-25): generates a period-over-period P&L flux and surfaces the
+  // threshold-breaching lines that management must explain before close sign-off. Read-only.
+  flux_analysis: { label: 'วิเคราะห์ผลต่าง (Flux) เพื่อสอบทานปิดงวด', labelEn: 'Flux / variance analysis' },
   // Supplier performance (RG-3): wraps the supplier scorecard compute (avg score + underperformers).
   supplier_scorecard: { label: 'คะแนนผลงานผู้ขาย', labelEn: 'Supplier performance scorecard' },
   // Action job: each run captures a dated EVM/RAG health snapshot for every project (idempotent per day).

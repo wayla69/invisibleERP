@@ -3,6 +3,8 @@ import { tenants } from '../../database/schema';
 import { fixedAssets } from '../../database/schema';
 import { menuItems } from '../../database/schema';
 import { itemCategories, taxCodes } from '../../database/schema';
+import { accounts } from '../../database/schema';
+import { postingRules } from '../../database/schema';
 
 export type MdType = 'str' | 'num' | 'int' | 'bool' | 'date';
 export interface MdCol {
@@ -175,6 +177,37 @@ export const MASTER_REGISTRY: MdEntity[] = [
       C('Useful_Life_Months', 'usefulLifeMonths', 'int'), C('Location', 'location'),
       C('Department', 'department'), C('Serial_No', 'serialNo'), C('Assigned_To', 'assignedTo'),
       C('Status', 'status'), C('Notes', 'notes'),
+    ],
+  },
+  // docs/43 PR-8 (owner decision Q4) — bulk IO for the CANONICAL chart of accounts. Gated to the platform
+  // Admin at import time (GL-11 COA_ADMIN_ONLY, enforced in masterdata.service) — the universe is shared
+  // across every tenant. Type/postability/SCF bucket are financially sensitive → any import that sets
+  // them is STAGED for a distinct approver (the standing masterdata maker-checker). Type is normalized
+  // to the pgEnum casing by the accounts special-case (enumVals lower-cases, which would break the enum).
+  {
+    key: 'accounts', labelEn: 'Chart of Accounts (canonical)', labelTh: 'ผังบัญชี (กลาง)',
+    table: accounts, tenantScoped: false, allowReplace: false,
+    required: ['Code', 'Name', 'Type'],
+    cols: [
+      C('Code', 'code'), C('Name', 'name'), C('Name_TH', 'nameTh'),
+      C('Type', 'type', 'str', { sensitive: true }),
+      C('Parent_Code', 'parentCode'), C('Normal_Balance', 'normalBalance'),
+      C('Is_Postable', 'isPostable', 'bool', { def: true, sensitive: true }),
+      C('CF_Bucket', 'cfBucket', 'str', { enumVals: ['operating', 'investing', 'financing', 'addback'], sensitive: true }),
+      C('CF_Label', 'cfLabel'), C('Is_Current', 'isCurrent', 'bool'),
+    ],
+  },
+  // docs/43 PR-8 (owner decision Q4) — bulk IO for tenant posting-rule overrides. The import NEVER writes
+  // the table directly: masterdata.service routes every row through PostingService.upsertRule, so each row
+  // is registry-validated FAIL-CLOSED (event/role/tier/side/postable account) and lands as its own GL-24
+  // PendingApproval rule — a DIFFERENT user then approves; a bulk import can never bypass the maker-checker.
+  {
+    key: 'posting_rules', labelEn: 'Posting-Rule Overrides (GL-24)', labelTh: 'กฎการลงบัญชี (GL-24)',
+    table: postingRules, tenantScoped: true, allowReplace: false,
+    required: ['Event_Type', 'Leg_Order', 'Role', 'Side', 'Account_Code'],
+    cols: [
+      C('Event_Type', 'eventType'), C('Leg_Order', 'legOrder', 'int'), C('Role', 'role'),
+      C('Side', 'side'), C('Account_Code', 'accountCode'),
     ],
   },
 ];

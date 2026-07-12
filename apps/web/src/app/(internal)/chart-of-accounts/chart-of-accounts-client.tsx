@@ -39,6 +39,8 @@ type RawAccount = {
   isControl?: boolean | null;
   controlSubledger?: string | null;
   isPostable?: boolean | null;
+  cfBucket?: string | null;
+  isCurrent?: boolean | null;
   requireDimension?: Record<string, boolean> | null;
   active?: string | boolean | null;
 };
@@ -332,6 +334,10 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
   const [type, setType] = useState<string>('Expense');
   const [parentCode, setParentCode] = useState('');
   const [postable, setPostable] = useState(true);
+  // docs/43 PR-8: a balance-sheet account self-declares its SCF bucket + current/non-current so the
+  // indirect cash flow and the BS metrics classify it without a code change.
+  const [cfBucket, setCfBucket] = useState('');
+  const [isCurrent, setIsCurrent] = useState('');
   const codeOk = /^\d{4}$/.test(code);
   const save = useMutation({
     mutationFn: () =>
@@ -342,6 +348,8 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
           ...(nameTh.trim() ? { nameTh: nameTh.trim() } : {}),
           ...(parentCode.trim() ? { parentCode: parentCode.trim() } : {}),
           isPostable: postable,
+          ...(cfBucket ? { cfBucket } : {}),
+          ...(isCurrent !== '' ? { isCurrent: isCurrent === 'true' } : {}),
         }),
       }),
     onSuccess: () => { notifySuccess(t('fnx.coa.created', { code })); onSaved(); },
@@ -376,6 +384,26 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
             <input type="checkbox" checked={postable} onChange={(e) => setPostable(e.target.checked)} />
             {t('fnx.coa.f_postable')}
           </label>
+          {(type === 'Asset' || type === 'Liability' || type === 'Equity') && (
+            <>
+              <FormField label={t('fnx.coa.f_cf_bucket')} htmlFor="coa-cf">
+                <select id="coa-cf" className={SELECT_CLS} value={cfBucket} onChange={(e) => setCfBucket(e.target.value)}>
+                  <option value="">{t('fnx.coa.f_cf_auto')}</option>
+                  <option value="operating">{t('fnx.coa.cf_operating')}</option>
+                  <option value="investing">{t('fnx.coa.cf_investing')}</option>
+                  <option value="financing">{t('fnx.coa.cf_financing')}</option>
+                  <option value="addback">{t('fnx.coa.cf_addback')}</option>
+                </select>
+              </FormField>
+              <FormField label={t('fnx.coa.f_is_current')} htmlFor="coa-cur">
+                <select id="coa-cur" className={SELECT_CLS} value={isCurrent} onChange={(e) => setIsCurrent(e.target.value)}>
+                  <option value="">{t('fnx.coa.f_cf_auto')}</option>
+                  <option value="true">{t('fnx.coa.cur_current')}</option>
+                  <option value="false">{t('fnx.coa.cur_noncurrent')}</option>
+                </select>
+              </FormField>
+            </>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>

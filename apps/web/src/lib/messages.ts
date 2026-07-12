@@ -238,6 +238,8 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.cost_centers': { th: 'ศูนย์ต้นทุน & กำไรตามมิติ', en: 'Cost Centres & P&L' },
   'nav.gl_schedules': { th: 'รายการบัญชีตั้งเวลา', en: 'Recurring & Prepaid' },
   'nav.period_close': { th: 'ปิดงวดบัญชี (Period-close)', en: 'Period Close' },
+  'nav.flux_analysis': { th: 'วิเคราะห์ผลต่าง (Flux)', en: 'Flux / Variance' },
+  'nav.disclosure_checklist': { th: 'รายการตรวจสอบการเปิดเผยข้อมูล', en: 'Disclosure Checklist' },
 
   // ── Finance / Banking ─────────────────────────────────────────────────────
   'nav.bank': { th: 'ธนาคาร', en: 'Banking' },

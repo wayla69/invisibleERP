@@ -335,6 +335,26 @@ async function main() {
   const reimport = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: cleanCsv });
   ok('Bulk import: re-importing existing rows reports them as EXISTS (append, 0 new)', reimport.json.imported === 0 && (reimport.json.errors ?? []).every((e: any) => e.code === 'EXISTS') && (reimport.json.errors ?? []).length === 2, `${JSON.stringify({ imported: reimport.json.imported, errs: (reimport.json.errors ?? []).map((e: any) => e.code) })}`);
 
+  // ── docs/43 PR-8 — bulk IO for the canonical CoA + posting-rule overrides (owner decision Q4) ──
+  // (a) posting_rules import routes EVERY row through the GL-24 pipeline — valid rows land as individual
+  // PendingApproval rules (never Approved, never a raw table write); a bad role is a per-row error.
+  const prCsv = 'Event_Type,Leg_Order,Role,Side,Account_Code\nBADDEBT.WRITEOFF,1,bad_debt_exp,DR,5100\nTILL.VARIANCE,1,bogus_role,DR,5100';
+  const prImp = await inj('POST', '/api/admin/master-data/posting_rules/import/checked', token, { format: 'csv', mode: 'append', csv: prCsv, skip_errors: true });
+  ok('PR-8: posting_rules import lands valid rows as GL-24 PendingApproval + reports the bad role per-row',
+    prImp.json.status === 'PendingApproval' && prImp.json.imported === 1 && (prImp.json.errors ?? []).some((e: any) => e.code === 'UNKNOWN_POSTING_ROLE'),
+    JSON.stringify({ st: prImp.json.status, imp: prImp.json.imported, errs: (prImp.json.errors ?? []).map((e: any) => e.code) }));
+  const prRow = (await db.select().from(s.postingRules).where(and(eq(s.postingRules.eventType, 'BADDEBT.WRITEOFF'), eq(s.postingRules.accountCode, '5100'))))[0];
+  ok('PR-8: the imported rule row is PendingApproval (import can never bypass the maker-checker)', prRow?.status === 'PendingApproval', `${prRow?.status}`);
+  // (b) canonical accounts import: financially-sensitive (Type/CF bucket) → STAGED for a distinct approver.
+  const accCsv = 'Code,Name,Type,CF_Bucket,Is_Current\n6100,Research Expense (PR-8),Expense,,\n2660,Bond Payable (PR-8),Liability,financing,false';
+  const accImp = await inj('POST', '/api/admin/master-data/accounts/import/checked', token, { format: 'csv', mode: 'append', csv: accCsv });
+  ok('PR-8: accounts import (sensitive Type/CF fields) is STAGED for independent approval, nothing written',
+    accImp.json.status === 'PendingApproval' && !!accImp.json.req_no && (await db.select().from(s.accounts).where(eq(s.accounts.code, '6100'))).length === 0,
+    JSON.stringify({ st: accImp.json.status, req: accImp.json.req_no }));
+  // (c) the canonical chart is Admin/HQ-gated (GL-11) — a masterdata-duty non-Admin is refused.
+  const accDenied = await inj('POST', '/api/admin/master-data/accounts/import/checked', hqwh, { format: 'csv', mode: 'append', csv: accCsv });
+  ok('PR-8: accounts bulk import by a non-Admin → 403 COA_ADMIN_ONLY', accDenied.status === 403 && accDenied.json.error?.code === 'COA_ADMIN_ONLY', `${accDenied.status} ${accDenied.json.error?.code}`);
+
   // vendors are tenant-scoped: a Warehouse admin's import is stamped with their tenant
   const vend = await inj('POST', '/api/admin/master-data/vendors/import/checked', hqwh, { format: 'csv', mode: 'append', csv: 'Vendor_Code,Name\nV-BULK,Acme Co' });
   const vrow = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-BULK')))[0];
