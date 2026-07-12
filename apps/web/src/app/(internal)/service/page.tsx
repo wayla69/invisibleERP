@@ -47,31 +47,37 @@ export default function ServicePage() {
 }
 
 // GET /api/service/cases → { cases: [...], count }
-interface Case { id: number; case_no: string; subject: string; status: string; priority: string; source: string; contact_email: string | null; customer_name: string | null; assignee: string | null; created_at: string | null }
+interface Case { id: number; case_no: string; subject: string; status: string; priority: string; source: string; contact_email: string | null; customer_name: string | null; assignee: string | null; sla_tier: string; response_breached: boolean; resolution_breached: boolean; created_at: string | null }
+const SLA_TIERS = ['Standard', 'Bronze', 'Silver', 'Gold', 'Platinum'];
 
 function Cases() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<{ cases: Case[]; count: number }>({ queryKey: ['svc-cases'], queryFn: () => api('/api/service/cases') });
+  // SVC-5: the live SLA-breach worklist (open cases past their first-response / resolution due time).
+  const breachesQ = useQuery<{ breaches: Case[]; count: number }>({ queryKey: ['svc-case-breaches'], queryFn: () => api('/api/service/cases/sla/breaches') });
   const cases = q.data?.cases ?? [];
   const openCount = cases.filter((c) => c.status === 'new' || c.status === 'open' || c.status === 'pending').length;
-  const emailCount = cases.filter((c) => c.source === 'email').length;
+  const breachCount = breachesQ.data?.count ?? 0;
 
   const [subject, setSubject] = useState('');
   const [priority, setPriority] = useState('P3');
   const [contactEmail, setContactEmail] = useState('');
   const [assignee, setAssignee] = useState('');
+  const [slaTier, setSlaTier] = useState('Standard');
+
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['svc-cases'] }); qc.invalidateQueries({ queryKey: ['svc-case-breaches'] }); };
 
   const create = useMutation({
     mutationFn: () =>
       api('/api/service/cases', {
         method: 'POST',
-        body: JSON.stringify({ subject, priority, contact_email: contactEmail || undefined, assignee: assignee || undefined }),
+        body: JSON.stringify({ subject, priority, sla_tier: slaTier, contact_email: contactEmail || undefined, assignee: assignee || undefined }),
       }),
     onSuccess: (r: any) => {
       notifySuccess(t('crm.case_created_ok', { no: r.case_no }));
       setSubject(''); setContactEmail(''); setAssignee('');
-      qc.invalidateQueries({ queryKey: ['svc-cases'] });
+      refresh();
     },
     onError: (e: any) => notifyError(e.message),
   });
@@ -80,8 +86,8 @@ function Cases() {
     mutationFn: ({ id, action, body }: { id: number; action: string; body?: unknown }) =>
       api(`/api/service/cases/${id}/${action}`, { method: 'POST', body: body != null ? JSON.stringify(body) : undefined }),
     onSuccess: (_r, v) => {
-      notifySuccess(t(v.action === 'assign' ? 'crm.case_assigned_ok' : v.action === 'resolve' ? 'crm.case_resolved_ok' : v.action === 'close' ? 'crm.case_closed_ok' : 'crm.case_reopened_ok'));
-      qc.invalidateQueries({ queryKey: ['svc-cases'] });
+      notifySuccess(t(v.action === 'assign' ? 'crm.case_assigned_ok' : v.action === 'resolve' ? 'crm.case_resolved_ok' : v.action === 'close' ? 'crm.case_closed_ok' : v.action === 'entitlement' ? 'crm.case_entitlement_ok' : 'crm.case_reopened_ok'));
+      refresh();
     },
     onError: (e: any) => notifyError(e.message),
   });
@@ -89,6 +95,10 @@ function Cases() {
   const assign = (c: Case) => {
     const who = window.prompt(t('crm.case_assign_prompt'), c.assignee ?? '');
     if (who && who.trim()) act.mutate({ id: c.id, action: 'assign', body: { assignee: who.trim() } });
+  };
+  const setTier = (c: Case) => {
+    const tier = window.prompt(t('crm.case_entitlement_prompt'), c.sla_tier ?? 'Standard');
+    if (tier && SLA_TIERS.includes(tier.trim())) act.mutate({ id: c.id, action: 'entitlement', body: { tier: tier.trim() } });
   };
 
   return (
@@ -98,7 +108,7 @@ function Cases() {
           <div className="grid gap-4 sm:grid-cols-3">
             <StatCard label={t('crm.total_cases')} value={num(cases.length)} icon={LifeBuoy} tone="primary" />
             <StatCard label={t('crm.open_cases')} value={num(openCount)} tone="warning" />
-            <StatCard label={t('crm.email_cases')} value={num(emailCount)} tone="info" />
+            <StatCard label={t('crm.case_sla_breaches')} value={num(breachCount)} icon={AlertTriangle} tone={breachCount > 0 ? 'danger' : 'success'} />
           </div>
         )}
       </StateView>
@@ -128,6 +138,12 @@ function Cases() {
               <Label htmlFor="case-assignee">{t('crm.case_assignee')}</Label>
               <Input id="case-assignee" value={assignee} onChange={(e) => setAssignee(e.target.value)} placeholder={t('crm.case_assignee_ph')} />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="case-sla">{t('crm.case_sla_tier')}</Label>
+              <Select id="case-sla" value={slaTier} onChange={(e) => setSlaTier(e.target.value)}>
+                {SLA_TIERS.map((tier) => <option key={tier} value={tier}>{tier}</option>)}
+              </Select>
+            </div>
           </div>
           <Button disabled={create.isPending || !subject.trim()} onClick={() => create.mutate()}>
             <Plus className="size-4" /> {create.isPending ? t('crm.saving') : t('crm.case_create_btn')}
@@ -146,6 +162,16 @@ function Cases() {
               { key: 'priority', label: t('crm.case_priority'), render: (r: Case) => <Badge variant={statusVariant(r.priority)}>{r.priority}</Badge> },
               { key: 'source', label: t('crm.case_source'), render: (r: Case) => <Badge variant="info">{r.source}</Badge> },
               { key: 'assignee', label: t('crm.case_assignee'), render: (r: Case) => r.assignee ?? '—' },
+              {
+                key: 'sla',
+                label: t('crm.case_sla'),
+                render: (r: Case) => (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Badge variant="info">{r.sla_tier}</Badge>
+                    {(r.response_breached || r.resolution_breached) && <Badge variant="destructive">{t('crm.case_breached')}</Badge>}
+                  </span>
+                ),
+              },
               { key: 'status', label: t('fin.col_status'), render: (r: Case) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               {
                 key: 'actions',
@@ -153,6 +179,9 @@ function Cases() {
                 align: 'right',
                 render: (r: Case) => (
                   <div className="flex justify-end gap-2">
+                    {r.status !== 'closed' && (
+                      <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => setTier(r)}>{t('crm.case_entitlement')}</Button>
+                    )}
                     {r.status !== 'closed' && (
                       <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => assign(r)}>{t('crm.case_assign')}</Button>
                     )}
