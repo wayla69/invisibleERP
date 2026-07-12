@@ -202,7 +202,7 @@ For every such change, review and update as needed:
   re-created idempotently inside 0218). See `docs/ops/drizzle-migration-debt.md` §3bis.
 - **CI runner pnpm version comes from `package.json` `packageManager` (pnpm@11.8.0).** Do **not** also pin
   `version:` in `pnpm/action-setup` — the two conflict (`ERR_PNPM_BAD_PM_VERSION`) and break every job.
-- **The `build` gate ends with two down-only RATCHETS that fail on *new* debt (not just real errors)** — a
+- **The `build` gate ends with three down-only RATCHETS that fail on *new* debt (not just real errors)** — a
   clean `tsc`/`next build` locally is **not** enough. (1) `tools/ci/check-ts-debt.mjs`: a new `as any` over
   `ts-debt-baseline.json.asAny`, **or** any `tsc --noUncheckedIndexedAccess` error over `.strictIndexErrors`,
   fails. Never add `as any` — use a precise cast (`x as unknown as Parameters<typeof fn>[0]` for cross-pkg
@@ -211,7 +211,12 @@ For every such change, review and update as needed:
   trip **both** counters. (2) `tools/ci/check-use-client.mjs`: a new `'use client'` file over
   `use-client-baseline.json` fails. A shared **client island imported only by already-`'use client'` pages
   must OMIT its own directive** (it inherits the boundary — pattern: `apps/web/src/components/state-view.tsx`);
-  adding the directive needlessly is what trips it. Run both scripts locally before pushing. Also: **PR CI runs
+  adding the directive needlessly is what trips it. (3) `tools/ci/check-service-size.mjs` (docs/46 Phase 0 —
+  god-service accretion): a grandfathered `apps/api/src/modules` file (the 14 over 600 LOC in
+  `service-size-baseline.json`) may not GROW — in lines **or** constructor params — and no NEW module file may
+  pass 600 LOC. Land the feature as its own sub-service / registered provider (docs/46 §4) instead of appending
+  to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
+  after an extraction. Run all three scripts locally before pushing. Also: **PR CI runs
   on the branch⋈main *merge* commit**, so a ratchet reads against *current* `main`'s baseline — your local
   count can be off by the files `main` added since you branched (relative pass/fail still holds).
 - **Bulk master-data import/export is registry-driven; extend it, don't rebuild.** `modules/masterdata`

@@ -1,7 +1,9 @@
 # 46 — God-service regrowth audit & decoupling plan (2026-07-12)
 
-> **Status:** PROPOSAL — audit findings + a step-by-step refactoring plan for review. **No code has been
-> changed.** This is the follow-up to docs/38 (god-service decomposition, COMPLETE 2026-07-08): four days
+> **Status:** Phase 0 DELIVERED (2026-07-12) — the service-size accretion ratchet
+> (`tools/ci/check-service-size.mjs` + `service-size-baseline.json`, wired into the `build` gate) is live;
+> Phases 1–5 below remain proposals awaiting sign-off. This is the follow-up to docs/38 (god-service
+> decomposition, COMPLETE 2026-07-08): four days
 > after that workstream closed, the decomposed facades are **re-accreting** and a second generation of god
 > services (never in docs/38's scope) has kept growing. The plan below reuses the docs/38 recipe
 > (characterization-first, facade-preserving, one sub-service per PR, golden-master gated) and adds the
@@ -249,4 +251,5 @@ PR lands with its harness list green and this doc's revision history updated.
 ## Revision history
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 0.2 | 2026-07-12 | Platform / IT | Phase 0 delivered: `tools/ci/check-service-size.mjs` added as the third down-only ratchet in the `build` gate. Baseline grandfathers the 14 module files over 600 LOC at their exact LOC + ctor-param counts (both down-only); any new module file over 600 LOC fails; scope = every non-test `.ts` under `apps/api/src/modules` (services, controllers, single-file `.module.ts`) so logic can't dodge the suffix. Verified all three modes locally (pass · grandfathered-growth fail · new-file fail). Doc-sync: CLAUDE.md ratchet bullet, docs/07-backend.md §8 log. No app behaviour change → no narrative/UAT/RCM impact. |
 | 0.1 | 2026-07-12 | Platform / IT | Initial audit: regrowth measurements post-docs/38 (bi-generate +68%, ledger facade +34%), second-generation god services (crm-pipeline, billing, finance, line-webhook), cross-domain table access inventory (GOV-01 16-table aggregator, treasury-pool/revenue direct GL reads, 34-dep BiGenerateService), coupling hubs (posting-events 35 importers, LedgerService 39, flat 168-file schema barrel, 146-module flat app module), and the phased decoupling plan (accretion guards → BI provider registry → GOV-01 contributor interface → ledger read API + boundary ratchet → second-generation decomposition → hygiene). Analysis only — no code changes. |
