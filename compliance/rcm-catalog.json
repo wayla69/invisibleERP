@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 263,
+    "total": 264,
     "by_status": {
-      "Implemented": 260,
+      "Implemented": 261,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 34,
+      "Revenue & Cash": 35,
       "Tax": 12
     }
   },
@@ -1517,6 +1517,25 @@
       "tod": "Inspect the recognize asset-aware split (release 2410 first, build 1265 for the surplus), the billing-schedule maker + Σ-planned ≤ contract-price guard, the bill-side reclass (1265→1100, excess→2410) with the maker≠biller SoD and cumulative-billing cap, and the /position tie-out.",
       "toe": "Re-perform (revrec-billing harness): activate a 1200 contract bill_upfront=false → billed 0; recognize 3 months (300) → contract asset 1265 rises 300, no 2410 moved; /position shows recognized 300 / billed 0 / asset 300; define a billing schedule (maker) → the maker billing it → 403 SOD_SELF_BILLING; a different user bills 200 → 1265→1100 reclass (asset 100 left); bill 400 → 100 clears the asset and 300 parks contract liability 2410; /position ties recognized 300 / billed 600 / liability 300 / asset 0; a milestone beyond the contract price → SCHEDULE_EXCEEDS_CONTRACT; a contract activated up-front (bill_upfront default) still releases 2410 on recognition (REV-19 back-compat); a second tenant sees 0 of the first tenant's contract/schedule (RLS).",
       "evidence": "Contract-asset / contract-liability roll-forward; billing-schedule maker-checker log; 1265↔1100 reclass tie-out; /position report",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "REV-25",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Recognized Revenue (4300); Contract Liability / Deferred Revenue (2410); Contract Asset / Unbilled Receivable (1265)",
+      "risk": "A contract with VARIABLE consideration (rebates, refunds, performance bonuses/penalties, price concessions, usage/volume tiers) is recognized at a fixed price only — the variable amount is either ignored or booked in full with NO constraint, so revenue is OVER-stated by an amount that is not highly probable to survive (a subsequent reversal restates prior revenue), the estimate is never revisited as facts change, and a change in the estimate does not TRUE-UP the revenue already recognized on satisfied obligations — breaching TFRS 15 / IFRS 15 / ASC 606 §50-59 (estimating variable consideration by expected value or most-likely amount, constraining it to the amount highly probable not to reverse, re-estimating each period and catching up prior revenue). A single person could also set AND bless the estimate (manage earnings via an aggressive, unreviewed judgement).",
+      "assertion": "Valuation/Accuracy/Cutoff",
+      "description": "Variable-consideration estimate + the constraint, as a maker-checker management judgement (Track D Wave 2, TFRS 15 / IFRS 15 / ASC 606 §50-59). Extends the REV-19 fixed-price engine (does not rebuild it). (1) A MAKER records an estimate (POST …/variable-consideration) computed by EXPECTED VALUE (Σ probability × amount; probabilities must sum to 1 → INVALID_PROBABILITIES) OR MOST-LIKELY amount (§53). (2) THE CONSTRAINT (§56-58) is the reviewed control: only the CONSTRAINED amount (highly probable not to reverse) — never the gross estimate — drives the recognizable transaction price, and a constrained amount ABOVE the estimate is rejected as over-recognition (CONSTRAINT_EXCEEDS_ESTIMATE). (3) The estimate is a JUDGEMENT, so approval is MANDATORY before it drives revenue: a DIFFERENT user must approve it (POST …/variable-consideration/:vcId/approve; the estimator self-approving → 403 SOD_SELF_APPROVAL) and only an Approved estimate can be applied. (4) RE-ESTIMATE each period (POST …/reestimate) recomputes the transaction price (fixed base + constrained variable), re-allocates by SSP, rebuilds only the UNRECOGNIZED schedule, and TRUES-UP already-recognized revenue via a cumulative catch-up (§88) — building a contract asset (Dr 1265) when recognized ahead of billing, or releasing the contract liability (Dr 2410) when billed up-front — and is idempotent (a re-run with no new approved estimate posts nothing; also guarded by LedgerService.alreadyPosted). All posting routes through LedgerService.postEntry so the period lock (PERIOD_LOCKED, GL-15/16) + GL-17 audit bind; tenant-scoped (RLS). No new COA (2410/1265/4300 already exist + CF-classified).",
+      "prev_det": "Prev/Detect",
+      "nature": "Automated",
+      "frequency": "Per estimate / re-estimate / period-end",
+      "owner": "Revenue Accountant / Controller",
+      "coso": "P10/P13",
+      "code_reference": "revrec-variable/rev-variable.service.ts (recordEstimate expected_value/most_likely + CONSTRAINT_EXCEEDS_ESTIMATE / INVALID_PROBABILITIES; approveEstimate SOD_SELF_APPROVAL; reestimate recompute price + re-allocateBySSP + buildSchedule + cumulative catch-up Dr2410/Dr1265 / Cr4300, idempotent); rev-variable.controller.ts (/api/revenue/contracts/:id/variable-consideration POST|GET, :id/variable-consideration/:vcId/approve POST, :id/reestimate POST — gated exec/ar/fin_report); reuses revenue/revrec.service.ts (allocateBySSP/buildSchedule/sumRecognized); schema/revrec-variable.ts rev_variable_estimates + migration 0359 (0232-form RLS, leading (tenant_id, contract_id) index); COA 2410/1265/4300; cutover/revrec-variable.ts (ToE)",
+      "tod": "Inspect the two estimation methods (expected value vs most-likely) and the probability-sum check, the constraint gate that caps the recognizable amount at the estimate (CONSTRAINT_EXCEEDS_ESTIMATE), the estimator≠approver maker-checker (SOD_SELF_APPROVAL) with approval mandatory before recognition, and the re-estimate cumulative catch-up (price recompute → re-allocate → rebuild unrecognized → true-up already-recognized revenue) and its idempotency.",
+      "toe": "Re-perform (revrec-variable harness): recognize 400 of a 1000 fixed-price contract; record an expected-value estimate {200@50%,0@50%}=100 constrained to 80; reestimate before approval is a no-op (approval mandatory); the estimator self-approving → 403 SOD_SELF_APPROVAL; a different user approves; reestimate → price 1080 (constrained 80, not gross 100), catch-up 32 builds contract asset 1265 and lifts 4300; a second reestimate posts nothing (idempotent); most-likely {100@30%,300@70%}=300 with a constrained amount above the estimate → CONSTRAINT_EXCEEDS_ESTIMATE; on an up-front-billed contract the catch-up releases 2410 instead of building 1265; a second tenant sees 0 of the first tenant's estimates (RLS).",
+      "evidence": "Variable-consideration estimate register (expected-value/most-likely + constrained amount); estimate maker-checker approval log; re-estimate true-up (catch-up delta) posting; period re-estimate history",
       "status": "Implemented"
     },
     {
