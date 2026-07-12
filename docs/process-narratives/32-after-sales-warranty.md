@@ -174,7 +174,7 @@ Beyond warranty claims, the after-sales desk runs **support cases** — the gove
 or complaint — and an **Email-to-Case** intake so that *no inbound customer email is ever dropped* (the SVC-04
 completeness control).
 
-**Case object (`service_cases`, migration 0348).** A case has a per-tenant `case_no` (`CASE-NNNNN`), a subject +
+**Case object (`service_cases`, migration 0349).** A case has a per-tenant `case_no` (`CASE-NNNNN`), a subject +
 description, a **priority** (P1–P4), an owner/**assignee**, an optional CRM contact link (`contact_email`), and a
 **governed status lifecycle**: `new → open → pending → resolved → closed`, with `reopen → open`. Transitions are
 enforced by the service — `assign` moves `new → open` and records the owner; `pending` parks a case waiting on the
@@ -209,4 +209,4 @@ Email-to-Case new-case-on-unmatched, thread-token + contact threading, Message-I
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-07-11 | `<<author>>` | Initial narrative — SVC-2 Warranty & Entitlement registry (warranty terms, installed base, warranty claims) with control SVC-01 (coverage-authorization maker-checker) + expiring / coverage-exceptions detective reads. Migration 0329; harness `tools/cutover/src/warranty.ts` (20 checks). |
-| 0.2 DRAFT | 2026-07-11 | `<<author>>` | Added **§10b — Support Cases & Email-to-Case (SVC-4, control SVC-04, migration 0348)**: the `service_cases` object with a governed status lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee/CRM-contact link, the append-only `case_email_messages` trail (Message-ID dedupe), and the public HMAC-authenticated Email-to-Case webhook that threads a reply onto its case (thread token → sender's open case) or opens a new case so no inbound email is dropped. Added the case + inbound error-code rows. Harness `tools/cutover/src/service.ts` (SVC-4 checks). |
+| 0.2 DRAFT | 2026-07-11 | `<<author>>` | Added **§10b — Support Cases & Email-to-Case (SVC-4, control SVC-04, migration 0349)**: the `service_cases` object with a governed status lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee/CRM-contact link, the append-only `case_email_messages` trail (Message-ID dedupe), and the public HMAC-authenticated Email-to-Case webhook that threads a reply onto its case (thread token → sender's open case) or opens a new case so no inbound email is dropped. Added the case + inbound error-code rows. Harness `tools/cutover/src/service.ts` (SVC-4 checks). |

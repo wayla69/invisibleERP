@@ -1,4 +1,4 @@
--- 0348_service_cases — SVC-4 (Service Cloud): Support Cases + Email-to-Case (SVC-04 control). Net-new customer-
+-- 0349_service_cases — SVC-4 (Service Cloud): Support Cases + Email-to-Case (SVC-04 control). Net-new customer-
 -- service foundation, ALONGSIDE the existing #666 subscription/SLA spine and the SVC-2 warranty registry (no
 -- change to those paths). Two new tenant-scoped tables:
 --   • service_cases        — a support case with a governed status lifecycle (new → open → pending → resolved →

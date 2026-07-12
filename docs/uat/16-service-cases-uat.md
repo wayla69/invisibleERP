@@ -33,4 +33,4 @@ Message-ID. Authenticated endpoints are under `/api/service/cases/*` (gated `exe
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
-| 0.1 DRAFT | 2026-07-11 | `<<author>>` | Initial UAT — SVC-4 Support Cases + Email-to-Case (control SVC-04, migration 0348): manual case lifecycle (open/assign/resolve/reopen/close + illegal-transition reject), Email-to-Case new-case-on-unmatched, thread-token + contact-email threading, Message-ID idempotency, reopen-on-reply, unknown-tenant + webhook-auth rejects, and RLS isolation. Traced to `tools/cutover/src/service.ts` SVC-4 checks. |
+| 0.1 DRAFT | 2026-07-11 | `<<author>>` | Initial UAT — SVC-4 Support Cases + Email-to-Case (control SVC-04, migration 0349): manual case lifecycle (open/assign/resolve/reopen/close + illegal-transition reject), Email-to-Case new-case-on-unmatched, thread-token + contact-email threading, Message-ID idempotency, reopen-on-reply, unknown-tenant + webhook-auth rejects, and RLS isolation. Traced to `tools/cutover/src/service.ts` SVC-4 checks. |

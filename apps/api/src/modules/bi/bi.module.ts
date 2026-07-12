@@ -13,6 +13,7 @@ import { RealEstateModule } from '../realestate/realestate.module';
 import { CrmPipelineModule } from '../crm/pipeline/crm-pipeline.module';
 import { CrmModule } from '../crm/crm.module';
 import { BudgetModule } from '../budget/budget.module';
+import { FluxModule } from '../flux/flux.module';
 import { ProcurementModule } from '../procurement/procurement.module';
 import { MatchModule } from '../match/match.module';
 import { BillingModule } from '../billing/billing.module';
@@ -37,5 +38,5 @@ import { HcmModule } from '../hcm/hcm.module';
 // (CrmPipelineService) supply the project_evm + crm_win_loss report types. DRIZZLE is global.
 // BudgetModule/ProcurementModule/MatchModule supply the residual-gap report types budget_variance,
 // supplier_scorecard and the exec_scorecard supply-chain leg (RG-1/2/3).
-@Module({ imports: [MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule, ScheduledChangesModule, PdpaModule, HcmModule], providers: [BiService, BiGenerateService, BiScheduleService, SchedulerTickService], controllers: [BiController], exports: [BiService] })
+@Module({ imports: [MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, FluxModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule, ScheduledChangesModule, PdpaModule, HcmModule], providers: [BiService, BiGenerateService, BiScheduleService, SchedulerTickService], controllers: [BiController], exports: [BiService] })
 export class BiModule {}
