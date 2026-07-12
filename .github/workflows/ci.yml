@@ -117,7 +117,7 @@ jobs:
           # ── finance / accounting ──
           - shard: finance
             run: >-
-              cutover:revrec cutover:revrec-billing cutover:revrec-variable cutover:fxreval cutover:intercompany cutover:consolidation
+              cutover:revrec cutover:revrec-billing cutover:revrec-variable cutover:revrec-modifications cutover:fxreval cutover:intercompany cutover:consolidation
               cutover:recon-profitability cutover:multiledger cutover:bankrec
               cutover:costcenter cutover:budget cutover:flux-analysis cutover:disclosure-checklist cutover:tax-provision cutover:tax-utp cutover:treasury-debt cutover:treasury-invest cutover:treasury-hedge cutover:treasury-pool
           # ── supply chain / inventory / manufacturing ──
