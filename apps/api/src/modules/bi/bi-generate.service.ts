@@ -40,6 +40,7 @@ import { GovernanceService } from '../governance/governance.service';
 import { TaxJobsService } from '../tax/tax-jobs.service';
 import { HcmLeaveService } from '../hcm/hcm-leave.service';
 import { FluxService } from '../flux/flux.service';
+import { RevDisclosureService } from '../revrec-disclosure/rev-disclosure.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -91,6 +92,9 @@ export class BiGenerateService {
     // CLS-01 (GL-25) — supplies the flux_analysis report. Appended at the END to preserve the positional
     // constructor contract the goldenmaster harness relies on. @Optional so a partial harness constructs.
     @Optional() private readonly flux?: FluxService,
+    // REV-27 (Track D Wave 4) — supplies the contract_liability_rollforward + rpo_backlog disclosure reports.
+    // Appended at the END to preserve the positional constructor contract the goldenmaster harness relies on.
+    @Optional() private readonly revDisclosure?: RevDisclosureService,
   ) {}
 
   async generateReport(reportType: string, filters: any, user: JwtUser, reads: BiReadPort): Promise<{ data: any; summary: string; summaryTh: string }> {
@@ -477,6 +481,21 @@ export class BiGenerateService {
       const period = new Date().toISOString().slice(0, 7); // YYYY-MM
       const r = await this.revrec.recognize({ period }, user, user.tenantId ?? null);
       return { data: r, summary: `Revenue recognition ${period}: recognized ${r.recognized_count} schedule(s), total ${r.total_recognized}`, summaryTh: `รับรู้รายได้งวด ${period}: ${r.recognized_count} รายการ รวม ${r.total_recognized}` };
+    }
+    if (reportType === 'contract_liability_rollforward') {
+      if (!this.revDisclosure) throw new BadRequestException({ code: 'REVDISCLOSURE_UNAVAILABLE', message: 'Revenue disclosure service not available', messageTh: 'ระบบเปิดเผยข้อมูลรายได้ไม่พร้อมใช้งาน' });
+      // TFRS 15 §120(b) contract-liability rollforward for the caller's tenant. Read-only; ties to GL by construction.
+      let period = f.period as string | undefined;
+      if (!period || !/^\d{4}-\d{2}$/.test(period)) period = new Date().toISOString().slice(0, 7);
+      const r = await this.revDisclosure.contractLiabilityRollforward(period, user, user.tenantId ?? null);
+      const cl = r.contract_liability;
+      return { data: r, summary: `Contract-liability rollforward ${period}: opening ${cl.opening} + billings ${cl.billings} − recognized ${cl.recognized} = closing ${cl.closing} (GL ${cl.gl_closing}, ${r.reconciled ? 'reconciled' : 'OUT OF BALANCE'})`, summaryTh: `กระทบยอดหนี้สินตามสัญญา ${period}: ยกมา ${cl.opening} + วางบิล ${cl.billings} − รับรู้ ${cl.recognized} = ยกไป ${cl.closing} (${r.reconciled ? 'กระทบยอดตรง' : 'ไม่ตรง'})` };
+    }
+    if (reportType === 'rpo_backlog') {
+      if (!this.revDisclosure) throw new BadRequestException({ code: 'REVDISCLOSURE_UNAVAILABLE', message: 'Revenue disclosure service not available', messageTh: 'ระบบเปิดเผยข้อมูลรายได้ไม่พร้อมใช้งาน' });
+      // TFRS 15 §120(a) remaining performance obligation (backlog) for the caller's tenant. Read-only.
+      const r = await this.revDisclosure.rpo(user, { asOf: f.period, explicitTenantId: user.tenantId ?? null });
+      return { data: r, summary: `RPO / backlog: ${r.total_rpo} across ${r.count} contract(s) — ${r.within_12m} within 12m, ${r.beyond_12m} beyond`, summaryTh: `ภาระที่ยังไม่ปฏิบัติ (Backlog): ${r.total_rpo} จาก ${r.count} สัญญา — ภายใน 12 เดือน ${r.within_12m} · เกินกว่านั้น ${r.beyond_12m}` };
     }
     if (reportType === 'data_retention_purge') {
       // Delete ONLY dead ephemeral security rows (auth-global, no statutory value once expired). This

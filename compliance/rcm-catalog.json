@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 265,
+    "total": 266,
     "by_status": {
-      "Implemented": 262,
+      "Implemented": 263,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 36,
+      "Revenue & Cash": 37,
       "Tax": 12
     }
   },
@@ -1555,6 +1555,25 @@
       "tod": "Inspect the §18-21 classification (distinct×at-SSP → the three outcomes), that separate_contract leaves the original untouched and creates a new contract, that prospective re-allocates the remaining price over remaining POs with no catch-up, that cumulative_catchup posts a catch-up on the satisfied portion, and the maker≠approver maker-checker (SOD_SELF_APPROVAL) with approval mandatory before it drives revenue.",
       "toe": "Re-perform (revrec-modifications harness): recognize 400 of a 1000 contract; a NOT-distinct +200 modification classifies cumulative_catchup and (after a distinct approver — self-approve → SOD_SELF_APPROVAL) posts an 80 catch-up (Dr 1265 / Cr 4300) lifting recognized revenue to 480; a distinct-not-at-SSP +300 modification classifies prospective, re-allocates the remaining 900 over the remaining POs (Support 600→540, Add-on 360, satisfied Setup frozen at 400) with catch_up_delta 0 and no revenue movement; a distinct-at-SSP +500 modification classifies separate_contract, creating a new linked contract (total 500, PO 500) while the original stays total 1000 / recognized 400; a Pending modification drives nothing and re-approving an applied one → MODIFICATION_NOT_PENDING; a second tenant sees 0 of the first tenant's modifications (RLS).",
       "evidence": "Contract-modification register (type/added_price/distinct_flag/at_ssp_flag/effect_amount + new_contract_id link); modification maker-checker approval log (created_by/approved_by); cumulative catch-up (REVREC-MOD) posting; re-allocation schedule rebuild",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "REV-27",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Contract Liability / Deferred Revenue (2410); Contract Asset / Unbilled Receivable (1265); Significant Financing Component Interest Income (4650); Interest Expense (5900); Recognized Revenue (4300)",
+      "risk": "A contract whose payment timing gives a MATERIAL financing benefit is recognized at the undiscounted (face) price — the significant financing component is ignored, so revenue is mis-stated (over-stated when the customer prepays, understated when payment is deferred) and the interest element is never separated from the revenue element, breaching TFRS 15 / IFRS 15 / ASC 606 §60-65 (adjust the promised consideration to its cash-selling-price present value and recognize the financing component as interest over the contract). Separately, the §120 DISCLOSURES are incomplete or do not tie to the ledger: the contract-liability rollforward (opening → billings → recognized → closing) does not reconcile to the GL contract-liability (2410) / contract-asset (1265) control accounts, and the remaining-performance-obligation (RPO / backlog) is not disclosed — so a reader cannot see how much revenue is deferred, how it moved, or how much is still to be delivered. The DISCOUNT RATE is a management judgement a single person could set AND bless (an aggressive/omitted rate manages the revenue↔interest split).",
+      "assertion": "Valuation/Presentation & Disclosure/Completeness",
+      "description": "Significant-financing-component rate as a maker-checker judgement + a GL-reconciled revenue-disclosure pack (Track D Wave 4, TFRS 15 / IFRS 15 / ASC 606 §60-65 + §120). Extends the REV-19 recognition engine + Wave 1 billing (does not rebuild them; reuses the contract-asset 1265 / contract-liability 2410 balances). (A) Financing component (§60-65): a MAKER flags a material financing component and sets the discount rate (POST …/financing-component); the service discounts the transaction price to its cash-selling-price PRESENT VALUE and schedules the interest UNWIND by the effective-interest method (the same EIR primitive the lease engine uses, LSE-01) so Σ interest == face − PV exactly. The rows land Pending and DRIVE NOTHING until a DIFFERENT user approves the rate (POST …/financing-component/approve; the maker self-approving → 403 SOD_SELF_APPROVAL); run-financing on an un-approved component → FINANCING_NOT_APPROVED. Only an APPROVED component posts (POST …/run-financing, idempotent via LedgerService.alreadyPosted): advance (customer prepays) Dr 2410 / Cr 4650 financing interest income; arrears (deferred payment) Dr 1265 / Cr 5900. (B) Disclosure pack (§120): the contract-liability rollforward (GET …/disclosure/contract-liability-rollforward) reconstructs opening → additions (billings) → recognized → closing over 2410/1265 DIRECTLY from the GL journal lines so it RECONCILES to GL by construction (opening + additions − reductions = closing = GL); the RPO / backlog (GET …/disclosure/rpo) = Σ unrecognized allocated price, banded by expected timing (≤12m / >12m). All GL routes through LedgerService.postEntry so the period lock (PERIOD_LOCKED, GL-15/16) + GL-17 audit bind; tenant-scoped (RLS). New COA 4650 (added to the canonical COA + CF_CLASSIFY operating); the arrears case reuses 5900.",
+      "prev_det": "Prev/Detect",
+      "nature": "Automated",
+      "frequency": "Per financing component / per period disclosure",
+      "owner": "Revenue Accountant / Controller",
+      "coso": "P10/P13",
+      "code_reference": "revrec-disclosure/rev-financing.service.ts (setFinancingComponent discounts to PV + builds the EIR unwind schedule so Σ interest = face − PV, records Pending; approveFinancingComponent SOD_SELF_APPROVAL flips Pending→Approved; runFinancing posts advance Dr2410/Cr4650 or arrears Dr1265/Cr5900, FINANCING_NOT_APPROVED guard, idempotent) + rev-disclosure.service.ts (contractLiabilityRollforward decomposes the GL 2410/1265 movements by source and reconciles closing to the GL balance; rpo sums unrecognized revrec_schedules planned amounts with a 12-month timing band); rev-disclosure.controller.ts (/api/revenue/contracts/:id/financing-component POST + /approve POST + GET, :id/run-financing POST, /api/revenue/disclosure/contract-liability-rollforward GET, /disclosure/rpo GET — gated exec/ar/fin_report); schema/revrec-disclosure.ts rev_financing_schedules + migration 0361 (0232-form RLS, leading (tenant_id, contract_id) index); ledger-constants.ts COA 4650 + CF_CLASSIFY; posting-events.ts REVFIN.INCOME/REVFIN.EXPENSE; bi report types contract_liability_rollforward + rpo_backlog; cutover/revrec-disclosure.ts (ToE)",
+      "tod": "Inspect that a material financing component discounts the transaction price to PV and unwinds the interest so Σ interest equals face − PV, that the discount-rate judgement is maker-checker (maker ≠ approver, SOD_SELF_APPROVAL) with an un-approved component unable to post (FINANCING_NOT_APPROVED), that advance posts interest income to 4650 and arrears to 5900, and that the §120 contract-liability rollforward reconciles to the GL 2410/1265 control accounts and the RPO equals the unrecognized allocated price.",
+      "toe": "Re-perform (revrec-disclosure harness): a 1200 face at 12%/yr over 12 months discounts to PV 1064.94 and Σ interest 135.06 = face − PV, last closing balance = 1200; the maker self-approving → SOD_SELF_APPROVAL and run-before-approval → FINANCING_NOT_APPROVED; a different checker approves and run-financing posts 12 periods of interest income to 4650 (idempotent re-run posts 0); an arrears component accretes the contract asset 1265 against 5900; the contract-liability rollforward reads opening 0 + billings 300 − recognized 100 = closing 200 = GL 2410; the RPO = 900 unrecognized allocated price banded within 12 months; a second tenant sees 0 of the first tenant's financing/RPO (RLS).",
+      "evidence": "Financing-component schedule (PV/face/interest + EIR unwind) with the discount-rate maker-checker approval log (created_by/approved_by); REVFIN interest postings (4650/5900); §120 contract-liability rollforward reconciled to GL; RPO / backlog by contract with timing band",
       "status": "Implemented"
     },
     {
