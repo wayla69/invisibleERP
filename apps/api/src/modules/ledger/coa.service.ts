@@ -119,6 +119,13 @@ export class CoaService {
     const [existing] = await this.db.select().from(accounts).where(eq(accounts.code, code)).limit(1);
     if (action === 'create') {
       if (existing) throw new BadRequestException({ code: 'DUPLICATE_ACCOUNT', message: `Account ${code} already exists`, messageTh: `บัญชี ${code} มีอยู่แล้ว` });
+      // COA-D2: a parent must be a real account (was accepted unvalidated — a typo'd parent silently
+      // orphaned the row in every hierarchy rollup).
+      const parent = (dto as { parentCode?: string } | undefined)?.parentCode;
+      if (parent) {
+        const [p] = await this.db.select({ code: accounts.code }).from(accounts).where(eq(accounts.code, parent)).limit(1);
+        if (!p) throw new BadRequestException({ code: 'PARENT_NOT_FOUND', message: `Parent account ${parent} does not exist`, messageTh: `ไม่พบบัญชีแม่ ${parent}` });
+      }
     } else {
       if (!existing) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${code} not found`, messageTh: `ไม่พบบัญชี ${code}` });
       if (action === 'deactivate') {
