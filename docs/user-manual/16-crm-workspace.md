@@ -329,6 +329,25 @@ breaching.
 
 ---
 
+## 16.12 Knowledge base & case deflection (ฐานความรู้ — `/service`, SVC-6)
+
+The **ฐานความรู้ (Knowledge base)** tab on `/service` is where the team writes help articles and sees how well
+they **deflect** cases (customers self-serving instead of opening a case).
+
+**Write & publish.** Press **เขียนบทความ (Write an article)** to save a **draft** (title, body, category, tags).
+A draft is only visible to the team. To make it live, **a different colleague** presses **เผยแพร่ (Publish)** on
+it — the author can't publish their own article (you'll get a *publisher must differ from author* error). This
+keeps every published article reviewed. You can edit a draft freely; once published it's locked (re-draft a new
+version if it needs changes). Press **เก็บถาวร (Archive)** to retire a published article.
+
+**Search.** The search box finds **published** articles only (by title, body, or tags) — this is what agents and
+customers use to self-serve, and each hit bumps the article's view count.
+
+**Deflection rate.** The **อัตราการเบี่ยงเคส (Deflection rate)** stat shows what share of KB-assisted
+interactions ended without a case being opened — a direct read on how much work the knowledge base is saving.
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -359,6 +378,7 @@ breaching.
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.9 | 2026-07-12 | **Knowledge base & case deflection (`/service`) — SVC-6, control SVC-06:** new §16.12. Write help articles as drafts; a **different colleague** publishes them (authors can't self-publish — governed review); published articles are searchable (published-only), archivable, and score helpful votes; a **deflection-rate** stat shows the share of KB-assisted interactions that avoided opening a case. |
 | 1.8 | 2026-07-12 | **Case SLAs & breach worklist (`/service`) — SVC-5, control SVC-05:** new §16.11. Each case gets an **SLA tier** (Standard/Bronze/Silver/Gold/Platinum) that sets first-response + resolution due times from the case open time; the first reply and a late resolution flag a red **เกิน SLA** badge; a **SLA-breaches** stat counts open past-due cases and clears as you respond/resolve. Added a **Set SLA tier** row action and the SLA-tier field on the open-a-case form; email-opened cases default to Standard. |
 | 1.7 | 2026-07-11 | **Support cases & Email-to-Case (`/service`) — SVC-4, control SVC-04:** new §16.10. The เคสบริการ tab opens/tracks support cases with a governed lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee, and **Email-to-Case** turns customer emails into cases automatically — an unmatched email opens a new case (nothing dropped), a reply threads back onto its case (reopening it if resolved/closed), duplicate redeliveries are ignored, and the HMAC-signed webhook rejects forged/replayed mail. Added the `CASE_NOT_ACTIVE` / `CASE_ALREADY_CLOSED` / `CASE_NOT_CLOSED` / `UNKNOWN_TENANT` error rows. |
 | 1.6 | 2026-07-11 | **Contract renewals & expiry (`/service/renewals`) — SVC-3, control SVC-02:** new §16.9. Propose a renewal with an uplift % (new value = base × (1+uplift)); within the tenant ceiling (default 5%) it auto-approves and creates the successor contract, above the ceiling — or any auto-renew that raises price — it routes to maker-checker (a different user must approve; the proposer is blocked with `SOD_SELF_APPROVAL`). Renewal queue (approve/reject) + an expiry worklist of Active contracts near their end date with no renewal in flight. Added the `SOD_SELF_APPROVAL` / `CONTRACT_ALREADY_RENEWED` / `RENEWAL_IN_FLIGHT` error rows. |
