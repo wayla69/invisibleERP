@@ -208,7 +208,9 @@ export class ProjectsEvmService {
     const db = this.db;
     const p = await this.rowOf(code);
     const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
-    const today = asOf ?? ymd();
+    // `as_of` arrives from an HTTP query param, which may be an array or malformed — only a well-formed
+    // YYYY-MM-DD string is honoured (anything else falls back to the business day).
+    const today = typeof asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : ymd();
     const idxOf = (ym: string) => Number(ym.slice(0, 4)) * 12 + (Number(ym.slice(5, 7)) - 1);
     const buckets = new Map<number, number>();
     for (const t of tasks) {
