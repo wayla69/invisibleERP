@@ -200,6 +200,88 @@ describe('ProjectsEvmService — evmSeries S-curve buckets', () => {
   });
 });
 
+describe('ProjectsEvmService — earnedSchedule (PROJ-19 Lipke ES / SPI(t) / SV(t))', () => {
+  // routes per call: earned-schedule task scan → evm() task scan → evm() non-billable sum
+  const esSvc = (tasks: any[], rowOf?: (code: string) => Promise<any>) =>
+    evmSvc([tasks, tasks, [{ v: '0' }]], rowOf ? { rowOf } : {});
+
+  it('catches the slip the classic SPI hides: 2-month plan 95% earned read at month 6', async () => {
+    // Jan 1000 + Feb 1000, both 95% → EV 1900. Classic SPI = 1900/2000 = 0.95 (reads fine); ES crosses the
+    // Feb bucket at 1 + 900/1000 = 1.9 months vs AT = 6.0 (as_of month-end June) → SPI(t) 0.3167 RED.
+    const svc = esSvc([
+      task(1, { plannedCost: '1000', pctComplete: 95, plannedEnd: '2026-01-31' }),
+      task(2, { plannedCost: '1000', pctComplete: 95, plannedEnd: '2026-02-28' }),
+    ]);
+    const r = await svc.earnedSchedule('P-1', '2026-06-30');
+    expect(r).toMatchObject({
+      start_month: '2026-01', planned_duration_months: 2,
+      earned_schedule_months: 1.9, actual_time_months: 6,
+      spi_t: 0.3167, sv_t_months: -4.1, eac_t_months: 6.32, forecast_finish_month: '2026-07',
+      spi: 0.95, schedule_rag: 'red',
+    });
+  });
+
+  it('an EV sitting on a flat PV plateau is credited as earned (reads ahead, never a false slip)', async () => {
+    // Jan 1000 done, next planned cost only in Dec → EV 1000 sits on the Jan→Dec plateau; ES lands at the
+    // start of the December bucket (11 months) so SPI(t) = 11/6 reads ahead, not behind.
+    const svc = esSvc([
+      task(1, { plannedCost: '1000', pctComplete: 100, plannedEnd: '2026-01-31' }),
+      task(2, { plannedCost: '1000', pctComplete: 0, plannedEnd: '2026-12-31' }),
+    ]);
+    const r = await svc.earnedSchedule('P-1', '2026-06-30');
+    expect(r.earned_schedule_months).toBe(11);
+    expect(r.spi_t).toBe(1.8333);
+    expect(r.schedule_rag).toBe('green');
+  });
+
+  it('a fully-earned plan pins ES at the planned duration (a late finish still reads behind)', async () => {
+    const svc = esSvc([
+      task(1, { plannedCost: '1000', pctComplete: 100, plannedEnd: '2026-01-31' }),
+      task(2, { plannedCost: '1000', pctComplete: 100, plannedEnd: '2026-02-28' }),
+    ]);
+    const r = await svc.earnedSchedule('P-1', '2026-06-30');
+    expect(r.earned_schedule_months).toBe(2); // = planned_duration_months
+    expect(r.spi_t).toBe(0.3333);             // 2 / 6 — done, but 4 months late
+  });
+
+  it('zero EV → ES 0, SPI(t) 0 and no finish forecast (guarded division)', async () => {
+    const svc = esSvc([task(1, { plannedCost: '1000', pctComplete: 0, plannedEnd: '2026-01-31' })]);
+    const r = await svc.earnedSchedule('P-1', '2026-06-30');
+    expect(r).toMatchObject({ earned_schedule_months: 0, spi_t: 0, sv_t_months: -6, eac_t_months: null, forecast_finish_month: null, schedule_rag: 'red' });
+  });
+
+  it('no costed dated plan → explicit NO_DATED_PLAN, no phantom metric', async () => {
+    const svc = esSvc([task(1, { plannedCost: '0', plannedEnd: '2026-01-31' })]);
+    const r = await svc.earnedSchedule('P-1', '2026-06-30');
+    expect(r).toMatchObject({ spi_t: null, earned_schedule_months: null, reason: 'NO_DATED_PLAN', schedule_rag: 'no_data' });
+  });
+
+  it('a plan entirely in the future → PLAN_NOT_STARTED (AT clamped to 0)', async () => {
+    const svc = esSvc([task(1, { plannedCost: '1000', pctComplete: 50, plannedEnd: '2099-12-31' })]);
+    const r = await svc.earnedSchedule('P-1', '2026-06-30');
+    expect(r).toMatchObject({ start_month: '2099-12', planned_duration_months: 1, actual_time_months: 0, spi_t: null, reason: 'PLAN_NOT_STARTED', schedule_rag: 'no_data' });
+  });
+
+  it('a task with no planned_end buckets into the project start month', async () => {
+    const svc = esSvc(
+      [task(1, { plannedCost: '800', pctComplete: 100, plannedEnd: null })],
+      async () => ({ id: 1, startDate: '2026-03-15', costToDate: '0', budgetAmount: '0' }),
+    );
+    const r = await svc.earnedSchedule('P-1', '2026-06-30');
+    expect(r.start_month).toBe('2026-03');
+    expect(r.earned_schedule_months).toBe(1); // fully earned, 1-month plan
+  });
+
+  it('a tampered/malformed as_of query param is ignored (typeof + shape guard falls back to today)', async () => {
+    const T = [task(1, { plannedCost: '1000', pctComplete: 100, plannedEnd: '2026-01-31' })];
+    const arr = await esSvc(T).earnedSchedule('P-1', ['2026-06-30'] as any);
+    expect(arr.as_of).toMatch(/^\d{4}-\d{2}-\d{2}$/); // not the array — the real business day
+    const bad = await esSvc(T).earnedSchedule('P-1', '2026-6-30' as any);
+    expect(bad.as_of).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(bad.as_of).not.toBe('2026-6-30');
+  });
+});
+
 describe('ProjectsEvmService — ragOf bands (PPM health)', () => {
   const svc = evmSvc([[]]);
   it.each([

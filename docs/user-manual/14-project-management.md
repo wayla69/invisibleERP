@@ -92,9 +92,14 @@ print-friendly **period governance pack** (`/projects/{code}/status`): the proje
 deck assembled for you. (It can also be scheduled portfolio-wide via the `project_governance_pack` report.)
 - **ภาพรวม (Overview)** — % complete, **CPI** (cost) and **SPI** (schedule) health tiles (green ≥ 1, amber
   ≥ 0.9, red below), cumulative margin/WIP; an **S-curve** of planned cost vs the current EV/AC; the
-  full earned-value breakdown (BAC/PV/EV/AC/CV/SV/EAC); and a **ใบสั่งเปลี่ยนแปลง (Change orders)** panel —
-  request a contract/budget variation; a *different* person approves it (maker-checker), which applies the
-  change and re-baselines the project.
+  full earned-value breakdown (BAC/PV/EV/AC/CV/SV/EAC) with a **กำหนดการที่ได้รับ (Earned schedule)** block
+  underneath — **ES** (the date the plan said you'd be where you are), **AT** (months actually elapsed),
+  **SV(t)**, an **SPI(t)** badge (green ≥ 1, grey ≥ 0.9, red below) and a forecast finish month. Trust SPI(t)
+  late in a project: the classic SPI drifts back to 1 as the plan runs out, while SPI(t) keeps telling the
+  truth (a red SPI(t) also raises a *schedule_slip_es* item on the Action Center); it needs tasks with
+  planned cost + due dates, otherwise the block explains what's missing. And a **ใบสั่งเปลี่ยนแปลง (Change
+  orders)** panel — request a contract/budget variation; a *different* person approves it (maker-checker),
+  which applies the change and re-baselines the project.
 - **กำหนดการ & Gantt (Schedule)** — a dependency-aware **Gantt** with the **critical path** highlighted in
   the primary colour and an inner fill for % complete, plus the WBS table. **เพิ่มงาน** adds a task (hours,
   budget, dates, %, predecessors, and **RACI** — an *Accountable* owner + *Responsible* doers); the check
@@ -289,10 +294,14 @@ Cash spent at site can be booked **against the project** so it shows up in the p
   value — see the troubleshooting list for `BILL_EXCEEDS_CONTRACT`, `OPP_NOT_WON`, `SOD_SELF_APPROVAL`,
   `BAD_ALLOC`, `BAD_DEPENDENCY`.
 - EVM (CPI/SPI) and the critical-path schedule are **detective** signals (**PROJ-06**) — they post nothing.
+- **Earned schedule** (SPI(t)/SV(t), the Overview block + `schedule_slip_es` Action-Center item) is the
+  time-based schedule check (**PROJ-19**) — read-only, it flags slips the classic SPI stops seeing late in a
+  project.
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.26 | 2026-07-12 | **PROJ-19 — earned schedule on the workspace Overview.** A **กำหนดการที่ได้รับ (Earned schedule)** block under the earned-value breakdown: **ES** / **AT** / **SV(t)** in months, an **SPI(t)** badge (green ≥ 1, grey ≥ 0.9, red below) and a forecast finish month (`GET /api/projects/{code}/earned-schedule`). SPI(t) stays honest late in a project where the classic SPI converges to 1; a red SPI(t) on a project that otherwise reads fine raises a **schedule_slip_es** (medium) item on the Action Center. Needs tasks with planned cost + due dates (`NO_DATED_PLAN` otherwise). Read-only — no new permission. |
 | 2.25 | 2026-07-10 | **CRM-2 — the CRM workspace replaces `/projects/crm` + `/pipeline` (both now redirect to `/crm`; deep links preserved).** The pipeline section points to the new manual **16-crm-workspace.md** (kanban board, deal page with the CRM-WL convert-to-project button, leads import wizard, web-to-lead, accounts/contacts web surface). Win/Loss dashboard (`/projects/pipeline`) unchanged. |
 | 2.24 | 2026-07-10 | **CRM-1 — one pipeline, duplicate-governed accounts/contacts (migration 0293).** `/projects/crm` and `/pipeline` now work the SAME deal list (unified `crm_opportunities` spine; tenant-configurable stages; won/lost terminal everywhere → `OPP_CLOSED`; per-deal stage-change audit trail). Lead conversion also creates/links a CRM account + primary contact. New API section **CRM accounts & contacts**: `/api/crm/accounts` + `/api/crm/contacts` with create-time duplicate detection (**409 `DUPLICATE_SUSPECT`** + `force` override) and a maker-checked survivor **merge** (`SOD_VIOLATION` when the duplicate's creator tries to merge away children). CPQ quotes now validate their opportunity link (`OPP_NOT_FOUND`). Troubleshooting rows added in 99. |
 | 2.23 | 2026-07-09 | **Project picked from a dropdown on the construction screens (UI-only).** **วางบิลงวดงาน** (`/projects/billing`), **ผู้รับเหมาช่วง** (`/projects/subcontracts`) and the tender form (`/projects/tenders`) no longer ask you to type `PRJ-…`: the project field is a dropdown of the project register (`GET /api/projects` — name + status shown; picking it opens the project immediately; choose **พิมพ์เลขเอกสารเอง…** to key a code). No endpoint/control change. |
