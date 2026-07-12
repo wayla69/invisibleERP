@@ -44,6 +44,9 @@ interface Lead { lead_no: string; name: string; company: string | null; email: s
 interface Account { account_no: string; name: string; tax_id: string | null; industry: string | null; email: string | null; phone: string | null; customer_no: string | null; status: string; created_at: string }
 interface Contact { id: number; account_id: number | null; name: string; email: string | null; phone: string | null; role: string; status: string }
 interface SavedView { id: number; name: string; config: Record<string, unknown>; mine?: boolean }
+// CRM-7: governed account plan + product-whitespace shapes.
+interface AccountPlan { plan_no: string; account_no: string | null; period: string | null; objective: string | null; target_revenue: number; target_categories: string[]; status: string; owner: string | null; created_at: string }
+interface Whitespace { account_no: string; name: string; categories: { code: string; name: string; targeted: boolean; plan_no: string | null }[]; targeted_count: number; whitespace_count: number }
 
 // The six seeded default stage names ↔ the legacy lowercase machine kept in sync on `opp.stage`.
 const LEGACY_BY_NAME: Record<string, string> = {
@@ -75,6 +78,7 @@ export default function CrmWorkspaceClient() {
           { key: 'leads', label: t('crmx.tab_leads'), content: <LeadsTab /> },
           { key: 'accounts', label: t('crmx.tab_accounts'), content: <AccountsTab /> },
           { key: 'contacts', label: t('crmx.tab_contacts'), content: <ContactsTab /> },
+          { key: 'plans', label: t('crmx.tab_plans'), content: <PlansTab /> },
         ]}
       />
     </div>
@@ -795,6 +799,98 @@ function ContactsTab() {
       </Dialog>
 
       <DupDialog matches={dups} onClose={() => setDups(null)} onForce={() => create.mutate(true)} />
+    </div>
+  );
+}
+
+// ── Account plans + whitespace (CRM-7): governed plan lifecycle + product-coverage view ────────────
+function PlansTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [accountNo, setAccountNo] = useState('');
+  const plansQ = useQuery<{ plans: AccountPlan[] }>({ queryKey: ['crm-plans', accountNo], queryFn: () => api(`/api/crm/account-plans${accountNo ? `?account_no=${encodeURIComponent(accountNo)}` : ''}`) });
+  const wsQ = useQuery<Whitespace>({ queryKey: ['crm-whitespace', accountNo], queryFn: () => api(`/api/crm/accounts/${encodeURIComponent(accountNo)}/whitespace`), enabled: !!accountNo });
+
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ account_no: '', objective: '', period: '', target_revenue: '', target_categories: '' });
+  const create = useMutation({
+    mutationFn: () => api<AccountPlan>('/api/crm/account-plans', {
+      method: 'POST',
+      body: JSON.stringify({
+        account_no: f.account_no, objective: f.objective || undefined, period: f.period || undefined,
+        target_revenue: f.target_revenue ? Number(f.target_revenue) : undefined,
+        target_categories: f.target_categories ? f.target_categories.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+      }),
+    }),
+    onSuccess: (r) => { notifySuccess(t('crmx.toast_plan_created', { no: r.plan_no })); setOpen(false); setF({ account_no: '', objective: '', period: '', target_revenue: '', target_categories: '' }); qc.invalidateQueries({ queryKey: ['crm-plans'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const lifecycle = useMutation({
+    mutationFn: (v: { plan_no: string; action: 'activate' | 'close' }) => api(`/api/crm/account-plans/${encodeURIComponent(v.plan_no)}/${v.action}`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess(t('crmx.toast_plan_updated')); qc.invalidateQueries({ queryKey: ['crm-plans'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
+  return (
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Building2 className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input className="w-56 pl-8" aria-label={t('crmx.f_account_no')} placeholder={t('crmx.ph_plan_account')} value={accountNo} onChange={(e) => setAccountNo(e.target.value.trim())} />
+        </div>
+        <div className="ms-auto"><Button size="sm" onClick={() => { setF({ ...f, account_no: accountNo }); setOpen(true); }}><Plus className="size-4" /> {t('crmx.btn_new_plan')}</Button></div>
+      </div>
+
+      {accountNo && wsQ.data && (
+        <Card className="p-4">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Target className="size-4 text-primary" /> {t('crmx.whitespace_title', { targeted: wsQ.data.targeted_count, total: wsQ.data.categories.length })}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {wsQ.data.categories.map((c) => <Badge key={c.code} variant={c.targeted ? 'success' : 'outline'} title={c.targeted ? (c.plan_no ?? '') : t('crmx.whitespace_uncovered')}>{c.name}</Badge>)}
+            {!wsQ.data.categories.length && <span className="text-sm text-muted-foreground">{t('crmx.whitespace_no_cats')}</span>}
+          </div>
+        </Card>
+      )}
+
+      <StateView q={plansQ}>
+        <DataTable
+          rows={plansQ.data?.plans ?? []}
+          rowKey={(r) => r.plan_no}
+          columns={[
+            { key: 'plan_no', label: t('dash.col_no'), render: (r: AccountPlan) => r.plan_no },
+            { key: 'account_no', label: t('crmx.col_account'), render: (r: AccountPlan) => r.account_no ?? '—' },
+            { key: 'period', label: t('crmx.col_period'), render: (r: AccountPlan) => r.period ?? '—' },
+            { key: 'objective', label: t('crmx.col_objective'), render: (r: AccountPlan) => r.objective ?? '—' },
+            { key: 'target_revenue', label: t('crmx.col_target_rev'), render: (r: AccountPlan) => baht(r.target_revenue) },
+            { key: 'status', label: t('fin.col_status'), render: (r: AccountPlan) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+            { key: 'actions', label: '', render: (r: AccountPlan) => (
+              <div className="flex justify-end gap-1">
+                {r.status === 'draft' && <Button size="sm" variant="outline" disabled={lifecycle.isPending} onClick={() => lifecycle.mutate({ plan_no: r.plan_no, action: 'activate' })}>{t('crmx.btn_activate')}</Button>}
+                {r.status === 'active' && <Button size="sm" variant="outline" disabled={lifecycle.isPending} onClick={() => lifecycle.mutate({ plan_no: r.plan_no, action: 'close' })}>{t('crmx.btn_close_plan')}</Button>}
+              </div>
+            ) },
+          ]}
+          emptyState={{ icon: Target, title: t('crmx.empty_plans_title'), description: t('crmx.empty_plans_desc') }}
+        />
+      </StateView>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('crmx.dlg_new_plan')}</DialogTitle></DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5"><Label>{t('crmx.f_account_no')}</Label><Input value={f.account_no} onChange={(e) => setF({ ...f, account_no: e.target.value })} placeholder="ACC-…" /></div>
+            <div className="grid gap-1.5"><Label>{t('crmx.col_objective')}</Label><Input value={f.objective} onChange={(e) => setF({ ...f, objective: e.target.value })} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5"><Label>{t('crmx.col_period')}</Label><Input value={f.period} onChange={(e) => setF({ ...f, period: e.target.value })} placeholder="FY2026" /></div>
+              <div className="grid gap-1.5"><Label>{t('crmx.col_target_rev')}</Label><Input type="number" min="0" value={f.target_revenue} onChange={(e) => setF({ ...f, target_revenue: e.target.value })} /></div>
+            </div>
+            <div className="grid gap-1.5"><Label>{t('crmx.f_target_cats')}</Label><Input value={f.target_categories} onChange={(e) => setF({ ...f, target_categories: e.target.value })} placeholder={t('crmx.ph_target_cats')} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>{t('crmx.btn_cancel')}</Button>
+            <Button disabled={!f.account_no.trim() || create.isPending} onClick={() => create.mutate()}><Plus className="size-4" /> {t('crmx.btn_create')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

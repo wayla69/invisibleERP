@@ -75,7 +75,7 @@ holdout, cost is checked against `budget`. Every step is an existing endpoint.
 
 ## 4. Roadmap — the four thin gaps (each = one doc-synced PR)
 
-- **G1 — Marketplace-to-member identity capture. ✅ DELIVERED (migration `0363`, control MKT-13, PN-19 rev 1.45, UAT-LOY-076..079).** Grab/LINE MAN/foodpanda/Robinhood orders ingest with
+- **G1 — Marketplace-to-member identity capture. ✅ DELIVERED (migration `0366`, control MKT-13, PN-19 rev 1.45, UAT-LOY-076..079).** Grab/LINE MAN/foodpanda/Robinhood orders ingest with
   no member key. Add package-insert QR / post-order LINE-link flow (reuse `receipt-submissions` +
   `line-link`) + a `channel_customer_refs` mapping so repeat marketplace buyers accrue to one profile.
   New detective control (mkt-consent-scoped); PDPA: consent captured at link time.
@@ -106,5 +106,5 @@ Extend them per the module map above.
 
 | Version | Date | Change |
 | --- | --- | --- |
-| v0.2 | 2026-07-12 | G1 DELIVERED — `channel_customer_refs` (0363), hash-only capture on both ingest paths, consent-gated QR/staff linking, auto-attach `dine_in_orders.member_id`, control MKT-13 (RCM 267). |
+| v0.2 | 2026-07-12 | G1 DELIVERED — `channel_customer_refs` (0366), hash-only capture on both ingest paths, consent-gated QR/staff linking, auto-attach `dine_in_orders.member_id`, control MKT-13 (RCM 268). |
 | v0.1 | 2026-07-12 | Initial assessment + strategy + G1–G4 roadmap (planning only, no feature code). |

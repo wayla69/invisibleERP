@@ -175,6 +175,8 @@ export class CrmAccountsService {
       await db.transaction(async (tx: any) => {
         await tx.update(crmContacts).set({ accountId: Number(survivor.id) }).where(eq(crmContacts.accountId, Number(dup.id)));
         await tx.update(crmOpportunities).set({ accountId: Number(survivor.id) }).where(eq(crmOpportunities.accountId, Number(dup.id)));
+        // CRM-7: re-parent any child accounts that pointed at the duplicate to the survivor (keep the hierarchy intact).
+        await tx.update(crmAccounts).set({ parentAccountId: Number(survivor.id) }).where(eq(crmAccounts.parentAccountId, Number(dup.id)));
         const fill: Record<string, unknown> = {};
         const pick = (k: string, s: unknown, d: unknown) => { if ((s === null || s === undefined || s === '') && d !== null && d !== undefined && d !== '') fill[k] = d; };
         pick('email', survivor.email, dup.email); pick('phone', survivor.phone, dup.phone); pick('taxId', survivor.taxId, dup.taxId);
@@ -266,6 +268,7 @@ function shapeAccount(a: any) {
     account_no: a.accountNo, name: a.name, tax_id: a.taxId ?? null, industry: a.industry ?? null, size: a.size ?? null,
     email: a.email ?? null, phone: a.phone ?? null, website: a.website ?? null,
     owner_user_id: a.ownerUserId != null ? Number(a.ownerUserId) : null, customer_no: a.customerNo ?? null,
+    parent_account_id: a.parentAccountId != null ? Number(a.parentAccountId) : null,
     status: a.status, merged_into: a.mergedInto != null ? Number(a.mergedInto) : null,
     notes: a.notes ?? null, created_by: a.createdBy, created_at: a.createdAt,
   };

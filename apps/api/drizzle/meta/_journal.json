@@ -2533,7 +2533,14 @@
       "idx": 362,
       "version": "7",
       "when": 2023820000327,
-      "tag": "0363_channel_customer_refs",
+      "tag": "0365_crm_account_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 363,
+      "version": "7",
+      "when": 2023820000328,
+      "tag": "0366_channel_customer_refs",
       "breakpoints": true
     }
   ]

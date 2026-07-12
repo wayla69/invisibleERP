@@ -1,4 +1,4 @@
--- 0363_channel_customer_refs — G1 (docs/45): marketplace-to-member identity capture (MKT-13 control).
+-- 0366_channel_customer_refs — G1 (docs/45): marketplace-to-member identity capture (MKT-13 control).
 -- Delivery-aggregator buyers (Grab / LINE MAN / foodpanda / Robinhood) are anonymous today: the webhook
 -- ingest keeps only a display name. This table maps a STABLE external customer reference to a loyalty
 -- member so repeat marketplace buyers accrue to one profile:
