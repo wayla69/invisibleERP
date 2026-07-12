@@ -22,6 +22,17 @@ export interface CaseInboundEmail {
 const PRIORITIES = ['P1', 'P2', 'P3', 'P4'] as const;
 const OPEN_STATES = ['new', 'open', 'pending'] as const; // a case that can still receive work / threading
 
+// SVC-5 — per-case SLA entitlement tiers → first-response + resolution targets (hours). Mirrors the #666
+// service-contract SLA tiers (service.service.ts SLA_TIERS); `Standard` is the default when no tier is set.
+const CASE_SLA: Record<string, { firstResponseHours: number; resolutionHours: number }> = {
+  Bronze: { firstResponseHours: 8, resolutionHours: 72 },
+  Silver: { firstResponseHours: 4, resolutionHours: 24 },
+  Gold: { firstResponseHours: 2, resolutionHours: 8 },
+  Platinum: { firstResponseHours: 1, resolutionHours: 4 },
+  Standard: { firstResponseHours: 8, resolutionHours: 48 },
+};
+const HOUR = 3600000;
+
 // SVC-4 — Service Cloud: Support Cases + Email-to-Case (SVC-04 control). Net-new customer-service surface,
 // distinct from the #666 subscription/SLA ServiceService and the SVC-2 warranty registry. A case has a governed
 // status lifecycle (new → open → pending → resolved → closed, reopen → open) and an append-only email trail; an
@@ -47,6 +58,16 @@ export class ServiceCasesService {
     return `CASE-${String(Number(r[0]!.n)).padStart(5, '0')}`;
   }
 
+  // SVC-5: resolve an entitlement tier to a first-response + resolution due time anchored on `anchor` (open time).
+  private slaTierOf(tier?: string) { return tier && CASE_SLA[tier] ? tier : 'Standard'; }
+  private slaDue(tier: string, anchor: Date) {
+    const p = CASE_SLA[tier] ?? CASE_SLA.Standard!;
+    return {
+      firstResponseDueAt: new Date(anchor.getTime() + p.firstResponseHours * HOUR),
+      resolutionDueAt: new Date(anchor.getTime() + p.resolutionHours * HOUR),
+    };
+  }
+
   // ── Authenticated Case surface ─────────────────────────────────────────────
   async listCases(user: JwtUser, status?: string) {
     const conds = [];
@@ -65,19 +86,58 @@ export class ServiceCasesService {
     return { case: fmtCase(c), messages: msgs.map(fmtMsg) };
   }
 
-  async createCase(user: JwtUser, dto: { subject: string; description?: string; priority?: string; contact_email?: string; customer_name?: string; assignee?: string }) {
+  async createCase(user: JwtUser, dto: { subject: string; description?: string; priority?: string; contact_email?: string; customer_name?: string; assignee?: string; sla_tier?: string }) {
     const tenantId = user.tenantId ?? null;
     const priority = PRIORITIES.includes((dto.priority ?? '') as (typeof PRIORITIES)[number]) ? dto.priority! : 'P3';
     const caseNo = await this.nextCaseNo(user.tenantId!);
     const token = newCaseThreadToken();
     const assignee = dto.assignee?.trim() || null;
+    // SVC-5: apply the SLA entitlement at open — compute first-response + resolution due times from the tier.
+    const tier = this.slaTierOf(dto.sla_tier);
+    const anchor = new Date();
+    const due = this.slaDue(tier, anchor);
     const [row] = await this.db.insert(serviceCases).values({
       tenantId, caseNo, subject: dto.subject.trim(), description: dto.description ?? null,
       status: assignee ? 'open' : 'new', priority, source: 'manual',
       contactEmail: dto.contact_email ? this.norm(dto.contact_email) : null,
       customerName: dto.customer_name ?? null, assignee, threadToken: token, createdBy: user.username,
+      slaTier: tier, openedAt: anchor, firstResponseDueAt: due.firstResponseDueAt, resolutionDueAt: due.resolutionDueAt,
     }).returning();
     return fmtCase(row!);
+  }
+
+  // SVC-5: (re)set a case's SLA entitlement tier — recomputes the due times off the original open time and
+  // re-evaluates the breach flags against any already-recorded first-response / resolution timestamps.
+  async setEntitlement(user: JwtUser, id: number, dto: { tier: string }) {
+    const c = await this.loadCase(user, id);
+    if (c.status === 'closed') throw new BadRequestException({ code: 'CASE_CLOSED', message: `Case ${c.caseNo} is closed`, messageTh: `เคส ${c.caseNo} ปิดแล้ว` });
+    const tier = this.slaTierOf(dto.tier);
+    const anchor = c.openedAt ? new Date(c.openedAt) : new Date();
+    const due = this.slaDue(tier, anchor);
+    const [row] = await this.db.update(serviceCases).set({
+      slaTier: tier, firstResponseDueAt: due.firstResponseDueAt, resolutionDueAt: due.resolutionDueAt,
+      responseBreached: c.firstRespondedAt ? new Date(c.firstRespondedAt) > due.firstResponseDueAt : false,
+      resolutionBreached: c.resolvedAt ? new Date(c.resolvedAt) > due.resolutionDueAt : false,
+    }).where(eq(serviceCases.id, c.id)).returning();
+    return fmtCase(row!);
+  }
+
+  // SVC-5 detective read: open cases whose first-response or resolution SLA is currently breached (past due,
+  // no response / not resolved yet) — the worklist that stops a service commitment silently lapsing.
+  async slaBreaches(user: JwtUser) {
+    const conds = [inArray(serviceCases.status, [...OPEN_STATES])];
+    if (user.tenantId != null) conds.push(eq(serviceCases.tenantId, user.tenantId));
+    const rows = await this.db.select().from(serviceCases).where(and(...conds)).orderBy(desc(serviceCases.id)).limit(500);
+    const now = Date.now();
+    const breaches = rows.map((c) => {
+      const respDue = c.firstResponseDueAt ? new Date(c.firstResponseDueAt).getTime() : null;
+      const resoDue = c.resolutionDueAt ? new Date(c.resolutionDueAt).getTime() : null;
+      const responseBreach = c.firstRespondedAt == null && respDue != null && now > respDue;
+      const resolutionBreach = resoDue != null && now > resoDue;
+      return { c, responseBreach, resolutionBreach };
+    }).filter((x) => x.responseBreach || x.resolutionBreach)
+      .map((x) => ({ ...fmtCase(x.c), breach_kind: x.responseBreach && x.resolutionBreach ? 'both' : x.responseBreach ? 'response' : 'resolution' }));
+    return { breaches, count: breaches.length };
   }
 
   async assignCase(user: JwtUser, id: number, dto: { assignee: string }) {
@@ -102,8 +162,11 @@ export class ServiceCasesService {
   async resolveCase(user: JwtUser, id: number, dto: { note?: string }) {
     const c = await this.loadCase(user, id);
     if (!(OPEN_STATES as readonly string[]).includes(c.status)) throw this.notActive(c.caseNo, c.status);
+    // SVC-5: stamp the resolution SLA breach — resolved after the resolution due time is a breach.
+    const resolvedAt = new Date();
+    const resolutionBreached = c.resolutionDueAt ? resolvedAt > new Date(c.resolutionDueAt) : false;
     const [row] = await this.db.update(serviceCases)
-      .set({ status: 'resolved', resolvedAt: new Date(), resolutionNote: dto.note ?? c.resolutionNote })
+      .set({ status: 'resolved', resolvedAt, resolutionNote: dto.note ?? c.resolutionNote, resolutionBreached })
       .where(eq(serviceCases.id, c.id)).returning();
     return fmtCase(row!);
   }
@@ -138,10 +201,20 @@ export class ServiceCasesService {
       fromAddr: user.username, toAddr: dto.to ?? c.contactEmail ?? null,
       subject, bodyPreview: body.slice(0, 2000), threadToken: token, createdBy: user.username,
     });
-    // Sending a reply moves a pending case back to 'open' (ball back in our court is false, but it is active).
-    if (c.status === 'pending') await this.db.update(serviceCases).set({ status: 'open' }).where(eq(serviceCases.id, c.id));
-    if (!c.threadToken) await this.db.update(serviceCases).set({ threadToken: token }).where(eq(serviceCases.id, c.id));
-    return { case_no: c.caseNo, replied: true };
+    // The first outbound reply is the first response — stamp it and evaluate the response SLA (SVC-5). A reply
+    // also moves a pending case back to 'open', and backfills the thread token if one was never minted.
+    const patch: Partial<typeof serviceCases.$inferInsert> = {};
+    if (c.status === 'pending') patch.status = 'open';
+    if (!c.threadToken) patch.threadToken = token;
+    let responded = false;
+    if (!c.firstRespondedAt) {
+      const now = new Date();
+      patch.firstRespondedAt = now;
+      patch.responseBreached = c.firstResponseDueAt ? now > new Date(c.firstResponseDueAt) : false;
+      responded = true;
+    }
+    if (Object.keys(patch).length) await this.db.update(serviceCases).set(patch).where(eq(serviceCases.id, c.id));
+    return { case_no: c.caseNo, replied: true, first_response: responded };
   }
 
   private notActive(caseNo: string, status: string) {
@@ -189,13 +262,16 @@ export class ServiceCasesService {
       return { received: true, created: false, case_id: Number(matched.id), case_no: matched.caseNo, matched_by: token && matched.threadToken === token ? 'thread_token' : 'contact_email' };
     }
 
-    // No match → open a NEW case from the email.
+    // No match → open a NEW case from the email, on the Standard SLA entitlement (SVC-5: every case is tracked).
     const caseNo = await this.nextCaseNo(tenantId);
     const newToken = newCaseThreadToken();
+    const anchor = new Date();
+    const due = this.slaDue('Standard', anchor);
     const [created] = await this.db.insert(serviceCases).values({
       tenantId, caseNo, subject: subject ?? `Email from ${from}`, description: bodyPreview,
       status: 'open', priority: 'P3', source: 'email', contactEmail: from, customerName: from,
       threadToken: newToken, createdBy: `email:${from}`,
+      slaTier: 'Standard', openedAt: anchor, firstResponseDueAt: due.firstResponseDueAt, resolutionDueAt: due.resolutionDueAt,
     }).returning();
     await this.logMessage(tenantId, Number(created!.id), from, subject, bodyPreview, newToken, msgId);
     return { received: true, created: true, case_id: Number(created!.id), case_no: caseNo, matched_by: 'new_case' };
@@ -246,6 +322,8 @@ function fmtCase(c: typeof serviceCases.$inferSelect) {
     contact_email: c.contactEmail, customer_name: c.customerName, assignee: c.assignee,
     thread_token: c.threadToken, opened_at: c.openedAt, resolved_at: c.resolvedAt, closed_at: c.closedAt,
     resolution_note: c.resolutionNote, created_by: c.createdBy, created_at: c.createdAt,
+    sla_tier: c.slaTier, first_response_due_at: c.firstResponseDueAt, resolution_due_at: c.resolutionDueAt,
+    first_responded_at: c.firstRespondedAt, response_breached: c.responseBreached, resolution_breached: c.resolutionBreached,
   };
 }
 

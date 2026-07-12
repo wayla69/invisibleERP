@@ -13,7 +13,7 @@
 // case is opened — so no inbound customer email is ever dropped. Append-only: never posts to the GL.
 // Each table is RLS-scoped (canonical 0232-form tenant_isolation, migration 0350) with a leading (tenant_id,…)
 // index. No GL post in v1 (a service-order / billable-time posting is future work).
-import { pgTable, bigserial, bigint, text, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, timestamp, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // status: 'new' | 'open' | 'pending' | 'resolved' | 'closed'  (governed lifecycle)
@@ -34,6 +34,14 @@ export const serviceCases = pgTable('service_cases', {
   customerName: text('customer_name'),
   assignee: text('assignee'),
   threadToken: text('thread_token'), // stable per-case email reply-threading token (svct_<hex>)
+  // SVC-5 — SLA entitlement: due times computed from the tier at open/entitlement, breach flags stamped on
+  // first response / resolution (a tier→hours policy, mirroring the #666 contract SLA tiers).
+  slaTier: text('sla_tier').notNull().default('Standard'),
+  firstResponseDueAt: timestamp('first_response_due_at', { withTimezone: true }),
+  resolutionDueAt: timestamp('resolution_due_at', { withTimezone: true }),
+  firstRespondedAt: timestamp('first_responded_at', { withTimezone: true }),
+  responseBreached: boolean('response_breached').notNull().default(false),
+  resolutionBreached: boolean('resolution_breached').notNull().default(false),
   openedAt: timestamp('opened_at', { withTimezone: true }).defaultNow(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   closedAt: timestamp('closed_at', { withTimezone: true }),

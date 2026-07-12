@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Per drawdown / monthly accrual + each covenant cadence |
-| Version note | Rev **0.1** (2026-07-12) — Track C Wave 1: Debt & Borrowings register + EIR amortized-cost engine (new controls TRE-01 + TRE-02, migration `0352`). |
+| Version note | Rev **0.1** (2026-07-12) — Track C Wave 1: Debt & Borrowings register + EIR amortized-cost engine (new controls TRE-01 + TRE-02, migration `0353`). |
 | Related RCM controls | TRE-01, TRE-02, GL-05, GL-24, TR-01 |
 | Related policy | `compliance/policies/11-financial-close-policy.md` |
 
@@ -146,4 +146,4 @@ covenant headroom, and count/ageing of outstanding covenant breaches.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| 0.1 | 2026-07-12 | Treasury / Controller | Initial narrative — TRE-01 debt & borrowings register + EIR amortized-cost engine, TRE-02 covenant-breach monitor (migration 0352). |
+| 0.1 | 2026-07-12 | Treasury / Controller | Initial narrative — TRE-01 debt & borrowings register + EIR amortized-cost engine, TRE-02 covenant-breach monitor (migration 0353). |

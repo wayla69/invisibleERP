@@ -213,6 +213,48 @@ async function main() {
   const t1Cases = await inj('GET', '/api/service/cases', svcT1);
   ok('RLS isolation → T1 user sees 0 HQ cases', t1Cases.json.count === 0, `count=${t1Cases.json.count}`);
 
+  // ── SVC-5 — CASE ENTITLEMENTS / SLA (SVC-05 control) ──
+
+  // 1. Create a case with a Gold entitlement → due times computed from open (2h response, 8h resolution)
+  const slaCase = await inj('POST', '/api/service/cases', admin, { subject: 'SLA test', sla_tier: 'Gold' });
+  const slaId = slaCase.json.id;
+  const openMs = new Date(slaCase.json.opened_at).getTime();
+  const frDueMs = new Date(slaCase.json.first_response_due_at).getTime() - openMs;
+  const resDueMs = new Date(slaCase.json.resolution_due_at).getTime() - openMs;
+  ok('Gold entitlement → first_response_due = open + 2h, resolution_due = open + 8h', slaCase.status === 201 && slaCase.json.sla_tier === 'Gold' && frDueMs === 2 * 3600000 && resDueMs === 8 * 3600000, `fr=${frDueMs} res=${resDueMs}`);
+
+  // 2. Re-set the entitlement to Bronze → recompute off the ORIGINAL open time (72h resolution)
+  const reEnt = await inj('POST', `/api/service/cases/${slaId}/entitlement`, admin, { tier: 'Bronze' });
+  const reResMs = new Date(reEnt.json.resolution_due_at).getTime() - new Date(reEnt.json.opened_at).getTime();
+  ok('Re-set entitlement Bronze → resolution_due = open + 72h (recomputed off open)', reEnt.status === 200 && reEnt.json.sla_tier === 'Bronze' && reResMs === 72 * 3600000, `res=${reResMs}`);
+
+  // 3. First reply stamps first_responded_at (within SLA → no response breach)
+  const firstReply = await inj('POST', `/api/service/cases/${slaId}/reply`, admin, { body: 'Working on it' });
+  const afterReply = await inj('GET', `/api/service/cases/${slaId}`, admin);
+  ok('First reply stamps first_responded_at (within SLA → response_breached=false)', firstReply.json.first_response === true && afterReply.json.case.first_responded_at != null && afterReply.json.case.response_breached === false, JSON.stringify({ fr: afterReply.json.case.first_responded_at, b: afterReply.json.case.response_breached }));
+
+  // 4. Force a breach: backdate an open case's due times into the past → it appears in the breach worklist
+  const breachCase = await inj('POST', '/api/service/cases', admin, { subject: 'Overdue case', sla_tier: 'Platinum' });
+  const breachId = breachCase.json.id;
+  const past = new Date(Date.now() - 3600000); // 1h ago
+  await db.update(s.serviceCases).set({ firstResponseDueAt: past, resolutionDueAt: past }).where(eq(s.serviceCases.id, breachId));
+  const breaches = await inj('GET', '/api/service/cases/sla/breaches', admin);
+  const hasBreach = (breaches.json.breaches ?? []).some((b: any) => b.id === breachId && b.breach_kind === 'both');
+  ok('Backdated open case appears in SLA breach worklist (breach_kind=both)', breaches.status === 200 && hasBreach, `count=${breaches.json.count}`);
+
+  // 5. Resolving a past-due case → resolution_breached=true
+  const resolveBreach = await inj('POST', `/api/service/cases/${breachId}/resolve`, admin, {});
+  ok('Resolve a past-due case → resolution_breached=true', resolveBreach.status === 200 && resolveBreach.json.resolution_breached === true, JSON.stringify({ rb: resolveBreach.json.resolution_breached }));
+
+  // 6. The resolved case drops out of the breach worklist
+  const breaches2 = await inj('GET', '/api/service/cases/sla/breaches', admin);
+  const stillThere = (breaches2.json.breaches ?? []).some((b: any) => b.id === breachId);
+  ok('Resolved case drops out of the SLA breach worklist', !stillThere, `count=${breaches2.json.count}`);
+
+  // 7. RLS: a second-tenant user sees 0 of HQ's SLA breaches
+  const t1Breaches = await inj('GET', '/api/service/cases/sla/breaches', svcT1);
+  ok('RLS isolation → T1 sees 0 HQ SLA breaches', t1Breaches.json.count === 0, `count=${t1Breaches.json.count}`);
+
   await app.close();
 }
 

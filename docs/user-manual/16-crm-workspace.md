@@ -309,6 +309,26 @@ ledger.
 
 ---
 
+## 16.11 Case SLAs & breach worklist (ระดับ SLA ของเคส — `/service`, SVC-5)
+
+Every support case carries a **service level (SLA)** so you can see whether you're meeting your commitments.
+
+**SLA tier.** When you open a case, pick an **SLA tier** (Standard / Bronze / Silver / Gold / Platinum). The tier
+sets two clocks from the moment the case opens: a **first-response** target and a **resolution** target (e.g. Gold
+= respond within 2 h, resolve within 8 h; Standard = 8 h / 48 h). You can change a case's tier later with
+**ตั้งระดับ SLA (Set SLA tier)** on its row — the due times recalculate from the original open time. Cases created
+from an email get the **Standard** tier automatically.
+
+**Breach flags.** The first reply you send is recorded as the **first response** — if it's late, the case shows a
+red **เกิน SLA (Breached)** badge. Likewise a case resolved after its resolution target is flagged breached.
+
+**Breach worklist.** The **เกิน SLA (SLA breaches)** stat at the top of the เคสบริการ tab counts the **open** cases
+that are currently past a first-response or resolution target (with no response / not yet resolved). Work those
+down to zero — responding to or resolving a case removes it from the count. It turns green when nothing is
+breaching.
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -339,6 +359,7 @@ ledger.
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.8 | 2026-07-12 | **Case SLAs & breach worklist (`/service`) — SVC-5, control SVC-05:** new §16.11. Each case gets an **SLA tier** (Standard/Bronze/Silver/Gold/Platinum) that sets first-response + resolution due times from the case open time; the first reply and a late resolution flag a red **เกิน SLA** badge; a **SLA-breaches** stat counts open past-due cases and clears as you respond/resolve. Added a **Set SLA tier** row action and the SLA-tier field on the open-a-case form; email-opened cases default to Standard. |
 | 1.7 | 2026-07-11 | **Support cases & Email-to-Case (`/service`) — SVC-4, control SVC-04:** new §16.10. The เคสบริการ tab opens/tracks support cases with a governed lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee, and **Email-to-Case** turns customer emails into cases automatically — an unmatched email opens a new case (nothing dropped), a reply threads back onto its case (reopening it if resolved/closed), duplicate redeliveries are ignored, and the HMAC-signed webhook rejects forged/replayed mail. Added the `CASE_NOT_ACTIVE` / `CASE_ALREADY_CLOSED` / `CASE_NOT_CLOSED` / `UNKNOWN_TENANT` error rows. |
 | 1.6 | 2026-07-11 | **Contract renewals & expiry (`/service/renewals`) — SVC-3, control SVC-02:** new §16.9. Propose a renewal with an uplift % (new value = base × (1+uplift)); within the tenant ceiling (default 5%) it auto-approves and creates the successor contract, above the ceiling — or any auto-renew that raises price — it routes to maker-checker (a different user must approve; the proposer is blocked with `SOD_SELF_APPROVAL`). Renewal queue (approve/reject) + an expiry worklist of Active contracts near their end date with no renewal in flight. Added the `SOD_SELF_APPROVAL` / `CONTRACT_ALREADY_RENEWED` / `RENEWAL_IN_FLIGHT` error rows. |
 | 1.5 | 2026-07-11 | **SVC-2 Warranty & Entitlement registry (`/service/warranty`):** new §16.8 documenting the warranty-term catalogue, the installed-base serialized-unit registry (auto-computed warranty end), and warranty claims with the **SVC-01** coverage-authorization maker-checker (in-coverage → auto-free; out-of-coverage → a *different* person authorizes/rejects, `SOD_SELF_APPROVAL` on self-approval), plus the coverage-exceptions override register. Added `SOD_SELF_APPROVAL` / `CLAIM_NOT_PENDING` / `SERIAL_EXISTS`+`TERM_EXISTS` error rows. |

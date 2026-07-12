@@ -1,4 +1,4 @@
--- 0352_treasury_debt_register — Track C Wave 1: Debt & Borrowings register (controls TRE-01 + TRE-02). A
+-- 0353_treasury_debt_register — Track C Wave 1: Debt & Borrowings register (controls TRE-01 + TRE-02). A
 -- reusable EIR/amortized-cost engine (Waves 2 & 4 depend on it): debt facilities under maker-checker
 -- (create → PendingApproval; a DIFFERENT user approves → Approved; self-approve → SOD_SELF_APPROVAL), drawdowns
 -- that book principal to the short-/long-term borrowings control (Dr 1010 Bank / Cr 2500|2550), an idempotent
