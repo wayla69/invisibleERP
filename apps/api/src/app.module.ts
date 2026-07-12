@@ -81,6 +81,7 @@ import { CpqModule } from './modules/cpq/cpq.module';
 import { ServiceModule } from './modules/service/service.module';
 import { QualityModule } from './modules/quality/quality.module';
 import { ServiceWarrantyModule } from './modules/service-warranty/service-warranty.module';
+import { ServiceCasesModule } from './modules/service-cases/service-cases.module';
 import { QualityCapaModule } from './modules/quality-capa/quality-capa.module';
 import { BiModule } from './modules/bi/bi.module';
 import { AdminConfigModule } from './modules/admin-config/admin-config.module';
@@ -223,6 +224,7 @@ import { MailModule } from './modules/mail/mail.module';
     ServiceModule,
     QualityModule,
     ServiceWarrantyModule,
+    ServiceCasesModule,
     QualityCapaModule,
     BiModule,
     AdminConfigModule,

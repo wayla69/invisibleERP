@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 253,
+    "total": 254,
     "by_status": {
-      "Implemented": 250,
+      "Implemented": 251,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 30,
+      "Revenue & Cash": 31,
       "Tax": 11
     }
   },
@@ -1555,6 +1555,25 @@
       "tod": "Inspect the computed warranty_end, the coverage check (window + kind), the auto-authorize-free vs park-pending split, the authorizer≠requester maker-checker (SOD_SELF_APPROVAL), and the expiring + coverage-exceptions detective reads.",
       "toe": "Re-perform: create a 12-month full term; register a unit sold today → warranty_end = sold + 12mo; an in-coverage claim auto-authorizes free (charge 0); a claim on an expired unit parks pending; a parts-only unit + a labor claim is out of coverage (kind mismatch); the requester self-authorizing → 403 SOD_SELF_APPROVAL; a DISTINCT authorizer approves with a charge (paid) or free (override); the free out-of-coverage override appears in coverage-exceptions (the in-coverage + paid ones do not); expiring(30d) surfaces a soon-expiring unit; a distinct user rejects with a reason; RLS isolates a second tenant (re-performed by the warranty harness).",
       "evidence": "Warranty-term catalogue + installed-base register (computed warranty_end); claim coverage snapshot; SOD_SELF_APPROVAL test; coverage-exceptions override register; expiring worklist",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SVC-04",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Service revenue; Customer-service obligations / SLA response (no direct GL in v1)",
+      "risk": "A customer request or complaint that arrives by email is DROPPED or lost — no support case is created, so a service obligation (and any warranty / revenue / liability exposure behind it) goes untracked and unresolved; OR the inbound email webhook is unauthenticated, so a forged or replayed message injects or mutates cases; OR a case is advanced through an ad-hoc, ungoverned status lifecycle so its resolution/closure state and the record of customer communication are unreliable and incomplete.",
+      "assertion": "Completeness/Accuracy/Authorization",
+      "description": "Service Cloud — Support Cases + Email-to-Case (SVC-4, migration 0350): a per-tenant service_cases register (case_no unique per tenant, a governed status lifecycle new → open → pending → resolved → closed with reopen → open, priority P1–P4, owner/assignee, optional CRM contact link) and an append-only case_email_messages trail (each inbound customer→us / outbound us→customer message, deduped per tenant on the provider Message-ID). The COMPLETENESS control is Email-to-Case: a @Public @NoTx webhook (POST /api/service/email-to-case/inbound/:tenantCode) receives the provider-parsed email and is AUTHENTICATED by the per-tenant email shared secret / HMAC over the raw body (verifyInboundWebhook — a configured HMAC secret REQUIRES a valid signature, an optional timestamp enforces a 300s freshness window against replay → WEBHOOK_STALE, a bad secret → BAD_INBOUND_SECRET, and in production an unconfigured secret is FAIL-CLOSED → INBOUND_UNVERIFIED); the tenant is resolved from the path code (UNKNOWN_TENANT). Every authenticated inbound is then matched — (1) a per-case thread token embedded in the reply (subject/body/In-Reply-To/References) threads onto the exact case; (2) else the sender address threads onto their most-recent OPEN case; (3) else a NEW case is OPENED — so no inbound customer email is ever dropped (completeness), and a reply onto a resolved/closed case REOPENS it. Redeliveries are idempotent (Message-ID dedupe). The lifecycle is GOVERNED: assign (→open), pending, resolve, close and reopen enforce valid transitions (CASE_NOT_ACTIVE / CASE_ALREADY_CLOSED / CASE_NOT_CLOSED / CASE_CLOSED), and an outbound reply embeds the case thread token so the customer's reply threads back. Tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes); the authenticated surface gates exec/marketing. No GL post in v1 (a service-order / billable-time posting is future work).",
+      "prev_det": "Prev/Det",
+      "nature": "Automated",
+      "frequency": "Per case / continuous",
+      "owner": "Service Manager / Support Lead",
+      "coso": "P13",
+      "code_reference": "modules/service-cases/service-cases.service.ts (handleInbound: resolve tenant by code → assertSecret verifyInboundWebhook (HMAC/static/stale/unconfigured) → Message-ID dedupe → matchCase thread-token/contact-open-case → thread-or-create, reopen on reply; createCase case_no + thread token; assignCase/setPending/resolveCase/closeCase/reopenCase governed transitions; addReply outbound + caseThreadMark); service-cases.controller.ts (ServiceCasesController /api/service/cases[/:id[/assign|pending|resolve|close|reopen|reply]] gated exec/marketing; CaseEmailInboundController @Public @NoTx POST /api/service/email-to-case/inbound/:tenantCode); case-thread.ts (svct_ token mint/mark/parse); schema/service-cases.ts service_cases + case_email_messages + migration 0350 (RLS, tenant-leading indexes, case_no unique per tenant, Message-ID unique per tenant); cutover/service.ts (ToE, SVC-4 checks)",
+      "tod": "Inspect the inbound-webhook authentication (HMAC-over-rawBody, timestamp freshness/replay, prod fail-closed), the tenant resolution from the path code, the three-way match (thread token → open-case-by-sender → new case) that guarantees no dropped email, the Message-ID idempotency, and the governed status transitions.",
+      "toe": "Re-perform: an inbound email with no matching case OPENS a new case (source=email, thread token minted); a reply carrying the case thread token threads onto the same case; a reply from the same sender with no token threads onto their open case; a redelivered Message-ID is ignored (idempotent); a reply onto a resolved case reopens it; an inbound with a bad secret → BAD_INBOUND_SECRET and a stale timestamp → WEBHOOK_STALE; the lifecycle transitions enforce (resolve a closed case → CASE_NOT_ACTIVE, reopen an active case → CASE_NOT_CLOSED); a second tenant cannot see the first tenant's cases (RLS) (re-performed by the service harness SVC-4 checks).",
+      "evidence": "Support-case register (governed lifecycle) + append-only inbound/outbound email trail; Email-to-Case webhook HMAC/tenant-resolution rejects; Message-ID idempotency; no-dropped-email completeness (new-case-on-unmatched)",
       "status": "Implemented"
     },
     {
