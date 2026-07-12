@@ -595,6 +595,45 @@ async function main() {
   const t1See = await inj('GET', `/api/crm/accounts/${hqhAcc.json.account_no}/health/history`, sales1);
   ok('CRM-15 RLS: a T1 user cannot read an HQ account\'s health (404)', t1See.status === 404 && t1See.json.error?.code === 'ACCOUNT_NOT_FOUND', `${t1See.status} ${t1See.json.error?.code}`);
 
+  // ── CRM-12 — sales forecasting depth (migration 0378, control CRM-09) ────────────────────────────
+  // 50. Rep→manager override: a rep submits a governed forecast (draft→submitted) for a named owner, and the
+  //     manager roll-up reconciles it against the system-weighted forecast (commit at full value) + variance.
+  const fcAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Forecast Co', tax_id: '0105561000904' });
+  await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Commit Deal', amount: 500000, probability: 80, owner: 'fc_rep', account_no: fcAcc.json.account_no });
+  const fcSub = await inj('POST', '/api/crm/forecast/submission', sales1, { owner: 'fc_rep', commit_amount: 400000, best_case_amount: 50000, status: 'submitted' });
+  ok('CRM-12 submission: a rep submits a governed forecast override (draft→submitted)', [200, 201].includes(fcSub.status) && fcSub.json.status === 'submitted' && fcSub.json.owner === 'fc_rep', JSON.stringify(fcSub.json));
+
+  const fcDepth = await inj('GET', '/api/crm/forecast/depth', sales1);
+  const fcRow = (fcDepth.json.rollup ?? []).find((r: any) => r.owner === 'fc_rep');
+  ok('CRM-12 roll-up: system-weighted vs submitted forecast with variance', fcDepth.status === 200 && !!fcRow && fcRow.system.commit >= 500000 && fcRow.submitted?.commit === 400000 && fcRow.variance !== null, JSON.stringify(fcRow && { sys: fcRow.system.forecast, sub: fcRow.submitted?.forecast, variance: fcRow.variance }));
+
+  // 51. Pipeline coverage: open pipeline ÷ commit target ratio is computed.
+  ok('CRM-12 coverage: open pipeline ÷ commit target ratio computed', !!fcDepth.json.coverage && fcDepth.json.coverage.ratio !== null && fcDepth.json.coverage.open_pipeline > 0, JSON.stringify(fcDepth.json.coverage));
+
+  // 52. Category waterfall: commit → best-case → pipeline builds up to the system forecast total.
+  const wf = fcDepth.json.waterfall ?? [];
+  const wfLast = wf[wf.length - 1];
+  ok('CRM-12 waterfall: commit→best-case→pipeline builds to the system forecast', wf.length === 3 && Math.abs((wfLast?.running ?? 0) - fcDepth.json.totals.system_forecast) < 0.02, JSON.stringify(wf.map((w: any) => `${w.stage}:${w.running}`)));
+
+  // 53. Snapshot (BI-schedulable) captures the forecast + the period's actual won (a won deal exists this period).
+  const fcSnap = await inj('POST', '/api/crm/forecast/snapshot', sales1, {});
+  ok('CRM-12 snapshot: captures a dated forecast + the period actual-won', fcSnap.status === 200 && fcSnap.json.forecast > 0 && fcSnap.json.actual_won >= 90000, JSON.stringify(fcSnap.json));
+
+  // 54. Forecast-vs-actual accuracy trend, idempotent per (period, day).
+  await inj('POST', '/api/crm/forecast/snapshot', sales1, {}); // re-run same day → upsert, not dup
+  const fcHist = await inj('GET', '/api/crm/forecast/history', sales1);
+  const fcPeriodRows = (fcHist.json.accuracy ?? []).filter((a: any) => a.period === fcSnap.json.period);
+  ok('CRM-12 forecast-vs-actual: one snapshot per period (idempotent) + accuracy %', fcHist.status === 200 && fcPeriodRows.length === 1 && fcPeriodRows[0].actual_won >= 90000 && fcPeriodRows[0].accuracy_pct !== null, JSON.stringify(fcPeriodRows[0]));
+
+  // 55. BI registry exposes the crm_forecast_snapshot report type.
+  const rtypes3 = await inj('GET', '/api/bi/report-types', admin);
+  ok('CRM-12 BI: registry exposes crm_forecast_snapshot report type', (rtypes3.json.report_types ?? []).some((r: any) => r.key === 'crm_forecast_snapshot'), 'crm_forecast_snapshot');
+
+  // 56. RLS: a T1 user cannot see an HQ tenant's forecast submissions.
+  await inj('POST', '/api/crm/forecast/submission', admin, { owner: 'hq_rep', commit_amount: 999999, status: 'submitted' });
+  const t1subs = await inj('GET', '/api/crm/forecast/submissions', sales1);
+  ok('CRM-12 RLS: a T1 user cannot see HQ forecast submissions', t1subs.status === 200 && !(t1subs.json.submissions ?? []).some((x: any) => x.owner === 'hq_rep'), `owners=${(t1subs.json.submissions ?? []).map((x: any) => x.owner).join(',')}`);
+
   await app.close();
 }
 

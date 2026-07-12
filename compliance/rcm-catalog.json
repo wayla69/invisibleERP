@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 270,
+    "total": 271,
     "by_status": {
-      "Implemented": 267,
+      "Implemented": 268,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 39,
+      "Revenue & Cash": 40,
       "Tax": 12
     }
   },
@@ -1612,6 +1612,25 @@
       "tod": "Inspect the explainable per-account health formula (engagement / pipeline / support-case / win-loss factors + banding), the churn watchlist ranking, the renewal/expansion pipeline + renewal-gap detection, and the idempotent snapshot + trend.",
       "toe": "Re-perform: an engaged account (recent activity + open deal) scores in the healthy band with an explainable breakdown; an account with open escalated + SLA-breached cases and no open pipeline scores in the at_risk band; tagging a deal renewal surfaces it in the renewal pipeline (weighted); a won account with no open renewal is flagged a renewal gap; the portfolio watchlist ranks at_risk first and filters by band; a snapshot captures a dated score per account (re-run same day is idempotent) and appears in the account's health history; the crm_account_health report type is registered; a second tenant cannot read the first tenant's account health (RLS) (re-performed by the pipeline harness CRM-15 checks).",
       "evidence": "Per-account health score register (band + explainable breakdown) + churn watchlist; renewal/expansion forward pipeline + renewal-gap queue; daily health snapshot + trend",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-09",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (sales forecast governance)",
+      "risk": "The sales forecast reported to management is UNGOVERNED — it rests on a single system-weighted number with no rep->manager accountability (a rep's own commit is never captured or reconciled, so over-optimism or sandbagging is invisible), it is never SNAPSHOTTED so forecast-vs-actual accuracy cannot be measured after the fact, and pipeline COVERAGE (open pipeline vs the commit target) is not tracked — so a thin, unbacked forecast or a quota with too little pipeline behind it goes unnoticed until the period closes short.",
+      "assertion": "Accuracy/Completeness/Timeliness",
+      "description": "Sales FORECASTING depth (CRM-12, migration 0378) — a governance layer over the REV-17 pipeline forecast. Rep->manager OVERRIDE roll-up: crm_forecast_submissions records per (period, owner) a rep's own commit / best-case / pipeline number under a governed draft->submitted status (POST /api/crm/forecast/submission, upsert per period/owner); GET /api/crm/forecast/depth is the MANAGER ROLL-UP — each rep's submitted forecast reconciled against the system-weighted forecast (commit at full value + best-case/pipeline risk-weighted) with the VARIANCE surfaced, plus totals, a category WATERFALL (commit -> best-case -> pipeline build-up of the forecast) and pipeline COVERAGE (open pipeline / the submitted-commit target, >=3x healthy). Dated SNAPSHOTS: a schedulable period snapshot (POST /api/crm/forecast/snapshot / BI report crm_forecast_snapshot) persists the forecast + the period's ACTUAL won to crm_forecast_snapshots (idempotent per period/day, mirrors crm_account_health_snapshots), so GET /api/crm/forecast/history is the forecast-vs-actual ACCURACY trend (actual / forecast per period). Both tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes); the surface gates crm/exec/ar (submission + snapshot crm/exec). No GL post.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per period / continuous",
+      "owner": "Sales Manager / Sales Operations / VP Sales",
+      "coso": "P13",
+      "code_reference": "modules/crm/forecast/crm-forecast.module.ts (systemByOwner weighted forecast by rep; depth manager roll-up — system vs submitted forecast + variance + totals; forecastOf commit-full + best-case/pipeline weighted; waterfall category build-up; coverage open-pipeline / submitted-or-system commit target; submit rep override upsert draft->submitted; listSubmissions; captureSnapshot idempotent per period/day + actual-won-in-period; accuracy/history forecast-vs-actual trend); schema/crm-pipeline.ts crm_forecast_submissions + crm_forecast_snapshots + migration 0378 (RLS, tenant-leading indexes); bi report-registry crm_forecast_snapshot + bi-generate crm_forecast_snapshot branch (captureSnapshot action job); cutover/pipeline.ts (ToE, CRM-12 checks)",
+      "tod": "Inspect the rep->manager submission roll-up + system-vs-submitted variance, the pipeline-coverage ratio, the category waterfall, and the idempotent period snapshot + forecast-vs-actual accuracy trend.",
+      "toe": "Re-perform: a rep submits a period commit/best-case (draft->submitted) and it appears in the manager roll-up reconciled against the system-weighted forecast with the variance; the coverage ratio = open pipeline / the submitted-commit target; the waterfall's commit->best-case->pipeline stages build up to the forecast total; capturing a snapshot persists the forecast + the period's actual won (re-run same day is idempotent) and the history shows the forecast-vs-actual accuracy %; the crm_forecast_snapshot report type is registered; a second tenant cannot read the first tenant's submissions/snapshots (RLS) (re-performed by the pipeline harness CRM-12 checks).",
+      "evidence": "Rep->manager forecast-override roll-up + system-vs-submitted variance; pipeline-coverage + category waterfall; dated forecast snapshot + forecast-vs-actual accuracy trend",
       "status": "Implemented"
     },
     {
