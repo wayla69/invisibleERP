@@ -41,6 +41,9 @@ import { TaxJobsService } from '../tax/tax-jobs.service';
 import { HcmLeaveService } from '../hcm/hcm-leave.service';
 import { FluxService } from '../flux/flux.service';
 import { RevDisclosureService } from '../revrec-disclosure/rev-disclosure.service';
+import { MarketingAutomationService } from '../marketing/marketing-automation.service';
+import { VouchersService } from '../campaigns/vouchers.service';
+import { FoodCostService } from '../menu/food-cost.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -95,6 +98,10 @@ export class BiGenerateService {
     // REV-27 (Track D Wave 4) — supplies the contract_liability_rollforward + rpo_backlog disclosure reports.
     // Appended at the END to preserve the positional constructor contract the goldenmaster harness relies on.
     @Optional() private readonly revDisclosure?: RevDisclosureService,
+    // G4 (docs/45) — supply the marketing_roi report. Appended at the END (positional contract, as above).
+    @Optional() private readonly marketingAuto?: MarketingAutomationService,
+    @Optional() private readonly vouchers?: VouchersService,
+    @Optional() private readonly foodCost?: FoodCostService,
   ) {}
 
   async generateReport(reportType: string, filters: any, user: JwtUser, reads: BiReadPort): Promise<{ data: any; summary: string; summaryTh: string }> {
@@ -546,6 +553,7 @@ export class BiGenerateService {
       const r = await this.budget.budgetVsActual({ fiscal_year: fy, period: f.period, cost_center: f.cost_center });
       return { data: r, summary: `Budget ${fy}: net variance ${r.rollup.net.variance} (${r.rollup.net.favorable ? 'favorable' : 'unfavorable'}); ${r.review.requires_review_count} item(s) need review`, summaryTh: `งบประมาณ ${fy}: ผลต่างสุทธิ ${r.rollup.net.variance} · ต้องทบทวน ${r.review.requires_review_count} รายการ` };
     }
+    if (reportType === 'marketing_roi') return this.marketingRoi(user, f);
     if (reportType === 'flux_analysis') {
       if (!this.flux) throw new BadRequestException({ code: 'FLUX_UNAVAILABLE', message: 'Flux analysis service not available', messageTh: 'ระบบวิเคราะห์ผลต่างไม่พร้อมใช้งาน' });
       // Default the period to the prior month (last full close period) if the schedule didn't pin one.
@@ -651,6 +659,65 @@ export class BiGenerateService {
       return { data, summary: `Key rotation sweep (active kid ${activeKid}): re-encrypted ${rotated} of ${scanned} scanned ciphertext(s)`, summaryTh: `หมุนกุญแจเข้ารหัส (kid ${activeKid}): เข้ารหัสใหม่ ${rotated} จาก ${scanned} รายการ` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
+  }
+
+  // G4 (docs/45) — one exec view of marketing spend → lift → margin. HONEST FRAMING (the semantic trap the
+  // plan calls out): campaign attribution's redeemedValue is the DISCOUNT GIVEN (marketing cost), never
+  // revenue — real revenue comes from the redeemed sales' own totals, margin from their line items joined
+  // to the recipe-based food-cost layer (the same source menu-engineering uses), and the organic holdout
+  // lift is the incremental-revenue truth. Optional legs degrade to null like execScorecard.
+  private async marketingRoi(user: JwtUser, f: any) {
+    if (!this.marketingAuto) throw new BadRequestException({ code: 'MARKETING_UNAVAILABLE', message: 'Marketing automation service not available', messageTh: 'ระบบการตลาดอัตโนมัติไม่พร้อมใช้งาน' });
+    const mkt = await this.marketingAuto.roiAttribution(user, { days: f.days });
+
+    // margin on the attributed sales via the food-cost layer (only costed items count; coverage is reported)
+    let margin: { attributed_margin: number; costed_coverage_pct: number } | null = null;
+    if (this.foodCost && mkt.attributed.items.length) {
+      const m = await this.foodCost.menuMargins(user).catch(() => null);
+      if (m) {
+        const costBySku = new Map<string, any>((m.items ?? []).map((i: any) => [String(i.sku), i]));
+        let attributedMargin = 0, costedAmount = 0, totalAmount = 0;
+        for (const it of mkt.attributed.items) {
+          totalAmount = round2(totalAmount + it.amount);
+          const cm = costBySku.get(String(it.item_id));
+          if (cm && cm.costed) { attributedMargin = round2(attributedMargin + (it.amount - n(cm.cost) * it.qty)); costedAmount = round2(costedAmount + it.amount); }
+        }
+        margin = { attributed_margin: attributedMargin, costed_coverage_pct: totalAmount > 0 ? round2((costedAmount / totalAmount) * 100) : 0 };
+      }
+    }
+
+    const vouchers = this.vouchers
+      ? await this.vouchers.listCampaigns(user, {}).then((v: any) => {
+          const cs = v.campaigns ?? [];
+          const redeemed = cs.reduce((a: number, c: any) => a + n(c.redeemed_count), 0);
+          // only amount-kind codes have a knowable discount without the sale; percent-kind is counted, not costed
+          const est = cs.filter((c: any) => c.kind === 'amount').reduce((a: number, c: any) => a + n(c.value) * n(c.redeemed_count), 0);
+          return { campaigns: cs.length, codes_redeemed: redeemed, est_discount_given_amount_kind: round2(est) };
+        }).catch(() => null)
+      : null;
+    const b2b = this.crm ? await this.crm.sourceRoi(user, { months: f.months }).catch(() => null) : null;
+    const budget = this.budget && f.fiscal_year
+      ? await this.budget.budgetVsActual({ fiscal_year: Number(f.fiscal_year), period: f.period, cost_center: f.cost_center }).catch(() => null)
+      : null;
+
+    const spend = round2(mkt.discount_cost + (vouchers?.est_discount_given_amount_kind ?? 0));
+    const netMargin = margin ? round2(margin.attributed_margin - mkt.discount_cost) : null;
+    const totals = {
+      spend, attributed_sales: mkt.attributed.sales_count, attributed_revenue: mkt.attributed.revenue,
+      attributed_margin: margin?.attributed_margin ?? null, net_margin_after_discount: netMargin,
+      roi_on_spend: netMargin != null && spend > 0 ? round2(netMargin / spend) : null,
+      organic_incremental_revenue: mkt.lift?.incremental_revenue ?? null,
+      b2b_won: b2b?.total_won ?? null,
+    };
+    const data = { window_days: mkt.window_days, totals, campaigns: mkt.campaigns, top_campaigns: mkt.top_campaigns, attributed: mkt.attributed, margin, lift: mkt.lift, vouchers, b2b, budget, note: 'spend = ส่วนลดที่ให้จริง (redeemedValue) — ไม่ใช่รายได้; รายได้/กำไรมาจากบิลที่แลกจริง; lift มาจาก holdout baseline' };
+    const mg = margin ? `, margin ${margin.attributed_margin} (net ${netMargin})` : '';
+    const lf = mkt.lift ? `; organic lift +${mkt.lift.incremental_revenue} (${mkt.lift.campaigns_measured} campaign(s))` : '';
+    const bb = b2b ? `; B2B won ${b2b.total_won}` : '';
+    return {
+      data,
+      summary: `Marketing ROI (${mkt.window_days}d): spend ${spend} → ${mkt.attributed.sales_count} attributed sale(s), revenue ${mkt.attributed.revenue}${mg}${lf}${bb}`,
+      summaryTh: `ผลตอบแทนการตลาด (${mkt.window_days} วัน): ใช้ส่วนลด ${spend} → บิลที่แลก ${mkt.attributed.sales_count} ใบ รายได้ ${mkt.attributed.revenue}${margin ? ` กำไรขั้นต้น ${margin.attributed_margin} (สุทธิ ${netMargin})` : ''}${mkt.lift ? ` · lift ${mkt.lift.incremental_revenue}` : ''}${b2b ? ` · B2B ชนะ ${b2b.total_won}` : ''}`,
+    };
   }
 
   private async execScorecard(user: JwtUser, reads: BiReadPort) {
