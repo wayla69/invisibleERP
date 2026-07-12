@@ -157,6 +157,12 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     cit_expense: r(DR, '5960', 'free', 'Corporate income-tax expense (current)'), cit_payable: r(CR, '2110', 'free', 'CIT payable — Revenue Department') } },
   'RCVAT.SELF':       { name: 'Reverse-charge self VAT',       description: 'ภ.พ.36 self-assessed VAT on imported services', wired: true, roles: {
     input_vat: r(DR, '1300', 'widen', 'Input VAT (PP30/36 set)'), pp36_payable: r(CR, '2120', 'widen', 'PP36 VAT payable (separate return set)') } },
+  'DEBT.DRAWDOWN':    { name: 'Borrowing drawdown',            description: 'Facility drawdown — cash in, borrowings up (TRE-01; short-/long-term control pinned)', wired: true, roles: {
+    bank: r(DR, '1010', 'pinned', 'Bank (CASH set)'), borrowings: r(CR, '2500', 'pinned', 'Borrowings control (TRE-01 register tie; long-term drawdowns post 2550)') } },
+  'DEBT.INTEREST':    { name: 'Borrowing EIR interest accrual', description: 'Effective-interest accrual on the amortized cost (TRE-01)', wired: true, roles: {
+    interest_exp: r(DR, '5900', 'free', 'Interest expense'), accrued_interest: r(CR, '2450', 'pinned', 'Accrued interest payable (TRE-01 schedule tie)') } },
+  'DEBT.REPAY':       { name: 'Borrowing repayment',           description: 'Repay principal + accrued interest against cash (TRE-01)', wired: true, roles: {
+    borrowings: r(DR, '2500', 'pinned', 'Borrowings control (TRE-01; long-term posts 2550)'), accrued_interest: r(DR, '2450', 'pinned', 'Accrued interest payable (TRE-01)'), bank: r(CR, '1010', 'pinned', 'Bank (CASH set)') } },
   'FX.UNREALIZED':    { name: 'FX revaluation (unrealized)',   description: 'Month-end open-item revaluation (control deltas pinned)', wired: true, roles: {
     fx_gain_loss: r(DR, '5400', 'free', 'Unrealized FX gain/loss') } },
   'FX.REALIZED':      { name: 'FX settlement (realized)',      description: 'Realized FX difference at settlement', wired: true, roles: {
