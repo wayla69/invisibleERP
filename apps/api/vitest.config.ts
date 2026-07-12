@@ -66,6 +66,13 @@ export default defineConfig({
         // it is HARNESS-tested (taxdocs), not unit-tested — same convention as documents/ + reports/. Add it
         // to the coverage set WITH unit tests, not before.
         '**/tax-jobs.service.ts',
+        // tax-utp.service.ts / tax-utp.controller.ts (TAX-12 DTA valuation allowance + UTP register) also sit
+        // at src/modules/tax/*.ts so the include glob catches them, but they are HARNESS-tested (the tax-utp
+        // cutover harness re-performs the maker-checker/RLS ToE), not unit-tested — same convention as
+        // tax-jobs + documents/ + reports/, and as TAX-11's tax-provision service (which lives in its own
+        // modules/tax-provision/ dir and so falls outside the glob). Add them WITH unit tests, not before.
+        '**/tax-utp.service.ts',
+        '**/tax-utp.controller.ts',
       ],
       // Three-tier ratchet (each floor locked just below its measured value; NEVER loosen — a floor may
       // only move down when its measured value itself fell below the old floor because the executed

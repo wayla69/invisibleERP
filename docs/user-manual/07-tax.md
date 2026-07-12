@@ -347,6 +347,31 @@ posts `POST /api/ledger/deferred-tax/{id}/post` (maker-checker) → **Dr 1700 / 
 for a deferred tax benefit. Full steps: [General Ledger](./06-general-ledger.md) ▸
 *Deferred tax*. Errors: `SELF_POST`, `ALREADY_POSTED`.
 
+## DTA valuation allowance & Uncertain Tax Positions (ASC 740) — control TAX-12
+
+Two ASC 740 year-end/quarterly disclosures that sit on top of deferred tax. Open **Tax ▸
+ค่าเผื่อภาษี & สถานะภาษีไม่แน่นอน** (`/tax/utp`, needs `gl_close`, `gl_post` or `exec`). Two tabs:
+
+**Valuation allowance (ค่าเผื่อการด้อยค่า DTA).** Assess how much of the gross deferred tax
+asset is *more likely than not* (MLTN) to be realised against future taxable income. On the
+first tab enter the **period**, the **MLTN-recoverable amount**, and optionally an explicit
+**gross DTA** (leave it blank to pull the latest figure from the deferred-tax run) and a
+rationale, then press **คำนวณค่าเผื่อ**. The system stages an **Open** row with
+**allowance = max(0, gross DTA − MLTN-recoverable)**. A **different** user then presses
+**โพสต์** on the row (maker-checker) — the *change* vs the prior posted allowance posts to the
+GL: an increase is a charge **Dr 5950 / Cr 1700**, a release reverses it, so the net DTA on the
+balance sheet is only the recoverable portion. Errors: `SELF_POST` (poster ≠ runner),
+`ALREADY_POSTED`, `INVALID_MLTN` / `INVALID_DTA` (negatives).
+
+**Uncertain Tax Positions — FIN 48 (สถานะภาษีที่ไม่แน่นอน).** A register of tax positions whose
+treatment might not be sustained on examination (e.g. transfer-pricing adjustments). On the
+second tab enter the **tax year**, a **description**, the **gross exposure**, the **recognized
+benefit** (the MLTN-sustainable amount) and any **interest/penalty**, then **บันทึกสถานะ**. The
+**reserve** (unrecognized benefit) = gross exposure − recognized benefit is a **disclosure only**
+(no GL posting). When a position is resolved a **different** user presses **ยุติ** (Settled) or
+**พ้นอายุ** (Lapsed) — maker-checker. The register totals show gross exposure, recognized benefit
+and the **open** reserve (settled/lapsed positions drop out). Errors: `BENEFIT_EXCEEDS_EXPOSURE`
+(recognized > gross), `SELF_SETTLE` (settler ≠ creator), `NOT_OPEN`.
 ## Income-tax provision + ETR reconciliation — control TAX-11
 
 Where deferred tax (above) is the *deferred* side, the **Income-Tax Provision** screen computes

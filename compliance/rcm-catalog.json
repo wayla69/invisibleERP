@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 255,
+    "total": 256,
     "by_status": {
-      "Implemented": 252,
+      "Implemented": 253,
       "Partial": 3
     },
     "by_family": {
@@ -33,7 +33,7 @@
       "Real Estate": 4,
       "Reconciliation": 5,
       "Revenue & Cash": 32,
-      "Tax": 11
+      "Tax": 12
     }
   },
   "controls": [
@@ -1583,13 +1583,13 @@
       "fsli": "Service revenue; Customer-service SLA commitments / service obligations (no direct GL in v1)",
       "risk": "A contracted service-level commitment on a support case silently lapses — a case has no computed first-response or resolution target, so the desk cannot tell whether a customer entitlement is being met, a breach goes unnoticed and unremediated (service liability / churn / SLA-credit exposure), and no worklist surfaces the cases that are past due, so the completeness of the SLA obligation over the case population is unmonitored.",
       "assertion": "Completeness/Accuracy",
-      "description": "Service Cloud — per-case Entitlement / SLA tracking (SVC-5, migration 0351): the SVC-4 service_cases object is extended with an SLA ENTITLEMENT — a tier (Standard/Bronze/Silver/Gold/Platinum, mirroring the #666 contract SLA tiers) whose first-response + resolution targets (hours) are COMPUTED into first_response_due_at / resolution_due_at, anchored on the case open time, at creation and whenever the entitlement is (re)set (POST /api/service/cases/:id/entitlement — recomputes the due times off the original open time and re-evaluates the breach flags). The first outbound reply (addReply) is the FIRST RESPONSE: it stamps first_responded_at and sets response_breached = responded after first_response_due_at; resolveCase stamps resolution_breached = resolved after resolution_due_at. The DETECTIVE control is GET /api/service/cases/sla/breaches — the worklist of OPEN cases (new/open/pending) whose first-response (no response yet, past due) or resolution (past due, not resolved) SLA is currently breached, each tagged breach_kind response/resolution/both — exactly the population a service manager must action so no commitment lapses unseen. Additive columns on the already-RLS-scoped service_cases (no new table); tenant-scoped; the authenticated surface gates exec/marketing. No GL post in v1 (an SLA-credit / service-order posting is future work).",
+      "description": "Service Cloud — per-case Entitlement / SLA tracking (SVC-5, migration 0352): the SVC-4 service_cases object is extended with an SLA ENTITLEMENT — a tier (Standard/Bronze/Silver/Gold/Platinum, mirroring the #666 contract SLA tiers) whose first-response + resolution targets (hours) are COMPUTED into first_response_due_at / resolution_due_at, anchored on the case open time, at creation and whenever the entitlement is (re)set (POST /api/service/cases/:id/entitlement — recomputes the due times off the original open time and re-evaluates the breach flags). The first outbound reply (addReply) is the FIRST RESPONSE: it stamps first_responded_at and sets response_breached = responded after first_response_due_at; resolveCase stamps resolution_breached = resolved after resolution_due_at. The DETECTIVE control is GET /api/service/cases/sla/breaches — the worklist of OPEN cases (new/open/pending) whose first-response (no response yet, past due) or resolution (past due, not resolved) SLA is currently breached, each tagged breach_kind response/resolution/both — exactly the population a service manager must action so no commitment lapses unseen. Additive columns on the already-RLS-scoped service_cases (no new table); tenant-scoped; the authenticated surface gates exec/marketing. No GL post in v1 (an SLA-credit / service-order posting is future work).",
       "prev_det": "Prev/Det",
       "nature": "Automated",
       "frequency": "Per case / continuous",
       "owner": "Service Manager / Support Lead",
       "coso": "P13",
-      "code_reference": "modules/service-cases/service-cases.service.ts (CASE_SLA tier→hours map; slaDue(tier, anchor) computes first_response_due_at/resolution_due_at; createCase applies the entitlement at open; setEntitlement recomputes off opened_at + re-evaluates breaches; addReply stamps first_responded_at + response_breached; resolveCase stamps resolution_breached; slaBreaches detective worklist over open past-due cases, breach_kind response/resolution/both); service-cases.controller.ts (POST /api/service/cases/:id/entitlement, GET /api/service/cases/sla/breaches, sla_tier accepted on create — gated exec/marketing); schema/service-cases.ts service_cases SLA columns + migration 0351 (additive on the RLS-scoped table); cutover/service.ts (ToE, SVC-5 checks)",
+      "code_reference": "modules/service-cases/service-cases.service.ts (CASE_SLA tier→hours map; slaDue(tier, anchor) computes first_response_due_at/resolution_due_at; createCase applies the entitlement at open; setEntitlement recomputes off opened_at + re-evaluates breaches; addReply stamps first_responded_at + response_breached; resolveCase stamps resolution_breached; slaBreaches detective worklist over open past-due cases, breach_kind response/resolution/both); service-cases.controller.ts (POST /api/service/cases/:id/entitlement, GET /api/service/cases/sla/breaches, sla_tier accepted on create — gated exec/marketing); schema/service-cases.ts service_cases SLA columns + migration 0352 (additive on the RLS-scoped table); cutover/service.ts (ToE, SVC-5 checks)",
       "tod": "Inspect the tier→hours due-time computation (anchored on open time), the first-response stamp + breach on the first outbound reply, the resolution breach on resolve, the entitlement recompute + breach re-evaluation, and the breaches detective worklist (open past-due population).",
       "toe": "Re-perform: create a case with a Gold entitlement → resolution_due_at = opened + 8h, first_response_due_at = opened + 2h; re-set the entitlement to Bronze → due times recompute off the original open time (resolution = opened + 72h); a first reply stamps first_responded_at + response_breached vs the due; resolve after the resolution due → resolution_breached=true; a case opened with a due time in the past appears in GET /cases/sla/breaches with breach_kind; a responded/resolved case drops out of the worklist; a second tenant cannot see the first tenant's breaches (RLS) (re-performed by the service harness SVC-5 checks).",
       "evidence": "Per-case SLA entitlement (tier + computed first-response/resolution due times); first-response & resolution breach flags; SLA-breach worklist (breach_kind)",
@@ -4253,6 +4253,25 @@
       "tod": "Inspect the temp-difference gathering (allowance×rate DTA + accelerated-dep DTL with the documented tax-dep simplification), the delta-vs-prior-run, the SELF_POST maker-checker, and the 1700/5950 posting through the period-lock gate.",
       "toe": "TC-TAX-06-01: run with a posted AR allowance of 1100 at 20% → DTA 220, net deferred asset 220, delta 220 (Open); TC-TAX-06-02: runner self-post → SELF_POST (403), a different user posts → Dr 1700 / Cr 5950 (220), re-post → ALREADY_POSTED (400) (re-performed by the basics.ts harness).",
       "evidence": "deferred_tax_runs register (Open→Posted, temp-difference schedule, runner/poster); the DEFTAX JE to 1700/5950; quarterly/year-end deferred-tax sign-off",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "TAX-12",
+      "cycle": "Tax",
+      "category": "Application",
+      "fsli": "Deferred Tax Asset (1700); Deferred Tax Expense (5950)",
+      "risk": "Two mandatory ASC 740 income-tax disclosures are omitted or prepared by one person with no review: (a) the gross deferred tax asset is carried at full value with no more-likely-than-not (MLTN) recoverability assessment, so a DTA that will not be realised against future taxable income is overstated (no valuation allowance); (b) uncertain tax positions (transfer pricing, deductions at risk) are not registered with a recognised benefit / unrecognised reserve, so the tax provision and the FIN 48 disclosure are understated — and a single user could book/release a valuation allowance or close a position to flatter earnings.",
+      "assertion": "Valuation/Accuracy/Completeness/Authorization/Segregation of Duties",
+      "description": "ASC 740 disclosures on top of the deferred-tax engine (TAX-06), maker-checker: (1) DTA valuation allowance — POST /api/tax/valuation-allowance/run resolves the GROSS DTA (explicit, else the latest deferred_tax_runs.dta for the tenant) and an MLTN-recoverable amount (management judgment) and computes allowance = max(0, dta_gross − mltn_recoverable) + the DELTA vs the prior posted allowance, staging an 'Open' dta_valuation_allowances row (one per tenant/period; a Posted period → ALREADY_POSTED). POST …/valuation-allowance/:id/post is segregated (poster ≠ runner → SELF_POST) and posts the DELTA via LedgerService.postEntry (allowance increase = a charge → Dr 5950 / Cr 1700; a release → Dr 1700 / Cr 5950), so PERIOD_LOCKED + the GL audit trail apply and the net DTA on the balance sheet is the recoverable portion. (2) Uncertain Tax Positions (FIN 48) — POST /api/tax/utp registers a position (tax year, gross exposure, recognized MLTN-sustainable benefit, reserve = gross − recognized, interest/penalty accrual; BENEFIT_EXCEEDS_EXPOSURE guard) as a MEMO register (no GL leg — the reserve is a disclosure). POST /api/tax/utp/:id/settle is segregated (settler ≠ creator → SELF_SETTLE; only an Open position → NOT_OPEN) and closes it Settled | Lapsed. Both surfaces are tenant-isolated (RLS).",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Quarterly / year-end",
+      "owner": "Tax / Financial Controller",
+      "coso": "P10",
+      "code_reference": "tax/tax-utp.service.ts (runValuationAllowance gross-DTA-from-TAX-06 + allowance=max(0,gross−MLTN) + delta-vs-prior + stage Open, idempotent ALREADY_POSTED; postValuationAllowance SELF_POST maker-checker + 5950/1700 delta posting; createUtp reserve=gross−recognized + BENEFIT_EXCEEDS_EXPOSURE; settleUtp SELF_SETTLE/NOT_OPEN maker-checker; list*); tax/tax-utp.controller.ts (valuation-allowance run + :id/post gl_close/gl_post, utp create + :id/settle gl_close/gl_post, reads gl_close/gl_post/exec); tax/tax-utp.module.ts (wired into TaxModule, imports LedgerModule); schema/tax-utp.ts (dta_valuation_allowances uq tenant/period, uncertain_tax_positions uq tenant/position_no) + migration 0351 (tables + leading tenant index + 0232-form RLS); reuses deferred_tax_runs (TAX-06) + COA 1700/5950 + DocNumberService (UTP-…); cutover/tax-utp.ts (TAX-12 ToE)",
+      "tod": "Inspect the allowance computation (gross DTA sourced from TAX-06, max(0, gross − MLTN)), the delta-vs-prior-run, the SELF_POST maker-checker and the 5950/1700 posting; and the UTP register's reserve = gross − recognized, the BENEFIT_EXCEEDS_EXPOSURE guard, and the SELF_SETTLE create→settle segregation.",
+      "toe": "TC-TAX-12-01: run a valuation allowance with gross DTA 1000 vs MLTN 600 → allowance 400, delta 400 (Open); TC-TAX-12-02: runner self-post → SELF_POST (403), a different user posts → Dr 5950 / Cr 1700 (400) + trial balance balanced, re-post → ALREADY_POSTED (400); TC-TAX-12-03: run without an explicit gross DTA sources it (500) from deferred_tax_runs; TC-TAX-12-04: register a UTP (gross 100000, recognized 60000 → reserve 40000, Open), recognized > gross → BENEFIT_EXCEEDS_EXPOSURE (400); TC-TAX-12-05: creator self-settle → SELF_SETTLE (403), a different user settles → Settled, re-settle → NOT_OPEN (400); TC-TAX-12-06: a second tenant's positions are not visible cross-tenant (RLS) (re-performed by the tax-utp harness).",
+      "evidence": "dta_valuation_allowances register (Open→Posted, gross/MLTN/allowance, runner/poster); the DTAVA JE to 5950/1700; uncertain_tax_positions register (Open→Settled/Lapsed, exposure/recognized/reserve, creator/settler); quarterly/year-end deferred-tax & UTP sign-off",
       "status": "Implemented"
     },
     {

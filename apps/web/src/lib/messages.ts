@@ -264,6 +264,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.tax_reports': { th: 'รายงานภาษี', en: 'Tax Reports' },
   'nav.tax_provision': { th: 'ประมาณการภาษีเงินได้', en: 'Income-Tax Provision' },
   'nav.wht': { th: 'หัก ณ ที่จ่าย', en: 'Withholding Tax' },
+  'nav.tax_utp': { th: 'ค่าเผื่อภาษี & สถานะภาษีไม่แน่นอน', en: 'DTA Allowance & Uncertain Positions' },
   'nav.pos_fiscal': { th: 'ภาษีอิเล็กทรอนิกส์ (e-Tax/Journal)', en: 'e-Tax / Fiscal Journal' },
 
   // ── HR & Payroll ──────────────────────────────────────────────────────────

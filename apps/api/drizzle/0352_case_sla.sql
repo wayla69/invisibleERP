@@ -1,4 +1,4 @@
--- 0351_case_sla — SVC-5 (Service Cloud): per-case Entitlements / SLA policy (SVC-05 control). Extends the SVC-4
+-- 0352_case_sla — SVC-5 (Service Cloud): per-case Entitlements / SLA policy (SVC-05 control). Extends the SVC-4
 -- service_cases object with service-level commitments so a support case's first-response and resolution due
 -- times are computed from its entitlement tier, breaches are flagged, and a breach worklist surfaces cases that
 -- are slipping. Additive nullable/defaulted columns on the existing (already RLS-scoped) service_cases table —
