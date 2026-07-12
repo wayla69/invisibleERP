@@ -2458,6 +2458,13 @@
       "when": 2023820000316,
       "tag": "0351_dta_valuation_allowance_utp",
       "breakpoints": true
+    },
+    {
+      "idx": 352,
+      "version": "7",
+      "when": 2023820000317,
+      "tag": "0352_treasury_debt_register",
+      "breakpoints": true
     }
   ]
 }

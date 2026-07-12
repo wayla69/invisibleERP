@@ -84,6 +84,7 @@ Control IDs use the RCM taxonomy: `ITGC-AC/CM/SD/OP-nn` (IT general controls), `
 | 26 | Reporting, BI & AI Analytics | [`26-reporting-bi-ai.md`](./26-reporting-bi-ai.md) | ITGC-SD-03, Operational (IPE) | 06-information-security |
 | 27 | Platform Customization & Extensibility | [`27-platform-customization.md`](./27-platform-customization.md) | Operational (no new control); reinforces ITGC-AC-03/04/10, MDM-02 | Access Control; IPE; Change Management |
 | 32 | After-Sales — Warranty & Entitlement | [`32-after-sales-warranty.md`](./32-after-sales-warranty.md) | SVC-01 | 03-delegation-of-authority |
+| 33 | Treasury — Financial Instruments (Debt & Borrowings) | [`33-treasury-financial-instruments.md`](./33-treasury-financial-instruments.md) | TRE-01, TRE-02 | 11-financial-close |
 
 ---
 
