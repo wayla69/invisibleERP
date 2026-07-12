@@ -30,6 +30,9 @@ import { BiLiveModule } from './bi-live.module';
 import { BiController } from './bi.controller';
 import { PdpaModule } from '../pdpa/pdpa.module';
 import { HcmModule } from '../hcm/hcm.module';
+import { MarketingModule } from '../marketing/marketing.module';
+import { CampaignsModule } from '../campaigns/campaigns.module';
+import { MenuModule } from '../menu/menu.module';
 
 // MessagingModule supplies MessagingService for scheduled-report email delivery (Phase 4). FinanceModule
 // (CollectionsService), EamModule (EamService), LedgerModule (LedgerService) and LeasesModule (LeasesService)
@@ -38,5 +41,5 @@ import { HcmModule } from '../hcm/hcm.module';
 // (CrmPipelineService) supply the project_evm + crm_win_loss report types. DRIZZLE is global.
 // BudgetModule/ProcurementModule/MatchModule supply the residual-gap report types budget_variance,
 // supplier_scorecard and the exec_scorecard supply-chain leg (RG-1/2/3).
-@Module({ imports: [MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, FluxModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule, ScheduledChangesModule, PdpaModule, HcmModule], providers: [BiService, BiGenerateService, BiScheduleService, SchedulerTickService], controllers: [BiController], exports: [BiService] })
+@Module({ imports: [MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, FluxModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule, ScheduledChangesModule, PdpaModule, HcmModule, MarketingModule, CampaignsModule, MenuModule], providers: [BiService, BiGenerateService, BiScheduleService, SchedulerTickService], controllers: [BiController], exports: [BiService] })
 export class BiModule {}

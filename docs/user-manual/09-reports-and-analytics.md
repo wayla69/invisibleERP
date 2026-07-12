@@ -417,6 +417,12 @@ without anyone running it by hand.
    deliver the existing variance/scorecard figures on a schedule; the *Project
    governance / status pack* delivers the RAG-ranked portfolio status roll-up (red
    projects, unmitigated-high risks, overdue milestones, pending change orders).
+   **Marketing ROI (spend → lift → margin)** is the one-board marketing view: coupon
+   discount actually given (the true marketing spend — never dressed up as revenue),
+   the redeemed bills' real revenue and recipe-costed margin, organic holdout lift,
+   voucher-code redemptions, and the B2B source-ROI leg — with an honest note on what
+   each number is. Optional filters: `days` (window, default 90), `months` (B2B),
+   `fiscal_year`/`cost_center` (adds the budget-vs-actual leg).
    For **fixed assets**, two report types surface the physical-custody controls:
    *Asset audit results* (recent counts with found/missing/misplaced/unknown plus the
    pending custody-change queue) and **Assets not verified in N days** — a monthly

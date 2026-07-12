@@ -1,6 +1,6 @@
 # 45 — ERP × POS Data-Driven Marketing Strategy (internal + external, combined)
 
-> **Date:** 2026-07-12 · **Status:** v0.2 — G1 DELIVERED; G2–G4 PLANNED · **Owner:** ERP / Product
+> **Date:** 2026-07-12 · **Status:** v0.3 — G1 + G4 DELIVERED; G2–G3 PLANNED · **Owner:** ERP / Product
 > **Question answered:** *"Can we use the data in ERP and POS to make a marketing strategy by combining
 > both internally and externally together?"* — **Yes**, and most of the plumbing already exists. This doc
 > inventories what we already collect, maps it into one closed marketing loop, and lists the four thin
@@ -87,7 +87,7 @@ holdout, cost is checked against `budget`. Every step is an existing endpoint.
   target: start with **ads-platform custom audiences** (hashed phone/email export, consent-filtered) and
   a weather/holiday overlay for demand-ml-timed promos. Strictly opt-in-only export + ROPA entry;
   fail-closed if consent basis missing (mirrors the security-review posture).
-- **G4 — Unified marketing ROI report.** New BI report type `marketing_roi` joining
+- **G4 — Unified marketing ROI report. ✅ DELIVERED (BI report type `marketing_roi`, PN-19 rev 1.46, UAT-LOY-080; no new control — read-only aggregator).** New BI report type `marketing_roi` joining
   `campaign_sends` attribution + voucher redemptions + `crm_source_roi` + campaign cost vs
   `modules/budget` — one exec view of spend → lift → margin (menu-engineering-aware, so a "successful"
   campaign that only discounted *Stars* reads as the margin loss it is).
@@ -106,5 +106,6 @@ Extend them per the module map above.
 
 | Version | Date | Change |
 | --- | --- | --- |
+| v0.3 | 2026-07-12 | G4 DELIVERED — `marketing_roi` BI report: spend (discount given) → attributed revenue/margin (food-cost layer) → organic holdout lift, + voucher/B2B/budget legs. No new control. |
 | v0.2 | 2026-07-12 | G1 DELIVERED — `channel_customer_refs` (0366), hash-only capture on both ingest paths, consent-gated QR/staff linking, auto-attach `dine_in_orders.member_id`, control MKT-13 (RCM 268). |
 | v0.1 | 2026-07-12 | Initial assessment + strategy + G1–G4 roadmap (planning only, no feature code). |
