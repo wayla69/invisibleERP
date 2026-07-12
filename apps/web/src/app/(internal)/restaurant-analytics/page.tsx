@@ -68,6 +68,7 @@ export default function RestaurantAnalyticsPage() {
         tabs={[
           { key: 'menu', label: 'Menu engineering', content: <MenuEngineering win={win} /> },
           { key: 'daypart', label: t('mf.ra_tab_daypart'), content: <Daypart url={`/api/analytics/daypart?${win}`} /> },
+          { key: 'affinity', label: t('mf.ra_tab_affinity'), content: <Affinity url={`/api/analytics/menu-affinity?${win}`} /> },
           { key: 'voids', label: t('mf.ra_tab_voids'), content: <Voids url={`/api/analytics/voids-discounts?${win}`} /> },
           { key: 'staff', label: t('mf.ra_tab_staff'), content: <Staff url={`/api/analytics/staff-performance?${win}`} /> },
           { key: 'trend', label: t('mf.ra_tab_trend'), content: <Trend url={`/api/analytics/sales-trend?${win}`} /> },
@@ -170,6 +171,44 @@ export default function RestaurantAnalyticsPage() {
                 ]}
               />
             </Section>
+          </>
+        )}
+      </StateView>
+    );
+  }
+
+  // ── G2 (docs/45): market-basket affinity — pairs that sell together (support/confidence/lift) ──
+  function Affinity({ url }: { url: string }) {
+    const q = useReport<any>('affinity', url);
+    const pairCols = [
+      { key: 'pair', label: t('mf.ra_af_col_pair'), render: (r: any) => `${r.name_a} + ${r.name_b}` },
+      { key: 'pair_count', label: t('mf.ra_af_col_count'), align: 'right' as const, render: (r: any) => num(r.pair_count) },
+      { key: 'support_pct', label: t('mf.ra_af_col_support'), align: 'right' as const, render: (r: any) => `${r.support_pct}%` },
+      { key: 'confidence_a_to_b_pct', label: t('mf.ra_af_col_conf'), align: 'right' as const, render: (r: any) => `${r.confidence_a_to_b_pct}% / ${r.confidence_b_to_a_pct}%` },
+      { key: 'lift', label: t('mf.ra_af_col_lift'), align: 'right' as const, render: (r: any) => num(r.lift) },
+    ];
+    return (
+      <StateView q={q}>
+        {q.data && (
+          <>
+            <Grid>
+              <StatCard label={t('mf.ra_af_baskets')} value={num(q.data.summary.baskets)} />
+              <StatCard label={t('mf.ra_af_multi')} value={num(q.data.summary.multi_item_baskets)} />
+              <StatCard label={t('mf.ra_af_pairs')} value={num(q.data.summary.pairs_returned)} tone="info" />
+            </Grid>
+            <Section title={t('mf.ra_af_section')}>
+              <DataTable
+                rows={q.data.pairs}
+                rowKey={(r: any) => `${r.item_a}|${r.item_b}`}
+                emptyState={{ icon: Clock, title: t('mf.ra_af_empty_title'), description: t('mf.ra_adjust_dates') }}
+                columns={pairCols}
+              />
+            </Section>
+            {(q.data.by_daypart ?? []).map((d: any) => (
+              <Section key={d.daypart} title={`${t('mf.ra_af_by_daypart')} — ${d.label_th}`}>
+                <DataTable rows={d.top_pairs} rowKey={(r: any) => `${r.item_a}|${r.item_b}`} emptyState={{ icon: Clock, title: t('mf.ra_af_empty_title'), description: t('mf.ra_adjust_dates2') }} columns={pairCols} />
+              </Section>
+            ))}
           </>
         )}
       </StateView>

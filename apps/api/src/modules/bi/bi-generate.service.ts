@@ -12,7 +12,7 @@ import { hrDepartments, hrPositions, hrAssignments } from '../../database/schema
 import { employeeLifecycle } from '../../database/schema/hcm-lifecycle';
 import { payGrades } from '../../database/schema/hcm-comp';
 import { CASH_ACCOUNTS } from '../ledger/ledger-constants';
-import { n } from '../../database/queries';
+import { n, ymd } from '../../database/queries';
 import { cdpConfigured, pushToCdp } from '../../common/cdp-sync';
 import { activeKeyId, needsRotation, encrypt, decrypt } from '../../common/crypto';
 import { CollectionsService } from '../finance/collections.service';
@@ -46,6 +46,7 @@ import { RevDisclosureService } from '../revrec-disclosure/rev-disclosure.servic
 import { MarketingAutomationService } from '../marketing/marketing-automation.service';
 import { VouchersService } from '../campaigns/vouchers.service';
 import { FoodCostService } from '../menu/food-cost.service';
+import { MenuEngineeringService } from '../analytics/menu-engineering.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -109,6 +110,8 @@ export class BiGenerateService {
     @Optional() private readonly crmHealth?: CrmAccountHealthService,
     // CRM-12 (CRM-09) — supplies the crm_forecast_snapshot action job. Appended at the END (positional contract).
     @Optional() private readonly crmForecast?: CrmForecastService,
+    // G2 (docs/45) — supplies the menu_affinity report. Appended at the END (positional contract, as above).
+    @Optional() private readonly menuEng?: MenuEngineeringService,
   ) {}
 
   async generateReport(reportType: string, filters: any, user: JwtUser, reads: BiReadPort): Promise<{ data: any; summary: string; summaryTh: string }> {
@@ -561,6 +564,20 @@ export class BiGenerateService {
       return { data: r, summary: `Budget ${fy}: net variance ${r.rollup.net.variance} (${r.rollup.net.favorable ? 'favorable' : 'unfavorable'}); ${r.review.requires_review_count} item(s) need review`, summaryTh: `งบประมาณ ${fy}: ผลต่างสุทธิ ${r.rollup.net.variance} · ต้องทบทวน ${r.review.requires_review_count} รายการ` };
     }
     if (reportType === 'marketing_roi') return this.marketingRoi(user, f);
+    if (reportType === 'menu_affinity') {
+      if (!this.menuEng) throw new BadRequestException({ code: 'ANALYTICS_UNAVAILABLE', message: 'Menu analytics service not available', messageTh: 'ระบบวิเคราะห์เมนูไม่พร้อมใช้งาน' });
+      // scheduled runs default to a trailing window (days, default 30) on the business clock
+      const days = Math.min(Math.max(Number(f.days ?? 30) || 30, 1), 365);
+      const to = f.to ?? ymd();
+      const from = f.from ?? ymd(new Date(Date.now() - days * 86_400_000));
+      const r = await this.menuEng.menuAffinity(user, { from, to, branch_id: f.branch_id, min_pair_count: f.min_pair_count, top: f.top });
+      const topPair = r.pairs[0];
+      return {
+        data: r,
+        summary: `Menu affinity (${r.from}..${r.to}): ${r.summary.baskets} basket(s), ${r.summary.pairs_returned} pair(s)${topPair ? `; top ${topPair.name_a} + ${topPair.name_b} (lift ${topPair.lift})` : ''}`,
+        summaryTh: `คู่เมนูขายด้วยกัน (${r.from}..${r.to}): ${r.summary.baskets} บิล · ${r.summary.pairs_returned} คู่${topPair ? ` · เด่นสุด ${topPair.name_a}+${topPair.name_b} (lift ${topPair.lift})` : ''}`,
+      };
+    }
     if (reportType === 'flux_analysis') {
       if (!this.flux) throw new BadRequestException({ code: 'FLUX_UNAVAILABLE', message: 'Flux analysis service not available', messageTh: 'ระบบวิเคราะห์ผลต่างไม่พร้อมใช้งาน' });
       // Default the period to the prior month (last full close period) if the schedule didn't pin one.

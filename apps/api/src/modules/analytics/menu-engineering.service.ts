@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, gte, lte, eq, sql } from 'drizzle-orm';
+import { and, gte, lte, eq, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, custPosItems, payments, posOverrides } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
@@ -24,6 +24,9 @@ function daypartOf(h: number): { key: string; label_th: string } {
   return { key: 'late', label_th: 'ดึก' }; // 23–05
 }
 const DAYPART_ORDER = ['breakfast', 'lunch', 'afternoon', 'dinner', 'late'];
+
+// G2: shown on every affinity payload so the reader interprets lift correctly.
+const NOTE_AFFINITY = 'lift > 1 = คู่ที่ขายด้วยกันบ่อยกว่าบังเอิญ — ใช้เลือกคู่ cross-sell / set menu; บิลที่ไม่มีเวลาไม่ถูกนับใน by_daypart';
 
 // Restaurant management analytics that go beyond a daily-sales export: the menu-engineering matrix,
 // daypart/hour demand, and void/discount (shrinkage) analytics — all from sales already in the DB.
@@ -163,6 +166,118 @@ export class MenuEngineeringService {
       summary: { revenue: totalRevenue, txns: totalTxns, avg_ticket: totalTxns > 0 ? r2(totalRevenue / totalTxns) : 0, peak_hour: peakPart!.txns ? peakHour!.hour : null, peak_daypart: peakPart!.txns ? peakPart!.daypart : null },
       by_hour,
       by_daypart,
+    };
+  }
+
+  // ── G2 (docs/45) — market-basket affinity: which menu items sell TOGETHER. Classic association metrics
+  //    over completed sales (a basket = one sale's DISTINCT items): support = P(A∧B), confidence = P(B|A),
+  //    lift = P(A∧B)/(P(A)·P(B)) — lift > 1 means the pair co-occurs more than chance, the cross-sell
+  //    signal promo/audience configuration consumes. Read-only aggregation; daypart slices reuse daypartOf
+  //    on the sale's business-clock hour (sales without a timestamp count in the overall view only). ──
+  async menuAffinity(_user: JwtUser, opts?: { from?: string; to?: string; branch_id?: number; min_pair_count?: number; top?: number }) {
+    const db = this.db;
+    const to = opts?.to ?? ymd();
+    const from = opts?.from ?? to;
+    const branchId = opts?.branch_id;
+    const minPair = Math.max(Number(opts?.min_pair_count ?? 2) || 2, 1);
+    const top = Math.min(Math.max(Number(opts?.top ?? 50) || 50, 1), 200);
+
+    const sales = await db.select({ id: custPosSales.id, saleNo: custPosSales.saleNo })
+      .from(custPosSales)
+      .where(and(
+        gte(custPosSales.saleDate, from), lte(custPosSales.saleDate, to),
+        sql`${custPosSales.status}::text = 'Completed'`,
+        ...(branchId != null ? [eq(custPosSales.branchId, branchId)] : []),
+      ));
+    const empty = { from, to, branch_id: branchId ?? null, thresholds: { min_pair_count: minPair, top }, summary: { baskets: 0, multi_item_baskets: 0, items: 0, pairs_returned: 0 }, pairs: [], by_daypart: [], note: NOTE_AFFINITY };
+    if (!sales.length) return empty;
+
+    const saleIds = sales.map((s: any) => Number(s.id));
+    const lines = await db.select({ saleId: custPosItems.saleId, itemId: custPosItems.itemId, description: custPosItems.itemDescription })
+      .from(custPosItems).where(inArray(custPosItems.saleId, saleIds));
+
+    // basket = the DISTINCT items on one sale (qty doesn't change co-occurrence)
+    const baskets = new Map<number, Set<string>>();
+    const nameOf = new Map<string, string>();
+    for (const l of lines) {
+      const sid = Number(l.saleId);
+      const item = String(l.itemId ?? '');
+      if (!item) continue;
+      if (!nameOf.has(item) && l.description) nameOf.set(item, String(l.description));
+      let set = baskets.get(sid);
+      if (!set) { set = new Set(); baskets.set(sid, set); }
+      set.add(item);
+    }
+    // A sale header has no timestamp (saleDate is a business date) — bucket the basket's daypart by its
+    // captured tender's hour, exactly like daypart() does. Sales with no captured tender stay overall-only.
+    const saleNos = sales.map((s: any) => String(s.saleNo));
+    const tenders = await db.select({ saleNo: payments.saleNo, createdAt: payments.createdAt, capturedAt: payments.capturedAt })
+      .from(payments)
+      .where(and(sql`${payments.status}::text IN ('Captured','Settled')`, inArray(payments.saleNo, saleNos)));
+    const hourBySaleNo = new Map<string, number>();
+    for (const t of tenders) {
+      if (!t.saleNo || hourBySaleNo.has(String(t.saleNo))) continue;
+      const when = t.capturedAt ?? t.createdAt;
+      if (when) hourBySaleNo.set(String(t.saleNo), bizParts(new Date(when)).h);
+    }
+    const daypartBySale = new Map<number, string | null>(
+      sales.map((s: any) => {
+        const h = hourBySaleNo.get(String(s.saleNo));
+        return [Number(s.id), h != null ? daypartOf(h).key : null];
+      }),
+    );
+
+    const compute = (ids: number[]) => {
+      const N = ids.length;
+      const itemCnt = new Map<string, number>();
+      const pairCnt = new Map<string, number>();
+      let multi = 0;
+      for (const sid of ids) {
+        const set = baskets.get(sid);
+        if (!set || set.size === 0) continue;
+        const arr = Array.from(set).sort();
+        for (const it of arr) itemCnt.set(it, (itemCnt.get(it) ?? 0) + 1);
+        if (arr.length < 2) continue;
+        multi++;
+        for (let i = 0; i < arr.length; i++)
+          for (let j = i + 1; j < arr.length; j++)
+            pairCnt.set(`${arr[i]}|${arr[j]}`, (pairCnt.get(`${arr[i]}|${arr[j]}`) ?? 0) + 1);
+      }
+      const pairs = Array.from(pairCnt.entries())
+        .filter(([, c]) => c >= minPair)
+        .map(([key, c]) => {
+          const [a, b] = key.split('|') as [string, string];
+          const ca = itemCnt.get(a)!;
+          const cb = itemCnt.get(b)!;
+          return {
+            item_a: a, name_a: nameOf.get(a) ?? a, item_b: b, name_b: nameOf.get(b) ?? b,
+            pair_count: c,
+            support_pct: r2((c / N) * 100),
+            confidence_a_to_b_pct: r2((c / ca) * 100),
+            confidence_b_to_a_pct: r2((c / cb) * 100),
+            lift: r2((c * N) / (ca * cb)),
+          };
+        })
+        .sort((x, y) => y.lift - x.lift || y.pair_count - x.pair_count);
+      return { N, multi, items: itemCnt.size, pairs };
+    };
+
+    const overall = compute(saleIds);
+    const by_daypart = DAYPART_ORDER.flatMap((key) => {
+      const ids = saleIds.filter((sid: number) => daypartBySale.get(sid) === key);
+      if (!ids.length) return [];
+      const r = compute(ids);
+      const sampleH = key === 'late' ? 23 : key === 'breakfast' ? 6 : key === 'lunch' ? 11 : key === 'afternoon' ? 15 : 18;
+      return [{ daypart: key, label_th: daypartOf(sampleH).label_th, baskets: r.N, top_pairs: r.pairs.slice(0, 10) }];
+    });
+
+    return {
+      from, to, branch_id: branchId ?? null,
+      thresholds: { min_pair_count: minPair, top },
+      summary: { baskets: overall.N, multi_item_baskets: overall.multi, items: overall.items, pairs_returned: Math.min(overall.pairs.length, top) },
+      pairs: overall.pairs.slice(0, top),
+      by_daypart,
+      note: NOTE_AFFINITY,
     };
   }
 
