@@ -127,11 +127,16 @@ export class LedgerPostingService {
     // silently and then VANISHES from every typed report (they INNER JOIN accounts) — the classic
     // "balance disappears after a CoA cleanup" defect. Runs for subledger postings too: viaSubledger
     // only relaxes the control-account rule below, never existence/postability.
-    type AccRow = { code: string; isPostable: boolean | null; isControl: boolean | null; controlSubledger: string | null };
+    type AccRow = {
+      code: string; isPostable: boolean | null; isControl: boolean | null; controlSubledger: string | null;
+      effectiveFrom: string | null; effectiveTo: string | null; requireDimension: Record<string, boolean> | null;
+    };
     const lineCodes = [...new Set(nzLines.map((l) => l.account_code))];
     const accRows: AccRow[] = await db.select({
       code: accounts.code, isPostable: accounts.isPostable,
       isControl: accounts.isControl, controlSubledger: accounts.controlSubledger,
+      effectiveFrom: accounts.effectiveFrom, effectiveTo: accounts.effectiveTo,
+      requireDimension: accounts.requireDimension,
     }).from(accounts).where(inArray(accounts.code, lineCodes));
     const accByCode = new Map<string, AccRow>(accRows.map((r) => [r.code, r]));
     for (const c of lineCodes) {
@@ -149,6 +154,39 @@ export class LedgerPostingService {
           message: `Account '${c}' is not postable (a header account or deactivated)`,
           messageTh: `บัญชี '${c}' ไม่สามารถบันทึกรายการได้ (เป็นบัญชีหัวหรือถูกปิดใช้งาน)`,
         });
+      }
+      // COA-D2 (GL-21): effective-date window — enforced ONLY when declared, so the (unset) universe is
+      // byte-identical. ISO yyyy-mm-dd strings compare lexicographically. This is what makes the manual's
+      // "use an effective-to date instead of flipping postability" advice actually bind.
+      if ((acc.effectiveFrom && entryDate < acc.effectiveFrom) || (acc.effectiveTo && entryDate > acc.effectiveTo)) {
+        throw new BadRequestException({
+          code: 'ACCOUNT_NOT_EFFECTIVE',
+          message: `Account '${c}' is not effective on ${entryDate} (window ${acc.effectiveFrom ?? '…'} → ${acc.effectiveTo ?? '…'})`,
+          messageTh: `บัญชี '${c}' ไม่อยู่ในช่วงวันที่มีผล (${acc.effectiveFrom ?? '…'} → ${acc.effectiveTo ?? '…'})`,
+        });
+      }
+    }
+    // COA-D2 (GL-21): required dimensions — an account flagged {"branch":true,...} rejects a line that
+    // omits that dimension (fail-closed at posting, so multi-dim reports on the account are complete).
+    // Key → line-field mapping mirrors the journal_lines dimension stamps below.
+    const DIM_FIELD: Record<string, (l: JournalLineDto) => unknown> = {
+      branch: (l) => l.branch_id, project: (l) => l.project_id,
+      department: (l) => l.dept_id, cost_center: (l) => l.cost_center,
+    };
+    for (const l of nzLines) {
+      const req = accByCode.get(l.account_code)?.requireDimension;
+      if (!req) continue;
+      for (const [dim, on] of Object.entries(req)) {
+        const get = DIM_FIELD[dim];
+        if (!on || !get) continue;
+        const v = get(l);
+        if (v == null || v === '') {
+          throw new BadRequestException({
+            code: 'REQUIRED_DIMENSION_MISSING',
+            message: `Account '${l.account_code}' requires the '${dim}' dimension on every line`,
+            messageTh: `บัญชี '${l.account_code}' ต้องระบุมิติ '${dim}' ในทุกรายการ`,
+          });
+        }
       }
     }
     // Control-account guard (WS1.1): reject direct postings to control accounts unless
