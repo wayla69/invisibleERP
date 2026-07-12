@@ -7,6 +7,7 @@ import { MemberService } from './member.service';
 import { MembershipService } from './membership.service';
 import { ReceiptSubmissionsService } from './receipt-submissions.service';
 import { WalletPassService } from '../wallet-pass/wallet-pass.service';
+import { ChannelCustomerRefsService } from '../channel-adapter/channel-customer-refs.service';
 
 const ConfigBody = z.object({
   enabled: z.boolean().optional(),
@@ -46,10 +47,14 @@ const EnrollLineBody = z.object({ id_token: z.string().min(1), name: z.string().
 const LinkLineBody = z.object({ id_token: z.string().min(1) });
 const ReceiptQueueQuery = z.object({ status: z.string().optional() });
 const RejectReceiptBody = z.preprocess((v) => v ?? {}, z.object({ reason: z.string().optional() }));
+// G1 (MKT-13) — staff link of a marketplace buyer ref to a member. marketing_opt_in is REQUIRED: staff
+// attests the customer's explicit consent decision (recorded source='pos'); there is no default.
+const ChannelRefsQuery = z.object({ linked: z.coerce.boolean().optional(), limit: z.coerce.number().int().positive().max(500).optional() });
+const ChannelRefLinkBody = z.object({ member_id: z.number().int().positive(), marketing_opt_in: z.boolean() });
 
 @Controller('api/loyalty')
 export class LoyaltyController {
-  constructor(private readonly svc: LoyaltyService, private readonly member: MemberService, private readonly membership: MembershipService, private readonly receipts: ReceiptSubmissionsService, private readonly walletPasses: WalletPassService) {}
+  constructor(private readonly svc: LoyaltyService, private readonly member: MemberService, private readonly membership: MembershipService, private readonly receipts: ReceiptSubmissionsService, private readonly walletPasses: WalletPassService, private readonly channelRefs: ChannelCustomerRefsService) {}
 
   @Get('config') @Permissions('loyalty', 'marketing')
   getConfig() { return this.svc.getConfig(); }
@@ -82,6 +87,18 @@ export class LoyaltyController {
   getConsents(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.member.getConsents(+id, u); }
   @Post('members/:id/consents') @Permissions('loyalty', 'crm')
   setConsent(@Param('id') id: string, @Body(new ZodValidationPipe(ConsentBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.setConsent(+id, b, u); }
+
+  // ── G1 (MKT-13): marketplace buyer refs (hashed) → member linkage ──
+  @Get('channel-refs') @Permissions('crm_member', 'loyalty', 'crm')
+  listChannelRefs(@Query(new ZodValidationPipe(ChannelRefsQuery)) q: any, @CurrentUser() u: JwtUser) { return this.channelRefs.listRefs(u, q); }
+  // Staff link (e.g. the customer identifies their Grab account at the counter). Consent is captured in
+  // the SAME request tx as the link — the endpoint refuses a link without an explicit consent decision.
+  @Post('channel-refs/:id/link') @Permissions('crm_member', 'loyalty')
+  async linkChannelRef(@Param('id') id: string, @Body(new ZodValidationPipe(ChannelRefLinkBody)) b: z.infer<typeof ChannelRefLinkBody>, @CurrentUser() u: JwtUser) {
+    const res = await this.channelRefs.staffLink(+id, b.member_id, u);
+    await this.member.setConsent(b.member_id, { purpose: 'marketing', granted: b.marketing_opt_in, channel: `channel:${res.platform}`, source: 'pos' }, u);
+    return { ...res, marketing_opt_in: b.marketing_opt_in };
+  }
 
   // ── Tiers (CRM Phase 3): journey view + auto-recompute (also run by the maintenance sweep) ──
   @Get('members/:id/tier') @Permissions('loyalty', 'marketing', 'crm', 'pos')

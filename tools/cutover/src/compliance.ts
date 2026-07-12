@@ -1192,6 +1192,10 @@ async function main() {
 
   // 1e. A rejected request leaves the chart untouched.
   const rejReq = await inj('POST', '/api/ledger/accounts', admin, { code: '9993', name: 'to be rejected', type: 'Expense' });
+  const govCoa = await inj('GET', '/api/finance/approvals/pending', admin);
+  ok('COA-D1 (GOV-01): the staged GL-27 request surfaces in the pending-approvals center',
+    (govCoa.json.items ?? []).some((i: any) => i.type === 'coa_change' && i.control === 'GL-27' && i.ref === `COA-${rejReq.json.id}`),
+    `types=${JSON.stringify(govCoa.json.by_type ?? {})}`);
   const rejDone = await inj('POST', `/api/ledger/accounts/change-requests/${rejReq.json.id}/reject`, whchk, { reason: 'not needed' });
   const rejGone = await inj('GET', '/api/ledger/accounts/9993/where-used', admin);
   ok('GL-27: reject closes the request and the account never exists',
@@ -1246,6 +1250,10 @@ async function main() {
   const prOk = await inj('POST', '/api/ledger/posting-rules', admin, { eventType: 'PAYROLL.GROSS', legOrder: 1, role: 'wages_expense', side: 'DR', accountCode: '5100' });
   ok('GL-24: a VALID rule write lands PendingApproval (no posting effect yet)',
     prOk.status === 201 && prOk.json.status === 'PendingApproval', `${prOk.status} st=${prOk.json.status}`);
+  const govPr = await inj('GET', '/api/finance/approvals/pending', admin);
+  ok('COA-D1 (GOV-01): the pending GL-24 override surfaces in the pending-approvals center',
+    (govPr.json.items ?? []).some((i: any) => i.type === 'posting_rule' && i.control === 'GL-24' && i.ref === `PRULE-${prOk.json.id}`),
+    `types=${JSON.stringify(govPr.json.by_type ?? {})}`);
   const prSelf = await inj('POST', `/api/ledger/posting-rules/${prOk.json.id}/approve`, admin);
   ok('GL-24: creator self-approval → 403 SOD_VIOLATION (binds even Admin)',
     prSelf.status === 403 && prSelf.json.error?.code === 'SOD_VIOLATION', `${prSelf.status} ${prSelf.json.error?.code}`);

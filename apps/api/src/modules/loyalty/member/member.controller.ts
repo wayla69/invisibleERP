@@ -14,6 +14,8 @@ import { ReferralsService } from '../engagement/referrals.service';
 import { WheelsService } from '../engagement/wheels.service';
 import { PartnersService } from '../../partners/partners.service';
 import { WalletPassService } from '../../wallet-pass/wallet-pass.service';
+import { ChannelCustomerRefsService } from '../../channel-adapter/channel-customer-refs.service';
+import { rateLimit } from '../../restaurant/rate-limit.util';
 
 const RequestOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string().min(1) });
 const VerifyOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string().min(1), code: z.string().min(4) });
@@ -29,6 +31,10 @@ const LinkLineBody = z.object({ id_token: z.string().min(1) });
 const MemberConsentBody = z.object({ purpose: z.string().min(1), granted: z.boolean(), channel: z.string().optional() });
 // V5 (docs/29): the member's card in their phone wallet (Apple/Google; mock provider until certs exist).
 const WalletPassBody = z.preprocess((v) => v ?? {}, z.object({ platform: z.enum(['apple', 'google']).optional() }));
+// G1 (MKT-13): claim a marketplace (Grab/LINE MAN/…) buyer ref for the AUTHENTICATED member. The QR token
+// names WHICH external ref; the member JWT names WHO. marketing_opt_in is REQUIRED — consent is an explicit
+// decision captured at link time (recorded source='self'), never a default.
+const ChannelLinkBody = z.object({ token: z.string().min(1), marketing_opt_in: z.boolean() });
 // LYL-17: member submits a photo of a receipt from a purchase made outside our POS to claim points.
 const SubmitReceiptBody = z.object({
   receipt_image: z.string().min(1), purchase_amount: z.number().positive(),
@@ -50,6 +56,7 @@ export class MemberController {
     private readonly wheels: WheelsService,
     private readonly partners: PartnersService,
     private readonly walletPasses: WalletPassService,
+    private readonly channelRefs: ChannelCustomerRefsService,
   ) {}
 
   // ── Auth (public) ──
@@ -116,6 +123,23 @@ export class MemberController {
   @Put('consents') @UseGuards(MemberGuard)
   setMyConsent(@Body(new ZodValidationPipe(MemberConsentBody)) b: z.infer<typeof MemberConsentBody>, @CurrentUser() u: JwtUser) {
     return this.member.setConsent(u.memberId!, { purpose: b.purpose, granted: b.granted, channel: b.channel, source: 'self' }, u);
+  }
+
+  // ── G1 (MKT-13): marketplace account linking ──
+  // What the QR landing page shows BEFORE login: platform + repeat-order count + link state. @Public — the
+  // token is an unguessable HMAC capability; rate-limited; returns no PII and no member identity.
+  @Public() @NoTx() @Get('channel-link/:token')
+  channelLinkInfo(@Param('token') token: string) {
+    rateLimit(`clink:${token.slice(0, 32)}`, 20, 60_000);
+    return this.channelRefs.resolveToken(token);
+  }
+  // The actual link — member token required (the anonymous scanner logs in via OTP/LINE first), self-scoped
+  // to u.memberId. Link + consent land in the SAME request tx: no link without an explicit consent decision.
+  @Post('channel-link') @UseGuards(MemberGuard)
+  async channelLink(@Body(new ZodValidationPipe(ChannelLinkBody)) b: z.infer<typeof ChannelLinkBody>, @CurrentUser() u: JwtUser) {
+    const res = await this.channelRefs.linkMember(u, b.token);
+    await this.member.setConsent(u.memberId!, { purpose: 'marketing', granted: b.marketing_opt_in, channel: `channel:${res.platform}`, source: 'self' }, u);
+    return { ...res, marketing_opt_in: b.marketing_opt_in };
   }
 
   // Submit a photo of a receipt from a purchase made outside our POS (staff review before points post).
