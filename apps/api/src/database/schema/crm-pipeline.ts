@@ -142,6 +142,7 @@ export const crmOpportunities = pgTable('crm_opportunities', {
   accountId: bigint('account_id', { mode: 'number' }).references(() => crmAccounts.id),
   primaryContactId: bigint('primary_contact_id', { mode: 'number' }).references(() => crmContacts.id),
   accountName: text('account_name'),                   // legacy free-text account (Batch 2A carry-over)
+  dealType: text('deal_type').notNull().default('new'), // CRM-15 (CRM-08, migration 0370): new | renewal | expansion
   lostReason: text('lost_reason'),
   winReason: text('win_reason'),
   notes: text('notes'),
@@ -157,6 +158,24 @@ export const crmOpportunities = pgTable('crm_opportunities', {
   byStatus: index('idx_crm_opp_status').on(t.tenantId, t.status),
   byAccount: index('idx_crm_opp_account').on(t.tenantId, t.accountId),
   byLegacy: index('idx_crm_opp_legacy').on(t.tenantId, t.legacyOpportunityId),
+}));
+
+// CRM-15 (CRM-08, migration 0370): a persisted per-account HEALTH snapshot (mirrors project_health_snapshots)
+// — a daily churn-watchlist score + band for trend. The live score is computed in CrmAccountHealthService;
+// this table is the schedulable snapshot (upsert on (tenant_id, account_id, snapshot_date)). Tenant-scoped (RLS).
+export const crmAccountHealthSnapshots = pgTable('crm_account_health_snapshots', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  accountId: bigint('account_id', { mode: 'number' }).notNull().references(() => crmAccounts.id),
+  snapshotDate: date('snapshot_date').notNull(),
+  score: integer('score').notNull().default(0),         // 0..100 (100 = healthiest)
+  band: text('band').notNull().default('no_data'),      // healthy | watch | at_risk | no_data
+  signals: jsonb('signals').notNull().default({}),      // per-factor breakdown snapshot
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqDay: unique('uq_crm_acct_health_day').on(t.tenantId, t.accountId, t.snapshotDate),
+  byAccount: index('idx_crm_acct_health_account').on(t.tenantId, t.accountId),
 }));
 
 // Append-only stage-transition audit (REV-17): who moved which opportunity from → to, when. Written on
