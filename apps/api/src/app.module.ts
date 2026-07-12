@@ -32,6 +32,7 @@ import { BomModule } from './modules/bom/bom.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { TaxProvisionModule } from './modules/tax-provision/tax-provision.module';
 import { TreasuryDebtModule } from './modules/treasury-debt/debt.module';
+import { TreasuryInvestModule } from './modules/treasury-invest/investment.module';
 import { DisclosureModule } from './modules/disclosure/disclosure.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { TaxModule } from './modules/tax/tax.module';
@@ -176,6 +177,7 @@ import { MailModule } from './modules/mail/mail.module';
     LedgerModule,
     TaxProvisionModule,
     TreasuryDebtModule,
+    TreasuryInvestModule,
     DisclosureModule,
     PaymentsModule,
     TaxModule,

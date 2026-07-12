@@ -55,6 +55,7 @@
     "input-vat": "tsx src/input-vat.ts",
     "tax-provision": "tsx src/tax-provision.ts",
     "treasury-debt": "tsx src/treasury-debt.ts",
+    "treasury-invest": "tsx src/treasury-invest.ts",
     "tax-point": "tsx src/tax-point.ts",
     "migration-tooling": "tsx src/migration-tooling.ts",
     "proration": "tsx src/proration.ts",

@@ -161,3 +161,4 @@ export * from './masterdata-change';
 export * from './landed-cost';
 export * from './flux';
 export * from './treasury-debt';
+export * from './treasury-invest';
