@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 266,
+    "total": 267,
     "by_status": {
-      "Implemented": 263,
+      "Implemented": 264,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 36,
+      "Revenue & Cash": 37,
       "Tax": 12
     }
   },
@@ -1555,6 +1555,25 @@
       "tod": "Inspect the §18-21 classification (distinct×at-SSP → the three outcomes), that separate_contract leaves the original untouched and creates a new contract, that prospective re-allocates the remaining price over remaining POs with no catch-up, that cumulative_catchup posts a catch-up on the satisfied portion, and the maker≠approver maker-checker (SOD_SELF_APPROVAL) with approval mandatory before it drives revenue.",
       "toe": "Re-perform (revrec-modifications harness): recognize 400 of a 1000 contract; a NOT-distinct +200 modification classifies cumulative_catchup and (after a distinct approver — self-approve → SOD_SELF_APPROVAL) posts an 80 catch-up (Dr 1265 / Cr 4300) lifting recognized revenue to 480; a distinct-not-at-SSP +300 modification classifies prospective, re-allocates the remaining 900 over the remaining POs (Support 600→540, Add-on 360, satisfied Setup frozen at 400) with catch_up_delta 0 and no revenue movement; a distinct-at-SSP +500 modification classifies separate_contract, creating a new linked contract (total 500, PO 500) while the original stays total 1000 / recognized 400; a Pending modification drives nothing and re-approving an applied one → MODIFICATION_NOT_PENDING; a second tenant sees 0 of the first tenant's modifications (RLS).",
       "evidence": "Contract-modification register (type/added_price/distinct_flag/at_ssp_flag/effect_amount + new_contract_id link); modification maker-checker approval log (created_by/approved_by); cumulative catch-up (REVREC-MOD) posting; re-allocation schedule rebuild",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-07",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (pipeline / account planning)",
+      "risk": "B2B account relationships are ungoverned — a company's parent/subsidiary structure is not modelled (so pipeline cannot be rolled up to the buying group, and re-parented accounts can loop), a deal is worked without documenting WHO decides (no buying committee, so the forecast rests on a single unverified contact), and there is no account plan (owner, target, product-line coverage) — so strategic accounts are pursued ad-hoc, whitespace (un-targeted product lines) is invisible, and the account-based revenue forecast is unreliable.",
+      "assertion": "Accuracy/Completeness/Authorization",
+      "description": "B2B account/contact 360 DEPTH (CRM-7, migration 0365) on the REV-17 CRM spine. Account HIERARCHY: crm_accounts gains a self-referential parent_account_id; PATCH /api/crm/accounts/:no/parent rejects a self-parent (SELF_PARENT) and any link that would close a loop (HIERARCHY_CYCLE), and GET /api/crm/accounts/:no/hierarchy returns the ancestor chain + direct children + a SUBTREE pipeline roll-up (Σ open weighted amount across the account and all descendants) so pipeline ties to the buying group; a survivor-merge re-parents the duplicate's child accounts so the hierarchy stays intact. Buying COMMITTEE: crm_opportunity_contacts records which contacts sit on a deal, each with a role (decision_maker/champion/influencer/evaluator/blocker/user) + influence weight — a committee contact must belong to the deal's account (CONTACT_ACCOUNT_MISMATCH), a contact appears at most once per deal (COMMITTEE_DUP), and at most one is_primary. Account PLANS: crm_account_plans is a GOVERNED draft -> active -> closed plan carrying an owner, objective, strategy, target revenue and target product categories validated against item_categories (UNKNOWN_CATEGORY); a plan activates only when it has an owner AND an objective (PLAN_INCOMPLETE), the lifecycle is enforced (PLAN_NOT_DRAFT / PLAN_NOT_ACTIVE, a closed plan is immutable PLAN_CLOSED), and GET /api/crm/accounts/:no/whitespace surfaces the product categories the account is NOT yet being pursued for (active item_categories minus the union of active-plan targets). All three tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes); the surface gates crm/exec/ar. No GL post.",
+      "prev_det": "Prev/Det",
+      "nature": "Automated",
+      "frequency": "Per account / continuous",
+      "owner": "Sales / Account Manager / Sales Manager",
+      "coso": "P13",
+      "code_reference": "modules/crm/account-depth/crm-account-depth.module.ts (setParent SELF_PARENT/HIERARCHY_CYCLE cycle guard; hierarchy ancestors+children+subtree open-weighted roll-up; addCommitteeMember CONTACT_ACCOUNT_MISMATCH/COMMITTEE_DUP + single is_primary; listCommittee/removeCommitteeMember; createPlan APL- + target-category validation UNKNOWN_CATEGORY; updatePlan PLAN_CLOSED guard; activatePlan PLAN_NOT_DRAFT/PLAN_INCOMPLETE; closePlan PLAN_NOT_ACTIVE; whitespace active-plan targets vs item_categories); crm/accounts/crm-accounts.module.ts (merge re-parents child accounts); schema/crm-pipeline.ts crm_accounts.parent_account_id + crm_opportunity_contacts + crm_account_plans + migration 0365 (RLS, tenant-leading indexes); cutover/pipeline.ts (ToE, CRM-7 checks)",
+      "tod": "Inspect the account-hierarchy cycle guard + subtree pipeline roll-up, the buying-committee account-membership + uniqueness + single-primary rules, the account-plan draft->active->closed lifecycle + category validation, and the whitespace derivation.",
+      "toe": "Re-perform: link a subsidiary under a parent, then parenting the parent under its own child -> HIERARCHY_CYCLE; the hierarchy read rolls a child's open deal into the parent's subtree weighted pipeline; add a buying-committee member (is_primary) then re-add the same contact -> COMMITTEE_DUP and a contact from another account -> CONTACT_ACCOUNT_MISMATCH; create an account plan (APL-) with a valid target category, an unknown category -> UNKNOWN_CATEGORY, activate a complete draft -> active, re-activate -> PLAN_NOT_DRAFT, activate an incomplete draft -> PLAN_INCOMPLETE, close -> closed; whitespace reports the targeted category as covered and the rest as whitespace; a T1 user sees none of HQ's account plans (RLS) (re-performed by the pipeline harness CRM-7 checks).",
+      "evidence": "Account hierarchy + subtree pipeline roll-up; buying-committee register (role/influence/primary); governed account-plan lifecycle + whitespace coverage read",
       "status": "Implemented"
     },
     {

@@ -479,6 +479,66 @@ async function main() {
     rtypes.status === 200 && ['crm_funnel', 'crm_source_roi', 'crm_forecast'].every((k) => keys.includes(k)),
     JSON.stringify(keys.filter((k: string) => k.startsWith('crm_'))));
 
+  // ── CRM-7 — B2B Account/Contact 360 depth (migration 0365, control CRM-07) ──────────────────────
+  // Seed active item categories for the whitespace/plan-target validation (tenant T1).
+  await db.insert(s.itemCategories).values([
+    { tenantId: t1, code: 'SOFTWARE', name: 'Software', active: true },
+    { tenantId: t1, code: 'HARDWARE', name: 'Hardware', active: true },
+    { tenantId: t1, code: 'SERVICES', name: 'Services', active: true },
+  ]).onConflictDoNothing();
+
+  // 37. Account hierarchy: parent link, cycle guard, subtree pipeline rollup.
+  const parentAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Globex Holdings', tax_id: '0105561000777' });
+  const childAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Globex Subsidiary', tax_id: '0105561000778' });
+  const setPar = await inj('PATCH', `/api/crm/accounts/${childAcc.json.account_no}/parent`, sales1, { parent_account_no: parentAcc.json.account_no });
+  ok('CRM-7 hierarchy: set parent account → child linked', setPar.status === 200 && setPar.json.parent_account_no === parentAcc.json.account_no, JSON.stringify(setPar.json));
+  const cycle = await inj('PATCH', `/api/crm/accounts/${parentAcc.json.account_no}/parent`, sales1, { parent_account_no: childAcc.json.account_no });
+  ok('CRM-7 hierarchy: parenting a company under its own child → 400 HIERARCHY_CYCLE', cycle.status === 400 && cycle.json.error?.code === 'HIERARCHY_CYCLE', `${cycle.status} ${cycle.json.error?.code}`);
+  await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Child Deal', amount: 100000, account_no: childAcc.json.account_no });
+  const hier = await inj('GET', `/api/crm/accounts/${parentAcc.json.account_no}/hierarchy`, sales1);
+  ok('CRM-7 hierarchy: read exposes 1 child + rolls the child deal into subtree_open_weighted', hier.status === 200 && hier.json.children?.length === 1 && hier.json.subtree_open_weighted > 0, JSON.stringify({ children: hier.json.children?.length, weighted: hier.json.subtree_open_weighted }));
+
+  // 38. Buying committee: contact must belong to the deal's account; unique per deal; single primary.
+  const bcContact = await inj('POST', '/api/crm/contacts', sales1, { account_no: parentAcc.json.account_no, name: 'ผู้ตัดสินใจ Globex', email: 'dm@globex.example', role: 'decision_maker' });
+  const bcOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Globex Deal', amount: 250000, account_no: parentAcc.json.account_no });
+  const addBc = await inj('POST', `/api/crm/opportunities/${bcOpp.json.opp_no}/committee`, sales1, { contact_id: bcContact.json.id, role: 'decision_maker', influence: 'high', is_primary: true });
+  ok('CRM-7 committee: add member → 201, is_primary + role', addBc.status === 201 && addBc.json.is_primary === true && addBc.json.role === 'decision_maker', JSON.stringify(addBc.json));
+  const dupBc = await inj('POST', `/api/crm/opportunities/${bcOpp.json.opp_no}/committee`, sales1, { contact_id: bcContact.json.id });
+  ok('CRM-7 committee: re-add the same contact → 409 COMMITTEE_DUP', dupBc.status === 409 && dupBc.json.error?.code === 'COMMITTEE_DUP', `${dupBc.status} ${dupBc.json.error?.code}`);
+  const otherContact = await inj('POST', '/api/crm/contacts', sales1, { account_no: childAcc.json.account_no, name: 'Outsider', email: 'out@globex-sub.example' });
+  const mismatchBc = await inj('POST', `/api/crm/opportunities/${bcOpp.json.opp_no}/committee`, sales1, { contact_id: otherContact.json.id });
+  ok('CRM-7 committee: contact from another account → 400 CONTACT_ACCOUNT_MISMATCH', mismatchBc.status === 400 && mismatchBc.json.error?.code === 'CONTACT_ACCOUNT_MISMATCH', `${mismatchBc.status} ${mismatchBc.json.error?.code}`);
+  const bcList = await inj('GET', `/api/crm/opportunities/${bcOpp.json.opp_no}/committee`, sales1);
+  ok('CRM-7 committee: list → 1 member with contact_name joined', bcList.json.count === 1 && bcList.json.committee?.[0]?.contact_name != null, JSON.stringify(bcList.json));
+  const rmBc = await inj('DELETE', `/api/crm/opportunities/${bcOpp.json.opp_no}/committee/${bcContact.json.id}`, sales1);
+  ok('CRM-7 committee: remove member → 200 removed', rmBc.status === 200 && rmBc.json.removed === true, JSON.stringify(rmBc.json));
+
+  // 39. Account plans: category validation + governed draft → active → closed lifecycle.
+  const planCreate = await inj('POST', '/api/crm/account-plans', sales1, { account_no: parentAcc.json.account_no, period: 'FY2026', objective: 'Grow Globex', target_revenue: 1000000, target_categories: ['SOFTWARE'] });
+  ok('CRM-7 plan: create → draft, APL- number, target category kept', planCreate.status === 201 && planCreate.json.status === 'draft' && /^APL-/.test(planCreate.json.plan_no) && planCreate.json.target_categories?.includes('SOFTWARE'), JSON.stringify(planCreate.json));
+  const badCat = await inj('POST', '/api/crm/account-plans', sales1, { account_no: parentAcc.json.account_no, target_categories: ['NONEXIST'] });
+  ok('CRM-7 plan: unknown target category → 400 UNKNOWN_CATEGORY', badCat.status === 400 && badCat.json.error?.code === 'UNKNOWN_CATEGORY', `${badCat.status} ${badCat.json.error?.code}`);
+  const activate = await inj('POST', `/api/crm/account-plans/${planCreate.json.plan_no}/activate`, sales1, {});
+  ok('CRM-7 plan: activate a complete draft (owner + objective) → active', activate.status === 200 && activate.json.status === 'active', JSON.stringify({ status: activate.json.status }));
+  const reactivate = await inj('POST', `/api/crm/account-plans/${planCreate.json.plan_no}/activate`, sales1, {});
+  ok('CRM-7 plan: re-activate an active plan → 400 PLAN_NOT_DRAFT', reactivate.status === 400 && reactivate.json.error?.code === 'PLAN_NOT_DRAFT', `${reactivate.status} ${reactivate.json.error?.code}`);
+  const draft2 = await inj('POST', '/api/crm/account-plans', sales1, { account_no: childAcc.json.account_no });
+  const actIncomplete = await inj('POST', `/api/crm/account-plans/${draft2.json.plan_no}/activate`, sales1, {});
+  ok('CRM-7 plan: activate an incomplete draft (no objective) → 400 PLAN_INCOMPLETE', actIncomplete.status === 400 && actIncomplete.json.error?.code === 'PLAN_INCOMPLETE', `${actIncomplete.status} ${actIncomplete.json.error?.code}`);
+
+  // 40. Whitespace: the active-plan target vs the tenant's active categories.
+  const ws = await inj('GET', `/api/crm/accounts/${parentAcc.json.account_no}/whitespace`, sales1);
+  const softwareRow = ws.json.categories?.find((c: any) => c.code === 'SOFTWARE');
+  ok('CRM-7 whitespace: SOFTWARE targeted by the active plan; 1 targeted / 2 whitespace', ws.status === 200 && softwareRow?.targeted === true && ws.json.targeted_count === 1 && ws.json.whitespace_count === 2, JSON.stringify({ targeted: ws.json.targeted_count, whitespace: ws.json.whitespace_count }));
+  const close = await inj('POST', `/api/crm/account-plans/${planCreate.json.plan_no}/close`, sales1, {});
+  ok('CRM-7 plan: close an active plan → closed', close.status === 200 && close.json.status === 'closed', JSON.stringify({ status: close.json.status }));
+
+  // 41. RLS: a plan created under HQ is invisible to the T1 sales user.
+  const hqAcc = await inj('POST', '/api/crm/accounts', admin, { name: 'HQ Only Account' });
+  const hqPlan = await inj('POST', '/api/crm/account-plans', admin, { account_no: hqAcc.json.account_no, objective: 'HQ plan' });
+  const t1Plans = await inj('GET', '/api/crm/account-plans', sales1);
+  ok('CRM-7 RLS: a T1 user sees none of HQ\'s account plans', t1Plans.status === 200 && !t1Plans.json.plans?.some((p: any) => p.plan_no === hqPlan.json.plan_no), `t1_count=${t1Plans.json.plans?.length}`);
+
   await app.close();
 }
 
