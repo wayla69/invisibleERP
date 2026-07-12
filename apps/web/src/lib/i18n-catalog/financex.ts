@@ -219,6 +219,11 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.coa.mc_reject': { th: 'ปฏิเสธ', en: 'Reject' },
   'fnx.coa.mc_approved': { th: 'อนุมัติคำขอแล้ว — มีผลกับผังบัญชีทันที', en: 'Change approved — the chart is updated' },
   'fnx.coa.mc_rejected': { th: 'ปฏิเสธคำขอแล้ว ผังบัญชีไม่เปลี่ยนแปลง', en: 'Change rejected — the chart is untouched' },
+  // COA-D2 — effective window + required dimensions (enforced in the posting guard when set)
+  'fnx.coa.f_eff_from': { th: 'มีผลตั้งแต่ (ว่าง = ไม่จำกัด)', en: 'Effective from (blank = open)' },
+  'fnx.coa.f_eff_to': { th: 'มีผลถึง (ว่าง = ไม่จำกัด)', en: 'Effective to (blank = open)' },
+  'fnx.coa.f_req_dims': { th: 'มิติที่ต้องระบุทุกรายการ', en: 'Required dimensions on every line' },
+  'fnx.coa.f_req_dims_hint': { th: 'รายการที่ไม่ระบุมิติที่เลือกจะถูกปฏิเสธ (REQUIRED_DIMENSION_MISSING); วันที่นอกช่วงมีผลจะถูกปฏิเสธ (ACCOUNT_NOT_EFFECTIVE)', en: 'A line missing a ticked dimension is rejected (REQUIRED_DIMENSION_MISSING); a line dated outside the window is rejected (ACCOUNT_NOT_EFFECTIVE)' },
   'fnx.coa.mc_history_title': { th: 'ประวัติคำขอแก้ไขผังบัญชี (GL-27)', en: 'Chart-change request history (GL-27)' },
   'fnx.coa.mc_history_show': { th: 'แสดง', en: 'Show' },
   'fnx.coa.mc_history_hide': { th: 'ซ่อน', en: 'Hide' },
