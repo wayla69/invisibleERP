@@ -4325,7 +4325,7 @@
       "frequency": "Continuous / pre-close",
       "owner": "Controller / CFO",
       "coso": "P16",
-      "code_reference": "finance.service.ts pendingApprovals; finance.controller.ts GET approvals/pending (exec/approvals/creditors); aggregates journalEntries(Draft incl. BANKADJ→BANK-02)/apPayments/payruns/asset_revaluations/fixed_assets(disposal_pending)/inv_writeoff_requests/till_sessions(PendingApproval)/fx_rates(PendingApproval)/budgets(PendingApproval); cutover/compliance.ts (ToE)",
+      "code_reference": "finance.service.ts pendingApprovals; finance.controller.ts GET approvals/pending (exec/approvals/creditors); aggregates journalEntries(Draft incl. BANKADJ→BANK-02)/apPayments/payruns/asset_revaluations/fixed_assets(disposal_pending)/inv_writeoff_requests/till_sessions(PendingApproval)/fx_rates(PendingApproval)/budgets(PendingApproval); cutover/compliance.ts (ToE); COA-D1: + postingRules PendingApproval (GL-24), coaChangeRequests PendingApproval (GL-27, platform-global), masterdataImportBatches PendingApproval (MDM-03), masterdataChangeRequests pending (MDM-01) — with /approvals per-item + batch approve routing for all four",
       "tod": "Inspect the aggregation across all pending sources + the age/overdue roll-up.",
       "toe": "Re-perform: create a pending item (e.g. a Draft JE) and confirm it appears in the worklist with its control ID, amount and age; the overdue count flags items past the threshold (re-performed by the harness).",
       "evidence": "Pending-approvals worklist",
