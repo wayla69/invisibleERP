@@ -1,4 +1,4 @@
-import { Controller, Post, Patch, Body, Param, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, ForbiddenException } from '@nestjs/common';
 import { z } from 'zod';
 import { CoaService } from './coa.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -104,6 +104,13 @@ export class CoaController {
   deactivate(@Param('code') code: string, @CurrentUser() u: JwtUser) {
     this.assertPlatformAdmin(u);
     return this.coa.deactivateAccount(code);
+  }
+
+  // COA follow-up B — read-only where-used report (config masters referencing this code). Not Admin-gated:
+  // any gl_coa holder may check impact before requesting a change; tenant tables are RLS-narrowed anyway.
+  @Get(':code/where-used')
+  whereUsed(@Param('code') code: string) {
+    return this.coa.whereUsed(code);
   }
 
   // ── Per-tenant overlay curation (gl_coa; RLS-scoped to the caller's own tenant) ──

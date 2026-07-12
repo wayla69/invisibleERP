@@ -499,6 +499,13 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
 // stays intact and postEntry's account guard blocks new activity once isPostable flips off.
 function DeactivateAccountDialog({ account, onClose, onSaved }: { account: Row; onClose: () => void; onSaved: () => void }) {
   const { t } = useLang();
+  // COA follow-up B — where-used: config masters still pointing at this code. Warn-only: deactivation
+  // remains balance-gated server-side, but a lingering reference would fail-closed at posting time
+  // (INVALID_POSTING_ACCOUNT), so the impact is shown BEFORE the retire instead of at month-end.
+  const used = useQuery<{ account_code: string; references: { source: string; count: number }[]; total: number }>({
+    queryKey: ['coa-where-used', account.code],
+    queryFn: () => api(`/api/ledger/accounts/${account.code}/where-used`),
+  });
   const save = useMutation({
     mutationFn: () => api(`/api/ledger/accounts/${account.code}/deactivate`, { method: 'POST' }),
     onSuccess: () => { notifySuccess(t('fnx.coa.deactivated', { code: account.code })); onSaved(); },
@@ -511,6 +518,20 @@ function DeactivateAccountDialog({ account, onClose, onSaved }: { account: Row; 
           <DialogTitle>{t('fnx.coa.deactivate_title', { code: account.code })}</DialogTitle>
           <DialogDescription>{t('fnx.coa.deactivate_desc')}</DialogDescription>
         </DialogHeader>
+        {(used.data?.total ?? 0) > 0 && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+            <div className="font-medium">{t('fnx.coa.used_title', { n: String(used.data!.total) })}</div>
+            <ul className="mt-1 list-disc pl-5">
+              {used.data!.references.map((r) => (
+                <li key={r.source}><span className="font-mono">{t(`fnx.coa.used_${r.source}`)}</span> × {r.count}</li>
+              ))}
+            </ul>
+            <div className="mt-1 text-muted-foreground">{t('fnx.coa.used_hint')}</div>
+          </div>
+        )}
+        {used.data && used.data.total === 0 && (
+          <p className="text-sm text-muted-foreground">{t('fnx.coa.used_none')}</p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>
           <Button variant="destructive" onClick={() => save.mutate()} disabled={save.isPending}>{t('fnx.coa.deactivate')}</Button>
