@@ -39,13 +39,14 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const { t } = useLang();
   const router = useRouter();
   const qc = useQueryClient();
-  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders', 'health', 'boq', 'commitments', 'pmr', 'reservations', 'sitecash']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
+  const refresh = () => { for (const k of ['detail', 'evm', 'es', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders', 'health', 'boq', 'commitments', 'pmr', 'reservations', 'sitecash']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
 
   // detail + evm are server-prefetched (see page.tsx) so the first paint carries data; react-query still
   // owns the cache and refetches on invalidation exactly as before (null prefetch = old client-only path).
   const detail = useQuery<any>({ queryKey: ['proj', code, 'detail'], queryFn: () => api(`/api/projects/${code}`), initialData: initialDetail ?? undefined });
   const evm = useQuery<any>({ queryKey: ['proj', code, 'evm'], queryFn: () => api(`/api/projects/${code}/evm`), initialData: initialEvm ?? undefined });
   const series = useQuery<any>({ queryKey: ['proj', code, 'series'], queryFn: () => api(`/api/projects/${code}/evm/series`) });
+  const esq = useQuery<any>({ queryKey: ['proj', code, 'es'], queryFn: () => api(`/api/projects/${code}/earned-schedule`) });
   const schedule = useQuery<any>({ queryKey: ['proj', code, 'schedule'], queryFn: () => api(`/api/projects/${code}/schedule`) });
   const tasks = useQuery<any>({ queryKey: ['proj', code, 'tasks'], queryFn: () => api(`/api/projects/${code}/tasks`) });
   const milestones = useQuery<any>({ queryKey: ['proj', code, 'milestones'], queryFn: () => api(`/api/projects/${code}/milestones`) });
@@ -529,6 +530,30 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
               </div>
             ))}
           </dl>
+          {/* Earned Schedule (PROJ-19) — the time-based schedule signal that stays honest to completion. */}
+          <div className="mt-4 border-t pt-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold">{t('pj.es_title')}</h4>
+              {esq.data?.spi_t != null && (
+                <Badge variant={esq.data.spi_t >= 1 ? 'success' : esq.data.spi_t >= 0.9 ? 'secondary' : 'destructive'}>SPI(t) {esq.data.spi_t}</Badge>
+              )}
+            </div>
+            {esq.data?.spi_t != null ? (
+              <dl className="mt-2 space-y-2.5 text-sm">
+                {[
+                  [t('pj.es_es'), t('pj.es_months', { n: esq.data.earned_schedule_months })],
+                  [t('pj.es_at'), t('pj.es_months', { n: esq.data.actual_time_months })],
+                  [t('pj.es_svt'), t('pj.es_months', { n: esq.data.sv_t_months })],
+                  [t('pj.es_finish'), `${esq.data.forecast_finish_month ?? '—'} (${t('pj.es_plan_months', { n: esq.data.planned_duration_months })})`],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between gap-3 border-b border-dashed border-border/60 pb-2 last:border-0">
+                    <dt className="text-muted-foreground">{k}</dt>
+                    <dd className="tabular font-medium">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : <p className="mt-1 text-xs text-muted-foreground">{t('pj.es_empty')}</p>}
+          </div>
         </Card>
       </div>
 

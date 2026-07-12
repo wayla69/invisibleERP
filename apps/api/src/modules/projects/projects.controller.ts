@@ -329,6 +329,13 @@ export class ProjectsController {
     return this.svc.evmSeries(code, { months: months ? Number(months) : undefined });
   }
 
+  // Earned Schedule (PROJ-19): time-based schedule performance off the PV curve — ES / SV(t) / SPI(t) stay
+  // honest to completion where the classic SPI converges to 1 (PV saturates at BAC on a late project).
+  @Get(':code/earned-schedule')
+  earnedSchedule(@Param('code') code: string, @Query('as_of') asOf: string | undefined) {
+    return this.svc.earnedSchedule(code, asOf);
+  }
+
   // Project health history (PPM upgrade): capture a dated EVM/RAG snapshot; read the trajectory.
   @Post(':code/health')
   captureHealth(@Param('code') code: string, @Body() b: { as_of?: string }, @CurrentUser() u: JwtUser) {
