@@ -57,8 +57,10 @@ export class RevRecController {
   @Post(':id/schedule')
   schedule(@Param('id', ParseIntPipe) id: number) { return this.svc.buildSchedule(id); }
 
+  // bill_upfront defaults TRUE (REV-19 back-compat: Dr 1100 / Cr 2410 for the whole price). Set FALSE to
+  // decouple billing from recognition (REV-24) — invoices are then raised via /billing-schedule + /bill.
   @Post(':id/activate')
-  activate(@Param('id', ParseIntPipe) id: number, @Body() b: { date?: string }, @CurrentUser() u: JwtUser) {
+  activate(@Param('id', ParseIntPipe) id: number, @Body() b: { date?: string; bill_upfront?: boolean }, @CurrentUser() u: JwtUser) {
     return this.svc.activate(id, b ?? {}, u);
   }
 

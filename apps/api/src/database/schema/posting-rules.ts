@@ -51,7 +51,7 @@ export const postingRuleAudit = pgTable('posting_rule_audit', {
 export type PostingRule = typeof postingRules.$inferSelect;
 export type PostingEventType = typeof postingEventTypes.$inferSelect;
 
-// GL-27 (0358): canonical Chart-of-Accounts maker-checker. A canonical account create/update/
+// GL-27 (0359): canonical Chart-of-Accounts maker-checker. A canonical account create/update/
 // deactivate stages here and applies only on a DIFFERENT Admin's approval; with exactly ONE active
 // Admin the change applies immediately, recorded as 'AutoApplied' (the single-Admin exception).
 // PLATFORM table — the company column is created_tenant_id (context only, NOT tenant_id) so the

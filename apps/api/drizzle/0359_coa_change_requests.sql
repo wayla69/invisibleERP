@@ -1,4 +1,4 @@
--- 0358: COA follow-up C — canonical Chart-of-Accounts maker-checker (GL-27).
+-- 0359: COA follow-up C — canonical Chart-of-Accounts maker-checker (GL-27).
 -- A canonical account create/update/deactivate is staged here and applied only on a DIFFERENT
 -- Admin's approval; when the system has exactly ONE active Admin the change applies immediately
 -- and the row records the exception (status 'AutoApplied') — owner decision 2026-07-12.
