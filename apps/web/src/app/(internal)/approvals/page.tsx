@@ -25,7 +25,7 @@ interface Item {
 }
 interface Resp { items: Item[]; count: number; by_type: Record<string, number>; oldest_age_days: number; overdue_days: number; overdue: number; total_amount: number }
 
-const KNOWN_TYPES = ['journal', 'ap_payment', 'payroll', 'asset_revaluation', 'asset_disposal', 'inventory_writeoff', 'till_variance', 'refund'];
+const KNOWN_TYPES = ['journal', 'ap_payment', 'payroll', 'asset_revaluation', 'asset_disposal', 'inventory_writeoff', 'till_variance', 'refund', 'posting_rule', 'coa_change', 'masterdata_import', 'masterdata_change'];
 
 export default function ApprovalsPage() {
   const { t } = useLang();
@@ -53,6 +53,12 @@ export default function ApprovalsPage() {
     till_variance:       (r, a) => `/api/payments/till/variance/${encodeURIComponent(r)}/${a}`,
     refund:              (r, a) => `/api/payments/refund-requests/${r.replace('RR-', '')}/${a}`,
     ar_cash_application: (r, a) => `/api/finance/ar/cash-application/${encodeURIComponent(r)}/${a}`,
+    // COA-D1 governance queues — each still hits its own maker-checker route (GL-24 / GL-27 SoD, the
+    // GL-27 platform-Admin gate, and MDM approver perms are all enforced server-side per item).
+    posting_rule:        (r, a) => `/api/ledger/posting-rules/${r.replace('PRULE-', '')}/${a}`,
+    coa_change:          (r, a) => `/api/ledger/accounts/change-requests/${r.replace('COA-', '')}/${a}`,
+    masterdata_import:   (r, a) => `/api/admin/master-data/import-approvals/${encodeURIComponent(r)}/${a}`,
+    masterdata_change:   (r, a) => `/api/masterdata/change-requests/${encodeURIComponent(r)}/${a}`,
   };
   const isBatchable = (it: Item) => it.type in BATCHABLE;
   const keyOf = (it: Item) => `${it.type}:${it.ref}`;
