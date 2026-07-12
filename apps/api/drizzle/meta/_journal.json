@@ -2505,7 +2505,14 @@
       "idx": 358,
       "version": "7",
       "when": 2023820000323,
-      "tag": "0358_crm_account_depth",
+      "tag": "0358_revrec_billing_schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 359,
+      "version": "7",
+      "when": 2023820000324,
+      "tag": "0359_crm_account_depth",
       "breakpoints": true
     }
   ]

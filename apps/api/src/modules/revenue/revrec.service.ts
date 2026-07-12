@@ -15,6 +15,7 @@ import type { JwtUser } from '../../common/decorators';
 // All posting routes through LedgerService.postEntry so PERIOD_LOCKED (WS2.1) + GL-17 audit (WS2.2) apply.
 
 const DEFERRED_REVENUE = '2410';   // Contract Liability / Deferred Revenue
+const CONTRACT_ASSET = '1265';     // Contract Asset (Unbilled Receivable) — recognized ahead of billing (REV-24)
 const REVENUE = '4300';            // Subscription & Service Revenue (recognized)
 const AR = '1100';                 // Accounts Receivable (control — posted viaSubledger)
 const REFUND_LIAB = '2420';        // Refund Liability
@@ -111,24 +112,38 @@ export class RevRecService {
     return { contract_id: contractId, total_price: total, sum_ssp: sumSsp, allocation: pos.map((p: any, i: number) => ({ obligation_id: Number(p.id), name: p.name, ssp: n(p.ssp), allocated_price: alloc[i] })), sum_allocated: round4(alloc.reduce((a: number, x: number) => a + x, 0)) };
   }
 
-  // Activation/invoice — raise the contract liability for the full price: Dr 1100 AR / Cr 2410.
-  async activate(contractId: number, dto: { date?: string }, user: JwtUser) {
+  // Activation — set the contract Active. `bill_upfront` (default TRUE, REV-19 back-compat) raises the whole
+  // contract price as a contract liability on day one: Dr 1100 AR / Cr 2410 Deferred Revenue. Set it FALSE
+  // (REV-24, TFRS 15 §105-107) to DECOUPLE billing from recognition — nothing is billed here, so recognition
+  // then runs ahead of billing and builds a contract ASSET (1265); invoices are raised on their own schedule
+  // via /billing-schedule + /bill (RevBillingService). `billed_amount` on the contract tracks cumulative
+  // billing and drives the asset/liability split.
+  async activate(contractId: number, dto: { date?: string; bill_upfront?: boolean }, user: JwtUser) {
     const db = this.db;
     const c = await this.assertContract(contractId);
     if (c.status === 'Active' || c.status === 'Completed') throw new BadRequestException({ code: 'ALREADY_ACTIVE', message: 'Contract already active', messageTh: 'สัญญาเปิดใช้งานแล้ว' });
     const total = n(c.totalPrice);
-    const ref = `REVREC-INV:${c.contractNo}`;
+    const billUpfront = dto.bill_upfront !== false; // default = today's behaviour
     let entryNo: string | null = null;
-    if (this.ledger && !(await this.ledger.alreadyPosted('REVREC-INV', ref, c.tenantId))) {
-      const je: any = await this.ledger.postEntry({
-        date: dto.date ?? c.contractDate ?? undefined, source: 'REVREC-INV', sourceRef: ref, tenantId: c.tenantId, currency: c.currency ?? undefined,
-        memo: `TFRS15 contract activation ${c.contractNo}`, createdBy: user.username, viaSubledger: true,
-        lines: [{ account_code: AR, debit: total, memo: 'AR — contract' }, { account_code: DEFERRED_REVENUE, credit: total, memo: 'Deferred revenue' }],
-      });
-      entryNo = je?.entry_no ?? null;
+    if (billUpfront) {
+      const ref = `REVREC-INV:${c.contractNo}`;
+      if (this.ledger && !(await this.ledger.alreadyPosted('REVREC-INV', ref, c.tenantId))) {
+        const je: any = await this.ledger.postEntry({
+          date: dto.date ?? c.contractDate ?? undefined, source: 'REVREC-INV', sourceRef: ref, tenantId: c.tenantId, currency: c.currency ?? undefined,
+          memo: `TFRS15 contract activation ${c.contractNo}`, createdBy: user.username, viaSubledger: true,
+          lines: [{ account_code: AR, debit: total, memo: 'AR — contract' }, { account_code: DEFERRED_REVENUE, credit: total, memo: 'Deferred revenue' }],
+        });
+        entryNo = je?.entry_no ?? null;
+      }
     }
-    await db.update(revContracts).set({ status: 'Active' }).where(eq(revContracts.id, contractId));
-    return { contract_id: contractId, status: 'Active', deferred_revenue: total, entry_no: entryNo };
+    await db.update(revContracts).set({ status: 'Active', billedAmount: fx(billUpfront ? total : 0, 4) }).where(eq(revContracts.id, contractId));
+    return { contract_id: contractId, status: 'Active', bill_upfront: billUpfront, billed: billUpfront ? total : 0, deferred_revenue: billUpfront ? total : 0, entry_no: entryNo };
+  }
+
+  // Σ recognized revenue for a contract (used for the contract-asset / contract-liability split, REV-24).
+  async sumRecognized(contractId: number): Promise<number> {
+    const rows = await this.db.select().from(revrecSchedules).where(eq(revrecSchedules.contractId, contractId));
+    return round4(rows.filter((r: any) => r.recognized).reduce((a: number, r: any) => a + n(r.recognizedAmount), 0));
   }
 
   // Step 5 prep — build the recognition (amortization) schedule. over_time POs straight-line their
@@ -181,12 +196,25 @@ export class RevRecService {
       const c = await this.assertContract(Number(row.contractId));
       const ref = `REVREC:${c.contractNo}:${row.obligationId}:${row.period}`;
       try {
+        // TFRS 15 §105-107 contract-asset / contract-liability split (REV-24): recognizing revenue first
+        // RELEASES any contract liability already billed in advance (Dr 2410), and the surplus recognized
+        // AHEAD of billing builds a contract ASSET / unbilled receivable (Dr 1265). For a contract billed
+        // up-front (REV-19 default, billed_amount == total_price) the liability always covers the amount, so
+        // this reduces to today's Dr 2410 / Cr 4300 — back-compat preserved.
+        const recognizedToDate = await this.sumRecognized(Number(row.contractId));
+        const availableLiability = round4(Math.max(0, n(c.billedAmount) - recognizedToDate));
+        const fromLiability = round4(Math.min(amount, availableLiability));
+        const toAsset = round4(amount - fromLiability);
         let entryNo: string | null = null;
         if (this.ledger && !(await this.ledger.alreadyPosted('REVREC', ref, c.tenantId))) {
+          const lines: any[] = [];
+          if (fromLiability > 0) lines.push({ account_code: DEFERRED_REVENUE, debit: fromLiability, memo: 'Release contract liability (billed in advance)' });
+          if (toAsset > 0) lines.push({ account_code: CONTRACT_ASSET, debit: toAsset, memo: 'Contract asset (unbilled receivable)' });
+          lines.push({ account_code: REVENUE, credit: amount, memo: 'Recognized revenue' });
           const je: any = await this.ledger.postEntry({
             date: `${row.period}-01`, source: 'REVREC', sourceRef: ref, tenantId: c.tenantId, currency: c.currency ?? undefined,
             memo: `TFRS15 revenue recognition ${c.contractNo} ${row.period}`, createdBy: user.username,
-            lines: [{ account_code: DEFERRED_REVENUE, debit: amount, memo: 'Release deferred revenue' }, { account_code: REVENUE, credit: amount, memo: 'Recognized revenue' }],
+            lines,
           });
           entryNo = je?.entry_no ?? null;
         }

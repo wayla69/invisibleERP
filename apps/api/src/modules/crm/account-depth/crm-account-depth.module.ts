@@ -8,7 +8,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorato
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { isUniqueViolation } from '../../../common/db-error';
 
-// ── CRM-7 — B2B Account/Contact 360 DEPTH (REV-24, migration 0358) ──────────────────────────────────
+// ── CRM-7 — B2B Account/Contact 360 DEPTH (REV-25, migration 0359) ──────────────────────────────────
 // Three net-new capabilities layered on the REV-17 CRM spine (no change to lead→convert→opportunity):
 //   1. Account HIERARCHY — crm_accounts.parent_account_id; set-parent rejects cycles (HIERARCHY_CYCLE);
 //      the hierarchy read rolls the open weighted pipeline up the subtree.
@@ -17,7 +17,7 @@ import { isUniqueViolation } from '../../../common/db-error';
 //   3. Account PLANS — crm_account_plans: a governed draft → active → closed plan (owner + objective +
 //      target revenue + target product categories validated against item_categories); the whitespace read
 //      surfaces the product categories the account is NOT yet being pursued for.
-// The control (REV-24): B2B relationships are governed — hierarchies stay acyclic, each deal's buying
+// The control (REV-25): B2B relationships are governed — hierarchies stay acyclic, each deal's buying
 // committee is documented, and account plans carry an owner + target through a governed lifecycle.
 
 const MAX_DEPTH = 50;
