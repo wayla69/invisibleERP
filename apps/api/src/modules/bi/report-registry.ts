@@ -21,6 +21,8 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   marketing_roi: { label: 'ผลตอบแทนการตลาด (spend → lift → margin)', labelEn: 'Marketing ROI (spend → lift → margin)' },
   // G2 (docs/45): market-basket affinity — which menu items sell together (support/confidence/lift)
   menu_affinity: { label: 'คู่เมนูขายด้วยกัน (basket affinity)', labelEn: 'Menu affinity (co-purchase pairs)' },
+  // G3 (docs/45, PDPA-05): consent-gated HASHED ads-audience push — fail-closed without the ROPA entry
+  audience_export_sync: { label: 'ส่งกลุ่มเป้าหมายโฆษณา (hashed, ตามความยินยอม)', labelEn: 'Audience export (hashed, consent-gated)' },
   // Forecast categories (commit/best-case/pipeline) + quota attainment per owner + activity leaderboard.
   crm_forecast: { label: 'พยากรณ์การขาย + โควตา', labelEn: 'CRM forecast categories + quota attainment' },
   // Likewise: each run re-profiles the tenant's whole active member base (RFM) so segments stay fresh (F2).
