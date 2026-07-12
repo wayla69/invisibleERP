@@ -46,6 +46,7 @@ import { MarketingAutomationService } from '../marketing/marketing-automation.se
 import { VouchersService } from '../campaigns/vouchers.service';
 import { FoodCostService } from '../menu/food-cost.service';
 import type { JwtUser } from '../../common/decorators';
+import type { BiReportGenerator, BiReportSource } from './report-registry';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -108,8 +109,19 @@ export class BiGenerateService {
     @Optional() private readonly crmHealth?: CrmAccountHealthService,
   ) {}
 
+  // docs/46 Phase 1 — module-owned generators, filled at boot by BiReportRegistrarService (see
+  // report-registry.ts). Consulted BEFORE the legacy if-chain below, so a migrated report type has exactly
+  // one home; new report types register here from their owning module instead of growing this file (the
+  // check-service-size ratchet enforces it).
+  private readonly registered = new Map<string, BiReportGenerator>();
+  registerReports(source: BiReportSource) {
+    for (const g of source.biReports()) this.registered.set(g.type, g);
+  }
+
   async generateReport(reportType: string, filters: any, user: JwtUser, reads: BiReadPort): Promise<{ data: any; summary: string; summaryTh: string }> {
     const f = filters ?? {};
+    const provider = this.registered.get(reportType);
+    if (provider) return provider.generate(f, user);
     if (reportType === 'kpi_board') {
       const k = await reads.kpiBoard(user);
       return { data: k, summary: `MTD sales ${k.sales.mtd}, open AR ${k.receivables.open_ar}, open AP ${k.payables.open_ap}, pipeline ${k.pipeline.open_value}`, summaryTh: `ยอดขายเดือนนี้ ${k.sales.mtd} · ลูกหนี้คงค้าง ${k.receivables.open_ar} · เจ้าหนี้คงค้าง ${k.payables.open_ap}` };
