@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 267,
+    "total": 268,
     "by_status": {
-      "Implemented": 264,
+      "Implemented": 265,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 37,
+      "Revenue & Cash": 38,
       "Tax": 12
     }
   },
@@ -1570,10 +1570,29 @@
       "frequency": "Per financing component / per period disclosure",
       "owner": "Revenue Accountant / Controller",
       "coso": "P10/P13",
-      "code_reference": "revrec-disclosure/rev-financing.service.ts (setFinancingComponent discounts to PV + builds the EIR unwind schedule so Σ interest = face − PV, records Pending; approveFinancingComponent SOD_SELF_APPROVAL flips Pending→Approved; runFinancing posts advance Dr5900/Cr2410 or arrears Dr1265/Cr4650, FINANCING_NOT_APPROVED guard, idempotent) + rev-disclosure.service.ts (contractLiabilityRollforward decomposes the GL 2410/1265 movements by source and reconciles closing to the GL balance; rpo sums unrecognized revrec_schedules planned amounts with a 12-month timing band); rev-disclosure.controller.ts (/api/revenue/contracts/:id/financing-component POST + /approve POST + GET, :id/run-financing POST, /api/revenue/disclosure/contract-liability-rollforward GET, /disclosure/rpo GET — gated exec/ar/fin_report); schema/revrec-disclosure.ts rev_financing_schedules + migration 0361 (0232-form RLS, leading (tenant_id, contract_id) index); ledger-constants.ts COA 4650 + CF_CLASSIFY; posting-events.ts REVFIN.INCOME/REVFIN.EXPENSE; bi report types contract_liability_rollforward + rpo_backlog; cutover/revrec-disclosure.ts (ToE)",
+      "code_reference": "revrec-disclosure/rev-financing.service.ts (setFinancingComponent discounts to PV + builds the EIR unwind schedule so Σ interest = face − PV, records Pending; approveFinancingComponent SOD_SELF_APPROVAL flips Pending→Approved; runFinancing posts advance Dr5900/Cr2410 or arrears Dr1265/Cr4650, FINANCING_NOT_APPROVED guard, idempotent) + rev-disclosure.service.ts (contractLiabilityRollforward decomposes the GL 2410/1265 movements by source and reconciles closing to the GL balance; rpo sums unrecognized revrec_schedules planned amounts with a 12-month timing band); rev-disclosure.controller.ts (/api/revenue/contracts/:id/financing-component POST + /approve POST + GET, :id/run-financing POST, /api/revenue/disclosure/contract-liability-rollforward GET, /disclosure/rpo GET — gated exec/ar/fin_report); schema/revrec-disclosure.ts rev_financing_schedules + migration 0366 (0232-form RLS, leading (tenant_id, contract_id) index); ledger-constants.ts COA 4650 + CF_CLASSIFY; posting-events.ts REVFIN.INCOME/REVFIN.EXPENSE; bi report types contract_liability_rollforward + rpo_backlog; cutover/revrec-disclosure.ts (ToE)",
       "tod": "Inspect that a material financing component discounts the transaction price to PV and unwinds the interest so Σ interest equals face − PV, that the discount-rate judgement is maker-checker (maker ≠ approver, SOD_SELF_APPROVAL) with an un-approved component unable to post (FINANCING_NOT_APPROVED), that advance (customer prepays) posts interest expense to 5900 with the contract liability 2410 accreting and arrears (deferred payment) posts interest income to 4650 with the contract asset 1265 accreting, and that the §120 contract-liability rollforward reconciles to the GL 2410/1265 control accounts and the RPO equals the unrecognized allocated price.",
       "toe": "Re-perform (revrec-disclosure harness): a 1200 face at 12%/yr over 12 months discounts to PV 1064.94 and Σ interest 135.06 = face − PV, last closing balance = 1200; the maker self-approving → SOD_SELF_APPROVAL and run-before-approval → FINANCING_NOT_APPROVED; a different checker approves and run-financing posts 12 periods of interest EXPENSE to 5900 with the contract liability 2410 accreting toward face (idempotent re-run posts 0); an arrears component accretes the contract asset 1265 against interest income 4650; the contract-liability rollforward reads opening 0 + billings 300 − recognized 100 = closing 200 = GL 2410; the RPO = 900 unrecognized allocated price banded within 12 months; a second tenant sees 0 of the first tenant's financing/RPO (RLS).",
       "evidence": "Financing-component schedule (PV/face/interest + EIR unwind) with the discount-rate maker-checker approval log (created_by/approved_by); REVFIN interest postings (4650/5900); §120 contract-liability rollforward reconciled to GL; RPO / backlog by contract with timing band",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-07",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (pipeline / account planning)",
+      "risk": "B2B account relationships are ungoverned — a company's parent/subsidiary structure is not modelled (so pipeline cannot be rolled up to the buying group, and re-parented accounts can loop), a deal is worked without documenting WHO decides (no buying committee, so the forecast rests on a single unverified contact), and there is no account plan (owner, target, product-line coverage) — so strategic accounts are pursued ad-hoc, whitespace (un-targeted product lines) is invisible, and the account-based revenue forecast is unreliable.",
+      "assertion": "Accuracy/Completeness/Authorization",
+      "description": "B2B account/contact 360 DEPTH (CRM-7, migration 0365) on the REV-17 CRM spine. Account HIERARCHY: crm_accounts gains a self-referential parent_account_id; PATCH /api/crm/accounts/:no/parent rejects a self-parent (SELF_PARENT) and any link that would close a loop (HIERARCHY_CYCLE), and GET /api/crm/accounts/:no/hierarchy returns the ancestor chain + direct children + a SUBTREE pipeline roll-up (Σ open weighted amount across the account and all descendants) so pipeline ties to the buying group; a survivor-merge re-parents the duplicate's child accounts so the hierarchy stays intact. Buying COMMITTEE: crm_opportunity_contacts records which contacts sit on a deal, each with a role (decision_maker/champion/influencer/evaluator/blocker/user) + influence weight — a committee contact must belong to the deal's account (CONTACT_ACCOUNT_MISMATCH), a contact appears at most once per deal (COMMITTEE_DUP), and at most one is_primary. Account PLANS: crm_account_plans is a GOVERNED draft -> active -> closed plan carrying an owner, objective, strategy, target revenue and target product categories validated against item_categories (UNKNOWN_CATEGORY); a plan activates only when it has an owner AND an objective (PLAN_INCOMPLETE), the lifecycle is enforced (PLAN_NOT_DRAFT / PLAN_NOT_ACTIVE, a closed plan is immutable PLAN_CLOSED), and GET /api/crm/accounts/:no/whitespace surfaces the product categories the account is NOT yet being pursued for (active item_categories minus the union of active-plan targets). All three tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes); the surface gates crm/exec/ar. No GL post.",
+      "prev_det": "Prev/Det",
+      "nature": "Automated",
+      "frequency": "Per account / continuous",
+      "owner": "Sales / Account Manager / Sales Manager",
+      "coso": "P13",
+      "code_reference": "modules/crm/account-depth/crm-account-depth.module.ts (setParent SELF_PARENT/HIERARCHY_CYCLE cycle guard; hierarchy ancestors+children+subtree open-weighted roll-up; addCommitteeMember CONTACT_ACCOUNT_MISMATCH/COMMITTEE_DUP + single is_primary; listCommittee/removeCommitteeMember; createPlan APL- + target-category validation UNKNOWN_CATEGORY; updatePlan PLAN_CLOSED guard; activatePlan PLAN_NOT_DRAFT/PLAN_INCOMPLETE; closePlan PLAN_NOT_ACTIVE; whitespace active-plan targets vs item_categories); crm/accounts/crm-accounts.module.ts (merge re-parents child accounts); schema/crm-pipeline.ts crm_accounts.parent_account_id + crm_opportunity_contacts + crm_account_plans + migration 0365 (RLS, tenant-leading indexes); cutover/pipeline.ts (ToE, CRM-7 checks)",
+      "tod": "Inspect the account-hierarchy cycle guard + subtree pipeline roll-up, the buying-committee account-membership + uniqueness + single-primary rules, the account-plan draft->active->closed lifecycle + category validation, and the whitespace derivation.",
+      "toe": "Re-perform: link a subsidiary under a parent, then parenting the parent under its own child -> HIERARCHY_CYCLE; the hierarchy read rolls a child's open deal into the parent's subtree weighted pipeline; add a buying-committee member (is_primary) then re-add the same contact -> COMMITTEE_DUP and a contact from another account -> CONTACT_ACCOUNT_MISMATCH; create an account plan (APL-) with a valid target category, an unknown category -> UNKNOWN_CATEGORY, activate a complete draft -> active, re-activate -> PLAN_NOT_DRAFT, activate an incomplete draft -> PLAN_INCOMPLETE, close -> closed; whitespace reports the targeted category as covered and the rest as whitespace; a T1 user sees none of HQ's account plans (RLS) (re-performed by the pipeline harness CRM-7 checks).",
+      "evidence": "Account hierarchy + subtree pipeline roll-up; buying-committee register (role/influence/primary); governed account-plan lifecycle + whitespace coverage read",
       "status": "Implemented"
     },
     {

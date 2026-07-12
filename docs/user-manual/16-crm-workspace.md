@@ -122,6 +122,31 @@ deal (and the Customer-360). If the contact has no address for the chosen channe
 
 ---
 
+## 16.4b Account hierarchy, buying committee & account plans (โครงสร้างบริษัท คณะผู้ตัดสินใจ และแผนบัญชีลูกค้า — CRM-7)
+
+Three tools deepen the account view so a strategic B2B account is *governed*, not just listed.
+
+- **โครงสร้างบริษัท (Account hierarchy).** Give an account a **parent** (`PATCH …/accounts/:no/parent`) to
+  model a group — a holding company and its subsidiaries. The system blocks a company being its own parent
+  (`SELF_PARENT`) or a link that would loop back on itself (`HIERARCHY_CYCLE`). The **hierarchy** view
+  (`GET …/accounts/:no/hierarchy`) shows the parent chain, the direct children, and a **subtree pipeline
+  roll-up** — the open, probability-weighted pipeline across the whole group, so you see the buying group's
+  value, not just one company. Merging a duplicate keeps the tree intact (its children re-parent to the survivor).
+- **คณะผู้ตัดสินใจ (Buying committee).** On a deal, record **who decides** — add contacts as committee
+  members with a **role** (ผู้ตัดสินใจ / แชมเปี้ยน / ผู้มีอิทธิพล / ผู้ประเมิน / ผู้คัดค้าน / ผู้ใช้งาน) and an
+  **influence** weight; mark exactly one as **primary**. A committee contact must belong to the deal's account
+  (`CONTACT_ACCOUNT_MISMATCH`) and appears once per deal (`COMMITTEE_DUP`). So a forecast rests on a documented
+  decision unit, not a single name.
+- **แผนบัญชีลูกค้า (Account plans) — the "Account plans" tab.** Create a plan for an account with an **owner**,
+  **objective**, **target revenue** and **target product categories** (comma-separated category codes, checked
+  against your item categories — an unknown code is rejected `UNKNOWN_CATEGORY`). A plan runs a governed
+  lifecycle: **ร่าง (draft) → เปิดใช้งาน (active) → ปิด (closed)**. **เปิดใช้งาน (Activate)** needs an owner **and**
+  an objective; a closed plan is read-only. The **whitespace panel** (per account) shows every active product
+  category as **covered** (green — targeted by an active plan) or **whitespace** (not yet pursued), so coverage
+  gaps are obvious at a glance.
+
+---
+
 ## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
 
 Beyond the win/loss dashboard, three read-only analytics answer *why* deals move the way they do. Each looks
@@ -360,6 +385,10 @@ interactions ended without a case being opened — a direct read on how much wor
 | `NO_ROUND_ROBIN` | **Assign** pressed with no round-robin owners configured and no owner given | Set `round_robin_owners` in follow-up settings, or pass an owner. |
 | `NO_RECIPIENT` | Comms send where the contact has no address for that channel | Enter a `to` address, or set the contact's email/LINE id/phone. |
 | `ACCOUNT_NOT_FOUND` | Opening Customer 360 for an account number that doesn't exist in your company | Check the `ACC-…` number, or open the account from the Accounts tab. |
+| `HIERARCHY_CYCLE` / `SELF_PARENT` | Setting an account's parent to itself or to one of its own subsidiaries (§16.4b, CRM-7) | Pick a parent outside the account's own group subtree. |
+| `CONTACT_ACCOUNT_MISMATCH` / `COMMITTEE_DUP` | Adding a buying-committee contact from another account, or the same contact twice (§16.4b, CRM-7) | Add only this deal account's contacts; each contact appears once per deal. |
+| `UNKNOWN_CATEGORY` | An account-plan target category code that isn't one of your item categories (§16.4b, CRM-7) | Use an existing active item-category code (comma-separated). |
+| `PLAN_INCOMPLETE` / `PLAN_NOT_DRAFT` / `PLAN_NOT_ACTIVE` / `PLAN_CLOSED` | An out-of-order account-plan lifecycle action (§16.4b, CRM-7) | Follow draft → active → closed; set owner + objective before activating; a closed plan is read-only. |
 | `BAD_INBOUND_SECRET` / `INBOUND_UNVERIFIED` | An inbound CRM email arrived unsigned or with a wrong signature (CRM-6) | Not a user action — ask your administrator to configure the CRM inbound email secret at the mail provider. |
 | `ALREADY_RESOLVED` | Linking a review-queue item that was already linked or dismissed | Refresh the review queue; someone already handled it. |
 | `SUB_CANCELLED` | Resuming/pausing a subscription that is already cancelled (§16.7) | Cancel is permanent — create a new subscription instead. |
@@ -378,6 +407,7 @@ interactions ended without a case being opened — a direct read on how much wor
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.0 | 2026-07-12 | **B2B account/contact 360 depth (`/crm`) — CRM-7, control CRM-07:** new §16.4b. **Account hierarchy** (give an account a parent to model a group; the hierarchy view rolls the whole group's weighted pipeline up; cycles blocked); **buying committee** (record who decides on a deal — role + influence + one primary, contacts must belong to the deal's account); and **account plans** (a new *Account plans* tab — governed draft → active → closed plans with an owner, objective, target revenue and target product categories, plus a **whitespace** panel showing which product categories the account isn't being pursued for). Added the `HIERARCHY_CYCLE`/`SELF_PARENT`, `CONTACT_ACCOUNT_MISMATCH`/`COMMITTEE_DUP`, `UNKNOWN_CATEGORY`, and `PLAN_*` error rows. |
 | 1.9 | 2026-07-12 | **Knowledge base & case deflection (`/service`) — SVC-6, control SVC-06:** new §16.12. Write help articles as drafts; a **different colleague** publishes them (authors can't self-publish — governed review); published articles are searchable (published-only), archivable, and score helpful votes; a **deflection-rate** stat shows the share of KB-assisted interactions that avoided opening a case. |
 | 1.8 | 2026-07-12 | **Case SLAs & breach worklist (`/service`) — SVC-5, control SVC-05:** new §16.11. Each case gets an **SLA tier** (Standard/Bronze/Silver/Gold/Platinum) that sets first-response + resolution due times from the case open time; the first reply and a late resolution flag a red **เกิน SLA** badge; a **SLA-breaches** stat counts open past-due cases and clears as you respond/resolve. Added a **Set SLA tier** row action and the SLA-tier field on the open-a-case form; email-opened cases default to Standard. |
 | 1.7 | 2026-07-11 | **Support cases & Email-to-Case (`/service`) — SVC-4, control SVC-04:** new §16.10. The เคสบริการ tab opens/tracks support cases with a governed lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee, and **Email-to-Case** turns customer emails into cases automatically — an unmatched email opens a new case (nothing dropped), a reply threads back onto its case (reopening it if resolved/closed), duplicate redeliveries are ignored, and the HMAC-signed webhook rejects forged/replayed mail. Added the `CASE_NOT_ACTIVE` / `CASE_ALREADY_CLOSED` / `CASE_NOT_CLOSED` / `UNKNOWN_TENANT` error rows. |
