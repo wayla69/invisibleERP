@@ -100,6 +100,19 @@ code, evaluate the request against these rules and raise concerns if a violation
   HTML in frameworks like Streamlit), ensure proper escaping. Never pass raw unsanitized text into
   components that can execute HTML or JavaScript.
 
+### 9. Multi-Tenant Data Isolation & Leak Prevention
+- **Mandatory Tenant Filtering:** Every single database query, ORM look-up, and update operation MUST
+  explicitly filter by the active `tenant_id` (or use a global tenant context/Row-Level Security wrapper).
+- **Prohibition of Raw/Unfiltered Queries:** Writing queries that fetch records without an explicit
+  `tenant_id` check is strictly prohibited, unless it is a cross-tenant global configuration table
+  (e.g., system-wide currency codes).
+- **Context Preservation:** Ensure that the tenant context (e.g., extracted from the request header, JWT
+  token, or Streamlit session state) is securely propagated down to the service layer and database layer.
+  Never allow the tenant context to be overridden or modified by client-side inputs.
+- **Cross-Tenant Mutation Prevention:** When updating or deleting records, always perform a combined
+  check: `WHERE id = :id AND tenant_id = :active_tenant_id`. Never assume an ID belongs to the active
+  tenant.
+
 ### Pre-Flight Check Protocol
 For every task involving code modification, output a brief validation before writing code:
 1. **Context Check:** Is this feature in the right module?
@@ -127,6 +140,13 @@ Before finalizing code changes, you must run local security linters if they are 
    introduced packages have known CVEs.
 3. **Remediation:** If any high-severity security warnings are tripped, stop implementation immediately and
    rewrite the logic securely.
+
+### Multi-Tenant Test Protocol
+When writing tests for new features, you must include a "Cross-Tenant Boundary Test":
+1. **Isolation Verification:** Assert that a request using Tenant A's credentials attempting to access
+   Tenant B's resource ID returns a `403 Forbidden`, `404 Not Found`, or an explicit authorization error.
+2. **Data Leak Test:** Verify that list operations (e.g., fetching invoices) return exactly 0 records
+   belonging to other tenants.
 
 ## 🐞 Debug mantra (follow in order)
 
