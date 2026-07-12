@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { Permissions, Public, NoTx, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ChannelAdapterService } from './channel-adapter.service';
+import { ChannelCustomerRefsService } from './channel-customer-refs.service';
 import { qint, qintOpt } from '../../common/query';
 
 const AdapterBody = z.object({ id: z.number().optional(), platform: z.string().min(1), store_ref: z.string().optional(), enabled: z.boolean().optional(), auto_accept: z.boolean().optional(), config: z.record(z.any()).optional() });
@@ -17,7 +18,7 @@ const WebhookPayload = z.object({}).passthrough();
 @Controller('api/channels')
 @Permissions('pos', 'order_mgt', 'exec')
 export class ChannelAdapterController {
-  constructor(private readonly svc: ChannelAdapterService) {}
+  constructor(private readonly svc: ChannelAdapterService, private readonly customerRefs: ChannelCustomerRefsService) {}
 
   @Get('adapters') list() { return this.svc.listAdapters(); }
   // POS-7 — current per-channel auto-86 state + the 86/un-86 transition audit trail.
@@ -26,6 +27,9 @@ export class ChannelAdapterController {
   @Post(':platform/menu-sync') menuSync(@Param('platform') p: string, @CurrentUser() u: JwtUser) { return this.svc.menuSyncOut(p, u); }
   @Get('orders') orders(@Query('limit') limit?: string) { return this.svc.listChannelOrders(qint('limit', limit, 50)); }
   @Post('orders/:orderNo/status') status(@Param('orderNo') no: string, @Body(new ZodValidationPipe(StatusBody)) b: z.infer<typeof StatusBody>) { return this.svc.updateStatus(no, b.status); }
+  // G1 (MKT-13) — mint the package-insert QR deep link for one aggregator order: the customer scans it,
+  // logs in as a member (OTP/LINE) and links their platform account with an explicit consent decision.
+  @Post('orders/:orderNo/link-qr') linkQr(@Param('orderNo') no: string, @CurrentUser() u: JwtUser) { return this.customerRefs.linkQrForOrder(no, u); }
   @Post('orders/:orderNo/accept') accept(@Param('orderNo') no: string) { return this.svc.acceptOrder(no); }
   @Post('orders/:orderNo/reject') reject(@Param('orderNo') no: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>) { return this.svc.rejectOrder(no, b.reason ?? ''); }
 }
