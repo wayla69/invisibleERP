@@ -103,6 +103,7 @@
     "revrec-billing": "tsx src/revrec-billing.ts",
     "revrec-variable": "tsx src/revrec-variable.ts",
     "revrec-modifications": "tsx src/revrec-modifications.ts",
+    "revrec-disclosure": "tsx src/revrec-disclosure.ts",
     "fxreval": "tsx src/fxreval.ts",
     "intercompany": "tsx src/intercompany.ts",
     "multiledger": "tsx src/multiledger.ts",

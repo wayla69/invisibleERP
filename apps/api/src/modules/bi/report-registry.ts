@@ -83,6 +83,10 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   membership_revenue_recognize: { label: 'รับรู้รายได้ค่าสมาชิก VIP รายเดือน', labelEn: 'Recognize monthly VIP membership revenue' }, // V4 (docs/29)
   // Likewise: each run recognizes every due TFRS-15 revenue schedule through the current period (idempotent).
   rev_rec_recognize: { label: 'รับรู้รายได้ตามสัญญา (TFRS 15)', labelEn: 'Recognize due revenue schedules' },
+  // REV-27 (Track D Wave 4) — TFRS 15 §120 revenue disclosure pack. Read-only detective aggregators:
+  // the contract-liability rollforward (§120(b), ties to GL 2410/1265) + the RPO / backlog (§120(a)).
+  contract_liability_rollforward: { label: 'กระทบยอดหนี้สินตามสัญญา (TFRS 15)', labelEn: 'Contract-liability rollforward (TFRS 15 §120)' },
+  rpo_backlog: { label: 'ภาระที่ยังไม่ปฏิบัติคงเหลือ (RPO/Backlog)', labelEn: 'Remaining performance obligation (RPO/backlog)' },
   // Governance readiness (ELC-01/02/04): each run snapshots acknowledgement coverage, oversight cadence and
   // open-case ageing; the run summary surfaces any breach. Schedule it `weekly` to drive the cadence reminders.
   governance_readiness: { label: 'ความพร้อมธรรมาภิบาล (ELC)', labelEn: 'Governance readiness (ELC)' },
