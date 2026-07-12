@@ -1952,6 +1952,23 @@ async function main() {
   ok('COA-B: where-used on a non-existent code → 404 ACCOUNT_NOT_FOUND',
     wuMissing.status === 404 && wuMissing.json?.error?.code === 'ACCOUNT_NOT_FOUND', `${wuMissing.status} ${wuMissing.json?.error?.code}`);
 
+  // ── COA-D2 (GL-21): effective window + required dimensions are ENFORCED at posting once declared ──
+  const effReq = await inj('POST', '/api/ledger/accounts', admin, { code: '5910', name: 'Retired sundry expense (D2)', type: 'Expense', effectiveTo: '2026-06-30' });
+  await inj('POST', `/api/ledger/accounts/change-requests/${effReq.json?.id}/approve`, mgr);
+  const effJe = await inj('POST', '/api/ledger/journal', admin, { date: '2027-03-06', source: 'Manual', memo: 'D2 effective window', lines: [{ account_code: '5910', debit: 10 }, { account_code: '1010', credit: 10 }] });
+  ok('COA-D2: a line dated after effective_to → 400 ACCOUNT_NOT_EFFECTIVE (the manual\'s "use an effective-to date" now binds)',
+    effJe.status === 400 && effJe.json?.error?.code === 'ACCOUNT_NOT_EFFECTIVE', `${effJe.status} ${effJe.json?.error?.code}`);
+  const dimReq = await inj('POST', '/api/ledger/accounts', admin, { code: '5920', name: 'Project-tracked expense (D2)', type: 'Expense', requireDimension: { cost_center: true } });
+  await inj('POST', `/api/ledger/accounts/change-requests/${dimReq.json?.id}/approve`, mgr);
+  const dimMiss = await inj('POST', '/api/ledger/journal', admin, { date: '2027-03-06', source: 'Manual', memo: 'D2 dim missing', lines: [{ account_code: '5920', debit: 10 }, { account_code: '1010', credit: 10 }] });
+  const dimOkJe = await inj('POST', '/api/ledger/journal', admin, { date: '2027-03-06', source: 'Manual', memo: 'D2 dim present', lines: [{ account_code: '5920', debit: 10, cost_center: 'CC-1' }, { account_code: '1010', credit: 10 }] });
+  ok('COA-D2: a flagged dimension missing → 400 REQUIRED_DIMENSION_MISSING; the same line WITH it posts',
+    dimMiss.status === 400 && dimMiss.json?.error?.code === 'REQUIRED_DIMENSION_MISSING' && (dimOkJe.status === 200 || dimOkJe.status === 201) && !!dimOkJe.json?.entry_no,
+    `miss=${dimMiss.status}/${dimMiss.json?.error?.code} ok=${dimOkJe.status}`);
+  const badParent = await inj('POST', '/api/ledger/accounts', admin, { code: '5930', name: 'orphan (D2)', type: 'Expense', parentCode: '9876' });
+  ok('COA-D2: a create naming a non-existent parent → 400 PARENT_NOT_FOUND (fail-closed at request time)',
+    badParent.status === 400 && badParent.json?.error?.code === 'PARENT_NOT_FOUND', `${badParent.status} ${badParent.json?.error?.code}`);
+
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) + PR-3 category-grain asset accounts & dispose/prepaid overrides ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
