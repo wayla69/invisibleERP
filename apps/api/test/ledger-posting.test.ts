@@ -117,6 +117,40 @@ describe('LedgerPostingService — postEntry guards (GL-05, balanced by construc
       { account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 },
     ] } as any))).toBe('INVALID_POSTING_ACCOUNT');
   });
+
+  // ── COA-D2 (GL-21): the effective window and required dimensions are ENFORCED only when declared,
+  // so every existing account (none set either) posts byte-identically — asserted by the pass case.
+  it('rejects a line dated after the account\'s effective-to (ACCOUNT_NOT_EFFECTIVE)', async () => {
+    const svcEff = new LedgerPostingService(fakeDb([
+      { rows: [] },
+      { rows: [
+        { code: '5100', isPostable: true, isControl: false, controlSubledger: null, effectiveFrom: null, effectiveTo: '2026-06-30', requireDimension: null },
+        { code: '1000', isPostable: true, isControl: false, controlSubledger: null, effectiveFrom: null, effectiveTo: null, requireDimension: null },
+      ] },
+    ]) as any, docNo);
+    expect(await code(() => svcEff.postEntry({ source: 'T', createdBy: 'a', tenantId: 1, date: '2026-07-12', lines: [
+      { account_code: '5100', debit: 10 }, { account_code: '1000', credit: 10 },
+    ] } as any))).toBe('ACCOUNT_NOT_EFFECTIVE');
+  });
+
+  it('rejects a line missing a required dimension (REQUIRED_DIMENSION_MISSING); the same line WITH it passes the guard', async () => {
+    const rows = [
+      { code: '5100', isPostable: true, isControl: false, controlSubledger: null, effectiveFrom: null, effectiveTo: null, requireDimension: { project: true } },
+      { code: '1000', isPostable: true, isControl: false, controlSubledger: null, effectiveFrom: null, effectiveTo: null, requireDimension: null },
+    ];
+    const svcDim = new LedgerPostingService(fakeDb([{ rows: [] }, { rows }]) as any, docNo);
+    expect(await code(() => svcDim.postEntry({ source: 'T', createdBy: 'a', tenantId: 1, lines: [
+      { account_code: '5100', debit: 10 }, { account_code: '1000', credit: 10 },
+    ] } as any))).toBe('REQUIRED_DIMENSION_MISSING');
+    // with the project stamped, the guard passes — the next failure is the fake db's write refusal,
+    // proving the entry reached the insert stage (all guards cleared).
+    const svcDim2 = new LedgerPostingService(fakeDb([{ rows: [] }, { rows }]) as any, docNo);
+    const out = await code(() => svcDim2.postEntry({ source: 'T', createdBy: 'a', tenantId: 1, lines: [
+      { account_code: '5100', debit: 10, project_id: 7 }, { account_code: '1000', credit: 10 },
+    ] } as any));
+    expect(out).not.toBe('REQUIRED_DIMENSION_MISSING');
+    expect(out).not.toBe('ACCOUNT_NOT_EFFECTIVE');
+  });
 });
 
 describe('LedgerPostingService — approveEntry maker-checker (GL-05 SoD)', () => {

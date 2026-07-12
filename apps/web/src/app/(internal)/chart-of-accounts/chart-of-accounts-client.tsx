@@ -42,6 +42,8 @@ type RawAccount = {
   isPostable?: boolean | null;
   cfBucket?: string | null;
   isCurrent?: boolean | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
   requireDimension?: Record<string, boolean> | null;
   active?: string | boolean | null;
 };
@@ -61,6 +63,8 @@ type Row = {
   active: boolean;
   cfBucket: string | null;
   isCurrent: boolean | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
 };
 
 type CoaResponse = { accounts: RawAccount[]; count?: number; source?: string; industry_scoped?: boolean };
@@ -161,6 +165,8 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
         active: activeRaw === false || activeRaw === 'false' ? false : true,
         cfBucket: c?.cfBucket ?? null,
         isCurrent: c?.isCurrent ?? null,
+        effectiveFrom: c?.effectiveFrom ?? null,
+        effectiveTo: c?.effectiveTo ?? null,
       };
     });
   }, [showAll, canonQ.data, overlayQ.data]);
@@ -422,6 +428,10 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
   // indirect cash flow and the BS metrics classify it without a code change.
   const [cfBucket, setCfBucket] = useState('');
   const [isCurrent, setIsCurrent] = useState('');
+  // COA-D2: effective window + required dimensions — now ENFORCED by the posting guard when set.
+  const [effFrom, setEffFrom] = useState('');
+  const [effTo, setEffTo] = useState('');
+  const [reqDims, setReqDims] = useState<Record<string, boolean>>({});
   const codeOk = /^\d{4}$/.test(code);
   const save = useMutation({
     mutationFn: () =>
@@ -434,6 +444,9 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
           isPostable: postable,
           ...(cfBucket ? { cfBucket } : {}),
           ...(isCurrent !== '' ? { isCurrent: isCurrent === 'true' } : {}),
+          ...(effFrom ? { effectiveFrom: effFrom } : {}),
+          ...(effTo ? { effectiveTo: effTo } : {}),
+          ...(Object.values(reqDims).some(Boolean) ? { requireDimension: reqDims } : {}),
         }),
       }),
     onSuccess: (res: any) => { notifySuccess(res?.status === 'PendingApproval' ? t('fnx.coa.staged', { code }) : t('fnx.coa.created', { code })); onSaved(); },
@@ -468,6 +481,26 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
             <input type="checkbox" checked={postable} onChange={(e) => setPostable(e.target.checked)} />
             {t('fnx.coa.f_postable')}
           </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label={t('fnx.coa.f_eff_from')} htmlFor="coa-eff-from">
+              <Input id="coa-eff-from" type="date" value={effFrom} onChange={(e) => setEffFrom(e.target.value)} />
+            </FormField>
+            <FormField label={t('fnx.coa.f_eff_to')} htmlFor="coa-eff-to">
+              <Input id="coa-eff-to" type="date" value={effTo} onChange={(e) => setEffTo(e.target.value)} />
+            </FormField>
+          </div>
+          <div className="grid gap-1">
+            <span className="text-sm font-medium">{t('fnx.coa.f_req_dims')}</span>
+            <div className="flex flex-wrap gap-3 text-sm">
+              {Object.keys(DIM_KEY).map((d) => (
+                <label key={d} className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={!!reqDims[d]} onChange={(e) => setReqDims((v) => ({ ...v, [d]: e.target.checked }))} />
+                  {t(DIM_KEY[d]!)}
+                </label>
+              ))}
+            </div>
+            <span className="text-xs text-muted-foreground">{t('fnx.coa.f_req_dims_hint')}</span>
+          </div>
           {(type === 'Asset' || type === 'Liability' || type === 'Equity') && (
             <>
               <FormField label={t('fnx.coa.f_cf_bucket')} htmlFor="coa-cf">
@@ -511,6 +544,12 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
   const cur0 = account.isCurrent === true ? 'true' : account.isCurrent === false ? 'false' : '';
   const [cfBucket, setCfBucket] = useState(cf0);
   const [isCurrent, setIsCurrent] = useState(cur0);
+  // COA-D2: effective window + required dimensions (enforced by the posting guard when set).
+  const ef0 = account.effectiveFrom ?? '', et0 = account.effectiveTo ?? '';
+  const rd0 = account.requireDimension ?? {};
+  const [effFrom, setEffFrom] = useState(ef0);
+  const [effTo, setEffTo] = useState(et0);
+  const [reqDims, setReqDims] = useState<Record<string, boolean>>({ ...rd0 });
   const isBs = account.type === 'Asset' || account.type === 'Liability' || account.type === 'Equity';
   const save = useMutation({
     mutationFn: () =>
@@ -522,6 +561,9 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
           ...(postable !== account.isPostable ? { isPostable: postable } : {}),
           ...(cfBucket !== cf0 ? { cfBucket: cfBucket || null } : {}),
           ...(isCurrent !== cur0 ? { isCurrent: isCurrent === '' ? null : isCurrent === 'true' } : {}),
+          ...(effFrom !== ef0 ? { effectiveFrom: effFrom } : {}),
+          ...(effTo !== et0 ? { effectiveTo: effTo } : {}),
+          ...(JSON.stringify(reqDims) !== JSON.stringify(rd0) ? { requireDimension: reqDims } : {}),
         }),
       }),
     onSuccess: (res: any) => { notifySuccess(res?.status === 'PendingApproval' ? t('fnx.coa.staged', { code: account.code }) : t('fnx.coa.saved', { code: account.code })); onSaved(); },
@@ -545,6 +587,26 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
             <input type="checkbox" checked={postable} onChange={(e) => setPostable(e.target.checked)} />
             {t('fnx.coa.f_postable')}
           </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label={t('fnx.coa.f_eff_from')} htmlFor="coa-e-eff-from">
+              <Input id="coa-e-eff-from" type="date" value={effFrom} onChange={(e) => setEffFrom(e.target.value)} />
+            </FormField>
+            <FormField label={t('fnx.coa.f_eff_to')} htmlFor="coa-e-eff-to">
+              <Input id="coa-e-eff-to" type="date" value={effTo} onChange={(e) => setEffTo(e.target.value)} />
+            </FormField>
+          </div>
+          <div className="grid gap-1">
+            <span className="text-sm font-medium">{t('fnx.coa.f_req_dims')}</span>
+            <div className="flex flex-wrap gap-3 text-sm">
+              {Object.keys(DIM_KEY).map((d) => (
+                <label key={d} className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={!!reqDims[d]} onChange={(e) => setReqDims((v) => ({ ...v, [d]: e.target.checked }))} />
+                  {t(DIM_KEY[d]!)}
+                </label>
+              ))}
+            </div>
+            <span className="text-xs text-muted-foreground">{t('fnx.coa.f_req_dims_hint')}</span>
+          </div>
           {isBs && (
             <>
               <FormField label={t('fnx.coa.f_cf_bucket')} htmlFor="coa-e-cf">
