@@ -2540,7 +2540,14 @@
       "idx": 363,
       "version": "7",
       "when": 2023820000328,
-      "tag": "0366_revrec_financing_schedules",
+      "tag": "0366_channel_customer_refs",
+      "breakpoints": true
+    },
+    {
+      "idx": 364,
+      "version": "7",
+      "when": 2023820000329,
+      "tag": "0367_revrec_financing_schedules",
       "breakpoints": true
     }
   ]

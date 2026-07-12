@@ -7,6 +7,7 @@ import { RealtimeScope } from '../restaurant/realtime.scope';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { normalizeAggregatorPayload } from './mappers';
+import { ChannelCustomerRefsService } from './channel-customer-refs.service';
 import { getPlatformProvider } from './providers';
 import { verifyInboundWebhook } from '../../common/webhook-auth';
 
@@ -20,7 +21,7 @@ const channelOf = (p: string) => (p === 'grab' || p === 'lineman' ? p : 'web');
 // + status round-trip are simulated until per-platform creds exist.
 @Injectable()
 export class ChannelAdapterService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService, private readonly scope: RealtimeScope) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService, private readonly scope: RealtimeScope, private readonly customerRefs: ChannelCustomerRefsService) {}
 
   async listAdapters() {
     const db = this.db;
@@ -94,13 +95,21 @@ export class ChannelAdapterService {
 
       const orderNo = await this.docNo.nextDaily('DIN');
       const subtotal = round2(norm.lines.reduce((a, l) => a + l.qty * l.unit_price, 0));
+      // G1 (MKT-13): capture the platform's stable buyer ref (hashed) so repeat marketplace buyers accrue
+      // to one profile; an already-linked ref attaches the member to this order. Best-effort — a ref
+      // failure must never block a food order.
+      let linkedMemberId: number | null = null;
+      if (norm.extCustomerRef) {
+        const cap = await this.customerRefs.captureOnIngest(tenantId, platform, norm.extCustomerRef, orderNo).catch(() => null);
+        linkedMemberId = cap?.memberId ?? null;
+      }
       await db.transaction(async (tx: any) => {
         const [ord] = await tx.insert(dineInOrders).values({
           orderNo, tenantId, status: adapter.autoAccept ? 'sent_to_kitchen' : 'open',
           channel: channelOf(platform), fulfillmentType: 'delivery', fulfillmentStatus: adapter.autoAccept ? 'accepted' : 'received',
           extSource: platform, extOrderId: norm.extOrderId ?? null, deliveryFee: String(norm.deliveryFee ?? 0),
           subtotal: String(subtotal), total: String(round2(subtotal + (norm.deliveryFee ?? 0))), notes: norm.customerName ? `aggregator: ${norm.customerName}` : `aggregator ${platform}`,
-          createdBy: `channel:${platform}`,
+          createdBy: `channel:${platform}`, memberId: linkedMemberId,
         }).returning({ id: dineInOrders.id });
         for (const l of norm.lines)
           await tx.insert(dineInOrderItems).values({ tenantId, orderId: ord.id, name: l.name, qty: String(l.qty), unitPrice: String(l.unit_price), amount: String(round2(l.qty * l.unit_price)), kdsStatus: adapter.autoAccept ? 'queued' : 'new', createdBy: `channel:${platform}` });

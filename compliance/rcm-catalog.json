@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 268,
+    "total": 269,
     "by_status": {
-      "Implemented": 265,
+      "Implemented": 266,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 21,
+      "CRM — Loyalty": 22,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 7,
@@ -1570,7 +1570,7 @@
       "frequency": "Per financing component / per period disclosure",
       "owner": "Revenue Accountant / Controller",
       "coso": "P10/P13",
-      "code_reference": "revrec-disclosure/rev-financing.service.ts (setFinancingComponent discounts to PV + builds the EIR unwind schedule so Σ interest = face − PV, records Pending; approveFinancingComponent SOD_SELF_APPROVAL flips Pending→Approved; runFinancing posts advance Dr5900/Cr2410 or arrears Dr1265/Cr4650, FINANCING_NOT_APPROVED guard, idempotent) + rev-disclosure.service.ts (contractLiabilityRollforward decomposes the GL 2410/1265 movements by source and reconciles closing to the GL balance; rpo sums unrecognized revrec_schedules planned amounts with a 12-month timing band); rev-disclosure.controller.ts (/api/revenue/contracts/:id/financing-component POST + /approve POST + GET, :id/run-financing POST, /api/revenue/disclosure/contract-liability-rollforward GET, /disclosure/rpo GET — gated exec/ar/fin_report); schema/revrec-disclosure.ts rev_financing_schedules + migration 0366 (0232-form RLS, leading (tenant_id, contract_id) index); ledger-constants.ts COA 4650 + CF_CLASSIFY; posting-events.ts REVFIN.INCOME/REVFIN.EXPENSE; bi report types contract_liability_rollforward + rpo_backlog; cutover/revrec-disclosure.ts (ToE)",
+      "code_reference": "revrec-disclosure/rev-financing.service.ts (setFinancingComponent discounts to PV + builds the EIR unwind schedule so Σ interest = face − PV, records Pending; approveFinancingComponent SOD_SELF_APPROVAL flips Pending→Approved; runFinancing posts advance Dr5900/Cr2410 or arrears Dr1265/Cr4650, FINANCING_NOT_APPROVED guard, idempotent) + rev-disclosure.service.ts (contractLiabilityRollforward decomposes the GL 2410/1265 movements by source and reconciles closing to the GL balance; rpo sums unrecognized revrec_schedules planned amounts with a 12-month timing band); rev-disclosure.controller.ts (/api/revenue/contracts/:id/financing-component POST + /approve POST + GET, :id/run-financing POST, /api/revenue/disclosure/contract-liability-rollforward GET, /disclosure/rpo GET — gated exec/ar/fin_report); schema/revrec-disclosure.ts rev_financing_schedules + migration 0367 (0232-form RLS, leading (tenant_id, contract_id) index); ledger-constants.ts COA 4650 + CF_CLASSIFY; posting-events.ts REVFIN.INCOME/REVFIN.EXPENSE; bi report types contract_liability_rollforward + rpo_backlog; cutover/revrec-disclosure.ts (ToE)",
       "tod": "Inspect that a material financing component discounts the transaction price to PV and unwinds the interest so Σ interest equals face − PV, that the discount-rate judgement is maker-checker (maker ≠ approver, SOD_SELF_APPROVAL) with an un-approved component unable to post (FINANCING_NOT_APPROVED), that advance (customer prepays) posts interest expense to 5900 with the contract liability 2410 accreting and arrears (deferred payment) posts interest income to 4650 with the contract asset 1265 accreting, and that the §120 contract-liability rollforward reconciles to the GL 2410/1265 control accounts and the RPO equals the unrecognized allocated price.",
       "toe": "Re-perform (revrec-disclosure harness): a 1200 face at 12%/yr over 12 months discounts to PV 1064.94 and Σ interest 135.06 = face − PV, last closing balance = 1200; the maker self-approving → SOD_SELF_APPROVAL and run-before-approval → FINANCING_NOT_APPROVED; a different checker approves and run-financing posts 12 periods of interest EXPENSE to 5900 with the contract liability 2410 accreting toward face (idempotent re-run posts 0); an arrears component accretes the contract asset 1265 against interest income 4650; the contract-liability rollforward reads opening 0 + billings 300 − recognized 100 = closing 200 = GL 2410; the RPO = 900 unrecognized allocated price banded within 12 months; a second tenant sees 0 of the first tenant's financing/RPO (RLS).",
       "evidence": "Financing-component schedule (PV/face/interest + EIR unwind) with the discount-rate maker-checker approval log (created_by/approved_by); REVFIN interest postings (4650/5900); §120 contract-liability rollforward reconciled to GL; RPO / backlog by contract with timing band",
@@ -2125,6 +2125,25 @@
       "tod": "Inspect the claim-first guarded UPDATE, the consent-respecting send path, the frequency-cap check + audited skip, and the tenant scoping.",
       "toe": "Re-perform: an opted-out member enrols, the step is 'skipped' + audited in message_log and a re-run fires nothing (at-most-once); an over-cap step is skipped with error 'frequency cap'; a T2 user cannot see/enrol into a T1 journey (404) — re-performed by the MKT-12 compliance check + the crm harness journey checks.",
       "evidence": "message_log journey:<code>:<step> rows; journey_enrollments claim trail",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-13",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "A marketplace buyer (Grab/LINE MAN/foodpanda/Robinhood) is profiled or marketed to WITHOUT consent, raw platform identifiers (phone/customer id) accumulate as unmanaged PII (PDPA breach), or a stolen link QR silently binds someone else's platform account to an attacker's member profile — poisoning CRM attribution.",
+      "assertion": "Occurrence/Authorization",
+      "description": "Marketplace-to-member identity capture (G1, docs/45): the aggregator ingest paths (channel-adapter ingestWebhook + restaurant ingestThirdParty) persist ONLY a SHA-256 hash of the platform's stable buyer identifier in channel_customer_refs (raw id/phone is NEVER copied out of the audited webhook payload — data minimization) plus counters. LINKING is consent-gated and identity-bound: the member self-link (POST /api/member/channel-link) requires an authenticated member token (the HMAC QR capability only NAMES which ref — possession alone links nothing, and a cross-tenant token is rejected TENANT_MISMATCH) and a REQUIRED explicit marketing_opt_in decision recorded to member_consents (source='self') in the SAME request tx; the staff link (POST /api/loyalty/channel-refs/:id/link, crm_member/loyalty duty) equally refuses to link without the attested consent boolean (source='pos'). One ref = one member: a second member claiming a linked ref is rejected REF_ALREADY_LINKED (409). Once linked, later ingests auto-attach dine_in_orders.member_id so attribution accrues only along the consented mapping.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per ingest / per link",
+      "owner": "Marketing / Loyalty Admin",
+      "coso": "P10/P16",
+      "code_reference": "channel-adapter/channel-customer-refs.service.ts (hashCustomerRef data-minimization; captureOnIngest; linkMember/staffLink single-winner); channel-adapter/link-token.util.ts (HMAC capability); channel-adapter/mappers.ts (extCustomerRef); restaurant/channel-order.service.ts + channel-adapter.service.ts (ingest hooks); loyalty/member/member.controller.ts + loyalty.controller.ts (consent-in-same-tx endpoints); schema/channel-customer-refs.ts + migration 0367 (RLS, tenant-leading index); cutover/channel.ts (MKT-13 ToE)",
+      "tod": "Inspect the hash-only persistence at both ingest sites, the member-token + required-consent link path, the REF_ALREADY_LINKED single-winner, and the tenant-mismatch rejection.",
+      "toe": "Re-perform: ingest two orders with the same buyer ref → ONE ref row, order_count=2, raw identifier absent from channel_customer_refs; link via member token + marketing_opt_in → consent row written and the next ingest auto-attaches member_id; a second member linking the same ref → 409 REF_ALREADY_LINKED; a token minted for another tenant → 403 TENANT_MISMATCH (re-performed by the channel-harness MKT-13 checks).",
+      "evidence": "channel_customer_refs (hashed refs + link audit trail); member_consents channel:<platform> rows",
       "status": "Implemented"
     },
     {

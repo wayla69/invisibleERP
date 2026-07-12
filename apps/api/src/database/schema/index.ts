@@ -169,3 +169,4 @@ export * from './treasury-debt';
 export * from './treasury-invest';
 export * from './treasury-hedge';
 export * from './treasury-pool';
+export * from './channel-customer-refs';

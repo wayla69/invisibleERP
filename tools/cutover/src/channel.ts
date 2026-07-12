@@ -124,6 +124,57 @@ async function main() {
   const grabRows = (await pg.query(`SELECT count(*)::int n FROM dine_in_orders WHERE ext_source='grab' AND ext_order_id='G-1'`)).rows as any[];
   ok('3rd-party ingest idempotent: processed then duplicate, same order_no, exactly 1 order', w1.json.status === 'processed' && /^DIN-/.test(w1.json.order_no ?? '') && w2.json.status === 'duplicate' && w2.json.order_no === w1.json.order_no && grabRows[0].n === 1, JSON.stringify({ s1: w1.json.status, s2: w2.json.status, n: grabRows[0].n }));
 
+  // ── 9b. MKT-13 (G1 docs/45): marketplace-to-member identity capture ──
+  // hash-only capture: a SECOND distinct order from the same buyer folds into ONE ref row; raw phone never persisted
+  const w3 = await inj('POST', '/api/channel/webhook/grab', undefined, { ...wbody, ext_order_id: 'G-2', ext_event_id: 'E-2' });
+  const refRows = (await pg.query(`SELECT id, ref_hash, member_id, order_count::int, last_order_no FROM channel_customer_refs WHERE platform='grab'`)).rows as any[];
+  const rawLeak = (await pg.query(`SELECT count(*)::int n FROM channel_customer_refs WHERE ref_hash LIKE '%0899999999%' OR last_order_no LIKE '%0899999999%'`)).rows as any[];
+  ok('MKT-13: same buyer over 2 orders → ONE ref row, order_count=2, sha256 hash only (raw phone absent)',
+    refRows.length === 1 && refRows[0].order_count === 2 && /^[0-9a-f]{64}$/.test(refRows[0].ref_hash) && refRows[0].member_id == null && rawLeak[0].n === 0,
+    JSON.stringify({ rows: refRows.length, n: refRows[0]?.order_count, hash: String(refRows[0]?.ref_hash).slice(0, 8) }));
+
+  // staff mints the package-insert QR capability for the aggregator order
+  const qr = await inj('POST', `/api/channels/orders/${w3.json.order_no}/link-qr`, sales1);
+  ok('MKT-13: staff link-qr mints an HMAC capability + portal deep link for the order', qr.status === 201 && typeof qr.json.token === 'string' && qr.json.platform === 'grab' && String(qr.json.url).includes('clink='), JSON.stringify({ st: qr.status, url: qr.json.url }));
+
+  // members: enroll two via the mock LINE verifier, mint member JWTs
+  await inj('POST', '/api/loyalty/members/enroll-line', sales1, { id_token: 'mock:U-G1A:สมชาย', phone: '0811111111', marketing_opt_in: false });
+  await inj('POST', '/api/loyalty/members/enroll-line', sales1, { id_token: 'mock:U-G1B:สมหญิง', phone: '0822222222' });
+  const memA = (await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', id_token: 'mock:U-G1A' })).json.token;
+  const memB = (await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', id_token: 'mock:U-G1B' })).json.token;
+
+  // public QR landing: platform + repeat count, no PII, not linked yet
+  const info = await inj('GET', `/api/member/channel-link/${qr.json.token}`, undefined);
+  ok('MKT-13: public link info → platform + order_count, linked=false, no PII', info.json.platform === 'grab' && info.json.order_count === 2 && info.json.linked === false && info.json.phone === undefined, JSON.stringify(info.json));
+
+  // consent is never implicit: omitting marketing_opt_in is a validation reject
+  const noConsent = await inj('POST', '/api/member/channel-link', memA, { token: qr.json.token });
+  ok('MKT-13: link without an explicit marketing_opt_in decision → 400 (consent never defaulted)', noConsent.status === 400, `${noConsent.status}`);
+
+  // member self-link: link + consent row land together; ref + latest order attach
+  const linkA = await inj('POST', '/api/member/channel-link', memA, { token: qr.json.token, marketing_opt_in: true });
+  const consentA = (await pg.query(`SELECT c.granted, c.source, c.channel FROM member_consents c JOIN pos_members m ON m.id=c.member_id WHERE m.line_user_id='U-G1A' AND c.purpose='marketing'`)).rows as any[];
+  const refAfter = (await pg.query(`SELECT member_id FROM channel_customer_refs WHERE platform='grab'`)).rows as any[];
+  const ordAfter = (await pg.query(`SELECT member_id FROM dine_in_orders WHERE ext_source='grab' AND ext_order_id='G-2'`)).rows as any[];
+  ok('MKT-13: member self-link → ref linked + marketing consent (source=self, channel:grab) in the same request + latest order attached',
+    linkA.json.linked === true && refAfter[0].member_id != null && consentA.length === 1 && consentA[0].granted === true && consentA[0].source === 'self' && consentA[0].channel === 'channel:grab' && ordAfter[0].member_id != null,
+    JSON.stringify({ link: linkA.json.linked, consent: consentA[0], ord: ordAfter[0]?.member_id }));
+
+  // future ingest auto-attaches the linked member
+  const w4 = await inj('POST', '/api/channel/webhook/grab', undefined, { ...wbody, ext_order_id: 'G-3', ext_event_id: 'E-3' });
+  const ordAuto = (await pg.query(`SELECT member_id FROM dine_in_orders WHERE ext_source='grab' AND ext_order_id='G-3'`)).rows as any[];
+  ok('MKT-13: next ingest for the linked buyer auto-attaches member_id', w4.json.status === 'processed' && ordAuto[0].member_id != null && String(ordAuto[0].member_id) === String(refAfter[0].member_id), JSON.stringify({ ord: ordAuto[0]?.member_id }));
+
+  // single-winner: a second member claiming the linked ref is rejected
+  const linkB = await inj('POST', '/api/member/channel-link', memB, { token: qr.json.token, marketing_opt_in: true });
+  ok('MKT-13: second member claiming a linked ref → 409 REF_ALREADY_LINKED', linkB.status === 409 && linkB.json.error?.code === 'REF_ALREADY_LINKED', `${linkB.status} ${linkB.json.error?.code}`);
+
+  // tenant-bound capability: a T2-minted token is refused by a T1 member session
+  await inj('POST', '/api/channel/webhook/lineman', undefined, { store_ref: 'T2', ext_order_id: 'L-77', ext_event_id: 'E-77', items: [{ name: 'ก๋วยเตี๋ยว', qty: 1, unit_price: 50 }], customer: { name: 'ลูกค้า LM', phone: '0633333333' } });
+  const qrT2 = await inj('POST', '/api/channels/orders/' + ((await pg.query(`SELECT order_no FROM dine_in_orders WHERE ext_source='lineman' AND ext_order_id='L-77'`)).rows as any[])[0].order_no + '/link-qr', sales2);
+  const cross = await inj('POST', '/api/member/channel-link', memA, { token: qrT2.json.token, marketing_opt_in: true });
+  ok('MKT-13: cross-tenant link token → 403 TENANT_MISMATCH', cross.status === 403 && cross.json.error?.code === 'TENANT_MISMATCH', `${cross.status} ${cross.json.error?.code}`);
+
   // ── 10. permission: Warehouse (no pos) cannot kiosk-checkout ──
   const noPerm = await inj('POST', '/api/restaurant/kiosk/checkout', wh1, { items: [item(100)] });
   ok('Permission: Warehouse (no pos) kiosk checkout → 403', noPerm.status === 403, `${noPerm.status}`);

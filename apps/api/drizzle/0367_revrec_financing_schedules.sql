@@ -1,4 +1,4 @@
--- 0366_revrec_financing_schedules — Track D Wave 4 (control REV-27, FINAL): significant financing component +
+-- 0367_revrec_financing_schedules — Track D Wave 4 (control REV-27, FINAL): significant financing component +
 -- revenue disclosure pack under TFRS 15 / IFRS 15 / ASC 606 §60-65 (financing) + §120 (disclosure).
 --
 -- (A) Significant financing component (§60-65): when the TIMING of payment gives a MATERIAL financing benefit,
