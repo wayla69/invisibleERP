@@ -479,7 +479,7 @@ async function main() {
     rtypes.status === 200 && ['crm_funnel', 'crm_source_roi', 'crm_forecast'].every((k) => keys.includes(k)),
     JSON.stringify(keys.filter((k: string) => k.startsWith('crm_'))));
 
-  // ── CRM-7 — B2B Account/Contact 360 depth (migration 0362, control CRM-07) ──────────────────────
+  // ── CRM-7 — B2B Account/Contact 360 depth (migration 0365, control CRM-07) ──────────────────────
   // Seed active item categories for the whitespace/plan-target validation (tenant T1).
   await db.insert(s.itemCategories).values([
     { tenantId: t1, code: 'SOFTWARE', name: 'Software', active: true },

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, ForbiddenException, HttpCode, ParseIntPipe } from '@nestjs/common';
 import { z } from 'zod';
 import { CoaService } from './coa.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -87,23 +87,47 @@ export class CoaController {
       });
   }
 
-  // ── Canonical universe (Admin/HQ) ──
+  // ── Canonical universe (Admin/HQ) — GL-27 maker-checker (COA follow-up C) ──
+  // Every canonical write is validated fail-closed NOW, then staged PendingApproval for a DIFFERENT
+  // Admin — unless the system has exactly one active Admin (single-Admin exception: applied
+  // immediately, recorded as AutoApplied). See coa.service.ts requestChange.
   @Post()
   create(@Body(new ZodValidationPipe(CreateAccountBody)) dto: CreateAccountBodyT, @CurrentUser() u: JwtUser) {
     this.assertPlatformAdmin(u);
-    return this.coa.createAccount(dto);
+    return this.coa.requestChange('create', dto.code, dto, u);
   }
 
   @Patch(':code')
   update(@Param('code') code: string, @Body(new ZodValidationPipe(UpdateAccountBody)) dto: UpdateAccountBodyT, @CurrentUser() u: JwtUser) {
     this.assertPlatformAdmin(u);
-    return this.coa.updateAccount(code, dto);
+    return this.coa.requestChange('update', code, dto, u);
   }
 
   @Post(':code/deactivate')
   deactivate(@Param('code') code: string, @CurrentUser() u: JwtUser) {
     this.assertPlatformAdmin(u);
-    return this.coa.deactivateAccount(code);
+    return this.coa.requestChange('deactivate', code, undefined, u);
+  }
+
+  // GL-27 queue: list / approve (distinct Admin, SOD_VIOLATION on self) / reject.
+  @Get('change-requests')
+  listChanges(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) {
+    this.assertPlatformAdmin(u);
+    return this.coa.listChanges(status);
+  }
+
+  @Post('change-requests/:id/approve')
+  @HttpCode(200)
+  approveChange(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
+    this.assertPlatformAdmin(u);
+    return this.coa.approveChange(id, u);
+  }
+
+  @Post('change-requests/:id/reject')
+  @HttpCode(200)
+  rejectChange(@Param('id', ParseIntPipe) id: number, @Body() b: { reason?: string }, @CurrentUser() u: JwtUser) {
+    this.assertPlatformAdmin(u);
+    return this.coa.rejectChange(id, u, b?.reason);
   }
 
   // COA follow-up B — read-only where-used report (config masters referencing this code). Not Admin-gated:

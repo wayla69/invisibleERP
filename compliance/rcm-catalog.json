@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 266,
+    "total": 267,
     "by_status": {
-      "Implemented": 263,
+      "Implemented": 264,
       "Partial": 3
     },
     "by_family": {
@@ -16,7 +16,7 @@
       "Entity-Level": 7,
       "Expenditure": 16,
       "Fixed Assets": 8,
-      "General Ledger": 26,
+      "General Ledger": 27,
       "ITGC · Access": 22,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
@@ -1564,13 +1564,13 @@
       "fsli": "Revenue (pipeline / account planning)",
       "risk": "B2B account relationships are ungoverned — a company's parent/subsidiary structure is not modelled (so pipeline cannot be rolled up to the buying group, and re-parented accounts can loop), a deal is worked without documenting WHO decides (no buying committee, so the forecast rests on a single unverified contact), and there is no account plan (owner, target, product-line coverage) — so strategic accounts are pursued ad-hoc, whitespace (un-targeted product lines) is invisible, and the account-based revenue forecast is unreliable.",
       "assertion": "Accuracy/Completeness/Authorization",
-      "description": "B2B account/contact 360 DEPTH (CRM-7, migration 0362) on the REV-17 CRM spine. Account HIERARCHY: crm_accounts gains a self-referential parent_account_id; PATCH /api/crm/accounts/:no/parent rejects a self-parent (SELF_PARENT) and any link that would close a loop (HIERARCHY_CYCLE), and GET /api/crm/accounts/:no/hierarchy returns the ancestor chain + direct children + a SUBTREE pipeline roll-up (Σ open weighted amount across the account and all descendants) so pipeline ties to the buying group; a survivor-merge re-parents the duplicate's child accounts so the hierarchy stays intact. Buying COMMITTEE: crm_opportunity_contacts records which contacts sit on a deal, each with a role (decision_maker/champion/influencer/evaluator/blocker/user) + influence weight — a committee contact must belong to the deal's account (CONTACT_ACCOUNT_MISMATCH), a contact appears at most once per deal (COMMITTEE_DUP), and at most one is_primary. Account PLANS: crm_account_plans is a GOVERNED draft -> active -> closed plan carrying an owner, objective, strategy, target revenue and target product categories validated against item_categories (UNKNOWN_CATEGORY); a plan activates only when it has an owner AND an objective (PLAN_INCOMPLETE), the lifecycle is enforced (PLAN_NOT_DRAFT / PLAN_NOT_ACTIVE, a closed plan is immutable PLAN_CLOSED), and GET /api/crm/accounts/:no/whitespace surfaces the product categories the account is NOT yet being pursued for (active item_categories minus the union of active-plan targets). All three tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes); the surface gates crm/exec/ar. No GL post.",
+      "description": "B2B account/contact 360 DEPTH (CRM-7, migration 0365) on the REV-17 CRM spine. Account HIERARCHY: crm_accounts gains a self-referential parent_account_id; PATCH /api/crm/accounts/:no/parent rejects a self-parent (SELF_PARENT) and any link that would close a loop (HIERARCHY_CYCLE), and GET /api/crm/accounts/:no/hierarchy returns the ancestor chain + direct children + a SUBTREE pipeline roll-up (Σ open weighted amount across the account and all descendants) so pipeline ties to the buying group; a survivor-merge re-parents the duplicate's child accounts so the hierarchy stays intact. Buying COMMITTEE: crm_opportunity_contacts records which contacts sit on a deal, each with a role (decision_maker/champion/influencer/evaluator/blocker/user) + influence weight — a committee contact must belong to the deal's account (CONTACT_ACCOUNT_MISMATCH), a contact appears at most once per deal (COMMITTEE_DUP), and at most one is_primary. Account PLANS: crm_account_plans is a GOVERNED draft -> active -> closed plan carrying an owner, objective, strategy, target revenue and target product categories validated against item_categories (UNKNOWN_CATEGORY); a plan activates only when it has an owner AND an objective (PLAN_INCOMPLETE), the lifecycle is enforced (PLAN_NOT_DRAFT / PLAN_NOT_ACTIVE, a closed plan is immutable PLAN_CLOSED), and GET /api/crm/accounts/:no/whitespace surfaces the product categories the account is NOT yet being pursued for (active item_categories minus the union of active-plan targets). All three tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes); the surface gates crm/exec/ar. No GL post.",
       "prev_det": "Prev/Det",
       "nature": "Automated",
       "frequency": "Per account / continuous",
       "owner": "Sales / Account Manager / Sales Manager",
       "coso": "P13",
-      "code_reference": "modules/crm/account-depth/crm-account-depth.module.ts (setParent SELF_PARENT/HIERARCHY_CYCLE cycle guard; hierarchy ancestors+children+subtree open-weighted roll-up; addCommitteeMember CONTACT_ACCOUNT_MISMATCH/COMMITTEE_DUP + single is_primary; listCommittee/removeCommitteeMember; createPlan APL- + target-category validation UNKNOWN_CATEGORY; updatePlan PLAN_CLOSED guard; activatePlan PLAN_NOT_DRAFT/PLAN_INCOMPLETE; closePlan PLAN_NOT_ACTIVE; whitespace active-plan targets vs item_categories); crm/accounts/crm-accounts.module.ts (merge re-parents child accounts); schema/crm-pipeline.ts crm_accounts.parent_account_id + crm_opportunity_contacts + crm_account_plans + migration 0362 (RLS, tenant-leading indexes); cutover/pipeline.ts (ToE, CRM-7 checks)",
+      "code_reference": "modules/crm/account-depth/crm-account-depth.module.ts (setParent SELF_PARENT/HIERARCHY_CYCLE cycle guard; hierarchy ancestors+children+subtree open-weighted roll-up; addCommitteeMember CONTACT_ACCOUNT_MISMATCH/COMMITTEE_DUP + single is_primary; listCommittee/removeCommitteeMember; createPlan APL- + target-category validation UNKNOWN_CATEGORY; updatePlan PLAN_CLOSED guard; activatePlan PLAN_NOT_DRAFT/PLAN_INCOMPLETE; closePlan PLAN_NOT_ACTIVE; whitespace active-plan targets vs item_categories); crm/accounts/crm-accounts.module.ts (merge re-parents child accounts); schema/crm-pipeline.ts crm_accounts.parent_account_id + crm_opportunity_contacts + crm_account_plans + migration 0365 (RLS, tenant-leading indexes); cutover/pipeline.ts (ToE, CRM-7 checks)",
       "tod": "Inspect the account-hierarchy cycle guard + subtree pipeline roll-up, the buying-committee account-membership + uniqueness + single-primary rules, the account-plan draft->active->closed lifecycle + category validation, and the whitespace derivation.",
       "toe": "Re-perform: link a subsidiary under a parent, then parenting the parent under its own child -> HIERARCHY_CYCLE; the hierarchy read rolls a child's open deal into the parent's subtree weighted pipeline; add a buying-committee member (is_primary) then re-add the same contact -> COMMITTEE_DUP and a contact from another account -> CONTACT_ACCOUNT_MISMATCH; create an account plan (APL-) with a valid target category, an unknown category -> UNKNOWN_CATEGORY, activate a complete draft -> active, re-activate -> PLAN_NOT_DRAFT, activate an incomplete draft -> PLAN_INCOMPLETE, close -> closed; whitespace reports the targeted category as covered and the rest as whitespace; a T1 user sees none of HQ's account plans (RLS) (re-performed by the pipeline harness CRM-7 checks).",
       "evidence": "Account hierarchy + subtree pipeline roll-up; buying-committee register (role/influence/primary); governed account-plan lifecycle + whitespace coverage read",
@@ -3778,6 +3778,25 @@
       "tod": "Inspect the seeded standard-item set with standard refs/owners, the item complete/NA + support-doc attach, the ITEMS_INCOMPLETE review gate, the SOD_SELF_APPROVAL maker-checker (reviewer ≠ preparer), the Reviewed→Issued release, and the tenant RLS isolation.",
       "toe": "TC-CLS-02-01: open seeds ≥10 standard disclosure items (Draft, DISC checklist_no); TC-CLS-02-02: review while an item is Open → ITEMS_INCOMPLETE (400); TC-CLS-02-03: self-review by the preparer → SOD_SELF_APPROVAL (403); TC-CLS-02-04: complete/NA all + a DISTINCT reviewer reviews → Reviewed, then issue → Issued; TC-CLS-02-05: attach DISC support evidence to the checklist_no (assertDocExists), a bogus checklist_no → NOT_FOUND; TC-CLS-02-06: another tenant sees 0 checklists (RLS) (re-performed by the disclosure-checklist harness).",
       "evidence": "disclosure_checklists / disclosure_items with prepared_by/reviewed_by/issued_by sign-off trail + per-item completed_by/support_doc_ref; harness ToE (disclosure-checklist)",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "GL-27",
+      "cycle": "General Ledger",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "The canonical Chart of Accounts is SHARED by every tenant and the posting engine hard-references its codes, but canonical account changes (create / rename / postability flip / cash-flow-bucket reroute / deactivate) were a single-person action with NO record: GL-11 restricts WHO may change it (platform Admin/HQ + gl_coa) yet nothing records WHAT changed, WHEN, or BY WHOM, and no second person reviews a change that re-routes every tenant's financial statements (the audit gap symmetric to the one GL-24 closed for posting rules).",
+      "assertion": "Authorization/Accuracy/Completeness",
+      "description": "Canonical CoA maker-checker (COA follow-up C): every canonical account write on /api/ledger/accounts (POST create, PATCH :code update, POST :code/deactivate — all still Admin/HQ-gated per GL-11) is validated FAIL-CLOSED at request time (DUPLICATE_ACCOUNT / ACCOUNT_NOT_FOUND / ACCOUNT_HAS_BALANCE / CODE_HAS_POSTINGS; one pending request per code — CHANGE_ALREADY_PENDING) and staged as a coa_change_requests row (payload + before-snapshot, created_by); the change applies ONLY when a DIFFERENT Admin approves (POST /api/ledger/accounts/change-requests/:id/approve — creator self-approval → 403 SOD_VIOLATION, binds even Admin; re-validated at approve), or is rejected with a recorded reason. SINGLE-ADMIN EXCEPTION (owner decision 2026-07-12): when the system has exactly one ACTIVE Admin a maker-checker would deadlock, so the change applies immediately and the request row records status AutoApplied with the exception reason — the audit trail survives even where the second pair of eyes cannot. The /chart-of-accounts screen carries the pending queue (approve/reject) and stages its create/edit/deactivate dialogs through the same flow. Bulk imports keep their own standing maker-checker (masterdata staged batches, PR-8).",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Each canonical CoA change",
+      "owner": "Platform Admin (HQ) x2 / CFO",
+      "coso": "P10",
+      "code_reference": "ledger/coa.service.ts (activeAdminCount, validateChange fail-closed, requestChange stage-or-AutoApply, approveChange SOD_VIOLATION + re-validate, rejectChange, listChanges); ledger/coa.controller.ts (writes route through requestChange; GET change-requests + :id/approve|reject, assertPlatformAdmin defence-in-depth); schema/posting-rules.ts coaChangeRequests + migration 0362 (PLATFORM table — created_tenant_id, app_user grants, status index); /chart-of-accounts pending-queue card + staged-write toasts; apps/api/test coa maker-checker unit (single-admin exception)",
+      "tod": "Inspect the fail-closed request-time validation, the PendingApproval→distinct-Admin flow, the AutoApplied single-admin exception rows, and the append-only request trail (payload + before snapshot).",
+      "toe": "Re-perform (compliance GL-27 ToE): Admin stages a create → PendingApproval, account does NOT exist yet; creator self-approve → 403 SOD_VIOLATION; a DIFFERENT Admin approves → account exists; duplicate create for the same code → DUPLICATE_ACCOUNT (or CHANGE_ALREADY_PENDING while staged); reject leaves the chart untouched; unit ToE: with exactly ONE active Admin the write applies immediately and the row reads AutoApplied.",
+      "evidence": "coa_change_requests rows (payload/before/created_by/approved_by/reason); compliance harness + unit ToE",
       "status": "Implemented"
     },
     {

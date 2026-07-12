@@ -1925,8 +1925,11 @@ async function main() {
   // A NEW balance-sheet account created with its own bucket classifies itself: a loan drawdown on 2650
   // (cf_bucket=financing, is_current=false) lands in the FINANCING section — before 0346 it fell to the
   // type-based operating fallback and was surfaced "unclassified".
-  const coa2650 = await inj('POST', '/api/ledger/accounts', admin, { code: '2650', name: 'Long-term Bank Loan (PR-8)', type: 'Liability', cfBucket: 'financing', cfLabel: 'เงินกู้ยืมระยะยาว', isCurrent: false });
-  ok('PR-8: COA create accepts cfBucket/isCurrent self-classification', coa2650.status === 201 && coa2650.json?.cfBucket === 'financing', `${coa2650.status} ${coa2650.json?.cfBucket}`);
+  // GL-27 (COA follow-up C): the canonical create STAGES with >1 active Admin; a DIFFERENT Admin approves.
+  const coa2650req = await inj('POST', '/api/ledger/accounts', admin, { code: '2650', name: 'Long-term Bank Loan (PR-8)', type: 'Liability', cfBucket: 'financing', cfLabel: 'เงินกู้ยืมระยะยาว', isCurrent: false });
+  ok('GL-27: canonical COA create stages PendingApproval', coa2650req.status === 201 && coa2650req.json?.status === 'PendingApproval', `${coa2650req.status} ${coa2650req.json?.status}`);
+  const coa2650 = await inj('POST', `/api/ledger/accounts/change-requests/${coa2650req.json?.id}/approve`, mgr);
+  ok('PR-8: approved COA create carries cfBucket/isCurrent self-classification', coa2650.status === 200 && coa2650.json?.cfBucket === 'financing', `${coa2650.status} ${coa2650.json?.cfBucket}`);
   const loanJe = await inj('POST', '/api/ledger/journal', admin, { date: '2027-03-05', source: 'Manual', memo: 'PR-8 loan drawdown', lines: [{ account_code: '1010', debit: 250000 }, { account_code: '2650', credit: 250000 }] });
   await inj('POST', `/api/ledger/journal/${loanJe.json?.entry_no}/approve`, mgr);
   const scf8 = (await inj('GET', '/api/ledger/cash-flow?from=2027-03-01&to=2027-03-31', admin)).json;

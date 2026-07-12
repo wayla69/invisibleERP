@@ -45,7 +45,7 @@ export const crmAccounts = pgTable('crm_accounts', {
   website: text('website'),
   ownerUserId: bigint('owner_user_id', { mode: 'number' }).references(() => users.id),
   customerNo: text('customer_no'),                     // → customer_master once transacting (nullable)
-  // CRM-7 (CRM-07, migration 0362): a self-referential PARENT link so a company can be modelled as a
+  // CRM-7 (CRM-07, migration 0365): a self-referential PARENT link so a company can be modelled as a
   // hierarchy (parent ⋈ subsidiaries). The set-parent endpoint rejects cycles (HIERARCHY_CYCLE).
   parentAccountId: bigint('parent_account_id', { mode: 'number' }),
   status: text('status').notNull().default('active'),  // active | inactive | merged
@@ -62,7 +62,7 @@ export const crmAccounts = pgTable('crm_accounts', {
   byParent: index('idx_crm_account_parent').on(t.tenantId, t.parentAccountId),
 }));
 
-// CRM-7 (CRM-07, migration 0362): the per-deal BUYING COMMITTEE — which contacts sit on an opportunity,
+// CRM-7 (CRM-07, migration 0365): the per-deal BUYING COMMITTEE — which contacts sit on an opportunity,
 // each with a role + influence weight; at most one is_primary per deal. Tenant-scoped (RLS).
 export const crmOpportunityContacts = pgTable('crm_opportunity_contacts', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -80,7 +80,7 @@ export const crmOpportunityContacts = pgTable('crm_opportunity_contacts', {
   byOpp: index('idx_crm_opp_contact_opp').on(t.tenantId, t.opportunityId),
 }));
 
-// CRM-7 (CRM-07, migration 0362): a governed ACCOUNT PLAN (draft → active → closed) with an owner,
+// CRM-7 (CRM-07, migration 0365): a governed ACCOUNT PLAN (draft → active → closed) with an owner,
 // objective, strategy, target revenue and target product categories (validated against item_categories).
 // The whitespace read diffs the tenant's active item_categories against the account's active-plan targets.
 export const crmAccountPlans = pgTable('crm_account_plans', {

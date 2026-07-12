@@ -106,6 +106,25 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
   // per-row show/hide toggle in the full-chart view.
   const overlayActive = useMemo(() => new Set((hasOverlay ? overlayQ.data?.accounts ?? [] : []).map((a) => a.code)), [hasOverlay, overlayQ.data]);
 
+  // GL-27 (COA follow-up C): canonical writes stage as change requests — the pending queue lives here so a
+  // second Admin clears it on the same screen. Creator self-approval is rejected server-side (SOD_VIOLATION).
+  const changes = useQuery<{ requests: any[]; count: number }>({
+    queryKey: ['coa-change-requests'],
+    queryFn: () => api('/api/ledger/accounts/change-requests?status=PendingApproval'),
+    enabled: isAdmin,
+    retry: false,
+  });
+  const approveChange = useMutation({
+    mutationFn: (id: number) => api(`/api/ledger/accounts/change-requests/${id}/approve`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess(t('fnx.coa.mc_approved')); qc.invalidateQueries({ queryKey: ['coa-change-requests'] }); refresh(); },
+    onError: (e) => notifyFromError(e),
+  });
+  const rejectChange = useMutation({
+    mutationFn: (id: number) => api(`/api/ledger/accounts/change-requests/${id}/reject`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => { notifySuccess(t('fnx.coa.mc_rejected')); qc.invalidateQueries({ queryKey: ['coa-change-requests'] }); },
+    onError: (e) => notifyFromError(e),
+  });
+
   // GL-11 per-tenant curation: toggle an account on/off MY chart (never touches the canonical universe).
   const curate = useMutation({
     mutationFn: ({ code, active }: { code: string; active: boolean }) =>
@@ -303,6 +322,35 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
             <StatCard label={t('fnx.coa.stat_types')} value={groups.length} hint={t('fnx.coa.stat_types_hint')} />
           </div>
 
+          {isAdmin && (changes.data?.requests?.length ?? 0) > 0 && (
+            <Card className="gap-3 p-5">
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold">{t('fnx.coa.mc_queue_title')}</h3>
+                <Badge variant="warning">{changes.data!.requests.length}</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">{t('fnx.coa.mc_queue_desc')}</p>
+              <DataTable
+                rows={changes.data!.requests}
+                rowKey={(r: any) => r.id}
+                dense
+                columns={[
+                  { key: 'action', label: t('fnx.coa.mc_col_action'), render: (r: any) => <Badge variant={r.action === 'deactivate' ? 'destructive' : r.action === 'create' ? 'success' : 'info'}>{t(`fnx.coa.mc_action_${r.action}`)}</Badge> },
+                  { key: 'accountCode', label: t('fnx.coa.col_code'), render: (r: any) => <span className="font-mono">{r.accountCode}</span> },
+                  { key: 'payload', label: t('fnx.coa.mc_col_change'), sortable: false, render: (r: any) => <span className="font-mono text-xs">{r.payload ? Object.entries(r.payload).filter(([k]) => k !== 'code').map(([k, v]) => `${k}=${v}`).join(' · ') : '—'}</span> },
+                  { key: 'createdBy', label: t('fnx.coa.mc_col_by') },
+                  {
+                    key: 'actions', label: t('fnx.coa.col_actions'), sortable: false, render: (r: any) => (
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="outline" disabled={approveChange.isPending} onClick={() => approveChange.mutate(Number(r.id))}>{t('fnx.coa.mc_approve')}</Button>
+                        <Button size="sm" variant="ghost" disabled={rejectChange.isPending} onClick={() => rejectChange.mutate(Number(r.id))}>{t('fnx.coa.mc_reject')}</Button>
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            </Card>
+          )}
+
           {groups.length === 0 ? (
             <Card className="p-8 text-center text-sm text-muted-foreground">{t('fnx.coa.no_match')}</Card>
           ) : (
@@ -356,7 +404,7 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
           ...(isCurrent !== '' ? { isCurrent: isCurrent === 'true' } : {}),
         }),
       }),
-    onSuccess: () => { notifySuccess(t('fnx.coa.created', { code })); onSaved(); },
+    onSuccess: (res: any) => { notifySuccess(res?.status === 'PendingApproval' ? t('fnx.coa.staged', { code }) : t('fnx.coa.created', { code })); onSaved(); },
     onError: (e) => notifyFromError(e),
   });
   return (
@@ -444,7 +492,7 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
           ...(isCurrent !== cur0 ? { isCurrent: isCurrent === '' ? null : isCurrent === 'true' } : {}),
         }),
       }),
-    onSuccess: () => { notifySuccess(t('fnx.coa.saved', { code: account.code })); onSaved(); },
+    onSuccess: (res: any) => { notifySuccess(res?.status === 'PendingApproval' ? t('fnx.coa.staged', { code: account.code }) : t('fnx.coa.saved', { code: account.code })); onSaved(); },
     onError: (e) => notifyFromError(e),
   });
   return (
@@ -508,7 +556,7 @@ function DeactivateAccountDialog({ account, onClose, onSaved }: { account: Row; 
   });
   const save = useMutation({
     mutationFn: () => api(`/api/ledger/accounts/${account.code}/deactivate`, { method: 'POST' }),
-    onSuccess: () => { notifySuccess(t('fnx.coa.deactivated', { code: account.code })); onSaved(); },
+    onSuccess: (res: any) => { notifySuccess(res?.status === 'PendingApproval' ? t('fnx.coa.staged', { code: account.code }) : t('fnx.coa.deactivated', { code: account.code })); onSaved(); },
     onError: (e) => notifyFromError(e),
   });
   return (
