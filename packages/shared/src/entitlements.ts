@@ -44,8 +44,10 @@ export type SuiteKey =
 export const SUITES: Record<SuiteKey, Permission[]> = {
   // Base capabilities every tenant keeps regardless of plan (ALWAYS_ON). Never gated.
   core: ['users', 'dashboard', 'approvals', 'mobile', 'images', 'track'],
-  // Finance / GL / AR / AP ('exec' implies gl_post/gl_close/recon_prep/fin_report).
-  finance: ['ar', 'creditors', 'exec'],
+  // Finance / GL / AR / AP ('exec' implies gl_post/gl_close/recon_prep/fin_report). Treasury (debt/EIR,
+  // hedge, investments, pooling — TRE-01..05) is finance depth; its checker duty (treasury_approve) is a
+  // sub-permission, not suite-gated.
+  finance: ['ar', 'creditors', 'exec', 'treasury'],
   // Sales & order management / POS front office.
   sales: ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
   // Warehouse / inventory.
@@ -69,15 +71,17 @@ export const SUITES: Record<SuiteKey, Permission[]> = {
   ],
   // Employee & vendor self-service portals.
   selfservice: ['ess', 'vendor_portal'],
-  // ── Token-less premium suites (1.1b) — gated via @RequiresSuite on the controller, not by a token. ──
-  manufacturing: [],
+  // ── Premium suites (1.1b) — primarily gated via @RequiresSuite on their controllers. Coarse tokens
+  //    added AFTER the 1.1 map (QMS `quality`, HCM-depth `hr`/`hr_admin`) are owned here so the token
+  //    path agrees with the decorator path; the *_approve checker duties are sub-permissions. ──
+  manufacturing: ['quality'],
   projects: [],
-  hcm: [],
+  hcm: ['hr', 'hr_admin'],
   realestate: [],
 };
 
 // Suites that own no module token and are therefore gated exclusively by the @RequiresSuite decorator.
-export const TOKENLESS_SUITES: SuiteKey[] = ['manufacturing', 'projects', 'hcm', 'realestate'];
+export const TOKENLESS_SUITES: SuiteKey[] = ['projects', 'realestate'];
 
 // All suite keys (handy for validating @RequiresSuite arguments).
 export const SUITE_KEYS = Object.keys(SUITES) as SuiteKey[];
