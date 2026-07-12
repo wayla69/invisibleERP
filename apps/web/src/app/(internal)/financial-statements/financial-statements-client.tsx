@@ -8,6 +8,7 @@
 //   • งบกระแสเงินสด    → GET /api/ledger/cash-flow{,-direct,-forecast}
 // Read-only; multi-GAAP ledger selectable (TFRS / TAX / IFRS). CSV export per statement.
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Download, ShieldCheck, PlayCircle, Landmark, FileText, Scale } from 'lucide-react';
 
@@ -416,6 +417,15 @@ function CashFlow({ lp }: { lp: string }) {
       <StateView q={q}>
         {d && method === 'indirect' && (
           <div className="space-y-4">
+            {(d.unclassified_accounts ?? []).length > 0 && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+                <span className="font-medium">{t('fnx.fs.cf_unclassified_title')}</span>{' '}
+                <span className="font-mono">{(d.unclassified_accounts as string[]).join(', ')}</span>
+                {' — '}
+                <span className="text-muted-foreground">{t('fnx.fs.cf_unclassified_hint')}</span>{' '}
+                <Link href="/chart-of-accounts" className="underline underline-offset-2">{t('fnx.fs.cf_unclassified_link')}</Link>
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-3">
               <StatCard label={t('fnx.fs.cf_operating')} value={baht(d.operating?.net)} tone={d.operating?.net >= 0 ? 'success' : 'danger'} />
               <StatCard label={t('fnx.fs.cf_investing')} value={baht(d.investing?.net)} />
