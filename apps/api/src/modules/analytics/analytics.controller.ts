@@ -50,6 +50,20 @@ export class AnalyticsController {
     return this.menuEng.daypart(u, { from, to });
   }
 
+  // G2 (docs/45) — market-basket affinity: which menu items sell together (support/confidence/lift,
+  // overall + per daypart). The cross-sell signal for promo/audience configuration.
+  @Get('menu-affinity') @Permissions('dashboard', 'exec', 'planner')
+  menuAffinity(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('branch_id') branchId: string | undefined,
+    @Query('min_pair_count') minPair: string | undefined,
+    @Query('top') top: string | undefined,
+    @CurrentUser() u: JwtUser,
+  ) {
+    return this.menuEng.menuAffinity(u, { from, to, branch_id: qintOpt('branch_id', branchId), min_pair_count: qintOpt('min_pair_count', minPair), top: qintOpt('top', top) });
+  }
+
   // Void / discount (shrinkage) analytics from the manager-override audit.
   @Get('voids-discounts') @Permissions('dashboard', 'exec')
   voidsDiscounts(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) {

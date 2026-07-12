@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 272,
+    "total": 273,
     "by_status": {
-      "Implemented": 269,
+      "Implemented": 270,
       "Partial": 3
     },
     "by_family": {
@@ -28,7 +28,7 @@
       "Multi-Branch & Offline POS": 7,
       "Payroll": 15,
       "Privacy · PDPA": 4,
-      "Project Accounting": 19,
+      "Project Accounting": 20,
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
@@ -3303,6 +3303,25 @@
       "tod": "Inspect the estimate cost build-up (bid_rate/bid_price), the status machine (won/lost terminal, lost-reason required), the won-only + idempotent award, and the seeded DRAFT BoQ whose maker-checker approve sets the budget baseline.",
       "toe": "Re-perform: build a tender (2 lines, 20% markup → bid_price 24000); submit; award before won → TENDER_NOT_WON; mark won; award → a Fixed project (contract 24000) + a DRAFT BoQ (rate = bid_rate); an independent approver approves the BoQ → project budget 24000; re-award → already (no duplicate) (re-performed by the projects harness).",
       "evidence": "Tender register + win-rate; the awarded project + its draft-then-approved BoQ baseline",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "PROJ-19",
+      "cycle": "Project Accounting",
+      "category": "Detective",
+      "fsli": "Project schedule performance (earned schedule)",
+      "risk": "A late project reads on-schedule: the classic SPI (EV/PV) mathematically converges to 1 once planned value saturates at BAC — every task past its planned finish counts fully in PV — so a project months behind still shows SPI ≈ 1, the PROJ-11 red check (SPI < 0.9) never fires, and the schedule slip stays invisible to the PMO until delivery fails.",
+      "assertion": "Completeness/Timeliness",
+      "description": "Earned-schedule monitoring (Lipke ES / SV(t) / SPI(t)): GET /api/projects/:code/earned-schedule projects today's EV onto the PLANNED-value curve (the evmSeries month buckets) to find ES — the date the plan said the project would be where it actually is (the last month with cumulative PV ≤ EV, interpolated within the crossing month; a flat plateau at exactly EV is credited as earned, so a stretch with nothing planned never raises a false alarm). SPI(t) = ES / AT (months actually elapsed since the first planned month) and SV(t) = ES − AT stay honest schedule signals to completion where the classic SPI cannot, and forecast the finish (IEAC(t) = planned duration / SPI(t) → forecast finish month). A project with no costed dated plan returns an explicit NO_DATED_PLAN (no phantom metric); a plan that hasn't started returns PLAN_NOT_STARTED. DETECTIVE HOOK: the PMO action center (PROJ-11) surfaces `schedule_slip_es` (medium) whenever SPI(t) < 0.9 while the project does NOT already read red (CPI/SPI < 0.9) — exactly the slip the PV-based signal hides — deep-linked to the project overview where the earned-schedule card shows ES/AT/SV(t)/forecast finish beside the classic EVM. Read-only; posts nothing; no new tables.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Continuous / per review",
+      "owner": "PMO / ProjectController",
+      "coso": "P13",
+      "code_reference": "projects-evm.service.ts earnedSchedule (Lipke ES over the evmSeries month buckets + AT + SPI(t)/SV(t)/IEAC(t); NO_DATED_PLAN / PLAN_NOT_STARTED); projects.controller.ts GET :code/earned-schedule; projects.service.ts actionCenter schedule_slip_es (suppressed when already red); web projects/[code] earned-schedule card; cutover/projects.ts (ToE)",
+      "tod": "Inspect the ES interpolation (last cumulative-PV ≤ EV month + within-month fraction, plateau credited), the AT month arithmetic, the SPI(t)/SV(t)/forecast derivation, and the action-center gate (fires only when the project is not already red).",
+      "toe": "Re-perform: a 2-month plan 95% earned read at month 6 → classic SPI 0.95 (reads fine) but ES 1.9 / AT 6.0 → SPI(t) 0.3167 RED, SV(t) −4.1 mo, forecast ~6.3 mo; the action center surfaces schedule_slip_es (medium) for it and suppresses the item on an already-red project; an EV sitting on a flat PV plateau reads ahead (no false alarm); a project without a costed dated plan → NO_DATED_PLAN (re-performed by the projects harness).",
+      "evidence": "Earned-schedule endpoint payload (ES/AT/SV(t)/SPI(t)/forecast finish); the schedule_slip_es action-center item",
       "status": "Implemented"
     },
     {

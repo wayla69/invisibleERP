@@ -196,6 +196,66 @@ export class ProjectsEvmService {
     return { project_code: code, series, current, bac: current.bac };
   }
 
+  // ── Earned Schedule (PROJ-19) ─────────────────────────────────────────────
+  // Time-based schedule performance (Lipke): ES = the point on the PLANNED-value curve where cumulative PV
+  // equals today's EV — i.e. "the date the plan said we'd be where we actually are". Late in a project the
+  // classic SPI (EV/PV) converges to 1 even when delivery is months late (PV saturates at BAC); SPI(t) =
+  // ES / AT keeps degrading, so it stays an honest schedule signal to completion. Convention: find the last
+  // month N with cumulative PV ≤ EV (PV_N ≤ EV < PV_{N+1}) and interpolate within the crossing month; a flat
+  // plateau at exactly EV is credited as earned (no false "behind" alarm on months with nothing planned).
+  // Month buckets mirror evmSeries (a task's planned cost lands in its planned_end month). No new tables.
+  async earnedSchedule(code: string, asOf?: string) {
+    const db = this.db;
+    const p = await this.rowOf(code);
+    const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
+    // `as_of` arrives from an HTTP query param, which may be an array or malformed — only a well-formed
+    // YYYY-MM-DD string is honoured (anything else falls back to the business day).
+    const today = typeof asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : ymd();
+    const idxOf = (ym: string) => Number(ym.slice(0, 4)) * 12 + (Number(ym.slice(5, 7)) - 1);
+    const buckets = new Map<number, number>();
+    for (const t of tasks) {
+      const m = t.plannedEnd ? String(t.plannedEnd).slice(0, 7) : (p.startDate ? String(p.startDate).slice(0, 7) : today.slice(0, 7));
+      const i = idxOf(m);
+      buckets.set(i, r2((buckets.get(i) ?? 0) + n(t.plannedCost)));
+    }
+    const pts = [...buckets.entries()].sort((a, b) => a[0] - b[0]);
+    const total = r2(pts.reduce((s, [, v]) => s + v, 0));
+    const e = await this.evm(code, today);
+    const base = { project_code: code, as_of: today, ev: e.ev, spi: e.spi };
+    if (!pts.length || total <= 0) {
+      return { ...base, start_month: null, planned_duration_months: null, earned_schedule_months: null, actual_time_months: null, sv_t_months: null, spi_t: null, eac_t_months: null, forecast_finish_month: null, schedule_rag: 'no_data', reason: 'NO_DATED_PLAN' };
+    }
+    const firstIdx = pts[0]![0], lastIdx = pts[pts.length - 1]![0];
+    const pd = lastIdx - firstIdx + 1; // planned duration, months
+    // ES: cumulative PV rises within each bucket month (start = prior cum, end = cum incl. this bucket).
+    let es = pd, cum = 0;
+    if (e.ev <= 0) es = 0;
+    else {
+      for (const [idx, v] of pts) {
+        const next = r2(cum + v);
+        if (e.ev < next) { es = (idx - firstIdx) + (v > 0 ? (e.ev - cum) / v : 0); break; }
+        cum = next;
+      }
+    }
+    // AT: months elapsed from the start of the first planned month to as_of (fractional within the month).
+    const asOfIdx = idxOf(today.slice(0, 7));
+    const dim = new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0).getDate();
+    const at = (asOfIdx - firstIdx) + Number(today.slice(8, 10)) / dim;
+    const monthOf = (i: number) => `${String(Math.floor(i / 12)).padStart(4, '0')}-${String((i % 12) + 1).padStart(2, '0')}`;
+    if (at <= 0) {
+      return { ...base, start_month: monthOf(firstIdx), planned_duration_months: pd, earned_schedule_months: null, actual_time_months: r4(Math.max(0, at)), sv_t_months: null, spi_t: null, eac_t_months: null, forecast_finish_month: null, schedule_rag: 'no_data', reason: 'PLAN_NOT_STARTED' };
+    }
+    const spiT = r4(es / at);
+    const eacT = spiT > 0 ? r2(pd / spiT) : null; // estimated total duration, months
+    return {
+      ...base, start_month: monthOf(firstIdx), planned_duration_months: pd,
+      earned_schedule_months: r4(es), actual_time_months: r4(at),
+      sv_t_months: r2(es - at), spi_t: spiT, eac_t_months: eacT,
+      forecast_finish_month: eacT != null ? monthOf(firstIdx + Math.max(0, Math.ceil(eacT) - 1)) : null,
+      schedule_rag: this.ragOf(null, spiT),
+    };
+  }
+
   ragOf(cpi: number | null, spi: number | null): string {
     if (cpi == null && spi == null) return 'no_data';
     if ((cpi != null && cpi < 0.9) || (spi != null && spi < 0.9)) return 'red';
