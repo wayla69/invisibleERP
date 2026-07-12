@@ -255,6 +255,56 @@ async function main() {
   const t1Breaches = await inj('GET', '/api/service/cases/sla/breaches', svcT1);
   ok('RLS isolation → T1 sees 0 HQ SLA breaches', t1Breaches.json.count === 0, `count=${t1Breaches.json.count}`);
 
+  // ── SVC-6 — KNOWLEDGE BASE + CASE DEFLECTION (SVC-06 control) ──
+
+  // 1. Author a draft article (admin)
+  const kb1 = await inj('POST', '/api/service/kb/articles', admin, { title: 'How to reset your password', body: 'Go to settings and click reset password.', category: 'Account', tags: 'password login reset' });
+  ok('Create KB draft → KB-00001, status=draft, author=admin', kb1.status === 201 && kb1.json.article_no === 'KB-00001' && kb1.json.status === 'draft' && kb1.json.author === 'admin', JSON.stringify({ no: kb1.json.article_no, s: kb1.json.status }));
+  const kb1Id = kb1.json.id;
+
+  // 2. Author self-publishing is blocked (SVC-06 maker-checker)
+  const selfPub = await inj('POST', `/api/service/kb/articles/${kb1Id}/publish`, admin, {});
+  ok('Author self-publish → 403 SOD_SELF_PUBLISH', selfPub.status === 403 && selfPub.json.error?.code === 'SOD_SELF_PUBLISH', JSON.stringify(selfPub.json));
+
+  // 3. Editing a draft is allowed
+  const editDraft = await inj('PATCH', `/api/service/kb/articles/${kb1Id}`, admin, { body: 'Go to Settings → Security → Reset password.' });
+  ok('Edit a draft article → updated', editDraft.status === 200 && String(editDraft.json.body).includes('Security'), JSON.stringify({ b: editDraft.json.body }));
+
+  // 4. A DIFFERENT user publishes → published
+  const pub = await inj('POST', `/api/service/kb/articles/${kb1Id}/publish`, sales1, {});
+  ok('Distinct user publishes → status=published, published_by=sales1', pub.status === 200 && pub.json.status === 'published' && pub.json.published_by === 'sales1', JSON.stringify({ s: pub.json.status, by: pub.json.published_by }));
+
+  // 5. Editing a published article is blocked
+  const editPub = await inj('PATCH', `/api/service/kb/articles/${kb1Id}`, admin, { title: 'x' });
+  ok('Edit a published article → 400 ARTICLE_NOT_DRAFT', editPub.status === 400 && editPub.json.error?.code === 'ARTICLE_NOT_DRAFT', JSON.stringify(editPub.json));
+
+  // 6. Search finds the PUBLISHED article + bumps views
+  const search1 = await inj('GET', '/api/service/kb/search?q=password', admin);
+  ok('Search published article by term → found', search1.status === 200 && (search1.json.results ?? []).some((a: any) => a.id === kb1Id), `count=${search1.json.count}`);
+
+  // 7. A draft article does NOT appear in search (published-only)
+  await inj('POST', '/api/service/kb/articles', admin, { title: 'Unpublished widget guide', body: 'Secret draft content zzxq.', tags: 'zzxq' });
+  const search2 = await inj('GET', '/api/service/kb/search?q=zzxq', admin);
+  ok('Draft article excluded from search (published-only)', search2.json.count === 0, `count=${search2.json.count}`);
+
+  // 8. Helpful feedback increments the counter
+  const fb = await inj('POST', `/api/service/kb/articles/${kb1Id}/feedback`, admin, { helpful: true });
+  ok('Helpful feedback → helpful=1', fb.status === 200 && fb.json.helpful === 1, JSON.stringify({ h: fb.json.helpful }));
+
+  // 9. Deflection log + stats (1 deflected self-serve + 1 case-opened → rate 0.5)
+  await inj('POST', '/api/service/kb/deflect', admin, { query: 'password', article_id: kb1Id, deflected: true });
+  await inj('POST', '/api/service/kb/deflect', admin, { query: 'billing', deflected: false });
+  const stats = await inj('GET', '/api/service/kb/deflection-stats', admin);
+  ok('Deflection stats → 2 interactions, 1 deflected, rate 0.5', stats.status === 200 && stats.json.total_interactions === 2 && stats.json.deflected === 1 && stats.json.deflection_rate === 0.5, JSON.stringify({ t: stats.json.total_interactions, d: stats.json.deflected, r: stats.json.deflection_rate }));
+
+  // 10. Archive a published article
+  const arch = await inj('POST', `/api/service/kb/articles/${kb1Id}/archive`, sales1, {});
+  ok('Archive published article → status=archived', arch.status === 200 && arch.json.status === 'archived', JSON.stringify({ s: arch.json.status }));
+
+  // 11. RLS: a second-tenant user sees 0 HQ articles
+  const t1Kb = await inj('GET', '/api/service/kb/articles', svcT1);
+  ok('RLS isolation → T1 sees 0 HQ KB articles', t1Kb.json.count === 0, `count=${t1Kb.json.count}`);
+
   await app.close();
 }
 
