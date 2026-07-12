@@ -7,10 +7,10 @@
 | Process ID | PN-32-SVC |
 | Process owner | `<<Service Manager>>` |
 | Approver | `<<CFO>>` |
-| Version | **0.3 DRAFT** |
+| Version | **0.4 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | SVC-01; SVC-04 (support cases / Email-to-Case completeness); SVC-05 (case SLA entitlement / breach tracking); SoD (requester ≠ authorizer) |
+| Related RCM controls | SVC-01; SVC-04 (support cases / Email-to-Case completeness); SVC-05 (case SLA entitlement / breach tracking); SVC-06 (KB governed publish / case deflection); SoD (requester ≠ authorizer; author ≠ publisher) |
 | Related policy | `compliance/policies/03-delegation-of-authority.md` |
 
 ## 2. Purpose
@@ -232,10 +232,36 @@ commitment lapses unseen. Reads gate `exec`/`marketing`; RLS-scoped; posts no GL
 recompute off open, first-response stamp + breach, resolution breach, the breach worklist appear/drop, RLS
 isolation).
 
+## 10d. Knowledge Base & Case Deflection (SVC-6 · control SVC-06)
+
+Alongside cases (§10b/§10c), the service desk maintains a **knowledge base** and measures how effectively it
+**deflects** cases (SVC-06).
+
+**Governed publish (`kb_articles`, migration 0355).** An article is authored as a **draft** (`article_no` unique
+per tenant, title/body/category/tags) and is **editable only while a draft** (a published article is immutable —
+`ARTICLE_NOT_DRAFT`). The **SVC-06 maker-checker** is the publish: a draft becomes **published** only when a user
+who is **not the author** publishes it (`published_by ≠ author`, else **403 `SOD_SELF_PUBLISH`**) — so no one
+publishes their own unreviewed knowledge. A published article can be **archived** (`published → archived`;
+`ARTICLE_NOT_PUBLISHED` otherwise). Usage counters (`views`, `helpful`, `not_helpful`) track quality.
+
+**Self-service search.** `GET /api/service/kb/search?q=` searches **published** articles only (title / body /
+tags), incrementing `views` on the hits; `…/articles/:id/feedback` records a helpful / not-helpful vote.
+
+**Case-deflection log & detective read.** `POST /api/service/kb/deflect` records each KB-assisted interaction —
+the query, the article, and whether it **deflected** (`deflected=true`, customer self-served, no case) or a case
+was still opened (`deflected=false`, optional `case_id`). `GET /api/service/kb/deflection-stats` returns the
+**deflection rate** (`deflected / total`) + the top articles — the population a service manager reads to gauge
+self-service effectiveness. Both tables are RLS-scoped; the surface gates `exec`/`marketing`; no GL post.
+
+**Verification.** `tools/cutover/src/service.ts` exercises the SVC-6 surface (author-a-draft, author self-publish
+→ `SOD_SELF_PUBLISH`, distinct-user publish, draft-only edit guard, published-only search, helpful feedback,
+deflection log + rate, archive, RLS isolation).
+
 ## 11. Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.4 DRAFT | 2026-07-12 | `<<author>>` | Added **§10d — Knowledge Base & Case Deflection (SVC-6, control SVC-06, migration 0355)**: a per-tenant `kb_articles` register with a governed publish lifecycle (draft → published → archived), the **author ≠ publisher** maker-checker (`SOD_SELF_PUBLISH`), draft-only edit (`ARTICLE_NOT_DRAFT`), published-only self-service `search` + helpful feedback, and the `kb_deflections` case-deflection log with a `deflection-stats` detective read (deflection rate + top articles). New RLS-scoped tables; harness SVC-6 checks. |
 | 0.1 DRAFT | 2026-07-11 | `<<author>>` | Initial narrative — SVC-2 Warranty & Entitlement registry (warranty terms, installed base, warranty claims) with control SVC-01 (coverage-authorization maker-checker) + expiring / coverage-exceptions detective reads. Migration 0329; harness `tools/cutover/src/warranty.ts` (20 checks). |
 | 0.3 DRAFT | 2026-07-12 | `<<author>>` | Added **§10c — Case Entitlements & SLA breach tracking (SVC-5, control SVC-05, migration 0352)**: the `service_cases` object gains an SLA `sla_tier` whose first-response + resolution targets are computed into `first_response_due_at`/`resolution_due_at` at open and on `POST …/cases/:id/entitlement` (recomputed off the original open time); the first reply stamps `first_responded_at` + `response_breached`, resolve stamps `resolution_breached`; and `GET …/cases/sla/breaches` is the detective worklist of open past-due cases (`breach_kind` response/resolution/both). Additive columns on the RLS-scoped `service_cases`; harness SVC-5 checks. |
 | 0.2 DRAFT | 2026-07-11 | `<<author>>` | Added **§10b — Support Cases & Email-to-Case (SVC-4, control SVC-04, migration 0350)**: the `service_cases` object with a governed status lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee/CRM-contact link, the append-only `case_email_messages` trail (Message-ID dedupe), and the public HMAC-authenticated Email-to-Case webhook that threads a reply onto its case (thread token → sender's open case) or opens a new case so no inbound email is dropped. Added the case + inbound error-code rows. Harness `tools/cutover/src/service.ts` (SVC-4 checks). |

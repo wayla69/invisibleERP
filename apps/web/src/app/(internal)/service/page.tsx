@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, AlertTriangle, ShieldCheck, ClipboardList, Repeat, LifeBuoy } from 'lucide-react';
+import { Plus, AlertTriangle, ShieldCheck, ClipboardList, Repeat, LifeBuoy, BookOpen, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -38,6 +38,7 @@ export default function ServicePage() {
       <Tabs
         tabs={[
           { key: 'cases', label: t('crm.tab_cases'), content: <Cases /> },
+          { key: 'kb', label: t('crm.tab_kb'), content: <KnowledgeBase /> },
           { key: 'contracts', label: t('crm.tab_contracts'), content: <Contracts /> },
           { key: 'subs', label: t('crm.tab_subscriptions'), content: <Subscriptions /> },
         ]}
@@ -193,6 +194,133 @@ function Cases() {
                     )}
                     {(r.status === 'resolved' || r.status === 'closed') && (
                       <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'reopen' })}>{t('crm.case_reopen')}</Button>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// GET /api/service/kb/articles → { articles: [...], count }
+interface Article { id: number; article_no: string; title: string; status: string; category: string | null; author: string | null; published_by: string | null; views: number; helpful: number; not_helpful: number }
+
+function KnowledgeBase() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ articles: Article[]; count: number }>({ queryKey: ['svc-kb'], queryFn: () => api('/api/service/kb/articles') });
+  const stats = useQuery<{ deflection_rate: number; total_interactions: number }>({ queryKey: ['svc-kb-stats'], queryFn: () => api('/api/service/kb/deflection-stats') });
+  const articles = q.data?.articles ?? [];
+  const publishedCount = articles.filter((a) => a.status === 'published').length;
+
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [category, setCategory] = useState('');
+  const [tags, setTags] = useState('');
+  const [term, setTerm] = useState('');
+  const [query, setQuery] = useState('');
+
+  const searchQ = useQuery<{ results: Article[]; count: number }>({ queryKey: ['svc-kb-search', query], queryFn: () => api(`/api/service/kb/search?q=${encodeURIComponent(query)}`), enabled: query.length > 0 });
+
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['svc-kb'] }); qc.invalidateQueries({ queryKey: ['svc-kb-search'] }); };
+
+  const create = useMutation({
+    mutationFn: () => api('/api/service/kb/articles', { method: 'POST', body: JSON.stringify({ title, body, category: category || undefined, tags: tags || undefined }) }),
+    onSuccess: (r: any) => { notifySuccess(t('crm.kb_created_ok', { no: r.article_no })); setTitle(''); setBody(''); setCategory(''); setTags(''); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const act = useMutation({
+    mutationFn: ({ id, action }: { id: number; action: 'publish' | 'archive' }) => api(`/api/service/kb/articles/${id}/${action}`, { method: 'POST' }),
+    onSuccess: (_r, v) => { notifySuccess(t(v.action === 'publish' ? 'crm.kb_published_ok' : 'crm.kb_archived_ok')); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const cols = [
+    { key: 'article_no', label: t('dash.col_no') },
+    { key: 'title', label: t('crm.kb_title') },
+    { key: 'category', label: t('crm.kb_category'), render: (r: Article) => r.category ?? '—' },
+    { key: 'views', label: t('crm.kb_views'), align: 'right' as const, render: (r: Article) => <span className="tabular">{num(r.views)}</span> },
+    { key: 'status', label: t('fin.col_status'), render: (r: Article) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <StateView q={q}>
+        {q.data && (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatCard label={t('crm.kb_total')} value={num(articles.length)} icon={BookOpen} tone="primary" />
+            <StatCard label={t('crm.kb_published')} value={num(publishedCount)} tone="success" />
+            <StatCard label={t('crm.kb_deflection_rate')} value={`${Math.round((stats.data?.deflection_rate ?? 0) * 100)}%`} tone="info" hint={`${num(stats.data?.total_interactions ?? 0)}`} />
+          </div>
+        )}
+      </StateView>
+
+      {/* Search (published only) */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid grow gap-2">
+          <Label htmlFor="kb-search">{t('crm.kb_search_results')}</Label>
+          <Input id="kb-search" value={term} onChange={(e) => setTerm(e.target.value)} placeholder={t('crm.kb_search_ph')} onKeyDown={(e) => { if (e.key === 'Enter') setQuery(term.trim()); }} />
+        </div>
+        <Button variant="outline" onClick={() => setQuery(term.trim())}><Search className="size-4" /> {t('crm.kb_search_results')}</Button>
+      </div>
+      {query && searchQ.data && (
+        <DataTable
+          rows={searchQ.data.results}
+          emptyState={{ icon: Search, title: t('crm.kb_search_results'), description: t('crm.kb_no_articles_desc') }}
+          columns={cols}
+        />
+      )}
+
+      {/* Write a draft */}
+      <Card className="max-w-3xl gap-4">
+        <CardHeader><CardTitle className="text-base">{t('crm.kb_new')}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="kb-title">{t('crm.kb_title')}</Label>
+            <Input id="kb-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="kb-body">{t('crm.kb_body')}</Label>
+            <textarea id="kb-body" className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 text-sm" value={body} onChange={(e) => setBody(e.target.value)} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="kb-cat">{t('crm.kb_category')}</Label>
+              <Input id="kb-cat" value={category} onChange={(e) => setCategory(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="kb-tags">{t('crm.kb_tags')}</Label>
+              <Input id="kb-tags" value={tags} onChange={(e) => setTags(e.target.value)} />
+            </div>
+          </div>
+          <Button disabled={create.isPending || !title.trim() || !body.trim()} onClick={() => create.mutate()}>
+            <Plus className="size-4" /> {create.isPending ? t('crm.saving') : t('crm.kb_create_btn')}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={articles}
+            emptyState={{ icon: BookOpen, title: t('crm.kb_no_articles_title'), description: t('crm.kb_no_articles_desc') }}
+            columns={[
+              ...cols,
+              {
+                key: 'actions',
+                label: '',
+                align: 'right' as const,
+                render: (r: Article) => (
+                  <div className="flex justify-end gap-2">
+                    {r.status === 'draft' && (
+                      <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'publish' })}>{t('crm.kb_publish')}</Button>
+                    )}
+                    {r.status === 'published' && (
+                      <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, action: 'archive' })}>{t('crm.kb_archive')}</Button>
                     )}
                   </div>
                 ),
