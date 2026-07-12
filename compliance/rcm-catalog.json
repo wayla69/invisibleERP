@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 265,
+    "total": 266,
     "by_status": {
-      "Implemented": 262,
+      "Implemented": 263,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 36,
+      "Revenue & Cash": 37,
       "Tax": 12
     }
   },
@@ -1536,6 +1536,25 @@
       "tod": "Inspect the two estimation methods (expected value vs most-likely) and the probability-sum check, the constraint gate that caps the recognizable amount at the estimate (CONSTRAINT_EXCEEDS_ESTIMATE), the estimator≠approver maker-checker (SOD_SELF_APPROVAL) with approval mandatory before recognition, and the re-estimate cumulative catch-up (price recompute → re-allocate → rebuild unrecognized → true-up already-recognized revenue) and its idempotency.",
       "toe": "Re-perform (revrec-variable harness): recognize 400 of a 1000 fixed-price contract; record an expected-value estimate {200@50%,0@50%}=100 constrained to 80; reestimate before approval is a no-op (approval mandatory); the estimator self-approving → 403 SOD_SELF_APPROVAL; a different user approves; reestimate → price 1080 (constrained 80, not gross 100), catch-up 32 builds contract asset 1265 and lifts 4300; a second reestimate posts nothing (idempotent); most-likely {100@30%,300@70%}=300 with a constrained amount above the estimate → CONSTRAINT_EXCEEDS_ESTIMATE; on an up-front-billed contract the catch-up releases 2410 instead of building 1265; a second tenant sees 0 of the first tenant's estimates (RLS).",
       "evidence": "Variable-consideration estimate register (expected-value/most-likely + constrained amount); estimate maker-checker approval log; re-estimate true-up (catch-up delta) posting; period re-estimate history",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "REV-26",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Recognized Revenue (4300); Contract Liability / Deferred Revenue (2410); Contract Asset / Unbilled Receivable (1265)",
+      "risk": "A contract MODIFICATION (added/changed goods or services, or a price change) is MIS-CLASSIFIED or applied on an ad-hoc basis — the three TFRS 15 / IFRS 15 / ASC 606 §18-21 outcomes are conflated, so revenue is mis-stated: added distinct goods at their standalone selling price are folded into the existing contract (understating a genuinely separate contract) instead of a NEW contract (§20); a distinct-but-not-at-SSP modification is either ignored or catch-up-adjusted (§21a is PROSPECTIVE — re-allocate the remaining transaction price over the remaining obligations, NO catch-up — so a wrongful catch-up over/under-states prior revenue); or a NOT-distinct modification (§21b) is treated prospectively and the REQUIRED cumulative catch-up on the already-satisfied portion is NEVER booked (revenue mis-stated in the period of change). A wrong 'separate_contract' call in particular HIDES a required catch-up. A single person could also set AND bless the classification (an aggressive, unreviewed judgement manages earnings).",
+      "assertion": "Accuracy/Cutoff/Completeness",
+      "description": "Contract-modification classification & re-allocation as a maker-checker management judgement (Track D Wave 3, TFRS 15 / IFRS 15 / ASC 606 §18-21). Extends the REV-19 fixed-price engine (does not rebuild it; reuses createContract/allocateBySSP/buildSchedule/sumRecognized). A MAKER records a modification (POST …/modify) with the added/changed obligations, the added price, and the management judgements distinct_flag + at_ssp_flag; the service CLASSIFIES it into exactly one of three and this classification IS the control: (1) separate_contract (§20 — distinct AND at SSP) → a NEW independent contract is created and the ORIGINAL is left untouched (no re-allocation, no catch-up); (2) prospective (§21a — distinct but NOT at SSP) → the remaining (unrecognized) transaction price + the added price is RE-ALLOCATED over the remaining performance obligations by relative SSP with NO catch-up (already-recognized revenue is frozen); (3) cumulative_catchup (§21b — NOT distinct) → the transaction price is recomputed, re-allocated by SSP, and a cumulative CATCH-UP is posted on the already-satisfied portion (Dr 2410/1265 ↔ Cr 4300, same asset-aware split as recognition; a downward modification reverses). The modification is a JUDGEMENT, so approval is MANDATORY before it drives revenue: a Pending modification changes nothing, and a DIFFERENT user must approve it (POST …/modifications/:modId/approve; the maker self-approving → 403 SOD_SELF_APPROVAL; re-approving an applied modification → MODIFICATION_NOT_PENDING). Approval APPLIES the classified effect; the GL post is guarded by LedgerService.alreadyPosted (idempotent) so the period lock (PERIOD_LOCKED, GL-15/16) + GL-17 audit bind; tenant-scoped (RLS). No new COA (2410/1265/4300 already exist + CF-classified).",
+      "prev_det": "Prev/Detect",
+      "nature": "Automated",
+      "frequency": "Per contract modification",
+      "owner": "Revenue Accountant / Controller",
+      "coso": "P10/P13",
+      "code_reference": "revrec-modifications/rev-modification.service.ts (modify classifies §18-21 from distinct_flag/at_ssp_flag → separate_contract | prospective | cumulative_catchup, records Pending with a preview effect, drives nothing; approve SOD_SELF_APPROVAL + MODIFICATION_NOT_PENDING then applies: applySeparate creates a new linked contract via createContract/allocateBySSP/buildSchedule, applyProspective inserts distinct POs + re-allocates the remaining consideration over remaining POs by SSP + rebuilds the unrecognized schedule with no catch-up, applyCumulative re-allocateBySSP + scales recognized rows + buildSchedule + posts the catch-up Dr2410/Dr1265 / Cr4300); rev-modification.controller.ts (/api/revenue/contracts/:id/modify POST, :id/modifications/:modId/approve POST, :id/modifications GET — gated exec/ar/fin_report); reuses revenue/revrec.service.ts (createContract/allocateBySSP/buildSchedule/sumRecognized); schema/revrec-modifications.ts rev_contract_modifications + migration 0360 (0232-form RLS, leading (tenant_id, contract_id) index); COA 2410/1265/4300; cutover/revrec-modifications.ts (ToE)",
+      "tod": "Inspect the §18-21 classification (distinct×at-SSP → the three outcomes), that separate_contract leaves the original untouched and creates a new contract, that prospective re-allocates the remaining price over remaining POs with no catch-up, that cumulative_catchup posts a catch-up on the satisfied portion, and the maker≠approver maker-checker (SOD_SELF_APPROVAL) with approval mandatory before it drives revenue.",
+      "toe": "Re-perform (revrec-modifications harness): recognize 400 of a 1000 contract; a NOT-distinct +200 modification classifies cumulative_catchup and (after a distinct approver — self-approve → SOD_SELF_APPROVAL) posts an 80 catch-up (Dr 1265 / Cr 4300) lifting recognized revenue to 480; a distinct-not-at-SSP +300 modification classifies prospective, re-allocates the remaining 900 over the remaining POs (Support 600→540, Add-on 360, satisfied Setup frozen at 400) with catch_up_delta 0 and no revenue movement; a distinct-at-SSP +500 modification classifies separate_contract, creating a new linked contract (total 500, PO 500) while the original stays total 1000 / recognized 400; a Pending modification drives nothing and re-approving an applied one → MODIFICATION_NOT_PENDING; a second tenant sees 0 of the first tenant's modifications (RLS).",
+      "evidence": "Contract-modification register (type/added_price/distinct_flag/at_ssp_flag/effect_amount + new_contract_id link); modification maker-checker approval log (created_by/approved_by); cumulative catch-up (REVREC-MOD) posting; re-allocation schedule rebuild",
       "status": "Implemented"
     },
     {
