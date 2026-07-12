@@ -86,6 +86,20 @@ code, evaluate the request against these rules and raise concerns if a violation
 - **Explicit Error Handling:** Never use silent exceptions (`except: pass`). Financial and supply chain
   errors must be explicitly caught, logged with meaningful context, and bubbled up to the UI gracefully.
 
+### 8. Secure Coding & Pentest Readiness (OWASP Mitigation)
+- **Input Validation & Sanitization:** All user inputs, API parameters, and file uploads must be strictly
+  validated, typed, and sanitized. Never trust client-side data. Prevent SQL Injection (SQLi) by strictly
+  using parameterized queries or ORM abstractions.
+- **Broken Object Level Authorization (BOLA / IDOR):** In an ERP, checking if a user is logged in is not
+  enough. You must explicitly verify that the active user/session has direct authorization to access or
+  mutate the specific resource ID (e.g., Invoice ID, Project ID) they are requesting.
+- **Secrets & Credential Management:** Hardcoding API keys, database passwords, private tokens, or
+  encryption salts in the codebase is strictly prohibited. All credentials must be fetched from
+  environment variables (`.env`) or a secure secret manager.
+- **Cross-Site Scripting (XSS) & UI Security:** For UI elements (especially when rendering dynamic text or
+  HTML in frameworks like Streamlit), ensure proper escaping. Never pass raw unsanitized text into
+  components that can execute HTML or JavaScript.
+
 ### Pre-Flight Check Protocol
 For every task involving code modification, output a brief validation before writing code:
 1. **Context Check:** Is this feature in the right module?
@@ -104,6 +118,15 @@ When executing commands via the CLI, you must adhere to this working flow:
    immediately.
 4. **Code Styling:** Adhere strictly to PEP 8 standards. Do not perform aggressive global linting fixes on
    unaffected lines of code; keep your code modifications focused tightly on the task at hand.
+
+### Security Automation Protocol
+Before finalizing code changes, you must run local security linters if they are configured in the project:
+1. **Python Security Scan:** Run `bandit -r .` or `semgrep` to detect high-risk security flaws (like
+   hardcoded passwords, insecure random number generators, or execution of raw strings).
+2. **Dependency Vulnerability Scan:** Run `pip-audit` or `safety check` if requested, to ensure no recently
+   introduced packages have known CVEs.
+3. **Remediation:** If any high-severity security warnings are tripped, stop implementation immediately and
+   rewrite the logic securely.
 
 ## 🐞 Debug mantra (follow in order)
 
