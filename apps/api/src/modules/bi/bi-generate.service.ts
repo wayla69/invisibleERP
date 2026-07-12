@@ -2,10 +2,8 @@ import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/commo
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { workflowInstances, purchaseRequests, alertEvents } from '../../database/schema';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { arInvoices } from '../../database/schema/finance';
 import { branchStock } from '../../database/schema/portal';
-import { CASH_ACCOUNTS } from '../ledger/ledger-constants';
 import { n } from '../../database/queries';
 import { activeKeyId, needsRotation, encrypt, decrypt } from '../../common/crypto';
 import { CollectionsService } from '../finance/collections.service';
@@ -13,6 +11,7 @@ import { FinanceMetricsService } from '../finance/finance-metrics.service';
 import { EamService } from '../eam/eam.service';
 import { AssetsService } from '../assets/assets.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { LeasesService } from '../leases/leases.service';
 import { ScheduledChangesService } from '../scheduled-changes/scheduled-changes.service';
 import { RevRecService } from '../revenue/revrec.service';
@@ -100,6 +99,9 @@ export class BiGenerateService {
     // CRM-15 (CRM-08) — supplies the crm_account_health snapshot action job. Appended at the END to preserve
     // the positional constructor contract the goldenmaster harness relies on. @Optional so a partial harness constructs.
     @Optional() private readonly crmHealth?: CrmAccountHealthService,
+    // docs/46 Phase 3 — the line_daily_digest GL cash position rides the ledger's narrow read API instead
+    // of a direct journal join here. Appended at the END (positional contract, as above).
+    @Optional() private readonly ledgerRead?: LedgerReadService,
   ) {}
 
   // docs/46 Phase 1 — module-owned generators, filled at boot by BiReportRegistrarService (see
@@ -148,10 +150,10 @@ export class BiGenerateService {
         .where(and(user.tenantId != null ? eq(arInvoices.tenantId, user.tenantId) : sql`true`, eq(arInvoices.invoiceDate, yesterday)));
       const [ao] = await db.select({ v: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount}, 0)), 0)` }).from(arInvoices)
         .where(and(user.tenantId != null ? eq(arInvoices.tenantId, user.tenantId) : sql`true`, sql`${arInvoices.status} <> 'Paid'`, sql`${arInvoices.dueDate} < ${today}`));
-      const [cp] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}), 0)` })
-        .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-        .where(and(eq(journalEntries.status, 'Posted'), inArray(journalLines.accountCode, [...CASH_ACCOUNTS]),
-          user.tenantId != null ? eq(journalEntries.tenantId, user.tenantId) : sql`true`));
+      // docs/46 Phase 3 — the GL cash position comes from the ledger's narrow read API (CASH_ACCOUNTS +
+      // the journal join live with the ledger, not here). ledgerRead is DI-provided in the app; a partial
+      // hand-built harness without it reads 0, matching the other degrade-to-empty legs of this digest.
+      const cp = { v: this.ledgerRead ? await this.ledgerRead.cashPosition(user.tenantId ?? null) : 0 };
       const [ls] = await db.select({ c: sql<number>`count(*)` }).from(branchStock)
         .where(and(user.tenantId != null ? eq(branchStock.tenantId, user.tenantId) : sql`true`,
           sql`${branchStock.reorderPoint} > 0 and ${branchStock.onHand} <= ${branchStock.reorderPoint}`));

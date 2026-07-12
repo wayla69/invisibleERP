@@ -202,7 +202,7 @@ For every such change, review and update as needed:
   re-created idempotently inside 0218). See `docs/ops/drizzle-migration-debt.md` §3bis.
 - **CI runner pnpm version comes from `package.json` `packageManager` (pnpm@11.8.0).** Do **not** also pin
   `version:` in `pnpm/action-setup` — the two conflict (`ERR_PNPM_BAD_PM_VERSION`) and break every job.
-- **The `build` gate ends with three down-only RATCHETS that fail on *new* debt (not just real errors)** — a
+- **The `build` gate ends with four down-only RATCHETS that fail on *new* debt (not just real errors)** — a
   clean `tsc`/`next build` locally is **not** enough. (1) `tools/ci/check-ts-debt.mjs`: a new `as any` over
   `ts-debt-baseline.json.asAny`, **or** any `tsc --noUncheckedIndexedAccess` error over `.strictIndexErrors`,
   fails. Never add `as any` — use a precise cast (`x as unknown as Parameters<typeof fn>[0]` for cross-pkg
@@ -216,7 +216,11 @@ For every such change, review and update as needed:
   `service-size-baseline.json`) may not GROW — in lines **or** constructor params — and no NEW module file may
   pass 600 LOC. Land the feature as its own sub-service / registered provider (docs/46 §4) instead of appending
   to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
-  after an extraction. Run all three scripts locally before pushing. Also: **PR CI runs
+  after an extraction. (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
+  `modules/ledger` referencing the `journalEntries`/`journalLines` tables are grandfathered in
+  `ledger-boundary-baseline.json` and the set may only SHRINK — read GL state via **`LedgerReadService`**
+  (`accountNet`/`cashPosition`/`entryRefNo`, exported by LedgerModule) and post via `LedgerService.postEntry`,
+  never a direct journal join from another module. Run all four scripts locally before pushing. Also: **PR CI runs
   on the branch⋈main *merge* commit**, so a ratchet reads against *current* `main`'s baseline — your local
   count can be off by the files `main` added since you branched (relative pass/fail still holds).
 - **Bulk master-data import/export is registry-driven; extend it, don't rebuild.** `modules/masterdata`
