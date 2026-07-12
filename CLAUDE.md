@@ -66,11 +66,44 @@ code, evaluate the request against these rules and raise concerns if a violation
   immediate surrounding code. Clean up unused variables, split overly long functions into smaller ones,
   and improve naming conventions without changing the behavior.
 
+### 6. Python & UI Performance Best Practices
+- **Separation of Concerns (UI vs Logic):** Keep business logic, database queries, and data processing
+  entirely independent of the UI rendering layer. View/UI files should only handle presentation and
+  user input.
+- **State Management & Caching:** For interactive elements, strictly manage state transitions without
+  polluting global scope. Efficiently utilize caching mechanisms (e.g., caching heavy DB lookups or
+  financial reports) to prevent redundant data processing or database hits on every application rerun.
+- **Type Hinting:** All new or refactored Python functions must use explicit type hints for arguments and
+  return values to ensure readability and prevent data type mismatches in financial calculations.
+
+### 7. ERP Data Integrity & Transaction Safety
+- **Database Transactions:** Any operation that modifies data across multiple tables (e.g., creating an
+  invoice AND updating inventory balances) MUST be wrapped in an atomic database transaction. Partial
+  updates are unacceptable.
+- **Idempotency:** Core business mutations (like posting a journal entry or adjusting stock) must be
+  written idempotently where possible. Running the same action twice accidentally must not result in
+  duplicate ledger entries or double deductions.
+- **Explicit Error Handling:** Never use silent exceptions (`except: pass`). Financial and supply chain
+  errors must be explicitly caught, logged with meaningful context, and bubbled up to the UI gracefully.
+
 ### Pre-Flight Check Protocol
 For every task involving code modification, output a brief validation before writing code:
 1. **Context Check:** Is this feature in the right module?
 2. **Coupling Check:** Does this introduce direct dependencies on other modules or cross-domain DB joins?
 3. **Test Readiness:** What tests need to run or be created?
+
+### Claude Operational Protocol (How to Work)
+When executing commands via the CLI, you must adhere to this working flow:
+
+1. **Read & Discover First:** Do not guess the structure. Use `grep`, `find`, or read existing architecture
+   patterns in the codebase before proposing changes.
+2. **Incremental Implementation:** Break large feature requests into small, testable commits. Do not
+   refactor multiple unrelated files in a single pass.
+3. **Run Pre-Checks:** Before final execution of code changes, explicitly state which existing tests you
+   are going to run to verify the change. If the relevant test suite fails, roll back the code changes
+   immediately.
+4. **Code Styling:** Adhere strictly to PEP 8 standards. Do not perform aggressive global linting fixes on
+   unaffected lines of code; keep your code modifications focused tightly on the task at hand.
 
 ## 🐞 Debug mantra (follow in order)
 
