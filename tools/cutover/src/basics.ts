@@ -1935,6 +1935,20 @@ async function main() {
     finLine != null && near(finLine.amount, 250000) && !(scf8.unclassified_accounts ?? []).includes('2650'),
     JSON.stringify({ fin: finLine, uncls: scf8.unclassified_accounts }));
 
+  // ── COA follow-up B — where-used report (config masters referencing an account) ──
+  // A category pointing its COGS at 2650 must show up; the report is read-only (deactivate stays
+  // balance-gated) and a gl_coa holder can call it without the Admin canonical-write gate.
+  const wuCat = await inj('POST', '/api/item-setup/categories', admin, { code: 'WUCAT', name: 'Where-used probe', cogs_account: '2650' });
+  ok('COA-B: probe category created with cogs_account=2650', wuCat.status === 201 || wuCat.status === 200, `${wuCat.status}`);
+  const wu = await inj('GET', '/api/ledger/accounts/2650/where-used', admin);
+  const wuCatRef = (wu.json?.references ?? []).find((r: any) => r.source === 'item_categories');
+  ok('COA-B: where-used reports the item-category reference (count ≥ 1, total ≥ 1)',
+    wu.status === 200 && wu.json?.account_code === '2650' && wuCatRef?.count >= 1 && wu.json?.total >= 1,
+    JSON.stringify(wu.json));
+  const wuMissing = await inj('GET', '/api/ledger/accounts/6666/where-used', admin);
+  ok('COA-B: where-used on a non-existent code → 404 ACCOUNT_NOT_FOUND',
+    wuMissing.status === 404 && wuMissing.json?.error?.code === 'ACCOUNT_NOT_FOUND', `${wuMissing.status} ${wuMissing.json?.error?.code}`);
+
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) + PR-3 category-grain asset accounts & dispose/prepaid overrides ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
