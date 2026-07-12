@@ -162,3 +162,4 @@ export * from './landed-cost';
 export * from './flux';
 export * from './treasury-debt';
 export * from './treasury-invest';
+export * from './treasury-hedge';
