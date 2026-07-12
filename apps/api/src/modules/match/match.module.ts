@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import { MatchController } from './match.controller';
 import { ThreeWayMatchService } from './three-way-match.service';
+import { MatchBiReports } from './match-bi-reports';
 
 // 3-way match (PO↔GR↔Invoice). Exported so FinanceService can gate AP payment. DocNumber/StatusLog are global.
 @Module({
   controllers: [MatchController],
-  providers: [ThreeWayMatchService],
+  providers: [MatchBiReports, ThreeWayMatchService],
   exports: [ThreeWayMatchService],
 })
 export class MatchModule {}

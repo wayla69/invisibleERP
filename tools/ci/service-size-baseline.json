@@ -6,10 +6,6 @@
       "loc": 916,
       "ctorParams": 6
     },
-    "apps/api/src/modules/bi/bi-generate.service.ts": {
-      "loc": 778,
-      "ctorParams": 32
-    },
     "apps/api/src/modules/billing/billing.service.ts": {
       "loc": 1095,
       "ctorParams": 5

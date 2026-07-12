@@ -481,7 +481,10 @@ For every such change, review and update as needed:
   - Asset revaluation/impairment + disposal recycling (**FA-07**): `modules/assets/assets.service.ts`
     (`revalue`, `dispose` recycles surplus 3200→3100). EAM work orders/PM/reliability (**FA-06**): `modules/eam/`.
   - Collections/dunning + credit-hold workflow (**REV-08/REV-12**): `modules/finance/collections.service.ts`.
-  - Scheduled "action" jobs ride the BI report scheduler (`modules/bi/bi.service.ts` `REPORT_TYPES` +
-    `generateReport`): `ar_collections_dunning`, `eam_pm_generate`, `gl_recurring_journals`,
-    `gl_prepaid_amortize`, `lease_periodic_run` — each is idempotent and injected `@Optional()` to keep
-    partial harnesses constructible.
+  - Scheduled "action" jobs ride the BI report scheduler: `ar_collections_dunning`, `eam_pm_generate`,
+    `gl_recurring_journals`, `gl_prepaid_amortize`, `lease_periodic_run` — each idempotent. Since docs/46
+    Phase 1 the GENERATOR lives in the owning module's `*-bi-reports.ts` provider (implements
+    `BiReportSource` from `modules/bi/report-registry.ts`; discovered app-wide at boot by
+    `BiReportRegistrarService`). **A new report type = a `REPORT_TYPES` catalog entry + a generator in the
+    owning module** — never a new branch in `bi-generate.service.ts` or a new ctor param there (positional
+    goldenmaster contract; the `check-service-size` ratchet blocks both).

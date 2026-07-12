@@ -3,6 +3,7 @@ import { MessagingModule } from '../../messaging/messaging.module';
 import { AutomationModule } from '../../automation/automation.module';
 import { CrmPipelineService } from './crm-pipeline.service';
 import { CrmPipelineController, CrmWebToLeadController } from './crm-pipeline.controller';
+import { CrmPipelineBiReports } from './crm-pipeline-bi-reports';
 
 // CRM sales pipeline (REV-17). DocNumberService + DRIZZLE are global (CommonModule / DatabaseModule).
 // CRM-2: CrmWebToLeadController is the @Public website-form capture (rate-limited + honeypot).
@@ -11,7 +12,7 @@ import { CrmPipelineController, CrmWebToLeadController } from './crm-pipeline.co
 @Module({
   imports: [MessagingModule, AutomationModule],
   controllers: [CrmPipelineController, CrmWebToLeadController],
-  providers: [CrmPipelineService],
+  providers: [CrmPipelineBiReports, CrmPipelineService],
   exports: [CrmPipelineService],
 })
 export class CrmPipelineModule {}

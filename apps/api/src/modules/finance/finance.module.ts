@@ -18,11 +18,12 @@ import { MatchModule } from '../match/match.module';
 import { MessagingModule } from '../messaging/messaging.module';
 import { CommitmentsModule } from '../commitments/commitments.module';
 import { BudgetModule } from '../budget/budget.module';
+import { FinanceBiReports } from './finance-bi-reports';
 
 @Module({
   imports: [LedgerModule, TaxModule, MatchModule, MessagingModule, CommitmentsModule, BudgetModule],
   controllers: [FinanceController, CollectionsController, FinanceMetricsController],
-  providers: [FinanceService, ArInvoicePdfService, FinanceDocsPdfService, FinancialHealthService, ArAllowanceService, ArCashApplicationService, ApPaymentRunService, ArApNettingService, CollectionsService, FinanceMetricsService],
+  providers: [FinanceBiReports, FinanceService, ArInvoicePdfService, FinanceDocsPdfService, FinancialHealthService, ArAllowanceService, ArCashApplicationService, ApPaymentRunService, ArApNettingService, CollectionsService, FinanceMetricsService],
   exports: [FinanceService, FinancialHealthService, ArAllowanceService, ArCashApplicationService, ApPaymentRunService, ArApNettingService, CollectionsService, FinanceMetricsService],
 })
 export class FinanceModule {}

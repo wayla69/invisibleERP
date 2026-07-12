@@ -5,6 +5,7 @@ import { RecoveryService } from './recovery.service';
 import { MessagingModule } from '../messaging/messaging.module';
 import { PlatformModule } from '../platform/platform.module';
 import { AutomationModule } from '../automation/automation.module';
+import { NpsBiReports } from './nps-bi-reports';
 
 // W3 (docs/27) — NPS closed loop. Survey sends ride MessagingService (consent path; 'nps' is
 // transactional-exempt from the governance caps); the detractor event fans out through webhooks + the
@@ -13,7 +14,7 @@ import { AutomationModule } from '../automation/automation.module';
 @Module({
   imports: [MessagingModule, PlatformModule, AutomationModule],
   controllers: [NpsController, RecoveryController],
-  providers: [NpsService, RecoveryService],
+  providers: [NpsBiReports, NpsService, RecoveryService],
   exports: [NpsService, RecoveryService],
 })
 export class NpsModule {}
