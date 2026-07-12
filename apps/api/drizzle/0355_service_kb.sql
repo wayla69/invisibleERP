@@ -1,4 +1,4 @@
--- 0354_service_kb — SVC-6 (Service Cloud): Knowledge Base + Case Deflection (SVC-06 control). Net-new, alongside
+-- 0355_service_kb — SVC-6 (Service Cloud): Knowledge Base + Case Deflection (SVC-06 control). Net-new, alongside
 -- the SVC-4/5 case surface (no change to those paths). Two new tenant-scoped tables:
 --   • kb_articles     — a per-tenant KB article with a GOVERNED publish lifecycle (draft → published →
 --                       archived); an article is published only by a DIFFERENT user than its author

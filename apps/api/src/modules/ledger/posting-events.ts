@@ -163,6 +163,16 @@ export const POSTING_EVENTS: Record<string, PostingEventDef> = {
     interest_exp: r(DR, '5900', 'free', 'Interest expense'), accrued_interest: r(CR, '2450', 'pinned', 'Accrued interest payable (TRE-01 schedule tie)') } },
   'DEBT.REPAY':       { name: 'Borrowing repayment',           description: 'Repay principal + accrued interest against cash (TRE-01)', wired: true, roles: {
     borrowings: r(DR, '2500', 'pinned', 'Borrowings control (TRE-01; long-term posts 2550)'), accrued_interest: r(DR, '2450', 'pinned', 'Accrued interest payable (TRE-01)'), bank: r(CR, '1010', 'pinned', 'Bank (CASH set)') } },
+  'INVEST.BUY':       { name: 'Investment purchase',           description: 'Buy a security — Dr the class asset (amortized cost / FVOCI / FVTPL) / Cr 1010 Bank (TRE-03; posted at maker-checker approval)', wired: true, roles: {
+    investment_ac: r(DR, '1350', 'pinned', 'Investments — amortized cost (register tie)'), investment_fvoci: r(DR, '1360', 'pinned', 'Investments — FVOCI (register tie)'), investment_fvtpl: r(DR, '1370', 'pinned', 'Investments — FVTPL (register tie)'), bank: r(CR, '1010', 'pinned', 'Bank (CASH set)') } },
+  'INVEST.INCOME':    { name: 'Investment income',             description: 'Interest (amortized-cost EIR accretion, Dr class asset) or cash dividend (Dr bank) / Cr 4700 Investment Income (TRE-03)', wired: true, roles: {
+    income: r(CR, '4700', 'free', 'Investment income — interest/dividend'), bank: r(DR, '1010', 'pinned', 'Bank (CASH set) — cash dividend received') } },
+  'INVEST.MTM.PL':    { name: 'Investment MTM — FVTPL (P&L)',  description: 'Mark-to-market a FVTPL holding through P&L using the latest APPROVED price (TRE-03)', wired: true, roles: {
+    fv_gain_loss: r(DR, '5430', 'free', 'Fair-value gain/loss — FVTPL (gain=credit, loss=debit)'), investment_fvtpl: r(DR, '1370', 'pinned', 'Investments — FVTPL (register tie)') } },
+  'INVEST.MTM.OCI':   { name: 'Investment MTM — FVOCI (OCI)',  description: 'Mark-to-market a FVOCI holding through the OCI equity reserve (the reusable OCI-reserve primitive) using the latest APPROVED price (TRE-03)', wired: true, roles: {
+    oci_reserve: r(CR, '3500', 'pinned', 'FVOCI reserve (OCI equity) — reusable OCI-reserve primitive; Wave 3 hedge accounting reuses it'), investment_fvoci: r(DR, '1360', 'pinned', 'Investments — FVOCI (register tie)') } },
+  'INVEST.IMPAIR':    { name: 'Investment ECL impairment',     description: 'Expected-credit-loss impairment — Dr 5440 / Cr 1355 allowance (contra-asset) (TRE-03)', wired: true, roles: {
+    impairment_loss: r(DR, '5440', 'free', 'Investment impairment (ECL)'), allowance: r(CR, '1355', 'pinned', 'Allowance for investment ECL (contra-asset)') } },
   'FX.UNREALIZED':    { name: 'FX revaluation (unrealized)',   description: 'Month-end open-item revaluation (control deltas pinned)', wired: true, roles: {
     fx_gain_loss: r(DR, '5400', 'free', 'Unrealized FX gain/loss') } },
   'FX.REALIZED':      { name: 'FX settlement (realized)',      description: 'Realized FX difference at settlement', wired: true, roles: {
