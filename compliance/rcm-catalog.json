@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 266,
+    "total": 267,
     "by_status": {
-      "Implemented": 263,
+      "Implemented": 264,
       "Partial": 3
     },
     "by_family": {
@@ -16,7 +16,7 @@
       "Entity-Level": 7,
       "Expenditure": 16,
       "Fixed Assets": 8,
-      "General Ledger": 26,
+      "General Ledger": 27,
       "ITGC · Access": 22,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
@@ -3778,6 +3778,25 @@
       "tod": "Inspect the seeded standard-item set with standard refs/owners, the item complete/NA + support-doc attach, the ITEMS_INCOMPLETE review gate, the SOD_SELF_APPROVAL maker-checker (reviewer ≠ preparer), the Reviewed→Issued release, and the tenant RLS isolation.",
       "toe": "TC-CLS-02-01: open seeds ≥10 standard disclosure items (Draft, DISC checklist_no); TC-CLS-02-02: review while an item is Open → ITEMS_INCOMPLETE (400); TC-CLS-02-03: self-review by the preparer → SOD_SELF_APPROVAL (403); TC-CLS-02-04: complete/NA all + a DISTINCT reviewer reviews → Reviewed, then issue → Issued; TC-CLS-02-05: attach DISC support evidence to the checklist_no (assertDocExists), a bogus checklist_no → NOT_FOUND; TC-CLS-02-06: another tenant sees 0 checklists (RLS) (re-performed by the disclosure-checklist harness).",
       "evidence": "disclosure_checklists / disclosure_items with prepared_by/reviewed_by/issued_by sign-off trail + per-item completed_by/support_doc_ref; harness ToE (disclosure-checklist)",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "GL-27",
+      "cycle": "General Ledger",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "The canonical Chart of Accounts is SHARED by every tenant and the posting engine hard-references its codes, but canonical account changes (create / rename / postability flip / cash-flow-bucket reroute / deactivate) were a single-person action with NO record: GL-11 restricts WHO may change it (platform Admin/HQ + gl_coa) yet nothing records WHAT changed, WHEN, or BY WHOM, and no second person reviews a change that re-routes every tenant's financial statements (the audit gap symmetric to the one GL-24 closed for posting rules).",
+      "assertion": "Authorization/Accuracy/Completeness",
+      "description": "Canonical CoA maker-checker (COA follow-up C): every canonical account write on /api/ledger/accounts (POST create, PATCH :code update, POST :code/deactivate — all still Admin/HQ-gated per GL-11) is validated FAIL-CLOSED at request time (DUPLICATE_ACCOUNT / ACCOUNT_NOT_FOUND / ACCOUNT_HAS_BALANCE / CODE_HAS_POSTINGS; one pending request per code — CHANGE_ALREADY_PENDING) and staged as a coa_change_requests row (payload + before-snapshot, created_by); the change applies ONLY when a DIFFERENT Admin approves (POST /api/ledger/accounts/change-requests/:id/approve — creator self-approval → 403 SOD_VIOLATION, binds even Admin; re-validated at approve), or is rejected with a recorded reason. SINGLE-ADMIN EXCEPTION (owner decision 2026-07-12): when the system has exactly one ACTIVE Admin a maker-checker would deadlock, so the change applies immediately and the request row records status AutoApplied with the exception reason — the audit trail survives even where the second pair of eyes cannot. The /chart-of-accounts screen carries the pending queue (approve/reject) and stages its create/edit/deactivate dialogs through the same flow. Bulk imports keep their own standing maker-checker (masterdata staged batches, PR-8).",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Each canonical CoA change",
+      "owner": "Platform Admin (HQ) x2 / CFO",
+      "coso": "P10",
+      "code_reference": "ledger/coa.service.ts (activeAdminCount, validateChange fail-closed, requestChange stage-or-AutoApply, approveChange SOD_VIOLATION + re-validate, rejectChange, listChanges); ledger/coa.controller.ts (writes route through requestChange; GET change-requests + :id/approve|reject, assertPlatformAdmin defence-in-depth); schema/posting-rules.ts coaChangeRequests + migration 0362 (PLATFORM table — created_tenant_id, app_user grants, status index); /chart-of-accounts pending-queue card + staged-write toasts; apps/api/test coa maker-checker unit (single-admin exception)",
+      "tod": "Inspect the fail-closed request-time validation, the PendingApproval→distinct-Admin flow, the AutoApplied single-admin exception rows, and the append-only request trail (payload + before snapshot).",
+      "toe": "Re-perform (compliance GL-27 ToE): Admin stages a create → PendingApproval, account does NOT exist yet; creator self-approve → 403 SOD_VIOLATION; a DIFFERENT Admin approves → account exists; duplicate create for the same code → DUPLICATE_ACCOUNT (or CHANGE_ALREADY_PENDING while staged); reject leaves the chart untouched; unit ToE: with exactly ONE active Admin the write applies immediately and the row reads AutoApplied.",
+      "evidence": "coa_change_requests rows (payload/before/created_by/approved_by/reason); compliance harness + unit ToE",
       "status": "Implemented"
     },
     {
