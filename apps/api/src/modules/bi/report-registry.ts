@@ -17,6 +17,8 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   crm_funnel: { label: 'วิเคราะห์กรวยการขาย + ความเร็ว', labelEn: 'CRM funnel conversion + velocity' },
   // Lead source → won revenue (win rate + average deal size per channel).
   crm_source_roi: { label: 'ผลตอบแทนตามแหล่งที่มา (Source ROI)', labelEn: 'CRM source ROI (won revenue by source)' },
+  // G4 (docs/45): one exec view of marketing spend → lift → margin (campaign attribution + vouchers + B2B + budget)
+  marketing_roi: { label: 'ผลตอบแทนการตลาด (spend → lift → margin)', labelEn: 'Marketing ROI (spend → lift → margin)' },
   // Forecast categories (commit/best-case/pipeline) + quota attainment per owner + activity leaderboard.
   crm_forecast: { label: 'พยากรณ์การขาย + โควตา', labelEn: 'CRM forecast categories + quota attainment' },
   // Likewise: each run re-profiles the tenant's whole active member base (RFM) so segments stay fresh (F2).
