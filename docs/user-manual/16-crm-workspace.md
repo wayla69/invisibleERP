@@ -277,6 +277,38 @@ red *หมดอายุแล้ว* badge.
 
 ---
 
+## 16.10 Support cases & Email-to-Case (เคสบริการ & อีเมลเข้าเคส — `/service`, SVC-4)
+
+The **เคสบริการ (Support cases)** tab on `/service` is where the service team tracks every customer request or
+complaint as a **case** — and where customer emails become cases automatically (**Email-to-Case**) so nothing is
+lost.
+
+**Open a case** — fill in the subject, pick a **priority** (P1–P4), optionally the customer's email and an
+assignee, and press **เปิดเคส (Open case)**. The case gets a number (`CASE-…`) and starts at **new** (or **open**
+if you named an assignee).
+
+**Work the case** — each row has the actions that its status allows:
+- **มอบหมาย (Assign)** — type the owner's username; the case moves to **open**.
+- **แก้ไขแล้ว (Resolve)** — mark the case resolved once you've handled it.
+- **ปิดเคส (Close)** — close the case (terminal).
+- **เปิดใหม่ (Reopen)** — bring a resolved/closed case back to **open**.
+
+The lifecycle is governed (**new → open → pending → resolved → closed**, with reopen), so the status you see is
+always reliable — you can't, for example, resolve a case that's already closed.
+
+**Email-to-Case (control SVC-04).** Point your support inbox (e.g. `support@yourcompany`) at the tenant webhook
+`/api/service/email-to-case/inbound/<company code>` at your mail provider (SendGrid Inbound Parse / Mailgun route
+/ Postmark), authenticated with the **same per-tenant email secret** your CRM inbound uses. Then:
+- A customer email that matches no case **opens a new case** (source **email**) — so no request is dropped.
+- A **reply** threads straight back onto its case (via the hidden `[case:…]` tag on the reply we send, or the
+  sender's open case), and if the case was already resolved/closed the reply **reopens** it.
+- Duplicate provider redeliveries are ignored automatically.
+
+The webhook is HMAC-signed — forged or replayed deliveries are rejected — and Email-to-Case never posts to the
+ledger.
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -299,11 +331,15 @@ red *หมดอายุแล้ว* badge.
 | `SOD_SELF_APPROVAL` | Approving a contract renewal you proposed yourself (§16.9, SVC-02) | A different service/executive user must approve the renewal. |
 | `CONTRACT_ALREADY_RENEWED` | Proposing a renewal on a contract that already has a successor (§16.9) | The contract is already renewed — open its successor instead. |
 | `RENEWAL_IN_FLIGHT` | Proposing a second renewal while one is still pending (§16.9) | Approve or reject the pending renewal first. |
+| `CASE_NOT_ACTIVE` | Resolving a case that is not new/open/pending (§16.10) | Reopen the case first if you need to work it again. |
+| `CASE_ALREADY_CLOSED` / `CASE_NOT_CLOSED` | Closing an already-closed case / reopening a case that isn't resolved/closed (§16.10) | Refresh the list; the status changed under you. |
+| `UNKNOWN_TENANT` | An Email-to-Case delivery used a company code that doesn't exist (§16.10) | Not a user action — fix the webhook URL's company code at the mail provider. |
 
 ## Revision history
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.7 | 2026-07-11 | **Support cases & Email-to-Case (`/service`) — SVC-4, control SVC-04:** new §16.10. The เคสบริการ tab opens/tracks support cases with a governed lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee, and **Email-to-Case** turns customer emails into cases automatically — an unmatched email opens a new case (nothing dropped), a reply threads back onto its case (reopening it if resolved/closed), duplicate redeliveries are ignored, and the HMAC-signed webhook rejects forged/replayed mail. Added the `CASE_NOT_ACTIVE` / `CASE_ALREADY_CLOSED` / `CASE_NOT_CLOSED` / `UNKNOWN_TENANT` error rows. |
 | 1.6 | 2026-07-11 | **Contract renewals & expiry (`/service/renewals`) — SVC-3, control SVC-02:** new §16.9. Propose a renewal with an uplift % (new value = base × (1+uplift)); within the tenant ceiling (default 5%) it auto-approves and creates the successor contract, above the ceiling — or any auto-renew that raises price — it routes to maker-checker (a different user must approve; the proposer is blocked with `SOD_SELF_APPROVAL`). Renewal queue (approve/reject) + an expiry worklist of Active contracts near their end date with no renewal in flight. Added the `SOD_SELF_APPROVAL` / `CONTRACT_ALREADY_RENEWED` / `RENEWAL_IN_FLIGHT` error rows. |
 | 1.5 | 2026-07-11 | **SVC-2 Warranty & Entitlement registry (`/service/warranty`):** new §16.8 documenting the warranty-term catalogue, the installed-base serialized-unit registry (auto-computed warranty end), and warranty claims with the **SVC-01** coverage-authorization maker-checker (in-coverage → auto-free; out-of-coverage → a *different* person authorizes/rejects, `SOD_SELF_APPROVAL` on self-approval), plus the coverage-exceptions override register. Added `SOD_SELF_APPROVAL` / `CLAIM_NOT_PENDING` / `SERIAL_EXISTS`+`TERM_EXISTS` error rows. |
 | 1.4 | 2026-07-11 | **Service workspace (`/service`) — subscription lifecycle + SLA resolve made usable:** new §16.7 documenting the after-sales workspace. Surfaced the previously UI-less flows: **ปิดเคส (Resolve)** on SLA events (with breach computation + red *เกิน SLA* badges), and on subscriptions a **create form**, **รันรอบเรียกเก็บ (Run billing)**, per-row **พัก/เปิดใช้/ยกเลิก (pause/resume/cancel)** with a cancel-confirm, and an **ใบแจ้งหนี้ (invoices)** drill-down with **บันทึกชำระ (mark paid)**. New backend endpoint `POST /api/service/subscriptions/:id/resume`; cancel is now terminal. Added the `SUB_CANCELLED` / `ALREADY_PAID` error rows. |

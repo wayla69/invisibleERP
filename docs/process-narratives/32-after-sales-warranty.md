@@ -7,10 +7,10 @@
 | Process ID | PN-32-SVC |
 | Process owner | `<<Service Manager>>` |
 | Approver | `<<CFO>>` |
-| Version | **0.1 DRAFT** |
+| Version | **0.2 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | SVC-01; SoD (requester ≠ authorizer) |
+| Related RCM controls | SVC-01; SVC-04 (support cases / Email-to-Case completeness); SoD (requester ≠ authorizer) |
 | Related policy | `compliance/policies/03-delegation-of-authority.md` |
 
 ## 2. Purpose
@@ -161,9 +161,52 @@ out-of-coverage overrides) as detective oversight. All data is RLS-scoped per te
 | `SOD_SELF_APPROVAL` | 403 | The authorizer/rejector is the claim requester (segregation of duties) |
 | `BAD_DISPOSITION` | 400 | Disposition on authorize is not `repair`/`replace` |
 | `REASON_REQUIRED` | 400 | A reject reason was not supplied |
+| `UNKNOWN_TENANT` | 401 | Email-to-Case inbound path tenant code does not resolve |
+| `BAD_INBOUND_SECRET` / `WEBHOOK_STALE` / `INBOUND_UNVERIFIED` | 401 | Email-to-Case webhook auth: bad secret / stale timestamp (replay) / unconfigured secret in production |
+| `CASE_NOT_FOUND` | 404 | Support case not found (or another tenant's) |
+| `CASE_NOT_ACTIVE` | 400 | Resolve/pending attempted on a case that is not new/open/pending |
+| `CASE_ALREADY_CLOSED` / `CASE_CLOSED` | 400 | Close attempted on a closed case / mutate attempted on a closed case |
+| `CASE_NOT_CLOSED` | 400 | Reopen attempted on a case that is not resolved/closed |
+
+## 10b. Support Cases & Email-to-Case (SVC-4 · control SVC-04)
+
+Beyond warranty claims, the after-sales desk runs **support cases** — the governed record of a customer request
+or complaint — and an **Email-to-Case** intake so that *no inbound customer email is ever dropped* (the SVC-04
+completeness control).
+
+**Case object (`service_cases`, migration 0350).** A case has a per-tenant `case_no` (`CASE-NNNNN`), a subject +
+description, a **priority** (P1–P4), an owner/**assignee**, an optional CRM contact link (`contact_email`), and a
+**governed status lifecycle**: `new → open → pending → resolved → closed`, with `reopen → open`. Transitions are
+enforced by the service — `assign` moves `new → open` and records the owner; `pending` parks a case waiting on the
+customer; `resolve` records a resolution note and timestamp; `close` is terminal; `reopen` returns a
+resolved/closed case to `open`. Illegal transitions are rejected (`CASE_NOT_ACTIVE` / `CASE_ALREADY_CLOSED` /
+`CASE_NOT_CLOSED`), so a case's resolution/closure state and its audit trail are reliable. The authenticated
+surface (`GET/POST /api/service/cases[/:id[/assign|pending|resolve|close|reopen|reply]]`) is gated to the service
+duties (`exec`/`marketing`).
+
+**Email trail (`case_email_messages`).** Every inbound (customer → us) and outbound (us → customer) message is
+appended, deduped per tenant on the provider **Message-ID**. An outbound `reply` embeds the case's stable thread
+token (`[case:svct_…]`) so the customer's reply threads straight back onto the case.
+
+**Email-to-Case webhook (SVC-04 completeness control).** A **public, no-JWT** webhook
+(`POST /api/service/email-to-case/inbound/:tenantCode`, mirroring the CRM-6 inbound rail) receives the
+provider-parsed email. Authenticity is the **per-tenant email shared secret / HMAC over the raw body**
+(`verifyInboundWebhook`): a configured HMAC secret *requires* a valid signature, an optional timestamp enforces a
+300-second freshness window against replay (`WEBHOOK_STALE`), a bad secret is rejected (`BAD_INBOUND_SECRET`), and
+in production an *unconfigured* secret is **fail-closed** (`INBOUND_UNVERIFIED`); the tenant is resolved from the
+path code (`UNKNOWN_TENANT`). Each authenticated inbound is then matched deterministically — **(1)** a per-case
+thread token in the reply threads onto the exact case; **(2)** else the sender address threads onto their
+most-recent **open** case; **(3)** else a **new case is opened** — so no customer email is dropped. Redeliveries
+are idempotent (Message-ID dedupe), and a reply onto a resolved/closed case **reopens** it. The trail never posts
+to the GL (v1).
+
+**Verification.** `tools/cutover/src/service.ts` exercises the full SVC-4 surface (manual case lifecycle,
+Email-to-Case new-case-on-unmatched, thread-token + contact threading, Message-ID idempotency, reopen-on-reply,
+`UNKNOWN_TENANT`, illegal-transition rejects, and RLS tenant isolation).
 
 ## 11. Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-07-11 | `<<author>>` | Initial narrative — SVC-2 Warranty & Entitlement registry (warranty terms, installed base, warranty claims) with control SVC-01 (coverage-authorization maker-checker) + expiring / coverage-exceptions detective reads. Migration 0329; harness `tools/cutover/src/warranty.ts` (20 checks). |
+| 0.2 DRAFT | 2026-07-11 | `<<author>>` | Added **§10b — Support Cases & Email-to-Case (SVC-4, control SVC-04, migration 0350)**: the `service_cases` object with a governed status lifecycle (new→open→pending→resolved→closed, reopen) + priority/assignee/CRM-contact link, the append-only `case_email_messages` trail (Message-ID dedupe), and the public HMAC-authenticated Email-to-Case webhook that threads a reply onto its case (thread token → sender's open case) or opens a new case so no inbound email is dropped. Added the case + inbound error-code rows. Harness `tools/cutover/src/service.ts` (SVC-4 checks). |

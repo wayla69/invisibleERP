@@ -43,6 +43,7 @@ async function main() {
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: hq },
+    { username: 'svc_t1', passwordHash: await pw.hash('pw9'), role: 'Admin', tenantId: t1 }, // 2nd tenant → prove RLS isolation
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] })
@@ -59,7 +60,7 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
-  const [admin, sales1] = [await login('admin', 'admin123'), await login('sales1', 'pw1')];
+  const [admin, sales1, svcT1] = [await login('admin', 'admin123'), await login('sales1', 'pw1'), await login('svc_t1', 'pw9')];
 
   // ── SERVICE CONTRACTS + SLA ──
 
@@ -149,6 +150,68 @@ async function main() {
   ok('Cancel subscription → status=Cancelled', cancelled.status === 200 && cancelled.json.status === 'Cancelled', JSON.stringify(cancelled.json));
   const resumeCancelled = await inj('POST', `/api/service/subscriptions/${subId}/resume`, admin);
   ok('Resume cancelled sub → 400 SUB_CANCELLED', resumeCancelled.status === 400 && resumeCancelled.json.error?.code === 'SUB_CANCELLED', JSON.stringify(resumeCancelled.json));
+
+  // ── SVC-4 — SUPPORT CASES + EMAIL-TO-CASE (SVC-04 control) ──
+
+  // 1. Open a case manually → CASE-00001, status 'new' (no assignee)
+  const case1 = await inj('POST', '/api/service/cases', admin, { subject: 'Login broken', priority: 'P2', contact_email: 'Bob@Acme.com' });
+  ok('Create case → CASE-00001, status=new', case1.status === 201 && case1.json.case_no === 'CASE-00001' && case1.json.status === 'new', JSON.stringify(case1.json));
+  const case1Id = case1.json.id;
+
+  // 2. Assign → status open, assignee set
+  const assigned = await inj('POST', `/api/service/cases/${case1Id}/assign`, admin, { assignee: 'agent1' });
+  ok('Assign case → status=open, assignee=agent1', assigned.status === 200 && assigned.json.status === 'open' && assigned.json.assignee === 'agent1', JSON.stringify(assigned.json));
+
+  // 3. Resolve → status resolved
+  const caseResolved = await inj('POST', `/api/service/cases/${case1Id}/resolve`, admin, { note: 'Reset password' });
+  ok('Resolve case → status=resolved', caseResolved.status === 200 && caseResolved.json.status === 'resolved', JSON.stringify(caseResolved.json));
+
+  // 4. Reopen resolved → open
+  const caseReopened = await inj('POST', `/api/service/cases/${case1Id}/reopen`, admin, {});
+  ok('Reopen resolved case → status=open', caseReopened.status === 200 && caseReopened.json.status === 'open', JSON.stringify(caseReopened.json));
+
+  // 5. Close → closed; resolving a closed case is rejected (governed lifecycle)
+  const caseClosed = await inj('POST', `/api/service/cases/${case1Id}/close`, admin, {});
+  ok('Close case → status=closed', caseClosed.status === 200 && caseClosed.json.status === 'closed', JSON.stringify(caseClosed.json));
+  const resolveClosed = await inj('POST', `/api/service/cases/${case1Id}/resolve`, admin, {});
+  ok('Resolve a closed case → 400 CASE_NOT_ACTIVE', resolveClosed.status === 400 && resolveClosed.json.error?.code === 'CASE_NOT_ACTIVE', JSON.stringify(resolveClosed.json));
+
+  // 6. Email-to-Case: an unmatched inbound OPENS a new case (completeness — no email dropped)
+  const inbound1 = await inj('POST', '/api/service/email-to-case/inbound/HQ', undefined, { from: 'Carol@Acme.com', subject: 'Cannot print', text: 'Printer offline', message_id: 'msg-1' });
+  ok('Email-to-Case (unmatched) → opens new case CASE-00002 (source=email)', inbound1.status === 201 && inbound1.json.created === true && inbound1.json.case_no === 'CASE-00002', JSON.stringify(inbound1.json));
+  const emailCaseId = inbound1.json.case_id;
+  const emailCaseNo = inbound1.json.case_no;
+
+  // 7. New email case carries a thread token + the inbound message is logged
+  const gotCase = await inj('GET', `/api/service/cases/${emailCaseId}`, admin);
+  const token = gotCase.json.case?.thread_token as string;
+  ok('New email case has thread token + 1 inbound message', !!token && gotCase.json.case?.source === 'email' && gotCase.json.messages?.length === 1 && gotCase.json.messages[0].direction === 'inbound', JSON.stringify({ token, msgs: gotCase.json.messages?.length }));
+
+  // 8. A reply carrying the thread token threads onto the SAME case (no new case)
+  const inbound2 = await inj('POST', '/api/service/email-to-case/inbound/HQ', undefined, { from: 'someoneelse@acme.com', subject: `Re: Cannot print [case:${token}]`, text: 'Still down', message_id: 'msg-2' });
+  ok('Reply with thread token → threads onto same case (no new case)', inbound2.json.created === false && inbound2.json.case_no === emailCaseNo && inbound2.json.matched_by === 'thread_token', JSON.stringify(inbound2.json));
+
+  // 9. Redelivered Message-ID → idempotent skip
+  const dup = await inj('POST', '/api/service/email-to-case/inbound/HQ', undefined, { from: 'someoneelse@acme.com', subject: 'x', text: 'y', message_id: 'msg-2' });
+  ok('Redelivered Message-ID → idempotent skip', dup.json.skipped === 'duplicate', JSON.stringify(dup.json));
+
+  // 10. A reply from the ORIGINAL sender with no token threads onto their open case (contact match)
+  const inbound3 = await inj('POST', '/api/service/email-to-case/inbound/HQ', undefined, { from: 'carol@acme.com', subject: 'more detail', text: 'model X100', message_id: 'msg-3' });
+  ok('Reply from same sender (no token) → threads onto open case (contact_email)', inbound3.json.created === false && inbound3.json.case_no === emailCaseNo && inbound3.json.matched_by === 'contact_email', JSON.stringify(inbound3.json));
+
+  // 11. A reply onto a RESOLVED case reopens it
+  await inj('POST', `/api/service/cases/${emailCaseId}/resolve`, admin, {});
+  await inj('POST', '/api/service/email-to-case/inbound/HQ', undefined, { from: 'carol@acme.com', subject: `Re [case:${token}]`, text: 'reopen', message_id: 'msg-4' });
+  const afterReopen = await inj('GET', `/api/service/cases/${emailCaseId}`, admin);
+  ok('Reply onto resolved case reopens it → status=open', afterReopen.json.case?.status === 'open', JSON.stringify({ status: afterReopen.json.case?.status }));
+
+  // 12. Unknown tenant code → 401 UNKNOWN_TENANT
+  const badTenant = await inj('POST', '/api/service/email-to-case/inbound/NOPE', undefined, { from: 'x@y.com', text: 'hi', message_id: 'm-x' });
+  ok('Email-to-Case unknown tenant → 401 UNKNOWN_TENANT', badTenant.status === 401 && badTenant.json.error?.code === 'UNKNOWN_TENANT', JSON.stringify(badTenant.json));
+
+  // 13. RLS isolation → a 2nd-tenant user sees 0 of HQ's cases
+  const t1Cases = await inj('GET', '/api/service/cases', svcT1);
+  ok('RLS isolation → T1 user sees 0 HQ cases', t1Cases.json.count === 0, `count=${t1Cases.json.count}`);
 
   await app.close();
 }
