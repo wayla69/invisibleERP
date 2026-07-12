@@ -105,6 +105,17 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '2450', name: 'Accrued Interest Payable', type: 'Liability' },      // ดอกเบี้ยค้างจ่าย — accrued-but-unpaid interest on borrowings (EIR accrual, Cr; cleared on repayment)
   { code: '2500', name: 'Short-term Borrowings', type: 'Liability' },         // เงินกู้ยืมระยะสั้น — principal drawn on a short-term facility (Cr at drawdown, Dr on repayment)
   { code: '2550', name: 'Long-term Borrowings', type: 'Liability' },          // เงินกู้ยืมระยะยาว — principal drawn on a long-term facility (Cr at drawdown, Dr on repayment)
+  // Investment & Securities register (Track C Wave 2, TRE-03) — a purchase books cost to the class asset
+  // (1350/1360/1370); FVOCI mark-to-market moves through the OCI equity reserve 3500 (the reusable OCI-reserve
+  // primitive), FVTPL through P&L 5430; interest/dividend income → 4700; ECL impairment Dr 5440 / Cr allowance 1355.
+  { code: '1350', name: 'Investments — Amortized Cost', type: 'Asset' },      // เงินลงทุน–ราคาทุนตัดจำหน่าย (held-to-collect debt securities, EIR)
+  { code: '1355', name: 'Allowance for Investment ECL', type: 'Asset' },      // ค่าเผื่อการด้อยค่าเงินลงทุน — contra-asset (normal credit bal); Cr from the ECL impairment (TRE-03)
+  { code: '1360', name: 'Investments — FVOCI', type: 'Asset' },               // เงินลงทุน–มูลค่ายุติธรรมผ่านกำไรขาดทุนเบ็ดเสร็จอื่น (fair value through OCI)
+  { code: '1370', name: 'Investments — FVTPL', type: 'Asset' },               // เงินลงทุน–มูลค่ายุติธรรมผ่านกำไรขาดทุน (fair value through profit or loss)
+  { code: '3500', name: 'FVOCI Reserve (OCI)', type: 'Equity' },              // สำรองมูลค่ายุติธรรม (กำไรขาดทุนเบ็ดเสร็จอื่น) — FVOCI cumulative MTM reserve in equity (reusable OCI-reserve primitive; Wave 3 hedge accounting reuses it)
+  { code: '4700', name: 'Investment Income', type: 'Revenue' },               // รายได้จากเงินลงทุน — interest (amortized-cost accretion) + dividends (TRE-03)
+  { code: '5430', name: 'Fair-value Gain/Loss (FVTPL)', type: 'Expense' },    // กำไร/ขาดทุนจากการวัดมูลค่ายุติธรรม (FVTPL) — MTM through P&L; gain=credit, loss=debit
+  { code: '5440', name: 'Investment Impairment (ECL)', type: 'Expense' },     // ผลขาดทุนจากการด้อยค่าเงินลงทุน — ECL impairment (Dr 5440 / Cr 1355 allowance, TRE-03)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -162,6 +173,13 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '1520': { bucket: 'investing', label: 'สินทรัพย์ระหว่างก่อสร้าง (Construction in progress / AUC)' }, // FA-13 — CIP cost accumulation, an investing outflow
   '1600': { bucket: 'investing', label: 'สินทรัพย์สิทธิการใช้ (Right-of-use assets)' },
   '1610': { bucket: 'investing', label: 'เงินลงทุนสุทธิในสัญญาเช่าการเงิน (Net investment in finance leases)' }, // FIN-10 lessor — collections of the net investment (principal) are investing flows
+  // Investing — marketable investments & securities (TRE-03). Purchases are investing outflows; the ECL
+  // allowance (1355, contra-asset) nets against the amortized-cost holding. FVOCI/FVTPL MTM is a NON-CASH
+  // remeasurement (asset ↔ 3500 OCI reserve / 5430 P&L), so it self-cancels in the SCF reconciliation.
+  '1350': { bucket: 'investing', label: 'เงินลงทุน–ราคาทุนตัดจำหน่าย (Investments — amortized cost)' },
+  '1355': { bucket: 'investing', label: 'ค่าเผื่อการด้อยค่าเงินลงทุน (Allowance for investment ECL)' },
+  '1360': { bucket: 'investing', label: 'เงินลงทุน–มูลค่ายุติธรรมผ่าน OCI (Investments — FVOCI)' },
+  '1370': { bucket: 'investing', label: 'เงินลงทุน–มูลค่ายุติธรรมผ่านกำไรขาดทุน (Investments — FVTPL)' },
   // Financing — borrowings (TRE-01 debt register), owners' equity, dividends, lease liabilities
   '2500': { bucket: 'financing', label: 'เงินกู้ยืมระยะสั้น (Short-term borrowings)' },   // TRE-01 — drawdowns/repayments of principal are financing flows
   '2550': { bucket: 'financing', label: 'เงินกู้ยืมระยะยาว (Long-term borrowings)' },    // TRE-01 — drawdowns/repayments of principal are financing flows
@@ -169,4 +187,5 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '3000': { bucket: 'financing', label: 'ส่วนทุน/เงินลงทุนจากเจ้าของ (Owner capital contributions)' },
   '3100': { bucket: 'financing', label: 'เงินปันผลจ่าย / กำไรสะสม (Dividends paid)' },
   '3200': { bucket: 'financing', label: 'ส่วนเกินทุนจากการตีราคา (Revaluation surplus)' },
+  '3500': { bucket: 'financing', label: 'สำรองมูลค่ายุติธรรม FVOCI (FVOCI reserve, OCI)' }, // TRE-03 — FVOCI cumulative MTM equity reserve (non-cash remeasurement; mirrors 3200 handling)
 };

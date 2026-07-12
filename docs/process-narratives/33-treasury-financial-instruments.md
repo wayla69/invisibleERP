@@ -7,11 +7,11 @@
 | Process ID | PN-33-TRE |
 | Process owner | `<<Treasury / Controller>>` |
 | Approver | `<<CFO>>` |
-| Version | **0.1 DRAFT** |
+| Version | **0.2 DRAFT** |
 | Effective date | `<<effective-date>>` |
-| Review cadence | Per drawdown / monthly accrual + each covenant cadence |
-| Version note | Rev **0.1** (2026-07-12) — Track C Wave 1: Debt & Borrowings register + EIR amortized-cost engine (new controls TRE-01 + TRE-02, migration `0353`). |
-| Related RCM controls | TRE-01, TRE-02, GL-05, GL-24, TR-01 |
+| Review cadence | Per drawdown / monthly accrual + each covenant cadence · per trade / month-end investment valuation |
+| Version note | Rev **0.2** (2026-07-12) — Track C Wave 2: Investment & Securities register + the reusable OCI-reserve primitive (new control **TRE-03**, migration `0354`). Rev **0.1** (2026-07-12) — Track C Wave 1: Debt & Borrowings register + EIR amortized-cost engine (new controls TRE-01 + TRE-02, migration `0353`). |
+| Related RCM controls | TRE-01, TRE-02, TRE-03, GL-05, GL-24, TR-01 |
 | Related policy | `compliance/policies/11-financial-close-policy.md` |
 
 ## 2. Purpose
@@ -25,16 +25,25 @@ waves (investments, hedging) build.
 ## 3. Scope
 
 - **In scope:** debt facilities, drawdowns, the periodic EIR interest accrual, repayments, covenant tracking +
-  breach detection, and the maturity ladder for the debt register. Multi-tenant (RLS), Thai-localized.
-- **Out of scope (this wave):** derivative/hedge accounting, marketable-investment fair-value measurement,
-  and lender cash-management integrations. Cash *position/forecast* is the existing TR-01 liquidity board.
+  breach detection, and the maturity ladder for the debt register (Wave 1); the **investment & securities
+  register** — classification (AMORTIZED_COST / FVOCI / FVTPL), a maker-checker market-price register,
+  mark-to-market valuation (FVOCI → OCI reserve, FVTPL → P&L), ECL impairment, and interest/dividend income
+  (Wave 2, §7bis). Multi-tenant (RLS), Thai-localized.
+- **Out of scope (this wave):** derivative/hedge accounting and lender cash-management integrations. Cash
+  *position/forecast* is the existing TR-01 liquidity board. (Hedge accounting — Wave 3 — reuses the OCI-reserve
+  primitive built here in §7bis.)
 
 ## 4. References
 
-- IFRS 9 / TFRS 9 — financial liabilities at amortized cost, effective-interest method.
-- Chart of accounts: 1010 Bank, 2450 Accrued Interest Payable, 2500 Short-term Borrowings, 2550 Long-term
-  Borrowings, 5900 Interest Expense (`apps/api/src/modules/ledger/ledger-constants.ts`).
-- Posting-event registry `DEBT.DRAWDOWN` / `DEBT.INTEREST` / `DEBT.REPAY` (`posting-events.ts`, GL-24).
+- IFRS 9 / TFRS 9 — financial liabilities at amortized cost, effective-interest method; financial-asset
+  classification (amortized cost / FVOCI / FVTPL), mark-to-market, and expected-credit-loss (ECL) impairment.
+- Chart of accounts (debt): 1010 Bank, 2450 Accrued Interest Payable, 2500 Short-term Borrowings, 2550 Long-term
+  Borrowings, 5900 Interest Expense. **Investments (TRE-03):** 1350 Investments–Amortized Cost, 1355 Allowance for
+  Investment ECL (contra-asset), 1360 Investments–FVOCI, 1370 Investments–FVTPL, 3500 FVOCI Reserve (OCI equity),
+  4700 Investment Income, 5430 Fair-value Gain/Loss (FVTPL), 5440 Investment Impairment
+  (`apps/api/src/modules/ledger/ledger-constants.ts`).
+- Posting-event registry `DEBT.DRAWDOWN` / `DEBT.INTEREST` / `DEBT.REPAY`; `INVEST.BUY` / `INVEST.INCOME` /
+  `INVEST.MTM.PL` / `INVEST.MTM.OCI` / `INVEST.IMPAIR` (`posting-events.ts`, GL-24).
 - Permissions/SoD: `packages/shared/src/permissions.ts` (`treasury`, `treasury_approve`, SoD R23).
 
 ## 5. Definitions & abbreviations
@@ -57,6 +66,9 @@ waves (investments, hedging) build.
 | Run EIR interest accrual | I | **R** | A |
 | Run covenant tests / review breach worklist | C | **R** | A |
 | Review debt register, maturity ladder | C | C | **R** |
+| Buy investment, classify, maintain, post market prices | **R** | C | A |
+| Approve investment / market price, run MTM · ECL · income accrual | I | **R** | A |
+| Review investment register, portfolio, valuation ledger | C | C | **R** |
 
 Segregation of duties is enforced **in-app** (creator ≠ approver → `403 SOD_SELF_APPROVAL`, binding even
 Admin) and flagged by **SoD R23** (`treasury` vs `treasury_approve`). Roles **TreasuryAnalyst** (maker) and
@@ -90,6 +102,48 @@ Admin) and flagged by **SoD R23** (`treasury` vs `treasury_approve`). Roles **Tr
    flag, and returns the breaches. `GET /api/treasury/covenants/breaches` is the outstanding-breach worklist
    the controller reviews each cadence — recording the breach **is** the detective control.
 
+## 7bis. Investment & Securities register (Track C Wave 2, TRE-03)
+
+The investment register records **marketable securities** end to end under maker-checker, classifies each holding,
+values it, and recognises its income — building the **reusable OCI-reserve primitive** (the FVOCI equity reserve
+`3500`) that Wave 3 hedge accounting reuses. Module `modules/treasury-invest` (`investment.service.ts` /
+`investment.controller.ts`); tables `investments`, `investment_prices`, `investment_valuations` (migration `0354`,
+all tenant-scoped/RLS). Reads gate `treasury / treasury_approve / fin_report / exec`; the maker/checker split is
+SoD **R23** (`treasury` vs `treasury_approve`), enforced in-app (creator ≠ approver → `403 SOD_SELF_APPROVAL`).
+
+1. **Classification.** Every holding carries one of:
+   - **AMORTIZED_COST** (held-to-collect debt, asset `1350`) — interest income accretes on the effective-interest
+     (EIR) amortized-cost carrying; **not** marked to market.
+   - **FVOCI** (fair value through OCI, asset `1360`) — remeasurement moves through the **OCI equity reserve
+     `3500`**, not P&L.
+   - **FVTPL** (fair value through P&L, asset `1370`) — remeasurement moves through P&L `5430`.
+2. **Buy (maker → checker).** `POST /api/treasury/investments` records a holding (`instrument`, `classification`,
+   `symbol`, `quantity`, `cost`, `eir_pct`, `trade_date`, `maturity_date`) as **PendingApproval** (`cost` > 0,
+   `BAD_COST`). A **different** user `POST .../:id/approve` → **Approved**, and the buy posts **Dr `1350`|`1360`|
+   `1370`** (per classification) **/ Cr `1010` Bank** via `LedgerService.postEntry`. Self-approval is rejected
+   `403 SOD_SELF_APPROVAL` — so a security cannot be bought and self-approved (cash released with no independent
+   check). `POST .../:id/reject` rejects a pending holding.
+3. **Market-price register (maker → checker, mirrors FX-04).** `POST /api/treasury/prices` records a market price
+   (`symbol`, `price_date`, `price`) — a **manual** price lands **PendingApproval**; an explicit non-manual
+   `source` (a feed) is auto-approved. `POST /api/treasury/prices/approve` (a **different** user, else
+   `SOD_SELF_APPROVAL`) approves it. **Only an Approved price can drive MTM** — this is the core TRE-03 valuation
+   control.
+4. **Mark-to-market.** `POST .../:id/revalue` values the holding at `quantity × latest Approved price` as of a
+   date. An **un-approved** price is rejected `NO_APPROVED_PRICE`. The fair-value delta routes by classification:
+   **FVOCI → the OCI reserve `3500`** (`Dr/Cr 1360` ↔ `Cr/Dr 3500`), **FVTPL → P&L `5430`** (`Dr/Cr 1370` ↔
+   `Cr/Dr 5430`). An **AMORTIZED_COST** holding is measured at amortized cost, so MTM is rejected
+   `MTM_NOT_APPLICABLE`. Each event writes an `investment_valuations` row (prior/new carrying, delta, OCI/P&L
+   split) and is idempotent per `as_of`.
+5. **Interest / dividend income.** `POST .../:id/accrue`. For **AMORTIZED_COST** it posts one month of EIR
+   interest = `round2(carrying × EIR/100/12)` — **Dr `1350` / Cr `4700` Investment Income** — reusing the Wave-1
+   periodic cursor + `alreadyPosted('INVEST-ACCR', investment+period)` guard (re-running the same period posts
+   nothing; carrying accretes). For **FVOCI/FVTPL** it books a cash dividend/coupon for the supplied `amount` —
+   **Dr `1010` Bank / Cr `4700`**.
+6. **ECL impairment.** `POST .../:id/impair` books an expected-credit-loss provision — **Dr `5440` Investment
+   Impairment / Cr `1355` Allowance** (contra-asset, `ecl` > 0 → `BAD_ECL`) — reducing the net carrying.
+7. **Reads.** `GET .../investments` (register), `.../investments/:id` (holding + its valuation ledger),
+   `.../portfolio` (roll-up by classification: cost, carrying, allowance, OCI reserve), `.../prices`.
+
 ## 8. Process flow
 
 ```mermaid
@@ -110,26 +164,51 @@ flowchart TD
   C --> J[Maturity ladder]
 ```
 
+Investment & securities register (TRE-03):
+
+```mermaid
+flowchart TD
+  A[Analyst: buy security + classification] -->|PendingApproval| B{Manager approves?}
+  B -->|self-approve| X[403 SOD_SELF_APPROVAL]
+  B -->|distinct approver| C[Approved -> buy Dr 1350|1360|1370 / Cr 1010]
+  P1[Analyst: post market price] -->|manual = PendingApproval| P2{Manager approves price?}
+  P2 -->|self-approve| PX[403 SOD_SELF_APPROVAL]
+  P2 -->|distinct approver| P3[Approved price]
+  C --> M{Revalue MTM}
+  M -->|no approved price| MX[400 NO_APPROVED_PRICE]
+  M -->|AMORTIZED_COST| MA[400 MTM_NOT_APPLICABLE]
+  P3 --> M
+  M -->|FVOCI| MO[delta -> OCI reserve 3500]
+  M -->|FVTPL| MP[delta -> P&L 5430]
+  C -->|AMORTIZED_COST| E[EIR interest Dr 1350 / Cr 4700, idempotent]
+  C --> K[ECL impair Dr 5440 / Cr 1355]
+```
+
 ## 9. Control matrix
 
 | Control | Type | Assertion(s) | Description | Test of operating effectiveness |
 |---|---|---|---|---|
 | **TRE-01** | Application (Preventive) | Authorization / Accuracy / Valuation / Completeness / SoD | Debt facility + drawdown maker-checker (creator ≠ approver → `SOD_SELF_APPROVAL`), drawdown limit gate, correct Dr 1010 / Cr 2500\|2550 posting, and an **idempotent EIR amortized-cost accrual** (carrying × EIR/12 → Dr 5900 / Cr 2450). | `treasury-debt` harness (36 checks): create→self-approve blocked→distinct approver; drawdown GL + `LIMIT_EXCEEDED`; EIR schedule ties a hand-computed amortization table; re-accrue same period idempotent; repayment legs + `REPAY_EXCEEDS_PRINCIPAL`; RLS isolation. |
 | **TRE-02** | Detective | Completeness / Timeliness | Covenant tracking + breach detection: a covenant test persists a `debt_covenant_tests` reading with a `breached` flag and surfaces outstanding breaches on a worklist for periodic controller review. | `treasury-debt` harness: DSCR ≥ 1.25 passes at 1.40, breaches at 1.10 (persisted), the worklist surfaces the breach; tenant isolation. |
+| **TRE-03** | Application (Preventive) | Authorization / Accuracy / Valuation / Completeness / SoD | Investment & securities register: classification (AMORTIZED_COST / FVOCI / FVTPL) + buy maker-checker (creator ≠ approver → `SOD_SELF_APPROVAL`), classification-correct buy posting (Dr `1350`\|`1360`\|`1370` / Cr `1010`), a **maker-checker market-price register** where **MTM can only be driven by an Approved price** (`NO_APPROVED_PRICE`), the FVOCI→OCI-`3500` vs FVTPL→P&L-`5430` remeasurement split (amortized cost not marked, `MTM_NOT_APPLICABLE`), idempotent EIR interest income (Dr `1350` / Cr `4700`), and ECL impairment (Dr `5440` / Cr `1355`). | `treasury-invest` harness (40 checks): buy→self-approve blocked→distinct approver; classification routes to the right GL; unapproved price cannot drive MTM; FVOCI MTM lands in OCI (not P&L) vs FVTPL in P&L; EIR interest ties a hand-computed schedule + idempotent; ECL impairment; RLS isolation. |
 
 Related: **GL-05** (all postings route through the ledger's balanced/period-locked posting), **GL-24**
 (posting-event registry), **TR-01** (the cash-position/forecast board reads the same posted GL).
 
 ## 10. Inputs & outputs
 
-- **Inputs:** facility terms (limit, EIR, maturity), drawdown/repayment amounts, covenant readings.
+- **Inputs:** facility terms (limit, EIR, maturity), drawdown/repayment amounts, covenant readings; investment
+  terms (classification, symbol, quantity, cost, EIR), market prices, ECL provisions, dividend/coupon amounts.
 - **Outputs:** the debt register (facilities + drawdowns), the DEBT-DRAW / DEBT-ACCR / DEBT-REPAY journal
-  entries, the maturity ladder, and the covenant-test / breach records.
+  entries, the maturity ladder, and the covenant-test / breach records; the investment register + valuation
+  ledger, the INVEST-BUY / INVEST-MTM / INVEST-ACCR / INVEST-DIV / INVEST-ECL journal entries, the maker-checker
+  market-price register, and the portfolio roll-up.
 
 ## 11. Records & retention
 
-`debt_facilities`, `debt_drawdowns`, `debt_covenants`, `debt_covenant_tests` (tenant-scoped, RLS) + the
-underlying GL journal entries (append-only audit trail). Retained per the financial-records retention policy.
+`debt_facilities`, `debt_drawdowns`, `debt_covenants`, `debt_covenant_tests`; `investments`,
+`investment_prices`, `investment_valuations` (all tenant-scoped, RLS) + the underlying GL journal entries
+(append-only audit trail). Retained per the financial-records retention policy.
 
 ## 12. KPIs / metrics
 
@@ -138,12 +217,16 @@ covenant headroom, and count/ageing of outstanding covenant breaches.
 
 ## 13. Exception & error handling
 
-`BAD_LIMIT`, `NOT_PENDING`, `SOD_SELF_APPROVAL`, `FACILITY_NOT_APPROVED`, `LIMIT_EXCEEDED`, `BAD_AMOUNT`,
+Debt: `BAD_LIMIT`, `NOT_PENDING`, `SOD_SELF_APPROVAL`, `FACILITY_NOT_APPROVED`, `LIMIT_EXCEEDED`, `BAD_AMOUNT`,
 `NOTHING_TO_REPAY`, `NO_ACTIVE_DRAWDOWN`, `REPAY_EXCEEDS_PRINCIPAL`, `REPAY_EXCEEDS_INTEREST`,
-`FACILITY_NOT_FOUND`, `COVENANT_NOT_FOUND`. All surface as `json.error.code` (wrapped by `AllExceptionsFilter`).
+`FACILITY_NOT_FOUND`, `COVENANT_NOT_FOUND`. Investments (TRE-03): `BAD_COST`, `BAD_QUANTITY`, `BAD_RATE`,
+`NOT_PENDING`, `SOD_SELF_APPROVAL`, `INVESTMENT_NOT_APPROVED`, `INVESTMENT_NOT_FOUND`, `BAD_PRICE`,
+`NO_PENDING_PRICE`, `NO_APPROVED_PRICE`, `MTM_NOT_APPLICABLE`, `NO_SYMBOL`, `BAD_ECL`. All surface as
+`json.error.code` (wrapped by `AllExceptionsFilter`).
 
 ## 14. Revision history
 
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-12 | Treasury / Controller | Initial narrative — TRE-01 debt & borrowings register + EIR amortized-cost engine, TRE-02 covenant-breach monitor (migration 0353). |
+| 0.2 | 2026-07-12 | Treasury / Controller | Added §7bis Investment & Securities register (TRE-03): classification (AMORTIZED_COST/FVOCI/FVTPL) + buy maker-checker, maker-checker market-price register (MTM only from Approved prices), MTM (FVOCI→OCI reserve 3500 / FVTPL→P&L 5430), EIR interest income, ECL impairment. New COA 1350/1355/1360/1370/3500/4700/5430/5440; INVEST.* posting events; migration 0354; harness `treasury-invest` (40 checks). The OCI-reserve primitive (3500) is reused by Wave 3 hedge accounting. |

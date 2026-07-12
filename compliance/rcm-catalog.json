@@ -2,16 +2,16 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 258,
+    "total": 259,
     "by_status": {
-      "Implemented": 255,
+      "Implemented": 256,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
       "CRM — Loyalty": 21,
-      "Cash & Treasury": 4,
+      "Cash & Treasury": 5,
       "Consolidation & FX": 6,
       "Entity-Level": 7,
       "Expenditure": 16,
@@ -4120,6 +4120,25 @@
       "tod": "Inspect the covenant definition (metric/operator/threshold), the pass/breach evaluation, the persisted debt_covenant_tests row with the breached flag, and the breach worklist.",
       "toe": "TC-TRE-02-01: define a DSCR ≥ 1.25 covenant; a test at 1.40 passes (not breached); a test at 1.10 breaches and is persisted; the breach worklist surfaces the outstanding DSCR breach; a sibling tenant never sees it (RLS) (re-performed by the treasury-debt harness).",
       "evidence": "debt_covenants register + debt_covenant_tests (breached readings) + the covenant-breach worklist",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "TRE-03",
+      "cycle": "Cash & Treasury",
+      "category": "Application",
+      "fsli": "Investments — Amortized Cost (1350); Investments — FVOCI (1360); Investments — FVTPL (1370); Allowance for Investment ECL (1355); FVOCI Reserve — OCI (3500); Investment Income (4700); Fair-value Gain/Loss FVTPL (5430); Investment Impairment (5440); Bank (1010)",
+      "risk": "A marketable security is classified, marked-to-market or impaired by one person with no approved prices or independent review — a holding is bought and self-approved (unauthorised investment / cash booked to the drawer), MIS-CLASSIFIED (a fair-value holding parked at amortized cost, or the reverse, so remeasurement is routed to the wrong place — P&L instead of OCI or vice versa), marked to market against an UN-APPROVED / fat-fingered price, or impaired at a manager's discretion — so investment assets, the OCI equity reserve and earnings are misstated.",
+      "assertion": "Accuracy/Valuation/Completeness/Authorization/Segregation of Duties",
+      "description": "Investment & Securities register with classification + valuation maker-checker and the reusable OCI-reserve primitive (Track C Wave 2; Wave 3 hedge accounting reuses the OCI reserve). A security is CREATED as PendingApproval (POST /api/treasury/investments, maker duty `treasury`) carrying its classification AMORTIZED_COST | FVOCI | FVTPL; a DIFFERENT user APPROVES it (POST .../:id/approve, checker duty `treasury_approve`) — self-approve is rejected 403 SOD_SELF_APPROVAL (creator ≠ approver, binds even Admin, mirroring FX-04 / TRE-01) — and the buy posts Dr 1350 (amortized cost) | 1360 (FVOCI) | 1370 (FVTPL) / Cr 1010 Bank via LedgerService.postEntry (GL-05 balanced + period-lock). A maker-checker market-PRICE register (POST /api/treasury/prices → PendingApproval; POST .../prices/approve by a DIFFERENT user, SOD_SELF_APPROVAL; mirrors fx_rates / FX-04) drives mark-to-market: MTM (POST .../:id/revalue) values the holding at quantity x the LATEST APPROVED price — an UN-approved price is rejected NO_APPROVED_PRICE — and routes the fair-value delta by classification: FVOCI → the OCI equity RESERVE 3500 (the reusable OCI-reserve primitive), FVTPL → P&L 5430 fair-value gain/loss; an AMORTIZED_COST holding is measured at amortized cost, not marked (MTM_NOT_APPLICABLE). AMORTIZED_COST interest income accretes on the effective-interest carrying (POST .../:id/accrue → Dr 1350 / Cr 4700 Investment Income), reusing the Wave-1 EIR periodic cursor + alreadyPosted idempotency (a re-run of the same period posts nothing). ECL impairment (POST .../:id/impair) posts Dr 5440 Investment Impairment / Cr 1355 Allowance (contra-asset). Tenant-scoped (RLS) so the register never leaks across companies; reads gate treasury/treasury_approve/fin_report/exec, the maker/checker split is enforced by SoD R23.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per trade / month-end valuation",
+      "owner": "Treasury / Financial Controller",
+      "coso": "P10",
+      "code_reference": "treasury-invest/investment.service.ts (createInvestment PendingApproval / approveInvestment SOD_SELF_APPROVAL maker-checker + buy Dr 1350|1360|1370 / Cr 1010 / postPrice+approvePrice maker-checker price register (FX-04 shape) / revalue MTM from the latest APPROVED price → ociReserveLines 3500 (FVOCI) | plGainLossLines 5430 (FVTPL), MTM_NOT_APPLICABLE for amortized cost, NO_APPROVED_PRICE gate / accrue EIR interest Dr 1350 / Cr 4700 idempotent + alreadyPosted / impair ECL Dr 5440 / Cr 1355 / portfolio); investment.controller.ts (api/treasury/investments[/:id/{approve,reject,revalue,impair,accrue}], prices[/approve,/reject], portfolio); schema/treasury-invest.ts (investments/investment_prices/investment_valuations, tenant-leading indexes); migration 0354 (tables + RLS + INVEST.* posting-events); ledger-constants 1350/1355/1360/1370/3500/4700/5430/5440 (COA + CF_CLASSIFY 1350/1355/1360/1370 investing, 3500 financing); posting-events.ts INVEST.BUY/INCOME/MTM.PL/MTM.OCI/IMPAIR; permissions.ts treasury/treasury_approve + SoD R23; investment.module.ts (wired, imports LedgerModule); cutover/treasury-invest.ts (TRE-03 ToE, 40 checks)",
+      "tod": "Inspect the investment create→approve maker-checker (SOD_SELF_APPROVAL) + classification routing of the buy (1350/1360/1370), the price-register maker-checker (SOD_SELF_APPROVAL) + the MTM-only-from-Approved-price gate (NO_APPROVED_PRICE), the FVOCI-to-OCI-3500 vs FVTPL-to-P&L-5430 remeasurement split, MTM_NOT_APPLICABLE for amortized cost, the idempotent EIR interest accrual (Dr 1350 / Cr 4700), and the ECL impairment (Dr 5440 / Cr 1355).",
+      "toe": "TC-TRE-03-01: create an investment, self-approve → SOD_SELF_APPROVAL (403), a distinct approver approves → the buy posts to the class asset; a non-treasury role is denied. TC-TRE-03-02: buy AMORTIZED_COST/FVOCI/FVTPL → Dr 1350/1360/1370 / Cr 1010 balanced. TC-TRE-03-03: an unapproved price cannot drive MTM (NO_APPROVED_PRICE); a self-approved price → SOD_SELF_APPROVAL; a distinct approver approves; FVOCI MTM lands in OCI 3500 (not P&L) and FVTPL MTM lands in P&L 5430; AMORTIZED_COST MTM → MTM_NOT_APPLICABLE. TC-TRE-03-04: AMORTIZED_COST interest ties a hand-computed EIR schedule (1,000 then 1,010), re-run same period posts 0 (idempotent). TC-TRE-03-05: ECL impairment → Dr 5440 / Cr 1355; a sibling tenant never sees the register (RLS) (re-performed by the treasury-invest harness, 40 checks).",
+      "evidence": "Investment & securities register (holding PendingApproval→Approved, classification, MTM/ECL valuation ledger); the INVEST-BUY/MTM/ACCR/DIV/ECL JEs; the maker-checker market-price register; the portfolio roll-up",
       "status": "Implemented"
     },
     {
