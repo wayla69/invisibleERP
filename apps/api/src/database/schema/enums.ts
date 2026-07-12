@@ -9,6 +9,8 @@ export const roleEnum = pgEnum('role_enum', [
   'Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',
   'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
   'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer',
+  // Treasury (Track C Wave 1) — added by migration 0352
+  'TreasuryAnalyst', 'TreasuryManager',
 ]);
 export const orderStatusEnum = pgEnum('order_status', ['Pending', 'Processing', 'Shipped', 'Completed', 'Claimed', 'Cancelled']);
 export const claimStatusEnum = pgEnum('claim_status', ['Waiting', 'Approved', 'Rejected']);

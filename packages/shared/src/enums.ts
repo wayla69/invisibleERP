@@ -8,6 +8,8 @@ export const ROLES = [
   'Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',
   'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
   'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer',
+  // Treasury (Track C Wave 1) — debt & borrowings register maker (analyst) + checker (manager). SoD-clean.
+  'TreasuryAnalyst', 'TreasuryManager',
 ] as const;
 export type Role = (typeof ROLES)[number];
 

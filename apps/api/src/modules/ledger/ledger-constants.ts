@@ -100,6 +100,11 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   // Landed-cost accrual (INV-1, COST-01) — freight/duty/insurance/broker payable, credited when a landed-cost
   // voucher capitalises those charges into inventory unit cost (Dr 1200 / Dr 5500 variance / Cr 2010).
   { code: '2010', name: 'Landed-Cost Accrual', type: 'Liability' },          // เจ้าหนี้ค่าขนส่ง/อากร/ประกันภัย/นายหน้า (ต้นทุนแฝง) — landed-cost charges accrued at capitalisation
+  // Debt & borrowings register (Track C Wave 1, TRE-01) — a drawdown books principal to the short-/long-term
+  // borrowings control (2500/2550); the EIR amortized-cost accrual credits accrued interest payable (2450).
+  { code: '2450', name: 'Accrued Interest Payable', type: 'Liability' },      // ดอกเบี้ยค้างจ่าย — accrued-but-unpaid interest on borrowings (EIR accrual, Cr; cleared on repayment)
+  { code: '2500', name: 'Short-term Borrowings', type: 'Liability' },         // เงินกู้ยืมระยะสั้น — principal drawn on a short-term facility (Cr at drawdown, Dr on repayment)
+  { code: '2550', name: 'Long-term Borrowings', type: 'Liability' },          // เงินกู้ยืมระยะยาว — principal drawn on a long-term facility (Cr at drawdown, Dr on repayment)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -146,6 +151,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '2400': { bucket: 'operating', label: 'รายได้รับล่วงหน้า (Unearned revenue)' },
   '2410': { bucket: 'operating', label: 'หนี้สินตามสัญญา/รายได้รอรับรู้ (Contract liability / deferred revenue)' },
   '2420': { bucket: 'operating', label: 'หนี้สินค่าคืนเงิน (Refund liability)' },
+  '2450': { bucket: 'operating', label: 'ดอกเบี้ยค้างจ่าย (Accrued interest payable)' }, // TRE-01 — EIR accrual on borrowings (working-capital liability; interest expense flows through net income)
   // Operating — other current assets (an increase ties up cash)
   '1180': { bucket: 'operating', label: 'เงินทดรองจ่ายพนักงาน (Employee advances)' },
   '1280': { bucket: 'operating', label: 'ค่าใช้จ่ายจ่ายล่วงหน้า (Prepaid expenses)' },
@@ -156,7 +162,9 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '1520': { bucket: 'investing', label: 'สินทรัพย์ระหว่างก่อสร้าง (Construction in progress / AUC)' }, // FA-13 — CIP cost accumulation, an investing outflow
   '1600': { bucket: 'investing', label: 'สินทรัพย์สิทธิการใช้ (Right-of-use assets)' },
   '1610': { bucket: 'investing', label: 'เงินลงทุนสุทธิในสัญญาเช่าการเงิน (Net investment in finance leases)' }, // FIN-10 lessor — collections of the net investment (principal) are investing flows
-  // Financing — owners' equity, dividends, lease liabilities
+  // Financing — borrowings (TRE-01 debt register), owners' equity, dividends, lease liabilities
+  '2500': { bucket: 'financing', label: 'เงินกู้ยืมระยะสั้น (Short-term borrowings)' },   // TRE-01 — drawdowns/repayments of principal are financing flows
+  '2550': { bucket: 'financing', label: 'เงินกู้ยืมระยะยาว (Long-term borrowings)' },    // TRE-01 — drawdowns/repayments of principal are financing flows
   '2600': { bucket: 'financing', label: 'หนี้สินตามสัญญาเช่า (Lease liabilities)' },
   '3000': { bucket: 'financing', label: 'ส่วนทุน/เงินลงทุนจากเจ้าของ (Owner capital contributions)' },
   '3100': { bucket: 'financing', label: 'เงินปันผลจ่าย / กำไรสะสม (Dividends paid)' },

@@ -2470,7 +2470,14 @@
       "idx": 353,
       "version": "7",
       "when": 2023820000318,
-      "tag": "0353_service_kb",
+      "tag": "0353_treasury_debt_register",
+      "breakpoints": true
+    },
+    {
+      "idx": 354,
+      "version": "7",
+      "when": 2023820000319,
+      "tag": "0354_service_kb",
       "breakpoints": true
     }
   ]

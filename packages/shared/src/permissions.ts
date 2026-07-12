@@ -59,6 +59,13 @@ export const PERMISSIONS = [
   //    (NOT implied by a coarse perm); endpoints gate `quality_approve OR exec` so exec approvers keep working.
   //    Ungranted ⇒ the module is invisible. ──
   'quality', 'quality_approve',
+  // ── Treasury / debt & borrowings register (Track C Wave 1, TRE-01/02; SoD R23) — `treasury` is the maker
+  //    duty (create/maintain a debt facility, request a drawdown/repayment, add covenants, read the register);
+  //    `treasury_approve` is the checker duty (approve a facility, run the idempotent EIR interest accrual,
+  //    run covenant-breach tests). The two are segregated in-app (creator ≠ approver → 403 SOD_SELF_APPROVAL)
+  //    and by SoD R23. `treasury_approve` is a standalone granular perm (NOT implied by a coarse perm) so a
+  //    maker role can't inherit it. Endpoints gate `treasury[_approve] OR exec` so exec roles keep working. ──
+  'treasury', 'treasury_approve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -76,6 +83,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   're_sales', 're_contract_approve', 're_transfer',
   'cpq', 'cpq_approve',
   'quality_approve',
+  'treasury_approve',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -92,7 +100,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Sales & Orders': ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
   'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing', 'proj_tender'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
-  'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify'],
+  'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify', 'treasury', 'treasury_approve'],
   'Procurement': ['procurement', 'pr_raise', 'proj_subcon', 'quality', 'quality_approve'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
@@ -136,6 +144,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ReturnsClerk: ['returns', 'pr_raise'],
   AccessAdmin: ['users'],
   ExecutiveViewer: ['fin_report', 'dashboard', 'planner', 'marketing', 'pr_raise'],
+  // Treasury (Track C Wave 1) — SoD-clean: the analyst is the maker (maintain facilities, drawdown/repay,
+  // covenants) and the manager is the checker (approve facilities, run accruals, run covenant tests). Neither
+  // holds both sides of SoD R23. Both read the register (fin_report).
+  TreasuryAnalyst: ['treasury', 'fin_report', 'pr_raise'],
+  TreasuryManager: ['treasury_approve', 'fin_report', 'pr_raise'],
 };
 
 // ── SoD sub-permission model ────────────────────────────────────────────────
@@ -244,6 +257,13 @@ export const SOD_RULES: SodRule[] = [
   //    control regardless of the permissions held; this rule flags the role-design combination. ──
   { id: 'R22', dutyA: 'Maintain sensitive master data (vendor bank/credit/terms)', dutyB: 'Approve master-data change requests',
     a: ['md_vendor', 'md_item', 'md_config'], b: ['exec'], severity: 'High', risk: 'Maintain sensitive vendor/customer/item master fields (bank account, credit limit, payment terms) and also hold the elevated authority to approve a single-record master-data change — redirect a supplier’s payee bank details and release the change unchecked.', mitigation: 'Separate master-data maintenance from change-request approval; maker-checker enforced in-app (requester ≠ approver → 403 SOD_SELF_APPROVAL, MDM-01).' },
+  // ── Treasury / debt (Track C Wave 1, TRE-01) — originating/maintaining a debt facility + drawdown is
+  //    segregated from approving the facility and running its interest accrual. A person who both maintains a
+  //    facility AND approves it could draw down borrowings, book the cash to themselves and self-approve the
+  //    line. The in-app creator ≠ approver block (SOD_SELF_APPROVAL) is the real control regardless of the
+  //    permissions held; this rule flags the role-design combination. ──
+  { id: 'R23', dutyA: 'Maintain debt facility / drawdown', dutyB: 'Approve facility & run EIR accrual',
+    a: ['treasury'], b: ['treasury_approve'], severity: 'High', risk: 'Originate and maintain a debt facility, draw down borrowings (Dr Bank), AND approve the facility and run its interest accrual — draw down and self-approve borrowings, booking cash with no independent check.', mitigation: 'Separate debt-facility maintenance/drawdown from facility approval + interest accrual; maker-checker enforced in-app (creator ≠ approver → 403 SOD_SELF_APPROVAL, TRE-01).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }
@@ -300,4 +320,5 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   hr: '/hcm',
   cpq: '/cpq',
   quality: '/quality/ncr',
+  treasury: '/treasury/debt',
 };

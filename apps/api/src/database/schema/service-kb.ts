@@ -7,7 +7,7 @@
 //   • kb_deflections   — the case-deflection log: each KB-assisted interaction records the search query, the
 //                        article involved, and whether it DEFLECTED (customer self-served, no case) or a case
 //                        was still opened — so self-service effectiveness / deflection rate is measurable.
-// Each table is RLS-scoped (canonical 0232-form tenant_isolation, migration 0353) with a leading (tenant_id,…)
+// Each table is RLS-scoped (canonical 0232-form tenant_isolation, migration 0354) with a leading (tenant_id,…)
 // index. No GL post (knowledge/deflection are operational, never financial).
 import { pgTable, bigserial, bigint, text, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
