@@ -8,7 +8,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorato
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { isUniqueViolation } from '../../../common/db-error';
 
-// ── CRM-7 — B2B Account/Contact 360 DEPTH (REV-24, migration 0357) ──────────────────────────────────
+// ── CRM-7 — B2B Account/Contact 360 DEPTH (REV-24, migration 0358) ──────────────────────────────────
 // Three net-new capabilities layered on the REV-17 CRM spine (no change to lead→convert→opportunity):
 //   1. Account HIERARCHY — crm_accounts.parent_account_id; set-parent rejects cycles (HIERARCHY_CYCLE);
 //      the hierarchy read rolls the open weighted pipeline up the subtree.

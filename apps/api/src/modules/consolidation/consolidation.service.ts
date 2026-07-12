@@ -5,6 +5,7 @@ import { consolidationGroups, consolidationEntities, consolidationRuns, consolid
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { accounts } from '../../database/schema/ledger';
 import { icTransactions } from '../../database/schema/intercompany';
+import { icLoans, icLoanAccruals } from '../../database/schema/treasury-pool';
 import { icReconPeriods } from '../../database/schema/ic-recon';
 import { fxRates } from '../../database/schema/fx';
 import { n, fx } from '../../database/queries';
@@ -232,6 +233,39 @@ export class ConsolidationService {
       runLineValues.push({ runId, lineType: 'Elimination', entityTenantId: null, accountCode: '2150', amountThb: fx(amt, 4), notes: `Elim IC ${ic.icNo}` });
     }
 
+    // ── Step 2b: IC-loan elimination (TRE-05) ──
+    // An intercompany LOAN posts a Due-From-loan receivable (1155, creditor) mirrored by a Due-To-loan payable
+    // (2155, debtor), and its EIR interest posts creditor income (4700) mirrored by debtor expense (5900). For a
+    // loan whose BOTH legs are in the group, these must ELIMINATE at the group layer — so group balances net to
+    // zero (1155 vs 2155) AND group finance cost/income nets to zero (4700 vs 5900) — mirroring the trade-IC
+    // 1150/2150 pair above. This IS control TRE-05's core. Per period: the receivable eliminated = the principal
+    // drawn in the period (drawdown posted at approval, dated start_date) + the interest accrued in the period;
+    // the payable is its mirror; the interest nets the creditor 4700 income against the debtor 5900 expense.
+    const loanRows = await db.select().from(icLoans).where(
+      and(inArray(icLoans.creditorTenantId, entityTenantIds), inArray(icLoans.debtorTenantId, entityTenantIds)),
+    );
+    let icLoanEliminations = 0;
+    for (const loan of loanRows) {
+      if (loan.status === 'PendingApproval' || loan.status === 'Rejected') continue; // no GL yet
+      const principalInPeriod = String(loan.startDate ?? '').slice(0, 7) === period ? n(loan.principal) : 0;
+      const [accr] = await db.select({ sum: sql<string>`coalesce(sum(${icLoanAccruals.interest}),0)` })
+        .from(icLoanAccruals).where(and(eq(icLoanAccruals.loanId, Number(loan.id)), eq(icLoanAccruals.period, period)));
+      const interestInPeriod = round4(n(accr?.sum));
+      const receivableInPeriod = round4(principalInPeriod + interestInPeriod);
+      if (Math.abs(receivableInPeriod) < 1e-6 && Math.abs(interestInPeriod) < 1e-6) continue;
+      icLoanEliminations++;
+      if (Math.abs(receivableInPeriod) > 1e-6) {
+        // Eliminate 1155 (creditor receivable, positive net) ↔ 2155 (debtor payable, negative net).
+        runLineValues.push({ runId, lineType: 'Elimination', entityTenantId: null, accountCode: '1155', amountThb: fx(-receivableInPeriod, 4), notes: `Elim IC loan ${loan.loanNo} receivable` });
+        runLineValues.push({ runId, lineType: 'Elimination', entityTenantId: null, accountCode: '2155', amountThb: fx(receivableInPeriod, 4), notes: `Elim IC loan ${loan.loanNo} payable` });
+      }
+      if (Math.abs(interestInPeriod) > 1e-6) {
+        // Eliminate the IC interest: 4700 creditor income (negative net) ↔ 5900 debtor expense (positive net).
+        runLineValues.push({ runId, lineType: 'Elimination', entityTenantId: null, accountCode: '4700', amountThb: fx(interestInPeriod, 4), notes: `Elim IC loan ${loan.loanNo} interest income` });
+        runLineValues.push({ runId, lineType: 'Elimination', entityTenantId: null, accountCode: '5900', amountThb: fx(-interestInPeriod, 4), notes: `Elim IC loan ${loan.loanNo} interest expense` });
+      }
+    }
+
     // Insert all lines
     if (runLineValues.length) {
       await db.insert(consolidationRunLines).values(runLineValues);
@@ -269,7 +303,7 @@ export class ConsolidationService {
 
     return {
       run_id: runId, group_id: groupId, period, status: 'Final', balanced,
-      entity_count: entities.length, ic_eliminations: icRows.length,
+      entity_count: entities.length, ic_eliminations: icRows.length, ic_loan_eliminations: icLoanEliminations,
       tb_net: tbSum, elimination_net: elimSum, cta_total: ctaTotal,
       consolidated_accounts: Object.entries(totals).map(([account_code, net_thb]) => ({ account_code, net_thb })),
     };

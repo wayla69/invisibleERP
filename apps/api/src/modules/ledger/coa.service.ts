@@ -2,7 +2,11 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { Inject } from '@nestjs/common';
 import { eq, and, isNull, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, accountGroups, journalLines, tenantAccounts } from '../../database/schema';
+import {
+  accounts, accountGroups, journalLines, tenantAccounts,
+  postingRules, itemCategories, taxCodes, items, locations, assetCategories,
+  bankAccounts, recurringJournals, prepaidSchedules, revRecSchedules,
+} from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 
 @Injectable()
@@ -93,6 +97,55 @@ export class CoaService {
       messageTh: `บัญชี ${code} มียอดคงเหลือ ไม่สามารถปิดได้`,
     });
     return this.updateAccount(code, { active: 'false', isPostable: false });
+  }
+
+  // COA follow-up B — where-used: every CONFIG master that references this account code. Deactivation
+  // stays balance-gated only (warn, don't block) — but a retired code left in any of these would surface
+  // later as a fail-closed INVALID_POSTING_ACCOUNT at posting time, so the dialog shows this list up
+  // front. Tenant-scoped tables are already narrowed by RLS; counts are per the caller's visibility.
+  async whereUsed(code: string) {
+    const [exists] = await this.db.select({ code: accounts.code }).from(accounts).where(eq(accounts.code, code)).limit(1);
+    if (!exists) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${code} not found`, messageTh: `ไม่พบบัญชี ${code}` });
+    const n = async (q: Promise<{ n: unknown }[]>) => Number((await q)[0]?.n ?? 0);
+    const cnt = { n: sql<string>`count(*)` };
+    const [rules, cats, taxes, itemRows, locs, assetCats, banks, recurring, prepaids, revrec] = await Promise.all([
+      n(this.db.select(cnt).from(postingRules).where(and(eq(postingRules.accountCode, code), eq(postingRules.active, true)))),
+      n(this.db.select(cnt).from(itemCategories).where(or(
+        eq(itemCategories.revenueAccount, code), eq(itemCategories.cogsAccount, code),
+        eq(itemCategories.inventoryAccount, code), eq(itemCategories.valuationAccount, code)))),
+      n(this.db.select(cnt).from(taxCodes).where(and(eq(taxCodes.active, true), or(
+        eq(taxCodes.outputAccount, code), eq(taxCodes.inputAccount, code), eq(taxCodes.whtAccount, code))))),
+      n(this.db.select(cnt).from(items).where(or(
+        eq(items.revenueAccount, code), eq(items.cogsAccount, code),
+        eq(items.inventoryAccount, code), eq(items.valuationAccount, code)))),
+      n(this.db.select(cnt).from(locations).where(or(
+        eq(locations.inventoryAccount, code), eq(locations.adjustmentAccount, code)))),
+      n(this.db.select(cnt).from(assetCategories).where(or(
+        eq(assetCategories.assetAccount, code), eq(assetCategories.accumDepAccount, code),
+        eq(assetCategories.depExpenseAccount, code)))),
+      n(this.db.select(cnt).from(bankAccounts).where(eq(bankAccounts.glAccountCode, code))),
+      n(this.db.select(cnt).from(recurringJournals).where(and(
+        eq(recurringJournals.active, 'true'),
+        sql`exists (select 1 from jsonb_array_elements(${recurringJournals.lines}) e where e->>'account_code' = ${code})`))),
+      n(this.db.select(cnt).from(prepaidSchedules).where(and(
+        sql`coalesce(${prepaidSchedules.periodsPosted},0) < ${prepaidSchedules.months}`,
+        or(eq(prepaidSchedules.expenseAccount, code), eq(prepaidSchedules.prepaidAccount, code))))),
+      n(this.db.select(cnt).from(revRecSchedules).where(or(
+        eq(revRecSchedules.deferredAccount, code), eq(revRecSchedules.revenueAccount, code)))),
+    ]);
+    const references = [
+      { source: 'posting_rules', count: rules },
+      { source: 'item_categories', count: cats },
+      { source: 'tax_codes', count: taxes },
+      { source: 'items', count: itemRows },
+      { source: 'locations', count: locs },
+      { source: 'asset_categories', count: assetCats },
+      { source: 'bank_accounts', count: banks },
+      { source: 'recurring_journals', count: recurring },
+      { source: 'prepaid_schedules', count: prepaids },
+      { source: 'rev_rec_schedules', count: revrec },
+    ].filter((r) => r.count > 0);
+    return { account_code: code, references, total: references.reduce((a, r) => a + r.count, 0) };
   }
 
   // GL-11 — per-tenant chart curation. Upserts the caller tenant's `tenant_accounts` overlay row for a

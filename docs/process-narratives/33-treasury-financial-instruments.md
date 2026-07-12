@@ -7,11 +7,11 @@
 | Process ID | PN-33-TRE |
 | Process owner | `<<Treasury / Controller>>` |
 | Approver | `<<CFO>>` |
-| Version | **0.3 DRAFT** |
+| Version | **0.4 DRAFT** |
 | Effective date | `<<effective-date>>` |
-| Review cadence | Per drawdown / monthly accrual + each covenant cadence · per trade / month-end investment valuation · per hedge designation / month-end remeasurement / on the hedged cash flow |
-| Version note | Rev **0.3** (2026-07-12) — Track C Wave 3: Hedge accounting register (new control **TRE-04**, migration `0356`; IFRS 9 / ASC 815 designation + effectiveness + valuation maker-checker, reusing the Wave-2 OCI-reserve primitive at a new Cash-Flow Hedge Reserve 3550). Rev **0.2** (2026-07-12) — Track C Wave 2: Investment & Securities register + the reusable OCI-reserve primitive (new control **TRE-03**, migration `0354`). Rev **0.1** (2026-07-12) — Track C Wave 1: Debt & Borrowings register + EIR amortized-cost engine (new controls TRE-01 + TRE-02, migration `0353`). |
-| Related RCM controls | TRE-01, TRE-02, TRE-03, TRE-04, GL-05, GL-24, TR-01 |
+| Review cadence | Per drawdown / monthly accrual + each covenant cadence · per trade / month-end investment valuation · per hedge designation / month-end remeasurement / on the hedged cash flow · per intercompany loan / month-end accrual / on consolidation |
+| Version note | Rev **0.4** (2026-07-12) — Track C Wave 4 (FINAL): Cash pooling / in-house bank / intercompany-loan register (new control **TRE-05**, migration `0357`; maker-checker IC loans with EIR interest whose 1155/2155 receivable/payable pair AND 4700/5900 interest ELIMINATE on consolidation, plus notional zero-sum interest allocation + physical cash sweeps). Rev **0.3** (2026-07-12) — Track C Wave 3: Hedge accounting register (new control **TRE-04**, migration `0356`; IFRS 9 / ASC 815 designation + effectiveness + valuation maker-checker, reusing the Wave-2 OCI-reserve primitive at a new Cash-Flow Hedge Reserve 3550). Rev **0.2** (2026-07-12) — Track C Wave 2: Investment & Securities register + the reusable OCI-reserve primitive (new control **TRE-03**, migration `0354`). Rev **0.1** (2026-07-12) — Track C Wave 1: Debt & Borrowings register + EIR amortized-cost engine (new controls TRE-01 + TRE-02, migration `0353`). |
+| Related RCM controls | TRE-01, TRE-02, TRE-03, TRE-04, TRE-05, GL-05, GL-24, TR-01, CON-03 (IC elimination), REC-03 |
 | Related policy | `compliance/policies/11-financial-close-policy.md` |
 
 ## 2. Purpose
@@ -30,7 +30,10 @@ waves (investments, hedging) build.
   mark-to-market valuation (FVOCI → OCI reserve, FVTPL → P&L), ECL impairment, and interest/dividend income
   (Wave 2, §7bis); **hedge accounting** — designation + documentation, effectiveness testing, cash-flow hedges
   (effective portion → OCI reserve, ineffective → P&L), fair-value hedges (basis-adjust the hedged item + P&L),
-  and OCI→P&L reclassification (Wave 3, §7ter). Multi-tenant (RLS), Thai-localized.
+  and OCI→P&L reclassification (Wave 3, §7ter); **cash pooling / in-house bank / intercompany loans** —
+  notional & physical cash pools, physical cash sweeps, notional zero-sum interest allocation, and an
+  intercompany-loan register with EIR interest whose receivable/payable pair AND interest **eliminate on
+  consolidation** (Wave 4, §7quater). Multi-tenant (RLS), Thai-localized.
 - **Out of scope (this wave):** lender cash-management integrations and net-investment (foreign-operation)
   hedges. Cash *position/forecast* is the existing TR-01 liquidity board.
 
@@ -48,6 +51,12 @@ waves (investments, hedging) build.
   P&L, reclassified to earnings when the hedged cash flow occurs), and fair-value hedges (derivative to P&L +
   hedged-item basis adjustment). **Hedge COA:** 1380 Derivative Asset, 2460 Derivative Liability, 3550
   Cash-Flow Hedge Reserve (OCI equity), 5450 Hedge Ineffectiveness / FV-hedge P&L.
+- Cash pooling / in-house bank / intercompany loans (**TRE-05**): notional & physical cash pools (in-house
+  bank), physical cash concentration (sweep), notional interest allocation (zero-sum), and intercompany
+  lending at effective interest whose intra-group receivable/payable + interest **eliminate on
+  consolidation** (mirroring the trade-IC 1150/2150 pair). **Pool/IC-loan COA:** 1155 Intercompany Loan
+  Receivable, 2155 Intercompany Loan Payable (CF_CLASSIFY 1155 investing / 2155 financing); 4700
+  Investment/Interest Income, 5900 Interest Expense, 1010/1020 the pool header/member bank accounts.
 - Posting-event registry `DEBT.DRAWDOWN` / `DEBT.INTEREST` / `DEBT.REPAY`; `INVEST.BUY` / `INVEST.INCOME` /
   `INVEST.MTM.PL` / `INVEST.MTM.OCI` / `INVEST.IMPAIR`; `HEDGE.DERIVATIVE.MTM` / `HEDGE.CF.OCI` /
   `HEDGE.RECLASSIFY` / `HEDGE.FV.BASIS` (`posting-events.ts`, GL-24).
@@ -193,6 +202,45 @@ values the hedging derivative, and applies **hedge accounting** — reusing the 
 6. **Reads.** `GET .../hedges` (register), `.../hedges/:id` (relationship + derivative + effectiveness-test
    history + OCI-movement ledger).
 
+## 7quater. Cash pooling / in-house bank / intercompany-loan register (Track C Wave 4 — FINAL, TRE-05)
+
+The pool register models the **in-house bank** (a header/master account with member sub-accounts) and an
+**intercompany-loan** book, and — the control core — makes the intercompany balances **eliminate on
+consolidation**. Module `modules/treasury-pool` (`pool.service.ts` / `pool.controller.ts`); tables
+`cash_pools`, `cash_pool_members`, `ic_loans`, `ic_loan_accruals` (migration `0357`, all tenant-scoped/RLS;
+the `ic_loans` row's `tenant_id` = the **creditor** side, mirroring `ic_transactions`). Reads gate
+`treasury / treasury_approve / fin_report / exec`; the IC-loan maker/checker split is SoD **R23**, enforced
+in-app (creator ≠ approver → `403 SOD_SELF_APPROVAL`).
+
+1. **Cash pool definition (maker).** `POST /api/treasury/pools` defines a pool (`pool_type` **notional |
+   physical**, `header_account`, `members[]`). A `header_account` is required (`BAD_HEADER_ACCOUNT`).
+2. **Physical sweep (in-house-bank concentration).** `POST .../pools/:id/sweep` moves cash from a member
+   sub-account to the header — **Dr header-bank / Cr member-bank** (only on a physical pool; a notional pool
+   → `NOT_PHYSICAL_POOL`).
+3. **Notional interest allocation (zero-sum).** `POST .../pools/:id/allocate-interest` allocates the pooled
+   interest across members — a **pure internal redistribution that MUST sum to zero** (`ALLOCATION_NOT_ZERO`
+   otherwise): surplus members earn **Cr `4700`** interest income, deficit members bear **Dr `5900`** interest
+   expense, so the JE self-balances and the group's net P&L on the pool is **zero** (the zero-sum IS the
+   control). Only on a notional pool (a physical pool → `NOT_NOTIONAL_POOL`).
+4. **IC-loan register (maker → checker).** `POST .../ic-loans` registers a loan (`creditor_tenant_id`,
+   `debtor_tenant_id`, `principal`, `eir_pct`, `start_date`) as **PendingApproval** (creditor ≠ debtor,
+   `SAME_PARTY`; principal > 0, `BAD_PRINCIPAL`). A **different** user `POST .../ic-loans/:id/approve` posts
+   the **mirrored drawdown** — **Dr `1155` IC-Loan Receivable / Cr `1010` Bank** (creditor) AND **Dr `1010`
+   Bank / Cr `2155` IC-Loan Payable** (debtor); self-approval is rejected `403 SOD_SELF_APPROVAL`.
+5. **EIR interest accrual (idempotent).** `POST .../ic-loans/:id/accrue` accrues one month of effective
+   interest on the amortized-cost carrying (carrying × EIR/12) → creditor **Dr `1155` / Cr `4700`** Investment/
+   Interest Income and debtor **Dr `5900` Interest Expense / Cr `2155`**, reusing the Wave-1 periodic cursor +
+   `alreadyPosted` idempotency (a re-run of the same period posts nothing). Accrual before approval →
+   `LOAN_NOT_APPROVED`.
+6. **THE CONTROL CORE — consolidation elimination.** `consolidation.runConsolidation` is extended so that for
+   a loan whose **both** legs are in the group the **1155/2155 receivable/payable pair** AND the **4700/5900**
+   IC interest **ELIMINATE** for the period (mirroring the trade-IC 1150/2150 pair) — so the consolidated group
+   **balance sheet nets the intra-group loan to zero** and the group **finance cost/income nets to zero**, and
+   **CON-03**'s balanced-TB integrity holds (`ic_loan_eliminations` reported on the run). The period's IC
+   reconciliation must be approved first (**REC-03** gate).
+7. **Reads.** `GET .../ic-loans` (register), `.../pools` (pools), `.../pools/:id/position` (header + member GL
+   balances + net notional position).
+
 ## 8. Process flow
 
 ```mermaid
@@ -251,6 +299,23 @@ flowchart TD
   R -->|over-release| RX[400 OCI_INSUFFICIENT]
 ```
 
+Cash pooling / in-house bank / intercompany-loan register (TRE-05):
+
+```mermaid
+flowchart TD
+  A[Maker: register IC loan creditor->debtor] -->|PendingApproval| B{Checker approves?}
+  B -->|self-approve| X[403 SOD_SELF_APPROVAL]
+  B -->|distinct approver| C[Mirrored drawdown: Dr 1155 / Cr 1010 creditor + Dr 1010 / Cr 2155 debtor]
+  C --> D[EIR accrual: Dr 1155 / Cr 4700 creditor + Dr 5900 / Cr 2155 debtor]
+  D -->|re-run same period| D2[idempotent: posts 0]
+  D --> E[Consolidation: 1155/2155 + 4700/5900 ELIMINATE -> group nets to 0 CON-03]
+  P[Maker: define pool notional|physical] --> S{Pool type}
+  S -->|physical| SW[Sweep: Dr header-bank / Cr member-bank]
+  S -->|notional| AL{Allocation sums to zero?}
+  AL -->|no| ALX[400 ALLOCATION_NOT_ZERO]
+  AL -->|yes| ALO[Cr 4700 surplus / Dr 5900 deficit -> group P&L 0]
+```
+
 ## 9. Control matrix
 
 | Control | Type | Assertion(s) | Description | Test of operating effectiveness |
@@ -258,29 +323,37 @@ flowchart TD
 | **TRE-01** | Application (Preventive) | Authorization / Accuracy / Valuation / Completeness / SoD | Debt facility + drawdown maker-checker (creator ≠ approver → `SOD_SELF_APPROVAL`), drawdown limit gate, correct Dr 1010 / Cr 2500\|2550 posting, and an **idempotent EIR amortized-cost accrual** (carrying × EIR/12 → Dr 5900 / Cr 2450). | `treasury-debt` harness (36 checks): create→self-approve blocked→distinct approver; drawdown GL + `LIMIT_EXCEEDED`; EIR schedule ties a hand-computed amortization table; re-accrue same period idempotent; repayment legs + `REPAY_EXCEEDS_PRINCIPAL`; RLS isolation. |
 | **TRE-02** | Detective | Completeness / Timeliness | Covenant tracking + breach detection: a covenant test persists a `debt_covenant_tests` reading with a `breached` flag and surfaces outstanding breaches on a worklist for periodic controller review. | `treasury-debt` harness: DSCR ≥ 1.25 passes at 1.40, breaches at 1.10 (persisted), the worklist surfaces the breach; tenant isolation. |
 | **TRE-03** | Application (Preventive) | Authorization / Accuracy / Valuation / Completeness / SoD | Investment & securities register: classification (AMORTIZED_COST / FVOCI / FVTPL) + buy maker-checker (creator ≠ approver → `SOD_SELF_APPROVAL`), classification-correct buy posting (Dr `1350`\|`1360`\|`1370` / Cr `1010`), a **maker-checker market-price register** where **MTM can only be driven by an Approved price** (`NO_APPROVED_PRICE`), the FVOCI→OCI-`3500` vs FVTPL→P&L-`5430` remeasurement split (amortized cost not marked, `MTM_NOT_APPLICABLE`), idempotent EIR interest income (Dr `1350` / Cr `4700`), and ECL impairment (Dr `5440` / Cr `1355`). | `treasury-invest` harness (40 checks): buy→self-approve blocked→distinct approver; classification routes to the right GL; unapproved price cannot drive MTM; FVOCI MTM lands in OCI (not P&L) vs FVTPL in P&L; EIR interest ties a hand-computed schedule + idempotent; ECL impairment; RLS isolation. |
-| **TRE-04** | Application (Preventive) | Authorization / Accuracy / Valuation / Presentation / Disclosure / Completeness / SoD | Hedge accounting register (IFRS 9 / ASC 815): designation + documentation maker-checker (creator ≠ approver → `SOD_SELF_APPROVAL`), and the **two-part control gate** — no hedge/OCI accounting until the relationship is **Approved** AND its **latest effectiveness test is effective=true**. A CASH_FLOW hedge defers only the **effective portion** in the OCI reserve `3550` and the **ineffective portion** in P&L `5450`; when not effective the OCI path is refused (`HEDGE_NOT_EFFECTIVE`) and the whole change routes to P&L. A FAIR_VALUE hedge basis-adjusts the hedged item + P&L `5450`. Any accounting on an undesignated relationship is refused (`HEDGE_NOT_DESIGNATED`). Deferred OCI recycles to earnings on the hedged cash flow (Dr `3550` / Cr revenue). Derivative FV change Dr `1380` / Cr `2460`. | `treasury-hedge` harness (38 checks): designate→self-approve blocked→distinct approver; measure an unapproved relationship → `HEDGE_NOT_DESIGNATED`; with the latest test effective=false the CASH_FLOW OCI attempt → `HEDGE_NOT_EFFECTIVE` and the whole change routes to P&L vs effective=true → effective portion in OCI `3550`, ineffective in P&L `5450`; reclassification Dr `3550` / Cr `4000` + `OCI_INSUFFICIENT`; FAIR_VALUE basis adjustment (Cr `1200` / Dr `5450`); RLS isolation. |
+| **TRE-04** | Application (Preventive) | Authorization / Accuracy / Valuation / Presentation / Disclosure / Completeness / SoD | Hedge accounting register (IFRS 9 / TFRS 9 · ASC 815): designation + documentation maker-checker (creator ≠ approver → `SOD_SELF_APPROVAL`), and the **two-part control gate** — no hedge/OCI accounting until the relationship is **Approved** AND its **latest effectiveness test is effective=true**. A CASH_FLOW hedge defers only the **effective portion** in the OCI reserve `3550` and the **ineffective portion** in P&L `5450`; when not effective the OCI path is refused (`HEDGE_NOT_EFFECTIVE`) and the whole change routes to P&L. A FAIR_VALUE hedge basis-adjusts the hedged item + P&L `5450`. Any accounting on an undesignated relationship is refused (`HEDGE_NOT_DESIGNATED`). Deferred OCI recycles to earnings on the hedged cash flow (Dr `3550` / Cr revenue). Derivative FV change Dr `1380` / Cr `2460`. | `treasury-hedge` harness (38 checks): designate→self-approve blocked→distinct approver; measure an unapproved relationship → `HEDGE_NOT_DESIGNATED`; with the latest test effective=false the CASH_FLOW OCI attempt → `HEDGE_NOT_EFFECTIVE` and the whole change routes to P&L vs effective=true → effective portion in OCI `3550`, ineffective in P&L `5450`; reclassification Dr `3550` / Cr `4000` + `OCI_INSUFFICIENT`; FAIR_VALUE basis adjustment (Cr `1200` / Dr `5450`); RLS isolation. |
+| **TRE-05** | Application (Preventive) | Authorization / Accuracy / Valuation / Completeness / SoD | Cash pooling / in-house bank / intercompany-loan register: IC-loan register→approve **maker-checker** (creator ≠ approver → `SOD_SELF_APPROVAL`) posts the **mirrored drawdown** (Dr `1155` / Cr `1010` creditor + Dr `1010` / Cr `2155` debtor); **idempotent EIR interest** (creditor Dr `1155` / Cr `4700`, debtor Dr `5900` / Cr `2155`); a notional pool interest allocation **MUST sum to zero** (`ALLOCATION_NOT_ZERO`); a physical pool **sweeps** member→header (Dr header / Cr member). **The control core:** on consolidation the **1155/2155** receivable/payable pair AND the **4700/5900** IC interest **ELIMINATE** so the group balance sheet and group finance cost/income net to zero (CON-03 balanced), gated by the REC-03 IC-reconciliation sign-off. | `treasury-pool` harness (46 checks): register→self-approve blocked→distinct approver posts both tenants (Dr `1155`/Cr `1010`, Dr `1010`/Cr `2155`); EIR accrual posts both sides (Dr `1155`/Cr `4700`, Dr `5900`/Cr `2155`) + idempotent; a non-zero allocation → `ALLOCATION_NOT_ZERO`, a zero-sum posts Cr `4700`/Dr `5900`; a physical sweep Dr `1010`/Cr `1020`; **consolidation eliminates 1155/2155 + 4700/5900 → group nets to 0 (balanced)**; RLS isolation. |
 
 Related: **GL-05** (all postings route through the ledger's balanced/period-locked posting), **GL-24**
-(posting-event registry), **TR-01** (the cash-position/forecast board reads the same posted GL).
+(posting-event registry), **TR-01** (the cash-position/forecast board reads the same posted GL), **CON-03**
+(consolidation elimination integrity — the balanced TB that the TRE-05 IC-loan elimination must preserve),
+**REC-03** (IC-reconciliation sign-off gating the consolidation run).
 
 ## 10. Inputs & outputs
 
 - **Inputs:** facility terms (limit, EIR, maturity), drawdown/repayment amounts, covenant readings; investment
   terms (classification, symbol, quantity, cost, EIR), market prices, ECL provisions, dividend/coupon amounts;
   hedge designations (hedged item, hedging instrument, type, ratio, documentation), effectiveness-test readings,
-  derivative fair values, effective/ineffective splits, and OCI reclassification amounts.
+  derivative fair values, effective/ineffective splits, and OCI reclassification amounts; cash-pool
+  definitions (type, header/member accounts, caps), sweep amounts, notional interest allocations, and
+  intercompany-loan terms (creditor/debtor, principal, EIR).
 - **Outputs:** the debt register (facilities + drawdowns), the DEBT-DRAW / DEBT-ACCR / DEBT-REPAY journal
   entries, the maturity ladder, and the covenant-test / breach records; the investment register + valuation
   ledger, the INVEST-BUY / INVEST-MTM / INVEST-ACCR / INVEST-DIV / INVEST-ECL journal entries, the maker-checker
   market-price register, and the portfolio roll-up; the hedge register + effectiveness-test history + OCI-movement
-  ledger, and the HEDGE-MTM / HEDGE-RECLASS journal entries.
+  ledger, and the HEDGE-MTM / HEDGE-RECLASS journal entries; the cash-pool + in-house-bank register (header/
+  members), the intercompany-loan register + interest-accrual ledger, the ICLOAN-DRAW / ICLOAN-ACCR / POOL-SWEEP /
+  POOL-ALLOC journal entries, and the consolidation IC-loan elimination lines (1155/2155 + 4700/5900).
 
 ## 11. Records & retention
 
 `debt_facilities`, `debt_drawdowns`, `debt_covenants`, `debt_covenant_tests`; `investments`,
 `investment_prices`, `investment_valuations`; `hedge_relationships`, `hedge_derivatives`,
-`hedge_effectiveness_tests`, `hedge_oci_movements` (all tenant-scoped, RLS) + the underlying GL journal entries
-(append-only audit trail). Retained per the financial-records retention policy.
+`hedge_effectiveness_tests`, `hedge_oci_movements`; `cash_pools`, `cash_pool_members`, `ic_loans`,
+`ic_loan_accruals` (all tenant-scoped, RLS) + the underlying GL journal entries (append-only audit trail).
+Retained per the financial-records retention policy.
 
 ## 12. KPIs / metrics
 
@@ -296,7 +369,11 @@ Debt: `BAD_LIMIT`, `NOT_PENDING`, `SOD_SELF_APPROVAL`, `FACILITY_NOT_APPROVED`, 
 `NO_PENDING_PRICE`, `NO_APPROVED_PRICE`, `MTM_NOT_APPLICABLE`, `NO_SYMBOL`, `BAD_ECL`. Hedge accounting
 (TRE-04): `BAD_DOCUMENTATION`, `BAD_RATIO`, `BAD_NOTIONAL`, `NOT_PENDING`, `SOD_SELF_APPROVAL`,
 `HEDGE_NOT_DESIGNATED`, `HEDGE_NOT_EFFECTIVE`, `BAD_HEDGE_TYPE`, `BAD_AMOUNT`, `OCI_INSUFFICIENT`,
-`HEDGE_NOT_FOUND`. All surface as `json.error.code` (wrapped by `AllExceptionsFilter`).
+`HEDGE_NOT_FOUND`. Cash pooling / IC loans (TRE-05): `BAD_HEADER_ACCOUNT`, `BAD_MEMBER_ACCOUNT`,
+`NOT_PHYSICAL_POOL`, `NOT_NOTIONAL_POOL`, `EMPTY_ALLOCATION`, `ALLOCATION_NOT_ZERO`, `MEMBER_NOT_FOUND`,
+`POOL_NOT_FOUND`, `SAME_PARTY`, `BAD_PRINCIPAL`, `BAD_RATE`, `NOT_PENDING`, `SOD_SELF_APPROVAL`,
+`LOAN_NOT_APPROVED`, `LOAN_NOT_FOUND`, `BAD_AMOUNT`. All surface as `json.error.code` (wrapped by
+`AllExceptionsFilter`).
 
 ## 14. Revision history
 
@@ -305,3 +382,4 @@ Debt: `BAD_LIMIT`, `NOT_PENDING`, `SOD_SELF_APPROVAL`, `FACILITY_NOT_APPROVED`, 
 | 0.1 | 2026-07-12 | Treasury / Controller | Initial narrative — TRE-01 debt & borrowings register + EIR amortized-cost engine, TRE-02 covenant-breach monitor (migration 0353). |
 | 0.2 | 2026-07-12 | Treasury / Controller | Added §7bis Investment & Securities register (TRE-03): classification (AMORTIZED_COST/FVOCI/FVTPL) + buy maker-checker, maker-checker market-price register (MTM only from Approved prices), MTM (FVOCI→OCI reserve 3500 / FVTPL→P&L 5430), EIR interest income, ECL impairment. New COA 1350/1355/1360/1370/3500/4700/5430/5440; INVEST.* posting events; migration 0354; harness `treasury-invest` (40 checks). The OCI-reserve primitive (3500) is reused by Wave 3 hedge accounting. |
 | 0.3 | 2026-07-12 | Treasury / Controller | Added §7ter Hedge accounting register (TRE-04, IFRS 9 / TFRS 9 · ASC 815): designation + documentation maker-checker, prospective/retrospective effectiveness testing, and the two-part control gate (no OCI accounting until Approved AND effective). Cash-flow hedges defer the effective portion in the Cash-Flow Hedge Reserve 3550 (OCI) and route the ineffective portion (or, when not effective, the whole change) to P&L 5450; fair-value hedges route the derivative change to P&L 5450 and basis-adjust the hedged item; OCI→P&L reclassification on the hedged cash flow (Dr 3550 / Cr revenue). New COA 1380/2460/3550/5450 (CF_CLASSIFY 3550 financing, 1380/2460 operating); HEDGE.DERIVATIVE.MTM/CF.OCI/RECLASSIFY/FV.BASIS posting events; migration 0356; harness `treasury-hedge` (38 checks). Exception codes HEDGE_NOT_DESIGNATED / HEDGE_NOT_EFFECTIVE / OCI_INSUFFICIENT / BAD_DOCUMENTATION. |
+| 0.4 | 2026-07-12 | Treasury / Controller | Added §7quater Cash pooling / in-house bank / intercompany-loan register (TRE-05, FINAL Track C wave): notional & physical cash pools (in-house bank), a physical cash sweep (Dr header / Cr member), a notional zero-sum interest allocation (surplus Cr 4700 / deficit Dr 5900, must sum to zero — ALLOCATION_NOT_ZERO), and an intercompany-loan register under maker-checker (mirrored drawdown Dr 1155 / Cr 1010 creditor + Dr 1010 / Cr 2155 debtor; idempotent EIR interest Dr 1155 / Cr 4700 creditor + Dr 5900 / Cr 2155 debtor). **Control core:** consolidation.runConsolidation extended so the intra-group 1155/2155 receivable/payable pair AND the 4700/5900 IC interest ELIMINATE per period (mirroring the trade-IC 1150/2150 pair) so group balances + finance cost/income net to zero (CON-03 balanced), gated by REC-03. New COA 1155/2155 (CF_CLASSIFY 1155 investing / 2155 financing); ICLOAN.DRAWDOWN/INTEREST + POOL.SWEEP/INTEREST posting events; migration 0357; harness `treasury-pool` (46 checks). Exception codes SAME_PARTY / BAD_PRINCIPAL / LOAN_NOT_APPROVED / ALLOCATION_NOT_ZERO / NOT_PHYSICAL_POOL / NOT_NOTIONAL_POOL / SOD_SELF_APPROVAL. |
