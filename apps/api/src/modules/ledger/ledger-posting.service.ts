@@ -169,17 +169,16 @@ export class LedgerPostingService {
     // COA-D2 (GL-21): required dimensions — an account flagged {"branch":true,...} rejects a line that
     // omits that dimension (fail-closed at posting, so multi-dim reports on the account are complete).
     // Key → line-field mapping mirrors the journal_lines dimension stamps below.
-    const DIM_FIELD: Record<string, (l: JournalLineDto) => unknown> = {
-      branch: (l) => l.branch_id, project: (l) => l.project_id,
-      department: (l) => l.dept_id, cost_center: (l) => l.cost_center,
+    const DIM_FIELD: Record<string, keyof JournalLineDto> = {
+      branch: 'branch_id', project: 'project_id', department: 'dept_id', cost_center: 'cost_center',
     };
     for (const l of nzLines) {
       const req = accByCode.get(l.account_code)?.requireDimension;
       if (!req) continue;
       for (const [dim, on] of Object.entries(req)) {
-        const get = DIM_FIELD[dim];
-        if (!on || !get) continue;
-        const v = get(l);
+        const field = DIM_FIELD[dim];
+        if (!on || !field) continue;
+        const v = l[field];
         if (v == null || v === '') {
           throw new BadRequestException({
             code: 'REQUIRED_DIMENSION_MISSING',
