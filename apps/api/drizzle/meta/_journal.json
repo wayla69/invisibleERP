@@ -2507,6 +2507,27 @@
       "when": 2023820000323,
       "tag": "0358_revrec_billing_schedule",
       "breakpoints": true
+    },
+    {
+      "idx": 359,
+      "version": "7",
+      "when": 2023820000324,
+      "tag": "0359_revrec_variable_estimates",
+      "breakpoints": true
+    },
+    {
+      "idx": 360,
+      "version": "7",
+      "when": 2023820000325,
+      "tag": "0360_revrec_contract_modifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 361,
+      "version": "7",
+      "when": 2023820000326,
+      "tag": "0362_coa_change_requests",
+      "breakpoints": true
     }
   ]
 }

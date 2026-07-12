@@ -1167,13 +1167,38 @@ async function main() {
   // PLATFORM/HQ duty (role Admin + gl_coa); per-tenant chart curation (`tenant_accounts` overlay) is a tenant
   // duty (gl_coa, RLS-scoped). Exercises the CoaController now that it is reachable at /api/ledger/accounts.
 
-  // 1. A platform Admin/HQ operator creates a canonical account (auto-defaulted normal balance + postable).
+  // 1. GL-27 (COA follow-up C): a canonical create by a platform Admin STAGES a change request — with more
+  //    than one active Admin in the system (this DB has many) nothing touches the chart yet.
   const mkAcct = await inj('POST', '/api/ledger/accounts', admin, { code: '9990', name: 'ToE Custom Expense', type: 'Expense' });
-  ok('GL-11: platform Admin/HQ creates a canonical account → 201 (D-normal, postable)',
-    (mkAcct.status === 200 || mkAcct.status === 201) && mkAcct.json.code === '9990' && mkAcct.json.normalBalance === 'D' && mkAcct.json.isPostable === true,
+  ok('GL-27: platform Admin canonical create → staged PendingApproval (no chart effect yet)',
+    (mkAcct.status === 200 || mkAcct.status === 201) && mkAcct.json.status === 'PendingApproval' && mkAcct.json.account_code === '9990',
     `${mkAcct.status} ${JSON.stringify(mkAcct.json)}`);
 
-  // 2. Duplicate code is refused.
+  // 1b. A second request for the SAME code while one is pending is refused fail-closed.
+  const dupPending = await inj('POST', '/api/ledger/accounts', admin, { code: '9990', name: 'dup while pending', type: 'Expense' });
+  ok('GL-27: a second request for the same code while pending → 400 CHANGE_ALREADY_PENDING',
+    dupPending.status === 400 && dupPending.json.error?.code === 'CHANGE_ALREADY_PENDING', `${dupPending.status} ${dupPending.json.error?.code}`);
+
+  // 1c. The creator cannot approve their own request (SoD binds even Admin).
+  const selfAppr = await inj('POST', `/api/ledger/accounts/change-requests/${mkAcct.json.id}/approve`, admin);
+  ok('GL-27: creator self-approval → 403 SOD_VIOLATION',
+    selfAppr.status === 403 && selfAppr.json.error?.code === 'SOD_VIOLATION', `${selfAppr.status} ${selfAppr.json.error?.code}`);
+
+  // 1d. A DIFFERENT Admin approves → the account NOW exists (auto-defaulted normal balance + postable, GL-11 semantics).
+  const apprAcct = await inj('POST', `/api/ledger/accounts/change-requests/${mkAcct.json.id}/approve`, whchk);
+  ok('GL-27→GL-11: a DIFFERENT Admin approves → account created (D-normal, postable)',
+    apprAcct.status === 200 && apprAcct.json.code === '9990' && apprAcct.json.normalBalance === 'D' && apprAcct.json.isPostable === true,
+    `${apprAcct.status} ${JSON.stringify(apprAcct.json)}`);
+
+  // 1e. A rejected request leaves the chart untouched.
+  const rejReq = await inj('POST', '/api/ledger/accounts', admin, { code: '9993', name: 'to be rejected', type: 'Expense' });
+  const rejDone = await inj('POST', `/api/ledger/accounts/change-requests/${rejReq.json.id}/reject`, whchk, { reason: 'not needed' });
+  const rejGone = await inj('GET', '/api/ledger/accounts/9993/where-used', admin);
+  ok('GL-27: reject closes the request and the account never exists',
+    rejDone.status === 200 && rejDone.json.status === 'Rejected' && rejGone.status === 404,
+    `${rejDone.status} ${rejDone.json.status} lookup=${rejGone.status}`);
+
+  // 2. Duplicate code is refused fail-closed at REQUEST time (9990 now exists after 1d).
   const dupAcct = await inj('POST', '/api/ledger/accounts', admin, { code: '9990', name: 'dup', type: 'Expense' });
   ok('GL-11: duplicate account code → 400 DUPLICATE_ACCOUNT',
     dupAcct.status === 400 && dupAcct.json.error?.code === 'DUPLICATE_ACCOUNT', `${dupAcct.status} ${dupAcct.json.error?.code}`);

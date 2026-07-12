@@ -50,3 +50,27 @@ export const postingRuleAudit = pgTable('posting_rule_audit', {
 
 export type PostingRule = typeof postingRules.$inferSelect;
 export type PostingEventType = typeof postingEventTypes.$inferSelect;
+
+// GL-27 (0362): canonical Chart-of-Accounts maker-checker. A canonical account create/update/
+// deactivate stages here and applies only on a DIFFERENT Admin's approval; with exactly ONE active
+// Admin the change applies immediately, recorded as 'AutoApplied' (the single-Admin exception).
+// PLATFORM table — the company column is created_tenant_id (context only, NOT tenant_id) so the
+// generic RLS loop and the tenant-idx gate skip it (the canonical chart is global).
+export const coaChangeRequests = pgTable('coa_change_requests', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  action: text('action').notNull(),                 // 'create' | 'update' | 'deactivate'
+  accountCode: text('account_code').notNull(),
+  payload: jsonb('payload'),
+  before: jsonb('before'),
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected | AutoApplied
+  reason: text('reason'),
+  createdBy: text('created_by'),
+  createdTenantId: bigint('created_tenant_id', { mode: 'number' }).references(() => tenants.id),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byStatus: index('idx_coa_change_requests_status').on(t.status, t.id),
+}));
+
+export type CoaChangeRequest = typeof coaChangeRequests.$inferSelect;
