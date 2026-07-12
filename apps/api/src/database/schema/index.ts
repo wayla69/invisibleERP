@@ -148,6 +148,7 @@ export * from './income-tax-provision';
 export * from './revrec-contracts';
 export * from './revrec-billing';
 export * from './revrec-variable';
+export * from './revrec-modifications';
 export * from './ai-usage';
 export * from './usage-meters';
 export * from './background-jobs';
