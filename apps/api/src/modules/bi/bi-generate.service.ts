@@ -39,6 +39,7 @@ import { PdpaService } from '../pdpa/pdpa.service';
 import { GovernanceService } from '../governance/governance.service';
 import { TaxJobsService } from '../tax/tax-jobs.service';
 import { HcmLeaveService } from '../hcm/hcm-leave.service';
+import { FluxService } from '../flux/flux.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -87,6 +88,9 @@ export class BiGenerateService {
     @Optional() private readonly taxJobs?: TaxJobsService,
     // HR-2 (docs/42) — supplies the hr_leave_accrual scheduled action job. @Optional so a partial harness constructs.
     @Optional() private readonly hcmLeave?: HcmLeaveService,
+    // CLS-01 (GL-25) — supplies the flux_analysis report. Appended at the END to preserve the positional
+    // constructor contract the goldenmaster harness relies on. @Optional so a partial harness constructs.
+    @Optional() private readonly flux?: FluxService,
   ) {}
 
   async generateReport(reportType: string, filters: any, user: JwtUser, reads: BiReadPort): Promise<{ data: any; summary: string; summaryTh: string }> {
@@ -522,6 +526,18 @@ export class BiGenerateService {
       const fy = Number(f.fiscal_year) || new Date().getFullYear();
       const r = await this.budget.budgetVsActual({ fiscal_year: fy, period: f.period, cost_center: f.cost_center });
       return { data: r, summary: `Budget ${fy}: net variance ${r.rollup.net.variance} (${r.rollup.net.favorable ? 'favorable' : 'unfavorable'}); ${r.review.requires_review_count} item(s) need review`, summaryTh: `งบประมาณ ${fy}: ผลต่างสุทธิ ${r.rollup.net.variance} · ต้องทบทวน ${r.review.requires_review_count} รายการ` };
+    }
+    if (reportType === 'flux_analysis') {
+      if (!this.flux) throw new BadRequestException({ code: 'FLUX_UNAVAILABLE', message: 'Flux analysis service not available', messageTh: 'ระบบวิเคราะห์ผลต่างไม่พร้อมใช้งาน' });
+      // Default the period to the prior month (last full close period) if the schedule didn't pin one.
+      let period = f.period as string | undefined;
+      if (!period || !/^\d{4}-\d{2}$/.test(period)) {
+        const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1);
+        period = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      }
+      const r = await this.flux.generate({ period, basis: f.basis, comparative: f.comparative, threshold_abs: f.threshold_abs, threshold_pct: f.threshold_pct }, user);
+      const a = r.analysis;
+      return { data: r, summary: `Flux ${a.period} (${a.basis} vs ${a.comparative_period}): ${a.breached_count} line(s) breach threshold${a.breached_count ? ' — explanation required before sign-off' : ''}`, summaryTh: `วิเคราะห์ผลต่าง ${a.period} (${a.basis} เทียบ ${a.comparative_period}): เกินเกณฑ์ ${a.breached_count} รายการ${a.breached_count ? ' — ต้องอธิบายก่อนลงนามรับรอง' : ''}` };
     }
     if (reportType === 'supplier_scorecard') {
       if (!this.procurement) throw new BadRequestException({ code: 'PROCUREMENT_UNAVAILABLE', message: 'Procurement service not available', messageTh: 'ระบบจัดซื้อไม่พร้อมใช้งาน' });

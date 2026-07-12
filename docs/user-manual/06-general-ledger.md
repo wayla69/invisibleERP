@@ -817,6 +817,41 @@ period is already hard-closed), `CLOSE_RUN_NOT_FOUND`, `STEP_NOT_FOUND`.
 **Expected result:** Profit & loss accounts are zeroed into **Retained Earnings
 (3100)** and all twelve periods are closed. The operation is safe to re-run.
 
+### Flux / variance analysis with forced explanation + sign-off (control GL-25 / CLS-01)
+
+A management-review control for the close: before you rely on the financial statements,
+**explain the material movements**. The screen lives at **`/close/flux`** (menu: *บัญชีแยกประเภท
+› วิเคราะห์ผลต่าง (Flux)*).
+
+**Required permission:** `gl_close`, `fin_report` or `exec` to read and generate/explain;
+sign-off is `gl_close`/`exec`. Sign-off is **maker-checker** — the reviewer must be a
+different person from the preparer.
+
+**How it works:**
+
+1. **Generate** — pick the **period** (`YYYY-MM`), the **basis** (P&L or Balance Sheet), the
+   **comparative** (prior period, prior year, or approved budget — budget applies to P&L
+   only), and the **thresholds** (an absolute THB amount *and* a percentage). Click
+   **สร้างการวิเคราะห์** (`POST /api/close/flux/generate`). The system reads the
+   `gl_period_balances` snapshot and lists every account with its current amount, the
+   comparative amount, Δ$ and Δ%. A line is flagged **เกินเกณฑ์ (breach)** when the movement
+   exceeds **both** thresholds (so a tiny % on a large base, or a large % on a trivial base,
+   is not flagged). The analysis **posts nothing to the GL** — it is read-only.
+2. **Explain** — every breaching line **requires a written explanation** (`PUT
+   /api/close/flux/:id/lines/:lineId/explain`). Type the cause and click บันทึกคำอธิบาย. When
+   every breaching line is explained the analysis advances to **Explained**.
+3. **Sign off** — an **independent** reviewer clicks **ลงนามรับรอง** (`POST
+   /api/close/flux/:id/review`). The analysis becomes **Certified** and is locked.
+
+The `flux_review` step also appears on the hard-close checklist (advisory), and the
+`flux_analysis` BI report type lets you schedule the analysis to run automatically.
+
+**Possible errors:** `UNEXPLAINED_LINES` (you tried to sign off while a breaching line still
+has no explanation — explain every flagged line first), `SOD_SELF_APPROVAL` (you tried to
+sign off an analysis you prepared — a different reviewer must sign), `LINE_NOT_BREACHED` (only
+threshold-breaching lines take an explanation), `ALREADY_CERTIFIED` (a certified analysis is
+locked), `BUDGET_PL_ONLY` (the budget comparative is available only on the P&L basis),
+`BAD_PERIOD` / `BAD_THRESHOLD`.
 ### Disclosure / close-package checklist (governed close binder — GL-26)
 
 **Screen:** `/close/disclosure` (**รายการตรวจสอบการเปิดเผยข้อมูล**) · **Required

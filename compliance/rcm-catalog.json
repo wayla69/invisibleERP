@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 251,
+    "total": 252,
     "by_status": {
-      "Implemented": 248,
+      "Implemented": 249,
       "Partial": 3
     },
     "by_family": {
@@ -16,7 +16,7 @@
       "Entity-Level": 7,
       "Expenditure": 16,
       "Fixed Assets": 8,
-      "General Ledger": 25,
+      "General Ledger": 26,
       "ITGC · Access": 22,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
@@ -3610,6 +3610,25 @@
       "status": "Implemented"
     },
     {
+      "control_id": "GL-25",
+      "cycle": "General Ledger",
+      "category": "Detective",
+      "fsli": "All",
+      "risk": "Material period-over-period movements in the financial statements are relied upon without a documented management analysis — a large or anomalous swing in a revenue/expense (or balance-sheet) account is neither explained nor independently reviewed, so an error or manipulation that first surfaces as an unexpected fluctuation goes undetected before the books are relied upon / the period is locked.",
+      "assertion": "Completeness/Accuracy/Presentation",
+      "description": "Flux / variance analysis with FORCED explanation + independent sign-off (CLS-01): a preparer GENERATES a period movement analysis from the gl_period_balances snapshot (POST /api/close/flux/generate — basis P&L period-activity or Balance-Sheet cumulative-through-period; comparative prior_period / prior_year / vs approved-budget). Each account line carries the current amount, the comparative amount, Δ$ and Δ%, and is flagged BREACHED when |Δ$| ≥ a configurable absolute threshold AND |Δ%| ≥ a configurable percent threshold (both must trip, so a trivial % on a large base or a large % on a trivial base is not noise). A threshold-breaching line REQUIRES a written explanation (PUT …/lines/:lineId/explain) before the analysis can advance from Draft to Explained; review/sign-off (POST …/review) is REFUSED while any breached line is unexplained (UNEXPLAINED_LINES). Sign-off is maker-checker: the reviewer MUST differ from the preparer (SOD_SELF_APPROVAL), and certification locks the analysis (ALREADY_CERTIFIED). Read-only aggregator — posts NOTHING to the GL, adds no posting authority (no new SoD conflict). Surfaced as the advisory 'flux_review' step on the close checklist (GL-15) and as the schedulable flux_analysis BI report.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per period-close",
+      "owner": "Financial Controller",
+      "coso": "P10",
+      "code_reference": "flux/flux.service.ts (generate — signed amounts per account from gl_period_balances, prior_period/prior_year/budget comparatives, abs+pct breach flags; explain forced-explanation + Draft→Explained; review UNEXPLAINED_LINES + SOD_SELF_APPROVAL maker-checker → Certified); flux/flux.controller.ts (POST close/flux/generate, GET close/flux[/:id], PUT :id/lines/:lineId/explain, POST :id/review — gl_close/fin_report/exec); schema/flux.ts (flux_analyses + flux_lines, tenant-leading index) + migration 0348 (canonical RLS); ledger/close.service.ts (advisory flux_review checklist step); bi/report-registry.ts + bi-generate.service.ts (flux_analysis report type); apps/web /close/flux; cutover/flux-analysis.ts (ToE)",
+      "tod": "Inspect the abs+pct breach logic, the forced-explanation gate before sign-off, the maker-checker reviewer≠preparer rule, and that the analysis posts nothing to the GL.",
+      "toe": "Re-perform (flux-analysis harness): generate a P&L flux flags the lines breaching abs/pct thresholds and leaves the below-threshold line unflagged; review while a breached line is unexplained → UNEXPLAINED_LINES; the preparer's self-review → SOD_SELF_APPROVAL; after every breached line is explained a DISTINCT reviewer certifies; prior_year/budget comparatives resolve correctly; RLS isolates tenants.",
+      "evidence": "flux_analyses / flux_lines with per-line explanations + reviewer sign-off; flux-analysis harness ToE",
+      "status": "Implemented"
+    },
+    {
       "control_id": "GL-26",
       "cycle": "General Ledger",
       "category": "Detective",
@@ -3622,7 +3641,7 @@
       "frequency": "Per period-close / reporting package",
       "owner": "Financial Controller / CFO",
       "coso": "P10",
-      "code_reference": "disclosure.service.ts (open seeds STANDARD_ITEMS, updateItem complete/NA + support_doc_ref, review ITEMS_INCOMPLETE + SOD_SELF_APPROVAL maker-checker gate Draft→Reviewed, issue Reviewed→Issued NOT_REVIEWED); disclosure.controller.ts (api/close/disclosure open/list/get/item/review/issue, gl_close mutate + gl_close/gl_post/fin_report/exec read); schema/disclosure-checklists.ts (disclosure_checklists + disclosure_items, tenant-leading index + canonical 0232-form RLS); migration 0346 (tables + RLS + app_user grants); procurement/attachments.service.ts (assertDocExists DISC → disclosure_checklists); common/doc-number.service.ts (DISC daily doc number); ledger/close.service.ts (advisory disclosure_review step); app.module.ts (DisclosureModule wired); cutover/disclosure-checklist.ts (ToE)",
+      "code_reference": "disclosure.service.ts (open seeds STANDARD_ITEMS, updateItem complete/NA + support_doc_ref, review ITEMS_INCOMPLETE + SOD_SELF_APPROVAL maker-checker gate Draft→Reviewed, issue Reviewed→Issued NOT_REVIEWED); disclosure.controller.ts (api/close/disclosure open/list/get/item/review/issue, gl_close mutate + gl_close/gl_post/fin_report/exec read); schema/disclosure-checklists.ts (disclosure_checklists + disclosure_items, tenant-leading index + canonical 0232-form RLS); migration 0347 (tables + RLS + app_user grants); procurement/attachments.service.ts (assertDocExists DISC → disclosure_checklists); common/doc-number.service.ts (DISC daily doc number); ledger/close.service.ts (advisory disclosure_review step); app.module.ts (DisclosureModule wired); cutover/disclosure-checklist.ts (ToE)",
       "tod": "Inspect the seeded standard-item set with standard refs/owners, the item complete/NA + support-doc attach, the ITEMS_INCOMPLETE review gate, the SOD_SELF_APPROVAL maker-checker (reviewer ≠ preparer), the Reviewed→Issued release, and the tenant RLS isolation.",
       "toe": "TC-CLS-02-01: open seeds ≥10 standard disclosure items (Draft, DISC checklist_no); TC-CLS-02-02: review while an item is Open → ITEMS_INCOMPLETE (400); TC-CLS-02-03: self-review by the preparer → SOD_SELF_APPROVAL (403); TC-CLS-02-04: complete/NA all + a DISTINCT reviewer reviews → Reviewed, then issue → Issued; TC-CLS-02-05: attach DISC support evidence to the checklist_no (assertDocExists), a bogus checklist_no → NOT_FOUND; TC-CLS-02-06: another tenant sees 0 checklists (RLS) (re-performed by the disclosure-checklist harness).",
       "evidence": "disclosure_checklists / disclosure_items with prepared_by/reviewed_by/issued_by sign-off trail + per-item completed_by/support_doc_ref; harness ToE (disclosure-checklist)",
