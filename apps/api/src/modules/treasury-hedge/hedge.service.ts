@@ -90,7 +90,7 @@ export class HedgeService {
   async designate(dto: HedgeDto, user: JwtUser) {
     const db = this.db;
     if (!dto.documentation || !dto.documentation.trim()) {
-      throw new BadRequestException({ code: 'BAD_DOCUMENTATION', message: 'Hedge documentation is required at designation (IFRS 9 6.4.1)', messageTh: 'ต้องมีเอกสารกำหนดความสัมพันธ์การป้องกันความเสี่ยง' });
+      throw new BadRequestException({ code: 'BAD_DOCUMENTATION', message: 'Hedge documentation is required at designation (IFRS 9 / TFRS 9 §6.4.1)', messageTh: 'ต้องมีเอกสารกำหนดความสัมพันธ์การป้องกันความเสี่ยง' });
     }
     const type = (TYPES as readonly string[]).includes(dto.hedgeType ?? '') ? (dto.hedgeType as HedgeType) : 'CASH_FLOW';
     const ratio = round2(dto.hedgeRatio ?? 1);
