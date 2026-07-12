@@ -16,6 +16,10 @@ export const revContracts = pgTable('rev_contracts', {
   totalPrice: numeric('total_price', { precision: 18, scale: 4 }).notNull(),
   status: text('status').notNull().default('Draft'),       // Draft | Active | Completed | Cancelled
   description: text('description'),
+  // REV-24 — cumulative amount billed to the customer (independent of recognition). Drives the contract
+  // asset (1265) / contract liability (2410) split: recognized > billed ⇒ asset; billed > recognized ⇒
+  // liability. Set to total_price on up-front activation (REV-19 back-compat); incremented by each bill.
+  billedAmount: numeric('billed_amount', { precision: 18, scale: 4 }).notNull().default('0'),
   invoiceEntryId: bigint('invoice_entry_id', { mode: 'number' }),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
