@@ -11,7 +11,60 @@
 --     records which tier applied (manager|exec) for the ToE.
 -- No new maker-checker rail — extends the CPQ-01 one. Tenant-scoped (0232 RLS). Migration number buffered
 -- ahead of the concurrently-hot sequence.
+--
+-- ⚠️ §0 below re-creates 0328's objects FIRST (verbatim, all idempotent): 0328_cpq_discount_approval was
+-- journaled with `when`=…293 while prod had already applied past that point, so prod SILENTLY SKIPPED it
+-- forever (the 0145/0146 class — drizzle only applies entries with `when` greater than the last applied).
+-- First prod deploy of this file therefore failed 42P01 `relation "cpq_settings" does not exist` while
+-- fresh-DB CI stayed green (fresh DBs apply 0328 normally; every statement here is IF-NOT-EXISTS-safe for
+-- them). This file had never been applied in prod, so editing it in place is safe.
 
+-- ── §0. Re-create the silently-skipped 0328 objects (idempotent) ─────────────────────────────────────
+ALTER TABLE quote_lines ADD COLUMN IF NOT EXISTS unit_cost numeric(14,2) NOT NULL DEFAULT 0;
+--> statement-breakpoint
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS discount_pct numeric(6,3) NOT NULL DEFAULT 0;
+--> statement-breakpoint
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS margin_pct numeric(6,3);
+--> statement-breakpoint
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS requires_approval boolean NOT NULL DEFAULT false;
+--> statement-breakpoint
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS approved_by text;
+--> statement-breakpoint
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS approved_at timestamptz;
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS cpq_settings (
+  id bigserial PRIMARY KEY,
+  tenant_id bigint REFERENCES tenants(id),
+  min_margin_pct numeric(6,3) NOT NULL DEFAULT 20,
+  max_discount_pct numeric(6,3) NOT NULL DEFAULT 15,
+  updated_by text,
+  updated_at timestamptz DEFAULT now()
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cpq_settings_tenant ON cpq_settings (tenant_id);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS quote_approvals (
+  id bigserial PRIMARY KEY,
+  tenant_id bigint REFERENCES tenants(id),
+  quote_id bigint NOT NULL REFERENCES quotes(id),
+  requested_by text,
+  approved_by text,
+  status text NOT NULL DEFAULT 'pending',
+  reason text,
+  min_margin_pct numeric(6,3),
+  max_discount_pct numeric(6,3),
+  margin_pct numeric(6,3),
+  discount_pct numeric(6,3),
+  created_at timestamptz DEFAULT now(),
+  decided_at timestamptz
+);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_quote_appr_quote ON quote_approvals (tenant_id, quote_id);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_quote_appr_status ON quote_approvals (tenant_id, status);
+--> statement-breakpoint
+
+-- ── §1. CRM-14 proper ─────────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cpq_bundles (
   id bigserial PRIMARY KEY,
   tenant_id bigint REFERENCES tenants(id),
