@@ -22,10 +22,6 @@
       "loc": 680,
       "ctorParams": 7
     },
-    "apps/api/src/modules/messaging/line-webhook.controller.ts": {
-      "loc": 978,
-      "ctorParams": 6
-    },
     "apps/api/src/modules/payments/payments.service.ts": {
       "loc": 737,
       "ctorParams": 7
