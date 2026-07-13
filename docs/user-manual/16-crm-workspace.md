@@ -1,7 +1,7 @@
 # 16 — CRM Workspace (งานขาย: บอร์ดดีล ลีด บัญชีลูกค้า ผู้ติดต่อ)
 
 **Who this is for:** Sales, CRM/Credit Manager, Marketing, Executives
-**Screens:** `/crm` (workspace) · `/crm/deals/<OPP-…>` (deal) · `/crm/accounts/<ACC-…>` (account) · `/crm/members` (member CRM 360) · `/crm/audience-export` (hashed audience export, docs/45) · `/projects/pipeline` (win/loss analytics)
+**Screens:** `/crm` (workspace) · `/crm/deals/<OPP-…>` (deal) · `/crm/accounts/<ACC-…>` (account) · `/crm/members` (member CRM 360) · `/crm/audience-export` (hashed audience export, docs/45) · `/reputation` (Google Maps reviews & GA4 analytics, docs/47) · `/projects/pipeline` (win/loss analytics)
 **Required permission:** `crm`, `marketing`, `exec` or `ar` (the workspace); account **merge** additionally needs `crm`/`exec`/`masterdata`
 
 The CRM workspace is ONE screen for the whole sales motion: a drag-and-drop **deal board**, **leads**
@@ -457,6 +457,23 @@ history (per recipient — success/failed/blocked, rows pushed/removed), and a b
 
 ---
 
+## 16.14 Reputation & external analytics — Google Maps reviews and GA4 (docs/47, `/reputation`)
+
+**Who:** `marketing` / `exec`. **Connections** tab: click **Connect** for Google Maps or Google Analytics —
+you'll be sent to Google's real consent screen (this is a genuine OAuth2 login, not a webhook: neither
+platform pushes events to us, so we poll instead). After granting access, pick which Business Profile
+location(s) or GA4 propert(y/ies) to track under **Manage targets**. **Sync now** pulls immediately;
+scheduling automatic daily syncs is done the same way as any other report — from **Scheduled Reports**,
+create a `reputation_review_sync` or `reputation_ga4_sync` subscription. **Reviews** tab: every synced
+Google Maps review, filterable to **Needs attention** (rating ≤3 with no reply yet), with an in-app
+**Reply** button that posts straight back to Google. **Analytics** tab: average rating, needs-attention
+count, GA4 sessions/revenue tiles, and the daily sessions/users/conversions/revenue/top-channel table.
+Your Google OAuth tokens are encrypted at rest and never shown back to you or anyone else — only the
+connected account's email and sync status are visible. **Wongnai reviews are not supported** — no
+documented public API exists yet for pulling a business's own Wongnai reviews.
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -486,11 +503,16 @@ history (per recipient — success/failed/blocked, rows pushed/removed), and a b
 | `CASE_NOT_ACTIVE` | Resolving a case that is not new/open/pending (§16.10) | Reopen the case first if you need to work it again. |
 | `CASE_ALREADY_CLOSED` / `CASE_NOT_CLOSED` | Closing an already-closed case / reopening a case that isn't resolved/closed (§16.10) | Refresh the list; the status changed under you. |
 | `UNKNOWN_TENANT` | An Email-to-Case delivery used a company code that doesn't exist (§16.10) | Not a user action — fix the webhook URL's company code at the mail provider. |
+| `OAUTH_NOT_CONFIGURED` | Clicking Connect (§16.14) before the platform's Google OAuth client is set up | Not a user action — ask your administrator to set `GOOGLE_OAUTH_CLIENT_ID`/`SECRET`. |
+| `BAD_STATE` | The Google consent screen's callback arrived late, twice, or was replayed (§16.14) | Click Connect again — a login attempt is single-use and expires after 10 minutes. |
+| `NO_REFRESH_TOKEN` | A sync ran after Google's access expired with no refresh token stored (§16.14) | Disconnect and Connect again to re-grant access. |
+| `CONNECTION_NOT_FOUND` | Managing targets/replying on a connection that was already disconnected (§16.14) | Refresh the Connections tab; reconnect if needed. |
 
 ## Revision history
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.6 | 2026-07-13 | **Reputation & external analytics (docs/47, new control MKT-14) — new §16.14, `/reputation`.** Connect Google Maps reviews (Business Profile OAuth2) and Google Analytics (GA4) — neither offers a webhook, so this is scheduled-poll ingestion (`reputation_review_sync`/`reputation_ga4_sync` via Scheduled Reports). New errors `OAUTH_NOT_CONFIGURED`/`BAD_STATE`/`NO_REFRESH_TOKEN`/`CONNECTION_NOT_FOUND`. |
 | 2.5 | 2026-07-13 | **Audience export screen (docs/45) — new §16.13, `/crm/audience-export`.** No new control (extends PDPA-05, documented in manual 09 §7) — a dedicated preview + register + ROPA-status view over the existing consent-gated hashed audience export, cross-linked to Scheduled Reports for actually running it. |
 | 2.4 | 2026-07-13 | **Sequences & cadences (`/crm`) — CRM-8, control CRM-11:** new §16.4f + a new *Sequences* tab. Multi-step outreach **playbooks** (channel + wait-days steps) on the comms rail: enroll a lead (`LEAD-…`) or deal (`OPP-…`), and the cadence **advances** each enrolment step-by-step — sending the message (or logging a task), recording the touch on the timeline, and scheduling the next step — until it **completes**; enrolments can be **stopped**, and **Run due** (also a scheduled *CRM sequence run* BI report) advances everything that's due. Read-only to the ledger. |
 | 2.3 | 2026-07-12 | **Territory & quota (`/crm`) — CRM-11, control CRM-10:** new §16.4e + a new *Territory / quota* tab. Sales **territories** become governed master data — a name, optional **parent** (team roll-up hierarchy), manager and match criteria (regions/segments/categories) — with **rep assignments** and per-period **quotas** for an owner or a territory. The **attainment** tables reconcile won-in-period against the quota **per rep** and **by territory** (a territory's won sums its whole subtree), with a ≥100/≥70/below badge so a shortfall to plan surfaces early. Read-only to the ledger. |

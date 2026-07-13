@@ -1,4 +1,4 @@
--- 0402 — Let the god-only factory-reset / purge tenant-wipe delete append-only rows that immutability
+-- 0403 — Let the god-only factory-reset / purge tenant-wipe delete append-only rows that immutability
 -- triggers otherwise block. The wipe (tenant-wipe.ts) sets a transaction-local `app.tenant_wipe='on'`
 -- GUC; these two DELETE-blocking triggers skip their RAISE only while it is set. Every other code path is
 -- unchanged (GUC unset → full immutability, ITGC-AC-16 / append-only approval trail holds).
