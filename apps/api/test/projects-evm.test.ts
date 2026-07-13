@@ -150,11 +150,31 @@ describe('ProjectsEvmService — schedule() critical path (PROJ-06 CPM)', () => 
     expect(r.count).toBe(2);
     expect(r.project_duration_days).toBeGreaterThan(0);
   });
+
+  it('an enabled working calendar (PPM-B1) counts only working days, excluding weekends + a holiday exception', async () => {
+    // 2026-01-01 (Thu) .. 2026-01-14 (Wed) = 14 raw days; excludes 2 Sat + 2 Sun (weekend) and the
+    // 2026-01-01 holiday exception (not already a weekend day) → 14 − 4 − 1 = 9 working days.
+    const svc = evmSvc(
+      [
+        [task(1, { plannedStart: '2026-01-01', plannedEnd: '2026-01-14' })], // schedule tasks
+        [{ enabled: true, nonWorkingWeekdays: '0,6' }],                      // calRow
+        [{ exceptionDate: '2026-01-01' }],                                   // calendar exceptions
+        [],                                                                  // depRows
+      ],
+      { rowOf: async () => ({ id: 1, tenantId: 1 }) },
+    );
+    const r = await svc.schedule('P-1');
+    expect(r.working_calendar_enabled).toBe(true);
+    expect(r.project_duration_days).toBe(9);
+    expect(r.tasks[0].duration_days).toBe(9);
+  });
 });
 
 describe('ProjectsEvmService — programCriticalPath (PMO-4 cross-project CPM)', () => {
   it('chains member projects finish-to-start; an independent member carries slack', async () => {
     // A (40h ⇒ 5d) ← B (24h ⇒ 3d, depends on A); C (16h ⇒ 2d, independent) → program 8d, CP = A→B
+    // PPM-B1: schedule() now also reads project_task_dependencies (an empty route — no tenantId on
+    // these rowOf rows, so the calendar select is skipped) per member's schedule() call.
     const ids: Record<string, number> = { A: 1, B: 2, C: 3 };
     const svc = evmSvc(
       [
@@ -163,9 +183,12 @@ describe('ProjectsEvmService — programCriticalPath (PMO-4 cross-project CPM)',
           { projectCode: 'B', name: 'b', status: 'active', dependsOnProjects: 'A,X-NOT-MEMBER' }, // non-members filtered
           { projectCode: 'C', name: 'c', status: 'active', dependsOnProjects: null },
         ],
-        [task(11, { plannedHours: '40' })], // A's schedule
-        [task(21, { plannedHours: '24' })], // B's schedule
-        [task(31, { plannedHours: '16' })], // C's schedule
+        [task(11, { plannedHours: '40' })], // A's schedule tasks
+        [], // A's schedule depRows
+        [task(21, { plannedHours: '24' })], // B's schedule tasks
+        [], // B's schedule depRows
+        [task(31, { plannedHours: '16' })], // C's schedule tasks
+        [], // C's schedule depRows
       ],
       { rowOf: async (code: string) => ({ id: ids[code] ?? 0 }) },
     );
@@ -296,9 +319,9 @@ describe('ProjectsEvmService — ragOf bands (PPM health)', () => {
 
 describe('ProjectsEvmService — captureBaseline re-baseline guard (PROJ-07)', () => {
   it('re-baselining over an ACTIVE baseline without a reason is BASELINE_REASON_REQUIRED — nothing written', async () => {
-    // routes: currentPlan task scan → schedule task scan → active-baseline lookup
+    // routes: currentPlan task scan → schedule task scan → schedule depRows (PPM-B1, empty) → active-baseline lookup
     const svc = evmSvc(
-      [[task(1, { plannedCost: '1000' })], [task(1, { plannedCost: '1000' })], [{ id: 3, status: 'active', baselineBac: '1000' }]],
+      [[task(1, { plannedCost: '1000' })], [task(1, { plannedCost: '1000' })], [], [{ id: 3, status: 'active', baselineBac: '1000' }]],
       { noWrites: true },
     );
     await expect(svc.captureBaseline('P-1', {} as any, { username: 'pm' } as any)).rejects.toMatchObject({ response: { code: 'BASELINE_REASON_REQUIRED' } });
@@ -320,7 +343,7 @@ function evmWriteSvc(routes: any[][], opts: { fmt?: any } = {}) {
   };
   const db: any = {
     select: () => { if (call >= routes.length) throw new Error(`unexpected select #${call + 1} — add a route`); return chain(routes[call++] ?? []); },
-    insert: () => ({ values: (v: any) => { cap.inserts.push(v); return { onConflictDoUpdate: (c: any) => { cap.conflicts.push(c); return Promise.resolve(); } }; } }),
+    insert: () => ({ values: (v: any) => { cap.inserts.push(v); return { onConflictDoUpdate: (c: any) => { cap.conflicts.push(c); return Promise.resolve(); }, onConflictDoNothing: () => Promise.resolve() }; } }),
     update: () => ({ set: (v: any) => ({ where: () => { cap.updates.push(v); return Promise.resolve(); } }) }),
   };
   const rowOf = async () => PROJ;
@@ -366,8 +389,9 @@ describe('ProjectsEvmService — programs() portfolio rollup (PMO-4)', () => {
       { projectCode: 'A', name: 'a', status: 'active', programCode: 'PRG-1', dependsOnProjects: null },
       { projectCode: 'B', name: 'b', status: 'active', programCode: 'PRG-1', dependsOnProjects: 'A' },
     ];
-    // routes: program-code scan → programCriticalPath: members → A's schedule tasks → B's schedule tasks
-    const svc = evmSvc([rows, rows, [task(11, { plannedHours: '40' })], [task(21, { plannedHours: '24' })]],
+    // routes: program-code scan → programCriticalPath: members → A's schedule tasks → A's depRows (PPM-B1,
+    // empty) → B's schedule tasks → B's depRows (PPM-B1, empty)
+    const svc = evmSvc([rows, rows, [task(11, { plannedHours: '40' })], [], [task(21, { plannedHours: '24' })], []],
       { rowOf: async (code: string) => ({ id: code === 'A' ? 1 : 2 }) });
     const r = await svc.programs({ username: 'pmo' } as any);
     expect(r.count).toBe(1);
@@ -403,8 +427,10 @@ describe('ProjectsEvmService — captureBaseline write paths (PROJ-07)', () => {
   const ACTIVE = { id: 1, status: 'active', label: 'Baseline', baselineBac: '1000', baselineDurationDays: 1, baselineEnd: null, reason: null, createdBy: 'pm', capturedAt: 'T1' };
 
   it('the FIRST baseline is free: snapshots current BAC + CP duration as active, zero variance', async () => {
-    // routes: currentPlan tasks → schedule tasks → active lookup (none) → [getBaseline] all-baselines → currentPlan tasks → schedule tasks
-    const { svc, cap } = evmWriteSvc([T, T, [], [ACTIVE], T, T]);
+    // routes: currentPlan tasks → schedule tasks → schedule calRow (PPM-B1, PROJ.tenantId=1 so this select
+    // fires; empty = no calendar row) → schedule depRows (PPM-B1, empty) → active lookup (none) →
+    // [getBaseline] all-baselines → currentPlan tasks → schedule tasks → schedule calRow → schedule depRows
+    const { svc, cap } = evmWriteSvc([T, T, [], [], [], [ACTIVE], T, T, [], []]);
     const r = await svc.captureBaseline('P-1', {} as any, { username: 'pm' } as any);
     expect(cap.inserts[0]).toMatchObject({ projectId: 1, label: 'Baseline', baselineBac: '1000.00', baselineDurationDays: 1, status: 'active', createdBy: 'pm', reason: null });
     expect(cap.updates).toHaveLength(0); // nothing to supersede
@@ -413,7 +439,8 @@ describe('ProjectsEvmService — captureBaseline write paths (PROJ-07)', () => {
   });
 
   it('re-baselining WITH a reason supersedes the prior active baseline (history preserved)', async () => {
-    const { svc, cap } = evmWriteSvc([T, T, [{ ...ACTIVE, id: 3 }], [ACTIVE], T, T]);
+    // routes: see the FIRST-baseline test above (PPM-B1 adds a calRow + depRows select per schedule() call)
+    const { svc, cap } = evmWriteSvc([T, T, [], [], [{ ...ACTIVE, id: 3 }], [ACTIVE], T, T, [], []]);
     await svc.captureBaseline('P-1', { reason: 'scope change' } as any, { username: 'pm2' } as any);
     expect(cap.updates[0]).toEqual({ status: 'superseded' });
     expect(cap.inserts[0]).toMatchObject({ label: 'Re-baseline', reason: 'scope change', status: 'active', createdBy: 'pm2' });
@@ -439,5 +466,48 @@ describe('ProjectsEvmService — setProgram (PMO-4 grouping + dependency guards)
     const r = await svc.setProgram('P-1', { program_code: ' PRG-1 ', depends_on_projects: ['P-2', 'P-2', 'P-3'] } as any, { username: 'pm' } as any);
     expect(cap.updates[0]).toEqual({ programCode: 'PRG-1', dependsOnProjects: 'P-2,P-3' });
     expect(r).toEqual({ project_code: 'P-1', refreshed: true });
+  });
+});
+
+describe('ProjectsEvmService — working calendar CRUD (PPM-B1, PROJ-21)', () => {
+  it('getCalendar defaults to disabled + weekend-only when no tenant row exists yet', async () => {
+    const { svc } = evmWriteSvc([[]]);
+    const r = await svc.getCalendar({ tenantId: 1, username: 'u' } as any);
+    expect(r).toEqual({ enabled: false, non_working_weekdays: [0, 6] });
+  });
+
+  it('getCalendar reflects an existing enabled row with custom non-working weekdays', async () => {
+    const { svc } = evmWriteSvc([[{ enabled: true, nonWorkingWeekdays: '5,6' }]]);
+    const r = await svc.getCalendar({ tenantId: 1, username: 'u' } as any);
+    expect(r).toEqual({ enabled: true, non_working_weekdays: [5, 6] });
+  });
+
+  it('setCalendar inserts a new row for a tenant with none yet, then returns the refreshed calendar', async () => {
+    // routes: existing-lookup (none) → getCalendar re-read
+    const { svc, cap } = evmWriteSvc([[], [{ enabled: true, nonWorkingWeekdays: '0,6' }]]);
+    const r = await svc.setCalendar({ enabled: true, non_working_weekdays: [0, 6] } as any, { tenantId: 1, username: 'pm' } as any);
+    expect(cap.inserts[0]).toMatchObject({ tenantId: 1, enabled: true, nonWorkingWeekdays: '0,6', createdBy: 'pm' });
+    expect(r).toEqual({ enabled: true, non_working_weekdays: [0, 6] });
+  });
+
+  it('setCalendar updates an existing row, keeping its prior weekdays when none are supplied', async () => {
+    const existing = { id: 5, enabled: false, nonWorkingWeekdays: '0,6' };
+    const { svc, cap } = evmWriteSvc([[existing], [{ ...existing, enabled: true }]]);
+    const r = await svc.setCalendar({ enabled: true } as any, { tenantId: 1, username: 'pm' } as any);
+    expect(cap.updates[0]).toEqual({ enabled: true, nonWorkingWeekdays: '0,6' });
+    expect(r).toEqual({ enabled: true, non_working_weekdays: [0, 6] });
+  });
+
+  it('addCalendarException inserts (idempotent on conflict) and returns the refreshed exception list', async () => {
+    const { svc, cap } = evmWriteSvc([[{ exceptionDate: '2026-12-25', description: 'Christmas' }]]);
+    const r = await svc.addCalendarException({ exception_date: '2026-12-25', description: 'Christmas' } as any, { tenantId: 1, username: 'pm' } as any);
+    expect(cap.inserts[0]).toMatchObject({ tenantId: 1, exceptionDate: '2026-12-25', description: 'Christmas', createdBy: 'pm' });
+    expect(r).toEqual({ exceptions: [{ exception_date: '2026-12-25', description: 'Christmas' }], count: 1 });
+  });
+
+  it('listCalendarExceptions maps rows to the public shape', async () => {
+    const { svc } = evmWriteSvc([[{ exceptionDate: '2026-01-01', description: null }]]);
+    const r = await svc.listCalendarExceptions({} as any);
+    expect(r).toEqual({ exceptions: [{ exception_date: '2026-01-01', description: null }], count: 1 });
   });
 });

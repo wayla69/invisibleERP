@@ -1,12 +1,29 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
-import { projects, projectTasks, projectMilestones, timesheets } from '../../database/schema';
+import { projects, projectTasks, projectMilestones, timesheets, projectTaskDependencies } from '../../database/schema';
 import { n, fx, ymd } from '../../database/queries';
 import { r2, clampPct, depsCsv, peopleCsv, csvToList } from './projects.helpers';
 import { shapeTask, shapeMilestone } from './projects.shapes';
 import type { JwtUser } from '../../common/decorators';
-import type { TaskDto, TaskPatchDto, MilestoneDto } from './projects.service';
+import type { TaskDto, TaskPatchDto, MilestoneDto, TaskDependencyDto } from './projects.service';
+
+// PPM-B1 (PROJ-21): validate a richer `dependencies` list (type/lag; `type` is a closed Zod enum, same
+// precedent as `status`) and replace this task's edge-metadata rows in project_task_dependencies (successor
+// = taskId). A plain `depends_on` (no `dependencies`) leaves no rows behind — schedule() then defaults every
+// predecessor to FS/lag-0, the pre-PPM-B1 behaviour.
+async function syncDependencies(db: DrizzleDb, projectId: number, tenantId: number | null, taskId: number, deps: TaskDependencyDto[], user: JwtUser) {
+  for (const d of deps) {
+    if (Number(d.task_id) === Number(taskId)) throw new BadRequestException({ code: 'BAD_DEPENDENCY', message: 'A task cannot depend on itself', messageTh: 'งานขึ้นกับตัวเองไม่ได้' });
+  }
+  await db.delete(projectTaskDependencies).where(eq(projectTaskDependencies.successorTaskId, Number(taskId)));
+  if (deps.length) {
+    await db.insert(projectTaskDependencies).values(deps.map((d) => ({
+      tenantId, projectId, predecessorTaskId: Number(d.task_id), successorTaskId: Number(taskId),
+      depType: d.type ?? 'FS', lagDays: Math.round(d.lag_days ?? 0), createdBy: user.username,
+    })));
+  }
+}
 
 // WBS sub-service (docs/38 §3 projects decomposition, PR-3): tasks, milestones and RACI, moved VERBATIM.
 // A PLAIN class constructed in the ProjectsService constructor BODY (positional-goldenmaster constraint,
@@ -24,14 +41,19 @@ export class ProjectsWbsService {
     const db = this.db;
     const p = await this.rowOf(code);
     const tenantId = p.tenantId ?? user.tenantId ?? null;
+    // PPM-B1 (PROJ-21): a richer `dependencies` list derives the plain depends_on CSV (read-compat, e.g. the
+    // Gantt task table) — the join-table rows carrying type/lag are written after the task id is known.
+    const dependsOnIds = dto.dependencies != null ? dto.dependencies.map((d) => Number(d.task_id)) : dto.depends_on;
     const [t] = await db.insert(projectTasks).values({
       projectId: Number(p.id), tenantId, parentId: dto.parent_id ?? null, wbsCode: dto.wbs_code ?? null, name: dto.name,
       status: dto.status ?? 'open', plannedStart: dto.planned_start ?? null, plannedEnd: dto.planned_end ?? null,
       plannedHours: fx(dto.planned_hours ?? 0, 2), plannedCost: fx(dto.planned_cost ?? 0, 2),
-      pctComplete: fx(clampPct(dto.pct_complete ?? 0), 2), dependsOn: depsCsv(dto.depends_on), assignee: dto.assignee ?? null,
+      pctComplete: fx(clampPct(dto.pct_complete ?? 0), 2), dependsOn: depsCsv(dependsOnIds),
+      constraintType: dto.constraint_type ?? null, constraintOffsetDays: dto.constraint_offset_days ?? null, assignee: dto.assignee ?? null,
       accountable: dto.accountable ?? null, responsible: peopleCsv(dto.responsible) ?? null, consulted: peopleCsv(dto.consulted) ?? null, informed: peopleCsv(dto.informed) ?? null,
       createdBy: user.username,
     }).returning({ id: projectTasks.id });
+    if (dto.dependencies != null) await syncDependencies(db, Number(p.id), tenantId, Number(t!.id), dto.dependencies, user);
     return this.listTasks(code);
   }
 
@@ -58,10 +80,21 @@ export class ProjectsWbsService {
     if (dto.responsible != null) set.responsible = peopleCsv(dto.responsible);
     if (dto.consulted != null) set.consulted = peopleCsv(dto.consulted);
     if (dto.informed != null) set.informed = peopleCsv(dto.informed);
-    if (dto.depends_on != null) {
+    // PPM-B1 (PROJ-21): `dependencies` (richer) replaces both the CSV and the join-table edges; plain
+    // `depends_on` (no `dependencies`) replaces the CSV only and CLEARS any prior join-table rows for this
+    // task, so every predecessor reverts to the FS/lag-0 default — a single call always fully determines the
+    // predecessor set + edge metadata, never leaving a stale typed edge behind.
+    if (dto.dependencies != null) {
+      const ids = dto.dependencies.map((d) => Number(d.task_id));
+      set.dependsOn = depsCsv(ids);
+      await syncDependencies(db, Number(t.projectId), t.tenantId ?? null, Number(taskId), dto.dependencies, user);
+    } else if (dto.depends_on != null) {
       if (dto.depends_on.some((d) => Number(d) === Number(taskId))) throw new BadRequestException({ code: 'BAD_DEPENDENCY', message: 'A task cannot depend on itself', messageTh: 'งานขึ้นกับตัวเองไม่ได้' });
       set.dependsOn = depsCsv(dto.depends_on);
+      await db.delete(projectTaskDependencies).where(eq(projectTaskDependencies.successorTaskId, Number(taskId)));
     }
+    if (dto.constraint_type !== undefined) set.constraintType = dto.constraint_type;
+    if (dto.constraint_offset_days !== undefined) set.constraintOffsetDays = dto.constraint_offset_days;
     // Marking a task done implies 100% complete unless an explicit pct is given.
     if (dto.pct_complete != null) set.pctComplete = fx(clampPct(dto.pct_complete), 2);
     else if (dto.status === 'done') set.pctComplete = fx(100, 2);

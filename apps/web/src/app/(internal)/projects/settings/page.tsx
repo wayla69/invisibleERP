@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, DollarSign, LayoutTemplate, Users, ShieldAlert } from 'lucide-react';
+import { Plus, Trash2, DollarSign, LayoutTemplate, Users, ShieldAlert, CalendarClock } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -31,6 +31,7 @@ export default function ProjectSettingsPage() {
         { key: 'rates', label: t('pj.tab_rate_cards'), content: <RateCards /> },
         { key: 'templates', label: t('pj.tab_wbs_templates'), content: <Templates /> },
         { key: 'util', label: t('pj.tab_utilization'), content: <Utilization /> },
+        { key: 'calendar', label: t('pj.tab_working_calendar'), content: <WorkingCalendar /> },
       ]} />
     </div>
   );
@@ -181,6 +182,83 @@ function Utilization() {
           emptyState={{ icon: Users, title: t('pj.empty_util_title'), description: t('pj.empty_util_desc') }}
         />
       )}</StateView>
+    </div>
+  );
+}
+
+// PPM-B1 (PROJ-21): opt-in per-tenant working calendar — a dated task's duration counts only working days
+// (skipping weekends + holidays) once enabled. Disabled by default; existing schedules are unaffected.
+const WEEKDAYS = [
+  { day: 0, key: 'pj.weekday_sun' }, { day: 1, key: 'pj.weekday_mon' }, { day: 2, key: 'pj.weekday_tue' }, { day: 3, key: 'pj.weekday_wed' },
+  { day: 4, key: 'pj.weekday_thu' }, { day: 5, key: 'pj.weekday_fri' }, { day: 6, key: 'pj.weekday_sat' },
+] as const;
+
+function WorkingCalendar() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const cal = useQuery<{ enabled: boolean; non_working_weekdays: number[] }>({ queryKey: ['proj-calendar'], queryFn: () => api('/api/projects/calendar') });
+  const exc = useQuery<{ exceptions: { exception_date: string; description: string | null }[]; count: number }>({ queryKey: ['proj-calendar-exceptions'], queryFn: () => api('/api/projects/calendar/exceptions') });
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [weekdays, setWeekdays] = useState<number[] | null>(null);
+  const effEnabled = enabled ?? cal.data?.enabled ?? false;
+  const effWeekdays = weekdays ?? cal.data?.non_working_weekdays ?? [0, 6];
+
+  const save = useMutation({
+    mutationFn: () => api('/api/projects/calendar', { method: 'PUT', body: JSON.stringify({ enabled: effEnabled, non_working_weekdays: effWeekdays }) }),
+    onSuccess: () => { notifySuccess(t('pj.toast_working_calendar_saved')); qc.invalidateQueries({ queryKey: ['proj-calendar'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const toggleWeekday = (day: number) => setWeekdays(effWeekdays.includes(day) ? effWeekdays.filter((d) => d !== day) : [...effWeekdays, day]);
+
+  const [excDate, setExcDate] = useState('');
+  const [excDesc, setExcDesc] = useState('');
+  const addExc = useMutation({
+    mutationFn: () => api('/api/projects/calendar/exceptions', { method: 'POST', body: JSON.stringify({ exception_date: excDate, description: excDesc || undefined }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['proj-calendar-exceptions'] }); setExcDate(''); setExcDesc(''); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card className="gap-3 p-5">
+        <h3 className="text-sm font-medium">{t('pj.calendar_settings_title')}</h3>
+        <p className="text-sm text-muted-foreground">{t('pj.calendar_settings_desc')}</p>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={effEnabled} onChange={(ev) => setEnabled(ev.target.checked)} className="size-4" />
+          {t('pj.f_calendar_enabled')}
+        </label>
+        <div className="space-y-1.5">
+          <Label>{t('pj.f_non_working_weekdays')}</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {WEEKDAYS.map((w) => (
+              <Button key={w.day} type="button" size="sm" variant={effWeekdays.includes(w.day) ? 'default' : 'outline'} onClick={() => toggleWeekday(w.day)}>
+                {t(w.key)}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <Button onClick={() => save.mutate()} disabled={save.isPending}>{t('pj.btn_save')}</Button>
+      </Card>
+
+      <Card className="gap-3 p-5">
+        <h3 className="text-sm font-medium">{t('pj.calendar_exceptions_title')}</h3>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-1.5"><Label>{t('pj.f_exception_date')}</Label><Input type="date" value={excDate} onChange={(ev) => setExcDate(ev.target.value)} /></div>
+          <div className="grid gap-1.5 sm:col-span-2"><Label>{t('pj.f_exception_desc')}</Label><Input value={excDesc} onChange={(ev) => setExcDesc(ev.target.value)} /></div>
+        </div>
+        <Button size="sm" onClick={() => addExc.mutate()} disabled={!excDate || addExc.isPending}><Plus className="size-4" /> {t('pj.btn_add_exception')}</Button>
+        <StateView q={exc}>{exc.data && (
+          <DataTable
+            rows={exc.data.exceptions}
+            rowKey={(r) => r.exception_date}
+            columns={[
+              { key: 'exception_date', label: t('pj.col_exception_date') },
+              { key: 'description', label: t('pj.col_exception_desc'), render: (r) => r.description ?? '—' },
+            ]}
+            emptyState={{ icon: CalendarClock, title: t('pj.empty_exceptions_title'), description: t('pj.empty_exceptions_desc') }}
+          />
+        )}</StateView>
+      </Card>
     </div>
   );
 }

@@ -236,6 +236,24 @@ A dedicated workspace deepening the settings-page utilization roll-up and the po
 Required role/permission: same as the rest of PPM (`exec`/`planner`/`ar`). Read-only detective surface —
 posts nothing to the GL.
 
+## Richer scheduling — dependency types, constraints, working calendar (PROJ-21)
+The project schedule (`/projects/[code]`, Gantt/critical-path tab) is no longer finish-to-start-only:
+- **Dependency type & lag** — when editing a task's predecessors (the **ลิงก์งานก่อนหน้า (dependencies)**
+  icon on each task row), pick per-predecessor whether it's **FS** (finish-to-start), **SS** (start-to-start),
+  **FF** (finish-to-finish), or **SF** (start-to-finish), and a **lag** in days (a negative lag is a **lead** —
+  the successor may start/finish early). A predecessor with no type/lag set behaves exactly as before
+  (FS, 0 lag). The task table shows the effective type/lag next to each predecessor id (e.g. "#3 (SS+2d)").
+- **Constraints** — a task can carry **SNET** (start no earlier than) or **FNLT** (finish no later than) with
+  a day-offset, independent of its predecessors — useful for a hard site-access date or a contractual
+  deadline. Leave it unset for a task whose date is driven purely by its dependencies.
+- **ปฏิทินการทำงาน (Working calendar)** — a new tab on `/projects/settings`. Off by default (a task's
+  duration counts raw calendar days, as before). Turn it **on** to count only **working days**: pick which
+  weekdays are non-working (default เสาร์-อาทิตย์) and add specific **วันหยุด (holiday exceptions)** — every
+  dated task's duration then excludes those days.
+
+Required role/permission: same as the rest of PPM (`exec`/`planner`/`ar`). No change to who may create/edit a
+task; the calendar tab is on the same settings page as rate cards/templates/utilization.
+
 ## Timesheets → project labour (`/hcm`, tab ลงเวลา / OT)
 When logging a timesheet you can allocate it to a **โครงการ (project)** and a **งาน (WBS task)** and mark it
 **billable**. The entry lands **Pending**; a **different** approver presses **อนุมัติ** (maker-checker,
@@ -318,10 +336,14 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 - The **resource capacity heatmap** now checks over-allocation against each person's real availability
   calendar (not a flat 100%), and **role/skill supply-vs-demand** (**PROJ-20**) flags an understaffed role
   before it slips a schedule — both are read-only detective surfaces, they post nothing.
+- **Dependency type/lag, SNET/FNLT constraints and the opt-in working calendar** (**PROJ-21**) make the
+  critical-path schedule (**PROJ-06**) match how work is actually planned — a self-dependency is rejected
+  (`BAD_DEPENDENCY`); still read-only/detective, posts nothing.
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.28 | 2026-07-13 | **PROJ-21 — richer scheduling: dependency types/lag, SNET/FNLT constraints, opt-in working calendar.** The task dialog and a new dependency-editor dialog (per-predecessor **type** — FS/SS/FF/SF — and **lag/lead days**) on `/projects/[code]`; new per-task **constraint** fields (SNET/FNLT + day-offset); a new **ปฏิทินการทำงาน (Working calendar)** tab on `/projects/settings` (enable + non-working weekdays + holiday exceptions, off by default). The schedule/critical-path computation now honours all four dependency types and the constraints, and — once the calendar is enabled — counts only working days toward a dated task's duration. No change when none of the new fields are set. |
 | 2.27 | 2026-07-13 | **PROJ-20 — resource capacity heatmap governed by a real availability calendar + role/skill supply-vs-demand.** New page **`/projects/resources`** (four tabs): the **Heatmap** now flags over-allocation against each resource's TRUE monthly availability (a documented part-time/leave override, default 100% absent one) instead of a flat 100%, and tags each booking **ระบุตัวบุคคล (Named)** or **ยังไม่ระบุตัวบุคคล (Generic)**; **Skills** tags a real person with a skill/role (the supply side); **Availability calendar** sets a person's monthly availability override; **Role supply-vs-demand** rolls assigned demand up against qualified supply per role/month, flagging **กำลังคนไม่พอ (Understaffed)**. Read-only — no new permission beyond the existing `exec`/`planner`/`ar` PPM gate. |
 | 2.26 | 2026-07-12 | **PROJ-19 — earned schedule on the workspace Overview.** A **กำหนดการที่ได้รับ (Earned schedule)** block under the earned-value breakdown: **ES** / **AT** / **SV(t)** in months, an **SPI(t)** badge (green ≥ 1, grey ≥ 0.9, red below) and a forecast finish month (`GET /api/projects/{code}/earned-schedule`). SPI(t) stays honest late in a project where the classic SPI converges to 1; a red SPI(t) on a project that otherwise reads fine raises a **schedule_slip_es** (medium) item on the Action Center. Needs tasks with planned cost + due dates (`NO_DATED_PLAN` otherwise). Read-only — no new permission. |
 | 2.25 | 2026-07-10 | **CRM-2 — the CRM workspace replaces `/projects/crm` + `/pipeline` (both now redirect to `/crm`; deep links preserved).** The pipeline section points to the new manual **16-crm-workspace.md** (kanban board, deal page with the CRM-WL convert-to-project button, leads import wizard, web-to-lead, accounts/contacts web surface). Win/Loss dashboard (`/projects/pipeline`) unchanged. |

@@ -521,6 +521,61 @@ async function main() {
     esCpm.json.spi_t === null && esCpm.json.reason === 'NO_DATED_PLAN' && esCpm.json.schedule_rag === 'no_data',
     JSON.stringify({ reason: esCpm.json.reason }));
 
+  // ── 16c. richer scheduling: SS/FF/SF dependency types + lag/lead, SNET/FNLT constraints, working
+  // calendar (PPM-B1, PROJ-21). A→5d; B (SS,lag+2 on A)→3d; C (FF,lag-1 on A)→1d; D (FS,lag-2 "lead" on B)→2d.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-DEP', name: 'งานความสัมพันธ์ขั้นสูง', billing_type: 'TM' });
+  const depA = await inj('POST', '/api/projects/PRJ-DEP/tasks', admin, { name: 'DEP-A', planned_hours: 40 }); // 5d
+  const depAid = depA.json.tasks[0].id;
+  await inj('POST', '/api/projects/PRJ-DEP/tasks', admin, { name: 'DEP-B', planned_hours: 24, dependencies: [{ task_id: depAid, type: 'SS', lag_days: 2 }] }); // 3d
+  await inj('POST', '/api/projects/PRJ-DEP/tasks', admin, { name: 'DEP-C', planned_hours: 8, dependencies: [{ task_id: depAid, type: 'FF', lag_days: -1 }] }); // 1d
+  const depList = await inj('GET', '/api/projects/PRJ-DEP/tasks', admin);
+  const depBid = depList.json.tasks.find((t: any) => t.name === 'DEP-B').id;
+  await inj('POST', '/api/projects/PRJ-DEP/tasks', admin, { name: 'DEP-D', planned_hours: 16, dependencies: [{ task_id: depBid, type: 'FS', lag_days: -2 }] }); // 2d, lead
+  const depSched = await inj('GET', '/api/projects/PRJ-DEP/schedule', admin);
+  const dTask = (name: string) => (depSched.json.tasks ?? []).find((t: any) => t.name === name);
+  ok('PROJ-21: SS+lag2 — DEP-B starts 2d after DEP-A starts (es 2, ef 5)', near(dTask('DEP-B')?.es, 2) && near(dTask('DEP-B')?.ef, 5), JSON.stringify({ es: dTask('DEP-B')?.es, ef: dTask('DEP-B')?.ef }));
+  ok('PROJ-21: FF+lag-1 — DEP-C finishes 1d before DEP-A finishes (es 3, ef 4)', near(dTask('DEP-C')?.es, 3) && near(dTask('DEP-C')?.ef, 4), JSON.stringify({ es: dTask('DEP-C')?.es, ef: dTask('DEP-C')?.ef }));
+  ok('PROJ-21: FS+lag-2 (lead) — DEP-D starts 2d before DEP-B finishes (es 3, ef 5)', near(dTask('DEP-D')?.es, 3) && near(dTask('DEP-D')?.ef, 5), JSON.stringify({ es: dTask('DEP-D')?.es, ef: dTask('DEP-D')?.ef }));
+  ok('PROJ-21: critical path A→B→D (slack 0), C has 1d slack (off path)',
+    dTask('DEP-A')?.on_critical_path && dTask('DEP-B')?.on_critical_path && dTask('DEP-D')?.on_critical_path && dTask('DEP-C')?.on_critical_path === false && near(dTask('DEP-C')?.slack, 1),
+    JSON.stringify({ slackC: dTask('DEP-C')?.slack }));
+  ok('PROJ-21: dependency_details echoes the edge type + lag for DEP-B', dTask('DEP-B')?.dependency_details?.[0]?.type === 'SS' && dTask('DEP-B')?.dependency_details?.[0]?.lag_days === 2, JSON.stringify(dTask('DEP-B')?.dependency_details));
+  const depSelf = await inj('PATCH', `/api/projects/tasks/${depBid}`, admin, { dependencies: [{ task_id: depBid, type: 'FS' }] });
+  ok('PROJ-21: a richer self-dependency → 400 BAD_DEPENDENCY', depSelf.status === 400 && depSelf.json.error?.code === 'BAD_DEPENDENCY', `${depSelf.status} ${depSelf.json.error?.code}`);
+
+  // SNET floors the forward pass; FNLT caps the backward pass — proven against an unconstrained sibling (H)
+  // of identical shape so the cap is attributable to the constraint, not a general project effect.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CONSTRAIN', name: 'งานข้อจำกัดกำหนดการ', billing_type: 'TM' });
+  const conE = await inj('POST', '/api/projects/PRJ-CONSTRAIN/tasks', admin, { name: 'CON-E', planned_hours: 8, constraint_type: 'SNET', constraint_offset_days: 10 }); // 1d
+  const conEid = conE.json.tasks[0].id;
+  await inj('POST', '/api/projects/PRJ-CONSTRAIN/tasks', admin, { name: 'CON-F', planned_hours: 8, depends_on: [conEid] }); // 1d
+  await inj('POST', '/api/projects/PRJ-CONSTRAIN/tasks', admin, { name: 'CON-G', planned_hours: 8, constraint_type: 'FNLT', constraint_offset_days: 3 }); // 1d
+  await inj('POST', '/api/projects/PRJ-CONSTRAIN/tasks', admin, { name: 'CON-H', planned_hours: 8 }); // 1d, unconstrained control
+  const conSched = await inj('GET', '/api/projects/PRJ-CONSTRAIN/schedule', admin);
+  const cTask = (name: string) => (conSched.json.tasks ?? []).find((t: any) => t.name === name);
+  ok('PROJ-21: SNET=10 floors CON-E\'s early start (es 10, ef 11) though it has no predecessor', near(cTask('CON-E')?.es, 10) && near(cTask('CON-E')?.ef, 11), JSON.stringify({ es: cTask('CON-E')?.es }));
+  ok('PROJ-21: CON-F (depends on the SNET-floored CON-E) inherits es 11, ef 12 → project duration 12', near(cTask('CON-F')?.es, 11) && conSched.json.project_duration_days === 12, JSON.stringify({ es: cTask('CON-F')?.es, dur: conSched.json.project_duration_days }));
+  ok('PROJ-21: FNLT=3 caps CON-G\'s late finish (lf 3) vs its unconstrained twin CON-H (lf 12) — same shape, only the constraint differs',
+    near(cTask('CON-G')?.lf, 3) && near(cTask('CON-H')?.lf, 12) && cTask('CON-G')!.slack < cTask('CON-H')!.slack,
+    JSON.stringify({ lfG: cTask('CON-G')?.lf, lfH: cTask('CON-H')?.lf, slackG: cTask('CON-G')?.slack, slackH: cTask('CON-H')?.slack }));
+
+  // Working calendar (opt-in, per-tenant): disabled by default → plain calendar-day duration; enabled →
+  // working-day-only duration. A 14-calendar-day span always contains exactly 2 Saturdays + 2 Sundays
+  // regardless of which weekday it starts on, so 14→10 is a deterministic, alignment-independent assertion.
+  const calBefore = await inj('GET', '/api/projects/calendar', admin);
+  ok('PROJ-21: working calendar defaults to disabled, non_working_weekdays [0,6]', calBefore.json.enabled === false && JSON.stringify(calBefore.json.non_working_weekdays) === JSON.stringify([0, 6]), JSON.stringify(calBefore.json));
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CAL', name: 'งานปฏิทินทำงาน', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-CAL/tasks', admin, { name: 'CAL-1', planned_start: '2026-07-01', planned_end: '2026-07-14' }); // 14 calendar days
+  const calSchedOff = await inj('GET', '/api/projects/PRJ-CAL/schedule', admin);
+  ok('PROJ-21: calendar disabled → plain 14 calendar-day duration (unchanged pre-PPM-B1 behaviour)', calSchedOff.json.working_calendar_enabled === false && calSchedOff.json.tasks?.[0]?.duration_days === 14, JSON.stringify({ dur: calSchedOff.json.tasks?.[0]?.duration_days }));
+  const calOn = await inj('PUT', '/api/projects/calendar', admin, { enabled: true });
+  ok('PROJ-21: enable the working calendar', calOn.json.enabled === true, JSON.stringify(calOn.json));
+  const calSchedOn = await inj('GET', '/api/projects/PRJ-CAL/schedule', admin);
+  ok('PROJ-21: calendar enabled → 14 calendar days minus 2 Sat + 2 Sun = 10 working days', calSchedOn.json.working_calendar_enabled === true && calSchedOn.json.tasks?.[0]?.duration_days === 10, JSON.stringify({ dur: calSchedOn.json.tasks?.[0]?.duration_days }));
+  const calExc = await inj('POST', '/api/projects/calendar/exceptions', admin, { exception_date: '2026-12-25', description: 'Christmas' });
+  ok('PROJ-21: add + list a calendar holiday exception', calExc.json.exceptions?.some((e: any) => e.exception_date === '2026-12-25' && e.description === 'Christmas'), JSON.stringify(calExc.json.exceptions));
+  await inj('PUT', '/api/projects/calendar', admin, { enabled: false }); // cleanup — leave the tenant calendar disabled for the rest of the harness
+
   const oppLost = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลที่เสีย', amount: 50000, owner: 'sales1' });
   await inj('PATCH', `/api/crm/pipeline/opportunities/${oppLost.json.opp_no}/stage`, admin, { stage: 'lost', lost_reason: 'ราคาสูงเกินไป (price)' });
   const wl = await inj('GET', '/api/crm/pipeline/win-loss', admin);

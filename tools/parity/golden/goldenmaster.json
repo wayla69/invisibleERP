@@ -413,8 +413,11 @@
         {
           "accountable": null,
           "assignee": null,
+          "constraint_offset_days": null,
+          "constraint_type": null,
           "consulted": [],
           "created_at": "<TS>",
+          "dependency_details": [],
           "depends_on": [],
           "duration_days": 9,
           "ef": 9,
@@ -440,8 +443,11 @@
         {
           "accountable": null,
           "assignee": null,
+          "constraint_offset_days": null,
+          "constraint_type": null,
           "consulted": [],
           "created_at": "<TS>",
+          "dependency_details": [],
           "depends_on": [],
           "duration_days": 13,
           "ef": 13,
@@ -464,7 +470,8 @@
           "status": "open",
           "wbs_code": null
         }
-      ]
+      ],
+      "working_calendar_enabled": false
     },
     "create": {
       "billed_pct": null,
@@ -668,6 +675,8 @@
         {
           "accountable": null,
           "assignee": null,
+          "constraint_offset_days": null,
+          "constraint_type": null,
           "consulted": [],
           "created_at": "<TS>",
           "depends_on": [],
@@ -695,6 +704,8 @@
         {
           "accountable": null,
           "assignee": null,
+          "constraint_offset_days": null,
+          "constraint_type": null,
           "consulted": [],
           "created_at": "<TS>",
           "depends_on": [],
@@ -715,6 +726,8 @@
         {
           "accountable": null,
           "assignee": null,
+          "constraint_offset_days": null,
+          "constraint_type": null,
           "consulted": [],
           "created_at": "<TS>",
           "depends_on": [],
