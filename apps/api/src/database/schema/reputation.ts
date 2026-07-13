@@ -38,7 +38,9 @@ export const reputationOauthState = pgTable('reputation_oauth_state', {
   codeVerifier: text('code_verifier').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
-});
+}, (t) => ({
+  idxTenant: index('reputation_oauth_state_tenant').on(t.tenantId),
+}));
 
 // Synced Google Maps (Business Profile) reviews. Reviewer name/photo are public data the reviewer already
 // posted to Google Maps — not first-party consent-gated PII (distinct from the G3 audience-export control).

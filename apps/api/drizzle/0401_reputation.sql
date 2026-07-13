@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS reputation_oauth_state (
   consumed_at timestamptz
 );
 --> statement-breakpoint
+CREATE INDEX IF NOT EXISTS reputation_oauth_state_tenant ON reputation_oauth_state (tenant_id);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS external_reviews (
   id bigserial PRIMARY KEY,
