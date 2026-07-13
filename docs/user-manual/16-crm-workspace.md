@@ -202,6 +202,22 @@ an approved target instead of an ad-hoc number. It posts nothing to the ledger. 
   included), measured against the territory quota. A badge flags ≥100% (green), ≥70% (amber) and below
   (red), so a rep's or a region's shortfall to plan surfaces before the period closes.
 
+## 16.4f Sequences & cadences (ลำดับการติดตาม — the "Sequences" tab, CRM-8)
+
+The **ลำดับการติดตาม** tab runs multi-step outreach playbooks so a lead or deal is nurtured on a governed
+cadence and every touch is recorded. It posts nothing to the ledger. *(Control CRM-11.)*
+
+- **Create a sequence.** In *สร้างลำดับการติดตาม*, name it and give the first email's message. The quick form
+  creates a **2-step cadence** — an email now + a follow-up *task* in 3 days — as a starting point.
+- **Enroll a lead or deal.** In *เพิ่มลีด/ดีลเข้าลำดับ*, pick a sequence and enter a lead (`LEAD-…`) or deal
+  (`OPP-…`) number, then **เพิ่มเข้าลำดับ (Enroll)**. The first step's due date is set from its wait-days.
+- **Advance, stop & run-due.** The **Enrollments** table lists each enrolment with its current step, status
+  (active / completed / stopped) and next-due date. **เดินหน้า (Advance)** executes the next step now — it
+  sends the message (email/LINE/SMS) or logs the task, records it on the lead/deal timeline, and schedules
+  the next step; on the last step the enrolment **completes**. **หยุด (Stop)** ends an enrolment. **รันที่ถึง
+  กำหนด (Run due)** advances every enrolment whose next step is due (also runs on a schedule via the *CRM
+  sequence run* BI report), so the whole cadence keeps moving without manual nudging.
+
 ---
 
 ## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
@@ -464,6 +480,7 @@ interactions ended without a case being opened — a direct read on how much wor
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.4 | 2026-07-13 | **Sequences & cadences (`/crm`) — CRM-8, control CRM-11:** new §16.4f + a new *Sequences* tab. Multi-step outreach **playbooks** (channel + wait-days steps) on the comms rail: enroll a lead (`LEAD-…`) or deal (`OPP-…`), and the cadence **advances** each enrolment step-by-step — sending the message (or logging a task), recording the touch on the timeline, and scheduling the next step — until it **completes**; enrolments can be **stopped**, and **Run due** (also a scheduled *CRM sequence run* BI report) advances everything that's due. Read-only to the ledger. |
 | 2.3 | 2026-07-12 | **Territory & quota (`/crm`) — CRM-11, control CRM-10:** new §16.4e + a new *Territory / quota* tab. Sales **territories** become governed master data — a name, optional **parent** (team roll-up hierarchy), manager and match criteria (regions/segments/categories) — with **rep assignments** and per-period **quotas** for an owner or a territory. The **attainment** tables reconcile won-in-period against the quota **per rep** and **by territory** (a territory's won sums its whole subtree), with a ≥100/≥70/below badge so a shortfall to plan surfaces early. Read-only to the ledger. |
 | 2.2 | 2026-07-12 | **Sales forecast depth (`/crm`) — CRM-12, control CRM-09:** new §16.4d + a new *Forecast* tab. A governance layer over the live pipeline forecast: the **manager roll-up** reconciles each rep's **submitted** commit/best-case override against the **system-weighted** forecast with the **variance**; reps submit their own number per period (governed draft → submitted); a **pipeline-coverage** ratio (open pipeline ÷ commit target, ≥3× healthy) + a commit→best-case→pipeline **waterfall**; and **Snapshot now** (or the scheduled *CRM sales forecast snapshot* report) records a dated forecast + the period's actual won for the **forecast-vs-actual accuracy** trend. Read-only — posts nothing to the ledger. |
 | 2.1 | 2026-07-12 | **Account health & churn watchlist (`/crm`) — CRM-15, control CRM-08:** new §16.4c + a new *Account health* tab. Every account gets a 0–100 **health score** (engagement recency, open pipeline, open/escalated/SLA-breached support cases, win/loss) banded **healthy / watch / at-risk**, ranked worst-first as a **churn watchlist** with an explainable per-factor breakdown. Deals tag **new / renewal / expansion** and a **renewal pipeline** card totals renewal/expansion value; an account that won before but has no open renewal is flagged a **renewal gap**. **Snapshot now** (or the scheduled *CRM account health snapshot* report) stores a dated score per account for trend. Read-only — posts nothing to the ledger. |
