@@ -32,6 +32,7 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   crm_followup_digest: { label: 'สรุปการติดตามงานขายประจำวัน', labelEn: 'CRM follow-up digest' },
   crm_account_health: { label: 'บันทึกสุขภาพบัญชีลูกค้า (churn watchlist)', labelEn: 'CRM account health snapshot' },
   crm_forecast_snapshot: { label: 'บันทึกพยากรณ์ยอดขาย (forecast vs actual)', labelEn: 'CRM sales forecast snapshot' },
+  crm_sequence_run: { label: 'รันลำดับติดตามการขาย (cadence)', labelEn: 'CRM sequence run (advance due steps)' },
   // Likewise: each run advances every ACTIVE lifecycle journey — segment-entry sweeps + due steps (G1).
   journey_runner: { label: 'รันเจอร์นีย์ลูกค้า (Journeys)', labelEn: 'Run lifecycle journeys' },
   // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.

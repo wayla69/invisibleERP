@@ -2577,6 +2577,13 @@
       "when": 2023820000333,
       "tag": "0385_crm_territory",
       "breakpoints": true
+    },
+    {
+      "idx": 369,
+      "version": "7",
+      "when": 2023820000334,
+      "tag": "0392_crm_sequences",
+      "breakpoints": true
     }
   ]
 }
