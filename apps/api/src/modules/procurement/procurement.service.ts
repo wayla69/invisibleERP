@@ -63,7 +63,7 @@ export class ProcurementService {
   private async notifyPoPrRequesters(poNo: string, text: string): Promise<void> {
     if (!this.lineNotify) return;
     try {
-      // purchase_requests is a company-wide doc (no tenant_id) — notifyUser resolves each user's own tenant.
+      // purchase_requests is tenant-scoped (0387); this runs in-scope so it only sees same-tenant requesters.
       const rows = await this.db.select({ requestedBy: purchaseRequests.requestedBy })
         .from(prItems).innerJoin(purchaseRequests, eq(prItems.prId, purchaseRequests.id)).where(eq(prItems.poNo, poNo));
       const seen = new Set<string>();

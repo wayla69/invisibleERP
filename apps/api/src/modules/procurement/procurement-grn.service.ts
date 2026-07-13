@@ -184,6 +184,7 @@ export class ProcurementGrnService {
       const [gh] = await tx.insert(goodsReceipts).values({
         grNo, grDate: today, poNo: dto.po_no, vendorId: po.vendorId, vendorName: po.vendorName, receivedBy: user.username, remarks: dto.remarks ?? null,
         currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000', projectId: po.projectId ?? null, // M0 — inherit the PO's project dimension
+        tenantId: po.tenantId ?? user.tenantId ?? null, // inherit the receiving PO's tenant (migration 0387)
       }).returning({ id: goodsReceipts.id });
 
       for (const it of lines) {
@@ -201,7 +202,7 @@ export class ProcurementGrnService {
           grId: Number(gh.id), poNo: dto.po_no, itemId: it.item_id, itemDescription: poi?.itemDescription ?? null,
           poQty: poi?.orderQty ?? null, receivedQty: String(recv), uom: it.uom ?? poi?.uom ?? null,
           lotNo: it.lot_no ?? null, expiryDate: it.expiry_date ?? null, unitCost: it.unit_cost != null ? String(it.unit_cost) : (poi?.unitPrice ?? null),
-          isCapital,
+          isCapital, tenantId: po.tenantId ?? user.tenantId ?? null,
         });
         if (poi) await tx.update(poItems).set({ receivedQty: sql`${poItems.receivedQty} + ${recv}` }).where(eq(poItems.id, poi.id));
         // Phase 17A — build cost basis (FIFO layer / AVG running cost) for configured items (capital goods excluded)

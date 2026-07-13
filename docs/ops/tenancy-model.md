@@ -1,6 +1,6 @@
 # Ops — Multi-tenancy model & TENANCY_MODE (ITGC-AC-18)
 
-> **Status:** v1.24 · **Date:** 2026-07-13 · **Owner:** Platform / Security
+> **Status:** v1.25 · **Date:** 2026-07-13 · **Owner:** Platform / Security
 > How tenant data is isolated, what `TENANCY_MODE` does, and how to choose it for your deployment.
 
 ## 1. The two isolation layers
@@ -372,9 +372,31 @@ wins). **NB:** PGlite *does* execute the dynamic `DO`-loop (verified on 0.2.17) 
 apply the loop" note was mistaken; the sole cause was 0218's clobber. **Forward rule:** any new tenant
 table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy **0232**'s org-clause form.
 
-## 7. Revision history
+## 7. Legacy P2P pipeline had NO tenant scoping at all (fixed 0387)
+
+`purchase_requests`, `pr_items`, `purchase_orders`, `po_items`, `po_deliveries`, `goods_receipts`, `gr_items`
+date to `0000_big_elektra` (the pre-multi-tenancy schema) and never received a `tenant_id` column — unlike
+every table added since (`rfqs`, `supplier_quotes`, `invoice_match_results`, `ap_invoice_intakes`,
+`supplier_price_lists`, `my_purchase_orders`, …), which are all correctly scoped. Net effect: since
+`TENANCY_MODE=multi-company` went live 2026-07-03, every company on the platform could see (and the
+`/procurement`, `/requisitions` screens did show) every other company's requisitions, purchase orders, and
+goods receipts — unfiltered, because the generic RLS loop and `factoryResetTenant()`'s table enumeration
+both key off a literal `tenant_id` column, so these 7 tables were silently excluded from both.
+
+Discovered while investigating why `factoryResetTenant()` reported "0 rows deleted" for a test tenant that
+still showed PO data — the reset was actually correct (no rows had that tenant's id anywhere), the data was
+simply unscoped to begin with. Migration `0387_procurement_tenant_isolation` adds `tenant_id` to all 7
+tables, backfills the ~196 existing rows (verified attributable via `created_by`/`requested_by` → either a
+real login's `users.tenant_id`, or the `procurement-demo` seed-script tag → OSHINEI tenant), adds a leading
+tenant index per table, and applies the canonical org-clause RLS policy (§6). Every writer
+(`procurement-po/pr/grn.service.ts`, `seed-demo-procurement.ts`) now stamps `tenant_id` on insert. ToE:
+`cutover/procurement-tenant-isolation.ts` — T1 raises a PR/PO/GR, T2 (scoped) sees zero of them, T1 still
+sees its own.
+
+## 8. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.25 | 2026-07-13 | Platform / SRE | **§7: legacy P2P pipeline had no tenant scoping at all (migration 0387).** `purchase_requests`/`pr_items`/`purchase_orders`/`po_items`/`po_deliveries`/`goods_receipts`/`gr_items` predated multi-tenancy and never got a `tenant_id` column — every company on the platform could see every other company's requisitions/POs/goods-receipts, unfiltered. Fixed: `tenant_id` added + backfilled (~196 rows, all attributable) + leading index + canonical org-clause RLS on all 7 tables; every writer now stamps `tenant_id`. ToE: `cutover/procurement-tenant-isolation.ts`. |
 | 1.24 | 2026-07-13 | Platform | **§2: tenant soft-delete + purge (migration 0393) — Amber cleanup.** New two-step lifecycle beyond suspend/factory-reset: `deleteTenant` (suspended-only) flags `deleted_at` without touching data, permanently blocking logins (`TENANT_DELETED`, independent of `suspended_at`) — reversible via `restoreTenant`. `purgeTenant` (already-deleted-only) is the follow-up IRREVERSIBLE step that wipes every other tenant-scoped table but, per explicit product decision, NEVER erases `audit_log` (ITGC-AC-16) — so the `tenants` row survives purge too, as that chain's anchor. Landed in a new `TenantLifecycleService` + shared `tenant-wipe.ts` engine (factory-reset's loop extracted into it), not appended to `billing.service.ts`. ToE: `cutover/onboarding.ts` (23 new checks). Go-live runbook items 11-12. |
 | 1.23 | 2026-07-13 | Platform / SRE | **§1bis provisioning: transfer ownership of enum TYPES too (0353 deploy failure).** Migration `0353_treasury_debt_register`'s `ALTER TYPE "role_enum" ADD VALUE ...` 42501'd `must be owner of type role_enum` in prod under `ierp_app` — the run-1/1.21 ownership transfer covered `public`/`drizzle` tables, sequences, and views, but not user-defined TYPEs, and `ALTER TYPE ... ADD VALUE` requires actual ownership (table grants don't cover it). `ops-provision-app-role.yml` now also loops `pg_type` (`typtype='e'`) in `public` and `ALTER TYPE ... OWNER TO ierp_app`; §1bis SQL updated to match. Re-run the workflow to unblock prod. |
 | 1.22 | 2026-07-09 | Platform / SRE | **§1bis provisioning: grant `CREATE` on the DATABASE (deploy-outage run-3 fix).** After run 3 provisioned the correct instance, the deploy still died in the pre-deploy `drizzle-kit migrate`: it always opens with `CREATE SCHEMA IF NOT EXISTS "drizzle"`, and Postgres checks CREATE-on-database *before* the IF-NOT-EXISTS shortcut, so `ierp_app` (schema grants only) failed with 42501 `permission denied for database railway` — invisible under the superuser, which skips ACL checks. `ops-provision-app-role.yml` now also runs `GRANT CREATE ON DATABASE current_database() TO ierp_app`; §1bis SQL updated to match. |

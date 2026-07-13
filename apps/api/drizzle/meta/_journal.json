@@ -2598,6 +2598,13 @@
       "when": 2023820000336,
       "tag": "0393_tenant_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 372,
+      "version": "7",
+      "when": 2023820000337,
+      "tag": "0387_procurement_tenant_isolation",
+      "breakpoints": true
     }
   ]
 }
