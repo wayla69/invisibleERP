@@ -10,10 +10,6 @@
       "loc": 1095,
       "ctorParams": 5
     },
-    "apps/api/src/modules/crm/pipeline/crm-pipeline.service.ts": {
-      "loc": 1109,
-      "ctorParams": 5
-    },
     "apps/api/src/modules/finance/ap-payment-run.service.ts": {
       "loc": 669,
       "ctorParams": 9
