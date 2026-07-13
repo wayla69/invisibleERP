@@ -13,25 +13,17 @@ import { AutomationService } from '../../automation/automation.service';
 import { n, fx } from '../../../database/queries';
 import { normalizeName, normalizeKey } from '../../../common/text-similarity';
 import { parseCsv, parseXlsx, type ImportError } from '../../masterdata/masterdata.service';
-import { newCrmThreadToken, crmThreadMark } from '../crm-thread';
+import { CrmPipelineAnalyticsService } from './crm-pipeline-analytics.service';
+import { CrmPipelineLegacyService } from './crm-pipeline-legacy.service';
+import { CrmLeadEngineService } from './crm-lead-engine.service';
+import { CrmPipelineCommsService } from './crm-pipeline-comms.service';
+// Re-exported from the lead engine so any existing import path keeps working (the scoring model + version
+// live with the scorer now).
+export { LEAD_SCORE_VERSION, LEAD_SCORE_COEFFS } from './crm-lead-engine.service';
 import type { JwtUser } from './../../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
-
-// CRM-4 (docs/41) — EXPLAINABLE, versioned rules-based lead score (v1). Not a trained model (SOX posture:
-// coefficients are code-reviewed + documented, every stored score carries LEAD_SCORE_VERSION and its
-// per-factor breakdown). Mirrors the customer_profiles churn/LTV formula pattern in crm.service.ts.
-export const LEAD_SCORE_VERSION = 'v1';
-export const LEAD_SCORE_COEFFS = {
-  // source quality (fit + intent) — the strongest single signal
-  source: { referral: 40, partner: 40, event: 30, expo: 30, webinar: 25, inbound: 25, web: 20, import: 10, cold: 10, purchased: 5 } as Record<string, number>,
-  sourceDefault: 15,
-  hasCompany: 20, noCompany: 5,   // size proxy: a company name ⇒ B2B (bigger deal potential)
-  hasEmail: 10, hasPhone: 10,     // contactability
-  engaged7d: 20, engaged30d: 10,  // engagement recency: a recently-touched lead is hotter
-  gradeA: 70, gradeB: 50, gradeC: 30, // score → grade cut-offs (else D)
-} as const;
 
 // Default stages seeded per-tenant on first use (CRM-1 unification: the ONE stage master is the
 // tenant-configurable pipeline_stages; these six defaults mirror the pre-0293 hardcoded machine).
@@ -53,7 +45,7 @@ const STAGE_NAME_BY_LEGACY: Record<string, string> = {
 const LEGACY_BY_STAGE_NAME: Record<string, string> = Object.fromEntries(
   Object.entries(STAGE_NAME_BY_LEGACY).map(([legacy, name]) => [name, legacy]));
 
-type StageRow = { id: number | null; name: string; sequence: number; defaultProbability: number; isWon: boolean | null; isLost: boolean | null; isActive?: boolean | null; tenantId?: number | null };
+export type StageRow = { id: number | null; name: string; sequence: number; defaultProbability: number; isWon: boolean | null; isLost: boolean | null; isActive?: boolean | null; tenantId?: number | null };
 
 // CRM sales pipeline (REV-17) — the ONE opportunity spine after the CRM-1 unification (migration 0294):
 // leads → opportunities (stage machine over the tenant-configurable pipeline_stages, every transition
@@ -62,6 +54,11 @@ type StageRow = { id: number | null; name: string; sequence: number; defaultProb
 // adapters over the same table (pipeline* methods below) — the old `opportunities` table is read-legacy.
 @Injectable()
 export class CrmPipelineService {
+  private readonly analytics: CrmPipelineAnalyticsService;
+  private readonly comms: CrmPipelineCommsService;
+  private readonly leadEngine: CrmLeadEngineService;
+  private readonly legacy: CrmPipelineLegacyService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
@@ -69,7 +66,22 @@ export class CrmPipelineService {
     // harnesses (and the /api/pipeline-only paths) still construct without the automation/messaging graph.
     @Optional() private readonly automation?: AutomationService,
     @Optional() private readonly messaging?: MessagingService,
-  ) {}
+  ) {
+    this.analytics = new CrmPipelineAnalyticsService(db);
+    this.comms = new CrmPipelineCommsService(db, { oppByNo: (no, u) => this.oppByNo(no, u) }, messaging);
+    this.leadEngine = new CrmLeadEngineService(db, {
+      leadByNo: (no, u) => this.leadByNo(no, u),
+      emitEvent: (e, pl, u) => this.emitEvent(e, pl, u),
+    });
+    this.legacy = new CrmPipelineLegacyService(db, {
+      listStages: (u) => this.listStages(u),
+      legacyNameOf: (s) => this.legacyNameOf(s),
+      statusOf: (s) => this.statusOf(s),
+      recordStage: (t, o, from, to, by) => this.recordStage(t, o, from, to, by),
+      userIdByUsername: (u) => this.userIdByUsername(u),
+      emitEvent: (e, pl, u) => this.emitEvent(e, pl, u),
+    });
+  }
 
   // CRM-4 — emit a pipeline event into the automation engine (best-effort; a rules failure never blocks the
   // write). Reuses the SAME AutomationService.runEvent path the loyalty/NPS events ride.
@@ -128,7 +140,7 @@ export class CrmPipelineService {
     const leadNo = await this.docNo.nextDaily('LEAD');
     // CRM-4: round-robin assignment per pipeline — an explicit owner wins, else rotate the configured
     // round-robin owners, else fall back to the creator.
-    const owner = dto.owner ?? (await this.nextRoundRobinOwner(user)) ?? user.username;
+    const owner = dto.owner ?? (await this.leadEngine.nextRoundRobinOwner(user)) ?? user.username;
     await db.insert(crmLeads).values({ tenantId: user.tenantId ?? null, leadNo, name: dto.name, company: dto.company ?? null, email: dto.email ?? null, phone: dto.phone ?? null, source: dto.source ?? null, status: 'new', owner, notes: dto.notes ?? null, createdBy: user.username });
     // CRM-4: score the lead (grade A–D) + emit lead.created into the automation engine.
     const score = await this.scoreLead(leadNo, user).catch(() => null);
@@ -366,243 +378,15 @@ export class CrmPipelineService {
     return { opp_no: oppNo, history: rows.map((h: any) => ({ id: Number(h.id), from_stage: h.fromStage, to_stage: h.toStage, changed_by: h.changedBy, changed_at: h.changedAt })), count: rows.length };
   }
 
-  // Weighted pipeline forecast: open opportunities by stage (count + amount + Σ amount×probability), plus
-  // won/lost totals. The weighted figure is the revenue forecast finance can rely on. Open/won/lost is
-  // decided by the derived status (so a custom tenant stage flagged is_won/is_lost buckets correctly).
-  async pipelineSummary(_user: JwtUser) {
-    const db = this.db;
-    const rows = await db.select().from(crmOpportunities);
-    const byStage: Record<string, { count: number; amount: number; weighted: number }> = {};
-    let openAmount = 0, weightedForecast = 0, wonAmount = 0, lostAmount = 0;
-    for (const o of rows) {
-      const amt = n(o.amount); const prob = Number(o.probability) || 0;
-      const s = o.stage;
-      byStage[s] = byStage[s] ?? { count: 0, amount: 0, weighted: 0 };
-      byStage[s].count++; byStage[s].amount = round2(byStage[s].amount + amt); byStage[s].weighted = round2(byStage[s].weighted + amt * prob / 100);
-      if (o.status === 'Won') wonAmount = round2(wonAmount + amt);
-      else if (o.status === 'Lost') lostAmount = round2(lostAmount + amt);
-      else { openAmount = round2(openAmount + amt); weightedForecast = round2(weightedForecast + amt * prob / 100); }
-    }
-    const closed = wonAmount + lostAmount;
-    return { by_stage: byStage, open_amount: openAmount, weighted_forecast: weightedForecast, won_amount: wonAmount, lost_amount: lostAmount, win_rate: closed > 0 ? round2(wonAmount / closed) : 0 };
-  }
-
-  // Win/loss analytics for the dashboard: the headline summary plus breakdowns by loss reason, by owner (with
-  // each owner's win rate), and a monthly won/lost/win-rate trend — everything a sales leader needs to see why
-  // deals are won or lost. Tenant-scoped by RLS.
-  async winLoss(user: JwtUser, dto?: { months?: number }) {
-    const db = this.db;
-    // CRM-5: bound the scan by created_at SERVER-SIDE (was a full-history table scan). The `months` window
-    // is now enforced in SQL, not just used to slice the monthly array — so the query cost is O(window), and
-    // the by-owner / loss-reason breakdowns reflect the same period as the monthly trend. Tenant-scoped by RLS.
-    const { months, since } = this.analyticsWindow(dto?.months);
-    const rows = await db.select().from(crmOpportunities).where(gte(crmOpportunities.createdAt, since));
-    const lossReasons: Record<string, { count: number; amount: number }> = {};
-    const byOwner: Record<string, { won: number; lost: number; open: number; won_amount: number; lost_amount: number }> = {};
-    const byMonth: Record<string, { month: string; won: number; lost: number; created: number; won_amount: number }> = {};
-    for (const o of rows) {
-      const amt = n(o.amount), s = o.status, owner = o.owner || 'unassigned';
-      byOwner[owner] = byOwner[owner] ?? { won: 0, lost: 0, open: 0, won_amount: 0, lost_amount: 0 };
-      if (s === 'Won') { byOwner[owner].won++; byOwner[owner].won_amount = round2(byOwner[owner].won_amount + amt); }
-      else if (s === 'Lost') {
-        byOwner[owner].lost++; byOwner[owner].lost_amount = round2(byOwner[owner].lost_amount + amt);
-        const reason = o.lostReason || 'ไม่ระบุ (unspecified)';
-        lossReasons[reason] = lossReasons[reason] ?? { count: 0, amount: 0 };
-        lossReasons[reason].count++; lossReasons[reason].amount = round2(lossReasons[reason].amount + amt);
-      } else byOwner[owner].open++;
-      // Monthly velocity, keyed on the creation month (YYYY-MM).
-      const m = o.createdAt ? new Date(o.createdAt).toISOString().slice(0, 7) : null;
-      if (m) {
-        byMonth[m] = byMonth[m] ?? { month: m, won: 0, lost: 0, created: 0, won_amount: 0 };
-        byMonth[m].created++;
-        if (s === 'Won') { byMonth[m].won++; byMonth[m].won_amount = round2(byMonth[m].won_amount + amt); }
-        else if (s === 'Lost') byMonth[m].lost++;
-      }
-    }
-    const loss_reasons = Object.entries(lossReasons).map(([reason, v]) => ({ reason, ...v })).sort((a, b) => b.amount - a.amount);
-    const by_owner = Object.entries(byOwner).map(([owner, v]) => {
-      const decided = v.won + v.lost;
-      return { owner, ...v, win_rate: decided > 0 ? round2((v.won / decided) * 100) : 0 };
-    }).sort((a, b) => b.won_amount - a.won_amount);
-    const monthly = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month)).slice(-months)
-      .map((m) => ({ ...m, win_rate_pct: (m.won + m.lost) > 0 ? round2((m.won / (m.won + m.lost)) * 100) : 0 }));
-    return { window_months: months, summary: await this.pipelineSummary(user), loss_reasons, by_owner, monthly };
-  }
-
-  // ── CRM-5 — analytics that answer "why" (funnel, velocity, source ROI, forecast categories) ────────────
-  // Read-only aggregators on the CRM spine (crm_leads / crm_opportunities / crm_stage_history / crm_activities),
-  // surfaced as BI report types (crm_funnel / crm_source_roi / crm_forecast). Every scan is bounded by a
-  // SERVER-SIDE created_at/changed_at window (default 6 months, clamped 1..24) and tenant-scoped by RLS.
-  private analyticsWindow(months?: number): { months: number; since: Date } {
-    const m = Math.max(1, Math.min(24, Math.trunc(Number(months)) || 6));
-    const since = new Date();
-    since.setMonth(since.getMonth() - m);
-    return { months: m, since };
-  }
-
-  // Funnel conversion (lead → qualified → opportunity → won) plus stage-to-stage progression and
-  // time-in-stage VELOCITY, both derived from the crm_stage_history audit trail (CRM-1). Answers "where in the
-  // funnel do deals stall, and how long do they sit in each stage?".
-  async funnel(user: JwtUser, dto?: { months?: number }) {
-    const db = this.db;
-    const { months, since } = this.analyticsWindow(dto?.months);
-    const pct = (num: number, den: number) => den > 0 ? round2((num / den) * 100) : 0;
-
-    const leads = await db.select({ status: crmLeads.status }).from(crmLeads).where(gte(crmLeads.createdAt, since));
-    let leadTotal = 0, qualified = 0, convertedLeads = 0;
-    for (const l of leads) {
-      leadTotal++;
-      if (l.status === 'qualified' || l.status === 'converted') qualified++;
-      if (l.status === 'converted') convertedLeads++;
-    }
-
-    const opps = await db.select({ status: crmOpportunities.status, amount: crmOpportunities.amount, createdAt: crmOpportunities.createdAt, closedAt: crmOpportunities.closedAt })
-      .from(crmOpportunities).where(gte(crmOpportunities.createdAt, since));
-    let oppTotal = 0, won = 0, wonAmount = 0;
-    for (const o of opps) { oppTotal++; if (o.status === 'Won') { won++; wonAmount = round2(wonAmount + n(o.amount)); } }
-
-    const funnel = [
-      { stage: 'leads', label: 'ลูกค้ามุ่งหวัง (Leads)', count: leadTotal, conv_from_prev_pct: 100 },
-      { stage: 'qualified', label: 'ผ่านคุณสมบัติ (Qualified)', count: qualified, conv_from_prev_pct: pct(qualified, leadTotal) },
-      { stage: 'opportunities', label: 'โอกาสการขาย (Opportunities)', count: oppTotal, conv_from_prev_pct: pct(oppTotal, qualified || leadTotal) },
-      { stage: 'won', label: 'ปิดการขายได้ (Won)', count: won, conv_from_prev_pct: pct(won, oppTotal) },
-    ];
-
-    // Stage-to-stage progression + time-in-stage velocity from the append-only audit trail.
-    const hist = await db.select({ opportunityId: crmStageHistory.opportunityId, toStage: crmStageHistory.toStage, changedAt: crmStageHistory.changedAt })
-      .from(crmStageHistory).where(gte(crmStageHistory.changedAt, since))
-      .orderBy(crmStageHistory.opportunityId, crmStageHistory.changedAt, crmStageHistory.id);
-    const byOpp = new Map<number, { to: string; at: number }[]>();
-    for (const h of hist) {
-      const oid = Number(h.opportunityId);
-      const at = h.changedAt ? new Date(h.changedAt as unknown as string).getTime() : 0;
-      const arr = byOpp.get(oid) ?? [];
-      arr.push({ to: h.toStage, at });
-      byOpp.set(oid, arr);
-    }
-    const reached: Record<string, number> = {};
-    const stageDur: Record<string, { total_ms: number; samples: number }> = {};
-    for (const seq of byOpp.values()) {
-      const seen = new Set<string>();
-      for (let i = 0; i < seq.length; i++) {
-        const cur = seq[i]!;
-        if (!seen.has(cur.to)) { reached[cur.to] = (reached[cur.to] ?? 0) + 1; seen.add(cur.to); }
-        const next = seq[i + 1];
-        if (next && next.at >= cur.at) {
-          const d = stageDur[cur.to] ?? { total_ms: 0, samples: 0 };
-          d.total_ms += next.at - cur.at; d.samples++;
-          stageDur[cur.to] = d;
-        }
-      }
-    }
-    const stage_progression = Object.entries(reached)
-      .map(([stage, count]) => ({ stage, opportunities_reached: count }))
-      .sort((a, b) => b.opportunities_reached - a.opportunities_reached);
-    const velocity = Object.entries(stageDur)
-      .map(([stage, v]) => ({ stage, avg_days_in_stage: round2(v.total_ms / v.samples / 86400000), samples: v.samples }))
-      .sort((a, b) => b.avg_days_in_stage - a.avg_days_in_stage);
-
-    // Overall sales cycle: average days from creation to close for deals won in the window.
-    const cycleDays = opps
-      .filter((o) => o.status === 'Won' && o.createdAt && o.closedAt)
-      .map((o) => (new Date(o.closedAt as unknown as string).getTime() - new Date(o.createdAt as unknown as string).getTime()) / 86400000)
-      .filter((d) => d >= 0);
-    const avg_sales_cycle_days = cycleDays.length ? round2(cycleDays.reduce((s, d) => s + d, 0) / cycleDays.length) : 0;
-
-    return {
-      window_months: months,
-      funnel,
-      overall_conversion_pct: pct(won, leadTotal),   // lead → won
-      lead_to_opp_pct: pct(convertedLeads, leadTotal),
-      won_amount: wonAmount,
-      stage_progression,
-      velocity,
-      avg_sales_cycle_days,
-    };
-  }
-
-  // Source ROI: lead source → won revenue (and win rate / average deal size per source). Opportunities carry a
-  // lead_no provenance link; an opp with no originating lead is bucketed 'direct'. Answers "which channels
-  // actually convert to revenue?".
-  async sourceRoi(user: JwtUser, dto?: { months?: number }) {
-    const db = this.db;
-    const { months, since } = this.analyticsWindow(dto?.months);
-    const leads = await db.select({ leadNo: crmLeads.leadNo, source: crmLeads.source, createdAt: crmLeads.createdAt }).from(crmLeads);
-    const srcByLead = new Map<string, string>();
-    const leadCount: Record<string, number> = {};
-    for (const l of leads) {
-      const src = (l.source || 'direct').trim() || 'direct';
-      if (l.leadNo) srcByLead.set(l.leadNo, src);
-      if (l.createdAt && new Date(l.createdAt as unknown as string) >= since) leadCount[src] = (leadCount[src] ?? 0) + 1;
-    }
-    const opps = await db.select({ leadNo: crmOpportunities.leadNo, status: crmOpportunities.status, amount: crmOpportunities.amount })
-      .from(crmOpportunities).where(gte(crmOpportunities.createdAt, since));
-    const bySrc: Record<string, { source: string; leads: number; opps: number; won: number; lost: number; won_amount: number; open_amount: number }> = {};
-    const bucket = (src: string) => (bySrc[src] = bySrc[src] ?? { source: src, leads: leadCount[src] ?? 0, opps: 0, won: 0, lost: 0, won_amount: 0, open_amount: 0 });
-    for (const src of Object.keys(leadCount)) bucket(src); // sources with leads but no opp yet
-    for (const o of opps) {
-      const src = (o.leadNo && srcByLead.get(o.leadNo)) || 'direct';
-      const b = bucket(src);
-      b.opps++;
-      const amt = n(o.amount);
-      if (o.status === 'Won') { b.won++; b.won_amount = round2(b.won_amount + amt); }
-      else if (o.status === 'Lost') b.lost++;
-      else b.open_amount = round2(b.open_amount + amt);
-    }
-    const sources = Object.values(bySrc).map((b) => {
-      const decided = b.won + b.lost;
-      return {
-        ...b,
-        win_rate_pct: decided > 0 ? round2((b.won / decided) * 100) : 0,
-        avg_won_deal: b.won > 0 ? round2(b.won_amount / b.won) : 0,
-        lead_to_won_pct: b.leads > 0 ? round2((b.won / b.leads) * 100) : 0,
-      };
-    }).sort((a, b) => b.won_amount - a.won_amount);
-    const total_won = round2(sources.reduce((s, r) => s + r.won_amount, 0));
-    return { window_months: months, sources, total_won };
-  }
-
-  // Forecast categories (commit / best-case / pipeline) from OPEN opportunities by probability band, plus
-  // quota attainment per owner (won-in-window vs an optional per-owner quota supplied in the report filters)
-  // and an activity leaderboard. Answers "what will we close, and who is carrying it?".
-  async forecast(user: JwtUser, dto?: { months?: number; quotas?: Record<string, number> }) {
-    const db = this.db;
-    const { months, since } = this.analyticsWindow(dto?.months);
-
-    // Forecast categories: open pipeline split by the row's forecast weight (probability).
-    const open = await db.select({ amount: crmOpportunities.amount, probability: crmOpportunities.probability })
-      .from(crmOpportunities).where(eq(crmOpportunities.status, 'Open'));
-    const mk = () => ({ count: 0, amount: 0, weighted: 0 });
-    const categories = { commit: mk(), best_case: mk(), pipeline: mk() };
-    for (const o of open) {
-      const amt = n(o.amount), p = Number(o.probability) || 0;
-      const b = p >= 70 ? categories.commit : p >= 40 ? categories.best_case : categories.pipeline;
-      b.count++; b.amount = round2(b.amount + amt); b.weighted = round2(b.weighted + amt * p / 100);
-    }
-    // Commit is booked at full value; best-case + pipeline enter the forecast at their weighted (risk-adjusted) value.
-    const forecast_amount = round2(categories.commit.amount + categories.best_case.weighted + categories.pipeline.weighted);
-
-    // Quota attainment: won amount per owner within the window vs an optional per-owner quota (filters.quotas).
-    const wonRows = await db.select({ owner: crmOpportunities.owner, amount: crmOpportunities.amount })
-      .from(crmOpportunities).where(and(eq(crmOpportunities.status, 'Won'), gte(crmOpportunities.createdAt, since)));
-    const wonByOwner: Record<string, number> = {};
-    for (const o of wonRows) { const owner = o.owner || 'unassigned'; wonByOwner[owner] = round2((wonByOwner[owner] ?? 0) + n(o.amount)); }
-    const quotas = dto?.quotas ?? {};
-    const quota_attainment = Object.entries(wonByOwner).map(([owner, wonAmt]) => {
-      const quota = Number(quotas[owner]) || 0;
-      return { owner, won_amount: wonAmt, quota, attainment_pct: quota > 0 ? round2((wonAmt / quota) * 100) : null };
-    }).sort((a, b) => b.won_amount - a.won_amount);
-
-    // Activity leaderboard: logged CRM activities per owner within the window (total + completed).
-    const acts = await db.select({ owner: crmActivities.owner, done: crmActivities.done }).from(crmActivities).where(gte(crmActivities.createdAt, since));
-    const actByOwner: Record<string, { owner: string; total: number; done: number }> = {};
-    for (const a of acts) { const owner = a.owner || 'unassigned'; const e = actByOwner[owner] ?? { owner, total: 0, done: 0 }; e.total++; if (a.done) e.done++; actByOwner[owner] = e; }
-    const activity_leaderboard = Object.values(actByOwner)
-      .map((v) => ({ ...v, completion_pct: v.total > 0 ? round2((v.done / v.total) * 100) : 0 }))
-      .sort((a, b) => b.total - a.total);
-
-    return { window_months: months, categories, forecast_amount, quota_attainment, activity_leaderboard };
-  }
+  // ── Pipeline analytics (docs/46 Phase 4b cut 1) ────────────────────────
+  // The read-only analytics cluster (weighted summary, win/loss, CRM-5 funnel/velocity, source ROI,
+  // forecast categories) lives in CrmPipelineAnalyticsService (ctor-BODY construction — docs/38 recipe).
+  // Thin delegators keep the public API — and the BI providers riding it — byte-identical.
+  pipelineSummary(user: JwtUser) { return this.analytics.pipelineSummary(user); }
+  winLoss(user: JwtUser, dto?: { months?: number }) { return this.analytics.winLoss(user, dto); }
+  funnel(user: JwtUser, dto?: { months?: number }) { return this.analytics.funnel(user, dto); }
+  sourceRoi(user: JwtUser, dto?: { months?: number }) { return this.analytics.sourceRoi(user, dto); }
+  forecast(user: JwtUser, dto?: { months?: number; quotas?: Record<string, number> }) { return this.analytics.forecast(user, dto); }
 
   // ── Activities ─────────────────────────────────────────────────────────
   async logActivity(dto: { entity_type: 'lead' | 'opportunity'; entity_no: string; type: string; subject?: string; notes?: string; due_date?: string; done?: boolean }, user: JwtUser) {
@@ -708,160 +492,17 @@ export class CrmPipelineService {
     return { entity: 'crm_leads', dry_run: false, total: rows.length, imported, skipped: rows.length - imported, errors };
   }
 
-  // ── /api/pipeline adapter (Batch 2A routes preserved; ONE write path — this spine) ──────────────────
-  // Legacy per-tenant OPP-%05d numbering for the adapter route (disjoint from the crm route's daily format,
-  // so the shared (tenant_id, opp_no) unique key can never collide across the two).
-  private async nextPipelineOppNo(tenantId: number) {
-    const db = this.db;
-    const r = await db.insert(docCountersTenant)
-      .values({ docType: 'OPP', tenantId, period: 'all', n: 1 })
-      .onConflictDoUpdate({
-        target: [docCountersTenant.docType, docCountersTenant.tenantId, docCountersTenant.period],
-        set: { n: sql`${docCountersTenant.n} + 1` },
-      }).returning({ n: docCountersTenant.n });
-    return `OPP-${String(Number(r[0]!.n)).padStart(5, '0')}`;
-  }
-
-  private async oppById(id: number) {
-    const db = this.db;
-    const [o] = await db.select().from(crmOpportunities).where(eq(crmOpportunities.id, id)).limit(1);
-    if (!o) throw new NotFoundException({ code: 'OPP_NOT_FOUND', message: `Opportunity ${id} not found` });
-    return o;
-  }
-
-  async pipelineCreateOpportunity(dto: { name: string; account_name?: string; stage_name?: string; expected_value?: number; expected_close?: string; assigned_to?: string; notes?: string }, user: JwtUser) {
-    const db = this.db;
-    const tenantId = user.tenantId!;
-    const oppNo = await this.nextPipelineOppNo(tenantId);
-    // Resolve stage (default = first stage "Prospect"; an unknown stage_name falls back to the first stage —
-    // legacy Batch 2A behaviour preserved)
-    const stages = await this.listStages(user);
-    const stageName = dto.stage_name ?? 'Prospect';
-    const stage = stages.find((s) => s.name === stageName) ?? stages[0];
-    if (!stage) throw new BadRequestException({ code: 'NO_STAGES', message: 'No pipeline stages configured', messageTh: 'ยังไม่ได้ตั้งค่าขั้นตอน pipeline' });
-    const owner = dto.assigned_to ?? user.username;
-    const [opp] = await db.insert(crmOpportunities).values({
-      tenantId, oppNo, name: dto.name,
-      accountName: dto.account_name ?? null,
-      stage: this.legacyNameOf(stage), stageId: stage.id ?? null, status: this.statusOf(stage),
-      probability: stage.defaultProbability,
-      amount: fx(dto.expected_value ?? 0, 2), currency: 'THB',
-      expectedCloseDate: dto.expected_close ?? null,
-      owner, ownerUserId: await this.userIdByUsername(owner),
-      notes: dto.notes ?? null, createdBy: user.username,
-    }).returning();
-    await this.recordStage(tenantId, Number(opp!.id), null, this.legacyNameOf(stage), user.username);
-    return this.fmtPipelineOpp(opp, stage);
-  }
-
-  async pipelineMoveStage(oppId: number, dto: { stage_name: string }, user: JwtUser) {
-    const db = this.db;
-    const opp = await this.oppById(oppId);
-    const stages = await this.listStages(user);
-    const stage = stages.find((s) => s.name === dto.stage_name);
-    if (!stage) throw new BadRequestException({ code: 'STAGE_NOT_FOUND', message: `Stage '${dto.stage_name}' not found` });
-    // CRM-1: won/lost are terminal on EVERY route now (REV-17 — a closed deal can't silently re-open).
-    if (opp.status !== 'Open') throw new BadRequestException({ code: 'OPP_CLOSED', message: `Opportunity is already ${opp.status}`, messageTh: 'โอกาสการขายปิดแล้ว' });
-    const status = this.statusOf(stage);
-    const set: any = { stage: this.legacyNameOf(stage), stageId: stage.id ?? null, probability: stage.defaultProbability, status };
-    if (status !== 'Open') set.closedAt = new Date();
-    const [updated] = await db.update(crmOpportunities).set(set).where(eq(crmOpportunities.id, oppId)).returning();
-    await this.recordStage(opp.tenantId != null ? Number(opp.tenantId) : null, oppId, opp.stage, this.legacyNameOf(stage), user.username);
-    // CRM-4: emit stage-change + terminal deal events (legacy /api/pipeline route, same spine).
-    await this.emitEvent('opp.stage_changed', { opp_no: opp.oppNo, from_stage: opp.stage, to_stage: this.legacyNameOf(stage), owner: opp.owner, amount: n(opp.amount), status }, user);
-    if (status === 'Won') await this.emitEvent('deal.won', { opp_no: opp.oppNo, amount: n(opp.amount), owner: opp.owner, win_reason: null }, user);
-    if (status === 'Lost') await this.emitEvent('deal.lost', { opp_no: opp.oppNo, amount: n(opp.amount), owner: opp.owner, lost_reason: null }, user);
-    return this.fmtPipelineOpp(updated, stage);
-  }
-
-  async pipelineCloseOpportunity(oppId: number, dto: { outcome: 'Won' | 'Lost'; reason?: string }, user: JwtUser) {
-    const db = this.db;
-    const opp = await this.oppById(oppId);
-    if (opp.status !== 'Open') throw new BadRequestException({ code: 'OPP_CLOSED', message: `Opportunity is already ${opp.status}`, messageTh: 'โอกาสการขายปิดแล้ว' });
-    const stages = await this.listStages(user);
-    const targetStage = stages.find((s) => (dto.outcome === 'Won' ? s.isWon : s.isLost)) ?? stages[0];
-    if (!targetStage) throw new BadRequestException({ code: 'NO_STAGES', message: 'No pipeline stages configured', messageTh: 'ยังไม่ได้ตั้งค่าขั้นตอน pipeline' });
-    const legacyName = this.legacyNameOf(targetStage);
-    const set: any = { status: dto.outcome, stage: legacyName, stageId: targetStage.id ?? null, probability: targetStage.defaultProbability, closedAt: new Date() };
-    if (dto.outcome === 'Won') set.winReason = dto.reason ?? null;
-    if (dto.outcome === 'Lost') set.lostReason = dto.reason ?? null;
-    const [updated] = await db.update(crmOpportunities).set(set).where(eq(crmOpportunities.id, oppId)).returning();
-    await this.recordStage(opp.tenantId != null ? Number(opp.tenantId) : null, oppId, opp.stage, legacyName, user.username);
-    // CRM-4: emit stage-change + terminal deal events (legacy /api/pipeline close route).
-    await this.emitEvent('opp.stage_changed', { opp_no: opp.oppNo, from_stage: opp.stage, to_stage: legacyName, owner: opp.owner, amount: n(opp.amount), status: dto.outcome }, user);
-    await this.emitEvent(dto.outcome === 'Won' ? 'deal.won' : 'deal.lost',
-      dto.outcome === 'Won'
-        ? { opp_no: opp.oppNo, amount: n(opp.amount), owner: opp.owner, win_reason: dto.reason ?? null }
-        : { opp_no: opp.oppNo, amount: n(opp.amount), owner: opp.owner, lost_reason: dto.reason ?? null }, user);
-    return this.fmtPipelineOpp(updated, targetStage);
-  }
-
-  async pipelineListOpportunities(filter: { status?: string; stage_name?: string }, user: JwtUser) {
-    const db = this.db;
-    const conds: any[] = [eq(crmOpportunities.tenantId, user.tenantId!)];
-    if (filter.status) conds.push(eq(crmOpportunities.status, filter.status));
-    const rows = await db.select().from(crmOpportunities).where(and(...conds)).orderBy(desc(crmOpportunities.createdAt));
-    return { opportunities: rows.map((o: any) => this.fmtPipelineOpp(o)), count: rows.length };
-  }
-
-  async pipelineAddActivity(oppId: number, dto: { activity_type: string; subject: string; notes?: string; activity_date?: string }, user: JwtUser) {
-    const db = this.db;
-    const opp = await this.oppById(oppId);
-    const [act] = await db.insert(crmActivities).values({
-      tenantId: opp.tenantId != null ? Number(opp.tenantId) : null,
-      entityType: 'opportunity', entityNo: opp.oppNo,
-      type: dto.activity_type, subject: dto.subject ?? null, notes: dto.notes ?? null,
-      dueDate: dto.activity_date ?? null, done: false, owner: user.username,
-      source: 'pipeline', createdBy: user.username,
-    }).returning();
-    return { id: Number(act!.id), activity_type: act!.type, subject: act!.subject, notes: act!.notes, activity_date: act!.dueDate, completed: act!.done === true };
-  }
-
-  async pipelineListActivities(oppId: number) {
-    const db = this.db;
-    const opp = await this.oppById(oppId);
-    const rows = await db.select().from(crmActivities)
-      .where(and(eq(crmActivities.entityType, 'opportunity'), eq(crmActivities.entityNo, opp.oppNo)))
-      .orderBy(desc(crmActivities.createdAt));
-    return { activities: rows.map((a: any) => ({ id: Number(a.id), activity_type: a.type, subject: a.subject, notes: a.notes, activity_date: a.dueDate, completed: a.done === true })), count: rows.length };
-  }
-
-  async pipelineForecast(user: JwtUser) {
-    const db = this.db;
-    const rows = await db.select({
-      stageName: pipelineStages.name,
-      probability: pipelineStages.defaultProbability,
-      count: sql<string>`count(*)`,
-      totalValue: sql<string>`coalesce(sum(${crmOpportunities.amount}),0)`,
-      weightedValue: sql<string>`coalesce(sum(${crmOpportunities.amount} * ${pipelineStages.defaultProbability} / 100.0),0)`,
-    }).from(crmOpportunities)
-      .innerJoin(pipelineStages, eq(crmOpportunities.stageId, pipelineStages.id))
-      .where(and(eq(crmOpportunities.tenantId, user.tenantId!), eq(crmOpportunities.status, 'Open')))
-      .groupBy(pipelineStages.name, pipelineStages.sequence, pipelineStages.defaultProbability)
-      .orderBy(pipelineStages.sequence);
-
-    return {
-      by_stage: rows.map((r: any) => ({
-        stage: r.stageName, probability: r.probability,
-        count: Number(r.count), total_value: round4(n(r.totalValue)),
-        weighted_value: round4(n(r.weightedValue)),
-      })),
-      total_pipeline: round4(rows.reduce((s: number, r: any) => s + n(r.totalValue), 0)),
-      weighted_pipeline: round4(rows.reduce((s: number, r: any) => s + n(r.weightedValue), 0)),
-    };
-  }
-
-  // Legacy Batch 2A response shape (fmtOpp) mapped off the unified spine row.
-  private fmtPipelineOpp(o: any, stage?: StageRow) {
-    return {
-      id: Number(o.id), opp_no: o.oppNo, name: o.name, account_name: o.accountName ?? null,
-      stage_id: o.stageId != null ? Number(o.stageId) : null, stage_name: stage?.name ?? null,
-      probability: o.probability, expected_value: n(o.amount), currency: o.currency,
-      expected_close: o.expectedCloseDate, status: o.status, assigned_to: o.owner,
-      win_reason: o.winReason ?? null, loss_reason: o.lostReason ?? null, notes: o.notes ?? null,
-      created_by: o.createdBy, created_at: o.createdAt,
-    };
-  }
+  // ── /api/pipeline adapter — docs/46 Phase 4b cut 2 ─────────────────────
+  // The legacy Batch 2A route adapter (OPP-%05d numbering + fmtOpp shapes over the SAME unified spine)
+  // lives in CrmPipelineLegacyService (ctor-BODY construction; the stage-machine primitives arrive as
+  // callback ports). Thin delegators keep PipelineService and every response shape byte-identical.
+  pipelineCreateOpportunity(dto: { name: string; account_name?: string; stage_name?: string; expected_value?: number; expected_close?: string; assigned_to?: string; notes?: string }, user: JwtUser) { return this.legacy.pipelineCreateOpportunity(dto, user); }
+  pipelineMoveStage(oppId: number, dto: { stage_name: string }, user: JwtUser) { return this.legacy.pipelineMoveStage(oppId, dto, user); }
+  pipelineCloseOpportunity(oppId: number, dto: { outcome: 'Won' | 'Lost'; reason?: string }, user: JwtUser) { return this.legacy.pipelineCloseOpportunity(oppId, dto, user); }
+  pipelineListOpportunities(filter: { status?: string; stage_name?: string }, user: JwtUser) { return this.legacy.pipelineListOpportunities(filter, user); }
+  pipelineAddActivity(oppId: number, dto: { activity_type: string; subject: string; notes?: string; activity_date?: string }, user: JwtUser) { return this.legacy.pipelineAddActivity(oppId, dto, user); }
+  pipelineListActivities(oppId: number) { return this.legacy.pipelineListActivities(oppId); }
+  pipelineForecast(user: JwtUser) { return this.legacy.pipelineForecast(user); }
 
   // Account lookup shared with createOpportunity (full accounts CRUD lives in CrmAccountsService).
   private async accountByNo(accountNo: string, user: JwtUser) {
@@ -873,228 +514,23 @@ export class CrmPipelineService {
     return a;
   }
 
-  // ── CRM-4: lead scoring (explainable, versioned rules) ───────────────────
-  private computeLeadScore(lead: { source: string | null; company: string | null; email: string | null; phone: string | null }, recentActivityDays: number | null) {
-    const C = LEAD_SCORE_COEFFS;
-    const breakdown: { factor: string; points: number; detail: string }[] = [];
-    const src = String(lead.source ?? '').toLowerCase().trim();
-    const srcPts = C.source[src] ?? C.sourceDefault;
-    breakdown.push({ factor: 'source', points: srcPts, detail: src || 'unknown' });
-    const sizePts = lead.company ? C.hasCompany : C.noCompany;
-    breakdown.push({ factor: 'size', points: sizePts, detail: lead.company ? 'company (B2B)' : 'individual' });
-    const emailPts = lead.email ? C.hasEmail : 0;
-    breakdown.push({ factor: 'email', points: emailPts, detail: lead.email ? 'reachable' : 'no email' });
-    const phonePts = lead.phone ? C.hasPhone : 0;
-    breakdown.push({ factor: 'phone', points: phonePts, detail: lead.phone ? 'reachable' : 'no phone' });
-    const engPts = recentActivityDays == null ? 0 : recentActivityDays <= 7 ? C.engaged7d : recentActivityDays <= 30 ? C.engaged30d : 0;
-    breakdown.push({ factor: 'engagement', points: engPts, detail: recentActivityDays == null ? 'no activity' : `last touch ${recentActivityDays}d ago` });
-    const score = Math.max(0, Math.min(100, srcPts + sizePts + emailPts + phonePts + engPts));
-    const grade = score >= C.gradeA ? 'A' : score >= C.gradeB ? 'B' : score >= C.gradeC ? 'C' : 'D';
-    return { score, grade, breakdown };
-  }
+  // ── CRM-4 lead engine — docs/46 Phase 4b cut 3 ─────────────────────────
+  // Explainable scoring, follow-up settings + round-robin, and the REV-22 follow-up center/sweep live in
+  // CrmLeadEngineService (ctor-BODY construction; leadByNo/emitEvent arrive as callback ports). Thin
+  // delegators keep the public API — and the crm_followup_digest BI provider — byte-identical.
+  scoreLead(leadNo: string, user: JwtUser) { return this.leadEngine.scoreLead(leadNo, user); }
+  getLeadScore(leadNo: string, user: JwtUser) { return this.leadEngine.getLeadScore(leadNo, user); }
+  getFollowupSettings(user: JwtUser) { return this.leadEngine.getFollowupSettings(user); }
+  putFollowupSettings(dto: { sla_hours?: number; rotting_days?: number; round_robin_owners?: string[] }, user: JwtUser) { return this.leadEngine.putFollowupSettings(dto, user); }
+  assignLead(leadNo: string, dto: { owner?: string }, user: JwtUser) { return this.leadEngine.assignLead(leadNo, dto, user); }
+  followUpCenter(user: JwtUser, opts?: { sla_hours?: number; rotting_days?: number }) { return this.leadEngine.followUpCenter(user, opts); }
+  runFollowUpSweep(user: JwtUser) { return this.leadEngine.runFollowUpSweep(user); }
 
-  // (Re)score one lead and upsert crm_lead_scores. Idempotent on (tenant, lead) — re-scoring a lead with no
-  // new signal produces the same grade. The breakdown is persisted so a rep sees WHY the lead graded A–D.
-  async scoreLead(leadNo: string, user: JwtUser) {
-    const db = this.db;
-    const l = await this.leadByNo(leadNo, user);
-    const [lastAct] = await db.select({ at: crmActivities.createdAt }).from(crmActivities)
-      .where(and(eq(crmActivities.entityType, 'lead'), eq(crmActivities.entityNo, leadNo)))
-      .orderBy(desc(crmActivities.createdAt)).limit(1);
-    const recentDays = lastAct?.at ? Math.floor((Date.now() - new Date(lastAct.at).getTime()) / 86_400_000) : null;
-    const { score, grade, breakdown } = this.computeLeadScore(l, recentDays);
-    const tenantId = l.tenantId != null ? Number(l.tenantId) : (user.tenantId ?? null);
-    await db.insert(crmLeadScores).values({ tenantId, leadNo, score, grade, version: LEAD_SCORE_VERSION, breakdown, scoredAt: new Date() })
-      .onConflictDoUpdate({ target: [crmLeadScores.tenantId, crmLeadScores.leadNo], set: { score, grade, version: LEAD_SCORE_VERSION, breakdown, scoredAt: new Date() } });
-    return { lead_no: leadNo, score, grade, version: LEAD_SCORE_VERSION, breakdown };
-  }
-
-  // Read the stored score (score on first read if none yet).
-  async getLeadScore(leadNo: string, user: JwtUser) {
-    const db = this.db;
-    await this.leadByNo(leadNo, user); // tenant guard + existence
-    const [row] = await db.select().from(crmLeadScores).where(eq(crmLeadScores.leadNo, leadNo)).limit(1);
-    if (!row) return this.scoreLead(leadNo, user);
-    return { lead_no: leadNo, score: Number(row.score), grade: row.grade, version: row.version, breakdown: row.breakdown ?? [], scored_at: row.scoredAt };
-  }
-
-  // ── CRM-4: follow-up discipline settings + round-robin ───────────────────
-  async getFollowupSettings(_user: JwtUser) {
-    const [row] = await this.db.select().from(crmFollowupSettings).limit(1); // RLS scopes to caller's tenant
-    return {
-      sla_hours: row ? Number(row.slaHours) : 24,
-      rotting_days: row ? Number(row.rottingDays) : 7,
-      round_robin_owners: (row?.roundRobinOwners as string[] | null) ?? [],
-      rr_cursor: row ? Number(row.rrCursor) : 0,
-      updated_by: row?.updatedBy ?? null, updated_at: row?.updatedAt ?? null,
-    };
-  }
-
-  async putFollowupSettings(dto: { sla_hours?: number; rotting_days?: number; round_robin_owners?: string[] }, user: JwtUser) {
-    const db = this.db;
-    const owners = Array.isArray(dto.round_robin_owners) ? dto.round_robin_owners.map((o) => String(o).trim()).filter(Boolean).slice(0, 50) : undefined;
-    const [existing] = await db.select().from(crmFollowupSettings).limit(1);
-    const set: Record<string, unknown> = { updatedBy: user.username, updatedAt: new Date() };
-    if (dto.sla_hours != null) set.slaHours = Math.max(1, Math.floor(dto.sla_hours));
-    if (dto.rotting_days != null) set.rottingDays = Math.max(1, Math.floor(dto.rotting_days));
-    if (owners !== undefined) { set.roundRobinOwners = owners; set.rrCursor = 0; }
-    if (existing) await db.update(crmFollowupSettings).set(set).where(eq(crmFollowupSettings.id, Number(existing.id)));
-    else await db.insert(crmFollowupSettings).values({ tenantId: user.tenantId ?? null, slaHours: (set.slaHours as number) ?? 24, rottingDays: (set.rottingDays as number) ?? 7, roundRobinOwners: (set.roundRobinOwners as string[]) ?? [], rrCursor: 0, updatedBy: user.username });
-    return this.getFollowupSettings(user);
-  }
-
-  // Pick the next round-robin owner and advance the cursor (null when none configured).
-  private async nextRoundRobinOwner(_user: JwtUser): Promise<string | null> {
-    const db = this.db;
-    const [row] = await db.select().from(crmFollowupSettings).limit(1);
-    const owners = (row?.roundRobinOwners as string[] | null) ?? [];
-    if (!row || !owners.length) return null;
-    const idx = Number(row.rrCursor) % owners.length;
-    await db.update(crmFollowupSettings).set({ rrCursor: (Number(row.rrCursor) + 1) % owners.length }).where(eq(crmFollowupSettings.id, Number(row.id)));
-    return owners[idx] ?? null;
-  }
-
-  // Assign (or re-assign) a lead's owner — explicit owner wins, else rotate the round-robin.
-  async assignLead(leadNo: string, dto: { owner?: string }, user: JwtUser) {
-    const db = this.db;
-    const l = await this.leadByNo(leadNo, user);
-    const owner = dto.owner?.trim() || (await this.nextRoundRobinOwner(user));
-    if (!owner) throw new BadRequestException({ code: 'NO_ROUND_ROBIN', message: 'No round-robin owners configured; pass an explicit owner', messageTh: 'ยังไม่ได้ตั้งค่าผู้รับผิดชอบแบบวน — โปรดระบุผู้รับผิดชอบ' });
-    await db.update(crmLeads).set({ owner }).where(eq(crmLeads.id, Number(l.id)));
-    return { lead_no: leadNo, owner };
-  }
-
-  // ── CRM-4: follow-up center (detective control REV-22) ───────────────────
-  // ONE severity-ranked "what needs me now" worklist for the sales team, assembled from signals the pipeline
-  // already produces — pure aggregation, posts nothing (mirrors the PROJ-11 action-center pattern):
-  //  • SLA breach: a NEW lead untouched (no activity logged) past sla_hours (leads must be touched in time);
-  //  • overdue activity: an open follow-up task whose due date has passed;
-  //  • rotting deal: an OPEN opportunity with no activity for rotting_days.
-  async followUpCenter(user: JwtUser, opts?: { sla_hours?: number; rotting_days?: number }) {
-    const db = this.db;
-    const settings = await this.getFollowupSettings(user);
-    const slaHours = opts?.sla_hours != null && Number(opts.sla_hours) > 0 ? Math.floor(Number(opts.sla_hours)) : settings.sla_hours;
-    const rottingDays = opts?.rotting_days != null && Number(opts.rotting_days) > 0 ? Math.floor(Number(opts.rotting_days)) : settings.rotting_days;
-    const now = Date.now();
-    const today = new Date(now + 7 * 3600_000).toISOString().slice(0, 10); // Asia/Bangkok business day
-    const items: { kind: string; severity: 'high' | 'medium' | 'low'; ref: string; title_th: string; title_en: string; owner: string | null; as_of: string; meta: Record<string, any> }[] = [];
-    const SEV_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
-    const push = (kind: string, severity: 'high' | 'medium' | 'low', ref: string, titleTh: string, titleEn: string, owner: string | null, meta: Record<string, any> = {}) =>
-      items.push({ kind, severity, ref, title_th: titleTh, title_en: titleEn, owner, as_of: today, meta });
-
-    // 1. SLA-breached leads (REV-22): status 'new', created > sla_hours ago, no activity logged yet.
-    const openLeads = await db.select().from(crmLeads).where(eq(crmLeads.status, 'new')).orderBy(desc(crmLeads.id)).limit(500);
-    for (const l of openLeads) {
-      const created = l.createdAt ? new Date(l.createdAt).getTime() : now;
-      const hours = (now - created) / 3600_000;
-      if (hours < slaHours) continue;
-      const [act] = await db.select({ id: crmActivities.id }).from(crmActivities).where(and(eq(crmActivities.entityType, 'lead'), eq(crmActivities.entityNo, l.leadNo))).limit(1);
-      if (act) continue; // already touched
-      push('lead_sla_breach', 'high', l.leadNo, `ลีดยังไม่ถูกติดต่อเกิน SLA (${Math.floor(hours)} ชม.): ${l.name}`, `Lead untouched past SLA (${Math.floor(hours)}h): ${l.name}`, l.owner ?? null, { name: l.name, hours_since_created: Math.floor(hours), sla_hours: slaHours, source: l.source ?? null });
-    }
-
-    // 2. Overdue follow-up tasks: an open task whose due date has passed.
-    const tasks = await db.select().from(crmActivities).where(and(eq(crmActivities.type, 'task'), eq(crmActivities.done, false))).orderBy(crmActivities.dueDate).limit(500);
-    for (const t of tasks) {
-      if (!t.dueDate || String(t.dueDate) >= today) continue;
-      push('activity_overdue', 'medium', t.entityNo, `งานติดตามเลยกำหนด: ${t.subject ?? t.entityNo} (${t.dueDate})`, `Follow-up task overdue: ${t.subject ?? t.entityNo} (${t.dueDate})`, t.owner ?? null, { entity_type: t.entityType, entity_no: t.entityNo, subject: t.subject, due_date: t.dueDate });
-    }
-
-    // 3. Rotting deals: an OPEN opportunity with no activity for rotting_days.
-    const openOpps = await db.select().from(crmOpportunities).where(eq(crmOpportunities.status, 'Open')).orderBy(desc(crmOpportunities.id)).limit(500);
-    for (const o of openOpps) {
-      const [lastAct] = await db.select({ at: crmActivities.createdAt }).from(crmActivities).where(and(eq(crmActivities.entityType, 'opportunity'), eq(crmActivities.entityNo, o.oppNo))).orderBy(desc(crmActivities.createdAt)).limit(1);
-      const anchor = lastAct?.at ? new Date(lastAct.at).getTime() : (o.createdAt ? new Date(o.createdAt).getTime() : now);
-      const idleDays = Math.floor((now - anchor) / 86_400_000);
-      if (idleDays < rottingDays) continue;
-      push('deal_rotting', 'medium', o.oppNo, `ดีลไม่มีความเคลื่อนไหว ${idleDays} วัน: ${o.name}`, `Deal idle ${idleDays}d: ${o.name}`, o.owner ?? null, { name: o.name, idle_days: idleDays, rotting_days: rottingDays, amount: n(o.amount), stage: o.stage });
-    }
-
-    items.sort((a, b) => (SEV_RANK[a.severity]! - SEV_RANK[b.severity]!) || String(a.ref).localeCompare(String(b.ref)));
-    const by_kind: Record<string, number> = {};
-    for (const it of items) by_kind[it.kind] = (by_kind[it.kind] ?? 0) + 1;
-    const summary = {
-      total: items.length,
-      high: items.filter((i) => i.severity === 'high').length,
-      medium: items.filter((i) => i.severity === 'medium').length,
-      low: items.filter((i) => i.severity === 'low').length,
-      by_kind,
-    };
-    return { as_of: today, sla_hours: slaHours, rotting_days: rottingDays, summary, items };
-  }
-
-  // The schedulable daily follow-up digest (BI report type crm_followup_digest). Computes the follow-up
-  // center, fires lead.stagnant into the automation engine per SLA-breached lead (rules can escalate), and
-  // drops a single digest notification on the alerts/notifications rail. Read-only — posts nothing to the GL.
-  async runFollowUpSweep(user: JwtUser) {
-    const center = await this.followUpCenter(user);
-    const breaches = center.items.filter((i) => i.kind === 'lead_sla_breach');
-    for (const b of breaches) {
-      await this.emitEvent('lead.stagnant', { lead_no: b.ref, name: b.meta.name ?? b.ref, owner: b.owner, source: b.meta.source ?? null, hours_since_created: b.meta.hours_since_created ?? null, sla_hours: center.sla_hours }, user);
-    }
-    if (center.summary.total > 0) {
-      const bk = center.summary.by_kind;
-      try {
-        await this.db.insert(notifications).values({
-          targetTenantId: user.tenantId ?? null, targetRole: null,
-          message: `สรุปการติดตามงานขาย: ${center.summary.total} รายการต้องดำเนินการ (ลีดเกิน SLA ${bk.lead_sla_breach ?? 0} · งานเลยกำหนด ${bk.activity_overdue ?? 0} · ดีลค้าง ${bk.deal_rotting ?? 0})`,
-          messageEn: `Sales follow-up digest: ${center.summary.total} item(s) need action (SLA-breached leads ${bk.lead_sla_breach ?? 0} · overdue tasks ${bk.activity_overdue ?? 0} · rotting deals ${bk.deal_rotting ?? 0})`,
-        });
-      } catch { /* never throw from the notification rail */ }
-    }
-    return { as_of: center.as_of, total: center.summary.total, sla_breaches: breaches.length, overdue_activities: center.summary.by_kind.activity_overdue ?? 0, rotting_deals: center.summary.by_kind.deal_rotting ?? 0 };
-  }
-
-  // ── CRM-4: sales comms from the deal timeline (email / LINE via messaging, merge fields) ──────────────
-  static readonly COMMS_MERGE_FIELDS = ['opp.name', 'opp.no', 'opp.amount', 'opp.stage', 'account.name', 'contact.name', 'contact.email', 'owner', 'sender'] as const;
-
-  mergeFields() { return { fields: [...CrmPipelineService.COMMS_MERGE_FIELDS] }; }
-
-  private commsContext(opp: any, account: any, contact: any, user: JwtUser): Record<string, string> {
-    return {
-      'opp.name': opp.name ?? '', 'opp.no': opp.oppNo ?? '', 'opp.amount': n(opp.amount).toLocaleString('en-US'), 'opp.stage': opp.stage ?? '',
-      'account.name': account?.name ?? opp.accountName ?? '', 'contact.name': contact?.name ?? '', 'contact.email': contact?.email ?? '',
-      owner: opp.owner ?? user.username, sender: user.username,
-    };
-  }
-
-  // Presentation-only {{field}} substitution (document-templates merge-field style); an unknown token is left
-  // verbatim so a typo is visible rather than silently dropped.
-  private renderMergeFields(template: string, ctx: Record<string, string>): string {
-    return String(template ?? '').replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, k: string) => (k in ctx ? ctx[k]! : `{{${k}}}`));
-  }
-
-  // Send an email / LINE / SMS from a deal — merge fields resolved from the opportunity + account + contact,
-  // dispatched through the existing MessagingService, and LOGGED as a timeline activity (a completed touch).
-  async sendComms(oppNo: string, dto: { channel: 'email' | 'line' | 'sms'; to?: string; subject?: string; body: string; contact_id?: number }, user: JwtUser) {
-    const db = this.db;
-    if (!this.messaging) throw new BadRequestException({ code: 'MESSAGING_UNAVAILABLE', message: 'Messaging service not available', messageTh: 'ระบบส่งข้อความไม่พร้อมใช้งาน' });
-    const o = await this.oppByNo(oppNo, user);
-    const [account] = o.accountId != null ? await db.select().from(crmAccounts).where(eq(crmAccounts.id, Number(o.accountId))).limit(1) : [undefined];
-    const contactId = dto.contact_id ?? (o.primaryContactId != null ? Number(o.primaryContactId) : null);
-    const [contact] = contactId != null ? await db.select().from(crmContacts).where(eq(crmContacts.id, contactId)).limit(1) : [undefined];
-    let to = dto.to?.trim() || null;
-    if (!to && contact) to = dto.channel === 'email' ? (contact.email ?? null) : dto.channel === 'line' ? (contact.lineId ?? null) : (contact.phone ?? null);
-    if (!to) throw new BadRequestException({ code: 'NO_RECIPIENT', message: `No ${dto.channel} recipient on the contact — pass an explicit 'to'`, messageTh: 'ไม่พบผู้รับสำหรับช่องทางนี้' });
-    const ctx = this.commsContext(o, account, contact, user);
-    const body = this.renderMergeFields(dto.body, ctx);
-    const subject = dto.subject ? this.renderMergeFields(dto.subject, ctx) : null;
-    // CRM-6: stamp a deterministic reply-threading token and embed it in the dispatched message (subject +
-    // body footer) so an inbound reply carrying `[ref:<token>]` threads back to THIS deal even when the
-    // sender replies from a different address than the one on file. Only meaningful for email today.
-    const threadToken = newCrmThreadToken();
-    const composed = subject ? `${subject}\n\n${body}` : body;
-    const dispatchBody = dto.channel === 'email' ? `${composed}\n\n${crmThreadMark(threadToken)}` : composed;
-    const dispatchSubject = dto.channel === 'email' && subject ? `${subject} ${crmThreadMark(threadToken)}` : subject;
-    const res = await this.messaging.send({ to, channel: dto.channel, body: dispatchBody, campaign: 'crm_comms' }, user);
-    // Log the send as a timeline activity so it shows in the deal history + Customer-360.
-    await db.insert(crmActivities).values({
-      tenantId: o.tenantId != null ? Number(o.tenantId) : (user.tenantId ?? null), entityType: 'opportunity', entityNo: oppNo,
-      type: dto.channel === 'email' ? 'email' : 'note', subject: subject ?? `${dto.channel.toUpperCase()} → ${to}`,
-      notes: body.slice(0, 2000), done: true, owner: user.username, source: 'comms', threadToken, createdBy: user.username,
-    });
-    return { opp_no: oppNo, channel: dto.channel, to, status: (res as { status?: string })?.status ?? 'sent', subject: dispatchSubject, body, thread_token: threadToken };
-  }
+  // ── CRM-4 sales comms — docs/46 Phase 4b cut 4 ─────────────────────────
+  // Merge fields + email/LINE/SMS dispatch + the CRM-6 reply-threading token live in
+  // CrmPipelineCommsService (ctor-BODY construction; oppByNo arrives as a callback port). Thin delegators.
+  mergeFields() { return this.comms.mergeFields(); }
+  sendComms(oppNo: string, dto: { channel: 'email' | 'line' | 'sms'; to?: string; subject?: string; body: string; contact_id?: number }, user: JwtUser) { return this.comms.sendComms(oppNo, dto, user); }
 }
 
 function shapeActivity(a: any) {
