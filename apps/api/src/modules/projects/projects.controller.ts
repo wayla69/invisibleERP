@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
 
 // BoQ (M0, docs/32) — line: amount is budget_qty × rate unless an explicit budget_amount is given.
 const BoqLineBody = z.object({
@@ -64,6 +64,13 @@ const CostBody = z.object({
 });
 const BillBody = z.object({ amount: z.number().positive().optional(), percent: z.number().positive().max(100).optional() })
   .refine((b) => b.amount != null || b.percent != null, { message: 'amount or percent is required' });
+// PPM-B1 (PROJ-21): a richer predecessor list — dep_type (default FS) + lag/lead in days. Omit and pass plain
+// `depends_on` for the unchanged FS/lag-0 behaviour.
+const TaskDependencyBody = z.object({
+  task_id: z.number().int().positive(),
+  type: z.enum(['FS', 'SS', 'FF', 'SF']).optional(),
+  lag_days: z.number().int().optional(),
+});
 const TaskBody = z.object({
   name: z.string().min(1),
   parent_id: z.number().int().positive().optional(),
@@ -76,6 +83,9 @@ const TaskBody = z.object({
   pct_complete: z.number().min(0).max(100).optional(),
   assignee: z.string().optional(),
   depends_on: z.array(z.number().int().positive()).optional(),
+  dependencies: z.array(TaskDependencyBody).optional(),
+  constraint_type: z.enum(['SNET', 'FNLT']).nullable().optional(),
+  constraint_offset_days: z.number().int().nullable().optional(),
   accountable: z.string().optional(),
   responsible: z.array(z.string()).optional(),
   consulted: z.array(z.string()).optional(),
@@ -91,10 +101,22 @@ const TaskPatchBody = z.object({
   pct_complete: z.number().min(0).max(100).optional(),
   assignee: z.string().optional(),
   depends_on: z.array(z.number().int().positive()).optional(),
+  dependencies: z.array(TaskDependencyBody).optional(),
+  constraint_type: z.enum(['SNET', 'FNLT']).nullable().optional(),
+  constraint_offset_days: z.number().int().nullable().optional(),
   accountable: z.string().optional(),
   responsible: z.array(z.string()).optional(),
   consulted: z.array(z.string()).optional(),
   informed: z.array(z.string()).optional(),
+});
+// PPM-B1 (PROJ-21): opt-in per-tenant working calendar.
+const CalendarBody = z.object({
+  enabled: z.boolean().optional(),
+  non_working_weekdays: z.array(z.number().int().min(0).max(6)).optional(),
+});
+const CalendarExceptionBody = z.object({
+  exception_date: z.string().min(1),
+  description: z.string().optional(),
 });
 const MilestoneBody = z.object({
   name: z.string().min(1),
@@ -527,6 +549,27 @@ export class ProjectsController {
   @Get('resources/role-demand')
   roleDemand(@Query('months') months: string | undefined, @Query('from') from: string | undefined, @CurrentUser() u: JwtUser) {
     return this.svc.roleSupplyDemand(u, { months: months ? Number(months) : undefined, from });
+  }
+
+  // ── Working calendar (PPM-B1, PROJ-21) ── opt-in per-tenant non-working-weekday/holiday set. Static segments.
+  @Get('calendar')
+  getCalendar(@CurrentUser() u: JwtUser) {
+    return this.svc.getCalendar(u);
+  }
+
+  @Put('calendar')
+  setCalendar(@Body(new ZodValidationPipe(CalendarBody)) b: ProjectCalendarDto, @CurrentUser() u: JwtUser) {
+    return this.svc.setCalendar(b, u);
+  }
+
+  @Post('calendar/exceptions')
+  addCalendarException(@Body(new ZodValidationPipe(CalendarExceptionBody)) b: CalendarExceptionDto, @CurrentUser() u: JwtUser) {
+    return this.svc.addCalendarException(b, u);
+  }
+
+  @Get('calendar/exceptions')
+  listCalendarExceptions(@CurrentUser() u: JwtUser) {
+    return this.svc.listCalendarExceptions(u);
   }
 
   @Post(':code/resources')

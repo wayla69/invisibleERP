@@ -58,16 +58,42 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
 
   // ── dialogs ──
   const [taskDlg, setTaskDlg] = useState(false);
-  const [tf, setTf] = useState({ name: '', planned_hours: '', planned_cost: '', planned_start: '', planned_end: '', pct_complete: '', accountable: '', responsible: '' });
+  const [tf, setTf] = useState({ name: '', planned_hours: '', planned_cost: '', planned_start: '', planned_end: '', pct_complete: '', accountable: '', responsible: '', depends_on: '', constraint_type: '', constraint_offset_days: '' });
   const splitPeople = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
+  const splitIds = (s: string) => s.split(',').map((x) => Number(x.trim())).filter((x) => Number.isFinite(x) && x > 0);
+  const tfBlank = { name: '', planned_hours: '', planned_cost: '', planned_start: '', planned_end: '', pct_complete: '', accountable: '', responsible: '', depends_on: '', constraint_type: '', constraint_offset_days: '' };
   const addTask = useMutation({
-    mutationFn: () => api(`/api/projects/${code}/tasks`, { method: 'POST', body: JSON.stringify({ name: tf.name, planned_hours: Number(tf.planned_hours) || 0, planned_cost: Number(tf.planned_cost) || 0, planned_start: tf.planned_start || undefined, planned_end: tf.planned_end || undefined, pct_complete: Number(tf.pct_complete) || 0, accountable: tf.accountable || undefined, responsible: tf.responsible ? splitPeople(tf.responsible) : undefined }) }),
-    onSuccess: () => { notifySuccess(t('pj.toast_task_added')); setTaskDlg(false); setTf({ name: '', planned_hours: '', planned_cost: '', planned_start: '', planned_end: '', pct_complete: '', accountable: '', responsible: '' }); refresh(); },
+    mutationFn: () => api(`/api/projects/${code}/tasks`, { method: 'POST', body: JSON.stringify({
+      name: tf.name, planned_hours: Number(tf.planned_hours) || 0, planned_cost: Number(tf.planned_cost) || 0, planned_start: tf.planned_start || undefined, planned_end: tf.planned_end || undefined, pct_complete: Number(tf.pct_complete) || 0, accountable: tf.accountable || undefined, responsible: tf.responsible ? splitPeople(tf.responsible) : undefined,
+      depends_on: tf.depends_on ? splitIds(tf.depends_on) : undefined,
+      constraint_type: tf.constraint_type || undefined, constraint_offset_days: tf.constraint_offset_days ? Number(tf.constraint_offset_days) : undefined,
+    }) }),
+    onSuccess: () => { notifySuccess(t('pj.toast_task_added')); setTaskDlg(false); setTf(tfBlank); refresh(); },
     onError: (err: any) => notifyError(err.message),
   });
   const markDone = useMutation({
     mutationFn: (id: number) => api(`/api/projects/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done' }) }),
     onSuccess: () => { notifySuccess(t('pj.toast_marked_done')); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+
+  // PPM-B1 (PROJ-21): rich per-edge dependency editor (type + lag/lead) + SNET/FNLT constraint, prefilled
+  // from the schedule's `dependency_details` for the task being edited.
+  const [depDlg, setDepDlg] = useState<null | { taskId: number; rows: { task_id: string; type: string; lag_days: string }[]; constraint_type: string; constraint_offset_days: string }>(null);
+  const openDepDlg = (r: any) => {
+    const details = depDetailsById.get(r.id) ?? (r.depends_on ?? []).map((id: number) => ({ task_id: id, type: 'FS', lag_days: 0 }));
+    setDepDlg({
+      taskId: r.id,
+      rows: details.map((d: any) => ({ task_id: String(d.task_id), type: d.type ?? 'FS', lag_days: String(d.lag_days ?? 0) })),
+      constraint_type: r.constraint_type ?? '', constraint_offset_days: r.constraint_offset_days != null ? String(r.constraint_offset_days) : '',
+    });
+  };
+  const saveDeps = useMutation({
+    mutationFn: () => api(`/api/projects/tasks/${depDlg!.taskId}`, { method: 'PATCH', body: JSON.stringify({
+      dependencies: depDlg!.rows.filter((row) => row.task_id.trim()).map((row) => ({ task_id: Number(row.task_id), type: row.type, lag_days: Number(row.lag_days) || 0 })),
+      constraint_type: depDlg!.constraint_type || null, constraint_offset_days: depDlg!.constraint_type ? (Number(depDlg!.constraint_offset_days) || 0) : null,
+    }) }),
+    onSuccess: () => { notifySuccess(t('pj.toast_updated')); setDepDlg(null); refresh(); },
+    onError: (err: any) => notifyError(err.message),
   });
 
   const [msDlg, setMsDlg] = useState(false);
@@ -403,6 +429,10 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
 
   const scurve = (series.data?.series ?? []).map((s: any) => ({ month: s.month, planned: s.cumulative_planned }));
   const ganttTasks: GanttTask[] = (schedule.data?.tasks ?? []);
+  // PPM-B1 (PROJ-21): per-task edge type/lag, keyed by task id — schedule() is the only endpoint that carries
+  // dependency_details (the plain task list from GET :code/tasks does not).
+  const depDetailsById = new Map<number, { task_id: number; type: string; lag_days: number }[]>((schedule.data?.tasks ?? []).map((t: any) => [t.id, t.dependency_details ?? []]));
+  const depSuffix = (d: { type: string; lag_days: number }) => (d.type !== 'FS' || d.lag_days !== 0) ? ` (${d.type}${d.lag_days > 0 ? `+${d.lag_days}d` : d.lag_days < 0 ? `${d.lag_days}d` : ''})` : '';
 
   const bl = baseline.data;
   const raciData = raci.data;
@@ -641,7 +671,12 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             ) },
             { key: 'planned_hours', label: t('pj.col_hours'), align: 'right', render: (r: any) => <span className="tabular">{r.planned_hours}</span> },
             { key: 'planned_cost', label: t('pj.col_budget'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.planned_cost)}</span> },
-            { key: 'depends_on', label: t('pj.col_depends_on'), render: (r: any) => r.depends_on?.length ? `#${r.depends_on.join(', #')}` : '—' },
+            { key: 'depends_on', label: t('pj.col_depends_on'), render: (r: any) => {
+              if (!r.depends_on?.length) return '—';
+              const details = depDetailsById.get(r.id) ?? [];
+              return r.depends_on.map((id: number) => { const d = details.find((x) => x.task_id === id); return `#${id}${d ? depSuffix(d) : ''}`; }).join(', ');
+            } },
+            { key: 'constraint_type', label: t('pj.col_constraint'), render: (r: any) => r.constraint_type ? <Badge variant="secondary">{r.constraint_type} {r.constraint_offset_days}d</Badge> : '—' },
             { key: 'accountable', label: t('pj.col_raci'), sortable: false, render: (r: any) => (
               <div className="flex flex-wrap items-center gap-1">
                 {r.accountable ? <Badge variant="default" title={t('pj.tip_accountable')}>A: {r.accountable}</Badge> : <span className="text-xs text-muted-foreground" title={t('pj.tip_no_accountable')}>{t('pj.no_a')}</span>}
@@ -649,8 +684,12 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
               </div>
             ) },
             { key: 'status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-            { key: 'act', label: '', sortable: false, render: (r: any) => r.status !== 'done' && r.status !== 'cancelled'
-              ? <Button variant="ghost" size="sm" title={t('pj.tip_mark_done')} onClick={() => markDone.mutate(r.id)}><CheckCircle2 className="size-4" /></Button> : null },
+            { key: 'act', label: '', sortable: false, render: (r: any) => (
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" title={t('pj.tip_edit_deps')} onClick={() => openDepDlg(r)}><ListTree className="size-4" /></Button>
+                {r.status !== 'done' && r.status !== 'cancelled' && <Button variant="ghost" size="sm" title={t('pj.tip_mark_done')} onClick={() => markDone.mutate(r.id)}><CheckCircle2 className="size-4" /></Button>}
+              </div>
+            ) },
           ]}
           emptyState={{ icon: GanttChartSquare, title: t('pj.empty_tasks_title'), description: t('pj.empty_tasks_desc') }}
         />
@@ -818,8 +857,60 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
               <div className="grid gap-1.5"><Label>{t('pj.f_accountable')}</Label><Input value={tf.accountable} onChange={(ev) => setTf({ ...tf, accountable: ev.target.value })} placeholder={t('pj.ph_one_user')} /></div>
               <div className="grid gap-1.5"><Label>{t('pj.f_responsible')}</Label><Input value={tf.responsible} onChange={(ev) => setTf({ ...tf, responsible: ev.target.value })} placeholder={t('pj.ph_comma')} /></div>
             </div>
+            {/* PPM-B1 (PROJ-21): plain FS/lag-0 predecessors here; use the ListTree icon on an existing task row for SS/FF/SF + lag/lead. */}
+            <div className="grid gap-1.5"><Label>{t('pj.f_depends_on')}</Label><Input value={tf.depends_on} onChange={(ev) => setTf({ ...tf, depends_on: ev.target.value })} placeholder={t('pj.ph_task_ids')} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label>{t('pj.f_constraint_type')}</Label>
+                <Select value={tf.constraint_type} onChange={(ev) => setTf({ ...tf, constraint_type: ev.target.value })}>
+                  <option value="">{t('pj.opt_none')}</option>
+                  <option value="SNET">SNET</option>
+                  <option value="FNLT">FNLT</option>
+                </Select>
+              </div>
+              <div className="grid gap-1.5"><Label>{t('pj.f_constraint_offset')}</Label><Input type="number" value={tf.constraint_offset_days} onChange={(ev) => setTf({ ...tf, constraint_offset_days: ev.target.value })} disabled={!tf.constraint_type} /></div>
+            </div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setTaskDlg(false)}>{t('pj.btn_close')}</Button><Button onClick={() => addTask.mutate()} disabled={!tf.name || addTask.isPending}>{t('pj.btn_add')}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit dependencies (PPM-B1, PROJ-21): per-edge type/lag + SNET/FNLT constraint on this task */}
+      <Dialog open={depDlg != null} onOpenChange={(open) => !open && setDepDlg(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('pj.dlg_edit_deps')}</DialogTitle></DialogHeader>
+          {depDlg && (
+            <div className="grid gap-3">
+              <div className="grid gap-2">
+                {depDlg.rows.map((row, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_5.5rem_5rem_auto] items-end gap-2">
+                    <div className="grid gap-1.5"><Label>{t('pj.f_predecessor_id')}</Label><Input type="number" value={row.task_id} onChange={(ev) => setDepDlg({ ...depDlg, rows: depDlg.rows.map((r, j) => j === i ? { ...r, task_id: ev.target.value } : r) })} /></div>
+                    <div className="grid gap-1.5">
+                      <Label>{t('pj.f_dep_type')}</Label>
+                      <Select value={row.type} onChange={(ev) => setDepDlg({ ...depDlg, rows: depDlg.rows.map((r, j) => j === i ? { ...r, type: ev.target.value } : r) })}>
+                        <option value="FS">FS</option><option value="SS">SS</option><option value="FF">FF</option><option value="SF">SF</option>
+                      </Select>
+                    </div>
+                    <div className="grid gap-1.5"><Label>{t('pj.f_lag_days')}</Label><Input type="number" value={row.lag_days} onChange={(ev) => setDepDlg({ ...depDlg, rows: depDlg.rows.map((r, j) => j === i ? { ...r, lag_days: ev.target.value } : r) })} /></div>
+                    <Button variant="ghost" size="sm" onClick={() => setDepDlg({ ...depDlg, rows: depDlg.rows.filter((_, j) => j !== i) })}><X className="size-4" /></Button>
+                  </div>
+                ))}
+                <Button variant="outline" size="sm" onClick={() => setDepDlg({ ...depDlg, rows: [...depDlg.rows, { task_id: '', type: 'FS', lag_days: '0' }] })}><Plus className="size-4" /> {t('pj.btn_add_dependency')}</Button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label>{t('pj.f_constraint_type')}</Label>
+                  <Select value={depDlg.constraint_type} onChange={(ev) => setDepDlg({ ...depDlg, constraint_type: ev.target.value })}>
+                    <option value="">{t('pj.opt_none')}</option>
+                    <option value="SNET">SNET</option>
+                    <option value="FNLT">FNLT</option>
+                  </Select>
+                </div>
+                <div className="grid gap-1.5"><Label>{t('pj.f_constraint_offset')}</Label><Input type="number" value={depDlg.constraint_offset_days} onChange={(ev) => setDepDlg({ ...depDlg, constraint_offset_days: ev.target.value })} disabled={!depDlg.constraint_type} /></div>
+              </div>
+            </div>
+          )}
+          <DialogFooter><Button variant="outline" onClick={() => setDepDlg(null)}>{t('pj.btn_close')}</Button><Button onClick={() => saveDeps.mutate()} disabled={saveDeps.isPending}>{t('pj.btn_save')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

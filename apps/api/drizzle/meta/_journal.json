@@ -2619,6 +2619,13 @@
       "when": 2023820000339,
       "tag": "0400_resource_skills_calendar",
       "breakpoints": true
+    },
+    {
+      "idx": 375,
+      "version": "7",
+      "when": 2023820000340,
+      "tag": "0401_task_dependencies_calendar",
+      "breakpoints": true
     }
   ]
 }
