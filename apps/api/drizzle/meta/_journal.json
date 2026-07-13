@@ -2605,6 +2605,13 @@
       "when": 2023820000337,
       "tag": "0387_procurement_tenant_isolation",
       "breakpoints": true
+    },
+    {
+      "idx": 373,
+      "version": "7",
+      "when": 2023820000338,
+      "tag": "0399_cpq_bundles",
+      "breakpoints": true
     }
   ]
 }

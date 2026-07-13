@@ -97,6 +97,9 @@ export const quoteLines = pgTable('quote_lines', {
   unitCost: numeric('unit_cost', { precision: 14, scale: 2 }).notNull().default('0'),
   discountPct: numeric('discount_pct', { precision: 7, scale: 4 }).notNull().default('0'),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull().default('0'),
+  // CRM-14 (CRM-12, migration 0399): tags lines expanded from a bundle instance (bundle code + instance
+  // suffix) so they're grouped on the quote; null for an ordinary line.
+  bundleCode: text('bundle_code'),
 }, (t) => ({
   byQuote: index('idx_ql_quote').on(t.quoteId),
 }));
@@ -107,6 +110,10 @@ export const cpqSettings = pgTable('cpq_settings', {
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   minMarginPct: numeric('min_margin_pct', { precision: 6, scale: 3 }).notNull().default('20'),
   maxDiscountPct: numeric('max_discount_pct', { precision: 6, scale: 3 }).notNull().default('15'),
+  // CRM-14 (CRM-12, migration 0399): the tier-2 discount threshold — a breach above max_discount_pct but
+  // at/under this still needs any cpq_approve holder (manager tier, unchanged); above it needs `exec`
+  // specifically. Null = tiering off (today's single-floor behaviour).
+  execDiscountPct: numeric('exec_discount_pct', { precision: 6, scale: 3 }),
   updatedBy: text('updated_by'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
@@ -127,11 +134,39 @@ export const quoteApprovals = pgTable('quote_approvals', {
   maxDiscountPct: numeric('max_discount_pct', { precision: 6, scale: 3 }),
   marginPct: numeric('margin_pct', { precision: 6, scale: 3 }),
   discountPct: numeric('discount_pct', { precision: 6, scale: 3 }),
+  // CRM-14 (CRM-12, migration 0399): which approval tier this breach requires — 'manager' (any cpq_approve
+  // holder, unchanged) or 'exec' (the exec-tier threshold was crossed).
+  requiredTier: text('required_tier'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
 }, (t) => ({
   byQuote: index('idx_quote_appr_quote').on(t.tenantId, t.quoteId),
   byStatus: index('idx_quote_appr_status').on(t.tenantId, t.status),
 }));
+
+// CRM-14 (CRM-12, migration 0399): a bundle SKU priced as the discounted sum of its component product
+// configs. Expands into ordinary quote_lines on add (bundleCode-tagged), so the EXISTING CPQ-01 floor check
+// automatically covers a bundle's blended margin — no core service duplication.
+export const cpqBundles = pgTable('cpq_bundles', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  active: boolean('active').notNull().default(true),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uqCode: uniqueIndex('uq_cpq_bundle_code').on(t.tenantId, t.code) }));
+
+export const cpqBundleItems = pgTable('cpq_bundle_items', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  bundleId: bigint('bundle_id', { mode: 'number' }).notNull().references(() => cpqBundles.id),
+  configId: bigint('config_id', { mode: 'number' }).notNull().references(() => productConfigs.id),
+  qty: numeric('qty', { precision: 10, scale: 2 }).notNull().default('1'),
+  unitCost: numeric('unit_cost', { precision: 14, scale: 2 }).notNull().default('0'), // component COGS
+  sequence: integer('sequence').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byBundle: index('idx_cpq_bundle_item_bundle').on(t.tenantId, t.bundleId) }));
 
 export type Quote = typeof quotes.$inferSelect;

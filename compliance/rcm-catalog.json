@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 275,
+    "total": 276,
     "by_status": {
-      "Implemented": 272,
+      "Implemented": 273,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 42,
+      "Revenue & Cash": 43,
       "Tax": 12
     }
   },
@@ -1689,6 +1689,25 @@
       "toe": "Per enrolment / continuous",
       "evidence": "Sales / SDR / Sales Manager",
       "status": "P13"
+    },
+    {
+      "control_id": "CRM-12",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (CPQ bundles / tiered discount authority)",
+      "risk": "CPQ bundle pricing and large-discount authority are ungoverned: a bundle (multiple products sold as one SKU, priced below the sum of parts) has no product-cost basis captured, so a bundle's blended margin can silently fall below the company's floor without CPQ-01's per-line check ever seeing it; and EVERY breach of the discount ceiling — a 6% overage or a 60% giveaway — routes to the same single approver tier, so there is no escalation to executive sign-off for a materially larger discount. Bundles can hide margin erosion, and a large discount clears the SAME low bar as a small one.",
+      "assertion": "Occurrence/Accuracy/Authorization",
+      "description": "CPQ guided selling depth (CRM-14, migration 0399) — extends CPQ-01, no new maker-checker rail. BUNDLES: cpq_bundles/cpq_bundle_items define a bundle SKU with each component's cost captured; POST …/quotes/:id/lines/bundle EXPANDS the bundle into ordinary quote_lines (bundle_code-tagged, one row per component carrying its captured unit_cost) — so the EXISTING CPQ-01 metricsFromLines()/sendQuote() floor check automatically covers the bundle's blended margin with NO core-service duplication; a bundle cannot be used to hide margin erosion. TIERED discount-approval matrix: cpq_settings.exec_discount_pct is an optional second, higher discount ceiling; a breach at/under it still needs any cpq_approve holder (manager tier, CPQ-01 unchanged), but a breach ABOVE it requires a caller holding `exec` specifically (quote_approvals.required_tier records which tier applied; TIER_APPROVAL_REQUIRED on a mismatched approver) — so a materially larger discount escalates past the standard approver. GUIDED SELLING: GET /api/cpq/recommendations is a read-only, EXPLAINABLE co-purchase surface (which other configs the same customer bought in a different Accepted quote, ranked by frequency — no trained model, mirrors the G2 market-basket-affinity posture) — informational, not itself a control. Bundle/recommendation reads gate exec/cpq; bundle creation is masterdata (mirrors config/rule creation). Two new tenant tables + three ALTERs (0232 RLS, tenant-leading indexes).",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per quote send / approval",
+      "owner": "Sales / Sales Manager / Executive",
+      "coso": "P10",
+      "code_reference": "cpq.service.ts (createBundle/listBundles/getBundle; addBundleLine expands a bundle instance into bundle_code-tagged quote_lines with captured component unit_cost; sendQuote computes requiredTier from exec_discount_pct and stamps quote_approvals.required_tier; approveDiscount enforces the exec-tier gate — TIER_APPROVAL_REQUIRED when a non-exec cpq_approve holder attempts an exec-tier approval; getSettings/updateSettings expose exec_discount_pct; recommendations co-purchase read over quotes.configId + bundle-expanded quote_lines.itemCode); cpq.controller.ts (/api/cpq/bundles[/:code], /api/cpq/quotes/:id/lines/bundle, /api/cpq/recommendations); schema/cpq.ts cpq_bundles + cpq_bundle_items + quote_lines.bundle_code + cpq_settings.exec_discount_pct + quote_approvals.required_tier, migration 0399; cutover/cpq-approval.ts (ToE, CRM-14 checks)",
+      "tod": "Inspect the bundle-to-quote_lines expansion (captured component cost, no core floor-check change), the exec-tier threshold computation on send + the enforced approver-tier check on approve, and the co-purchase recommendation read.",
+      "toe": "Re-perform (cpq-approval harness): create a 2-component bundle (one thin-margin, one healthy) and add it to a Draft quote -> 2 bundle-tagged lines; sending the quote catches the BLENDED margin breach via the unmodified CPQ-01 check -> PendingApproval, and a plain cpq_approve holder (no exec) clears it (margin-only breach stays manager-tier); set an exec-tier discount ceiling, add a healthy-margin bundle with a discount above it -> PendingApproval, a plain cpq_approve holder is BLOCKED (403 TIER_APPROVAL_REQUIRED), an exec-permission holder clears it; accepting the bundle quote then makes its components surface as a mutual recommendation; a second tenant cannot see the first tenant's bundle (RLS).",
+      "evidence": "Bundle master + component cost register; bundle-expansion audit trail (shared quote_lines, CPQ-01 floor coverage); tiered discount-approval log (required_tier on quote_approvals); co-purchase recommendation read",
+      "status": "Implemented"
     },
     {
       "control_id": "CPQ-01",
