@@ -365,6 +365,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   // nav
   'nav.crm_workspace': { th: 'CRM งานขาย (บอร์ดดีล)', en: 'Sales CRM (deal board)' },
   'nav.crm_members': { th: 'CRM สมาชิก (360)', en: 'Member CRM (360)' },
+  'nav.audience_export': { th: 'ส่งกลุ่มเป้าหมายโฆษณา', en: 'Audience export' },
 
   // ── SVC-2 Warranty & Entitlement registry (/service/warranty) ─────────────
   'wty.title': { th: 'การรับประกัน & สิทธิ์คุ้มครอง', en: 'Warranty & Entitlement' },

@@ -34,7 +34,8 @@ interface AccuracyResp { runs: number; avg_wape: number | null; avg_mase: number
 
 const pct = (v: number | null) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`);
 
-const ALGOS = ['', 'naive', 'moving_average', 'ses', 'holt', 'croston'];
+// Mirrors apps/api/src/modules/demand-ml/forecast-algorithms.ts ALGOS keys exactly.
+const ALGOS = ['', 'sma', 'ses', 'holt', 'seasonal_naive', 'croston', 'croston_sba', 'dow_seasonal', 'th_holiday', 'weather'];
 
 export default function DemandPage() {
   const { t } = useLang();

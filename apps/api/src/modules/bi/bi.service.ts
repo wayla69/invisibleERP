@@ -504,6 +504,14 @@ export class BiService implements OnModuleInit {
   async runSubscriptionNow(id: number, user: JwtUser) { return this.scheduleOrThrow().runSubscriptionNow(id, user, this); }
   async listRuns(user: JwtUser, limit = 100) { return this.scheduleOrThrow().listRuns(user, limit); }
 
+  // Live ROI dashboard read (docs/45 — the marketing_roi report type had no ad-hoc read path, only the
+  // scheduled-report machinery). Calls the SAME BiGenerateService.marketingRoi composition the report type
+  // uses — no duplicated business logic, no report_runs/register side effect (this is a pure read).
+  async marketingRoiLive(user: JwtUser, days?: number) {
+    if (!this.generateSvc) throw new BadRequestException({ code: 'BI_UNAVAILABLE', message: 'Report generation not available', messageTh: 'ระบบสร้างรายงานไม่พร้อมใช้งาน' });
+    const r = await this.generateSvc.marketingRoi(user, { days });
+    return r.data;
+  }
 
 
 

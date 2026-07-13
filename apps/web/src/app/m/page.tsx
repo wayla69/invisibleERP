@@ -53,6 +53,10 @@ export default function MemberApp() {
   // null = still probing the session; true/false once known. The auth JWT is httpOnly and unreadable, so we
   // confirm a live member session by probing /api/member/me rather than reading a token from localStorage.
   const [authed, setAuthed] = useState<boolean | null>(null);
+  // G1 (docs/45, control MKT-13): staff mint a QR pointing at /m?clink=<token> for a channel order. Read
+  // it client-side only (SSR has no window) — the null initial value avoids a hydration mismatch.
+  const [clinkToken, setClinkToken] = useState<string | null>(null);
+  useEffect(() => { setClinkToken(new URLSearchParams(window.location.search).get('clink')); }, []);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -71,7 +75,92 @@ export default function MemberApp() {
   if (authed === null) return null;
   return (
     <div className="mx-auto min-h-screen max-w-md bg-muted/30 px-4 py-6">
-      {authed ? <Home onLogout={onLogout} on401={() => setAuthed(false)} /> : <Login onAuthed={() => setAuthed(true)} />}
+      {clinkToken
+        ? <ChannelLink token={clinkToken} authed={authed} onAuthed={() => setAuthed(true)} onLogout={onLogout} />
+        : authed ? <Home onLogout={onLogout} on401={() => setAuthed(false)} /> : <Login onAuthed={() => setAuthed(true)} />}
+    </div>
+  );
+}
+
+// ── Channel-to-member identity linking (docs/45 G1, control MKT-13) ─────────
+// GET is @Public() so the platform/order_count preview shows BEFORE login; the actual link (POST) requires
+// a member session, and always carries a REQUIRED explicit marketing_opt_in choice (never pre-selected —
+// this is a consent decision, not a default). Ref hashes only, never raw PII (channel-customer-refs.service.ts).
+function ChannelLink({ token, authed, onAuthed, onLogout }: { token: string; authed: boolean; onAuthed: () => void; onLogout: () => void }) {
+  const [info, setInfo] = useState<{ platform: string; order_count: number; linked: boolean } | null>(null);
+  const [loadErr, setLoadErr] = useState('');
+  const [optIn, setOptIn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try { const r = await mapi<{ platform: string; order_count: number; linked: boolean }>(`/api/member/channel-link/${encodeURIComponent(token)}`); if (!cancelled) setInfo(r); }
+      catch (e: any) { if (!cancelled) setLoadErr(e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  if (loadErr) {
+    return (
+      <div className="flex min-h-[80vh] flex-col items-center justify-center gap-2 px-4 text-center">
+        <p className="text-sm text-destructive">{loadErr}</p>
+        <p className="text-xs text-muted-foreground">ลิงก์นี้อาจหมดอายุหรือไม่ถูกต้อง — ขอลิงก์ใหม่จากพนักงาน</p>
+      </div>
+    );
+  }
+  if (!info) return <div className="flex justify-center py-20"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>;
+
+  if (info.linked || done) {
+    return (
+      <div className="flex min-h-[80vh] flex-col items-center justify-center gap-3 px-4 text-center">
+        <ShieldCheck className="size-10 text-success" />
+        <p className="text-base font-semibold">ผูกบัญชี {info.platform} เรียบร้อยแล้ว</p>
+        <Button onClick={() => { window.location.href = '/m'; }}>ไปที่หน้าสมาชิก</Button>
+      </div>
+    );
+  }
+
+  if (!authed) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl bg-primary/10 p-4 text-center">
+          <p className="text-sm font-medium">ผูกบัญชี {info.platform} ({num(info.order_count)} ออเดอร์) กับสมาชิกของคุณ</p>
+          <p className="mt-1 text-xs text-muted-foreground">เข้าสู่ระบบก่อนเพื่อดำเนินการต่อ</p>
+        </div>
+        <Login onAuthed={onAuthed} />
+      </div>
+    );
+  }
+
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true); setErr('');
+    try { await mapi('/api/member/channel-link', { method: 'POST', body: JSON.stringify({ token, marketing_opt_in: optIn }) }); setDone(true); }
+    catch (e: any) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="flex min-h-[80vh] flex-col justify-center gap-4">
+      <div className="text-center">
+        <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground"><Users className="size-7" /></div>
+        <h1 className="text-lg font-bold">ผูกบัญชี {info.platform}</h1>
+        <p className="text-sm text-muted-foreground">พบ {num(info.order_count)} ออเดอร์จากบัญชีนี้ — ผูกกับสมาชิกของคุณเพื่อสะสมแต้มและรับสิทธิพิเศษ</p>
+      </div>
+      <Card>
+        <CardContent className="space-y-3 pt-6">
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={optIn} onChange={(e) => setOptIn(e.target.checked)} />
+            <span>ยินยอมรับข่าวสารและโปรโมชันทางการตลาด (เลือกได้ ไม่บังคับ ถอนได้ทุกเมื่อ)</span>
+          </label>
+          <Button className="w-full" disabled={busy} onClick={confirm}>{busy ? <Loader2 className="size-4 animate-spin" /> : 'ยืนยันผูกบัญชี'}</Button>
+          {err && <p className="text-center text-sm text-destructive">{err}</p>}
+        </CardContent>
+      </Card>
+      <button className="text-center text-xs text-muted-foreground underline" onClick={onLogout}>ออกจากระบบ</button>
     </div>
   );
 }
