@@ -42,6 +42,8 @@ interface Company {
   code: string;
   name: string;
   suspended: boolean;
+  deleted?: boolean;
+  deleted_by?: string | null;
   status: string | null;
   plan_code: string | null;
   trial_ends_at: string | null;
@@ -68,12 +70,14 @@ function statusBadge(s: string | null, t: (key: string, vars?: Record<string, st
     s === 'Active' ? 'default'
     : s === 'Trialing' ? 'secondary'
     : s === 'Suspended' ? 'destructive'
+    : s === 'Deleted' ? 'destructive'
     : s === 'PastDue' ? 'destructive'
     : 'outline';
   const label =
     s === 'Active' ? t('plt.status_active')
     : s === 'Trialing' ? t('plt.status_trialing')
     : s === 'Suspended' ? t('plt.status_suspended')
+    : s === 'Deleted' ? t('plt.status_deleted')
     : s === 'PastDue' ? t('plt.status_past_due')
     : s === 'Canceled' ? t('plt.status_canceled')
     : (s ?? '—');
@@ -98,8 +102,9 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const [days, setDays] = useState('14');
   const [tagsInput, setTagsInput] = useState('');
   const [resetConfirm, setResetConfirm] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState('');
   useEffect(() => { setTagsInput((detail.data?.tags ?? []).join(', ')); }, [detail.data]);
-  useEffect(() => { setResetConfirm(''); }, [id]);
+  useEffect(() => { setResetConfirm(''); setDeleteConfirm(''); }, [id]);
 
   const saveTags = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean) }) }),
@@ -125,6 +130,18 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
     onSuccess: (r: any) => { notifySuccess(t('plt.company_reset_done', { name: detail.data?.name ?? String(id), rows: num(r?.rows_deleted ?? 0) })); setResetConfirm(''); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
+  // Soft-delete — hides the company + permanently blocks its logins WITHOUT touching business data
+  // (unlike factory reset above). Same suspended-first gate; reversible via restoreTenant.
+  const deleteTenant = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/delete`, { method: 'POST', body: JSON.stringify({ confirm: deleteConfirm.trim() }) }),
+    onSuccess: () => { notifySuccess(t('plt.company_deleted', { name: detail.data?.name ?? String(id) })); setDeleteConfirm(''); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const restoreTenant = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/restore`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => { notifySuccess(t('plt.company_restored', { name: detail.data?.name ?? String(id) })); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
 
   const d = detail.data;
   return (
@@ -139,7 +156,7 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
             <div className="space-y-5 px-4 pb-6 text-sm">
               {/* Snapshot */}
               <div className="grid grid-cols-2 gap-3">
-                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_status')}</div>{statusBadge(d.suspended ? 'Suspended' : d.subscription?.status ?? null, t)}</div>
+                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_status')}</div>{statusBadge(d.deleted ? 'Deleted' : d.suspended ? 'Suspended' : d.subscription?.status ?? null, t)}</div>
                 <div><div className="text-xs text-muted-foreground">{t('plt.drawer_plan')}</div>{d.subscription?.plan_code ?? '—'}</div>
                 <div><div className="text-xs text-muted-foreground">{t('plt.drawer_users_branches')}</div>{d.counts.users} · {d.counts.branches}</div>
                 <div><div className="text-xs text-muted-foreground">{t('plt.drawer_trial_until')}</div>{d.subscription?.trial_ends_at ? thaiDate(d.subscription.trial_ends_at) : '—'}</div>
@@ -152,6 +169,17 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                     by: d.suspended_by ? t('plt.drawer_suspended_by', { who: d.suspended_by }) : '',
                     reason: d.suspend_reason ? t('plt.drawer_suspended_reason', { reason: d.suspend_reason }) : '',
                   })}
+                </div>
+              )}
+              {d.deleted && (
+                <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                    <AlertTriangle className="size-3.5" /> {t('plt.drawer_restore_title')}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t('plt.drawer_restore_desc')}</p>
+                  <Button size="sm" variant="outline" onClick={() => restoreTenant.mutate()} disabled={restoreTenant.isPending}>
+                    <Play className="size-3.5" /> {t('plt.drawer_restore_btn')}
+                  </Button>
                 </div>
               )}
 
@@ -202,8 +230,9 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                 </Button>
               </div>
 
-              {/* Danger zone — factory reset. Only offered on a suspended company (two-step safety). */}
-              {d.suspended && (
+              {/* Danger zone — factory reset + delete. Only offered on a suspended, non-deleted company
+                  (two-step safety: suspend → reset/delete). */}
+              {d.suspended && !d.deleted && (
                 <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
                   <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
                     <AlertTriangle className="size-3.5" /> {t('plt.drawer_reset_title')}
@@ -217,6 +246,21 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                     <Button size="sm" variant="destructive" onClick={() => factoryReset.mutate()} disabled={resetConfirm.trim() !== d.code || factoryReset.isPending}>
                       <Trash2 className="size-3.5" /> {t('plt.drawer_reset_btn')}
                     </Button>
+                  </div>
+                  <div className="mt-1 border-t border-destructive/20 pt-2">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                      <AlertTriangle className="size-3.5" /> {t('plt.drawer_delete_title')}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{t('plt.drawer_delete_desc')}</p>
+                    <div className="mt-2 flex items-end gap-2">
+                      <div className="grid flex-1 gap-1">
+                        <Label className="text-xs">{t('plt.drawer_delete_confirm_label', { code: d.code })}</Label>
+                        <Input value={deleteConfirm} onChange={(e) => setDeleteConfirm(e.target.value)} placeholder={d.code} />
+                      </div>
+                      <Button size="sm" variant="destructive" onClick={() => deleteTenant.mutate()} disabled={deleteConfirm.trim() !== d.code || deleteTenant.isPending}>
+                        <Trash2 className="size-3.5" /> {t('plt.drawer_delete_btn')}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -252,12 +296,15 @@ export default function PlatformConsole({
 }) {
   const { t } = useLang();
   const qc = useQueryClient();
+  // Show-deleted toggle (migration 0386 soft-delete) — off by default so the fleet list matches the
+  // pre-delete behaviour; flipping it refetches with deleted companies included, for restoreTenant.
+  const [showDeleted, setShowDeleted] = useState(false);
   // Auto-refresh so the fleet view stays current without a manual reload — new signup requests, trials
   // slipping past due, etc. surface on their own (near-real-time; platform events aren't sub-second).
   const companies = useQuery<Company[]>({
-    queryKey: ['admin-tenants'],
-    queryFn: () => api<Company[]>('/api/admin/tenants'),
-    initialData: initialCompanies,
+    queryKey: ['admin-tenants', showDeleted],
+    queryFn: () => api<Company[]>(`/api/admin/tenants${showDeleted ? '?include_deleted=1' : ''}`),
+    initialData: showDeleted ? undefined : initialCompanies,
     refetchInterval: 60_000,
   });
   const requests = useQuery<SignupRequest[]>({
@@ -428,17 +475,20 @@ export default function PlatformConsole({
         )}
       </div>
     ) },
-    { key: 'status', label: t('plt.col_status'), render: (c) => statusBadge(c.status, t) },
+    { key: 'status', label: t('plt.col_status'), render: (c) => statusBadge(c.deleted ? 'Deleted' : c.status, t) },
     { key: 'plan_code', label: t('plt.col_plan'), render: (c) => c.plan_code ?? '—' },
     { key: 'users', label: t('plt.col_users'), align: 'right', sortable: true, render: (c) => c.users },
     { key: 'trial_ends_at', label: t('plt.col_trial_until'), render: (c) => (c.trial_ends_at ? thaiDate(c.trial_ends_at) : '—') },
     { key: 'created_at', label: t('plt.col_opened_at'), sortable: true, render: (c) => (c.created_at ? thaiDate(c.created_at) : '—') },
     { key: 'actions', label: '', align: 'right', render: (c) => (
       <div className="flex justify-end gap-1">
-        <Button size="sm" variant="outline" onClick={() => view(c)}><Eye className="size-3.5" /> {t('plt.action_view')}</Button>
-        <Button size="sm" variant={c.suspended ? 'outline' : 'ghost'} onClick={() => suspend.mutate(c)} disabled={suspend.isPending}>
+        <Button size="sm" variant="outline" onClick={() => view(c)} disabled={c.deleted}><Eye className="size-3.5" /> {t('plt.action_view')}</Button>
+        <Button size="sm" variant={c.suspended ? 'outline' : 'ghost'} onClick={() => suspend.mutate(c)} disabled={suspend.isPending || c.deleted}>
           {c.suspended ? <><Play className="size-3.5" /> {t('plt.action_reactivate')}</> : <><Pause className="size-3.5" /> {t('plt.action_suspend')}</>}
         </Button>
+        {c.deleted && (
+          <Button size="sm" variant="outline" onClick={() => setDetailId(c.id)}>{t('plt.drawer_restore_btn')}</Button>
+        )}
       </div>
     ) },
   ];
@@ -528,6 +578,10 @@ export default function PlatformConsole({
   const companyRows = tagFilter ? comps.filter((c) => (c.tags ?? []).includes(tagFilter)) : comps;
   const companiesTab = (
     <StateView q={companies}>
+      <label className="mb-2 flex w-fit items-center gap-1.5 text-xs text-muted-foreground">
+        <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} />
+        {t('plt.show_deleted_toggle')}
+      </label>
       {allTags.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-muted-foreground">{t('plt.tags_label')}</span>

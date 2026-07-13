@@ -46,6 +46,18 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.drawer_reset_confirm_label': { th: 'พิมพ์รหัสบริษัท "{code}" เพื่อยืนยัน', en: 'Type the company code "{code}" to confirm' },
   'plt.drawer_reset_btn': { th: 'ล้างข้อมูล', en: 'Reset' },
   'plt.company_reset_done': { th: 'ล้างข้อมูล {name} แล้ว (ลบ {rows} แถว)', en: '{name} reset — {rows} rows deleted' },
+  // Danger zone — delete company (soft, offered only on a suspended company: suspend → delete)
+  'plt.drawer_delete_title': { th: 'ลบบริษัท', en: 'Delete company' },
+  'plt.drawer_delete_desc': { th: 'ซ่อนบริษัทนี้จากรายชื่อและปิดกั้นการเข้าสู่ระบบถาวร — ไม่ลบข้อมูลธุรกิจ (ต่างจาก Factory reset) กู้คืนได้ภายหลังด้วยปุ่ม "กู้คืน" ทำได้เฉพาะบริษัทที่ถูกระงับอยู่', en: 'Hides this company from the list and permanently blocks logins — business data is NOT touched (unlike Factory reset). Reversible later with "Restore". Available only while the company is suspended.' },
+  'plt.drawer_delete_confirm_label': { th: 'พิมพ์รหัสบริษัท "{code}" เพื่อยืนยันการลบ', en: 'Type the company code "{code}" to confirm deletion' },
+  'plt.drawer_delete_btn': { th: 'ลบบริษัท', en: 'Delete' },
+  'plt.company_deleted': { th: 'ลบ {name} แล้ว', en: '{name} deleted' },
+  'plt.drawer_restore_title': { th: 'บริษัทนี้ถูกลบแล้ว', en: 'This company is deleted' },
+  'plt.drawer_restore_desc': { th: 'ผู้ใช้ล็อกอินไม่ได้จนกว่าจะกู้คืน — กู้คืนแล้วบริษัทจะยังอยู่ในสถานะระงับ ต้องกดคืนสถานะแยกต่างหาก', en: 'Users cannot log in until restored — after restoring the company stays suspended, requiring a separate reactivate.' },
+  'plt.drawer_restore_btn': { th: 'กู้คืน', en: 'Restore' },
+  'plt.company_restored': { th: 'กู้คืน {name} แล้ว', en: '{name} restored' },
+  'plt.show_deleted_toggle': { th: 'แสดงบริษัทที่ถูกลบ', en: 'Show deleted companies' },
+  'plt.status_deleted': { th: 'ถูกลบ', en: 'Deleted' },
 
   // ── Company table / list ──
   'plt.col_company': { th: 'บริษัท', en: 'Company' },

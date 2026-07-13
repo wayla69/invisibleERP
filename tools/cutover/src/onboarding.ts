@@ -308,6 +308,59 @@ async function main() {
   ok('The company Admin logs in and works after reset+reactivate (identity preserved)', lcRelogin.status === 200 && !!lcRelogin.json.token && lcAccess.status === 200, `login=${lcRelogin.status} access=${lcAccess.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
+  // ── 3g3. Tenant soft-delete (migration 0386): lighter than factory-reset — flags the tenant row
+  //         WITHOUT touching business data. Same two-step safety (suspend → delete), god-only, typed
+  //         company code. Deleted users are blocked (TENANT_DELETED) even if later reactivated (only
+  //         restoreTenant clears it); the company drops out of listTenants() until restored. ──
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+  const delActive = await inj('POST', `/api/admin/tenants/${lcTid}/delete`, owner, { confirm: 'lifeco1' });
+  ok('Delete on an ACTIVE (non-suspended) company → 409 TENANT_NOT_SUSPENDED', delActive.status === 409 && delActive.json.error?.code === 'TENANT_NOT_SUSPENDED', `${delActive.status} ${delActive.json.error?.code}`);
+
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // owner1 no longer god → guard must deny before anything runs
+  const delNonGod = await inj('POST', `/api/admin/tenants/${lcTid}/delete`, owner, { confirm: 'lifeco1' });
+  ok('Delete blocked for a non-platform-admin (403)', delNonGod.status === 403, `${delNonGod.status}`);
+
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+  await inj('POST', `/api/admin/tenants/${lcTid}/suspend`, owner, { reason: 'pre-delete (pure test tenant)' });
+  const delBadConfirm = await inj('POST', `/api/admin/tenants/${lcTid}/delete`, owner, { confirm: 'wrong-code' });
+  ok('Delete with a wrong typed code → 400 CONFIRM_MISMATCH', delBadConfirm.status === 400 && delBadConfirm.json.error?.code === 'CONFIRM_MISMATCH', `${delBadConfirm.status} ${delBadConfirm.json.error?.code}`);
+
+  const preDelCounts = (await pg.query(`SELECT (SELECT count(*)::int FROM users WHERE tenant_id=${lcTid}) u`)).rows[0] as any;
+  const del = await inj('POST', `/api/admin/tenants/${lcTid}/delete`, owner, { confirm: 'lifeco1' });
+  ok('Delete (god + suspended + typed code) → 200 status=deleted', del.status === 200 && del.json.status === 'deleted', `${del.status} ${JSON.stringify(del.json)}`);
+  const postDelCounts = (await pg.query(`SELECT (SELECT count(*)::int FROM users WHERE tenant_id=${lcTid}) u`)).rows[0] as any;
+  ok('Delete does NOT touch business data (unlike factory-reset — user rows unchanged)', postDelCounts.u === preDelCounts.u, JSON.stringify({ pre: preDelCounts.u, post: postDelCounts.u }));
+
+  const delAgain = await inj('POST', `/api/admin/tenants/${lcTid}/delete`, owner, { confirm: 'lifeco1' });
+  ok('Deleting an already-deleted company → 409 TENANT_ALREADY_DELETED', delAgain.status === 409 && delAgain.json.error?.code === 'TENANT_ALREADY_DELETED', `${delAgain.status} ${delAgain.json.error?.code}`);
+
+  const listDefault = await inj('GET', '/api/admin/tenants', owner);
+  ok('Deleted company drops out of the default company list', listDefault.status === 200 && !(listDefault.json as any[]).some((c: any) => c.id === lcTid), `${listDefault.status}`);
+  const listIncl = await inj('GET', '/api/admin/tenants?include_deleted=1', owner);
+  ok('include_deleted=1 shows the deleted company (flagged)', listIncl.status === 200 && (listIncl.json as any[]).some((c: any) => c.id === lcTid && c.deleted === true), `${listIncl.status}`);
+
+  // Reactivate the SUSPENDED-and-deleted company: TENANT_DELETED must still win over TENANT_SUSPENDED
+  // clearing — reactivate does not implicitly restore, so login stays blocked, now for the deleted reason.
+  await inj('POST', `/api/admin/tenants/${lcTid}/reactivate`, owner, {});
+  const delAccessBlocked = await inj('GET', '/api/tenant/onboarding-status', lcTok);
+  ok('A deleted (even reactivated) company Admin is BLOCKED (403 TENANT_DELETED)', delAccessBlocked.status === 403 && delAccessBlocked.json.error?.code === 'TENANT_DELETED', `${delAccessBlocked.status} ${delAccessBlocked.json.error?.code}`);
+  await inj('POST', `/api/admin/tenants/${lcTid}/suspend`, owner, { reason: 're-suspend for restore test' }); // put back to the pre-reactivate state
+
+  const restoreNonDel = await inj('POST', `/api/admin/tenants/${newTid}/restore`, owner, {});
+  ok('Restoring a non-deleted company → 409 TENANT_NOT_DELETED', restoreNonDel.status === 409 && restoreNonDel.json.error?.code === 'TENANT_NOT_DELETED', `${restoreNonDel.status} ${restoreNonDel.json.error?.code}`);
+
+  const restore = await inj('POST', `/api/admin/tenants/${lcTid}/restore`, owner, {});
+  ok('Restore (god-only) → 200 status=restored', restore.status === 200 && restore.json.status === 'restored', `${restore.status} ${JSON.stringify(restore.json)}`);
+  const listAfterRestore = await inj('GET', '/api/admin/tenants', owner);
+  ok('Restored company reappears in the default list', listAfterRestore.status === 200 && (listAfterRestore.json as any[]).some((c: any) => c.id === lcTid), `${listAfterRestore.status}`);
+  const stillSuspendedAccess = await inj('GET', '/api/tenant/onboarding-status', lcTok);
+  ok('Restore does NOT auto-reactivate — still 403 TENANT_SUSPENDED (separate reactivate required)', stillSuspendedAccess.status === 403 && stillSuspendedAccess.json.error?.code === 'TENANT_SUSPENDED', `${stillSuspendedAccess.status} ${stillSuspendedAccess.json.error?.code}`);
+  const finalReact = await inj('POST', `/api/admin/tenants/${lcTid}/reactivate`, owner, {});
+  const finalLogin = await login('lifeco_admin', 'lifeco12345');
+  const finalAccess = await inj('GET', '/api/tenant/onboarding-status', finalLogin.json.token);
+  ok('After restore + reactivate, the company Admin works normally again', finalReact.status === 200 && finalAccess.status === 200, `react=${finalReact.status} access=${finalAccess.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
+
   // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;
   //        a free plan is rejected (nothing to charge). Real Stripe is exercised only with a key set. ──
   const coPro = await inj('POST', '/api/billing/checkout', owner, { plan_code: 'pro' });

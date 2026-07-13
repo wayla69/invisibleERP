@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Public, Permissions, PlatformAdmin, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BillingService, type SignupDto } from './billing.service';
+import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { SaasMetricsService } from './saas-metrics.service';
 
 const SignupBody = z.object({
@@ -32,6 +33,7 @@ const RejectBody = z.object({ reason: z.string().max(500).optional() });
 type RejectDto = z.infer<typeof RejectBody>;
 
 const FactoryResetBody = z.object({ confirm: z.string().min(1).max(100) });
+const DeleteTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 
 const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional() }); // 1.7 — annual billing + multi-currency
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
@@ -43,6 +45,7 @@ export class BillingController {
   constructor(
     private readonly svc: BillingService,
     private readonly metrics: SaasMetricsService,
+    private readonly lifecycle: TenantLifecycleService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -103,8 +106,8 @@ export class BillingController {
   // single company to scope its view to (see the X-Act-As-Tenant header in TenantTxInterceptor). Lists ALL
   // tenants (runs under the @PlatformAdmin RLS bypass); non-owners 403 at the guard.
   @Get('admin/tenants') @PlatformAdmin()
-  listTenants() {
-    return this.svc.listTenants();
+  listTenants(@Query('include_deleted') includeDeleted?: string) {
+    return this.svc.listTenants(includeDeleted === '1' || includeDeleted === 'true');
   }
 
   // Cross-company AI-token usage aggregate (Platform Console AI-spend panel).
@@ -155,6 +158,20 @@ export class BillingController {
   @Post('admin/tenants/:id/factory-reset') @PlatformAdmin() @HttpCode(200)
   factoryResetTenant(@Param('id') id: string, @Body(new ZodValidationPipe(FactoryResetBody)) b: { confirm: string }, @CurrentUser() u: JwtUser) {
     return this.svc.factoryResetTenant(Number(id), u.username, b.confirm);
+  }
+
+  // Tenant soft-delete (migration 0386) — flags the company row deleted WITHOUT touching business data
+  // (lighter than factory-reset). Same two-step safety: SUSPENDED first (409 TENANT_NOT_SUSPENDED), then
+  // type the company code (400 CONFIRM_MISMATCH). Deleted companies drop out of listTenants() and their
+  // users are permanently blocked (TENANT_DELETED) regardless of suspended_at. Reversible via restore.
+  @Post('admin/tenants/:id/delete') @PlatformAdmin() @HttpCode(200)
+  deleteTenant(@Param('id') id: string, @Body(new ZodValidationPipe(DeleteTenantBody)) b: { confirm: string }, @CurrentUser() u: JwtUser) {
+    return this.lifecycle.deleteTenant(Number(id), u.username, b.confirm);
+  }
+
+  @Post('admin/tenants/:id/restore') @PlatformAdmin() @HttpCode(200)
+  restoreTenant(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.lifecycle.restoreTenant(Number(id), u.username);
   }
 
   // PUBLIC plan catalogue
