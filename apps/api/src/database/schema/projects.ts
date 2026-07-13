@@ -175,6 +175,49 @@ export const projectResources = pgTable(
   (t) => ({ byProject: index('idx_presource_project').on(t.projectId), byResource: index('idx_presource_name').on(t.tenantId, t.resourceName) }),
 );
 
+// Resource skills (PPM-A1, PROJ-20) — which real, named people can fill a given role/skill. A `project_resources`
+// assignment whose resource_name has no matching row here is a GENERIC placeholder booking (e.g. "Senior Dev
+// TBD"); one with a matching row is a NAMED booking. Also the supply side of role/skill supply-vs-demand.
+export const resourceSkills = pgTable(
+  'resource_skills',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    resourceName: text('resource_name').notNull(),
+    skill: text('skill').notNull(),                            // same free-text space as project_resources.role
+    proficiency: text('proficiency'),                          // e.g. junior | mid | senior (optional)
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    byResource: index('idx_rskill_resource').on(t.tenantId, t.resourceName),
+    bySkill: index('idx_rskill_skill').on(t.tenantId, t.skill),
+    uniq: unique('uq_rskill_resource_skill').on(t.tenantId, t.resourceName, t.skill),
+  }),
+);
+
+// Resource availability calendar (PPM-A1, PROJ-20) — a per-resource, per-month capacity CEILING (default 100%
+// when no row exists). Backs the heatmap's over-allocation flag against a resource's TRUE availability (e.g. a
+// 50%-part-time person flagged over-allocated at 60%, not only above the old flat 100% assumption) and the
+// supply side of role/skill supply-vs-demand.
+export const resourceCalendar = pgTable(
+  'resource_calendar',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    resourceName: text('resource_name').notNull(),
+    month: date('month').notNull(),                            // first-of-month, e.g. 2026-07-01
+    availablePct: numeric('available_pct', { precision: 5, scale: 2 }).notNull().default('100'),
+    reason: text('reason'),                                    // e.g. PTO | part_time | leave
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    byResource: index('idx_rcal_resource').on(t.tenantId, t.resourceName),
+    uniq: unique('uq_rcal_resource_month').on(t.tenantId, t.resourceName, t.month),
+  }),
+);
+
 // Project baseline (B1) — a change-controlled snapshot of the approved plan (BAC + schedule duration) at a
 // point in time. Re-baselining requires a reason and preserves history (status active→superseded); variance
 // of the current plan vs the active baseline surfaces scope/cost creep (PROJ-07).
@@ -671,3 +714,5 @@ export type ProjectTask = typeof projectTasks.$inferSelect;
 export type ProjectMilestone = typeof projectMilestones.$inferSelect;
 export type ResourceRate = typeof resourceRates.$inferSelect;
 export type ProjectResource = typeof projectResources.$inferSelect;
+export type ResourceSkill = typeof resourceSkills.$inferSelect;
+export type ResourceCalendarEntry = typeof resourceCalendar.$inferSelect;

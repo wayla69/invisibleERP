@@ -41,7 +41,7 @@ data import, finance-adjacent). Reuses existing **infrastructure patterns**, not
 - Dashboard read: a `reputation_summary` report type + a thin `BiService.reputationSummaryLive()` wrapper
   (same shape as `marketing_roi` / `BiService.marketingRoiLive()`), backing a live dashboard tab.
 
-## 2. Schema (migration `0400`)
+## 2. Schema (migration `0401`)
 
 - **`reputation_connections`** — one row per `(tenant_id, platform)`. `platform: 'google_maps' |
   'google_analytics'`. Encrypted `access_token_enc`/`refresh_token_enc`, `token_expires_at`, `scope`,
@@ -76,7 +76,7 @@ All four get the canonical org-scoped `tenant_isolation` RLS policy (0232/0399 f
 
 ## 4. Control & risk impact
 
-New RCM control **MKT-15** (external reputation & analytics ingestion): encrypted-at-rest OAuth credential
+New RCM control **MKT-14** (external reputation & analytics ingestion): encrypted-at-rest OAuth credential
 storage (never returned by any read endpoint), tenant-scoped ingestion (RLS + explicit `tenant_id` filter,
 Multi-Tenant Test Protocol boundary test), and reviewer PII (name/photo) is genuinely public data the
 reviewer already published to Google Maps — not first-party consent-gated PII, so no ROPA/consent gate

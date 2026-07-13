@@ -2617,7 +2617,14 @@
       "idx": 374,
       "version": "7",
       "when": 2023820000339,
-      "tag": "0400_reputation",
+      "tag": "0400_resource_skills_calendar",
+      "breakpoints": true
+    },
+    {
+      "idx": 375,
+      "version": "7",
+      "when": 2023820000340,
+      "tag": "0401_reputation",
       "breakpoints": true
     }
   ]

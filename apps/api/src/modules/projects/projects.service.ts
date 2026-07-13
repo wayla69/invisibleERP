@@ -27,6 +27,8 @@ export interface TaskPatchDto { name?: string; status?: string; planned_start?: 
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
+export interface ResourceSkillDto { resource_name: string; skill: string; proficiency?: string }
+export interface ResourceCalendarDto { resource_name: string; month: string; available_pct?: number; reason?: string }
 export interface BaselineDto { label?: string; reason?: string }
 export interface ProgramDto { program_code?: string | null; depends_on_projects?: string[] }
 export interface TemplateItemDto { item_type?: 'task' | 'milestone'; seq?: number; name: string; parent_seq?: number; wbs_code?: string; planned_hours?: number; planned_cost?: number; offset_start_days?: number; offset_end_days?: number; depends_on_seq?: number[]; billing_percent?: number; owner?: string; assignee?: string }
@@ -340,6 +342,11 @@ export class ProjectsService {
   async listResources(code: string) { return this.resourcing.listResources(code); }
   async resourceUtilization(user: JwtUser) { return this.resourcing.resourceUtilization(user); }
   async resourceCapacity(user: JwtUser, dto?: { months?: number; from?: string }) { return this.resourcing.resourceCapacity(user, dto); }
+  async upsertResourceSkill(dto: ResourceSkillDto, user: JwtUser) { return this.resourcing.upsertResourceSkill(dto, user); }
+  async listResourceSkills(user: JwtUser) { return this.resourcing.listResourceSkills(user); }
+  async upsertResourceCalendar(dto: ResourceCalendarDto, user: JwtUser) { return this.resourcing.upsertResourceCalendar(dto, user); }
+  async listResourceCalendar(user: JwtUser, resourceName?: string) { return this.resourcing.listResourceCalendar(user, resourceName); }
+  async roleSupplyDemand(user: JwtUser, dto?: { months?: number; from?: string }) { return this.resourcing.roleSupplyDemand(user, dto); }
 
 
 
