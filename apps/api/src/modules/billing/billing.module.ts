@@ -4,6 +4,7 @@ import { LedgerModule } from '../ledger/ledger.module';
 import { TaxModule } from '../tax/tax.module';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
+import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { SaasMetricsService } from './saas-metrics.service';
 import { TenantController } from './tenant.controller';
 import { StripeWebhookController } from './stripe-webhook.controller';
@@ -19,7 +20,7 @@ import { BillingBiReports } from './billing-bi-reports';
 @Module({
   imports: [AuthModule, LedgerModule, TaxModule, PlatformNotificationsModule],
   controllers: [BillingController, TenantController, StripeWebhookController],
-  providers: [BillingBiReports, BillingService, SaasMetricsService, PlanGuard],
+  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasMetricsService, PlanGuard],
   exports: [BillingService, PlanGuard],
 })
 export class BillingModule {}

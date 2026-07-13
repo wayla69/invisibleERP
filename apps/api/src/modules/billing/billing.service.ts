@@ -15,6 +15,7 @@ import type { JwtUser } from '../../common/decorators';
 import { PLAN_SUITES } from '@ierp/shared';
 import { computeProration } from './proration';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
+import { wipeTenantRefs, tenantIdColumns } from './tenant-wipe';
 
 // Public self-serve signup gate (ITGC-AC-18). In PRODUCTION, self-service company provisioning is
 // DISABLED unconditionally — only the platform owner ("god", godmimi) opens a new company (directly via
@@ -269,11 +270,14 @@ export class BillingService {
   // Console table. Runs under the @PlatformAdmin RLS bypass, so it lists EVERY tenant. Enriched with the
   // subscription (plan/status/trial) and a live user count so the console can show each company's posture
   // at a glance. Ordered by code for a stable list.
-  async listTenants() {
+  // includeDeleted — the Platform Console fleet list/switcher hides soft-deleted companies (migration
+  // 0386) by default; pass true to show them (e.g. a "show deleted" toggle) for restoreTenant.
+  async listTenants(includeDeleted = false) {
     const rows = await this.db
       .select({
         id: tenants.id, code: tenants.code, name: tenants.name,
         suspendedAt: tenants.suspendedAt, createdAt: tenants.createdAt,
+        deletedAt: tenants.deletedAt, deletedBy: tenants.deletedBy, purgedAt: tenants.purgedAt,
         legalName: tenants.legalName, taxId: tenants.taxId, addressLine1: tenants.addressLine1, province: tenants.province,
         tags: tenants.tags,
         planCode: subscriptions.planCode, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt,
@@ -294,11 +298,15 @@ export class BillingService {
       const id = Number(t.id);
       if (seen.has(id)) continue;
       seen.add(id);
+      if (t.deletedAt && !includeDeleted) continue;
       out.push({
         id, code: t.code, name: t.name,
         suspended: !!t.suspendedAt,
-        // Suspended wins as the headline status; otherwise show the subscription status (or null if none).
-        status: t.suspendedAt ? 'Suspended' : (t.status ?? null),
+        deleted: !!t.deletedAt,
+        deleted_by: t.deletedBy ?? null,
+        purged: !!t.purgedAt,
+        // Deleted wins over suspended as the headline status; otherwise show the subscription status.
+        status: t.deletedAt ? 'Deleted' : t.suspendedAt ? 'Suspended' : (t.status ?? null),
         plan_code: t.planCode ?? null,
         trial_ends_at: t.trialEndsAt ?? null,
         users: countByTenant.get(id) ?? 0,
@@ -369,6 +377,8 @@ export class BillingService {
       id: Number(t.id), code: t.code, name: t.name, legal_name: t.legalName ?? null, tax_id: t.taxId ?? null,
       created_at: t.createdAt ?? null,
       suspended: !!t.suspendedAt, suspended_at: t.suspendedAt ?? null, suspend_reason: t.suspendReason ?? null, suspended_by: t.suspendedBy ?? null,
+      deleted: !!t.deletedAt, deleted_at: t.deletedAt ?? null, deleted_by: t.deletedBy ?? null,
+      purged: !!t.purgedAt, purged_at: t.purgedAt ?? null, purged_by: t.purgedBy ?? null,
       tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
       subscription: sub ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null } : null,
       counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },
@@ -425,37 +435,13 @@ export class BillingService {
     if ((confirm ?? '').trim() !== t.code)
       throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type the company code exactly to confirm the reset', messageTh: `พิมพ์รหัสบริษัท "${t.code}" ให้ตรงเพื่อยืนยันการล้างข้อมูล` });
 
-    const db = this.db;
     // Same runtime enumeration the RLS loop migrations use — every BASE TABLE carrying a tenant_id column
     // is tenant-scoped by convention (platform tables name theirs about_tenant_id/created_tenant_id).
-    const enumRes: any = await db.execute(sql`
-      SELECT c.table_name FROM information_schema.columns c
-      JOIN information_schema.tables tb ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name
-      WHERE c.table_schema = 'public' AND c.column_name = 'tenant_id' AND tb.table_type = 'BASE TABLE'
-      ORDER BY c.table_name`);
-    const allTables: string[] = (enumRes.rows ?? enumRes).map((r: any) => String(r.table_name));
-    let remaining = allTables.filter((n) => !FACTORY_RESET_PRESERVE.has(n));
-    const targeted = remaining.length;
-    let rowsDeleted = 0;
-
-    while (remaining.length) {
-      const blocked: string[] = [];
-      for (const name of remaining) {
-        const ident = sql.raw(`"${name.replace(/"/g, '""')}"`); // identifier from information_schema, not user input
-        await db.execute(sql`SAVEPOINT factory_reset_tbl`);
-        try {
-          const r: any = await db.execute(sql`DELETE FROM ${ident} WHERE tenant_id = ${id}`);
-          await db.execute(sql`RELEASE SAVEPOINT factory_reset_tbl`);
-          rowsDeleted += Number(r?.rowCount ?? r?.affectedRows ?? 0);
-        } catch {
-          await db.execute(sql`ROLLBACK TO SAVEPOINT factory_reset_tbl`);
-          blocked.push(name);
-        }
-      }
-      if (blocked.length === remaining.length)
-        throw new ConflictException({ code: 'FACTORY_RESET_BLOCKED', message: `Reset blocked — tables still referenced: ${blocked.slice(0, 8).join(', ')}${blocked.length > 8 ? '…' : ''}`, messageTh: 'ล้างข้อมูลไม่สำเร็จ — มีตารางที่ยังถูกอ้างอิงจากข้อมูลที่ระบบต้องเก็บไว้' });
-      remaining = blocked;
-    }
+    const { targeted, rowsDeleted } = await wipeTenantRefs(
+      this.db, id, await tenantIdColumns(this.db), FACTORY_RESET_PRESERVE, 'FACTORY_RESET_BLOCKED',
+      (names) => `Reset blocked — tables still referenced: ${names}`,
+      () => 'ล้างข้อมูลไม่สำเร็จ — มีตารางที่ยังถูกอ้างอิงจากข้อมูลที่ระบบต้องเก็บไว้',
+    );
 
     // Re-seed the fresh-tenant defaults so the company is immediately usable (mirrors provisionTenant).
     const industry = isIndustryKey((t as { industry?: string }).industry) ? (t as { industry?: string }).industry! : 'general';
