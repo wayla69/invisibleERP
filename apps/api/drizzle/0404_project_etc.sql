@@ -1,4 +1,4 @@
--- 0402_project_etc — PPM-B2 (docs/44): bottom-up cost-to-complete (ETC) entry + independent EAC scenarios
+-- 0404_project_etc — PPM-B2 (docs/44): bottom-up cost-to-complete (ETC) entry + independent EAC scenarios
 -- (control PROJ-22). Extends the existing evm() closed-form EAC (`ac + (bac-ev)/cpi`, formulaic) with an
 -- OPTIONAL, per-task manual estimate-to-complete that management can enter directly — additive, zero
 -- regression: a project with no project_etc rows computes evm()/eac-scenarios exactly as before (the

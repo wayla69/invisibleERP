@@ -279,10 +279,26 @@ async function main() {
     VALUES ('SALE-FR-1', '${year}-06-20', ${lcTid}, '100', '0', '0', '100', 'Cash', 'Completed', 'lifeco_admin')`);
   await pg.query(`INSERT INTO cust_pos_items (sale_id, item_id, item_description, qty, uom, unit_price, amount, discount_pct, is_custom)
     SELECT id, 'A', 'Apple', '1', 'EA', '100', '100', '0', false FROM cust_pos_sales WHERE sale_no='SALE-FR-1'`);
+  // The 2026-07-13 Amber reset outage (second bug): goods_receipts↔gr_items are BOTH tenant-scoped, but
+  // gr_items FK-references goods_receipts and sorts AFTER it alphabetically. The old savepoint-retry loop
+  // relied on catching the failed goods_receipts DELETE and retrying next round — which PGlite honours but
+  // postgres-js does NOT (a failed statement poisons the whole tx), so prod raised a raw FK 500 while CI
+  // stayed green. Seed the exact shape so the reset must delete gr_items BEFORE goods_receipts (topo order).
+  await pg.query(`INSERT INTO goods_receipts (gr_no, gr_date, tenant_id, received_by) VALUES ('GR-FR-1', '${year}-06-20', ${lcTid}, 'lifeco_admin')`);
+  await pg.query(`INSERT INTO gr_items (gr_id, tenant_id, po_no, item_id, received_qty, uom) SELECT id, ${lcTid}, 'PO-FR-1', 'A', '1', 'EA' FROM goods_receipts WHERE gr_no='GR-FR-1'`);
+  // Third bug: append-only immutability triggers (GL_IMMUTABLE on a Posted journal_entries row,
+  // approval_actions_immutable on any approval_actions row) RAISE on DELETE and block the wipe. The wipe
+  // sets app.tenant_wipe='on' (migration 0402) so those triggers skip their block. Seed both directly
+  // (Posted status + an approval action) so the reset must delete through the immutability guard.
+  await pg.query(`INSERT INTO journal_entries (entry_no, entry_date, source, status, tenant_id) VALUES ('JE-POSTED-FR', '${year}-06-20', 'TEST', 'Posted', ${lcTid})`);
+  await pg.query(`INSERT INTO journal_lines (entry_id, account_code, debit, credit, tenant_id) SELECT id, '1000', '25', '0', ${lcTid} FROM journal_entries WHERE entry_no='JE-POSTED-FR'`);
+  await pg.query(`INSERT INTO workflow_instances (tenant_id, doc_type, doc_no, created_by) VALUES (${lcTid}, 'PO', 'WF-FR-1', 'lifeco_admin')`);
+  await pg.query(`INSERT INTO approval_actions (tenant_id, instance_id, step_no, actor, decision) SELECT ${lcTid}, id, 1, 'lifeco_admin', 'approve' FROM workflow_instances WHERE doc_no='WF-FR-1'`);
   const preCounts = (await pg.query(`SELECT (SELECT count(*)::int FROM branches WHERE tenant_id=${lcTid}) b,
     (SELECT count(*)::int FROM journal_entries WHERE tenant_id=${lcTid}) j,
+    (SELECT count(*)::int FROM gr_items WHERE tenant_id=${lcTid}) gri,
     (SELECT count(*)::int FROM cust_pos_items ci JOIN cust_pos_sales cs ON ci.sale_id=cs.id WHERE cs.tenant_id=${lcTid}) ci`)).rows[0] as any;
-  ok('Factory-reset setup: LifeCo holds test data (branch + JE + POS sale with a TENANTLESS line child)', preCounts.b >= 1 && preCounts.j >= 1 && preCounts.ci >= 1, JSON.stringify(preCounts));
+  ok('Factory-reset setup: LifeCo holds test data (branch + JE + POS TENANTLESS child + GR tenant-scoped child)', preCounts.b >= 1 && preCounts.j >= 1 && preCounts.ci >= 1 && preCounts.gri >= 1, JSON.stringify(preCounts));
 
   process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
   const frActive = await inj('POST', `/api/admin/tenants/${lcTid}/factory-reset`, owner, { confirm: 'lifeco1' });
@@ -309,9 +325,14 @@ async function main() {
             (SELECT count(*)::int FROM audit_log WHERE tenant_id=${lcTid}) al,
             (SELECT count(*)::int FROM cust_pos_sales WHERE tenant_id=${lcTid}) cs,
             (SELECT count(*)::int FROM cust_pos_items WHERE item_description='Apple') ci,
+            (SELECT count(*)::int FROM goods_receipts WHERE tenant_id=${lcTid}) gr,
+            (SELECT count(*)::int FROM gr_items WHERE tenant_id=${lcTid}) gri,
+            (SELECT count(*)::int FROM approval_actions WHERE tenant_id=${lcTid}) aa,
             (SELECT count(*)::int FROM branches WHERE tenant_id=${newTid}) ob`)).rows[0] as any;
   ok('Reset wiped LifeCo data (branches + JEs = 0) and re-seeded 12 fiscal periods', post.b === 0 && post.j === 0 && post.fp === 12, JSON.stringify(post));
   ok('Reset cleared the TENANTLESS FK child too (cust_pos_items via cust_pos_sales — the OSHINEI blocker)', post.cs === 0 && post.ci === 0, JSON.stringify({ cs: post.cs, ci: post.ci }));
+  ok('Reset cleared the tenant-scoped FK child in child-first order (gr_items before goods_receipts — the Amber blocker)', post.gr === 0 && post.gri === 0, JSON.stringify({ gr: post.gr, gri: post.gri }));
+  ok('Reset deleted APPEND-ONLY rows through the immutability guard (Posted JE + approval_actions — app.tenant_wipe bypass)', post.j === 0 && post.aa === 0, JSON.stringify({ j: post.j, aa: post.aa }));
   ok('Reset PRESERVED identity/billing/audit (users, subscription, audit_log rows survive)', post.u >= 1 && post.sub >= 1 && post.al >= 1, JSON.stringify({ u: post.u, sub: post.sub, al: post.al }));
   ok('Reset did NOT touch the sibling tenant (its branches unchanged)', post.ob === otherBranchesBefore, `before=${otherBranchesBefore} after=${post.ob}`);
   const reactAfterReset = await inj('POST', `/api/admin/tenants/${lcTid}/reactivate`, owner, {});

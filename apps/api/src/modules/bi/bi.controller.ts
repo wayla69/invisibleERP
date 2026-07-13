@@ -66,6 +66,13 @@ export class BiController {
     return this.svc.marketingRoiLive(user!, qintOpt('days', days));
   }
 
+  // Live reputation dashboard read (docs/47) — same gate/shape as marketing-roi above.
+  @Get('reputation-summary')
+  @Permissions('marketing', 'exec')
+  reputationSummary(@Query('days') days?: string, @CurrentUser() user?: JwtUser) {
+    return this.svc.reputationSummaryLive(user!, qintOpt('days', days));
+  }
+
   // ── Real-time streaming analytics (docs/22 Phase B) ──
   // Live KPI/event SSE stream, filtered to the caller's tenant. A snapshot refresh pushes a kpi_refresh event.
   @Sse('live/stream')

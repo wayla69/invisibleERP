@@ -1,0 +1,53 @@
+import type { Lang } from '../messages';
+
+// docs/47 — reputation & external analytics ingestion (Google Maps reviews, GA4). Namespaced `rep.*`.
+export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
+  'rep.title': { th: 'รีวิว & Analytics', en: 'Reputation & analytics' },
+  'rep.subtitle': { th: 'เชื่อมต่อ Google Maps และ Google Analytics เพื่อดึงรีวิวและข้อมูลการเข้าชมเว็บไซต์เข้ามาในระบบอัตโนมัติ', en: 'Connect Google Maps and Google Analytics to automatically pull reviews and site-traffic data into the ERP' },
+  'rep.tab_connections': { th: 'การเชื่อมต่อ', en: 'Connections' },
+  'rep.tab_reviews': { th: 'รีวิว', en: 'Reviews' },
+  'rep.tab_analytics': { th: 'Analytics', en: 'Analytics' },
+
+  'rep.not_connected': { th: 'ยังไม่ได้เชื่อมต่อ', en: 'Not connected' },
+  'rep.connect': { th: 'เชื่อมต่อ', en: 'Connect' },
+  'rep.targets_tracked': { th: 'รายการที่ติดตาม', en: 'target(s) tracked' },
+  'rep.never_synced': { th: 'ยังไม่เคยซิงก์', en: 'never synced' },
+  'rep.manage_targets': { th: 'จัดการสาขา/พร็อพเพอร์ตี้', en: 'Manage targets' },
+  'rep.sync_now': { th: 'ซิงก์ตอนนี้', en: 'Sync now' },
+  'rep.disconnect': { th: 'ยกเลิกการเชื่อมต่อ', en: 'Disconnect' },
+  'rep.synced': { th: 'ซิงก์สำเร็จ', en: 'Synced' },
+  'rep.disconnected': { th: 'ยกเลิกการเชื่อมต่อแล้ว', en: 'Disconnected' },
+  'rep.targets_saved': { th: 'บันทึกรายการที่ติดตามแล้ว', en: 'Targets saved' },
+  'rep.targets_dlg_title': { th: 'เลือกสาขา/พร็อพเพอร์ตี้ที่จะติดตาม', en: 'Choose locations/properties to track' },
+  'rep.no_targets_found': { th: 'ไม่พบสาขา/พร็อพเพอร์ตี้ที่เข้าถึงได้จากบัญชีนี้', en: 'No locations/properties accessible from this account' },
+  'rep.save': { th: 'บันทึก', en: 'Save' },
+
+  'rep.filter_all': { th: 'ทั้งหมด', en: 'All' },
+  'rep.filter_needs_attention': { th: 'ต้องตอบกลับ', en: 'Needs attention' },
+  'rep.no_reviews': { th: 'ยังไม่มีรีวิว', en: 'No reviews yet' },
+  'rep.col_author': { th: 'ผู้รีวิว', en: 'Reviewer' },
+  'rep.col_rating': { th: 'คะแนน', en: 'Rating' },
+  'rep.col_comment': { th: 'ความเห็น', en: 'Comment' },
+  'rep.col_date': { th: 'วันที่', en: 'Date' },
+  'rep.col_reply': { th: 'การตอบกลับ', en: 'Reply' },
+  'rep.replied': { th: 'ตอบแล้ว', en: 'Replied' },
+  'rep.reply': { th: 'ตอบกลับ', en: 'Reply' },
+  'rep.reply_dlg_title': { th: 'ตอบกลับรีวิว', en: 'Reply to review' },
+  'rep.reply_ph': { th: 'พิมพ์คำตอบ…', en: 'Write a reply…' },
+  'rep.send_reply': { th: 'ส่งคำตอบ', en: 'Send reply' },
+  'rep.reply_sent': { th: 'ส่งคำตอบแล้ว', en: 'Reply sent' },
+
+  'rep.avg_rating': { th: 'คะแนนเฉลี่ย', en: 'Average rating' },
+  'rep.needs_attention': { th: 'ต้องตอบกลับ', en: 'Needs a reply' },
+  'rep.ga4_sessions': { th: 'เซสชัน (GA4)', en: 'Sessions (GA4)' },
+  'rep.ga4_revenue': { th: 'รายได้ (GA4)', en: 'Revenue (GA4)' },
+  'rep.no_analytics': { th: 'ยังไม่มีข้อมูล Analytics', en: 'No analytics data yet' },
+  'rep.col_sessions': { th: 'เซสชัน', en: 'Sessions' },
+  'rep.col_users': { th: 'ผู้ใช้งาน', en: 'Users' },
+  'rep.col_conversions': { th: 'Conversions', en: 'Conversions' },
+  'rep.col_revenue': { th: 'รายได้', en: 'Revenue' },
+  'rep.col_top_channel': { th: 'ช่องทางหลัก', en: 'Top channel' },
+
+  'rep.callback_processing': { th: 'กำลังเชื่อมต่อ…', en: 'Connecting…' },
+  'rep.callback_failed': { th: 'เชื่อมต่อไม่สำเร็จ', en: 'Connection failed' },
+};

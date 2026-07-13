@@ -13,6 +13,7 @@ export * from './finance';
 export * from './bom';
 export * from './portal';
 export * from './marketing';
+export * from './reputation';
 export * from './logistics';
 export * from './system';
 export * from './ledger';
