@@ -98,7 +98,7 @@ async function main() {
   const bSteady = await inj('POST', '/api/demand/backtest', admin, { item_id: 'DM-STEADY' });
   const cand = (resp: any) => (resp.json.candidates ?? []) as any[];
   const byAlgo = (resp: any, a: string) => cand(resp).find((c) => c.algorithm === a);
-  ok('Backtest STEADY → all 8 candidates scored (incl. croston_sba/dow_seasonal/th_holiday, docs/27 R4-3)', cand(bSteady).length === 8 && cand(bSteady).every((c) => typeof c.wape === 'number'), JSON.stringify(cand(bSteady).map((c) => [c.algorithm, c.wape])));
+  ok('Backtest STEADY → all 9 candidates scored (incl. croston_sba/dow_seasonal/th_holiday, docs/27 R4-3; weather, docs/45 residual)', cand(bSteady).length === 9 && cand(bSteady).every((c) => typeof c.wape === 'number'), JSON.stringify(cand(bSteady).map((c) => [c.algorithm, c.wape])));
   ok('Backtest STEADY → best WAPE small (< 0.10)', (bSteady.json.best?.wape ?? 1) < 0.10, `best=${bSteady.json.best?.algorithm} wape=${bSteady.json.best?.wape}`);
   ok('Backtest STEADY → MASE computed (finite)', Number.isFinite(bSteady.json.best?.mase), `mase=${bSteady.json.best?.mase}`);
 
@@ -133,6 +133,57 @@ async function main() {
   ok('th_holiday without date context degrades to dow_seasonal (no fabricated calendar)',
     JSON.stringify(ALGOS_D.th_holiday(hist, 3)) === JSON.stringify(ALGOS_D.dow_seasonal(hist, 3)),
     'ctx-less parity');
+
+  // ── docs/45 residual — weather overlay: deterministic direct check on the pure algorithm ──
+  // History = 120 days ending 2026-04-12, base 10/day, with a rain-day dip to 4/day on 3 in-window dates
+  // (non-consecutive DOW slots so the dip doesn't contaminate weekday-factor learning). Forecasting 3 days
+  // with rainDates flagging day 1 & 2 (not day 3): the weather model must apply the learned rain dip on
+  // exactly those days while a rainDates-less model stays flat.
+  const rainHistDates = new Set<string>([addDaysYmd(lastDate, -30), addDaysYmd(lastDate, -20), addDaysYmd(lastDate, -10)]);
+  const histW: number[] = [];
+  for (let i = 0; i < 120; i++) { const d = addDaysYmd(lastDate, i - 119); histW.push(rainHistDates.has(d) ? 4 : 10); }
+  const rainForecastDates = new Set<string>([...rainHistDates, addDaysYmd(lastDate, 1), addDaysYmd(lastDate, 2)]);
+  const wRain = ALGOS_D.weather(histW, 3, { lastDate, rainDates: rainForecastDates });
+  const wBlind = ALGOS_D.dow_seasonal(histW, 3, { lastDate });
+  ok('weather: rain-forecast days (1,2) carry the learned dip (≈4, dry level ≈10); day 3 (no rain flag) and the date-blind model stay at the dry level',
+    wRain[0] < 6 && wRain[1] < 6 && wRain[2] > 8 && wBlind.every((x: number) => x > 8),
+    JSON.stringify({ weather: wRain.map((x: number) => Math.round(x * 10) / 10), blind: wBlind.map((x: number) => Math.round(x * 10) / 10) }));
+  ok('weather without a rainDates context degrades to dow_seasonal (no fabricated signal)',
+    JSON.stringify(ALGOS_D.weather(histW, 3, { lastDate })) === JSON.stringify(ALGOS_D.dow_seasonal(histW, 3, { lastDate })),
+    'ctx-less parity');
+
+  // ── docs/45 residual — weather overlay: the fetch-stubbed provider adapter (geocode → archive → forecast) ──
+  const { resolveRainDates, weatherOverlayEnabled } = await import('../../../apps/api/dist/modules/demand-ml/weather-provider.js');
+  ok('weather-provider: OFF by default (DEMAND_WEATHER_ENABLED unset)', !weatherOverlayEnabled(), '');
+  const noSignal = await resolveRainDates('กรุงเทพมหานคร', '2026-01-01', '2026-04-12');
+  ok('resolveRainDates: disabled → empty Set even with a province (no network call)', noSignal.size === 0, '');
+
+  process.env.DEMAND_WEATHER_ENABLED = 'true';
+  const realFetchW = global.fetch;
+  const wCalls: string[] = [];
+  global.fetch = (async (url: any) => {
+    const u = String(url);
+    wCalls.push(u);
+    const host = (() => { try { return new URL(u).hostname; } catch { return ''; } })();
+    if (host === 'geocoding-api.open-meteo.com') return { ok: true, status: 200, json: async () => ({ results: [{ latitude: 13.75, longitude: 100.5 }] }) } as any;
+    if (host === 'archive-api.open-meteo.com') return { ok: true, status: 200, json: async () => ({ daily: { time: ['2026-04-01', '2026-04-02'], precipitation_sum: [5, 0] } }) } as any;
+    if (host === 'api.open-meteo.com') return { ok: true, status: 200, json: async () => ({ daily: { time: ['2026-04-13', '2026-04-14'], precipitation_probability_max: [80, 10] } }) } as any;
+    return { ok: false, status: 404, json: async () => ({}) } as any;
+  }) as any;
+  const rd = await resolveRainDates('กรุงเทพมหานคร', '2026-04-01', '2026-04-12');
+  global.fetch = realFetchW;
+  delete process.env.DEMAND_WEATHER_ENABLED;
+  ok('resolveRainDates: enabled → geocode + archive + forecast all called; merged rain-day set (archive ≥1mm, forecast ≥60% only)',
+    wCalls.some((u) => u.includes('geocoding-api.open-meteo.com')) && wCalls.some((u) => u.includes('archive-api.open-meteo.com')) && wCalls.some((u) => u.includes('api.open-meteo.com/v1/forecast')) &&
+    rd.has('2026-04-01') && !rd.has('2026-04-02') && rd.has('2026-04-13') && !rd.has('2026-04-14'),
+    JSON.stringify({ calls: wCalls.length, dates: [...rd] }));
+
+  process.env.DEMAND_WEATHER_ENABLED = 'true';
+  global.fetch = (async () => { throw new Error('network down'); }) as any;
+  const rdFail = await resolveRainDates('ไม่มีจังหวัดนี้จริง', '2026-04-01', '2026-04-12');
+  global.fetch = realFetchW;
+  delete process.env.DEMAND_WEATHER_ENABLED;
+  ok('resolveRainDates: fetch failure never throws — empty Set (graceful degrade, identical to unconfigured)', rdFail.size === 0, '');
 
   const fcWeekly = await inj('POST', '/api/demand/forecast', admin, { item_id: 'DM-WEEKLY', horizon: 7 });
   const wf: number[] = fcWeekly.json.forecast ?? [];

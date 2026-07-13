@@ -5,7 +5,10 @@
 // Optional date context (docs/27 R4-3 remainder): `lastDate` is the ISO date of the LAST history point.
 // Date-blind models ignore it; calendar-aware models (th_holiday) use it to place each point on the Thai
 // calendar. walkForward shifts it per fold so backtests stay honest.
-export interface ForecastContext { lastDate?: string }
+// `rainDates` (docs/45 residual — weather overlay): ISO dates (YYYY-MM-DD) flagged rainy by an external
+// provider (common/weather-provider.ts, Open-Meteo, opt-in), covering BOTH the history window and the
+// forecast horizon. Absolute dates, not fold-relative — unlike `lastDate` it needs no per-fold shift.
+export interface ForecastContext { lastDate?: string; rainDates?: Set<string> }
 
 export type Forecaster = (history: number[], horizon: number, ctx?: ForecastContext) => number[];
 
@@ -148,6 +151,40 @@ export const thaiHoliday = (alpha = 0.3, period = 7): Forecaster => (h, hz, ctx)
   });
 };
 
+// Weather-overlay demand model (docs/45 residual — G3 follow-up to the marketing-strategy roadmap):
+// structurally identical to thaiHoliday above — day-of-week factors + SES level learned from NON-rain days
+// × a multiplicative uplift/dip learned from the rain days observed in-window (≥2 observations required,
+// else factor 1) — but keyed off a REAL rain signal (`ctx.rainDates`, common/weather-provider.ts,
+// Open-Meteo, opt-in via DEMAND_WEATHER_ENABLED) instead of a fixed calendar. Degrades to dowSeasonal
+// without a rain-date context (unconfigured/disabled/geocode-miss/fetch-failure all land here — never a
+// fabricated signal); auto-selection only ever picks it when it WINS the walk-forward backtest.
+export const weatherOverlay = (alpha = 0.3, period = 7): Forecaster => (h, hz, ctx) => {
+  if (!ctx?.lastDate || !ctx.rainDates?.size || h.length < period * 2) return dowSeasonal(alpha, period)(h, hz, ctx);
+  const rainDates = ctx.rainDates;
+  const dates = h.map((_, i) => addDaysYmd(ctx.lastDate as string, i - (h.length - 1)));
+  const rain = h.filter((_, i) => rainDates.has(dates[i]!));
+  const dry = h.filter((_, i) => !rainDates.has(dates[i]!));
+  const base = mean(dry.length ? dry : h);
+  if (base <= 0) return Array(hz).fill(0);
+  const rainFactor = rain.length >= 2 ? Math.max(0.1, mean(rain) / base) : 1;
+  // DOW factors + SES level from dry days only (a rain-day dip must not contaminate its weekday factor).
+  const sums = Array(period).fill(0);
+  const counts = Array(period).fill(0);
+  for (let i = 0; i < h.length; i++) { if (rainDates.has(dates[i]!)) continue; sums[i % period] += h[i]!; counts[i % period]++; }
+  const factors = sums.map((sm, p) => (counts[p] ? sm / counts[p] / base : 1)).map((f) => (f > 0 ? f : 1));
+  let level = 0; let init = false;
+  for (let i = 0; i < h.length; i++) {
+    if (rainDates.has(dates[i]!)) continue;
+    const d = h[i]! / factors[i % period]!;
+    if (!init) { level = d; init = true; } else level = alpha * d + (1 - alpha) * level;
+  }
+  if (!init) return dowSeasonal(alpha, period)(h, hz, ctx);
+  return Array.from({ length: hz }, (_, k) => {
+    const date = addDaysYmd(ctx.lastDate as string, k + 1);
+    return Math.max(0, level * factors[(h.length + k) % period]! * (rainDates.has(date) ? rainFactor : 1));
+  });
+};
+
 // The candidate model set, keyed by name. Auto-selection picks the lowest-WAPE entry.
 export const ALGOS: Record<string, Forecaster> = {
   sma: sma(7),
@@ -158,6 +195,7 @@ export const ALGOS: Record<string, Forecaster> = {
   croston_sba: crostonSba(0.1),
   dow_seasonal: dowSeasonal(0.3, 7),
   th_holiday: thaiHoliday(0.3, 7),
+  weather: weatherOverlay(0.3, 7),
 };
 
 // ── accuracy metrics ──
@@ -201,7 +239,8 @@ export function walkForward(series: number[], f: Forecaster, testSize: number, c
   for (let t = start; t < series.length; t++) {
     // Per-fold date shift: the fold's history is series[0..t), whose last point sits (series.length - t)
     // days BEFORE the full series' lastDate — calendar-aware models must not see the future's dates.
-    const foldCtx = ctx?.lastDate ? { lastDate: addDaysYmd(ctx.lastDate, t - series.length) } : undefined;
+    // rainDates is a set of ABSOLUTE dates (not fold-relative), so it carries through unshifted.
+    const foldCtx = ctx?.lastDate ? { lastDate: addDaysYmd(ctx.lastDate, t - series.length), rainDates: ctx.rainDates } : undefined;
     pred.push(f(series.slice(0, t), 1, foldCtx)[0]!);
     actual.push(series[t]!);
   }

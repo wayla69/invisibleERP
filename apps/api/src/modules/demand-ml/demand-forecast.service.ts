@@ -1,10 +1,11 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { sql, eq, and, ne, gte, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosItems, custPosSales, demandForecasts } from '../../database/schema';
+import { custPosItems, custPosSales, demandForecasts, tenants } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
-import { ALGOS, walkForward, wape, mase, rmse, bias, type Forecaster, type ForecastContext } from './forecast-algorithms';
+import { ALGOS, walkForward, wape, mase, rmse, bias, addDaysYmd, type Forecaster, type ForecastContext } from './forecast-algorithms';
+import { resolveRainDates, weatherOverlayEnabled } from './weather-provider';
 
 const LOOKBACK = 400;        // days of POS history to build the demand series from
 const MIN_HISTORY = 14;      // need at least 2 weeks to backtest meaningfully
@@ -51,6 +52,21 @@ export class DemandForecastService {
     return Math.min(28, Math.max(SEASON, Math.floor(len * 0.25)));
   }
 
+  // Weather-overlay context (docs/45 residual — opt-in via DEMAND_WEATHER_ENABLED): resolve ONCE per call
+  // and reuse for both backtest model-selection and the deployed forecast, so the chosen model and its
+  // output stay consistent. Never throws — an unresolved tenant/province/geocode/fetch failure just yields
+  // no rain signal, which is the `weather` forecaster's natural degrade-to-dow_seasonal path.
+  private async buildContext(tenantId: number | null | undefined, seriesLen: number): Promise<ForecastContext> {
+    const lastDate = ymd();
+    if (!weatherOverlayEnabled() || tenantId == null || !seriesLen) return { lastDate };
+    const db = this.db;
+    const [t] = await db.select({ province: tenants.province }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    if (!t?.province) return { lastDate };
+    const startDate = addDaysYmd(lastDate, -(seriesLen - 1));
+    const rainDates = await resolveRainDates(t.province, startDate, lastDate).catch(() => new Set<string>());
+    return { lastDate, rainDates };
+  }
+
   // Backtest every candidate model; return metrics sorted best-WAPE-first.
   private evaluate(series: number[], testSize: number, ctx?: ForecastContext): AlgoMetric[] {
     const out = Object.entries(ALGOS).map(([algorithm, f]: [string, Forecaster]) => {
@@ -70,23 +86,25 @@ export class DemandForecastService {
   }
 
   // Backtest only (no persistence) — model comparison for a planner deciding which to trust.
-  async backtest(dto: BacktestDto, _user: JwtUser) {
+  async backtest(dto: BacktestDto, user: JwtUser) {
     const series = await this.dailyDemand(dto.item_id);
     if (series.length < MIN_HISTORY) throw new BadRequestException({ code: 'INSUFFICIENT_HISTORY', message: `Need ≥${MIN_HISTORY} days of demand history`, messageTh: `ต้องมีประวัติอย่างน้อย ${MIN_HISTORY} วัน` });
     const testSize = this.testSize(series.length, dto.test_size);
-    const candidates = this.evaluate(series, testSize, { lastDate: ymd() });
+    const ctx = await this.buildContext(user.tenantId, series.length);
+    const candidates = this.evaluate(series, testSize, ctx);
     return { item_id: dto.item_id, data_days: series.length, test_size: testSize, candidates, best: candidates[0] };
   }
 
   // Non-persisting forecast for planning (e.g. the production plan): build the series, auto-select the best
   // model by backtest WAPE, and return the horizon point forecasts + the chosen model + its accuracy.
   // Returns null when there isn't enough history to model (caller falls back to a simpler heuristic).
-  async planForecast(itemId: string, horizon: number): Promise<{ algorithm: string; forecast: number[]; wape: number | null; data_days: number } | null> {
+  async planForecast(itemId: string, horizon: number, tenantId?: number | null): Promise<{ algorithm: string; forecast: number[]; wape: number | null; data_days: number } | null> {
     const series = await this.dailyDemand(itemId);
     if (series.length < MIN_HISTORY) return null;
     const hz = Math.min(Math.max(1, Math.floor(horizon)), 90);
-    const chosen = this.evaluate(series, this.testSize(series.length), { lastDate: ymd() })[0];
-    const forecast = ALGOS[chosen!.algorithm]!(series, hz, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));
+    const ctx = await this.buildContext(tenantId, series.length);
+    const chosen = this.evaluate(series, this.testSize(series.length), ctx)[0];
+    const forecast = ALGOS[chosen!.algorithm]!(series, hz, ctx).map((x) => Math.max(0, r2(x)));
     return { algorithm: chosen!.algorithm, forecast, wape: chosen!.wape, data_days: series.length };
   }
 
@@ -96,7 +114,8 @@ export class DemandForecastService {
     const series = await this.dailyDemand(dto.item_id);
     if (series.length < MIN_HISTORY) throw new BadRequestException({ code: 'INSUFFICIENT_HISTORY', message: `Need ≥${MIN_HISTORY} days of demand history`, messageTh: `ต้องมีประวัติอย่างน้อย ${MIN_HISTORY} วัน` });
     const horizon = dto.horizon && dto.horizon > 0 ? Math.min(dto.horizon, 90) : DEFAULT_HORIZON;
-    const candidates = this.evaluate(series, this.testSize(series.length, dto.test_size), { lastDate: ymd() });
+    const ctx = await this.buildContext(user.tenantId, series.length);
+    const candidates = this.evaluate(series, this.testSize(series.length, dto.test_size), ctx);
 
     let chosen: AlgoMetric;
     let selectedBy: string;
@@ -107,7 +126,7 @@ export class DemandForecastService {
     } else { chosen = candidates[0]!; selectedBy = 'lowest_wape'; }
 
     // demand can't be negative — clamp (Holt can extrapolate below 0 on a declining trend).
-    const forecast = ALGOS[chosen.algorithm]!(series, horizon, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));
+    const forecast = ALGOS[chosen.algorithm]!(series, horizon, ctx).map((x) => Math.max(0, r2(x)));
 
     await db.insert(demandForecasts).values({
       tenantId: user.tenantId, itemId: dto.item_id, algorithm: chosen.algorithm, selectedBy, horizon,
