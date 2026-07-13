@@ -1,6 +1,6 @@
 # Ops — Multi-tenancy model & TENANCY_MODE (ITGC-AC-18)
 
-> **Status:** v1.26 · **Date:** 2026-07-13 · **Owner:** Platform / Security
+> **Status:** v1.27 · **Date:** 2026-07-13 · **Owner:** Platform / Security
 > How tenant data is isolated, what `TENANCY_MODE` does, and how to choose it for your deployment.
 
 ## 1. The two isolation layers
@@ -165,7 +165,11 @@ migration must ever run via the bare CLI.
 >   an actively-used company unwipeable in one click (suspending already blocks its users); typed-code
 >   mismatch ⇒ **`400 CONFIRM_MISMATCH`**. The wipe deletes the tenant's rows from **every** tenant-scoped
 >   table (runtime `information_schema` enumeration — the same convention as the RLS loop — FK-safe
->   fixpoint passes with savepoints, atomic: full rollback if any table can't clear) **except** the
+>   fixpoint passes with savepoints, atomic: full rollback if any table can't clear), **plus TENANTLESS
+>   FK-child tables** (line-item tables with no `tenant_id` column, e.g. `cust_pos_items`,
+>   `survey_answers` — the engine walks the FK graph at runtime and deletes the rows whose ancestor chain
+>   terminates in a wiped tenant row; added after the 2026-07-13 OSHINEI reset was permanently
+>   `FACTORY_RESET_BLOCKED` by exactly those two tables), **except** the
 >   preserve-set: `users`/`user_permissions`/`user_prefs` (logins survive), `subscriptions` (plan intact),
 >   **`audit_log` (the ITGC-AC-16 hash chain is never erasable)** and the AI/usage billing meters — then
 >   re-seeds the fresh-tenant defaults (fiscal year + industry CoA) like `provisionTenant`, so the company
@@ -409,6 +413,7 @@ sees its own.
 ## 8. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.27 | 2026-07-13 | Platform / SRE | **§2 factory-reset: wipe TENANTLESS FK-child tables too (OSHINEI reset outage).** The OSHINEI factory-reset was permanently `FACTORY_RESET_BLOCKED`: `cust_pos_items` (2,417 rows) and `survey_answers` (74) have **no `tenant_id` column**, so the wipe loop never deleted them and they FK-blocked their parents (`cust_pos_sales`, `survey_responses`) forever. `tenant-wipe.ts` now walks the FK graph at runtime (`pg_constraint`, transitively) and deletes tenantless-child rows whose ancestor chain terminates in a wiped tenant row — ownership derived via FK, never guessed; other tenants'/shared rows untouched. Covers factory-reset AND purge (shared engine). Also documents the ordering gotcha: legacy cross-tenant vendor references (Amber POs → OSHINEI vendors) mean the referencing tenant must be reset FIRST. ToE: `cutover/onboarding.ts` seeds a tenantless `cust_pos_items` child and asserts the reset clears it. |
 | 1.26 | 2026-07-13 | Platform / SRE | **§1bis: migrations run under RLS — GUC-setting migration runner (0387 deploy outage, root cause 3rd attempt).** Two deploys of 0387 failed with "196 rows unattributed": the backfill's `FROM users` join saw ZERO rows because prod migrations run as `ierp_app` (NOBYPASSRLS), `users` is FORCE RLS, and `drizzle-kit migrate` sets no `app.bypass_rls` GUC. Every local test masked it (superuser connections bypass RLS unconditionally). Fix: (a) 0387 sets the transaction-local GUC inline as its first statement; (b) **permanently**, `db:migrate` is now `src/database/migrate.ts` — sets the session GUC on a dedicated `max:1` connection, then runs drizzle-orm's programmatic `migrate()` (drizzle-kit-compatible bookkeeping; `db:migrate:kit` = bare-CLI fallback). Rule: test migration behaviour under `SET ROLE app_user`, never the superuser. |
 | 1.25 | 2026-07-13 | Platform / SRE | **§7: legacy P2P pipeline had no tenant scoping at all (migration 0387).** `purchase_requests`/`pr_items`/`purchase_orders`/`po_items`/`po_deliveries`/`goods_receipts`/`gr_items` predated multi-tenancy and never got a `tenant_id` column — every company on the platform could see every other company's requisitions/POs/goods-receipts, unfiltered. Fixed: `tenant_id` added + backfilled (~196 rows, all attributable) + leading index + canonical org-clause RLS on all 7 tables; every writer now stamps `tenant_id`. ToE: `cutover/procurement-tenant-isolation.ts`. |
 | 1.24 | 2026-07-13 | Platform | **§2: tenant soft-delete + purge (migration 0393) — Amber cleanup.** New two-step lifecycle beyond suspend/factory-reset: `deleteTenant` (suspended-only) flags `deleted_at` without touching data, permanently blocking logins (`TENANT_DELETED`, independent of `suspended_at`) — reversible via `restoreTenant`. `purgeTenant` (already-deleted-only) is the follow-up IRREVERSIBLE step that wipes every other tenant-scoped table but, per explicit product decision, NEVER erases `audit_log` (ITGC-AC-16) — so the `tenants` row survives purge too, as that chain's anchor. Landed in a new `TenantLifecycleService` + shared `tenant-wipe.ts` engine (factory-reset's loop extracted into it), not appended to `billing.service.ts`. ToE: `cutover/onboarding.ts` (23 new checks). Go-live runbook items 11-12. |

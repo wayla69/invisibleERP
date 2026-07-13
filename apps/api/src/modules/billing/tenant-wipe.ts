@@ -19,30 +19,113 @@ export async function tenantIdColumns(db: DrizzleDb): Promise<string[]> {
   return (res.rows ?? res).map((r: any) => String(r.tbl));
 }
 
+// A tenantless child table reachable from a tenant-rooted parent via FK edges, plus the nested
+// IN-subquery path that selects exactly the tenant's rows in it (see tenantlessChildTargets).
+interface ChildTarget { table: string; fkCol: string; parentSubquery: string }
+
+const q = (name: string) => `"${name.replace(/"/g, '""')}"`; // identifiers come from pg_catalog, not user input
+
+// The 2026-07-13 OSHINEI factory-reset outage: pure line-item tables WITHOUT a tenant_id column
+// (cust_pos_items → cust_pos_sales, survey_answers → survey_responses) are invisible to the
+// tenant_id-column enumeration above, so their rows were never deleted and permanently blocked their
+// parents' DELETE → FACTORY_RESET_BLOCKED with zero progress. This walks the FK graph at runtime
+// (single-column FKs) and returns, for every tenantless table reachable from a wiped tenant table
+// through child→parent edges (transitively, so a tenantless grandchild of a tenantless child is still
+// found), a DELETE predicate that selects exactly the rows belonging to the tenant — a nested
+// IN-subquery chain terminating in `WHERE tenant_id = $1` on the tenant-rooted ancestor. Rows whose
+// ancestor is another tenant's (or NULL/shared) are untouched: ownership is derived, never guessed.
+export async function tenantlessChildTargets(
+  db: DrizzleDb, wipedTables: Set<string>,
+): Promise<ChildTarget[]> {
+  const res: any = await db.execute(sql`
+    SELECT child.relname AS child_table, ca.attname AS child_col,
+           parent.relname AS parent_table, pa.attname AS parent_col
+    FROM pg_constraint con
+    JOIN pg_class child  ON child.oid  = con.conrelid
+    JOIN pg_class parent ON parent.oid = con.confrelid
+    JOIN pg_attribute ca ON ca.attrelid = child.oid  AND ca.attnum = con.conkey[1]
+    JOIN pg_attribute pa ON pa.attrelid = parent.oid AND pa.attnum = con.confkey[1]
+    WHERE con.contype = 'f' AND child.relnamespace = 'public'::regnamespace
+      AND array_length(con.conkey, 1) = 1`);
+  const fks: { child: string; childCol: string; parent: string; parentCol: string }[] =
+    (res.rows ?? res).map((r: any) => ({
+      child: String(r.child_table), childCol: String(r.child_col),
+      parent: String(r.parent_table), parentCol: String(r.parent_col),
+    }));
+  const tenantScoped = new Set(await tenantIdColumns(db));
+
+  // covered: table → SQL fragment selecting the tenant's <parentCol> values in it ($1 = tenant id).
+  // Seed with the directly-wiped tenant tables, then expand through tenantless children to a fixpoint.
+  const targets: ChildTarget[] = [];
+  const coveredSubquery = new Map<string, (col: string) => string>();
+  for (const t of wipedTables) coveredSubquery.set(t, (col) => `SELECT ${q(col)} FROM ${q(t)} WHERE tenant_id = $1`);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const fk of fks) {
+      if (tenantScoped.has(fk.child)) continue;           // the normal tenant_id loop owns it
+      if (fk.child === 'audit_log') continue;             // never touched (append-only hash chain)
+      if (!coveredSubquery.has(fk.parent)) continue;      // parent not (yet) reachable from a tenant root
+      const parentSubquery = coveredSubquery.get(fk.parent)!(fk.parentCol);
+      if (targets.some((t) => t.table === fk.child && t.fkCol === fk.childCol)) continue;
+      targets.push({ table: fk.child, fkCol: fk.childCol, parentSubquery });
+      if (!coveredSubquery.has(fk.child)) {
+        coveredSubquery.set(fk.child, (col) => `SELECT ${q(col)} FROM ${q(fk.child)} WHERE ${q(fk.childCol)} IN (${parentSubquery})`);
+        grew = true;
+      }
+    }
+  }
+  return targets;
+}
+
 // FK-safe fixpoint delete: a table blocked by a still-referencing row retries after its dependents clear;
-// if a whole pass makes no progress, the transaction is left to roll back (caller's request tx).
+// each round also clears tenantless FK-child tables (see tenantlessChildTargets) so pure line-item tables
+// can't deadlock their parents. If a whole pass deletes nothing and every table stays blocked, the
+// transaction is left to roll back (caller's request tx).
 export async function wipeTenantRefs(
   db: DrizzleDb, tenantId: number, tables: string[], preserveTables: Set<string>,
   blockedCode: string, blockedMessage: (names: string) => string, blockedMessageTh: (names: string) => string,
 ): Promise<{ targeted: number; rowsDeleted: number }> {
+  // The child-target DELETEs are assembled as raw SQL with the tenant id inlined — hard-require an
+  // integer so a malformed value can never reach the string (callers already Number() route params).
+  if (!Number.isInteger(tenantId)) throw new Error(`wipeTenantRefs: tenantId must be an integer, got ${String(tenantId)}`);
   let remaining = tables.filter((n) => !preserveTables.has(n));
   const targeted = remaining.length;
+  const childTargets = await tenantlessChildTargets(db, new Set(remaining));
   let rowsDeleted = 0;
   while (remaining.length) {
+    let roundDeleted = 0;
+    // 1. tenantless FK children first (they're what blocks their parents); child-of-child ordering
+    //    resolves across rounds — a child blocked by its own grandchild simply retries next pass.
+    for (const ct of childTargets) {
+      await db.execute(sql`SAVEPOINT tenant_wipe_tbl`);
+      try {
+        const r: any = await db.execute(sql.raw(
+          `DELETE FROM ${q(ct.table)} WHERE ${q(ct.fkCol)} IN (${ct.parentSubquery})`.replace(/\$1/g, String(Number(tenantId))),
+        ));
+        await db.execute(sql`RELEASE SAVEPOINT tenant_wipe_tbl`);
+        const n = Number(r?.rowCount ?? r?.affectedRows ?? 0);
+        rowsDeleted += n; roundDeleted += n;
+      } catch {
+        await db.execute(sql`ROLLBACK TO SAVEPOINT tenant_wipe_tbl`);
+      }
+    }
+    // 2. the tenant_id tables proper
     const blocked: string[] = [];
     for (const name of remaining) {
-      const ident = sql.raw(`"${name.replace(/"/g, '""')}"`); // identifier from information_schema, not user input
+      const ident = sql.raw(q(name)); // identifier from information_schema, not user input
       await db.execute(sql`SAVEPOINT tenant_wipe_tbl`);
       try {
         const r: any = await db.execute(sql`DELETE FROM ${ident} WHERE tenant_id = ${tenantId}`);
         await db.execute(sql`RELEASE SAVEPOINT tenant_wipe_tbl`);
-        rowsDeleted += Number(r?.rowCount ?? r?.affectedRows ?? 0);
+        const n = Number(r?.rowCount ?? r?.affectedRows ?? 0);
+        rowsDeleted += n; roundDeleted += n;
       } catch {
         await db.execute(sql`ROLLBACK TO SAVEPOINT tenant_wipe_tbl`);
         blocked.push(name);
       }
     }
-    if (blocked.length === remaining.length) {
+    if (blocked.length === remaining.length && roundDeleted === 0) {
       const names = blocked.slice(0, 8).join(', ') + (blocked.length > 8 ? '…' : '');
       throw new ConflictException({ code: blockedCode, message: blockedMessage(names), messageTh: blockedMessageTh(names) });
     }
