@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 276,
+    "total": 277,
     "by_status": {
-      "Implemented": 273,
+      "Implemented": 274,
       "Partial": 3
     },
     "by_family": {
@@ -28,7 +28,7 @@
       "Multi-Branch & Offline POS": 7,
       "Payroll": 15,
       "Privacy · PDPA": 5,
-      "Project Accounting": 20,
+      "Project Accounting": 21,
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
@@ -3379,6 +3379,25 @@
       "tod": "Inspect the ES interpolation (last cumulative-PV ≤ EV month + within-month fraction, plateau credited), the AT month arithmetic, the SPI(t)/SV(t)/forecast derivation, and the action-center gate (fires only when the project is not already red).",
       "toe": "Re-perform: a 2-month plan 95% earned read at month 6 → classic SPI 0.95 (reads fine) but ES 1.9 / AT 6.0 → SPI(t) 0.3167 RED, SV(t) −4.1 mo, forecast ~6.3 mo; the action center surfaces schedule_slip_es (medium) for it and suppresses the item on an already-red project; an EV sitting on a flat PV plateau reads ahead (no false alarm); a project without a costed dated plan → NO_DATED_PLAN (re-performed by the projects harness).",
       "evidence": "Earned-schedule endpoint payload (ES/AT/SV(t)/SPI(t)/forecast finish); the schedule_slip_es action-center item",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "PROJ-20",
+      "cycle": "Project Accounting",
+      "category": "Detective",
+      "fsli": "Resource capacity (skills/role supply-vs-demand)",
+      "risk": "A resource heatmap assumes every booked person is at 100% capacity and every named assignment is a real, qualified person — so a part-time or on-leave resource reads as merely 'busy' at 60% instead of critically over-committed, a generic placeholder booking ('Senior Dev TBD') is silently treated as staffed, and a role or skill with more assigned demand than qualified people to do the work goes unnoticed until the project slips.",
+      "assertion": "Completeness/Accuracy/Timeliness",
+      "description": "Resource capacity heatmap governed by a REAL per-resource availability calendar + named-vs-generic booking visibility + role/skill supply-vs-demand (PPM-A1): GET /api/projects/resources/capacity's over-allocation flag now compares each month's demand to the resource's TRUE availability ceiling (resource_calendar.available_pct, default 100% absent an override — e.g. a documented 50%-part-time person is flagged over-allocated at 60%, not only above a flat 100% assumption) instead of a hardcoded 100%, and marks each resource `named` (backed by a resource_skills row) vs a GENERIC placeholder booking. GET /api/projects/resources/role-demand rolls assignment demand (Σ alloc_pct tagged with a role) up against role/skill SUPPLY (Σ availability of every resource_skills-tagged person who can fill it, calendar-aware) per month, flagging a role `understaffed` whenever demand exceeds the qualified supply — surfaced before it becomes a schedule slip. Read-only detective layer; posts nothing; existing resourceUtilization/portfolio()/forecast() callers are unaffected (additive fields only, same over-100%-only behaviour when no calendar/skills data exists).",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Continuous / per review",
+      "owner": "PMO / Resource Manager",
+      "coso": "P13",
+      "code_reference": "projects-resourcing.service.ts resourceCapacity (calendar-aware over_allocated + named flag) / roleSupplyDemand (per-role/month demand vs supply, understaffed_months) / upsertResourceSkill+listResourceSkills / upsertResourceCalendar+listResourceCalendar; projects.controller.ts GET/POST resources/skills, resources/calendar, GET resources/role-demand; schema/projects.ts resource_skills + resource_calendar (migration 0400, 0232 RLS, tenant-leading indexes); web projects/resources heatmap + skills + calendar + role-demand tabs; cutover/projects.ts (ToE)",
+      "tod": "Inspect the calendar-ceiling substitution in resourceCapacity (default 100% absent an override, else the calendar's available_pct), the named-resource lookup (resource_skills membership), and the role/skill supply-vs-demand roll-up (demand from project_resources.role, supply from resource_skills × resource_calendar).",
+      "toe": "Re-perform: a resource on a documented 50%-part-time calendar entry assigned 60% reads over_allocated (60 > 50) though under the old flat 100% ceiling it would not; an assignment with no matching resource_skills row reads named=false; a role with 150% assigned demand and only one named 100%-available person reads understaffed for that month; a second tenant cannot see the first tenant's skills/calendar rows (RLS) (re-performed by the projects harness).",
+      "evidence": "Time-phased capacity heatmap with calendar-aware over-allocation + named flag; role/skill supply-vs-demand roll-up with understaffed flag",
       "status": "Implemented"
     },
     {

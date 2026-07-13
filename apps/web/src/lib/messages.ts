@@ -286,6 +286,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.projects': { th: 'โครงการ (Projects)', en: 'Projects' },
   'nav.pm_portfolio': { th: 'พอร์ตโครงการ', en: 'Portfolio' },
   'nav.pm_action_center': { th: 'ศูนย์งานที่ต้องทำ', en: 'Action Center' },
+  'nav.pm_resources': { th: 'กำลังคน (Resources)', en: 'Resources' },
   'nav.pm_pipeline': { th: 'ไปป์ไลน์ Win/Loss', en: 'Win/Loss Pipeline' },
   'nav.pm_crm': { th: 'ลีด & โอกาสการขาย', en: 'Leads & Opportunities' },
   'nav.pm_close': { th: 'ปิดงวดโครงการ', en: 'Project Period Close' },

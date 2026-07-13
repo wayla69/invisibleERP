@@ -472,6 +472,8 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'nav.pm_portfolio', href: '/projects/portfolio', icon: LayoutDashboard, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.pm_action_center', href: '/projects/action-center', icon: BellRing, perms: ['exec', 'planner', 'ar'] },
+      // PPM-A1 (PROJ-20): resource capacity heatmap + skills/role supply-vs-demand.
+      { label: 'nav.pm_resources', href: '/projects/resources', icon: Users, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
       // Construction/real-estate vertical (docs/35): tender→award, progress billing (งวดงาน), subcontracts.
       { label: 'nav.pm_tenders', href: '/projects/tenders', icon: FileSignature, perms: ['proj_tender', 'marketing', 'exec'] },
