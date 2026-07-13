@@ -576,6 +576,34 @@ async function main() {
   ok('PROJ-21: add + list a calendar holiday exception', calExc.json.exceptions?.some((e: any) => e.exception_date === '2026-12-25' && e.description === 'Christmas'), JSON.stringify(calExc.json.exceptions));
   await inj('PUT', '/api/projects/calendar', admin, { enabled: false }); // cleanup — leave the tenant calendar disabled for the rest of the harness
 
+  // ── 16d. bottom-up cost-to-complete (ETC) vs the formulaic EAC (PPM-B2, PROJ-22) ──
+  // ETC-1: BAC 1000, 50% complete → EV 500; a non-billable 200 cost entry → AC 200 (does not touch WIP/GL).
+  // Formulaic: CPI = 500/200 = 2.5 → EAC = 200 + (1000-500)/2.5 = 400, ETC = 200.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-ETC', name: 'งานประมาณการต้นทุนคงเหลือ', billing_type: 'TM' });
+  const etcTask = await inj('POST', '/api/projects/PRJ-ETC/tasks', admin, { name: 'ETC-1', planned_cost: 1000, pct_complete: 50 });
+  const etcTaskId = etcTask.json.tasks[0].id;
+  await inj('POST', '/api/projects/PRJ-ETC/cost', admin, { entry_type: 'expense', amount: 200, billable: false, description: 'non-billable AC' });
+  const eacBefore = await inj('GET', '/api/projects/PRJ-ETC/eac-scenarios', admin);
+  ok('PROJ-22: with no manual ETC entries, eac-scenarios reports the formulaic EAC only (bottom_up null)',
+    eacBefore.json.bottom_up === null && near(eacBefore.json.formulaic?.eac, 400) && near(eacBefore.json.formulaic?.etc, 200) && near(eacBefore.json.ac, 200),
+    JSON.stringify(eacBefore.json));
+  const etcBadTask = await inj('POST', '/api/projects/PRJ-ETC/etc', admin, { task_id: depAid, etc_amount: 100 });
+  ok('PROJ-22: an ETC submitted against a task from ANOTHER project → 400/404 TASK_NOT_FOUND',
+    [400, 404].includes(etcBadTask.status) && etcBadTask.json.error?.code === 'TASK_NOT_FOUND', `${etcBadTask.status} ${etcBadTask.json.error?.code}`);
+  const etc1 = await inj('POST', '/api/projects/PRJ-ETC/etc', admin, { task_id: etcTaskId, etc_amount: 600, note: 'first estimate' });
+  ok('PROJ-22: a per-task ETC entry drives the bottom-up EAC (ETC 600 → EAC 800 = AC 200 + 600), variance vs formulaic',
+    near(etc1.json.bottom_up?.etc, 600) && near(etc1.json.bottom_up?.eac, 800) && etc1.json.bottom_up?.entry_count === 1
+      && near(etc1.json.variance?.eac_delta, 400) && near(etc1.json.variance?.etc_delta, 400),
+    JSON.stringify({ bottomUp: etc1.json.bottom_up, variance: etc1.json.variance }));
+  const etc2 = await inj('POST', '/api/projects/PRJ-ETC/etc', admin, { task_id: etcTaskId, etc_amount: 650, note: 'revised estimate' });
+  ok('PROJ-22: a SECOND entry for the SAME task SUPERSEDES the first (entry_count stays 1, not 2)',
+    near(etc2.json.bottom_up?.etc, 650) && etc2.json.bottom_up?.entry_count === 1, JSON.stringify(etc2.json.bottom_up));
+  const etc3 = await inj('POST', '/api/projects/PRJ-ETC/etc', admin, { etc_amount: 50, note: 'contingency (project-level)' });
+  ok('PROJ-22: a project-level entry (task_id omitted) SUMS alongside the per-task entry (700 = 650 + 50, entry_count 2)',
+    near(etc3.json.bottom_up?.etc, 700) && etc3.json.bottom_up?.entry_count === 2, JSON.stringify(etc3.json.bottom_up));
+  ok('PROJ-22: existing evm()/schedule() callers are unaffected by ETC entries (formulaic figures unchanged)',
+    near(etc3.json.formulaic?.eac, 400) && near(etc3.json.formulaic?.etc, 200), JSON.stringify(etc3.json.formulaic));
+
   const oppLost = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลที่เสีย', amount: 50000, owner: 'sales1' });
   await inj('PATCH', `/api/crm/pipeline/opportunities/${oppLost.json.opp_no}/stage`, admin, { stage: 'lost', lost_reason: 'ราคาสูงเกินไป (price)' });
   const wl = await inj('GET', '/api/crm/pipeline/win-loss', admin);
