@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 274,
+    "total": 275,
     "by_status": {
-      "Implemented": 271,
+      "Implemented": 272,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 41,
+      "Revenue & Cash": 42,
       "Tax": 12
     }
   },
@@ -1670,6 +1670,25 @@
       "toe": "Re-perform: create a parent + child territory and assign a rep to the child; set an owner quota + a territory quota for the period; a won deal for the rep counts toward its owner attainment (won vs quota) and rolls up into the parent territory's subtree_won vs the territory quota; the territory read lists its members; a second tenant cannot see the first tenant's territories (RLS) (re-performed by the pipeline harness CRM-11 checks).",
       "evidence": "Territory master + criteria + hierarchy; rep-membership register; per-period owner/territory quota; attainment roll-up (owner + territory subtree)",
       "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-11",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (lead / deal nurture cadence)",
+      "risk": "Multi-step outreach on leads and open deals is manual and ungoverned — a rep is meant to touch a prospect on a cadence (day 0 email, day 3 call, day 7 follow-up) but there is no playbook and no tracking, so a nurtured lead or deal silently DROPS OUT of the follow-up (a step is skipped or forgotten), the touches are not logged as auditable activity, and there is no way to run the due outreach systematically. Revenue is lost to inconsistent, unrecorded follow-up rather than on the merits.",
+      "assertion": "Completeness/Timeliness",
+      "description": "Det",
+      "prev_det": "Automated",
+      "nature": "Per enrolment / continuous",
+      "frequency": "Sales / SDR / Sales Manager",
+      "owner": "P13",
+      "coso": "Sales SEQUENCES / cadences (CRM-8, migration 0392) on the REV-17 spine + the CRM-6 comms rail. crm_sequences is a named playbook; crm_sequence_steps is its ordered steps (channel email/line/sms/task + wait_days + subject/body); crm_sequence_enrollments enrols a lead or opportunity (unique per sequence/entity, ALREADY_ENROLLED guard; SEQUENCE_INACTIVE / SEQUENCE_NO_STEPS / ENTITY_NOT_FOUND guards). The due-runner ADVANCES each active enrolment whose next step is due: it sends the step via MessagingService (best-effort; a 'task' step is a reminder only), LOGS the touch as an auditable crm_activities entry (source='sequence'), and schedules the next step by its wait_days — until the last step (status -> completed). A rep may stop an enrolment (status -> stopped); advancing a non-active enrolment is rejected (ENROLLMENT_NOT_ACTIVE). POST /api/crm/sequences[/:code/enroll], POST …/enrollments/:id/[advance|stop], POST …/run-due (crm/exec); the run-due sweep is schedulable as the BI report crm_sequence_run (module-owned BiReportSource provider, docs/46). Reads gate crm/exec/ar. Three tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes). No GL post.",
+      "code_reference": "Det",
+      "tod": "Automated",
+      "toe": "Per enrolment / continuous",
+      "evidence": "Sales / SDR / Sales Manager",
+      "status": "P13"
     },
     {
       "control_id": "CPQ-01",
