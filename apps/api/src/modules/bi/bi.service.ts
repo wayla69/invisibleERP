@@ -47,6 +47,7 @@ import { BillingService } from '../billing/billing.service';
 import { PdpaService } from '../pdpa/pdpa.service';
 import { GovernanceService } from '../governance/governance.service';
 import { TaxJobsService } from '../tax/tax-jobs.service';
+import { ReputationBiReports } from '../reputation/reputation-bi-reports';
 
 // Job type for offloading a due report/action subscription to the background worker.
 export const REPORT_SUBSCRIPTION_JOB = 'report_subscription';
@@ -119,6 +120,9 @@ export class BiService implements OnModuleInit {
     // so existing param order is a hard contract; new params only ever append.
     @Optional() private readonly generateSvc?: BiGenerateService,
     @Optional() private readonly scheduleSvc?: BiScheduleService,
+    // docs/47 (param 32, APPENDED — see the param-31 note above: positional contract, new params only
+    // ever append) — reputation_summary live dashboard read (Google Maps reviews + GA4).
+    @Optional() private readonly reputationBi?: ReputationBiReports,
   ) {}
 
   // Register the background handler that runs one due subscription (report or heavy action job) off the
@@ -511,6 +515,14 @@ export class BiService implements OnModuleInit {
     if (!this.generateSvc) throw new BadRequestException({ code: 'BI_UNAVAILABLE', message: 'Report generation not available', messageTh: 'ระบบสร้างรายงานไม่พร้อมใช้งาน' });
     const r = await this.generateSvc.marketingRoi(user, { days });
     return r.data;
+  }
+
+  // Live reputation dashboard read (docs/47) — same shape as marketingRoiLive: calls the SAME
+  // ReputationBiReports.summary() composition the reputation_summary report type uses, no duplicated
+  // logic, no report_runs/register side effect.
+  async reputationSummaryLive(user: JwtUser, days?: number) {
+    if (!this.reputationBi) throw new BadRequestException({ code: 'BI_UNAVAILABLE', message: 'Report generation not available', messageTh: 'ระบบสร้างรายงานไม่พร้อมใช้งาน' });
+    return this.reputationBi.summary(user, days ?? 30);
   }
 
 

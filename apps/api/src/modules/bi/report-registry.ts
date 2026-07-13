@@ -135,6 +135,12 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   cfo_kpi_pack: { label: 'สรุปตัวชี้วัด CFO + คำอธิบาย', labelEn: 'CFO KPI pack + narrative' },
   cash_position_pack: { label: 'สถานะเงินสด + พยากรณ์ 13 สัปดาห์', labelEn: 'Cash position + 13-week forecast' },
   close_status_pack: { label: 'ความพร้อมปิดงวดบัญชี', labelEn: 'Period-close readiness' },
+  // docs/47 — scheduled poll ingestion (no webhook exists for either platform). An idempotent "action" job
+  // per platform, same shape as ar_collections_dunning/eam_pm_generate.
+  reputation_review_sync: { label: 'ซิงก์รีวิว Google Maps', labelEn: 'Sync Google Maps reviews' },
+  reputation_ga4_sync: { label: 'ซิงก์ Google Analytics (GA4)', labelEn: 'Sync Google Analytics (GA4)' },
+  // Read-only dashboard aggregate — also exposed live via GET /api/bi/reputation-summary.
+  reputation_summary: { label: 'สรุปชื่อเสียงร้าน + Analytics', labelEn: 'Reputation & analytics summary' },
 };
 export const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 

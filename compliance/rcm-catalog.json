@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 276,
+    "total": 277,
     "by_status": {
-      "Implemented": 273,
+      "Implemented": 274,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 22,
+      "CRM — Loyalty": 23,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 7,
@@ -2258,6 +2258,25 @@
       "tod": "Inspect the hash-only persistence at both ingest sites, the member-token + required-consent link path, the REF_ALREADY_LINKED single-winner, and the tenant-mismatch rejection.",
       "toe": "Re-perform: ingest two orders with the same buyer ref → ONE ref row, order_count=2, raw identifier absent from channel_customer_refs; link via member token + marketing_opt_in → consent row written and the next ingest auto-attaches member_id; a second member linking the same ref → 409 REF_ALREADY_LINKED; a token minted for another tenant → 403 TENANT_MISMATCH (re-performed by the channel-harness MKT-13 checks).",
       "evidence": "channel_customer_refs (hashed refs + link audit trail); member_consents channel:<platform> rows",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-14",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "A tenant's Google OAuth refresh/access token (Business Profile reviews, GA4) is stored/leaked in plaintext, a stale OAuth state is replayed to bind a rogue Google account to a tenant's connection, or synced data (reviews/analytics) leaks across tenants.",
+      "assertion": "Occurrence/Authorization",
+      "description": "External reputation & analytics ingestion (docs/47): Google OAuth tokens are stored via the transparent `encryptedText` column type (AES-256-GCM, common/crypto.ts) in reputation_connections and are NEVER returned by any read endpoint (list/targets responses expose only has_refresh_token: boolean). The OAuth handshake mirrors the SSO login-state pattern: a single-use, server-persisted, expiring `state` row (reputation_oauth_state) + PKCE code_verifier/code_challenge protects the authorization-code exchange — a replayed/expired/forged state is rejected BAD_STATE. The web callback page forwards window.location.search VERBATIM to the backend in the POST body (never reads code/state by name client-side), keeping the credential out of any URL/log per the CWE-598 lesson. Every table (reputation_connections, external_reviews, analytics_daily_snapshots) is tenant-scoped (RLS + explicit tenant_id filter in every query) so a review/analytics row can never surface for a different tenant. Reviewer name/photo are public data the reviewer already posted to Google Maps — not first-party consent-gated PII, so no ROPA/consent gate applies (distinct from MKT-13/the G3 audience-export control, which push OUR members' hashed PII out).",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per connect / per sync",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P16",
+      "code_reference": "reputation/google-oauth.service.ts (encrypted token storage, single-use state, PKCE, token refresh); reputation/reputation-connections.service.ts (redacted reads, revoke); reputation/reputation-review-sync.service.ts + reputation-analytics-sync.service.ts (tenant-scoped sync); schema/reputation.ts + migration 0400 (RLS, tenant-leading indexes); apps/web reputation/callback/page.tsx (verbatim query forwarding); cutover/reputation.ts (MKT-14 ToE, cross-tenant boundary test)",
+      "tod": "Inspect the encrypted token columns (never plaintext, never returned by a read), the single-use OAuth state consumption, and the tenant-scoped sync queries.",
+      "toe": "Re-perform: a connection's list/targets response never contains a token value; a replayed OAuth state is rejected BAD_STATE; a T2 tenant's review/analytics query returns zero T1 rows and a T2 sync only ever touches T2's own connections (re-performed by the reputation harness MKT-14 checks).",
+      "evidence": "reputation_connections (encrypted columns, redacted reads); external_reviews / analytics_daily_snapshots tenant isolation",
       "status": "Implemented"
     },
     {
