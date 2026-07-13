@@ -27,6 +27,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build shared
         run: pnpm --filter @ierp/shared build
+      - name: Entitlements packaging guard (every MODULE_KEY maps to exactly one suite)
+        # docs/36 §1 — plan→suite→module map in packages/shared/src/entitlements.ts. Unwired until
+        # 2026-07-13, which let 4 orphaned tokens (hr/hr_admin/quality/treasury) drift for a week (#737).
+        run: node tools/ci/check-entitlements.mjs
       - name: Typecheck
         run: pnpm -r typecheck
       - name: Build
