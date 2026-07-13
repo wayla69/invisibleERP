@@ -44,6 +44,7 @@ interface Company {
   suspended: boolean;
   deleted?: boolean;
   deleted_by?: string | null;
+  purged?: boolean;
   status: string | null;
   plan_code: string | null;
   trial_ends_at: string | null;
@@ -71,6 +72,7 @@ function statusBadge(s: string | null, t: (key: string, vars?: Record<string, st
     : s === 'Trialing' ? 'secondary'
     : s === 'Suspended' ? 'destructive'
     : s === 'Deleted' ? 'destructive'
+    : s === 'Purged' ? 'destructive'
     : s === 'PastDue' ? 'destructive'
     : 'outline';
   const label =
@@ -78,6 +80,7 @@ function statusBadge(s: string | null, t: (key: string, vars?: Record<string, st
     : s === 'Trialing' ? t('plt.status_trialing')
     : s === 'Suspended' ? t('plt.status_suspended')
     : s === 'Deleted' ? t('plt.status_deleted')
+    : s === 'Purged' ? t('plt.status_purged')
     : s === 'PastDue' ? t('plt.status_past_due')
     : s === 'Canceled' ? t('plt.status_canceled')
     : (s ?? '—');
@@ -103,8 +106,9 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const [tagsInput, setTagsInput] = useState('');
   const [resetConfirm, setResetConfirm] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [purgeConfirm, setPurgeConfirm] = useState('');
   useEffect(() => { setTagsInput((detail.data?.tags ?? []).join(', ')); }, [detail.data]);
-  useEffect(() => { setResetConfirm(''); setDeleteConfirm(''); }, [id]);
+  useEffect(() => { setResetConfirm(''); setDeleteConfirm(''); setPurgeConfirm(''); }, [id]);
 
   const saveTags = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean) }) }),
@@ -142,6 +146,13 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
     onSuccess: () => { notifySuccess(t('plt.company_restored', { name: detail.data?.name ?? String(id) })); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
+  // Purge — IRREVERSIBLE, only offered on an already-soft-deleted company (delete → purge). Erases every
+  // row referencing this tenant anywhere in the schema (incl. users/audit_log) plus the tenants row itself.
+  const purgeTenant = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/purge`, { method: 'POST', body: JSON.stringify({ confirm: purgeConfirm.trim() }) }),
+    onSuccess: () => { notifySuccess(t('plt.company_purged', { name: detail.data?.name ?? String(id) })); setPurgeConfirm(''); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
 
   const d = detail.data;
   return (
@@ -156,7 +167,7 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
             <div className="space-y-5 px-4 pb-6 text-sm">
               {/* Snapshot */}
               <div className="grid grid-cols-2 gap-3">
-                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_status')}</div>{statusBadge(d.deleted ? 'Deleted' : d.suspended ? 'Suspended' : d.subscription?.status ?? null, t)}</div>
+                <div><div className="text-xs text-muted-foreground">{t('plt.drawer_status')}</div>{statusBadge(d.purged ? 'Purged' : d.deleted ? 'Deleted' : d.suspended ? 'Suspended' : d.subscription?.status ?? null, t)}</div>
                 <div><div className="text-xs text-muted-foreground">{t('plt.drawer_plan')}</div>{d.subscription?.plan_code ?? '—'}</div>
                 <div><div className="text-xs text-muted-foreground">{t('plt.drawer_users_branches')}</div>{d.counts.users} · {d.counts.branches}</div>
                 <div><div className="text-xs text-muted-foreground">{t('plt.drawer_trial_until')}</div>{d.subscription?.trial_ends_at ? thaiDate(d.subscription.trial_ends_at) : '—'}</div>
@@ -171,7 +182,12 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                   })}
                 </div>
               )}
-              {d.deleted && (
+              {d.purged && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs">
+                  {t('plt.drawer_purged_note')}
+                </div>
+              )}
+              {d.deleted && !d.purged && (
                 <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
                   <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
                     <AlertTriangle className="size-3.5" /> {t('plt.drawer_restore_title')}
@@ -180,6 +196,21 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                   <Button size="sm" variant="outline" onClick={() => restoreTenant.mutate()} disabled={restoreTenant.isPending}>
                     <Play className="size-3.5" /> {t('plt.drawer_restore_btn')}
                   </Button>
+                  <div className="mt-1 border-t border-destructive/20 pt-2">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                      <AlertTriangle className="size-3.5" /> {t('plt.drawer_purge_title')}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{t('plt.drawer_purge_desc')}</p>
+                    <div className="mt-2 flex items-end gap-2">
+                      <div className="grid flex-1 gap-1">
+                        <Label className="text-xs">{t('plt.drawer_purge_confirm_label', { code: d.code })}</Label>
+                        <Input value={purgeConfirm} onChange={(e) => setPurgeConfirm(e.target.value)} placeholder={d.code} />
+                      </div>
+                      <Button size="sm" variant="destructive" onClick={() => purgeTenant.mutate()} disabled={purgeConfirm.trim() !== d.code || purgeTenant.isPending}>
+                        <Trash2 className="size-3.5" /> {t('plt.drawer_purge_btn')}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -475,7 +506,7 @@ export default function PlatformConsole({
         )}
       </div>
     ) },
-    { key: 'status', label: t('plt.col_status'), render: (c) => statusBadge(c.deleted ? 'Deleted' : c.status, t) },
+    { key: 'status', label: t('plt.col_status'), render: (c) => statusBadge(c.purged ? 'Purged' : c.deleted ? 'Deleted' : c.status, t) },
     { key: 'plan_code', label: t('plt.col_plan'), render: (c) => c.plan_code ?? '—' },
     { key: 'users', label: t('plt.col_users'), align: 'right', sortable: true, render: (c) => c.users },
     { key: 'trial_ends_at', label: t('plt.col_trial_until'), render: (c) => (c.trial_ends_at ? thaiDate(c.trial_ends_at) : '—') },

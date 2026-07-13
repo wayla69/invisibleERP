@@ -99,7 +99,23 @@ alone never re-opens a deleted company). Reversible via the drawer's **กู้
 until a separate reactivate.
 **Verify:** after delete, the company is gone from the default `/platform` company list and its admin's
 login is blocked with `TENANT_DELETED`; toggling "show deleted" surfaces it again with a Restore action.
-Model + gates: `docs/ops/tenancy-model.md` §1bis/§2 (rev 1.23), migration 0386.
+Model + gates: `docs/ops/tenancy-model.md` §1bis/§2 (rev 1.24), migration 0393.
+
+## 12. Actually reclaiming space — permanently purging an already-deleted company — ITGC-AC-18
+
+**Owner:** Platform.
+**Action:** deleting (item 11) only hides a company — it does not reclaim any space, so a fleet with many
+disposable test companies still accumulates junk. Once a company has been deleted (item 11) and you're
+certain it will never be needed again, in `/platform` → บริษัท → check "แสดงบริษัทที่ถูกลบ" (show deleted) →
+open the company → danger zone **ล้างถาวร (Permanent purge)** → type the company code → purge. This
+**IRREVERSIBLE** step wipes every remaining tenant-scoped table (business data, users, subscriptions,
+AI/usage meters). **By explicit product decision it never erases `audit_log`** (the ITGC-AC-16 hash chain is
+append-only) — so the company record itself also survives purge, kept solely as that audit trail's anchor;
+it will always show under "show deleted" with a "ล้างถาวรแล้ว" (Purged) status, but has zero users and can
+never log in or be restored again.
+**Verify:** after purge, the drawer shows the purged banner (Restore button gone); the company's audit
+history is still visible in the cross-company activity feed (§ god notification/audit inbox).
+Model + gates: `docs/ops/tenancy-model.md` §2 (rev 1.24), migration 0393.
 
 ## Revision history
 
@@ -107,4 +123,5 @@ Model + gates: `docs/ops/tenancy-model.md` §1bis/§2 (rev 1.23), migration 0386
 |---|---|---|---|
 | 1.0 | 2026-07-02 | Platform | Initial runbook consolidating every open human/console item from docs/27 (legal execution, Anthropic DPA → `AI_DPA_ACKNOWLEDGED`, SOC 2 engagement + quarterly evidence, ELC operation, Railway PgBouncer/Redis, prod `db:backfill:pii`, loadtest §4 baseline, `SEED_ADMIN_PASSWORD`, Wave 6) with owner + exact action + verification each. |
 | 1.1 | 2026-07-09 | Platform | Added item 10 — pilot-company test-data factory reset from the Platform Console (**suspend → reset → reactivate**): wipes a pilot's UAT data before real usage while preserving logins/plan/audit-chain; only ever possible on a suspended company, so an active company cannot be wiped in one click. |
-| 1.2 | 2026-07-13 | Platform | Added item 11 — tenant soft-delete (migration 0386, **suspend → delete**): for a pure-test company that should stop existing entirely, lighter than the factory reset (no data touched, only the company row is flagged) and reversible via Restore. Prompted by a request to fully remove a test tenant ("Amber") after the factory reset UI was confused with a full company deletion. |
+| 1.2 | 2026-07-13 | Platform | Added item 11 — tenant soft-delete (migration 0393, **suspend → delete**): for a pure-test company that should stop existing entirely, lighter than the factory reset (no data touched, only the company row is flagged) and reversible via Restore. Prompted by a request to fully remove a test tenant ("Amber") after the factory reset UI was confused with a full company deletion. |
+| 1.3 | 2026-07-13 | Platform | Added item 12 — tenant purge (migration 0393, **delete → purge**): the actual space-reclaiming follow-up to item 11's soft-delete, since delete alone leaves junk accumulating forever. IRREVERSIBLE; wipes everything except `audit_log` (ITGC-AC-16 chain preserved by explicit product decision) and therefore the company record itself. Prompted by the same "Amber" cleanup — soft-delete alone wasn't enough to actually reduce junk. |
