@@ -1,6 +1,6 @@
 # Ops — Multi-tenancy model & TENANCY_MODE (ITGC-AC-18)
 
-> **Status:** v1.22 · **Date:** 2026-07-09 · **Owner:** Platform / Security
+> **Status:** v1.24 · **Date:** 2026-07-13 · **Owner:** Platform / Security
 > How tenant data is isolated, what `TENANCY_MODE` does, and how to choose it for your deployment.
 
 ## 1. The two isolation layers
@@ -49,6 +49,16 @@ GRANT CREATE ON DATABASE railway TO ierp_app;  -- substitute your DB name (curre
                               -- IF NOT EXISTS shortcut — without this the pre-deploy migrate fails
                               -- with 42501 "permission denied for database" even on a fully
                               -- migrated DB (superusers never see it; they skip ACL checks).
+-- Also transfer ownership of every enum TYPE in public (role_enum, etc.), not just tables/sequences/
+-- views: ALTER TYPE ... ADD VALUE requires OWNERSHIP of the type specifically — a migration that grows
+-- an enum (e.g. adding a role) 42501s "must be owner of type role_enum" under ierp_app otherwise, even
+-- though every table grant above is in place.
+DO $$ DECLARE r record; BEGIN
+  FOR r IN SELECT n.nspname, t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+           WHERE n.nspname = 'public' AND t.typtype = 'e' LOOP
+    EXECUTE format('ALTER TYPE %I.%I OWNER TO ierp_app', r.nspname, r.typname);
+  END LOOP;
+END $$;
 ```
 Then point `DATABASE_URL` at `ierp_app`. Keep the intentionally-unscoped auth-global tables (`login_attempts`,
 scheduler heartbeats, etc.) as reviewed exceptions.
@@ -64,9 +74,10 @@ legacy reverse-direction
 app_user` and blocks the correct grant with a membership-cycle error), grants `CREATE` on the schemas
 **and on the database itself** (drizzle-kit's opening `CREATE SCHEMA IF NOT EXISTS "drizzle"` checks the
 database ACL even when the schema already exists — missing it fails every pre-deploy migrate with 42501)
-and **transfers ownership of all `public`/`drizzle` tables + sequences + views to `ierp_app`** — because
-boot-time `drizzle-kit migrate` runs as `DATABASE_URL` and `ALTER TABLE` requires ownership (`FORCE` RLS
-still binds the owner, so no isolation is lost). It then verifies the role posture over a live login,
+and **transfers ownership of all `public`/`drizzle` tables + sequences + views, and every `public` enum
+TYPE, to `ierp_app`** — because boot-time `drizzle-kit migrate` runs as `DATABASE_URL` and `ALTER TABLE`/
+`ALTER TYPE ... ADD VALUE` both require ownership (`FORCE` RLS still binds the owner, so no isolation is
+lost). It then verifies the role posture over a live login,
 repoints the API service's `DATABASE_URL` (password rotated every run, never logged), and dispatches
 `deploy.yml`. Known residual: future migrations that `CREATE EXTENSION` would still need a superuser —
 run those by hand. This workflow is the remediation for the production deploy outage that started with
@@ -148,6 +159,33 @@ with a loud warning instead while you migrate the role (NOT recommended in prod)
 >   restarts real usage immediately. Audit-logged + god-inbox notification. Console: a danger-zone section
 >   in the company drawer, rendered only while the company is suspended. Reset procedure for a pilot
 >   go-live: go-live runbook item 10.
+> - **Company soft-delete (suspended companies only, migration 0386).** Lighter than factory-reset above —
+>   **`POST /api/admin/tenants/:id/delete`**, body `{ confirm: "<company code>" }`, flags `tenants.deleted_at`
+>   WITHOUT touching any business data. Same gates as factory-reset (god-only 403, `409 TENANT_NOT_SUSPENDED`,
+>   `400 CONFIRM_MISMATCH`) plus `409 TENANT_ALREADY_DELETED`. A deleted company drops out of
+>   `listTenants()` (pass `?include_deleted=1` to see it) and its users are blocked with **`403
+>   TENANT_DELETED`** at the auth guard — this check is independent of `suspended_at`, so calling
+>   `reactivate` on a deleted-but-suspended company does NOT re-open logins (only `…/:id/restore` clears the
+>   flag; the company then stays suspended until a separate reactivate — restore never implicitly
+>   reactivates). Kept in its own provider, `TenantLifecycleService` (`modules/billing/tenant-lifecycle.service.ts`),
+>   not appended to `billing.service.ts` (docs/46 Phase 0 ratchet). Console: an additional danger-zone
+>   section alongside factory-reset (rendered only while suspended and not already deleted) + a Restore
+>   button (rendered while deleted) + a "show deleted companies" toggle on the fleet list. Procedure:
+>   go-live runbook item 11.
+> - **Company purge (already-soft-deleted companies only, migration 0386, IRREVERSIBLE).** The follow-up to
+>   soft-delete (**`POST /api/admin/tenants/:id/purge`**, same `confirm` body) so god-only console operators
+>   can actually reclaim space instead of accumulating deleted-but-intact companies forever. Gated behind
+>   `deleted_at` already set (`409 TENANT_NOT_DELETED` — delete → purge, same shape as suspend → reset) plus
+>   `409 TENANT_ALREADY_PURGED` on a repeat call. Wipes every OTHER tenant-scoped table (business data,
+>   users, subscriptions, AI/usage meters) via the same fixpoint engine as factory-reset — **`tenant-wipe.ts`**,
+>   extracted so both share it. **Deliberately, by explicit product decision, NEVER touches `audit_log`** —
+>   the ITGC-AC-16 hash chain is append-only and DB-enforced regardless of what a preserve-set says — so the
+>   `tenants` row itself also survives purge, kept solely as that chain's anchor (`purged_at`/`purged_by`
+>   columns record it). A purged company therefore has zero users (permanently inaccessible; login 401s
+>   normally, same as any unknown username) but still shows under `?include_deleted=1` with `purged: true`.
+>   `restoreTenant` refuses on a purged company (`409 TENANT_PURGED`) — there is nothing left to restore to.
+>   Console: a second danger-zone section under Restore (only while deleted and not yet purged) + a
+>   purged-state banner replacing the Restore/Purge controls once purged.
 > - **Each new company gets its OWN org** — signup sets `org_id = the new tenant's id` on both the tenant
 >   and its Admin, so under `multi-company` the new Admin is isolated to just that company by default (and
 >   never needs the org_id backfill the boot warning mentions).
@@ -337,6 +375,8 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 ## 7. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.24 | 2026-07-13 | Platform | **§2: tenant soft-delete + purge (migration 0393) — Amber cleanup.** New two-step lifecycle beyond suspend/factory-reset: `deleteTenant` (suspended-only) flags `deleted_at` without touching data, permanently blocking logins (`TENANT_DELETED`, independent of `suspended_at`) — reversible via `restoreTenant`. `purgeTenant` (already-deleted-only) is the follow-up IRREVERSIBLE step that wipes every other tenant-scoped table but, per explicit product decision, NEVER erases `audit_log` (ITGC-AC-16) — so the `tenants` row survives purge too, as that chain's anchor. Landed in a new `TenantLifecycleService` + shared `tenant-wipe.ts` engine (factory-reset's loop extracted into it), not appended to `billing.service.ts`. ToE: `cutover/onboarding.ts` (23 new checks). Go-live runbook items 11-12. |
+| 1.23 | 2026-07-13 | Platform / SRE | **§1bis provisioning: transfer ownership of enum TYPES too (0353 deploy failure).** Migration `0353_treasury_debt_register`'s `ALTER TYPE "role_enum" ADD VALUE ...` 42501'd `must be owner of type role_enum` in prod under `ierp_app` — the run-1/1.21 ownership transfer covered `public`/`drizzle` tables, sequences, and views, but not user-defined TYPEs, and `ALTER TYPE ... ADD VALUE` requires actual ownership (table grants don't cover it). `ops-provision-app-role.yml` now also loops `pg_type` (`typtype='e'`) in `public` and `ALTER TYPE ... OWNER TO ierp_app`; §1bis SQL updated to match. Re-run the workflow to unblock prod. |
 | 1.22 | 2026-07-09 | Platform / SRE | **§1bis provisioning: grant `CREATE` on the DATABASE (deploy-outage run-3 fix).** After run 3 provisioned the correct instance, the deploy still died in the pre-deploy `drizzle-kit migrate`: it always opens with `CREATE SCHEMA IF NOT EXISTS "drizzle"`, and Postgres checks CREATE-on-database *before* the IF-NOT-EXISTS shortcut, so `ierp_app` (schema grants only) failed with 42501 `permission denied for database railway` — invisible under the superuser, which skips ACL checks. `ops-provision-app-role.yml` now also runs `GRANT CREATE ON DATABASE current_database() TO ierp_app`; §1bis SQL updated to match. |
 | 1.21 | 2026-07-09 | Platform / SRE | **§1bis one-click provisioning + H-3 outage remediation.** New manual-dispatch workflow `ops-provision-app-role.yml`: creates/rotates `ierp_app` per §1bis (+ `GRANT app_user TO ierp_app` — the direction `SET LOCAL ROLE app_user` requires; + schema `CREATE`; + ownership transfer of `public`/`drizzle` tables/sequences/views so boot-time `drizzle-kit migrate` keeps working under FORCE RLS), verifies posture over a live login, repoints the API's `DATABASE_URL`, dispatches `deploy.yml`. Root cause documented: every prod deploy failed healthcheck since the 1.20 H-3 merge because Railway's default `DATABASE_URL` is the `postgres` superuser — the old pre-hardening replica kept serving. |
 | 1.20 | 2026-07-08 | Security review | **Fail-closed data-isolation boot checks (H-3 / H-4).** (H-4) The tenancy-mode check now **refuses to boot by default** in prod on the dangerous state (single-company + >1 company), instead of warn-only; opt out with `ALLOW_SINGLE_COMPANY_MULTI_TENANT=1`. The old `STRICT_TENANCY_BOOT` flag is removed (its fail-closed behaviour is now the default). (H-3) New `assertRlsBackstop` (§1bis): in prod the API **probes the base DB role and refuses to boot** if it is superuser / has `BYPASSRLS`, since RLS is not enforced on the base connection (`@NoTx`/SSE/raw/job paths); opt out with `ALLOW_RLS_BYPASS_BASE_ROLE=1`, fix by connecting as a non-superuser owner role (§1bis provisioning SQL). Both are prod-only, best-effort (a read/probe failure never blocks boot). Unit tests: `apps/api/test/tenancy-boot-check.test.ts` (14 checks). |

@@ -53,6 +53,10 @@ interface HealthPortfolio { accounts: HealthRow[]; count: number; band_counts: R
 interface RenewalPipeline { renewals: { opp_no: string; name: string; deal_type: string; amount: number; weighted: number; expected_close_date: string | null }[]; count: number; weighted: number; renewal_gaps: { account_no: string; name: string }[]; gap_count: number }
 interface ForecastRollupRow { owner: string; system: { commit: number; best_case: number; pipeline: number; weighted: number; open_count: number; forecast: number }; submitted: { commit: number; best_case: number; pipeline: number; forecast: number | null; status: string } | null; variance: number | null }
 interface ForecastDepth { period: string; totals: { system_commit: number; system_forecast: number; weighted: number; open_total: number; submitted_total: number; submissions: number; reps: number }; coverage: { open_pipeline: number; target: number; ratio: number | null; basis: string }; waterfall: { stage: string; amount: number; running: number }[]; rollup: ForecastRollupRow[]; accuracy: { period: string; forecast: number; actual_won: number; accuracy_pct: number | null }[] }
+interface TerritoryRow { code: string; name: string; manager: string | null; active: boolean; parent_code: string | null }
+interface Attainment { period: string; owners: { owner: string; won_amount: number; quota: number; attainment_pct: number | null }[]; territories: { code: string; name: string; manager: string | null; member_count: number; subtree_won: number; quota: number; attainment_pct: number | null }[] }
+interface SequenceRow { code: string; name: string; active: boolean; description: string | null }
+interface EnrollmentRow { id: number; entity_type: string; entity_no: string; current_step: number; status: string; next_due_at: string | null }
 
 // The six seeded default stage names ↔ the legacy lowercase machine kept in sync on `opp.stage`.
 const LEGACY_BY_NAME: Record<string, string> = {
@@ -87,6 +91,8 @@ export default function CrmWorkspaceClient() {
           { key: 'plans', label: t('crmx.tab_plans'), content: <PlansTab /> },
           { key: 'health', label: t('crmx.tab_health'), content: <AccountHealthTab /> },
           { key: 'forecast', label: t('crmx.tab_forecast'), content: <ForecastTab /> },
+          { key: 'territory', label: t('crmx.tab_territory'), content: <TerritoryTab /> },
+          { key: 'sequences', label: t('crmx.tab_sequences'), content: <SequencesTab /> },
         ]}
       />
     </div>
@@ -1043,6 +1049,184 @@ function ForecastTab() {
           emptyState={{ icon: TrendingUp, title: t('crmx.empty_forecast_title'), description: t('crmx.empty_forecast_desc') }}
         />
       </StateView>
+    </div>
+  );
+}
+
+// ── CRM-11 — persisted territory & quota management: hierarchy + quota + attainment roll-up ────────
+function TerritoryTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [parent, setParent] = useState('');
+  const [manager, setManager] = useState('');
+  const [qScope, setQScope] = useState<'owner' | 'territory'>('owner');
+  const [qSubject, setQSubject] = useState('');
+  const [qTarget, setQTarget] = useState('');
+  const listQ = useQuery<{ territories: TerritoryRow[] }>({ queryKey: ['crm-territories'], queryFn: () => api('/api/crm/territory/territories') });
+  const attQ = useQuery<Attainment>({ queryKey: ['crm-attainment'], queryFn: () => api('/api/crm/territory/attainment') });
+  const createT = useMutation({
+    mutationFn: () => api('/api/crm/territory/territories', { method: 'POST', body: JSON.stringify({ name, parent_code: parent || undefined, manager: manager || undefined }) }),
+    onSuccess: () => { notifySuccess(t('crmx.toast_territory_created')); setName(''); setParent(''); setManager(''); qc.invalidateQueries({ queryKey: ['crm-territories'] }); qc.invalidateQueries({ queryKey: ['crm-attainment'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const setQuota = useMutation({
+    mutationFn: () => api('/api/crm/territory/quotas', { method: 'POST', body: JSON.stringify({ scope: qScope, subject: qSubject, target_amount: Number(qTarget) || 0 }) }),
+    onSuccess: () => { notifySuccess(t('crmx.toast_quota_set')); setQSubject(''); setQTarget(''); qc.invalidateQueries({ queryKey: ['crm-attainment'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card className="p-4">
+          <div className="mb-2 text-sm font-medium">{t('crmx.terr_create_title')}</div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="grid gap-1"><Label htmlFor="tr-name">{t('crmx.terr_name')}</Label><Input id="tr-name" className="w-40" value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div className="grid gap-1"><Label htmlFor="tr-parent">{t('crmx.terr_parent')}</Label>
+              <Select id="tr-parent" className="w-36" value={parent} onChange={(e) => setParent(e.target.value)}>
+                <option value="">{t('crmx.terr_no_parent')}</option>
+                {(listQ.data?.territories ?? []).map((tr) => <option key={tr.code} value={tr.code}>{tr.name}</option>)}
+              </Select>
+            </div>
+            <div className="grid gap-1"><Label htmlFor="tr-mgr">{t('crmx.terr_manager')}</Label><Input id="tr-mgr" className="w-32" value={manager} onChange={(e) => setManager(e.target.value)} /></div>
+            <Button size="sm" disabled={createT.isPending || !name} onClick={() => createT.mutate()}>{t('crmx.terr_create_btn')}</Button>
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="mb-2 text-sm font-medium">{t('crmx.terr_quota_title')}</div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="grid gap-1"><Label htmlFor="q-scope">{t('crmx.terr_scope')}</Label>
+              <Select id="q-scope" className="w-28" value={qScope} onChange={(e) => setQScope(e.target.value as 'owner' | 'territory')}>
+                <option value="owner">{t('crmx.terr_scope_owner')}</option>
+                <option value="territory">{t('crmx.terr_scope_territory')}</option>
+              </Select>
+            </div>
+            <div className="grid gap-1"><Label htmlFor="q-subj">{t('crmx.terr_subject')}</Label><Input id="q-subj" className="w-36" placeholder={qScope === 'owner' ? t('crmx.terr_subject_owner_ph') : t('crmx.terr_subject_terr_ph')} value={qSubject} onChange={(e) => setQSubject(e.target.value)} /></div>
+            <div className="grid gap-1"><Label htmlFor="q-target">{t('crmx.terr_target')}</Label><Input id="q-target" className="w-32" inputMode="numeric" value={qTarget} onChange={(e) => setQTarget(e.target.value)} /></div>
+            <Button size="sm" disabled={setQuota.isPending || !qSubject || !qTarget} onClick={() => setQuota.mutate()}>{t('crmx.terr_quota_btn')}</Button>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
+          <div className="mb-2 text-sm font-medium">{t('crmx.terr_owner_attainment')}</div>
+          <StateView q={attQ}>
+            <DataTable
+              rows={attQ.data?.owners ?? []}
+              rowKey={(r) => r.owner}
+              columns={[
+                { key: 'owner', label: t('crmx.fc_owner'), render: (r: Attainment['owners'][number]) => <span className="font-medium">{r.owner}</span> },
+                { key: 'won', label: t('crmx.terr_won'), render: (r: Attainment['owners'][number]) => baht(r.won_amount) },
+                { key: 'quota', label: t('crmx.terr_quota'), render: (r: Attainment['owners'][number]) => r.quota ? baht(r.quota) : '—' },
+                { key: 'att', label: t('crmx.terr_attainment'), render: (r: Attainment['owners'][number]) => r.attainment_pct == null ? '—' : <Badge variant={r.attainment_pct >= 100 ? 'success' : r.attainment_pct >= 70 ? 'warning' : 'destructive'}>{Math.round(r.attainment_pct)}%</Badge> },
+              ]}
+              emptyState={{ icon: Target, title: t('crmx.terr_empty_att_title'), description: t('crmx.terr_empty_att_desc') }}
+            />
+          </StateView>
+        </div>
+        <div>
+          <div className="mb-2 text-sm font-medium">{t('crmx.terr_rollup')}</div>
+          <StateView q={attQ}>
+            <DataTable
+              rows={attQ.data?.territories ?? []}
+              rowKey={(r) => r.code}
+              columns={[
+                { key: 'name', label: t('crmx.terr_name'), render: (r: Attainment['territories'][number]) => <span className="font-medium">{r.name}</span> },
+                { key: 'members', label: t('crmx.terr_members'), render: (r: Attainment['territories'][number]) => r.member_count || '—' },
+                { key: 'won', label: t('crmx.terr_subtree_won'), render: (r: Attainment['territories'][number]) => baht(r.subtree_won) },
+                { key: 'quota', label: t('crmx.terr_quota'), render: (r: Attainment['territories'][number]) => r.quota ? baht(r.quota) : '—' },
+                { key: 'att', label: t('crmx.terr_attainment'), render: (r: Attainment['territories'][number]) => r.attainment_pct == null ? '—' : <Badge variant={r.attainment_pct >= 100 ? 'success' : r.attainment_pct >= 70 ? 'warning' : 'destructive'}>{Math.round(r.attainment_pct)}%</Badge> },
+              ]}
+              emptyState={{ icon: Layers, title: t('crmx.terr_empty_terr_title'), description: t('crmx.terr_empty_terr_desc') }}
+            />
+          </StateView>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── CRM-8 — sales sequences / cadences: playbooks + enrolments + due-runner ──────────────────────
+const SEQ_STATUS_VARIANT: Record<string, 'success' | 'warning' | 'muted' | 'outline'> = { active: 'success', completed: 'muted', stopped: 'warning' };
+function SequencesTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [step1, setStep1] = useState('');
+  const [enrollCode, setEnrollCode] = useState('');
+  const [enrollNo, setEnrollNo] = useState('');
+  const seqQ = useQuery<{ sequences: SequenceRow[] }>({ queryKey: ['crm-sequences'], queryFn: () => api('/api/crm/sequences') });
+  const enrolQ = useQuery<{ enrollments: EnrollmentRow[] }>({ queryKey: ['crm-seq-enrollments'], queryFn: () => api('/api/crm/sequences/enrollments') });
+  const invalidate = () => { qc.invalidateQueries({ queryKey: ['crm-sequences'] }); qc.invalidateQueries({ queryKey: ['crm-seq-enrollments'] }); };
+  const createSeq = useMutation({
+    mutationFn: () => api('/api/crm/sequences', { method: 'POST', body: JSON.stringify({ name, steps: [{ channel: 'email', wait_days: 0, subject: name, body: step1 || 'Hi {{name}}' }, { channel: 'task', wait_days: 3, subject: 'Follow up' }] }) }),
+    onSuccess: () => { notifySuccess(t('crmx.toast_seq_created')); setName(''); setStep1(''); invalidate(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const enroll = useMutation({
+    mutationFn: () => api(`/api/crm/sequences/${encodeURIComponent(enrollCode)}/enroll`, { method: 'POST', body: JSON.stringify({ entity_type: enrollNo.trim().toUpperCase().startsWith('OPP') ? 'opportunity' : 'lead', entity_no: enrollNo.trim() }) }),
+    onSuccess: () => { notifySuccess(t('crmx.toast_seq_enrolled')); setEnrollNo(''); invalidate(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const advance = useMutation({ mutationFn: (id: number) => api(`/api/crm/sequences/enrollments/${id}/advance`, { method: 'POST' }), onSuccess: invalidate, onError: (e: Error) => notifyError(e.message) });
+  const stop = useMutation({ mutationFn: (id: number) => api(`/api/crm/sequences/enrollments/${id}/stop`, { method: 'POST' }), onSuccess: invalidate, onError: (e: Error) => notifyError(e.message) });
+  const runDue = useMutation({
+    mutationFn: () => api<{ advanced: number; scanned: number }>('/api/crm/sequences/run-due', { method: 'POST' }),
+    onSuccess: (r) => { notifySuccess(t('crmx.toast_seq_run', { n: r.advanced })); invalidate(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card className="p-4">
+          <div className="mb-2 text-sm font-medium">{t('crmx.seq_create_title')}</div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="grid gap-1"><Label htmlFor="seq-name">{t('crmx.seq_name')}</Label><Input id="seq-name" className="w-44" value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div className="grid gap-1"><Label htmlFor="seq-body">{t('crmx.seq_step1_body')}</Label><Input id="seq-body" className="w-56" placeholder="Hi {{name}}" value={step1} onChange={(e) => setStep1(e.target.value)} /></div>
+            <Button size="sm" disabled={createSeq.isPending || !name} onClick={() => createSeq.mutate()}>{t('crmx.seq_create_btn')}</Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">{t('crmx.seq_create_hint')}</p>
+        </Card>
+        <Card className="p-4">
+          <div className="mb-2 flex items-center justify-between gap-2"><span className="text-sm font-medium">{t('crmx.seq_enroll_title')}</span><Button size="sm" variant="outline" disabled={runDue.isPending} onClick={() => runDue.mutate()}><TrendingUp className="size-4" /> {t('crmx.seq_run_btn')}</Button></div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="grid gap-1"><Label htmlFor="seq-code">{t('crmx.seq_code')}</Label>
+              <Select id="seq-code" className="w-36" value={enrollCode} onChange={(e) => setEnrollCode(e.target.value)}>
+                <option value="">{t('crmx.seq_pick')}</option>
+                {(seqQ.data?.sequences ?? []).filter((s) => s.active).map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+              </Select>
+            </div>
+            <div className="grid gap-1"><Label htmlFor="seq-entity">{t('crmx.seq_entity')}</Label><Input id="seq-entity" className="w-40" placeholder="LEAD-… / OPP-…" value={enrollNo} onChange={(e) => setEnrollNo(e.target.value)} /></div>
+            <Button size="sm" disabled={enroll.isPending || !enrollCode || !enrollNo} onClick={() => enroll.mutate()}>{t('crmx.seq_enroll_btn')}</Button>
+          </div>
+        </Card>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-medium">{t('crmx.seq_enrollments')}</div>
+        <StateView q={enrolQ}>
+          <DataTable
+            rows={enrolQ.data?.enrollments ?? []}
+            rowKey={(r) => String(r.id)}
+            columns={[
+              { key: 'entity', label: t('crmx.seq_entity'), render: (r: EnrollmentRow) => <span className="font-medium">{r.entity_no}</span> },
+              { key: 'step', label: t('crmx.seq_step'), render: (r: EnrollmentRow) => r.current_step || '—' },
+              { key: 'status', label: t('crmx.health_band'), render: (r: EnrollmentRow) => <Badge variant={SEQ_STATUS_VARIANT[r.status] ?? 'outline'}>{t(`crmx.seq_status_${r.status}`)}</Badge> },
+              { key: 'due', label: t('crmx.seq_next_due'), render: (r: EnrollmentRow) => r.next_due_at ? new Date(r.next_due_at).toLocaleDateString() : '—' },
+              { key: 'actions', label: '', render: (r: EnrollmentRow) => r.status === 'active' ? (
+                <div className="flex gap-1">
+                  <Button size="sm" variant="outline" disabled={advance.isPending} onClick={() => advance.mutate(r.id)}>{t('crmx.seq_advance')}</Button>
+                  <Button size="sm" variant="ghost" disabled={stop.isPending} onClick={() => stop.mutate(r.id)}>{t('crmx.seq_stop')}</Button>
+                </div>
+              ) : '—' },
+            ]}
+            emptyState={{ icon: Handshake, title: t('crmx.seq_empty_title'), description: t('crmx.seq_empty_desc') }}
+          />
+        </StateView>
+      </div>
     </div>
   );
 }

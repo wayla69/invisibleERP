@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 273,
+    "total": 275,
     "by_status": {
-      "Implemented": 270,
+      "Implemented": 272,
       "Partial": 3
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 40,
+      "Revenue & Cash": 42,
       "Tax": 12
     }
   },
@@ -766,16 +766,16 @@
       "fsli": "All",
       "risk": "Member PII is shared with an external ads platform / CDP without a legal basis: an audience export runs with no recorded processing activity, includes members who never consented (or withdrew), ships RAW phone/email off-platform, or pushes to an attacker-controlled/internal destination (SSRF) — a PDPA s.19/24 breach with regulatory and reputational exposure.",
       "assertion": "Compliance/Confidentiality/Authorization",
-      "description": "Consent-gated hashed audience export (G3, docs/45): the audience_export_sync BI job is FAIL-CLOSED twice over. (1) It refuses to run without an ACTIVE ropa_activities row named 'audience_export' with legal_basis='consent' (ROPA_MISSING — the processing register IS the permission to process), recording a 'blocked' row in the append-only audience_exports register (migration 0379, canonical RLS). (2) The payload builder (CrmService.exportForCustomerMatch) includes ONLY members with a LIVE marketing consent in member_consents (granted, not withdrawn) — NO fallback to the legacy marketingOptIn flag (the ledger is the legal basis; a member with no row is EXCLUDED) — and emits ONLY SHA-256 hashes of the normalized email (trim/lowercase) and phone (E.164 digits, Thai 0x→66x), the exact Meta Custom Audiences / Google Customer Match ingest format: raw PII never reaches the wire (no names, no codes, no traits). The push routes through pushHashedAudience with the L-6 SSRF gate (assertPublicUrl: public https only; the legacy pushToCdp gained the same gate); unconfigured destination = deterministic mock. Every attempt — success, failed, or blocked — lands in audience_exports (counts, target, consent basis, the ROPA id it ran under, actor) plus an ITGC-AC-10 egress row in audit_log; GET /api/crm/audience-export/preview (marketing/exec) lets the marketer SEE the consent gate + hash-only payload before scheduling.",
+      "description": "Consent-gated hashed audience export (G3, docs/45): the audience_export_sync BI job is FAIL-CLOSED twice over. (1) It refuses to run without an ACTIVE ropa_activities row named 'audience_export' with legal_basis='consent' (ROPA_MISSING — the processing register IS the permission to process), recording a 'blocked' row in the append-only audience_exports register (migration 0379, canonical RLS). (2) The payload builder (CrmService.exportForCustomerMatch) includes ONLY members with a LIVE marketing consent in member_consents (granted, not withdrawn) — NO fallback to the legacy marketingOptIn flag (the ledger is the legal basis; a member with no row is EXCLUDED) — and emits ONLY SHA-256 hashes of the normalized email (trim/lowercase) and phone (E.164 digits, Thai 0x→66x), the exact Meta Custom Audiences / Google Customer Match ingest format: raw PII never reaches the wire (no names, no codes, no traits). The push routes through pushHashedAudience with the L-6 SSRF gate (assertPublicUrl: public https only; the legacy pushToCdp gained the same gate); unconfigured destination = deterministic mock. Every attempt — success, failed, or blocked — lands in audience_exports (counts, target, consent basis, the ROPA id it ran under, actor) plus an ITGC-AC-10 egress row in audit_log; GET /api/crm/audience-export/preview (marketing/exec) lets the marketer SEE the consent gate + hash-only payload before scheduling. (3) Withdrawal REMOVAL sync (migration 0386): each successful direct upload maintains audience_export_members — a hash-only manifest of exactly which member hashes are sitting at the external platforms (captured at upload time, so removal still works after a DSAR erasure nulls the raw identifiers) — and every run then prunes: manifest members with NO live marketing consent are pushed as REMOVE operations (Meta HTTP DELETE /{audience}/users; Google OfflineUserDataJob remove operations on its own job; webhook action='remove'), removed_at is stamped ONLY when every configured target accepted (a partial failure keeps the member a candidate and fails the run visibly, AUDIENCE_REMOVE_FAILED), and the per-run rows_removed count lands on each register row — the external audience stays continuously consistent with the consent ledger instead of merely additive.",
       "prev_det": "Prev",
       "nature": "Automated",
       "frequency": "Per export run",
       "owner": "DPO / Marketing owner",
       "coso": "P10/P16",
-      "code_reference": "crm/crm.service.ts (exportForCustomerMatch consent filter + sha256 normalization; audienceExportRegister); bi/bi-generate.service.ts (audienceExportSync fail-closed ROPA gate + register writes); common/cdp-sync.ts (pushHashedAudience + assertPublicUrl SSRF gates); crm/crm.controller.ts (audience-export/preview + /register, marketing/exec); schema/audience-exports.ts + migration 0379 (canonical org-scoped RLS, tenant-leading index); cutover/pdpa.ts (PDPA-05 ToE)",
-      "tod": "Inspect the ROPA fail-closed gate, the member_consents-only filter (no flag fallback), the sha256 normalization, the SSRF gate on the push, and the append-only register.",
-      "toe": "Re-perform: the preview returns hash-only rows for ONLY the consented member (a no-consent-row member with marketingOptIn=true and a withdrawn member are both excluded) with byte-exact normalized sha256 email/phone and no raw PII anywhere in the payload; a run without the audience_export ROPA activity FAILS CLOSED (ROPA_MISSING) with a 'blocked' register row; after the DPO records the ROPA activity the run succeeds and the register row carries consented/pushed counts, the mock target, and the ROPA id — re-performed by the pdpa harness (PDPA-05 checks).",
-      "evidence": "audience_exports register rows (blocked + success) tied to the ROPA activity; audit_log CRM.AUDIENCE_EXPORT egress rows",
+      "code_reference": "crm/crm.service.ts (exportForCustomerMatch consent filter + sha256 normalization; audienceExportRegister); bi/bi-generate.service.ts (audienceExportSync fail-closed ROPA gate + register writes); common/cdp-sync.ts (pushHashedAudience + assertPublicUrl SSRF gates); common/audience-providers.ts (direct Meta Custom Audiences + Google Customer Match adapters, env-gated, per-recipient register rows); crm/crm.controller.ts (audience-export/preview + /register, marketing/exec); schema/audience-exports.ts + migrations 0379/0386 (canonical org-scoped RLS, tenant-leading index; audience_export_members withdrawal manifest + rows_removed); cutover/pdpa.ts (PDPA-05 + G3b adapter ToE)",
+      "tod": "Inspect the ROPA fail-closed gate, the member_consents-only filter (no flag fallback), the sha256 normalization, the SSRF gate on the push, the manifest-driven withdrawal removal sync, and the append-only register.",
+      "toe": "Re-perform: the preview returns hash-only rows for ONLY the consented member (a no-consent-row member with marketingOptIn=true and a withdrawn member are both excluded) with byte-exact normalized sha256 email/phone and no raw PII anywhere in the payload; a run without the audience_export ROPA activity FAILS CLOSED (ROPA_MISSING) with a 'blocked' register row; after the DPO records the ROPA activity the run succeeds and the register row carries consented/pushed counts, the mock target, and the ROPA id; withdrawing the already-uploaded member's consent makes the NEXT run push REMOVE ops to every adapter (Meta DELETE with the same hashed row, Google remove operations), stamp the manifest removed_at, and record rows_removed=1 per recipient, while a re-run removes 0 (idempotent) — re-performed by the pdpa harness (PDPA-05 + G3b/G3c checks).",
+      "evidence": "audience_exports register rows (blocked + success, rows_pushed/rows_removed) tied to the ROPA activity; audience_export_members manifest (last_pushed_at/removed_at); audit_log CRM.AUDIENCE_EXPORT egress rows",
       "status": "Implemented"
     },
     {
@@ -1651,6 +1651,44 @@
       "toe": "Re-perform: a rep submits a period commit/best-case (draft->submitted) and it appears in the manager roll-up reconciled against the system-weighted forecast with the variance; the coverage ratio = open pipeline / the submitted-commit target; the waterfall's commit->best-case->pipeline stages build up to the forecast total; capturing a snapshot persists the forecast + the period's actual won (re-run same day is idempotent) and the history shows the forecast-vs-actual accuracy %; the crm_forecast_snapshot report type is registered; a second tenant cannot read the first tenant's submissions/snapshots (RLS) (re-performed by the pipeline harness CRM-12 checks).",
       "evidence": "Rep->manager forecast-override roll-up + system-vs-submitted variance; pipeline-coverage + category waterfall; dated forecast snapshot + forecast-vs-actual accuracy trend",
       "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-10",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (territory / quota governance)",
+      "risk": "Sales territories and quotas are NOT persisted governed master data — a territory's boundaries (regions / segments / product lines) and the reps that own it live in spreadsheets or someone's head, and quota attainment is measured against an ad-hoc number passed at report time rather than an approved target. So there is no auditable link from a rep's result to an owned territory + an agreed quota, no team roll-up of attainment up the sales hierarchy, and a rep's or a region's shortfall to plan is invisible until the period closes.",
+      "assertion": "Accuracy/Completeness/Authorization",
+      "description": "Persisted TERRITORY & QUOTA management (CRM-11, migration 0385) — a governance layer over the REV-17 pipeline. crm_territories is named territory master data with match CRITERIA (regions / segments / product categories, jsonb), a self-referential parent_territory_id for a team ROLL-UP hierarchy, and a manager; crm_territory_members assigns reps (role rep | manager); crm_quotas holds a per-period TARGET for an owner or a territory (scope + subject, upsert per period/scope/subject) so attainment is measured against an auditable quota rather than a number passed at request time. GET /api/crm/territory/attainment is the roll-up: won-in-period per owner vs the owner quota, and per territory the Σ of its members' won across the whole SUBTREE vs the territory quota (a parent's attainment includes its descendants). POST /api/crm/territory/territories[/:code/members], POST /api/crm/territory/quotas gate crm/exec; reads gate crm/exec/ar. All three tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes). No GL post.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per period / continuous",
+      "owner": "Sales Operations / Sales Manager / VP Sales",
+      "coso": "P13",
+      "code_reference": "modules/crm/territory/crm-territory.module.ts (createTerritory TERR- code + parent link; listTerritories; getTerritory members+children; addMember/removeMember upsert; setQuota owner|territory upsert per period/scope/subject; attainment — won-in-period per owner vs owner quota + territory subtree roll-up vs territory quota via recursive subtreeWon); schema/crm-pipeline.ts crm_territories + crm_territory_members + crm_quotas + migration 0385 (RLS, tenant-leading indexes); cutover/pipeline.ts (ToE, CRM-11 checks)",
+      "tod": "Inspect the territory hierarchy + criteria, the rep-membership assignment, the per-period owner/territory quota persistence, and the attainment roll-up (owner vs quota, territory subtree vs quota).",
+      "toe": "Re-perform: create a parent + child territory and assign a rep to the child; set an owner quota + a territory quota for the period; a won deal for the rep counts toward its owner attainment (won vs quota) and rolls up into the parent territory's subtree_won vs the territory quota; the territory read lists its members; a second tenant cannot see the first tenant's territories (RLS) (re-performed by the pipeline harness CRM-11 checks).",
+      "evidence": "Territory master + criteria + hierarchy; rep-membership register; per-period owner/territory quota; attainment roll-up (owner + territory subtree)",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-11",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (lead / deal nurture cadence)",
+      "risk": "Multi-step outreach on leads and open deals is manual and ungoverned — a rep is meant to touch a prospect on a cadence (day 0 email, day 3 call, day 7 follow-up) but there is no playbook and no tracking, so a nurtured lead or deal silently DROPS OUT of the follow-up (a step is skipped or forgotten), the touches are not logged as auditable activity, and there is no way to run the due outreach systematically. Revenue is lost to inconsistent, unrecorded follow-up rather than on the merits.",
+      "assertion": "Completeness/Timeliness",
+      "description": "Det",
+      "prev_det": "Automated",
+      "nature": "Per enrolment / continuous",
+      "frequency": "Sales / SDR / Sales Manager",
+      "owner": "P13",
+      "coso": "Sales SEQUENCES / cadences (CRM-8, migration 0392) on the REV-17 spine + the CRM-6 comms rail. crm_sequences is a named playbook; crm_sequence_steps is its ordered steps (channel email/line/sms/task + wait_days + subject/body); crm_sequence_enrollments enrols a lead or opportunity (unique per sequence/entity, ALREADY_ENROLLED guard; SEQUENCE_INACTIVE / SEQUENCE_NO_STEPS / ENTITY_NOT_FOUND guards). The due-runner ADVANCES each active enrolment whose next step is due: it sends the step via MessagingService (best-effort; a 'task' step is a reminder only), LOGS the touch as an auditable crm_activities entry (source='sequence'), and schedules the next step by its wait_days — until the last step (status -> completed). A rep may stop an enrolment (status -> stopped); advancing a non-active enrolment is rejected (ENROLLMENT_NOT_ACTIVE). POST /api/crm/sequences[/:code/enroll], POST …/enrollments/:id/[advance|stop], POST …/run-due (crm/exec); the run-due sweep is schedulable as the BI report crm_sequence_run (module-owned BiReportSource provider, docs/46). Reads gate crm/exec/ar. Three tables tenant-scoped (RLS, canonical 0232 policy, tenant-leading indexes). No GL post.",
+      "code_reference": "Det",
+      "tod": "Automated",
+      "toe": "Per enrolment / continuous",
+      "evidence": "Sales / SDR / Sales Manager",
+      "status": "P13"
     },
     {
       "control_id": "CPQ-01",

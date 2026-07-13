@@ -12,6 +12,7 @@ import { isPlatformAdmin } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
 import { logger } from '../../observability/logger';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
+import { wipeTenantRefs, tenantIdColumns } from './tenant-wipe';
 
 // Public self-serve signup gate (ITGC-AC-18). In PRODUCTION, self-service company provisioning is
 // DISABLED unconditionally — only the platform owner ("god", godmimi) opens a new company (directly via
@@ -218,37 +219,13 @@ export class TenantProvisioningService {
     if ((confirm ?? '').trim() !== t.code)
       throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type the company code exactly to confirm the reset', messageTh: `พิมพ์รหัสบริษัท "${t.code}" ให้ตรงเพื่อยืนยันการล้างข้อมูล` });
 
-    const db = this.db;
     // Same runtime enumeration the RLS loop migrations use — every BASE TABLE carrying a tenant_id column
     // is tenant-scoped by convention (platform tables name theirs about_tenant_id/created_tenant_id).
-    const enumRes: any = await db.execute(sql`
-      SELECT c.table_name FROM information_schema.columns c
-      JOIN information_schema.tables tb ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name
-      WHERE c.table_schema = 'public' AND c.column_name = 'tenant_id' AND tb.table_type = 'BASE TABLE'
-      ORDER BY c.table_name`);
-    const allTables: string[] = (enumRes.rows ?? enumRes).map((r: any) => String(r.table_name));
-    let remaining = allTables.filter((n) => !FACTORY_RESET_PRESERVE.has(n));
-    const targeted = remaining.length;
-    let rowsDeleted = 0;
-
-    while (remaining.length) {
-      const blocked: string[] = [];
-      for (const name of remaining) {
-        const ident = sql.raw(`"${name.replace(/"/g, '""')}"`); // identifier from information_schema, not user input
-        await db.execute(sql`SAVEPOINT factory_reset_tbl`);
-        try {
-          const r: any = await db.execute(sql`DELETE FROM ${ident} WHERE tenant_id = ${id}`);
-          await db.execute(sql`RELEASE SAVEPOINT factory_reset_tbl`);
-          rowsDeleted += Number(r?.rowCount ?? r?.affectedRows ?? 0);
-        } catch {
-          await db.execute(sql`ROLLBACK TO SAVEPOINT factory_reset_tbl`);
-          blocked.push(name);
-        }
-      }
-      if (blocked.length === remaining.length)
-        throw new ConflictException({ code: 'FACTORY_RESET_BLOCKED', message: `Reset blocked — tables still referenced: ${blocked.slice(0, 8).join(', ')}${blocked.length > 8 ? '…' : ''}`, messageTh: 'ล้างข้อมูลไม่สำเร็จ — มีตารางที่ยังถูกอ้างอิงจากข้อมูลที่ระบบต้องเก็บไว้' });
-      remaining = blocked;
-    }
+    const { targeted, rowsDeleted } = await wipeTenantRefs(
+      this.db, id, await tenantIdColumns(this.db), FACTORY_RESET_PRESERVE, 'FACTORY_RESET_BLOCKED',
+      (names) => `Reset blocked — tables still referenced: ${names}`,
+      () => 'ล้างข้อมูลไม่สำเร็จ — มีตารางที่ยังถูกอ้างอิงจากข้อมูลที่ระบบต้องเก็บไว้',
+    );
 
     // Re-seed the fresh-tenant defaults so the company is immediately usable (mirrors provisionTenant).
     const industry = isIndustryKey((t as { industry?: string }).industry) ? (t as { industry?: string }).industry! : 'general';

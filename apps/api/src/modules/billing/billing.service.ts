@@ -109,7 +109,7 @@ export class BillingService {
   // ───────────────────── Platform console — docs/46 Phase 4c cut 3 ─────────────────────
   // Cross-company directory/tags/AI-spend/detail/trial/suspend live in PlatformAdminService
   // (ctor-BODY construction). Thin delegators keep the console endpoints byte-identical.
-  listTenants() { return this.platformAdmin.listTenants(); }
+  listTenants(includeDeleted = false) { return this.platformAdmin.listTenants(includeDeleted); }
   setTenantTags(id: number, tags: string[]) { return this.platformAdmin.setTenantTags(id, tags); }
   aiUsageByTenant() { return this.platformAdmin.aiUsageByTenant(); }
   getTenantDetail(id: number) { return this.platformAdmin.getTenantDetail(id); }

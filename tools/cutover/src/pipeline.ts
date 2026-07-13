@@ -11,7 +11,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
@@ -633,6 +633,83 @@ async function main() {
   await inj('POST', '/api/crm/forecast/submission', admin, { owner: 'hq_rep', commit_amount: 999999, status: 'submitted' });
   const t1subs = await inj('GET', '/api/crm/forecast/submissions', sales1);
   ok('CRM-12 RLS: a T1 user cannot see HQ forecast submissions', t1subs.status === 200 && !(t1subs.json.submissions ?? []).some((x: any) => x.owner === 'hq_rep'), `owners=${(t1subs.json.submissions ?? []).map((x: any) => x.owner).join(',')}`);
+
+  // ── CRM-11 — persisted territory & quota management (migration 0385, control CRM-10) ─────────────
+  // 57. Create a territory hierarchy (parent + child) + assign a rep to the child.
+  const terrN = await inj('POST', '/api/crm/territory/territories', sales1, { name: 'North Region', manager: 'mgr_n' });
+  const terrNE = await inj('POST', '/api/crm/territory/territories', sales1, { name: 'Northeast', parent_code: terrN.json.code, manager: 'mgr_ne' });
+  ok('CRM-11 territory: create a parent + child territory (hierarchy)', [200, 201].includes(terrN.status) && [200, 201].includes(terrNE.status) && !!terrN.json.code && !!terrNE.json.code, JSON.stringify({ parent: terrN.json.code, child: terrNE.json.code }));
+  const addM = await inj('POST', `/api/crm/territory/territories/${terrNE.json.code}/members`, sales1, { owner: 'terr_rep', role: 'rep' });
+  ok('CRM-11 territory: assign a rep to the child territory', [200, 201].includes(addM.status) && addM.json.owner === 'terr_rep', JSON.stringify(addM.json));
+
+  // 58. A won deal for the rep in the current period + owner & territory quotas → attainment roll-up.
+  const twAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Territory Deal Co', tax_id: '0105561000905' });
+  const twOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Terr Deal', amount: 300000, owner: 'terr_rep', account_no: twAcc.json.account_no });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${twOpp.json.opp_no}/stage`, sales1, { stage: 'won', win_reason: 'closed' });
+  await inj('POST', '/api/crm/territory/quotas', sales1, { scope: 'owner', subject: 'terr_rep', target_amount: 600000 });
+  await inj('POST', '/api/crm/territory/quotas', sales1, { scope: 'territory', subject: terrN.json.code, target_amount: 1000000 });
+  const att = await inj('GET', '/api/crm/territory/attainment', sales1);
+  const ownerRow = (att.json.owners ?? []).find((o: any) => o.owner === 'terr_rep');
+  ok('CRM-11 attainment: rep won-in-period vs a persisted owner quota', att.status === 200 && !!ownerRow && ownerRow.won_amount >= 300000 && ownerRow.quota === 600000 && ownerRow.attainment_pct !== null, JSON.stringify(ownerRow));
+
+  // 59. Territory subtree roll-up: parent North's subtree includes the child NE member's won.
+  const parentRow = (att.json.territories ?? []).find((tr: any) => tr.code === terrN.json.code);
+  ok('CRM-11 roll-up: parent territory subtree_won includes the child member\'s won + territory quota', !!parentRow && parentRow.subtree_won >= 300000 && parentRow.quota === 1000000 && parentRow.attainment_pct !== null, JSON.stringify(parentRow));
+
+  // 60. Territory read exposes members.
+  const terrGet = await inj('GET', `/api/crm/territory/territories/${terrNE.json.code}`, sales1);
+  ok('CRM-11 territory read: members listed on the territory', terrGet.status === 200 && (terrGet.json.members ?? []).some((m: any) => m.owner === 'terr_rep'), JSON.stringify({ members: (terrGet.json.members ?? []).map((m: any) => m.owner) }));
+
+  // 61. RLS: a T1 user cannot see an HQ tenant's territory (per-tenant codes collide, so assert via the
+  //     tenant-scoped list rather than a code lookup).
+  await inj('POST', '/api/crm/territory/territories', admin, { name: 'HQ Only Region' });
+  const t1list = await inj('GET', '/api/crm/territory/territories', sales1);
+  ok('CRM-11 RLS: a T1 user cannot see an HQ tenant\'s territory', t1list.status === 200 && !(t1list.json.territories ?? []).some((tr: any) => tr.name === 'HQ Only Region'), `names=${(t1list.json.territories ?? []).map((tr: any) => tr.name).join('|')}`);
+
+  // ── CRM-8 — sales sequences / cadences (migration 0392, control CRM-11) ──────────────────────────
+  // 62. Create a 2-step sequence (email now + a follow-up task after 3 days).
+  const seq = await inj('POST', '/api/crm/sequences', sales1, { name: 'New-lead nurture', steps: [{ channel: 'email', wait_days: 0, subject: 'Welcome', body: 'Hi {{name}}' }, { channel: 'task', wait_days: 3, subject: 'Call the lead' }] });
+  ok('CRM-8 sequence: create a 2-step cadence', [200, 201].includes(seq.status) && !!seq.json.code && seq.json.steps === 2, JSON.stringify(seq.json));
+
+  // 63. Enroll a lead (with an email) → active, first step due now (wait_days 0).
+  const seqLead = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Cadence Lead', email: 'cadence@example.com', company: 'Cadence Co' });
+  const enrol = await inj('POST', `/api/crm/sequences/${seq.json.code}/enroll`, sales1, { entity_type: 'lead', entity_no: seqLead.json.lead_no });
+  ok('CRM-8 enroll: a lead is enrolled and active with a due date', [200, 201].includes(enrol.status) && enrol.json.status === 'active' && !!enrol.json.id && !!enrol.json.next_due_at, JSON.stringify({ id: enrol.json.id, status: enrol.json.status }));
+
+  // 64. Advance step 1 (email) → sent/logged, enrolment stays active (step 2 remains).
+  const adv1 = await inj('POST', `/api/crm/sequences/enrollments/${enrol.json.id}/advance`, sales1, {});
+  ok('CRM-8 advance: step 1 email executed, enrolment still active', [200, 201].includes(adv1.status) && adv1.json.step_no === 1 && adv1.json.channel === 'email' && adv1.json.status === 'active', JSON.stringify(adv1.json));
+  // The touch is logged as an auditable activity on the lead's timeline.
+  const [actRow] = await db.select().from(s.crmActivities).where(and(eq(s.crmActivities.entityNo, seqLead.json.lead_no), eq(s.crmActivities.source, 'sequence')));
+  ok('CRM-8 advance: the step is logged as a sequence activity', !!actRow && actRow.type === 'email', JSON.stringify({ type: actRow?.type, source: actRow?.source }));
+
+  // 65. Advance step 2 (the last step) → enrolment completes.
+  const adv2 = await inj('POST', `/api/crm/sequences/enrollments/${enrol.json.id}/advance`, sales1, {});
+  ok('CRM-8 advance: the last step completes the enrolment', [200, 201].includes(adv2.status) && adv2.json.step_no === 2 && adv2.json.status === 'completed', JSON.stringify(adv2.json));
+  // Advancing a completed enrolment is rejected.
+  const advDone = await inj('POST', `/api/crm/sequences/enrollments/${enrol.json.id}/advance`, sales1, {});
+  ok('CRM-8 advance: a completed enrolment cannot advance', advDone.status === 400 && advDone.json.error?.code === 'ENROLLMENT_NOT_ACTIVE', `${advDone.status} ${advDone.json.error?.code}`);
+
+  // 66. The schedulable due-runner (BI job) advances due enrolments; a fresh enrolment (step1 due now) is advanced.
+  const seqLead2 = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Cadence Lead 2', email: 'cadence2@example.com' });
+  await inj('POST', `/api/crm/sequences/${seq.json.code}/enroll`, sales1, { entity_type: 'lead', entity_no: seqLead2.json.lead_no });
+  const run = await inj('POST', '/api/crm/sequences/run-due', sales1, {});
+  ok('CRM-8 due-runner: advances due enrolments (schedulable as crm_sequence_run)', run.status === 200 && run.json.advanced >= 1 && run.json.scanned >= 1, JSON.stringify({ scanned: run.json.scanned, advanced: run.json.advanced }));
+
+  // 67. Stop an enrolment.
+  const seqLead3 = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Cadence Lead 3', email: 'cadence3@example.com' });
+  const enrol3 = await inj('POST', `/api/crm/sequences/${seq.json.code}/enroll`, sales1, { entity_type: 'lead', entity_no: seqLead3.json.lead_no });
+  const stopped = await inj('POST', `/api/crm/sequences/enrollments/${enrol3.json.id}/stop`, sales1, {});
+  ok('CRM-8 stop: an enrolment can be stopped', [200, 201].includes(stopped.status) && stopped.json.status === 'stopped', JSON.stringify(stopped.json));
+
+  // 68. BI registry exposes the crm_sequence_run report type.
+  const rtypesSeq = await inj('GET', '/api/bi/report-types', admin);
+  ok('CRM-8 BI: registry exposes crm_sequence_run report type', (rtypesSeq.json.report_types ?? []).some((r: any) => r.key === 'crm_sequence_run'), 'crm_sequence_run');
+
+  // 69. RLS: a T1 user cannot see an HQ tenant's sequence.
+  await inj('POST', '/api/crm/sequences', admin, { name: 'HQ Only Cadence', steps: [{ channel: 'email', body: 'x' }] });
+  const t1seqs = await inj('GET', '/api/crm/sequences', sales1);
+  ok('CRM-8 RLS: a T1 user cannot see an HQ tenant\'s sequence', t1seqs.status === 200 && !(t1seqs.json.sequences ?? []).some((x: any) => x.name === 'HQ Only Cadence'), `names=${(t1seqs.json.sequences ?? []).map((x: any) => x.name).join('|')}`);
 
   await app.close();
 }

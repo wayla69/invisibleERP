@@ -23,11 +23,14 @@ export class PlatformAdminService {
   // Console table. Runs under the @PlatformAdmin RLS bypass, so it lists EVERY tenant. Enriched with the
   // subscription (plan/status/trial) and a live user count so the console can show each company's posture
   // at a glance. Ordered by code for a stable list.
-  async listTenants() {
+  // includeDeleted — the Platform Console fleet list/switcher hides soft-deleted companies (migration
+  // 0386) by default; pass true to show them (e.g. a "show deleted" toggle) for restoreTenant.
+  async listTenants(includeDeleted = false) {
     const rows = await this.db
       .select({
         id: tenants.id, code: tenants.code, name: tenants.name,
         suspendedAt: tenants.suspendedAt, createdAt: tenants.createdAt,
+        deletedAt: tenants.deletedAt, deletedBy: tenants.deletedBy, purgedAt: tenants.purgedAt,
         legalName: tenants.legalName, taxId: tenants.taxId, addressLine1: tenants.addressLine1, province: tenants.province,
         tags: tenants.tags,
         planCode: subscriptions.planCode, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt,
@@ -48,11 +51,15 @@ export class PlatformAdminService {
       const id = Number(t.id);
       if (seen.has(id)) continue;
       seen.add(id);
+      if (t.deletedAt && !includeDeleted) continue;
       out.push({
         id, code: t.code, name: t.name,
         suspended: !!t.suspendedAt,
-        // Suspended wins as the headline status; otherwise show the subscription status (or null if none).
-        status: t.suspendedAt ? 'Suspended' : (t.status ?? null),
+        deleted: !!t.deletedAt,
+        deleted_by: t.deletedBy ?? null,
+        purged: !!t.purgedAt,
+        // Deleted wins over suspended as the headline status; otherwise show the subscription status.
+        status: t.deletedAt ? 'Deleted' : t.suspendedAt ? 'Suspended' : (t.status ?? null),
         plan_code: t.planCode ?? null,
         trial_ends_at: t.trialEndsAt ?? null,
         users: countByTenant.get(id) ?? 0,
@@ -123,6 +130,8 @@ export class PlatformAdminService {
       id: Number(t.id), code: t.code, name: t.name, legal_name: t.legalName ?? null, tax_id: t.taxId ?? null,
       created_at: t.createdAt ?? null,
       suspended: !!t.suspendedAt, suspended_at: t.suspendedAt ?? null, suspend_reason: t.suspendReason ?? null, suspended_by: t.suspendedBy ?? null,
+      deleted: !!t.deletedAt, deleted_at: t.deletedAt ?? null, deleted_by: t.deletedBy ?? null,
+      purged: !!t.purgedAt, purged_at: t.purgedAt ?? null, purged_by: t.purgedBy ?? null,
       tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
       subscription: sub ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null } : null,
       counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },

@@ -83,7 +83,7 @@ holdout, cost is checked against `budget`. Every step is an existing endpoint.
   analytic. Add an affinity computation over `custPosItems` (support/confidence/lift, per branch +
   daypart) surfaced in `analytics` and consumable by `promo_audience_rules` (cross-sell offers).
   Read-only aggregator — build on `analytics`, don't fork it.
-- **G3 — External activation & enrichment via `cdp_export_sync`. ✅ DELIVERED (BI job `audience_export_sync`, control PDPA-05, migration `0379`, PN-19 rev 1.47, UAT-LOY-081..082). Residuals stated: live Meta/Google API adapters are creds-gated follow-ups (webhook/middleware target today); the weather overlay needs a data-vendor decision — the Thai-holiday overlay already ships in demand-ml (`th_holiday`).** Give the existing hook a real
+- **G3 — External activation & enrichment via `cdp_export_sync`. ✅ DELIVERED (BI job `audience_export_sync`, control PDPA-05, migration `0379`, PN-19 rev 1.47, UAT-LOY-081..082). G3b: DIRECT Meta Custom Audiences + Google Customer Match adapters delivered (`common/audience-providers.ts`, env-gated — live the moment creds land, mock until then; per-recipient register rows; PN-19 rev 1.48, UAT-LOY-083). G3c: consent-WITHDRAWAL removal sync delivered (migration `0386` — hash-only upload manifest `audience_export_members` + `rows_removed` register evidence; every run prunes no-longer-consented members from Meta/Google/webhook, idempotent; PN-19 rev 1.49, UAT-LOY-084). Remaining residual: the weather overlay needs a data-vendor decision — the Thai-holiday overlay already ships in demand-ml (`th_holiday`).** Give the existing hook a real
   target: start with **ads-platform custom audiences** (hashed phone/email export, consent-filtered) and
   a weather/holiday overlay for demand-ml-timed promos. Strictly opt-in-only export + ROPA entry;
   fail-closed if consent basis missing (mirrors the security-review posture).
@@ -106,6 +106,8 @@ Extend them per the module map above.
 
 | Version | Date | Change |
 | --- | --- | --- |
+| v0.6 | 2026-07-13 | G3b — direct Meta/Google audience adapters (env-gated, platform-exact hashed wire formats, per-recipient register rows). No new control, no migration. |
+| v0.7 | 2026-07-13 | G3c — consent-withdrawal removal sync (extends PDPA-05, migration `0386`): manifest-driven REMOVE ops keep external audiences consistent with the consent ledger. |
 | v0.5 | 2026-07-12 | G3 DELIVERED — `audience_export_sync`: consent-gated (live `member_consents` rows only), sha256-hashed audiences, fail-closed ROPA gate + append-only `audience_exports` register (0371, PDPA-05), SSRF-gated push. Weather overlay = stated residual; Thai-holiday overlay already in demand-ml. **Roadmap complete.** |
 | v0.4 | 2026-07-12 | G2 DELIVERED — menu-affinity analytic (support/confidence/lift per daypart, `min_pair_count` gate), web tab on /restaurant-analytics, schedulable `menu_affinity` BI type. No new control. |
 | v0.3 | 2026-07-12 | G4 DELIVERED — `marketing_roi` BI report: spend (discount given) → attributed revenue/margin (food-cost layer) → organic holdout lift, + voucher/B2B/budget legs. No new control. |
