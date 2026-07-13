@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2, ShieldCheck, KeyRound, Delete, LogIn } from 'lucide-react';
+import { Loader2, ShieldCheck, KeyRound, Delete, LogIn, Smartphone } from 'lucide-react';
 import { api, publicApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,11 @@ export default function LoginPage() {
   const [mode, setMode] = useState<Mode>('password');
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
+  // Second factor (ITGC-AC-06). The field stays hidden until the server tells us the account has MFA on
+  // (MFA_REQUIRED) — so the vast majority of users who don't use MFA never see it. Revealed, the same
+  // "เข้าสู่ระบบ" button re-submits with the code.
+  const [totp, setTotp] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [company, setCompany] = useState('Invisible ERP V2');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,13 +52,20 @@ export default function LoginPage() {
       // which turns every 401 into a misleading "session expired".
       // Usernames are stored canonicalized (trimmed + lowercased) server-side; mirror that here so the
       // submitted value matches regardless of casing or stray surrounding whitespace.
+      const code = totp.trim();
       const res = await publicApi<{ token: string; role: string }>('/api/login', {
         method: 'POST',
-        body: JSON.stringify({ username: username.trim().toLowerCase(), password }),
+        // Only send `totp` once there's a code to send — an empty field must reproduce the plain
+        // password submit so MFA accounts still get the MFA_REQUIRED prompt on the first attempt.
+        body: JSON.stringify({ username: username.trim().toLowerCase(), password, ...(code ? { totp: code } : {}) }),
       });
       // The server set the httpOnly auth cookie + readable CSRF cookie on this response — no client storage.
       router.push(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');
     } catch (err) {
+      // MFA_REQUIRED (account has 2FA, no code yet) / MFA_INVALID (wrong or expired code): reveal the OTP
+      // field and let the user enter/retry the 6-digit code without re-typing username + password.
+      const errCode = (err as { code?: string })?.code;
+      if (errCode === 'MFA_REQUIRED' || errCode === 'MFA_INVALID') setMfaRequired(true);
       setError(err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ');
     } finally {
       setLoading(false);
@@ -164,14 +176,36 @@ export default function LoginPage() {
                 autoComplete="current-password"
               />
             </div>
+            {mfaRequired && (
+              <div className="grid gap-2">
+                <Label htmlFor="totp" className="flex items-center gap-1.5">
+                  <Smartphone className="size-3.5" />
+                  รหัสยืนยันสองชั้น (OTP)
+                </Label>
+                <Input
+                  id="totp"
+                  value={totp}
+                  onChange={(e) => setTotp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="6 หลัก"
+                  className="text-center text-lg tracking-[0.4em]"
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">
+                  เปิดแอป Authenticator แล้วกรอกรหัส 6 หลักที่แสดงอยู่
+                </p>
+              </div>
+            )}
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full" disabled={loading || (mfaRequired && totp.length < 6)}>
               {loading && <Loader2 className="size-4 animate-spin" />}
-              {loading ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
+              {loading ? 'กำลังเข้าสู่ระบบ…' : mfaRequired ? 'ยืนยันรหัส OTP' : 'เข้าสู่ระบบ'}
             </Button>
           </form>
         ) : (
