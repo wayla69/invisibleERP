@@ -1,22 +1,17 @@
-import { Inject, Injectable, ConflictException, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
-import { eq, sql, and, desc, gt, isNull } from 'drizzle-orm';
-import { randomBytes, createHash } from 'node:crypto';
+import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { eq, sql, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { plans, subscriptions, tenants, users, branches, auditLog, aiTokenUsage, aiOverageBillingRuns, usageEvents, usageOverageBillingRuns, signupInvites, signupRequests } from '../../database/schema';
+import { plans, subscriptions, tenants, users } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
-import { isIndustryKey } from '../ledger/coa-templates';
-import { ymd } from '../../database/queries';
-import { normalizeUsername } from '../../common/username';
-import { isPlatformAdmin } from '../../common/decorators';
-import { isUniqueViolation } from '../../common/db-error';
-import { logger } from '../../observability/logger';
 import type { JwtUser } from '../../common/decorators';
 import { PLAN_SUITES } from '@ierp/shared';
 import { computeProration } from './proration';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 import { StripeBilling } from './stripe-gateway';
 import { TenantProvisioningService, type SignupDto } from './tenant-provisioning.service';
+import { PlatformAdminService } from './platform-admin.service';
+import { BillingMeteringService } from './billing-metering.service';
 // Re-exported so existing import sites (controllers, unit tests) keep working.
 export { isSignupAllowed, type SignupDto } from './tenant-provisioning.service';
 // Re-exported so existing import sites keep working (the adapter lives in stripe-gateway.ts now).
@@ -70,12 +65,16 @@ export class BillingService {
     @Optional() private readonly platformNotifs?: PlatformNotificationsService, // god event feed; optional for partial harnesses
   ) {
     this.provisioning = new TenantProvisioningService(db, password, ledger, platformNotifs);
+    this.platformAdmin = new PlatformAdminService(db, platformNotifs);
+    this.metering = new BillingMeteringService(db, this.stripe);
   }
 
   // ONE Stripe adapter instance for every billing path (docs/46 Phase 4c cut 1 — was `new StripeBilling()`
   // at each call site). Env-driven (STRIPE_SECRET_KEY), so a single shared instance is safe.
   private readonly stripe = new StripeBilling();
   private readonly provisioning: TenantProvisioningService;
+  private readonly platformAdmin: PlatformAdminService;
+  private readonly metering: BillingMeteringService;
 
   // ───────────────────── Seed (idempotent — run at startup) ─────────────────────
   async seedPlans(): Promise<{ seeded: number }> {
@@ -105,153 +104,18 @@ export class BillingService {
   }
 
 
-  // ── #5 tenant lifecycle — a platform owner suspends/reactivates a company. Suspending sets suspended_at,
-  // which the auth guard reads to block the tenant's users (403 TENANT_SUSPENDED); platform owners are exempt.
-  // The mutation is audit-logged (AuditInterceptor). Runs under the platform-admin bypass (writes another
-  // tenant's row). ──
-  // Company directory for the platform owner ("god") — backs the web company-switcher AND the Platform
-  // Console table. Runs under the @PlatformAdmin RLS bypass, so it lists EVERY tenant. Enriched with the
-  // subscription (plan/status/trial) and a live user count so the console can show each company's posture
-  // at a glance. Ordered by code for a stable list.
-  async listTenants() {
-    const rows = await this.db
-      .select({
-        id: tenants.id, code: tenants.code, name: tenants.name,
-        suspendedAt: tenants.suspendedAt, createdAt: tenants.createdAt,
-        legalName: tenants.legalName, taxId: tenants.taxId, addressLine1: tenants.addressLine1, province: tenants.province,
-        tags: tenants.tags,
-        planCode: subscriptions.planCode, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt,
-      })
-      .from(tenants)
-      .leftJoin(subscriptions, eq(subscriptions.tenantId, tenants.id))
-      .orderBy(tenants.code);
-    // One grouped query for all user counts (avoids an N+1 over the tenant list).
-    const counts = await this.db
-      .select({ tenantId: users.tenantId, n: sql<number>`count(*)` })
-      .from(users)
-      .groupBy(users.tenantId);
-    const countByTenant = new Map(counts.map((c) => [Number(c.tenantId), Number(c.n)]));
-    // A tenant with two subscription rows would duplicate in the left join — keep the first (ordered) per id.
-    const seen = new Set<number>();
-    const out = [];
-    for (const t of rows) {
-      const id = Number(t.id);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push({
-        id, code: t.code, name: t.name,
-        suspended: !!t.suspendedAt,
-        // Suspended wins as the headline status; otherwise show the subscription status (or null if none).
-        status: t.suspendedAt ? 'Suspended' : (t.status ?? null),
-        plan_code: t.planCode ?? null,
-        trial_ends_at: t.trialEndsAt ?? null,
-        users: countByTenant.get(id) ?? 0,
-        created_at: t.createdAt ?? null,
-        // Setup essentials for issuing tax invoices — mirrors TenantController.fmt's setup_complete.
-        setup_complete: !!(t.legalName && t.taxId && t.addressLine1 && t.province),
-        tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
-      });
-    }
-    return out;
-  }
 
-  // Set a company's tags/segments (Platform Console). Normalises to a de-duplicated, trimmed, capped list.
-  async setTenantTags(id: number, tags: string[]) {
-    const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
-    const clean = Array.from(new Set((tags ?? []).map((s) => String(s).trim()).filter(Boolean))).slice(0, 20);
-    await this.db.update(tenants).set({ tags: clean }).where(eq(tenants.id, id));
-    return { tenant_id: id, tags: clean };
-  }
 
-  // Cross-company AI-token usage aggregate (Platform Console) — total in/out/overage per company, ordered by
-  // spend. Cross-tenant read under the @PlatformAdmin bypass. Powers the AI-spend oversight panel.
-  async aiUsageByTenant() {
-    const rows = await this.db
-      .select({
-        tenantId: aiTokenUsage.tenantId,
-        input: sql<number>`coalesce(sum(${aiTokenUsage.inputTokens}),0)`,
-        output: sql<number>`coalesce(sum(${aiTokenUsage.outputTokens}),0)`,
-        overage: sql<number>`coalesce(sum(${aiTokenUsage.overageTokens}),0)`,
-      })
-      .from(aiTokenUsage)
-      .groupBy(aiTokenUsage.tenantId);
-    const names = await this.db.select({ id: tenants.id, code: tenants.code, name: tenants.name }).from(tenants);
-    const nameById = new Map(names.map((t) => [Number(t.id), { code: t.code, name: t.name }]));
-    return rows
-      .map((r) => {
-        const id = Number(r.tenantId);
-        const meta = nameById.get(id);
-        return {
-          tenant_id: id, code: meta?.code ?? null, name: meta?.name ?? `#${id}`,
-          input_tokens: Number(r.input), output_tokens: Number(r.output), overage_tokens: Number(r.overage),
-          total_tokens: Number(r.input) + Number(r.output),
-        };
-      })
-      .sort((a, b) => b.total_tokens - a.total_tokens);
-  }
-
-  // Full detail for one company — backs the Platform Console company drawer. Cross-tenant read under the
-  // @PlatformAdmin bypass: profile + latest subscription + user/branch counts + recent activity + AI usage.
-  async getTenantDetail(id: number) {
-    const [t] = await this.db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
-    const [sub] = await this.db.select().from(subscriptions).where(eq(subscriptions.tenantId, id)).orderBy(sql`${subscriptions.createdAt} desc`).limit(1);
-    const [uc] = await this.db.select({ n: sql<number>`count(*)` }).from(users).where(eq(users.tenantId, id));
-    const [bc] = await this.db.select({ n: sql<number>`count(*)` }).from(branches).where(eq(branches.tenantId, id));
-    const recent = await this.db
-      .select({ ts: auditLog.ts, actor: auditLog.actor, action: auditLog.action, status: auditLog.status })
-      .from(auditLog).where(eq(auditLog.tenantId, id)).orderBy(desc(auditLog.ts)).limit(12);
-    const [ai] = await this.db
-      .select({
-        input: sql<number>`coalesce(sum(${aiTokenUsage.inputTokens}),0)`,
-        output: sql<number>`coalesce(sum(${aiTokenUsage.outputTokens}),0)`,
-        overage: sql<number>`coalesce(sum(${aiTokenUsage.overageTokens}),0)`,
-      })
-      .from(aiTokenUsage).where(eq(aiTokenUsage.tenantId, id));
-    return {
-      id: Number(t.id), code: t.code, name: t.name, legal_name: t.legalName ?? null, tax_id: t.taxId ?? null,
-      created_at: t.createdAt ?? null,
-      suspended: !!t.suspendedAt, suspended_at: t.suspendedAt ?? null, suspend_reason: t.suspendReason ?? null, suspended_by: t.suspendedBy ?? null,
-      tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
-      subscription: sub ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null } : null,
-      counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },
-      ai_usage: { input_tokens: Number(ai?.input ?? 0), output_tokens: Number(ai?.output ?? 0), overage_tokens: Number(ai?.overage ?? 0) },
-      recent_activity: recent.map((r) => ({ ts: r.ts, actor: r.actor, action: r.action, status: r.status })),
-    };
-  }
-
-  // Platform-level trial extension — pushes trial_ends_at out by `days` (from the later of now / current end)
-  // and (re)sets the subscription to Trialing. Cross-tenant @PlatformAdmin action; audit-logged by the filter.
-  async extendTrial(id: number, days: number) {
-    const d = Math.min(Math.max(Math.floor(Number(days) || 0), 1), 365);
-    const [sub] = await this.db.select().from(subscriptions).where(eq(subscriptions.tenantId, id)).orderBy(sql`${subscriptions.createdAt} desc`).limit(1);
-    if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for tenant', messageTh: 'ไม่พบการสมัครสมาชิกของบริษัท' });
-    const cur = sub.trialEndsAt ? new Date(sub.trialEndsAt).getTime() : 0;
-    const base = cur > Date.now() ? cur : Date.now();
-    const next = new Date(base + d * 24 * 60 * 60 * 1000);
-    await this.db.update(subscriptions).set({ trialEndsAt: next, status: 'Trialing' }).where(eq(subscriptions.id, sub.id));
-    return { tenant_id: id, trial_ends_at: next.toISOString(), status: 'Trialing', extended_days: d };
-  }
-
-  async suspendTenant(id: number, by: string, reason?: string) {
-    const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
-    await this.db.update(tenants).set({ suspendedAt: new Date(), suspendedBy: by, suspendReason: reason ?? null }).where(eq(tenants.id, id));
-    logger.warn({ event: 'tenant_suspended', tenant_id: id, by, reason: reason ?? null }, 'company suspended');
-    await this.platformNotifs?.emit({ type: 'tenant_suspended', title: `ระงับบริษัท #${id}`, body: `โดย ${by}${reason ? ` — ${reason}` : ''}`, tenantId: id, refType: 'tenant', refId: String(id) });
-    return { tenant_id: id, status: 'suspended' };
-  }
-
-  async reactivateTenant(id: number, by: string) {
-    const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
-    await this.db.update(tenants).set({ suspendedAt: null, suspendedBy: null, suspendReason: null }).where(eq(tenants.id, id));
-    logger.info({ event: 'tenant_reactivated', tenant_id: id, by }, 'company reactivated');
-    await this.platformNotifs?.emit({ type: 'tenant_reactivated', title: `คืนสถานะบริษัท #${id}`, body: `โดย ${by}`, tenantId: id, refType: 'tenant', refId: String(id) });
-    return { tenant_id: id, status: 'active' };
-  }
-
+  // ───────────────────── Platform console — docs/46 Phase 4c cut 3 ─────────────────────
+  // Cross-company directory/tags/AI-spend/detail/trial/suspend live in PlatformAdminService
+  // (ctor-BODY construction). Thin delegators keep the console endpoints byte-identical.
+  listTenants() { return this.platformAdmin.listTenants(); }
+  setTenantTags(id: number, tags: string[]) { return this.platformAdmin.setTenantTags(id, tags); }
+  aiUsageByTenant() { return this.platformAdmin.aiUsageByTenant(); }
+  getTenantDetail(id: number) { return this.platformAdmin.getTenantDetail(id); }
+  extendTrial(id: number, days: number) { return this.platformAdmin.extendTrial(id, days); }
+  suspendTenant(id: number, by: string, reason?: string) { return this.platformAdmin.suspendTenant(id, by, reason); }
+  reactivateTenant(id: number, by: string) { return this.platformAdmin.reactivateTenant(id, by); }
 
   // ───────────────────── Tenant lifecycle — docs/46 Phase 4c cut 2 ─────────────────────
   // Signup gate + invites + approval queue + provisioning + factory reset live in
@@ -292,250 +156,19 @@ export class BillingService {
     return { ...row, price_monthly: Number(row.price_monthly ?? 0) };
   }
 
-  // Per-tenant AI token consumption (cost attribution / COGS visibility). The enforcement side — the daily
-  // budget gate (AI_BUDGET_EXCEEDED) and the autocommit usage writes — lives in AgentService; this is the
-  // read-only view of the same `ai_token_usage` rows, plus the plan's daily limit so the UI can show
-  // "X of Y tokens used today". Read through the normal (tenant-scoped) connection.
-  async aiUsage(tenantId: number) {
-    const db = this.db;
-    const [planRow] = await db.select({ features: plans.features })
-      .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
-      .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
-      .orderBy(desc(subscriptions.createdAt)).limit(1);
-    const features: any = planRow?.features ?? {};
-    const dailyLimit = features.ai_tokens_daily != null ? Number(features.ai_tokens_daily) : 50000; // included daily cap (default Pro-tier)
-    // Hard ceiling + overage economics (ceiling + metered-overage model). A plan that omits the max has no
-    // overage band → the included cap IS the ceiling. The rate prices the (included, max] band.
-    const dailyMax = features.ai_tokens_daily_max != null ? Number(features.ai_tokens_daily_max) : dailyLimit;
-    const overageRate = Number(features.ai_overage_rate_thb_per_1k ?? 0); // THB per 1,000 overage tokens
-    const [today] = await db.select({ input: aiTokenUsage.inputTokens, output: aiTokenUsage.outputTokens, overage: aiTokenUsage.overageTokens })
-      .from(aiTokenUsage)
-      .where(and(eq(aiTokenUsage.tenantId, tenantId), sql`${aiTokenUsage.usageDate} = (now() AT TIME ZONE 'Asia/Bangkok')::date`))
-      .limit(1);
-    const tIn = today ? Number(today.input) : 0;
-    const tOut = today ? Number(today.output) : 0;
-    const tTotal = tIn + tOut;
-    const tOverage = today ? Number(today.overage) : 0;
-    // 30-day usage + overage (the billable accumulation the overage invoice line draws from).
-    const [m] = await db.select({
-      input: sql<number>`coalesce(sum(${aiTokenUsage.inputTokens}),0)`,
-      output: sql<number>`coalesce(sum(${aiTokenUsage.outputTokens}),0)`,
-      overage: sql<number>`coalesce(sum(${aiTokenUsage.overageTokens}),0)`,
-    }).from(aiTokenUsage)
-      .where(and(eq(aiTokenUsage.tenantId, tenantId), sql`${aiTokenUsage.usageDate} >= (now() AT TIME ZONE 'Asia/Bangkok')::date - INTERVAL '30 days'`));
-    const mIn = Number(m?.input ?? 0);
-    const mOut = Number(m?.output ?? 0);
-    const mOverage = Number(m?.overage ?? 0);
-    const round2 = (x: number) => Math.round(x * 100) / 100;
-    return {
-      daily_limit: dailyLimit,          // included finite cap (free band)
-      daily_max: dailyMax,              // hard ceiling (absolute cutoff)
-      overage_rate_thb_per_1k: overageRate,
-      today: {
-        input_tokens: tIn, output_tokens: tOut, total_tokens: tTotal,
-        remaining: Math.max(0, dailyMax - tTotal),     // tokens left before the hard ceiling
-        over_budget: tTotal >= dailyMax,               // hit the hard ceiling (blocked)
-        overage_tokens: tOverage,                      // metered beyond the included cap
-        projected_overage_thb: round2((tOverage / 1000) * overageRate),
-      },
-      last_30_days: {
-        input_tokens: mIn, output_tokens: mOut, total_tokens: mIn + mOut,
-        overage_tokens: mOverage,
-        overage_charge_thb: round2((mOverage / 1000) * overageRate),
-      },
-    };
-  }
 
-  // AI overage invoice line for a billing month (YYYY-MM, Asia/Bangkok). Sums the metered overage tokens —
-  // the band consumed ABOVE each day's included cap — and prices them at the plan's overage rate. This is the
-  // line a monthly invoice run appends so heavy AI usage is billed (panel #3: connect the COGS meter to a
-  // price). Returns a zero line when the plan has no overage rate or the tenant stayed within its cap.
-  async aiOverageInvoice(tenantId: number, month?: string) {
-    const db = this.db;
-    const ym = (month && /^\d{4}-\d{2}$/.test(month)) ? month : null;
-    const [planRow] = await db.select({ features: plans.features, plan_code: subscriptions.planCode })
-      .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
-      .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
-      .orderBy(desc(subscriptions.createdAt)).limit(1);
-    const features: any = planRow?.features ?? {};
-    // Rate is data-driven: per-plan feature is the source of truth; an optional global env override
-    // (AI_OVERAGE_RATE_THB_PER_1K) lets ops re-price overage without a deploy. Real numbers drop in here.
-    const envRate = process.env.AI_OVERAGE_RATE_THB_PER_1K;
-    const overageRate = envRate && envRate.trim() ? Number(envRate) : Number(features.ai_overage_rate_thb_per_1k ?? 0); // THB / 1,000 overage tokens
-    // Scope to the requested month (default: current Bangkok month). usage_date is already a Bangkok business date.
-    const monthFilter = ym
-      ? sql`to_char(${aiTokenUsage.usageDate}, 'YYYY-MM') = ${ym}`
-      : sql`to_char(${aiTokenUsage.usageDate}, 'YYYY-MM') = to_char((now() AT TIME ZONE 'Asia/Bangkok')::date, 'YYYY-MM')`;
-    const [agg] = await db.select({ overage: sql<number>`coalesce(sum(${aiTokenUsage.overageTokens}),0)` })
-      .from(aiTokenUsage)
-      .where(and(eq(aiTokenUsage.tenantId, tenantId), monthFilter));
-    const overageTokens = Number(agg?.overage ?? 0);
-    const amount = Math.round((overageTokens / 1000) * overageRate * 100) / 100;
-    return {
-      tenant_id: tenantId,
-      month: ym ?? new Date().toISOString().slice(0, 7),
-      plan_code: planRow?.plan_code ?? null,
-      overage_tokens: overageTokens,
-      overage_rate_thb_per_1k: overageRate,
-      currency: 'THB',
-      amount, // billable overage charge for the month
-      line_description: `AI usage overage — ${overageTokens.toLocaleString()} tokens @ ${overageRate} THB/1k`,
-    };
-  }
 
-  // ───────────────────── Monthly AI overage billing (scheduled action job — Wave 1) ─────────────────────
-  // Charges each tenant's metered AI overage for a billing month as a Stripe invoice item, IDEMPOTENT per
-  // (tenant, month) via the ai_overage_billing_runs UNIQUE. Runs from the BI scheduler (report type
-  // 'ai_overage_billing') or POST /api/billing/ai-overage/run. Default month = the just-closed Bangkok month.
-  // Operator scope: iterates the active/trialing subscriptions VISIBLE to the caller (RLS — the HQ scheduler
-  // bypasses RLS and bills every tenant; a tenant-scoped caller bills only itself, harmless).
-  // Idempotency ordering: we INSERT the run row FIRST (ON CONFLICT DO NOTHING); only the winner calls Stripe,
-  // so a concurrent/retried run can never double-charge. The Stripe idempotencyKey is a second guard.
-  async runAiOverageBilling(user: JwtUser, month?: string): Promise<{ month: string; processed_count: number; total_amount: number; processed: any[] }> {
-    const db = this.db;
-    const round2 = (x: number) => Math.round(x * 100) / 100;
-    let billingMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : '';
-    if (!billingMonth) {
-      const res: any = await db.execute(sql`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok')::date - INTERVAL '1 month', 'YYYY-MM') AS m`);
-      const rows = (res.rows ?? res) as any[];
-      billingMonth = String(rows[0]?.m ?? new Date().toISOString().slice(0, 7));
-    }
-    const subs = await db.select({ tenantId: subscriptions.tenantId, cust: subscriptions.stripeCustomerId, createdAt: subscriptions.createdAt })
-      .from(subscriptions).where(sql`${subscriptions.status} in ('Active','Trialing')`).orderBy(desc(subscriptions.createdAt));
-    const seen = new Set<number>();
-    const processed: any[] = [];
-    let total = 0;
-    for (const s of subs) {
-      const tenantId = Number(s.tenantId);
-      if (seen.has(tenantId)) continue; // one (latest) subscription per tenant
-      seen.add(tenantId);
-      const inv = await this.aiOverageInvoice(tenantId, billingMonth);
-      if (inv.amount <= 0) continue; // nothing metered above the included cap this month
-      // Reserve the (tenant, month) slot before charging — the UNIQUE makes this the idempotency gate.
-      const ins = await db.insert(aiOverageBillingRuns).values({
-        tenantId, billingMonth, overageTokens: inv.overage_tokens, rateThbPer1k: String(inv.overage_rate_thb_per_1k),
-        amount: String(inv.amount), currency: inv.currency, status: 'pending', processedBy: user?.username ?? 'system:scheduler',
-      }).onConflictDoNothing({ target: [aiOverageBillingRuns.tenantId, aiOverageBillingRuns.billingMonth] }).returning({ id: aiOverageBillingRuns.id });
-      if (!ins.length) continue; // already billed this (tenant, month) → idempotent skip
-      const runId = Number(ins[0]!.id);
-      const charge = await this.stripe.createOverageInvoiceItem(s.cust ?? null, inv.amount, inv.line_description, `ai-overage:${tenantId}:${billingMonth}`);
-      const status = charge.mock ? 'recorded' : 'invoiced';
-      await db.update(aiOverageBillingRuns).set({ stripeInvoiceItemId: charge.id, status }).where(eq(aiOverageBillingRuns.id, runId));
-      total += inv.amount;
-      processed.push({ tenant_id: tenantId, month: billingMonth, overage_tokens: inv.overage_tokens, amount: inv.amount, currency: inv.currency, stripe_invoice_item_id: charge.id, status });
-    }
-    return { month: billingMonth, processed_count: processed.length, total_amount: round2(total), processed };
-  }
-
-  // History of AI-overage charges for a tenant (most recent first) — the read view of ai_overage_billing_runs.
-  async listOverageRuns(tenantId: number, month?: string) {
-    const db = this.db;
-    const conds: any[] = [eq(aiOverageBillingRuns.tenantId, tenantId)];
-    if (month && /^\d{4}-\d{2}$/.test(month)) conds.push(eq(aiOverageBillingRuns.billingMonth, month));
-    const rows = await db.select().from(aiOverageBillingRuns).where(and(...conds)).orderBy(desc(aiOverageBillingRuns.billingMonth)).limit(36);
-    return {
-      runs: rows.map((r: any) => ({
-        month: r.billingMonth, overage_tokens: Number(r.overageTokens), rate_thb_per_1k: Number(r.rateThbPer1k),
-        amount: Number(r.amount), currency: r.currency, status: r.status, stripe_invoice_item_id: r.stripeInvoiceItemId, processed_at: r.processedAt,
-      })),
-    };
-  }
-
-  // ───────────────────── Generic usage metering → overage billing (1.5) ─────────────────────
-  // The e-Tax-document and POS-transaction meters mirror AI tokens: per-event rows in usage_events, a monthly
-  // included quota + per-unit overage price on the plan, and an idempotent monthly Stripe charge.
-  static readonly USAGE_METERS: Record<string, { includedKey: string; rateKey: string; unit: string; label: string }> = {
-    etax_docs: { includedKey: 'etax_docs_monthly', rateKey: 'etax_overage_rate_thb_per_doc', unit: 'doc', label: 'e-Tax documents' },
-    pos_txns: { includedKey: 'pos_txns_monthly', rateKey: 'pos_overage_rate_thb_per_txn', unit: 'txn', label: 'POS transactions' },
-  };
-
-  // Overage invoice line for one meter for a billing month: count the tenant's metered events in the period,
-  // subtract the plan's included monthly quota (−1 = unlimited ⇒ no overage), price the excess at the per-unit
-  // rate. Returns a zero line when within quota, unlimited, or the plan has no rate.
-  async usageOverageInvoice(tenantId: number, meter: string, month?: string) {
-    const cfg = BillingService.USAGE_METERS[meter];
-    if (!cfg) throw new BadRequestException({ code: 'UNKNOWN_METER', message: `Unknown meter ${meter}`, messageTh: `ไม่รู้จักมิเตอร์ ${meter}` });
-    const db = this.db;
-    const ym = (month && /^\d{4}-\d{2}$/.test(month)) ? month : new Date().toISOString().slice(0, 7);
-    const [planRow] = await db.select({ features: plans.features, plan_code: subscriptions.planCode })
-      .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
-      .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
-      .orderBy(desc(subscriptions.createdAt)).limit(1);
-    const features: any = planRow?.features ?? {};
-    const included = Number(features[cfg.includedKey] ?? 0); // −1 = unlimited
-    const rate = Number(features[cfg.rateKey] ?? 0); // THB per unit
-    const [agg] = await db.select({ n: sql<number>`count(*)` }).from(usageEvents)
-      .where(and(eq(usageEvents.tenantId, tenantId), eq(usageEvents.meter, meter), eq(usageEvents.period, ym)));
-    const used = Number(agg?.n ?? 0);
-    const overageUnits = included < 0 ? 0 : Math.max(0, used - included);
-    const amount = Math.round(overageUnits * rate * 100) / 100;
-    return {
-      tenant_id: tenantId, meter, month: ym, plan_code: planRow?.plan_code ?? null,
-      used, included, overage_units: overageUnits, rate_thb_per_unit: rate, currency: 'THB', amount,
-      line_description: `${cfg.label} overage — ${overageUnits.toLocaleString()} ${cfg.unit} @ ${rate} THB/${cfg.unit} (${ym})`,
-    };
-  }
-
-  // Monthly usage-overage billing across every configured meter (scheduled action job). IDEMPOTENT per
-  // (tenant, meter, month) via the usage_overage_billing_runs UNIQUE — the run row is INSERTed first
-  // (ON CONFLICT DO NOTHING); only the winner calls Stripe. Mirrors runAiOverageBilling.
-  async runUsageOverageBilling(user: JwtUser, month?: string): Promise<{ month: string; processed_count: number; total_amount: number; processed: any[] }> {
-    const db = this.db;
-    const round2 = (x: number) => Math.round(x * 100) / 100;
-    let billingMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : '';
-    if (!billingMonth) {
-      const res = await db.execute(sql`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok')::date - INTERVAL '1 month', 'YYYY-MM') AS m`);
-      const rows = ((res as { rows?: { m?: string }[] }).rows ?? (res as { m?: string }[]));
-      billingMonth = String(rows[0]?.m ?? new Date().toISOString().slice(0, 7));
-    }
-    const subs = await db.select({ tenantId: subscriptions.tenantId, cust: subscriptions.stripeCustomerId, createdAt: subscriptions.createdAt })
-      .from(subscriptions).where(sql`${subscriptions.status} in ('Active','Trialing')`).orderBy(desc(subscriptions.createdAt));
-    const seen = new Set<number>();
-    const processed: Array<Record<string, unknown>> = [];
-    let total = 0;
-    for (const s of subs) {
-      const tenantId = Number(s.tenantId);
-      if (seen.has(tenantId)) continue;
-      seen.add(tenantId);
-      for (const meter of Object.keys(BillingService.USAGE_METERS)) {
-        const inv = await this.usageOverageInvoice(tenantId, meter, billingMonth);
-        if (inv.amount <= 0) continue;
-        const ins = await db.insert(usageOverageBillingRuns).values({
-          tenantId, meter, billingMonth, overageUnits: inv.overage_units, rateThbPerUnit: String(inv.rate_thb_per_unit),
-          amount: String(inv.amount), currency: inv.currency, status: 'pending', processedBy: user?.username ?? 'system:scheduler',
-        }).onConflictDoNothing({ target: [usageOverageBillingRuns.tenantId, usageOverageBillingRuns.meter, usageOverageBillingRuns.billingMonth] }).returning({ id: usageOverageBillingRuns.id });
-        if (!ins.length) continue; // already billed this (tenant, meter, month)
-        const runId = Number(ins[0]!.id);
-        const charge = await this.stripe.createOverageInvoiceItem(s.cust ?? null, inv.amount, inv.line_description, `usage-overage:${meter}:${tenantId}:${billingMonth}`);
-        const status = charge.mock ? 'recorded' : 'invoiced';
-        await db.update(usageOverageBillingRuns).set({ stripeInvoiceItemId: charge.id, status }).where(eq(usageOverageBillingRuns.id, runId));
-        total += inv.amount;
-        processed.push({ tenant_id: tenantId, meter, month: billingMonth, overage_units: inv.overage_units, amount: inv.amount, currency: inv.currency, stripe_invoice_item_id: charge.id, status });
-      }
-    }
-    return { month: billingMonth, processed_count: processed.length, total_amount: round2(total), processed };
-  }
-
-  // Read view of usage_overage_billing_runs for a tenant (most recent first).
-  async listUsageOverageRuns(tenantId: number, meter?: string, month?: string) {
-    const db = this.db;
-    const conds: any[] = [eq(usageOverageBillingRuns.tenantId, tenantId)];
-    if (meter && BillingService.USAGE_METERS[meter]) conds.push(eq(usageOverageBillingRuns.meter, meter));
-    if (month && /^\d{4}-\d{2}$/.test(month)) conds.push(eq(usageOverageBillingRuns.billingMonth, month));
-    const rows = await db.select().from(usageOverageBillingRuns).where(and(...conds)).orderBy(desc(usageOverageBillingRuns.billingMonth)).limit(72);
-    return {
-      runs: rows.map((r: any) => ({
-        meter: r.meter, month: r.billingMonth, overage_units: Number(r.overageUnits), rate_thb_per_unit: Number(r.rateThbPerUnit),
-        amount: Number(r.amount), currency: r.currency, status: r.status, stripe_invoice_item_id: r.stripeInvoiceItemId, processed_at: r.processedAt,
-      })),
-    };
-  }
-
-  // Current-month usage snapshot per meter (used/included/overage) — the tenant's live usage view.
-  async usageSummary(tenantId: number, month?: string) {
-    const meters = await Promise.all(Object.keys(BillingService.USAGE_METERS).map((m) => this.usageOverageInvoice(tenantId, m, month)));
-    return { tenant_id: tenantId, month: meters[0]?.month ?? new Date().toISOString().slice(0, 7), meters };
-  }
+  // ───────────────────── Usage metering — docs/46 Phase 4c cut 4 ─────────────────────
+  // AI-token + e-Tax/POS meters, overage invoice lines and the idempotent monthly billing runs live in
+  // BillingMeteringService (ctor-BODY construction, shared Stripe gateway). Thin delegators.
+  aiUsage(tenantId: number) { return this.metering.aiUsage(tenantId); }
+  aiOverageInvoice(tenantId: number, month?: string) { return this.metering.aiOverageInvoice(tenantId, month); }
+  runAiOverageBilling(user: JwtUser, month?: string) { return this.metering.runAiOverageBilling(user, month); }
+  listOverageRuns(tenantId: number, month?: string) { return this.metering.listOverageRuns(tenantId, month); }
+  usageOverageInvoice(tenantId: number, meter: string, month?: string) { return this.metering.usageOverageInvoice(tenantId, meter, month); }
+  runUsageOverageBilling(user: JwtUser, month?: string) { return this.metering.runUsageOverageBilling(user, month); }
+  listUsageOverageRuns(tenantId: number, meter?: string, month?: string) { return this.metering.listUsageOverageRuns(tenantId, meter, month); }
+  usageSummary(tenantId: number, month?: string) { return this.metering.usageSummary(tenantId, month); }
 
   async changePlan(tenantId: number, planCode: string, interval?: 'monthly' | 'annual') {
     const db = this.db;
