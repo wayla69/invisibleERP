@@ -271,8 +271,18 @@ async function main() {
   await inj('POST', '/api/tenant/starter-pack', lcTok, {});
   await inj('PATCH', '/api/tenant/profile', lcTok, { address_line1: '9 ถนนรอง', province: 'กรุงเทพมหานคร', postal_code: '10120' });
   await inj('POST', '/api/ledger/journal', lcTok, { date: `${year}-06-20`, source: 'TEST', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
-  const preCounts = (await pg.query(`SELECT (SELECT count(*)::int FROM branches WHERE tenant_id=${lcTid}) b, (SELECT count(*)::int FROM journal_entries WHERE tenant_id=${lcTid}) j`)).rows[0] as any;
-  ok('Factory-reset setup: LifeCo holds test data (branch + JE)', preCounts.b >= 1 && preCounts.j >= 1, JSON.stringify(preCounts));
+  // The 2026-07-13 OSHINEI reset outage: a TENANTLESS line-item child (cust_pos_items has no tenant_id
+  // column) referencing a tenant-scoped parent was invisible to the wipe loop's tenant_id enumeration and
+  // permanently blocked the parent's DELETE → FACTORY_RESET_BLOCKED. Seed that exact shape so the reset
+  // must clear it via the FK-child walk in tenant-wipe.ts.
+  await pg.query(`INSERT INTO cust_pos_sales (sale_no, sale_date, tenant_id, subtotal, discount, tax_amount, total, payment_method, status, created_by)
+    VALUES ('SALE-FR-1', '${year}-06-20', ${lcTid}, '100', '0', '0', '100', 'Cash', 'Completed', 'lifeco_admin')`);
+  await pg.query(`INSERT INTO cust_pos_items (sale_id, item_id, item_description, qty, uom, unit_price, amount, discount_pct, is_custom)
+    SELECT id, 'A', 'Apple', '1', 'EA', '100', '100', '0', false FROM cust_pos_sales WHERE sale_no='SALE-FR-1'`);
+  const preCounts = (await pg.query(`SELECT (SELECT count(*)::int FROM branches WHERE tenant_id=${lcTid}) b,
+    (SELECT count(*)::int FROM journal_entries WHERE tenant_id=${lcTid}) j,
+    (SELECT count(*)::int FROM cust_pos_items ci JOIN cust_pos_sales cs ON ci.sale_id=cs.id WHERE cs.tenant_id=${lcTid}) ci`)).rows[0] as any;
+  ok('Factory-reset setup: LifeCo holds test data (branch + JE + POS sale with a TENANTLESS line child)', preCounts.b >= 1 && preCounts.j >= 1 && preCounts.ci >= 1, JSON.stringify(preCounts));
 
   process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
   const frActive = await inj('POST', `/api/admin/tenants/${lcTid}/factory-reset`, owner, { confirm: 'lifeco1' });
@@ -297,8 +307,11 @@ async function main() {
             (SELECT count(*)::int FROM users WHERE tenant_id=${lcTid}) u,
             (SELECT count(*)::int FROM subscriptions WHERE tenant_id=${lcTid}) sub,
             (SELECT count(*)::int FROM audit_log WHERE tenant_id=${lcTid}) al,
+            (SELECT count(*)::int FROM cust_pos_sales WHERE tenant_id=${lcTid}) cs,
+            (SELECT count(*)::int FROM cust_pos_items WHERE item_description='Apple') ci,
             (SELECT count(*)::int FROM branches WHERE tenant_id=${newTid}) ob`)).rows[0] as any;
   ok('Reset wiped LifeCo data (branches + JEs = 0) and re-seeded 12 fiscal periods', post.b === 0 && post.j === 0 && post.fp === 12, JSON.stringify(post));
+  ok('Reset cleared the TENANTLESS FK child too (cust_pos_items via cust_pos_sales — the OSHINEI blocker)', post.cs === 0 && post.ci === 0, JSON.stringify({ cs: post.cs, ci: post.ci }));
   ok('Reset PRESERVED identity/billing/audit (users, subscription, audit_log rows survive)', post.u >= 1 && post.sub >= 1 && post.al >= 1, JSON.stringify({ u: post.u, sub: post.sub, al: post.al }));
   ok('Reset did NOT touch the sibling tenant (its branches unchanged)', post.ob === otherBranchesBefore, `before=${otherBranchesBefore} after=${post.ob}`);
   const reactAfterReset = await inj('POST', `/api/admin/tenants/${lcTid}/reactivate`, owner, {});
