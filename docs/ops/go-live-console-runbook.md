@@ -85,9 +85,26 @@ that was deliberately taken offline first, so an actively-used company cannot be
 normally; the reset appears in the company's audit trail + the god notification inbox.
 Model + gates: `docs/ops/tenancy-model.md` §2 (rev 1.19).
 
+## 11. Deleting a pure-test company (suspend → delete) — ITGC-AC-18
+
+**Owner:** Platform.
+**Action:** for a company that was ONLY ever used for testing and should stop existing entirely (not just
+have its data reset — e.g. a duplicate/mistaken provision), in `/platform` → บริษัท: (a) **suspend** the
+company if not already, (b) open the company drawer → danger zone **ลบบริษัท (Delete company)** → type the
+company code → delete. This is lighter than item 10's factory reset: it does **not** touch any business
+data, it only flags the company row itself — the company disappears from the fleet list/switcher and its
+users are **permanently** blocked (`TENANT_DELETED`), even if the company is later reactivated (reactivate
+alone never re-opens a deleted company). Reversible via the drawer's **กู้คืน (Restore)** button (check
+"แสดงบริษัทที่ถูกลบ" / show-deleted to find it in the list) — after restoring, the company stays suspended
+until a separate reactivate.
+**Verify:** after delete, the company is gone from the default `/platform` company list and its admin's
+login is blocked with `TENANT_DELETED`; toggling "show deleted" surfaces it again with a Restore action.
+Model + gates: `docs/ops/tenancy-model.md` §1bis/§2 (rev 1.23), migration 0386.
+
 ## Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 1.0 | 2026-07-02 | Platform | Initial runbook consolidating every open human/console item from docs/27 (legal execution, Anthropic DPA → `AI_DPA_ACKNOWLEDGED`, SOC 2 engagement + quarterly evidence, ELC operation, Railway PgBouncer/Redis, prod `db:backfill:pii`, loadtest §4 baseline, `SEED_ADMIN_PASSWORD`, Wave 6) with owner + exact action + verification each. |
 | 1.1 | 2026-07-09 | Platform | Added item 10 — pilot-company test-data factory reset from the Platform Console (**suspend → reset → reactivate**): wipes a pilot's UAT data before real usage while preserving logins/plan/audit-chain; only ever possible on a suspended company, so an active company cannot be wiped in one click. |
+| 1.2 | 2026-07-13 | Platform | Added item 11 — tenant soft-delete (migration 0386, **suspend → delete**): for a pure-test company that should stop existing entirely, lighter than the factory reset (no data touched, only the company row is flagged) and reversible via Restore. Prompted by a request to fully remove a test tenant ("Amber") after the factory reset UI was confused with a full company deletion. |

@@ -159,6 +159,19 @@ with a loud warning instead while you migrate the role (NOT recommended in prod)
 >   restarts real usage immediately. Audit-logged + god-inbox notification. Console: a danger-zone section
 >   in the company drawer, rendered only while the company is suspended. Reset procedure for a pilot
 >   go-live: go-live runbook item 10.
+> - **Company soft-delete (suspended companies only, migration 0386).** Lighter than factory-reset above —
+>   **`POST /api/admin/tenants/:id/delete`**, body `{ confirm: "<company code>" }`, flags `tenants.deleted_at`
+>   WITHOUT touching any business data. Same gates as factory-reset (god-only 403, `409 TENANT_NOT_SUSPENDED`,
+>   `400 CONFIRM_MISMATCH`) plus `409 TENANT_ALREADY_DELETED`. A deleted company drops out of
+>   `listTenants()` (pass `?include_deleted=1` to see it) and its users are blocked with **`403
+>   TENANT_DELETED`** at the auth guard — this check is independent of `suspended_at`, so calling
+>   `reactivate` on a deleted-but-suspended company does NOT re-open logins (only `…/:id/restore` clears the
+>   flag; the company then stays suspended until a separate reactivate — restore never implicitly
+>   reactivates). Kept in its own provider, `TenantLifecycleService` (`modules/billing/tenant-lifecycle.service.ts`),
+>   not appended to `billing.service.ts` (docs/46 Phase 0 ratchet). Console: an additional danger-zone
+>   section alongside factory-reset (rendered only while suspended and not already deleted) + a Restore
+>   button (rendered while deleted) + a "show deleted companies" toggle on the fleet list. Procedure:
+>   go-live runbook item 11.
 > - **Each new company gets its OWN org** — signup sets `org_id = the new tenant's id` on both the tenant
 >   and its Admin, so under `multi-company` the new Admin is isolated to just that company by default (and
 >   never needs the org_id backfill the boot warning mentions).
