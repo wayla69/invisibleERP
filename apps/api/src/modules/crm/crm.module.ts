@@ -9,6 +9,7 @@ import { CrmAccountHealthModule } from './account-health/crm-account-health.modu
 import { CrmForecastModule } from './forecast/crm-forecast.module';
 import { CrmInboundModule } from './inbound/crm-inbound.module';
 import { FinanceModule } from '../finance/finance.module';
+import { CrmBiReports } from './crm-bi-reports';
 
 // Umbrella CRM module: accounts/360 core + the UNIFIED pipeline (CRM-1, migration 0293). The deferred
 // service-level merge (docs/28 PR #3) is now done: CrmPipelineModule owns the ONE opportunity spine
@@ -20,7 +21,7 @@ import { FinanceModule } from '../finance/finance.module';
 @Module({
   imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmInboundModule, FinanceModule],
   controllers: [CrmController],
-  providers: [CrmService],
+  providers: [CrmBiReports, CrmService],
   exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmInboundModule],
 })
 export class CrmModule {}

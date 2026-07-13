@@ -19,6 +19,7 @@ import { HcmTrainingController } from './hcm-training.controller';
 import { HcmTrainingService } from './hcm-training.service';
 import { ProjectsModule } from '../projects/projects.module';
 import { MessagingModule } from '../messaging/messaging.module';
+import { HcmBiReports } from './hcm-bi-reports';
 
 // Phase 19 — HCM: attendance/timesheets (OT → payroll) + leave (unpaid → payroll deduction).
 // ProjectsModule: approved timesheets post project labor cost (PPM P3 — PROJ-04).
@@ -41,7 +42,7 @@ import { MessagingModule } from '../messaging/messaging.module';
 @Module({
   imports: [ProjectsModule, MessagingModule],
   controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmCompController, HcmLifecycleController, HcmRecruitingController, HcmEssController, HcmTrainingController],
-  providers: [HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmCompService, HcmLifecycleService, HcmRecruitingService, HcmEssService, HcmTrainingService],
+  providers: [HcmBiReports, HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmCompService, HcmLifecycleService, HcmRecruitingService, HcmEssService, HcmTrainingService],
   exports: [HcmLeaveService],
 })
 export class HcmModule {}

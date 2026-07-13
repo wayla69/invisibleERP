@@ -1,8 +1,9 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, Optional } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { revRecSchedules, revRecLines, journalEntries } from '../../database/schema';
+import { revRecSchedules, revRecLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { DocNumberService } from '../../common/doc-number.service';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -28,6 +29,9 @@ export class RevenueService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly ledger: LedgerService,
     private readonly docNo: DocNumberService,
+    // docs/46 Phase 3 — entry-no crash-recovery lookup via the ledger's narrow read API instead of a
+    // direct journal_entries read. Appended @Optional (positional-construction convention).
+    @Optional() private readonly ledgerRead?: LedgerReadService,
   ) {}
 
   // create a deferral schedule + book the cash-in-advance to 2400 Unearned Revenue
@@ -68,9 +72,9 @@ export class RevenueService {
           journalNo = je?.entry_no ?? null;
         } else {
           // crash-recovery: the JE posted but the line wasn't marked — recover the existing entry_no so the
-          // audit link is preserved instead of persisting journalNo = null.
-          const [existing] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries).where(and(eq(journalEntries.source, 'REVREC'), eq(journalEntries.sourceRef, ref))).limit(1);
-          journalNo = existing?.entryNo ?? null;
+          // audit link is preserved instead of persisting journalNo = null (docs/46 Phase 3: via the
+          // ledger's narrow read API instead of a direct journal_entries read).
+          journalNo = this.ledgerRead ? await this.ledgerRead.entryRefNo('REVREC', ref) : null;
         }
         await db.update(revRecLines).set({ recognized: true, journalNo }).where(eq(revRecLines.id, line.id));
         journals.push({ schedule_no: sched.scheduleNo, journal_no: journalNo, amount: n(line.amount) });

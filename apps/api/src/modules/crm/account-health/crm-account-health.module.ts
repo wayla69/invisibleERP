@@ -9,6 +9,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorato
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { CollectionsService } from '../../finance/collections.service';
 import { FinanceModule } from '../../finance/finance.module';
+import type { BiReportGenerator, BiReportSource } from '../../bi/report-registry';
 
 // ── CRM-15 — B2B account HEALTH / churn + renewal-expansion pipeline (CRM-08, migration 0370) ────────
 // A read-mostly DETECTIVE layer on the REV-17 CRM spine. A per-account health SCORE is computed from
@@ -256,5 +257,24 @@ export class CrmAccountHealthController {
   @Patch('opportunities/:oppNo/deal-type') dealType(@Param('oppNo') no: string, @Body(new ZodValidationPipe(DealTypeBody)) b: z.infer<typeof DealTypeBody>, @CurrentUser() u: JwtUser) { return this.svc.setDealType(no, b.deal_type, u); }
 }
 
-@Module({ imports: [FinanceModule], controllers: [CrmAccountHealthController], providers: [CrmAccountHealthService], exports: [CrmAccountHealthService] })
+// docs/46 Phase 1 — module-owned BI report generator (discovered by BiReportRegistrarService;
+// moved verbatim out of bi-generate.service.ts, behaviour identical).
+@Injectable()
+export class CrmAccountHealthBiReports implements BiReportSource {
+  constructor(private readonly svc: CrmAccountHealthService) {}
+
+  biReports(): BiReportGenerator[] {
+    return [
+      {
+        type: 'crm_account_health',
+        generate: async (_f, user) => {
+          const r = await this.svc.captureAllHealth(user); // idempotent per (account, date)
+          return { data: r, summary: `Account health: captured ${r.captured} of ${r.scanned} account(s) for ${r.as_of}`, summaryTh: `บันทึกสุขภาพบัญชีลูกค้า: ${r.captured} จาก ${r.scanned} บัญชี` };
+        },
+      },
+    ];
+  }
+}
+
+@Module({ imports: [FinanceModule], controllers: [CrmAccountHealthController], providers: [CrmAccountHealthService, CrmAccountHealthBiReports], exports: [CrmAccountHealthService] })
 export class CrmAccountHealthModule {}

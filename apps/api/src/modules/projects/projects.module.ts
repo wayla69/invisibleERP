@@ -5,6 +5,7 @@ import { CommitmentsModule } from '../commitments/commitments.module';
 import { RetentionModule } from '../retention/retention.module';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
+import { ProjectsBiReports } from './projects-bi-reports';
 
 // Phase 18 — Projects / PPM: project costing (→ WIP) + billing (→ revenue, relieve WIP to COGS).
 // BiLiveModule supplies the shared real-time bus so the action center (PMO-1) can proactively push a
@@ -14,7 +15,7 @@ import { ProjectsService } from './projects.service';
 @Module({
   imports: [LedgerModule, BiLiveModule, CommitmentsModule, RetentionModule],
   controllers: [ProjectsController],
-  providers: [ProjectsService],
+  providers: [ProjectsBiReports, ProjectsService],
   exports: [ProjectsService],
 })
 export class ProjectsModule {}

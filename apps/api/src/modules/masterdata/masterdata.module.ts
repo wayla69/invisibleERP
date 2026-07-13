@@ -4,11 +4,12 @@ import { MasterDataService } from './masterdata.service';
 import { MasterDataController } from './masterdata.controller';
 import { MasterdataChangeService } from './masterdata-change.service';
 import { MasterdataChangeController } from './masterdata-change.controller';
+import { MasterdataApprovalQueues } from './masterdata-approval-queues';
 
 @Module({
   imports: [LedgerModule],
   controllers: [MasterDataController, MasterdataChangeController],
-  providers: [MasterDataService, MasterdataChangeService],
+  providers: [MasterdataApprovalQueues, MasterDataService, MasterdataChangeService],
   exports: [MasterDataService, MasterdataChangeService],
 })
 export class MasterDataModule {}

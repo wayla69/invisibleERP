@@ -17,6 +17,7 @@ import { WheelsModule } from './engagement/wheels.module';
 import { GamificationModule } from './engagement/gamification.module';
 import { WalletPassModule } from '../wallet-pass/wallet-pass.module';
 import { ChannelAdapterModule } from '../channel-adapter/channel-adapter.module';
+import { MembershipBiReports } from './membership-bi-reports';
 
 // PlatformModule/AutomationModule power the W1 loyalty.points_expiring look-ahead event (webhook fan-out +
 // no-code rules). No cycle: platform → automation → messaging/journeys, none of which import LoyaltyModule.
@@ -28,7 +29,7 @@ import { ChannelAdapterModule } from '../channel-adapter/channel-adapter.module'
 @Module({
   imports: [LedgerModule, BiLiveModule, PlatformModule, AutomationModule, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule, WalletPassModule, ChannelAdapterModule],
   controllers: [LoyaltyController, SavedSegmentsController],
-  providers: [LoyaltyService, MemberService, MembershipService, ReceiptSubmissionsService, SavedSegmentsService],
+  providers: [MembershipBiReports, LoyaltyService, MemberService, MembershipService, ReceiptSubmissionsService, SavedSegmentsService],
   exports: [LoyaltyService, MemberService, MembershipService, ReceiptSubmissionsService, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule, WalletPassModule],
 })
 export class LoyaltyModule {}
