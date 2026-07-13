@@ -393,9 +393,22 @@ tenant index per table, and applies the canonical org-clause RLS policy (§6). E
 `cutover/procurement-tenant-isolation.ts` — T1 raises a PR/PO/GR, T2 (scoped) sees zero of them, T1 still
 sees its own.
 
+**Backfill gotcha (RLS-visibility trap, cost two failed prod deploys).** The backfill reads `users` and
+`tenants` (`FROM users u WHERE u.username = …`, `SELECT id FROM tenants WHERE code='OSHINEI'`), but both
+tables are **FORCE ROW LEVEL SECURITY** and `drizzle-kit migrate` connects as the non-superuser `ierp_app`
+role (`bypassrls=false`, enforced by the H-3 boot check). During a migration no `app.*` GUCs are set, so
+the `tenant_isolation` policy's USING clause is false and `ierp_app` sees **zero** rows in `users`/`tenants`
+— every backfill join matched nothing and all 196 rows tripped the fail-loud check. The fix is a single
+`SELECT set_config('app.bypass_rls','on',true);` as the migration's first statement (transaction-local,
+auto-resets at COMMIT) — the same bypass path every `src/database/seed-*.ts` and backfill already uses.
+**Rule for any future data-migration that JOINs against an RLS/FORCE-RLS table: set `app.bypass_rls` first,
+and test as `ierp_app` — a rolled-back check run as the `postgres` superuser silently bypasses RLS and hides
+the bug** (exactly what masked it here). See also `docs/ops/drizzle-migration-debt.md`.
+
 ## 8. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.26 | 2026-07-13 | Platform / SRE | **§7 backfill hotfix (migration 0387).** The 0387 backfill silently no-op'd in prod (all 196 rows failed the fail-loud attribution check, two deploys running) because it JOINs `users`/`tenants` — both FORCE RLS — while `drizzle-kit migrate` runs as the non-superuser `ierp_app` role with no `app.*` GUCs, so those join sources were invisible. Not a statement-chunking issue (the earlier split-per-breakpoint attempt left the count identical). Fixed by prepending `SELECT set_config('app.bypass_rls','on',true);` to the migration. No change to 0387's schema/RLS outcome. |
 | 1.25 | 2026-07-13 | Platform / SRE | **§7: legacy P2P pipeline had no tenant scoping at all (migration 0387).** `purchase_requests`/`pr_items`/`purchase_orders`/`po_items`/`po_deliveries`/`goods_receipts`/`gr_items` predated multi-tenancy and never got a `tenant_id` column — every company on the platform could see every other company's requisitions/POs/goods-receipts, unfiltered. Fixed: `tenant_id` added + backfilled (~196 rows, all attributable) + leading index + canonical org-clause RLS on all 7 tables; every writer now stamps `tenant_id`. ToE: `cutover/procurement-tenant-isolation.ts`. |
 | 1.24 | 2026-07-13 | Platform | **§2: tenant soft-delete + purge (migration 0393) — Amber cleanup.** New two-step lifecycle beyond suspend/factory-reset: `deleteTenant` (suspended-only) flags `deleted_at` without touching data, permanently blocking logins (`TENANT_DELETED`, independent of `suspended_at`) — reversible via `restoreTenant`. `purgeTenant` (already-deleted-only) is the follow-up IRREVERSIBLE step that wipes every other tenant-scoped table but, per explicit product decision, NEVER erases `audit_log` (ITGC-AC-16) — so the `tenants` row survives purge too, as that chain's anchor. Landed in a new `TenantLifecycleService` + shared `tenant-wipe.ts` engine (factory-reset's loop extracted into it), not appended to `billing.service.ts`. ToE: `cutover/onboarding.ts` (23 new checks). Go-live runbook items 11-12. |
 | 1.23 | 2026-07-13 | Platform / SRE | **§1bis provisioning: transfer ownership of enum TYPES too (0353 deploy failure).** Migration `0353_treasury_debt_register`'s `ALTER TYPE "role_enum" ADD VALUE ...` 42501'd `must be owner of type role_enum` in prod under `ierp_app` — the run-1/1.21 ownership transfer covered `public`/`drizzle` tables, sequences, and views, but not user-defined TYPEs, and `ALTER TYPE ... ADD VALUE` requires actual ownership (table grants don't cover it). `ops-provision-app-role.yml` now also loops `pg_type` (`typtype='e'`) in `public` and `ALTER TYPE ... OWNER TO ierp_app`; §1bis SQL updated to match. Re-run the workflow to unblock prod. |

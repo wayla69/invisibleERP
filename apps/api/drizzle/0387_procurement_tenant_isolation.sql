@@ -17,14 +17,26 @@
 -- rows are expected — the final verification block below fails the migration loudly if any remain NULL,
 -- rather than silently leaving orphaned/invisible-to-everyone data.
 --
--- NB (first deploy attempt, 2026-07-13): the original version of this file batched multiple UPDATE
--- statements per migration-runner dispatch chunk, which caused the backfill to silently no-op in prod
--- (deploy failed on step 4's fail-loud check, reporting all 196 rows unattributed) even though the
--- identical logic run as individually-dispatched queries backfills every row cleanly (verified directly
--- against prod in a rolled-back transaction). Root cause not fully isolated (suspected drizzle-kit/
--- postgres-js multi-statement-chunk dispatch), but the fix is unambiguous: one statement per dispatch
--- chunk, forcing each UPDATE to run as its own round-trip. The failed attempt rolled back cleanly (this
+-- NB (2026-07-13, root-caused): the first two deploy attempts failed here with all 196 rows still
+-- unattributed. The real cause is NOT statement chunking (the split-per-breakpoint change in #748 left
+-- the count identical) — it is RLS visibility. `drizzle-kit migrate` connects as the non-superuser
+-- `ierp_app` role (bypassrls=false; enforced by the H-3 boot check, docs/security-review), and `users`
+-- and `tenants` are FORCE ROW LEVEL SECURITY. With no app.* GUCs set during a migration, the
+-- tenant_isolation policy's USING clause evaluates false, so `ierp_app` sees ZERO rows in users/tenants.
+-- The backfill's `FROM users u` join and `SELECT id FROM tenants WHERE code='OSHINEI'` subquery therefore
+-- match nothing and every UPDATE silently no-ops. (Verified directly against prod: as `ierp_app`,
+-- `count(*) FROM users` = 0; after `set_config('app.bypass_rls','on')`, = 4.) Earlier "verified in a
+-- rolled-back transaction" runs passed only because they connected as the `postgres` superuser, which
+-- bypasses RLS — masking the real role's behaviour. Fix: take the app's own bypass path (as every seed
+-- and backfill in src/database does) for the duration of this migration's transaction. `set_config(...,
+-- true)` is transaction-local and auto-resets at COMMIT, and RLS is not enabled on the 7 P2P tables until
+-- step 6, so the backfill writes are unaffected either way. The failed attempts rolled back cleanly (this
 -- file was never marked applied), so editing it in place is safe.
+
+-- ── 0. Bypass RLS for this migration's transaction so the backfill can READ users/tenants ─────────────
+-- (both are FORCE RLS; without this the join sources are invisible to the ierp_app migration role).
+SELECT set_config('app.bypass_rls', 'on', true);
+--> statement-breakpoint
 
 -- ── 1. Add the column ───────────────────────────────────────────────────────────────────────────────
 ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);

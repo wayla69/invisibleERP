@@ -91,10 +91,35 @@ June-30 build.
   When you renumber a migration after merging `main`, also make sure its `when` is **greater than the
   current journal maximum** — renumbering the filename alone is not enough.
 
+## 3ter. A backfill that JOINs an RLS table silently no-ops (migration 0387, two failed deploys)
+
+`drizzle-kit migrate` connects as the non-superuser **`ierp_app`** role (`bypassrls=false`; the H-3 boot
+check refuses to boot on a superuser/`BYPASSRLS` base role) and sets **no `app.* GUCs`** during a migration.
+So any migration statement that **reads** a table under `FORCE ROW LEVEL SECURITY` — `users`, `tenants`, and
+every tenant-scoped table — sees **zero rows**, because the `tenant_isolation` policy's USING clause is false
+without `app.tenant_id`/`app.bypass_rls`/`app.org_id` set.
+
+Migration 0387 (tenant-scope the legacy P2P tables) backfilled `tenant_id` via `UPDATE … FROM users u WHERE
+u.username = …` and `SELECT id FROM tenants WHERE code='OSHINEI'`. The join sources were invisible to
+`ierp_app`, so every UPDATE matched nothing, all 196 rows stayed NULL, and the migration's fail-loud check
+aborted the deploy — **twice**. The first "fix" mis-diagnosed it as statement-batching and split each
+statement onto its own breakpoint; the row count came back **identical**, which is the tell that dispatch
+was never the cause. It was masked because a rolled-back verification run was done as the `postgres`
+**superuser**, which bypasses RLS.
+
+**Rule.** If a data-migration reads/joins an RLS or FORCE-RLS table (backfills almost always do — `users`,
+`tenants`, any tenant table), prepend **`SELECT set_config('app.bypass_rls','on',true);`** (`--> statement-breakpoint`
+after it) as the migration's first statement — transaction-local, auto-resets at COMMIT, the same bypass
+every `src/database/seed-*.ts` uses. **Verify as `ierp_app`, never as `postgres`** — a superuser run hides
+the failure. (Writes to a table *before* its own RLS is enabled are unaffected; this is purely about read
+visibility of the join sources.)
+
 ## 4. Adding migrations going forward
 
 - Use `db:generate` to draft, **or** hand-write — either way assign the **next free number** and ensure the
   journal entry exists (the CI gate enforces it). Hand-append the RLS loop for new tenant tables.
+- If the migration **reads/joins an RLS table** (backfills against `users`/`tenants`/any tenant table),
+  set `app.bypass_rls='on'` as the first statement and test as `ierp_app`, not `postgres` — see §3ter.
 - The journal `when` must be **strictly greater than the current maximum** (the CI gate enforces
   monotonicity — see §3bis for why a lower/equal `when` is silently skipped in prod).
 - The snapshot baseline is current; keep it that way by letting `generate` advance it, or by leaving the
@@ -112,4 +137,5 @@ June-30 build.
 | 2026-06-25 | v1.1 | Platform / DB | **Snapshot drift resolved**: regenerated the baseline (`0129_baseline_resync`, snapshot-only, catch-up neutralised to a no-op). `db:generate` now yields a minimal diff again; zero runtime/prod effect (snapshots are generate-only). Verified by the `migrations-journaled` gate + `tenant-isolation`/`e2e` harnesses. §3/§4 rewritten; orphan-journaling + dup-number grandfathering left as low-priority follow-ups. |
 | 2026-07-02 | v1.2 | Platform / DB | **docs/27 R5-1:** the 'orphans' were found journaled all along (idx 102/103) — stale dead-code `GRANDFATHERED` list removed (now empty); dup-number grandfathering made a recorded decision (cannot renumber applied migrations); new `migration-parity` CI harness proves filename-order ≡ journal-order schema. |
 | 2026-07-03 | v1.3 | Platform / DB | **§3bis — non-monotonic `when` silent-skip (prod deploy outage):** 0145/0146 (`when` ≤ 0144's) were never applied in prod; 0218's tenant-index on the missing `tip_distribution_lines` failed every deploy since 2026-07-02. Fix: 0218 now idempotently re-creates the 0145/0146 objects (PGlite-verified on prod-like + fresh paths); `migrations-journaled` gate extended to fail on any new non-monotonic `when` (0145/0146 grandfathered). |
+| 2026-07-13 | v1.5 | Platform / SRE | **§3ter — RLS-visibility no-op in a backfill (migration 0387, two failed deploys).** The 0387 backfill JOINed `users`/`tenants` (both FORCE RLS) while `drizzle-kit migrate` runs as the non-superuser `ierp_app` with no `app.*` GUCs → join sources invisible → all 196 rows failed the fail-loud check. Not statement-chunking (the earlier split-per-breakpoint attempt left the count identical); masked by a rolled-back check run as the `postgres` superuser. Fix: prepend `SELECT set_config('app.bypass_rls','on',true);`. New rule in §3ter/§4: any migration reading an RLS table must set the bypass and be tested as `ierp_app`. |
 | 2026-07-07 | v1.4 | Platform / DB | **Wave 2 · 2.3 — pre-emptive migration scaffolder.** The `migrations-journaled` gate catches collisions *after* the fact; `tools/ci/new-migration.mjs` prevents them *before*: it computes the correct next number / journal `idx` / monotonic `when` from the live tree and (with `--create <slug>`, wired as `pnpm --filter @ierp/api db:new <slug>`) scaffolds the `.sql` stub **and** the journal entry together so they can't drift. Pure `analyzeMigrations()` also detects dup number/idx/tag + orphan sql↔journal (honouring the grandfathered dup-numbers). ToE: `cutover/migration-tooling` (11/11). |
