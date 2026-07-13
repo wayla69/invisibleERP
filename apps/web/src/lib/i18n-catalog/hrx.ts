@@ -349,6 +349,24 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'hx.ch.items_empty_title': { th: 'ไม่มีสินค้าที่ติดตามสต๊อก', en: 'No stock-tracked items' },
   'hx.ch.items_empty_desc': { th: 'สินค้าที่ผูกกับการติดตามสต๊อกจะแสดงสถานะความพร้อมขาย (86) ที่นี่', en: 'Items linked to stock tracking show their availability (86) status here.' },
 
+  // ── Channel-to-member identity links (docs/45 G1, control MKT-13) ──────────
+  'hx.ch.tab_refs': { th: 'ผูกสมาชิก', en: 'Member links' },
+  'hx.ch.col_link_member': { th: 'ลิงก์ผูกสมาชิก', en: 'Member link' },
+  'hx.ch.mint_qr': { th: 'สร้าง QR', en: 'Generate QR' },
+  'hx.ch.qr_dlg_title': { th: 'ลิงก์ผูกบัญชีสมาชิก', en: 'Member self-link' },
+  'hx.ch.qr_dlg_desc': { th: 'ให้ลูกค้าสแกน QR หรือเปิดลิงก์นี้บนมือถือเพื่อผูกบัญชีแพลตฟอร์มกับสมาชิก (ต้องเข้าสู่ระบบและยืนยันความยินยอม)', en: "Have the customer scan the QR or open this link on their phone to link their platform account to their member profile (requires login + a consent decision)" },
+  'hx.ch.link_copied': { th: 'คัดลอกลิงก์แล้ว', en: 'Link copied' },
+  'hx.ch.filter_unlinked': { th: 'ยังไม่ผูก', en: 'Unlinked' },
+  'hx.ch.filter_linked': { th: 'ผูกแล้ว', en: 'Linked' },
+  'hx.ch.col_ref_hash': { th: 'รหัสอ้างอิง (hash)', en: 'Reference (hashed)' },
+  'hx.ch.col_link_source': { th: 'ผูกโดย', en: 'Linked via' },
+  'hx.ch.link_to_member': { th: 'ผูกกับสมาชิก', en: 'Link to member' },
+  'hx.ch.refs_empty_title': { th: 'ไม่มีรายการ', en: 'No links found' },
+  'hx.ch.refs_empty_desc': { th: 'บัญชีลูกค้าจากแพลตฟอร์มเดลิเวอรีจะปรากฏที่นี่หลังมีออเดอร์เข้ามา', en: 'Aggregator buyer accounts appear here once an order comes in.' },
+  'hx.ch.link_dlg_title': { th: 'ผูกกับสมาชิก (ต้องยืนยันความยินยอม)', en: 'Link to a member (consent required)' },
+  'hx.ch.link_dlg_desc': { th: 'ผูกบัญชี {platform} นี้กับสมาชิกที่ระบุ — ต้องระบุการยินยอมรับการตลาดอย่างชัดเจน', en: 'Link this {platform} account to the given member — an explicit marketing-consent decision is required.' },
+  'hx.ch.consent_opt_in': { th: 'สมาชิกยินยอมรับข้อมูลการตลาด', en: 'Member consents to marketing' },
+
   // ── Claims (claims/page.tsx) ────────────────────────────────────────────────
   'hx.cl.search_aria': { th: 'ค้นหาเคลม', en: 'Search claims' },
   'hx.cl.title': { th: 'จัดการเคลม (Claims)', en: 'Claims management' },

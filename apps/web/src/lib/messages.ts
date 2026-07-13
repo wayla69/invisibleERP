@@ -1656,6 +1656,28 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'crm.exec_discount_hint': { th: 'ส่วนลดเกินเพดานนี้ต้องได้รับอนุมัติจากผู้มีสิทธิ์ exec เท่านั้น (เว้นว่าง = ปิดการแบ่งระดับ)', en: 'A discount above this ceiling needs an exec-permission holder to approve (blank = tiering off)' },
   'crm.toast_settings_saved': { th: 'บันทึกการตั้งค่าแล้ว', en: 'Settings saved' },
 
+  // ── Audience export (docs/45 G3/G3b/G3c, PDPA-05) ──────────────────────────
+  'crm.aud_title': { th: 'ส่งกลุ่มเป้าหมายโฆษณา', en: 'Audience export' },
+  'crm.aud_subtitle': { th: 'ส่งข้อมูลสมาชิกแบบ hash เท่านั้น ไปยัง Meta/Google — เฉพาะสมาชิกที่ยินยอม', en: 'Consent-gated, hash-only export to ad platforms' },
+  'crm.aud_ropa_ok': { th: 'มีกิจกรรม ROPA ‘audience_export’ (ฐานความยินยอม) แล้ว — ส่งได้', en: "ROPA activity 'audience_export' (consent basis) is recorded — export can run" },
+  'crm.aud_ropa_missing': { th: 'ยังไม่มีกิจกรรม ROPA ‘audience_export’ — การส่งจะถูกบล็อก จนกว่า DPO จะบันทึกกิจกรรมนี้', en: "No ROPA activity 'audience_export' recorded yet — every export run will be blocked until the DPO records it" },
+  'crm.aud_ropa_unknown': { th: 'ไม่สามารถตรวจสอบสถานะ ROPA ได้ (ต้องมีสิทธิ์ users) — ตรวจสอบกับ DPO', en: "Can't verify ROPA status (requires the 'users' permission) — check with your DPO" },
+  'crm.aud_preview_title': { th: 'ตัวอย่างข้อมูล (hash-only)', en: 'Payload preview (hash-only)' },
+  'crm.aud_consented': { th: 'สมาชิกที่ยินยอม', en: 'Consented members' },
+  'crm.aud_total_active': { th: 'สมาชิกทั้งหมด (ใช้งานอยู่)', en: 'Total active members' },
+  'crm.aud_hash_alg': { th: 'อัลกอริทึม Hash', en: 'Hash algorithm' },
+  'crm.aud_col_hashed_email': { th: 'Email (hash)', en: 'Email (hashed)' },
+  'crm.aud_col_hashed_phone': { th: 'เบอร์ (hash)', en: 'Phone (hashed)' },
+  'crm.aud_no_consented': { th: 'ยังไม่มีสมาชิกที่ยินยอมส่งข้อมูลโฆษณา', en: 'No members have a live marketing consent yet' },
+  'crm.aud_register_title': { th: 'ประวัติการส่ง', en: 'Export register' },
+  'crm.aud_col_target': { th: 'ปลายทาง', en: 'Target' },
+  'crm.aud_col_pushed': { th: 'ส่งแล้ว', en: 'Pushed' },
+  'crm.aud_col_removed': { th: 'ถอนแล้ว', en: 'Removed' },
+  'crm.aud_col_error': { th: 'ข้อผิดพลาด', en: 'Error' },
+  'crm.aud_no_runs': { th: 'ยังไม่มีการส่งข้อมูล', en: 'No export runs yet' },
+  'crm.aud_schedule_hint': { th: 'ตั้งเวลาส่งอัตโนมัติได้ที่หน้า รายงานตามกำหนดเวลา (ประเภทรายงาน audience_export_sync)', en: "Schedule automatic runs from Scheduled Reports (report type audience_export_sync)" },
+  'crm.aud_go_scheduled': { th: 'ไปที่รายงานตามกำหนดเวลา', en: 'Go to Scheduled Reports' },
+
   // ── Onboarding page ───────────────────────────────────────────────────────
   'onb.title': { th: 'เริ่มต้นใช้งาน (Onboarding)', en: 'Getting started (Onboarding)' },
   'onb.subtitle': { th: 'ทำตามขั้นตอนเพื่อตั้งค่าระบบ และติดตั้งชุดเริ่มต้นตามประเภทธุรกิจ (สร้างออบเจ็กต์ตัวอย่างให้ — ไม่กระทบบัญชี แยกตามกิจการ)', en: 'Follow the steps to set up the system, and install a starter pack for your industry (seeds sample objects — no accounting impact, per company)' },

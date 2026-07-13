@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Megaphone, Users, Tag } from 'lucide-react';
+import { Megaphone, Users, Tag, TrendingUp, Wallet, PiggyBank, Percent } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht, thaiDate } from '@/lib/format';
+import { baht, pct, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
@@ -120,6 +120,49 @@ function Promotions() {
   );
 }
 
+function RoiPanel() {
+  const { t } = useLang();
+  const [days, setDays] = useState(90);
+  const q = useQuery<any>({ queryKey: ['mk-roi', days], queryFn: () => api(`/api/bi/marketing-roi?days=${days}`) });
+  const d = q.data;
+  const totals = d?.totals ?? {};
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted-foreground">{t('ly.roi_window')}</span>
+        <Select value={String(days)} onValueChange={(v) => setDays(Number(v))}>
+          <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="30">30 {t('ly.roi_days')}</SelectItem>
+            <SelectItem value="90">90 {t('ly.roi_days')}</SelectItem>
+            <SelectItem value="180">180 {t('ly.roi_days')}</SelectItem>
+            <SelectItem value="365">365 {t('ly.roi_days')}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <StateView q={q}>
+        {d && (
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label={t('ly.roi_spend')} value={baht(totals.spend)} icon={Wallet} tone="warning" hint={t('ly.roi_spend_hint')} />
+              <StatCard label={t('ly.roi_revenue')} value={baht(totals.attributed_revenue)} icon={TrendingUp} tone="primary" />
+              <StatCard label={t('ly.roi_margin')} value={baht(totals.net_margin_after_discount)} icon={PiggyBank} tone="success" />
+              <StatCard label={t('ly.roi_pct')} value={totals.roi_on_spend != null ? pct(totals.roi_on_spend * 100) : '—'} icon={Percent} tone={totals.roi_on_spend != null && totals.roi_on_spend >= 0 ? 'success' : 'danger'} />
+            </div>
+            {d.note && <p className="text-sm text-muted-foreground">{d.note}</p>}
+            {Array.isArray(d.top_campaigns) && d.top_campaigns.length > 0 && (
+              <DataTable rows={d.top_campaigns} emptyState={{ icon: TrendingUp, title: t('ly.roi_no_campaigns'), description: '' }} columns={[
+                { key: 'name', label: t('ly.col_name'), render: (r: any) => g(r, 'campaign_name', 'name') },
+                { key: 'revenue', label: t('ly.roi_revenue'), align: 'right', render: (r: any) => baht(g(r, 'revenue', 'attributed_revenue')) },
+              ]} />
+            )}
+          </div>
+        )}
+      </StateView>
+    </div>
+  );
+}
+
 export default function Marketing() {
   const { t } = useLang();
   return (
@@ -129,6 +172,7 @@ export default function Marketing() {
         { key: 'c', label: t('ly.tab_campaigns'), content: <Campaigns /> },
         { key: 's', label: t('ly.tab_segments'), content: <Segments /> },
         { key: 'p', label: t('ly.tab_promotions'), content: <Promotions /> },
+        { key: 'r', label: t('ly.tab_roi'), content: <RoiPanel /> },
       ]} />
     </div>
   );

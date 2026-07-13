@@ -1,6 +1,9 @@
 # Members & Points CRM (สมาชิก & แต้ม)
 
-**Status: DRAFT v0.2** · Last updated: 2026-07-10 · For: Sales, Marketing, Loyalty Admin, Managers
+**Status: DRAFT v0.3** · Last updated: 2026-07-13 · For: Sales, Marketing, Loyalty Admin, Managers
+_(2026-07-13: §15 corrected to the real screens — the ผูกสมาชิก tab on `/channels` and the member self-link
+page moved to `/m?clink=` (was pointing at a non-existent `/portal/loyalty` flow); added §16 Marketing ROI
+dashboard.)_
 
 This guide covers the loyalty CRM — the **member directory**, the **360° member view**, the **PDPA
 consent register**, and the **points-liability** report. Configuring earn/redeem rates is in
@@ -485,25 +488,39 @@ claim points by uploading a photo of the receipt.
 ## 15. Link marketplace accounts (เชื่อมบัญชี Grab/LINE MAN เข้ากับสมาชิก)
 
 **Who:** staff with **CRM-member/Loyalty** duty (staff link), **POS/Order-management** (QR mint); the customer self-links from their phone.
-**Where:** `/loyalty` back-office (`GET /api/loyalty/channel-refs`) · channels screen (QR per order) · member app (QR landing).
+**Where:** `/channels` → **ผูกสมาชิก** tab (the ref list + staff-link dialog) and the **ออเดอร์เดลิเวอรี** tab
+(สร้าง QR button per order) · the customer scans and lands on `/m?clink=<token>` (the member self-service app).
 
 Repeat buyers on Grab / LINE MAN / foodpanda / Robinhood are anonymous by default. The system captures a
 **hashed** reference of each platform buyer (never the raw phone/id — PDPA data minimization) so you can see
 repeat-buyer counts, and lets the buyer become a **known member** — always with explicit consent (MKT-13):
 
-1. **Mint the QR** for an aggregator order (`POST /api/channels/orders/:orderNo/link-qr`) and slip it in the bag.
-2. **The customer scans**, logs in to the member app (OTP or LINE), reviews the shop + order count, ticks the
+1. On `/channels` → **ออเดอร์เดลิเวอรี**, click **สร้าง QR** next to an aggregator order — a dialog shows the
+   link (copy it, or generate the QR image from it) to slip in the bag or hand to the customer.
+2. **The customer scans**, logs in to `/m` (OTP or LINE), reviews the shop + order count, ticks the
    **marketing consent checkbox** (required — accept or decline, never pre-filled), and links. The consent
    decision is recorded on their consent register (`source=self`) in the same action as the link.
 3. From then on that platform account's orders attach to their member profile automatically (dining history,
    loyalty attribution). One platform account can only ever belong to **one** member.
-4. **Staff link** (customer identifies their account at the counter): pick the ref on `/api/loyalty/channel-refs`
-   and link with the customer's attested consent decision (`POST /api/loyalty/channel-refs/:id/link` —
-   the request is rejected without an explicit `marketing_opt_in` boolean; recorded `source=pos`).
+4. **Staff link** (customer identifies their account at the counter): on `/channels` → **ผูกสมาชิก**, find the
+   unlinked ref and click **ผูกกับสมาชิก** — enter the member ID and tick the consent checkbox (the request is
+   rejected without an explicit choice; recorded `source=pos`).
 
 > 🔒 **Control MKT-13:** a stolen QR alone links nothing (member login required; another shop's QR → 403), the
 > raw platform identifier is never stored (hash only), and a ref already linked to someone else answers
 > `409 REF_ALREADY_LINKED`.
+
+## 16. Marketing ROI dashboard (docs/45)
+
+**Who:** `marketing` / `exec`. **Where:** `/marketing` → **ROI การตลาด** tab (alongside แคมเปญ/กลุ่มลูกค้า/
+โปรโมชั่น — a different screen from `/loyalty/campaigns` in §11 above, which manages the campaign records
+themselves rather than the money picture).
+
+Pick a window (30/90/180/365 days) to see: the **discount actually given** (the true marketing cost — never
+labelled revenue), the **redeemed bills' real revenue and margin**, **net margin after the discount**, and
+**ROI on spend**. A short note under the tiles restates the honest framing in plain language. This is a live
+read of the same figures the schedulable *Marketing ROI* report (§7 above) computes — no separate data path,
+so the dashboard and any scheduled/emailed report always agree.
 
 ## Errors you might see
 

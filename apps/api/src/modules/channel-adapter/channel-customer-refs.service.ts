@@ -78,7 +78,9 @@ export class ChannelCustomerRefsService {
     await db.insert(channelCustomerRefs).values({ tenantId, platform, refHash, lastOrderNo: orderNo }).onConflictDoNothing({ target: [channelCustomerRefs.tenantId, channelCustomerRefs.platform, channelCustomerRefs.refHash] });
     const token = mintChannelLinkToken({ tenantId, platform, refHash });
     const base = (process.env.WEB_BASE_URL ?? '').replace(/\/+$/, '');
-    return { order_no: orderNo, platform, token, url: base ? `${base}/portal/loyalty?clink=${token}` : `/portal/loyalty?clink=${token}` };
+    // /m is the member self-service app (its own phone-OTP/LINE auth + httpOnly cookie) — NOT /portal,
+    // which is the separate B2B customer-account portal and shares no auth with a loyalty member.
+    return { order_no: orderNo, platform, token, url: base ? `${base}/m?clink=${token}` : `/m?clink=${token}` };
   }
 
   // PUBLIC (rate-limited at the controller): what the QR landing page shows before login — platform +
