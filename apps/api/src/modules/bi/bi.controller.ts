@@ -58,6 +58,14 @@ export class BiController {
   @Permissions('exec')
   reportTypes() { return this.svc.reportTypes(); }
 
+  // Live ROI dashboard read (docs/45) — same gate as the CRM audience-export reads (marketing sees
+  // marketing data; exec sees everything). No report_runs side effect (pure read).
+  @Get('marketing-roi')
+  @Permissions('marketing', 'exec')
+  marketingRoi(@Query('days') days?: string, @CurrentUser() user?: JwtUser) {
+    return this.svc.marketingRoiLive(user!, qintOpt('days', days));
+  }
+
   // ── Real-time streaming analytics (docs/22 Phase B) ──
   // Live KPI/event SSE stream, filtered to the caller's tenant. A snapshot refresh pushes a kpi_refresh event.
   @Sse('live/stream')

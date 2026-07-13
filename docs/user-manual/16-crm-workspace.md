@@ -1,7 +1,7 @@
 # 16 — CRM Workspace (งานขาย: บอร์ดดีล ลีด บัญชีลูกค้า ผู้ติดต่อ)
 
 **Who this is for:** Sales, CRM/Credit Manager, Marketing, Executives
-**Screens:** `/crm` (workspace) · `/crm/deals/<OPP-…>` (deal) · `/crm/accounts/<ACC-…>` (account) · `/crm/members` (member CRM 360) · `/projects/pipeline` (win/loss analytics)
+**Screens:** `/crm` (workspace) · `/crm/deals/<OPP-…>` (deal) · `/crm/accounts/<ACC-…>` (account) · `/crm/members` (member CRM 360) · `/crm/audience-export` (hashed audience export, docs/45) · `/projects/pipeline` (win/loss analytics)
 **Required permission:** `crm`, `marketing`, `exec` or `ar` (the workspace); account **merge** additionally needs `crm`/`exec`/`masterdata`
 
 The CRM workspace is ONE screen for the whole sales motion: a drag-and-drop **deal board**, **leads**
@@ -446,6 +446,17 @@ interactions ended without a case being opened — a direct read on how much wor
 
 ---
 
+## 16.13 Audience export — send a hashed audience to ads platforms (docs/45, `/crm/audience-export`)
+
+**Who:** `marketing` / `exec`. Full detail (payload rules, ROPA fail-closed gate, direct Meta/Google
+adapters, withdrawal removal sync) lives in **manual 09 §7** (Scheduled reports); this screen is a
+dedicated view over the same data: the consent-filtered hash-only **preview**, the **export register**
+history (per recipient — success/failed/blocked, rows pushed/removed), and a banner showing whether the
+`audience_export` ROPA activity is recorded (or "can't verify" if you don't hold the `users` duty). A
+**Go to Scheduled Reports** button takes you where to actually run or schedule it.
+
+---
+
 ## Common errors on these screens
 
 | Error | Meaning | What to do |
@@ -480,6 +491,7 @@ interactions ended without a case being opened — a direct read on how much wor
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.5 | 2026-07-13 | **Audience export screen (docs/45) — new §16.13, `/crm/audience-export`.** No new control (extends PDPA-05, documented in manual 09 §7) — a dedicated preview + register + ROPA-status view over the existing consent-gated hashed audience export, cross-linked to Scheduled Reports for actually running it. |
 | 2.4 | 2026-07-13 | **Sequences & cadences (`/crm`) — CRM-8, control CRM-11:** new §16.4f + a new *Sequences* tab. Multi-step outreach **playbooks** (channel + wait-days steps) on the comms rail: enroll a lead (`LEAD-…`) or deal (`OPP-…`), and the cadence **advances** each enrolment step-by-step — sending the message (or logging a task), recording the touch on the timeline, and scheduling the next step — until it **completes**; enrolments can be **stopped**, and **Run due** (also a scheduled *CRM sequence run* BI report) advances everything that's due. Read-only to the ledger. |
 | 2.3 | 2026-07-12 | **Territory & quota (`/crm`) — CRM-11, control CRM-10:** new §16.4e + a new *Territory / quota* tab. Sales **territories** become governed master data — a name, optional **parent** (team roll-up hierarchy), manager and match criteria (regions/segments/categories) — with **rep assignments** and per-period **quotas** for an owner or a territory. The **attainment** tables reconcile won-in-period against the quota **per rep** and **by territory** (a territory's won sums its whole subtree), with a ≥100/≥70/below badge so a shortfall to plan surfaces early. Read-only to the ledger. |
 | 2.2 | 2026-07-12 | **Sales forecast depth (`/crm`) — CRM-12, control CRM-09:** new §16.4d + a new *Forecast* tab. A governance layer over the live pipeline forecast: the **manager roll-up** reconciles each rep's **submitted** commit/best-case override against the **system-weighted** forecast with the **variance**; reps submit their own number per period (governed draft → submitted); a **pipeline-coverage** ratio (open pipeline ÷ commit target, ≥3× healthy) + a commit→best-case→pipeline **waterfall**; and **Snapshot now** (or the scheduled *CRM sales forecast snapshot* report) records a dated forecast + the period's actual won for the **forecast-vs-actual accuracy** trend. Read-only — posts nothing to the ledger. |

@@ -235,7 +235,10 @@ export class BiGenerateService {
   // revenue — real revenue comes from the redeemed sales' own totals, margin from their line items joined
   // to the recipe-based food-cost layer (the same source menu-engineering uses), and the organic holdout
   // lift is the incremental-revenue truth. Optional legs degrade to null like execScorecard.
-  private async marketingRoi(user: JwtUser, f: any) {
+  // Public (not private like the other report-type branches): also called directly by BiService for the
+  // live ROI dashboard read (GET /api/bi/marketing-roi) — same composition, no duplicated logic, and no
+  // report_runs/register side effect (that's only written by BiScheduleService.executeSubscription).
+  async marketingRoi(user: JwtUser, f: any) {
     if (!this.marketingAuto) throw new BadRequestException({ code: 'MARKETING_UNAVAILABLE', message: 'Marketing automation service not available', messageTh: 'ระบบการตลาดอัตโนมัติไม่พร้อมใช้งาน' });
     const mkt = await this.marketingAuto.roiAttribution(user, { days: f.days });
 

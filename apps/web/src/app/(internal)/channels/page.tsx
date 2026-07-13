@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plug, PlugZap, PackageSearch, RefreshCw, SearchX, Send, ShoppingBag } from 'lucide-react';
+import { Plug, PlugZap, PackageSearch, RefreshCw, SearchX, Send, ShoppingBag, QrCode, Link2, Copy, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
@@ -16,6 +16,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { statusVariant } from '@/components/ui';
 
 const sel = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm';
@@ -26,7 +28,7 @@ export default function ChannelsPage() {
   return (
     <div>
       <PageHeader title={t('hx.ch.title')} description={t('hx.ch.desc')} />
-      <Tabs tabs={[{ key: 'orders', label: t('hx.ch.tab_orders'), content: <Orders /> }, { key: 'adapters', label: t('hx.ch.tab_adapters'), content: <Adapters /> }, { key: 'avail', label: t('hx.ch.tab_avail'), content: <Availability /> }]} />
+      <Tabs tabs={[{ key: 'orders', label: t('hx.ch.tab_orders'), content: <Orders /> }, { key: 'adapters', label: t('hx.ch.tab_adapters'), content: <Adapters /> }, { key: 'avail', label: t('hx.ch.tab_avail'), content: <Availability /> }, { key: 'refs', label: t('hx.ch.tab_refs'), content: <Refs /> }]} />
     </div>
   );
 }
@@ -36,6 +38,14 @@ function Orders() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['channel-orders'], queryFn: () => api('/api/channels/orders') });
   const setStatus = useMutation({ mutationFn: (v: { no: string; status: string }) => api(`/api/channels/orders/${v.no}/status`, { method: 'POST', body: JSON.stringify({ status: v.status }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['channel-orders'] }) });
+  // G1 (docs/45, control MKT-13): mint a member self-link QR for one channel order. The link page lives
+  // under /m (member self-service auth), not this staff app — the URL is opened on the member's device.
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const mintQr = useMutation({
+    mutationFn: (no: string) => api<{ url: string }>(`/api/channels/orders/${no}/link-qr`, { method: 'POST' }),
+    onSuccess: (r) => setQrUrl(r.url),
+    onError: (e: any) => notifyError(e.message),
+  });
   const FS = ['accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'rejected'];
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -71,6 +81,7 @@ function Orders() {
           { key: 'total', label: t('fin.col_amount'), align: 'right', render: (r: any) => baht(r.total) },
           { key: 'fulfillment_status', label: t('fin.col_status'), render: (r: any) => <Badge variant={statusVariant(r.fulfillment_status === 'completed' ? 'paid' : 'open')}>{r.fulfillment_status ?? '—'}</Badge> },
           { key: 'act', label: t('hx.common.update_status'), sortable: false, render: (r: any) => <select className={sel} value={r.fulfillment_status ?? ''} aria-label={t('hx.common.update_status')} onChange={(e) => setStatus.mutate({ no: r.order_no, status: e.target.value })}><option value="">—</option>{FS.map((f) => <option key={f} value={f}>{f}</option>)}</select> },
+          { key: 'link', label: t('hx.ch.col_link_member'), sortable: false, render: (r: any) => <Button size="sm" variant="outline" disabled={mintQr.isPending} onClick={() => mintQr.mutate(r.order_no)}><QrCode className="size-4" /> {t('hx.ch.mint_qr')}</Button> },
         ]} emptyState={
           search || statusFilter
             ? {
@@ -87,6 +98,21 @@ function Orders() {
         } />
         </div>
       )}
+      <Dialog open={!!qrUrl} onOpenChange={(o) => !o && setQrUrl(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('hx.ch.qr_dlg_title')}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">{t('hx.ch.qr_dlg_desc')}</p>
+          <div className="flex items-center gap-2">
+            <Input readOnly value={qrUrl ?? ''} className="font-mono text-xs" />
+            <Button variant="outline" size="icon" onClick={() => { if (qrUrl) { navigator.clipboard.writeText(qrUrl); notifySuccess(t('hx.ch.link_copied')); } }}>
+              <Copy className="size-4" />
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQrUrl(null)}>{t('crmx.btn_cancel')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </StateView>
   );
 }
@@ -156,6 +182,64 @@ function Availability() {
           </div>
         )}
       </StateView>
+    </div>
+  );
+}
+
+// G1 (docs/45, control MKT-13) — channel-to-member identity links. Refs carry only a SHA-256 hash of the
+// aggregator buyer id (channel-customer-refs.service.ts) and require a REQUIRED consent decision on link.
+function Refs() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [filter, setFilter] = useState<'all' | 'unlinked' | 'linked'>('unlinked');
+  const q = useQuery<any>({
+    queryKey: ['channel-refs', filter],
+    queryFn: () => api(`/api/loyalty/channel-refs${filter === 'all' ? '' : `?linked=${filter === 'linked'}`}`),
+  });
+  const [linkTarget, setLinkTarget] = useState<any | null>(null);
+  const [memberId, setMemberId] = useState('');
+  const [optIn, setOptIn] = useState(false);
+  const link = useMutation({
+    mutationFn: () => api(`/api/loyalty/channel-refs/${linkTarget.id}/link`, { method: 'POST', body: JSON.stringify({ member_id: Number(memberId), marketing_opt_in: optIn }) }),
+    onSuccess: () => { notifySuccess(t('hx.ch.ref_linked')); qc.invalidateQueries({ queryKey: ['channel-refs'] }); setLinkTarget(null); setMemberId(''); setOptIn(false); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const refs: any[] = q.data?.refs ?? [];
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t('hx.common.filter_status')}>
+        <Button variant={filter === 'unlinked' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('unlinked')}>{t('hx.ch.filter_unlinked')}</Button>
+        <Button variant={filter === 'linked' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('linked')}>{t('hx.ch.filter_linked')}</Button>
+        <Button variant={filter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('all')}>{t('hx.common.all')}</Button>
+      </div>
+      <StateView q={q}>
+        <DataTable rows={refs} rowKey={(r: any) => r.id} columns={[
+          { key: 'platform', label: t('hx.ch.col_platform'), render: (r: any) => <Badge>{r.platform}</Badge> },
+          { key: 'ref_hash', label: t('hx.ch.col_ref_hash'), render: (r: any) => <span className="font-mono text-xs">{r.ref_hash}</span> },
+          { key: 'order_count', label: t('ly.col_orders'), align: 'right' },
+          { key: 'member', label: t('ly.col_member'), render: (r: any) => r.linked ? `${r.member_name ?? r.member_code} (${r.member_code})` : <span className="text-muted-foreground">—</span> },
+          { key: 'link_source', label: t('hx.ch.col_link_source'), render: (r: any) => r.link_source ? <Badge variant="muted">{r.link_source}</Badge> : '—' },
+          { key: 'act', label: '', sortable: false, render: (r: any) => !r.linked && <Button size="sm" variant="outline" onClick={() => setLinkTarget(r)}><Link2 className="size-4" /> {t('hx.ch.link_to_member')}</Button> },
+        ]} emptyState={{ icon: Users, title: t('hx.ch.refs_empty_title'), description: t('hx.ch.refs_empty_desc') }} />
+      </StateView>
+      <Dialog open={!!linkTarget} onOpenChange={(o) => !o && setLinkTarget(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('hx.ch.link_dlg_title')}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">{t('hx.ch.link_dlg_desc', { platform: linkTarget?.platform })}</p>
+          <div className="grid gap-2">
+            <Label htmlFor="ref-member-id">{t('crm.member_id_label')}</Label>
+            <Input id="ref-member-id" type="number" min="1" value={memberId} onChange={(e) => setMemberId(e.target.value)} placeholder={t('crm.member_id_placeholder')} />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={optIn} onChange={(e) => setOptIn(e.target.checked)} />
+            {t('hx.ch.consent_opt_in')}
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkTarget(null)}>{t('crmx.btn_cancel')}</Button>
+            <Button disabled={!memberId.trim() || link.isPending} onClick={() => link.mutate()}>{t('hx.ch.link_to_member')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
