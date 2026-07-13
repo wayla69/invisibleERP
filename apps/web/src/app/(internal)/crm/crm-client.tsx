@@ -53,6 +53,8 @@ interface HealthPortfolio { accounts: HealthRow[]; count: number; band_counts: R
 interface RenewalPipeline { renewals: { opp_no: string; name: string; deal_type: string; amount: number; weighted: number; expected_close_date: string | null }[]; count: number; weighted: number; renewal_gaps: { account_no: string; name: string }[]; gap_count: number }
 interface ForecastRollupRow { owner: string; system: { commit: number; best_case: number; pipeline: number; weighted: number; open_count: number; forecast: number }; submitted: { commit: number; best_case: number; pipeline: number; forecast: number | null; status: string } | null; variance: number | null }
 interface ForecastDepth { period: string; totals: { system_commit: number; system_forecast: number; weighted: number; open_total: number; submitted_total: number; submissions: number; reps: number }; coverage: { open_pipeline: number; target: number; ratio: number | null; basis: string }; waterfall: { stage: string; amount: number; running: number }[]; rollup: ForecastRollupRow[]; accuracy: { period: string; forecast: number; actual_won: number; accuracy_pct: number | null }[] }
+interface TerritoryRow { code: string; name: string; manager: string | null; active: boolean; parent_code: string | null }
+interface Attainment { period: string; owners: { owner: string; won_amount: number; quota: number; attainment_pct: number | null }[]; territories: { code: string; name: string; manager: string | null; member_count: number; subtree_won: number; quota: number; attainment_pct: number | null }[] }
 
 // The six seeded default stage names ↔ the legacy lowercase machine kept in sync on `opp.stage`.
 const LEGACY_BY_NAME: Record<string, string> = {
@@ -87,6 +89,7 @@ export default function CrmWorkspaceClient() {
           { key: 'plans', label: t('crmx.tab_plans'), content: <PlansTab /> },
           { key: 'health', label: t('crmx.tab_health'), content: <AccountHealthTab /> },
           { key: 'forecast', label: t('crmx.tab_forecast'), content: <ForecastTab /> },
+          { key: 'territory', label: t('crmx.tab_territory'), content: <TerritoryTab /> },
         ]}
       />
     </div>
@@ -1043,6 +1046,101 @@ function ForecastTab() {
           emptyState={{ icon: TrendingUp, title: t('crmx.empty_forecast_title'), description: t('crmx.empty_forecast_desc') }}
         />
       </StateView>
+    </div>
+  );
+}
+
+// ── CRM-11 — persisted territory & quota management: hierarchy + quota + attainment roll-up ────────
+function TerritoryTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [parent, setParent] = useState('');
+  const [manager, setManager] = useState('');
+  const [qScope, setQScope] = useState<'owner' | 'territory'>('owner');
+  const [qSubject, setQSubject] = useState('');
+  const [qTarget, setQTarget] = useState('');
+  const listQ = useQuery<{ territories: TerritoryRow[] }>({ queryKey: ['crm-territories'], queryFn: () => api('/api/crm/territory/territories') });
+  const attQ = useQuery<Attainment>({ queryKey: ['crm-attainment'], queryFn: () => api('/api/crm/territory/attainment') });
+  const createT = useMutation({
+    mutationFn: () => api('/api/crm/territory/territories', { method: 'POST', body: JSON.stringify({ name, parent_code: parent || undefined, manager: manager || undefined }) }),
+    onSuccess: () => { notifySuccess(t('crmx.toast_territory_created')); setName(''); setParent(''); setManager(''); qc.invalidateQueries({ queryKey: ['crm-territories'] }); qc.invalidateQueries({ queryKey: ['crm-attainment'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const setQuota = useMutation({
+    mutationFn: () => api('/api/crm/territory/quotas', { method: 'POST', body: JSON.stringify({ scope: qScope, subject: qSubject, target_amount: Number(qTarget) || 0 }) }),
+    onSuccess: () => { notifySuccess(t('crmx.toast_quota_set')); setQSubject(''); setQTarget(''); qc.invalidateQueries({ queryKey: ['crm-attainment'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card className="p-4">
+          <div className="mb-2 text-sm font-medium">{t('crmx.terr_create_title')}</div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="grid gap-1"><Label htmlFor="tr-name">{t('crmx.terr_name')}</Label><Input id="tr-name" className="w-40" value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div className="grid gap-1"><Label htmlFor="tr-parent">{t('crmx.terr_parent')}</Label>
+              <Select id="tr-parent" className="w-36" value={parent} onChange={(e) => setParent(e.target.value)}>
+                <option value="">{t('crmx.terr_no_parent')}</option>
+                {(listQ.data?.territories ?? []).map((tr) => <option key={tr.code} value={tr.code}>{tr.name}</option>)}
+              </Select>
+            </div>
+            <div className="grid gap-1"><Label htmlFor="tr-mgr">{t('crmx.terr_manager')}</Label><Input id="tr-mgr" className="w-32" value={manager} onChange={(e) => setManager(e.target.value)} /></div>
+            <Button size="sm" disabled={createT.isPending || !name} onClick={() => createT.mutate()}>{t('crmx.terr_create_btn')}</Button>
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="mb-2 text-sm font-medium">{t('crmx.terr_quota_title')}</div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="grid gap-1"><Label htmlFor="q-scope">{t('crmx.terr_scope')}</Label>
+              <Select id="q-scope" className="w-28" value={qScope} onChange={(e) => setQScope(e.target.value as 'owner' | 'territory')}>
+                <option value="owner">{t('crmx.terr_scope_owner')}</option>
+                <option value="territory">{t('crmx.terr_scope_territory')}</option>
+              </Select>
+            </div>
+            <div className="grid gap-1"><Label htmlFor="q-subj">{t('crmx.terr_subject')}</Label><Input id="q-subj" className="w-36" placeholder={qScope === 'owner' ? t('crmx.terr_subject_owner_ph') : t('crmx.terr_subject_terr_ph')} value={qSubject} onChange={(e) => setQSubject(e.target.value)} /></div>
+            <div className="grid gap-1"><Label htmlFor="q-target">{t('crmx.terr_target')}</Label><Input id="q-target" className="w-32" inputMode="numeric" value={qTarget} onChange={(e) => setQTarget(e.target.value)} /></div>
+            <Button size="sm" disabled={setQuota.isPending || !qSubject || !qTarget} onClick={() => setQuota.mutate()}>{t('crmx.terr_quota_btn')}</Button>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
+          <div className="mb-2 text-sm font-medium">{t('crmx.terr_owner_attainment')}</div>
+          <StateView q={attQ}>
+            <DataTable
+              rows={attQ.data?.owners ?? []}
+              rowKey={(r) => r.owner}
+              columns={[
+                { key: 'owner', label: t('crmx.fc_owner'), render: (r: Attainment['owners'][number]) => <span className="font-medium">{r.owner}</span> },
+                { key: 'won', label: t('crmx.terr_won'), render: (r: Attainment['owners'][number]) => baht(r.won_amount) },
+                { key: 'quota', label: t('crmx.terr_quota'), render: (r: Attainment['owners'][number]) => r.quota ? baht(r.quota) : '—' },
+                { key: 'att', label: t('crmx.terr_attainment'), render: (r: Attainment['owners'][number]) => r.attainment_pct == null ? '—' : <Badge variant={r.attainment_pct >= 100 ? 'success' : r.attainment_pct >= 70 ? 'warning' : 'destructive'}>{Math.round(r.attainment_pct)}%</Badge> },
+              ]}
+              emptyState={{ icon: Target, title: t('crmx.terr_empty_att_title'), description: t('crmx.terr_empty_att_desc') }}
+            />
+          </StateView>
+        </div>
+        <div>
+          <div className="mb-2 text-sm font-medium">{t('crmx.terr_rollup')}</div>
+          <StateView q={attQ}>
+            <DataTable
+              rows={attQ.data?.territories ?? []}
+              rowKey={(r) => r.code}
+              columns={[
+                { key: 'name', label: t('crmx.terr_name'), render: (r: Attainment['territories'][number]) => <span className="font-medium">{r.name}</span> },
+                { key: 'members', label: t('crmx.terr_members'), render: (r: Attainment['territories'][number]) => r.member_count || '—' },
+                { key: 'won', label: t('crmx.terr_subtree_won'), render: (r: Attainment['territories'][number]) => baht(r.subtree_won) },
+                { key: 'quota', label: t('crmx.terr_quota'), render: (r: Attainment['territories'][number]) => r.quota ? baht(r.quota) : '—' },
+                { key: 'att', label: t('crmx.terr_attainment'), render: (r: Attainment['territories'][number]) => r.attainment_pct == null ? '—' : <Badge variant={r.attainment_pct >= 100 ? 'success' : r.attainment_pct >= 70 ? 'warning' : 'destructive'}>{Math.round(r.attainment_pct)}%</Badge> },
+              ]}
+              emptyState={{ icon: Layers, title: t('crmx.terr_empty_terr_title'), description: t('crmx.terr_empty_terr_desc') }}
+            />
+          </StateView>
+        </div>
+      </div>
     </div>
   );
 }
