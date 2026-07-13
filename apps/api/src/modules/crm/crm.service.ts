@@ -5,7 +5,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, promoAudienceRules } from '../../database/schema/crm';
 import { posMembers } from '../../database/schema/loyalty-members';
 import { memberConsents } from '../../database/schema/member-consents';
-import { auditLog, audienceExports } from '../../database/schema';
+import { auditLog, audienceExports, audienceExportMembers } from '../../database/schema';
 import { dineInOrders } from '../../database/schema/restaurant';
 import { npsResponses, recoveryCases } from '../../database/schema/nps';
 import { promotions } from '../../database/schema/marketing';
@@ -329,7 +329,8 @@ export class CrmService {
       if (!em && !ph) return [];
       // hashed_phone = Meta's format (E.164 digits, no '+'); hashed_phone_plus = Google's ('+' prefixed
       // before hashing, per each platform's published normalization). Both are sha256 — still hash-only.
-      return [{ ...(em ? { hashed_email: sha(em) } : {}), ...(ph ? { hashed_phone: sha(ph), hashed_phone_plus: sha(`+${ph}`) } : {}) }];
+      // member_id is INTERNAL (manifest upkeep) — the BI job strips it before any wire payload.
+      return [{ member_id: Number(r.id), ...(em ? { hashed_email: sha(em) } : {}), ...(ph ? { hashed_phone: sha(ph), hashed_phone_plus: sha(`+${ph}`) } : {}) }];
     });
 
     // ICFR/PDPA egress trail (ITGC-AC-10): a hashed-audience export is still a sensitive egress — record it.
@@ -347,6 +348,47 @@ export class CrmService {
     };
   }
 
+  // ── Withdrawal removal sync (extends PDPA-05) — the upload manifest keeps the external audience
+  //    continuously consistent with the consent ledger. Hashes are captured at upload time, so a later
+  //    DSAR erasure (which nulls phone/email) cannot orphan the removal. ──
+  async upsertAudienceManifest(tenantId: number, rows: { member_id: number; hashed_email?: string; hashed_phone?: string; hashed_phone_plus?: string }[]) {
+    const db = this.db;
+    const now = new Date();
+    for (const r of rows) {
+      await db.insert(audienceExportMembers)
+        .values({ tenantId, memberId: r.member_id, hashedEmail: r.hashed_email ?? null, hashedPhone: r.hashed_phone ?? null, hashedPhonePlus: r.hashed_phone_plus ?? null, lastPushedAt: now, removedAt: null })
+        .onConflictDoUpdate({
+          target: [audienceExportMembers.tenantId, audienceExportMembers.memberId],
+          set: { hashedEmail: r.hashed_email ?? null, hashedPhone: r.hashed_phone ?? null, hashedPhonePlus: r.hashed_phone_plus ?? null, lastPushedAt: now, removedAt: null, updatedAt: now },
+        });
+    }
+  }
+
+  // Manifest rows still "out there" whose member NO LONGER has a live marketing consent — the removal set.
+  async audienceRemovalCandidates(tenantId: number, limit = 5000) {
+    const db = this.db;
+    const liveConsent = and(
+      eq(memberConsents.tenantId, tenantId), eq(memberConsents.purpose, 'marketing'),
+      eq(memberConsents.granted, true), sql`${memberConsents.withdrawnAt} IS NULL`,
+    );
+    const consentedIds = db.select({ id: memberConsents.memberId }).from(memberConsents).where(liveConsent);
+    const rows = await db.select().from(audienceExportMembers)
+      .where(and(
+        eq(audienceExportMembers.tenantId, tenantId), sql`${audienceExportMembers.removedAt} IS NULL`,
+        sql`${audienceExportMembers.memberId} NOT IN (${consentedIds})`,
+      ))
+      .limit(limit);
+    return rows.map((r: any) => ({ member_id: Number(r.memberId), ...(r.hashedEmail ? { hashed_email: r.hashedEmail } : {}), ...(r.hashedPhone ? { hashed_phone: r.hashedPhone } : {}), ...(r.hashedPhonePlus ? { hashed_phone_plus: r.hashedPhonePlus } : {}) }));
+  }
+
+  async markAudienceRemoved(tenantId: number, memberIds: number[]) {
+    if (!memberIds.length) return;
+    const db = this.db;
+    const now = new Date();
+    await db.update(audienceExportMembers).set({ removedAt: now, updatedAt: now })
+      .where(and(eq(audienceExportMembers.tenantId, tenantId), inArray(audienceExportMembers.memberId, memberIds)));
+  }
+
   // G3 — the append-only export register (PDPA-05 evidence surface).
   async audienceExportRegister(user: JwtUser, limit = 50) {
     const db = this.db;
@@ -354,7 +396,7 @@ export class CrmService {
     return {
       exports: rows.map((r: any) => ({
         id: r.id, purpose: r.purpose, consent_basis: r.consentBasis, target: r.target, hash_alg: r.hashAlg,
-        members_considered: Number(r.membersConsidered), members_consented: Number(r.membersConsented), rows_pushed: Number(r.rowsPushed),
+        members_considered: Number(r.membersConsidered), members_consented: Number(r.membersConsented), rows_pushed: Number(r.rowsPushed), rows_removed: Number(r.rowsRemoved ?? 0),
         status: r.status, error: r.error, ropa_activity_id: r.ropaActivityId, created_by: r.createdBy, created_at: r.createdAt,
       })),
       count: rows.length,
