@@ -49,8 +49,8 @@ async function main() {
   // ── Backward-trace fixture: supplier V1 → PO-L1 → GR-L1 (which stamps lot LOT-A1) ──
   await db.insert(s.vendors).values({ name: 'V1', isSupplier: true, approvalStatus: 'approved' }).onConflictDoNothing();
   const vId = Number((await db.select().from(s.vendors).where(eq(s.vendors.name, 'V1')))[0].id);
-  await db.insert(s.purchaseOrders).values({ poNo: 'PO-L1', poDate: daysAhead(-10), vendorId: vId, vendorName: 'V1', status: 'Approved', createdBy: 'admin' }).onConflictDoNothing();
-  await db.insert(s.goodsReceipts).values({ grNo: 'GR-L1', grDate: daysAhead(-9), poNo: 'PO-L1', vendorId: vId, vendorName: 'V1', receivedBy: 'wh1' }).onConflictDoNothing();
+  await db.insert(s.purchaseOrders).values({ poNo: 'PO-L1', poDate: daysAhead(-10), vendorId: vId, vendorName: 'V1', status: 'Approved', createdBy: 'admin', tenantId: t1 }).onConflictDoNothing();
+  await db.insert(s.goodsReceipts).values({ grNo: 'GR-L1', grDate: daysAhead(-9), poNo: 'PO-L1', vendorId: vId, vendorName: 'V1', receivedBy: 'wh1', tenantId: t1 }).onConflictDoNothing();
 
   // ── Lot ledger: LOT-A1 received 100 (from GR-L1), LOT-A2 received 50 (later expiry, for FEFO ordering) ──
   await db.insert(s.lotLedger).values([

@@ -41,12 +41,12 @@ export class ProcurementPrService {
     const prNo = await this.docNo.nextDaily('PR');
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(purchaseRequests).values({
-        prNo, prDate: ymd(), requestedBy: user.username, status: 'Pending', remarks: dto.remarks ?? null, priority: dto.priority ?? 'Normal', projectId,
+        prNo, prDate: ymd(), requestedBy: user.username, status: 'Pending', remarks: dto.remarks ?? null, priority: dto.priority ?? 'Normal', projectId, tenantId: user.tenantId ?? null,
       }).returning({ id: purchaseRequests.id });
       await tx.insert(prItems).values(dto.items.map((it) => ({
         prId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null,
         requestQty: String(n(it.request_qty)), uom: it.uom ?? null, requiredDate: it.required_date ?? null,
-        reason: it.reason ?? null, status: 'Open', boqLineId: it.boq_line_id ?? null,
+        reason: it.reason ?? null, status: 'Open', boqLineId: it.boq_line_id ?? null, tenantId: user.tenantId ?? null,
       })));
     });
     await this.statusLog.log('PR', prNo, '', 'Pending', user.username);
