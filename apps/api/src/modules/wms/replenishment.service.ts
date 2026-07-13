@@ -268,7 +268,7 @@ export class ReplenishmentService {
       let mlSource: 'ml' | 'static_fallback' | 'service_unavailable' = 'service_unavailable';
 
       if (this.demand) {
-        const fc = await this.demand.planForecast(c.itemId, horizon);
+        const fc = await this.demand.planForecast(c.itemId, horizon, tenantId);
         if (fc) {
           mlQty = Math.ceil(fc.forecast.reduce((a, b) => a + b, 0));
           mlAlgo = fc.algorithm;

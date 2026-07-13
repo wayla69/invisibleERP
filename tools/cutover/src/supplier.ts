@@ -52,10 +52,10 @@ async function main() {
   ]).onConflictDoNothing();
   const vid = async (code: string) => Number((await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, code)))[0].id);
   const [v1, v2] = [await vid('V1'), await vid('V2')];
-  // a PO for V1 and one for V2 (purchase_orders is keyed by vendor, not tenant)
-  const po1 = await db.insert(s.purchaseOrders).values({ poNo: 'PO-T-001', poDate: '2026-06-20', vendorId: v1, vendorName: 'Acme Supply', status: 'Pending', totalAmount: '1000' }).returning({ id: s.purchaseOrders.id });
-  await db.insert(s.poItems).values({ poId: Number(po1[0].id), itemId: 'WIDGET', itemDescription: 'Widget', orderQty: '10', unitPrice: '100', amount: '1000' });
-  await db.insert(s.purchaseOrders).values({ poNo: 'PO-T-002', poDate: '2026-06-20', vendorId: v2, vendorName: 'Other Vendor', status: 'Pending', totalAmount: '500' });
+  // a PO for V1 and one for V2 (purchase_orders is tenant-scoped, migration 0387 — both under T1 here)
+  const po1 = await db.insert(s.purchaseOrders).values({ poNo: 'PO-T-001', poDate: '2026-06-20', vendorId: v1, vendorName: 'Acme Supply', status: 'Pending', totalAmount: '1000', tenantId: t1 }).returning({ id: s.purchaseOrders.id });
+  await db.insert(s.poItems).values({ poId: Number(po1[0].id), itemId: 'WIDGET', itemDescription: 'Widget', orderQty: '10', unitPrice: '100', amount: '1000', tenantId: t1 });
+  await db.insert(s.purchaseOrders).values({ poNo: 'PO-T-002', poDate: '2026-06-20', vendorId: v2, vendorName: 'Other Vendor', status: 'Pending', totalAmount: '500', tenantId: t1 });
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

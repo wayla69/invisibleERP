@@ -57,13 +57,13 @@ export class ProcurementPoService {
       const [h] = await tx.insert(purchaseOrders).values({
         poNo, poDate: ymd(), vendorId, vendorName, status: isDraft ? 'Draft' : 'Pending', totalAmount: String(total),
         createdBy: user.username, expectedDate: dto.expected_date ?? null, remarks: dto.remarks ?? null,
-        currency: dto.currency ?? 'THB', fxRate: String(dto.fx_rate ?? 1), projectId,
+        currency: dto.currency ?? 'THB', fxRate: String(dto.fx_rate ?? 1), projectId, tenantId: user.tenantId ?? null,
       }).returning({ id: purchaseOrders.id });
       await tx.insert(poItems).values(dto.items.map((it) => ({
         poId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null,
         orderQty: String(n(it.order_qty)), unitPrice: String(n(it.unit_price)), uom: it.uom ?? null,
         amount: String(n(it.order_qty) * n(it.unit_price)), receivedQty: '0', isCapital: it.is_capital === true, status: 'Open',
-        projectId, boqLineId: it.boq_line_id ?? null,
+        projectId, boqLineId: it.boq_line_id ?? null, tenantId: user.tenantId ?? null,
       })));
       // M1 (PROJ-12) — a project PO line tagged to a BoQ line ENCUMBERS that line's budget. reserve() locks the
       // BoQ line (FOR UPDATE) and throws BUDGET_EXCEEDED if the line's open+consumed commitments would exceed

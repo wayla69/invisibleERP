@@ -99,7 +99,7 @@ export class ProductionPlanService {
       const yld = Math.max(n(rec.yieldQty), 1);
       // Demand-ML first (auto-selected model over the dish's full history); DOW average when too thin.
       let forecast: number; let velocity: number; let model: string; let wape: number | null = null;
-      const ml = this.demand ? await this.demand.planForecast(String(rec.sku), days).catch(() => null) : null;
+      const ml = this.demand ? await this.demand.planForecast(String(rec.sku), days, tenantId).catch(() => null) : null;
       if (ml) {
         forecast = Math.ceil(ml.forecast.slice(0, days).reduce((a, b) => a + b, 0));
         velocity = r3(ml.forecast.length ? ml.forecast.reduce((a, b) => a + b, 0) / ml.forecast.length : 0);

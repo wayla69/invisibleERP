@@ -454,8 +454,8 @@ async function main() {
   // A capital goods-receipt line is capitalised onto the asset register only via a maker-checker request: the
   // preparer raises it (NO GL effect) and a DIFFERENT user approves before the asset + acquisition JE
   // (Dr 1500 / Cr 2000) are created — receiving goods and putting them on the books are segregated duties.
-  const [grMc] = await db.insert(s.goodsReceipts).values({ grNo: 'GR-MC1', grDate: '2026-09-25', poNo: 'PO-MC1', vendorName: 'Capital Vendor (FA-10)', receivedBy: 'payprep' }).returning({ id: s.goodsReceipts.id });
-  const [grItemMc] = await db.insert(s.grItems).values({ grId: Number(grMc.id), poNo: 'PO-MC1', itemId: 'SERVER-MC', itemDescription: 'Rack server (FA-10)', poQty: '1', receivedQty: '1', uom: 'EA', unitCost: '40000', isCapital: true }).returning({ id: s.grItems.id });
+  const [grMc] = await db.insert(s.goodsReceipts).values({ grNo: 'GR-MC1', grDate: '2026-09-25', poNo: 'PO-MC1', vendorName: 'Capital Vendor (FA-10)', receivedBy: 'payprep', tenantId: t1 }).returning({ id: s.goodsReceipts.id });
+  const [grItemMc] = await db.insert(s.grItems).values({ grId: Number(grMc.id), poNo: 'PO-MC1', itemId: 'SERVER-MC', itemDescription: 'Rack server (FA-10)', poQty: '1', receivedQty: '1', uom: 'EA', unitCost: '40000', isCapital: true, tenantId: t1 }).returning({ id: s.grItems.id });
   const fa1500Pre = await tbDebit('2026-09', '1500');
   const capReq = await inj('POST', '/api/assets/registrations', payprep, { gr_no: 'GR-MC1', gr_item_id: Number(grItemMc.id), name: 'Rack server (capex)', useful_life_months: 60 });
   ok('FA-10: registration request raised as PendingApproval; 1500 unchanged (no GL until approved)', capReq.json?.status === 'PendingApproval' && capReq.json?.acquire_cost === 40000 && (await tbDebit('2026-09', '1500')) === fa1500Pre, JSON.stringify({ st: capReq.json?.status, cost: capReq.json?.acquire_cost, fa1500: fa1500Pre }));

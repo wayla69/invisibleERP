@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.5** _(2026-07-12: audience export — `audience_export_sync` pushes SHA-256-hashed, consent-filtered audiences (fail-closed without the DPO's ROPA entry; preview at CRM audience-export); 2026-07-12: menu affinity — คู่เมนูขายด้วยกัน tab (co-purchase support/confidence/lift, per daypart) + schedulable `menu_affinity` report; 2026-07-10: menu engineering — branch picker + quantity-weighted average-margin threshold + on-screen thresholds; 2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
+**Status: DRAFT v0.7** _(2026-07-13: audience export now also REMOVES members who withdraw marketing consent from the external audiences (Meta/Google/webhook) on every run — see the register’s rows_removed; 2026-07-13: audience export can now push DIRECTLY to Meta Custom Audiences / Google Customer Match — set the env creds (see .env.example); each platform gets its own register row; 2026-07-12: audience export — `audience_export_sync` pushes SHA-256-hashed, consent-filtered audiences (fail-closed without the DPO's ROPA entry; preview at CRM audience-export); 2026-07-12: menu affinity — คู่เมนูขายด้วยกัน tab (co-purchase support/confidence/lift, per daypart) + schedulable `menu_affinity` report; 2026-07-10: menu engineering — branch picker + quantity-weighted average-margin threshold + on-screen thresholds; 2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
 
 This chapter is for **managers, planners and executives** — and anyone who needs
 reports. It covers dashboards, Excel / PDF reports, AI-driven forecasting and
@@ -259,10 +259,18 @@ For items with enough sales history, the system forecasts future demand using
 several classic models (moving average, exponential smoothing, Holt trend,
 seasonal-naive, Croston and Croston-SBA for sporadic items, a
 **day-of-week seasonal** model for weekly patterns like weekend-heavy
-restaurant demand, and a **Thai-calendar holiday** model that learns each
+restaurant demand, a **Thai-calendar holiday** model that learns each
 item's uplift on fixed public holidays — ปีใหม่, สงกรานต์, วันแม่/วันพ่อ — and
-applies it to future dates that land on one) and **automatically picks the
-most accurate one** by back-testing each on recent history.
+applies it to future dates that land on one, and an optional **weather**
+model that learns each item's rain-day dip/uplift and applies it to days a
+forecast calls for rain) and **automatically picks the most accurate one**
+by back-testing each on recent history.
+
+> ☔ **Weather model (opt-in):** off by default. An operator turns it on with
+> `DEMAND_WEATHER_ENABLED=true` — no API key or signup needed (the free
+> Open-Meteo service, geocoded from your company's **province**). Left off,
+> the weather model quietly sits out of auto-selection (it behaves exactly
+> like the day-of-week model) and nothing changes.
 
 1. **Compare models** — the **เทียบโมเดล** tab back-tests every model for an item.
    You get each model's accuracy scored by **WAPE** (lower is better) and
@@ -421,6 +429,14 @@ without anyone running it by hand.
    CDP — but only members with a live marketing consent, only as SHA-256 hashes (never raw phone/email),
    and only after the DPO records the `audience_export` processing activity (otherwise the run blocks
    with `ROPA_MISSING`). Every run lands in the export register (`GET /api/crm/audience-export/register`).
+   Destinations: a generic webhook/CDP (`AUDIENCE_EXPORT_URL`) and/or **direct Meta Custom Audiences +
+   Google Customer Match** (set the `META_*` / `GOOGLE_ADS_*` creds; each configured platform gets its own
+   register row). Nothing configured = a safe mock run.
+   **Consent withdrawal is honoured externally too:** every run also *removes* previously-uploaded
+   members whose marketing consent is no longer live from each configured platform (Meta delete,
+   Google remove job, webhook `action='remove'`) — the register row shows the count as `rows_removed`,
+   and a member is only marked removed once **every** platform accepted (otherwise the run fails with
+   `AUDIENCE_REMOVE_FAILED` and retries on the next run).
    **Marketing ROI (spend → lift → margin)** is the one-board marketing view: coupon
    discount actually given (the true marketing spend — never dressed up as revenue),
    the redeemed bills' real revenue and recipe-costed margin, organic holdout lift,

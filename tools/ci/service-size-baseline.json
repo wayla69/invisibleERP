@@ -1,18 +1,10 @@
 {
-  "_note": "docs/46 Phase 0 (2026-07-12): god-service accretion ratchet. Every apps/api/src/modules file over maxLoc=600 at introduction is grandfathered at its then-current LOC + constructor-param count; both may only go DOWN (extractions lower them; a file dropping under 600 leaves the list). Growing a listed file, adding a ctor param to one, or pushing a new file past 600 fails the build gate — land the change as a sub-service/registered provider per docs/46 §4 instead, or bump this baseline in the same PR with a justification appended here (use-client precedent). 2026-07-13 merge of origin/main: projects.service.ts re-baselined 1163→1173 LOC — main's PROJ-19 earned-schedule feature (#735) landed on main before this ratchet existed there, so the growth predates the guard and is not new accretion by this branch; docs/46 Phase 4 lists projects for a later extraction round.",
+  "_note": "docs/46 Phase 0 (2026-07-12): god-service accretion ratchet. Every apps/api/src/modules file over maxLoc=600 at introduction is grandfathered at its then-current LOC + constructor-param count; both may only go DOWN (extractions lower them; a file dropping under 600 leaves the list). Growing a listed file, adding a ctor param to one, or pushing a new file past 600 fails the build gate — land the change as a sub-service/registered provider per docs/46 §4 instead, or bump this baseline in the same PR with a justification appended here (use-client precedent). 2026-07-13 merge of origin/main: projects.service.ts re-baselined 1163→1173 LOC — main's PROJ-19 earned-schedule feature (#735) landed on main before this ratchet existed there, so the growth predates the guard and is not new accretion by this branch; docs/46 Phase 4 lists projects for a later extraction round. 2026-07-13 tenant soft-delete (migration 0386): billing.service.ts re-baselined 1095→1102 LOC — surfacing the new deleted/deleted_by fields in listTenants()/getTenantDetail() (already-owned tenant read paths) plus the includeDeleted filter; the mutations themselves landed in the new tenant-lifecycle.service.ts provider, not appended here. 2026-07-13 tenant purge follow-up: extracted factoryResetTenant's fixpoint-delete loop into the shared apps/api/src/modules/billing/tenant-wipe.ts helper (reused by TenantLifecycleService.purgeTenant) — billing.service.ts SHRANK 1102→1079 LOC, baseline lowered accordingly. 2026-07-13 same PR: re-baselined 1079→1081 LOC surfacing purged/purged_by in listTenants()/getTenantDetail() (audit_log-preserving purge redesign after the product decision to never erase the ITGC-AC-16 chain). 2026-07-13 merge into the docs/46 Phase 4 branch: those billing.service.ts entries are gone because Phase 4c decomposed the facade to 369 LOC (off the list); the #744 soft-delete/purge read-path changes were ported into platform-admin.service.ts and the wipe refactor into tenant-provisioning.service.ts.",
   "maxLoc": 600,
   "files": {
     "apps/api/src/modules/assets/assets.service.ts": {
       "loc": 916,
       "ctorParams": 6
-    },
-    "apps/api/src/modules/billing/billing.service.ts": {
-      "loc": 1095,
-      "ctorParams": 5
-    },
-    "apps/api/src/modules/crm/pipeline/crm-pipeline.service.ts": {
-      "loc": 1109,
-      "ctorParams": 5
     },
     "apps/api/src/modules/finance/ap-payment-run.service.ts": {
       "loc": 669,
@@ -22,17 +14,9 @@
       "loc": 607,
       "ctorParams": 4
     },
-    "apps/api/src/modules/ledger/ledger.service.ts": {
-      "loc": 927,
-      "ctorParams": 3
-    },
     "apps/api/src/modules/loyalty/member.service.ts": {
       "loc": 680,
       "ctorParams": 7
-    },
-    "apps/api/src/modules/messaging/line-webhook.controller.ts": {
-      "loc": 978,
-      "ctorParams": 6
     },
     "apps/api/src/modules/payments/payments.service.ts": {
       "loc": 737,

@@ -11,7 +11,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
@@ -665,6 +665,51 @@ async function main() {
   await inj('POST', '/api/crm/territory/territories', admin, { name: 'HQ Only Region' });
   const t1list = await inj('GET', '/api/crm/territory/territories', sales1);
   ok('CRM-11 RLS: a T1 user cannot see an HQ tenant\'s territory', t1list.status === 200 && !(t1list.json.territories ?? []).some((tr: any) => tr.name === 'HQ Only Region'), `names=${(t1list.json.territories ?? []).map((tr: any) => tr.name).join('|')}`);
+
+  // ── CRM-8 — sales sequences / cadences (migration 0392, control CRM-11) ──────────────────────────
+  // 62. Create a 2-step sequence (email now + a follow-up task after 3 days).
+  const seq = await inj('POST', '/api/crm/sequences', sales1, { name: 'New-lead nurture', steps: [{ channel: 'email', wait_days: 0, subject: 'Welcome', body: 'Hi {{name}}' }, { channel: 'task', wait_days: 3, subject: 'Call the lead' }] });
+  ok('CRM-8 sequence: create a 2-step cadence', [200, 201].includes(seq.status) && !!seq.json.code && seq.json.steps === 2, JSON.stringify(seq.json));
+
+  // 63. Enroll a lead (with an email) → active, first step due now (wait_days 0).
+  const seqLead = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Cadence Lead', email: 'cadence@example.com', company: 'Cadence Co' });
+  const enrol = await inj('POST', `/api/crm/sequences/${seq.json.code}/enroll`, sales1, { entity_type: 'lead', entity_no: seqLead.json.lead_no });
+  ok('CRM-8 enroll: a lead is enrolled and active with a due date', [200, 201].includes(enrol.status) && enrol.json.status === 'active' && !!enrol.json.id && !!enrol.json.next_due_at, JSON.stringify({ id: enrol.json.id, status: enrol.json.status }));
+
+  // 64. Advance step 1 (email) → sent/logged, enrolment stays active (step 2 remains).
+  const adv1 = await inj('POST', `/api/crm/sequences/enrollments/${enrol.json.id}/advance`, sales1, {});
+  ok('CRM-8 advance: step 1 email executed, enrolment still active', [200, 201].includes(adv1.status) && adv1.json.step_no === 1 && adv1.json.channel === 'email' && adv1.json.status === 'active', JSON.stringify(adv1.json));
+  // The touch is logged as an auditable activity on the lead's timeline.
+  const [actRow] = await db.select().from(s.crmActivities).where(and(eq(s.crmActivities.entityNo, seqLead.json.lead_no), eq(s.crmActivities.source, 'sequence')));
+  ok('CRM-8 advance: the step is logged as a sequence activity', !!actRow && actRow.type === 'email', JSON.stringify({ type: actRow?.type, source: actRow?.source }));
+
+  // 65. Advance step 2 (the last step) → enrolment completes.
+  const adv2 = await inj('POST', `/api/crm/sequences/enrollments/${enrol.json.id}/advance`, sales1, {});
+  ok('CRM-8 advance: the last step completes the enrolment', [200, 201].includes(adv2.status) && adv2.json.step_no === 2 && adv2.json.status === 'completed', JSON.stringify(adv2.json));
+  // Advancing a completed enrolment is rejected.
+  const advDone = await inj('POST', `/api/crm/sequences/enrollments/${enrol.json.id}/advance`, sales1, {});
+  ok('CRM-8 advance: a completed enrolment cannot advance', advDone.status === 400 && advDone.json.error?.code === 'ENROLLMENT_NOT_ACTIVE', `${advDone.status} ${advDone.json.error?.code}`);
+
+  // 66. The schedulable due-runner (BI job) advances due enrolments; a fresh enrolment (step1 due now) is advanced.
+  const seqLead2 = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Cadence Lead 2', email: 'cadence2@example.com' });
+  await inj('POST', `/api/crm/sequences/${seq.json.code}/enroll`, sales1, { entity_type: 'lead', entity_no: seqLead2.json.lead_no });
+  const run = await inj('POST', '/api/crm/sequences/run-due', sales1, {});
+  ok('CRM-8 due-runner: advances due enrolments (schedulable as crm_sequence_run)', run.status === 200 && run.json.advanced >= 1 && run.json.scanned >= 1, JSON.stringify({ scanned: run.json.scanned, advanced: run.json.advanced }));
+
+  // 67. Stop an enrolment.
+  const seqLead3 = await inj('POST', '/api/crm/pipeline/leads', sales1, { name: 'Cadence Lead 3', email: 'cadence3@example.com' });
+  const enrol3 = await inj('POST', `/api/crm/sequences/${seq.json.code}/enroll`, sales1, { entity_type: 'lead', entity_no: seqLead3.json.lead_no });
+  const stopped = await inj('POST', `/api/crm/sequences/enrollments/${enrol3.json.id}/stop`, sales1, {});
+  ok('CRM-8 stop: an enrolment can be stopped', [200, 201].includes(stopped.status) && stopped.json.status === 'stopped', JSON.stringify(stopped.json));
+
+  // 68. BI registry exposes the crm_sequence_run report type.
+  const rtypesSeq = await inj('GET', '/api/bi/report-types', admin);
+  ok('CRM-8 BI: registry exposes crm_sequence_run report type', (rtypesSeq.json.report_types ?? []).some((r: any) => r.key === 'crm_sequence_run'), 'crm_sequence_run');
+
+  // 69. RLS: a T1 user cannot see an HQ tenant's sequence.
+  await inj('POST', '/api/crm/sequences', admin, { name: 'HQ Only Cadence', steps: [{ channel: 'email', body: 'x' }] });
+  const t1seqs = await inj('GET', '/api/crm/sequences', sales1);
+  ok('CRM-8 RLS: a T1 user cannot see an HQ tenant\'s sequence', t1seqs.status === 200 && !(t1seqs.json.sequences ?? []).some((x: any) => x.name === 'HQ Only Cadence'), `names=${(t1seqs.json.sequences ?? []).map((x: any) => x.name).join('|')}`);
 
   await app.close();
 }
