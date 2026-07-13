@@ -1,10 +1,11 @@
 import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/common';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { workflowInstances, purchaseRequests, alertEvents } from '../../database/schema';
+import { workflowInstances, purchaseRequests, alertEvents, audienceExports, ropaActivities } from '../../database/schema';
 import { arInvoices } from '../../database/schema/finance';
 import { branchStock } from '../../database/schema/portal';
-import { n } from '../../database/queries';
+import { n, ymd } from '../../database/queries';
+import { audienceExportConfigured, pushHashedAudience } from '../../common/cdp-sync';
 import { activeKeyId, needsRotation, encrypt, decrypt } from '../../common/crypto';
 import { CollectionsService } from '../finance/collections.service';
 import { FinanceMetricsService } from '../finance/finance-metrics.service';
@@ -20,6 +21,7 @@ import { RetentionService } from '../retention/retention.service';
 import { RealEstateService } from '../realestate/realestate.service';
 import { CrmPipelineService } from '../crm/pipeline/crm-pipeline.service';
 import { CrmAccountHealthService } from '../crm/account-health/crm-account-health.module';
+import { CrmForecastService } from '../crm/forecast/crm-forecast.module';
 import { CrmService } from '../crm/crm.service';
 import { NpsService } from '../nps/nps.service';
 import { MembershipService } from '../loyalty/membership.service';
@@ -37,6 +39,7 @@ import { RevDisclosureService } from '../revrec-disclosure/rev-disclosure.servic
 import { MarketingAutomationService } from '../marketing/marketing-automation.service';
 import { VouchersService } from '../campaigns/vouchers.service';
 import { FoodCostService } from '../menu/food-cost.service';
+import { MenuEngineeringService } from '../analytics/menu-engineering.service';
 import type { JwtUser } from '../../common/decorators';
 import type { BiReportGenerator, BiReportSource } from './report-registry';
 
@@ -99,6 +102,10 @@ export class BiGenerateService {
     // CRM-15 (CRM-08) — supplies the crm_account_health snapshot action job. Appended at the END to preserve
     // the positional constructor contract the goldenmaster harness relies on. @Optional so a partial harness constructs.
     @Optional() private readonly crmHealth?: CrmAccountHealthService,
+    // CRM-12 (CRM-09) — supplies the crm_forecast_snapshot action job. Appended at the END (positional contract).
+    @Optional() private readonly crmForecast?: CrmForecastService,
+    // G2 (docs/45) — supplies the menu_affinity report. Appended at the END (positional contract, as above).
+    @Optional() private readonly menuEng?: MenuEngineeringService,
     // docs/46 Phase 3 — the line_daily_digest GL cash position rides the ledger's narrow read API instead
     // of a direct journal join here. Appended at the END (positional contract, as above).
     @Optional() private readonly ledgerRead?: LedgerReadService,
@@ -135,6 +142,7 @@ export class BiGenerateService {
       const last = p.trend[p.trend.length - 1];
       return { data: p, summary: last ? `Latest ${last.month}: ${last.open} open (${last.open_value}), win rate ${last.win_rate_pct}%` : 'No pipeline in range', summaryTh: last ? `เดือนล่าสุด ${last.month}: เปิดอยู่ ${last.open} รายการ` : 'ไม่มีไปป์ไลน์ในช่วงนี้' };
     }
+    if (reportType === 'audience_export_sync') return this.audienceExportSync(user, f);
     if (reportType === 'line_daily_digest') {
       const db = this.db;
       const tenantCond = user.tenantId != null ? eq(workflowInstances.tenantId, user.tenantId) : sql`true`;
@@ -183,6 +191,25 @@ export class BiGenerateService {
       return { data: purged, summary: `Retention purge: removed ${total} expired ephemeral security rows (financial/audit data untouched)`, summaryTh: `ล้างข้อมูลชั่วคราวที่หมดอายุ ${total} รายการ (ไม่แตะข้อมูลการเงิน/ออดิต)` };
     }
     if (reportType === 'marketing_roi') return this.marketingRoi(user, f);
+    if (reportType === 'menu_affinity') {
+      if (!this.menuEng) throw new BadRequestException({ code: 'ANALYTICS_UNAVAILABLE', message: 'Menu analytics service not available', messageTh: 'ระบบวิเคราะห์เมนูไม่พร้อมใช้งาน' });
+      // scheduled runs default to a trailing window (days, default 30) on the business clock
+      const days = Math.min(Math.max(Number(f.days ?? 30) || 30, 1), 365);
+      const to = f.to ?? ymd();
+      const from = f.from ?? ymd(new Date(Date.now() - days * 86_400_000));
+      const r = await this.menuEng.menuAffinity(user, { from, to, branch_id: f.branch_id, min_pair_count: f.min_pair_count, top: f.top });
+      const topPair = r.pairs[0];
+      return {
+        data: r,
+        summary: `Menu affinity (${r.from}..${r.to}): ${r.summary.baskets} basket(s), ${r.summary.pairs_returned} pair(s)${topPair ? `; top ${topPair.name_a} + ${topPair.name_b} (lift ${topPair.lift})` : ''}`,
+        summaryTh: `คู่เมนูขายด้วยกัน (${r.from}..${r.to}): ${r.summary.baskets} บิล · ${r.summary.pairs_returned} คู่${topPair ? ` · เด่นสุด ${topPair.name_a}+${topPair.name_b} (lift ${topPair.lift})` : ''}`,
+      };
+    }
+    if (reportType === 'crm_forecast_snapshot') {
+      if (!this.crmForecast) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM service not available', messageTh: 'ระบบ CRM ไม่พร้อมใช้งาน' });
+      const r = await this.crmForecast.captureSnapshot(user, { period: filters?.period }); // idempotent per (period, date)
+      return { data: r, summary: `Forecast snapshot ${r.period}: forecast ${r.forecast}, actual won ${r.actual_won}, ${r.open_count} open`, summaryTh: `บันทึกพยากรณ์ยอดขาย ${r.period}: พยากรณ์ ${r.forecast} · ปิดจริง ${r.actual_won} · เปิดอยู่ ${r.open_count}` };
+    }
     if (reportType === 'exec_scorecard') {
       const r = await this.execScorecard(user, reads);
       return { data: r, summary: `Exec: sales(MTD) ${r.finance.sales_mtd}, margin ${r.finance.margin_pct ?? '—'}%, win rate ${r.crm.win_rate_pct ?? '—'}%, portfolio CPI ${r.projects.cpi ?? '—'}, ${r.supply_chain.blocked_invoices} held invoice(s)`, summaryTh: `ผู้บริหาร: ยอดขายเดือนนี้ ${r.finance.sales_mtd} · มาร์จิน ${r.finance.margin_pct ?? '—'}% · อัตราชนะ ${r.crm.win_rate_pct ?? '—'}% · CPI ${r.projects.cpi ?? '—'}` };
@@ -235,6 +262,57 @@ export class BiGenerateService {
   // revenue — real revenue comes from the redeemed sales' own totals, margin from their line items joined
   // to the recipe-based food-cost layer (the same source menu-engineering uses), and the organic holdout
   // lift is the incremental-revenue truth. Optional legs degrade to null like execScorecard.
+  // G3 (docs/45) — PDPA-05: the consent-gated, hashed ads-audience activation job. FAIL-CLOSED twice over:
+  // (1) it refuses to run without an ACTIVE ROPA activity named 'audience_export' with legal_basis='consent'
+  // (the processing register IS the permission to process — ROPA_MISSING otherwise, recorded 'blocked');
+  // (2) the payload builder (CrmService.exportForCustomerMatch) includes ONLY members with a live marketing
+  // consent row and emits ONLY sha256 hashes — raw PII never reaches the wire. Every attempt lands in the
+  // append-only audience_exports register; the push routes through the SSRF-gated pushHashedAudience.
+  private async audienceExportSync(user: JwtUser, f: any) {
+    if (!this.crmMembers) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM service not available', messageTh: 'ระบบ CRM ไม่พร้อมใช้งาน' });
+    const db = this.db;
+    const tenantId = f.tenant_id ?? user.tenantId;
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id' });
+
+    const [ropa] = await db.select().from(ropaActivities).where(and(
+      eq(ropaActivities.tenantId, Number(tenantId)), eq(ropaActivities.active, true),
+      eq(ropaActivities.name, 'audience_export'), eq(ropaActivities.legalBasis, 'consent'),
+    )).limit(1);
+    if (!ropa) {
+      await db.insert(audienceExports).values({ tenantId: Number(tenantId), target: audienceExportConfigured() ? 'webhook' : 'mock', status: 'blocked', error: 'ROPA_MISSING', createdBy: user.username }).catch(() => null);
+      throw new BadRequestException({ code: 'ROPA_MISSING', message: "Audience export is blocked: create an ACTIVE ROPA activity named 'audience_export' with legal_basis='consent' (POST /api/pdpa/ropa) first", messageTh: 'ยังส่งกลุ่มเป้าหมายไม่ได้: ต้องบันทึกกิจกรรม ROPA ชื่อ audience_export (ฐานความยินยอม) ก่อน' });
+    }
+
+    const target = audienceExportConfigured() ? 'webhook' : 'mock';
+    const BATCH = 500;
+    let offset = 0, pushed = 0, consented = 0, considered = 0, ok = true, err: string | null = null;
+    for (let i = 0; i < 200; i++) { // safety cap: 200 batches (100k members)
+      const exp: any = await this.crmMembers.exportForCustomerMatch(user, { tenantId: Number(tenantId), limit: BATCH, offset });
+      if (exp?.error) throw new BadRequestException(exp.error);
+      considered = exp.total_active; consented = exp.consented;
+      if (!exp.members?.length && offset > 0) break;
+      if (exp.members?.length) {
+        const r = await pushHashedAudience({ tenant_id: exp.tenant_id, hash_alg: exp.hash_alg, consent_basis: exp.consent_basis, batch: i, offset, count: exp.members.length, members: exp.members });
+        if (!r.ok) { ok = false; err = r.error ?? `status ${r.status}`; break; }
+        pushed += exp.members.length;
+      }
+      offset += exp.count;
+      if (exp.count < BATCH) break;
+    }
+
+    await db.insert(audienceExports).values({
+      tenantId: Number(tenantId), target, membersConsidered: considered, membersConsented: consented,
+      rowsPushed: pushed, status: ok ? 'success' : 'failed', error: err, ropaActivityId: Number(ropa.id), createdBy: user.username,
+    }).catch(() => null);
+    if (!ok) throw new BadRequestException({ code: 'AUDIENCE_PUSH_FAILED', message: `Audience push failed: ${err}`, messageTh: 'ส่งกลุ่มเป้าหมายไม่สำเร็จ' });
+
+    return {
+      data: { target, considered, consented, pushed, hash_alg: 'sha256', consent_basis: 'member_consents:marketing', ropa_activity_id: Number(ropa.id) },
+      summary: `Audience export: ${pushed} hashed row(s) from ${consented} consented (of ${considered} active) → ${target}; ROPA #${ropa.id}`,
+      summaryTh: `ส่งกลุ่มเป้าหมายโฆษณา: ${pushed} แถว (hash) จากสมาชิกยินยอม ${consented}/${considered} → ${target} · ROPA #${ropa.id}`,
+    };
+  }
+
   private async marketingRoi(user: JwtUser, f: any) {
     if (!this.marketingAuto) throw new BadRequestException({ code: 'MARKETING_UNAVAILABLE', message: 'Marketing automation service not available', messageTh: 'ระบบการตลาดอัตโนมัติไม่พร้อมใช้งาน' });
     const mkt = await this.marketingAuto.roiAttribution(user, { days: f.days });

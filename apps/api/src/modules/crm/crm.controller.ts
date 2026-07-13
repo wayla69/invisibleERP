@@ -27,6 +27,20 @@ export class CrmController {
     return this.crm.customer360(accountNo, user);
   }
 
+  // G3 (docs/45, PDPA-05) — preview the hashed ads-audience export: counts + the first hashed rows, so a
+  // marketer can SEE the consent gate and the hash-only payload before scheduling audience_export_sync.
+  @Get('audience-export/preview')
+  @Permissions('marketing', 'exec')
+  audiencePreview(@Query('limit') limit: string | undefined, @CurrentUser() user: JwtUser) {
+    return this.crm.exportForCustomerMatch(user, { limit: limit != null ? Number(limit) || 10 : 10 });
+  }
+  // G3 — the append-only export register (PDPA-05 evidence: every run — success, failed, or blocked).
+  @Get('audience-export/register')
+  @Permissions('marketing', 'exec')
+  audienceRegister(@Query('limit') limit: string | undefined, @CurrentUser() user: JwtUser) {
+    return this.crm.audienceExportRegister(user, limit != null ? Number(limit) || 50 : 50);
+  }
+
   // POST /api/crm/profiles/refresh — bulk RFM re-profiling for the whole active member base (Phase F2).
   // On-demand counterpart of the scheduled `crm_profile_refresh` BI job — e.g. force-fresh before a big send.
   @Post('profiles/refresh')

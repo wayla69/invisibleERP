@@ -494,6 +494,33 @@ async function main() {
     series.json.series?.length === 2 && near(series.json.series[1].cumulative_planned, 2000) && near(series.json.bac, 2000),
     JSON.stringify({ n: series.json.series?.length, cum: series.json.series?.[1]?.cumulative_planned }));
 
+  // ── 16b. Earned Schedule (PROJ-19): the time-based schedule signal that stays honest to completion ──
+  // PRJ-ES: 2 tasks planned Jan+Feb 2026 (1000 each), both 95% done → EV 1900. At as_of 2026-06-30 the
+  // classic SPI = EV/PV = 1900/2000 = 0.95 (reads fine — PV saturated at BAC), but earned schedule says the
+  // plan reached 1900 at ES = 1.9 months vs AT = 6.0 months elapsed → SPI(t) 0.3167, SV(t) −4.1 mo, RED.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-ES', name: 'งานวัด Earned Schedule', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-ES/tasks', admin, { name: 'ES-1', planned_cost: 1000, planned_end: '2026-01-31', pct_complete: 95 });
+  await inj('POST', '/api/projects/PRJ-ES/tasks', admin, { name: 'ES-2', planned_cost: 1000, planned_end: '2026-02-28', pct_complete: 95 });
+  const esr = await inj('GET', '/api/projects/PRJ-ES/earned-schedule?as_of=2026-06-30', admin);
+  ok('Earned schedule (PROJ-19): ES 1.9 mo / AT 6.0 mo → SPI(t) 0.3167 SV(t) −4.1 RED while classic SPI 0.95 reads fine',
+    near(esr.json.earned_schedule_months, 1.9) && near(esr.json.actual_time_months, 6) && near(esr.json.spi_t, 0.3167) &&
+    near(esr.json.sv_t_months, -4.1) && near(esr.json.spi, 0.95) && esr.json.schedule_rag === 'red' && esr.json.planned_duration_months === 2,
+    JSON.stringify({ es: esr.json.earned_schedule_months, at: esr.json.actual_time_months, spi_t: esr.json.spi_t, spi: esr.json.spi }));
+  ok('Earned schedule forecasts finish from SPI(t): plan 2 mo / 0.3167 → ~6.32 mo → 2026-07',
+    Math.abs(Number(esr.json.eac_t_months) - 6.32) < 0.05 && esr.json.forecast_finish_month === '2026-07',
+    JSON.stringify({ eac_t: esr.json.eac_t_months, finish: esr.json.forecast_finish_month }));
+  // Lipke plateau convention: PRJ-EVM's EV (1000) sits exactly on a long flat PV stretch (nothing more
+  // planned until 2099) — the plateau is credited as earned, so SPI(t) reads ahead, never a false slip.
+  const esEvm = await inj('GET', '/api/projects/PRJ-EVM/earned-schedule', admin);
+  ok('Earned schedule plateau: EV on a flat PV stretch credits the plateau (PRJ-EVM SPI(t) > 1, no false alarm)',
+    esEvm.json.spi_t != null && esEvm.json.spi_t > 1 && esEvm.json.schedule_rag === 'green',
+    JSON.stringify({ spi_t: esEvm.json.spi_t }));
+  // A project with no dated/costed plan can't earn schedule → explicit NO_DATED_PLAN, no phantom metric.
+  const esCpm = await inj('GET', '/api/projects/PRJ-CPM/earned-schedule', admin);
+  ok('Earned schedule without a costed dated plan → nulls + NO_DATED_PLAN (PRJ-CPM has hours only)',
+    esCpm.json.spi_t === null && esCpm.json.reason === 'NO_DATED_PLAN' && esCpm.json.schedule_rag === 'no_data',
+    JSON.stringify({ reason: esCpm.json.reason }));
+
   const oppLost = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลที่เสีย', amount: 50000, owner: 'sales1' });
   await inj('PATCH', `/api/crm/pipeline/opportunities/${oppLost.json.opp_no}/stage`, admin, { stage: 'lost', lost_reason: 'ราคาสูงเกินไป (price)' });
   const wl = await inj('GET', '/api/crm/pipeline/win-loss', admin);
@@ -738,6 +765,12 @@ async function main() {
   ok('Action center items deep-link to the offending project tab + summary counts reconcile',
     acMine.every((i: any) => typeof i.href === 'string' && i.href.startsWith('/projects/PRJ-ACT?tab=')) && ac.json.summary?.total === (ac.json.items ?? []).length && ac.json.summary?.high >= 3,
     JSON.stringify({ total: ac.json.summary?.total, high: ac.json.summary?.high }));
+  // PROJ-19 detective: PRJ-ES slips by earned schedule (SPI(t) < 0.9) while its classic SPI (0.95) reads
+  // fine → a MEDIUM schedule_slip_es item; PRJ-ACT is already red, so the slip item is suppressed there.
+  const esItem = (ac.json.items ?? []).find((i: any) => i.kind === 'schedule_slip_es' && i.project_code === 'PRJ-ES');
+  ok('Action center surfaces schedule_slip_es (medium) for PRJ-ES — the slip the classic SPI hides (PROJ-19)',
+    !!esItem && esItem.severity === 'medium' && esItem.meta?.spi_t < 0.9 && !acKinds.has('schedule_slip_es'),
+    JSON.stringify({ found: !!esItem, spi_t: esItem?.meta?.spi_t, suppressed_on_red: !acKinds.has('schedule_slip_es') }));
 
   // Proactive SSE: the red health snapshot and the unmitigated-high risk pushed project_action events.
   const live = await inj('GET', '/api/bi/live/recent?limit=100', admin);

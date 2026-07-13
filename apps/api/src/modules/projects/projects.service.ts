@@ -313,6 +313,7 @@ export class ProjectsService {
   async evm(code: string, asOf?: string) { return this.evmSvc.evm(code, asOf); }
   async schedule(code: string) { return this.evmSvc.schedule(code); }
   async evmSeries(code: string, dto?: { months?: number; as_of?: string }) { return this.evmSvc.evmSeries(code, dto); }
+  async earnedSchedule(code: string, asOf?: string) { return this.evmSvc.earnedSchedule(code, asOf); }
   async setProgram(code: string, dto: ProgramDto, user: JwtUser) { return this.evmSvc.setProgram(code, dto, user); }
   async programCriticalPath(programCode: string, user: JwtUser) { return this.evmSvc.programCriticalPath(programCode, user); }
   async programs(user: JwtUser) { return this.evmSvc.programs(user); }
@@ -430,7 +431,16 @@ export class ProjectsService {
       const f = fmtByCode.get(code);
       if (f?.over_budget) push('over_budget', 'high', pid, code, `เกินงบประมาณ (${f.budget_used_pct}%)`, `Over budget (${f.budget_used_pct}%)`, `${f.budget_used_pct}%`, 'costs', { budget_used_pct: f.budget_used_pct, budget_variance: f.budget_variance });
       const e = await this.evm(code);
-      if ((e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9)) push('project_red', 'high', pid, code, `สุขภาพโครงการแดง (CPI ${e.cpi ?? '—'} / SPI ${e.spi ?? '—'})`, `Project health red (CPI ${e.cpi ?? '—'} / SPI ${e.spi ?? '—'})`, `CPI ${e.cpi ?? '—'}`, 'overview', { cpi: e.cpi, spi: e.spi });
+      const isRed = (e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9);
+      if (isRed) push('project_red', 'high', pid, code, `สุขภาพโครงการแดง (CPI ${e.cpi ?? '—'} / SPI ${e.spi ?? '—'})`, `Project health red (CPI ${e.cpi ?? '—'} / SPI ${e.spi ?? '—'})`, `CPI ${e.cpi ?? '—'}`, 'overview', { cpi: e.cpi, spi: e.spi });
+      // Earned-schedule slip (PROJ-19): late in a project the classic SPI (EV/PV) converges to 1 even when
+      // delivery is late — the time-based SPI(t) keeps degrading, so it catches slips the PV-based red check
+      // above no longer sees. Suppressed when the project already reads red (no duplicate worklist item).
+      if (!isRed) {
+        const esm = await this.earnedSchedule(code).catch(() => null);
+        if (esm?.spi_t != null && esm.spi_t < 0.9)
+          push('schedule_slip_es', 'medium', pid, code, `เวลาหลุดแผนตาม Earned Schedule (SPI(t) ${esm.spi_t})`, `Schedule slipping by earned schedule (SPI(t) ${esm.spi_t})`, `SPI(t) ${esm.spi_t}`, 'overview', { spi_t: esm.spi_t, sv_t_months: esm.sv_t_months, spi: e.spi });
+      }
       const inFlight = p.status !== 'Closed'; // an in-flight (Open/Active) project should be baselined + tracked
       if (inFlight && !hasBaseline.has(pid)) push('no_baseline', 'medium', pid, code, 'ยังไม่มีเส้นฐาน (baseline)', 'No change-controlled baseline', null, 'overview', {});
       const ls = lastSnap.get(pid);

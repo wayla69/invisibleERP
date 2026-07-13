@@ -29,6 +29,125 @@ For every such change, review and update as needed:
 - If a change genuinely has no doc impact, say so explicitly in your summary rather than skipping silently.
 - Prefer one commit (or a tightly-coupled series) that contains both the code and the doc updates.
 
+## 🏛️ ERP Architecture & Coding Standards (Architecture Gatekeeper)
+
+You are acting as the Architecture Gatekeeper for this ERP system. You must strictly enforce the following
+5 engineering principles in every task, refactoring, or code generation. Before modifying or creating any
+code, evaluate the request against these rules and raise concerns if a violation is detected.
+
+### 1. Bounded Context Enforcement
+- **Rule:** New features must live in their correct domain module (e.g., Inventory, Purchasing, Accounting,
+  Project Management). Do not put code in a module just because it uses the same data tables.
+- **Action:** If a new feature introduces a distinct business responsibility (e.g., certification, risk
+  assessment, compliance), do not append it to an existing service. Alert the user and propose a new
+  sub-module or dedicated service.
+
+### 2. API Integration & Loose Coupling (Contracts)
+- **Rule:** Strict separation of concerns. A service/module must NEVER directly access the internal logic,
+  state, or private methods of another module.
+- **Action:** Inter-module communication (e.g., inventory deduction during an accounting period close) must
+  be done via explicit, well-defined APIs or Data Contracts. Reject any code that introduces tight coupling.
+
+### 3. Database Isolation & Anti-Shared DB Patterns
+- **Rule:** Avoid cross-domain database coupling. Complex SQL Joins across tables owned by different core
+  domains are strictly prohibited in application logic.
+- **Action:** Scan for raw queries or ORM joins that cross boundaries. If modules need shared data,
+  recommend using explicit Database Views, Data Transfer Objects (DTOs), or an Event-Driven approach.
+
+### 4. Automated Testing for Core Logic
+- **Rule:** Zero tolerance for untested core financial or operational logic (e.g., cost calculations, tax
+  rules, inventory reconciliation, ledger entry generation).
+- **Action:** Every time you modify or add core logic, you MUST generate or update corresponding
+  Unit/Integration tests. Run the test suite before and after refactoring to ensure no breaking changes.
+
+### 5. The Boy Scout Rule (Continuous Refactoring)
+- **Rule:** Leave the codebase cleaner than you found it.
+- **Action:** Whenever you open a file to add a feature or fix a bug, perform minor refactoring on the
+  immediate surrounding code. Clean up unused variables, split overly long functions into smaller ones,
+  and improve naming conventions without changing the behavior.
+
+### 6. Python & UI Performance Best Practices
+- **Separation of Concerns (UI vs Logic):** Keep business logic, database queries, and data processing
+  entirely independent of the UI rendering layer. View/UI files should only handle presentation and
+  user input.
+- **State Management & Caching:** For interactive elements, strictly manage state transitions without
+  polluting global scope. Efficiently utilize caching mechanisms (e.g., caching heavy DB lookups or
+  financial reports) to prevent redundant data processing or database hits on every application rerun.
+- **Type Hinting:** All new or refactored Python functions must use explicit type hints for arguments and
+  return values to ensure readability and prevent data type mismatches in financial calculations.
+
+### 7. ERP Data Integrity & Transaction Safety
+- **Database Transactions:** Any operation that modifies data across multiple tables (e.g., creating an
+  invoice AND updating inventory balances) MUST be wrapped in an atomic database transaction. Partial
+  updates are unacceptable.
+- **Idempotency:** Core business mutations (like posting a journal entry or adjusting stock) must be
+  written idempotently where possible. Running the same action twice accidentally must not result in
+  duplicate ledger entries or double deductions.
+- **Explicit Error Handling:** Never use silent exceptions (`except: pass`). Financial and supply chain
+  errors must be explicitly caught, logged with meaningful context, and bubbled up to the UI gracefully.
+
+### 8. Secure Coding & Pentest Readiness (OWASP Mitigation)
+- **Input Validation & Sanitization:** All user inputs, API parameters, and file uploads must be strictly
+  validated, typed, and sanitized. Never trust client-side data. Prevent SQL Injection (SQLi) by strictly
+  using parameterized queries or ORM abstractions.
+- **Broken Object Level Authorization (BOLA / IDOR):** In an ERP, checking if a user is logged in is not
+  enough. You must explicitly verify that the active user/session has direct authorization to access or
+  mutate the specific resource ID (e.g., Invoice ID, Project ID) they are requesting.
+- **Secrets & Credential Management:** Hardcoding API keys, database passwords, private tokens, or
+  encryption salts in the codebase is strictly prohibited. All credentials must be fetched from
+  environment variables (`.env`) or a secure secret manager.
+- **Cross-Site Scripting (XSS) & UI Security:** For UI elements (especially when rendering dynamic text or
+  HTML in frameworks like Streamlit), ensure proper escaping. Never pass raw unsanitized text into
+  components that can execute HTML or JavaScript.
+
+### 9. Multi-Tenant Data Isolation & Leak Prevention
+- **Mandatory Tenant Filtering:** Every single database query, ORM look-up, and update operation MUST
+  explicitly filter by the active `tenant_id` (or use a global tenant context/Row-Level Security wrapper).
+- **Prohibition of Raw/Unfiltered Queries:** Writing queries that fetch records without an explicit
+  `tenant_id` check is strictly prohibited, unless it is a cross-tenant global configuration table
+  (e.g., system-wide currency codes).
+- **Context Preservation:** Ensure that the tenant context (e.g., extracted from the request header, JWT
+  token, or Streamlit session state) is securely propagated down to the service layer and database layer.
+  Never allow the tenant context to be overridden or modified by client-side inputs.
+- **Cross-Tenant Mutation Prevention:** When updating or deleting records, always perform a combined
+  check: `WHERE id = :id AND tenant_id = :active_tenant_id`. Never assume an ID belongs to the active
+  tenant.
+
+### Pre-Flight Check Protocol
+For every task involving code modification, output a brief validation before writing code:
+1. **Context Check:** Is this feature in the right module?
+2. **Coupling Check:** Does this introduce direct dependencies on other modules or cross-domain DB joins?
+3. **Test Readiness:** What tests need to run or be created?
+
+### Claude Operational Protocol (How to Work)
+When executing commands via the CLI, you must adhere to this working flow:
+
+1. **Read & Discover First:** Do not guess the structure. Use `grep`, `find`, or read existing architecture
+   patterns in the codebase before proposing changes.
+2. **Incremental Implementation:** Break large feature requests into small, testable commits. Do not
+   refactor multiple unrelated files in a single pass.
+3. **Run Pre-Checks:** Before final execution of code changes, explicitly state which existing tests you
+   are going to run to verify the change. If the relevant test suite fails, roll back the code changes
+   immediately.
+4. **Code Styling:** Adhere strictly to PEP 8 standards. Do not perform aggressive global linting fixes on
+   unaffected lines of code; keep your code modifications focused tightly on the task at hand.
+
+### Security Automation Protocol
+Before finalizing code changes, you must run local security linters if they are configured in the project:
+1. **Python Security Scan:** Run `bandit -r .` or `semgrep` to detect high-risk security flaws (like
+   hardcoded passwords, insecure random number generators, or execution of raw strings).
+2. **Dependency Vulnerability Scan:** Run `pip-audit` or `safety check` if requested, to ensure no recently
+   introduced packages have known CVEs.
+3. **Remediation:** If any high-severity security warnings are tripped, stop implementation immediately and
+   rewrite the logic securely.
+
+### Multi-Tenant Test Protocol
+When writing tests for new features, you must include a "Cross-Tenant Boundary Test":
+1. **Isolation Verification:** Assert that a request using Tenant A's credentials attempting to access
+   Tenant B's resource ID returns a `403 Forbidden`, `404 Not Found`, or an explicit authorization error.
+2. **Data Leak Test:** Verify that list operations (e.g., fetching invoices) return exactly 0 records
+   belonging to other tenants.
+
 ## 🐞 Debug mantra (follow in order)
 
 1. **Reproduce first — in the exact mode/width the user hit.** Get a deterministic failing signal before

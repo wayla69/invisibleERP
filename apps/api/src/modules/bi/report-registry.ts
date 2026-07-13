@@ -19,6 +19,10 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   crm_source_roi: { label: 'ผลตอบแทนตามแหล่งที่มา (Source ROI)', labelEn: 'CRM source ROI (won revenue by source)' },
   // G4 (docs/45): one exec view of marketing spend → lift → margin (campaign attribution + vouchers + B2B + budget)
   marketing_roi: { label: 'ผลตอบแทนการตลาด (spend → lift → margin)', labelEn: 'Marketing ROI (spend → lift → margin)' },
+  // G2 (docs/45): market-basket affinity — which menu items sell together (support/confidence/lift)
+  menu_affinity: { label: 'คู่เมนูขายด้วยกัน (basket affinity)', labelEn: 'Menu affinity (co-purchase pairs)' },
+  // G3 (docs/45, PDPA-05): consent-gated HASHED ads-audience push — fail-closed without the ROPA entry
+  audience_export_sync: { label: 'ส่งกลุ่มเป้าหมายโฆษณา (hashed, ตามความยินยอม)', labelEn: 'Audience export (hashed, consent-gated)' },
   // Forecast categories (commit/best-case/pipeline) + quota attainment per owner + activity leaderboard.
   crm_forecast: { label: 'พยากรณ์การขาย + โควตา', labelEn: 'CRM forecast categories + quota attainment' },
   // Likewise: each run re-profiles the tenant's whole active member base (RFM) so segments stay fresh (F2).
@@ -27,6 +31,7 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // (detective control REV-22). Fires lead.stagnant into the automation engine + drops a rail notification.
   crm_followup_digest: { label: 'สรุปการติดตามงานขายประจำวัน', labelEn: 'CRM follow-up digest' },
   crm_account_health: { label: 'บันทึกสุขภาพบัญชีลูกค้า (churn watchlist)', labelEn: 'CRM account health snapshot' },
+  crm_forecast_snapshot: { label: 'บันทึกพยากรณ์ยอดขาย (forecast vs actual)', labelEn: 'CRM sales forecast snapshot' },
   // Likewise: each run advances every ACTIVE lifecycle journey — segment-entry sweeps + due steps (G1).
   journey_runner: { label: 'รันเจอร์นีย์ลูกค้า (Journeys)', labelEn: 'Run lifecycle journeys' },
   // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.
