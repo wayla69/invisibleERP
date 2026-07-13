@@ -6,6 +6,7 @@ import { crmOpportunities, crmForecastSubmissions, crmForecastSnapshots } from '
 import { ymd, n } from '../../../database/queries';
 import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
 import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
+import type { BiReportGenerator, BiReportSource } from '../../bi/report-registry';
 
 // ── CRM-12 — sales FORECASTING depth (CRM-09, migration 0378) ──────────────────────────────────────────
 // A governance layer over the REV-17 pipeline forecast (crm_pipeline analytics/forecast, which stays the
@@ -240,9 +241,28 @@ export class CrmForecastController {
   @Post('snapshot') @HttpCode(200) @Permissions('crm', 'exec') snapshot(@Query('period') period: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.captureSnapshot(u, { period }); }
 }
 
+// docs/46 Phase 1 — module-owned BI report generator (discovered by BiReportRegistrarService;
+// moved verbatim out of bi-generate.service.ts, behaviour identical).
+@Injectable()
+export class CrmForecastBiReports implements BiReportSource {
+  constructor(private readonly svc: CrmForecastService) {}
+
+  biReports(): BiReportGenerator[] {
+    return [
+      {
+        type: 'crm_forecast_snapshot',
+        generate: async (f, user) => {
+          const r = await this.svc.captureSnapshot(user, { period: f.period }); // idempotent per (period, date)
+          return { data: r, summary: `Forecast snapshot ${r.period}: forecast ${r.forecast}, actual won ${r.actual_won}, ${r.open_count} open`, summaryTh: `บันทึกพยากรณ์ยอดขาย ${r.period}: พยากรณ์ ${r.forecast} · ปิดจริง ${r.actual_won} · เปิดอยู่ ${r.open_count}` };
+        },
+      },
+    ];
+  }
+}
+
 @Module({
   controllers: [CrmForecastController],
-  providers: [CrmForecastService],
+  providers: [CrmForecastService, CrmForecastBiReports],
   exports: [CrmForecastService],
 })
 export class CrmForecastModule {}
