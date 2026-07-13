@@ -327,7 +327,9 @@ export class CrmService {
       const em = r.email ? String(r.email).trim().toLowerCase() : null;
       const ph = r.phone ? normPhone(r.phone) : null;
       if (!em && !ph) return [];
-      return [{ ...(em ? { hashed_email: sha(em) } : {}), ...(ph ? { hashed_phone: sha(ph) } : {}) }];
+      // hashed_phone = Meta's format (E.164 digits, no '+'); hashed_phone_plus = Google's ('+' prefixed
+      // before hashing, per each platform's published normalization). Both are sha256 — still hash-only.
+      return [{ ...(em ? { hashed_email: sha(em) } : {}), ...(ph ? { hashed_phone: sha(ph), hashed_phone_plus: sha(`+${ph}`) } : {}) }];
     });
 
     // ICFR/PDPA egress trail (ITGC-AC-10): a hashed-audience export is still a sensitive egress — record it.
