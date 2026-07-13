@@ -18,10 +18,6 @@
       "loc": 669,
       "ctorParams": 9
     },
-    "apps/api/src/modules/finance/finance.service.ts": {
-      "loc": 916,
-      "ctorParams": 12
-    },
     "apps/api/src/modules/inventory/inventory-ledger.service.ts": {
       "loc": 607,
       "ctorParams": 4
