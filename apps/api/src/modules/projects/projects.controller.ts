@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
 
 // BoQ (M0, docs/32) — line: amount is budget_qty × rate unless an explicit budget_amount is given.
 const BoqLineBody = z.object({
@@ -157,6 +157,20 @@ const ResourceBody = z.object({
   alloc_pct: z.number().min(0).max(100).optional(),
   period_start: z.string().optional(),
   period_end: z.string().optional(),
+});
+// PPM-A1 (PROJ-20): named-vs-generic skill/role tagging + per-resource availability calendar.
+const ResourceSkillBody = z.object({
+  resource_name: z.string().min(1),
+  skill: z.string().min(1),
+  proficiency: z.string().optional(),
+});
+// month/available_pct format+range are business-rule checked in the service (BAD_MONTH/BAD_AVAILABLE_PCT with
+// a Thai message) rather than shadowed here by a stricter Zod constraint.
+const ResourceCalendarBody = z.object({
+  resource_name: z.string().min(1),
+  month: z.string().min(1),
+  available_pct: z.number().optional(),
+  reason: z.string().optional(),
 });
 
 @Controller('api/projects')
@@ -482,6 +496,37 @@ export class ProjectsController {
   @Get('resources/capacity')
   capacity(@Query('months') months: string | undefined, @Query('from') from: string | undefined, @CurrentUser() u: JwtUser) {
     return this.svc.resourceCapacity(u, { months: months ? Number(months) : undefined, from });
+  }
+
+  // PPM-A1 (PROJ-20): which real, NAMED people can fill a role/skill — the supply side of role/skill
+  // supply-vs-demand, and the named-vs-generic flag on the capacity heatmap. Static segment.
+  @Post('resources/skills')
+  upsertResourceSkill(@Body(new ZodValidationPipe(ResourceSkillBody)) b: ResourceSkillDto, @CurrentUser() u: JwtUser) {
+    return this.svc.upsertResourceSkill(b, u);
+  }
+
+  @Get('resources/skills')
+  listResourceSkills(@CurrentUser() u: JwtUser) {
+    return this.svc.listResourceSkills(u);
+  }
+
+  // PPM-A1 (PROJ-20): per-resource, per-month availability override (PTO/part-time) — the real capacity
+  // ceiling behind the heatmap's over-allocation flag (default 100% absent an override). Static segment.
+  @Post('resources/calendar')
+  upsertResourceCalendar(@Body(new ZodValidationPipe(ResourceCalendarBody)) b: ResourceCalendarDto, @CurrentUser() u: JwtUser) {
+    return this.svc.upsertResourceCalendar(b, u);
+  }
+
+  @Get('resources/calendar')
+  listResourceCalendar(@Query('resource_name') resourceName: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.listResourceCalendar(u, resourceName);
+  }
+
+  // PPM-A1 (PROJ-20): role/skill supply-vs-demand — per role, per month, qualified-people supply vs assigned
+  // demand; understaffed when supply < demand. Static segment.
+  @Get('resources/role-demand')
+  roleDemand(@Query('months') months: string | undefined, @Query('from') from: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.roleSupplyDemand(u, { months: months ? Number(months) : undefined, from });
   }
 
   @Post(':code/resources')

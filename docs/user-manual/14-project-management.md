@@ -218,6 +218,24 @@ PMO configuration, three tabs:
 - **การใช้กำลังคน (Utilization)** — the cross-project allocation rollup per resource, flagging anyone booked
   **over 100%**.
 
+## Resource capacity heatmap & role/skill supply-vs-demand (`/projects/resources`, PROJ-20)
+A dedicated workspace deepening the settings-page utilization roll-up and the portfolio heatmap:
+- **ปฏิทินกำลังคน (Heatmap)** — the same time-phased capacity heatmap as the portfolio card, but now each
+  cell's over-allocation is checked against the resource's **real** availability (see below) instead of a flat
+  100% assumption, and each resource is tagged **ระบุตัวบุคคล (Named)** or **ยังไม่ระบุตัวบุคคล (Generic)** — a
+  generic booking has no matching skill tag (e.g. "Senior Dev TBD"), so you can see at a glance which bookings
+  are placeholders.
+- **ทักษะ (Skills)** — tag a real person with a skill/role (optionally a proficiency level). This is what makes
+  a booking **named** and is the supply side of the role/skill roll-up below.
+- **ปฏิทินความพร้อม (Availability calendar)** — set a person's availability for a specific month (e.g. 50% for a
+  documented part-time month, or a PTO/leave month) — every resource defaults to 100% until you set one.
+- **อุปสงค์-อุปทานตามบทบาท (Role supply-vs-demand)** — per role/skill, per month: assigned **demand** vs qualified
+  **supply** (every named person tagged with that skill, at their calendar availability); a role is flagged
+  **กำลังคนไม่พอ (Understaffed)** when demand exceeds supply — surfaced before it becomes a schedule slip.
+
+Required role/permission: same as the rest of PPM (`exec`/`planner`/`ar`). Read-only detective surface —
+posts nothing to the GL.
+
 ## Timesheets → project labour (`/hcm`, tab ลงเวลา / OT)
 When logging a timesheet you can allocate it to a **โครงการ (project)** and a **งาน (WBS task)** and mark it
 **billable**. The entry lands **Pending**; a **different** approver presses **อนุมัติ** (maker-checker,
@@ -297,10 +315,14 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 - **Earned schedule** (SPI(t)/SV(t), the Overview block + `schedule_slip_es` Action-Center item) is the
   time-based schedule check (**PROJ-19**) — read-only, it flags slips the classic SPI stops seeing late in a
   project.
+- The **resource capacity heatmap** now checks over-allocation against each person's real availability
+  calendar (not a flat 100%), and **role/skill supply-vs-demand** (**PROJ-20**) flags an understaffed role
+  before it slips a schedule — both are read-only detective surfaces, they post nothing.
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.27 | 2026-07-13 | **PROJ-20 — resource capacity heatmap governed by a real availability calendar + role/skill supply-vs-demand.** New page **`/projects/resources`** (four tabs): the **Heatmap** now flags over-allocation against each resource's TRUE monthly availability (a documented part-time/leave override, default 100% absent one) instead of a flat 100%, and tags each booking **ระบุตัวบุคคล (Named)** or **ยังไม่ระบุตัวบุคคล (Generic)**; **Skills** tags a real person with a skill/role (the supply side); **Availability calendar** sets a person's monthly availability override; **Role supply-vs-demand** rolls assigned demand up against qualified supply per role/month, flagging **กำลังคนไม่พอ (Understaffed)**. Read-only — no new permission beyond the existing `exec`/`planner`/`ar` PPM gate. |
 | 2.26 | 2026-07-12 | **PROJ-19 — earned schedule on the workspace Overview.** A **กำหนดการที่ได้รับ (Earned schedule)** block under the earned-value breakdown: **ES** / **AT** / **SV(t)** in months, an **SPI(t)** badge (green ≥ 1, grey ≥ 0.9, red below) and a forecast finish month (`GET /api/projects/{code}/earned-schedule`). SPI(t) stays honest late in a project where the classic SPI converges to 1; a red SPI(t) on a project that otherwise reads fine raises a **schedule_slip_es** (medium) item on the Action Center. Needs tasks with planned cost + due dates (`NO_DATED_PLAN` otherwise). Read-only — no new permission. |
 | 2.25 | 2026-07-10 | **CRM-2 — the CRM workspace replaces `/projects/crm` + `/pipeline` (both now redirect to `/crm`; deep links preserved).** The pipeline section points to the new manual **16-crm-workspace.md** (kanban board, deal page with the CRM-WL convert-to-project button, leads import wizard, web-to-lead, accounts/contacts web surface). Win/Loss dashboard (`/projects/pipeline`) unchanged. |
 | 2.24 | 2026-07-10 | **CRM-1 — one pipeline, duplicate-governed accounts/contacts (migration 0293).** `/projects/crm` and `/pipeline` now work the SAME deal list (unified `crm_opportunities` spine; tenant-configurable stages; won/lost terminal everywhere → `OPP_CLOSED`; per-deal stage-change audit trail). Lead conversion also creates/links a CRM account + primary contact. New API section **CRM accounts & contacts**: `/api/crm/accounts` + `/api/crm/contacts` with create-time duplicate detection (**409 `DUPLICATE_SUSPECT`** + `force` override) and a maker-checked survivor **merge** (`SOD_VIOLATION` when the duplicate's creator tries to merge away children). CPQ quotes now validate their opportunity link (`OPP_NOT_FOUND`). Troubleshooting rows added in 99. |
