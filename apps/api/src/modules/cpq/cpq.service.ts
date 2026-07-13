@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { eq, and, sql, lte } from 'drizzle-orm';
+import { eq, and, sql, lte, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { productConfigs, configOptions, pricingRules, quotes, quoteLines, cpqSettings, quoteApprovals } from '../../database/schema/cpq';
+import { productConfigs, configOptions, pricingRules, quotes, quoteLines, cpqSettings, quoteApprovals, cpqBundles, cpqBundleItems } from '../../database/schema/cpq';
 import { crmOpportunities } from '../../database/schema/crm-pipeline';
 import { docCountersTenant } from '../../database/schema/system';
 import { tenants } from '../../database/schema';
@@ -191,6 +191,10 @@ export class CpqService {
       const [updated] = await db.update(quotes)
         .set({ status: 'PendingApproval', requiresApproval: true, discountPct: fx(m.discountPct, 3), marginPct: fx(m.marginPct, 3) })
         .where(eq(quotes.id, quoteId)).returning();
+      // CRM-14 (CRM-12): tiered discount-approval matrix — a discount above the exec ceiling (when configured)
+      // requires a caller holding `exec` specifically; everything else stays at the existing manager tier
+      // (any cpq_approve holder), unchanged from CPQ-01.
+      const requiredTier = floor.execDiscountPct != null && m.discountPct > floor.execDiscountPct + 1e-6 ? 'exec' : 'manager';
       // Open (or refresh) the pending maker-checker row with the floor snapshot + the breaching actuals.
       await db.delete(quoteApprovals).where(and(eq(quoteApprovals.quoteId, quoteId), eq(quoteApprovals.status, 'pending')));
       await db.insert(quoteApprovals).values({
@@ -199,7 +203,7 @@ export class CpqService {
           ? `Discount ${m.discountPct.toFixed(2)}% exceeds max ${floor.maxDiscountPct}%`
           : `Margin ${m.marginPct.toFixed(2)}% below floor ${floor.minMarginPct}%`,
         minMarginPct: fx(floor.minMarginPct, 3), maxDiscountPct: fx(floor.maxDiscountPct, 3),
-        marginPct: fx(m.marginPct, 3), discountPct: fx(m.discountPct, 3),
+        marginPct: fx(m.marginPct, 3), discountPct: fx(m.discountPct, 3), requiredTier,
       });
       return this.fmtQuote(updated);
     }
@@ -218,6 +222,13 @@ export class CpqService {
     if (q.status !== 'PendingApproval') throw new BadRequestException({ code: 'INVALID_TRANSITION', message: `Quote ${q.quoteNo} is not pending approval (status ${q.status})` });
     if (q.createdBy && q.createdBy === user.username) {
       throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot approve their own discount/margin breach — a different authorised user must approve', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติส่วนลด/มาร์จิ้นของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
+    }
+    // CRM-14 (CRM-12): a breach tiered to 'exec' needs a caller holding `exec` specifically — a plain
+    // cpq_approve holder (manager tier) may not clear it, even though the /approve route admits both.
+    const [pending] = await db.select({ requiredTier: quoteApprovals.requiredTier }).from(quoteApprovals)
+      .where(and(eq(quoteApprovals.quoteId, quoteId), eq(quoteApprovals.status, 'pending'))).limit(1);
+    if (pending?.requiredTier === 'exec' && !(user.permissions ?? []).includes('exec')) {
+      throw new ForbiddenException({ code: 'TIER_APPROVAL_REQUIRED', message: 'This discount breach exceeds the exec tier — only an exec-permission holder may approve it', messageTh: 'ส่วนลดนี้เกินเพดานระดับผู้บริหาร ต้องได้รับอนุมัติจากผู้มีสิทธิ์ exec เท่านั้น' });
     }
     await db.update(quoteApprovals)
       .set({ status: 'approved', approvedBy: user.username, decidedAt: new Date() })
@@ -282,19 +293,155 @@ export class CpqService {
 
   async getSettings(user: JwtUser) {
     const f = await this.getFloor(user.tenantId ?? null);
-    return { min_margin_pct: f.minMarginPct, max_discount_pct: f.maxDiscountPct };
+    return { min_margin_pct: f.minMarginPct, max_discount_pct: f.maxDiscountPct, exec_discount_pct: f.execDiscountPct };
   }
 
-  async updateSettings(dto: { min_margin_pct?: number; max_discount_pct?: number }, user: JwtUser) {
+  async updateSettings(dto: { min_margin_pct?: number; max_discount_pct?: number; exec_discount_pct?: number | null }, user: JwtUser) {
     const db = this.db;
     const tenantId = user.tenantId!;
     const cur = await this.getFloor(tenantId);
     const minMargin = dto.min_margin_pct ?? cur.minMarginPct;
     const maxDiscount = dto.max_discount_pct ?? cur.maxDiscountPct;
+    const execDiscount = dto.exec_discount_pct !== undefined ? dto.exec_discount_pct : cur.execDiscountPct;
+    const execVal = execDiscount != null ? fx(execDiscount, 3) : null;
     await db.insert(cpqSettings)
-      .values({ tenantId, minMarginPct: fx(minMargin, 3), maxDiscountPct: fx(maxDiscount, 3), updatedBy: user.username, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: [cpqSettings.tenantId], set: { minMarginPct: fx(minMargin, 3), maxDiscountPct: fx(maxDiscount, 3), updatedBy: user.username, updatedAt: new Date() } });
-    return { min_margin_pct: minMargin, max_discount_pct: maxDiscount };
+      .values({ tenantId, minMarginPct: fx(minMargin, 3), maxDiscountPct: fx(maxDiscount, 3), execDiscountPct: execVal, updatedBy: user.username, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: [cpqSettings.tenantId], set: { minMarginPct: fx(minMargin, 3), maxDiscountPct: fx(maxDiscount, 3), execDiscountPct: execVal, updatedBy: user.username, updatedAt: new Date() } });
+    return { min_margin_pct: minMargin, max_discount_pct: maxDiscount, exec_discount_pct: execDiscount };
+  }
+
+  // ── CRM-14 (CRM-12): bundles — a bundle SKU priced as the discounted sum of its component configs ──
+
+  async createBundle(dto: { code: string; name: string; description?: string; items: { config_id: number; qty?: number; unit_cost?: number }[] }, user: JwtUser) {
+    const db = this.db;
+    const tenantId = user.tenantId!;
+    for (const it of dto.items) await this.assertConfig(it.config_id); // every component must be a real config
+    const [b] = await db.insert(cpqBundles).values({
+      tenantId, code: dto.code, name: dto.name, description: dto.description ?? null, createdBy: user.username,
+    }).onConflictDoUpdate({
+      target: [cpqBundles.tenantId, cpqBundles.code],
+      set: { name: dto.name, description: dto.description ?? null },
+    }).returning();
+    const bundleId = Number(b!.id);
+    await db.delete(cpqBundleItems).where(eq(cpqBundleItems.bundleId, bundleId)); // re-create items on update
+    let seq = 1;
+    for (const it of dto.items) {
+      await db.insert(cpqBundleItems).values({
+        tenantId, bundleId, configId: it.config_id, qty: fx(it.qty ?? 1, 2), unitCost: fx(it.unit_cost ?? 0, 2), sequence: seq++,
+      });
+    }
+    return { code: b!.code, name: b!.name, items: dto.items.length };
+  }
+
+  async listBundles(user: JwtUser) {
+    const db = this.db;
+    const rows = await db.select().from(cpqBundles).where(eq(cpqBundles.tenantId, user.tenantId!));
+    return { bundles: rows.map((b: any) => ({ code: b.code, name: b.name, description: b.description, active: b.active })) };
+  }
+
+  async getBundle(code: string, user: JwtUser) {
+    const db = this.db;
+    const b = await this.assertBundle(code, user);
+    const items = await db.select({ item: cpqBundleItems, cfg: productConfigs }).from(cpqBundleItems)
+      .innerJoin(productConfigs, eq(cpqBundleItems.configId, productConfigs.id))
+      .where(eq(cpqBundleItems.bundleId, Number(b.id))).orderBy(cpqBundleItems.sequence);
+    return {
+      code: b.code, name: b.name, description: b.description, active: b.active,
+      items: items.map((r: any) => ({ config_code: r.cfg.code, config_name: r.cfg.name, qty: n(r.item.qty), unit_cost: n(r.item.unitCost), unit_price: n(r.cfg.basePrice) })),
+    };
+  }
+
+  // Expand a bundle into ordinary quote_lines (bundle_code-tagged) at the quote's current line count. Pricing
+  // = Σ(component base price × component qty) × bundle qty, less an optional bundle-level discount%; unit_cost
+  // per component line carries the component's captured cost — so the EXISTING CPQ-01 metricsFromLines() floor
+  // check on send() automatically covers the bundle's blended margin, no core service duplication.
+  async addBundleLine(quoteId: number, dto: { bundle_code: string; qty?: number; discount_pct?: number }, user: JwtUser) {
+    const db = this.db;
+    const q = await this.assertQuote(quoteId);
+    if (q.status !== 'Draft') throw new BadRequestException({ code: 'INVALID_TRANSITION', message: 'Bundle lines can only be added to a Draft quote' });
+    const b = await this.assertBundle(dto.bundle_code, user);
+    const items = await db.select({ item: cpqBundleItems, cfg: productConfigs }).from(cpqBundleItems)
+      .innerJoin(productConfigs, eq(cpqBundleItems.configId, productConfigs.id))
+      .where(eq(cpqBundleItems.bundleId, Number(b.id))).orderBy(cpqBundleItems.sequence);
+    if (!items.length) throw new BadRequestException({ code: 'BUNDLE_EMPTY', message: 'Bundle has no components' });
+    const bundleQty = dto.qty ?? 1;
+    const discountPct = dto.discount_pct ?? 0;
+    const existing = await db.select({ lineNo: quoteLines.lineNo }).from(quoteLines).where(eq(quoteLines.quoteId, quoteId));
+    let lineNo = existing.length ? Math.max(...existing.map((r: any) => r.lineNo)) + 1 : 1;
+    const instanceTag = `${b.code}-${Date.now().toString(36)}`;
+    const rows = items.map((r: any) => {
+      const qty = round4(n(r.item.qty) * bundleQty);
+      const lineTotal = round4(n(r.cfg.basePrice) * qty * (1 - discountPct / 100));
+      return {
+        quoteId, lineNo: lineNo++, itemCode: r.cfg.code, description: `${b.name}: ${r.cfg.name}`,
+        qty: fx(qty, 2), unitPrice: fx(r.cfg.basePrice, 4), unitCost: fx(r.item.unitCost, 2),
+        discountPct: fx(discountPct, 4), lineTotal: fx(lineTotal, 4), bundleCode: instanceTag,
+      };
+    });
+    await db.insert(quoteLines).values(rows);
+    const addedTotal = rows.reduce((t: number, r: any) => t + n(r.lineTotal), 0);
+    const [updated] = await db.update(quotes)
+      .set({ subtotal: fx(n(q.subtotal) + addedTotal, 4), total: fx(n(q.total) + addedTotal, 4) })
+      .where(eq(quotes.id, quoteId)).returning();
+    return { ...this.fmtQuote(updated), bundle_instance: instanceTag, lines_added: rows.length };
+  }
+
+  private async assertBundle(code: string, user: JwtUser) {
+    const db = this.db;
+    const [b] = await db.select().from(cpqBundles).where(and(eq(cpqBundles.code, code), eq(cpqBundles.tenantId, user.tenantId!))).limit(1);
+    if (!b) throw new NotFoundException({ code: 'BUNDLE_NOT_FOUND', message: `Bundle ${code} not found`, messageTh: 'ไม่พบชุดสินค้า' });
+    return b;
+  }
+
+  // ── CRM-14 (CRM-12): guided-selling recommendations ── explainable co-purchase read: for a target config,
+  // which OTHER configs were bought (in a different Accepted quote) by the same customer — ranked by
+  // frequency across all customers. No trained model; a pure historical co-occurrence count (mirrors the
+  // G2 market-basket-affinity posture: support/count based, not ML). Considers both a single-config quote
+  // (quotes.configId) and a bundle-expanded quote (quote_lines.itemCode, set to the component's config code).
+  async recommendations(configCode: string, user: JwtUser) {
+    const db = this.db;
+    const target = await this.assertConfigByCode(configCode, user);
+    const accepted = await db.select({ id: quotes.id, customerName: quotes.customerName, configId: quotes.configId })
+      .from(quotes).where(and(eq(quotes.tenantId, user.tenantId!), eq(quotes.status, 'Accepted')));
+    if (!accepted.length) return { config_code: configCode, recommendations: [] };
+    const byCustomer = new Map<string, Set<number>>();
+    const add = (customerName: string, configId: number) => {
+      if (!byCustomer.has(customerName)) byCustomer.set(customerName, new Set());
+      byCustomer.get(customerName)!.add(configId);
+    };
+    for (const r of accepted) if (r.configId != null) add(r.customerName, Number(r.configId));
+    const quoteIds = accepted.map((r: any) => Number(r.id));
+    const lineRows = await db.select({ quoteId: quoteLines.quoteId, itemCode: quoteLines.itemCode }).from(quoteLines).where(inArray(quoteLines.quoteId, quoteIds));
+    const cfgAll = await db.select().from(productConfigs).where(eq(productConfigs.tenantId, user.tenantId!));
+    const codeToId = new Map(cfgAll.map((c: any) => [c.code, Number(c.id)]));
+    const quoteById = new Map(accepted.map((r: any) => [Number(r.id), r]));
+    for (const l of lineRows) {
+      if (!l.itemCode) continue;
+      const cid = codeToId.get(l.itemCode);
+      const parent = quoteById.get(Number(l.quoteId));
+      if (cid == null || !parent) continue;
+      add(parent.customerName, cid);
+    }
+    const counts = new Map<number, number>();
+    for (const configs of byCustomer.values()) {
+      if (!configs.has(Number(target.id))) continue;
+      for (const cid of configs) { if (cid === Number(target.id)) continue; counts.set(cid, (counts.get(cid) ?? 0) + 1); }
+    }
+    if (!counts.size) return { config_code: configCode, recommendations: [] };
+    const cfgRows = await db.select().from(productConfigs).where(eq(productConfigs.tenantId, user.tenantId!));
+    const byId = new Map(cfgRows.map((c: any) => [Number(c.id), c]));
+    const recs = [...counts.entries()]
+      .map(([cid, count]) => ({ config_code: byId.get(cid)?.code, config_name: byId.get(cid)?.name, co_purchase_count: count }))
+      .filter((r) => r.config_code)
+      .sort((a, b2) => b2.co_purchase_count - a.co_purchase_count);
+    return { config_code: configCode, recommendations: recs };
+  }
+
+  private async assertConfigByCode(code: string, user: JwtUser) {
+    const db = this.db;
+    const [c] = await db.select().from(productConfigs).where(and(eq(productConfigs.code, code), eq(productConfigs.tenantId, user.tenantId!))).limit(1);
+    if (!c) throw new NotFoundException({ code: 'CONFIG_NOT_FOUND', message: `Product config ${code} not found` });
+    return c;
   }
 
   async listApprovals(filter: { status?: string }, user: JwtUser) {
@@ -324,7 +471,7 @@ export class CpqService {
   async getQuoteLines(quoteId: number) {
     const db = this.db;
     const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, quoteId)).orderBy(quoteLines.lineNo);
-    return { lines: lines.map((l: any) => ({ line_no: l.lineNo, description: l.description, qty: n(l.qty), unit_price: n(l.unitPrice), unit_cost: n(l.unitCost), discount_pct: n(l.discountPct), line_total: n(l.lineTotal) })) };
+    return { lines: lines.map((l: any) => ({ line_no: l.lineNo, description: l.description, qty: n(l.qty), unit_price: n(l.unitPrice), unit_cost: n(l.unitCost), discount_pct: n(l.discountPct), line_total: n(l.lineTotal), bundle_code: l.bundleCode ?? null })) };
   }
 
   // Assemble the printable ใบเสนอราคา (header + lines + our-company seller block) for the PDF/email path.
@@ -397,13 +544,17 @@ export class CpqService {
   }
 
   // The per-tenant discount/margin floor; defaults (20% margin / 15% discount) when no row is configured.
+  // CRM-14 (CRM-12): execDiscountPct is the optional tier-2 ceiling — null when tiering is off.
   private async getFloor(tenantId: number | null) {
     const db = this.db;
     const rows = tenantId != null
       ? await db.select().from(cpqSettings).where(eq(cpqSettings.tenantId, tenantId)).limit(1)
       : [];
     const s = rows[0];
-    return { minMarginPct: s ? n(s.minMarginPct) : 20, maxDiscountPct: s ? n(s.maxDiscountPct) : 15 };
+    return {
+      minMarginPct: s ? n(s.minMarginPct) : 20, maxDiscountPct: s ? n(s.maxDiscountPct) : 15,
+      execDiscountPct: s?.execDiscountPct != null ? n(s.execDiscountPct) : null,
+    };
   }
 
   private async assertConfig(id: number) {
