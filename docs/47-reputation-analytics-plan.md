@@ -41,7 +41,7 @@ data import, finance-adjacent). Reuses existing **infrastructure patterns**, not
 - Dashboard read: a `reputation_summary` report type + a thin `BiService.reputationSummaryLive()` wrapper
   (same shape as `marketing_roi` / `BiService.marketingRoiLive()`), backing a live dashboard tab.
 
-## 2. Schema (migration `0401`)
+## 2. Schema (migration `0402`)
 
 - **`reputation_connections`** — one row per `(tenant_id, platform)`. `platform: 'google_maps' |
   'google_analytics'`. Encrypted `access_token_enc`/`refresh_token_enc`, `token_expires_at`, `scope`,

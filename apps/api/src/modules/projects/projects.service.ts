@@ -22,8 +22,13 @@ export interface ChangeOrderDto { description?: string; contract_delta?: number;
 export interface CostDto { entry_type?: 'time' | 'expense'; description?: string; qty?: number; rate?: number; amount?: number; billable?: boolean; entry_date?: string }
 export interface BillDto { amount?: number; percent?: number }
 export interface FromOpportunityDto { project_code?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; start_date?: string; end_date?: string }
-export interface TaskDto { name: string; parent_id?: number; wbs_code?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[]; accountable?: string; responsible?: string[]; consulted?: string[]; informed?: string[] }
-export interface TaskPatchDto { name?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[]; accountable?: string; responsible?: string[]; consulted?: string[]; informed?: string[] }
+// PPM-B1 (PROJ-21): a richer alternative to plain `depends_on` ids — per-edge dep type (SS/FF/SF, default FS)
+// + lag/lead in days. Omit `dependencies` and pass plain `depends_on` for the unchanged FS/lag-0 behaviour.
+export interface TaskDependencyDto { task_id: number; type?: 'FS' | 'SS' | 'FF' | 'SF'; lag_days?: number }
+export interface TaskDto { name: string; parent_id?: number; wbs_code?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[]; dependencies?: TaskDependencyDto[]; constraint_type?: 'SNET' | 'FNLT' | null; constraint_offset_days?: number | null; accountable?: string; responsible?: string[]; consulted?: string[]; informed?: string[] }
+export interface TaskPatchDto { name?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[]; dependencies?: TaskDependencyDto[]; constraint_type?: 'SNET' | 'FNLT' | null; constraint_offset_days?: number | null; accountable?: string; responsible?: string[]; consulted?: string[]; informed?: string[] }
+export interface ProjectCalendarDto { enabled?: boolean; non_working_weekdays?: number[] }
+export interface CalendarExceptionDto { exception_date: string; description?: string }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
@@ -324,6 +329,13 @@ export class ProjectsService {
   async captureHealth(code: string, dto: { as_of?: string }, user: JwtUser) { return this.evmSvc.captureHealth(code, dto, user); }
   async captureAllHealth(user: JwtUser) { return this.evmSvc.captureAllHealth(user); }
   async healthHistory(code: string) { return this.evmSvc.healthHistory(code); }
+
+  // PPM-B1 (PROJ-21): opt-in per-tenant working calendar — schedule()'s duration calculation only skips
+  // non-working weekdays/holidays when enabled (default false, unchanged behaviour).
+  async getCalendar(user: JwtUser) { return this.evmSvc.getCalendar(user); }
+  async setCalendar(dto: ProjectCalendarDto, user: JwtUser) { return this.evmSvc.setCalendar(dto, user); }
+  async addCalendarException(dto: CalendarExceptionDto, user: JwtUser) { return this.evmSvc.addCalendarException(dto, user); }
+  async listCalendarExceptions(user: JwtUser) { return this.evmSvc.listCalendarExceptions(user); }
 
   // ── docs/38 projects PR-3: WBS (tasks/milestones/RACI) lives in ProjectsWbsService; thin delegators. ──
   async addTask(code: string, dto: TaskDto, user: JwtUser) { return this.wbs.addTask(code, dto, user); }

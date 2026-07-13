@@ -1,13 +1,13 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
-import { projects, projectTasks, projectEntries, projectBaselines, projectHealthSnapshots } from '../../database/schema';
+import { projects, projectTasks, projectEntries, projectBaselines, projectHealthSnapshots, projectTaskDependencies, projectCalendars, projectCalendarExceptions } from '../../database/schema';
 import { n, fx, ymd } from '../../database/queries';
-import { r2, r4, clampPct, addDays, peopleCsv, csvToList } from './projects.helpers';
+import { r2, r4, clampPct, addDays, peopleCsv, csvToList, workingDaysBetween } from './projects.helpers';
 import { shapeTask, shapeBaseline, shapeHealth } from './projects.shapes';
 import type { JwtUser } from '../../common/decorators';
 import type { ProjectsWbsService } from './projects-wbs.service';
-import type { BaselineDto, ProgramDto } from './projects.service';
+import type { BaselineDto, ProgramDto, ProjectCalendarDto, CalendarExceptionDto } from './projects.service';
 
 // EVM sub-service (docs/38 §3 projects decomposition, PR-4 — PROJ-06/07, the final prescribed cut):
 // earned value, CPM schedule, programs, baselines and health snapshots, moved VERBATIM. A PLAIN class
@@ -54,19 +54,39 @@ export class ProjectsEvmService {
   }
 
   // Critical-path schedule (CPM) over the WBS: a forward pass (early start/finish) + backward pass (late
-  // start/finish) on the finish-to-start `depends_on` graph, with each task's duration in days (explicit
-  // planned_start→planned_end span, else planned_hours/8, min 1). Tasks with zero slack are on the critical
-  // path. Cancelled tasks are excluded; a dependency cycle degrades gracefully (the back-edge is ignored).
+  // start/finish) on the `depends_on` graph, with each task's duration in days (explicit planned_start→
+  // planned_end span, else planned_hours/8, min 1). Tasks with zero slack are on the critical path.
+  // Cancelled tasks are excluded; a dependency cycle degrades gracefully (the back-edge is ignored).
+  //
+  // PPM-B1 (PROJ-21): richer scheduling, additive to the above — a predecessor/successor edge with no row in
+  // `project_task_dependencies` still schedules as plain FS/lag-0 (byte-identical to before); an edge WITH a
+  // row applies its dep_type (SS/FF/SF) + lag/lead per the standard CPM-with-lag formulas. A task's own
+  // `constraint_type` (SNET/FNLT) floors/caps its ES/LF. Duration counts only WORKING days when the tenant's
+  // `project_calendars` row is enabled (default: disabled, unchanged calendar-day arithmetic).
   async schedule(code: string) {
     const db = this.db;
     const p = await this.rowOf(code);
     const rows = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
     const tasks = rows.map(shapeTask);
     const byId = new Map<number, any>(tasks.map((t: any) => [t.id, t]));
+
+    const tenantIdForCal = p.tenantId ?? null;
+    const [calRow] = tenantIdForCal != null ? await db.select().from(projectCalendars).where(eq(projectCalendars.tenantId, tenantIdForCal)).limit(1) : [];
+    const calEnabled = !!calRow?.enabled;
+    const nonWorkingWeekdays = calRow ? csvToList(calRow.nonWorkingWeekdays).map(Number) : [0, 6];
+    const exceptionSet = new Set<string>();
+    if (calEnabled) {
+      const exRows = await db.select().from(projectCalendarExceptions).where(eq(projectCalendarExceptions.tenantId, tenantIdForCal!));
+      for (const e of exRows) exceptionSet.add(String(e.exceptionDate));
+    }
     const dur = (t: any) => {
-      if (t.planned_start && t.planned_end) return Math.max(1, Math.round((Date.parse(t.planned_end) - Date.parse(t.planned_start)) / 86400000) + 1);
+      if (t.planned_start && t.planned_end) {
+        if (calEnabled) return Math.max(1, workingDaysBetween(t.planned_start, t.planned_end, nonWorkingWeekdays, exceptionSet));
+        return Math.max(1, Math.round((Date.parse(t.planned_end) - Date.parse(t.planned_start)) / 86400000) + 1);
+      }
       return Math.max(1, Math.ceil(n(t.planned_hours) / 8) || 1);
     };
+
     // Predecessors restricted to known tasks; build successor adjacency.
     const preds = new Map<number, number[]>(tasks.map((t: any) => [t.id, (t.depends_on || []).filter((d: number) => byId.has(d) && d !== t.id)]));
     const succ = new Map<number, number[]>(tasks.map((t: any) => [t.id, []]));
@@ -80,24 +100,52 @@ export class ProjectsEvmService {
       for (const s of succ.get(id)!) { indeg.set(s, indeg.get(s)! - 1); if (indeg.get(s) === 0) queue.push(s); }
     }
     for (const t of tasks) if (!topo.includes(t.id)) topo.push(t.id);
+
+    // Per-edge dep type/lag (default FS/0 when no row exists — the pre-PPM-B1 behaviour).
+    const depRows = await db.select().from(projectTaskDependencies).where(eq(projectTaskDependencies.projectId, Number(p.id)));
+    const depMeta = new Map<string, { type: string; lag: number }>();
+    for (const d of depRows) depMeta.set(`${Number(d.predecessorTaskId)}|${Number(d.successorTaskId)}`, { type: d.depType, lag: Number(d.lagDays) });
+    const metaOf = (predId: number, succId: number) => depMeta.get(`${predId}|${succId}`) ?? { type: 'FS', lag: 0 };
+
     const es = new Map<number, number>(), ef = new Map<number, number>();
     for (const id of topo) {
-      const start = Math.max(0, ...preds.get(id)!.map((d) => ef.get(d) ?? 0));
-      es.set(id, start); ef.set(id, start + dur(byId.get(id)));
+      const t = byId.get(id);
+      const d = dur(t);
+      let start = 0;
+      for (const pid of preds.get(id)!) {
+        const { type, lag } = metaOf(pid, id);
+        const candidate = type === 'SS' ? (es.get(pid) ?? 0) + lag
+          : type === 'FF' ? (ef.get(pid) ?? 0) + lag - d
+          : type === 'SF' ? (es.get(pid) ?? 0) + lag - d
+          : (ef.get(pid) ?? 0) + lag; // FS (default)
+        start = Math.max(start, candidate);
+      }
+      if (t.constraint_type === 'SNET' && t.constraint_offset_days != null) start = Math.max(start, Number(t.constraint_offset_days));
+      es.set(id, start); ef.set(id, start + d);
     }
     const projectDuration = Math.max(0, ...tasks.map((t: any) => ef.get(t.id) ?? 0));
     const lf = new Map<number, number>(), ls = new Map<number, number>();
     for (const id of [...topo].reverse()) {
+      const t = byId.get(id);
+      const d = dur(t);
       const succs = succ.get(id)!;
-      const finish = succs.length ? Math.min(...succs.map((s) => ls.get(s)!)) : projectDuration;
-      lf.set(id, finish); ls.set(id, finish - dur(byId.get(id)));
+      let finish = succs.length ? Math.min(...succs.map((sid) => {
+        const { type, lag } = metaOf(id, sid);
+        return type === 'SS' ? (ls.get(sid)!) - lag + d
+          : type === 'FF' ? (lf.get(sid)!) - lag
+          : type === 'SF' ? (lf.get(sid)!) - lag + d
+          : (ls.get(sid)!) - lag; // FS (default)
+      })) : projectDuration;
+      if (t.constraint_type === 'FNLT' && t.constraint_offset_days != null) finish = Math.min(finish, Number(t.constraint_offset_days));
+      lf.set(id, finish); ls.set(id, finish - d);
     }
     const out = tasks.map((t: any) => {
       const slack = r2((ls.get(t.id) ?? 0) - (es.get(t.id) ?? 0));
-      return { ...t, duration_days: dur(t), es: es.get(t.id) ?? 0, ef: ef.get(t.id) ?? 0, ls: ls.get(t.id) ?? 0, lf: lf.get(t.id) ?? 0, slack, on_critical_path: slack <= 0.0001 };
+      const dependency_details = (t.depends_on || []).map((pid: number) => { const m = metaOf(pid, t.id); return { task_id: pid, type: m.type, lag_days: m.lag }; });
+      return { ...t, duration_days: dur(t), es: es.get(t.id) ?? 0, ef: ef.get(t.id) ?? 0, ls: ls.get(t.id) ?? 0, lf: lf.get(t.id) ?? 0, slack, on_critical_path: slack <= 0.0001, dependency_details };
     });
     return {
-      project_code: code, project_duration_days: projectDuration,
+      project_code: code, project_duration_days: projectDuration, working_calendar_enabled: calEnabled,
       critical_path: out.filter((t: any) => t.on_critical_path).map((t: any) => t.id),
       tasks: out, count: out.length,
     };
@@ -357,5 +405,42 @@ export class ProjectsEvmService {
     const p = await this.rowOf(code);
     const rows = await db.select().from(projectHealthSnapshots).where(eq(projectHealthSnapshots.projectId, Number(p.id))).orderBy(projectHealthSnapshots.snapshotDate);
     return { project_code: code, history: rows.map(shapeHealth), count: rows.length };
+  }
+
+  // ── Working calendar (PPM-B1, PROJ-21) ────────────────────────────────────
+  // One row per tenant. DISABLED by default — schedule()'s duration calculation stays plain calendar-day
+  // arithmetic (unchanged) until a tenant explicitly enables the working-day-aware count.
+  async getCalendar(user: JwtUser) {
+    const db = this.db;
+    const [row] = await db.select().from(projectCalendars).where(eq(projectCalendars.tenantId, user.tenantId!)).limit(1);
+    return { enabled: row?.enabled ?? false, non_working_weekdays: row ? csvToList(row.nonWorkingWeekdays).map(Number) : [0, 6] };
+  }
+
+  async setCalendar(dto: ProjectCalendarDto, user: JwtUser) {
+    const db = this.db;
+    const tenantId = user.tenantId!;
+    const [existing] = await db.select().from(projectCalendars).where(eq(projectCalendars.tenantId, tenantId)).limit(1);
+    const enabled = dto.enabled ?? existing?.enabled ?? false;
+    const nonWorking = dto.non_working_weekdays != null
+      ? [...new Set(dto.non_working_weekdays.map(Number).filter((x) => Number.isInteger(x) && x >= 0 && x <= 6))]
+      : (existing ? csvToList(existing.nonWorkingWeekdays).map(Number) : [0, 6]);
+    const nonWorkingCsv = nonWorking.length ? nonWorking.join(',') : '0,6';
+    if (existing) await db.update(projectCalendars).set({ enabled, nonWorkingWeekdays: nonWorkingCsv }).where(eq(projectCalendars.id, Number(existing.id)));
+    else await db.insert(projectCalendars).values({ tenantId, enabled, nonWorkingWeekdays: nonWorkingCsv, createdBy: user.username });
+    return this.getCalendar(user);
+  }
+
+  async addCalendarException(dto: CalendarExceptionDto, user: JwtUser) {
+    const db = this.db;
+    await db.insert(projectCalendarExceptions).values({
+      tenantId: user.tenantId ?? null, exceptionDate: dto.exception_date, description: dto.description ?? null, createdBy: user.username,
+    }).onConflictDoNothing();
+    return this.listCalendarExceptions(user);
+  }
+
+  async listCalendarExceptions(_user: JwtUser) {
+    const db = this.db;
+    const rows = await db.select().from(projectCalendarExceptions).orderBy(projectCalendarExceptions.exceptionDate);
+    return { exceptions: rows.map((r: any) => ({ exception_date: r.exceptionDate, description: r.description })), count: rows.length };
   }
 }

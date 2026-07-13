@@ -101,6 +101,11 @@ export const projectTasks = pgTable(
     plannedCost: numeric('planned_cost', { precision: 16, scale: 2 }).default('0'),
     pctComplete: numeric('pct_complete', { precision: 5, scale: 2 }).default('0'), // 0..100
     dependsOn: text('depends_on'),                            // P4 — predecessor task ids (CSV) for scheduling
+    // PPM-B1 (PROJ-21): a scheduling constraint on the CPM pass — SNET (start no earlier than) floors the
+    // forward-pass ES, FNLT (finish no later than) caps the backward-pass LF, both in the same day-offset
+    // units as es/ef/ls/lf. Null constraint_type (default) = unconstrained, unchanged behaviour.
+    constraintType: text('constraint_type'),                  // null | SNET | FNLT
+    constraintOffsetDays: integer('constraint_offset_days'),
     assignee: text('assignee'),
     // RACI accountability (B3) — accountable is the single answerable owner; responsible/consulted/informed
     // are CSV lists of people. `assignee` stays for back-compat (a convenience for the primary doer).
@@ -215,6 +220,63 @@ export const resourceCalendar = pgTable(
   (t) => ({
     byResource: index('idx_rcal_resource').on(t.tenantId, t.resourceName),
     uniq: unique('uq_rcal_resource_month').on(t.tenantId, t.resourceName, t.month),
+  }),
+);
+
+// Task dependency edges (PPM-B1, PROJ-21) — per-edge scheduling metadata beyond the flat FS/lag-0 default
+// baked into `project_tasks.depends_on`. A predecessor/successor pair with NO row here still schedules as
+// plain FS/lag-0 (the pre-PPM-B1 behaviour) — this table only carries the edges that need something richer:
+// SS/FF/SF dependency type and/or a lag (positive) or lead (negative) offset in days.
+export const projectTaskDependencies = pgTable(
+  'project_task_dependencies',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    predecessorTaskId: bigint('predecessor_task_id', { mode: 'number' }).notNull().references(() => projectTasks.id),
+    successorTaskId: bigint('successor_task_id', { mode: 'number' }).notNull().references(() => projectTasks.id),
+    depType: text('dep_type').notNull().default('FS'),         // FS | SS | FF | SF
+    lagDays: integer('lag_days').notNull().default(0),         // negative = lead
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    bySuccessor: index('idx_ptaskdep_successor').on(t.tenantId, t.successorTaskId),
+    byProject: index('idx_ptaskdep_project').on(t.tenantId, t.projectId),
+    uniq: unique('uq_ptaskdep_edge').on(t.tenantId, t.predecessorTaskId, t.successorTaskId),
+  }),
+);
+
+// Working calendar (PPM-B1, PROJ-21) — per-tenant non-working-weekday pattern (default Sat+Sun) + explicit
+// holiday exceptions. DISABLED by default (`enabled=false`): the CPM schedule's duration calculation stays
+// byte-identical calendar-day arithmetic unless a tenant explicitly opts in, so this is a zero-regression
+// additive feature. One row per tenant (upsert).
+export const projectCalendars = pgTable(
+  'project_calendars',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    enabled: boolean('enabled').notNull().default(false),
+    nonWorkingWeekdays: text('non_working_weekdays').notNull().default('0,6'), // CSV, 0=Sun..6=Sat
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ uniqTenant: unique('uq_pcal_tenant').on(t.tenantId) }),
+);
+
+export const projectCalendarExceptions = pgTable(
+  'project_calendar_exceptions',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    exceptionDate: date('exception_date').notNull(),
+    description: text('description'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    byTenant: index('idx_pcalexc_tenant').on(t.tenantId, t.exceptionDate),
+    uniq: unique('uq_pcalexc_date').on(t.tenantId, t.exceptionDate),
   }),
 );
 
@@ -716,3 +778,6 @@ export type ResourceRate = typeof resourceRates.$inferSelect;
 export type ProjectResource = typeof projectResources.$inferSelect;
 export type ResourceSkill = typeof resourceSkills.$inferSelect;
 export type ResourceCalendarEntry = typeof resourceCalendar.$inferSelect;
+export type ProjectTaskDependency = typeof projectTaskDependencies.$inferSelect;
+export type ProjectCalendar = typeof projectCalendars.$inferSelect;
+export type ProjectCalendarException = typeof projectCalendarExceptions.$inferSelect;

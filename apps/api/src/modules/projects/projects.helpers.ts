@@ -29,3 +29,18 @@ export const addDays = (ymdStr: string, days: number) => {
   d.setUTCDate(d.getUTCDate() + (Number(days) || 0));
   return d.toISOString().slice(0, 10);
 };
+
+// Working-calendar-aware duration (PPM-B1, PROJ-21): inclusive working-day count between two yyyy-mm-dd
+// dates, skipping the given non-working weekdays (0=Sun..6=Sat) and explicit exception dates. Only called
+// when a tenant's project_calendars row has enabled=true — the plain calendar-day count (unchanged) is used
+// otherwise, so this never regresses a tenant that hasn't opted in.
+export const workingDaysBetween = (startYmd: string, endYmd: string, nonWorkingWeekdays: number[], exceptions: Set<string>) => {
+  const start = new Date(`${startYmd}T00:00:00Z`);
+  const end = new Date(`${endYmd}T00:00:00Z`);
+  let count = 0;
+  for (const d = new Date(start); d.getTime() <= end.getTime(); d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().slice(0, 10);
+    if (!nonWorkingWeekdays.includes(d.getUTCDay()) && !exceptions.has(iso)) count++;
+  }
+  return count;
+};
