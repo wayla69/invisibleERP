@@ -2589,6 +2589,13 @@
       "idx": 370,
       "version": "7",
       "when": 2023820000335,
+      "tag": "0386_audience_export_members",
+      "breakpoints": true
+    },
+    {
+      "idx": 371,
+      "version": "7",
+      "when": 2023820000336,
       "tag": "0387_procurement_tenant_isolation",
       "breakpoints": true
     }
