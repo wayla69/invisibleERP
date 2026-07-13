@@ -32,7 +32,7 @@ PLAN (free / starter / business / pro / enterprise)
 | Suite | Modules (tokens) |
 |-------|------------------|
 | **core** (always-on) | users, dashboard, approvals, mobile, images, track |
-| **finance** | ar, creditors, exec |
+| **finance** | ar, creditors, exec, treasury *(TRE-01..05 depth; `treasury_approve` is a sub-permission)* |
 | **sales** | pos, order_mgt, claim_mgt, crm, delivery, returns, pricelist, promos |
 | **inventory** | warehouse, lots, locations |
 | **procurement** | procurement, pr_raise |
@@ -43,9 +43,9 @@ PLAN (free / starter / business / pro / enterprise)
 | **multibranch** | branch |
 | **portal** | order_cust, cust_dash, cust_inventory, cust_pos, cust_bom, cust_variance, cust_my_crm, cust_my_suppliers, cust_my_pos, cust_my_users |
 | **selfservice** | ess, vendor_portal |
-| **manufacturing** *(premium)* | — token-less; gated by `@RequiresSuite('manufacturing')` on the Manufacturing/MRP/QC/APS controllers |
+| **manufacturing** *(premium)* | quality *(QMS NCR/CAPA/SCAR; `quality_approve` is a sub-permission)* — plus `@RequiresSuite('manufacturing')` on the Manufacturing/MRP/QC/APS controllers |
 | **projects** *(premium)* | — token-less; gated by `@RequiresSuite('projects')` on the Projects + PMR controllers |
-| **hcm** *(premium)* | — token-less; gated by `@RequiresSuite('hcm')` on the HCM + Payroll controllers |
+| **hcm** *(premium)* | hr, hr_admin *(HCM depth, docs/42)* — plus `@RequiresSuite('hcm')` on the HCM + Payroll controllers |
 | **realestate** *(premium)* | — token-less; gated by `@RequiresSuite('realestate')` on the Real-estate controller |
 
 ## 3. Plans → suites (default; DB may override)
@@ -81,9 +81,12 @@ display names/prices changed. Prices are the recommended market-entry defaults �
 
 ## 4. Premium/add-on suites — the `@RequiresSuite` mechanism (1.1b, RESOLVED)
 
-Manufacturing / PPM / HCM / Real-estate have **no distinct coarse token** (their controllers ride on
-generic tokens like `exec`/`planner`/`bom_master`), so token→suite mapping alone would hand them to any
-plan that has `finance`. 1.1b resolves this with **token-less suites** gated by a class decorator:
+Manufacturing / PPM / HCM / Real-estate originally had **no distinct coarse token** (their controllers ride
+on generic tokens like `exec`/`planner`/`bom_master`), so token→suite mapping alone would hand them to any
+plan that has `finance`. 1.1b resolves this with **token-less suites** gated by a class decorator. (Later
+waves DID add coarse tokens for two of them — QMS `quality` and HCM-depth `hr`/`hr_admin` — which are now
+mapped into `manufacturing`/`hcm`, so both gating paths agree there; PPM and Real-estate remain purely
+decorator-gated, see `TOKENLESS_SUITES`.)
 
 - `apps/api/src/modules/billing/requires-suite.decorator.ts` — `@RequiresSuite('<suite>')`.
 - `PlanGuard` reads it and blocks (`403 SUITE_NOT_ENTITLED`) when the tenant's plan does not include the
@@ -184,6 +187,7 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # 
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.1 | 2026-07-12 | Platform | **Entitlement-map drift repaired** — four coarse MODULE_KEYs added by post-1.1 waves were never assigned to a suite, failing `check-entitlements.mjs` (`hr, hr_admin, quality, treasury`). Mapped: `treasury` → **finance** (TRE-01..05 is finance depth), `quality` → **manufacturing** (QMS rides the premium suite the doc already scoped as "Manufacturing/MRP/QC/APS"), `hr`+`hr_admin` → **hcm** (those controllers already carry `@RequiresSuite('hcm')`). The `*_approve` checker duties are sub-permissions (not suite-gated). `TOKENLESS_SUITES` narrowed to projects/realestate. Map-only — no runtime change while `ENTITLEMENTS_ENFORCE` is off; guard now reports 46 module keys across 16 suites. No control/RCM change. |
 | 1.0 | 2026-07-09 | Platform | 1.9 — **pricing-ladder restructure**: new `business` mid-tier ฿4,900/mo (Standard + procurement + multibranch, 25 seats, metered quotas between Standard/Pro); Standard re-priced ฿1,900→฿2,900 ($85/$850); premium-suite **list prices published** (§4b — was quote-only); **implementation packages** defined (§4c, one-time ฿30k/฿80k/฿150k). `PLAN_SUITES.business` added in `entitlements.ts` (validated by `check-entitlements.mjs`); seeded via `PLAN_SEED` upsert — existing subscriptions untouched (`seedPlans()` never writes `subscriptions`). No control/RCM change (commercial policy + seed data). |
 | 0.1 | 2026-07-07 | Platform | Initial packaging spec — plan→suite→module entitlement map (`entitlements.ts`) + CI guard (`check-entitlements.mjs`). Map-only; no enforcement yet (PlanGuard rewire is 1.2). Documented `KNOWN_UNGATED` gap (manufacturing/PPM/HCM/real-estate need gating tokens — 1.1b). |
 | 0.2 | 2026-07-07 | Platform | 1.2 — `PlanGuard` rewired: suite gating behind `ENTITLEMENTS_ENFORCE`/`ENTITLEMENTS_SHADOW` (default off = legacy behaviour), per-tenant Admin bypass removed (god-only), fail-open on infra error / fail-closed on missing plan, `resolveEntitledSuites` grandfather fallback. No behaviour change until enabled; enable SHADOW → backfill (1.3) → ENFORCE. |
