@@ -9,149 +9,25 @@ import { ModuleEnabledGuard } from './modules/admin-config/module.guard';
 import { PlanGuard } from './modules/billing/plan.guard';
 import { TenantTxInterceptor } from './common/tenant-tx.interceptor';
 import { AuditInterceptor } from './common/audit.interceptor';
-import { HealthModule } from './modules/health/health.module';
-import { AuthModule } from './modules/auth/auth.module';
-import { InventoryModule } from './modules/inventory/inventory.module';
-import { DashboardModule } from './modules/dashboard/dashboard.module';
-import { PosModule } from './modules/pos/pos.module';
-import { ProcurementModule } from './modules/procurement/procurement.module';
-import { FinanceModule } from './modules/finance/finance.module';
-import { ReportsModule } from './modules/reports/reports.module';
-import { CustomersModule } from './modules/customers/customers.module';
-import { NotificationsModule } from './modules/notifications/notifications.module';
-import { AnalyticsModule } from './modules/analytics/analytics.module';
-import { AiModule } from './modules/ai/ai.module';
-import { PortalModule } from './modules/portal/portal.module';
-import { MarketingModule } from './modules/marketing/marketing.module';
-import { LoyaltyModule } from './modules/loyalty/loyalty.module';
-import { CampaignsModule } from './modules/campaigns/campaigns.module';
-import { JourneysModule } from './modules/journeys/journeys.module';
-import { PartnersModule } from './modules/partners/partners.module';
-import { MemberModule } from './modules/loyalty/member/member.module';
-import { BomModule } from './modules/bom/bom.module';
-import { LedgerModule } from './modules/ledger/ledger.module';
-import { TaxProvisionModule } from './modules/tax-provision/tax-provision.module';
-import { TreasuryDebtModule } from './modules/treasury-debt/debt.module';
-import { TreasuryInvestModule } from './modules/treasury-invest/investment.module';
-import { TreasuryHedgeModule } from './modules/treasury-hedge/hedge.module';
-import { TreasuryPoolModule } from './modules/treasury-pool/pool.module';
-import { DisclosureModule } from './modules/disclosure/disclosure.module';
-import { PaymentsModule } from './modules/payments/payments.module';
-import { TaxModule } from './modules/tax/tax.module';
-import { BillingModule } from './modules/billing/billing.module';
-import { PlatformNotificationsModule } from './modules/platform-notifications/platform-notifications.module';
-import { PlatformModule } from './modules/platform/platform.module';
-import { RestaurantModule } from './modules/restaurant/restaurant.module';
-import { AssetsModule } from './modules/assets/assets.module';
-import { PettyCashModule } from './modules/petty-cash/petty-cash.module';
-import { EamModule } from './modules/eam/eam.module';
-import { LeasesModule } from './modules/leases/leases.module';
-import { MenuModule } from './modules/menu/menu.module';
-import { ReturnsModule } from './modules/returns/returns.module';
-import { BankModule } from './modules/bank/bank.module';
-import { BudgetModule } from './modules/budget/budget.module';
-import { RevenueModule } from './modules/revenue/revenue.module';
-import { RevBillingModule } from './modules/revrec-billing/rev-billing.module';
-import { RevVariableModule } from './modules/revrec-variable/rev-variable.module';
-import { RevModificationModule } from './modules/revrec-modifications/rev-modification.module';
-import { RevDisclosureModule } from './modules/revrec-disclosure/rev-disclosure.module';
-import { FxModule } from './modules/fx/fx.module';
-import { IntercompanyModule } from './modules/intercompany/intercompany.module';
-import { CoalitionModule } from './modules/coalition/coalition.module';
-import { NpsModule } from './modules/nps/nps.module';
-import { GiftCardsModule } from './modules/giftcards/gift-card.module';
-import { WorkflowModule } from './modules/workflow/workflow.module';
-import { MatchModule } from './modules/match/match.module';
-import { SourcingModule } from './modules/sourcing/sourcing.module';
-import { CostingModule } from './modules/costing/costing.module';
-import { LandedCostModule } from './modules/landed-cost/landed-cost.module';
-import { FluxModule } from './modules/flux/flux.module';
-import { WmsModule } from './modules/wms/wms.module';
-import { CrmModule } from './modules/crm/crm.module';
-import { MessagingModule } from './modules/messaging/messaging.module';
-import { PrintingModule } from './modules/printing/printing.module';
-import { PeripheralsModule } from './modules/peripherals/peripherals.module';
-import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
-import { AlertsModule } from './modules/alerts/alerts.module';
-import { SavedViewsModule } from './modules/saved-views/saved-views.module';
-import { UserPrefsModule } from './modules/user-prefs/user-prefs.module';
-import { GeoRefModule } from './modules/geo-ref/geo-ref.module';
-import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
-import { ItemSetupModule } from './modules/item-setup/item-setup.module';
-import { ScheduledChangesModule } from './modules/scheduled-changes/scheduled-changes.module';
-import { AuditViewerModule } from './modules/audit-viewer/audit-viewer.module';
-import { PlanningModule } from './modules/planning/planning.module';
-import { ConsolidationModule } from './modules/consolidation/consolidation.module';
-import { IcReconModule } from './modules/ic-reconciliation/ic-recon.module';
-import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
-import { ProfitabilityModule } from './modules/profitability/profitability.module';
-import { CpqModule } from './modules/cpq/cpq.module';
-import { ServiceModule } from './modules/service/service.module';
-import { QualityModule } from './modules/quality/quality.module';
-import { ServiceWarrantyModule } from './modules/service-warranty/service-warranty.module';
-import { ServiceCasesModule } from './modules/service-cases/service-cases.module';
-import { ServiceKbModule } from './modules/service-kb/service-kb.module';
-import { QualityCapaModule } from './modules/quality-capa/quality-capa.module';
-import { BiModule } from './modules/bi/bi.module';
-import { AdminConfigModule } from './modules/admin-config/admin-config.module';
-import { MasterDataModule } from './modules/masterdata/masterdata.module';
-import { StockOpsModule } from './modules/stock-ops/stock-ops.module';
-import { ClaimsModule } from './modules/claims/claims.module';
-import { DeliveryModule } from './modules/delivery/delivery.module';
-import { LotsModule } from './modules/lots/lots.module';
-import { ScanModule } from './modules/scan/scan.module';
-import { ImagesModule } from './modules/images/images.module';
-import { AdminUsersModule } from './modules/admin-users/admin-users.module';
-import { SodRegisterModule } from './modules/sod-register/sod-register.module';
-import { PayrollModule } from './modules/payroll/payroll.module';
-import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
-import { ProjectsModule } from './modules/projects/projects.module';
-import { PmrModule } from './modules/pmr/pmr.module';
-import { ReservationsModule } from './modules/reservations/reservations.module';
-import { RetentionModule } from './modules/retention/retention.module';
-import { ProgressBillingModule } from './modules/progress-billing/progress-billing.module';
-import { SubcontractsModule } from './modules/subcontracts/subcontracts.module';
-import { TendersModule } from './modules/tenders/tenders.module';
-import { RealEstateModule } from './modules/realestate/realestate.module';
-import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
-import { HcmModule } from './modules/hcm/hcm.module';
-import { PricingModule } from './modules/pricing/pricing.module';
-import { ChannelAdapterModule } from './modules/channel-adapter/channel-adapter.module';
-import { BranchModule } from './modules/branch/branch.module';
-import { HubModule } from './modules/hub/hub.module';
-import { EssModule } from './modules/ess/ess.module';
-import { SupplierModule } from './modules/supplier/supplier.module';
-import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
-import { AutomationModule } from './modules/automation/automation.module';
-import { QueryModule } from './modules/query/query.module';
-import { CopilotModule } from './modules/copilot/copilot.module';
-import { DocAiModule } from './modules/doc-ai/doc-ai.module';
-import { ApIntakeModule } from './modules/ap-intake/ap-intake.module';
-import { EmailCaptureModule } from './modules/email-capture/email-capture.module';
-import { NlAnalyticsModule } from './modules/nl-analytics/nl-analytics.module';
-import { AiConfigModule } from './modules/ai-config/ai-config.module';
-import { ControlsModule } from './modules/controls/controls.module';
-import { ControlConsoleModule } from './modules/control-console/control-console.module';
-import { DocumentTemplatesModule } from './modules/document-templates/document-templates.module';
-import { CustomObjectsModule } from './modules/custom-objects/custom-objects.module';
-import { ObjectLayoutsModule } from './modules/object-layouts/object-layouts.module';
-import { PublicApiModule } from './modules/public-api/public-api.module';
-import { IdentityModule } from './modules/identity/identity.module';
-import { I18nModule } from './modules/i18n/i18n.module';
-import { ThemeModule } from './modules/theme/theme.module';
-import { OnboardingModule } from './modules/onboarding/onboarding.module';
-import { SearchModule } from './modules/search/search.module';
-import { DeveloperModule } from './modules/developer/developer.module';
-import { ConnectorsModule } from './modules/connectors/connectors.module';
-import { MigrationModule } from './modules/migration/migration.module';
-import { LocalizationModule } from './modules/localization/localization.module';
-import { EInvoiceModule } from './modules/einvoice/einvoice.module';
-import { OpsModule } from './modules/ops/ops.module';
-import { PdpaModule } from './modules/pdpa/pdpa.module';
-import { GovernanceModule } from './modules/governance/governance.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { PdfModule } from './modules/pdf/pdf.module';
 import { MailModule } from './modules/mail/mail.module';
+import { AuthModule } from './modules/auth/auth.module';
+// docs/46 Phase 5 — the ~140 feature modules are grouped into ten domain AGGREGATES (src/domains/*),
+// pure wiring modules that make ownership legible and keep a new feature module a one-line change in its
+// own domain file instead of another line in a flat 140-entry array. Cosmetic for DI (Nest registers the
+// transitive imports identically); infrastructure (@Global Jobs/Pdf/Mail, Database, Common, Config) and
+// AuthModule (exports JwtModule → JwtAuthGuard can inject JwtService) stay at the root.
+import { FinanceDomainModule } from './domains/finance-domain.module';
+import { SupplyChainDomainModule } from './domains/supply-chain-domain.module';
+import { SalesCrmDomainModule } from './domains/sales-crm-domain.module';
+import { OperationsDomainModule } from './domains/operations-domain.module';
+import { ProjectsDomainModule } from './domains/projects-domain.module';
+import { PeopleDomainModule } from './domains/people-domain.module';
+import { AnalyticsDomainModule } from './domains/analytics-domain.module';
+import { AiDomainModule } from './domains/ai-domain.module';
+import { ExperienceDomainModule } from './domains/experience-domain.module';
+import { PlatformDomainModule } from './domains/platform-domain.module';
 
 @Module({
   imports: [
@@ -162,145 +38,16 @@ import { MailModule } from './modules/mail/mail.module';
     PdfModule, // @Global HTML→PDF renderer (external-service offload or pooled Chromium)
     MailModule, // @Global DocEmailService — email a rendered document (PDF attach, HTML fallback) via SMTP
     AuthModule, // exports JwtModule → JwtAuthGuard can inject JwtService
-    HealthModule,
-    InventoryModule,
-    DashboardModule,
-    PosModule,
-    ProcurementModule,
-    FinanceModule,
-    ReportsModule,
-    CustomersModule,
-    NotificationsModule,
-    AnalyticsModule,
-    AiModule,
-    PortalModule,
-    MarketingModule,
-    LoyaltyModule,
-    CampaignsModule,
-    JourneysModule,
-    PartnersModule,
-    MemberModule,
-    BomModule,
-    LedgerModule,
-    TaxProvisionModule,
-    TreasuryDebtModule,
-    TreasuryInvestModule,
-    TreasuryHedgeModule,
-    TreasuryPoolModule,
-    DisclosureModule,
-    PaymentsModule,
-    TaxModule,
-    BillingModule,
-    PlatformNotificationsModule,
-    PlatformModule,
-    RestaurantModule,
-    AssetsModule,
-    PettyCashModule,
-    EamModule,
-    LeasesModule,
-    MenuModule,
-    ReturnsModule,
-    BankModule,
-    BudgetModule,
-    RevenueModule,
-    RevBillingModule,
-    RevVariableModule,
-    RevModificationModule,
-    RevDisclosureModule,
-    FxModule,
-    IntercompanyModule,
-    CoalitionModule,
-    NpsModule,
-    GiftCardsModule,
-    WorkflowModule,
-    MatchModule,
-    SourcingModule,
-    CostingModule,
-    LandedCostModule,
-    FluxModule,
-    WmsModule,
-    CrmModule,
-    MessagingModule,
-    PrintingModule,
-    PeripheralsModule,
-    CustomFieldsModule,
-    AlertsModule,
-    SavedViewsModule,
-    UserPrefsModule,
-    GeoRefModule,
-    FeatureFlagsModule,
-    ItemSetupModule,
-    ScheduledChangesModule,
-    AuditViewerModule,
-    PlanningModule,
-    ConsolidationModule,
-    IcReconModule,
-    ReconciliationModule,
-    ProfitabilityModule,
-    CpqModule,
-    ServiceModule,
-    QualityModule,
-    ServiceWarrantyModule,
-    ServiceCasesModule,
-    ServiceKbModule,
-    QualityCapaModule,
-    BiModule,
-    AdminConfigModule,
-    MasterDataModule,
-    StockOpsModule,
-    ClaimsModule,
-    DeliveryModule,
-    LotsModule,
-    ScanModule,
-    ImagesModule,
-    AdminUsersModule,
-    SodRegisterModule,
-    PayrollModule,
-    ManufacturingModule,
-    ProjectsModule,
-    PmrModule,
-    ReservationsModule,
-    RetentionModule,
-    ProgressBillingModule,
-    SubcontractsModule,
-    TendersModule,
-    RealEstateModule,
-    MfgDepthModule,
-    HcmModule,
-    PricingModule,
-    ChannelAdapterModule,
-    BranchModule,
-    HubModule,
-    EssModule,
-    SupplierModule,
-    DemandMlModule,
-    DocumentTemplatesModule,
-    CustomObjectsModule,
-    ObjectLayoutsModule,
-    PublicApiModule,
-    IdentityModule,
-    AutomationModule,
-    QueryModule,
-    CopilotModule,
-    DocAiModule,
-    ApIntakeModule,
-    EmailCaptureModule,
-    NlAnalyticsModule,
-    AiConfigModule,
-    ControlsModule,
-    ControlConsoleModule,
-    I18nModule,
-    ThemeModule,
-    OnboardingModule,
-    SearchModule,
-    DeveloperModule,
-    ConnectorsModule,
-    MigrationModule,
-    LocalizationModule,
-    EInvoiceModule,
-    OpsModule,
-    PdpaModule,
-    GovernanceModule,
+    FinanceDomainModule,
+    SupplyChainDomainModule,
+    SalesCrmDomainModule,
+    OperationsDomainModule,
+    ProjectsDomainModule,
+    PeopleDomainModule,
+    AnalyticsDomainModule,
+    AiDomainModule,
+    ExperienceDomainModule,
+    PlatformDomainModule,
   ],
   providers: [
     // Guard order: auth → permission → module-enabled → plan-feature.
