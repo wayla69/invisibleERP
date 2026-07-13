@@ -244,6 +244,21 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     is only signal about *main*, never about your current tip. (b) When landing a CI-topology change (shard
     names, new required checks), remind the owner to update branch-protection required checks — the old
     check names never report again.
+13. **A registry-first dispatch SHADOWS main's inline rewrite at merge time — after every main merge, grep
+    the dispatch keys BOTH sides touched.** The docs/46 registries (BI reports, approval queues) are
+    consulted BEFORE bi-generate's residual if-chain, so when your branch moves a report type into a
+    `*-bi-reports.ts` provider while a concurrent main PR REWRITES that type's inline branch, the merge keeps
+    both and the OLD provider silently wins (bit the pdpa G3b/G3c checks: `{targets:['mock']}` looked like
+    env-gating, but main's new Meta/Google adapter code never ran). Three lessons from that day:
+    (a) **instrument, don't theorize** — a one-line `console.error` in the suspect resolver proved it was
+    NEVER CALLED, i.e. the run took a different code path entirely; that reframes the whole search.
+    (b) **cutover harnesses import the BUILT `apps/api/dist`** (e.g. the schema) — after any merge or schema
+    change, `pnpm --filter @ierp/api build` before trusting a harness failure; `onboarding` was red purely
+    from a stale dist while `tsc --noEmit` was green. (c) fix direction: port main's rewrite VERBATIM into
+    the provider (its owning module — module-local deps often let an `@Optional()` guard drop) and DELETE the
+    inline duplicate + its dispatch line; never leave both. And remember mantra #9's hidden second collision:
+    the auto-merge can silently DROP main's added dispatch line in a region your branch edited — grep the
+    merged file for every key main added, not just the conflict hunks.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -331,8 +346,8 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   `use-client-baseline.json` fails. A shared **client island imported only by already-`'use client'` pages
   must OMIT its own directive** (it inherits the boundary — pattern: `apps/web/src/components/state-view.tsx`);
   adding the directive needlessly is what trips it. (3) `tools/ci/check-service-size.mjs` (docs/46 Phase 0 —
-  god-service accretion): a grandfathered `apps/api/src/modules` file (the 14 over 600 LOC in
-  `service-size-baseline.json`) may not GROW — in lines **or** constructor params — and no NEW module file may
+  god-service accretion): a grandfathered `apps/api/src/modules` file (in
+  `service-size-baseline.json`; 14 at Phase 0, **8** after docs/46 Phase 4 — the list may only shrink) may not GROW — in lines **or** constructor params — and no NEW module file may
   pass 600 LOC. Land the feature as its own sub-service / registered provider (docs/46 §4) instead of appending
   to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
   after an extraction. (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
@@ -342,6 +357,27 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   never a direct journal join from another module. Run all four scripts locally before pushing. Also: **PR CI runs
   on the branch⋈main *merge* commit**, so a ratchet reads against *current* `main`'s baseline — your local
   count can be off by the files `main` added since you branched (relative pass/fail still holds).
+- **docs/46 is fully delivered (PRs #740/#749/#755) — its growth seams are now the ONLY way to add these
+  things; extend them, don't bypass.** (1) A new FEATURE MODULE is one line in its owning
+  `apps/api/src/domains/<domain>-domain.module.ts` aggregate, NOT `app.module.ts` (only infrastructure +
+  AuthModule + the ten aggregates live there). Aggregates must import **and RE-EXPORT** their members — the
+  root `APP_GUARD`/`APP_INTERCEPTOR` providers resolve in AppModule's own injector and only see re-exported
+  providers (JwtAuthGuard→ApiKeyService broke boot until the re-exports were added). (2) A new POSTING EVENT
+  goes in the owning `modules/ledger/posting-events.<domain>.ts` shard (sales·scm·payroll·assets·leases·
+  finance·treasury·revenue·projects; shared types + `r()` in `posting-events.types.ts`); `posting-events.ts`
+  composes them and stays the ONLY lookup API (`postingDefault`/`postingRole`/`assertPostingEventDefaults`).
+  (3) Ledger facade round 2 layout: reporting reads (TB/GL-detail/IS/BS/perAccountNet/gaapComparison + the
+  canonical `aggregateByType`/`ledgerCond`, both PUBLIC — they feed the cashflow + periods ports) live in
+  `ledger-reporting.service.ts`; fiscal periods/close/opening balances/TFRS-15 loyalty accrual in
+  `ledger-periods.service.ts` (exports `resolveTenantId`); GL-24 override RESOLUTION
+  (`resolvePostingOverrides`/`resolvePostingAccountSet`/`resolvePostingOverridesMany`) sits beside its
+  TtlCache in `posting-overrides-cache.ts` — **never move it into `posting.service.ts`**: LedgerService
+  value-importing PostingService while PostingService DI-injects LedgerService is a require cycle (undefined
+  `design:paramtypes` → forwardRef churn). The facade keeps thin delegators; its ctor stays positional
+  `(db, docNo)` (goldenmaster/writeflow contract). (4) The former single-file `.module.ts` gods (customers,
+  crm/accounts, crm/account-depth, crm/account-health) are conventional service/controller/module files now —
+  zod bodies export from the `*.service.ts`, and the module files re-export the service classes for old
+  import sites.
 - **Bulk master-data import/export is registry-driven; extend it, don't rebuild.** `modules/masterdata`
   (`master-registry.ts` + `masterdata.service.ts`) drives export/template/validate/import for all entities and
   accepts **csv / rows / base64 `xlsx`** (`rowsFromInput` → `parseXlsx`/`parseCsv`). Setup screens surface the
