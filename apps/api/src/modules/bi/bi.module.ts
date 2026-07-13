@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DiscoveryModule } from '@nestjs/core';
 import { MessagingModule } from '../messaging/messaging.module';
 import { FinanceModule } from '../finance/finance.module';
 import { EamModule } from '../eam/eam.module';
@@ -26,6 +27,7 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { BiService } from './bi.service';
 import { BiGenerateService } from './bi-generate.service';
 import { BiScheduleService } from './bi-schedule.service';
+import { BiReportRegistrarService } from './bi-report-registrar.service';
 import { SchedulerTickService } from './scheduler-tick.service';
 import { BiLiveModule } from './bi-live.module';
 import { BiController } from './bi.controller';
@@ -43,5 +45,5 @@ import { AnalyticsModule } from '../analytics/analytics.module';
 // (CrmPipelineService) supply the project_evm + crm_win_loss report types. DRIZZLE is global.
 // BudgetModule/ProcurementModule/MatchModule supply the residual-gap report types budget_variance,
 // supplier_scorecard and the exec_scorecard supply-chain leg (RG-1/2/3).
-@Module({ imports: [MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, RevDisclosureModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, FluxModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule, ScheduledChangesModule, PdpaModule, HcmModule, MarketingModule, CampaignsModule, MenuModule, AnalyticsModule], providers: [BiService, BiGenerateService, BiScheduleService, SchedulerTickService], controllers: [BiController], exports: [BiService] })
+@Module({ imports: [DiscoveryModule, MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, RevDisclosureModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, FluxModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule, ScheduledChangesModule, PdpaModule, HcmModule, MarketingModule, CampaignsModule, MenuModule, AnalyticsModule], providers: [BiService, BiGenerateService, BiScheduleService, SchedulerTickService, BiReportRegistrarService], controllers: [BiController], exports: [BiService] })
 export class BiModule {}

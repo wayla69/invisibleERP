@@ -1,0 +1,28 @@
+{
+  "_note": "docs/46 Phase 3 (2026-07-12): ledger import-boundary ratchet. Files outside modules/ledger that reference the journalEntries/journalLines Drizzle tables are grandfathered here; the set may only SHRINK. New GL reads go through LedgerReadService (accountNet/cashPosition/entryRefNo) — or add an equally narrow method there — and postings via LedgerService.postEntry. Some grandfathered reads are by design and expected to stay (finance reconcileControls REC-04 reads both sides of the reconciliation independently; consolidation's group eliminations); the rest are Phase 3+ migration candidates. Drop a file here in the same PR that removes its direct reads (--update regenerates).",
+  "files": [
+    "apps/api/src/database/seed-demo-finance.ts",
+    "apps/api/src/modules/assets/assets.service.ts",
+    "apps/api/src/modules/bank/bank.service.ts",
+    "apps/api/src/modules/bi/bi.service.ts",
+    "apps/api/src/modules/budget/budget.service.ts",
+    "apps/api/src/modules/commitments/commitments.service.ts",
+    "apps/api/src/modules/consolidation/consolidation.service.ts",
+    "apps/api/src/modules/controls/controls.service.ts",
+    "apps/api/src/modules/finance/finance-metrics.service.ts",
+    "apps/api/src/modules/finance/finance.service.ts",
+    "apps/api/src/modules/ic-reconciliation/ic-recon.service.ts",
+    "apps/api/src/modules/intercompany/intercompany.service.ts",
+    "apps/api/src/modules/inventory/inventory-ledger.service.ts",
+    "apps/api/src/modules/leases/leases.service.ts",
+    "apps/api/src/modules/leases/lessor-leases.service.ts",
+    "apps/api/src/modules/payroll/payroll.service.ts",
+    "apps/api/src/modules/planning/planning.service.ts",
+    "apps/api/src/modules/profitability/profitability.service.ts",
+    "apps/api/src/modules/projects/projects.service.ts",
+    "apps/api/src/modules/reconciliation/reconciliation.service.ts",
+    "apps/api/src/modules/restaurant/tip.service.ts",
+    "apps/api/src/modules/revrec-disclosure/rev-disclosure.service.ts",
+    "apps/api/src/modules/tax/reports/tax-reports.service.ts"
+  ]
+}

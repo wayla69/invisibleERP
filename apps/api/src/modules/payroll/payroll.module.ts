@@ -4,6 +4,7 @@ import { DocumentTemplatesModule } from '../document-templates/document-template
 import { PayrollController } from './payroll.controller';
 import { PayrollService } from './payroll.service';
 import { PayslipPdfService } from './payslip-pdf.service';
+import { PayrollApprovalQueues } from './payroll-approval-queues';
 
 // Payroll (เงินเดือน) — employees, monthly run with SSO + PIT withholding, balanced GL posting, ภ.ง.ด.1.
 // LedgerModule provides LedgerService for the payroll journal entry. The payslip renderer (PayslipPdfService)
@@ -12,7 +13,7 @@ import { PayslipPdfService } from './payslip-pdf.service';
 @Module({
   imports: [LedgerModule, DocumentTemplatesModule],
   controllers: [PayrollController],
-  providers: [PayrollService, PayslipPdfService],
+  providers: [PayrollApprovalQueues, PayrollService, PayslipPdfService],
   exports: [PayrollService],
 })
 export class PayrollModule {}

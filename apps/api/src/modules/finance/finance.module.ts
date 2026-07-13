@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DiscoveryModule } from '@nestjs/core';
 import { FinanceController } from './finance.controller';
 import { FinanceService } from './finance.service';
 import { ArInvoicePdfService } from './ar-invoice-pdf.service';
@@ -18,11 +19,13 @@ import { MatchModule } from '../match/match.module';
 import { MessagingModule } from '../messaging/messaging.module';
 import { CommitmentsModule } from '../commitments/commitments.module';
 import { BudgetModule } from '../budget/budget.module';
+import { FinanceBiReports } from './finance-bi-reports';
+import { ApprovalQueueRegistrarService } from './approval-queue-registrar.service';
 
 @Module({
-  imports: [LedgerModule, TaxModule, MatchModule, MessagingModule, CommitmentsModule, BudgetModule],
+  imports: [DiscoveryModule, LedgerModule, TaxModule, MatchModule, MessagingModule, CommitmentsModule, BudgetModule],
   controllers: [FinanceController, CollectionsController, FinanceMetricsController],
-  providers: [FinanceService, ArInvoicePdfService, FinanceDocsPdfService, FinancialHealthService, ArAllowanceService, ArCashApplicationService, ApPaymentRunService, ArApNettingService, CollectionsService, FinanceMetricsService],
+  providers: [ApprovalQueueRegistrarService, FinanceBiReports, FinanceService, ArInvoicePdfService, FinanceDocsPdfService, FinancialHealthService, ArAllowanceService, ArCashApplicationService, ApPaymentRunService, ArApNettingService, CollectionsService, FinanceMetricsService],
   exports: [FinanceService, FinancialHealthService, ArAllowanceService, ArCashApplicationService, ApPaymentRunService, ArApNettingService, CollectionsService, FinanceMetricsService],
 })
 export class FinanceModule {}

@@ -1,0 +1,54 @@
+{
+  "_note": "docs/46 Phase 0 (2026-07-12): god-service accretion ratchet. Every apps/api/src/modules file over maxLoc=600 at introduction is grandfathered at its then-current LOC + constructor-param count; both may only go DOWN (extractions lower them; a file dropping under 600 leaves the list). Growing a listed file, adding a ctor param to one, or pushing a new file past 600 fails the build gate — land the change as a sub-service/registered provider per docs/46 §4 instead, or bump this baseline in the same PR with a justification appended here (use-client precedent). 2026-07-13 merge of origin/main: projects.service.ts re-baselined 1163→1173 LOC — main's PROJ-19 earned-schedule feature (#735) landed on main before this ratchet existed there, so the growth predates the guard and is not new accretion by this branch; docs/46 Phase 4 lists projects for a later extraction round.",
+  "maxLoc": 600,
+  "files": {
+    "apps/api/src/modules/assets/assets.service.ts": {
+      "loc": 916,
+      "ctorParams": 6
+    },
+    "apps/api/src/modules/billing/billing.service.ts": {
+      "loc": 1095,
+      "ctorParams": 5
+    },
+    "apps/api/src/modules/crm/pipeline/crm-pipeline.service.ts": {
+      "loc": 1109,
+      "ctorParams": 5
+    },
+    "apps/api/src/modules/finance/ap-payment-run.service.ts": {
+      "loc": 669,
+      "ctorParams": 9
+    },
+    "apps/api/src/modules/inventory/inventory-ledger.service.ts": {
+      "loc": 607,
+      "ctorParams": 4
+    },
+    "apps/api/src/modules/ledger/ledger.service.ts": {
+      "loc": 927,
+      "ctorParams": 3
+    },
+    "apps/api/src/modules/loyalty/member.service.ts": {
+      "loc": 680,
+      "ctorParams": 7
+    },
+    "apps/api/src/modules/messaging/line-webhook.controller.ts": {
+      "loc": 978,
+      "ctorParams": 6
+    },
+    "apps/api/src/modules/payments/payments.service.ts": {
+      "loc": 737,
+      "ctorParams": 7
+    },
+    "apps/api/src/modules/procurement/procurement.service.ts": {
+      "loc": 1011,
+      "ctorParams": 13
+    },
+    "apps/api/src/modules/projects/projects.service.ts": {
+      "loc": 1173,
+      "ctorParams": 6
+    },
+    "apps/api/src/modules/restaurant/dine-in.service.ts": {
+      "loc": 654,
+      "ctorParams": 16
+    }
+  }
+}
