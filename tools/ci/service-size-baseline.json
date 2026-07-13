@@ -14,10 +14,6 @@
       "loc": 607,
       "ctorParams": 4
     },
-    "apps/api/src/modules/ledger/ledger.service.ts": {
-      "loc": 927,
-      "ctorParams": 3
-    },
     "apps/api/src/modules/loyalty/member.service.ts": {
       "loc": 680,
       "ctorParams": 7
