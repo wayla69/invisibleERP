@@ -187,6 +187,21 @@ accountability, coverage, and after-the-fact accuracy. It posts nothing to the l
   snapshot** BI report) stores a dated snapshot of the forecast **and** the period's actual won, so the
   **ความแม่นยำ (Accuracy)** tile and the history track how the forecast compared to what actually closed.
 
+## 16.4e Territory & quota (เขตการขาย/โควตา — the "Territory / quota" tab, CRM-11)
+
+The **เขตการขาย/โควตา** tab makes territories and quotas governed master data, so attainment is measured against
+an approved target instead of an ad-hoc number. It posts nothing to the ledger. *(Control CRM-10.)*
+
+- **Create a territory.** In *สร้างเขตการขาย*, give it a name, an optional **parent** (to build a roll-up
+  hierarchy — e.g. *Northeast* under *North*), and a manager. Territories carry match criteria (regions /
+  segments / product categories) for how accounts map to them.
+- **Assign reps & set quotas.** Assign reps to a territory (via its detail), then in *ตั้งโควตางวดนี้* set a
+  per-period **target** for either an **owner** (a rep, by username) or a **territory** (by its `TERR-…` code).
+- **Attainment roll-up.** The two tables show attainment for the current period: **per rep** (won vs the rep's
+  quota) and **by territory** — where a territory's *won* is the sum across its whole subtree (children
+  included), measured against the territory quota. A badge flags ≥100% (green), ≥70% (amber) and below
+  (red), so a rep's or a region's shortfall to plan surfaces before the period closes.
+
 ---
 
 ## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
@@ -449,6 +464,7 @@ interactions ended without a case being opened — a direct read on how much wor
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.3 | 2026-07-12 | **Territory & quota (`/crm`) — CRM-11, control CRM-10:** new §16.4e + a new *Territory / quota* tab. Sales **territories** become governed master data — a name, optional **parent** (team roll-up hierarchy), manager and match criteria (regions/segments/categories) — with **rep assignments** and per-period **quotas** for an owner or a territory. The **attainment** tables reconcile won-in-period against the quota **per rep** and **by territory** (a territory's won sums its whole subtree), with a ≥100/≥70/below badge so a shortfall to plan surfaces early. Read-only to the ledger. |
 | 2.2 | 2026-07-12 | **Sales forecast depth (`/crm`) — CRM-12, control CRM-09:** new §16.4d + a new *Forecast* tab. A governance layer over the live pipeline forecast: the **manager roll-up** reconciles each rep's **submitted** commit/best-case override against the **system-weighted** forecast with the **variance**; reps submit their own number per period (governed draft → submitted); a **pipeline-coverage** ratio (open pipeline ÷ commit target, ≥3× healthy) + a commit→best-case→pipeline **waterfall**; and **Snapshot now** (or the scheduled *CRM sales forecast snapshot* report) records a dated forecast + the period's actual won for the **forecast-vs-actual accuracy** trend. Read-only — posts nothing to the ledger. |
 | 2.1 | 2026-07-12 | **Account health & churn watchlist (`/crm`) — CRM-15, control CRM-08:** new §16.4c + a new *Account health* tab. Every account gets a 0–100 **health score** (engagement recency, open pipeline, open/escalated/SLA-breached support cases, win/loss) banded **healthy / watch / at-risk**, ranked worst-first as a **churn watchlist** with an explainable per-factor breakdown. Deals tag **new / renewal / expansion** and a **renewal pipeline** card totals renewal/expansion value; an account that won before but has no open renewal is flagged a **renewal gap**. **Snapshot now** (or the scheduled *CRM account health snapshot* report) stores a dated score per account for trend. Read-only — posts nothing to the ledger. |
 | 2.0 | 2026-07-12 | **B2B account/contact 360 depth (`/crm`) — CRM-7, control CRM-07:** new §16.4b. **Account hierarchy** (give an account a parent to model a group; the hierarchy view rolls the whole group's weighted pipeline up; cycles blocked); **buying committee** (record who decides on a deal — role + influence + one primary, contacts must belong to the deal's account); and **account plans** (a new *Account plans* tab — governed draft → active → closed plans with an owner, objective, target revenue and target product categories, plus a **whitespace** panel showing which product categories the account isn't being pursued for). Added the `HIERARCHY_CYCLE`/`SELF_PARENT`, `CONTACT_ACCOUNT_MISMATCH`/`COMMITTEE_DUP`, `UNKNOWN_CATEGORY`, and `PLAN_*` error rows. |
