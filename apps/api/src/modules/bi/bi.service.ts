@@ -48,6 +48,7 @@ import { PdpaService } from '../pdpa/pdpa.service';
 import { GovernanceService } from '../governance/governance.service';
 import { TaxJobsService } from '../tax/tax-jobs.service';
 import { ReputationBiReports } from '../reputation/reputation-bi-reports';
+import { MmmModelService } from '../mmm/mmm-model.service';
 
 // Job type for offloading a due report/action subscription to the background worker.
 export const REPORT_SUBSCRIPTION_JOB = 'report_subscription';
@@ -123,6 +124,8 @@ export class BiService implements OnModuleInit {
     // docs/47 (param 32, APPENDED — see the param-31 note above: positional contract, new params only
     // ever append) — reputation_summary live dashboard read (Google Maps reviews + GA4).
     @Optional() private readonly reputationBi?: ReputationBiReports,
+    // docs/48 (param 33, APPENDED) — mmm_summary live dashboard read (Marketing Mix channel ROI).
+    @Optional() private readonly mmmModel?: MmmModelService,
   ) {}
 
   // Register the background handler that runs one due subscription (report or heavy action job) off the
@@ -523,6 +526,13 @@ export class BiService implements OnModuleInit {
   async reputationSummaryLive(user: JwtUser, days?: number) {
     if (!this.reputationBi) throw new BadRequestException({ code: 'BI_UNAVAILABLE', message: 'Report generation not available', messageTh: 'ระบบสร้างรายงานไม่พร้อมใช้งาน' });
     return this.reputationBi.summary(user, days ?? 30);
+  }
+
+  // Live Marketing Mix dashboard read (docs/48) — the latest model run's per-channel results, same shape
+  // as reputationSummaryLive: reuses MmmModelService.latestSummary(), no report_runs/register side effect.
+  async mmmSummaryLive(user: JwtUser) {
+    if (!this.mmmModel) throw new BadRequestException({ code: 'BI_UNAVAILABLE', message: 'Report generation not available', messageTh: 'ระบบสร้างรายงานไม่พร้อมใช้งาน' });
+    return this.mmmModel.latestSummary(user);
   }
 
 
