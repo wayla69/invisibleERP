@@ -11,6 +11,7 @@
     "db:new": "node ../../tools/ci/new-migration.mjs --create",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/database/migrate.ts",
+    "db:migrate:kit": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/database/seed.ts",
     "db:create-god": "tsx src/database/create-god-user.ts",

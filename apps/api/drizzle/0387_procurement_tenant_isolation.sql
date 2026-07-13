@@ -17,14 +17,27 @@
 -- rows are expected — the final verification block below fails the migration loudly if any remain NULL,
 -- rather than silently leaving orphaned/invisible-to-everyone data.
 --
--- NB (first deploy attempt, 2026-07-13): the original version of this file batched multiple UPDATE
--- statements per migration-runner dispatch chunk, which caused the backfill to silently no-op in prod
--- (deploy failed on step 4's fail-loud check, reporting all 196 rows unattributed) even though the
--- identical logic run as individually-dispatched queries backfills every row cleanly (verified directly
--- against prod in a rolled-back transaction). Root cause not fully isolated (suspected drizzle-kit/
--- postgres-js multi-statement-chunk dispatch), but the fix is unambiguous: one statement per dispatch
--- chunk, forcing each UPDATE to run as its own round-trip. The failed attempt rolled back cleanly (this
--- file was never marked applied), so editing it in place is safe.
+-- NB (two failed deploy attempts, 2026-07-13): the real root cause of both failures is Row-Level Security
+-- on the `users` table. Prod runs migrations as the hardened `ierp_app` role (non-superuser, NOBYPASSRLS —
+-- security-review H-3), and `users` has FORCE ROW LEVEL SECURITY (it has a tenant_id column, so 0002's
+-- loop covers it). The canonical tenant_isolation policy is purely GUC-based (`app.bypass_rls`/
+-- `app.tenant_id`), not role-based — migrations set neither GUC, so `SELECT ... FROM users` inside this
+-- backfill saw ZERO rows under ierp_app's real privileges, even though it worked in every local/manual
+-- test (all of which connected as the Postgres-QDRG public endpoint's superuser, which bypasses RLS
+-- unconditionally — masking the bug entirely). Confirmed directly: `SELECT count(*) FROM users` returns 0
+-- under `SET ROLE app_user` with no bypass GUC set, and 4 once `app.bypass_rls='on'` is set. Fix: set that
+-- GUC explicitly as this migration's first statement (step 0) — the same mechanism the app itself uses
+-- for HQ/god bypass, just invoked directly since migrations run outside the request interceptor. (A prior,
+-- now-superseded attempt at this note blamed multi-statement dispatch batching — that was a red herring;
+-- it never reproduced when tested with the connecting role's REAL privileges.) The failed attempts rolled
+-- back cleanly (this file was never marked applied), so editing it in place is safe.
+
+-- ── 0. Bypass RLS for the duration of this migration — required to read `users.tenant_id` (FORCE RLS,
+-- migrations carry no app.bypass_rls/app.tenant_id GUC otherwise) — and harmless for every other
+-- statement below (ALTER/CREATE INDEX need no RLS at all; the RLS-setup step in §6 is unaffected since it
+-- operates via EXECUTE'd DDL, not row reads).
+SELECT set_config('app.bypass_rls', 'on', true);
+--> statement-breakpoint
 
 -- ── 1. Add the column ───────────────────────────────────────────────────────────────────────────────
 ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);
