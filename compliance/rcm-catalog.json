@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 275,
+    "total": 277,
     "by_status": {
-      "Implemented": 272,
+      "Implemented": 274,
       "Partial": 3
     },
     "by_family": {
@@ -28,11 +28,11 @@
       "Multi-Branch & Offline POS": 7,
       "Payroll": 15,
       "Privacy · PDPA": 5,
-      "Project Accounting": 20,
+      "Project Accounting": 21,
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 42,
+      "Revenue & Cash": 43,
       "Tax": 12
     }
   },
@@ -1689,6 +1689,25 @@
       "toe": "Per enrolment / continuous",
       "evidence": "Sales / SDR / Sales Manager",
       "status": "P13"
+    },
+    {
+      "control_id": "CRM-12",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (CPQ bundles / tiered discount authority)",
+      "risk": "CPQ bundle pricing and large-discount authority are ungoverned: a bundle (multiple products sold as one SKU, priced below the sum of parts) has no product-cost basis captured, so a bundle's blended margin can silently fall below the company's floor without CPQ-01's per-line check ever seeing it; and EVERY breach of the discount ceiling — a 6% overage or a 60% giveaway — routes to the same single approver tier, so there is no escalation to executive sign-off for a materially larger discount. Bundles can hide margin erosion, and a large discount clears the SAME low bar as a small one.",
+      "assertion": "Occurrence/Accuracy/Authorization",
+      "description": "CPQ guided selling depth (CRM-14, migration 0399) — extends CPQ-01, no new maker-checker rail. BUNDLES: cpq_bundles/cpq_bundle_items define a bundle SKU with each component's cost captured; POST …/quotes/:id/lines/bundle EXPANDS the bundle into ordinary quote_lines (bundle_code-tagged, one row per component carrying its captured unit_cost) — so the EXISTING CPQ-01 metricsFromLines()/sendQuote() floor check automatically covers the bundle's blended margin with NO core-service duplication; a bundle cannot be used to hide margin erosion. TIERED discount-approval matrix: cpq_settings.exec_discount_pct is an optional second, higher discount ceiling; a breach at/under it still needs any cpq_approve holder (manager tier, CPQ-01 unchanged), but a breach ABOVE it requires a caller holding `exec` specifically (quote_approvals.required_tier records which tier applied; TIER_APPROVAL_REQUIRED on a mismatched approver) — so a materially larger discount escalates past the standard approver. GUIDED SELLING: GET /api/cpq/recommendations is a read-only, EXPLAINABLE co-purchase surface (which other configs the same customer bought in a different Accepted quote, ranked by frequency — no trained model, mirrors the G2 market-basket-affinity posture) — informational, not itself a control. Bundle/recommendation reads gate exec/cpq; bundle creation is masterdata (mirrors config/rule creation). Two new tenant tables + three ALTERs (0232 RLS, tenant-leading indexes).",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per quote send / approval",
+      "owner": "Sales / Sales Manager / Executive",
+      "coso": "P10",
+      "code_reference": "cpq.service.ts (createBundle/listBundles/getBundle; addBundleLine expands a bundle instance into bundle_code-tagged quote_lines with captured component unit_cost; sendQuote computes requiredTier from exec_discount_pct and stamps quote_approvals.required_tier; approveDiscount enforces the exec-tier gate — TIER_APPROVAL_REQUIRED when a non-exec cpq_approve holder attempts an exec-tier approval; getSettings/updateSettings expose exec_discount_pct; recommendations co-purchase read over quotes.configId + bundle-expanded quote_lines.itemCode); cpq.controller.ts (/api/cpq/bundles[/:code], /api/cpq/quotes/:id/lines/bundle, /api/cpq/recommendations); schema/cpq.ts cpq_bundles + cpq_bundle_items + quote_lines.bundle_code + cpq_settings.exec_discount_pct + quote_approvals.required_tier, migration 0399; cutover/cpq-approval.ts (ToE, CRM-14 checks)",
+      "tod": "Inspect the bundle-to-quote_lines expansion (captured component cost, no core floor-check change), the exec-tier threshold computation on send + the enforced approver-tier check on approve, and the co-purchase recommendation read.",
+      "toe": "Re-perform (cpq-approval harness): create a 2-component bundle (one thin-margin, one healthy) and add it to a Draft quote -> 2 bundle-tagged lines; sending the quote catches the BLENDED margin breach via the unmodified CPQ-01 check -> PendingApproval, and a plain cpq_approve holder (no exec) clears it (margin-only breach stays manager-tier); set an exec-tier discount ceiling, add a healthy-margin bundle with a discount above it -> PendingApproval, a plain cpq_approve holder is BLOCKED (403 TIER_APPROVAL_REQUIRED), an exec-permission holder clears it; accepting the bundle quote then makes its components surface as a mutual recommendation; a second tenant cannot see the first tenant's bundle (RLS).",
+      "evidence": "Bundle master + component cost register; bundle-expansion audit trail (shared quote_lines, CPQ-01 floor coverage); tiered discount-approval log (required_tier on quote_approvals); co-purchase recommendation read",
+      "status": "Implemented"
     },
     {
       "control_id": "CPQ-01",
@@ -3360,6 +3379,25 @@
       "tod": "Inspect the ES interpolation (last cumulative-PV ≤ EV month + within-month fraction, plateau credited), the AT month arithmetic, the SPI(t)/SV(t)/forecast derivation, and the action-center gate (fires only when the project is not already red).",
       "toe": "Re-perform: a 2-month plan 95% earned read at month 6 → classic SPI 0.95 (reads fine) but ES 1.9 / AT 6.0 → SPI(t) 0.3167 RED, SV(t) −4.1 mo, forecast ~6.3 mo; the action center surfaces schedule_slip_es (medium) for it and suppresses the item on an already-red project; an EV sitting on a flat PV plateau reads ahead (no false alarm); a project without a costed dated plan → NO_DATED_PLAN (re-performed by the projects harness).",
       "evidence": "Earned-schedule endpoint payload (ES/AT/SV(t)/SPI(t)/forecast finish); the schedule_slip_es action-center item",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "PROJ-20",
+      "cycle": "Project Accounting",
+      "category": "Detective",
+      "fsli": "Resource capacity (skills/role supply-vs-demand)",
+      "risk": "A resource heatmap assumes every booked person is at 100% capacity and every named assignment is a real, qualified person — so a part-time or on-leave resource reads as merely 'busy' at 60% instead of critically over-committed, a generic placeholder booking ('Senior Dev TBD') is silently treated as staffed, and a role or skill with more assigned demand than qualified people to do the work goes unnoticed until the project slips.",
+      "assertion": "Completeness/Accuracy/Timeliness",
+      "description": "Resource capacity heatmap governed by a REAL per-resource availability calendar + named-vs-generic booking visibility + role/skill supply-vs-demand (PPM-A1): GET /api/projects/resources/capacity's over-allocation flag now compares each month's demand to the resource's TRUE availability ceiling (resource_calendar.available_pct, default 100% absent an override — e.g. a documented 50%-part-time person is flagged over-allocated at 60%, not only above a flat 100% assumption) instead of a hardcoded 100%, and marks each resource `named` (backed by a resource_skills row) vs a GENERIC placeholder booking. GET /api/projects/resources/role-demand rolls assignment demand (Σ alloc_pct tagged with a role) up against role/skill SUPPLY (Σ availability of every resource_skills-tagged person who can fill it, calendar-aware) per month, flagging a role `understaffed` whenever demand exceeds the qualified supply — surfaced before it becomes a schedule slip. Read-only detective layer; posts nothing; existing resourceUtilization/portfolio()/forecast() callers are unaffected (additive fields only, same over-100%-only behaviour when no calendar/skills data exists).",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Continuous / per review",
+      "owner": "PMO / Resource Manager",
+      "coso": "P13",
+      "code_reference": "projects-resourcing.service.ts resourceCapacity (calendar-aware over_allocated + named flag) / roleSupplyDemand (per-role/month demand vs supply, understaffed_months) / upsertResourceSkill+listResourceSkills / upsertResourceCalendar+listResourceCalendar; projects.controller.ts GET/POST resources/skills, resources/calendar, GET resources/role-demand; schema/projects.ts resource_skills + resource_calendar (migration 0400, 0232 RLS, tenant-leading indexes); web projects/resources heatmap + skills + calendar + role-demand tabs; cutover/projects.ts (ToE)",
+      "tod": "Inspect the calendar-ceiling substitution in resourceCapacity (default 100% absent an override, else the calendar's available_pct), the named-resource lookup (resource_skills membership), and the role/skill supply-vs-demand roll-up (demand from project_resources.role, supply from resource_skills × resource_calendar).",
+      "toe": "Re-perform: a resource on a documented 50%-part-time calendar entry assigned 60% reads over_allocated (60 > 50) though under the old flat 100% ceiling it would not; an assignment with no matching resource_skills row reads named=false; a role with 150% assigned demand and only one named 100%-available person reads understaffed for that month; a second tenant cannot see the first tenant's skills/calendar rows (RLS) (re-performed by the projects harness).",
+      "evidence": "Time-phased capacity heatmap with calendar-aware over-allocation + named flag; role/skill supply-vs-demand roll-up with understaffed flag",
       "status": "Implemented"
     },
     {

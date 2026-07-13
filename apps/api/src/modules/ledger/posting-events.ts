@@ -15,237 +15,33 @@
 // The posting_event_types seed migration is derived from this registry (0331); consuming services import
 // their fallback literal from here so code and catalogue can never drift. Maintained ON /setup/posting-rules;
 // governance (validation + maker-checker + audit) = control GL-24 in posting.service.ts.
+//
+// docs/46 Phase 5: the catalogue is COMPOSED from per-domain definition files (posting-events.<domain>.ts)
+// so a new event is a one-domain-file change and merge conflicts stay local — this file remains the single
+// exported POSTING_EVENTS and the only lookup API (postingRole / postingDefault / assertPostingEventDefaults).
 
-export type PostingSide = 'DR' | 'CR';
-export type RoleTier = 'free' | 'widen' | 'pinned';
+export type { PostingSide, RoleTier, PostingRoleDef, PostingEventDef } from './posting-events.types';
+import type { PostingEventDef, PostingRoleDef } from './posting-events.types';
+import { SALES_POSTING_EVENTS } from './posting-events.sales';
+import { SCM_POSTING_EVENTS } from './posting-events.scm';
+import { PAYROLL_POSTING_EVENTS } from './posting-events.payroll';
+import { ASSETS_POSTING_EVENTS } from './posting-events.assets';
+import { LEASES_POSTING_EVENTS } from './posting-events.leases';
+import { FINANCE_POSTING_EVENTS } from './posting-events.finance';
+import { TREASURY_POSTING_EVENTS } from './posting-events.treasury';
+import { REVENUE_POSTING_EVENTS } from './posting-events.revenue';
+import { PROJECTS_POSTING_EVENTS } from './posting-events.projects';
 
-export interface PostingRoleDef {
-  side: PostingSide;
-  /** The real literal the posting site falls back to (kept in lock-step by importing THIS constant). */
-  default: string;
-  tier: RoleTier;
-  description: string;
-}
-
-export interface PostingEventDef {
-  name: string;
-  description: string;
-  /** Delivered = a real posting path consumes overrides for this event today; catalog = visibility/roadmap. */
-  wired: boolean;
-  roles: Record<string, PostingRoleDef>;
-}
-
-const DR = 'DR' as const, CR = 'CR' as const;
-const r = (side: PostingSide, def: string, tier: RoleTier, description: string): PostingRoleDef => ({ side, default: def, tier, description });
-
-// prettier-ignore
 export const POSTING_EVENTS: Record<string, PostingEventDef> = {
-  // ── Sales / POS / restaurant ──
-  'SALE.FOOD':        { name: 'Sale — revenue',                description: 'POS/AR sale revenue leg (composes UNDER item-determination when the flag is on)', wired: true, roles: {
-    revenue: r(CR, '4000', 'free', 'Sales revenue'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
-  'SALE.VAT':         { name: 'Sale — output VAT',             description: 'Output-VAT leg of a sale/CN/DN', wired: true, roles: {
-    vat_output: r(CR, '2100', 'widen', 'Output VAT — PP30 tie sums the VAT-account set') } },
-  'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: true, roles: {
-    delivery_income: r(CR, '4100', 'free', 'Delivery income') } },
-  'SVC.CHARGE':       { name: 'Sale — service charge',         description: 'Auto service-charge income (large parties)', wired: true, roles: {
-    service_charge_income: r(CR, '4400', 'free', 'Service-charge income') } },
-  'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: true, roles: {
-    rounding: r(CR, '4900', 'free', 'Rounding adjustment (gain=credit, loss=debit)') } },
-  'SURCHARGE.INCOME': { name: 'Card surcharge income',         description: 'Card surcharge collected at settlement', wired: true, roles: {
-    surcharge_income: r(CR, '4500', 'free', 'Card surcharge income') } },
-  'TIP.COLLECT':      { name: 'Tip collected',                 description: 'Tip pass-through collected with a payment', wired: false, roles: {
-    tips_payable: r(CR, '2300', 'pinned', 'Tips payable — TIP-01 reconciles GL 2300 outstanding') } },
-  'TIP.PAYOUT':       { name: 'Tip paid out',                  description: 'Tip pool distribution to staff', wired: false, roles: {
-    tips_payable: r(DR, '2300', 'pinned', 'Tips payable — TIP-01'), payout: r(CR, '1000', 'pinned', 'Cash/pay account (per-distribution account already supported)') } },
-  'TILL.VARIANCE':    { name: 'Till close over/short',         description: 'Z-close cash variance (payments + hub replay share this key)', wired: true, roles: {
-    cash_over_short: r(DR, '5830', 'free', 'Cash over/short (short=debit, over=credit)') } },
-  'TILL.CASHMOV':     { name: 'Till paid-in/out',              description: 'Drawer paid-in / paid-out movement', wired: true, roles: {
-    expense: r(DR, '5100', 'free', 'Paid-out expense') } },
-  'DEPOSIT.TAKE':     { name: 'Customer deposit taken',        description: 'Booking/tab prepayment received', wired: true, roles: {
-    deposit_liability: r(CR, '2210', 'free', 'Customer deposits — prepaid') } },
-  'DEPOSIT.APPLY':    { name: 'Customer deposit applied',      description: 'Deposit recognised into a sale', wired: true, roles: {
-    deposit_liability: r(DR, '2210', 'free', 'Customer deposits — prepaid'), revenue: r(CR, '4000', 'free', 'Revenue on application') } },
-  'DEPOSIT.REFUND':   { name: 'Customer deposit refunded',     description: 'Deposit returned to the customer', wired: true, roles: {
-    deposit_liability: r(DR, '2210', 'free', 'Customer deposits — prepaid') } },
-  'GIFTCARD.ISSUE':   { name: 'Gift card issued',              description: 'Gift card / store credit sold', wired: false, roles: {
-    giftcard_liability: r(CR, '2200', 'pinned', 'Gift-card liability (REC-04 permanent)') } },
-  'GIFTCARD.REDEEM':  { name: 'Gift card redeemed',            description: 'Gift-card value applied to a sale', wired: false, roles: {
-    giftcard_liability: r(DR, '2200', 'pinned', 'Gift-card liability (REC-04 permanent)') } },
-  'RETURN.AR':        { name: 'Customer return — refund',      description: 'Revenue/VAT reversal on a return', wired: true, roles: {
-    revenue_reversal: r(DR, '4000', 'free', 'Revenue reversal'), vat_reversal: r(DR, '2100', 'widen', 'Output-VAT reversal (PP30 set)') } },
-  'RETURN.STOCK':     { name: 'Customer return — stock',       description: 'COGS reversal when stock returns', wired: true, roles: {
-    cogs_reversal: r(CR, '5300', 'free', 'COGS reversal'), inventory: r(DR, '1200', 'pinned', 'Inventory control (REC-04 permanent)') } },
-
-  // ── Procurement / inventory / costing / manufacturing ──
-  'GR.INVENTORY':     { name: 'Goods receipt — inventory',     description: 'Dr inventory at receipt (item-determination resolves the inventory leg)', wired: false, roles: {
-    inventory: r(DR, '1200', 'pinned', 'Inventory control (REC-04 permanent; item-grain override lives in GL-21 determination)') } },
-  'GR.AP':            { name: 'Goods receipt — AP',            description: 'AP control leg of a receipt', wired: false, roles: {
-    ap_control: r(CR, '2000', 'pinned', 'AP control (REC-04 permanent)') } },
-  'COSTING.RECEIPT':  { name: 'Costed receipt',                description: 'Valued receipt at standard/moving cost', wired: false, roles: {
-    inventory: r(DR, '1200', 'pinned', 'Inventory control'), ap_control: r(CR, '2000', 'pinned', 'AP control') } },
-  'COSTING.ISSUE':    { name: 'Costed issue / COGS',           description: 'Issue at cost (POS COGS, stock issues; composes under item-determination)', wired: true, roles: {
-    cogs: r(DR, '5000', 'free', 'COGS'), inventory: r(CR, '1200', 'pinned', 'Inventory control') } },
-  'COSTING.PPV':      { name: 'Purchase price variance',       description: 'STD-costing PPV (sign-conditional)', wired: true, roles: {
-    ppv: r(DR, '5500', 'free', 'Purchase price variance') } },
-  'LANDEDCOST.CAPITALIZE': { name: 'Landed-cost capitalisation', description: 'Freight/duty/insurance/broker apportioned into inventory unit cost; issued-share residual to costing variance (COST-01)', wired: true, roles: {
-    inventory: r(DR, '1200', 'pinned', 'Inventory control — on-hand capitalised share'), variance: r(DR, '5500', 'free', 'Costing variance — already-issued residual (mirrors PPV)'), accrual: r(CR, '2010', 'free', 'Landed-cost accrual liability (freight/duty/insurance/broker payable)') } },
-  'INV.ADJUST':       { name: 'Inventory adjustment',          description: 'Count/valuation adjustment (direction-conditional)', wired: true, roles: {
-    adjustment: r(DR, '5810', 'free', 'Adjustment expense (composes under warehouse determination)') } },
-  'WASTE.WRITEOFF':   { name: 'Waste write-off',               description: 'Spoilage/waste written off stock', wired: true, roles: {
-    waste_loss: r(DR, '5810', 'free', 'Waste loss'), inventory: r(CR, '1200', 'pinned', 'Inventory control') } },
-  'MFG.WO_ISSUE':     { name: 'Work order — issue',            description: 'Materials + applied labour/OH into WIP', wired: true, roles: {
-    wip: r(DR, '1250', 'pinned', 'WIP control'), labor_oh_applied: r(CR, '2380', 'free', 'Manufacturing costs applied (clearing)'), inventory: r(CR, '1200', 'pinned', 'Inventory control') } },
-  'MFG.WO_COMPLETE':  { name: 'Work order — complete',         description: 'Finished goods in; yield variance out', wired: true, roles: {
-    finished_goods: r(DR, '1210', 'pinned', 'FG control'), yield_variance: r(DR, '5810', 'free', 'Yield/material variance'), wip: r(CR, '1250', 'pinned', 'WIP control') } },
-  'QA.SCRAP':         { name: 'QC scrap disposition',          description: 'Scrap loss written off (source credit resolved by ref type)', wired: true, roles: {
-    scrap_loss: r(DR, '5810', 'free', 'Scrap / rework loss') } },
-
-  // ── Payroll / HR ──
-  'PAYROLL.GROSS':    { name: 'Payroll — gross wages',         description: 'Salaries + OT − unpaid (net-pay cash leg is pinned)', wired: true, roles: {
-    wages_expense: r(DR, '5600', 'free', 'Salaries & wages'), net_pay_cash: r(CR, '1000', 'pinned', 'Net pay (CASH set)') } },
-  'PAYROLL.SSO':      { name: 'Payroll — social security',     description: 'Employer SSO expense + combined payable', wired: true, roles: {
-    sso_expense: r(DR, '5610', 'free', 'Employer SSO expense'), sso_payable: r(CR, '2350', 'free', 'SSO payable — the PAY-02 schedule reads the widened set (PR-7)') } },
-  'PAYROLL.WHT':      { name: 'Payroll — income WHT',          description: 'ภ.ง.ด.1 payroll withholding payable', wired: true, roles: {
-    wht_payable: r(CR, '2360', 'free', 'Payroll WHT payable — the PAY-02 schedule reads the widened set (PR-7)') } },
-  'PAYROLL.PF':       { name: 'Payroll — provident fund',      description: 'Employer PF expense + combined payable', wired: true, roles: {
-    pf_expense: r(DR, '5620', 'free', 'Employer PF expense'), pf_payable: r(CR, '2370', 'free', 'PF payable — the PAY-02 schedule reads the widened set (PR-7)') } },
-  'PAYROLL.REMIT':    { name: 'Payroll liability remittance',  description: 'Statutory liability remitted to RD/SSO', wired: false, roles: {
-    liability: r(DR, '2350', 'widen', 'Remitted liability — the remit endpoint accepts any account in the PAY-02 widened sets (PR-7); this role itself stays catalog-only'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
-
-  // ── Fixed assets / CIP ──
-  'ASSET.ACQUIRE':    { name: 'Asset acquisition',             description: 'Capitalise an asset — under posting_determination the CATEGORY asset_account drives the debit (docs/43 Q2 grain); roles here are catalog visibility', wired: false, roles: {
-    fixed_asset_gross: r(DR, '1500', 'pinned', 'FA register control'), funding: r(CR, '2000', 'pinned', 'AP/cash funding leg') } },
-  'DEPRECIATION.FA':  { name: 'Fixed-asset depreciation',      description: 'Periodic depreciation run — under posting_determination the CATEGORY dep/accum accounts win (docs/43 Q2 grain), then the tenant posting-rule', wired: true, roles: {
-    dep_expense: r(DR, '5200', 'free', 'Depreciation expense'), accum_dep: r(CR, '1590', 'pinned', 'Accumulated depreciation — FA register tie') } },
-  'ASSET.DISPOSE':    { name: 'Asset disposal',                description: 'Derecognition with gain/loss', wired: true, roles: {
-    gain_loss: r(CR, '1510', 'free', 'Gain/loss on disposal'), fixed_asset_gross: r(CR, '1500', 'pinned', 'FA register control'), accum_dep: r(DR, '1590', 'pinned', 'Accum-dep control') } },
-  'ASSET.REVALUE':    { name: 'Asset revaluation / impairment', description: 'Revaluation surplus up / impairment down', wired: true, roles: {
-    impairment_loss: r(DR, '5820', 'free', 'Impairment loss'), revaluation_surplus: r(CR, '3200', 'pinned', 'Revaluation reserve (equity)') } },
-  'ASSET.CIP_COST':   { name: 'CIP cost accumulation',         description: 'Construction-in-progress cost (FA-13)', wired: false, roles: {
-    cip: r(DR, '1520', 'pinned', 'CIP control'), funding: r(CR, '2000', 'pinned', 'AP/cash funding leg') } },
-
-  // ── Leases (lessee + lessor) ──
-  'LEASE.COMMENCE':   { name: 'Lease commencement',            description: 'ROU + liability at PV (LSE-01 schedule ties both)', wired: false, roles: {
-    rou_asset: r(DR, '1600', 'pinned', 'ROU control'), lease_liability: r(CR, '2600', 'pinned', 'Lease-liability control (LSE-01)') } },
-  'LEASE.INTEREST':   { name: 'Lease interest unwinding',      description: 'Periodic interest on the liability', wired: true, roles: {
-    interest_exp: r(DR, '5900', 'free', 'Interest expense') } },
-  'LEASE.PRINCIPAL':  { name: 'Lease principal payment',       description: 'Cash payment reducing the liability', wired: true, roles: {
-    lease_liab: r(DR, '2600', 'pinned', 'Lease-liability control (LSE-01)'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'DEPRECIATION.ROU': { name: 'ROU depreciation',              description: 'Right-of-use asset depreciation', wired: true, roles: {
-    dep_expense: r(DR, '5210', 'free', 'ROU depreciation expense'), accum_dep_rou: r(CR, '1690', 'pinned', 'Accum ROU dep control') } },
-  'LEASE.MODIFY':     { name: 'Lease remeasurement',           description: 'Modification/termination remeasurement', wired: true, roles: {
-    remeasure_gain: r(CR, '1510', 'free', 'Remeasurement gain (ROU floored at zero)') } },
-  'LEASE.LESSOR_COMMENCE': { name: 'Lessor finance-lease commencement', description: 'Derecognise asset → net investment (LSE-02)', wired: true, roles: {
-    selling_pl: r(CR, '1510', 'free', 'Selling profit/loss'), net_investment: r(DR, '1610', 'pinned', 'Net-investment control (LSE-02)') } },
-  'LEASE.LESSOR_FINANCE': { name: 'Lessor finance-lease receipt', description: 'Collection: interest income + principal', wired: true, roles: {
-    interest_income: r(CR, '4600', 'free', 'Finance-lease interest income'), net_investment: r(CR, '1610', 'pinned', 'Net-investment control (LSE-02)') } },
-  'LEASE.LESSOR_OPERATING': { name: 'Lessor operating-lease receipt', description: 'Straight-line rental + continued depreciation', wired: true, roles: {
-    rental_income: r(CR, '4610', 'free', 'Operating-lease rental income'), dep_expense: r(DR, '5200', 'free', 'Depreciation expense') } },
-
-  // ── Finance / treasury / AR / AP ──
-  'ADVANCE.ISSUE':    { name: 'Employee advance issued',       description: 'Cash advance to an employee (EXP-07)', wired: false, roles: {
-    advance_asset: r(DR, '1180', 'pinned', 'Employee-advances control'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'ADVANCE.SETTLE':   { name: 'Employee advance settled',      description: 'Expense + returned cash clear the advance', wired: true, roles: {
-    expense: r(DR, '5100', 'free', 'Settlement expense (already dto-overridable; registry default)'), advance_asset: r(CR, '1180', 'pinned', 'Employee-advances control') } },
-  'BADDEBT.WRITEOFF': { name: 'Bad-debt write-off',            description: 'Uncollectible AR written off (REV-14)', wired: true, roles: {
-    bad_debt_exp: r(DR, '5720', 'free', 'Bad-debt expense'), ar_control: r(CR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
-  'APPAY.WHT':        { name: 'AP payment — vendor WHT',       description: 'ภ.ง.ด.3/53 withholding at AP payment (shared by AP pay + subcontract valuations)', wired: true, roles: {
-    wht_payable: r(CR, '2361', 'free', 'Vendor WHT payable — the PND3/53 tie-out reads the widened set (PR-7)') } },
-  'APPAY.DISCOUNT':   { name: 'AP early-payment discount',     description: 'Prompt-payment discount captured on a run (EXP-14)', wired: true, roles: {
-    discount_income: r(CR, '4600', 'free', 'Early-payment discount income (per-policy account already supported)') } },
-  'TAX.PROVISION':    { name: 'Current income-tax provision',   description: 'Current CIT provision (ASC 740 / IAS 12) — Dr 5960 expense / Cr 2110 payable (TAX-11, maker-checker)', wired: true, roles: {
-    cit_expense: r(DR, '5960', 'free', 'Corporate income-tax expense (current)'), cit_payable: r(CR, '2110', 'free', 'CIT payable — Revenue Department') } },
-  'RCVAT.SELF':       { name: 'Reverse-charge self VAT',       description: 'ภ.พ.36 self-assessed VAT on imported services', wired: true, roles: {
-    input_vat: r(DR, '1300', 'widen', 'Input VAT (PP30/36 set)'), pp36_payable: r(CR, '2120', 'widen', 'PP36 VAT payable (separate return set)') } },
-  'DEBT.DRAWDOWN':    { name: 'Borrowing drawdown',            description: 'Facility drawdown — cash in, borrowings up (TRE-01; short-/long-term control pinned)', wired: true, roles: {
-    bank: r(DR, '1010', 'pinned', 'Bank (CASH set)'), borrowings: r(CR, '2500', 'pinned', 'Borrowings control (TRE-01 register tie; long-term drawdowns post 2550)') } },
-  'DEBT.INTEREST':    { name: 'Borrowing EIR interest accrual', description: 'Effective-interest accrual on the amortized cost (TRE-01)', wired: true, roles: {
-    interest_exp: r(DR, '5900', 'free', 'Interest expense'), accrued_interest: r(CR, '2450', 'pinned', 'Accrued interest payable (TRE-01 schedule tie)') } },
-  'DEBT.REPAY':       { name: 'Borrowing repayment',           description: 'Repay principal + accrued interest against cash (TRE-01)', wired: true, roles: {
-    borrowings: r(DR, '2500', 'pinned', 'Borrowings control (TRE-01; long-term posts 2550)'), accrued_interest: r(DR, '2450', 'pinned', 'Accrued interest payable (TRE-01)'), bank: r(CR, '1010', 'pinned', 'Bank (CASH set)') } },
-  'INVEST.BUY':       { name: 'Investment purchase',           description: 'Buy a security — Dr the class asset (amortized cost / FVOCI / FVTPL) / Cr 1010 Bank (TRE-03; posted at maker-checker approval)', wired: true, roles: {
-    investment_ac: r(DR, '1350', 'pinned', 'Investments — amortized cost (register tie)'), investment_fvoci: r(DR, '1360', 'pinned', 'Investments — FVOCI (register tie)'), investment_fvtpl: r(DR, '1370', 'pinned', 'Investments — FVTPL (register tie)'), bank: r(CR, '1010', 'pinned', 'Bank (CASH set)') } },
-  'INVEST.INCOME':    { name: 'Investment income',             description: 'Interest (amortized-cost EIR accretion, Dr class asset) or cash dividend (Dr bank) / Cr 4700 Investment Income (TRE-03)', wired: true, roles: {
-    income: r(CR, '4700', 'free', 'Investment income — interest/dividend'), bank: r(DR, '1010', 'pinned', 'Bank (CASH set) — cash dividend received') } },
-  'INVEST.MTM.PL':    { name: 'Investment MTM — FVTPL (P&L)',  description: 'Mark-to-market a FVTPL holding through P&L using the latest APPROVED price (TRE-03)', wired: true, roles: {
-    fv_gain_loss: r(DR, '5430', 'free', 'Fair-value gain/loss — FVTPL (gain=credit, loss=debit)'), investment_fvtpl: r(DR, '1370', 'pinned', 'Investments — FVTPL (register tie)') } },
-  'INVEST.MTM.OCI':   { name: 'Investment MTM — FVOCI (OCI)',  description: 'Mark-to-market a FVOCI holding through the OCI equity reserve (the reusable OCI-reserve primitive) using the latest APPROVED price (TRE-03)', wired: true, roles: {
-    oci_reserve: r(CR, '3500', 'pinned', 'FVOCI reserve (OCI equity) — reusable OCI-reserve primitive; Wave 3 hedge accounting reuses it'), investment_fvoci: r(DR, '1360', 'pinned', 'Investments — FVOCI (register tie)') } },
-  'INVEST.IMPAIR':    { name: 'Investment ECL impairment',     description: 'Expected-credit-loss impairment — Dr 5440 / Cr 1355 allowance (contra-asset) (TRE-03)', wired: true, roles: {
-    impairment_loss: r(DR, '5440', 'free', 'Investment impairment (ECL)'), allowance: r(CR, '1355', 'pinned', 'Allowance for investment ECL (contra-asset)') } },
-  // ── Hedge accounting (TRE-04, IFRS 9 / ASC 815) ──
-  'HEDGE.DERIVATIVE.MTM': { name: 'Hedging derivative remeasurement', description: 'Derivative fair-value change — Dr 1380 Derivative Asset (gain) / Cr 2460 Derivative Liability (loss); the offset routes to OCI 3550 (CF-hedge effective portion) or P&L 5450 (ineffective / FV-hedge) (TRE-04)', wired: true, roles: {
-    derivative_asset: r(DR, '1380', 'pinned', 'Derivative asset — hedging instrument positive fair value (register tie)'), derivative_liab: r(CR, '2460', 'pinned', 'Derivative liability — hedging instrument negative fair value (register tie)'), hedge_pl: r(DR, '5450', 'free', 'Hedge ineffectiveness / FV-hedge P&L (gain=credit, loss=debit)') } },
-  'HEDGE.CF.OCI':     { name: 'Cash-flow hedge — effective portion to OCI', description: 'Effective portion of a CASH_FLOW hedge deferred in the Cash-Flow Hedge Reserve 3550 (OCI equity), only once the relationship is Approved AND its latest effectiveness test is effective (TRE-04)', wired: true, roles: {
-    cf_hedge_reserve: r(CR, '3550', 'pinned', 'Cash-flow hedge reserve (OCI equity) — deferred effective portion; recycled to P&L when the hedged cash flow occurs'), derivative_asset: r(DR, '1380', 'pinned', 'Derivative asset — hedging instrument (register tie)') } },
-  'HEDGE.RECLASSIFY': { name: 'Cash-flow hedge — OCI reclassification', description: 'When the hedged cash flow occurs the deferred OCI is recycled to earnings — Dr 3550 Cash-Flow Hedge Reserve / Cr the hedged-item revenue/P&L line (TRE-04)', wired: true, roles: {
-    cf_hedge_reserve: r(DR, '3550', 'pinned', 'Cash-flow hedge reserve (OCI equity) — recycled out on the hedged cash flow'), reclass_target: r(CR, '4000', 'free', 'Hedged-item revenue/P&L line the deferred OCI recycles into (per-relationship account already supported)') } },
-  'HEDGE.FV.BASIS':   { name: 'Fair-value hedge — hedged-item basis adjustment', description: 'FAIR_VALUE hedge — the hedged risk fair-value change adjusts the hedged item\'s carrying account with an offsetting P&L leg (Dr/Cr hedged item ↔ Cr/Dr 5450) (TRE-04)', wired: true, roles: {
-    hedged_item: r(DR, '1200', 'pinned', 'Hedged item carrying account (per-relationship account already supported — the item being fair-value hedged)'), hedge_pl: r(CR, '5450', 'free', 'Fair-value hedge P&L on the hedged item (gain=credit, loss=debit)') } },
-  // ── Cash pooling / in-house bank / intercompany loans (TRE-05) ──
-  'ICLOAN.DRAWDOWN':  { name: 'Intercompany loan drawdown',    description: 'Mirrored IC-loan drawdown — creditor Dr 1155 IC-Loan Receivable / Cr 1010 Bank; debtor Dr 1010 Bank / Cr 2155 IC-Loan Payable (the 1155/2155 pair eliminates on consolidation) (TRE-05)', wired: true, roles: {
-    ic_loan_receivable: r(DR, '1155', 'pinned', 'IC-loan receivable — creditor side (elimination pair with 2155)'), ic_loan_payable: r(CR, '2155', 'pinned', 'IC-loan payable — debtor side (elimination pair with 1155)'), bank: r(DR, '1010', 'pinned', 'Bank (CASH set)') } },
-  'ICLOAN.INTEREST':  { name: 'Intercompany loan EIR interest', description: 'Mirrored EIR interest accrual on the amortized cost — creditor Dr 1155 / Cr 4700 Investment/Interest Income; debtor Dr 5900 Interest Expense / Cr 2155 (the 4700/5900 IC interest eliminates on consolidation) (TRE-05)', wired: true, roles: {
-    ic_loan_receivable: r(DR, '1155', 'pinned', 'IC-loan receivable — creditor accretion (elimination pair)'), interest_income: r(CR, '4700', 'free', 'Intercompany interest income — creditor (eliminates against the debtor 5900)'), interest_exp: r(DR, '5900', 'free', 'Intercompany interest expense — debtor (eliminates against the creditor 4700)'), ic_loan_payable: r(CR, '2155', 'pinned', 'IC-loan payable — debtor accretion (elimination pair)') } },
-  'POOL.SWEEP':       { name: 'Cash pool physical sweep',       description: 'Physical cash-pool sweep member→header — Dr header-bank / Cr member-bank (in-house-bank concentration) (TRE-05)', wired: true, roles: {
-    header_bank: r(DR, '1010', 'pinned', 'Pool header (master) bank account (CASH set)'), member_bank: r(CR, '1020', 'pinned', 'Pool member sub-account bank account (CASH set)') } },
-  'POOL.INTEREST':    { name: 'Cash pool notional interest',    description: 'Notional cash-pool interest allocation across members — a zero-sum redistribution (surplus members Cr 4700 income, deficit members Dr 5900 expense; Σ = 0) (TRE-05)', wired: true, roles: {
-    interest_income: r(CR, '4700', 'free', 'Member interest income (surplus member benefit)'), interest_exp: r(DR, '5900', 'free', 'Member interest expense (deficit member cost)') } },
-  'FX.UNREALIZED':    { name: 'FX revaluation (unrealized)',   description: 'Month-end open-item revaluation (control deltas pinned)', wired: true, roles: {
-    fx_gain_loss: r(DR, '5400', 'free', 'Unrealized FX gain/loss') } },
-  'FX.REALIZED':      { name: 'FX settlement (realized)',      description: 'Realized FX difference at settlement', wired: true, roles: {
-    fx_gain_loss: r(DR, '5410', 'free', 'Realized FX gain/loss') } },
-  'BANK.INTEREST':    { name: 'Bank interest income',          description: 'Bank-rec adjustment: interest earned', wired: true, roles: {
-    interest_income: r(CR, '4000', 'free', 'Interest income') } },
-  'BANK.FEE':         { name: 'Bank fee expense',              description: 'Bank-rec adjustment: charges', wired: true, roles: {
-    fee_expense: r(DR, '5100', 'free', 'Bank fees') } },
-  'PETTY.TOPUP':      { name: 'Petty-cash replenishment',      description: 'Imprest float top-up (fund GL per-fund)', wired: false, roles: {
-    cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'PETTY.EXPENSE':    { name: 'Petty-cash expense',            description: 'Expense paid from the float', wired: true, roles: {
-    expense: r(DR, '5100', 'free', 'Petty-cash expense (already caller-set; registry default)') } },
-  'REVENUE.DEFER':    { name: 'Revenue deferred',              description: 'Cash received into deferred revenue', wired: false, roles: {
-    deferred_revenue: r(CR, '2400', 'pinned', 'Unearned revenue (REC-04 permanent — §8 Q3)') } },
-  'REVENUE.RECOGNIZE': { name: 'Revenue recognized',           description: 'Deferred → earned per schedule (per-schedule accounts already supported)', wired: false, roles: {
-    revenue: r(CR, '4300', 'free', 'Recognized revenue') } },
-  // ── TFRS 15 significant financing component (§60-65, REV-27) ──
-  'REVFIN.INCOME':    { name: 'Financing component — interest income', description: 'Deferred payment (arrears): the entity finances the customer; interest income accretes the contract asset (Dr 1265 / Cr 4650) — REV-27 / TFRS 15 §60-65', wired: true, roles: {
-    contract_asset: r(DR, '1265', 'pinned', 'Contract asset / unbilled receivable (REV-24 tie)'), interest_income: r(CR, '4650', 'free', 'Significant financing component interest income') } },
-  'REVFIN.EXPENSE':   { name: 'Financing component — interest charge', description: 'Customer PREPAYS (advance): the significant-financing charge accretes the contract liability as interest expense (Dr 5900 / Cr 2410) — REV-27 / TFRS 15 §60-65', wired: true, roles: {
-    interest_expense: r(DR, '5900', 'free', 'Interest expense — financing charge on the customer prepayment'), contract_liability: r(CR, '2410', 'pinned', 'Contract liability / deferred revenue (REV-19/24 tie)') } },
-  'MEMBERSHIP.DEFER': { name: 'Membership sold (deferred)',    description: 'VIP membership fee into contract liability', wired: true, roles: {
-    deferred: r(CR, '2410', 'free', 'Contract liability / deferred revenue') } },
-  'MEMBERSHIP.RECOGNIZE': { name: 'Membership recognized',     description: 'Membership revenue earned over the term', wired: true, roles: {
-    deferred: r(DR, '2410', 'free', 'Contract liability'), revenue: r(CR, '4300', 'free', 'Subscription & service revenue') } },
-  'LOYALTY.ACCRUE':   { name: 'Loyalty points accrual',        description: 'Points liability provision (TFRS 15)', wired: true, roles: {
-    loyalty_expense: r(DR, '5700', 'free', 'Loyalty points expense'), loyalty_liability: r(CR, '2250', 'pinned', 'Points-liability control (watermark tie)') } },
-  'SERVICE.ACCRUAL':  { name: 'Subscription billing',          description: 'Recurring service invoice raised', wired: false, roles: {
-    service_rev: r(CR, '4300', 'free', 'Subscription & service revenue'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
-  'PREPAID.CAPITALIZE': { name: 'Prepaid capitalised',         description: 'Up-front payment into the prepaid asset', wired: true, roles: {
-    prepaid: r(DR, '1280', 'free', 'Prepaid expenses (per-schedule account already supported)'), cash: r(CR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'PREPAID.AMORTIZE': { name: 'Prepaid amortised',             description: 'Monthly amortisation of the prepaid', wired: true, roles: {
-    expense: r(DR, '5100', 'free', 'Amortisation expense (per-schedule account already supported)'), prepaid: r(CR, '1280', 'free', 'Prepaid expenses') } },
-  'SBT.TAX':          { name: 'Specific business tax',         description: 'ภ.ธ.40 SBT accrued at RE ownership transfer (TAX-09)', wired: false, roles: {
-    sbt_expense: r(DR, '5840', 'free', 'SBT expense'), sbt_payable: r(CR, '2130', 'free', 'SBT payable — the ภ.ธ.40 tie-out reads the widened set (PR-7)') } },
-
-  // ── Intercompany / projects / construction / real estate ──
-  'IC.TRANSACTION':   { name: 'Intercompany transaction',      description: 'Due-from/due-to pair; the category MAP resolves the P&L legs (shared-cost/transfer legs overridable; loan = cash pinned, loyalty-clearing = LYL-03 tie)', wired: true, roles: {
-    ic_receivable: r(DR, '1150', 'pinned', 'IC due-from (elimination pair)'), ic_payable: r(CR, '2150', 'pinned', 'IC due-to (elimination pair)'),
-    recovery_shared_cost: r(CR, '5100', 'free', 'Creditor recovery — shared-cost'), expense_shared_cost: r(DR, '5100', 'free', 'Debtor expense — shared-cost'),
-    recovery_transfer: r(CR, '4000', 'free', 'Creditor recovery — transfer'), expense_transfer: r(DR, '5100', 'free', 'Debtor expense — transfer') } },
-  'IC.SETTLE':        { name: 'Intercompany settlement',       description: 'Cash settlement of the IC pair', wired: false, roles: {
-    ic_receivable: r(CR, '1150', 'pinned', 'IC due-from'), ic_payable: r(DR, '2150', 'pinned', 'IC due-to'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)') } },
-  'PROJECT.COST':     { name: 'Project cost accrual',          description: 'WIP capitalise / non-billable expense', wired: true, roles: {
-    project_wip: r(DR, '1260', 'pinned', 'Project-WIP control (cost_to_date tie)'), proj_applied: r(CR, '2390', 'free', 'Project costs applied (clearing)'), project_cogs: r(DR, '5800', 'free', 'Non-billable project cost') } },
-  'PROJECT.REVENUE':  { name: 'Project revenue',               description: 'Billing / POC revenue recognition', wired: true, roles: {
-    project_revenue: r(CR, '4200', 'free', 'Project revenue'), project_cogs: r(DR, '5800', 'free', 'Project cost of services'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
-  'PROJECT.BILLING':  { name: 'POC progress invoice',          description: 'Contract asset relief / billings in excess', wired: false, roles: {
-    contract_asset: r(CR, '1265', 'pinned', 'Contract-asset control'), billings_in_excess: r(CR, '2410', 'widen', 'Billings in excess (progress-billing tie)') } },
-  'REALESTATE.BOOK':  { name: 'RE booking deposit',            description: 'Unit booking deposit received', wired: true, roles: {
-    deposit_liability: r(CR, '2210', 'free', 'Customer deposits — prepaid') } },
-  'REALESTATE.CONTRACT': { name: 'RE contract down payment',   description: 'Contract signing: deposit reclass + down payment', wired: false, roles: {
-    contract_liability: r(CR, '2410', 'widen', 'Contract liability (progress tie)') } },
-  'REALESTATE.INSTALL': { name: 'RE installment received',     description: 'Installment into the contract liability', wired: false, roles: {
-    contract_liability: r(CR, '2410', 'widen', 'Contract liability') } },
+  ...SALES_POSTING_EVENTS,
+  ...SCM_POSTING_EVENTS,
+  ...PAYROLL_POSTING_EVENTS,
+  ...ASSETS_POSTING_EVENTS,
+  ...LEASES_POSTING_EVENTS,
+  ...FINANCE_POSTING_EVENTS,
+  ...TREASURY_POSTING_EVENTS,
+  ...REVENUE_POSTING_EVENTS,
+  ...PROJECTS_POSTING_EVENTS,
 };
 
 // ── Introspection helpers ──

@@ -5,7 +5,7 @@
 set -e
 
 if [ "${RUN_MIGRATIONS:-0}" = "1" ]; then
-  echo "[entrypoint] applying database migrations (drizzle-kit migrate)…"
+  echo "[entrypoint] applying database migrations (db:migrate — src/database/migrate.ts)…"
   pnpm --filter @ierp/api db:migrate
 fi
 

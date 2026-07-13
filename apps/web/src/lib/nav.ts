@@ -233,6 +233,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       // member lookup, messaging) moved to /crm/members.
       { label: 'nav.crm_workspace', href: '/crm', icon: Target, perms: ['crm', 'marketing', 'exec', 'ar'] },
       { label: 'nav.crm_members', href: '/crm/members', icon: Users, perms: ['marketing', 'exec'] },
+      { label: 'nav.audience_export', href: '/crm/audience-export', icon: Upload, perms: ['marketing', 'exec'] },
       { label: 'nav.customer_master', href: '/customers', icon: Users, perms: ['crm', 'ar', 'exec'] },
       { label: 'nav.cpq', href: '/cpq', icon: FileSignature, perms: ['marketing', 'exec'] },
       { label: 'nav.service', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
@@ -471,6 +472,8 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'nav.pm_portfolio', href: '/projects/portfolio', icon: LayoutDashboard, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.pm_action_center', href: '/projects/action-center', icon: BellRing, perms: ['exec', 'planner', 'ar'] },
+      // PPM-A1 (PROJ-20): resource capacity heatmap + skills/role supply-vs-demand.
+      { label: 'nav.pm_resources', href: '/projects/resources', icon: Users, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
       // Construction/real-estate vertical (docs/35): tender→award, progress billing (งวดงาน), subcontracts.
       { label: 'nav.pm_tenders', href: '/projects/tenders', icon: FileSignature, perms: ['proj_tender', 'marketing', 'exec'] },

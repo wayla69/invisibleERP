@@ -142,7 +142,7 @@ jobs:
           # ── CRM / billing / projects / loyalty ──
           - shard: crm
             run: >-
-              cutover:crm cutover:cpq cutover:cpq-gl cutover:sub-billing cutover:projects
+              cutover:crm cutover:cpq cutover:cpq-approval cutover:cpq-gl cutover:sub-billing cutover:projects
               cutover:pipeline cutover:service cutover:loyalty cutover:coalition
               cutover:giftcards cutover:receipts
           # ── planning / analytics / channels ──
@@ -336,7 +336,12 @@ jobs:
         run: node tools/ci/check-overclaims.mjs
 
   # Real-Postgres smoke (panel #1) — the divergence class PGlite hides: FORCE-RLS under app_user,
-  # the 0193 org-scoped policy, and postgres-js Date round-trips. Report-only for now (continue-on-error)
+  # the 0193 org-scoped policy, and postgres-js Date round-trips. Since the 0387 incident
+  # (tenancy-model.md rev 1.26) the harness applies migrations the way PROD does: `db:migrate`
+  # (apps/api/src/database/migrate.ts, sets the app.bypass_rls session GUC) connecting as a
+  # freshly-provisioned NOSUPERUSER/NOBYPASSRLS owner role mirroring §1bis ierp_app — a superuser
+  # apply loop bypasses RLS unconditionally and masked a migration reading zero rows from the
+  # FORCE-RLS users table in prod. Report-only for now (continue-on-error)
   # until proven stable on main, then promote to a required check.
   pg-smoke:
     needs: build
@@ -361,7 +366,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Real-Postgres smoke (RLS org-scoping + Date round-trip)
+      - name: Real-Postgres smoke (prod-shaped db:migrate under NOBYPASSRLS role + RLS org-scoping + Date round-trip)
         run: pnpm --filter @ierp/cutover pg-smoke
 
   # Real-Postgres CORE gate (operational maturity — Step 3). Boots the actual Nest app over a real

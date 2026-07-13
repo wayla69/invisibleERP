@@ -724,6 +724,39 @@ async function main() {
   const augRow = (cap.json.monthly ?? []).find((m: any) => m.month === '2026-08');
   ok('Capacity calendar monthly rollup: August flags ≥1 over-allocated resource', augRow && augRow.resources_over >= 1 && augRow.total_demand_pct >= 120, JSON.stringify({ over: augRow?.resources_over, demand: augRow?.total_demand_pct }));
 
+  // ── 25b. resource skills + availability calendar + role/skill supply-vs-demand (PPM-A1, PROJ-20) ──
+  const skillSet = await inj('POST', '/api/projects/resources/skills', admin, { resource_name: 'DevOne', skill: 'Developer', proficiency: 'senior' });
+  ok('PROJ-20: register a named skill → DevOne tagged Developer/senior', skillSet.json.skills?.some((s: any) => s.resource_name === 'DevOne' && s.skill === 'Developer' && s.proficiency === 'senior'), JSON.stringify(skillSet.json.skills));
+  const badMonth = await inj('POST', '/api/projects/resources/calendar', admin, { resource_name: 'DevOne', month: '2026/07', available_pct: 50 });
+  ok('PROJ-20: bad month format → 400 BAD_MONTH', badMonth.status === 400 && badMonth.json.error?.code === 'BAD_MONTH', `${badMonth.status} ${badMonth.json.error?.code}`);
+  const badPct = await inj('POST', '/api/projects/resources/calendar', admin, { resource_name: 'DevOne', month: '2026-07', available_pct: 150 });
+  ok('PROJ-20: out-of-range available_pct → 400 BAD_AVAILABLE_PCT', badPct.status === 400 && badPct.json.error?.code === 'BAD_AVAILABLE_PCT', `${badPct.status} ${badPct.json.error?.code}`);
+  const calSet = await inj('POST', '/api/projects/resources/calendar', admin, { resource_name: 'DevOne', month: '2026-07', available_pct: 50, reason: 'part_time' });
+  ok('PROJ-20: DevOne availability calendar → 50% for 2026-07', calSet.json.entries?.some((e: any) => e.month === '2026-07' && near(e.available_pct, 50) && e.reason === 'part_time'), JSON.stringify(calSet.json.entries));
+
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-SKILL', name: 'งานทดสอบทักษะ', billing_type: 'TM' });
+  // DevOne (named, 50%-part-time in July) at 60% → OVER-allocated against the TRUE 50% ceiling (would read fine
+  // against the old flat 100% assumption). GenericGuy (no skill row) at 100% → a GENERIC placeholder booking.
+  await inj('POST', '/api/projects/PRJ-SKILL/resources', admin, { resource_name: 'DevOne', role: 'Developer', alloc_pct: 60, period_start: '2026-07-01', period_end: '2026-07-31' });
+  await inj('POST', '/api/projects/PRJ-SKILL/resources', admin, { resource_name: 'GenericGuy', role: 'Developer', alloc_pct: 100, period_start: '2026-07-01', period_end: '2026-07-31' });
+  const cap2 = await inj('GET', '/api/projects/resources/capacity?from=2026-07&months=1', admin);
+  const devOneCap = (cap2.json.resources ?? []).find((r: any) => r.resource_name === 'DevOne');
+  const genericCap = (cap2.json.resources ?? []).find((r: any) => r.resource_name === 'GenericGuy');
+  const devOneJul = devOneCap?.months?.find((c: any) => c.month === '2026-07');
+  ok('PROJ-20: calendar-aware ceiling — DevOne 60% vs 50% availability reads OVER-allocated (not merely "busy")',
+    devOneCap?.named === true && near(devOneJul?.allocated_pct, 60) && near(devOneJul?.available_pct, 50) && devOneJul?.over_allocated === true,
+    JSON.stringify({ named: devOneCap?.named, alloc: devOneJul?.allocated_pct, avail: devOneJul?.available_pct, over: devOneJul?.over_allocated }));
+  ok('PROJ-20: GenericGuy has no resource_skills row → named=false (generic placeholder booking)', genericCap?.named === false, JSON.stringify({ named: genericCap?.named }));
+
+  const roleDemand = await inj('GET', '/api/projects/resources/role-demand?from=2026-07&months=1', admin);
+  const devRole = (roleDemand.json.roles ?? []).find((r: any) => r.role === 'Developer');
+  const devRoleJul = devRole?.months?.find((c: any) => c.month === '2026-07');
+  // Demand: DevOne 60 + GenericGuy 100 = 160. Supply: only DevOne is skill-tagged, at his calendar 50% = 50.
+  ok('PROJ-20: role/skill supply-vs-demand — Developer demand 160 vs supply 50 (only DevOne named) → understaffed',
+    near(devRoleJul?.demand_pct, 160) && near(devRoleJul?.supply_pct, 50) && devRoleJul?.understaffed === true && devRole?.understaffed_months >= 1,
+    JSON.stringify({ demand: devRoleJul?.demand_pct, supply: devRoleJul?.supply_pct, understaffed: devRoleJul?.understaffed }));
+  ok('PROJ-20: understaffed_role_count surfaces the Developer gap', roleDemand.json.understaffed_role_count >= 1, JSON.stringify({ n: roleDemand.json.understaffed_role_count }));
+
   // ── 26. project health history (EVM/RAG snapshots over time, PPM upgrade) ──
   // PRJ-EVM has CPI 1.1111 / SPI 1.0 → both ≥ 1 → green.
   const h1 = await inj('POST', '/api/projects/PRJ-EVM/health', admin, { as_of: '2026-02-15' });

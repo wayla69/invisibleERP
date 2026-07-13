@@ -135,7 +135,7 @@ async function main() {
 
   // staff mints the package-insert QR capability for the aggregator order
   const qr = await inj('POST', `/api/channels/orders/${w3.json.order_no}/link-qr`, sales1);
-  ok('MKT-13: staff link-qr mints an HMAC capability + portal deep link for the order', qr.status === 201 && typeof qr.json.token === 'string' && qr.json.platform === 'grab' && String(qr.json.url).includes('clink='), JSON.stringify({ st: qr.status, url: qr.json.url }));
+  ok('MKT-13: staff link-qr mints an HMAC capability + member self-service (/m) deep link for the order', qr.status === 201 && typeof qr.json.token === 'string' && qr.json.platform === 'grab' && String(qr.json.url).includes('/m?clink='), JSON.stringify({ st: qr.status, url: qr.json.url }));
 
   // members: enroll two via the mock LINE verifier, mint member JWTs
   await inj('POST', '/api/loyalty/members/enroll-line', sales1, { id_token: 'mock:U-G1A:สมชาย', phone: '0811111111', marketing_opt_in: false });
