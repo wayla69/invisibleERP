@@ -222,6 +222,55 @@ export const crmForecastSnapshots = pgTable('crm_forecast_snapshots', {
   byPeriod: index('idx_crm_fc_snap_period').on(t.tenantId, t.period),
 }));
 
+// CRM-11 (CRM-10, migration 0385): persisted territory & quota master data over the REV-17 pipeline.
+// A named territory with match criteria (regions/segments/categories) + a self-referential parent for a
+// team roll-up hierarchy + a manager owner.
+export const crmTerritories = pgTable('crm_territories', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  code: text('code').notNull(),                        // TERR-YYYYMMDD-NNN
+  name: text('name').notNull(),
+  description: text('description'),
+  criteria: jsonb('criteria').notNull().default({}),   // { regions:[], segments:[], categories:[] }
+  parentTerritoryId: bigint('parent_territory_id', { mode: 'number' }),  // self-FK, team roll-up
+  manager: text('manager'),                            // territory manager (owner username)
+  active: boolean('active').notNull().default(true),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqCode: unique('uq_crm_territory_code').on(t.tenantId, t.code),
+  byParent: index('idx_crm_territory_parent').on(t.tenantId, t.parentTerritoryId),
+}));
+
+// The reps assigned to a territory (role rep | manager).
+export const crmTerritoryMembers = pgTable('crm_territory_members', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  territoryId: bigint('territory_id', { mode: 'number' }).notNull().references(() => crmTerritories.id),
+  owner: text('owner').notNull(),                      // the rep (crm_opportunities.owner)
+  role: text('role').notNull().default('rep'),         // rep | manager
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqMember: unique('uq_crm_terr_member').on(t.tenantId, t.territoryId, t.owner),
+  byTerritory: index('idx_crm_terr_member').on(t.tenantId, t.territoryId),
+}));
+
+// A per-period target for an owner OR a territory (scope + subject), so attainment is measured against an
+// auditable quota rather than an ad-hoc number passed at request time.
+export const crmQuotas = pgTable('crm_quotas', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  period: text('period').notNull(),                    // 'YYYY-MM'
+  scope: text('scope').notNull(),                      // owner | territory
+  subject: text('subject').notNull(),                  // owner username OR territory code
+  targetAmount: numeric('target_amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqQuota: unique('uq_crm_quota').on(t.tenantId, t.period, t.scope, t.subject),
+  byPeriod: index('idx_crm_quota_period').on(t.tenantId, t.period),
+}));
+
 // Append-only stage-transition audit (REV-17): who moved which opportunity from → to, when. Written on
 // creation (from_stage NULL) and on every transition through either route (/api/crm/pipeline, /api/pipeline).
 export const crmStageHistory = pgTable('crm_stage_history', {
