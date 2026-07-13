@@ -17,6 +17,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
@@ -200,6 +201,49 @@ async function main() {
   // 5. Idempotent: a re-run sweeps nothing (the redacted member is no longer a candidate).
   const sweep2 = await inj('POST', '/api/pdpa/retention/sweep', dpo1, {});
   ok('PDPA-04: re-run sweeps 0 (idempotent — [erased] members are never candidates)', sweep2.json.swept_total === 0, JSON.stringify(sweep2.json));
+
+  // ── G3 (docs/45) — PDPA-05: consent-gated HASHED audience export ──
+  // Fresh trio (M-0001 is erased above): G3A consented (phone+email), G3B NO consent row but the legacy
+  // marketingOptIn flag true (must be EXCLUDED — the ledger is the basis, not the flag), G3C withdrawn.
+  const [g3a] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-G3A', name: 'Anong', phone: '081-000-9999', email: 'Anong@Example.com ', marketingOptIn: false }).returning();
+  const [g3b] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-G3B', name: 'Boonmee', phone: '0820009999', email: 'boonmee@example.com', marketingOptIn: true }).returning();
+  const [g3c] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-G3C', name: 'Chai', phone: '0830009999', email: 'chai@example.com', marketingOptIn: true }).returning();
+  await db.insert(s.memberConsents).values([
+    { tenantId: t1, memberId: Number(g3a.id), purpose: 'marketing', granted: true, grantedAt: new Date() },
+    { tenantId: t1, memberId: Number(g3c.id), purpose: 'marketing', granted: false, grantedAt: new Date(), withdrawnAt: new Date() },
+  ]);
+  await db.insert(s.users).values([{ username: 'mkt1', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 }]).onConflictDoNothing();
+  const mktUid = Number((await db.select().from(s.users).where(eq(s.users.username, 'mkt1')))[0].id);
+  await db.insert(s.userPermissions).values(['marketing', 'exec'].map((perm) => ({ userId: mktUid, perm }))).onConflictDoNothing();
+  const mkt1 = await login('mkt1');
+
+  const sha = (v: string) => createHash('sha256').update(v).digest('hex');
+  const prev = await inj('GET', '/api/crm/audience-export/preview', mkt1);
+  const pj = JSON.stringify(prev.json);
+  ok('PDPA-05: preview is hash-only + consent-filtered — 1 of 3 members (no-row + withdrawn excluded; flag is NOT a basis), normalized sha256 email/phone',
+    prev.json.consented === 1 && prev.json.count === 1 &&
+    prev.json.members?.[0]?.hashed_email === sha('anong@example.com') && prev.json.members?.[0]?.hashed_phone === sha('66810009999') &&
+    !pj.includes('@example.com') && !pj.includes('0810009999') && !pj.includes('Anong'),
+    JSON.stringify({ consented: prev.json.consented, count: prev.json.count, em_ok: prev.json.members?.[0]?.hashed_email === sha('anong@example.com') }));
+
+  // The BI job is FAIL-CLOSED without the ROPA activity: run → failed + a 'blocked' register row.
+  const mkSub = async () => (await inj('POST', '/api/bi/subscriptions', mkt1, { name: 'aud', report_type: 'audience_export_sync', frequency: 'weekly' })).json;
+  const sub1 = await mkSub();
+  const runBlocked = await inj('POST', `/api/bi/subscriptions/${sub1.id}/run`, mkt1, {});
+  const reg1 = await inj('GET', '/api/crm/audience-export/register', mkt1);
+  ok('PDPA-05: without an ACTIVE audience_export ROPA activity the run FAILS CLOSED and a blocked register row is recorded',
+    runBlocked.json.status !== 'success' && (reg1.json.exports ?? []).some((r: any) => r.status === 'blocked' && r.error === 'ROPA_MISSING'),
+    JSON.stringify({ run: runBlocked.json.status, reg: reg1.json.exports?.[0]?.status }));
+
+  // Record the processing activity (legal_basis=consent) → the same run now succeeds, register carries evidence.
+  const ropaAud = await inj('POST', '/api/pdpa/ropa', dpo1, { name: 'audience_export', purpose: 'Ads-platform custom audiences (hashed)', legal_basis: 'consent', recipients: ['ads platform'], cross_border: 'SCCs', data_categories: ['hashed_email', 'hashed_phone'] });
+  const runOk = await inj('POST', `/api/bi/subscriptions/${sub1.id}/run`, mkt1, {});
+  const reg2 = await inj('GET', '/api/crm/audience-export/register', mkt1);
+  const okRow = (reg2.json.exports ?? []).find((r: any) => r.status === 'success');
+  ok('PDPA-05: with the ROPA entry the export runs — 1 consented row pushed (mock target), register ties the run to the ROPA id',
+    runOk.json.status === 'success' && /Audience export: 1 hashed row/.test(runOk.json.summary ?? '') &&
+    okRow?.members_consented === 1 && okRow?.rows_pushed === 1 && okRow?.target === 'mock' && Number(okRow?.ropa_activity_id) === Number(ropaAud.json.id) && okRow?.consent_basis === 'member_consents:marketing',
+    JSON.stringify({ run: runOk.json.status, row: okRow }));
 
   await app.close();
   console.log('\n── Step 8 — PDPA (DSAR + erasure + audit pseudonymisation) ──');

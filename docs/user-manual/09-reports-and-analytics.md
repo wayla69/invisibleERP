@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.4** _(2026-07-12: menu affinity — คู่เมนูขายด้วยกัน tab (co-purchase support/confidence/lift, per daypart) + schedulable `menu_affinity` report; 2026-07-10: menu engineering — branch picker + quantity-weighted average-margin threshold + on-screen thresholds; 2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
+**Status: DRAFT v0.5** _(2026-07-12: audience export — `audience_export_sync` pushes SHA-256-hashed, consent-filtered audiences (fail-closed without the DPO's ROPA entry; preview at CRM audience-export); 2026-07-12: menu affinity — คู่เมนูขายด้วยกัน tab (co-purchase support/confidence/lift, per daypart) + schedulable `menu_affinity` report; 2026-07-10: menu engineering — branch picker + quantity-weighted average-margin threshold + on-screen thresholds; 2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
 
 This chapter is for **managers, planners and executives** — and anyone who needs
 reports. It covers dashboards, Excel / PDF reports, AI-driven forecasting and
@@ -417,6 +417,10 @@ without anyone running it by hand.
    deliver the existing variance/scorecard figures on a schedule; the *Project
    governance / status pack* delivers the RAG-ranked portfolio status roll-up (red
    projects, unmitigated-high risks, overdue milestones, pending change orders).
+   **Audience export (hashed, consent-gated)** pushes your marketing audience to an ads platform /
+   CDP — but only members with a live marketing consent, only as SHA-256 hashes (never raw phone/email),
+   and only after the DPO records the `audience_export` processing activity (otherwise the run blocks
+   with `ROPA_MISSING`). Every run lands in the export register (`GET /api/crm/audience-export/register`).
    **Marketing ROI (spend → lift → margin)** is the one-board marketing view: coupon
    discount actually given (the true marketing spend — never dressed up as revenue),
    the redeemed bills' real revenue and recipe-costed margin, organic holdout lift,
