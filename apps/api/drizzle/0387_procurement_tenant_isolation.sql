@@ -16,41 +16,65 @@
 -- which hardcodes the OSHINEI tenant. Child tables inherit their parent's tenant_id via FK. No orphaned
 -- rows are expected — the final verification block below fails the migration loudly if any remain NULL,
 -- rather than silently leaving orphaned/invisible-to-everyone data.
+--
+-- NB (first deploy attempt, 2026-07-13): the original version of this file batched multiple UPDATE
+-- statements per migration-runner dispatch chunk, which caused the backfill to silently no-op in prod
+-- (deploy failed on step 4's fail-loud check, reporting all 196 rows unattributed) even though the
+-- identical logic run as individually-dispatched queries backfills every row cleanly (verified directly
+-- against prod in a rolled-back transaction). Root cause not fully isolated (suspected drizzle-kit/
+-- postgres-js multi-statement-chunk dispatch), but the fix is unambiguous: one statement per dispatch
+-- chunk, forcing each UPDATE to run as its own round-trip. The failed attempt rolled back cleanly (this
+-- file was never marked applied), so editing it in place is safe.
 
 -- ── 1. Add the column ───────────────────────────────────────────────────────────────────────────────
 ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);
+--> statement-breakpoint
 ALTER TABLE pr_items          ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);
+--> statement-breakpoint
 ALTER TABLE purchase_orders   ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);
+--> statement-breakpoint
 ALTER TABLE po_items          ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);
+--> statement-breakpoint
 ALTER TABLE po_deliveries     ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);
+--> statement-breakpoint
 ALTER TABLE goods_receipts    ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);
+--> statement-breakpoint
 ALTER TABLE gr_items          ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENCES tenants(id);
 --> statement-breakpoint
 
 -- ── 2. Backfill headers via actor → users.tenant_id, then the demo-seed fallback ──────────────────────
 UPDATE purchase_requests pr SET tenant_id = u.tenant_id
   FROM users u WHERE u.username = pr.requested_by AND pr.tenant_id IS NULL;
+--> statement-breakpoint
 UPDATE purchase_requests SET tenant_id = (SELECT id FROM tenants WHERE code = 'OSHINEI')
   WHERE tenant_id IS NULL AND requested_by = 'procurement-demo';
+--> statement-breakpoint
 
 UPDATE purchase_orders po SET tenant_id = u.tenant_id
   FROM users u WHERE u.username = po.created_by AND po.tenant_id IS NULL;
+--> statement-breakpoint
 UPDATE purchase_orders SET tenant_id = (SELECT id FROM tenants WHERE code = 'OSHINEI')
   WHERE tenant_id IS NULL AND created_by = 'procurement-demo';
+--> statement-breakpoint
 
 UPDATE goods_receipts gr SET tenant_id = u.tenant_id
   FROM users u WHERE u.username = gr.received_by AND gr.tenant_id IS NULL;
+--> statement-breakpoint
 -- fallback: inherit from the PO this receipt was issued against
 UPDATE goods_receipts gr SET tenant_id = po.tenant_id
   FROM purchase_orders po WHERE po.po_no = gr.po_no AND gr.tenant_id IS NULL;
+--> statement-breakpoint
 UPDATE goods_receipts SET tenant_id = (SELECT id FROM tenants WHERE code = 'OSHINEI')
   WHERE tenant_id IS NULL AND received_by = 'procurement-demo';
 --> statement-breakpoint
 
 -- ── 3. Backfill line/child tables from their parent header ─────────────────────────────────────────────
 UPDATE pr_items i SET tenant_id = h.tenant_id FROM purchase_requests h WHERE h.id = i.pr_id AND i.tenant_id IS NULL;
+--> statement-breakpoint
 UPDATE po_items i SET tenant_id = h.tenant_id FROM purchase_orders h WHERE h.id = i.po_id AND i.tenant_id IS NULL;
+--> statement-breakpoint
 UPDATE po_deliveries d SET tenant_id = h.tenant_id FROM purchase_orders h WHERE h.id = d.po_id AND d.tenant_id IS NULL;
+--> statement-breakpoint
 UPDATE gr_items i SET tenant_id = h.tenant_id FROM goods_receipts h WHERE h.id = i.gr_id AND i.tenant_id IS NULL;
 --> statement-breakpoint
 
@@ -75,11 +99,17 @@ END $$;
 
 -- ── 5. Leading tenant_id index per table (tenant-idx CI gate) ──────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_purchase_requests_tenant ON purchase_requests (tenant_id);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_pr_items_tenant          ON pr_items (tenant_id);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_tenant   ON purchase_orders (tenant_id);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_po_items_tenant          ON po_items (tenant_id);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_po_deliveries_tenant     ON po_deliveries (tenant_id);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_goods_receipts_tenant    ON goods_receipts (tenant_id);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_gr_items_tenant          ON gr_items (tenant_id);
 --> statement-breakpoint
 
