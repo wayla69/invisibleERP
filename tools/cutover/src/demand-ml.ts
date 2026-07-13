@@ -173,8 +173,11 @@ async function main() {
   const rd = await resolveRainDates('กรุงเทพมหานคร', '2026-04-01', '2026-04-12');
   global.fetch = realFetchW;
   delete process.env.DEMAND_WEATHER_ENABLED;
+  // exact-hostname routing (js/incomplete-url-substring-sanitization — never substring-match a host)
+  const wHost = (u: string) => { try { return new URL(u).hostname; } catch { return ''; } };
+  const wPath = (u: string) => { try { return new URL(u).pathname; } catch { return ''; } };
   ok('resolveRainDates: enabled → geocode + archive + forecast all called; merged rain-day set (archive ≥1mm, forecast ≥60% only)',
-    wCalls.some((u) => u.includes('geocoding-api.open-meteo.com')) && wCalls.some((u) => u.includes('archive-api.open-meteo.com')) && wCalls.some((u) => u.includes('api.open-meteo.com/v1/forecast')) &&
+    wCalls.some((u) => wHost(u) === 'geocoding-api.open-meteo.com') && wCalls.some((u) => wHost(u) === 'archive-api.open-meteo.com') && wCalls.some((u) => wHost(u) === 'api.open-meteo.com' && wPath(u) === '/v1/forecast') &&
     rd.has('2026-04-01') && !rd.has('2026-04-02') && rd.has('2026-04-13') && !rd.has('2026-04-14'),
     JSON.stringify({ calls: wCalls.length, dates: [...rd] }));
 
