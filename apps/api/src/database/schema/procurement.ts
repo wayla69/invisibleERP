@@ -176,6 +176,9 @@ export const supplierRequests = pgTable('supplier_requests', {
 
 export const purchaseRequests = pgTable('purchase_requests', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  // Tenant ownership (migration 0387) — this table predates multi-tenancy and had no tenant_id at all
+  // until then; see 0387's header comment for the backfill rule. Always stamp on INSERT.
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   prNo: text('pr_no').notNull().unique(),
   prDate: date('pr_date'),
   requestedBy: text('requested_by'),
@@ -187,10 +190,11 @@ export const purchaseRequests = pgTable('purchase_requests', {
   // Project dimension (M0, docs/32) — a requisition can be raised against a project so material spend is
   // committed/received against that project's BoQ. Nullable → non-project buys are unaffected.
   projectId: bigint('project_id', { mode: 'number' }),
-});
+}, (t) => ({ byTenant: index('idx_purchase_requests_tenant').on(t.tenantId) }));
 
 export const prItems = pgTable('pr_items', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // migration 0387, mirrors the parent PR
   prId: bigint('pr_id', { mode: 'number' }).references(() => purchaseRequests.id),
   itemId: text('item_id'),
   itemDescription: text('item_description'),
@@ -201,10 +205,13 @@ export const prItems = pgTable('pr_items', {
   poNo: text('po_no'),
   status: text('status').default('Open'),
   boqLineId: bigint('boq_line_id', { mode: 'number' }), // → project_boq_lines.id (M0, docs/32)
-}, (t) => ({ byPr: index('idx_pr_items_pr').on(t.prId) }));
+}, (t) => ({ byPr: index('idx_pr_items_pr').on(t.prId), byTenant: index('idx_pr_items_tenant').on(t.tenantId) }));
 
 export const purchaseOrders = pgTable('purchase_orders', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  // Tenant ownership (migration 0387) — this table predates multi-tenancy and had no tenant_id at all
+  // until then; see 0387's header comment for the backfill rule. Always stamp on INSERT.
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   poNo: text('po_no').notNull().unique(), // PO-YYYYMMDD-NNN
   poDate: date('po_date'),
   vendorId: bigint('vendor_id', { mode: 'number' }).references(() => vendors.id),
@@ -222,10 +229,11 @@ export const purchaseOrders = pgTable('purchase_orders', {
   fxRate: numeric('fx_rate', { precision: 14, scale: 6 }).notNull().default('1.000000'),
   // Project dimension (M0, docs/32) — nullable; a project PO commits material against the project's BoQ.
   projectId: bigint('project_id', { mode: 'number' }),
-});
+}, (t) => ({ byTenant: index('idx_purchase_orders_tenant').on(t.tenantId) }));
 
 export const poItems = pgTable('po_items', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // migration 0387, mirrors the parent PO
   poId: bigint('po_id', { mode: 'number' }).references(() => purchaseOrders.id),
   itemId: text('item_id'),
   itemDescription: text('item_description'),
@@ -239,10 +247,11 @@ export const poItems = pgTable('po_items', {
   // Project/BoQ dimension (M0, docs/32) — a PO line draws a specific BoQ line's budget. Nullable.
   projectId: bigint('project_id', { mode: 'number' }),
   boqLineId: bigint('boq_line_id', { mode: 'number' }),
-}, (t) => ({ byPo: index('idx_po_items_po').on(t.poId) }));
+}, (t) => ({ byPo: index('idx_po_items_po').on(t.poId), byTenant: index('idx_po_items_tenant').on(t.tenantId) }));
 
 export const poDeliveries = pgTable('po_deliveries', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // migration 0387, mirrors the parent PO
   poId: bigint('po_id', { mode: 'number' }).references(() => purchaseOrders.id),
   deliveryNo: integer('delivery_no'),
   itemId: text('item_id'),
@@ -250,10 +259,13 @@ export const poDeliveries = pgTable('po_deliveries', {
   scheduledDate: date('scheduled_date'),
   receivedQty: numeric('received_qty').default('0'),
   status: text('status').default('Pending'),
-}, (t) => ({ byPo: index('idx_po_deliveries_po').on(t.poId) }));
+}, (t) => ({ byPo: index('idx_po_deliveries_po').on(t.poId), byTenant: index('idx_po_deliveries_tenant').on(t.tenantId) }));
 
 export const goodsReceipts = pgTable('goods_receipts', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  // Tenant ownership (migration 0387) — this table predates multi-tenancy and had no tenant_id at all
+  // until then; see 0387's header comment for the backfill rule. Always stamp on INSERT.
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   grNo: text('gr_no').notNull().unique(),
   grDate: date('gr_date'),
   poNo: text('po_no'),
@@ -269,10 +281,11 @@ export const goodsReceipts = pgTable('goods_receipts', {
   // Precise receipt timestamp (0290) — anchors the supplier-claim window (EXP-12): a claim must be opened
   // within receiving_settings.claim_window_hours of this moment. gr_date alone is business-day-grained.
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-}, (t) => ({ byPo: index('idx_gr_pono').on(t.poNo) }));
+}, (t) => ({ byPo: index('idx_gr_pono').on(t.poNo), byTenant: index('idx_goods_receipts_tenant').on(t.tenantId) }));
 
 export const grItems = pgTable('gr_items', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // migration 0387, mirrors the parent GR
   grId: bigint('gr_id', { mode: 'number' }).references(() => goodsReceipts.id),
   poNo: text('po_no'),
   itemId: text('item_id'),
@@ -285,7 +298,7 @@ export const grItems = pgTable('gr_items', {
   unitCost: numeric('unit_cost', { precision: 14, scale: 2 }),
   isCapital: boolean('is_capital').notNull().default(false), // FA-10: eligible for capitalisation to the asset register
   remarks: text('remarks'),
-}, (t) => ({ byGr: index('idx_gr_items_gr').on(t.grId), byPo: index('idx_gr_items_pono').on(t.poNo) }));
+}, (t) => ({ byGr: index('idx_gr_items_gr').on(t.grId), byPo: index('idx_gr_items_pono').on(t.poNo), byTenant: index('idx_gr_items_tenant').on(t.tenantId) }));
 
 // ── T2-D: Supplier price-list versioning (migration 0174) ──────────────────
 // Versioned purchase price per vendor+item+uom. On upsert the prior active row is superseded
