@@ -4,6 +4,7 @@ import { LeasesService } from './leases.service';
 import { LeasesController } from './leases.controller';
 import { LessorLeasesService } from './lessor-leases.service';
 import { LessorLeasesController } from './lessor-leases.controller';
+import { LeasesBiReports } from './leases-bi-reports';
 
 // LedgerModule supplies LedgerService for the GL postings — the lessee side (commencement + periodic
 // interest/payment/ROU depreciation, LSE-01) and the lessor side (finance-lease commencement + periodic
@@ -11,7 +12,7 @@ import { LessorLeasesController } from './lessor-leases.controller';
 // BiModule can ride lease_periodic_run.
 @Module({
   imports: [LedgerModule],
-  providers: [LeasesService, LessorLeasesService],
+  providers: [LeasesBiReports, LeasesService, LessorLeasesService],
   controllers: [LeasesController, LessorLeasesController],
   exports: [LeasesService, LessorLeasesService],
 })

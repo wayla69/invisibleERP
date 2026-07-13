@@ -4,6 +4,7 @@ import { MessagingModule } from '../messaging/messaging.module';
 import { CommitmentsModule } from '../commitments/commitments.module';
 import { PettyCashService } from './petty-cash.service';
 import { PettyCashController } from './petty-cash.controller';
+import { PettyCashApprovalQueues } from './petty-cash-approval-queues';
 
 // Petty cash imprest float + direct-expense / advance maker-checker (EXP-08). DocNumberService +
 // StatusLogService + DRIZZLE are global (CommonModule / DatabaseModule); LedgerService posts the GL.
@@ -12,7 +13,7 @@ import { PettyCashController } from './petty-cash.controller';
 @Module({
   imports: [LedgerModule, MessagingModule, CommitmentsModule],
   controllers: [PettyCashController],
-  providers: [PettyCashService],
+  providers: [PettyCashApprovalQueues, PettyCashService],
   exports: [PettyCashService],
 })
 export class PettyCashModule {}

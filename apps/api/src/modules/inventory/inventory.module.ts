@@ -9,11 +9,12 @@ import { WasteService } from './waste.service';
 import { InventoryRepository } from './inventory.repository';
 import { QrModule } from '../qr/qr.module';
 import { LedgerModule } from '../ledger/ledger.module';
+import { InventoryApprovalQueues } from './inventory-approval-queues';
 
 @Module({
   imports: [QrModule, LedgerModule],
   controllers: [InventoryController, InventoryQrController, InventoryLedgerController, WasteController],
-  providers: [InventoryService, InventoryLedgerService, WasteService, InventoryRepository],
+  providers: [InventoryApprovalQueues, InventoryService, InventoryLedgerService, WasteService, InventoryRepository],
   exports: [InventoryService, InventoryLedgerService, WasteService],
 })
 export class InventoryModule {}

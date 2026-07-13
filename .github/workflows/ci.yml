@@ -40,6 +40,16 @@ jobs:
         # docs/28 §4 / AUD-ARC-09 — baseline in tools/ci/use-client-baseline.json; new pages are server
         # components with client islands (see accounting/eam page.tsx + lib/server-api.ts).
         run: node tools/ci/check-use-client.mjs
+      - name: service-size ratchet (god-service accretion may only go DOWN)
+        # docs/46 Phase 0 — baseline in tools/ci/service-size-baseline.json; a grandfathered API module
+        # file may not grow (LOC or ctor params) and no new file may pass 600 LOC: land the change as a
+        # sub-service / registered provider instead (docs/46 §4), or bump the baseline with a note.
+        run: node tools/ci/check-service-size.mjs
+      - name: ledger import-boundary ratchet (direct GL-table access may only go DOWN)
+        # docs/46 Phase 3 — baseline in tools/ci/ledger-boundary-baseline.json; files outside modules/ledger
+        # that touch journalEntries/journalLines are grandfathered and the set may only shrink: read GL
+        # state via LedgerReadService (accountNet/cashPosition/entryRefNo), post via LedgerService.postEntry.
+        run: node tools/ci/check-import-boundaries.mjs
       # Hand the compiled output to the harness shards so they don't each rebuild.
       - name: Upload dist
         uses: actions/upload-artifact@v4

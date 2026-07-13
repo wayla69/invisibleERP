@@ -1,9 +1,10 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { cashPools, cashPoolMembers, icLoans, icLoanAccruals, journalLines, journalEntries } from '../../database/schema';
+import { cashPools, cashPoolMembers, icLoans, icLoanAccruals } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { postingDefault } from '../ledger/posting-events';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
@@ -54,6 +55,9 @@ export class PoolService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     @Optional() private readonly ledger?: LedgerService,
+    // docs/46 Phase 3 — GL balances come from the ledger's narrow read API instead of a direct
+    // journal_lines⋈journal_entries join here. Appended @Optional (positional-construction convention).
+    @Optional() private readonly ledgerRead?: LedgerReadService,
   ) {}
 
   private tenant(explicit?: number | null, user?: JwtUser): number | null {
@@ -158,11 +162,8 @@ export class PoolService {
     const tid = pool.tenantId ?? this.tenant(undefined, user);
     const today = asOf ?? ymd();
     const balanceOf = async (account: string): Promise<number> => {
-      const conds = [eq(journalLines.accountCode, account), eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${today}`];
-      if (tid != null) conds.push(eq(journalEntries.tenantId, tid));
-      const rows = await db.select({ net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)` })
-        .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...conds));
-      return round2(n(rows[0]?.net));
+      if (!this.ledgerRead) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger read service not available', messageTh: 'ระบบบัญชีแยกประเภทไม่พร้อมใช้งาน' });
+      return round2(await this.ledgerRead.accountNet([account], { tenantId: tid, asOf: today }));
     };
     const headerBalance = await balanceOf(pool.headerAccount);
     const memberPos: { member_account: string; member_tenant_id: number | null; cap: number; balance: number }[] = [];
