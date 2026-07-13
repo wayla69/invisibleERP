@@ -136,7 +136,7 @@ export class JwtAuthGuard implements CanActivate {
         .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).where(eq(users.username, payload.sub)).limit(1));
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
-        // Soft-delete (migration 0386) — a deleted company's users are blocked PERMANENTLY, independent of
+        // Soft-delete (migration 0393) — a deleted company's users are blocked PERMANENTLY, independent of
         // suspended_at (so a stray reactivate on a deleted tenant can never silently re-open logins; only
         // restoreTenant clears this). Platform owners are exempt so they can always restore.
         if (u.tenantDeleted && !isPlatformAdmin(payload.sub)) throw new ForbiddenException({ code: 'TENANT_DELETED', message: 'This company no longer exists — contact the administrator', messageTh: 'บริษัทนี้ถูกลบแล้ว — โปรดติดต่อผู้ดูแลระบบ' });

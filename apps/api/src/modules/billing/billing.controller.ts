@@ -34,6 +34,7 @@ type RejectDto = z.infer<typeof RejectBody>;
 
 const FactoryResetBody = z.object({ confirm: z.string().min(1).max(100) });
 const DeleteTenantBody = z.object({ confirm: z.string().min(1).max(100) });
+const PurgeTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 
 const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional() }); // 1.7 — annual billing + multi-currency
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
@@ -160,7 +161,7 @@ export class BillingController {
     return this.svc.factoryResetTenant(Number(id), u.username, b.confirm);
   }
 
-  // Tenant soft-delete (migration 0386) — flags the company row deleted WITHOUT touching business data
+  // Tenant soft-delete (migration 0393) — flags the company row deleted WITHOUT touching business data
   // (lighter than factory-reset). Same two-step safety: SUSPENDED first (409 TENANT_NOT_SUSPENDED), then
   // type the company code (400 CONFIRM_MISMATCH). Deleted companies drop out of listTenants() and their
   // users are permanently blocked (TENANT_DELETED) regardless of suspended_at. Reversible via restore.
@@ -172,6 +173,16 @@ export class BillingController {
   @Post('admin/tenants/:id/restore') @PlatformAdmin() @HttpCode(200)
   restoreTenant(@Param('id') id: string, @CurrentUser() u: JwtUser) {
     return this.lifecycle.restoreTenant(Number(id), u.username);
+  }
+
+  // Tenant PURGE (migration 0393) — IRREVERSIBLE. Wipes every tenant-scoped row EXCEPT audit_log
+  // (ITGC-AC-16 append-only chain — never erased by policy) and the tenants row itself, which survives
+  // solely as that chain's anchor. Gated behind an already-soft-deleted company (409 TENANT_NOT_DELETED —
+  // delete → purge) so nothing gets permanently erased in one click; typed company-code confirm (400
+  // CONFIRM_MISMATCH); 409 TENANT_ALREADY_PURGED on a repeat call.
+  @Post('admin/tenants/:id/purge') @PlatformAdmin() @HttpCode(200)
+  purgeTenant(@Param('id') id: string, @Body(new ZodValidationPipe(PurgeTenantBody)) b: { confirm: string }, @CurrentUser() u: JwtUser) {
+    return this.lifecycle.purgeTenant(Number(id), u.username, b.confirm);
   }
 
   // PUBLIC plan catalogue

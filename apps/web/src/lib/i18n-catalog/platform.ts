@@ -56,6 +56,14 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.drawer_restore_desc': { th: 'ผู้ใช้ล็อกอินไม่ได้จนกว่าจะกู้คืน — กู้คืนแล้วบริษัทจะยังอยู่ในสถานะระงับ ต้องกดคืนสถานะแยกต่างหาก', en: 'Users cannot log in until restored — after restoring the company stays suspended, requiring a separate reactivate.' },
   'plt.drawer_restore_btn': { th: 'กู้คืน', en: 'Restore' },
   'plt.company_restored': { th: 'กู้คืน {name} แล้ว', en: '{name} restored' },
+  // Danger zone — permanent purge (offered only on an already-deleted company: delete → purge)
+  'plt.drawer_purge_title': { th: 'ล้างถาวร', en: 'Permanent purge' },
+  'plt.drawer_purge_desc': { th: 'ลบข้อมูลธุรกิจ ผู้ใช้ และประวัติการเรียกเก็บเงินของบริษัทนี้ถาวร — กู้คืนไม่ได้อีก เก็บเฉพาะบันทึกตรวจสอบ (audit log) ไว้ตามข้อกำหนด ทำได้เฉพาะบริษัทที่ถูกลบ (soft-delete) ไปแล้วเท่านั้น', en: 'Permanently erases this company\'s business data, users, and billing history. Cannot be undone. The audit log is always preserved by policy. Available only on an already soft-deleted company.' },
+  'plt.drawer_purge_confirm_label': { th: 'พิมพ์รหัสบริษัท "{code}" เพื่อยืนยันการล้างถาวร', en: 'Type the company code "{code}" to confirm the permanent purge' },
+  'plt.drawer_purge_btn': { th: 'ล้างถาวร', en: 'Purge' },
+  'plt.company_purged': { th: 'ล้างถาวร {name} แล้ว (เก็บบันทึกตรวจสอบไว้)', en: '{name} permanently purged (audit log preserved)' },
+  'plt.drawer_purged_note': { th: 'บริษัทนี้ถูกล้างถาวรแล้ว — เหลือเพียงบันทึกตรวจสอบ (audit log) ไว้ตามข้อกำหนด กู้คืนไม่ได้อีก', en: 'This company has been permanently purged — only its audit log remains, kept by policy. Cannot be restored.' },
+  'plt.status_purged': { th: 'ล้างถาวรแล้ว', en: 'Purged' },
   'plt.show_deleted_toggle': { th: 'แสดงบริษัทที่ถูกลบ', en: 'Show deleted companies' },
   'plt.status_deleted': { th: 'ถูกลบ', en: 'Deleted' },
 

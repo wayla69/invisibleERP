@@ -6,6 +6,15 @@
 -- silently re-open a deleted company's logins. Reversible via restoreTenant (clears the flag; the company
 -- stays suspended until a separate reactivate). Columns on the existing `tenants` table (self-policy +
 -- app_user grants already in place, mirrors 0235_tenant_lifecycle). Idempotent; PGlite + Postgres alike.
+--
+-- purged_at (companion, same migration): the follow-up IRREVERSIBLE step (delete → purge) that wipes
+-- every OTHER tenant-scoped row (business data, users, subscriptions, AI/usage meters). NEVER erases
+-- audit_log — the ITGC-AC-16 hash chain is append-only by design — so the tenants row itself also
+-- survives purge, kept solely as that audit trail's anchor.
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 --> statement-breakpoint
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS deleted_by text;
+--> statement-breakpoint
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS purged_at timestamptz;
+--> statement-breakpoint
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS purged_by text;

@@ -1,6 +1,6 @@
 # Ops — Multi-tenancy model & TENANCY_MODE (ITGC-AC-18)
 
-> **Status:** v1.23 · **Date:** 2026-07-13 · **Owner:** Platform / Security
+> **Status:** v1.24 · **Date:** 2026-07-13 · **Owner:** Platform / Security
 > How tenant data is isolated, what `TENANCY_MODE` does, and how to choose it for your deployment.
 
 ## 1. The two isolation layers
@@ -172,6 +172,20 @@ with a loud warning instead while you migrate the role (NOT recommended in prod)
 >   section alongside factory-reset (rendered only while suspended and not already deleted) + a Restore
 >   button (rendered while deleted) + a "show deleted companies" toggle on the fleet list. Procedure:
 >   go-live runbook item 11.
+> - **Company purge (already-soft-deleted companies only, migration 0386, IRREVERSIBLE).** The follow-up to
+>   soft-delete (**`POST /api/admin/tenants/:id/purge`**, same `confirm` body) so god-only console operators
+>   can actually reclaim space instead of accumulating deleted-but-intact companies forever. Gated behind
+>   `deleted_at` already set (`409 TENANT_NOT_DELETED` — delete → purge, same shape as suspend → reset) plus
+>   `409 TENANT_ALREADY_PURGED` on a repeat call. Wipes every OTHER tenant-scoped table (business data,
+>   users, subscriptions, AI/usage meters) via the same fixpoint engine as factory-reset — **`tenant-wipe.ts`**,
+>   extracted so both share it. **Deliberately, by explicit product decision, NEVER touches `audit_log`** —
+>   the ITGC-AC-16 hash chain is append-only and DB-enforced regardless of what a preserve-set says — so the
+>   `tenants` row itself also survives purge, kept solely as that chain's anchor (`purged_at`/`purged_by`
+>   columns record it). A purged company therefore has zero users (permanently inaccessible; login 401s
+>   normally, same as any unknown username) but still shows under `?include_deleted=1` with `purged: true`.
+>   `restoreTenant` refuses on a purged company (`409 TENANT_PURGED`) — there is nothing left to restore to.
+>   Console: a second danger-zone section under Restore (only while deleted and not yet purged) + a
+>   purged-state banner replacing the Restore/Purge controls once purged.
 > - **Each new company gets its OWN org** — signup sets `org_id = the new tenant's id` on both the tenant
 >   and its Admin, so under `multi-company` the new Admin is isolated to just that company by default (and
 >   never needs the org_id backfill the boot warning mentions).
@@ -361,6 +375,7 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 ## 7. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.24 | 2026-07-13 | Platform | **§2: tenant soft-delete + purge (migration 0393) — Amber cleanup.** New two-step lifecycle beyond suspend/factory-reset: `deleteTenant` (suspended-only) flags `deleted_at` without touching data, permanently blocking logins (`TENANT_DELETED`, independent of `suspended_at`) — reversible via `restoreTenant`. `purgeTenant` (already-deleted-only) is the follow-up IRREVERSIBLE step that wipes every other tenant-scoped table but, per explicit product decision, NEVER erases `audit_log` (ITGC-AC-16) — so the `tenants` row survives purge too, as that chain's anchor. Landed in a new `TenantLifecycleService` + shared `tenant-wipe.ts` engine (factory-reset's loop extracted into it), not appended to `billing.service.ts`. ToE: `cutover/onboarding.ts` (23 new checks). Go-live runbook items 11-12. |
 | 1.23 | 2026-07-13 | Platform / SRE | **§1bis provisioning: transfer ownership of enum TYPES too (0353 deploy failure).** Migration `0353_treasury_debt_register`'s `ALTER TYPE "role_enum" ADD VALUE ...` 42501'd `must be owner of type role_enum` in prod under `ierp_app` — the run-1/1.21 ownership transfer covered `public`/`drizzle` tables, sequences, and views, but not user-defined TYPEs, and `ALTER TYPE ... ADD VALUE` requires actual ownership (table grants don't cover it). `ops-provision-app-role.yml` now also loops `pg_type` (`typtype='e'`) in `public` and `ALTER TYPE ... OWNER TO ierp_app`; §1bis SQL updated to match. Re-run the workflow to unblock prod. |
 | 1.22 | 2026-07-09 | Platform / SRE | **§1bis provisioning: grant `CREATE` on the DATABASE (deploy-outage run-3 fix).** After run 3 provisioned the correct instance, the deploy still died in the pre-deploy `drizzle-kit migrate`: it always opens with `CREATE SCHEMA IF NOT EXISTS "drizzle"`, and Postgres checks CREATE-on-database *before* the IF-NOT-EXISTS shortcut, so `ierp_app` (schema grants only) failed with 42501 `permission denied for database railway` — invisible under the superuser, which skips ACL checks. `ops-provision-app-role.yml` now also runs `GRANT CREATE ON DATABASE current_database() TO ierp_app`; §1bis SQL updated to match. |
 | 1.21 | 2026-07-09 | Platform / SRE | **§1bis one-click provisioning + H-3 outage remediation.** New manual-dispatch workflow `ops-provision-app-role.yml`: creates/rotates `ierp_app` per §1bis (+ `GRANT app_user TO ierp_app` — the direction `SET LOCAL ROLE app_user` requires; + schema `CREATE`; + ownership transfer of `public`/`drizzle` tables/sequences/views so boot-time `drizzle-kit migrate` keeps working under FORCE RLS), verifies posture over a live login, repoints the API's `DATABASE_URL`, dispatches `deploy.yml`. Root cause documented: every prod deploy failed healthcheck since the 1.20 H-3 merge because Railway's default `DATABASE_URL` is the `postgres` superuser — the old pre-hardening replica kept serving. |
