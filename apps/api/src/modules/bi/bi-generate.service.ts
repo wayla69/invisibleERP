@@ -304,6 +304,8 @@ export class BiGenerateService {
     }
     const totalRows = batches.reduce((a, b) => a + b.members.length, 0);
     const sessionId = Date.now();
+    // member_id is INTERNAL (manifest upkeep) — strip it from every wire payload
+    const wireRows = (members: any[]) => members.map(({ member_id, ...hashes }: any) => hashes);
 
     const results: { target: string; ok: boolean; err: string | null; ref?: string }[] = [];
     // webhook / mock leg (unchanged contract: per-batch JSON POST via the SSRF-gated pushHashedAudience)
@@ -311,7 +313,7 @@ export class BiGenerateService {
       let ok = true, err: string | null = null;
       for (let i = 0; i < batches.length; i++) {
         const exp = batches[i]!;
-        const r = await pushHashedAudience({ tenant_id: exp.tenant_id, hash_alg: exp.hash_alg, consent_basis: exp.consent_basis, batch: i, offset: i * BATCH, count: exp.members.length, members: exp.members });
+        const r = await pushHashedAudience({ tenant_id: exp.tenant_id, hash_alg: exp.hash_alg, consent_basis: exp.consent_basis, batch: i, offset: i * BATCH, count: exp.members.length, members: wireRows(exp.members) });
         if (!r.ok) { ok = false; err = r.error ?? `status ${r.status}`; break; }
       }
       results.push({ target: targets.length ? 'webhook' : 'mock', ok, err });
@@ -320,27 +322,57 @@ export class BiGenerateService {
     for (const provider of providers) {
       let ok = true, err: string | null = null, ref: string | undefined;
       for (let i = 0; i < batches.length; i++) {
-        const r = await provider.push(batches[i]!.members, { sessionId, batchSeq: i + 1, lastBatch: i === batches.length - 1, estimatedTotal: totalRows });
+        const r = await provider.push(wireRows(batches[i]!.members), { sessionId, batchSeq: i + 1, lastBatch: i === batches.length - 1, estimatedTotal: totalRows });
         ref = r.ref ?? ref;
         if (!r.ok) { ok = false; err = r.error ?? `status ${r.status}`; break; }
       }
       results.push({ target: provider.name, ok, err, ref });
     }
 
+    // ── Withdrawal removal sync (extends PDPA-05): keep the EXTERNAL audience continuously consistent
+    //    with the consent ledger. Only meaningful when at least one REAL target exists and its upload
+    //    succeeded (a mock run maintains no external audience). Manifest first, then prune. ──
+    const anyRealSuccess = results.some((r) => r.target !== 'mock' && r.ok);
+    let removed = 0;
+    let removalErr: string | null = null;
+    if (anyRealSuccess && totalRows > 0) {
+      const uploaded = batches.flatMap((b: any) => b.members);
+      await this.crmMembers.upsertAudienceManifest(Number(tenantId), uploaded).catch(() => null);
+    }
+    if (anyRealSuccess) {
+      const candidates = await this.crmMembers.audienceRemovalCandidates(Number(tenantId));
+      if (candidates.length) {
+        const removalSession = sessionId + 1; // its own adapter session (Google gets its own remove job)
+        let allOk = true;
+        if (targets.includes('webhook')) {
+          const r = await pushHashedAudience({ tenant_id: Number(tenantId), action: 'remove', hash_alg: 'sha256', consent_basis: 'member_consents:marketing', count: candidates.length, members: wireRows(candidates) });
+          if (!r.ok) { allOk = false; removalErr = r.error ?? `status ${r.status}`; }
+        }
+        for (const provider of providers) {
+          const r = await provider.remove(wireRows(candidates), { sessionId: removalSession, batchSeq: 1, lastBatch: true, estimatedTotal: candidates.length });
+          if (!r.ok) { allOk = false; removalErr = r.error ?? `status ${r.status}`; }
+        }
+        // stamp removed ONLY when every configured target accepted the removal — a partial removal must
+        // stay a candidate next run (fail-visible, never fail-silent)
+        if (allOk) { await this.crmMembers.markAudienceRemoved(Number(tenantId), candidates.map((c: any) => c.member_id)); removed = candidates.length; }
+      }
+    }
+
     for (const r of results) {
       await db.insert(audienceExports).values({
         tenantId: Number(tenantId), target: r.target, membersConsidered: considered, membersConsented: consented,
-        rowsPushed: r.ok ? totalRows : 0, status: r.ok ? 'success' : 'failed', error: r.err,
+        rowsPushed: r.ok ? totalRows : 0, rowsRemoved: r.ok ? removed : 0, status: r.ok ? 'success' : 'failed', error: r.err ?? removalErr,
         ropaActivityId: Number(ropa.id), createdBy: user.username,
       }).catch(() => null);
     }
     const failed = results.filter((r) => !r.ok);
     if (failed.length) throw new BadRequestException({ code: 'AUDIENCE_PUSH_FAILED', message: `Audience push failed (${failed.map((r) => r.target).join(', ')}): ${failed[0]!.err}`, messageTh: 'ส่งกลุ่มเป้าหมายไม่สำเร็จ' });
+    if (removalErr) throw new BadRequestException({ code: 'AUDIENCE_REMOVE_FAILED', message: `Audience removal failed: ${removalErr}`, messageTh: 'ถอนสมาชิกออกจากกลุ่มเป้าหมายไม่สำเร็จ' });
 
     return {
-      data: { targets: results.map((r) => ({ target: r.target, ok: r.ok, ref: r.ref ?? null })), considered, consented, pushed: totalRows, hash_alg: 'sha256', consent_basis: 'member_consents:marketing', ropa_activity_id: Number(ropa.id) },
-      summary: `Audience export: ${totalRows} hashed row(s) from ${consented} consented (of ${considered} active) → ${targetLabel}; ROPA #${ropa.id}`,
-      summaryTh: `ส่งกลุ่มเป้าหมายโฆษณา: ${totalRows} แถว (hash) จากสมาชิกยินยอม ${consented}/${considered} → ${targetLabel} · ROPA #${ropa.id}`,
+      data: { targets: results.map((r) => ({ target: r.target, ok: r.ok, ref: r.ref ?? null })), considered, consented, pushed: totalRows, removed, hash_alg: 'sha256', consent_basis: 'member_consents:marketing', ropa_activity_id: Number(ropa.id) },
+      summary: `Audience export: ${totalRows} hashed row(s) from ${consented} consented (of ${considered} active) → ${targetLabel}${removed ? `; removed ${removed} withdrawn` : ''}; ROPA #${ropa.id}`,
+      summaryTh: `ส่งกลุ่มเป้าหมายโฆษณา: ${totalRows} แถว (hash) จากสมาชิกยินยอม ${consented}/${considered} → ${targetLabel}${removed ? ` · ถอนผู้ถอนความยินยอม ${removed}` : ''} · ROPA #${ropa.id}`,
     };
   }
 

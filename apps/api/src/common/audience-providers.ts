@@ -29,6 +29,9 @@ export interface AudienceSession { sessionId: number; batchSeq: number; lastBatc
 export interface AudienceProvider {
   name: string; // 'meta' | 'google'
   push(rows: AudienceRow[], session: AudienceSession): Promise<AudiencePushResult>;
+  // Withdrawal removal sync (extends PDPA-05): prune previously-uploaded members whose marketing consent
+  // was withdrawn — Meta DELETE /users; Google OfflineUserDataJob remove operations. Same never-throw contract.
+  remove(rows: AudienceRow[], session: AudienceSession): Promise<AudiencePushResult>;
 }
 
 // The webhook target's URL is runtime-configurable, so it is ALWAYS SSRF-gated in cdp-sync. The adapter
@@ -55,25 +58,30 @@ function metaProvider(): AudienceProvider | null {
   const audienceId = process.env.META_AUDIENCE_ID;
   if (!token || !audienceId) return null;
   const version = process.env.META_GRAPH_VERSION || 'v21.0';
+  const send = async (method: 'POST' | 'DELETE', rows: AudienceRow[], s: AudienceSession): Promise<AudiencePushResult> => {
+    const url = `https://graph.facebook.com/${version}/${audienceId}/users`;
+    try {
+      await gate(url);
+      const body = JSON.stringify({
+        // multi-key schema with PRE-HASHED values; a missing identifier is an empty string per the spec
+        payload: { schema: ['EMAIL_SHA256', 'PHONE_SHA256'], data: rows.map((r) => [r.hashed_email ?? '', r.hashed_phone ?? '']) },
+        session: { session_id: s.sessionId, batch_seq: s.batchSeq, last_batch_flag: s.lastBatch, estimated_num_total: s.estimatedTotal },
+      });
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body });
+      let json: any = {};
+      try { json = await res.json(); } catch { /* non-JSON error body */ }
+      return res.ok
+        ? { ok: true, status: res.status, ref: `audience:${audienceId} session:${s.sessionId}` }
+        : { ok: false, status: res.status, error: `meta: ${errText(json, res.status)}` };
+    } catch (e: any) {
+      return { ok: false, error: `meta: ${String(e?.message ?? e).slice(0, 300)}` };
+    }
+  };
   return {
     name: 'meta',
-    async push(rows, s) {
-      const url = `https://graph.facebook.com/${version}/${audienceId}/users`;
-      try {
-        await gate(url);
-        const body = JSON.stringify({
-          // multi-key schema with PRE-HASHED values; a missing identifier is an empty string per the spec
-          payload: { schema: ['EMAIL_SHA256', 'PHONE_SHA256'], data: rows.map((r) => [r.hashed_email ?? '', r.hashed_phone ?? '']) },
-          session: { session_id: s.sessionId, batch_seq: s.batchSeq, last_batch_flag: s.lastBatch, estimated_num_total: s.estimatedTotal },
-        });
-        const res = await post(url, { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body);
-        return res.ok
-          ? { ok: true, status: res.status, ref: `audience:${audienceId} session:${s.sessionId}` }
-          : { ok: false, status: res.status, error: `meta: ${errText(res.json, res.status)}` };
-      } catch (e: any) {
-        return { ok: false, error: `meta: ${String(e?.message ?? e).slice(0, 300)}` };
-      }
-    },
+    push: (rows, s) => send('POST', rows, s),
+    // Meta removal = the same payload shape via HTTP DELETE on /users
+    remove: (rows, s) => send('DELETE', rows, s),
   };
 }
 
@@ -103,9 +111,7 @@ function googleProvider(): AudienceProvider | null {
   const cid = process.env.GOOGLE_ADS_CUSTOMER_ID!.replace(/-/g, '');
   const listId = process.env.GOOGLE_ADS_USER_LIST_ID!;
   const base = `https://googleads.googleapis.com/${version}/customers/${cid}`;
-  return {
-    name: 'google',
-    async push(rows, s) {
+  const sendOps = async (kind: 'create' | 'remove', rows: AudienceRow[], s: AudienceSession): Promise<AudiencePushResult> => {
       try {
         const token = await googleAccessToken();
         const headers: Record<string, string> = {
@@ -126,7 +132,7 @@ function googleProvider(): AudienceProvider | null {
           googleJobBySession.set(s.sessionId, jobRN);
         }
         const ops = rows.map((r) => ({
-          create: {
+          [kind]: {
             userIdentifiers: [
               ...(r.hashed_email ? [{ hashedEmail: r.hashed_email }] : []),
               ...(r.hashed_phone_plus ? [{ hashedPhoneNumber: r.hashed_phone_plus }] : []),
@@ -147,7 +153,12 @@ function googleProvider(): AudienceProvider | null {
         googleJobBySession.delete(s.sessionId);
         return { ok: false, error: `google: ${String(e?.message ?? e).slice(0, 300)}` };
       }
-    },
+  };
+  return {
+    name: 'google',
+    push: (rows, s) => sendOps('create', rows, s),
+    // Google removal = the same OfflineUserDataJob flow with `remove` operations (its own session/job)
+    remove: (rows, s) => sendOps('remove', rows, s),
   };
 }
 

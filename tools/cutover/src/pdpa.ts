@@ -14,7 +14,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -297,6 +297,66 @@ async function main() {
   ok('G3b: per-recipient register evidence — separate success rows for meta and google, counts intact',
     byTarget.meta?.rows_pushed === 1 && byTarget.google?.rows_pushed === 1 && byTarget.meta?.consent_basis === 'member_consents:marketing',
     JSON.stringify({ targets: Object.keys(byTarget) }));
+
+  // ── G3c — consent-WITHDRAWAL removal sync: the G3b upload put M-G3A in the manifest; withdrawing the
+  //    consent must PRUNE the external audiences on the next run (Meta DELETE /users; Google remove ops),
+  //    stamp the manifest, and be idempotent. ──
+  const manifest0: any = (await pg.query(`select removed_at from audience_export_members where member_id = ${Number(g3a.id)}`)).rows[0];
+  ok('G3c: the successful direct upload recorded M-G3A in the audience manifest (hash-only, not yet removed)',
+    !!manifest0 && manifest0.removed_at == null, JSON.stringify(manifest0));
+  await db.update(s.memberConsents).set({ granted: false, withdrawnAt: new Date() })
+    .where(and(eq(s.memberConsents.memberId, Number(g3a.id)), eq(s.memberConsents.purpose, 'marketing')));
+
+  process.env.META_ADS_ACCESS_TOKEN = 'meta-tok';
+  process.env.META_AUDIENCE_ID = 'AUD-1';
+  process.env.GOOGLE_ADS_DEVELOPER_TOKEN = 'dev-tok';
+  process.env.GOOGLE_ADS_CLIENT_ID = 'cid';
+  process.env.GOOGLE_ADS_CLIENT_SECRET = 'sec';
+  process.env.GOOGLE_ADS_REFRESH_TOKEN = 'ref-tok';
+  process.env.GOOGLE_ADS_CUSTOMER_ID = '123-456-7890';
+  process.env.GOOGLE_ADS_USER_LIST_ID = 'LIST-9';
+  const wire2: { url: string; host: string; method: string; body: any }[] = [];
+  global.fetch = (async (url: any, init: any) => {
+    const u = String(url);
+    const host = (() => { try { return new URL(u).hostname; } catch { return ''; } })();
+    let body: any = init?.body;
+    try { body = JSON.parse(init?.body); } catch { /* form-encoded token request */ }
+    wire2.push({ url: u, host, method: String(init?.method ?? 'GET'), body });
+    const json =
+      host === 'oauth2.googleapis.com' ? { access_token: 'gat', expires_in: 3600 } :
+      u.includes('offlineUserDataJobs:create') ? { resourceName: 'customers/1234567890/offlineUserDataJobs/88' } :
+      host === 'graph.facebook.com' ? { audience_id: 'AUD-1', num_received: 1 } : {};
+    return { ok: true, status: 200, json: async () => json } as any;
+  }) as any;
+  const runRemove = await inj('POST', `/api/bi/subscriptions/${sub2.id}/run`, mkt1, {});
+  const metaDel = wire2.find((w) => w.host === 'graph.facebook.com' && w.method === 'DELETE');
+  const gRemoveAdd = wire2.find((w) => w.url.includes(':addOperations'));
+  const manifest1: any = (await pg.query(`select removed_at from audience_export_members where member_id = ${Number(g3a.id)}`)).rows[0];
+  ok('G3c: withdrawal → Meta receives the SAME hashed row via HTTP DELETE /users (0 uploaded, 1 removed)',
+    runRemove.json.status === 'success' && /0 hashed row/.test(runRemove.json.summary ?? '') && /removed 1 withdrawn/.test(runRemove.json.summary ?? '') &&
+    metaDel?.url.includes('/v21.0/AUD-1/users') &&
+    metaDel?.body?.payload?.data?.[0]?.[0] === sha('anong@example.com') && metaDel?.body?.payload?.data?.[0]?.[1] === sha('66810009999'),
+    JSON.stringify({ run: runRemove.json.status, summary: runRemove.json.summary, del: metaDel?.method }));
+  ok('G3c: Google receives `remove` operations on its own OfflineUserDataJob, PLUS-prefixed phone hash',
+    gRemoveAdd?.body?.operations?.[0]?.remove?.userIdentifiers?.some((x: any) => x.hashedPhoneNumber === sha('+66810009999')) &&
+    gRemoveAdd?.body?.operations?.[0]?.remove?.userIdentifiers?.some((x: any) => x.hashedEmail === sha('anong@example.com')) &&
+    wire2.some((w) => w.url.includes(':run')),
+    JSON.stringify({ ops: gRemoveAdd?.body?.operations?.[0] }));
+  const reg4 = await inj('GET', '/api/crm/audience-export/register', mkt1);
+  const remRows = (reg4.json.exports ?? []).filter((r: any) => r.rows_removed === 1 && r.status === 'success');
+  ok('G3c: register evidence — meta + google rows carry rows_removed=1; the manifest row is stamped removed_at',
+    remRows.some((r: any) => r.target === 'meta') && remRows.some((r: any) => r.target === 'google') && manifest1?.removed_at != null,
+    JSON.stringify({ targets: remRows.map((r: any) => r.target), removed_at: manifest1?.removed_at }));
+
+  // Idempotent: a re-run finds no candidates (the stamped row is never re-removed) — no DELETE goes out.
+  const delsBefore = wire2.filter((w) => w.method === 'DELETE').length;
+  const runAgain = await inj('POST', `/api/bi/subscriptions/${sub2.id}/run`, mkt1, {});
+  const delsAfter = wire2.filter((w) => w.method === 'DELETE').length;
+  global.fetch = realFetch;
+  for (const k of ['META_ADS_ACCESS_TOKEN', 'META_AUDIENCE_ID', 'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID', 'GOOGLE_ADS_USER_LIST_ID']) delete process.env[k];
+  ok('G3c: idempotent — a re-run removes 0 (stamped manifest rows are no longer candidates), no wire DELETE',
+    runAgain.json.status === 'success' && !/removed \d+ withdrawn/.test(runAgain.json.summary ?? '') && delsAfter === delsBefore,
+    JSON.stringify({ summary: runAgain.json.summary, dels: [delsBefore, delsAfter] }));
 
   await app.close();
   console.log('\n── Step 8 — PDPA (DSAR + erasure + audit pseudonymisation) ──');
