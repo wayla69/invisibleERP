@@ -259,10 +259,18 @@ For items with enough sales history, the system forecasts future demand using
 several classic models (moving average, exponential smoothing, Holt trend,
 seasonal-naive, Croston and Croston-SBA for sporadic items, a
 **day-of-week seasonal** model for weekly patterns like weekend-heavy
-restaurant demand, and a **Thai-calendar holiday** model that learns each
+restaurant demand, a **Thai-calendar holiday** model that learns each
 item's uplift on fixed public holidays — ปีใหม่, สงกรานต์, วันแม่/วันพ่อ — and
-applies it to future dates that land on one) and **automatically picks the
-most accurate one** by back-testing each on recent history.
+applies it to future dates that land on one, and an optional **weather**
+model that learns each item's rain-day dip/uplift and applies it to days a
+forecast calls for rain) and **automatically picks the most accurate one**
+by back-testing each on recent history.
+
+> ☔ **Weather model (opt-in):** off by default. An operator turns it on with
+> `DEMAND_WEATHER_ENABLED=true` — no API key or signup needed (the free
+> Open-Meteo service, geocoded from your company's **province**). Left off,
+> the weather model quietly sits out of auto-selection (it behaves exactly
+> like the day-of-week model) and nothing changes.
 
 1. **Compare models** — the **เทียบโมเดล** tab back-tests every model for an item.
    You get each model's accuracy scored by **WAPE** (lower is better) and
