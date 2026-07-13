@@ -49,6 +49,18 @@ export const tenants = pgTable('tenants', {
   suspendedAt: timestamp('suspended_at', { withTimezone: true }),
   suspendedBy: text('suspended_by'),
   suspendReason: text('suspend_reason'),
+  // ── Soft-delete (migration 0393) — deleted_at != null hides the company from the Platform Console
+  // fleet list/switcher and PERMANENTLY blocks its users at the auth guard (TENANT_DELETED), independent
+  // of suspended_at (so a stray reactivate can't silently re-open a deleted company). Business data is
+  // untouched (unlike factory-reset) — reversible via restoreTenant. ──
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  deletedBy: text('deleted_by'),
+  // Purge (migration 0393) — purged_at != null means every OTHER tenant-scoped row (business data, users,
+  // subscriptions, AI/usage meters) has been permanently wiped; ONLY audit_log (ITGC-AC-16 append-only
+  // chain) and this tenants row itself survive, kept solely as the audit trail's anchor. IRREVERSIBLE —
+  // restoreTenant refuses once this is set (there is nothing left to restore: no users can ever log in).
+  purgedAt: timestamp('purged_at', { withTimezone: true }),
+  purgedBy: text('purged_by'),
   // Platform Console tags/segments (migration 0246) — free-form labels for fleet organisation/filtering.
   tags: jsonb('tags').notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
