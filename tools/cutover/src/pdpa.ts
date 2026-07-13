@@ -255,16 +255,18 @@ async function main() {
   process.env.GOOGLE_ADS_CUSTOMER_ID = '123-456-7890';
   process.env.GOOGLE_ADS_USER_LIST_ID = 'LIST-9';
   const realFetch = global.fetch;
-  const wire: { url: string; headers: any; body: any }[] = [];
+  const wire: { url: string; host?: string; headers: any; body: any }[] = [];
   global.fetch = (async (url: any, init: any) => {
     const u = String(url);
+    // exact-hostname routing (js/incomplete-url-substring-sanitization — never substring-match a host)
+    const host = (() => { try { return new URL(u).hostname; } catch { return ''; } })();
     let body: any = init?.body;
     try { body = JSON.parse(init?.body); } catch { /* form-encoded token request */ }
-    wire.push({ url: u, headers: init?.headers ?? {}, body });
+    wire.push({ url: u, host, headers: init?.headers ?? {}, body });
     const json =
-      u.includes('oauth2.googleapis.com') ? { access_token: 'gat', expires_in: 3600 } :
+      host === 'oauth2.googleapis.com' ? { access_token: 'gat', expires_in: 3600 } :
       u.includes('offlineUserDataJobs:create') ? { resourceName: 'customers/1234567890/offlineUserDataJobs/77' } :
-      u.includes('graph.facebook.com') ? { audience_id: 'AUD-1', num_received: 1 } : {};
+      host === 'graph.facebook.com' ? { audience_id: 'AUD-1', num_received: 1 } : {};
     return { ok: true, status: 200, json: async () => json } as any;
   }) as any;
   const sub2 = await mkSub();
@@ -272,7 +274,7 @@ async function main() {
   global.fetch = realFetch;
   for (const k of ['META_ADS_ACCESS_TOKEN', 'META_AUDIENCE_ID', 'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID', 'GOOGLE_ADS_USER_LIST_ID']) delete process.env[k];
 
-  const metaCall = wire.find((w) => w.url.includes('graph.facebook.com'));
+  const metaCall = wire.find((w) => w.host === 'graph.facebook.com');
   const gCreate = wire.find((w) => w.url.includes('offlineUserDataJobs:create'));
   const gAdd = wire.find((w) => w.url.includes(':addOperations'));
   const gRun = wire.find((w) => w.url.includes(':run'));
