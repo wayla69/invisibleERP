@@ -245,6 +245,59 @@ async function main() {
     okRow?.members_consented === 1 && okRow?.rows_pushed === 1 && okRow?.target === 'mock' && Number(okRow?.ropa_activity_id) === Number(ropaAud.json.id) && okRow?.consent_basis === 'member_consents:marketing',
     JSON.stringify({ run: runOk.json.status, row: okRow }));
 
+  // ── G3b — DIRECT ads adapters (env-gated): stub global.fetch, assert the EXACT wire shapes ──
+  process.env.META_ADS_ACCESS_TOKEN = 'meta-tok';
+  process.env.META_AUDIENCE_ID = 'AUD-1';
+  process.env.GOOGLE_ADS_DEVELOPER_TOKEN = 'dev-tok';
+  process.env.GOOGLE_ADS_CLIENT_ID = 'cid';
+  process.env.GOOGLE_ADS_CLIENT_SECRET = 'sec';
+  process.env.GOOGLE_ADS_REFRESH_TOKEN = 'ref-tok';
+  process.env.GOOGLE_ADS_CUSTOMER_ID = '123-456-7890';
+  process.env.GOOGLE_ADS_USER_LIST_ID = 'LIST-9';
+  const realFetch = global.fetch;
+  const wire: { url: string; host?: string; headers: any; body: any }[] = [];
+  global.fetch = (async (url: any, init: any) => {
+    const u = String(url);
+    // exact-hostname routing (js/incomplete-url-substring-sanitization — never substring-match a host)
+    const host = (() => { try { return new URL(u).hostname; } catch { return ''; } })();
+    let body: any = init?.body;
+    try { body = JSON.parse(init?.body); } catch { /* form-encoded token request */ }
+    wire.push({ url: u, host, headers: init?.headers ?? {}, body });
+    const json =
+      host === 'oauth2.googleapis.com' ? { access_token: 'gat', expires_in: 3600 } :
+      u.includes('offlineUserDataJobs:create') ? { resourceName: 'customers/1234567890/offlineUserDataJobs/77' } :
+      host === 'graph.facebook.com' ? { audience_id: 'AUD-1', num_received: 1 } : {};
+    return { ok: true, status: 200, json: async () => json } as any;
+  }) as any;
+  const sub2 = await mkSub();
+  const runAds = await inj('POST', `/api/bi/subscriptions/${sub2.id}/run`, mkt1, {});
+  global.fetch = realFetch;
+  for (const k of ['META_ADS_ACCESS_TOKEN', 'META_AUDIENCE_ID', 'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID', 'GOOGLE_ADS_USER_LIST_ID']) delete process.env[k];
+
+  const metaCall = wire.find((w) => w.host === 'graph.facebook.com');
+  const gCreate = wire.find((w) => w.url.includes('offlineUserDataJobs:create'));
+  const gAdd = wire.find((w) => w.url.includes(':addOperations'));
+  const gRun = wire.find((w) => w.url.includes(':run'));
+  ok('G3b: Meta adapter — pre-hashed EMAIL_SHA256/PHONE_SHA256 schema on the pinned audience, session-flagged, digits-no-plus phone hash',
+    runAds.json.status === 'success' && /meta\+google/.test(runAds.json.summary ?? '') &&
+    metaCall?.url.includes('/v21.0/AUD-1/users') &&
+    JSON.stringify(metaCall?.body?.payload?.schema) === JSON.stringify(['EMAIL_SHA256', 'PHONE_SHA256']) &&
+    metaCall?.body?.payload?.data?.[0]?.[0] === sha('anong@example.com') && metaCall?.body?.payload?.data?.[0]?.[1] === sha('66810009999') &&
+    metaCall?.body?.session?.batch_seq === 1 && metaCall?.body?.session?.last_batch_flag === true,
+    JSON.stringify({ run: runAds.json.status, url: metaCall?.url, s: metaCall?.body?.session }));
+  ok('G3b: Google adapter — OfflineUserDataJob create→addOperations→run against the pinned user list, PLUS-prefixed phone hash, partial-failure on',
+    gCreate?.body?.job?.customerMatchUserListMetadata?.userList === 'customers/1234567890/userLists/LIST-9' &&
+    gAdd?.url.includes('customers/1234567890/offlineUserDataJobs/77') && gAdd?.body?.enablePartialFailure === true &&
+    gAdd?.body?.operations?.[0]?.create?.userIdentifiers?.some((x: any) => x.hashedEmail === sha('anong@example.com')) &&
+    gAdd?.body?.operations?.[0]?.create?.userIdentifiers?.some((x: any) => x.hashedPhoneNumber === sha('+66810009999')) &&
+    gRun != null && (gAdd?.headers?.['developer-token'] === 'dev-tok'),
+    JSON.stringify({ create: gCreate?.body?.job, ids: gAdd?.body?.operations?.[0]?.create?.userIdentifiers?.length, run: !!gRun }));
+  const reg3 = await inj('GET', '/api/crm/audience-export/register', mkt1);
+  const byTarget = Object.fromEntries((reg3.json.exports ?? []).filter((r: any) => r.status === 'success').map((r: any) => [r.target, r]));
+  ok('G3b: per-recipient register evidence — separate success rows for meta and google, counts intact',
+    byTarget.meta?.rows_pushed === 1 && byTarget.google?.rows_pushed === 1 && byTarget.meta?.consent_basis === 'member_consents:marketing',
+    JSON.stringify({ targets: Object.keys(byTarget) }));
+
   await app.close();
   console.log('\n── Step 8 — PDPA (DSAR + erasure + audit pseudonymisation) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

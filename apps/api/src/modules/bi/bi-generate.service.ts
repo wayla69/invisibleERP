@@ -6,6 +6,7 @@ import { arInvoices } from '../../database/schema/finance';
 import { branchStock } from '../../database/schema/portal';
 import { n, ymd } from '../../database/queries';
 import { audienceExportConfigured, pushHashedAudience } from '../../common/cdp-sync';
+import { resolveAudienceProviders } from '../../common/audience-providers';
 import { activeKeyId, needsRotation, encrypt, decrypt } from '../../common/crypto';
 import { CollectionsService } from '../finance/collections.service';
 import { FinanceMetricsService } from '../finance/finance-metrics.service';
@@ -279,37 +280,67 @@ export class BiGenerateService {
       eq(ropaActivities.name, 'audience_export'), eq(ropaActivities.legalBasis, 'consent'),
     )).limit(1);
     if (!ropa) {
-      await db.insert(audienceExports).values({ tenantId: Number(tenantId), target: audienceExportConfigured() ? 'webhook' : 'mock', status: 'blocked', error: 'ROPA_MISSING', createdBy: user.username }).catch(() => null);
+      const blockedTargets = [...resolveAudienceProviders().map((p) => p.name), ...(audienceExportConfigured() ? ['webhook'] : [])];
+      await db.insert(audienceExports).values({ tenantId: Number(tenantId), target: blockedTargets.length ? blockedTargets.join('+') : 'mock', status: 'blocked', error: 'ROPA_MISSING', createdBy: user.username }).catch(() => null);
       throw new BadRequestException({ code: 'ROPA_MISSING', message: "Audience export is blocked: create an ACTIVE ROPA activity named 'audience_export' with legal_basis='consent' (POST /api/pdpa/ropa) first", messageTh: 'ยังส่งกลุ่มเป้าหมายไม่ได้: ต้องบันทึกกิจกรรม ROPA ชื่อ audience_export (ฐานความยินยอม) ก่อน' });
     }
 
-    const target = audienceExportConfigured() ? 'webhook' : 'mock';
+    // Targets: every env-configured DIRECT adapter (meta/google) + the generic webhook; none ⇒ mock.
+    // Each recipient gets its OWN append-only register row (per-recipient PDPA evidence).
+    const providers = resolveAudienceProviders();
+    const targets: string[] = [...providers.map((p) => p.name), ...(audienceExportConfigured() ? ['webhook'] : [])];
+    const targetLabel = targets.length ? targets.join('+') : 'mock';
     const BATCH = 500;
-    let offset = 0, pushed = 0, consented = 0, considered = 0, ok = true, err: string | null = null;
+    let consented = 0, considered = 0;
+    const batches: any[] = [];
+    let offset = 0;
     for (let i = 0; i < 200; i++) { // safety cap: 200 batches (100k members)
       const exp: any = await this.crmMembers.exportForCustomerMatch(user, { tenantId: Number(tenantId), limit: BATCH, offset });
       if (exp?.error) throw new BadRequestException(exp.error);
       considered = exp.total_active; consented = exp.consented;
-      if (!exp.members?.length && offset > 0) break;
-      if (exp.members?.length) {
-        const r = await pushHashedAudience({ tenant_id: exp.tenant_id, hash_alg: exp.hash_alg, consent_basis: exp.consent_basis, batch: i, offset, count: exp.members.length, members: exp.members });
-        if (!r.ok) { ok = false; err = r.error ?? `status ${r.status}`; break; }
-        pushed += exp.members.length;
-      }
+      if (exp.members?.length) batches.push(exp);
       offset += exp.count;
       if (exp.count < BATCH) break;
     }
+    const totalRows = batches.reduce((a, b) => a + b.members.length, 0);
+    const sessionId = Date.now();
 
-    await db.insert(audienceExports).values({
-      tenantId: Number(tenantId), target, membersConsidered: considered, membersConsented: consented,
-      rowsPushed: pushed, status: ok ? 'success' : 'failed', error: err, ropaActivityId: Number(ropa.id), createdBy: user.username,
-    }).catch(() => null);
-    if (!ok) throw new BadRequestException({ code: 'AUDIENCE_PUSH_FAILED', message: `Audience push failed: ${err}`, messageTh: 'ส่งกลุ่มเป้าหมายไม่สำเร็จ' });
+    const results: { target: string; ok: boolean; err: string | null; ref?: string }[] = [];
+    // webhook / mock leg (unchanged contract: per-batch JSON POST via the SSRF-gated pushHashedAudience)
+    if (!targets.length || targets.includes('webhook')) {
+      let ok = true, err: string | null = null;
+      for (let i = 0; i < batches.length; i++) {
+        const exp = batches[i]!;
+        const r = await pushHashedAudience({ tenant_id: exp.tenant_id, hash_alg: exp.hash_alg, consent_basis: exp.consent_basis, batch: i, offset: i * BATCH, count: exp.members.length, members: exp.members });
+        if (!r.ok) { ok = false; err = r.error ?? `status ${r.status}`; break; }
+      }
+      results.push({ target: targets.length ? 'webhook' : 'mock', ok, err });
+    }
+    // direct adapters: each gets the full session (create → add per batch → finalize on the last batch)
+    for (const provider of providers) {
+      let ok = true, err: string | null = null, ref: string | undefined;
+      for (let i = 0; i < batches.length; i++) {
+        const r = await provider.push(batches[i]!.members, { sessionId, batchSeq: i + 1, lastBatch: i === batches.length - 1, estimatedTotal: totalRows });
+        ref = r.ref ?? ref;
+        if (!r.ok) { ok = false; err = r.error ?? `status ${r.status}`; break; }
+      }
+      results.push({ target: provider.name, ok, err, ref });
+    }
+
+    for (const r of results) {
+      await db.insert(audienceExports).values({
+        tenantId: Number(tenantId), target: r.target, membersConsidered: considered, membersConsented: consented,
+        rowsPushed: r.ok ? totalRows : 0, status: r.ok ? 'success' : 'failed', error: r.err,
+        ropaActivityId: Number(ropa.id), createdBy: user.username,
+      }).catch(() => null);
+    }
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length) throw new BadRequestException({ code: 'AUDIENCE_PUSH_FAILED', message: `Audience push failed (${failed.map((r) => r.target).join(', ')}): ${failed[0]!.err}`, messageTh: 'ส่งกลุ่มเป้าหมายไม่สำเร็จ' });
 
     return {
-      data: { target, considered, consented, pushed, hash_alg: 'sha256', consent_basis: 'member_consents:marketing', ropa_activity_id: Number(ropa.id) },
-      summary: `Audience export: ${pushed} hashed row(s) from ${consented} consented (of ${considered} active) → ${target}; ROPA #${ropa.id}`,
-      summaryTh: `ส่งกลุ่มเป้าหมายโฆษณา: ${pushed} แถว (hash) จากสมาชิกยินยอม ${consented}/${considered} → ${target} · ROPA #${ropa.id}`,
+      data: { targets: results.map((r) => ({ target: r.target, ok: r.ok, ref: r.ref ?? null })), considered, consented, pushed: totalRows, hash_alg: 'sha256', consent_basis: 'member_consents:marketing', ropa_activity_id: Number(ropa.id) },
+      summary: `Audience export: ${totalRows} hashed row(s) from ${consented} consented (of ${considered} active) → ${targetLabel}; ROPA #${ropa.id}`,
+      summaryTh: `ส่งกลุ่มเป้าหมายโฆษณา: ${totalRows} แถว (hash) จากสมาชิกยินยอม ${consented}/${considered} → ${targetLabel} · ROPA #${ropa.id}`,
     };
   }
 
