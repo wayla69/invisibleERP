@@ -335,9 +335,9 @@ async function main() {
   //     and a 20-of-100 goods-receipt claim → quality 80%. Seeded via raw db (RLS-bypassing superuser). ──
   const [vsc] = await db.insert(s.vendors).values({ name: 'ผู้ขาย SC', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
   const VSC = Number(vsc.id);
-  await db.insert(s.purchaseOrders).values({ poNo: 'PO-SC-1', poDate: '2020-01-01', vendorId: VSC, status: 'Approved', expectedDate: '2020-01-10' });
-  const [grSc] = await db.insert(s.goodsReceipts).values({ grNo: 'GR-SC-1', grDate: '2020-02-01', poNo: 'PO-SC-1', vendorId: VSC }).returning({ id: s.goodsReceipts.id });
-  await db.insert(s.grItems).values({ grId: Number(grSc.id), poNo: 'PO-SC-1', itemId: 'X', receivedQty: '100', uom: 'EA' });
+  await db.insert(s.purchaseOrders).values({ poNo: 'PO-SC-1', poDate: '2020-01-01', vendorId: VSC, status: 'Approved', expectedDate: '2020-01-10', tenantId: hq });
+  const [grSc] = await db.insert(s.goodsReceipts).values({ grNo: 'GR-SC-1', grDate: '2020-02-01', poNo: 'PO-SC-1', vendorId: VSC, tenantId: hq }).returning({ id: s.goodsReceipts.id });
+  await db.insert(s.grItems).values({ grId: Number(grSc.id), poNo: 'PO-SC-1', itemId: 'X', receivedQty: '100', uom: 'EA', tenantId: hq });
   await db.insert(s.grClaims).values({ claimNo: 'GRC-SC-1', claimDate: '2020-02-02', grNo: 'GR-SC-1', poNo: 'PO-SC-1', vendorId: VSC, itemId: 'X', grQty: '100', claimQty: '20', uom: 'EA', status: 'Open' });
   const scReal = await inj('POST', `/api/procurement/suppliers/${VSC}/scorecard`, admin, { period: '2020-02' });
   ok('Supplier scorecard: LATE delivery → on_time_pct = 0 (computed, not hard-coded 100)', scReal.json.on_time_pct === 0, JSON.stringify(scReal.json));

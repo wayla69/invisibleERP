@@ -58,14 +58,14 @@ async function main() {
 
   // ── Seed T1 data that trips each detector ──
   // 1. Split PO: 3 approved POs to one (T1-owned) vendor within 7 days, each < 50,000 but summing to 60,000.
-  //    purchase_orders is not tenant-scoped, so the detector attributes the split to the vendor's tenant —
-  //    seed the vendor under T1 so the finding (and RLS isolation) is genuinely tenant-scoped.
+  //    purchase_orders is tenant-scoped (migration 0387) — seed both the vendor and the POs under T1 so the
+  //    finding (and RLS isolation) is genuinely tenant-scoped.
   await db.insert(s.vendors).values({ tenantId: t1, vendorCode: 'SPLIT', name: 'SplitCo' }).onConflictDoNothing();
   const splitVendor = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'SPLIT')))[0];
   await db.insert(s.purchaseOrders).values([
-    { poNo: 'PO-SPLIT-1', vendorId: splitVendor.id, vendorName: 'SplitCo', poDate: '2026-06-01', totalAmount: '20000', status: 'Approved' },
-    { poNo: 'PO-SPLIT-2', vendorId: splitVendor.id, vendorName: 'SplitCo', poDate: '2026-06-03', totalAmount: '20000', status: 'Approved' },
-    { poNo: 'PO-SPLIT-3', vendorId: splitVendor.id, vendorName: 'SplitCo', poDate: '2026-06-05', totalAmount: '20000', status: 'Approved' },
+    { poNo: 'PO-SPLIT-1', vendorId: splitVendor.id, vendorName: 'SplitCo', poDate: '2026-06-01', totalAmount: '20000', status: 'Approved', tenantId: t1 },
+    { poNo: 'PO-SPLIT-2', vendorId: splitVendor.id, vendorName: 'SplitCo', poDate: '2026-06-03', totalAmount: '20000', status: 'Approved', tenantId: t1 },
+    { poNo: 'PO-SPLIT-3', vendorId: splitVendor.id, vendorName: 'SplitCo', poDate: '2026-06-05', totalAmount: '20000', status: 'Approved', tenantId: t1 },
   ]).onConflictDoNothing();
   // 2. Weekend manual JE.
   await db.insert(s.journalEntries).values({ entryNo: 'JE-WKND-1', entryDate: sat, source: 'Manual', memo: 'ปรับปรุงวันหยุด', status: 'Posted', tenantId: t1 }).onConflictDoNothing();

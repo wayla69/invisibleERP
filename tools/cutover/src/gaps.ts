@@ -47,7 +47,7 @@ async function seed(db: any) {
 
   // EXP-12: a GR claim must reference a REAL receipt inside the claim window (goods_receipts.created_at
   // anchors the 24h cutoff), so seed the GR the claim below targets — a free-text gr_no now 404s.
-  await db.insert(s.goodsReceipts).values({ grNo: 'GR-1', grDate: ymd(), vendorName: 'V1', receivedBy: 'admin' });
+  await db.insert(s.goodsReceipts).values({ grNo: 'GR-1', grDate: ymd(), vendorName: 'V1', receivedBy: 'admin', tenantId: hq.id });
 
   // AR overdue ~40d, AP overdue ~70d
   await db.insert(s.arInvoices).values({ invoiceNo: 'INV-TEST-1', invoiceDate: daysAgo(70), dueDate: daysAgo(40), tenantId: hq.id, amount: '100', paidAmount: '0', status: 'Unpaid' });
