@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, Check, X, FileText, SlidersHorizontal, Printer, Mail } from 'lucide-react';
+import { Send, Check, X, FileText, SlidersHorizontal, Printer, Mail, Package } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifyError, notifySuccess } from '@/lib/notify';
@@ -12,6 +13,10 @@ import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/form-controls';
 import { statusVariant } from '@/components/ui';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -20,6 +25,10 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 interface Quote { id: number; quote_no: string; customer_name: string; status: string; issued_date: string | null; expires_date: string | null; subtotal: number; discount_total: number; total: number; discount_pct: number; margin_pct: number | null; requires_approval: boolean; approved_by: string | null; created_by: string | null }
 // GET /api/cpq/configs → { configs: [...], count }
 interface Config { id: number; code: string; name: string; base_price: number; currency: string | null; description: string | null }
+// GET /api/cpq/bundles → { bundles: [...] }. CRM-14 (CRM-12): a bundle SKU priced as the discounted sum of
+// its component configs — expanding it into a quote reuses the CPQ-01 floor check unmodified.
+interface Bundle { code: string; name: string; description: string | null; active: boolean }
+interface BundleDraftItem { config_id: number | ''; qty: number; unit_cost: number }
 
 // Quote lifecycle (cpq.service.ts): Draft → Sent → Accepted | Rejected. CPQ-01 (SVC-1): a quote breaching the
 // margin floor / max discount parks in PendingApproval on send and needs a different approver.
@@ -38,6 +47,7 @@ export default function CpqPage() {
         tabs={[
           { key: 'quotes', label: t('crm.tab_quotes'), content: <Quotes /> },
           { key: 'configs', label: t('crm.tab_configs'), content: <Configs /> },
+          { key: 'bundles', label: t('crm.tab_bundles'), content: <Bundles /> },
         ]}
       />
     </div>
@@ -143,5 +153,112 @@ function Configs() {
         />
       )}
     </StateView>
+  );
+}
+
+// CRM-14 (CRM-12): bundle master data — create a bundle from existing configs, then expand it into a quote
+// via `POST /api/cpq/quotes/:id/lines/bundle` (Quotes tab / deal workspace), not here.
+function Bundles() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ bundles: Bundle[] }>({ queryKey: ['cpq-bundles'], queryFn: () => api('/api/cpq/bundles') });
+  const configsQ = useQuery<{ configs: Config[]; count: number }>({ queryKey: ['cpq-configs'], queryFn: () => api('/api/cpq/configs') });
+
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [items, setItems] = useState<BundleDraftItem[]>([{ config_id: '', qty: 1, unit_cost: 0 }]);
+
+  const resetForm = () => { setCode(''); setName(''); setDescription(''); setItems([{ config_id: '', qty: 1, unit_cost: 0 }]); };
+
+  const create = useMutation({
+    mutationFn: () =>
+      api('/api/cpq/bundles', {
+        method: 'POST',
+        body: JSON.stringify({
+          code,
+          name,
+          description: description || undefined,
+          items: items.filter((it) => it.config_id !== '').map((it) => ({ config_id: Number(it.config_id), qty: it.qty, unit_cost: it.unit_cost })),
+        }),
+      }),
+    onSuccess: () => {
+      notifySuccess(t('crm.toast_bundle_created'));
+      qc.invalidateQueries({ queryKey: ['cpq-bundles'] });
+      resetForm();
+    },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const updateItem = (idx: number, patch: Partial<BundleDraftItem>) =>
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  const addRow = () => setItems((prev) => [...prev, { config_id: '', qty: 1, unit_cost: 0 }]);
+  const removeRow = (idx: number) => setItems((prev) => prev.filter((_, i) => i !== idx));
+
+  const canSubmit = code.trim().length > 0 && name.trim().length > 0 && items.some((it) => it.config_id !== '') && !create.isPending;
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-3">
+        <h3 className="text-sm font-medium">{t('crm.bundle_create_title')}</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label>{t('crm.bundle_code')}</Label>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t('crm.bundle_name')}</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>{t('crm.description')}</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-2">
+          {items.map((it, idx) => (
+            <div key={idx} className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_6rem_7rem_auto]">
+              <div className="space-y-1.5 sm:col-span-1">
+                <Label>{t('crm.bundle_component')}</Label>
+                <Select value={it.config_id} onChange={(e) => updateItem(idx, { config_id: e.target.value ? Number(e.target.value) : '' })}>
+                  <option value="">—</option>
+                  {configsQ.data?.configs.map((c) => (
+                    <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t('crm.qty')}</Label>
+                <Input type="number" min={0} value={it.qty} onChange={(e) => updateItem(idx, { qty: Number(e.target.value) })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t('crm.bundle_component_cost')}</Label>
+                <Input type="number" min={0} value={it.unit_cost} onChange={(e) => updateItem(idx, { unit_cost: Number(e.target.value) })} />
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => removeRow(idx)} disabled={items.length <= 1}>
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          ))}
+          <Button variant="outline" size="sm" onClick={addRow}>{t('crm.bundle_add_component')}</Button>
+        </div>
+        <Button disabled={!canSubmit} onClick={() => create.mutate()}>{t('crm.bundle_create_btn')}</Button>
+      </Card>
+
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.bundles}
+            emptyState={{ icon: Package, title: t('crm.no_bundles_title'), description: t('crm.no_bundles_desc') }}
+            columns={[
+              { key: 'code', label: t('crm.col_code') },
+              { key: 'name', label: t('crm.col_name') },
+              { key: 'description', label: t('crm.description'), render: (r: Bundle) => r.description ?? '—' },
+              { key: 'active', label: t('fin.col_status'), render: (r: Bundle) => <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? t('crm.active') : t('crm.inactive')}</Badge> },
+            ]}
+          />
+        )}
+      </StateView>
+    </div>
   );
 }

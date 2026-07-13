@@ -142,7 +142,7 @@ jobs:
           # ── CRM / billing / projects / loyalty ──
           - shard: crm
             run: >-
-              cutover:crm cutover:cpq cutover:cpq-gl cutover:sub-billing cutover:projects
+              cutover:crm cutover:cpq cutover:cpq-approval cutover:cpq-gl cutover:sub-billing cutover:projects
               cutover:pipeline cutover:service cutover:loyalty cutover:coalition
               cutover:giftcards cutover:receipts
           # ── planning / analytics / channels ──

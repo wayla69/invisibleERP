@@ -115,6 +115,56 @@ async function main() {
   const t1Appr = await inj('GET', '/api/cpq/approvals', t1user);
   ok('RLS: T1 sees 0 HQ approvals', t1Appr.json.approvals?.length === 0, `count=${t1Appr.json.approvals?.length}`);
 
+  // ── CRM-14 (CRM-12) — CPQ guided selling: bundles + tiered discount-approval matrix ──────────────
+  // A 'manager1' approver: cpq_approve WITHOUT exec (a plain manager, not an exec) — proves the exec-tier
+  // gate is a real permission check, not just the existing cpq_approve-or-exec route gate.
+  await db.insert(s.users).values([{ username: 'manager1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: hq }]).onConflictDoNothing();
+  const [mgr1Row] = await db.select().from(s.users).where(eq(s.users.username, 'manager1'));
+  await db.insert(s.userPermissions).values([{ userId: Number(mgr1Row.id), perm: 'cpq_approve' }]).onConflictDoNothing();
+  const manager1 = await login('manager1', 'pw1');
+
+  // 18. Bundle master data: LAPTOP (thin-margin component) + MOUSE (healthy component).
+  const mouseCfg = await inj('POST', '/api/cpq/configs', admin, { code: 'MOUSE', name: 'Mouse', base_price: 2000 });
+  const bundle = await inj('POST', '/api/cpq/bundles', admin, { code: 'STARTER-KIT', name: 'Starter Kit', items: [{ config_id: cfg.json.id, qty: 1, unit_cost: 45000 }, { config_id: mouseCfg.json.id, qty: 2, unit_cost: 200 }] });
+  ok('CRM-14 bundle: create with 2 components', bundle.status === 201 && bundle.json.code === 'STARTER-KIT' && bundle.json.items === 2, JSON.stringify(bundle.json));
+
+  // 19. Add the bundle to a fresh Draft quote → expands into 2 quote_lines (bundle-tagged), blended margin
+  //     15.9% < the 20% floor — the EXISTING CPQ-01 send() floor check covers it with NO core-service change.
+  const bq = await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'Bundle Buyer' });
+  const addBundle = await inj('POST', `/api/cpq/quotes/${bq.json.id}/lines/bundle`, sales1, { bundle_code: 'STARTER-KIT' });
+  ok('CRM-14 bundle: adding to a Draft quote expands 2 lines', addBundle.status === 201 && addBundle.json.lines_added === 2 && near(addBundle.json.total, 54000), JSON.stringify({ st: addBundle.status, n: addBundle.json.lines_added, total: addBundle.json.total }));
+  const bqLines = await inj('GET', `/api/cpq/quotes/${bq.json.id}/lines`, sales1);
+  ok('CRM-14 bundle: both lines share the same bundle instance tag', bqLines.json.lines?.length === 2 && bqLines.json.lines[0].bundle_code === bqLines.json.lines[1].bundle_code && !!bqLines.json.lines[0].bundle_code, JSON.stringify(bqLines.json.lines?.map((l: any) => l.bundle_code)));
+  const bqSend = await inj('POST', `/api/cpq/quotes/${bq.json.id}/send`, sales1);
+  ok('CRM-14 bundle: blended margin breach on send → PendingApproval (bundle covered by CPQ-01)', bqSend.status === 200 && bqSend.json.status === 'PendingApproval' && near(bqSend.json.margin_pct, 15.926), JSON.stringify({ st: bqSend.json.status, m: bqSend.json.margin_pct }));
+  const bqApprove = await inj('POST', `/api/cpq/quotes/${bq.json.id}/approve`, manager1);
+  ok('CRM-14 tier: a margin-only breach stays manager-tier — cpq_approve (no exec) can approve it', bqApprove.status === 200 && bqApprove.json.status === 'Sent', JSON.stringify(bqApprove.json));
+
+  // 20. Set the exec-tier discount ceiling, then breach ABOVE it via a discounted bundle instance (healthy
+  //     margin, so ONLY the discount tier is at stake) → requires exec specifically.
+  const setExecTier = await inj('PUT', '/api/cpq/settings', admin, { exec_discount_pct: 20 });
+  ok('CRM-14 tier: set the exec-tier discount ceiling (20%)', setExecTier.status === 200 && near(setExecTier.json.exec_discount_pct, 20), JSON.stringify(setExecTier.json));
+  const healthyBundle = await inj('POST', '/api/cpq/bundles', admin, { code: 'HEALTHY-KIT', name: 'Healthy Kit', items: [{ config_id: cfg.json.id, qty: 1, unit_cost: 10000 }, { config_id: mouseCfg.json.id, qty: 1, unit_cost: 200 }] });
+  const tq = await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'Exec Tier Buyer' });
+  const addHealthy = await inj('POST', `/api/cpq/quotes/${tq.json.id}/lines/bundle`, sales1, { bundle_code: 'HEALTHY-KIT', discount_pct: 25 });
+  ok('CRM-14 tier: a 25% bundle discount (healthy margin) added to the quote', addHealthy.status === 201, JSON.stringify({ st: addHealthy.status }));
+  const tqSend = await inj('POST', `/api/cpq/quotes/${tq.json.id}/send`, sales1);
+  ok('CRM-14 tier: a discount above the exec ceiling → PendingApproval', tqSend.status === 200 && tqSend.json.status === 'PendingApproval' && near(tqSend.json.discount_pct, 25), JSON.stringify({ st: tqSend.json.status, d: tqSend.json.discount_pct }));
+  const tqMgrBlocked = await inj('POST', `/api/cpq/quotes/${tq.json.id}/approve`, manager1);
+  ok('CRM-14 tier: a plain cpq_approve holder (no exec) is BLOCKED on an exec-tier breach', tqMgrBlocked.status === 403 && tqMgrBlocked.json.error?.code === 'TIER_APPROVAL_REQUIRED', JSON.stringify({ s: tqMgrBlocked.status, c: tqMgrBlocked.json.error?.code }));
+  const tqExecApprove = await inj('POST', `/api/cpq/quotes/${tq.json.id}/approve`, admin);
+  ok('CRM-14 tier: an exec-permission holder clears the exec-tier breach', tqExecApprove.status === 200 && tqExecApprove.json.status === 'Sent', JSON.stringify(tqExecApprove.json));
+
+  // 21. Guided-selling recommendations: LAPTOP + MOUSE were co-purchased (Accepted) by the same customer.
+  const acceptBundle = await inj('POST', `/api/cpq/quotes/${bq.json.id}/accept`, admin);
+  ok('CRM-14 recommendations setup: bundle quote accepted', acceptBundle.status === 200 && acceptBundle.json.status === 'Accepted', JSON.stringify(acceptBundle.json));
+  const recs = await inj('GET', '/api/cpq/recommendations?config_code=LAPTOP', sales1);
+  ok('CRM-14 recommendations: MOUSE surfaces as a co-purchase for LAPTOP', recs.status === 200 && (recs.json.recommendations ?? []).some((r: any) => r.config_code === 'MOUSE'), JSON.stringify(recs.json));
+
+  // 22. RLS: T1 cannot see the HQ bundle.
+  const t1Bundles = await inj('GET', '/api/cpq/bundles', t1user);
+  ok('CRM-14 RLS: a T1 user cannot see an HQ bundle', t1Bundles.status === 200 && !(t1Bundles.json.bundles ?? []).some((b: any) => b.code === 'STARTER-KIT'), `codes=${(t1Bundles.json.bundles ?? []).map((b: any) => b.code).join('|')}`);
+
   await app.close();
 }
 

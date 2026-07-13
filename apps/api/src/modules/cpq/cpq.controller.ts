@@ -18,8 +18,15 @@ const QuoteBody = z.object({
   validity_days: z.number().int().positive().optional(), notes: z.string().optional(),
   lines: z.array(z.object({ description: z.string().min(1), qty: z.number().optional(), unit_price: z.number().optional(), unit_cost: z.number().nonnegative().optional() })).optional(),
 });
-// CPQ-01 (SVC-1): per-tenant discount/margin floor.
-const SettingsBody = z.object({ min_margin_pct: z.number().min(0).max(100).optional(), max_discount_pct: z.number().min(0).max(100).optional() });
+// CPQ-01 (SVC-1): per-tenant discount/margin floor. CRM-14 (CRM-12): exec_discount_pct is the optional
+// tier-2 ceiling (null clears tiering).
+const SettingsBody = z.object({ min_margin_pct: z.number().min(0).max(100).optional(), max_discount_pct: z.number().min(0).max(100).optional(), exec_discount_pct: z.number().min(0).max(100).nullable().optional() });
+// CRM-14 (CRM-12): bundle master data + adding a bundle instance to a Draft quote.
+const BundleBody = z.object({
+  code: z.string().min(1), name: z.string().min(1), description: z.string().optional(),
+  items: z.array(z.object({ config_id: z.number().int(), qty: z.number().positive().optional(), unit_cost: z.number().nonnegative().optional() })).min(1).max(50),
+});
+const BundleLineBody = z.object({ bundle_code: z.string().min(1), qty: z.number().positive().optional(), discount_pct: z.number().min(0).max(100).optional() });
 
 @Controller('api/cpq')
 export class CpqController {
@@ -109,4 +116,28 @@ export class CpqController {
   @Permissions('exec', 'cpq', 'cpq_approve')
   @HttpCode(200)
   reject(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.rejectQuote(id, user); }
+
+  // ── CRM-14 (CRM-12): bundles — master data (masterdata-gated, mirrors config/rule creation) ──
+  @Get('bundles')
+  @Permissions('exec', 'cpq')
+  listBundles(@CurrentUser() user: JwtUser) { return this.svc.listBundles(user); }
+
+  @Get('bundles/:code')
+  @Permissions('exec', 'cpq')
+  getBundle(@Param('code') code: string, @CurrentUser() user: JwtUser) { return this.svc.getBundle(code, user); }
+
+  @Post('bundles')
+  @Permissions('masterdata')
+  createBundle(@Body(new ZodValidationPipe(BundleBody)) dto: z.infer<typeof BundleBody>, @CurrentUser() user: JwtUser) { return this.svc.createBundle(dto, user); }
+
+  // Expand a bundle instance into the quote's lines (Draft only) — the SAME CPQ-01 floor check on send()
+  // then covers the bundle's blended margin.
+  @Post('quotes/:id/lines/bundle')
+  @Permissions('exec', 'cpq')
+  addBundleLine(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(BundleLineBody)) dto: z.infer<typeof BundleLineBody>, @CurrentUser() user: JwtUser) { return this.svc.addBundleLine(id, dto, user); }
+
+  // ── CRM-14 (CRM-12): guided-selling — explainable co-purchase recommendations (no trained model) ──
+  @Get('recommendations')
+  @Permissions('exec', 'cpq')
+  recommendations(@Query('config_code') configCode: string, @CurrentUser() user: JwtUser) { return this.svc.recommendations(configCode, user); }
 }
