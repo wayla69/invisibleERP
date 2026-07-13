@@ -123,6 +123,14 @@ jobs:
             FOR r IN SELECT schemaname, viewname FROM pg_views WHERE schemaname='public' LOOP
               EXECUTE format('ALTER VIEW %I.%I OWNER TO ierp_app', r.schemaname, r.viewname);
             END LOOP;
+            -- Types (enums) too: ALTER TYPE ... ADD VALUE requires OWNERSHIP, not just table grants —
+            -- migrations that grow an enum (e.g. role_enum) 42501 "must be owner of type" under ierp_app
+            -- otherwise, even though it can read/write every table fine.
+            FOR r IN SELECT n.nspname AS schemaname, t.typname AS typname
+                     FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+                     WHERE n.nspname = 'public' AND t.typtype = 'e' LOOP
+              EXECUTE format('ALTER TYPE %I.%I OWNER TO ierp_app', r.schemaname, r.typname);
+            END LOOP;
           END \$\$;
           SQL
 
