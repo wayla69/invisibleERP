@@ -321,7 +321,7 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   re-created idempotently inside 0218). See `docs/ops/drizzle-migration-debt.md` §3bis.
 - **CI runner pnpm version comes from `package.json` `packageManager` (pnpm@11.8.0).** Do **not** also pin
   `version:` in `pnpm/action-setup` — the two conflict (`ERR_PNPM_BAD_PM_VERSION`) and break every job.
-- **The `build` gate ends with two down-only RATCHETS that fail on *new* debt (not just real errors)** — a
+- **The `build` gate ends with four down-only RATCHETS that fail on *new* debt (not just real errors)** — a
   clean `tsc`/`next build` locally is **not** enough. (1) `tools/ci/check-ts-debt.mjs`: a new `as any` over
   `ts-debt-baseline.json.asAny`, **or** any `tsc --noUncheckedIndexedAccess` error over `.strictIndexErrors`,
   fails. Never add `as any` — use a precise cast (`x as unknown as Parameters<typeof fn>[0]` for cross-pkg
@@ -330,7 +330,16 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   trip **both** counters. (2) `tools/ci/check-use-client.mjs`: a new `'use client'` file over
   `use-client-baseline.json` fails. A shared **client island imported only by already-`'use client'` pages
   must OMIT its own directive** (it inherits the boundary — pattern: `apps/web/src/components/state-view.tsx`);
-  adding the directive needlessly is what trips it. Run both scripts locally before pushing. Also: **PR CI runs
+  adding the directive needlessly is what trips it. (3) `tools/ci/check-service-size.mjs` (docs/46 Phase 0 —
+  god-service accretion): a grandfathered `apps/api/src/modules` file (the 14 over 600 LOC in
+  `service-size-baseline.json`) may not GROW — in lines **or** constructor params — and no NEW module file may
+  pass 600 LOC. Land the feature as its own sub-service / registered provider (docs/46 §4) instead of appending
+  to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
+  after an extraction. (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
+  `modules/ledger` referencing the `journalEntries`/`journalLines` tables are grandfathered in
+  `ledger-boundary-baseline.json` and the set may only SHRINK — read GL state via **`LedgerReadService`**
+  (`accountNet`/`cashPosition`/`entryRefNo`, exported by LedgerModule) and post via `LedgerService.postEntry`,
+  never a direct journal join from another module. Run all four scripts locally before pushing. Also: **PR CI runs
   on the branch⋈main *merge* commit**, so a ratchet reads against *current* `main`'s baseline — your local
   count can be off by the files `main` added since you branched (relative pass/fail still holds).
 - **Bulk master-data import/export is registry-driven; extend it, don't rebuild.** `modules/masterdata`
@@ -583,6 +592,11 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   finite-capacity production scheduler (extends `mfg-depth` routings/RCCP; new `work_centers` master) +
   a live KPI SSE feed (reuses the `@Sse` `RealtimeService` bus; BI is poll-based today). Build on, don't duplicate.
 - **Finance/GL feature map (controls + where the logic lives):**
+  - **GOV-01 pending-approvals center:** `finance.service.ts` `pendingApprovals` AGGREGATES module-owned
+    `*-approval-queues.ts` providers (docs/46 Phase 2 — implement `ApprovalQueueSource` from
+    `common/approval-queues.ts`; discovered at boot by `ApprovalQueueRegistrarService`). **A new maker-checker
+    queue = a provider in its owning module**, never a new inline query in finance.service.ts (the
+    `check-service-size` ratchet blocks it); only finance's own EXP-06/REV-21/REV-23 stay inline.
   - GL maker-checker / recurring / prepaid: `modules/ledger/ledger.service.ts` — `postEntry` (Draft+approve, **GL-05**),
     `createRecurring`/`runDueRecurring` (**GL-08**), `createPrepaid`/`runDuePrepaid` (**GL-09**); cash flow
     `cashFlowStatement`/`cashFlowDirect`/`cashFlowForecast` (**GL-07**).
@@ -595,7 +609,10 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   - Asset revaluation/impairment + disposal recycling (**FA-07**): `modules/assets/assets.service.ts`
     (`revalue`, `dispose` recycles surplus 3200→3100). EAM work orders/PM/reliability (**FA-06**): `modules/eam/`.
   - Collections/dunning + credit-hold workflow (**REV-08/REV-12**): `modules/finance/collections.service.ts`.
-  - Scheduled "action" jobs ride the BI report scheduler (`modules/bi/bi.service.ts` `REPORT_TYPES` +
-    `generateReport`): `ar_collections_dunning`, `eam_pm_generate`, `gl_recurring_journals`,
-    `gl_prepaid_amortize`, `lease_periodic_run` — each is idempotent and injected `@Optional()` to keep
-    partial harnesses constructible.
+  - Scheduled "action" jobs ride the BI report scheduler: `ar_collections_dunning`, `eam_pm_generate`,
+    `gl_recurring_journals`, `gl_prepaid_amortize`, `lease_periodic_run` — each idempotent. Since docs/46
+    Phase 1 the GENERATOR lives in the owning module's `*-bi-reports.ts` provider (implements
+    `BiReportSource` from `modules/bi/report-registry.ts`; discovered app-wide at boot by
+    `BiReportRegistrarService`). **A new report type = a `REPORT_TYPES` catalog entry + a generator in the
+    owning module** — never a new branch in `bi-generate.service.ts` or a new ctor param there (positional
+    goldenmaster contract; the `check-service-size` ratchet blocks both).

@@ -136,3 +136,22 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   close_status_pack: { label: 'ความพร้อมปิดงวดบัญชี', labelEn: 'Period-close readiness' },
 };
 export const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
+
+// ── Module-owned report generators (docs/46 Phase 1) ───────────────────────────────────────────────
+// A report type's GENERATOR lives in its owning module: any Nest provider (in any module) implementing
+// BiReportSource is discovered at boot by BiReportRegistrarService and registered with BiGenerateService,
+// which consults the registry BEFORE its legacy if-chain. Adding a report type = a REPORT_TYPES entry above
+// + a generator in the owning module's *-bi-reports.ts provider — never a new branch in bi-generate's
+// dispatcher or a new constructor param there (the ctor order is a goldenmaster positional contract and the
+// check-service-size ratchet caps both). This file stays a pure const/type module: no DI, importable from
+// any module without creating a module-graph edge.
+import type { JwtUser } from '../../common/decorators';
+
+export interface BiReportResult { data: any; summary: string; summaryTh: string }
+export interface BiReportGenerator {
+  type: string;
+  generate(filters: any, user: JwtUser): Promise<BiReportResult>;
+}
+export interface BiReportSource { biReports(): BiReportGenerator[] }
+export const isBiReportSource = (x: unknown): x is BiReportSource =>
+  typeof x === 'object' && x !== null && typeof (x as Record<string, unknown>).biReports === 'function';
