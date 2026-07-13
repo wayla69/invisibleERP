@@ -1,6 +1,6 @@
 # Ops — Multi-tenancy model & TENANCY_MODE (ITGC-AC-18)
 
-> **Status:** v1.25 · **Date:** 2026-07-13 · **Owner:** Platform / Security
+> **Status:** v1.26 · **Date:** 2026-07-13 · **Owner:** Platform / Security
 > How tenant data is isolated, what `TENANCY_MODE` does, and how to choose it for your deployment.
 
 ## 1. The two isolation layers
@@ -88,6 +88,19 @@ every deploy failed healthcheck while the pre-hardening replica kept serving).
 `BYPASSRLS` (`common/tenancy-boot-check.ts` → `assertRlsBackstop`). Set **`ALLOW_RLS_BYPASS_BASE_ROLE=1`** to boot
 with a loud warning instead while you migrate the role (NOT recommended in prod). Best-effort: a probe failure
 (DB not ready) never blocks boot; dev/test are a no-op.
+
+**Migrations under `ierp_app` — DML inside migrations needs the bypass GUC (rev 1.26, the 0387 incident).**
+Because RLS here is GUC-based (not role-based) and every `tenant_id` table is `FORCE` RLS, a migration
+session as `ierp_app` that **reads or updates rows** of such a table sees **zero rows** unless
+`app.bypass_rls='on'` is set — while the identical migration passes under any superuser connection
+(which bypasses RLS unconditionally, ACL and policy checks alike). `db:migrate` is therefore a
+programmatic runner (**`apps/api/src/database/migrate.ts`**, drop-in compatible with `drizzle-kit
+migrate` — same `drizzle.__drizzle_migrations` journal table and `when`-monotonic apply rule) that sets
+the `app.bypass_rls` **session** GUC on its single connection before applying, so backfills inside any
+migration operate on the real rows. CI parity: the `pg-smoke` harness provisions a throwaway
+§1bis-shaped role (`ierp_smoke`: `LOGIN NOSUPERUSER NOBYPASSRLS` + grants + `GRANT app_user` +
+`GRANT CREATE ON DATABASE` + ownership transfer) and applies ALL migrations through `db:migrate` as
+that role — asserting the full run completes and that `users` visibility flips 0 → 1 with the GUC.
 
 ## 2. `TENANCY_MODE`
 
@@ -396,6 +409,7 @@ sees its own.
 ## 8. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.26 | 2026-07-13 | Platform / SRE | **§1bis: migrations must set the RLS-bypass GUC + pg-smoke now applies migrations as prod does (0387 double deploy failure).** Incident: migration 0387's backfill read `users.tenant_id` to attribute legacy P2P rows; prod runs migrations as `ierp_app` (NOSUPERUSER, NOBYPASSRLS) and `users` is FORCE-RLS with the GUC-based policy, so the migration saw ZERO rows and the fail-loud check aborted the deploy — twice — while every CI gate stayed green, because CI's `pg-smoke` applied migrations as the postgres service container's superuser (bypasses RLS unconditionally) and every manual verification connected the same way. Fixes: (1) `db:migrate` is now `apps/api/src/database/migrate.ts` — a drizzle-orm runner, journal-compatible with `drizzle-kit migrate`, that sets `app.bypass_rls='on'` at session level so DML inside ANY migration reads real rows; (2) `pg-smoke` provisions a throwaway §1bis-shaped role (`ierp_smoke`) with the full provisioning recipe (grants, `GRANT app_user`, `GRANT CREATE ON DATABASE`, table/sequence/view/enum-TYPE ownership transfer) and applies all migrations via `pnpm --filter @ierp/api db:migrate` as that role, asserting the full run completes, the role posture (no superuser/BYPASSRLS), and the mechanism itself (seeded `users` row invisible to a bare role session, visible under the GUC). This closes the CI gap that shipped the bug twice. |
 | 1.25 | 2026-07-13 | Platform / SRE | **§7: legacy P2P pipeline had no tenant scoping at all (migration 0387).** `purchase_requests`/`pr_items`/`purchase_orders`/`po_items`/`po_deliveries`/`goods_receipts`/`gr_items` predated multi-tenancy and never got a `tenant_id` column — every company on the platform could see every other company's requisitions/POs/goods-receipts, unfiltered. Fixed: `tenant_id` added + backfilled (~196 rows, all attributable) + leading index + canonical org-clause RLS on all 7 tables; every writer now stamps `tenant_id`. ToE: `cutover/procurement-tenant-isolation.ts`. |
 | 1.24 | 2026-07-13 | Platform | **§2: tenant soft-delete + purge (migration 0393) — Amber cleanup.** New two-step lifecycle beyond suspend/factory-reset: `deleteTenant` (suspended-only) flags `deleted_at` without touching data, permanently blocking logins (`TENANT_DELETED`, independent of `suspended_at`) — reversible via `restoreTenant`. `purgeTenant` (already-deleted-only) is the follow-up IRREVERSIBLE step that wipes every other tenant-scoped table but, per explicit product decision, NEVER erases `audit_log` (ITGC-AC-16) — so the `tenants` row survives purge too, as that chain's anchor. Landed in a new `TenantLifecycleService` + shared `tenant-wipe.ts` engine (factory-reset's loop extracted into it), not appended to `billing.service.ts`. ToE: `cutover/onboarding.ts` (23 new checks). Go-live runbook items 11-12. |
 | 1.23 | 2026-07-13 | Platform / SRE | **§1bis provisioning: transfer ownership of enum TYPES too (0353 deploy failure).** Migration `0353_treasury_debt_register`'s `ALTER TYPE "role_enum" ADD VALUE ...` 42501'd `must be owner of type role_enum` in prod under `ierp_app` — the run-1/1.21 ownership transfer covered `public`/`drizzle` tables, sequences, and views, but not user-defined TYPEs, and `ALTER TYPE ... ADD VALUE` requires actual ownership (table grants don't cover it). `ops-provision-app-role.yml` now also loops `pg_type` (`typtype='e'`) in `public` and `ALTER TYPE ... OWNER TO ierp_app`; §1bis SQL updated to match. Re-run the workflow to unblock prod. |

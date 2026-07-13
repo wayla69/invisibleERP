@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "db:new": "node ../../tools/ci/new-migration.mjs --create",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx src/database/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/database/seed.ts",
     "db:create-god": "tsx src/database/create-god-user.ts",
