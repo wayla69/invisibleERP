@@ -78,10 +78,42 @@ export async function tenantlessChildTargets(
   return targets;
 }
 
-// FK-safe fixpoint delete: a table blocked by a still-referencing row retries after its dependents clear;
-// each round also clears tenantless FK-child tables (see tenantlessChildTargets) so pure line-item tables
-// can't deadlock their parents. If a whole pass deletes nothing and every table stays blocked, the
-// transaction is left to roll back (caller's request tx).
+// Topologically order the wiped tables so each is deleted BEFORE any table it references via FK
+// (children before parents) — a leaf-first order in which no single DELETE can violate a still-
+// referencing FK. This replaces the old savepoint-catch-retry loop, which relied on catching a failed
+// DELETE and ROLLBACK-TO-SAVEPOINT to recover: PGlite honours that, but **postgres-js does NOT** — once
+// any statement errors inside a drizzle/postgres-js transaction the whole tx is poisoned and the error
+// propagates out, so the retry never happened in prod (green on PGlite CI, raw FK 500 in prod — the
+// OSHINEI/Amber reset outage, same CI-vs-prod driver-divergence class as the 0387 RLS bug). With a
+// correct delete order there are no expected failures at all, so the outcome is driver-independent.
+function topoOrderChildrenFirst(tables: string[], fks: { child: string; parent: string }[]): string[] {
+  const inSet = new Set(tables);
+  // childrenOf[t] = tables that REFERENCE t (t is their FK parent). t may only be deleted once every
+  // table referencing it is already deleted — so emit t after all of childrenOf[t] are placed.
+  const childrenOf = new Map<string, Set<string>>();
+  for (const t of tables) childrenOf.set(t, new Set());
+  for (const fk of fks) {
+    if (fk.child === fk.parent) continue; // self-FK imposes no ordering
+    if (inSet.has(fk.child) && inSet.has(fk.parent)) childrenOf.get(fk.parent)!.add(fk.child);
+  }
+  const ordered: string[] = [];
+  const placed = new Set<string>();
+  let progress = true;
+  while (ordered.length < tables.length && progress) {
+    progress = false;
+    for (const t of tables) {
+      if (placed.has(t)) continue;
+      if ([...childrenOf.get(t)!].every((c) => placed.has(c) || c === t)) { ordered.push(t); placed.add(t); progress = true; }
+    }
+  }
+  for (const t of tables) if (!placed.has(t)) ordered.push(t); // FK cycle leftovers → best-effort tail
+  return ordered;
+}
+
+// FK-safe delete: clears tenantless FK-child tables (see tenantlessChildTargets), then deletes the
+// tenant_id tables in child-first topological order — no DELETE is expected to fail on an FK, so no
+// savepoint recovery is relied upon. A defensive savepoint still wraps each statement so an unforeseen
+// cyclic / preserved-table reference degrades to a clean FACTORY_RESET_BLOCKED instead of a raw 500.
 export async function wipeTenantRefs(
   db: DrizzleDb, tenantId: number, tables: string[], preserveTables: Set<string>,
   blockedCode: string, blockedMessage: (names: string) => string, blockedMessageTh: (names: string) => string,
@@ -89,47 +121,63 @@ export async function wipeTenantRefs(
   // The child-target DELETEs are assembled as raw SQL with the tenant id inlined — hard-require an
   // integer so a malformed value can never reach the string (callers already Number() route params).
   if (!Number.isInteger(tenantId)) throw new Error(`wipeTenantRefs: tenantId must be an integer, got ${String(tenantId)}`);
-  let remaining = tables.filter((n) => !preserveTables.has(n));
-  const targeted = remaining.length;
-  const childTargets = await tenantlessChildTargets(db, new Set(remaining));
+  // Authorise the wipe to delete append-only rows (Posted GL, approval actions) whose immutability
+  // triggers otherwise RAISE on DELETE — transaction-local, so it reverts at request end and only ever
+  // covers this god-only, two-step-gated reset/purge (migration 0402). app_user can't disable the
+  // triggers directly (not owner) nor session_replication_role (not superuser), so this GUC gate is it.
+  await db.execute(sql`SET LOCAL app.tenant_wipe = 'on'`);
+  const wiped = tables.filter((n) => !preserveTables.has(n));
+  const targeted = wiped.length;
+  const childTargets = await tenantlessChildTargets(db, new Set(wiped));
+
+  const fkRes: any = await db.execute(sql`
+    SELECT ch.relname AS child_t, pa.relname AS parent_t
+    FROM pg_constraint con
+    JOIN pg_class ch ON ch.oid = con.conrelid
+    JOIN pg_class pa ON pa.oid = con.confrelid
+    WHERE con.contype = 'f' AND ch.relnamespace = 'public'::regnamespace
+      AND array_length(con.conkey, 1) = 1`);
+  const fks = (fkRes.rows ?? fkRes).map((r: any) => ({ child: String(r.child_t), parent: String(r.parent_t) }));
+  const ordered = topoOrderChildrenFirst(wiped, fks);
+
   let rowsDeleted = 0;
-  while (remaining.length) {
-    let roundDeleted = 0;
-    // 1. tenantless FK children first (they're what blocks their parents); child-of-child ordering
-    //    resolves across rounds — a child blocked by its own grandchild simply retries next pass.
-    for (const ct of childTargets) {
-      await db.execute(sql`SAVEPOINT tenant_wipe_tbl`);
-      try {
-        const r: any = await db.execute(sql.raw(
-          `DELETE FROM ${q(ct.table)} WHERE ${q(ct.fkCol)} IN (${ct.parentSubquery})`.replace(/\$1/g, String(Number(tenantId))),
-        ));
-        await db.execute(sql`RELEASE SAVEPOINT tenant_wipe_tbl`);
-        const n = Number(r?.rowCount ?? r?.affectedRows ?? 0);
-        rowsDeleted += n; roundDeleted += n;
-      } catch {
-        await db.execute(sql`ROLLBACK TO SAVEPOINT tenant_wipe_tbl`);
-      }
+  const savepoint = async (run: () => Promise<number>): Promise<{ ok: boolean; n: number }> => {
+    await db.execute(sql`SAVEPOINT tenant_wipe_tbl`);
+    try {
+      const n = await run();
+      await db.execute(sql`RELEASE SAVEPOINT tenant_wipe_tbl`);
+      return { ok: true, n };
+    } catch {
+      await db.execute(sql`ROLLBACK TO SAVEPOINT tenant_wipe_tbl`);
+      return { ok: false, n: 0 };
     }
-    // 2. the tenant_id tables proper
-    const blocked: string[] = [];
-    for (const name of remaining) {
-      const ident = sql.raw(q(name)); // identifier from information_schema, not user input
-      await db.execute(sql`SAVEPOINT tenant_wipe_tbl`);
-      try {
-        const r: any = await db.execute(sql`DELETE FROM ${ident} WHERE tenant_id = ${tenantId}`);
-        await db.execute(sql`RELEASE SAVEPOINT tenant_wipe_tbl`);
-        const n = Number(r?.rowCount ?? r?.affectedRows ?? 0);
-        rowsDeleted += n; roundDeleted += n;
-      } catch {
-        await db.execute(sql`ROLLBACK TO SAVEPOINT tenant_wipe_tbl`);
-        blocked.push(name);
-      }
-    }
-    if (blocked.length === remaining.length && roundDeleted === 0) {
-      const names = blocked.slice(0, 8).join(', ') + (blocked.length > 8 ? '…' : '');
-      throw new ConflictException({ code: blockedCode, message: blockedMessage(names), messageTh: blockedMessageTh(names) });
-    }
-    remaining = blocked;
+  };
+
+  // 1. Tenantless FK children first, so a tenantless child never blocks its tenant-scoped parent.
+  for (const ct of childTargets) {
+    const { n } = await savepoint(async () => {
+      const r: any = await db.execute(sql.raw(
+        `DELETE FROM ${q(ct.table)} WHERE ${q(ct.fkCol)} IN (${ct.parentSubquery})`.replace(/\$1/g, String(tenantId)),
+      ));
+      return Number(r?.rowCount ?? r?.affectedRows ?? 0);
+    });
+    rowsDeleted += n;
+  }
+
+  // 2. Tenant_id tables in child-first order — single pass; nothing is expected to fail on an FK.
+  const blocked: string[] = [];
+  for (const name of ordered) {
+    const ident = sql.raw(q(name)); // identifier from pg_catalog, not user input
+    const { ok, n } = await savepoint(async () => {
+      const r: any = await db.execute(sql`DELETE FROM ${ident} WHERE tenant_id = ${tenantId}`);
+      return Number(r?.rowCount ?? r?.affectedRows ?? 0);
+    });
+    if (ok) rowsDeleted += n; else blocked.push(name);
+  }
+
+  if (blocked.length) {
+    const names = blocked.slice(0, 8).join(', ') + (blocked.length > 8 ? '…' : '');
+    throw new ConflictException({ code: blockedCode, message: blockedMessage(names), messageTh: blockedMessageTh(names) });
   }
   return { targeted, rowsDeleted };
 }
