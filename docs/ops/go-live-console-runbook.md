@@ -83,6 +83,16 @@ back for real usage. No env var involved: the operation is permanent but only ev
 that was deliberately taken offline first, so an actively-used company cannot be wiped in one click.
 **Verify:** after (b) the company's transaction lists are empty; after (c) its admin logs in and works
 normally; the reset appears in the company's audit trail + the god notification inbox.
+**Order matters when two companies share references:** wipe the *referencing* company first — e.g. Amber's
+PO/GR rows point at OSHINEI's vendor rows, so reset **Amber (AMBER)** before **OSHINEI**.
+**Diagnose (if the reset reports an error or "0 rows deleted"):** run the read-only
+`db:wipe-audit` script — it shows the tenant's lifecycle state, the *remaining* row count per tenant-scoped
+table (flagging any un-preserved business data the wipe failed to clear), and the lifecycle audit trail. It
+sets `app.bypass_rls='on'` (so it never reports phantom-empty tables — the non-superuser RLS trap from
+`database/migrate.ts`) and pins the session `default_transaction_read_only`, so it can only read:
+`railway run --service Postgres-QDRG -- pnpm --filter @ierp/api db:wipe-audit -- <tenantId> [--audit N]`
+(uses `DATABASE_PUBLIC_URL`). Un-preserved leftover tables ⇒ a blocking FK / an un-suspended tenant, not a
+no-op.
 Model + gates: `docs/ops/tenancy-model.md` §2 (rev 1.19).
 
 ## 11. Deleting a pure-test company (suspend → delete) — ITGC-AC-18
@@ -125,3 +135,4 @@ Model + gates: `docs/ops/tenancy-model.md` §2 (rev 1.24), migration 0393.
 | 1.1 | 2026-07-09 | Platform | Added item 10 — pilot-company test-data factory reset from the Platform Console (**suspend → reset → reactivate**): wipes a pilot's UAT data before real usage while preserving logins/plan/audit-chain; only ever possible on a suspended company, so an active company cannot be wiped in one click. |
 | 1.2 | 2026-07-13 | Platform | Added item 11 — tenant soft-delete (migration 0393, **suspend → delete**): for a pure-test company that should stop existing entirely, lighter than the factory reset (no data touched, only the company row is flagged) and reversible via Restore. Prompted by a request to fully remove a test tenant ("Amber") after the factory reset UI was confused with a full company deletion. |
 | 1.3 | 2026-07-13 | Platform | Added item 12 — tenant purge (migration 0393, **delete → purge**): the actual space-reclaiming follow-up to item 11's soft-delete, since delete alone leaves junk accumulating forever. IRREVERSIBLE; wipes everything except `audit_log` (ITGC-AC-16 chain preserved by explicit product decision) and therefore the company record itself. Prompted by the same "Amber" cleanup — soft-delete alone wasn't enough to actually reduce junk. |
+| 1.4 | 2026-07-14 | Platform | Item 10 — added the wipe-order note (referencing company first: Amber before OSHINEI) and a **read-only diagnostic** (`pnpm --filter @ierp/api db:wipe-audit -- <tenantId>`) for when a factory reset reports an error / "0 rows deleted": it sets `app.bypass_rls` (defeats the non-superuser phantom-empty-table RLS trap) + `default_transaction_read_only`, and reports remaining rows per tenant table (flagging un-preserved business-data leftovers) plus the lifecycle audit trail. |

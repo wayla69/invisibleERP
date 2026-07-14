@@ -17,6 +17,7 @@
     "db:create-god": "tsx src/database/create-god-user.ts",
     "db:reset-password": "tsx src/database/reset-admin-password.ts",
     "db:sync-catalog": "tsx src/database/sync-catalog.ts",
+    "db:wipe-audit": "tsx src/database/wipe-audit-check.ts",
     "db:hub:import": "tsx src/database/hub-import.ts",
     "db:hub:push": "tsx src/database/hub-push.ts",
     "db:backfill:pii": "tsx src/database/backfill-encrypt-pii.ts",
