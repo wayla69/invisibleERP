@@ -925,6 +925,41 @@ async function main() {
   const pfList = await inj('GET', '/api/projects/portfolio/scenarios', admin);
   ok('PROJ-25 list surfaces both scenarios with included counts', pfList.status < 300 && pfList.json.count >= 2 && pfList.json.scenarios.some((x: any) => x.scenario_no === psc && x.status === 'committed'), JSON.stringify({ n: pfList.json.count }));
 
+  // ── 24d. Project phase-gate governance (PPM Wave P4, PROJ-26) — a project advances through its lifecycle
+  // phases only through a gate that is submitted then independently decided (GO/HOLD/KILL, decider ≠ submitter). ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-GATE', name: 'งานตรวจเฟส', billing_type: 'TM' });
+  const gInit = await inj('GET', '/api/projects/PRJ-GATE/gates', admin);
+  ok('PROJ-26 a fresh project starts at the concept phase with no gates', gInit.status < 300 && gInit.json.current_phase === 'concept' && gInit.json.next_phase === 'planning' && gInit.json.gates.length === 0, JSON.stringify({ p: gInit.json.current_phase, n: gInit.json.next_phase }));
+
+  const gSubmit = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'planning', gate_key: 'G1', name: 'Concept review', readiness: 'ผ่านเกณฑ์ความพร้อม' });
+  ok('PROJ-26 submit a gate → pending, from_phase concept, target planning', gSubmit.status < 300 && gSubmit.json.pending_gate?.status === 'pending' && gSubmit.json.pending_gate?.from_phase === 'concept' && gSubmit.json.pending_gate?.target_phase === 'planning', JSON.stringify({ st: gSubmit.json.pending_gate?.status }));
+  const g1 = gSubmit.json.pending_gate.id;
+
+  const gDouble = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'execution' });
+  ok('PROJ-26 a second pending gate is rejected → GATE_ALREADY_PENDING', gDouble.status === 400 && gDouble.json.error?.code === 'GATE_ALREADY_PENDING', `${gDouble.status}/${gDouble.json.error?.code}`);
+
+  const gSelf = await inj('POST', `/api/projects/gates/${g1}/decide`, admin, { decision: 'go' });
+  ok('PROJ-26 the submitter cannot decide their own gate → SOD_SELF_APPROVAL', gSelf.status === 400 && gSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${gSelf.status}/${gSelf.json.error?.code}`);
+
+  const gGo = await inj('POST', `/api/projects/gates/${g1}/decide`, mgr, { decision: 'go', notes: 'อนุมัติเข้าเฟสวางแผน' });
+  ok('PROJ-26 an independent GO advances the project to planning; decided_by=mgr', gGo.status < 300 && gGo.json.current_phase === 'planning' && gGo.json.gates.find((x: any) => x.id === g1)?.status === 'go' && gGo.json.gates.find((x: any) => x.id === g1)?.decided_by === 'mgr', JSON.stringify({ p: gGo.json.current_phase }));
+
+  const gDecided = await inj('POST', `/api/projects/gates/${g1}/decide`, mgr, { decision: 'hold' });
+  ok('PROJ-26 a decided gate cannot be re-decided → GATE_ALREADY_DECIDED', gDecided.status === 400 && gDecided.json.error?.code === 'GATE_ALREADY_DECIDED', `${gDecided.status}/${gDecided.json.error?.code}`);
+
+  const gBackward = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'planning' });
+  ok('PROJ-26 a gate that does not advance past the current phase → BAD_PHASE_ORDER', gBackward.status === 400 && gBackward.json.error?.code === 'BAD_PHASE_ORDER', `${gBackward.status}/${gBackward.json.error?.code}`);
+
+  // A HOLD decision records the outcome WITHOUT advancing the phase.
+  const gHoldSubmit = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'execution', gate_key: 'G2' });
+  const g2 = gHoldSubmit.json.pending_gate.id;
+  const gHold = await inj('POST', `/api/projects/gates/${g2}/decide`, mgr, { decision: 'hold', notes: 'ยังไม่พร้อม' });
+  ok('PROJ-26 a HOLD records the decision but the project stays in planning (no advance)', gHold.status < 300 && gHold.json.current_phase === 'planning' && gHold.json.gates.find((x: any) => x.id === g2)?.status === 'hold', JSON.stringify({ p: gHold.json.current_phase }));
+
+  const gUnknownPhase = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'lunch' });
+  const gBadDecision = await inj('POST', `/api/projects/gates/999999/decide`, mgr, { decision: 'go' });
+  ok('PROJ-26 guards: unknown phase → BAD_PHASE, unknown gate → GATE_NOT_FOUND', gUnknownPhase.status === 400 && gUnknownPhase.json.error?.code === 'BAD_PHASE' && gBadDecision.status === 404 && gBadDecision.json.error?.code === 'GATE_NOT_FOUND', `${gUnknownPhase.json.error?.code}/${gBadDecision.json.error?.code}`);
+
   // ── 25. time-phased resource capacity calendar (PPM upgrade) ──
   await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CAP', name: 'งานวางกำลังคน', billing_type: 'TM' });
   // Bob: 60% Jul–Aug, +60% Aug–Sep → August double-booked to 120%.

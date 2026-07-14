@@ -13,6 +13,7 @@ import { ProjectsResourcingService } from './projects-resourcing.service';
 import { ProjectsWbsService } from './projects-wbs.service';
 import { ProjectsEvmService } from './projects-evm.service';
 import { ProjectsPortfolioService } from './projects-portfolio.service';
+import { ProjectsGateService } from './projects-gate.service';
 import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, depsCsv, csvToList, clamp15, riskScore, ragFor, addDays } from './projects.helpers';
 import { shapeTemplateItem, shapeRisk, shapeChangeOrder, shapeBoqLine } from './projects.shapes';
 
@@ -34,6 +35,9 @@ export interface CalendarExceptionDto { exception_date: string; description?: st
 export interface PortfolioScenarioDto { name: string; budget_envelope?: number; objective?: string; notes?: string }
 export interface PortfolioItemDto { project_code: string; decision?: 'include' | 'exclude'; priority_score?: number; rationale?: string }
 export interface PortfolioCommitDto { override?: boolean; override_reason?: string }
+// PROJ-26 project phase-gate governance (PPM Wave P4)
+export interface PhaseGateDto { target_phase: string; gate_key?: string; name?: string; readiness?: string }
+export interface GateDecisionDto { decision: 'go' | 'hold' | 'kill'; notes?: string }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
@@ -60,6 +64,7 @@ export class ProjectsService {
   private readonly wbs: ProjectsWbsService;
   private readonly evmSvc: ProjectsEvmService;
   private readonly portfolio: ProjectsPortfolioService;
+  private readonly gates: ProjectsGateService;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
@@ -80,6 +85,7 @@ export class ProjectsService {
     this.wbs = new ProjectsWbsService(db, (code) => this.row(code), (code, dto, user) => this.bill(code, dto, user));
     this.evmSvc = new ProjectsEvmService(db, this.wbs, (code) => this.row(code), (code) => this.get(code), (pr, nb) => this.fmt(pr, nb), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
     this.portfolio = new ProjectsPortfolioService(db);
+    this.gates = new ProjectsGateService(db, (code) => this.row(code));
   }
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
@@ -359,6 +365,11 @@ export class ProjectsService {
   async upsertPortfolioItem(scenarioNo: string, dto: PortfolioItemDto, user: JwtUser) { return this.portfolio.upsertItem(scenarioNo, dto, user); }
   async removePortfolioItem(scenarioNo: string, projectCode: string, user: JwtUser) { return this.portfolio.removeItem(scenarioNo, projectCode, user); }
   async commitPortfolioScenario(scenarioNo: string, dto: PortfolioCommitDto, user: JwtUser) { return this.portfolio.commitScenario(scenarioNo, dto, user); }
+
+  // ── PROJ-26 (PPM Wave P4): project phase-gate governance lives in ProjectsGateService; thin delegators. ──
+  async listPhaseGates(code: string) { return this.gates.listGates(code); }
+  async submitPhaseGate(code: string, dto: PhaseGateDto, user: JwtUser) { return this.gates.submitGate(code, dto, user); }
+  async decidePhaseGate(gateId: number, dto: GateDecisionDto, user: JwtUser) { return this.gates.decideGate(gateId, dto, user); }
 
   // ── docs/38 projects PR-3: WBS (tasks/milestones/RACI) lives in ProjectsWbsService; thin delegators. ──
   async addTask(code: string, dto: TaskDto, user: JwtUser) { return this.wbs.addTask(code, dto, user); }

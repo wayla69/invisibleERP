@@ -325,6 +325,21 @@ Nothing on the projects themselves changes — the scenario is a governance reco
 a mutation of project budgets. Required role/permission: `exec`/`planner`/`ar` (the exec override needs the
 `exec` duty). Preventive/authorization — posts nothing to the GL.
 
+## Phase-gate governance — an independent GO/HOLD/KILL at every lifecycle transition (PROJ-26)
+The project workspace (`/projects/{code}`) has a **เกตตรวจเฟสโครงการ (phase gates)** panel that governs how a
+project moves through its lifecycle: **concept → planning → execution → closeout → closed**.
+- A **phase-ladder strip** shows where the project is now.
+- To advance, **submit a gate** to the next phase with a readiness note (the exit criteria you've met). It sits
+  **pending** — nothing moves yet — and only **one** gate can be pending at a time.
+- Someone **other than the submitter** then decides the gate: **GO** advances the project to that phase, **HOLD**
+  parks it (revisit later), **KILL** stops it — each recorded with who decided and when. A gate can't be decided
+  by the person who submitted it, and a gate can only advance the project *forward*.
+- The gate history is the auditable trail of every transition (submitter, decider, decision).
+
+This gives a segregated stage-gate control over project continuation — a project can't change phase, or keep
+running unchecked, on one person's say-so. Required role/permission: `exec`/`planner`/`ar`.
+Preventive/authorization — posts nothing to the GL.
+
 ## Timesheets → project labour (`/hcm`, tab ลงเวลา / OT)
 When logging a timesheet you can allocate it to a **โครงการ (project)** and a **งาน (WBS task)** and mark it
 **billable**. The entry lands **Pending**; a **different** approver presses **อนุมัติ** (maker-checker,
@@ -425,10 +440,15 @@ Cash spent at site can be booked **against the project** so it shows up in the p
   scenario's GO-set is committed by a **different user than its author** and cannot exceed the budget envelope
   unless an exec overrides with a recorded reason — so portfolio capital can't be committed by one person
   alone or silently beyond the ceiling; the aggregation itself mutates no project.
+- **Phase-gate governance** (**PROJ-26**) gates every lifecycle transition maker-checker: a project advances
+  concept→planning→execution→closeout→closed only through a gate that is submitted then **decided by a
+  different user** (GO/HOLD/KILL) — so a project can't change phase, or keep running unchecked, on one
+  person's decision, and every transition is auditable.
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.33 | 2026-07-14 | **PROJ-26 — project phase-gate governance.** The project workspace gains a **เกตตรวจเฟสโครงการ (phase gates)** panel: a phase-ladder strip (concept→planning→execution→closeout→closed), a gate history, submit-a-gate to the next phase with a readiness note, and GO/HOLD/KILL on a pending gate. A gate must be decided by a **different user than the submitter**, only advances the project forward, and a GO is what moves the project into the next phase — a segregated stage-gate control over project continuation, fully auditable. |
 | 2.32 | 2026-07-14 | **PROJ-25 — portfolio selection scenarios.** The portfolio command center gains a **สถานการณ์คัดเลือกพอร์ตโฟลิโอ (selection scenarios)** panel: model candidate projects into a named scenario with a budget envelope + priorities, watch the selected budget vs the envelope live (headroom / over-envelope banner), then **commit** the GO-set as a two-person decision — a different user than the author must commit, and an over-envelope selection needs an exec override reason. Committed scenarios are locked and stamped with the committer + reason. Read-only aggregation — no project budget is mutated. |
 | 2.31 | 2026-07-14 | **PROJ-24 — change-order impact simulation.** Each pending change order gains a **จำลองผลกระทบ (simulate impact)** button opening a current/projected/Δ table for the contract value, budget, estimated cost, gross margin, EAC and budget headroom, with each Δ coloured favourable (green) / unfavourable (red). Read-only what-if — nothing is written; the figures are exactly what approval would then apply, so a variation that turns the project margin-negative or pushes the EAC past the new budget is obvious before authorization. |
 | 2.30 | 2026-07-14 | **PROJ-23 — resource leveling: over-allocation vs the schedule's slack.** The project's Resources tab gains a leveling panel: each over-allocated resource-month shows how far over its ceiling it is, plus a suggested shift (task + days + target month) drawn from the schedule's slack, or a "no slack to shift" flag when every contributing task is on the critical path. Advisory only — it never moves an assignment or task dates itself. |
