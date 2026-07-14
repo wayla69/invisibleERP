@@ -78,10 +78,49 @@ async function unusedItemRows(db: DrizzleDb): Promise<UnusedRow[]> {
 
 const SAMPLE = 500; // cap the preview list so a huge purge doesn't return an unbounded payload
 
-// Read-only preview (dry-run): how many items would be collected + a bounded sample of their codes.
-export async function previewUnusedItems(db: DrizzleDb): Promise<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number }> {
-  const [rows, refs] = [await unusedItemRows(db), await itemRefColumns(db)];
-  return { total: rows.length, item_ids: rows.slice(0, SAMPLE).map((r) => r.itemId), sampled: rows.length > SAMPLE, ref_columns: refs.length };
+// The base tables that carry a real `tenant_id` column — used to attribute a reference to the company that
+// owns it (a referencing table without one is platform/shared, reported as tenant_id=null).
+async function tablesWithTenantId(db: DrizzleDb): Promise<Set<string>> {
+  const res: any = await db.execute(sql`
+    SELECT c.table_name AS tbl FROM information_schema.columns c
+    JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+    WHERE c.table_schema = 'public' AND c.column_name = 'tenant_id' AND t.table_type = 'BASE TABLE'`);
+  return new Set(rowsOf(res).map((r: any) => String(r.tbl)));
+}
+
+export interface KeptByTenant { tenant_id: number | null; code: string | null; name: string | null; items: number }
+
+// DIAGNOSTIC — for the items that are KEPT (still referenced, so NOT collected by a purge), attribute them to
+// the company whose data references them. Answers "why do N products survive the purge?": if they map to the
+// company you just reset, its data wasn't fully wiped; if they map to OTHER companies, the shared catalogue is
+// simply in use elsewhere and a purge can't remove them. Grouped by referencing tenant, distinct items each
+// (an item used by two companies counts for both). Computed cross-tenant — the caller holds the god bypass.
+export async function keptByTenant(db: DrizzleDb): Promise<KeptByTenant[]> {
+  const refs = await itemRefColumns(db);
+  if (!refs.length) return [];
+  const tenantTables = await tablesWithTenantId(db);
+  const parts = refs.map((r) => {
+    const join = r.kind === 'code' ? `i.item_id = r.${q(r.col)}::text` : `i.id = r.${q(r.col)}::bigint`;
+    const tExpr = tenantTables.has(r.table) ? 'r.tenant_id' : 'NULL::bigint';
+    return `SELECT ${tExpr} AS tenant_id, i.id AS item_id FROM ${q(r.table)} r JOIN items i ON ${join} WHERE r.${q(r.col)} IS NOT NULL`;
+  });
+  const res: any = await db.execute(sql.raw(`
+    WITH refs AS (${parts.join(' UNION ALL ')})
+    SELECT refs.tenant_id, t.code, t.name, count(DISTINCT refs.item_id)::int AS items
+    FROM refs LEFT JOIN tenants t ON t.id = refs.tenant_id
+    GROUP BY refs.tenant_id, t.code, t.name
+    ORDER BY items DESC`));
+  return rowsOf(res).map((r: any) => ({
+    tenant_id: r.tenant_id != null ? Number(r.tenant_id) : null,
+    code: r.code ?? null, name: r.name ?? null, items: Number(r.items ?? 0),
+  }));
+}
+
+// Read-only preview (dry-run): how many items would be collected + a bounded sample of their codes, PLUS the
+// diagnostic breakdown of who keeps the rest alive (so a god can tell a reset-leftover from an in-use item).
+export async function previewUnusedItems(db: DrizzleDb): Promise<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number; kept_by: KeptByTenant[] }> {
+  const [rows, refs, keptBy] = [await unusedItemRows(db), await itemRefColumns(db), await keptByTenant(db)];
+  return { total: rows.length, item_ids: rows.slice(0, SAMPLE).map((r) => r.itemId), sampled: rows.length > SAMPLE, ref_columns: refs.length, kept_by: keptBy };
 }
 
 // Destructive purge — deletes the unreferenced items and their images. Idempotent: a second run finds nothing

@@ -135,7 +135,12 @@ Single-duty roles enforce SoD: **vendor master** maintenance is segregated from 
     new numbered control** (god-gated + typed-confirm + dry-run preview, mirroring the §7 step 12 merge and the
     tenant factory-reset/purge gates in PN-08 ITGC / `docs/ops/tenancy-model.md`). On the web the platform
     owner runs both from **`/platform` → ดูแลระบบ (Maintenance)** — a **ตรวจสอบ** (dry-run preview) button then
-    a **ลบ** button behind a confirm dialog. Verified by the `onboarding` harness.
+    a **ลบ** button behind a confirm dialog. The preview also returns a **`kept_by`** diagnostic — for the
+    items that are KEPT (still referenced, so *not* collected), the company (tenant) whose data references them
+    and how many items each keeps alive — so a god can tell a **reset-leftover** (the just-reset company still
+    appears ⇒ its data wasn't fully wiped; factory-reset it completely, then purge again) from a product
+    **genuinely in use by another company** (which the shared catalogue can't remove). Verified by the
+    `onboarding` harness.
 
 ## 8. Process flow
 

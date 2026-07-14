@@ -472,6 +472,13 @@ async function main() {
   const usedBeforePurge = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-USED'))).length;
   const orphanBeforePurge = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-ORPHAN'))).length;
   ok('Preview is a dry-run — nothing deleted yet', usedBeforePurge === 1 && orphanBeforePurge === 1, JSON.stringify({ usedBeforePurge, orphanBeforePurge }));
+  // Diagnostic: kept_by attributes each surviving (referenced) item to the company whose data keeps it alive —
+  // here HQ, which holds GC-USED on a PO line. Reveals whether leftover shop items are a reset-leftover of the
+  // viewed company or genuinely in use by another company.
+  const gcHqKept = (gcPreview.json.kept_by ?? []).find((k: any) => Number(k.tenant_id) === hq);
+  ok('Preview kept_by attributes a still-referenced item to the company that uses it (HQ ← GC-USED on a PO)',
+    Array.isArray(gcPreview.json.kept_by) && !!gcHqKept && gcHqKept.items >= 1,
+    `kept_by=${JSON.stringify((gcPreview.json.kept_by ?? []).slice(0, 4))}`);
 
   const gcBad = await inj('POST', '/api/admin/item-maintenance/purge-unused-items', owner, { confirm: 'nope' });
   ok('Purge with a wrong confirm phrase → 400 CONFIRM_MISMATCH', gcBad.status === 400 && gcBad.json.error?.code === 'CONFIRM_MISMATCH', `${gcBad.status} ${gcBad.json.error?.code}`);
