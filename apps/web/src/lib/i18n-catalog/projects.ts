@@ -742,4 +742,23 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'pj.col_exception_desc': { th: 'คำอธิบาย', en: 'Description' },
   'pj.empty_exceptions_title': { th: 'ยังไม่มีวันหยุดพิเศษ', en: 'No holiday exceptions yet' },
   'pj.empty_exceptions_desc': { th: 'เพิ่มวันหยุดนักขัตฤกษ์ที่ปฏิทินทำงานควรข้าม', en: 'Add public holidays the working calendar should skip' },
+
+  // ── PPM-B2 (PROJ-22): bottom-up cost-to-complete (ETC) vs the formulaic EAC ──
+  'pj.eac_title': { th: 'ประมาณการต้นทุนคงเหลือ (ETC) เทียบกับ EAC', en: 'Cost-to-complete (ETC) vs EAC' },
+  'pj.eac_variance': { th: 'ส่วนต่าง EAC {amount}', en: 'EAC variance {amount}' },
+  'pj.eac_formulaic': { th: 'ตามสูตร (CPI)', en: 'Formulaic (CPI-based)' },
+  'pj.eac_bottom_up': { th: 'ประมาณการจากหน้างาน (Bottom-up)', en: 'Bottom-up (manual)' },
+  'pj.eac_etc': { th: 'ต้นทุนคงเหลือโดยประมาณ (ETC)', en: 'Estimate to complete (ETC)' },
+  'pj.eac_eac': { th: 'ประมาณการต้นทุนรวม (EAC)', en: 'Estimate at completion (EAC)' },
+  'pj.eac_entry_count': { th: 'จำนวนรายการ', en: 'Entries' },
+  'pj.eac_empty': { th: 'ยังไม่มีประมาณการจากหน้างาน', en: 'No manual estimate submitted yet' },
+  'pj.eac_entries_title': { th: 'รายการประมาณการล่าสุด', en: 'Current entries' },
+  'pj.eac_task_entry': { th: 'งาน #{id}', en: 'Task #{id}' },
+  'pj.eac_project_entry': { th: 'ระดับโครงการ', en: 'Project-level' },
+  'pj.eac_project_level': { th: '— ระดับโครงการ (ไม่ระบุงาน) —', en: '— Project-level (no task) —' },
+  'pj.f_etc_task': { th: 'งาน', en: 'Task' },
+  'pj.f_etc_amount': { th: 'ต้นทุนคงเหลือโดยประมาณ', en: 'Estimate to complete' },
+  'pj.f_etc_note': { th: 'หมายเหตุ (ถ้ามี)', en: 'Note (optional)' },
+  'pj.btn_submit_etc': { th: 'บันทึกประมาณการ', en: 'Submit estimate' },
+  'pj.toast_etc_submitted': { th: 'บันทึกประมาณการต้นทุนคงเหลือแล้ว', en: 'Cost-to-complete estimate submitted' },
 };

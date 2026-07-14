@@ -35,6 +35,9 @@ export interface ResourceDto { resource_name: string; role?: string; task_id?: n
 export interface ResourceSkillDto { resource_name: string; skill: string; proficiency?: string }
 export interface ResourceCalendarDto { resource_name: string; month: string; available_pct?: number; reason?: string }
 export interface BaselineDto { label?: string; reason?: string }
+// PPM-B2 (PROJ-22): a manual bottom-up estimate-to-complete entry. Omit `task_id` for a project-level
+// (top-down override) entry; otherwise it's scoped to that one WBS task.
+export interface EtcDto { task_id?: number; etc_amount: number; note?: string }
 export interface ProgramDto { program_code?: string | null; depends_on_projects?: string[] }
 export interface TemplateItemDto { item_type?: 'task' | 'milestone'; seq?: number; name: string; parent_seq?: number; wbs_code?: string; planned_hours?: number; planned_cost?: number; offset_start_days?: number; offset_end_days?: number; depends_on_seq?: number[]; billing_percent?: number; owner?: string; assignee?: string }
 export interface TemplateDto { code?: string; name: string; description?: string; items?: TemplateItemDto[] }
@@ -318,6 +321,9 @@ export class ProjectsService {
   // the project's WIP actuals. `as_of` defaults to the business day; PV counts tasks scheduled to finish by then.
   // ── docs/38 projects PR-4: EVM/schedule/programs/baselines/health live in ProjectsEvmService. ──
   async evm(code: string, asOf?: string) { return this.evmSvc.evm(code, asOf); }
+  // PPM-B2 (PROJ-22): manual bottom-up ETC entry + the EAC-scenario comparison (formulaic vs bottom-up).
+  async submitEtc(code: string, dto: EtcDto, user: JwtUser) { return this.evmSvc.submitEtc(code, dto, user); }
+  async eacScenarios(code: string) { return this.evmSvc.eacScenarios(code); }
   async schedule(code: string) { return this.evmSvc.schedule(code); }
   async evmSeries(code: string, dto?: { months?: number; as_of?: string }) { return this.evmSvc.evmSeries(code, dto); }
   async earnedSchedule(code: string, asOf?: string) { return this.evmSvc.earnedSchedule(code, asOf); }

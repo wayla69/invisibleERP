@@ -1,13 +1,13 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
-import { projects, projectTasks, projectEntries, projectBaselines, projectHealthSnapshots, projectTaskDependencies, projectCalendars, projectCalendarExceptions } from '../../database/schema';
+import { projects, projectTasks, projectEntries, projectBaselines, projectHealthSnapshots, projectTaskDependencies, projectCalendars, projectCalendarExceptions, projectEtc } from '../../database/schema';
 import { n, fx, ymd } from '../../database/queries';
 import { r2, r4, clampPct, addDays, peopleCsv, csvToList, workingDaysBetween } from './projects.helpers';
 import { shapeTask, shapeBaseline, shapeHealth } from './projects.shapes';
 import type { JwtUser } from '../../common/decorators';
 import type { ProjectsWbsService } from './projects-wbs.service';
-import type { BaselineDto, ProgramDto, ProjectCalendarDto, CalendarExceptionDto } from './projects.service';
+import type { BaselineDto, ProgramDto, ProjectCalendarDto, CalendarExceptionDto, EtcDto } from './projects.service';
 
 // EVM sub-service (docs/38 §3 projects decomposition, PR-4 — PROJ-06/07, the final prescribed cut):
 // earned value, CPM schedule, programs, baselines and health snapshots, moved VERBATIM. A PLAIN class
@@ -50,6 +50,55 @@ export class ProjectsEvmService {
       project_code: code, as_of: today, bac, pv, ev, ac,
       cost_variance: r2(ev - ac), schedule_variance: r2(ev - pv),
       cpi, spi, eac, etc: r2(eac - ac), task_count: tasks.length,
+    };
+  }
+
+  // ── Bottom-up cost-to-complete / EAC scenarios (PPM-B2, PROJ-22) ──────────
+  // evm()'s EAC is purely formulaic (`ac + (bac-ev)/cpi`) — it assumes the historical cost-performance ratio
+  // holds for the remaining work. Management can instead enter a MANUAL, bottom-up estimate-to-complete per
+  // task (or a single project-level entry when task_id is omitted); eacScenarios() reports both figures side
+  // by side so a material divergence is visible (the formula no longer reflects ground truth — management-
+  // override risk). Append-only log (mirrors project_baselines): the CURRENT bottom-up figure for a given
+  // task/project-level bucket is simply its LATEST entry, summed across every bucket that has one. A project
+  // with zero project_etc rows has no bottom-up figure at all — the formulaic EAC is completely unaffected.
+  async submitEtc(code: string, dto: EtcDto, user: JwtUser) {
+    const db = this.db;
+    const p = await this.rowOf(code);
+    const tenantId = p.tenantId ?? user.tenantId ?? null;
+    if (dto.task_id != null) {
+      const [task] = await db.select().from(projectTasks)
+        .where(and(eq(projectTasks.id, Number(dto.task_id)), eq(projectTasks.projectId, Number(p.id)))).limit(1);
+      if (!task) throw new NotFoundException({ code: 'TASK_NOT_FOUND', message: 'Task not found on this project', messageTh: 'ไม่พบงานในโครงการนี้' });
+    }
+    await db.insert(projectEtc).values({
+      tenantId, projectId: Number(p.id), taskId: dto.task_id != null ? Number(dto.task_id) : null,
+      etcAmount: fx(dto.etc_amount, 2), note: dto.note ?? null, createdBy: user.username,
+    });
+    return this.eacScenarios(code);
+  }
+
+  async eacScenarios(code: string) {
+    const db = this.db;
+    const p = await this.rowOf(code);
+    const current = await this.evm(code);
+    const rows = await db.select().from(projectEtc).where(eq(projectEtc.projectId, Number(p.id))).orderBy(projectEtc.createdAt);
+    // Latest row per bucket (a task id, or 'project' for a project-level entry) is that bucket's current figure.
+    const latest = new Map<string, { amount: number; note: string | null; taskId: number | null }>();
+    for (const row of rows) {
+      const key = row.taskId != null ? String(row.taskId) : 'project';
+      latest.set(key, { amount: n(row.etcAmount), note: row.note, taskId: row.taskId != null ? Number(row.taskId) : null });
+    }
+    const entries = [...latest.values()];
+    const bottomUpEtc = entries.length ? r2(entries.reduce((s, e) => s + e.amount, 0)) : null;
+    const bottomUp = bottomUpEtc != null
+      ? { etc: bottomUpEtc, eac: r2(current.ac + bottomUpEtc), entry_count: entries.length }
+      : null;
+    const formulaic = { etc: current.etc, eac: current.eac };
+    const variance = bottomUp ? { eac_delta: r2(bottomUp.eac - formulaic.eac), etc_delta: r2(bottomUp.etc - formulaic.etc) } : null;
+    return {
+      project_code: code, ac: current.ac, bac: current.bac,
+      formulaic, bottom_up: bottomUp, variance,
+      entries: entries.map((e) => ({ task_id: e.taskId, etc_amount: e.amount, note: e.note })),
     };
   }
 

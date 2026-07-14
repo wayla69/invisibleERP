@@ -39,7 +39,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const { t } = useLang();
   const router = useRouter();
   const qc = useQueryClient();
-  const refresh = () => { for (const k of ['detail', 'evm', 'es', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders', 'health', 'boq', 'commitments', 'pmr', 'reservations', 'sitecash']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
+  const refresh = () => { for (const k of ['detail', 'evm', 'es', 'eac', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders', 'health', 'boq', 'commitments', 'pmr', 'reservations', 'sitecash']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
 
   // detail + evm are server-prefetched (see page.tsx) so the first paint carries data; react-query still
   // owns the cache and refetches on invalidation exactly as before (null prefetch = old client-only path).
@@ -47,6 +47,8 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const evm = useQuery<any>({ queryKey: ['proj', code, 'evm'], queryFn: () => api(`/api/projects/${code}/evm`), initialData: initialEvm ?? undefined });
   const series = useQuery<any>({ queryKey: ['proj', code, 'series'], queryFn: () => api(`/api/projects/${code}/evm/series`) });
   const esq = useQuery<any>({ queryKey: ['proj', code, 'es'], queryFn: () => api(`/api/projects/${code}/earned-schedule`) });
+  // PPM-B2 (PROJ-22): bottom-up cost-to-complete (ETC) vs the formulaic EAC.
+  const eac = useQuery<any>({ queryKey: ['proj', code, 'eac'], queryFn: () => api(`/api/projects/${code}/eac-scenarios`) });
   const schedule = useQuery<any>({ queryKey: ['proj', code, 'schedule'], queryFn: () => api(`/api/projects/${code}/schedule`) });
   const tasks = useQuery<any>({ queryKey: ['proj', code, 'tasks'], queryFn: () => api(`/api/projects/${code}/tasks`) });
   const milestones = useQuery<any>({ queryKey: ['proj', code, 'milestones'], queryFn: () => api(`/api/projects/${code}/milestones`) });
@@ -93,6 +95,16 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
       constraint_type: depDlg!.constraint_type || null, constraint_offset_days: depDlg!.constraint_type ? (Number(depDlg!.constraint_offset_days) || 0) : null,
     }) }),
     onSuccess: () => { notifySuccess(t('pj.toast_updated')); setDepDlg(null); refresh(); },
+    onError: (err: any) => notifyError(err.message),
+  });
+
+  // PPM-B2 (PROJ-22): submit a bottom-up ETC entry — per task, or project-level when task_id is left blank.
+  const [etcForm, setEtcForm] = useState({ task_id: '', etc_amount: '', note: '' });
+  const submitEtc = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/etc`, { method: 'POST', body: JSON.stringify({
+      task_id: etcForm.task_id ? Number(etcForm.task_id) : undefined, etc_amount: Number(etcForm.etc_amount) || 0, note: etcForm.note || undefined,
+    }) }),
+    onSuccess: () => { notifySuccess(t('pj.toast_etc_submitted')); setEtcForm({ task_id: '', etc_amount: '', note: '' }); refresh(); },
     onError: (err: any) => notifyError(err.message),
   });
 
@@ -586,6 +598,62 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           </div>
         </Card>
       </div>
+
+      {/* Bottom-up cost-to-complete (ETC) vs the formulaic EAC (PPM-B2, PROJ-22) */}
+      <Card className="gap-3 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">{t('pj.eac_title')}</h3>
+          {eac.data?.variance && (
+            <Badge variant={eac.data.variance.eac_delta > 0 ? 'warning' : eac.data.variance.eac_delta < 0 ? 'secondary' : 'success'}>
+              {t('pj.eac_variance', { amount: `${eac.data.variance.eac_delta >= 0 ? '+' : ''}${baht(eac.data.variance.eac_delta)}` })}
+            </Badge>
+          )}
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">{t('pj.eac_formulaic')}</p>
+            <dl className="mt-1 space-y-1.5 text-sm">
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">{t('pj.eac_etc')}</dt><dd className="tabular font-medium">{baht(eac.data?.formulaic?.etc ?? 0)}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-muted-foreground">{t('pj.eac_eac')}</dt><dd className="tabular font-medium">{baht(eac.data?.formulaic?.eac ?? 0)}</dd></div>
+            </dl>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">{t('pj.eac_bottom_up')}</p>
+            {eac.data?.bottom_up ? (
+              <dl className="mt-1 space-y-1.5 text-sm">
+                <div className="flex items-center justify-between"><dt className="text-muted-foreground">{t('pj.eac_etc')}</dt><dd className="tabular font-medium">{baht(eac.data.bottom_up.etc)}</dd></div>
+                <div className="flex items-center justify-between"><dt className="text-muted-foreground">{t('pj.eac_eac')}</dt><dd className="tabular font-medium">{baht(eac.data.bottom_up.eac)}</dd></div>
+                <div className="flex items-center justify-between"><dt className="text-muted-foreground">{t('pj.eac_entry_count')}</dt><dd className="tabular font-medium">{eac.data.bottom_up.entry_count}</dd></div>
+              </dl>
+            ) : <p className="mt-1 text-xs text-muted-foreground">{t('pj.eac_empty')}</p>}
+          </div>
+        </div>
+        {!!eac.data?.entries?.length && (
+          <div className="border-t pt-2">
+            <p className="mb-1 text-xs font-medium text-muted-foreground">{t('pj.eac_entries_title')}</p>
+            <div className="flex flex-col divide-y">
+              {eac.data.entries.map((en: any, i: number) => (
+                <div key={i} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                  <span className="text-muted-foreground">{en.task_id != null ? t('pj.eac_task_entry', { id: en.task_id }) : t('pj.eac_project_entry')}{en.note ? ` · ${en.note}` : ''}</span>
+                  <span className="tabular font-medium">{baht(en.etc_amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="grid gap-3 border-t pt-3 sm:grid-cols-4">
+          <div className="grid gap-1.5">
+            <Label>{t('pj.f_etc_task')}</Label>
+            <Select value={etcForm.task_id} onChange={(ev) => setEtcForm({ ...etcForm, task_id: ev.target.value })}>
+              <option value="">{t('pj.eac_project_level')}</option>
+              {(tasks.data?.tasks ?? []).map((tk: any) => <option key={tk.id} value={tk.id}>{tk.name}</option>)}
+            </Select>
+          </div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_etc_amount')}</Label><Input type="number" value={etcForm.etc_amount} onChange={(ev) => setEtcForm({ ...etcForm, etc_amount: ev.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>{t('pj.f_etc_note')}</Label><Input value={etcForm.note} onChange={(ev) => setEtcForm({ ...etcForm, note: ev.target.value })} /></div>
+          <div className="flex items-end"><Button size="sm" variant="outline" onClick={() => submitEtc.mutate()} disabled={submitEtc.isPending || !etcForm.etc_amount}><Plus className="size-4" /> {t('pj.btn_submit_etc')}</Button></div>
+        </div>
+      </Card>
 
       {/* Change orders (PROJ-10) — maker-checker contract/scope variations */}
       <Card className="gap-3 p-5">

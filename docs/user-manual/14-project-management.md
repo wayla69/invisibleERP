@@ -254,6 +254,26 @@ The project schedule (`/projects/[code]`, Gantt/critical-path tab) is no longer 
 Required role/permission: same as the rest of PPM (`exec`/`planner`/`ar`). No change to who may create/edit a
 task; the calendar tab is on the same settings page as rate cards/templates/utilization.
 
+## Bottom-up cost-to-complete (ETC) vs the formulaic EAC (PROJ-22)
+The project overview's EVM card (**ประมาณการต้นทุนคงเหลือ (ETC) เทียบกับ EAC**, beside the earned-schedule
+block) now shows TWO completion estimates side by side:
+- **ตามสูตร (Formulaic)** — the existing CPI-based estimate (`ac + (bac−ev)/cpi`), unchanged.
+- **ประมาณการจากหน้างาน (Bottom-up)** — a manual estimate management enters directly, when one exists; a
+  **ส่วนต่าง EAC (EAC variance)** badge highlights how far the two disagree.
+
+**Submitting an estimate** — pick a **งาน (task)** from the dropdown (or leave it as **ระดับโครงการ
+(project-level)** for one figure covering all remaining work), enter the **ต้นทุนคงเหลือโดยประมาณ (estimate
+to complete)** and an optional note, then **บันทึกประมาณการ**. Submitting again for the **same** task
+**replaces** the earlier figure (only the latest counts) — it does not add a second entry. A project-level
+entry and per-task entries **add together** into one bottom-up total; the entries list shows exactly what is
+currently contributing.
+
+With no estimate submitted yet, the bottom-up side reads **"ยังไม่มีประมาณการจากหน้างาน"** and only the
+formulaic EAC is shown — nothing about the existing EVM numbers changes.
+
+Required role/permission: same as the rest of PPM (`exec`/`planner`/`ar`). Detective — the comparison posts
+nothing to the GL.
+
 ## Timesheets → project labour (`/hcm`, tab ลงเวลา / OT)
 When logging a timesheet you can allocate it to a **โครงการ (project)** and a **งาน (WBS task)** and mark it
 **billable**. The entry lands **Pending**; a **different** approver presses **อนุมัติ** (maker-checker,
@@ -339,10 +359,15 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 - **Dependency type/lag, SNET/FNLT constraints and the opt-in working calendar** (**PROJ-21**) make the
   critical-path schedule (**PROJ-06**) match how work is actually planned — a self-dependency is rejected
   (`BAD_DEPENDENCY`); still read-only/detective, posts nothing.
+- A manual **bottom-up cost-to-complete (ETC)** entry, compared against the formulaic EAC (**PROJ-22**),
+  surfaces a material divergence between management's ground-level estimate and the CPI-driven number for
+  review — read-only/detective, the comparison posts nothing; a `task_id` off the project is rejected
+  (`TASK_NOT_FOUND`).
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.29 | 2026-07-13 | **PROJ-22 — bottom-up cost-to-complete (ETC) vs the formulaic EAC.** The project overview's EVM card gains an **ETC/EAC comparison** panel: submit a manual estimate-to-complete per task (or project-level) and see it side by side with the existing CPI-based EAC, with a variance badge. A second submission for the same task supersedes the first; a project-level entry sums alongside per-task entries. No change to the existing EVM/schedule figures when no estimate has been submitted. |
 | 2.28 | 2026-07-13 | **PROJ-21 — richer scheduling: dependency types/lag, SNET/FNLT constraints, opt-in working calendar.** The task dialog and a new dependency-editor dialog (per-predecessor **type** — FS/SS/FF/SF — and **lag/lead days**) on `/projects/[code]`; new per-task **constraint** fields (SNET/FNLT + day-offset); a new **ปฏิทินการทำงาน (Working calendar)** tab on `/projects/settings` (enable + non-working weekdays + holiday exceptions, off by default). The schedule/critical-path computation now honours all four dependency types and the constraints, and — once the calendar is enabled — counts only working days toward a dated task's duration. No change when none of the new fields are set. |
 | 2.27 | 2026-07-13 | **PROJ-20 — resource capacity heatmap governed by a real availability calendar + role/skill supply-vs-demand.** New page **`/projects/resources`** (four tabs): the **Heatmap** now flags over-allocation against each resource's TRUE monthly availability (a documented part-time/leave override, default 100% absent one) instead of a flat 100%, and tags each booking **ระบุตัวบุคคล (Named)** or **ยังไม่ระบุตัวบุคคล (Generic)**; **Skills** tags a real person with a skill/role (the supply side); **Availability calendar** sets a person's monthly availability override; **Role supply-vs-demand** rolls assigned demand up against qualified supply per role/month, flagging **กำลังคนไม่พอ (Understaffed)**. Read-only — no new permission beyond the existing `exec`/`planner`/`ar` PPM gate. |
 | 2.26 | 2026-07-12 | **PROJ-19 — earned schedule on the workspace Overview.** A **กำหนดการที่ได้รับ (Earned schedule)** block under the earned-value breakdown: **ES** / **AT** / **SV(t)** in months, an **SPI(t)** badge (green ≥ 1, grey ≥ 0.9, red below) and a forecast finish month (`GET /api/projects/{code}/earned-schedule`). SPI(t) stays honest late in a project where the classic SPI converges to 1; a red SPI(t) on a project that otherwise reads fine raises a **schedule_slip_es** (medium) item on the Action Center. Needs tasks with planned cost + due dates (`NO_DATED_PLAN` otherwise). Read-only — no new permission. |

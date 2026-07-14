@@ -223,6 +223,62 @@ describe('ProjectsEvmService — evmSeries S-curve buckets', () => {
   });
 });
 
+describe('ProjectsEvmService — eacScenarios / submitEtc (PPM-B2, PROJ-22)', () => {
+  it('with no manual ETC entries, eacScenarios reports the formulaic EAC only (bottom_up null)', async () => {
+    const tasks = [task(1, { plannedCost: '1000', pctComplete: 50, plannedEnd: '2026-01-01' })];
+    // routes: evm() task scan → evm() non-billable sum → project_etc scan (empty)
+    const svc = evmSvc([tasks, [{ v: '200' }], []], { rowOf: async () => ({ id: 1, costToDate: '300', budgetAmount: '0' }) });
+    const r = await svc.eacScenarios('P-1');
+    expect(r).toMatchObject({ project_code: 'P-1', ac: 500, bac: 1000, formulaic: { etc: 500, eac: 1000 }, bottom_up: null, variance: null, entries: [] });
+  });
+
+  it('sums the LATEST entry per task/project-level bucket into a bottom-up EAC, with variance vs formulaic', async () => {
+    const tasks = [task(1, { plannedCost: '1000', pctComplete: 50, plannedEnd: '2026-01-01' })];
+    const etcRows = [
+      { taskId: 1, etcAmount: '700', note: 'stale', createdAt: 'T1' },
+      { taskId: 1, etcAmount: '600', note: 'latest for task 1', createdAt: 'T2' }, // supersedes the row above
+      { taskId: null, etcAmount: '100', note: 'contingency', createdAt: 'T3' },
+    ];
+    const svc = evmSvc([tasks, [{ v: '200' }], etcRows], { rowOf: async () => ({ id: 1, costToDate: '300', budgetAmount: '0' }) });
+    const r = await svc.eacScenarios('P-1');
+    expect(r.formulaic).toEqual({ etc: 500, eac: 1000 });
+    expect(r.bottom_up).toEqual({ etc: 700, eac: 1200, entry_count: 2 }); // 600 (task 1, latest) + 100 (project-level) = 700
+    expect(r.variance).toEqual({ eac_delta: 200, etc_delta: 200 });
+    expect(r.entries).toEqual([
+      { task_id: 1, etc_amount: 600, note: 'latest for task 1' },
+      { task_id: null, etc_amount: 100, note: 'contingency' },
+    ]);
+  });
+
+  it('submitEtc rejects an unknown task_id with TASK_NOT_FOUND, writing nothing', async () => {
+    const { svc, cap } = evmWriteSvc([[]]); // task lookup returns nothing
+    await expect(svc.submitEtc('P-1', { task_id: 999, etc_amount: 100 } as any, { username: 'pm' } as any))
+      .rejects.toMatchObject({ response: { code: 'TASK_NOT_FOUND' } });
+    expect(cap.inserts).toHaveLength(0);
+  });
+
+  it('submitEtc inserts a project-level entry (task_id omitted) and returns the refreshed EAC scenarios', async () => {
+    const tasks = [task(1, { plannedCost: '1000', pctComplete: 50, plannedEnd: '2026-01-01' })];
+    // PROJ (evmWriteSvc's fixed rowOf row): costToDate 800, tenantId 1.
+    // routes: (no task lookup — task_id omitted) → eacScenarios: evm tasks → evm nb sum → project_etc scan
+    const { svc, cap } = evmWriteSvc([tasks, [{ v: '200' }], [{ taskId: null, etcAmount: '750', note: 'mgmt override', createdAt: 'T1' }]]);
+    const r = await svc.submitEtc('P-1', { etc_amount: 750, note: 'mgmt override' } as any, { username: 'pm' } as any);
+    expect(cap.inserts[0]).toMatchObject({ tenantId: 1, projectId: 1, taskId: null, etcAmount: '750.00', note: 'mgmt override', createdBy: 'pm' });
+    expect(r.formulaic).toEqual({ etc: 1000, eac: 2000 });        // ac=1000 (800+200), bac=1000, ev=500, cpi=0.5
+    expect(r.bottom_up).toEqual({ etc: 750, eac: 1750, entry_count: 1 });
+    expect(r.variance).toEqual({ eac_delta: -250, etc_delta: -250 });
+  });
+
+  it('submitEtc validates the task belongs to the project before inserting a per-task entry', async () => {
+    const tasks = [task(1, { plannedCost: '1000', pctComplete: 50, plannedEnd: '2026-01-01' })];
+    // routes: task lookup (found) → eacScenarios: evm tasks → evm nb sum → project_etc scan
+    const { svc, cap } = evmWriteSvc([[{ id: 1 }], tasks, [{ v: '200' }], [{ taskId: 1, etcAmount: '400', note: null, createdAt: 'T1' }]]);
+    const r = await svc.submitEtc('P-1', { task_id: 1, etc_amount: 400 } as any, { username: 'pm' } as any);
+    expect(cap.inserts[0]).toMatchObject({ tenantId: 1, projectId: 1, taskId: 1, etcAmount: '400.00', createdBy: 'pm' });
+    expect(r.bottom_up).toMatchObject({ etc: 400, entry_count: 1 });
+  });
+});
+
 describe('ProjectsEvmService — earnedSchedule (PROJ-19 Lipke ES / SPI(t) / SV(t))', () => {
   // routes per call: earned-schedule task scan → evm() task scan → evm() non-billable sum
   const esSvc = (tasks: any[], rowOf?: (code: string) => Promise<any>) =>

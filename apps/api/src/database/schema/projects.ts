@@ -280,6 +280,29 @@ export const projectCalendarExceptions = pgTable(
   }),
 );
 
+// Bottom-up cost-to-complete (PPM-B2, PROJ-22) — an append-only log of management's manual ETC estimate,
+// per task (or project-level when taskId is null). Never overwritten — the CURRENT bottom-up estimate for a
+// task is simply its latest row (ordered by createdAt), mirroring the project_baselines audit pattern. A
+// project with no rows here has no bottom-up figure; eacScenarios() falls back to "not available" — the
+// existing formulaic EAC (evm()'s `ac + (bac-ev)/cpi`) is completely unaffected either way.
+export const projectEtc = pgTable(
+  'project_etc',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    taskId: bigint('task_id', { mode: 'number' }).references(() => projectTasks.id),
+    etcAmount: numeric('etc_amount', { precision: 18, scale: 2 }).notNull(),
+    note: text('note'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    byProject: index('idx_petc_project').on(t.tenantId, t.projectId),
+    byTask: index('idx_petc_task').on(t.tenantId, t.taskId),
+  }),
+);
+
 // Project baseline (B1) — a change-controlled snapshot of the approved plan (BAC + schedule duration) at a
 // point in time. Re-baselining requires a reason and preserves history (status active→superseded); variance
 // of the current plan vs the active baseline surfaces scope/cost creep (PROJ-07).
@@ -781,3 +804,4 @@ export type ResourceCalendarEntry = typeof resourceCalendar.$inferSelect;
 export type ProjectTaskDependency = typeof projectTaskDependencies.$inferSelect;
 export type ProjectCalendar = typeof projectCalendars.$inferSelect;
 export type ProjectCalendarException = typeof projectCalendarExceptions.$inferSelect;
+export type ProjectEtc = typeof projectEtc.$inferSelect;

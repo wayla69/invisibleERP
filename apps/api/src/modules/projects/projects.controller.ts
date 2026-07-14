@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type EtcDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
 
 // BoQ (M0, docs/32) — line: amount is budget_qty × rate unless an explicit budget_amount is given.
 const BoqLineBody = z.object({
@@ -125,6 +125,13 @@ const MilestoneBody = z.object({
   billing_percent: z.number().positive().max(100).optional(),
 });
 const BaselineBody = z.object({ label: z.string().optional(), reason: z.string().optional() });
+// PPM-B2 (PROJ-22): non-negative-amount format is Zod-checked here; TASK_NOT_FOUND (a task_id that isn't on
+// this project) is a genuine business-rule check that stays in the service.
+const EtcBody = z.object({
+  task_id: z.number().int().positive().optional(),
+  etc_amount: z.number().nonnegative(),
+  note: z.string().optional(),
+});
 const TemplateItemBody = z.object({
   item_type: z.enum(['task', 'milestone']).optional(),
   seq: z.number().int().positive().optional(),
@@ -370,6 +377,18 @@ export class ProjectsController {
   @Get(':code/earned-schedule')
   earnedSchedule(@Param('code') code: string, @Query('as_of') asOf: string | undefined) {
     return this.svc.earnedSchedule(code, asOf);
+  }
+
+  // PPM-B2 (PROJ-22): manual bottom-up ETC entry (per task, or project-level when task_id is omitted) + the
+  // EAC-scenario comparison (formulaic evm() EAC vs the bottom-up figure).
+  @Post(':code/etc')
+  submitEtc(@Param('code') code: string, @Body(new ZodValidationPipe(EtcBody)) b: EtcDto, @CurrentUser() u: JwtUser) {
+    return this.svc.submitEtc(code, b, u);
+  }
+
+  @Get(':code/eac-scenarios')
+  eacScenarios(@Param('code') code: string) {
+    return this.svc.eacScenarios(code);
   }
 
   // Project health history (PPM upgrade): capture a dated EVM/RAG snapshot; read the trajectory.
