@@ -391,6 +391,21 @@ export default function PlatformConsole({
     onError: (e: any) => notifyError(e.message),
   });
 
+  // FORCE purge (DANGER) — deletes products even if a company still uses them, wiping the references across
+  // EVERY company. force-preview is the mandatory blast-radius report shown before the destructive call.
+  type ForcePreview = { items: number; total_ref_rows: number; by_tenant: (KeptBy & { ref_rows: number })[] };
+  const [forcePreview, setForcePreview] = useState<ForcePreview | null>(null);
+  const checkForce = useMutation({
+    mutationFn: () => api<ForcePreview>('/api/admin/item-maintenance/force-preview', { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (r) => { setForcePreview(r); notifyInfo(t('plt.mnt_force_preview_done', { n: r.items, rows: r.total_ref_rows })); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const forcePurge = useMutation({
+    mutationFn: () => api<{ items_deleted: number; ref_rows_deleted: number }>('/api/admin/item-maintenance/force-purge', { method: 'POST', body: JSON.stringify({ confirm: 'FORCE-PURGE-ITEMS' }) }),
+    onSuccess: (r) => { notifySuccess(t('plt.mnt_force_done', { n: r.items_deleted, rows: r.ref_rows_deleted })); setForcePreview(null); setUnusedPreview(null); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const comps = companies.data ?? [];
 
   const refresh = () => {
@@ -888,6 +903,7 @@ export default function PlatformConsole({
   );
 
   const maintenanceTab = (
+    <div className="space-y-4">
     <Card className="space-y-4 p-4">
       <div className="flex items-start gap-3">
         <Database className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
@@ -946,6 +962,62 @@ export default function PlatformConsole({
         </div>
       )}
     </Card>
+
+    <Card className="space-y-4 border-destructive/40 p-4">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+        <div>
+          <h3 className="font-medium text-destructive">{t('plt.mnt_force_title')}</h3>
+          <p className="text-sm text-muted-foreground">{t('plt.mnt_force_desc')}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" onClick={() => checkForce.mutate()} disabled={checkForce.isPending}>
+          {checkForce.isPending ? t('plt.mnt_checking') : t('plt.mnt_force_check')}
+        </Button>
+        {forcePreview && (
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="destructive" disabled={forcePreview.items === 0 || forcePurge.isPending}>
+                {t('plt.mnt_force_btn', { n: forcePreview.items })}
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle className="text-destructive">{t('plt.mnt_force_confirm_title')}</DialogTitle>
+                <DialogDescription>{t('plt.mnt_force_confirm_desc', { n: forcePreview.items, rows: forcePreview.total_ref_rows })}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="destructive" onClick={() => forcePurge.mutate()} disabled={forcePurge.isPending}>
+                  {forcePurge.isPending ? t('plt.mnt_purging') : t('plt.mnt_force_confirm_btn')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+      {forcePreview && (
+        <div className="rounded-md border border-destructive/40 p-3 text-sm">
+          <div className="mb-1 font-medium text-destructive">{t('plt.mnt_force_result', { n: forcePreview.items, rows: forcePreview.total_ref_rows })}</div>
+          {forcePreview.by_tenant.length > 0 ? (
+            <>
+              <p className="mb-2 text-xs text-muted-foreground">{t('plt.mnt_force_blast_hint')}</p>
+              <ul className="space-y-1">
+                {forcePreview.by_tenant.slice(0, 20).map((k, i) => (
+                  <li key={k.tenant_id ?? `shared-${i}`} className="flex items-center justify-between gap-3">
+                    <span>{k.tenant_id == null ? t('plt.mnt_kept_shared') : `${k.name ?? k.code ?? `#${k.tenant_id}`}${k.code ? ` (${k.code})` : ''}`}</span>
+                    <Badge variant="destructive">{t('plt.mnt_force_rows', { n: k.ref_rows })}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t('plt.mnt_force_no_refs')}</p>
+          )}
+        </div>
+      )}
+    </Card>
+    </div>
   );
 
   return (

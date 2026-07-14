@@ -139,7 +139,16 @@ Single-duty roles enforce SoD: **vendor master** maintenance is segregated from 
     items that are KEPT (still referenced, so *not* collected), the company (tenant) whose data references them
     and how many items each keeps alive — so a god can tell a **reset-leftover** (the just-reset company still
     appears ⇒ its data wasn't fully wiped; factory-reset it completely, then purge again) from a product
-    **genuinely in use by another company** (which the shared catalogue can't remove). Verified by the
+    **genuinely in use by another company** (which the shared catalogue can't remove). **Force purge (escape
+    hatch for junk/test products):** `POST /api/admin/item-maintenance/force-purge` deletes items **even when a
+    company still references them** — it wipes every referencing row across **every** tenant (PO/GR/stock/
+    recipe/price/… lines) then the item + image (`item_ids` targets a list; omitted ⇒ the whole catalogue).
+    Because that corrupts a real company's data if one genuinely uses the item, it is **god-only**, needs a
+    **distinct strong confirm** (`FORCE-PURGE-ITEMS`, else `CONFIRM_MISMATCH`), and is preceded by a mandatory
+    **blast-radius preview** `POST /api/admin/item-maintenance/force-preview` (how many referencing rows each
+    company would lose) rendered in the Maintenance tab's **ลบแบบบังคับ (danger)** card. Each delete is
+    savepoint-wrapped (a blocked table is reported, not a 500) and authorised for append-only rows via the same
+    `app.tenant_wipe` GUC as the tenant-wipe engine; audit-logged (`items_force_purged`). Verified by the
     `onboarding` harness.
 
 ## 8. Process flow
@@ -232,7 +241,7 @@ flowchart TD
 | `ALREADY_MERGED` (400) | The duplicate item was already merged into a survivor | Refresh the review queue; the item is already retired |
 | `MERGE_CONFLICT` (409) | Survivor and duplicate both own a child row with the same natural key | Resolve the conflicting child rows manually, then retry the merge |
 | `ITEM_PURGE_HQ_ONLY` (403) | A non-platform-owner called the unused-item preview/purge | The shared item master is cross-tenant — only the platform owner may garbage-collect unused items (§7 step 14) |
-| `CONFIRM_MISMATCH` (400) | The unused-item purge was called without the exact confirm phrase | Type `PURGE-UNUSED-ITEMS` to confirm the destructive purge (§7 step 14) |
+| `CONFIRM_MISMATCH` (400) | The unused-item purge was called without the exact confirm phrase | Type `PURGE-UNUSED-ITEMS` (normal) or `FORCE-PURGE-ITEMS` (force) to confirm the destructive purge (§7 step 14) |
 | `UNSUPPORTED_FIELD` (400) | A scheduled change names an entity:field the registry doesn't support | Use a supported target (item `unit_price`/`status`, customer `credit_limit`) — §7 step 13 |
 | `BAD_DATE` (400) | `effective_date` isn't `YYYY-MM-DD` | Supply a valid ISO date |
 | `SOD_VIOLATION` (403) | The scheduler tried to self-approve a sensitive (credit-limit) scheduled change | A distinct `exec`/`approvals` user must release it (maker ≠ checker; §7 step 13) |
