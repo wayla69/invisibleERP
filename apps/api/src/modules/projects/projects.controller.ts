@@ -391,6 +391,13 @@ export class ProjectsController {
     return this.svc.eacScenarios(code);
   }
 
+  // PPM-A2 (PROJ-23): resource leveling — over-allocated resource-months within this project cross-referenced
+  // against the CPM schedule's slack, suggesting which task-linked assignment could shift later.
+  @Get(':code/resource-leveling')
+  resourceLeveling(@Param('code') code: string, @CurrentUser() u: JwtUser) {
+    return this.svc.resourceLeveling(code, u);
+  }
+
   // Project health history (PPM upgrade): capture a dated EVM/RAG snapshot; read the trajectory.
   @Post(':code/health')
   captureHealth(@Param('code') code: string, @Body() b: { as_of?: string }, @CurrentUser() u: JwtUser) {

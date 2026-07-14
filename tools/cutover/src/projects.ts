@@ -604,6 +604,45 @@ async function main() {
   ok('PROJ-22: existing evm()/schedule() callers are unaffected by ETC entries (formulaic figures unchanged)',
     near(etc3.json.formulaic?.eac, 400) && near(etc3.json.formulaic?.etc, 200), JSON.stringify(etc3.json.formulaic));
 
+  // ── resource leveling: over-allocation vs the CPM schedule's slack (PPM-A2, PROJ-23) ──
+  // LVL-A (5d) → LVL-B (3d, depends on A) forms the critical path (8d, both slack 0); LVL-C (2d,
+  // independent) carries slack 6 (project duration 8 − its own 2d). Dev1 is booked on LVL-B (100%) + LVL-C
+  // (60%) in the same month → 160% over-allocated, and LVL-C (positive slack) is the leveling candidate.
+  // Dev2 is booked on LVL-A (100%) + LVL-B (100%) in the same month → 200% over-allocated, but BOTH
+  // contributors are critical-path (slack 0) → NO_SLACK, nothing to suggest.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-LEVEL', name: 'งานปรับสมดุลกำลังคน', billing_type: 'TM' });
+  const lvlA = await inj('POST', '/api/projects/PRJ-LEVEL/tasks', admin, { name: 'LVL-A', planned_hours: 40 }); // 5d
+  const lvlAid = lvlA.json.tasks[0].id;
+  const lvlB = await inj('POST', '/api/projects/PRJ-LEVEL/tasks', admin, { name: 'LVL-B', planned_hours: 24, depends_on: [lvlAid] }); // 3d
+  const lvlBid = lvlB.json.tasks[0].id;
+  // LVL-C's own planned_start (2026-08-27) is independent of its assignment's period_start (2026-08-01,
+  // set below) — the assignment's period_start drives which month is over-allocated, while the task's own
+  // planned_start is what a suggested shift (+6d slack) is measured from, crossing into September.
+  await inj('POST', '/api/projects/PRJ-LEVEL/tasks', admin, { name: 'LVL-C', planned_hours: 16, planned_start: '2026-08-27' }); // 2d, independent
+  const lvlList = await inj('GET', '/api/projects/PRJ-LEVEL/tasks', admin);
+  const lvlCid = lvlList.json.tasks.find((t: any) => t.name === 'LVL-C').id;
+  await inj('POST', '/api/projects/PRJ-LEVEL/resources', admin, { resource_name: 'Dev1', task_id: lvlBid, alloc_pct: 100, period_start: '2026-08-01' });
+  await inj('POST', '/api/projects/PRJ-LEVEL/resources', admin, { resource_name: 'Dev1', task_id: lvlCid, alloc_pct: 60, period_start: '2026-08-01' });
+  await inj('POST', '/api/projects/PRJ-LEVEL/resources', admin, { resource_name: 'Dev2', task_id: lvlAid, alloc_pct: 100, period_start: '2026-08-01' });
+  await inj('POST', '/api/projects/PRJ-LEVEL/resources', admin, { resource_name: 'Dev2', task_id: lvlBid, alloc_pct: 100, period_start: '2026-08-01' });
+  const leveling = await inj('GET', '/api/projects/PRJ-LEVEL/resource-leveling', admin);
+  const dev1Over = leveling.json.over_allocations?.find((o: any) => o.resource_name === 'Dev1' && o.month === '2026-08');
+  const dev2Over = leveling.json.over_allocations?.find((o: any) => o.resource_name === 'Dev2' && o.month === '2026-08');
+  ok('PROJ-23: Dev1 (LVL-B 100% + LVL-C 60%) over-allocated at 160% vs a 100% ceiling', near(dev1Over?.allocated_pct, 160) && near(dev1Over?.over_by_pct, 60), JSON.stringify(dev1Over));
+  ok('PROJ-23: Dev2 (LVL-A 100% + LVL-B 100%) over-allocated at 200% vs a 100% ceiling', near(dev2Over?.allocated_pct, 200) && near(dev2Over?.over_by_pct, 100), JSON.stringify(dev2Over));
+  const dev1Sugg = leveling.json.suggestions?.find((s: any) => s.resource_name === 'Dev1');
+  ok('PROJ-23: Dev1\'s over-allocation suggests shifting LVL-C (its only positive-slack contributor) by its full slack (6d) into 2026-09',
+    dev1Sugg?.task_id === lvlCid && dev1Sugg?.slack_days === 6 && dev1Sugg?.suggested_shift_days === 6 && dev1Sugg?.shifted_to_month === '2026-09',
+    JSON.stringify(dev1Sugg));
+  ok('PROJ-23: no suggestion is offered for LVL-B (slack 0) despite contributing to BOTH over-allocations', !leveling.json.suggestions?.some((s: any) => s.task_id === lvlBid), JSON.stringify(leveling.json.suggestions));
+  const dev2Unres = leveling.json.unresolvable?.find((u: any) => u.resource_name === 'Dev2');
+  ok('PROJ-23: Dev2\'s over-allocation is NO_SLACK — both contributing tasks (LVL-A, LVL-B) are on the critical path', dev2Unres?.reason === 'NO_SLACK', JSON.stringify(dev2Unres));
+  ok('PROJ-23: over_allocated_count reflects both resources (2)', leveling.json.over_allocated_count === 2, String(leveling.json.over_allocated_count));
+  const levelEmpty = await inj('GET', '/api/projects/PRJ-ETC/resource-leveling', admin); // no resource assignments on this project → nothing over-allocated
+  ok('PROJ-23: a project with no over-allocated resource reports empty results (regression)',
+    levelEmpty.json.over_allocated_count === 0 && !(levelEmpty.json.over_allocations ?? []).length && !(levelEmpty.json.suggestions ?? []).length && !(levelEmpty.json.unresolvable ?? []).length,
+    JSON.stringify(levelEmpty.json));
+
   const oppLost = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลที่เสีย', amount: 50000, owner: 'sales1' });
   await inj('PATCH', `/api/crm/pipeline/opportunities/${oppLost.json.opp_no}/stage`, admin, { stage: 'lost', lost_reason: 'ราคาสูงเกินไป (price)' });
   const wl = await inj('GET', '/api/crm/pipeline/win-loss', admin);

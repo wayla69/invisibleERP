@@ -274,6 +274,22 @@ formulaic EAC is shown — nothing about the existing EVM numbers changes.
 Required role/permission: same as the rest of PPM (`exec`/`planner`/`ar`). Detective — the comparison posts
 nothing to the GL.
 
+## Resource leveling — over-allocation vs the schedule's slack (PROJ-23)
+The project's **Resources** tab now opens with a **ปรับสมดุลกำลังคน (resource leveling)** panel whenever a
+resource is over-allocated in a month, WITHIN this project's own assignments:
+- Each row shows the over-allocated **resource + month** and how far over its ceiling it is (e.g. 160% vs a
+  100% ceiling).
+- If a task contributing to that over-allocation has spare **slack** in the schedule (it isn't on the
+  critical path), the panel suggests shifting that task later by up to its slack — e.g. "shift LVL-C by 6
+  days → 2026-09" — which would free the month without delaying the project finish date.
+- If **every** contributing task is already on the critical path (no slack anywhere), the row is flagged
+  **"ไม่มีระยะเผื่อให้เลื่อน" (no slack to shift)** — resolving it genuinely requires accepting a delay, adding
+  more capacity, or re-scoping, not just rescheduling.
+
+This is advisory only — it suggests a shift, it never moves an assignment or a task's dates itself; apply
+the suggestion by editing the task's dates or the assignment's period yourself. Required role/permission:
+same as the rest of PPM (`exec`/`planner`/`ar`). Detective — posts nothing to the GL.
+
 ## Timesheets → project labour (`/hcm`, tab ลงเวลา / OT)
 When logging a timesheet you can allocate it to a **โครงการ (project)** and a **งาน (WBS task)** and mark it
 **billable**. The entry lands **Pending**; a **different** approver presses **อนุมัติ** (maker-checker,
@@ -363,10 +379,14 @@ Cash spent at site can be booked **against the project** so it shows up in the p
   surfaces a material divergence between management's ground-level estimate and the CPI-driven number for
   review — read-only/detective, the comparison posts nothing; a `task_id` off the project is rejected
   (`TASK_NOT_FOUND`).
+- **Resource leveling** (**PROJ-23**) cross-references an over-allocated resource-month against the
+  schedule's slack to suggest a shift — read-only/detective, it suggests only, never moves an assignment; a
+  resource-month with no slack anywhere is flagged `NO_SLACK` instead of silently ignored.
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.30 | 2026-07-14 | **PROJ-23 — resource leveling: over-allocation vs the schedule's slack.** The project's Resources tab gains a leveling panel: each over-allocated resource-month shows how far over its ceiling it is, plus a suggested shift (task + days + target month) drawn from the schedule's slack, or a "no slack to shift" flag when every contributing task is on the critical path. Advisory only — it never moves an assignment or task dates itself. |
 | 2.29 | 2026-07-13 | **PROJ-22 — bottom-up cost-to-complete (ETC) vs the formulaic EAC.** The project overview's EVM card gains an **ETC/EAC comparison** panel: submit a manual estimate-to-complete per task (or project-level) and see it side by side with the existing CPI-based EAC, with a variance badge. A second submission for the same task supersedes the first; a project-level entry sums alongside per-task entries. No change to the existing EVM/schedule figures when no estimate has been submitted. |
 | 2.28 | 2026-07-13 | **PROJ-21 — richer scheduling: dependency types/lag, SNET/FNLT constraints, opt-in working calendar.** The task dialog and a new dependency-editor dialog (per-predecessor **type** — FS/SS/FF/SF — and **lag/lead days**) on `/projects/[code]`; new per-task **constraint** fields (SNET/FNLT + day-offset); a new **ปฏิทินการทำงาน (Working calendar)** tab on `/projects/settings` (enable + non-working weekdays + holiday exceptions, off by default). The schedule/critical-path computation now honours all four dependency types and the constraints, and — once the calendar is enabled — counts only working days toward a dated task's duration. No change when none of the new fields are set. |
 | 2.27 | 2026-07-13 | **PROJ-20 — resource capacity heatmap governed by a real availability calendar + role/skill supply-vs-demand.** New page **`/projects/resources`** (four tabs): the **Heatmap** now flags over-allocation against each resource's TRUE monthly availability (a documented part-time/leave override, default 100% absent one) instead of a flat 100%, and tags each booking **ระบุตัวบุคคล (Named)** or **ยังไม่ระบุตัวบุคคล (Generic)**; **Skills** tags a real person with a skill/role (the supply side); **Availability calendar** sets a person's monthly availability override; **Role supply-vs-demand** rolls assigned demand up against qualified supply per role/month, flagging **กำลังคนไม่พอ (Understaffed)**. Read-only — no new permission beyond the existing `exec`/`planner`/`ar` PPM gate. |

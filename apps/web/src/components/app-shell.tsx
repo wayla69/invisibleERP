@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, ShieldCheck, Star } from 'lucide-react';
+import { Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, ShieldCheck, SlidersHorizontal, Star } from 'lucide-react';
 
 import { useQuery } from '@tanstack/react-query';
 
@@ -14,6 +14,7 @@ import {
   INTERNAL_NAV,
   PORTAL_NAV,
   allGroupItems,
+  filterAdvancedNav,
   navForWorkspace,
   orderGroups,
   orderItems,
@@ -71,6 +72,11 @@ const RECENTS_KEY = 'ie-nav-recents'; // recently visited hrefs (auto, most-rece
 const RECENTS_SHOWN = 5; // how many recent items to surface
 const RECENTS_STORED = 12; // how many to retain so favourites filtering doesn't starve the list
 const PREFS_PUSH_MS = 600; // debounce for syncing pref changes to the server
+// Reserved fold-map key holding the "show advanced menus" toggle. Stored inside `navFold` (a free-form
+// {key: boolean} synced via /api/user-prefs) so it syncs across devices with no backend change; it can't
+// collide with a real group/subgroup title (those are all `nav.group.*` / `nav.sub.*`). Excluded from the
+// group render because no NavGroup carries this title.
+const ADVANCED_FOLD_KEY = '__show_advanced__';
 
 type SyncedPrefs = { favorites: string[]; navFold: Record<string, boolean> };
 
@@ -111,6 +117,54 @@ function NavSubSection({
       </button>
       <div className={cn(open ? 'block' : 'hidden', 'group-data-[collapsible=icon]:block')}>{children}</div>
     </div>
+  );
+}
+
+/** A collapsible TOP-LEVEL sidebar domain. The label becomes a fold toggle (chevron + title, with an
+ *  item-count badge when collapsed). Default-open is driven by the caller (only the domain containing the
+ *  active route opens on load); an explicit user toggle persists and overrides. In icon-collapsed (rail)
+ *  mode the header hides and items stay visible (icons only), matching NavSubSection. */
+function NavGroupSection({
+  title,
+  count,
+  open,
+  active,
+  onToggle,
+  children,
+}: {
+  title: string;
+  count: number;
+  open: boolean;
+  active: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <SidebarGroup>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={cn(
+          'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden',
+          active ? 'text-sidebar-foreground' : 'text-sidebar-foreground/60',
+        )}
+      >
+        <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} />
+        <span className="flex-1 truncate text-left">{title}</span>
+        {!open && count > 0 && (
+          <span
+            aria-hidden="true"
+            className="rounded-full bg-sidebar-accent px-1.5 text-[10px] font-medium tabular-nums text-sidebar-foreground/70"
+          >
+            {count}
+          </span>
+        )}
+      </button>
+      <SidebarGroupContent className={cn(open ? 'block' : 'hidden', 'group-data-[collapsible=icon]:block')}>
+        {children}
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }
 
@@ -524,6 +578,12 @@ export function AppShell({
     const ordered = orderGroups(base, groupOrder); // admin-curated system-wide category order
     return isGod ? [...ordered, PLATFORM_GROUP] : ordered; // platform console — god only
   }, [filterByPerm, wsNav, groupOrder, isGod]);
+  // "Show advanced menus" — kept in the synced fold map under a reserved key (see ADVANCED_FOLD_KEY). Off by
+  // default: infrequent/expert domains (Controls, Customise, Integrations, Intercompany) stay hidden.
+  const showAdvanced = navFold[ADVANCED_FOLD_KEY] ?? false;
+  // The domain tree hides `advanced` groups/subgroups when the toggle is off. Favourites/recents and the ⌘K
+  // palette resolve against the UNFILTERED `groups`, so a pinned advanced item stays reachable regardless.
+  const sidebarGroups = React.useMemo(() => filterAdvancedNav(groups, showAdvanced), [groups, showAdvanced]);
   const paletteGroups = React.useMemo(() => {
     const filtered = filterByPerm(nav);
     const base = filtered.length ? filtered : nav;
@@ -741,32 +801,64 @@ export function AppShell({
               </SidebarGroupContent>
             </SidebarGroup>
           )}
-          {groups.map((group) => (
-            <SidebarGroup key={group.title}>
-              <SidebarGroupLabel>{t(group.title)}</SidebarGroupLabel>
-              <SidebarGroupContent>
+          {sidebarGroups.map((group) => {
+            // Only-active-open default: the domain holding the current route opens on load; an explicit user
+            // toggle (navFold[group.title]) persists and overrides. Count feeds the collapsed badge.
+            const groupActive = allGroupItems(group).some((it) => isActive(it.href));
+            const open = navFold[group.title] ?? groupActive;
+            const count = allGroupItems(group).length;
+            return (
+              <NavGroupSection
+                key={group.title}
+                title={t(group.title)}
+                count={count}
+                open={open}
+                active={groupActive}
+                onToggle={() => toggleFold(group.title, groupActive)}
+              >
                 {group.items && group.items.length > 0 && (
                   <SidebarMenu>{orderItems(group.items, itemOrder?.[group.title]).map(renderItem)}</SidebarMenu>
                 )}
                 {group.subgroups?.map((sub) => {
-                  const open = navFold[sub.title] ?? sub.defaultOpen ?? true;
+                  const subOpen = navFold[sub.title] ?? sub.defaultOpen ?? true;
                   return (
                     <NavSubSection
                       key={sub.title}
                       title={t(sub.title)}
-                      open={open}
+                      open={subOpen}
                       onToggle={() => toggleFold(sub.title, sub.defaultOpen ?? true)}
                     >
                       <SidebarMenu>{orderItems(sub.items, itemOrder?.[sub.title]).map(renderItem)}</SidebarMenu>
                     </NavSubSection>
                   );
                 })}
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ))}
+              </NavGroupSection>
+            );
+          })}
         </SidebarContent>
 
         <SidebarFooter>
+          {pinsEnabled && (
+            <button
+              type="button"
+              onClick={() => toggleFold(ADVANCED_FOLD_KEY, false)}
+              aria-pressed={showAdvanced}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground group-data-[collapsible=icon]:hidden"
+            >
+              <span className="flex items-center gap-1.5">
+                <SlidersHorizontal className="size-3.5 shrink-0" />
+                {t('nav.show_advanced')}
+              </span>
+              <span
+                className={cn(
+                  'flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors',
+                  showAdvanced ? 'bg-primary' : 'bg-muted-foreground/30',
+                )}
+              >
+                <span className={cn('size-3 rounded-full bg-white transition-transform', showAdvanced && 'translate-x-3')} />
+              </span>
+            </button>
+          )}
           {me.data && (
             <div className="flex items-center gap-2 rounded-md px-1 py-1.5 group-data-[collapsible=icon]:hidden">
               <Avatar className="size-8">

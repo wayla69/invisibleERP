@@ -140,8 +140,10 @@ the platform.
 
 ### 3.1 Hide menus (**จัดการเมนู — แสดง/ซ่อน**)
 
-A tree that **mirrors your left sidebar** — category (หมวด) → sub-section (หมวดย่อย)
-→ individual menu (เมนู) — with a **Show / Hide** button at every level. Menu names
+A tree that **mirrors your left sidebar** — category/domain (หมวด) → sub-section (หมวดย่อย)
+→ individual menu (เมนู) — with a **Show / Hide** button at every level. The tree reflects
+the current sidebar taxonomy, so the consolidated domains (*ขาย & ลูกค้า*, *ซัพพลายเชน*,
+*การเงิน & บัญชี*, *โครงการ*, …) each list their sub-sections beneath them. Menu names
 match the sidebar exactly. Use the **ทั้งหมด / ERP / POS** filter at the top-right to
 view one surface at a time; **ERP** and **POS** use the same split as the sidebar
 switcher, so the list lines up one-to-one with what staff see on that surface (in
@@ -163,6 +165,11 @@ switcher, so the list lines up one-to-one with what staff see on that surface (i
 5. **Reset the arrangement** with **รีเซ็ตการจัดเมนู** (top-right) to show every menu
    again and restore the default category **and** menu order. This affects **menu
    arrangement only** — it does **not** re-enable any module you turned off in §3.2.
+
+> **Not the same as personal view settings.** Whether a domain is folded open/closed and whether the
+> **"แสดงเมนูขั้นสูง" (Show advanced)** toggle is on are **each user's own** preferences (they sync to that
+> user's account, across their devices). This admin screen sets the **company-wide** visibility and order;
+> it does not force anyone's fold-state or advanced toggle.
 
 > **Hiding a menu is presentation only** — it declutters the sidebar but does **not**
 > change anyone's permissions. To actually *block access* to a capability (including

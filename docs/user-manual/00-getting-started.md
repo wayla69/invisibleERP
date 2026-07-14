@@ -182,16 +182,22 @@ appear in **both** workspaces.
   payment method, open tills, and recent bills). Switching workspace takes you to its home.
 - **Search is global:** the command palette searches every screen you can access (regardless of the
   active workspace) **and** your customer/vendor/product records — type a name or code and open the match.
-- **Menus are grouped by area:** within each workspace the side menu is organised into focused groups —
-  e.g. POS shows *ขายหน้าร้าน*, *ร้าน & การจัดส่ง*, *อุปกรณ์ & การชำระเงิน*, *วิเคราะห์ร้านอาหาร*; ERP shows
-  *ลูกค้า & CRM*, *ลอยัลตี้*, *สินค้าคงคลัง*, *จัดซื้อ*, *การผลิต*, *การเงิน*, *ภาษี*, *บุคลากร*, *วางแผน & BI*. Shared
-  groups (*ราคา & สาขา*, *การควบคุม*, *ผู้ช่วย AI*, *ตั้งค่าระบบ*) appear in both.
-- **Big groups fold into sub-sections:** the *ตั้งค่าระบบ* group is split into collapsible sub-sections —
-  *ข้อมูลหลัก*, *ปรับแต่ง*, *เชื่อมต่อ & ขยาย*, *ผู้ดูแลระบบ*. The advanced sections (*ปรับแต่ง*, *เชื่อมต่อ & ขยาย*)
-  start collapsed so the group opens compact. The **การเงิน (Finance)** group is likewise organised into
-  PEAK-style **cycle** sub-sections — *รายรับ–รายจ่าย*, *สมุดบัญชี & แยกประเภท*, *ธนาคาร & กระทบยอด*,
-  *งบ & วิเคราะห์การเงิน*, *ระหว่างบริษัท & สกุลเงิน* (the last two start collapsed). Click a sub-section heading
-  to fold/unfold it; your choice is remembered.
+- **Menus are grouped into foldable domains:** within each workspace the side menu is organised into a small
+  set of top-level **domains**. In ERP these are *ภาพรวม*, *ขาย & ลูกค้า*, *ซัพพลายเชน*, *การเงิน & บัญชี*,
+  *บุคลากร & เงินเดือน*, *โครงการ*, *วางแผน & วิเคราะห์*, plus the shared *ผู้ช่วย AI* and *ตั้งค่าระบบ*; POS shows
+  *ขายหน้าร้าน* (with *ขาย & ออเดอร์ · โต๊ะ & ครัว · กะ & ควบคุม* sub-sections) and *ร้าน & อุปกรณ์*
+  (*ร้าน & การจัดส่ง · อุปกรณ์ & การชำระเงิน · วิเคราะห์ร้านอาหาร*).
+- **Click a domain heading to fold/unfold it.** Each domain collapses, and **only the domain you're currently
+  in opens automatically** when you load the app — the rest start collapsed (a small number badge shows how
+  many items are inside), so the menu stays short and scannable. Your open/closed choices are remembered and
+  **follow you across devices**. Big domains are further split into **sub-sections**: e.g. *ขาย & ลูกค้า* holds
+  *ลูกค้า & CRM · ลอยัลตี้ · ราคา & สาขา*; *ซัพพลายเชน* holds *สินค้าคงคลัง · จัดซื้อ · การผลิต*; and **การเงิน & บัญชี**
+  keeps the PEAK-style **cycle** sub-sections — *รายรับ–รายจ่าย · สมุดบัญชี & แยกประเภท · ธนาคาร & กระทบยอด ·
+  งบ & วิเคราะห์การเงิน · ระหว่างบริษัท & สกุลเงิน · ภาษี* (advanced/infrequent ones start collapsed).
+- **"แสดงเมนูขั้นสูง" (Show advanced):** a toggle at the bottom of the side menu hides expert/infrequent areas
+  by default — the **การควบคุม & ตรวจสอบ** (Controls) domain and the *ปรับแต่ง*, *เชื่อมต่อ & ขยาย* and
+  *ระหว่างบริษัท & สกุลเงิน* sub-sections. Turn it on to reveal them. (Anything you've pinned to Favourites or
+  can find via search stays reachable regardless of this toggle.)
 - **"เริ่มต้นใช้งาน" (Getting started) on the dashboard:** while your company is still being set up, the ERP
   home (*แดชบอร์ด*) shows a **first-run panel** at the top with your onboarding checklist and a completion
   bar. Each unfinished step (*set up branding*, *pick a theme*, *choose your language*, *add your first
@@ -205,8 +211,8 @@ appear in **both** workspaces.
 - **Favourites & recent:** hover any menu item and click the **★ star** to pin it to a **รายการโปรด**
   (Favourites) group at the top of the side menu; click the star again to unpin. A **ล่าสุด** (Recent)
   group automatically lists the last few screens you opened. Both only show items you can access in the
-  current workspace. Your **favourites and the fold-state of the Settings sub-sections follow you across
-  devices** (saved to your account); the **Recent** list is per-device.
+  current workspace. Your **favourites, the fold-state of every domain/sub-section, and the "show advanced"
+  toggle follow you across devices** (saved to your account); the **Recent** list is per-device.
 
 | Favourites & Recent | Foldable Settings |
 |---|---|
