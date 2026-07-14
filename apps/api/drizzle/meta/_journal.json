@@ -2675,6 +2675,13 @@
       "when": 2023820000347,
       "tag": "0408_cpq_pricebooks",
       "breakpoints": true
+    },
+    {
+      "idx": 383,
+      "version": "7",
+      "when": 2023820000348,
+      "tag": "0409_crm_dq_merge_log",
+      "breakpoints": true
     }
   ]
 }

@@ -839,6 +839,63 @@ async function main() {
   const badType = await inj('GET', '/api/crm/timeline?entity_type=widget&entity_no=x', sales1);
   ok('CRM-8 validation: an unknown entity_type → 400 BAD_ENTITY_TYPE', badType.status === 400 && badType.json.error?.code === 'BAD_ENTITY_TYPE', `${badType.status} ${badType.json.error?.code}`);
 
+  // ── CRM-17 CRM data-quality: scoring + duplicate surveillance + merge audit (control CRM-16, migration 0409) ──
+  // 90. A COMPLETE account scores well (all fields present + valid; owner is always set to the creator).
+  const dqGood = await inj('POST', '/api/crm/accounts', sales1, { name: 'DQ Complete Co', tax_id: '0105561999001', email: 'ops@dqcomplete.example', phone: '021234567', industry: 'software', website: 'https://dqcomplete.example', size: 'medium' });
+  const dqGoodView = await inj('GET', `/api/crm/dq/account/${dqGood.json.account_no}`, sales1);
+  ok('CRM-17 DQ: a complete account scores good (tax/email/phone/owner all ok)',
+    dqGoodView.status === 200 && dqGoodView.json.band === 'good' && dqGoodView.json.score >= 80 && dqGoodView.json.breakdown.find((b: any) => b.field === 'tax_id')?.ok === true,
+    JSON.stringify({ score: dqGoodView.json.score, band: dqGoodView.json.band }));
+
+  // 91. A SPARSE account scores poor, listing its missing fields.
+  const dqPoor = await inj('POST', '/api/crm/accounts', sales1, { name: 'DQ Sparse Co', force: true });
+  const dqPoorView = await inj('GET', `/api/crm/dq/account/${dqPoor.json.account_no}`, sales1);
+  ok('CRM-17 DQ: a name-only account scores poor with missing fields listed',
+    dqPoorView.json.band === 'poor' && dqPoorView.json.missing.includes('tax_id') && dqPoorView.json.missing.includes('email'),
+    JSON.stringify({ score: dqPoorView.json.score, missing: dqPoorView.json.missing }));
+
+  // 92. An INVALID field is scored as not-ok (a 5-digit tax id is present but invalid).
+  const dqBad = await inj('POST', '/api/crm/accounts', sales1, { name: 'DQ Invalid Tax Co', tax_id: '12345', email: 'x@bad', force: true });
+  const dqBadView = await inj('GET', `/api/crm/dq/account/${dqBad.json.account_no}`, sales1);
+  ok('CRM-17 DQ validity: an invalid tax_id / email is scored not-ok (present ≠ valid)',
+    dqBadView.json.breakdown.find((b: any) => b.field === 'tax_id')?.ok === false && dqBadView.json.breakdown.find((b: any) => b.field === 'email')?.ok === false,
+    JSON.stringify(dqBadView.json.breakdown.filter((b: any) => ['tax_id', 'email'].includes(b.field))));
+
+  // 93. The worklist ranks worst-first and counts bands.
+  const dqList = await inj('GET', '/api/crm/dq', sales1);
+  const poorIdx = (dqList.json.accounts ?? []).findIndex((a: any) => a.account_no === dqPoor.json.account_no);
+  const goodIdx = (dqList.json.accounts ?? []).findIndex((a: any) => a.account_no === dqGood.json.account_no);
+  ok('CRM-17 worklist: worst-score-first ordering + band counts', dqList.status === 200 && poorIdx >= 0 && goodIdx >= 0 && poorIdx < goodIdx && dqList.json.band_counts.poor >= 1 && dqList.json.band_counts.good >= 1, JSON.stringify(dqList.json.band_counts));
+
+  // 94. Idempotent daily snapshot + trend history.
+  const snap1 = await inj('POST', '/api/crm/dq/snapshot', sales1, {});
+  const snap2 = await inj('POST', '/api/crm/dq/snapshot', sales1, {});
+  const dqHist = await inj('GET', `/api/crm/dq/history/${dqPoor.json.account_no}`, sales1);
+  ok('CRM-17 snapshot: idempotent per account/day + trend history', snap1.status === 200 && snap2.status === 200 && snap1.json.captured === snap2.json.captured && snap1.json.captured >= 3 && dqHist.json.count >= 1, JSON.stringify({ c1: snap1.json.captured, c2: snap2.json.captured }));
+
+  // 95. The DQ scan is a registered BI report type.
+  const rtypesDq = await inj('GET', '/api/bi/report-types', admin);
+  ok('CRM-17 BI: registry exposes the crm_dq_scan report type', (rtypesDq.json.report_types ?? []).some((r: any) => r.key === 'crm_dq_scan'), 'crm_dq_scan');
+
+  // 96. Duplicate surveillance surfaces a likely-duplicate pair (shared phone + near-identical name).
+  const dup1 = await inj('POST', '/api/crm/accounts', sales1, { name: 'Acme Robotics Ltd', phone: '029998888', force: true });
+  const dup2 = await inj('POST', '/api/crm/accounts', sales1, { name: 'Acme Robotics Limited', phone: '029998888', force: true });
+  const dqDups = await inj('GET', '/api/crm/dq/duplicates', sales1);
+  const found = (dqDups.json.candidates ?? []).find((c: any) => [c.a, c.b].includes(dup1.json.account_no) && [c.a, c.b].includes(dup2.json.account_no));
+  ok('CRM-17 dedupe surveillance: a near-duplicate pair surfaces with reasons (phone + name)',
+    dqDups.status === 200 && !!found && found.reasons.includes('phone') && found.reasons.includes('name'), JSON.stringify(found));
+
+  // 97. Merge audit log: the earlier maker-checked account merge (accA survivor) is recorded.
+  const dqLog = await inj('GET', '/api/crm/dq/merge-log', sales1);
+  const logRow = (dqLog.json.merges ?? []).find((m: any) => m.survivor_no === accA.json.account_no);
+  ok('CRM-17 merge audit: the maker-checked merge is logged (survivor + children reassigned)',
+    dqLog.status === 200 && !!logRow && logRow.reassigned_children >= 2 && logRow.merged_by === 'sales2', JSON.stringify(logRow));
+
+  // 98. Tenant isolation: an HQ account is not in a T1 user's DQ worklist.
+  await inj('POST', '/api/crm/accounts', admin, { name: 'HQ Only DQ Co', tax_id: '0105561777001' });
+  const t1List = await inj('GET', '/api/crm/dq', sales1);
+  ok('CRM-17 RLS: an HQ account is absent from a T1 user\'s DQ worklist', !(t1List.json.accounts ?? []).some((a: any) => a.name === 'HQ Only DQ Co'), `names=${(t1List.json.accounts ?? []).map((a: any) => a.name).slice(0, 8).join('|')}`);
+
   await app.close();
 }
 

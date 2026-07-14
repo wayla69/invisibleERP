@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException, BadRequestException, ConflictExc
 import { z } from 'zod';
 import { eq, and, ne, or, ilike, desc, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
-import { crmAccounts, crmContacts, crmOpportunities, crmActivities, users } from '../../../database/schema';
+import { crmAccounts, crmContacts, crmOpportunities, crmActivities, crmMergeLog, users } from '../../../database/schema';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { type JwtUser } from '../../../common/decorators';
 import { isUniqueViolation } from '../../../common/db-error';
@@ -185,6 +185,11 @@ export class CrmAccountsService {
         pick('ownerUserId', survivor.ownerUserId, dup.ownerUserId);
         if (Object.keys(fill).length) await tx.update(crmAccounts).set(fill).where(eq(crmAccounts.id, Number(survivor.id)));
         await tx.update(crmAccounts).set({ status: 'merged', mergedInto: Number(survivor.id), mergedBy: user.username, mergedAt: new Date() }).where(eq(crmAccounts.id, Number(dup.id)));
+        // CRM-17: append the merge to the audit log inside the same transaction (a MERGE_CONFLICT rollback discards it).
+        await tx.insert(crmMergeLog).values({
+          tenantId: user.tenantId ?? null, survivorAccountId: Number(survivor.id), survivorNo, duplicateAccountId: Number(dup.id), duplicateNo,
+          reassignedChildren: childCount, filledFields: Object.keys(fill), mergedBy: user.username,
+        });
       });
     } catch (e) {
       if (isUniqueViolation(e)) throw new ConflictException({ code: 'MERGE_CONFLICT', message: 'Survivor and duplicate both own a row with the same key — resolve manually', messageTh: 'บัญชีทั้งสองมีรายการที่ซ้ำกัน กรุณาแก้ไขก่อนรวม' });
