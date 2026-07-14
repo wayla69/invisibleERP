@@ -64,6 +64,11 @@ class Deck:
         self.prs.slide_width = EMU_W
         self.prs.slide_height = EMU_H
         self.blank = self.prs.slide_layouts[6]
+        self.logo_white = None   # path to light-on-dark logo
+        self.logo_dark = None    # path to dark-on-light logo
+
+    def pic(self, s, path, x, y, w):
+        return s.shapes.add_picture(path, Inches(x), Inches(y), width=Inches(w))
 
     # ── low-level ──────────────────────────────────────────────────────────────
     def slide(self, bg=BG):

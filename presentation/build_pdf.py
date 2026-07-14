@@ -19,6 +19,10 @@ from content import build_specs
 F = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 if not os.path.isdir(F):
     F = os.path.expanduser("~/fonts")
+_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+LOGO_WHITE = os.path.join(_ASSETS, "invisible-consulting-logo-white.png")
+LOGO_DARK  = os.path.join(_ASSETS, "invisible-consulting-logo-dark.png")
+LOGO_AR = 1.908  # width / height
 pdfmetrics.registerFont(TTFont("Sarabun", f"{F}/Sarabun-Regular.ttf"))
 pdfmetrics.registerFont(TTFont("Sarabun-B", f"{F}/Sarabun-Bold.ttf"))
 pdfmetrics.registerFont(TTFont("Sarabun-L", f"{F}/Sarabun-Light.ttf"))
@@ -108,6 +112,9 @@ class Band(Flowable):
         # big number
         c.setFillColor(self.ac); c.setFont("Kanit-B", 150)
         c.drawString(24, h-140, self.num)
+        if os.path.exists(LOGO_WHITE):
+            lw=120; lh=lw/LOGO_AR
+            c.drawImage(LOGO_WHITE, CW-24-lw, h-30-lh, width=lw, height=lh, mask='auto', preserveAspectRatio=True, anchor='sw')
         c.setFillColor(self.ac); c.setFont("Kanit-B", 10)
         c.drawString(26, h-190, "SECTION")
         c.setFillColor(colors.white); c.setFont("Kanit-B", 30)
@@ -270,13 +277,16 @@ def cover_page(canvas, doc):
     canvas.setFillColor(DARK); canvas.rect(0,0,PW,PH,fill=1,stroke=0)
     canvas.setFillColor(TEAL); canvas.rect(0, PH-8, PW, 8, fill=1, stroke=0)
     canvas.setFillColor(VIOLET); canvas.rect(0, 0, PW, 8, fill=1, stroke=0)
-    # brand
-    canvas.setStrokeColor(TEAL); canvas.setLineWidth(2); canvas.roundRect(LM, PH-70, 34, 34, 8, fill=0, stroke=1)
-    canvas.setFillColor(TEAL); canvas.setFont("Kanit-B", 22); canvas.drawCentredString(LM+17, PH-63, "i")
-    canvas.setFillColor(colors.white); canvas.setFont("Kanit-B", 16); canvas.drawString(LM+44, PH-58, "Invisible")
-    tw=canvas.stringWidth("Invisible ","Kanit-B",16)
-    canvas.setFillColor(TEAL); canvas.drawString(LM+44+tw, PH-58, "ERP")
-    canvas.setFillColor(HexColor("#9AA6BD")); canvas.setFont("Sarabun",9); canvas.drawString(LM+44, PH-70, "V2 · Enterprise Suite · เอกสารสรุประบบ")
+    # brand — Invisible Consulting logo (developer)
+    if os.path.exists(LOGO_WHITE):
+        lw = 150; lh = lw/LOGO_AR
+        canvas.drawImage(LOGO_WHITE, LM, PH-40-lh, width=lw, height=lh, mask='auto', preserveAspectRatio=True, anchor='sw')
+    else:
+        canvas.setStrokeColor(TEAL); canvas.setLineWidth(2); canvas.roundRect(LM, PH-70, 34, 34, 8, fill=0, stroke=1)
+        canvas.setFillColor(TEAL); canvas.setFont("Kanit-B", 22); canvas.drawCentredString(LM+17, PH-63, "i")
+        canvas.setFillColor(colors.white); canvas.setFont("Kanit-B", 16); canvas.drawString(LM+44, PH-58, "Invisible")
+    canvas.setFillColor(HexColor("#9AA6BD")); canvas.setFont("Sarabun",9)
+    canvas.drawString(LM, PH-134, "V2 · Enterprise Suite · เอกสารสรุประบบ")
     canvas.restoreState()
 
 
@@ -368,6 +378,9 @@ def cover_flow(sp):
     out.append(Paragraph(_esc(sp["subtitle"]), ParagraphStyle("cs",fontName="Sarabun",fontSize=13,textColor=HexColor("#C4CBD8"),leading=19,wordWrap="CJK",spaceAfter=14)))
     out.append(Paragraph(f'<font color="{hx(TEAL)}">▎</font>  <i><font color="#FFFFFF">{_esc(sp["tagline"])}</font></i>',
                          ParagraphStyle("ctag",fontName="Sarabun",fontSize=12,textColor=colors.white,leading=16,wordWrap="CJK")))
+    out.append(Spacer(1, 8*mm))
+    out.append(Paragraph('<font color="#8A93A5">พัฒนาโดย </font><font name="Kanit-B" color="#C4CBD8">Invisible Consulting</font>',
+                         ParagraphStyle("cred",fontName="Sarabun",fontSize=11,textColor=HexColor("#C4CBD8"),leading=14)))
     return out
 
 def agenda_flow(sp, holder):
@@ -507,7 +520,12 @@ def compare_flow(rows):
     return t
 
 def closing_flow(sp):
-    out=[Spacer(1, 30*mm)]
+    from reportlab.platypus import Image as RLImage
+    out=[Spacer(1, 20*mm)]
+    if os.path.exists(LOGO_DARK):
+        lw=44*mm; lh=lw/LOGO_AR
+        img=RLImage(LOGO_DARK, width=lw, height=lh); img.hAlign="LEFT"
+        out.append(img); out.append(Spacer(1, 8*mm))
     out.append(AccentTick(TEAL,22,3))
     out.append(Paragraph("ก้าวต่อไปกับ INVISIBLE ERP", ParagraphStyle("k",fontName="Kanit-B",fontSize=10,textColor=TEAL,leading=14,spaceAfter=6)))
     out.append(Paragraph(_esc(sp["title"]), ParagraphStyle("t",fontName="Kanit-B",fontSize=30,textColor=INK,leading=34,spaceAfter=8)))

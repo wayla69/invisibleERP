@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Render the Invisible ERP deck as a premium dark 16:9 PPTX with embedded Thai fonts."""
-import sys
+import os, sys
 from slides import Slides
 from pptx_lib import TEAL, CYAN, VIOLET, GOLD, GREEN, CORAL
 from content import build_specs
@@ -24,6 +24,12 @@ def conv_panel(p):
 
 def main():
     d = Slides()
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _assets = os.path.join(_here, "assets")
+    lw = os.path.join(_assets, "invisible-consulting-logo-white.png")
+    ld = os.path.join(_assets, "invisible-consulting-logo-dark.png")
+    if os.path.exists(lw): d.logo_white = lw
+    if os.path.exists(ld): d.logo_dark = ld
     specs = build_specs()
     page = 0
     for sp in specs:

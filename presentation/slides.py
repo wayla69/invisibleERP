@@ -16,20 +16,25 @@ class Slides(Deck):
         # big soft panels (decorative)
         p = self.rect(s, 9.2, -1.4, 6.2, 6.2, color=CARD, radius=0.5); self._set_alpha(p, 42000)
         p = self.rect(s, 10.4, 3.1, 5.4, 5.4, color=CARD2, radius=0.5); self._set_alpha(p, 30000)
-        # brand mark
-        self.rect(s, MX, 0.95, 0.55, 0.55, color=None, line=TEAL, line_w=2, radius=0.3)
-        self.text(s, MX, 0.93, 0.55, 0.55, [self.para("i", HEAD, 30, TEAL, bold=True)],
-                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
-        self.text(s, MX+0.72, 0.98, 8, 0.6, [[("Invisible", HEAD, 22, INK, True, False),
-                                              (" ERP", HEAD, 22, TEAL, True, False)]],
-                  anchor=MSO_ANCHOR.MIDDLE)
-        self.text(s, MX+0.72, 1.44, 8, 0.4, [self.para("V2 · Enterprise Suite", BODY, 11.5, MUTED)])
+        # brand mark — Invisible Consulting logo (developer) if available, else improvised lockup
+        if self.logo_white:
+            self.pic(s, self.logo_white, MX, 0.82, 2.35)
+        else:
+            self.rect(s, MX, 0.95, 0.55, 0.55, color=None, line=TEAL, line_w=2, radius=0.3)
+            self.text(s, MX, 0.93, 0.55, 0.55, [self.para("i", HEAD, 30, TEAL, bold=True)],
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            self.text(s, MX+0.72, 0.98, 8, 0.6, [[("Invisible", HEAD, 22, INK, True, False),
+                                                  (" ERP", HEAD, 22, TEAL, True, False)]],
+                      anchor=MSO_ANCHOR.MIDDLE)
+            self.text(s, MX+0.72, 1.44, 8, 0.4, [self.para("V2 · Enterprise Suite", BODY, 11.5, MUTED)])
 
         self.kicker(s, MX, 3.15, kicker)
         self.text(s, MX, 3.35, 11.4, 2.0, [self.para(title, HEAD, 52, INK, bold=True)], leading=1.0)
         self.text(s, MX, 5.25, 10.6, 0.8, [self.para(subtitle, BODY, 19, MUTED)], leading=1.2)
         self.text(s, MX, 6.55, 11.4, 0.5, [[("▎ ", BODY, 15, TEAL, True, False),
                                             (tagline, BODY, 15, INK, False, True)]])
+        self.text(s, MX, 6.98, 11.4, 0.35, [[("พัฒนาโดย ", BODY, 11, FAINT, False, False),
+                                             ("Invisible Consulting", HEAD, 11, MUTED, True, False)]])
         return s
 
     # ── agenda / TOC ─────────────────────────────────────────────────────────
@@ -55,6 +60,8 @@ class Slides(Deck):
     def divider(self, number, title, subtitle, idx, accent=TEAL):
         s = self.slide(BG2)
         self.rect(s, 0, 0, 0.16, 7.5, color=accent)
+        if self.logo_white:
+            self.pic(s, self.logo_white, 10.75, 0.5, 1.85)
         p = self.rect(s, 8.6, -1.6, 7.0, 7.0, color=CARD, radius=0.5); self._set_alpha(p, 40000)
         self.text(s, MX+0.1, 1.5, 6, 3.0, [self.para(number, HEAD, 150, accent, bold=True)], leading=0.9)
         self._set_alpha  # no-op
@@ -303,6 +310,8 @@ class Slides(Deck):
         self.rect(s, 0, 0, 13.333, 0.10, color=TEAL)
         self.rect(s, 0, 7.40, 13.333, 0.10, color=VIOLET)
         p = self.rect(s, 9.0, 2.0, 6.5, 6.5, color=CARD, radius=0.5); self._set_alpha(p, 35000)
+        if self.logo_white:
+            self.pic(s, self.logo_white, MX, 1.0, 2.4)
         self.kicker(s, MX, 2.55, "ก้าวต่อไปกับ Invisible ERP")
         self.text(s, MX, 2.8, 11, 1.5, [self.para(title, HEAD, 46, INK, bold=True)], leading=1.0)
         self.text(s, MX, 4.5, 10.5, 0.8, [self.para(subtitle, BODY, 17, MUTED)], leading=1.25)
