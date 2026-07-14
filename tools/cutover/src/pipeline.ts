@@ -711,6 +711,74 @@ async function main() {
   const t1seqs = await inj('GET', '/api/crm/sequences', sales1);
   ok('CRM-8 RLS: a T1 user cannot see an HQ tenant\'s sequence', t1seqs.status === 200 && !(t1seqs.json.sequences ?? []).some((x: any) => x.name === 'HQ Only Cadence'), `names=${(t1seqs.json.sequences ?? []).map((x: any) => x.name).join('|')}`);
 
+  // ── CRM-7 kanban depth (control CRM-13, migration 0406) — stage playbooks: required-field exit criteria +
+  //    WIP limits + bulk stage moves ─────────────────────────────────────────────────────────────────────
+  const stageRows = (await inj('GET', '/api/pipeline/stages', sales1)).json as any[];
+  const qualifiedId = stageRows.find((s) => s.name === 'Qualified')?.id;
+
+  // 70. Playbook view lists every stage + live open-count + a field catalog; Qualified starts unconfigured.
+  const pb0 = await inj('GET', '/api/crm/pipeline/playbooks', sales1);
+  const qual0 = (pb0.json.stages ?? []).find((s: any) => s.name === 'Qualified');
+  ok('CRM-7 playbooks: view lists stages + field catalog; Qualified unconfigured (no wip/required)',
+    pb0.status === 200 && qual0 && qual0.wip_limit === null && Array.isArray(qual0.required_fields) && qual0.required_fields.length === 0
+    && Array.isArray(pb0.json.field_catalog) && pb0.json.field_catalog.some((f: any) => f.key === 'amount'),
+    JSON.stringify(qual0));
+  const baseOpen = Number(qual0?.open_count ?? 0);
+
+  // 71. Configure the Qualified playbook (supervisor crm/exec): require an amount + a WIP cap of base+1.
+  const putPb = await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, sales1, { required_fields: ['amount'], wip_limit: baseOpen + 1, guidance: 'Qualify only with a sized deal.' });
+  ok('CRM-7 playbook upsert: required_fields=[amount], wip_limit set', putPb.status === 200 && putPb.json.wip_limit === baseOpen + 1 && putPb.json.required_fields?.includes('amount'), JSON.stringify(putPb.json));
+
+  // 72. Reject an unknown required-field key (whitelist-validated).
+  const badPb = await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, sales1, { required_fields: ['nonsense_field'] });
+  ok('CRM-7 playbook: unknown required field → 400 BAD_REQUIRED_FIELDS', badPb.status === 400 && badPb.json.error?.code === 'BAD_REQUIRED_FIELDS', `${badPb.status} ${badPb.json.error?.code}`);
+
+  // 73. Required-field exit criteria: a deal with no amount cannot ADVANCE into Qualified.
+  const oppNoAmt = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 no-amount deal' });
+  const moveNoAmt = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppNoAmt.json.opp_no}/stage`, sales1, { stage: 'Qualified' });
+  ok('CRM-7 required-field: advancing a no-amount deal to Qualified → 400 STAGE_REQUIREMENTS_UNMET (missing amount)',
+    moveNoAmt.status === 400 && moveNoAmt.json.error?.code === 'STAGE_REQUIREMENTS_UNMET' && (moveNoAmt.json.error?.details?.missing ?? []).some((m: any) => m.key === 'amount'),
+    `${moveNoAmt.status} ${moveNoAmt.json.error?.code}`);
+
+  // 74. A sized deal satisfies the exit criteria and moves in (consuming the last WIP slot).
+  const oppA = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 sized deal A', amount: 50000 });
+  const moveA = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppA.json.opp_no}/stage`, sales1, { stage: 'Qualified' });
+  ok('CRM-7 required-field: a sized deal advances to Qualified → 200', moveA.status === 200 && moveA.json.stage === 'qualification', JSON.stringify(moveA.json));
+
+  // 75. WIP limit: the stage is now at its cap → the next sized deal is refused WIP_LIMIT_EXCEEDED.
+  const oppB = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 sized deal B', amount: 40000 });
+  const moveB = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppB.json.opp_no}/stage`, sales1, { stage: 'Qualified' });
+  ok('CRM-7 WIP limit: advancing past the Qualified cap → 400 WIP_LIMIT_EXCEEDED',
+    moveB.status === 400 && moveB.json.error?.code === 'WIP_LIMIT_EXCEEDED' && moveB.json.error?.details?.limit === baseOpen + 1,
+    `${moveB.status} ${moveB.json.error?.code} limit=${moveB.json.error?.details?.limit} current=${moveB.json.error?.details?.current}`);
+
+  // 76. The board view reflects the live WIP state (at/over the cap) after the move.
+  const pb1 = await inj('GET', '/api/crm/pipeline/playbooks', sales1);
+  const qual1 = (pb1.json.stages ?? []).find((s: any) => s.name === 'Qualified');
+  ok('CRM-7 playbook view: Qualified open_count reflects the moved deal and at_wip is flagged',
+    qual1 && qual1.open_count === baseOpen + 1 && qual1.at_wip === true && qual1.guidance === 'Qualify only with a sized deal.', JSON.stringify(qual1));
+
+  // 77. Clearing the WIP limit (null) lets the deal in — the cap is config, not hardcoded.
+  await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, sales1, { wip_limit: null });
+  const moveBagain = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppB.json.opp_no}/stage`, sales1, { stage: 'Qualified' });
+  ok('CRM-7 WIP limit: clearing wip_limit (null) admits the deal → 200', moveBagain.status === 200, `${moveBagain.status}`);
+
+  // 78. Bulk stage move: a multi-select advances through the SAME governed path (Proposal has no playbook).
+  const oppC = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 bulk C', amount: 10000 });
+  const oppD = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 bulk D', amount: 20000 });
+  const bulk = await inj('POST', '/api/crm/pipeline/opportunities/bulk-stage', sales1, { opp_nos: [oppC.json.opp_no, oppD.json.opp_no], stage: 'Proposal' });
+  ok('CRM-7 bulk-stage: two deals advanced to Proposal → moved 2, failed 0', bulk.status === 200 && bulk.json.moved === 2 && bulk.json.failed === 0, JSON.stringify({ moved: bulk.json.moved, failed: bulk.json.failed }));
+
+  // 79. Bulk partial success: an unknown opp fails per-item without blocking the valid one.
+  const bulkMixed = await inj('POST', '/api/crm/pipeline/opportunities/bulk-stage', sales1, { opp_nos: [oppC.json.opp_no, 'OPP-DOES-NOT-EXIST'], stage: 'Negotiation' });
+  ok('CRM-7 bulk-stage: partial success (1 moved, 1 NOT_FOUND) — per-item, never atomic across deals',
+    bulkMixed.status === 200 && bulkMixed.json.moved === 1 && bulkMixed.json.failed === 1 && bulkMixed.json.results?.some((r: any) => !r.ok && r.error === 'NOT_FOUND'),
+    JSON.stringify(bulkMixed.json.results));
+
+  // 80. HQ (no tenant) cannot configure a tenant stage playbook — the config is tenant-scoped.
+  const hqPut = await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, admin, { wip_limit: 5 });
+  ok('CRM-7 tenant-scope: HQ (no tenant) cannot configure a T1 stage playbook → 400', hqPut.status === 400 && ['BAD_STAGE', 'TENANT_REQUIRED'].includes(hqPut.json.error?.code), `${hqPut.status} ${hqPut.json.error?.code}`);
+
   await app.close();
 }
 

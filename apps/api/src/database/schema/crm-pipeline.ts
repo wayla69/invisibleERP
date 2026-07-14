@@ -410,6 +410,26 @@ export const crmFollowupSettings = pgTable('crm_followup_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqTenant: unique('uq_crm_followup_settings').on(t.tenantId) }));
 
+// CRM-7 kanban depth (control CRM-13, migration 0406) — a per-stage PLAYBOOK: the exit criteria a deal must
+// satisfy to ENTER a stage. `wip_limit` caps how many OPEN opportunities may sit in the stage at once (null =
+// unlimited; ignored for terminal Won/Lost); `required_fields` is a whitelist-validated list of opportunity
+// field keys that must be populated before a deal can advance into the stage; `guidance` is the coach's note
+// the board shows. One row per (tenant, stage). RLS (0232 canonical policy). Enforced in setStage.
+export const crmStagePlaybooks = pgTable('crm_stage_playbooks', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  stageId: bigint('stage_id', { mode: 'number' }).notNull().references(() => pipelineStages.id),
+  wipLimit: integer('wip_limit'),                             // max OPEN opps in this stage; null = unlimited
+  requiredFields: jsonb('required_fields').notNull().default('[]'), // string[] of opportunity field keys (whitelist)
+  guidance: text('guidance'),                                 // exit-criteria playbook note shown on the board
+  isActive: boolean('is_active').notNull().default(true),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqStage: unique('uq_crm_stage_playbook').on(t.tenantId, t.stageId),
+  byTenant: index('idx_crm_stage_playbook_tenant').on(t.tenantId, t.stageId),
+}));
+
 export type CrmLead = typeof crmLeads.$inferSelect;
 export type CrmOpportunity = typeof crmOpportunities.$inferSelect;
 export type CrmAccount = typeof crmAccounts.$inferSelect;
@@ -417,3 +437,4 @@ export type CrmContact = typeof crmContacts.$inferSelect;
 export type CrmLeadScore = typeof crmLeadScores.$inferSelect;
 export type CrmFollowupSettings = typeof crmFollowupSettings.$inferSelect;
 export type CrmInboundMessage = typeof crmInboundMessages.$inferSelect;
+export type CrmStagePlaybook = typeof crmStagePlaybooks.$inferSelect;

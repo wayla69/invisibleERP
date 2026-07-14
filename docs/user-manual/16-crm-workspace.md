@@ -32,6 +32,33 @@ current stage** (an age over 30 days shows red — a stalling deal).
   won value and win rate. For loss reasons, per-owner win rates and the monthly trend, open
   **วิเคราะห์ Win/Loss** (`/projects/pipeline`) from the header.
 
+## 16.1b Stage playbooks — exit criteria & WIP limits (Playbook ขั้นตอน — CRM-7, control CRM-13)
+
+A **stage playbook** governs *what a deal needs before it can enter a stage* and *how many deals a stage may
+hold*, so the pipeline advances on discipline rather than on drag alone. The rules bind on **every** move path
+— board drag, the list *ย้ายไป…* dropdown, the deal-page stepper, and the bulk move — and every move is still
+audited (**REV-17**).
+
+- **On the board columns you'll see** a **WIP badge** (e.g. `3/5` — open deals vs the cap; it turns amber at
+  the cap and red over it, and the column outlines red when over), and, when configured, a **ต้องมี
+  (Requires)** chip list of the fields a deal needs to enter, plus the stage's **guidance** note.
+- **Required-field exit criteria:** if you try to advance a deal into a stage before its required fields are
+  filled (e.g. a deal amount, an expected close date, a primary contact), the move is refused with
+  **ยังเข้าสู่ขั้น … ไม่ได้ ต้องกรอก:** and the missing fields listed (`STAGE_REQUIREMENTS_UNMET`). Fill them on
+  the deal, then move it. (Closing a deal as **Lost** is never blocked this way — only a Lost reason is
+  required.)
+- **WIP limit:** if a stage is already at its cap, advancing one more open deal into it is refused
+  **ขั้น … เต็มขีดจำกัดงานระหว่างทำแล้ว** (`WIP_LIMIT_EXCEEDED`). Work down the stage (advance or close deals)
+  first — this keeps a stage from silently overloading and stalling.
+- **Configure the playbooks (supervisors):** users with the CRM supervisor duty (`crm`/`exec`) see a
+  **Playbook ขั้นตอน** button on the board. It opens an editor with one card per stage where you set the
+  **WIP limit** (blank = unlimited), tick the **required fields**, and write a short **guidance** note; save
+  each stage on its own. An unknown field or a negative limit is rejected. Playbooks are per-company.
+- **Bulk move:** in **list** view, tick the checkboxes on several open deals, pick a target stage in the bar
+  that appears, and **ย้ายที่เลือก (Move selected)** advances them all through the same governed path. The
+  result reports how many moved and how many failed (a deal blocked by its own missing field or WIP limit is
+  skipped without affecting the others — it is *not* all-or-nothing).
+
 ## 16.2 The deal page (`/crm/deals/<OPP-…>`)
 
 Click any card (or a row in list view) to open the deal:
@@ -512,6 +539,7 @@ documented public API exists yet for pulling a business's own Wongnai reviews.
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.7 | 2026-07-14 | **Stage playbooks — exit criteria & WIP limits (`/crm`) — CRM-7, control CRM-13:** new §16.1b. Each pipeline stage can require a set of **fields before a deal enters** it (blocked with `STAGE_REQUIREMENTS_UNMET` + the missing list) and cap how many open deals it holds (a **WIP limit**, `WIP_LIMIT_EXCEEDED`), enforced on every move path and shown as a WIP badge + *Requires* chips + guidance on the board columns. Supervisors (`crm`/`exec`) configure them from the new **Playbook ขั้นตอน** editor. List view gains a multi-select **bulk stage move** (per-item result, not all-or-nothing). Read-only to the ledger. |
 | 2.6 | 2026-07-13 | **Reputation & external analytics (docs/47, new control MKT-14) — new §16.14, `/reputation`.** Connect Google Maps reviews (Business Profile OAuth2) and Google Analytics (GA4) — neither offers a webhook, so this is scheduled-poll ingestion (`reputation_review_sync`/`reputation_ga4_sync` via Scheduled Reports). New errors `OAUTH_NOT_CONFIGURED`/`BAD_STATE`/`NO_REFRESH_TOKEN`/`CONNECTION_NOT_FOUND`. |
 | 2.5 | 2026-07-13 | **Audience export screen (docs/45) — new §16.13, `/crm/audience-export`.** No new control (extends PDPA-05, documented in manual 09 §7) — a dedicated preview + register + ROPA-status view over the existing consent-gated hashed audience export, cross-linked to Scheduled Reports for actually running it. |
 | 2.4 | 2026-07-13 | **Sequences & cadences (`/crm`) — CRM-8, control CRM-11:** new §16.4f + a new *Sequences* tab. Multi-step outreach **playbooks** (channel + wait-days steps) on the comms rail: enroll a lead (`LEAD-…`) or deal (`OPP-…`), and the cadence **advances** each enrolment step-by-step — sending the message (or logging a task), recording the touch on the timeline, and scheduling the next step — until it **completes**; enrolments can be **stopped**, and **Run due** (also a scheduled *CRM sequence run* BI report) advances everything that's due. Read-only to the ledger. |
