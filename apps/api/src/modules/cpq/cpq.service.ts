@@ -13,6 +13,7 @@ import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
 import { normalizeA4Template } from '../../common/a4-template';
 import { DocumentTemplatesService } from '../document-templates/document-templates.service';
+import { CpqPricebookService } from './cpq-pricebook.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
@@ -31,6 +32,9 @@ export class CpqService {
     // Resolve the tenant's active no-code quotation template at print time (presentation only). @Optional so
     // the standalone cpq harness still constructs; absent ⇒ the built-in default layout.
     @Optional() private readonly docTemplates?: DocumentTemplatesService,
+    // CRM-15: resolve a quote's line prices from a governed pricebook. @Optional so a partial harness still
+    // constructs; when a pricebook_id is supplied without it, createQuote rejects rather than silently skipping.
+    @Optional() private readonly pricebooks?: CpqPricebookService,
   ) {}
 
   // ── Product Configs ──
@@ -95,7 +99,8 @@ export class CpqService {
   async createQuote(dto: {
     customer_name: string; opportunity_id?: number; config_id?: number;
     qty?: number; selected_options?: { group_name: string; option_code: string }[]; unit_cost?: number;
-    validity_days?: number; notes?: string; lines?: { description: string; qty?: number; unit_price?: number; unit_cost?: number }[];
+    validity_days?: number; notes?: string; pricebook_id?: number;
+    lines?: { description: string; qty?: number; unit_price?: number; unit_cost?: number; item_code?: string }[];
   }, user: JwtUser) {
     const db = this.db;
     const tenantId = user.tenantId!;
@@ -136,16 +141,25 @@ export class CpqService {
       const discountPct = bestRule ? n(bestRule.discountPct) : 0;
 
       const lineTotal = round4(unitPrice * qty * (1 - discountPct / 100));
-      lineValues.push({ lineNo: 1, description: cfg.name, qty: fx(qty, 2), unitPrice: fx(unitPrice, 4), unitCost: fx(dto.unit_cost ?? 0, 2), discountPct: fx(discountPct, 4), lineTotal: fx(lineTotal, 4) });
+      lineValues.push({ lineNo: 1, itemCode: cfg.code, description: cfg.name, qty: fx(qty, 2), unitPrice: fx(unitPrice, 4), unitCost: fx(dto.unit_cost ?? 0, 2), discountPct: fx(discountPct, 4), lineTotal: fx(lineTotal, 4) });
       subtotal = lineTotal;
     } else if (dto.lines?.length) {
       let lineNo = 1;
       for (const l of dto.lines) {
         const q = l.qty ?? 1; const up = l.unit_price ?? 0;
         const lt = round4(q * up);
-        lineValues.push({ lineNo: lineNo++, description: l.description, qty: fx(q, 2), unitPrice: fx(up, 4), unitCost: fx(l.unit_cost ?? 0, 2), discountPct: '0', lineTotal: fx(lt, 4) });
+        lineValues.push({ lineNo: lineNo++, itemCode: l.item_code ?? null, description: l.description, qty: fx(q, 2), unitPrice: fx(up, 4), unitCost: fx(l.unit_cost ?? 0, 2), discountPct: '0', lineTotal: fx(lt, 4) });
         subtotal += lt;
       }
+    }
+
+    // CRM-15: price the lines FROM a governed pricebook when one is selected (validated: tenant + active +
+    // effective window). A covered line takes the pricebook price; the CPQ-01 floor still governs the result.
+    let pricebookId: number | null = null;
+    if (dto.pricebook_id != null) {
+      if (!this.pricebooks) throw new BadRequestException({ code: 'PRICEBOOK_UNAVAILABLE', message: 'Pricebook pricing is not available', messageTh: 'ระบบตารางราคาไม่พร้อมใช้งาน' });
+      const applied = await this.pricebooks.applyToLines(lineValues, dto.pricebook_id, user);
+      subtotal = applied.subtotal; pricebookId = applied.pricebookId;
     }
 
     // SVC-1 (CPQ-01): compute the quote's effective discount% (gross→net) and margin% (net vs unit cost) up
@@ -162,7 +176,7 @@ export class CpqService {
       issuedDate, expiresDate, currency: 'THB',
       subtotal: fx(subtotal, 4), discountTotal: '0', total: fx(subtotal, 4),
       discountPct: fx(metrics.discountPct, 3), marginPct: fx(metrics.marginPct, 3),
-      notes: dto.notes ?? null, createdBy: user.username,
+      notes: dto.notes ?? null, createdBy: user.username, pricebookId,
     }).returning();
 
     if (lineValues.length) {
@@ -574,5 +588,5 @@ export class CpqService {
   private fmtConfig(c: any) { return { id: Number(c.id), code: c.code, name: c.name, base_price: n(c.basePrice), currency: c.currency, description: c.description }; }
   // opportunity_id resolves the unified spine link first (crm_opportunity_id), falling back to the
   // read-legacy Batch 2A pointer for pre-0293 rows that predate the data-migration backfill.
-  private fmtQuote(q: any) { return { id: Number(q.id), quote_no: q.quoteNo, opportunity_id: q.crmOpportunityId != null ? Number(q.crmOpportunityId) : (q.opportunityId != null ? Number(q.opportunityId) : null), customer_name: q.customerName, status: q.status, issued_date: q.issuedDate, expires_date: q.expiresDate, subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), discount_pct: n(q.discountPct), margin_pct: q.marginPct != null ? n(q.marginPct) : null, requires_approval: !!q.requiresApproval, approved_by: q.approvedBy ?? null, notes: q.notes, created_by: q.createdBy }; }
+  private fmtQuote(q: any) { return { id: Number(q.id), quote_no: q.quoteNo, opportunity_id: q.crmOpportunityId != null ? Number(q.crmOpportunityId) : (q.opportunityId != null ? Number(q.opportunityId) : null), customer_name: q.customerName, status: q.status, issued_date: q.issuedDate, expires_date: q.expiresDate, subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), discount_pct: n(q.discountPct), margin_pct: q.marginPct != null ? n(q.marginPct) : null, requires_approval: !!q.requiresApproval, approved_by: q.approvedBy ?? null, notes: q.notes, created_by: q.createdBy, pricebook_id: q.pricebookId != null ? Number(q.pricebookId) : null }; }
 }

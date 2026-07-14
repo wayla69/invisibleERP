@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 284,
+    "total": 285,
     "by_status": {
-      "Implemented": 280,
+      "Implemented": 281,
       "Partial": 4
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 45,
+      "Revenue & Cash": 46,
       "Tax": 12
     }
   },
@@ -1745,6 +1745,25 @@
       "tod": "Inspect the unified timeline merge (all activity sources + stage history + quotes + feed in one sorted stream; account roll-up), the append-only feed (no mutation path), the @mention validation + directed-notification routing, and the BOLA existence checks.",
       "toe": "Re-perform (pipeline harness, CRM-8 checks): a deal's timeline merges an activity + two stage transitions + a feed note into one newest-first stream; a feed note posts (201) with a valid @mention resolved and an unknown @handle dropped; the mentioned user receives a directed notification while the AUTHOR does not; an account timeline rolls up its opportunity's activity; posting/reading a timeline for an unknown opportunity is refused 404 NOT_FOUND and a bad entity_type 400.",
       "evidence": "Unified customer-interaction timeline (all sources); append-only collaboration feed; directed @mention notifications; BOLA existence checks",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-15",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (quote pricing basis)",
+      "risk": "Quote unit prices are TYPED FREELY per line — there is no governed, approved price list a quote must draw from, so the price a rep quotes has no auditable basis (was it the current list price? an expired promo? a number invented at the desk?), the same item can be quoted at different prices across reps with nothing to reconcile against, and a superseded price keeps being used because nothing enforces an effective date. Revenue is quoted off an ungoverned, unauditable price basis.",
+      "assertion": "Accuracy/Completeness/Authorization",
+      "description": "CPQ PRICEBOOKS (CRM-14, migration 0408) — a governed, effective-dated price list a quote is priced FROM instead of ad-hoc typed unit prices. cpq_pricebooks is MASTER DATA created under the `masterdata` duty (like configs/rules/bundles; an author with only `cpq` is refused 403), carrying a currency, an active flag and an inclusive effective window (from/to; a from>to window is rejected BAD_EFFECTIVE_WINDOW); cpq_pricebook_entries hold the per-item unit price (item_code -> unit_price, upsert). When a quote is created against a pricebook (quotes.pricebook_id, the audited pricing basis), each line whose item/config code has an entry takes the PRICEBOOK price — on BOTH the config path (by product_configs.code) and the free-line path (by item_code) — while a line the book doesn't cover keeps its resolved price. The book is validated at quote time: it must belong to the tenant (else PRICEBOOK_NOT_FOUND 404), be active (PRICEBOOK_INACTIVE) and be effective on the business day (PRICEBOOK_NOT_EFFECTIVE) — so a superseded/expired list cannot be used. The resulting price still flows through the CPQ-01 margin floor (a below-cost pricebook price still parks the quote in PendingApproval), so pricebooks and the floor COMPOSE — the pricebook governs the *basis*, CPQ-01 governs the *outcome*. Two tenant tables (0232 RLS, tenant-leading indexes) + quotes.pricebook_id; the pricing logic is a dedicated CpqPricebookService (the CPQ facade stays under the service-size ratchet). No new GL post.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per quote",
+      "owner": "Sales / Sales Manager / Master-data",
+      "coso": "P10",
+      "code_reference": "cpq-pricebook.service.ts (createPricebook/listPricebooks/getPricebook/upsertEntries — masterdata; resolveUsable validates tenant+active+effective window -> PRICEBOOK_NOT_FOUND/INACTIVE/NOT_EFFECTIVE; applyToLines re-prices the built quote lines by item code + recomputes the subtotal); cpq.service.ts createQuote (sets each line's item_code, calls applyToLines when pricebook_id is supplied, records quotes.pricebook_id) — the CPQ-01 floor runs on the repriced lines unchanged; cpq.controller.ts (GET /api/cpq/pricebooks[/:code] exec/cpq, POST /api/cpq/pricebooks[/:code/entries] masterdata, quote body pricebook_id); schema/cpq.ts cpq_pricebooks + cpq_pricebook_entries + quotes.pricebook_id, migration 0408; web cpq/page.tsx Pricebooks tab (create + entries + list); cutover/cpq-approval.ts (ToE, CRM-15 checks)",
+      "tod": "Inspect the pricebook master-data CRUD (masterdata-gated) + entries, the effective-window/active validation at quote time, the line-price resolution on both the config and free-line paths, the recorded pricing basis (quotes.pricebook_id), and that the CPQ-01 floor still governs a pricebook price.",
+      "toe": "Re-perform (cpq-approval harness): create a pricebook + entries (masterdata; a cpq-only author is 403); a quote priced against it takes the pricebook price on a covered line (typed price ignored) and keeps the typed price on an uncovered line, recording quotes.pricebook_id; a config-path quote prices from the book by config code; a below-cost pricebook price still trips CPQ-01 -> PendingApproval; an expired book -> PRICEBOOK_NOT_EFFECTIVE, an inactive book -> PRICEBOOK_INACTIVE, an unknown book -> PRICEBOOK_NOT_FOUND, a from>to window -> BAD_EFFECTIVE_WINDOW; a second tenant sees none of the first tenant's pricebooks and cannot price from one (404).",
+      "evidence": "Pricebook master + effective window; per-item price entries; quote pricing-basis (quotes.pricebook_id); effective/active validation; CPQ-01 floor composition",
       "status": "Implemented"
     },
     {
