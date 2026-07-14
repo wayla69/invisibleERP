@@ -290,6 +290,22 @@ This is advisory only — it suggests a shift, it never moves an assignment or a
 the suggestion by editing the task's dates or the assignment's period yourself. Required role/permission:
 same as the rest of PPM (`exec`/`planner`/`ar`). Detective — posts nothing to the GL.
 
+## Change-order impact simulation — margin/EAC before you approve (PROJ-24)
+A change order (the *ใบสั่งเปลี่ยนแปลง* panel on the project Overview) records only its three money deltas —
+contract `+/−`, budget `+/−`, estimated-cost `+/−`. Before you approve one, click the **จำลองผลกระทบ
+(simulate impact)** button on the pending row to see what those deltas actually do to the project:
+- An impact table shows **current vs projected vs Δ** for the contract value, budget, estimated cost, **gross
+  margin**, the **estimate-at-completion (EAC)**, and the **budget headroom** (budget − EAC).
+- Each Δ is coloured **green when favourable** and **red when unfavourable** for that metric (a smaller
+  estimated cost or EAC is favourable; a larger margin or headroom is favourable), so a variation that quietly
+  turns the project margin-negative or pushes the EAC past the new budget is obvious at a glance.
+- The EAC is computed off the live earned-value figures (`bac_basis` shows whether the budget-at-completion
+  came from the WBS task plan — `tasks` — or the project budget — `budget`).
+
+Nothing is written — it is a pure what-if; the numbers it shows are exactly what approval would then apply.
+Approve or reject the change order as usual from the same panel. Required role/permission: `exec`/`planner`/`ar`.
+Detective — posts nothing to the GL.
+
 ## Timesheets → project labour (`/hcm`, tab ลงเวลา / OT)
 When logging a timesheet you can allocate it to a **โครงการ (project)** and a **งาน (WBS task)** and mark it
 **billable**. The entry lands **Pending**; a **different** approver presses **อนุมัติ** (maker-checker,
@@ -382,10 +398,15 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 - **Resource leveling** (**PROJ-23**) cross-references an over-allocated resource-month against the
   schedule's slack to suggest a shift — read-only/detective, it suggests only, never moves an assignment; a
   resource-month with no slack anywhere is flagged `NO_SLACK` instead of silently ignored.
+- **Change-order impact simulation** (**PROJ-24**) projects a pending change order's compounded effect on
+  margin, EAC and budget headroom before it is approved — read-only/detective, it writes nothing; the
+  projection is exactly what approval would then apply, so a margin-negative or over-budget variation is
+  surfaced rather than approved blind.
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.31 | 2026-07-14 | **PROJ-24 — change-order impact simulation.** Each pending change order gains a **จำลองผลกระทบ (simulate impact)** button opening a current/projected/Δ table for the contract value, budget, estimated cost, gross margin, EAC and budget headroom, with each Δ coloured favourable (green) / unfavourable (red). Read-only what-if — nothing is written; the figures are exactly what approval would then apply, so a variation that turns the project margin-negative or pushes the EAC past the new budget is obvious before authorization. |
 | 2.30 | 2026-07-14 | **PROJ-23 — resource leveling: over-allocation vs the schedule's slack.** The project's Resources tab gains a leveling panel: each over-allocated resource-month shows how far over its ceiling it is, plus a suggested shift (task + days + target month) drawn from the schedule's slack, or a "no slack to shift" flag when every contributing task is on the critical path. Advisory only — it never moves an assignment or task dates itself. |
 | 2.29 | 2026-07-13 | **PROJ-22 — bottom-up cost-to-complete (ETC) vs the formulaic EAC.** The project overview's EVM card gains an **ETC/EAC comparison** panel: submit a manual estimate-to-complete per task (or project-level) and see it side by side with the existing CPI-based EAC, with a variance badge. A second submission for the same task supersedes the first; a project-level entry sums alongside per-task entries. No change to the existing EVM/schedule figures when no estimate has been submitted. |
 | 2.28 | 2026-07-13 | **PROJ-21 — richer scheduling: dependency types/lag, SNET/FNLT constraints, opt-in working calendar.** The task dialog and a new dependency-editor dialog (per-predecessor **type** — FS/SS/FF/SF — and **lag/lead days**) on `/projects/[code]`; new per-task **constraint** fields (SNET/FNLT + day-offset); a new **ปฏิทินการทำงาน (Working calendar)** tab on `/projects/settings` (enable + non-working weekdays + holiday exceptions, off by default). The schedule/critical-path computation now honours all four dependency types and the constraints, and — once the calendar is enabled — counts only working days toward a dated task's duration. No change when none of the new fields are set. |

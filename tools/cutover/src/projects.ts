@@ -832,6 +832,45 @@ async function main() {
   const coReApp = await inj('POST', `/api/projects/change-orders/${coId}/approve`, mgr, {});
   ok('Re-approve a decided change order → 400 CHANGE_ORDER_DECIDED', coReApp.status === 400 && coReApp.json.error?.code === 'CHANGE_ORDER_DECIDED', `${coReApp.status} ${coReApp.json.error?.code}`);
 
+  // ── 24b. change-order impact simulation (PROJ-24) — read-only cost/margin/EVM what-if before authorisation ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-SIM', name: 'งานจำลองผลกระทบ', billing_type: 'Fixed', contract_amount: 200000, budget_amount: 150000, estimated_cost: 140000 });
+  const simCo = await inj('POST', '/api/projects/PRJ-SIM/change-orders', admin, { description: 'เพิ่มขอบเขต', contract_delta: 50000, budget_delta: 30000, estimated_cost_delta: 45000, reason: 'ลูกค้าขอเพิ่ม' });
+  const simCoId = simCo.json.change_orders?.find((c: any) => c.status === 'pending')?.id;
+
+  // Current margin 60000 (200000−140000); projected 65000 (250000−185000) → the CO ADDS 5000 margin but at a
+  // thinner ratio (30%→26%); budget-derived BAC/EAC move with the budget delta.
+  const sim = await inj('GET', `/api/projects/change-orders/${simCoId}/simulate`, admin);
+  ok('PROJ-24 simulate: projected contract/budget/estimated-cost + margin + EVM impact computed',
+    sim.status === 200 && near(sim.json.projected.contract_amount, 250000) && near(sim.json.projected.estimated_cost, 185000) &&
+    near(sim.json.current.margin, 60000) && near(sim.json.projected.margin, 65000) && near(sim.json.delta.margin, 5000) &&
+    sim.json.bac_basis === 'budget' && near(sim.json.projected.eac, 180000) && near(sim.json.delta.eac, 30000),
+    JSON.stringify({ pm: sim.json.projected.margin, dm: sim.json.delta.margin, peac: sim.json.projected.eac }));
+
+  // Read-only proof: nothing changed on the project.
+  const simBefore = await inj('GET', '/api/projects/PRJ-SIM', admin);
+  ok('PROJ-24 simulate is READ-ONLY: the project is unchanged (contract still 200000)', near(simBefore.json.contract_amount, 200000), JSON.stringify({ c: simBefore.json.contract_amount }));
+
+  // Authorising the CO produces exactly the simulated figures.
+  const simApp = await inj('POST', `/api/projects/change-orders/${simCoId}/approve`, mgr, {});
+  ok('PROJ-24 the authorised change matches the simulation (contract 250000, budget 180000)',
+    simApp.json.status === 'approved' && near(simApp.json.contract_amount, 250000) && near(simApp.json.budget_amount, 180000), JSON.stringify({ c: simApp.json.contract_amount, b: simApp.json.budget_amount }));
+
+  // A decided CO can't be re-simulated (its impact is already reflected); an unknown CO 404s.
+  const simDecided = await inj('GET', `/api/projects/change-orders/${simCoId}/simulate`, admin);
+  const simBad = await inj('GET', '/api/projects/change-orders/999999/simulate', admin);
+  ok('PROJ-24 simulate guards: decided → 400 CHANGE_ORDER_DECIDED, unknown → 404 CHANGE_ORDER_NOT_FOUND',
+    simDecided.status === 400 && simDecided.json.error?.code === 'CHANGE_ORDER_DECIDED' && simBad.status === 404 && simBad.json.error?.code === 'CHANGE_ORDER_NOT_FOUND',
+    `${simDecided.json.error?.code}/${simBad.json.error?.code}`);
+
+  // Task-anchored EVM: on a project whose BAC comes from task planned cost, a pure budget CO leaves BAC/EAC
+  // unchanged (only the budget headroom moves) — the simulation reports bac_basis='tasks'.
+  const simTaskCo = await inj('POST', '/api/projects/PRJ-EVM/change-orders', admin, { description: 'budget top-up', budget_delta: 500 });
+  const simTaskCoId = simTaskCo.json.change_orders?.find((c: any) => c.status === 'pending')?.id;
+  const simTask = await inj('GET', `/api/projects/change-orders/${simTaskCoId}/simulate`, admin);
+  ok('PROJ-24 task-anchored EVM: a budget-only CO leaves BAC/EAC unchanged (bac_basis=tasks), only headroom moves +500',
+    simTask.status === 200 && simTask.json.bac_basis === 'tasks' && near(simTask.json.projected.bac, simTask.json.current.bac) && near(simTask.json.delta.eac, 0) && near(simTask.json.delta.budget_headroom, 500),
+    JSON.stringify({ basis: simTask.json.bac_basis, dbac: simTask.json.delta.eac, dh: simTask.json.delta.budget_headroom }));
+
   // ── 25. time-phased resource capacity calendar (PPM upgrade) ──
   await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CAP', name: 'งานวางกำลังคน', billing_type: 'TM' });
   // Bob: 60% Jul–Aug, +60% Aug–Sep → August double-booked to 120%.

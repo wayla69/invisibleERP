@@ -161,6 +161,12 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
     mutationFn: (v: { id: number; action: 'approve' | 'reject' }) => api(`/api/projects/change-orders/${v.id}/${v.action}`, { method: 'POST', body: '{}' }),
     onSuccess: () => { notifySuccess(t('pj.toast_co_updated')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
+  // PROJ-24: read-only change-order impact simulation (projected cost/margin/EVM before authorising).
+  const [simCo, setSimCo] = useState<any>(null);
+  const simulateCo = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/projects/change-orders/${id}/simulate`),
+    onSuccess: (r) => setSimCo(r), onError: (err: any) => notifyError(err.message),
+  });
   // Project health history (PPM upgrade) — dated EVM/RAG trend.
   const health = useQuery<any>({ queryKey: ['proj', code, 'health'], queryFn: () => api(`/api/projects/${code}/health`) });
   const captureHealth = useMutation({
@@ -681,6 +687,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
               </span>
               {c.status === 'pending' && (
                 <span className="flex gap-1">
+                  <Button size="sm" variant="ghost" title={t('pj.co_simulate_tip')} onClick={() => simulateCo.mutate(c.id)} disabled={simulateCo.isPending}><TrendingUp className="size-4" /></Button>
                   <Button size="sm" variant="ghost" title={t('pj.approve_not_requester')} onClick={() => decideCo.mutate({ id: c.id, action: 'approve' })}><CheckCircle2 className="size-4" /></Button>
                 </span>
               )}
@@ -689,6 +696,46 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           {!cos.data?.count && <p className="py-2 text-sm text-muted-foreground">{t('pj.co_empty')}</p>}
         </div>
       </Card>
+
+      {/* PROJ-24 change-order impact simulation — projected cost/margin/EVM before authorisation (read-only) */}
+      <Dialog open={!!simCo} onOpenChange={(o) => !o && setSimCo(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('pj.co_sim_title', { no: simCo?.change_order ?? '' })}</DialogTitle></DialogHeader>
+          {simCo && (() => {
+            const rows: { label: string; cur: number; proj: number; delta: number; good?: 'up' | 'down' }[] = [
+              { label: t('pj.co_sim_contract'), cur: simCo.current.contract_amount, proj: simCo.projected.contract_amount, delta: simCo.delta.contract },
+              { label: t('pj.co_sim_budget'), cur: simCo.current.budget_amount, proj: simCo.projected.budget_amount, delta: simCo.delta.budget },
+              { label: t('pj.co_sim_est_cost'), cur: simCo.current.estimated_cost, proj: simCo.projected.estimated_cost, delta: simCo.delta.estimated_cost, good: 'down' },
+              { label: t('pj.co_sim_margin'), cur: simCo.current.margin, proj: simCo.projected.margin, delta: simCo.delta.margin, good: 'up' },
+              { label: t('pj.co_sim_eac'), cur: simCo.current.eac, proj: simCo.projected.eac, delta: simCo.delta.eac, good: 'down' },
+              { label: t('pj.co_sim_headroom'), cur: simCo.current.budget_headroom, proj: simCo.projected.budget_headroom, delta: simCo.delta.budget_headroom, good: 'up' },
+            ];
+            return (
+              <div className="grid gap-2">
+                <p className="text-xs text-muted-foreground">{t('pj.co_sim_hint')} · {t('pj.co_sim_basis', { basis: simCo.bac_basis })}</p>
+                <div className="grid grid-cols-4 gap-x-3 gap-y-1 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">{t('pj.co_sim_metric')}</span>
+                  <span className="text-end text-xs font-medium text-muted-foreground">{t('pj.co_sim_current')}</span>
+                  <span className="text-end text-xs font-medium text-muted-foreground">{t('pj.co_sim_projected')}</span>
+                  <span className="text-end text-xs font-medium text-muted-foreground">Δ</span>
+                  {rows.map((r) => {
+                    const favourable = r.good == null || r.delta === 0 ? null : (r.good === 'up' ? r.delta > 0 : r.delta < 0);
+                    return (
+                      <div key={r.label} className="col-span-4 grid grid-cols-4 gap-x-3 border-t py-1">
+                        <span>{r.label}</span>
+                        <span className="text-end tabular">{baht(r.cur)}</span>
+                        <span className="text-end tabular font-medium">{baht(r.proj)}</span>
+                        <span className={`text-end tabular ${favourable == null ? 'text-muted-foreground' : favourable ? 'text-success' : 'text-destructive'}`}>{r.delta >= 0 ? '+' : ''}{baht(r.delta)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+          <DialogFooter><Button variant="outline" onClick={() => setSimCo(null)}>{t('pj.btn_close')}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Project health history (PPM upgrade) — CPI/SPI trend over snapshots */}
       <Card className="gap-3 p-5">
